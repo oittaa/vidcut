@@ -12,7 +12,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 **GPU check:** `scripts/gpu-check.sh` (release build) shows what runs on the GPU in a 4K export and in the viewer.
 
-- It uses 5 s of the Big Buck Bunny 4K60 clip from 1:00, plain and at 150% zoom.
+- It uses 5 s of the Big Buck Bunny 4K60 clip from 1:00: plain, at 150% zoom, and under a clip at Multiply.
 - For each, it exports with the hardware encoder and prints the export's report, the time and the CPU time.
 - It prints the PSNR of 12 frames against the CPU encoder's frames.
 - It prints where the viewer's picture was held, and its PSNR against the export pipeline's frame.

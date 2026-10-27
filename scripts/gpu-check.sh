@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # What runs on the GPU when vidcut exports and shows 4K: 5 s of the Big Buck
-# Bunny 4K60 clip from 1:00, plain and at 150% zoom.
+# Bunny 4K60 clip from 1:00: plain, at 150% zoom, and under a clip at Multiply.
 #
 #   scripts/gpu-check.sh
 #
-# For each of the two, it prints:
+# For each of the three, it prints:
 # - a 5 s export with the hardware encoder: vidcut's report (the frames that
 #   stayed on the GPU, the copies between memory and the GPU), the time and the
 #   CPU time;
@@ -48,8 +48,11 @@ v -p "$work/plain.vidcut" media add "$clip" >/dev/null
 v -p "$work/plain.vidcut" edit append m1 --range 1m..1m05s >/dev/null
 cp "$work/plain.vidcut" "$work/zoom.vidcut"
 v -p "$work/zoom.vidcut" picture set c1 --zoom 1.5 >/dev/null
+cp "$work/plain.vidcut" "$work/multiply.vidcut"
+v -p "$work/multiply.vidcut" edit place-on-top m1 --range 2m..2m05s --at 0s --video-only >/dev/null
+v -p "$work/multiply.vidcut" picture set c2 --composite-mode multiply >/dev/null
 
-for name in plain zoom; do
+for name in plain zoom multiply; do
   p="$work/$name.vidcut"
   echo
   echo "== $name: 5 s export with $encoder"

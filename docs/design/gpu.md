@@ -79,7 +79,7 @@ In exports:
 | Vulkan | NVENC; Vulkan's ProRes | libplacebo (`CudaPictures`) | `cuda::mix` | other encoders; alpha |
 | VA-API | VAAPI | `scale_vaapi`, `pad_vaapi`, `transpose_vaapi` | in memory | other encoders; color changes; dissolves |
 | Direct3D 11 | AMF | the video processor | in memory | other encoders; color changes; 8-bit into 10-bit; dissolves |
-| VideoToolbox | its own encoders | `vt::Fit` | `mixing::Mixer` | wipes; composite modes; a timeline color space that is not the color space of the export |
+| VideoToolbox | its own encoders | `vt::Fit` | `mixing::Mixer` | wipes; composite modes below the top layer; a timeline color space that is not the color space of the export |
 
 VideoToolbox (`vt::Fit`) fits a frame in these steps. It skips a step that the frame does not need.
 
@@ -103,7 +103,7 @@ Mixing and overlays:
 - CUDA and VideoToolbox draw subtitles, titles and placed pictures into the frame on the GPU (`cuda::burn`, `Mixer::burn`). The CPU draws the overlay.
 - CUDA and VideoToolbox place a picture on the GPU with a kernel of their own (`cuda::place`, `Mixer::place`). Then the CPU draws no overlay ([export](export.md#placed-pictures)).
 - For the other GPUs, a frame comes down while an overlay shows.
-- A wipe, a composite mode and a layer with alpha and nothing below mix in memory.
+- A wipe, a composite mode below the top layer and a layer with alpha and nothing below mix in memory.
 - A layer with alpha over other layers is a placed picture. The CPU draws its overlay with its alpha, and the GPU mixes it in.
 - A frame with alpha does not fit on the GPU (`hw::can_fit`). It comes down with its alpha.
 

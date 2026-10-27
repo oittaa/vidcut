@@ -19,4 +19,4 @@ vidcut has the composite modes from Normal to Darker Color (spec D75). These par
   - Measured in Resolve Studio 21.1.2: V2 is at Add over V1, V3 has a title, and V4 is 50% gray at Multiply.
   - Outside the title, the frame is (V1 + V2) × 0.5. The sum is not cut at 1.
   - To do: draw a title onto the `Canvas` of the layers below it.
-- **NVENC:** a frame with a composite mode is mixed on the CPU. A CUDA kernel can mix it on the GPU ([gpu-placement.md](gpu-placement.md)).
+- **NVENC and VideoToolbox:** a frame with a composite mode below its top layer mixes on the CPU ([gpu-placement.md](gpu-placement.md)).

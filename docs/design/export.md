@@ -336,9 +336,11 @@ The pictures:
   - They compute in 32-bit floats. The CPU computes the map in 64-bit floats. Why: GeForce GPUs run 64-bit floats much more slowly.
   - They take a picture in the layout of the frame, with up to `GPU_LEVELS` levels. Else the CPU makes the overlay.
   - With nothing below, the picture goes over black. For NVENC, a black frame goes up once in each export (`black_on_gpu`). The Metal kernel writes black itself.
+  - The kernels also mix by a composite mode, when the picture is the top layer of the frame and does not cross. The mode has its number from `CompositeMode::code`, as in the viewer's shader.
+  - Why only the top layer: a mode can give values above 1 or below 0. The CPU keeps them as floats for the layers above, but a kernel rounds its output.
 - For the other pictures, the frame below stays on the GPU. The CPU makes the colors and coverage of the picture (`cuda::burn::Overlay::of`, `mixing::Overlay::of`), and the GPU mixes them in, as for a title.
   - `place::overlay` reads the picture in its own layout. The coverage includes the alpha of the picture.
-  - A frame with a composite mode or a wipe mixes on the CPU.
+  - A frame with a wipe, or with a composite mode that the kernels do not mix, mixes on the CPU.
 - A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once (`mix::crossed`, `cuda::mix::sum`, `Mixer::sum`).
 
 Dynamic Zoom and keyframes (D75):
