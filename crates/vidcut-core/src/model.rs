@@ -1243,14 +1243,19 @@ pub enum Retime {
     /// nearer to the real frames. Its weights (264 MB) download at their
     /// first use.
     AiBest,
+    /// The frame rate conversion of macOS (VideoToolbox) makes the frame
+    /// from the motion between the two source frames. It is on macOS only,
+    /// where the app calls it AI, and where AI Fast and AI Best are off.
+    Macos,
 }
 
 impl Retime {
-    pub const ALL: [Retime; 4] = [
+    pub const ALL: [Retime; 5] = [
         Retime::Nearest,
         Retime::FrameBlend,
         Retime::AiFast,
         Retime::AiBest,
+        Retime::Macos,
     ];
 
     pub fn is_nearest(&self) -> bool {
@@ -1258,7 +1263,7 @@ impl Retime {
     }
 
     pub fn ai(&self) -> bool {
-        matches!(self, Retime::AiFast | Retime::AiBest)
+        matches!(self, Retime::AiFast | Retime::AiBest | Retime::Macos)
     }
 
     pub fn title(&self) -> &'static str {
@@ -1267,6 +1272,7 @@ impl Retime {
             Retime::FrameBlend => "Frame Blend",
             Retime::AiFast => "AI Fast",
             Retime::AiBest => "AI Best",
+            Retime::Macos => "AI",
         }
     }
 }

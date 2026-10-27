@@ -3218,7 +3218,7 @@ impl Workspace {
                             egui::ComboBox::from_id_salt("speed-retime")
                                 .selected_text(d.retime.title())
                                 .show_ui(ui, |ui| {
-                                    for r in Retime::ALL {
+                                    for r in super::retime_process::PROCESSES {
                                         ui.selectable_value(&mut d.retime, r, r.title());
                                     }
                                 });

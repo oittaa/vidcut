@@ -376,8 +376,12 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - Thus the bands give the same frame as one pass over the whole frame. A memory budget sets the height of the bands. A frame within the budget is one band.
   - The refinement uses three buffers in turn, as its layers finish with them.
 - PyTorch versions of the two networks, written from the official code, give the same frames within 1 of 255 levels, on 1080p frames.
+- **AI on macOS** (`interpolate::macos`): the frame rate conversion of macOS makes the frame, not wgpu.
+  - It keeps one session of `VTFrameProcessor` for each frame size. The session goes when the last `interpolate::User` goes.
+  - The pair stays in the session. The frames between one pair tell macOS that the pair is the same, and the next pair tells it that the frames follow.
+  - It shares the picture buffers and the pixel formats with the scaler of macOS (`frame_processor`).
 - **The work report** (`interpolate::report`):
-  - The device reports its GPU when it starts.
+  - The device reports its GPU when it starts. The session of macOS reports macOS.
   - `interpolate::between` reports each made frame (`interpolate::Made`): the process, the size, the weight and the time.
   - A shot change reports the kept source frame, without a time.
   - The Retime Process group of the stats panel shows the report (`RetimeStats`). It shows when the clip under the playhead has a process other than Nearest.

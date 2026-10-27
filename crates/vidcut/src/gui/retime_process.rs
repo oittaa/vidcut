@@ -5,6 +5,17 @@ use vidcut_core::model::Retime;
 use super::super_scale::field;
 use super::workspace::Workspace;
 
+#[cfg(target_os = "macos")]
+pub(super) const PROCESSES: [Retime; 3] = [Retime::Nearest, Retime::FrameBlend, Retime::Macos];
+
+#[cfg(not(target_os = "macos"))]
+pub(super) const PROCESSES: [Retime; 4] = [
+    Retime::Nearest,
+    Retime::FrameBlend,
+    Retime::AiFast,
+    Retime::AiBest,
+];
+
 impl Workspace {
     pub(super) fn set_retime(&mut self, clips: &[String], retime: Retime) {
         let params = json!({ "clips": clips, "retime": retime });

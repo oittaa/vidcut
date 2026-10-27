@@ -1090,7 +1090,7 @@ fn speed_section(
         egui::ComboBox::from_id_salt("inspector-retime")
             .selected_text(retime.title())
             .show_ui(ui, |ui| {
-                for r in Retime::ALL {
+                for r in super::retime_process::PROCESSES {
                     if ui.selectable_label(retime == r, r.title()).clicked() && r != retime {
                         acts.push(Act::Retime(r));
                     }
