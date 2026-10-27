@@ -23,9 +23,17 @@ const UHD: (u32, u32) = (3840, 2160);
 
 fn model(r: Retime) -> Option<&'static catalog::Model> {
     match r {
-        Retime::Rife => Some(&catalog::RIFE),
-        Retime::EmaVfi => Some(&catalog::EMA_VFI),
+        Retime::AiFast => Some(&catalog::RIFE),
+        Retime::AiBest => Some(&catalog::EMA_VFI),
         Retime::Nearest | Retime::FrameBlend => None,
+    }
+}
+
+pub fn name(r: Retime) -> &'static str {
+    match r {
+        Retime::AiFast => "AI Fast (RIFE 4.25)",
+        Retime::AiBest => "AI Best (EMA-VFI)",
+        Retime::Nearest | Retime::FrameBlend => r.title(),
     }
 }
 
@@ -264,7 +272,7 @@ impl Engine {
                 model(r).ok_or_else(|| Error::Invalid(format!("{} has no model", r.title())))?;
             let path = dir.join(m.files[0].name);
             let net = match r {
-                Retime::Rife => Net::Rife(Box::new(rife::load(&self.gpu, &path, m.title)?)),
+                Retime::AiFast => Net::Rife(Box::new(rife::load(&self.gpu, &path, m.title)?)),
                 _ => Net::Ema(Box::new(ema::load(&self.gpu, &path, m.title)?)),
             };
             self.nets.push((r, net));

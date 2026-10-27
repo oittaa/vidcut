@@ -2577,7 +2577,7 @@ impl VideoFrames {
             crate::debug!(
                 "interpolate",
                 "{}: a cut between the frames at {weight:.3}",
-                retime.title()
+                crate::interpolate::name(*retime)
             );
             crate::interpolate::kept_at_cut(*retime, size, weight);
             if weight < 0.5 { a } else { b }
@@ -2586,7 +2586,7 @@ impl VideoFrames {
             crate::debug!(
                 "interpolate",
                 "{}: {}x{} at {weight:.3} in {:.1} ms",
-                retime.title(),
+                crate::interpolate::name(*retime),
                 size.0,
                 size.1,
                 clock.elapsed().as_secs_f64() * 1e3

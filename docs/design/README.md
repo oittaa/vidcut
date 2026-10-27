@@ -57,6 +57,10 @@ flowchart LR
 - **The core is pure.** vidcut-core reaches media only through the `Env` trait: `AvEnv` in the app, `FakeEnv` in tests. Edits, plans and decisions are tested without FFmpeg.
 - **One decode and mix stack.** The player and exports read the same `RenderPlan` through the same `VideoFrames` and `AudioMix` in vidcut-av, so the viewer shows the frames an export writes.
 - **The GPU first.** Decoding, scaling, mixing and encoding stay on the GPU wherever it gives correct results. [gpu](gpu.md)
+- **AI features name roles.** Where vidcut picks the model, the app, the requests and the files name its role. The roles are AI Fast, AI Best, and AI for the system's own model on macOS.
+  - Where the user picks the model, as for speech, they name the model.
+  - In code, a feature is a module (`super_scale`, `interpolate`). Each model that vidcut runs with its own code is a module inside it (`nanovsr`, `flashvsr`, `macos`, `rife`, `ema`).
+  - Model names show in `vidcut models`, in Stats for Nerds and in the docs.
 - **A thread per purpose.** Each thread waits on one thing; media jobs run at the lowest priority and yield to playback. [threads](threads.md)
 
 ## Words

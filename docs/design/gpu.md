@@ -361,11 +361,11 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - `Ops::windows`, `Ops::attend` and `Ops::cor` are EMA-VFI's shifted and padded 7×7 windows, its attention between the frames, and its coordinate embedding.
   - A tensor is a `View`: channels last, with a channel offset and a stride. Thus a layer writes into its part of a concatenation, and no copy joins the parts.
 - The weights come from the authors' PyTorch files (`weights::Torch`).
-- **RIFE 4.25** (`rife`):
+- **AI Fast: RIFE 4.25** (`rife`):
   - The frames pad with zeros at the right and the bottom to a multiple of 128, as in the official code.
   - The encoder runs once for a pair. The five flow blocks run for each frame.
   - It finds the motion at half size for UHD, as its README says.
-- **EMA-VFI** (`ema`):
+- **AI Best: EMA-VFI** (`ema`):
   - The frames pad with their edges, centered, as in the official padder. The multiple is 32 divided by the scale of the motion.
   - The motion is found at half size for frames of 1080 lines and at a quarter for UHD (`motion_scale`). The refinement runs at full size. These are the scales of the authors' tests.
   - The pair also runs turned by 180 degrees, and the two results are averaged, as in the authors' tests.

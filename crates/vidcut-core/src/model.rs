@@ -1235,20 +1235,22 @@ pub enum Retime {
     Nearest,
     /// The two source frames around it, mixed by how near each is.
     FrameBlend,
-    /// RIFE 4.25 on the GPU makes the frame from the motion between the
-    /// two source frames. Its weights (25 MB) download at their first use.
-    Rife,
-    /// EMA-VFI on the GPU, as RIFE. Its weights (264 MB) download at their
+    /// A neural network (RIFE 4.25) on the GPU makes the frame from the
+    /// motion between the two source frames. Its weights (25 MB) download at
+    /// their first use.
+    AiFast,
+    /// A larger neural network (EMA-VFI) on the GPU, as AI Fast: slower, and
+    /// nearer to the real frames. Its weights (264 MB) download at their
     /// first use.
-    EmaVfi,
+    AiBest,
 }
 
 impl Retime {
     pub const ALL: [Retime; 4] = [
         Retime::Nearest,
         Retime::FrameBlend,
-        Retime::Rife,
-        Retime::EmaVfi,
+        Retime::AiFast,
+        Retime::AiBest,
     ];
 
     pub fn is_nearest(&self) -> bool {
@@ -1256,15 +1258,15 @@ impl Retime {
     }
 
     pub fn ai(&self) -> bool {
-        matches!(self, Retime::Rife | Retime::EmaVfi)
+        matches!(self, Retime::AiFast | Retime::AiBest)
     }
 
     pub fn title(&self) -> &'static str {
         match self {
             Retime::Nearest => "Nearest",
             Retime::FrameBlend => "Frame Blend",
-            Retime::Rife => "RIFE 4.25",
-            Retime::EmaVfi => "EMA-VFI",
+            Retime::AiFast => "AI Fast",
+            Retime::AiBest => "AI Best",
         }
     }
 }

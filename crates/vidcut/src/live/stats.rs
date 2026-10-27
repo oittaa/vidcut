@@ -314,7 +314,7 @@ impl RetimeStats {
                 }
             });
         Some(Self {
-            process: retime.title().to_string(),
+            process: interpolate::name(retime).to_string(),
             runs_on: report.runs_on.clone(),
             last,
         })
