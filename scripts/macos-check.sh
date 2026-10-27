@@ -199,6 +199,11 @@ facts() {
 
 
 say ""
+say "## Encoders"
+say "The ProRes rows of encoders.list after the build:"
+"$V" encoders list 2>&1 | grep prores_videotoolbox | block || true
+
+say ""
 say "## ProRes 4444"
 say "Half a second of the 4K file (30 frames) in a 1920x1080 timeline, on the GPU (default) and on the CPU (VIDCUT_HWDEC=none, --encoder cpu)."
 say "hq: ProRes 422 HQ, the path of #578, as a baseline. plain: ProRes 4444. bt601: ProRes 4444, the file read as BT.601. dissolve: ProRes 4444, two clips with a dissolve from black and one between them, 60 frames."
