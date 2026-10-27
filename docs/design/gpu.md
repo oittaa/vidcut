@@ -126,7 +126,7 @@ In exports:
      - As FFmpeg's pad filter, the place of the picture is rounded down to the grid of its chroma.
      - The clip rectangle of the kernel is the place of the picture, and its origin is the origin of the source. Thus the scale transform only scales.
   3. A pixel transfer of VideoToolbox changes its layout, such as 4:2:0 into the 10-bit 4:2:2 of ProRes (`Transfer`).
-     - ProRes 4444 takes 16-bit 4:4:4 (P416), with no alpha plane. The CPU's ProRes 4444 has an alpha plane, which is always opaque.
+     - ProRes 4444 takes 16-bit 4:4:4 (P416), with no alpha plane. The CPU's ProRes 4444 has the alpha of the top clip ([todo](../todo/clip-alpha.md)).
      - The Metal kernel of step 4 writes P416, as the pixel transfer writes it off ([gotchas](../gotchas.md#gpu-drivers)).
   4. Where its colors change, a Metal kernel takes the place of step 3 (`recolor::Recolor`, `color::recoloring`). It reads the planes of the frame and writes the layout of the encoder.
      - SDR into SDR changes only the matrix and the range, as swscale does on the CPU.
