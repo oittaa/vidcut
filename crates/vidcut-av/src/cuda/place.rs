@@ -1,14 +1,11 @@
 use std::ffi::c_void;
 
-use vidcut_core::render::WHOLE;
-
 use super::CudaFrames;
 use super::burn::pool_frame;
 use super::mix::{frame_u32, kernel_of, stride_u64};
 use super::share::{Cuda, check, cuda_context, in_context};
 use crate::error::Result;
-use crate::export::mix::Samples;
-use crate::export::place::Layer;
+use crate::export::place::{GpuPlane, Layer};
 use crate::ffmpeg::{ffi, format, frame};
 
 const PTX: &str = r#"
@@ -554,18 +551,7 @@ $L__BB0_64:
 }
 "#;
 
-const LEVELS: usize = 8;
 const BLOCK: (u32, u32) = (32, 8);
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct Level {
-    back: [f32; 8],
-    edge: [f32; 4],
-    inner: [f32; 4],
-    reach: [f32; 2],
-    opacity: f32,
-}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -576,47 +562,10 @@ struct Plane {
     under_pitch: u64,
     src: u64,
     src_pitch: u64,
-    width: u32,
-    height: u32,
-    comps: u32,
-    bytes: u32,
-    shift: u32,
-    top: u32,
-    x0: u32,
-    y0: u32,
-    x1: u32,
-    y1: u32,
-    cols: u32,
-    rows: u32,
-    tx: u32,
-    ty: u32,
-    count: u32,
-    across: f32,
-    down: f32,
-    sa: f32,
-    sd: f32,
-    fitted: [f32; 4],
-    lo: [f32; 2],
-    hi: [f32; 2],
-    level: f32,
-    levels: [Level; LEVELS],
+    sums: GpuPlane,
 }
 
 const _: () = assert!(std::mem::size_of::<Plane>() == 768);
-
-fn levels(layer: &Layer) -> [Level; LEVELS] {
-    let mut levels = [Level::default(); LEVELS];
-    for (to, l) in levels.iter_mut().zip(&layer.placing.levels) {
-        *to = Level {
-            back: l.back.map(|v| v as f32),
-            edge: l.edge.map(|v| v as f32),
-            inner: l.soft.inner.map(|v| v as f32),
-            reach: l.soft.reach.map(|v| v as f32),
-            opacity: l.opacity as f32,
-        };
-    }
-    levels
-}
 
 pub(crate) fn place(
     frames: &CudaFrames,
@@ -624,10 +573,7 @@ pub(crate) fn place(
     layer: &Layer,
     size: (u32, u32),
 ) -> Result<Option<frame::Video>> {
-    let (picture, placing) = (layer.picture, layer.placing);
-    if placing.levels.is_empty() || placing.levels.len() > LEVELS {
-        return Ok(None);
-    }
+    let picture = layer.picture;
     // SAFETY: the pool is a live CUDA frames context.
     let (fc, (ctx, stream)) = unsafe {
         let fc = &*((*frames.as_ptr()).data as *const ffi::AVHWFramesContext);
@@ -642,19 +588,16 @@ pub(crate) fn place(
     let Some(area) = layer.area(size) else {
         return crate::export::video::frame_ref(under).map(Some);
     };
+    let Some(sums) = layer.gpu_planes(frame_u32(fc.width, fc.height)?, size, area)? else {
+        return Ok(None);
+    };
     let cuda = Cuda::get()?;
     super::share::wait_for(under)?;
     super::share::wait_for(picture)?;
-    let samples = Samples::of(sw)?;
-    let (w, h) = frame_u32(fc.width, fc.height)?;
     let mut out = pool_frame(frames)?;
     let function = kernel_of(cuda, ctx, PTX, c"vidcut_place")?;
-    let [fx, fy, fw, fh] = layer.fitted;
-    let [dux, duy, dvx, dvy] = placing.step();
-    let taps = |a: f64, b: f64| (a.hypot(b).ceil() as u32).clamp(1, 8);
-    let levels = levels(layer);
     in_context(cuda, ctx, || {
-        for (p, g) in [(0usize, 0u32), (1, 1)] {
+        for (p, sums) in sums.into_iter().enumerate() {
             let plane = |f: &frame::Video| -> Result<(u64, u64)> {
                 // SAFETY: a CUDA frame's planes are device pointers.
                 let f = unsafe { &*f.as_ptr() };
@@ -662,11 +605,6 @@ pub(crate) fn place(
             };
             let ((o, o_pitch), (u, u_pitch)) = (plane(&out)?, plane(under)?);
             let (s, s_pitch) = plane(picture)?;
-            let step = f64::from(1u32 << g);
-            let (cols, rows) = (
-                picture.width().div_ceil(1 << g),
-                picture.height().div_ceil(1 << g),
-            );
             let mut args = Plane {
                 out: o,
                 out_pitch: o_pitch,
@@ -674,41 +612,15 @@ pub(crate) fn place(
                 under_pitch: u_pitch,
                 src: s,
                 src_pitch: s_pitch,
-                width: w.div_ceil(1 << g),
-                height: h.div_ceil(1 << g),
-                comps: if p == 0 { 1 } else { 2 },
-                bytes: samples.bytes as u32,
-                shift: samples.shift,
-                top: samples.top,
-                x0: area[0] >> g,
-                y0: area[1] >> g,
-                x1: area[2].min(size.0).div_ceil(1 << g),
-                y1: area[3].min(size.1).div_ceil(1 << g),
-                cols,
-                rows,
-                tx: taps(dux * fw, dvx * fh),
-                ty: taps(duy * fw, dvy * fh),
-                count: placing.levels.len() as u32,
-                across: step as f32,
-                down: step as f32,
-                sa: step as f32,
-                sd: step as f32,
-                fitted: layer.fitted.map(|v| v as f32),
-                lo: [(fx / step) as f32, (fy / step) as f32],
-                hi: [
-                    ((fx + fw) / step - 1.0).min(f64::from(cols) - 1.0) as f32,
-                    ((fy + fh) / step - 1.0).min(f64::from(rows) - 1.0) as f32,
-                ],
-                level: (f64::from(layer.weight) / f64::from(WHOLE)) as f32,
-                levels,
+                sums,
             };
             let mut params: [*mut c_void; 1] = [(&raw mut args).cast()];
             // SAFETY: the context is current; `params` holds the kernel's one parameter, laid out as its PTX declares.
             check("placing a picture", unsafe {
                 (cuda.launch_kernel)(
                     function,
-                    args.width.div_ceil(BLOCK.0),
-                    args.height.div_ceil(BLOCK.1),
+                    sums.width.div_ceil(BLOCK.0),
+                    sums.height.div_ceil(BLOCK.1),
                     1,
                     BLOCK.0,
                     BLOCK.1,

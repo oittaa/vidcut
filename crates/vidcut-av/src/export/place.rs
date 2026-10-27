@@ -357,7 +357,117 @@ impl Layer<'_> {
             })
             .filter(|[x0, y0, x1, y1]| x1 > x0 && y1 > y0)
     }
+
+    pub(crate) fn gpu_planes(
+        &self,
+        out: (u32, u32),
+        size: (u32, u32),
+        area: [u32; 4],
+    ) -> Result<Option<[GpuPlane; 2]>> {
+        let (picture, placing) = (self.picture, self.placing);
+        let sw = crate::hw::sw_format(picture);
+        if placing.levels.is_empty()
+            || placing.levels.len() > GPU_LEVELS
+            || !matches!(sw, format::Pixel::NV12 | format::Pixel::P010LE)
+        {
+            return Ok(None);
+        }
+        let samples = super::mix::Samples::of(sw)?;
+        let mut levels = [GpuLevel::default(); GPU_LEVELS];
+        for (to, l) in levels.iter_mut().zip(&placing.levels) {
+            *to = GpuLevel {
+                back: l.back.map(|v| v as f32),
+                edge: l.edge.map(|v| v as f32),
+                inner: l.soft.inner.map(|v| v as f32),
+                reach: l.soft.reach.map(|v| v as f32),
+                opacity: l.opacity as f32,
+            };
+        }
+        let [fx, fy, fw, fh] = self.fitted;
+        let [dux, duy, dvx, dvy] = placing.step();
+        let taps = |a: f64, b: f64| (a.hypot(b).ceil() as u32).clamp(1, 8);
+        let plane = |p: u32| {
+            let step = f64::from(1u32 << p);
+            let (cols, rows) = (
+                picture.width().div_ceil(1 << p),
+                picture.height().div_ceil(1 << p),
+            );
+            GpuPlane {
+                width: out.0.div_ceil(1 << p),
+                height: out.1.div_ceil(1 << p),
+                comps: p + 1,
+                bytes: samples.bytes as u32,
+                shift: samples.shift,
+                top: samples.top,
+                x0: area[0] >> p,
+                y0: area[1] >> p,
+                x1: area[2].min(size.0).div_ceil(1 << p),
+                y1: area[3].min(size.1).div_ceil(1 << p),
+                cols,
+                rows,
+                tx: taps(dux * fw, dvx * fh),
+                ty: taps(duy * fw, dvy * fh),
+                count: placing.levels.len() as u32,
+                across: step as f32,
+                down: step as f32,
+                sa: step as f32,
+                sd: step as f32,
+                fitted: self.fitted.map(|v| v as f32),
+                lo: [(fx / step) as f32, (fy / step) as f32],
+                hi: [
+                    ((fx + fw) / step - 1.0).min(f64::from(cols) - 1.0) as f32,
+                    ((fy + fh) / step - 1.0).min(f64::from(rows) - 1.0) as f32,
+                ],
+                level: (f64::from(self.weight) / f64::from(WHOLE)) as f32,
+                levels,
+            }
+        };
+        Ok(Some([plane(0), plane(1)]))
+    }
 }
+
+pub(crate) const GPU_LEVELS: usize = 8;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct GpuLevel {
+    back: [f32; 8],
+    edge: [f32; 4],
+    inner: [f32; 4],
+    reach: [f32; 2],
+    opacity: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct GpuPlane {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    comps: u32,
+    bytes: u32,
+    shift: u32,
+    top: u32,
+    x0: u32,
+    y0: u32,
+    x1: u32,
+    y1: u32,
+    cols: u32,
+    rows: u32,
+    tx: u32,
+    ty: u32,
+    count: u32,
+    across: f32,
+    down: f32,
+    sa: f32,
+    sd: f32,
+    fitted: [f32; 4],
+    lo: [f32; 2],
+    hi: [f32; 2],
+    level: f32,
+    levels: [GpuLevel; GPU_LEVELS],
+}
+
+const _: () = assert!(std::mem::size_of::<GpuPlane>() == 720);
 
 fn threads() -> usize {
     std::thread::available_parallelism().map_or(1, |n| n.get().clamp(1, 8))
