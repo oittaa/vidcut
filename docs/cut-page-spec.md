@@ -518,6 +518,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Change Clip Speed** (R†): a speed, reversed or not, or a freeze frame, for each selected clip (D48).
   - The Speed Change controls of the Inspector set the same (pp. 736–737).
   - vidcut: the Speed section of the Inspector tab (X70).
+  - vidcut: the window also sets Retime Process (X93).
 - **Change Clip Duration** (Ctrl+D, p. 693; Resolve Studio 21.1.1):
   - It takes frames or a timecode, or 1, 5 or 15 seconds, for each selected clip.
   - End runs to the end of the media.

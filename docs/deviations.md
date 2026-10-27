@@ -1884,6 +1884,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Speed Warp uses the DaVinci Neural Engine. AI Speed Warp Metal is a version of it for macOS only.
 - **vidcut:**
   - Retime Process is a setting of a clip. The Speed section of the Inspector tab sets it, and `clip.set` sets it as `retime`.
+  - The Change Clip Speed window (R) also sets it, for the selected clips with a picture.
   - Its values are Nearest, Frame Blend, RIFE 4.25, EMA-VFI and VFIMamba. The default is Nearest. There is no project setting.
   - Nearest shows the source frame that the frame falls in (D48).
   - Frame Blend mixes the two source frames around the frame. Each frame has the weight of how near it is.
@@ -1903,4 +1904,5 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The models make any point between two frames, not only the middle. A speed of 40% needs points such as 0.4 and 0.8.
   - The owner compares the three models before vidcut keeps fewer of them. Thus each model is a value of its own for now.
   - A morph from one shot into the next looks wrong. Thus a shot change keeps the nearer source frame, as Nearest does.
+  - A slow clip needs a process. Thus the window that sets the speed also sets the process.
   - Nearest is the behavior that vidcut had. Thus a clip keeps it until the user selects another process.
