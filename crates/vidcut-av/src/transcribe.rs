@@ -192,17 +192,20 @@ fn start(dir: &Path, runtime: &Runtime) -> Result<()> {
         return Ok(());
     }
     let home = runtime.home(dir);
-    let longest = std::fs::read_dir(&home)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path().as_os_str().len())
-        .max()
-        .unwrap_or(0);
-    if cfg!(windows) && longest >= 260 {
-        return Err(Error::Invalid(format!(
-            "transcribe.cpp's library is in {}, where its files' paths pass the 260 characters \
-             Windows loads from: set XDG_CACHE_HOME to a shorter folder",
-            home.display()
-        )));
+    #[cfg(windows)]
+    {
+        let longest = std::fs::read_dir(&home)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path().as_os_str().len())
+            .max()
+            .unwrap_or(0);
+        if longest >= 260 {
+            return Err(Error::Invalid(format!(
+                "transcribe.cpp's library is in {}, where its files' paths pass the 260 \
+                 characters Windows loads from: set XDG_CACHE_HOME to a shorter folder",
+                home.display()
+            )));
+        }
     }
     transcribe_cpp_sys::load(&home.join(runtime.library))
         .map_err(|e| Error::Invalid(format!("transcribe.cpp's library: {e}")))?;
@@ -756,11 +759,10 @@ fn device_label(device: &tc::Device) -> String {
 pub fn gpu_label() -> Option<String> {
     RUNTIME?;
     let gpu = crate::gpus::in_use()?;
-    let kind = if cfg!(target_os = "macos") {
-        "metal"
-    } else {
-        "vulkan"
-    };
+    #[cfg(target_os = "macos")]
+    let kind = "metal";
+    #[cfg(not(target_os = "macos"))]
+    let kind = "vulkan";
     Some(format!("{} ({})", gpu.name, kind_name(kind)))
 }
 

@@ -312,6 +312,18 @@ fn audio_codecs(c: Container) -> &'static [AudioCodec] {
     }
 }
 
+#[cfg(windows)]
+const GPU_ENCODERS: &[EncoderChoice] =
+    &[EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv];
+#[cfg(target_os = "macos")]
+const GPU_ENCODERS: &[EncoderChoice] = &[EncoderChoice::VideoToolbox];
+#[cfg(not(any(windows, target_os = "macos")))]
+const GPU_ENCODERS: &[EncoderChoice] = &[
+    EncoderChoice::Nvenc,
+    EncoderChoice::Vaapi,
+    EncoderChoice::Qsv,
+];
+
 const CONTAINERS: [Container; 9] = [
     Container::Mp4,
     Container::Mov,
@@ -2652,18 +2664,10 @@ fn settings_form(
                     egui::ComboBox::from_id_salt("export-encoder")
                         .selected_text(encoder(&v.encoder))
                         .show_ui(ui, |ui| {
-                            let gpus: &[EncoderChoice] = if cfg!(windows) {
-                                &[EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv]
-                            } else if cfg!(target_os = "macos") {
-                                &[EncoderChoice::VideoToolbox]
-                            } else {
-                                &[
-                                    EncoderChoice::Nvenc,
-                                    EncoderChoice::Vaapi,
-                                    EncoderChoice::Qsv,
-                                ]
-                            };
-                            for &e in [EncoderChoice::Auto, EncoderChoice::Cpu].iter().chain(gpus) {
+                            for &e in [EncoderChoice::Auto, EncoderChoice::Cpu]
+                                .iter()
+                                .chain(GPU_ENCODERS)
+                            {
                                 let why = why_video(can, v.codec, e);
                                 choice(ui, &mut v.encoder, e, encoder(&e), why);
                             }

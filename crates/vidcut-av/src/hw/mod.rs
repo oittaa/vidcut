@@ -145,11 +145,12 @@ impl Device {
 
     pub(crate) fn qsv(on: &str) -> Result<Self> {
         crate::init();
+        #[cfg(windows)]
+        let child = "d3d11va";
+        #[cfg(not(windows))]
+        let child = "vaapi";
         let mut options = ffmpeg::Dictionary::new();
-        options.set(
-            "child_device_type",
-            if cfg!(windows) { "d3d11va" } else { "vaapi" },
-        );
+        options.set("child_device_type", child);
         if !on.is_empty() {
             options.set("child_device", on);
         }
@@ -477,14 +478,17 @@ impl GpuDecoder {
         listed.chain(Self::unlisted().0).collect()
     }
 
+    #[cfg(target_os = "macos")]
     fn unlisted() -> (Option<Self>, String) {
-        if !cfg!(target_os = "macos") {
-            return (None, "no GPU is listed here".into());
-        }
         match Self::open(Kind::VideoToolbox, "") {
             Ok(d) => (Some(d), "the Mac's".into()),
             Err(e) => (None, format!("VideoToolbox won't open: {e}")),
         }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn unlisted() -> (Option<Self>, String) {
+        (None, "no GPU is listed here".into())
     }
 
     fn on_gpu(gpu: &crate::gpus::Gpu) -> Result<Self> {
