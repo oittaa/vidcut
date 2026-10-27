@@ -17,7 +17,8 @@ In vidcut:
   - Measured: red at an alpha of 0.25 over green exports as (62, 95, 0).
 - An export writes opaque frames. ProRes 4444 has an opaque alpha plane on the CPU, and no alpha plane on VideoToolbox.
 - A frame with a layer with alpha mixes on the CPU, also for CUDA and VideoToolbox.
-- Retime Process with Frame Blend or AI, Super Scale with AI, and HDR conversions drop the alpha.
+- Retime Process with Frame Blend or AI and Super Scale with AI drop the alpha.
+- An HDR conversion drops the alpha when FFmpeg has no zscale. Then the CPU converts the colors.
 
 To do:
 
@@ -26,4 +27,4 @@ To do:
   - ProRes 4444 on VideoToolbox needs AYUV64 for alpha.
   - With it off, the export composites over black. It writes opaque frames.
 - **Alpha on the GPU:** mix layers with alpha in the kernels of CUDA and Metal.
-- **Alpha through Retime Process, Super Scale and HDR conversions.**
+- **Alpha through Retime Process, Super Scale and the HDR conversion on the CPU.**

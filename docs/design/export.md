@@ -243,11 +243,12 @@ Every mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-
 - The other GPUs can fit a picture only when its colors do not change. Thus, for the timeline colors, their frames are copied to memory, and go to the encoder from there.
 - `color::tag_frame` gives the timeline's frames and the black frame their color tags. `burn::blend` and `Normalizer` read these tags.
 - The conversion keeps the HDR10+ and Dolby Vision metadata of the frame, as a mix does.
-- When the output has the timeline's colors, there is no second stage.
+- When the output is YUV in the timeline's colors, there is no second stage.
 
 Picture renders:
 
 - `frame.render` of a timeline frame and the storyboards use the same stages (`renderer::frames`, `FrameReader::rgba`).
+- Their output is RGB. Thus they always have the second stage, and the layers mix in YUV, as in an export.
 - `frame.render` of a media and the tiles do not use the timeline color space. They convert each picture of the file directly to RGB.
 
 ## Sound
@@ -447,6 +448,7 @@ The plan:
 - A clip at its usual values is laid over the same way, where its fitted picture leaves bars and something is below it.
 - Where its fitted picture fills the frame, it takes the place of the layers below. `place::fills` tells this, by the `place::fit` that the export and the viewer fit with.
 - A picture with an alpha channel (`VideoInfo::alpha`) never fills the frame. It is laid over the layers below by its straight alpha ([todo](../todo/clip-alpha.md)).
+- `Normalizer` keeps the alpha through the conversion to the timeline colors. zscale and tonemap then work on `gbrapf32le`.
 - Inside a placed compound clip, it takes the place of the layers of the compound.
 - With nothing below it, it is drawn with black bars, which costs less.
 

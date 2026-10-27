@@ -247,13 +247,13 @@ The audio device:
 - `Viewer::start` spawns `vidcut-viewer`.
 - The thread wakes when the session notifies or asks, when the size changes, or when `next_change` comes due.
 - Each turn calls `Player::present`, then `Screen::draw` into an RGBA target. The target has the size of the viewer's picture in physical pixels.
-- With an SDR timeline, one render pass of `crates/vidcut/src/gui/picture.wgsl` does all the drawing into the target.
+- With an SDR timeline and one layer, one render pass of `crates/vidcut/src/gui/picture.wgsl` does all the drawing into the target.
 - With an HDR timeline, the passes draw into a picture of 16-bit floats (`Wide`) in the PQ or HLG code values of the timeline:
   - Each layer is converted to linear light, then to BT.2020 colors, then to the PQ or HLG curve of the timeline. Titles and subtitles are converted the same way from sRGB.
   - Then one more draw (`fs_screen`) converts that picture to the target: to BT.709, tone-mapped with the export's math.
   - Thus the layers, titles and subtitles mix in the timeline's code values, as in an export.
-- With an SDR timeline and a layer with a composite mode, the passes also draw into `Wide`, in the SDR code values:
-  - Thus a color above 1 or below 0 stays between the layers, as in an export.
+- With an SDR timeline and more than one layer or a composite mode, the passes also draw into `Wide`, in the SDR code values:
+  - Thus a color above 1 or below 0 stays between the layers and in the composite modes, as in an export.
   - Then `fs_screen` only cuts each value to the range from 0 to 1.
 - The drawing:
   - It fits the picture as the export does, and turns it upright.
