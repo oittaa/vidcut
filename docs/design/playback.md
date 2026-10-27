@@ -144,7 +144,11 @@ Motions:
 - With a Retime Process other than Nearest, `VideoFrames` makes the frames between the source frames for the viewer too, as an export does ([export](export.md#which-source-frame)).
   - With AI Best, a frame can take seconds.
   - The key of such a frame holds the process (`source_key`), and its exact source position in millionths of a frame (`Plan::id`). Thus each made frame is a kept picture of its own.
-  - With an AI process, the player fills as with an AI upscaler: not behind the playhead, and without the lead (`Fill::of`).
+  - With an AI process, the player fills no frames behind the playhead (`Fill::of`).
+  - A frame of an AI process that the player must make aims ahead of the clock. The lead is the mean time of the recent made frames (`make_cost`).
+    - On the way to that frame, the player skips the frames between, and makes none of them. They would be late.
+    - Ahead of the playhead, it also makes only frames that are past the clock by the lead, and only frames after the reader. Thus slow frames are spread evenly, and the reader never seeks back.
+  - A skipped frame of such a clip moves the reader to its exact source time, as a made frame does (`exact_at`). Thus the reader never steps back between the two, which would seek.
 - While pictures are dragged, `Player::preview_pictures` at once puts each dragged picture in place of the picture of its clip.
 - The live core then plans the timeline again with the dragged pictures (`Msg::PreviewPictures`), `RELOAD_EVERY` apart at most.
 - This is necessary because a picture that stops filling the frame needs the tracks below it decoded.

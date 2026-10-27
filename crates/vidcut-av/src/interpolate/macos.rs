@@ -169,6 +169,7 @@ mod imp {
                 Some(p) if p.key.0 == key.0 && p.key.2 == key.1 => Mode::Sequential,
                 _ => Mode::Random,
             };
+            let clock = std::time::Instant::now();
             if mode != Mode::SequentialReferencesUnchanged {
                 self.pair = Some(Pair {
                     key: key.clone(),
@@ -197,13 +198,23 @@ mod imp {
                 )
             }
             .ok_or_else(|| Error::Invalid(format!("{WHAT} refused a pair of frames")))?;
+            let wrote = clock.elapsed();
             // SAFETY: a started session and live parameters.
             unsafe {
                 self.processor
                     .processWithParameters_error(ProtocolObject::from_ref(&*parameters))
             }
             .map_err(|e| failed(WHAT, e))?;
-            read(&made, self.format, self.size)
+            let processed = clock.elapsed();
+            let out = read(&made, self.format, self.size)?;
+            crate::debug!(
+                "interpolate",
+                "macOS: pair in {:.1} ms, processed in {:.1} ms, read in {:.1} ms",
+                wrote.as_secs_f64() * 1e3,
+                (processed - wrote).as_secs_f64() * 1e3,
+                (clock.elapsed() - processed).as_secs_f64() * 1e3
+            );
+            Ok(out)
         }
     }
 
