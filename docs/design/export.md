@@ -316,7 +316,7 @@ The plan:
 - A clip at its usual values goes over the same way where its fitted picture leaves bars and something is below it.
 - Where its fitted picture fills the frame, it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.
 - A picture with an alpha channel (`VideoInfo::alpha`) never fills the frame. It goes over the layers below by its straight alpha ([todo](../todo/clip-alpha.md)).
-- `Normalizer` keeps the alpha through the conversion to the timeline colors. zscale and tonemap then work on `gbrapf32le`.
+- `Normalizer` keeps the alpha through the conversion to the timeline colors. zscale converts only the color planes, and `mergeplanes` puts the alpha back ([gotchas](../gotchas.md#ffmpeg-filters-and-colors)).
 - With nothing below it, it is drawn with black bars. Why: this costs less.
 
 The pictures:
