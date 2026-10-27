@@ -35,7 +35,7 @@ The values in the Priority column:
 | `vidcut-task`, `vidcut-make`, `vidcut-measure` | the core, per `Step`; `Live::hear_ducking` also starts `vidcut-measure` | their step; the measurements that the ducking of the preview misses | task: its `Work`; make: interactive; measure: job |
 | vidcut-j1, vidcut-j2, … | `Live::start_export`, `Live::start_encode` | an export, proxy or transcription job | job |
 | `vidcut-history` | `OpenProject::apply` | `Store::compact` | job |
-| `vidcut-cache` | `main`, for the GUI | `disk_cache::start`: the index from one listing at startup, then `disk_cache::rebuild` every hour | job |
+| `vidcut-cache` | `main`, for the GUI | `disk_cache::start`: the index from one listing at startup, then `disk_cache::rebuild` at each `REBUILD_EVERY` | job |
 | `vidcut-preview` | `Live::preview_step` | the project at a step of the history (`Store::project_at`, from the nearest state its `Past` keeps); only the newest step asked | interactive |
 | `vidcut-worker-N`, `vidcut-tiles-N` | `Workers::new`, `Tiles::begin_frame` | filmstrips and waveforms; timeline tiles | job |
 | `vidcut-missing-media`, `vidcut-look` | `MissingWatch::start`, `look::watch` | media and proxy files; the OS's look | interactive |
@@ -48,7 +48,7 @@ The values in the Priority column:
 | `vidcut-quit`, `vidcut-exit-watch` | `Port::quit`, `threads::end_within` | quit fallback, exit watchdog | interactive |
 | `vidcut-viewer-close`, `vidcut-two-up-close`, `vidcut-frees-imports` | `threads::closing` | drop players, Vulkan imports | interactive |
 | `vidcut-cancel` | `ipc::client::call` | watches the cancel of a CLI call | interactive |
-| `vidcut-proxies`, `vidcut-transcribe`, `vidcut-story-N` | `session::run_with`, `storyboard::render` | a headless proxy encode or transcription; storyboard pictures | starter's (`Work::current`) |
+| `vidcut-proxies`, `vidcut-transcribe`, `vidcut-retime`, `vidcut-story-N` | `work_first` in `session::run_with`, `storyboard::render` | the work of a headless proxy, transcription or re-timing before its edit; storyboard pictures | starter's (`Work::current`) |
 | `vidcut-upload` | `speech_api::transcribe` | the upload to a paid speech service and its reply, while the job's thread reports and cancels | inherited |
 | `vidcut-speakers` | `transcribe::speakers_of` | the run of a speaker model, while the job's thread reports the time and cancels it | inherited |
 | `vidcut-play-video`, `vidcut-play-audio`, `vidcut-play-windows` | `Player::new`; windows once followed | the decoding, mix and two-up windows of an engine | inherited |
