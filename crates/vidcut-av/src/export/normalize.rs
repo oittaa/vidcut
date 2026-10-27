@@ -345,6 +345,7 @@ pub(crate) fn displayable(p: format::Pixel) -> bool {
             | P::YUV444P12LE
             | P::YUVA444P12LE
             | P::P416LE
+            | P::AYUV64LE
     )
 }
 

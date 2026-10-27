@@ -43,6 +43,10 @@ fn stored(u: vec2<f32>) -> vec2<f32> {
 
 fn yuv(u: vec2<f32>) -> vec3<f32> {
     let s = stored(u) * p.upright.zw;
+    if p.flags.z == 2u {
+        let ayuv = textureSampleLevel(luma, bilinear, s, 0.0);
+        return ayuv.gba;
+    }
     let y = textureSampleLevel(luma, bilinear, s, 0.0).r;
     let c = s * vec2<f32>(textureDimensions(luma)) / vec2<f32>(p.per.xy * textureDimensions(chroma_u));
     if p.flags.z == 1u {

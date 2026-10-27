@@ -1413,7 +1413,7 @@ impl Slot {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            layout @ (Layout::P210 | Layout::P416) => {
+            layout @ (Layout::P210 | Layout::P416 | Layout::Ayuv64) => {
                 return Err(format!("{layout:?} pictures aren't VA-API's"));
             }
             Layout::Yuv420p
@@ -1549,7 +1549,7 @@ impl Slot {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no P010 or 16-bit textures for P010".into()),
-            layout @ (Layout::P210 | Layout::P416) => {
+            layout @ (Layout::P210 | Layout::P416 | Layout::Ayuv64) => {
                 return Err(format!("{layout:?} pictures aren't Direct3D 11's"));
             }
             Layout::Yuv420p
@@ -1608,6 +1608,7 @@ impl Slot {
             | Layout::P010
             | Layout::P210
             | Layout::P416
+            | Layout::Ayuv64
             | Layout::Yuv420p
             | Layout::Yuv422p) => return Err(format!("{layout:?} pictures aren't Vulkan's")),
         }
@@ -1661,16 +1662,17 @@ impl Slot {
         if !gpu.metal {
             return Err("the display's device isn't Metal".into());
         }
-        let formats = match picture.layout() {
-            Layout::Nv12 => [
+        let formats: &[(MTLPixelFormat, F)] = match picture.layout() {
+            Layout::Nv12 => &[
                 (MTLPixelFormat::R8Unorm, F::R8Unorm),
                 (MTLPixelFormat::RG8Unorm, F::Rg8Unorm),
             ],
-            Layout::P010 | Layout::P210 | Layout::P416 if gpu.wide => [
+            Layout::P010 | Layout::P210 | Layout::P416 if gpu.wide => &[
                 (MTLPixelFormat::R16Unorm, F::R16Unorm),
                 (MTLPixelFormat::RG16Unorm, F::Rg16Unorm),
             ],
-            layout @ (Layout::P010 | Layout::P210 | Layout::P416) => {
+            Layout::Ayuv64 if gpu.wide => &[(MTLPixelFormat::RGBA16Unorm, F::Rgba16Unorm)],
+            layout @ (Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64) => {
                 return Err(format!("no 16-bit textures for {layout:?}"));
             }
             Layout::Yuv420p
@@ -1687,7 +1689,8 @@ impl Slot {
             CVPixelBufferGetIOSurface(buffer).as_ref()
         }
         .ok_or("a pixel buffer without an IOSurface")?;
-        if surface.plane_count() != 2 {
+        let planar = surface.plane_count() > 0;
+        if surface.plane_count().max(1) != formats.len() {
             return Err(format!("an IOSurface of {} planes", surface.plane_count()));
         }
         // SAFETY: wgpu's own device, which makes textures here only.
@@ -1695,10 +1698,13 @@ impl Slot {
         let label = Some("vidcut VideoToolbox picture");
         let plane = |index: usize| -> Result<(wgpu::TextureView, (u32, u32)), String> {
             let (mtl, format) = formats[index];
-            let (w, h) = (
-                surface.width_of_plane(index),
-                surface.height_of_plane(index),
-            );
+            let (w, h) = match planar {
+                true => (
+                    surface.width_of_plane(index),
+                    surface.height_of_plane(index),
+                ),
+                false => (surface.width(), surface.height()),
+            };
             // SAFETY: `desc` is the plane's size and format; Metal checks it against `surface`.
             let raw = unsafe {
                 let desc =
@@ -1748,8 +1754,11 @@ impl Slot {
             };
             Ok((texture.create_view(&Default::default()), (width, height)))
         };
-        let (y, uv) = gpu.checked(|| (plane(0), plane(1)))?;
-        let ((y, size), (uv, _)) = (y?, uv?);
+        let mut planes = gpu
+            .checked(|| (0..formats.len()).map(plane).collect::<Result<Vec<_>, _>>())??
+            .into_iter();
+        let (y, size) = planes.next().ok_or("an IOSurface of no planes")?;
+        let uv = planes.next().map_or_else(|| y.clone(), |(uv, _)| uv);
         self.views = Some((y, uv, size));
         self.imported = Some(picture.clone());
         self.imports += 1;
@@ -1769,7 +1778,9 @@ impl Slot {
             Layout::P010 if gpu.wide => 2,
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
             Layout::P210 => return Ok(false),
-            Layout::P416 => return Err("P416 pictures aren't NVDEC's".into()),
+            layout @ (Layout::P416 | Layout::Ayuv64) => {
+                return Err(format!("{layout:?} pictures aren't NVDEC's"));
+            }
             Layout::Yuv420p
             | Layout::Yuv420p10
             | Layout::Yuv422p
@@ -1848,13 +1859,18 @@ impl Slot {
         let wide = gpu.wide && sixteen(layout);
         let key = (layout, w, h, wide);
         if self.planes.as_ref().is_none_or(|p| p.key != key) {
-            let (one, two) = if wide {
+            let (one, two, four) = if wide {
                 (
                     wgpu::TextureFormat::R16Unorm,
                     wgpu::TextureFormat::Rg16Unorm,
+                    wgpu::TextureFormat::Rgba16Unorm,
                 )
             } else {
-                (wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Rg8Unorm)
+                (
+                    wgpu::TextureFormat::R8Unorm,
+                    wgpu::TextureFormat::Rg8Unorm,
+                    wgpu::TextureFormat::Rgba8Unorm,
+                )
             };
             let make = |size: (u32, u32), format| {
                 gpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -1887,6 +1903,12 @@ impl Slot {
                     key,
                     y: make((w, h), one),
                     u: make((cw, ch), two),
+                    v: make((1, 1), one),
+                },
+                Layout::Ayuv64 => Planes {
+                    key,
+                    y: make((w, h), four),
+                    u: make((1, 1), one),
                     v: make((1, 1), one),
                 },
             });
@@ -1948,10 +1970,13 @@ impl Slot {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 4);
             }
-            (Layout::P010 | Layout::P210 | Layout::P416, false) => {
-                for (texture, plane, size, samples) in
-                    [(&planes.y, 0, (w, h), 1), (&planes.u, 1, (cw, ch), 2)]
-                {
+            (Layout::Ayuv64, true) => put(&planes.y, 0, (w, h), 8),
+            (Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64, false) => {
+                let textures = match layout {
+                    Layout::Ayuv64 => vec![(&planes.y, 0, (w, h), 4)],
+                    _ => vec![(&planes.y, 0, (w, h), 1), (&planes.u, 1, (cw, ch), 2)],
+                };
+                for (texture, plane, size, samples) in textures {
                     let stride = frame.stride(plane);
                     let data = frame.data(plane);
                     let row = (size.0 * samples) as usize;
@@ -2396,18 +2421,20 @@ fn sixteen(layout: Layout) -> bool {
         | Layout::Yuv422p10
         | Layout::P210
         | Layout::Yuv444p12
-        | Layout::P416 => true,
+        | Layout::P416
+        | Layout::Ayuv64 => true,
     }
 }
 
-fn interleaved(layout: Layout) -> bool {
+fn packing(layout: Layout) -> u32 {
     match layout {
-        Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => true,
         Layout::Yuv420p
         | Layout::Yuv420p10
         | Layout::Yuv422p
         | Layout::Yuv422p10
-        | Layout::Yuv444p12 => false,
+        | Layout::Yuv444p12 => 0,
+        Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => 1,
+        Layout::Ayuv64 => 2,
     }
 }
 
@@ -2415,7 +2442,7 @@ fn per_chroma(layout: Layout) -> (u32, u32) {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => (2, 2),
         Layout::Yuv422p | Layout::Yuv422p10 | Layout::P210 => (2, 1),
-        Layout::Yuv444p12 | Layout::P416 => (1, 1),
+        Layout::Yuv444p12 | Layout::P416 | Layout::Ayuv64 => (1, 1),
     }
 }
 
@@ -2475,7 +2502,7 @@ fn params_of(
         (Layout::P010 | Layout::P210, true) => (65535.0 / 64.0, 1023.0),
         (Layout::Yuv420p10 | Layout::Yuv422p10, true) => (65535.0, 1023.0),
         (Layout::Yuv444p12, true) => (65535.0, 4095.0),
-        (Layout::P416, true) => (65535.0, 65535.0),
+        (Layout::P416 | Layout::Ayuv64, true) => (65535.0, 65535.0),
         _ => (255.0, 255.0),
     };
     let unit = (max + 1.0) / 256.0;
@@ -2510,7 +2537,7 @@ fn params_of(
     for v in floats.iter().flatten() {
         out.extend_from_slice(&(*v as f32).to_le_bytes());
     }
-    let uv = u32::from(interleaved(layout));
+    let uv = packing(layout);
     let (across, down) = per_chroma(layout);
     let mixes_in = transfer_of(timeline) as u32;
     for v in [hdr, turns, uv, kernel, across, down, mixes_in, 0] {

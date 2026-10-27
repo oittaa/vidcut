@@ -18,6 +18,7 @@ pub enum Layout {
     P210,
     Yuv444p12,
     P416,
+    Ayuv64,
 }
 
 impl Layout {
@@ -32,6 +33,7 @@ impl Layout {
             P::P210LE => Self::P210,
             P::YUV444P12LE | P::YUVA444P12LE => Self::Yuv444p12,
             P::P416LE => Self::P416,
+            P::AYUV64LE => Self::Ayuv64,
             _ => Self::Yuv420p,
         }
     }
