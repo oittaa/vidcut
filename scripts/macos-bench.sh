@@ -4,8 +4,8 @@
 #
 #   scripts/macos-bench.sh [retime] [scale] [quality] [viewer]
 #
-# With no names, it runs every section; with names, only those.
-# It pulls the branch claude/macos-zero-copy, builds vidcut and the player
+# With no names, it runs retime and quality; with names, only those.
+# It pulls the branch claude/macos-zero-copy-retime, builds vidcut and the player
 # benchmark, fetches Big Buck Bunny (673 MB, once) into $VIDCUT_TEST_DATA
 # (default ~/Downloads/vidcut-tmp), and measures exports that VideoToolbox
 # decodes and encodes: the time, the frames each second, the CPU time, the
