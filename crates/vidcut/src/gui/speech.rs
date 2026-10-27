@@ -95,7 +95,7 @@ fn split_list(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn hearing(s: &Settings, params: &mut serde_json::Value, send: bool) {
+fn hearing(s: &Settings, params: &mut serde_json::Value, send: bool, transcribing: bool) {
     params["find"] = json!(s.find);
     if s.find == FindSpeech::Sound && s.sound_db != vidcut_core::transcript::SOUND_DB {
         params["sound_db"] = json!(s.sound_db);
@@ -113,6 +113,7 @@ fn hearing(s: &Settings, params: &mut serde_json::Value, send: bool) {
         SpeechModel::Xai => {
             let xai = XaiOptions {
                 keyterm: split_list(&s.keyterms),
+                multichannel: s.xai.multichannel && transcribing,
                 ..s.xai.clone()
             };
             if xai != XaiOptions::default() {
@@ -440,6 +441,7 @@ struct Paying {
     model: SpeechModel,
     what: String,
     secs: f64,
+    mb: f64,
 }
 
 fn ask_payment(ctx: &egui::Context, p: &Paying, again: &mut bool) -> Option<bool> {
@@ -453,7 +455,7 @@ fn ask_payment(ctx: &egui::Context, p: &Paying, again: &mut bool) -> Option<bool
             "{}: {}, about {:.0} MB",
             p.what,
             length(p.secs),
-            vidcut_core::transcript::upload_mb(p.secs, 1).ceil()
+            p.mb.ceil()
         ));
         let cost = vidcut_core::transcript::dollars(vidcut_core::transcript::cost(p.model, p.secs));
         ui.label(format!(
@@ -524,7 +526,7 @@ struct Dialog {
     gpu: bool,
     device: Option<String>,
     asking: bool,
-    paying: Option<(f64, String)>,
+    paying: Option<(f64, f64, String)>,
     paid: bool,
     again: bool,
     hear: Hear,
@@ -954,7 +956,7 @@ impl Workspace {
         if again {
             params["again"] = json!(true);
         }
-        hearing(s, &mut params, go.send);
+        hearing(s, &mut params, go.send, true);
         if go.download {
             params["download"] = json!(true);
         }
@@ -987,7 +989,7 @@ impl Workspace {
         if let Some(l) = &s.language {
             params["language"] = json!(l);
         }
-        hearing(s, &mut params, go.send);
+        hearing(s, &mut params, go.send, false);
         if !s.plain() {
             params["look"] = json!(s.look);
         }
@@ -1196,7 +1198,15 @@ impl Workspace {
                         }
                     });
                 });
-                if transcribing {
+                let wide = match transcribing {
+                    true => d.media.iter().filter_map(|id| p.media(id)).find_map(|m| {
+                        vidcut_core::transcript::channels_of(s.model, Some(&s.xai), m, 0).err()
+                    }),
+                    false => None,
+                };
+                if let Some(text) = &wide {
+                    dialog::warn(ui, text.as_str());
+                } else if transcribing {
                     match kept {
                         0 => {}
                         _ if again => {
@@ -1256,7 +1266,8 @@ impl Workspace {
                         (false, _) => "Create",
                     };
                     let can = (transcribing || !heard.is_empty())
-                        && (instant || ready.key[index(s.model)]);
+                        && (instant || ready.key[index(s.model)])
+                        && wide.is_none();
                     create = dialog::main_button(ui, label, can);
                     cancel = ui.button("Cancel").clicked();
                 });
@@ -1264,11 +1275,12 @@ impl Workspace {
         });
         self.speech.tiles = tiles;
         let s = d.settings.clone();
-        if let Some((secs, what)) = d.paying.clone() {
+        if let Some((secs, mb, what)) = d.paying.clone() {
             let paying = Paying {
                 model: s.model,
                 what,
                 secs,
+                mb,
             };
             match ask_payment(ctx, &paying, &mut d.again) {
                 Some(true) => {
@@ -1292,10 +1304,23 @@ impl Workspace {
                 true => (duration(&p, &untold), files(untold.len())),
                 false => self.upload_size(&p, &s, &d, &heard),
             };
+            let mb = match transcribing {
+                true => d
+                    .media
+                    .iter()
+                    .filter_map(|id| p.media(id))
+                    .map(|m| {
+                        let sent =
+                            vidcut_core::transcript::channels_of(s.model, Some(&s.xai), m, 0);
+                        vidcut_core::transcript::upload_mb(m.info.duration, sent.unwrap_or(1))
+                    })
+                    .sum(),
+                false => vidcut_core::transcript::upload_mb(secs, 1),
+            };
             match (secs > 0.0, d.ready.ask[index(s.model)]) {
                 (false, _) => {}
                 (true, true) => {
-                    d.paying = Some((secs, what));
+                    d.paying = Some((secs, mb, what));
                     create = false;
                 }
                 (true, false) => d.paid = true,
