@@ -54,6 +54,13 @@ pub(crate) fn with_alpha(p: format::Pixel) -> Option<format::Pixel> {
         P::YUV444P10LE => P::YUVA444P10LE,
         P::YUV444P12LE => P::YUVA444P12LE,
         P::P416LE => P::YUVA444P16LE,
+        P::RGB24 => P::RGBA,
+        P::BGR24 => P::BGRA,
+        P::RGB48LE => P::RGBA64LE,
+        P::GBRP => P::GBRAP,
+        P::GBRP10LE => P::GBRAP10LE,
+        P::GBRP12LE => P::GBRAP12LE,
+        P::GBRP16LE => P::GBRAP16LE,
         p if has_alpha(p) => p,
         _ => return None,
     })
@@ -222,7 +229,12 @@ impl Normalizer {
             (crate::color::conversion(color, out_fmt, target), None)
         };
         let kept = has_alpha(fmt) && cpu.is_none() && conv.after.is_empty();
-        let (out_fmt, bars) = match kept.then(|| with_alpha(out_fmt)).flatten() {
+        let alpha = kept.then(|| with_alpha(out_fmt)).flatten();
+        let conv = match alpha {
+            Some(alpha) => crate::color::conversion(color, alpha, target),
+            None => conv,
+        };
+        let (out_fmt, bars) = match alpha {
             Some(alpha) => (alpha, "black@0"),
             None => (out_fmt, "black"),
         };
