@@ -40,6 +40,18 @@ impl Facts {
             keep_failed: false,
         }
     }
+
+    pub fn deinterlacing(f: &frame::Video, gpu_failed: bool) -> Self {
+        let place = Place::of(f);
+        Self {
+            place,
+            keep: !gpu_failed
+                && matches!(place, Place::Cuda | Place::Vulkan)
+                && crate::hw::deinterlace::gives_bwdifs(f),
+            displayable: true,
+            keep_failed: gpu_failed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

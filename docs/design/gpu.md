@@ -189,6 +189,11 @@ On macOS (`interpolate::macos`):
 
 - CUDA frames use `bwdif_cuda`, and Vulkan frames use `bwdif_vulkan`.
   - `hw::deinterlace` first checks that the filter gives the frames of `bwdif`. Else the frames come down for `bwdif`.
+- `route::Facts::deinterlacing` gives the facts of a frame for the deinterlacer, and `route::plan` gives its route:
+  - `Route::Kept`: the GPU filter deinterlaces the frame.
+  - `Route::Whole`: the frame comes down for `bwdif`.
+  - `Route::Cpu`: `bwdif` deinterlaces the frame in memory.
+  - A GPU filter that does not build becomes a fact. After that, the frames come down.
 - The shader of the draw converts each picture into the timeline color space (`color::shader_colors`).
 - `fs_encode` converts the timeline color space into the color space of the output.
 

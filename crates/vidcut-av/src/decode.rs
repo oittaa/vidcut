@@ -393,12 +393,8 @@ impl Deinterlacer {
     }
 
     fn takes(&self, f: &frame::Video) -> bool {
-        match f.format() {
-            format::Pixel::CUDA | format::Pixel::VULKAN => {
-                !self.gpu_failed && crate::hw::deinterlace::gives_bwdifs(f)
-            }
-            _ => !crate::hw::on_gpu(f),
-        }
+        let facts = crate::route::Facts::deinterlacing(f, self.gpu_failed);
+        crate::route::plan(&facts) != crate::route::Route::Whole
     }
 
     fn build(&mut self, f: &frame::Video) -> Result<()> {

@@ -21,8 +21,6 @@
    - Each backend has `down`, `up`, `keep` and `encoder_frames`.
    - Thus no code outside a backend asks on which kind of GPU a frame is.
    - The backends replace the split by mechanism: `hw::Keeper`, `Upload`, and `encoder_frames` for Direct3D 11 only.
-3. **Deinterlacing in `route::Facts`.**
-   - The reader deinterlaces before the planner sees a frame.
-4. **Capabilities tested, not written as rules.**
+3. **Capabilities tested, not written as rules.**
    - The code has rules for which encoders take the frames of which places (`encode::shares`).
    - Test these capabilities once for each GPU and FFmpeg, as vidcut tests the encoders. Keep the results with `encoders.json`.
