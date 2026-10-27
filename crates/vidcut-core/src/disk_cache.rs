@@ -11,16 +11,14 @@ pub enum Kind {
     Thumbs,
     Waveforms,
     Analysis,
-    Shaders,
     DecoderTests,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 5] = [
+    pub const ALL: [Kind; 4] = [
         Kind::Thumbs,
         Kind::Waveforms,
         Kind::Analysis,
-        Kind::Shaders,
         Kind::DecoderTests,
     ];
 
@@ -29,7 +27,6 @@ impl Kind {
             Kind::Thumbs => "thumbs",
             Kind::Waveforms => "waveforms",
             Kind::Analysis => "analysis",
-            Kind::Shaders => "shaders",
             Kind::DecoderTests => "decoder-tests",
         }
     }

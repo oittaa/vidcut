@@ -341,7 +341,6 @@ pub(crate) fn deinterlacing(
             (f.width(), f.height()),
             (time_base.into(), sar),
             frames,
-            None,
         )?;
     } else {
         let args = format!(
@@ -1044,26 +1043,12 @@ impl VideoReader {
         self.kind
     }
 
-    pub(crate) fn decoders_cuda(&self) -> Option<&crate::cuda::CudaDevice> {
-        self.gpu
-            .as_ref()
-            .filter(|_| self.kind.is_some())
-            .and_then(crate::hw::GpuDecoder::cuda)
-    }
-
     pub fn interlaced(&self) -> bool {
         self.interlaced
     }
 
     pub fn peek(&self) -> Option<&frame::Video> {
         self.pending.as_ref()
-    }
-
-    pub(crate) fn frames_stay(&self) -> bool {
-        match (&self.deinterlacer, &self.pending) {
-            (Some(d), Some(first)) => d.takes(first),
-            _ => true,
-        }
     }
 
     pub fn time_base(&self) -> ffmpeg::Rational {

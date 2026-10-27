@@ -7,11 +7,10 @@ use vidcut_core::render::{Image, Placed, Ramp, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
-use super::make::{Fitting, Maker, Output};
+use super::make::{Fitting, Maker};
 use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, format, frame};
-use crate::route::Route;
 
 pub(crate) fn target(fps: Rational, origin: f64, pos: i64) -> f64 {
     origin + fps.frames_to_secs(pos) - 0.5 * fps.frames_to_secs(1)
@@ -102,6 +101,7 @@ struct Source {
     run: Option<Session>,
     queued: VecDeque<frame::Video>,
     turner: Option<crate::hw::Turner>,
+    drawn: Option<Single>,
 }
 
 const DECODE_AHEAD: f64 = 1.0;
@@ -190,6 +190,7 @@ impl Source {
             run: None,
             queued: VecDeque::new(),
             turner: None,
+            drawn: None,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -245,6 +246,7 @@ impl Source {
             run: None,
             queued: VecDeque::new(),
             turner: None,
+            drawn: None,
         })
     }
 
@@ -434,7 +436,14 @@ impl Source {
         if let Some((_, _, rgb)) = self.rgb.iter().find(|(p, s, _)| *p == pts && *s == size) {
             return Ok((pts, rgb.clone()));
         }
-        let rgb = shown_rgb(f, rotation, size, reading)?;
+        let rgb = shown_rgb(
+            &mut self.drawn,
+            f,
+            rotation,
+            size,
+            reading,
+            self.reader.path(),
+        )?;
         self.rgb.retain(|(p, s, _)| *s == size && *p != pts);
         if self.rgb.len() >= 2 {
             self.rgb.remove(0);
@@ -459,7 +468,6 @@ pub(crate) struct Layer {
     pub(crate) rotation: u16,
     pub(crate) decoder: Option<crate::hw::Kind>,
     pub(crate) decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
-    made_on_gpu: bool,
     pub(crate) wipe: Option<Wipe>,
 }
 
@@ -615,22 +623,18 @@ fn in_memory(frame: &frame::Video) -> Result<frame::Video> {
 }
 
 fn shown_rgb(
+    drawn: &mut Option<Single>,
     frame: &frame::Video,
     rotation: u16,
     (dw, dh): (u32, u32),
     reading: Reading,
+    path: &Path,
 ) -> Result<Vec<u8>> {
-    let mem = in_memory(frame)?;
-    let mut to_rgb = super::normalize::Normalizer::new(
-        &mem,
-        rotation,
-        dw,
-        dh,
-        format::Pixel::RGB24,
-        None,
-        reading,
-    )?;
-    let rgb = to_rgb.run(&mem)?;
+    let single = match drawn {
+        Some(single) => single,
+        None => drawn.insert(Single::new(reading)?),
+    };
+    let rgb = single.draw(frame, rotation, (dw, dh), format::Pixel::RGB24, path)?;
     let (w, h) = (rgb.width() as usize, rgb.height() as usize);
     let stride = rgb.stride(0);
     let mut packed = Vec::with_capacity(w * h * 3);
@@ -915,7 +919,14 @@ impl Source {
         let clock = Instant::now();
         let rgb = match run.run.takes(f, rotation) {
             true => None,
-            false => Some(shown_rgb(f, rotation, run.size, reading)?),
+            false => Some(shown_rgb(
+                &mut self.drawn,
+                f,
+                rotation,
+                run.size,
+                reading,
+                self.reader.path(),
+            )?),
         };
         let converted = clock.elapsed();
         let outs = match rgb {
@@ -1084,7 +1095,6 @@ pub struct VideoFrames {
     drawer: Option<Drawer>,
     drawn: i64,
     encoder: Option<Handoff>,
-    through_memory: Option<String>,
 }
 
 pub(crate) enum Handoff {
@@ -1092,18 +1102,119 @@ pub(crate) enum Handoff {
     Surfaces(crate::hw::Frames),
 }
 
-struct Drawer {
+impl Handoff {
+    pub(crate) fn of(
+        kind: vidcut_core::export::EncoderChoice,
+        cuda: Option<(crate::cuda::CudaDevice, crate::cuda::CudaFrames)>,
+        upload: Option<&super::encode::Upload>,
+    ) -> Result<Option<Self>> {
+        Ok(match (cuda, upload) {
+            (Some((device, frames)), _) => Some(Self::Cuda(device, frames)),
+            (None, Some(up)) if kind == vidcut_core::export::EncoderChoice::VideoToolbox => {
+                // SAFETY: `up.frames` is the encoder's live frames reference.
+                Some(Self::Surfaces(unsafe { crate::hw::Frames::of(up.frames)? }))
+            }
+            _ => None,
+        })
+    }
+}
+
+pub(crate) struct Drawer {
     gpu: crate::screen::Gpu,
     screen: crate::screen::Screen,
+    encoder: Option<Handoff>,
+    through_memory: Option<String>,
 }
 
 impl Drawer {
-    fn new() -> Result<Self> {
+    pub(crate) fn new(encoder: Option<Handoff>) -> Result<Self> {
         let (_, device, queue) = crate::screen::device("vidcut export").map_err(Error::Invalid)?;
         Ok(Self {
             gpu: crate::screen::Gpu::new(&device, &queue),
             screen: crate::screen::Screen::for_export(),
+            encoder,
+            through_memory: None,
         })
+    }
+
+    pub(crate) fn keeps(&self) -> Vec<crate::hw::Kind> {
+        self.gpu.gpu_pictures()
+    }
+
+    pub(crate) fn through_memory(&self) -> Option<&str> {
+        self.through_memory.as_deref()
+    }
+
+    pub(crate) fn frame(
+        &mut self,
+        picture: &std::sync::Arc<crate::player::Picture>,
+        titles: &[crate::player::TitleOver],
+        layers: crate::screen::Layers<'_>,
+        (w, h): (u32, u32),
+        (pixel, colors): (format::Pixel, (Option<Hdr>, Option<Hdr>)),
+    ) -> Result<frame::Video> {
+        let (gpu, screen) = (&self.gpu, &mut self.screen);
+        screen.draw(gpu, Some(picture), titles, layers, w, h);
+        let handed =
+            match (&self.encoder, &self.through_memory) {
+                (Some(Handoff::Cuda(device, frames)), None) => Some(screen.encoded(
+                    gpu,
+                    pixel,
+                    colors,
+                    crate::screen::Sink::Cuda(device, frames),
+                )),
+                (Some(Handoff::Surfaces(frames)), None) => Some(frames.fresh().and_then(|f| {
+                    screen.encoded(gpu, pixel, colors, crate::screen::Sink::Surface(f))
+                })),
+                _ => None,
+            };
+        match handed {
+            Some(Ok(out)) => return Ok(out),
+            Some(Err(e)) => self.through_memory = Some(e.to_string()),
+            None => {}
+        }
+        let out = screen.encoded(gpu, pixel, colors, crate::screen::Sink::Memory)?;
+        match &self.encoder {
+            Some(Handoff::Cuda(_, frames)) => {
+                let mut up = frames.upload(&out)?;
+                crate::color::tag_frame(&mut up, colors.1);
+                Ok(up)
+            }
+            _ => Ok(out),
+        }
+    }
+}
+
+pub(crate) struct Single {
+    drawer: Drawer,
+    maker: Maker,
+    fitting: Fitting,
+}
+
+impl Single {
+    pub(crate) fn new(reading: Reading) -> Result<Self> {
+        let drawer = Drawer::new(None)?;
+        let maker = Maker::new((2, 2, format::Pixel::YUV420P), drawer.keeps(), reading);
+        Ok(Self {
+            drawer,
+            maker,
+            fitting: Fitting::none(),
+        })
+    }
+
+    pub(crate) fn draw(
+        &mut self,
+        frame: &frame::Video,
+        rotation: u16,
+        size: (u32, u32),
+        pixel: format::Pixel,
+        path: &Path,
+    ) -> Result<frame::Video> {
+        let made = self.maker.make(&mut self.fitting, frame, rotation, path)?;
+        let picture = std::sync::Arc::new(crate::player::Picture::new(made, rotation, None, None));
+        let layers = (&[][..], &[][..], &[][..], None);
+        self.drawer
+            .frame(&picture, &[], layers, size, (pixel, (None, None)))
     }
 }
 
@@ -1128,8 +1239,7 @@ impl VideoFrames {
             decoder: None,
             maker: Maker::new(
                 (width, height, format::Pixel::YUV420P),
-                None,
-                Output::Decoded { keep: Vec::new() },
+                Vec::new(),
                 Reading::Stream,
             ),
             gpu_made: 0,
@@ -1148,7 +1258,6 @@ impl VideoFrames {
             drawer: None,
             drawn: 0,
             encoder: None,
-            through_memory: None,
         }
     }
 
@@ -1158,7 +1267,7 @@ impl VideoFrames {
     }
 
     pub fn through_memory(&self) -> Option<&str> {
-        self.through_memory.as_deref()
+        self.drawer.as_ref().and_then(Drawer::through_memory)
     }
 
     pub fn with_timeline(mut self, timeline: Option<Hdr>) -> Result<Self> {
@@ -1188,12 +1297,8 @@ impl VideoFrames {
         crate::progress::note(super::Note::Source(source));
     }
 
-    pub(crate) fn output(mut self, output: Output) -> Self {
-        let mut out = self.maker.out();
-        if matches!(output, Output::Decoded { .. }) {
-            out.2 = format::Pixel::YUV420P;
-        }
-        self.maker = Maker::new(out, self.maker.target(), output, self.maker.reading());
+    pub(crate) fn keeping(mut self, keep: Vec<crate::hw::Kind>) -> Self {
+        self.maker = Maker::new(self.maker.out(), keep, self.maker.reading());
         self
     }
 
@@ -1262,11 +1367,9 @@ impl VideoFrames {
 
     pub fn next_frame(&mut self) -> Result<Option<frame::Video>> {
         if self.drawer.is_none() {
-            let drawer = Drawer::new()?;
-            let keep = drawer.gpu.gpu_pictures();
-            let out = self.maker.out();
-            let reading = self.maker.reading();
-            self.maker = Maker::new(out, None, Output::Decoded { keep }, reading);
+            let drawer = Drawer::new(self.encoder.take())?;
+            let (out, reading) = (self.maker.out(), self.maker.reading());
+            self.maker = Maker::new(out, drawer.keeps(), reading);
             self.drawer = Some(drawer);
         }
         let Some(layers) = self.next_layers()? else {
@@ -1306,49 +1409,15 @@ impl VideoFrames {
             .filter_map(crate::hdr::Hdr10Plus::of_frame)
             .reduce(|a, b| a.brightest(&b));
         let picture = std::sync::Arc::new(crate::player::picture(layers));
-        let d = self.drawer.as_mut().expect("made above");
-        d.screen.draw(
-            &d.gpu,
-            Some(&picture),
+        let drawer = self.drawer.as_mut().expect("made above");
+        let mut out = drawer.frame(
+            &picture,
             &titles,
             (&placed, &crosses, &kernels, self.timeline),
-            w,
-            h,
-        );
-        let colors = (self.timeline, self.out.1);
-        let pixel = self.out.0;
-        let handed = match (&self.encoder, &self.through_memory) {
-            (Some(Handoff::Cuda(device, frames)), None) => Some(d.screen.encoded(
-                &d.gpu,
-                pixel,
-                colors,
-                crate::screen::Sink::Cuda(device, frames),
-            )),
-            (Some(Handoff::Surfaces(frames)), None) => Some(frames.fresh().and_then(|f| {
-                d.screen
-                    .encoded(&d.gpu, pixel, colors, crate::screen::Sink::Surface(f))
-            })),
-            _ => None,
-        };
-        let mut out = match handed {
-            Some(Ok(out)) => out,
-            failed => {
-                if let Some(Err(e)) = failed {
-                    self.through_memory = Some(e.to_string());
-                }
-                let out = d
-                    .screen
-                    .encoded(&d.gpu, pixel, colors, crate::screen::Sink::Memory)?;
-                match &self.encoder {
-                    Some(Handoff::Cuda(_, frames)) => {
-                        let mut up = frames.upload(&out)?;
-                        crate::color::tag_frame(&mut up, colors.1);
-                        up
-                    }
-                    _ => out,
-                }
-            }
-        };
+            (w, h),
+            (self.out.0, (self.timeline, self.out.1)),
+        )?;
+        self.gpu_made += 1;
         if self.dynamic.dolby_vision {
             let dv = crate::hdr::Dynamic {
                 hdr10plus: false,
@@ -1396,10 +1465,6 @@ impl VideoFrames {
         self.last_decoder = shown.decoder;
         self.last_decoding = shown.decoding.clone();
         self.gpu_decoded += i64::from(shown.decoder.is_some());
-        let made_on_gpu = layers
-            .iter()
-            .all(|l| l.made_on_gpu || (l.frame.is_none() && layers.len() > 1));
-        self.gpu_made += i64::from(made_on_gpu);
         Ok(Some(layers))
     }
 
@@ -1450,7 +1515,6 @@ impl VideoFrames {
                             rotation: 0,
                             decoder: None,
                             decoding: None,
-                            made_on_gpu: false,
                             wipe,
                         });
                     }
@@ -1491,7 +1555,6 @@ impl VideoFrames {
                     rotation: if self.open[s].upright { 0 } else { rotation },
                     decoder,
                     decoding: Some(decoding),
-                    made_on_gpu: self.open[s].fitting.route == Some(Route::Gpu),
                     wipe,
                 });
             }
@@ -1586,7 +1649,7 @@ impl VideoFrames {
             let (w, h, pix) = self.maker.out();
             let mut f = frame::Video::new(pix, w, h);
             fill_black(&mut f)?;
-            crate::color::tag_frame(&mut f, self.maker.target());
+            crate::color::tag_frame(&mut f, None);
             self.black = Some(f);
         }
         Ok(self.black.as_ref().expect("just set"))
@@ -2027,10 +2090,9 @@ impl VideoFrames {
         };
         let between = clock.elapsed();
         let src = &mut self.open[s];
-        let made = self
-            .maker
-            .make_layer(i, &mut src.fitting, &big, 0, src.reader.path(), reading)?
-            .ok_or_else(no_picture)?;
+        let made =
+            self.maker
+                .make_layer(i, &mut src.fitting, &big, 0, src.reader.path(), reading)?;
         src.normalized = None;
         src.upright = true;
         let out = self.finished_layer(s, made)?;
@@ -2103,7 +2165,7 @@ impl VideoFrames {
                     clock.elapsed().as_secs_f64() * 1e3
                 );
             }
-            src.normalized = Some(made.ok_or_else(no_picture)?);
+            src.normalized = Some(made);
             src.upright = big.is_some();
             if big.is_some() && !src.told {
                 crate::progress::note(super::Note::Upscaled(super::UpscaleNote {
@@ -2144,10 +2206,6 @@ impl VideoFrames {
         }
         Ok(out)
     }
-}
-
-fn no_picture() -> Error {
-    Error::Invalid("the GPU scaler gave no picture".into())
 }
 
 fn dolby_vision(f: &frame::Video) -> Result<frame::Video> {

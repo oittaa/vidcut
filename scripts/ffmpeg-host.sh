@@ -16,7 +16,7 @@
 # on that FFmpeg, and CARGO_TARGET_DIR=target/ffmpeg/TARGET/cargo, a target
 # directory of its own: ffmpeg-sys-next's bindings come from FFmpeg's
 # headers, and cargo doesn't notice when those change. Its first build
-# builds every crate. FFmpeg's run-time libraries (x264, dav1d, libplacebo)
+# builds every crate. FFmpeg's run-time libraries (x264, dav1d, SVT-AV1)
 # are this computer's, Ubuntu 26.04's as in the image: on another system the
 # copy may not run.
 #

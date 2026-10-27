@@ -2,12 +2,10 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::CFRetained;
 use objc2_core_video::CVPixelBufferGetIOSurface;
-use objc2_foundation::NSString;
 use objc2_io_surface::IOSurfaceRef;
 use objc2_metal::{
-    MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandQueue, MTLComputePipelineState,
-    MTLCreateSystemDefaultDevice, MTLDevice, MTLLibrary, MTLPixelFormat, MTLTexture,
-    MTLTextureDescriptor, MTLTextureUsage,
+    MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandQueue, MTLCreateSystemDefaultDevice,
+    MTLDevice, MTLPixelFormat, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 
 use crate::error::{Error, Result};
@@ -16,7 +14,6 @@ use crate::frame_processor::{failed, pixels};
 
 pub(crate) type Device = Retained<ProtocolObject<dyn MTLDevice>>;
 pub(crate) type Queue = Retained<ProtocolObject<dyn MTLCommandQueue>>;
-pub(crate) type Pipeline = Retained<ProtocolObject<dyn MTLComputePipelineState>>;
 pub(crate) type Texture = Retained<ProtocolObject<dyn MTLTexture>>;
 
 fn refused(what: &str, why: &str) -> Error {
@@ -29,18 +26,6 @@ pub(crate) fn device(what: &str) -> Result<(Device, Queue)> {
         .newCommandQueue()
         .ok_or_else(|| refused(what, "no command queue"))?;
     Ok((device, queue))
-}
-
-pub(crate) fn kernel(device: &Device, source: &str, name: &str, what: &str) -> Result<Pipeline> {
-    let library = device
-        .newLibraryWithSource_options_error(&NSString::from_str(source), None)
-        .map_err(|e| failed(what, e))?;
-    let function = library
-        .newFunctionWithName(&NSString::from_str(name))
-        .ok_or_else(|| refused(what, "no kernel"))?;
-    device
-        .newComputePipelineStateWithFunction_error(&function)
-        .map_err(|e| failed(what, e))
 }
 
 pub(crate) fn surface(f: &Video, what: &str) -> Result<CFRetained<IOSurfaceRef>> {

@@ -87,7 +87,6 @@ pub const DNXHR: Part = encoder(&[own("dnxhd")], "DNxHR");
 pub const AAC: Part = encoder(&[own("aac")], "AAC sound");
 pub const OPUS: Part = encoder(&[lib("libopus", "libopus"), own("opus")], "Opus sound");
 pub const MP3: Part = encoder(&[lib("libmp3lame", "LAME")], "MP3 sound");
-pub const ZSCALE: Part = filter(&[lib("zscale", "zimg")], "faster HDR conversion");
 
 pub const PARTS: &[Part] = &[
     H264,
@@ -103,23 +102,12 @@ pub const PARTS: &[Part] = &[
     encoder(&[own("pcm_s16le")], "PCM sound"),
     encoder(&[own("pcm_s24le")], "PCM sound"),
     encoder(&[own("png")], "stills and storyboards"),
-    ZSCALE,
-    filter(
-        &[lib("libplacebo", "libplacebo")],
-        "NVDEC's pictures converted on the GPU",
-    ),
     filter(&[own("buffer")], "every picture conversion"),
     filter(&[own("buffersink")], "every picture conversion"),
     filter(&[own("abuffer")], "loudness"),
     filter(&[own("abuffersink")], "loudness"),
     filter(&[own("scale")], "every picture conversion"),
-    filter(&[own("pad")], "every picture conversion"),
-    filter(&[own("setsar")], "every picture conversion"),
     filter(&[own("format")], "every picture conversion"),
-    filter(&[own("transpose")], "turning pictures upright"),
-    filter(&[own("hflip")], "turning pictures upright"),
-    filter(&[own("vflip")], "turning pictures upright"),
-    filter(&[own("tonemap")], "HDR into SDR"),
     filter(&[own("bwdif")], "deinterlacing"),
     filter(&[own("ebur128")], "loudness"),
 ];

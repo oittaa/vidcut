@@ -99,8 +99,9 @@ fn strip_on(
         crate::export::normalize::fit(w, h, sar, max_w, max_h)
     };
     let mut fit = Fit {
+        drawn: None,
         space,
-        ..Fit::default()
+        path: path.to_path_buf(),
     };
 
     let rate = stream_rate(&input.stream(index).expect("found"));
@@ -211,11 +212,10 @@ fn keep(
     Ok(())
 }
 
-#[derive(Default)]
 struct Fit {
-    normalizer: Option<crate::export::normalize::Normalizer>,
-    shrinker: Option<crate::hw::Shrinker>,
+    drawn: Option<crate::export::video::Single>,
     space: ColorSpace,
+    path: std::path::PathBuf,
 }
 
 impl Fit {
@@ -231,27 +231,14 @@ impl Fit {
             retagged = f;
             &retagged
         };
-        let down;
-        let decoded = if crate::hw::on_gpu(decoded) {
-            down = crate::export::normalize::down(&mut self.shrinker, decoded, rotation, (tw, th))?;
-            &down
-        } else {
-            decoded
-        };
-        let normalizer = &mut self.normalizer;
-        let n = match normalizer {
-            Some(n) if n.matches(decoded, rotation) => n,
-            _ => normalizer.insert(crate::export::normalize::Normalizer::new(
-                decoded,
-                rotation,
-                tw,
-                th,
-                format::Pixel::RGBA,
-                None,
+        let single = match &mut self.drawn {
+            Some(single) => single,
+            None => self.drawn.insert(crate::export::video::Single::new(
                 crate::decode::Reading::Frames,
             )?),
         };
-        Ok(packed(&n.run(decoded)?))
+        let out = single.draw(decoded, rotation, (tw, th), format::Pixel::RGBA, &self.path)?;
+        Ok(packed(&out))
     }
 }
 

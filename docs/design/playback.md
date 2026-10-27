@@ -65,7 +65,8 @@ flowchart TD
 
 **Decoding**
 
-- Decoding uses the reader of the export, `VideoFrames`, with `Output::Decoded`: YUV frames at their own size.
+- Decoding uses the reader of the export, `VideoFrames`, with `VideoFrames::keeping`: frames at their own size.
+  - GPU frames of the kinds that the viewer takes stay on the GPU.
 - Each turn does the first of these:
   1. the viewer's frame
   2. pictures ahead in the direction of play
@@ -195,7 +196,7 @@ The audio device:
   - Then `fs_screen` converts that picture to the target: BT.709, tone-mapped.
   - Thus the layers, titles and subtitles mix in the code values of the timeline.
 - With an SDR timeline and more than one layer or a composite mode, the passes also draw into `Wide`, in SDR code values. Thus a color above 1 or below 0 stays between the layers and in the composite modes. `fs_screen` then clips each value.
-- An export draws with the same `Screen`, always into `Wide` (`Screen::for_export`). It writes the planes of its encoder from there ([export](export.md#timeline-colors)).
+- An export, a proxy and a thumbnail draw with the same `Screen`, always into `Wide` (`Screen::for_export`). They write the planes of the output from there ([export](export.md#timeline-colors)).
 - The drawing:
   - It fits the picture and turns it upright.
   - It scales in YUV and converts to RGB (`shader_colors`). In an SDR timeline, it tone-maps HDR.

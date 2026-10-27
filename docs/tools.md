@@ -100,7 +100,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - With `FFMPEG_DIR` set as usual, it needs the C headers of macOS from Zig (`winget install zig.zig`).
 - Set `BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin="-isystem ZIG/lib/include -isystem ZIG/lib/libc/include/any-macos-any"`. ZIG is the folder with `zig.exe`.
 
-**A smaller FFmpeg:** `VIDCUT_FFMPEG_WITHOUT=zscale,libx264` makes vidcut operate as if those parts are missing.
+**A smaller FFmpeg:** `VIDCUT_FFMPEG_WITHOUT=libx264,libopus` makes vidcut operate as if those parts are missing.
 
 **Media inspection** (`crates/vidcut-av/examples/`):
 

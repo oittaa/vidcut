@@ -11,7 +11,6 @@ use super::store::Kind;
 use super::{Busy, Decoder as Decoding, Mode, Shared, Snap, lock, ms};
 use crate::error::{Error, Result};
 use crate::export::is_cancelled;
-use crate::export::make::Output;
 use crate::export::renderer::{at, window};
 use crate::export::video::{Layer, VideoFrames};
 use crate::ffmpeg::format;
@@ -671,14 +670,13 @@ impl Decoder {
 
     fn new_reader(&mut self, p: &RenderPlan) -> VideoFrames {
         let frames = VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None);
-        let decoded = |keep| Output::Decoded { keep };
         if !self.hardware {
             crate::debug!(
                 "player",
                 "a new reader decodes on the CPU: GPU decoding is off"
             );
             self.shared.decodes_on_cpu(Some("GPU decoding is off"));
-            return frames.output(decoded(Vec::new()));
+            return frames.keeping(Vec::new());
         }
         let gpu = self.gpu.get_or_insert_with(crate::hw::GpuDecoder::best);
         let Some(gpu) = gpu else {
@@ -687,7 +685,7 @@ impl Decoder {
                 "a new reader decodes on the CPU: no GPU decoder here"
             );
             self.shared.decodes_on_cpu(Some("no GPU decoder here"));
-            return frames.output(decoded(Vec::new()));
+            return frames.keeping(Vec::new());
         };
         self.shared.decodes_on_cpu(None);
         let found = gpu.gpu();
@@ -703,7 +701,7 @@ impl Decoder {
         if let Some(found) = found {
             self.shared.gpu_found(found);
         }
-        frames.output(decoded(shows)).decode_on(gpu.clone())
+        frames.keeping(shows).decode_on(gpu.clone())
     }
 
     fn decode(&mut self, snap: &Snap, t: i64, reach: Reach) -> Result<i64> {

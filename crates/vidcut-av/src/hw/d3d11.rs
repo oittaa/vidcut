@@ -372,12 +372,6 @@ impl Shared {
     }
 }
 
-pub(crate) fn can_fit(ops: &crate::route::Ops) -> bool {
-    ops.colors_kept
-        && ops.into
-        && !(ops.layout == format::Pixel::NV12 && ops.out_layout == format::Pixel::P010LE)
-}
-
 pub(crate) struct Scaler {
     halvings: Vec<Scaler>,
     frames: *mut ffi::AVBufferRef,
@@ -408,36 +402,6 @@ impl Scaler {
         let layout = unsafe { (*((*source).data as *const ffi::AVHWFramesContext)).sw_format };
         let (halvings, mut scaler) = Self::passes(f, source, layout, size, 0)?;
         scaler.halvings = halvings;
-        Ok(scaler)
-    }
-
-    pub(super) unsafe fn into(
-        f: &frame::Video,
-        source: *mut ffi::AVBufferRef,
-        frames: *mut ffi::AVBufferRef,
-        fitted: (u32, u32),
-        rotation: u16,
-    ) -> Result<Self> {
-        // SAFETY: a live frames context, the encoder's.
-        let (layout, size) = unsafe {
-            let fc = &*((*frames).data as *const ffi::AVHWFramesContext);
-            (fc.sw_format, (fc.width as u32, fc.height as u32))
-        };
-        let (halvings, check) = Self::passes(f, source, layout, fitted, rotation)?;
-        drop(check);
-        let (fw, fh) = fitted;
-        let place = (((size.0 - fw) / 2) & !1, ((size.1 - fh) / 2) & !1, fw, fh);
-        // SAFETY: another reference to the encoder's frames.
-        let frames = unsafe { ffi::av_buffer_ref(frames) };
-        if frames.is_null() {
-            return Err(Error::Invalid("no memory for frames".into()));
-        }
-        let (from, input) = halvings
-            .last()
-            .map_or((source, (f.width(), f.height())), |h| (h.frames, h.size));
-        let mut scaler = Self::made(from, input, frames, size, place, color_space(f))?;
-        scaler.halvings = halvings;
-        scaler.turn(rotation)?;
         Ok(scaler)
     }
 
@@ -848,25 +812,6 @@ fn full_range(space: DXGI_COLOR_SPACE_TYPE) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::route::Ops;
-
-    fn into_frames() -> Ops {
-        Ops {
-            rotation: 0,
-            layout: format::Pixel::NV12,
-            out_layout: format::Pixel::NV12,
-            rgb: false,
-            colors_kept: true,
-            pads: false,
-            into: true,
-        }
-    }
-
-    #[test]
-    fn frames_fit_into_the_encoders_frames() {
-        assert!(can_fit(&into_frames()));
-    }
-
     #[test]
     fn frames_reject_a_side_past_i32() {
         // SAFETY: the size is rejected before the device pointer is used.
@@ -881,22 +826,6 @@ mod tests {
         }
         .unwrap_err();
         assert_eq!(err.to_string(), "2147483648×480 doesn't fit a frame");
-    }
-
-    #[test]
-    fn frames_dont_fit_without_the_encoders_frames() {
-        assert!(!can_fit(&Ops {
-            into: false,
-            ..into_frames()
-        }));
-    }
-
-    #[test]
-    fn eight_bit_frames_dont_fit_into_ten_bit_ones() {
-        assert!(!can_fit(&Ops {
-            out_layout: format::Pixel::P010LE,
-            ..into_frames()
-        }));
     }
 
     #[test]

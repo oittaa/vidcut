@@ -1,8 +1,7 @@
 use objc2::AllocAnyThread;
 use objc2::rc::Retained;
 use objc2_metal::{
-    MTLClearColor, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLLoadAction, MTLOrigin,
-    MTLPixelFormat, MTLRegion, MTLRenderPassDescriptor, MTLSize, MTLStoreAction, MTLTexture,
+    MTLCommandBuffer, MTLCommandQueue, MTLOrigin, MTLPixelFormat, MTLRegion, MTLSize, MTLTexture,
     MTLTextureUsage,
 };
 use objc2_metal_performance_shaders::{MPSImageLanczosScale, MPSScaleTransform};
@@ -48,23 +47,6 @@ fn chroma_shift(layout: format::Pixel) -> (u32, u32) {
     }
 }
 
-fn black(format: MTLPixelFormat, full: bool) -> [[f64; 2]; 2] {
-    let (luma, chroma) = if matches!(format, MTLPixelFormat::R16Unorm | MTLPixelFormat::RG16Unorm) {
-        (4096.0 / 65535.0, 32768.0 / 65535.0)
-    } else {
-        (16.0 / 255.0, 128.0 / 255.0)
-    };
-    [[if full { 0.0 } else { luma }, 0.0], [chroma, chroma]]
-}
-
-pub(crate) fn centered(f: &Video, out: (u32, u32), size: (u32, u32)) -> (u32, u32) {
-    let (sx, sy) = chroma_shift(crate::hw::sw_format(f));
-    (
-        (out.0.saturating_sub(size.0) / 2) >> sx << sx,
-        (out.1.saturating_sub(size.1) / 2) >> sy << sy,
-    )
-}
-
 pub(crate) fn sized(
     lanczos: &mut Option<Lanczos>,
     f: &Video,
@@ -97,18 +79,9 @@ impl Lanczos {
         })
     }
 
-    pub(crate) fn scale(&mut self, f: &Video, size: (u32, u32)) -> Result<Video> {
-        self.place(f, size, ((0, 0), size))
-    }
-
-    pub(crate) fn place(
-        &mut self,
-        f: &Video,
-        size: (u32, u32),
-        rect: ((u32, u32), (u32, u32)),
-    ) -> Result<Video> {
+    fn scale(&mut self, f: &Video, size: (u32, u32)) -> Result<Video> {
         let clock = std::time::Instant::now();
-        let out = self.drawn(f, size, rect)?;
+        let out = self.drawn(f, size)?;
         crate::debug!(
             "lanczos",
             "{}x{} to {}x{} in {:.1} ms",
@@ -121,24 +94,16 @@ impl Lanczos {
         Ok(out)
     }
 
-    fn drawn(
-        &mut self,
-        f: &Video,
-        size: (u32, u32),
-        ((x, y), (w, h)): ((u32, u32), (u32, u32)),
-    ) -> Result<Video> {
+    fn drawn(&mut self, f: &Video, (w, h): (u32, u32)) -> Result<Video> {
         let layout = crate::hw::sw_format(f);
         let formats = planes(layout)?;
         let out = self
             .frames
-            .fresh(f, (size, ffi::AVPixelFormat::from(layout)), WHAT)?;
+            .fresh(f, ((w, h), ffi::AVPixelFormat::from(layout)), WHAT)?;
         let (from, to) = (surface(f, WHAT)?, surface(&out, WHAT)?);
         if from.plane_count() != 2 || to.plane_count() != 2 {
             return Err(refused("IOSurfaces of other than two planes"));
         }
-        let padded = (x, y, w, h) != (0, 0, size.0, size.1);
-        // SAFETY: a plain field of a valid frame.
-        let full = unsafe { (*f.as_ptr()).color_range } == ffi::AVColorRange::AVCOL_RANGE_JPEG;
         let buffer = self
             .queue
             .commandBuffer()
@@ -147,38 +112,14 @@ impl Lanczos {
         for (plane, format) in formats.into_iter().enumerate() {
             let read = MTLTextureUsage::ShaderRead;
             let a = texture(&self.device, &from, (plane, format), read, WHAT)?;
-            let usage = MTLTextureUsage::ShaderWrite | MTLTextureUsage::RenderTarget;
+            let usage = MTLTextureUsage::ShaderWrite;
             let b = texture(&self.device, &to, (plane, format), usage, WHAT)?;
-            if padded {
-                let [r, g] = black(format, full)[plane];
-                let pass = MTLRenderPassDescriptor::renderPassDescriptor();
-                // SAFETY: attachment 0 of a new descriptor.
-                let color = unsafe { pass.colorAttachments().objectAtIndexedSubscript(0) };
-                color.setTexture(Some(&b));
-                color.setLoadAction(MTLLoadAction::Clear);
-                color.setClearColor(MTLClearColor {
-                    red: r,
-                    green: g,
-                    blue: 0.0,
-                    alpha: 1.0,
-                });
-                color.setStoreAction(MTLStoreAction::Store);
-                buffer
-                    .renderCommandEncoderWithDescriptor(&pass)
-                    .ok_or_else(|| refused("no render pass"))?
-                    .endEncoding();
-            }
             let (sx, sy) = if plane == 0 {
                 (0, 0)
             } else {
                 chroma_shift(layout)
             };
-            let (px, py, pw, ph) = (
-                (x >> sx) as usize,
-                (y >> sy) as usize,
-                (w >> sx) as usize,
-                (h >> sy) as usize,
-            );
+            let (pw, ph) = ((w >> sx) as usize, (h >> sy) as usize);
             let transform = MPSScaleTransform {
                 scaleX: pw as f64 / a.width() as f64,
                 scaleY: ph as f64 / a.height() as f64,
@@ -186,7 +127,7 @@ impl Lanczos {
                 translateY: 0.0,
             };
             let clip = MTLRegion {
-                origin: MTLOrigin { x: px, y: py, z: 0 },
+                origin: MTLOrigin { x: 0, y: 0, z: 0 },
                 size: MTLSize {
                     width: pw,
                     height: ph,

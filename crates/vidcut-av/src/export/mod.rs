@@ -369,7 +369,7 @@ pub fn is_cancelled(e: &Error) -> bool {
 
 pub(crate) const CANCELLED: &str = "export cancelled";
 
-fn gpu_pixel(enc: &encode::VideoEncoder) -> format::Pixel {
+pub(crate) fn gpu_pixel(enc: &encode::VideoEncoder) -> format::Pixel {
     if enc.pixel == format::Pixel::P010LE {
         format::Pixel::P010LE
     } else {
@@ -377,7 +377,7 @@ fn gpu_pixel(enc: &encode::VideoEncoder) -> format::Pixel {
     }
 }
 
-fn gpu_output(
+pub(crate) fn gpu_output(
     enc: &encode::VideoEncoder,
     w: u32,
     h: u32,
@@ -960,16 +960,7 @@ fn encode(
                 }
                 _ => (encoder, vaapi),
             };
-            let handoff = match (gpu, &vaapi) {
-                (Some((device, frames)), _) => Some(video::Handoff::Cuda(device, frames)),
-                (None, Some(up)) if enc.kind == EncoderChoice::VideoToolbox => {
-                    // SAFETY: `up.frames` is the encoder's live frames reference.
-                    Some(video::Handoff::Surfaces(unsafe {
-                        crate::hw::Frames::of(up.frames)?
-                    }))
-                }
-                _ => None,
-            };
+            let handoff = video::Handoff::of(enc.kind, gpu, vaapi.as_ref())?;
             let mut ost = octx
                 .add_stream(encoder::find_by_name(&enc.name))
                 .ctx(|| "adding video stream".into())?;

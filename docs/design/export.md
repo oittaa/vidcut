@@ -353,7 +353,9 @@ Soft crop edges:
 
 - `proxy.generate` uses the same machinery (spec D41).
 - `Env::generate_proxy` in `AvEnv` picks the encoders (`proxy::encoders`), from the codec preference and the detected GPU encoders. Automatic uses the codecs that the GPU plays (`export::plays`).
-- `proxy::write` decodes one source on a GPU decoder of its own. `Maker` makes the pictures, `vidcut-encode` encodes them, and the file is renamed into place.
+- `proxy::write` decodes one source on a GPU decoder of its own. `Maker` makes the pictures, and the draw of the export fits them (`Drawer`).
+  - `vidcut-encode` encodes them, and the file is renamed into place.
+  - NVENC and VideoToolbox take the drawn planes in GPU memory. The other encoders take them from memory ([gpu](gpu.md#each-decoders-frames)).
 - The Matroska file keeps the timestamp of each source frame. Its `VIDCUT_ORIGIN` tag lets an unchanged source use the proxy again.
 - The ProRes encoder of Vulkan makes only proxies.
 - Automatic tries DNxHR LB, ProRes Proxy, AV1, HEVC and H.264 in four rounds. The first codec that opens wins.

@@ -24,7 +24,6 @@ fn main() -> ExitCode {
         unsafe { std::env::set_var("LIBVA_MESSAGING_LEVEL", "1") };
     }
     let cli = Cli::parse();
-    vidcut_av::cuda::keep_shaders_in(Kind::Shaders.dir());
     vidcut_av::light::cache_in(Kind::Analysis.dir());
     let ran = run(&cli);
     vidcut_av::ending::join();

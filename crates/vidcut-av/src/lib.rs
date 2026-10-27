@@ -36,8 +36,6 @@ pub mod pool;
 pub mod probe;
 pub mod progress;
 pub mod proxy;
-#[cfg(target_os = "macos")]
-pub(crate) mod recolor;
 pub mod route;
 pub mod screen;
 pub mod speech_api;

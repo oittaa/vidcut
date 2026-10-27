@@ -495,36 +495,6 @@ pub(super) fn shrink_spec((w, h): (u32, u32)) -> String {
     format!("scale_vaapi=w={w}:h={h}")
 }
 
-pub(crate) fn can_fit(ops: &crate::route::Ops) -> bool {
-    ops.colors_kept
-}
-
-pub(super) fn fit_spec(
-    rotation: u16,
-    fitted: (u32, u32),
-    (w, h): (u32, u32),
-    layout: format::Pixel,
-) -> String {
-    let (fw, fh) = fitted;
-    let layout = if layout == format::Pixel::P010LE {
-        "p010"
-    } else {
-        "nv12"
-    };
-    let turn = match rotation {
-        90 => "transpose_vaapi=dir=clock,",
-        180 => "transpose_vaapi=dir=reversal,",
-        270 => "transpose_vaapi=dir=cclock,",
-        _ => "",
-    };
-    let mut spec = format!("{turn}scale_vaapi=w={fw}:h={fh}:format={layout}");
-    if fitted != (w, h) {
-        let (x, y) = (((w - fw) / 2) & !1, ((h - fh) / 2) & !1);
-        spec.push_str(&format!(",pad_vaapi=w={w}:h={h}:x={x}:y={y}:color=black"));
-    }
-    spec
-}
-
 #[cfg(target_os = "linux")]
 pub struct DrmFrame(frame::Video);
 
@@ -637,51 +607,9 @@ mod tests {
     fn a_settled_copy_returns_the_kept_frame() {
         assert_eq!(super::handed_back(Ok::<(), &str>(()), 4u8).unwrap(), 4);
     }
-    use crate::route::Ops;
-
-    fn kept() -> Ops {
-        Ops {
-            rotation: 0,
-            layout: format::Pixel::NV12,
-            out_layout: format::Pixel::NV12,
-            rgb: false,
-            colors_kept: true,
-            pads: false,
-            into: false,
-        }
-    }
-
-    #[test]
-    fn frames_in_the_outputs_colors_fit_on_the_gpu() {
-        assert!(can_fit(&kept()));
-    }
-
-    #[test]
-    fn frames_whose_colors_change_dont_fit_on_the_gpu() {
-        assert!(!can_fit(&Ops {
-            colors_kept: false,
-            ..kept()
-        }));
-    }
 
     #[test]
     fn shrinking_scales_to_the_size() {
         assert_eq!(shrink_spec((960, 540)), "scale_vaapi=w=960:h=540");
-    }
-
-    #[test]
-    fn fitting_at_the_output_size_adds_no_padding() {
-        assert_eq!(
-            fit_spec(0, (1920, 1080), (1920, 1080), format::Pixel::NV12),
-            "scale_vaapi=w=1920:h=1080:format=nv12"
-        );
-    }
-
-    #[test]
-    fn fitting_a_turned_frame_centers_it_on_black() {
-        assert_eq!(
-            fit_spec(90, (608, 1080), (1920, 1080), format::Pixel::P010LE),
-            "transpose_vaapi=dir=clock,scale_vaapi=w=608:h=1080:format=p010,pad_vaapi=w=1920:h=1080:x=656:y=0:color=black"
-        );
     }
 }

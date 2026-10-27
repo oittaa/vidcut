@@ -9,7 +9,7 @@
 flowchart LR
   dec["hw::GpuDecoder"] --> frame["frame on a route::Place"]
   frame -->|"Route::Kept"| kept["kept as decoded"]
-  frame -->|"Route::Shrunk, Route::Whole"| mem["memory"]
+  frame -->|"Route::Whole"| mem["memory"]
   kept --> screen["screen::Screen<br>picture.wgsl"]
   mem --> screen
   screen --> shown["viewer"]
@@ -17,8 +17,6 @@ flowchart LR
   planes -->|"CUDA, IOSurface"| genc["GPU encoder"]
   planes -->|"read back"| cpu["CPU encoders"]
   cpu -.->|"uploaded"| genc
-  frame -->|"Route::Gpu, proxies"| fitted["CudaPictures, hw::Fitter"]
-  fitted --> genc
 ```
 
 ## The GPU and the decoder
@@ -40,26 +38,25 @@ flowchart LR
 ## Routes
 
 - `route::Place` is where a picture is: `Memory`, or one of the GPU places of `hw::Kind`.
-- `route::Facts` holds what the planner knows of a frame and its `route::Dest`:
-  - `hw::can_fit`: its GPU fits it for that encoder.
-  - `hw::reaches`: its GPU hands it to the place of the encoder. CUDA and Vulkan reach each other.
-  - What failed before.
-- Exports and the viewer go to the display (`Dest::Display`). Proxies go to the encoder (`Dest::Encoder`).
-- `route::plan` gives the `Route`. A GPU route wins.
+- `route::Facts` holds what the planner knows of a frame:
+  - Its place.
+  - The draw takes the frames of that place (`Gpu::gpu_pictures`).
+  - The draw reads its layout (`normalize::displayable`).
+  - Keeping the frames failed before.
+- `route::plan` gives the `Route`. `Route::Kept` wins.
 
 | `Route` | The picture is |
 |---|---|
-| `Route::Gpu` | fitted on the GPU and handed on there |
 | `Route::Kept` | kept as decoded, for the draw |
-| `Route::Shrunk` | scaled down on the GPU, then copied down |
-| `Route::Whole` | copied down whole |
+| `Route::Whole` | copied down whole, or shrunk on the GPU and copied down |
 | `Route::Cpu` | already in memory |
 
-- A GPU route that fails becomes a fact. The planner then plans that file again without it.
+- `export::make::Maker` follows the plan. The viewer, exports, proxies, thumbnails and the AI inputs use it.
+- A keep that fails becomes a fact. After that, the frames of that layer come down.
 
 ## Each decoder's frames
 
-In playback and in exports:
+In the viewer, exports, proxies and thumbnails:
 
 | Decoder | Kept | Read by the draw |
 |---|---|---|
@@ -73,34 +70,19 @@ In playback and in exports:
   - Why: the viewer cannot import the pictures of another GPU.
 - vidcut keeps facts of each VA-API device. `NO_COPY` and `WAYS` are kept by the address of the display. `SIZES` is kept by the device, the layout and the size.
 
-In proxies:
-
-| Decoder | Fitted for | With | Comes down for |
-|---|---|---|---|
-| NVDEC (CUDA) | NVENC; Vulkan's ProRes | `CudaPictures`: `scale_cuda`, `pad_cuda`, libplacebo | other encoders |
-| Vulkan | NVENC; Vulkan's ProRes | libplacebo (`CudaPictures`) | other encoders; alpha |
-| VA-API | VAAPI | `scale_vaapi`, `pad_vaapi`, `transpose_vaapi` | other encoders; color changes |
-| Direct3D 11 | AMF | the video processor | other encoders; color changes; 8-bit into 10-bit |
-| VideoToolbox | its own encoders | `vt::Fit` | other encoders |
-
-VideoToolbox (`vt::Fit`) fits a frame in these steps. It skips a step that the frame does not need.
-
-1. `transpose_vt` turns the frame.
-2. Lanczos on Metal scales it (`lanczos::Lanczos`). A render pass clears the bars to black.
-   - Why: the scaler of VideoToolbox keeps less detail.
-3. A pixel transfer changes the layout (`Transfer`).
-4. A Metal kernel changes the colors (`recolor::Recolor`). It also writes P416, in the place of step 3.
-   - It uses the math of the CPU (`color::recoloring`, `CpuColors`).
-   - Why P416: the pixel transfer gives wrong levels in P416 ([gotchas](../gotchas.md#gpu-drivers)).
-
 - ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
 - A VideoToolbox frame that comes down is mapped, not copied (`hw::to_read`).
+- `vt::Fit` turns VideoToolbox frames (`transpose_vt`) and scales them with Lanczos on Metal (`lanczos::Lanczos`).
+  - `hw::Turner` and `hw::Shrinker` use it.
+  - Why Lanczos: the scaler of VideoToolbox keeps less detail.
 
 The draw:
 
-- The viewer and the export draw each frame with one shader (`screen::Screen`, `picture.wgsl`).
+- The viewer, exports, proxies and thumbnails draw each frame with one shader (`screen::Screen`, `picture.wgsl`).
+  - The AI upscalers and the frame interpolation take their RGB input from the same draw (`export::video::Single`).
 - It mixes the dissolves, the wipes, the composite modes, the placed pictures, the titles and the subtitles.
-- In an export, `fs_encode` then writes the planes of the encoder ([export](export.md#timeline-colors)).
+- `export::video::Drawer` draws for the export, proxies, thumbnails and the AI inputs.
+- There, `fs_encode` writes the planes of the encoder ([export](export.md#timeline-colors)).
   - NVENC takes them through memory that Vulkan shares with CUDA (`Shared::out`).
   - VideoToolbox takes them in the IOSurfaces of its own frames (`Sink::Surface`).
   - The other encoders take them from memory (`Sink::Memory`).
@@ -108,7 +90,7 @@ The draw:
 Frames that come down:
 
 - Where the output shows a frame smaller, the GPU shrinks it first (`hw::Shrinker`).
-- CPU encoders, renders and tiles take frames in memory.
+- CPU encoders take frames in memory.
 - The player brings a frame down when the viewer cannot show its kind, when an import fails, or when its pool leaves the budget.
 - A picture in memory goes up into the frames of a GPU encoder (`Upload`, `CudaFrames::upload`).
 
@@ -208,10 +190,8 @@ On macOS (`interpolate::macos`):
 
 - CUDA frames use `bwdif_cuda`, and Vulkan frames use `bwdif_vulkan`.
   - `hw::deinterlace` first checks that the filter gives the frames of `bwdif`. Else the frames come down for `bwdif`.
-- libplacebo converts HDR for NVENC and the ProRes of Vulkan (`CudaPictures`), with the math of the CPU (`color::gpu_color`).
-- VideoToolbox converts colors on Metal (`recolor::Recolor`).
-- The other GPUs fit pictures only where the colors stay (`color::kept`).
-- The viewer's shader converts each picture into the timeline color space (`color::shader_colors`).
+- The shader of the draw converts each picture into the timeline color space (`color::shader_colors`).
+- `fs_encode` converts the timeline color space into the color space of the output.
 
 ## Why
 
@@ -228,7 +208,6 @@ On macOS (`interpolate::macos`):
 - `crates/vidcut-av/src/hw/`
 - `crates/vidcut-av/src/cuda/`
 - `crates/vidcut-av/src/lanczos.rs`
-- `crates/vidcut-av/src/recolor.rs`
 - `crates/vidcut-av/src/screen/`
 - `crates/vidcut-av/src/metal.rs`
 - `crates/vidcut-av/src/super_scale/`

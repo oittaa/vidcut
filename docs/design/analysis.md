@@ -317,7 +317,6 @@ flowchart TD
 | GPU encoders that work | `encoders.json` (`export::detected`) | FFmpeg, system and GPUs |
 | proxy codecs the GPU decoder plays | `plays.json` (`export::plays`) | the same, per GPU |
 | clips for decoder tests | `decoder-tests` | none |
-| compiled libplacebo shaders | `shaders` (`cuda::keep_shaders_in`) | libplacebo's |
 | downloaded models | `models` (`paths::models_dir`) | file name, checked by size; SHA-256 when downloaded |
 | paid speech replies | `speech-replies` (`speech_api::replies_folder`) | the company, the request's settings, the audio |
 
@@ -329,7 +328,7 @@ flowchart TD
 
 `disk_cache` keeps what vidcut can make again under one limit:
 
-- the folders of `disk_cache::Kind`: `thumbs`, `waveforms`, `analysis`, `shaders`, `decoder-tests`
+- the folders of `disk_cache::Kind`: `thumbs`, `waveforms`, `analysis`, `decoder-tests`
 - the proxies (`.mkv` files) in `proxies.folder`, when it is in the cache dir (`Policy`)
 
 These stay, and do not count: transcripts (`words` files in `analysis`, `Kind::keeps`), `models`, `speech-replies`, `uploads`, `encoders.json` and `plays.json`.
@@ -361,7 +360,6 @@ A file with a `part` piece in its name is still being written, and does not coun
   - A decoder test clip goes through `disk_cache::added` only after its test. Thus a full disk costs the clip, not the result.
 - The lock covers only the map and list of the index. Listings, reads, writes, removals and time writes occur outside it.
 - A preference change (`disk_cache::set_policy`) pops what the new limit leaves out. Thumbnails turned off clear `thumbs`.
-- libplacebo reads and writes `shaders` itself. Thus the time of a shader is when it was compiled.
 - The preferences requests give `disk_cache::usage` in `cache`: from the index in the GUI, from one listing in a CLI process. The Cache page of Preferences shows it.
 
 **Why** an index built from the files:
