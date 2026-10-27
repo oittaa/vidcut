@@ -1870,10 +1870,14 @@ impl VideoFrames {
                 let placed: Vec<Placed> = placed.iter().map(|p| p.after(k)).collect();
                 let still = Pictures::of(image.as_ref()) == Pictures::Still;
                 let backward = pace.speed < 0.0 && !still;
+                let retimed = !retime.is_nearest() && !still && pace.speed > 0.0;
                 let k = if still { 0 } else { k };
                 let s = self.reading[i].expect("a file's picture is read");
                 if !picture {
-                    if !backward {
+                    if retimed {
+                        let at = self.exact_at(s, layer, k);
+                        self.pass_to(s, at)?;
+                    } else if !backward {
                         self.pass_source_frame(s, layer, k)?;
                     }
                     continue;
@@ -1888,7 +1892,7 @@ impl VideoFrames {
                 };
                 let mut frame = if backward {
                     self.reversed_frame(i, s, layer, k)?
-                } else if !retime.is_nearest() && !still && pace.speed > 0.0 {
+                } else if retimed {
                     self.retimed_frame(i, s, layer, k)?
                 } else {
                     self.source_frame(i, s, layer, k)?
@@ -2416,12 +2420,22 @@ impl VideoFrames {
     }
 
     fn pass_at(&mut self, s: usize, pos: i64) -> Result<()> {
-        let fps = self.fps;
+        let at = target(self.fps, self.open[s].origin, pos);
+        self.pass_to(s, at)
+    }
+
+    fn pass_to(&mut self, s: usize, at: f64) -> Result<()> {
         let src = &mut self.open[s];
-        if src.advance(target(fps, src.origin, pos))? {
+        if src.advance(at)? {
             src.normalized = None;
         }
         Ok(())
+    }
+
+    fn exact_at(&self, s: usize, layer: &VideoPiece, k: i64) -> f64 {
+        let src = &self.open[s];
+        let exact = src.source_frame as f64 + (layer.exact(k) - layer.position(0) as f64);
+        src.origin + exact * self.fps.frames_to_secs(1)
     }
 
     fn source_frame(
@@ -2530,11 +2544,8 @@ impl VideoFrames {
         else {
             return self.source_frame(i, s, layer, k);
         };
-        let fps = self.fps;
-        let first = self.open[s].source_frame;
-        let exact = first as f64 + (layer.exact(k) - layer.position(0) as f64);
+        let at = self.exact_at(s, layer, k);
         let src = &mut self.open[s];
-        let at = src.origin + exact * fps.frames_to_secs(1);
         let mut changed = src.advance(at)?;
         let later = src.current.as_ref().is_some_and(|(_, t)| *t > at + 1e-6);
         if later && src.prev.is_none() {
