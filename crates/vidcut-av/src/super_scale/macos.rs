@@ -612,7 +612,7 @@ mod imp {
                 processor.startSessionWithConfiguration_error(ProtocolObject::from_ref(&*config))
             }
             .map_err(failed)?;
-            super::runs_on(Upscaler::Macos, "macOS".into());
+            crate::super_scale::runs_on(Upscaler::Macos, "macOS".into());
             crate::debug!(
                 "ai",
                 "macOS: {}x{} to {}x{} at {factor}x, pictures as {}",
