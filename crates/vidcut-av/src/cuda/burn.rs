@@ -226,20 +226,7 @@ impl Overlay {
         };
         two_planes(sw)?;
         let (color, alpha) = (pool_frame(frames)?, pool_frame(frames)?);
-        let fits = |v: u32, most: u32| (v & !1).min(most);
-        let area = layer
-            .placing
-            .bounds((f64::from(size.0), f64::from(size.1)))
-            .map(|[x0, y0, x1, y1]| {
-                [
-                    fits(x0, size.0),
-                    fits(y0, size.1),
-                    fits(x1 + 1, size.0),
-                    fits(y1 + 1, size.1),
-                ]
-            })
-            .filter(|[x0, y0, x1, y1]| x1 > x0 && y1 > y0);
-        let Some(area) = area else {
+        let Some(area) = layer.area(size) else {
             return Ok(Self {
                 color,
                 alpha,

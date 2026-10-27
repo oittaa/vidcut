@@ -117,7 +117,7 @@ In exports:
 | Vulkan | NVENC, copied into CUDA on the GPU; Vulkan's ProRes | libplacebo (`CudaPictures`) | `cuda::mix` | other encoders; alpha |
 | VA-API | VAAPI on its device | `transpose_vaapi`, `scale_vaapi`, `pad_vaapi`; colors unchanged | in memory | other encoders, QSV too; color changes; dissolves |
 | Direct3D 11 | AMF on its adapter | the video processor; colors unchanged, not 8-bit into 10-bit | in memory | other encoders, QSV too; color changes; dissolves |
-| VideoToolbox | its own encoders | `transpose_vt`, lanczos on Metal with black bars, a pixel transfer for another layout, a Metal kernel for other colors (`vt::Fit`) | on Metal (`mixing::Mixer`) | wipes; placed pictures, titles and burned-in subtitles |
+| VideoToolbox | its own encoders | `transpose_vt`, lanczos on Metal with black bars, a pixel transfer for another layout, a Metal kernel for other colors (`vt::Fit`) | on Metal (`mixing::Mixer`) | wipes; composite modes |
 
 - A VideoToolbox frame fits in up to three steps on the GPU (`vt::Fit`). A step that the frame does not need is left out.
   1. `transpose_vt` turns it.
@@ -131,7 +131,9 @@ In exports:
      - To or from HDR, it goes to linear light, changes the gamut, tone-maps HDR into SDR (mobius) and encodes again, with the math of `CpuColors`.
      - It reads chroma bilinearly at each pixel, and averages the chroma of each block that it writes.
   - The scaling of VideoToolbox itself, which the pixel transfer and FFmpeg's scale_vt use, keeps less detail than lanczos. Thus no step scales with it.
-- A dissolve of VideoToolbox frames mixes on Metal (`mixing::Mixer`), by the integer sums of `cuda::mix`. A wipe or a placed picture mixes in memory.
+- A dissolve of VideoToolbox frames mixes on Metal (`mixing::Mixer`), by the integer sums of `cuda::mix`.
+- Subtitles, titles and placed pictures go into VideoToolbox frames on Metal too (`mixing::Overlay`, `Mixer::burn`), by the sums of `cuda::burn`.
+- A wipe or a composite mode mixes in memory.
 - A VideoToolbox frame that comes down is not copied. `hw::to_read` maps its pixel buffer (`av_hwframe_map`), and the CPU reads it in place.
   - The map is read-only. A step that writes into the picture copies it first (`av_frame_make_writable`).
   - The player still copies pictures down where it moves them out of video memory (`Picture::copied_down`).
@@ -140,7 +142,7 @@ Dissolves and overlays:
 
 - Where the driver does not take the kernel of `cuda::mix`, the export mixes its dissolves on the CPU for the rest of the export. Its result says why.
 - Burned-in subtitles, titles and placed pictures go the same ways:
-  - On the GPU, they go into CUDA frames (`cuda::burn`).
+  - On the GPU, they go into CUDA frames (`cuda::burn`) and VideoToolbox frames (`Mixer::burn`).
   - For the other decoders, they go in memory. These frames come down and go back up only while a cue, a title or a placed picture shows.
   - The frames of a placed picture come down shrunk to the size that it shows ([export](export.md#placed-pictures)).
 - The viewer blends the layers of a dissolve wherever each layer is.

@@ -2,15 +2,15 @@
 
 **When:** not decided.
 
-An NVENC export places a moved, zoomed or cropped picture on the CPU ([design/export.md](../design/export.md#placed-pictures)):
+An NVENC or VideoToolbox export places a moved, zoomed or cropped picture on the CPU ([design/export.md](../design/export.md#placed-pictures)):
 
 1. The picture's frames come down. The GPU first shrinks them to the size at which they show.
 2. The CPU fits them and lays them out with their coverage (`export::place::overlay`).
-3. `cuda::burn` mixes the result into the frame below. That frame stays on the GPU.
+3. `cuda::burn` or `Mixer::burn` mixes the result into the frame below. That frame stays on the GPU.
 
 Thus a full-frame punch-in on 4K brings every frame down whole.
 
-A title in a placed compound clip is also mapped on the CPU (`export::place::title`). Then `cuda::burn` mixes it into the frame below.
+A title in a placed compound clip is also mapped on the CPU (`export::place::title`). Then `cuda::burn` or `Mixer::burn` mixes it into the frame below.
 
 Open:
 

@@ -383,6 +383,7 @@ Blending:
   - The colors and coverage of the area that the pictures cover (`burn::bounds`) go up into two frames of the pool (`Overlay`).
   - In these frames, each place is laid over the places before it, as `burn::blend` lays them.
   - A kernel mixes them into a copy of each frame inside that area, and copies the rest.
+- VideoToolbox frames take it on Metal by the same sums (`Mixer::burn`). The colors and coverage go up into textures (`mixing::Overlay`).
 - The frames of other GPUs come down while a cue shows ([gpu](gpu.md)).
 
 ## Titles
@@ -414,7 +415,7 @@ Drawing:
 
 - A title is drawn once for the size of the output, and kept while it shows.
 - A `Placing` moves and fades it (`burn::blend_at`). The CUDA overlay is made again for each placing.
-- As the cues of the burn-in do (`Drawn`), the title goes onto a picture in memory with `burn::blend`. It goes into the CUDA frames of NVENC with `cuda::burn`.
+- As the cues of the burn-in do (`Drawn`), the title goes onto a picture in memory with `burn::blend`. It goes into the CUDA frames of NVENC with `cuda::burn`, and into VideoToolbox frames with `Mixer::burn`.
 - The frames of other GPUs come down while a title shows ([todo](../todo/gpu-burn-in.md)).
 - Titles draw in every export and in `frame.render`, whatever the subtitle settings are.
 
@@ -458,10 +459,10 @@ The pictures:
   - It converts both to R'G'B' by the matrix and the range of the frame, and mixes them by `blend::mixed`.
   - It converts the mix back, and lays it over the frame below by the coverage.
   - `place::Placing` takes the first mode other than Normal, from the picture out through its compound clips.
-- For NVENC, the frame below stays on the GPU.
+- For NVENC and VideoToolbox, the frame below stays on the GPU.
   - A frame with a composite mode is mixed on the CPU, as a frame with a wipe is.
-  - `cuda::burn::Overlay::of` makes the colors and coverage of the placed picture in memory.
-  - `cuda::burn` mixes them in, as for a title.
+  - `cuda::burn::Overlay::of` and `mixing::Overlay::of` make the colors and coverage of the placed picture in memory.
+  - `cuda::burn` and `Mixer::burn` mix them in, as for a title.
 - A crossing pair lays each side over what was below the first side, and adds the two. Then it takes that lower part away once.
   - In memory, `mix::crossed` does this. On the GPU, `cuda::mix::sum` and `Mixer::sum` do this.
 
@@ -472,7 +473,7 @@ A picture with a Dynamic Zoom is placed on each frame by its own box:
 - A clip inside a compound clip keeps the `Run` of its own frames, which `render::inside` gives.
 - In a reversed compound, that `Run` has a negative length and goes backward. In a frozen compound, it holds its frame (`Run::held`).
 - `layer_size` fits the layer for the smaller of the two boxes (`DynamicZoom::closest`).
-- The NVENC path is the same, as `cuda::burn::Overlay::of` takes the frame's `Placing`.
+- The NVENC and VideoToolbox paths are the same, as `Overlay::of` takes the frame's `Placing`.
 
 A picture value with keyframes is sampled on that same `Placing` (D75):
 
