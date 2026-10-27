@@ -1,11 +1,13 @@
 use std::path::Path;
 
-use super::ops::{self, Act, Conv, Deconv, Grid, Ops, Res, Shape, View, tensor};
+use super::ops::{self, Act, Carve, Conv, Deconv, Grid, Ops, Res, Shape, View, tensor};
 use crate::compute::{Gpu, bytes};
 use crate::error::Result;
 use crate::weights::Torch;
 
 const DEPTH: usize = 4;
+const HALO: u32 = 96;
+const BAND: u64 = 1 << 29;
 
 pub(super) struct Norm {
     pub(super) gamma: wgpu::Buffer,
@@ -330,7 +332,6 @@ pub(super) fn load(gpu: &Gpu, path: &Path, title: &'static str) -> Result<Ema> {
 }
 
 struct Tokens {
-    grids: [Grid; 2],
     win: View,
     normed: View,
     q: View,
@@ -347,56 +348,108 @@ struct Tokens {
     ping: View,
 }
 
-fn tokens(gpu: &Gpu, h: u32, w: u32, c: u32, cm: u32) -> Tokens {
-    let grids = [Grid::new(gpu, h, w, 0), Grid::new(gpu, h, w, 3)];
-    let n = 2 * grids[0].tokens();
-    let flat = |c: u32| tensor(gpu, 1, 1, n, c);
+fn tokens(c: &mut Carve, grid: &Grid, (w, h): (u32, u32), ch: u32, cm: u32) -> Tokens {
+    let n = 2 * grid.tokens();
     Tokens {
-        win: flat(c),
-        normed: flat(c),
-        q: flat(c),
-        kv: flat(2 * c),
-        ce: flat(cm),
-        xo: flat(c),
-        cr: flat(cm),
-        mo: flat(cm),
-        xa: flat(c),
-        x1: tensor(gpu, 2, h, w, c),
-        n2: tensor(gpu, 2, h, w, c),
-        h1: tensor(gpu, 2, h, w, 4 * c),
-        h2: tensor(gpu, 2, h, w, 4 * c),
-        ping: tensor(gpu, 2, h, w, c),
-        grids,
+        win: c.view(1, 1, n, ch),
+        normed: c.view(1, 1, n, ch),
+        q: c.view(1, 1, n, ch),
+        kv: c.view(1, 1, n, 2 * ch),
+        ce: c.view(1, 1, n, cm),
+        xo: c.view(1, 1, n, ch),
+        cr: c.view(1, 1, n, cm),
+        mo: c.view(1, 1, n, cm),
+        xa: c.view(1, 1, n, ch),
+        x1: c.view(2, h, w, ch),
+        n2: c.view(2, h, w, ch),
+        h1: c.view(2, h, w, 4 * ch),
+        h2: c.view(2, h, w, 4 * ch),
+        ping: c.view(2, h, w, ch),
     }
 }
 
-pub(super) struct Features {
-    pub(super) af: Vec<View>,
-    pub(super) mf: [View; 2],
+struct Scale {
+    size: (u32, u32),
+    g4: [Grid; 2],
+    g5: [Grid; 2],
 }
 
-pub(super) struct Scratch {
-    tmp: Vec<View>,
+impl Scale {
+    fn new(gpu: &Gpu, (w, h): (u32, u32)) -> Self {
+        let grids = |s: u32| {
+            [
+                Grid::new(gpu, h / s, w / s, 0),
+                Grid::new(gpu, h / s, w / s, 3),
+            ]
+        };
+        Self {
+            size: (w, h),
+            g4: grids(8),
+            g5: grids(16),
+        }
+    }
+}
+
+pub(super) struct Shallow {
+    af: [View; 3],
+}
+
+fn shallow_for(c: &mut Carve, (w, h): (u32, u32)) -> Shallow {
+    Shallow {
+        af: [
+            c.view(1, h, w, 32),
+            c.view(1, h / 2, w / 2, 64),
+            c.view(1, h / 4, w / 4, 128),
+        ],
+    }
+}
+
+pub(super) struct Deep {
+    af3: View,
+    af4: View,
+    mf: Option<[View; 2]>,
+}
+
+fn deep_for(gpu: &Gpu, (w, h): (u32, u32), motion: bool) -> Deep {
+    let at = |s: u32, c: u32| tensor(gpu, 2, h / s, w / s, c);
+    Deep {
+        af3: at(8, 256),
+        af4: at(16, 512),
+        mf: motion.then(|| [at(8, 256), at(16, 512)]),
+    }
+}
+
+struct Backbone {
     cross: View,
+    tmp3: View,
+    tmp4: View,
+    shallow: [Shallow; 2],
+    temp: View,
     t4: Tokens,
     t5: Tokens,
 }
 
-pub(super) fn features_for(gpu: &Gpu, (w, h): (u32, u32)) -> Features {
-    let at = |s: u32, c: u32| tensor(gpu, 2, h / s, w / s, c);
-    Features {
-        af: vec![at(1, 32), at(2, 64), at(4, 128), at(8, 256), at(16, 512)],
-        mf: [at(8, 256), at(16, 512)],
-    }
-}
-
-pub(super) fn scratch_for(gpu: &Gpu, (w, h): (u32, u32)) -> Scratch {
-    let at = |s: u32, c: u32| tensor(gpu, 2, h / s, w / s, c);
-    Scratch {
-        tmp: vec![at(1, 32), at(2, 64), at(4, 128), at(8, 256), at(16, 512)],
-        cross: at(8, 224),
-        t4: tokens(gpu, h / 8, w / 8, 256, 64),
-        t5: tokens(gpu, h / 16, w / 16, 512, 128),
+fn backbone_for(c: &mut Carve, s: &Scale) -> Backbone {
+    let (w, h) = s.size;
+    let cross = c.view(2, h / 8, w / 8, 224);
+    let tmp3 = c.view(2, h / 8, w / 8, 256);
+    let tmp4 = c.view(2, h / 16, w / 16, 512);
+    let m = c.mark();
+    let shallow = [shallow_for(c, s.size), shallow_for(c, s.size)];
+    let temp = c.view(1, h, w, 32);
+    c.reset(m);
+    let t4 = tokens(c, &s.g4[0], (w / 8, h / 8), 256, 64);
+    c.reset(m);
+    let t5 = tokens(c, &s.g5[0], (w / 16, h / 16), 512, 128);
+    c.reset(m);
+    Backbone {
+        cross,
+        tmp3,
+        tmp4,
+        shallow,
+        temp,
+        t4,
+        t5,
     }
 }
 
@@ -417,8 +470,8 @@ pub(super) struct Flow {
     warped: View,
 }
 
-pub(super) fn flow_for(gpu: &Gpu, (w, h): (u32, u32)) -> Flow {
-    let one = |s: u32, c: u32| tensor(gpu, 1, h / s, w / s, c);
+fn flow_for(c: &mut Carve, (w, h): (u32, u32)) -> Flow {
+    let mut one = |s: u32, ch: u32| c.view(1, h / s, w / s, ch);
     Flow {
         flow: one(1, 4),
         mask: one(1, 1),
@@ -437,39 +490,241 @@ pub(super) fn flow_for(gpu: &Gpu, (w, h): (u32, u32)) -> Flow {
     }
 }
 
-pub(super) struct Refine {
-    pub(super) d0: View,
-    flows: Vec<View>,
-    d: Vec<View>,
-    s: Vec<View>,
-    mid: Vec<View>,
-    u: Vec<View>,
-    pub(super) out: View,
-    pub(super) warped: View,
+struct Band {
+    x: View,
+    y: View,
+    z: [View; 4],
+    warped: View,
+    flows: [View; 4],
 }
 
-pub(super) fn refine_for(gpu: &Gpu, (w, h): (u32, u32), c: u32) -> Refine {
-    let one = |s: u32, ch: u32| tensor(gpu, 1, h / s, w / s, ch);
-    Refine {
-        d0: one(1, 17 + c),
-        flows: vec![one(2, 4), one(4, 4), one(8, 4), one(16, 4)],
-        d: vec![
-            one(2, 4 * c),
-            one(4, 8 * c),
-            one(8, 16 * c),
-            one(16, 32 * c),
-        ],
-        s: vec![one(2, 2 * c), one(4, 4 * c), one(8, 8 * c), one(16, 16 * c)],
-        mid: vec![one(2, 2 * c), one(4, 4 * c), one(8, 8 * c), one(16, 16 * c)],
-        u: vec![one(8, 16 * c), one(4, 8 * c), one(2, 4 * c), one(1, c)],
-        out: one(1, 3),
-        warped: one(1, 6),
+fn band_for(c: &mut Carve, rows: u32, w: u32, ch: u32) -> Band {
+    let mut at = |s: u32, k: u32| c.view(1, rows >> s, w >> s, k);
+    Band {
+        x: at(0, 17 + ch),
+        y: at(0, ch),
+        z: [at(1, 2 * ch), at(2, 4 * ch), at(3, 8 * ch), at(4, 16 * ch)],
+        warped: at(0, 6),
+        flows: [at(1, 4), at(2, 4), at(3, 4), at(4, 4)],
     }
 }
 
+fn band_rows((w, h): (u32, u32), ch: u32) -> u32 {
+    let per_row = u64::from(w) * u64::from(17 + 3 * ch + 7 + 2);
+    let rows = BAND / per_row;
+    if rows >= u64::from(h) {
+        return h;
+    }
+    ((rows as u32).saturating_sub(2 * HALO) / 16 * 16).max(16)
+}
+
+fn bands(h: u32, rows: u32) -> Vec<((u32, u32), (u32, u32))> {
+    let mut out = Vec::new();
+    let mut y0 = 0;
+    while y0 < h {
+        let y1 = (y0 + rows).min(h);
+        let a = y0.saturating_sub(HALO);
+        let b = (y1 + HALO).min(h);
+        out.push(((a, b - a), (y0, y1)));
+        y0 = y1;
+    }
+    out
+}
+
+fn motion_scale((w, h): (u32, u32)) -> f32 {
+    if w >= super::UHD.0 || h >= super::UHD.1 {
+        0.25
+    } else if w >= 1920 || h >= 1080 {
+        0.5
+    } else {
+        1.0
+    }
+}
+
+fn centered((w, h): (u32, u32), step: u32) -> ((u32, u32), (u32, u32)) {
+    let (pw, ph) = (w.next_multiple_of(step), h.next_multiple_of(step));
+    ((pw, ph), ((ph - h) / 2, (pw - w) / 2))
+}
+
+struct Turn {
+    img: View,
+    small: Option<(View, Deep)>,
+    full: Deep,
+    pred: View,
+}
+
+struct Work {
+    backbones: Vec<Backbone>,
+    shallow: [Shallow; 2],
+    temp: View,
+    flow: Flow,
+    band: Band,
+}
+
+pub(super) struct Pair {
+    turns: Vec<Turn>,
+    up: (View, View),
+    scales: Vec<Scale>,
+    work: Work,
+    _arena: Vec<wgpu::Buffer>,
+    ds: f32,
+    pad: (u32, u32),
+    padded: (u32, u32),
+    rows: u32,
+}
+
+impl Pair {
+    pub(super) fn new(gpu: &Gpu, size: (u32, u32)) -> Result<Self> {
+        let ds = motion_scale(size);
+        let (padded, pad) = centered(size, (32.0 / ds) as u32);
+        let (pw, ph) = padded;
+        let small = ((pw as f32 * ds) as u32, (ph as f32 * ds) as u32);
+        let mut scales = vec![Scale::new(gpu, padded)];
+        if ds < 1.0 {
+            scales.push(Scale::new(gpu, small));
+        }
+        let ch = 64;
+        let rows = band_rows(padded, ch);
+        let held = (rows + 2 * HALO).min(ph);
+        let (arena, work) = ops::arena(gpu, |c| {
+            let mut backbones = Vec::new();
+            for s in &scales {
+                backbones.push(backbone_for(c, s));
+                c.reset(0);
+            }
+            let shallow = [shallow_for(c, padded), shallow_for(c, padded)];
+            let m = c.mark();
+            let flow = flow_for(c, if ds < 1.0 { small } else { padded });
+            c.reset(m);
+            let temp = c.view(1, ph, pw, 32);
+            c.reset(m);
+            let band = band_for(c, held, pw, ch);
+            Work {
+                backbones,
+                shallow,
+                temp,
+                flow,
+                band,
+            }
+        })?;
+        let turns = (0..2)
+            .map(|_| Turn {
+                img: tensor(gpu, 2, ph, pw, 3),
+                small: (ds < 1.0).then(|| {
+                    (
+                        tensor(gpu, 2, small.1, small.0, 3),
+                        deep_for(gpu, small, true),
+                    )
+                }),
+                full: deep_for(gpu, padded, ds >= 1.0),
+                pred: tensor(gpu, 1, ph, pw, 3),
+            })
+            .collect();
+        Ok(Self {
+            turns,
+            up: (tensor(gpu, 1, ph, pw, 4), tensor(gpu, 1, ph, pw, 1)),
+            scales,
+            work,
+            _arena: arena,
+            ds,
+            pad,
+            padded,
+            rows,
+        })
+    }
+
+    pub(super) fn load(
+        &self,
+        o: &mut Ops,
+        (a, b): (&wgpu::Buffer, &wgpu::Buffer),
+        size: (u32, u32),
+    ) {
+        for (i, turn) in self.turns.iter().enumerate() {
+            o.load_turned(a, size, self.pad, true, i == 1, &turn.img.frame(0));
+            o.load_turned(b, size, self.pad, true, i == 1, &turn.img.frame(1));
+            if let Some((img, _)) = &turn.small {
+                o.scaled(&turn.img, img, img.w as f32 / turn.img.w as f32, 1.0, 0);
+            }
+        }
+    }
+
+    pub(super) fn backbone(&self, o: &mut Ops, net: &Ema) {
+        let w = &self.work;
+        for turn in &self.turns {
+            net.backbone(o, &turn.img, &self.scales[0], &w.backbones[0], &turn.full);
+            if let Some((img, deep)) = &turn.small {
+                net.backbone(o, img, &self.scales[1], &w.backbones[1], deep);
+            }
+        }
+    }
+
+    pub(super) fn frame(
+        &self,
+        o: &mut Ops,
+        net: &Ema,
+        t: f32,
+        size: (u32, u32),
+        out: &wgpu::Buffer,
+    ) {
+        let w = &self.work;
+        let (flow, mask) = (&self.up.0, &self.up.1);
+        for turn in &self.turns {
+            let (img, deep) = match &turn.small {
+                Some((img, deep)) => (img, deep),
+                None => (&turn.img, &turn.full),
+            };
+            net.flow(o, img, deep, &w.flow, t);
+            if self.ds < 1.0 {
+                o.scaled(&w.flow.flow, flow, 1.0 / self.ds, 1.0 / self.ds, 4);
+                o.scaled(&w.flow.mask, mask, 1.0 / self.ds, 1.0, 0);
+            } else {
+                o.copy(&w.flow.flow, flow, 1.0, 0.0, Act::None);
+                o.copy(&w.flow.mask, mask, 1.0, 0.0, Act::None);
+            }
+            for (k, s) in w.shallow.iter().enumerate() {
+                net.shallow(o, &turn.img.frame(k as u32), s, &w.temp);
+            }
+            let inputs = Inputs {
+                img: &turn.img,
+                shallow: &w.shallow,
+                deep: &turn.full,
+                flow,
+                mask,
+            };
+            for band in bands(self.padded.1, self.rows) {
+                net.refine(o, &inputs, &w.band, band, &turn.pred);
+            }
+        }
+        o.store_both(
+            &self.turns[0].pred,
+            Some(&self.turns[1].pred),
+            self.pad,
+            size,
+            out,
+        );
+    }
+}
+
+struct Inputs<'a> {
+    img: &'a View,
+    shallow: &'a [Shallow; 2],
+    deep: &'a Deep,
+    flow: &'a View,
+    mask: &'a View,
+}
+
 impl Ema {
-    fn former(&self, o: &mut Ops, f: &Former, t: &Tokens, x: &View, out: &View, motion: &View) {
-        let g = &t.grids[usize::from(f.shift > 0)];
+    #[allow(clippy::too_many_arguments)]
+    fn former(
+        &self,
+        o: &mut Ops,
+        f: &Former,
+        t: &Tokens,
+        g: &Grid,
+        x: &View,
+        out: &View,
+        motion: Option<&View>,
+    ) {
         o.windows(g, x, &t.win);
         o.norm(
             &f.norm1.gamma,
@@ -482,12 +737,16 @@ impl Ema {
         o.conv(&f.kv, &t.normed, &t.kv, Res::None);
         o.cor(g, (x.h, x.w), 2, &f.cor.0, &f.cor.1, &t.ce);
         o.attend(g, f.heads, &t.q, &t.kv, &t.ce, &t.xo, &t.cr);
-        o.combine(&t.cr, &t.ce, &t.xa.part(0, t.ce.c), 1.0, -1.0);
-        o.conv(&f.motion, &t.xa.part(0, t.ce.c), &t.mo, Res::None);
+        if motion.is_some() {
+            o.combine(&t.cr, &t.ce, &t.xa.part(0, t.ce.c), 1.0, -1.0);
+            o.conv(&f.motion, &t.xa.part(0, t.ce.c), &t.mo, Res::None);
+        }
         o.conv(&f.proj, &t.xo, &t.xa, Res::None);
         o.add(&t.xa, &t.normed);
         o.unwindows(g, &t.normed, &t.x1);
-        o.unwindows(g, &t.mo, motion);
+        if let Some(m) = motion {
+            o.unwindows(g, &t.mo, m);
+        }
         o.norm(&f.norm2.gamma, &f.norm2.beta, f.norm2.eps, &t.x1, &t.n2);
         o.conv(&f.fc1, &t.n2, &t.h1, Res::None);
         o.dwconv(&f.dw.0, &f.dw.1, 3, Act::Gelu, &t.h1, &t.h2);
@@ -500,12 +759,13 @@ impl Ema {
         o: &mut Ops,
         blocks: &[Former],
         t: &Tokens,
+        grids: &[Grid; 2],
         x: &View,
-        mf: &View,
+        mf: Option<&View>,
         norm: &Norm,
         af: &View,
     ) {
-        let cm = mf.c / blocks.len() as u32;
+        let cm = mf.map_or(0, |m| m.c / blocks.len() as u32);
         let mut from = x.clone();
         for (j, f) in blocks.iter().enumerate() {
             let to = if j % 2 == 0 {
@@ -513,60 +773,81 @@ impl Ema {
             } else {
                 x.clone()
             };
-            self.former(o, f, t, &from, &to, &mf.part(j as u32 * cm, cm));
+            let g = &grids[usize::from(f.shift > 0)];
+            let motion = mf.map(|m| m.part(j as u32 * cm, cm));
+            self.former(o, f, t, g, &from, &to, motion.as_ref());
             from = to;
         }
         o.norm(&norm.gamma, &norm.beta, norm.eps, &from, af);
     }
 
-    pub(super) fn features(&self, o: &mut Ops, img: &View, f: &Features, x: &Scratch) {
-        let (af, mf) = (&f.af, &f.mf);
-        o.conv(&self.stem[0], img, &x.tmp[0], Res::None);
-        o.conv(&self.stem[1], &x.tmp[0], &af[0], Res::None);
-        o.conv(&self.embed2, &af[0], &x.tmp[1], Res::None);
-        o.conv(&self.block2[0], &x.tmp[1], &af[1], Res::None);
-        o.conv(&self.block2[1], &af[1], &x.tmp[1], Res::None);
-        o.copy(&x.tmp[1], &af[1], 1.0, 0.0, Act::None);
-        o.conv(&self.embed3, &af[1], &x.tmp[2], Res::None);
-        o.conv(&self.block3[0], &x.tmp[2], &af[2], Res::None);
-        o.conv(&self.block3[1], &af[2], &x.tmp[2], Res::None);
-        o.copy(&x.tmp[2], &af[2], 1.0, 0.0, Act::None);
-        let sources = [&af[2], &af[1], &af[1], &af[0], &af[0], &af[0], &af[0]];
-        for (k, (c, src)) in self.cross.iter().zip(sources).enumerate() {
-            o.conv(c, src, &x.cross.part(32 * k as u32, 32), Res::None);
+    fn shallow(&self, o: &mut Ops, img: &View, s: &Shallow, temp: &View) {
+        let (h, w) = (img.h, img.w);
+        let t0 = temp.shaped(1, h, w, 32);
+        o.conv(&self.stem[0], img, &t0, Res::None);
+        o.conv(&self.stem[1], &t0, &s.af[0], Res::None);
+        let t1 = temp.shaped(1, h / 2, w / 2, 64);
+        o.conv(&self.embed2, &s.af[0], &t1, Res::None);
+        o.conv(&self.block2[0], &t1, &s.af[1], Res::None);
+        o.conv(&self.block2[1], &s.af[1], &t1, Res::None);
+        o.copy(&t1, &s.af[1], 1.0, 0.0, Act::None);
+        let t2 = temp.shaped(1, h / 4, w / 4, 128);
+        o.conv(&self.embed3, &s.af[1], &t2, Res::None);
+        o.conv(&self.block3[0], &t2, &s.af[2], Res::None);
+        o.conv(&self.block3[1], &s.af[2], &t2, Res::None);
+        o.copy(&t2, &s.af[2], 1.0, 0.0, Act::None);
+    }
+
+    fn backbone(&self, o: &mut Ops, img: &View, s: &Scale, b: &Backbone, d: &Deep) {
+        for (k, sh) in b.shallow.iter().enumerate() {
+            self.shallow(o, &img.frame(k as u32), sh, &b.temp);
         }
-        o.conv(&self.cross_proj, &x.cross, &x.tmp[3], Res::None);
+        let levels = [2, 1, 1, 0, 0, 0, 0];
+        for (k, sh) in b.shallow.iter().enumerate() {
+            let cross = b.cross.frame(k as u32);
+            for (j, (c, l)) in self.cross.iter().zip(levels).enumerate() {
+                o.conv(c, &sh.af[l], &cross.part(32 * j as u32, 32), Res::None);
+            }
+        }
+        o.conv(&self.cross_proj, &b.cross, &b.tmp3, Res::None);
         let n = &self.cross_norm;
-        o.norm(&n.gamma, &n.beta, n.eps, &x.tmp[3], &af[3]);
+        o.norm(&n.gamma, &n.beta, n.eps, &b.tmp3, &d.af3);
+        let mf = d.mf.as_ref();
         self.stage(
             o,
             &self.stage4,
-            &x.t4,
-            &af[3],
-            &mf[0],
+            &b.t4,
+            &s.g4,
+            &d.af3,
+            mf.map(|m| &m[0]),
             &self.norm4,
-            &x.tmp[3],
+            &b.tmp3,
         );
-        o.copy(&x.tmp[3], &af[3], 1.0, 0.0, Act::None);
-        o.conv(&self.embed5, &af[3], &x.tmp[4], Res::None);
+        o.copy(&b.tmp3, &d.af3, 1.0, 0.0, Act::None);
+        o.conv(&self.embed5, &d.af3, &b.tmp4, Res::None);
         let n = &self.embed5_norm;
-        o.norm(&n.gamma, &n.beta, n.eps, &x.tmp[4], &af[4]);
+        o.norm(&n.gamma, &n.beta, n.eps, &b.tmp4, &d.af4);
         self.stage(
             o,
             &self.stage5,
-            &x.t5,
-            &af[4],
-            &mf[1],
+            &b.t5,
+            &s.g5,
+            &d.af4,
+            mf.map(|m| &m[1]),
             &self.norm5,
-            &x.tmp[4],
+            &b.tmp4,
         );
-        o.copy(&x.tmp[4], &af[4], 1.0, 0.0, Act::None);
+        o.copy(&b.tmp4, &d.af4, 1.0, 0.0, Act::None);
     }
 
-    pub(super) fn flow(&self, o: &mut Ops, img: &View, f: &Features, fl: &Flow, t: f32) {
+    fn flow(&self, o: &mut Ops, img: &View, d: &Deep, fl: &Flow, t: f32) {
         let (img0, img1) = (img.frame(0), img.frame(1));
+        let mf = d.mf.as_ref().expect("motion features");
         let motion = |o: &mut Ops, level: usize, dst: &View| {
-            let (mf, af) = (&f.mf[level - 3], &f.af[level]);
+            let (mf, af) = match level {
+                3 => (&mf[0], &d.af3),
+                _ => (&mf[1], &d.af4),
+            };
             let c = mf.c;
             o.copy(&mf.frame(0), &dst.part(0, c), t, 0.0, Act::None);
             o.copy(&mf.frame(1), &dst.part(c, c), 1.0 - t, 0.0, Act::None);
@@ -610,71 +891,92 @@ impl Ema {
         o.add(&fl.big.part(4, 1), &fl.mask);
     }
 
-    pub(super) fn refine(
+    fn refine(
         &self,
         o: &mut Ops,
-        img: &View,
-        af: &[View],
-        flow: &View,
-        mask: &View,
-        r: &Refine,
+        i: &Inputs,
+        band: &Band,
+        ((a, hb), (y0, y1)): ((u32, u32), (u32, u32)),
+        pred: &View,
     ) {
-        refine(o, &self.unet, img, af, flow, mask, r);
-    }
-}
-
-pub(super) fn refine(
-    o: &mut Ops,
-    u: &Unet,
-    img: &View,
-    af: &[View],
-    flow: &View,
-    mask: &View,
-    r: &Refine,
-) {
-    let (img0, img1) = (img.frame(0), img.frame(1));
-    let a0 = af[0].c;
-    let c = 2 * a0;
-    o.copy(&img0, &r.d0.part(0, 3), 1.0, 0.0, Act::None);
-    o.copy(&img1, &r.d0.part(3, 3), 1.0, 0.0, Act::None);
-    o.warp(&img0, &flow.part(0, 2), &r.d0.part(6, 3));
-    o.warp(&img1, &flow.part(2, 2), &r.d0.part(9, 3));
-    o.warp(&img0, &flow.part(0, 2), &r.warped.part(0, 3));
-    o.warp(&img1, &flow.part(2, 2), &r.warped.part(3, 3));
-    o.copy(mask, &r.d0.part(12, 1), 1.0, 0.0, Act::None);
-    o.copy(flow, &r.d0.part(13, 4), 1.0, 0.0, Act::None);
-    o.warp(&af[0].frame(0), &flow.part(0, 2), &r.d0.part(17, a0));
-    o.warp(&af[0].frame(1), &flow.part(2, 2), &r.d0.part(17 + a0, a0));
-    let mut prev = flow.clone();
-    for (k, f) in r.flows.iter().enumerate() {
-        o.scaled(&prev, f, 0.5, 0.5, 4);
-        let a = &af[k + 1];
-        if k < 3 {
-            let at = r.s[k].c;
-            o.warp(&a.frame(0), &f.part(0, 2), &r.d[k].part(at, a.c));
-            o.warp(&a.frame(1), &f.part(2, 2), &r.d[k].part(at + a.c, a.c));
-        } else {
-            let at = r.s[3].c;
-            o.warp(&a.frame(0), &f.part(0, 2), &r.d[3].part(at, a.c));
-            o.warp(&a.frame(1), &f.part(2, 2), &r.d[3].part(at + a.c, a.c));
+        let u = &self.unet;
+        let w = i.img.w;
+        let (img0, img1) = (i.img.frame(0), i.img.frame(1));
+        let sh = i.shallow;
+        let a0 = sh[0].af[0].c;
+        let c = 2 * a0;
+        let fl = i.flow.rows(a, hb);
+        let d0 = band.x.shaped(1, hb, w, 17 + c);
+        o.copy(&img0.rows(a, hb), &d0.part(0, 3), 1.0, 0.0, Act::None);
+        o.copy(&img1.rows(a, hb), &d0.part(3, 3), 1.0, 0.0, Act::None);
+        o.warp_at(&img0, &fl.part(0, 2), &d0.part(6, 3), a);
+        o.warp_at(&img1, &fl.part(2, 2), &d0.part(9, 3), a);
+        let warped = band.warped.shaped(1, hb, w, 6);
+        o.warp_at(&img0, &fl.part(0, 2), &warped.part(0, 3), a);
+        o.warp_at(&img1, &fl.part(2, 2), &warped.part(3, 3), a);
+        o.copy(&i.mask.rows(a, hb), &d0.part(12, 1), 1.0, 0.0, Act::None);
+        o.copy(&fl, &d0.part(13, 4), 1.0, 0.0, Act::None);
+        o.warp_at(&sh[0].af[0], &fl.part(0, 2), &d0.part(17, a0), a);
+        o.warp_at(&sh[1].af[0], &fl.part(2, 2), &d0.part(17 + a0, a0), a);
+        let mut flows = Vec::new();
+        let mut prev = fl;
+        for (k, f) in band.flows.iter().enumerate() {
+            let s = k as u32 + 1;
+            let f = f.shaped(1, hb >> s, w >> s, 4);
+            o.scaled(&prev, &f, 0.5, 0.5, 4);
+            prev = f.clone();
+            flows.push(f);
         }
-        prev = f.clone();
+        let feature = |k: usize, b: usize| match k {
+            0 => sh[b].af[1].clone(),
+            1 => sh[b].af[2].clone(),
+            2 => i.deep.af3.frame(b as u32),
+            _ => i.deep.af4.frame(b as u32),
+        };
+        let skip = |k: usize| {
+            let s = k as u32 + 1;
+            band.z[k].shaped(1, hb >> s, w >> s, u.down[k].1.cout)
+        };
+        let mut input = d0;
+        for (k, (c1, c2)) in u.down.iter().enumerate() {
+            let s = k as u32 + 1;
+            let (hk, wk) = (hb >> s, w >> s);
+            let mid = band.y.shaped(1, hk, wk, c1.cout);
+            o.conv(c1, &input, &mid, Res::None);
+            let sk = skip(k);
+            o.conv(c2, &mid, &sk, Res::None);
+            let (f0, f1) = (feature(k, 0), feature(k, 1));
+            let dk = band.x.shaped(1, hk, wk, sk.c + 2 * f0.c);
+            o.copy(&sk, &dk.part(0, sk.c), 1.0, 0.0, Act::None);
+            o.warp_at(&f0, &flows[k].part(0, 2), &dk.part(sk.c, f0.c), a >> s);
+            o.warp_at(
+                &f1,
+                &flows[k].part(2, 2),
+                &dk.part(sk.c + f0.c, f0.c),
+                a >> s,
+            );
+            input = dk;
+        }
+        let u0 = band.y.shaped(1, hb >> 3, w >> 3, 16 * c);
+        o.deconv(&u.up[0], &input, &u0.part(0, 8 * c), 1);
+        o.copy(&skip(2), &u0.part(8 * c, 8 * c), 1.0, 0.0, Act::None);
+        let u1 = band.x.shaped(1, hb >> 2, w >> 2, 8 * c);
+        o.deconv(&u.up[1], &u0, &u1.part(0, 4 * c), 1);
+        o.copy(&skip(1), &u1.part(4 * c, 4 * c), 1.0, 0.0, Act::None);
+        let u2 = band.y.shaped(1, hb >> 1, w >> 1, 4 * c);
+        o.deconv(&u.up[2], &u1, &u2.part(0, 2 * c), 1);
+        o.copy(&skip(0), &u2.part(2 * c, 2 * c), 1.0, 0.0, Act::None);
+        let u3 = band.x.shaped(1, hb, w, c);
+        o.deconv(&u.up[3], &u2, &u3, 1);
+        let out = band.y.shaped(1, hb, w, 3);
+        o.conv(&u.last, &u3, &out, Res::None);
+        let n = y1 - y0;
+        o.predict(
+            &warped.part(0, 3).rows(y0 - a, n),
+            &warped.part(3, 3).rows(y0 - a, n),
+            &i.mask.rows(y0, n),
+            &out.rows(y0 - a, n),
+            &pred.rows(y0, n),
+        );
     }
-    let mut input = r.d0.clone();
-    for k in 0..4 {
-        let (c1, c2) = &u.down[k];
-        o.conv(c1, &input, &r.mid[k], Res::None);
-        let s = &r.s[k];
-        o.conv(c2, &r.mid[k], s, Res::None);
-        o.copy(s, &r.d[k].part(0, s.c), 1.0, 0.0, Act::None);
-        input = r.d[k].clone();
-    }
-    o.deconv(&u.up[0], &r.d[3], &r.u[0].part(0, 8 * c), 1);
-    o.copy(&r.s[2], &r.u[0].part(8 * c, 8 * c), 1.0, 0.0, Act::None);
-    o.deconv(&u.up[1], &r.u[0], &r.u[1].part(0, 4 * c), 1);
-    o.copy(&r.s[1], &r.u[1].part(4 * c, 4 * c), 1.0, 0.0, Act::None);
-    o.deconv(&u.up[2], &r.u[1], &r.u[2].part(0, 2 * c), 1);
-    o.copy(&r.s[0], &r.u[2].part(2 * c, 2 * c), 1.0, 0.0, Act::None);
-    o.deconv(&u.up[3], &r.u[2], &r.u[3], 1);
-    o.conv(&u.last, &r.u[3], &r.out, Res::None);
 }

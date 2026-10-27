@@ -346,6 +346,11 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
 - `interpolate` has a wgpu device of its own (`compute::Gpu`), on the GPU that wgpu prefers. Its pipelines (`ops::Kernels`) and the weights of each model stay.
   - The device goes when the last `interpolate::User` goes. Each `Source` with a process other than Nearest is a user.
 - The last pair stays on the GPU with its features. The next frame of the same pair uses them again. Thus the frames between one pair of a slow clip share the features.
+- A new pair of the same size and process uses the buffers of the last pair again.
+- **Work buffers** (`ops::arena`): the work buffers of an EMA-VFI pair come from one pool.
+  - The plan of the pool runs two times. The first run lists each buffer and the time that it is in use. The second run takes the planned buffers.
+  - Two buffers that are never in use at the same time can share a pool buffer. The largest buffers go first, each into the smallest free pool buffer that is large enough.
+  - Each buffer of one dispatch is a different pool buffer. wgpu refuses a buffer that one dispatch reads and also writes.
 - Frame Blend mixes the two frames on the same device (`Ops::combine`).
 - The networks run on kernels of vidcut's own (`interpolate::ops`), in 32-bit floats:
   - `Ops::conv` runs a convolution as a matrix multiply that gathers its taps. It also runs the linear layers, as 1×1 convolutions.
@@ -365,7 +370,11 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - The motion is found at half size for frames of 1080 lines and at a quarter for UHD (`motion_scale`). The refinement runs at full size. These are the scales of the authors' tests.
   - The pair also runs turned by 180 degrees, and the two results are averaged, as in the authors' tests.
   - The backbone runs once for a pair, at each size and each turn. The flow and the refinement run for each frame.
-  - Both turns use the same scratch buffers for the backbone.
+  - A pair keeps only the two deepest levels of the full-size features (`ema::Deep`). At full size, the backbone does not make the motion features, because only the flow uses them.
+  - The three shallow levels run again for each frame and each turn (`ema::Shallow`). They are only convolutions, but they are the largest buffers.
+  - The refinement runs in bands of rows (`ema::Pair`). Each band has extra rows above and below it, more than the reach of the refinement.
+  - Thus the bands give the same frame as one pass over the whole frame. A memory budget sets the height of the bands. A frame within the budget is one band.
+  - The refinement uses three buffers in turn, as its layers finish with them.
 - PyTorch versions of the two networks, written from the official code, give the same frames within 1 of 255 levels, on 1080p frames.
 - **The work report** (`interpolate::report`):
   - The device reports its GPU when it starts.

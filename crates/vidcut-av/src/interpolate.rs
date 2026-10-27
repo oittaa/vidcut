@@ -138,128 +138,10 @@ enum Net {
     Ema(Box<ema::Ema>),
 }
 
-struct Side<F> {
-    img: View,
-    feats: F,
-    down: Option<(View, F)>,
-    pred: View,
-}
-
-struct Shared<S> {
-    full: S,
-    down: Option<S>,
-    up: Option<(View, View)>,
-    refine: ema::Refine,
-    ds: f32,
-    pad: (u32, u32),
-}
-
-struct EmaState {
-    sides: Vec<Side<ema::Features>>,
-    shared: Shared<ema::Scratch>,
-    flow: ema::Flow,
-}
-
 enum State {
     Rife(Box<rife::Pair>),
-    Ema(Box<EmaState>),
+    Ema(Box<ema::Pair>),
     Blend(View, View),
-}
-
-fn motion_scale((w, h): (u32, u32)) -> f32 {
-    if w >= UHD.0 || h >= UHD.1 {
-        0.25
-    } else if w >= 1920 || h >= 1080 {
-        0.5
-    } else {
-        1.0
-    }
-}
-
-fn centered((w, h): (u32, u32), step: u32) -> ((u32, u32), (u32, u32)) {
-    let (pw, ph) = (w.next_multiple_of(step), h.next_multiple_of(step));
-    ((pw, ph), ((ph - h) / 2, (pw - w) / 2))
-}
-
-struct Layout {
-    padded: (u32, u32),
-    small: (u32, u32),
-    pad: (u32, u32),
-    ds: f32,
-}
-
-fn layout(size: (u32, u32)) -> Layout {
-    let ds = motion_scale(size);
-    let (padded, pad) = centered(size, (32.0 / ds) as u32);
-    let small = ((padded.0 as f32 * ds) as u32, (padded.1 as f32 * ds) as u32);
-    Layout {
-        padded,
-        small,
-        pad,
-        ds,
-    }
-}
-
-fn sides<F>(gpu: &Gpu, l: &Layout, feats: impl Fn((u32, u32)) -> F) -> Vec<Side<F>> {
-    let (pw, ph) = l.padded;
-    (0..2)
-        .map(|_| Side {
-            img: tensor(gpu, 2, ph, pw, 3),
-            feats: feats(l.padded),
-            down: (l.ds < 1.0).then(|| (tensor(gpu, 2, l.small.1, l.small.0, 3), feats(l.small))),
-            pred: tensor(gpu, 1, ph, pw, 3),
-        })
-        .collect()
-}
-
-fn shared<S>(gpu: &Gpu, l: &Layout, scratch: impl Fn((u32, u32)) -> S) -> Shared<S> {
-    let (pw, ph) = l.padded;
-    Shared {
-        full: scratch(l.padded),
-        down: (l.ds < 1.0).then(|| scratch(l.small)),
-        up: (l.ds < 1.0).then(|| (tensor(gpu, 1, ph, pw, 4), tensor(gpu, 1, ph, pw, 1))),
-        refine: ema::refine_for(gpu, l.padded, 64),
-        ds: l.ds,
-        pad: l.pad,
-    }
-}
-
-fn load_sides<F>(
-    o: &mut Ops,
-    sides: &[Side<F>],
-    (a, b): (&wgpu::Buffer, &wgpu::Buffer),
-    size: (u32, u32),
-    pad: (u32, u32),
-) {
-    for (i, side) in sides.iter().enumerate() {
-        o.load_turned(a, size, pad, true, i == 1, &side.img.frame(0));
-        o.load_turned(b, size, pad, true, i == 1, &side.img.frame(1));
-        if let Some((img, _)) = &side.down {
-            o.scaled(&side.img, img, img.w as f32 / side.img.w as f32, 1.0, 0);
-        }
-    }
-}
-
-fn upscaled<S>(o: &mut Ops, sh: &Shared<S>, flow: &View, mask: &View) -> (View, View) {
-    match &sh.up {
-        Some((f, m)) => {
-            o.scaled(flow, f, 1.0 / sh.ds, 1.0 / sh.ds, 4);
-            o.scaled(mask, m, 1.0 / sh.ds, 1.0, 0);
-            (f.clone(), m.clone())
-        }
-        None => (flow.clone(), mask.clone()),
-    }
-}
-
-fn predicted<S>(o: &mut Ops, sh: &Shared<S>, mask: &View, side_pred: &View) {
-    let r = &sh.refine;
-    o.predict(
-        &r.warped.part(0, 3),
-        &r.warped.part(3, 3),
-        mask,
-        &r.out,
-        side_pred,
-    );
 }
 
 struct Held {
@@ -426,58 +308,48 @@ impl Engine {
         {
             return Ok(());
         }
-        self.held = None;
+        let kept = self.held.take().filter(|h| h.retime == r && h.size == size);
         if r.ai() {
             self.net(r)?;
         }
         let (w, h) = size;
         let ua = self.upload(a);
         let ub = self.upload(b);
-        let out = self
-            .gpu
-            .buffer((w as usize * h as usize * 3).next_multiple_of(4));
         let gpu = &self.gpu;
-        let state = match (r, self.loaded(r)) {
-            (Retime::FrameBlend, _) => {
-                let img = tensor(gpu, 2, h, w, 3);
-                self.submit(|o| {
-                    o.load(&ua, size, (0, 0), false, &img.frame(0));
-                    o.load(&ub, size, (0, 0), false, &img.frame(1));
-                });
-                State::Blend(img, tensor(gpu, 1, h, w, 3))
-            }
-            (_, Some(Net::Rife(net))) => {
-                let scale = if w >= UHD.0 || h >= UHD.1 { 0.5 } else { 1.0 };
-                let pair = net.pair(gpu, rife::padded(size, scale), scale);
-                self.submit(|o| {
-                    o.load(&ua, size, (0, 0), false, &pair.img.frame(0));
-                    o.load(&ub, size, (0, 0), false, &pair.img.frame(1));
-                    net.features(o, &pair);
-                });
-                State::Rife(Box::new(pair))
-            }
-            (_, Some(Net::Ema(net))) => {
-                let l = layout(size);
-                let sides = sides(gpu, &l, |s| ema::features_for(gpu, s));
-                let sh = shared(gpu, &l, |s| ema::scratch_for(gpu, s));
-                let flow = ema::flow_for(gpu, l.small);
-                self.submit(|o| {
-                    load_sides(o, &sides, (&ua, &ub), size, l.pad);
-                    for side in &sides {
-                        net.features(o, &side.img, &side.feats, &sh.full);
-                        if let (Some((img, feats)), Some(x)) = (&side.down, &sh.down) {
-                            net.features(o, img, feats, x);
-                        }
+        let (state, out) = match kept {
+            Some(h) => (h.state, h.out),
+            None => {
+                let out = gpu.buffer((w as usize * h as usize * 3).next_multiple_of(4));
+                let state = match (r, self.loaded(r)) {
+                    (Retime::FrameBlend, _) => {
+                        State::Blend(tensor(gpu, 2, h, w, 3), tensor(gpu, 1, h, w, 3))
                     }
-                });
-                State::Ema(Box::new(EmaState {
-                    sides,
-                    shared: sh,
-                    flow,
-                }))
+                    (_, Some(Net::Rife(net))) => {
+                        let scale = if w >= UHD.0 || h >= UHD.1 { 0.5 } else { 1.0 };
+                        State::Rife(Box::new(net.pair(gpu, rife::padded(size, scale), scale)))
+                    }
+                    (_, Some(Net::Ema(_))) => State::Ema(Box::new(ema::Pair::new(gpu, size)?)),
+                    _ => return Err(Error::Invalid(format!("{} has no model", r.title()))),
+                };
+                (state, out)
             }
-            _ => return Err(Error::Invalid(format!("{} has no model", r.title()))),
         };
+        self.submit(|o| match (&state, self.loaded(r)) {
+            (State::Blend(img, _), _) => {
+                o.load(&ua, size, (0, 0), false, &img.frame(0));
+                o.load(&ub, size, (0, 0), false, &img.frame(1));
+            }
+            (State::Rife(pair), Some(Net::Rife(net))) => {
+                o.load(&ua, size, (0, 0), false, &pair.img.frame(0));
+                o.load(&ub, size, (0, 0), false, &pair.img.frame(1));
+                net.features(o, pair);
+            }
+            (State::Ema(pair), Some(Net::Ema(net))) => {
+                pair.load(o, (&ua, &ub), size);
+                pair.backbone(o, net);
+            }
+            _ => {}
+        });
         self.held = Some(Held {
             key: key.clone(),
             retime: r,
@@ -500,25 +372,8 @@ impl Engine {
                 net.frame(o, pair, t);
                 net.finish(o, pair, size, &held.out);
             }
-            (State::Ema(state), Some(Net::Ema(net))) => {
-                let (sides, sh, fl) = (&state.sides, &state.shared, &state.flow);
-                for side in sides {
-                    let (img, feats) = match &side.down {
-                        Some((img, feats)) => (img, feats),
-                        None => (&side.img, &side.feats),
-                    };
-                    net.flow(o, img, feats, fl, t);
-                    let (flow, mask) = upscaled(o, sh, &fl.flow, &fl.mask);
-                    net.refine(o, &side.img, &side.feats.af, &flow, &mask, &sh.refine);
-                    predicted(o, sh, &mask, &side.pred);
-                }
-                o.store_both(
-                    &sides[0].pred,
-                    Some(&sides[1].pred),
-                    sh.pad,
-                    size,
-                    &held.out,
-                );
+            (State::Ema(pair), Some(Net::Ema(net))) => {
+                pair.frame(o, net, t, size, &held.out);
             }
             _ => {}
         });

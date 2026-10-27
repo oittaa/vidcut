@@ -1,4 +1,5 @@
 use crate::compute::{Gpu, bytes};
+use crate::error::{Error, Result};
 
 #[derive(Clone)]
 pub(super) struct View {
@@ -29,9 +30,141 @@ impl View {
         }
     }
 
+    pub(super) fn rows(&self, y: u32, h: u32) -> View {
+        debug_assert_eq!(self.n, 1);
+        View {
+            base: self.base + y * self.w * self.stride,
+            h,
+            ..self.clone()
+        }
+    }
+
+    pub(super) fn shaped(&self, n: u32, h: u32, w: u32, c: u32) -> View {
+        View {
+            n,
+            h,
+            w,
+            c,
+            stride: c,
+            at: 0,
+            ..self.clone()
+        }
+    }
+
     fn words(&self) -> [u32; 6] {
         [self.base, self.h, self.w, self.stride, self.at, self.c]
     }
+}
+
+pub(super) struct Carve<'a> {
+    bufs: &'a [wgpu::Buffer],
+    dummy: &'a wgpu::Buffer,
+    plan: &'a [usize],
+    cap: u64,
+    asked: Vec<(u64, u64, u64)>,
+    live: Vec<usize>,
+    time: u64,
+    over: bool,
+}
+
+impl Carve<'_> {
+    pub(super) fn view(&mut self, n: u32, h: u32, w: u32, c: u32) -> View {
+        let size = u64::from(n) * u64::from(h) * u64::from(w) * u64::from(c);
+        self.over |= size > self.cap;
+        let i = self.asked.len();
+        self.asked.push((size, self.time, u64::MAX));
+        self.live.push(i);
+        self.time += 1;
+        View {
+            buf: self
+                .plan
+                .get(i)
+                .and_then(|&slot| self.bufs.get(slot))
+                .unwrap_or(self.dummy)
+                .clone(),
+            base: 0,
+            n,
+            h,
+            w,
+            c,
+            stride: c,
+            at: 0,
+        }
+    }
+
+    pub(super) fn mark(&self) -> usize {
+        self.live.len()
+    }
+
+    pub(super) fn reset(&mut self, mark: usize) {
+        for i in self.live.drain(mark..) {
+            self.asked[i].2 = self.time;
+        }
+        self.time += 1;
+    }
+}
+
+fn slots(asked: &[(u64, u64, u64)]) -> (Vec<u64>, Vec<usize>) {
+    let mut order: Vec<usize> = (0..asked.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(asked[i].0));
+    let mut sizes: Vec<u64> = Vec::new();
+    let mut users: Vec<Vec<usize>> = Vec::new();
+    let mut plan = vec![0; asked.len()];
+    for i in order {
+        let (size, from, to) = asked[i];
+        let free = |slot: &Vec<usize>| slot.iter().all(|&j| asked[j].2 <= from || to <= asked[j].1);
+        let open: Vec<usize> = (0..sizes.len()).filter(|&k| free(&users[k])).collect();
+        let fit = open
+            .iter()
+            .copied()
+            .filter(|&k| sizes[k] >= size)
+            .min_by_key(|&k| sizes[k])
+            .or_else(|| open.iter().copied().max_by_key(|&k| sizes[k]));
+        let slot = fit.unwrap_or_else(|| {
+            sizes.push(0);
+            users.push(Vec::new());
+            sizes.len() - 1
+        });
+        sizes[slot] = sizes[slot].max(size);
+        users[slot].push(i);
+        plan[i] = slot;
+    }
+    (sizes, plan)
+}
+
+pub(super) fn arena<T>(
+    gpu: &Gpu,
+    plan: impl Fn(&mut Carve) -> T,
+) -> Result<(Vec<wgpu::Buffer>, T)> {
+    let limits = gpu.device.limits();
+    let cap = (limits
+        .max_storage_buffer_binding_size
+        .min(limits.max_buffer_size)
+        / 4)
+    .min(u64::from(u32::MAX));
+    let dummy = gpu.buffer(16);
+    let carve = |bufs, plan| Carve {
+        bufs,
+        dummy: &dummy,
+        plan,
+        cap,
+        asked: Vec::new(),
+        live: Vec::new(),
+        time: 0,
+        over: false,
+    };
+    let mut c = carve(&[], &[]);
+    plan(&mut c);
+    if c.over {
+        return Err(Error::Invalid(
+            "frame interpolation on the GPU: the frame is larger than the GPU's buffers".into(),
+        ));
+    }
+    let (sizes, slots) = slots(&c.asked);
+    let bufs: Vec<wgpu::Buffer> = sizes.iter().map(|&f| gpu.buffer(f as usize * 4)).collect();
+    let mut c = carve(&bufs, &slots);
+    let t = plan(&mut c);
+    Ok((bufs, t))
 }
 
 pub(super) fn tensor(gpu: &Gpu, n: u32, h: u32, w: u32, c: u32) -> View {
@@ -462,9 +595,10 @@ const WARP: &str = r#"
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
     let n = u(0u);
-    let ib = u(1u); let h = u(2u); let w = u(3u); let istr = u(4u); let iat = u(5u); let c = u(6u);
-    let ob = u(7u); let ostr = u(10u); let oat = u(11u);
+    let ib = u(1u); let ih = u(2u); let w = u(3u); let istr = u(4u); let iat = u(5u); let c = u(6u);
+    let ob = u(7u); let h = u(8u); let ostr = u(10u); let oat = u(11u);
     let fb = u(13u); let fstr = u(16u); let fat = u(17u);
+    let oy = u(19u);
     let i = gid(wg, nw) * 256u + li;
     if (i >= n * h * w * c) {
         return;
@@ -476,9 +610,9 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
     let b = px / (w * h);
     let fl = fb + ((b * h + y) * w + x) * fstr + fat;
     let gx = -1.0 + 2.0 * f32(x) / f32(w - 1u) + flow[fl] / ((f32(w) - 1.0) / 2.0);
-    let gy = -1.0 + 2.0 * f32(y) / f32(h - 1u) + flow[fl + 1u] / ((f32(h) - 1.0) / 2.0);
+    let gy = -1.0 + 2.0 * f32(y + oy) / f32(ih - 1u) + flow[fl + 1u] / ((f32(ih) - 1.0) / 2.0);
     let sx = clamp((gx + 1.0) / 2.0 * (f32(w) - 1.0), 0.0, f32(w) - 1.0);
-    let sy = clamp((gy + 1.0) / 2.0 * (f32(h) - 1.0), 0.0, f32(h) - 1.0);
+    let sy = clamp((gy + 1.0) / 2.0 * (f32(ih) - 1.0), 0.0, f32(ih) - 1.0);
     let x0 = floor(sx);
     let y0 = floor(sy);
     let lx = sx - x0;
@@ -488,8 +622,8 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
         let xx = i32(x0) + i32(j % 2u);
         let yy = i32(y0) + i32(j / 2u);
         let wt = select(1.0 - lx, lx, j % 2u == 1u) * select(1.0 - ly, ly, j / 2u == 1u);
-        if (xx >= 0 && yy >= 0 && xx < i32(w) && yy < i32(h)) {
-            v += wt * src[ib + ((b * h + u32(yy)) * w + u32(xx)) * istr + iat + ch];
+        if (xx >= 0 && yy >= 0 && xx < i32(w) && yy < i32(ih)) {
+            v += wt * src[ib + ((b * ih + u32(yy)) * w + u32(xx)) * istr + iat + ch];
         }
     }
     dst[ob + ((b * h + y) * w + x) * ostr + oat + ch] = v;
@@ -1154,9 +1288,13 @@ impl Ops<'_, '_> {
     }
 
     pub(super) fn warp(&mut self, src: &View, flow: &View, dst: &View) {
-        let p = words(&[&[src.n], &src.words(), &dst.words(), &flow.words()]);
+        self.warp_at(src, flow, dst, 0);
+    }
+
+    pub(super) fn warp_at(&mut self, src: &View, flow: &View, dst: &View, oy: u32) {
+        let p = words(&[&[dst.n], &src.words(), &dst.words(), &flow.words(), &[oy]]);
         let param = self.gpu.uniform(&p);
-        let items = src.n as u64 * src.h as u64 * src.w as u64 * src.c as u64;
+        let items = dst.n as u64 * dst.h as u64 * dst.w as u64 * src.c as u64;
         self.gpu.dispatch(
             self.pass,
             &self.k.warp,
