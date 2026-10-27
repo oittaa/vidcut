@@ -1241,18 +1241,14 @@ pub enum Retime {
     /// EMA-VFI on the GPU, as RIFE. Its weights (264 MB) download at their
     /// first use.
     EmaVfi,
-    /// VFIMamba on the GPU, as RIFE. Its weights (264 MB) download at
-    /// their first use.
-    Vfimamba,
 }
 
 impl Retime {
-    pub const ALL: [Retime; 5] = [
+    pub const ALL: [Retime; 4] = [
         Retime::Nearest,
         Retime::FrameBlend,
         Retime::Rife,
         Retime::EmaVfi,
-        Retime::Vfimamba,
     ];
 
     pub fn is_nearest(&self) -> bool {
@@ -1260,7 +1256,7 @@ impl Retime {
     }
 
     pub fn ai(&self) -> bool {
-        matches!(self, Retime::Rife | Retime::EmaVfi | Retime::Vfimamba)
+        matches!(self, Retime::Rife | Retime::EmaVfi)
     }
 
     pub fn title(&self) -> &'static str {
@@ -1269,7 +1265,6 @@ impl Retime {
             Retime::FrameBlend => "Frame Blend",
             Retime::Rife => "RIFE 4.25",
             Retime::EmaVfi => "EMA-VFI",
-            Retime::Vfimamba => "VFIMamba",
         }
     }
 }

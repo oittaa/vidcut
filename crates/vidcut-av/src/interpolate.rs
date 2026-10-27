@@ -12,7 +12,6 @@ use crate::error::{Error, Result};
 use crate::models::{self, Fetch, Need};
 
 mod ema;
-mod mamba;
 mod ops;
 mod rife;
 
@@ -26,7 +25,6 @@ fn model(r: Retime) -> Option<&'static catalog::Model> {
     match r {
         Retime::Rife => Some(&catalog::RIFE),
         Retime::EmaVfi => Some(&catalog::EMA_VFI),
-        Retime::Vfimamba => Some(&catalog::VFIMAMBA),
         Retime::Nearest | Retime::FrameBlend => None,
     }
 }
@@ -138,7 +136,6 @@ pub fn check<'a>(
 enum Net {
     Rife(Box<rife::Rife>),
     Ema(Box<ema::Ema>),
-    Mamba(Box<mamba::Mamba>),
 }
 
 struct Side<F> {
@@ -163,17 +160,9 @@ struct EmaState {
     flow: ema::Flow,
 }
 
-struct MambaState {
-    sides: Vec<Side<mamba::Features>>,
-    shared: Shared<mamba::Scratch>,
-    flow: mamba::Flow,
-    locals: mamba::Locals,
-}
-
 enum State {
     Rife(Box<rife::Pair>),
     Ema(Box<EmaState>),
-    Mamba(Box<MambaState>),
     Blend(View, View),
 }
 
@@ -394,8 +383,7 @@ impl Engine {
             let path = dir.join(m.files[0].name);
             let net = match r {
                 Retime::Rife => Net::Rife(Box::new(rife::load(&self.gpu, &path, m.title)?)),
-                Retime::EmaVfi => Net::Ema(Box::new(ema::load(&self.gpu, &path, m.title)?)),
-                _ => Net::Mamba(Box::new(mamba::load(&self.gpu, &path, m.title)?)),
+                _ => Net::Ema(Box::new(ema::load(&self.gpu, &path, m.title)?)),
             };
             self.nets.push((r, net));
         }
@@ -488,28 +476,6 @@ impl Engine {
                     flow,
                 }))
             }
-            (_, Some(Net::Mamba(net))) => {
-                let l = layout(size);
-                let sides = sides(gpu, &l, |s| mamba::features_for(gpu, s));
-                let sh = shared(gpu, &l, |s| mamba::scratch_for(gpu, s));
-                let flow = mamba::flow_for(gpu, l.small);
-                let locals = mamba::locals_for(gpu, l.padded);
-                self.submit(|o| {
-                    load_sides(o, &sides, (&ua, &ub), size, l.pad);
-                    for side in &sides {
-                        net.features(o, &side.img, &side.feats, &sh.full);
-                        if let (Some((img, feats)), Some(x)) = (&side.down, &sh.down) {
-                            net.features(o, img, feats, x);
-                        }
-                    }
-                });
-                State::Mamba(Box::new(MambaState {
-                    sides,
-                    shared: sh,
-                    flow,
-                    locals,
-                }))
-            }
             _ => return Err(Error::Invalid(format!("{} has no model", r.title()))),
         };
         self.held = Some(Held {
@@ -544,36 +510,6 @@ impl Engine {
                     net.flow(o, img, feats, fl, t);
                     let (flow, mask) = upscaled(o, sh, &fl.flow, &fl.mask);
                     net.refine(o, &side.img, &side.feats.af, &flow, &mask, &sh.refine);
-                    predicted(o, sh, &mask, &side.pred);
-                }
-                o.store_both(
-                    &sides[0].pred,
-                    Some(&sides[1].pred),
-                    sh.pad,
-                    size,
-                    &held.out,
-                );
-            }
-            (State::Mamba(state), Some(Net::Mamba(net))) => {
-                let (sides, sh, fl, locals) =
-                    (&state.sides, &state.shared, &state.flow, &state.locals);
-                for side in sides {
-                    let (img, af) = match &side.down {
-                        Some((img, feats)) => (img, &feats.af),
-                        None => (&side.img, &side.feats.af),
-                    };
-                    net.flow(o, img, af, fl, t);
-                    let (flow, mask) = upscaled(o, sh, &fl.flow, &fl.mask);
-                    net.locals(o, &side.img, &flow, &mask, locals);
-                    ema::refine(
-                        o,
-                        &net.unet,
-                        &side.img,
-                        &side.feats.af,
-                        &flow,
-                        &mask,
-                        &sh.refine,
-                    );
                     predicted(o, sh, &mask, &side.pred);
                 }
                 o.store_both(

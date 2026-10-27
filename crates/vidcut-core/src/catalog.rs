@@ -786,26 +786,7 @@ pub static EMA_VFI: Model = Model {
     price: None,
 };
 
-pub const VFIMAMBA_WEIGHTS: File = File {
-    name: "vfimamba/VFIMamba.pkl",
-    title: "VFIMamba frame interpolation",
-    url: "https://huggingface.co/MCG-NJU/VFIMamba_ckpts/resolve/7c383874883191d240bcc9435590eecc573f1055/ckpt/VFIMamba.pkl",
-    bytes: 264_414_373,
-    sha256: "c1dac5b08f4c41e95452f7a41b35347409fc58b0e25b3ba8de899144ff28a350",
-};
-
-pub static VFIMAMBA: Model = Model {
-    id: "vfimamba",
-    times: None,
-    title: "VFIMamba",
-    files: &[VFIMAMBA_WEIGHTS],
-    service: None,
-    languages: &[],
-    limits: &[limit(Measure::HdrPictures, 0.0, Kind::Hard, Source::Vidcut)],
-    price: None,
-};
-
-pub static ALL: [&Model; 14] = [
+pub static ALL: [&Model; 13] = [
     &PARAKEET_ULTRA,
     &QWEN3_ASR,
     &WHISPER_LARGE_V3,
@@ -819,7 +800,6 @@ pub static ALL: [&Model; 14] = [
     &FLASHVSR,
     &RIFE,
     &EMA_VFI,
-    &VFIMAMBA,
 ];
 
 pub fn speech(model: SpeechModel) -> &'static Model {

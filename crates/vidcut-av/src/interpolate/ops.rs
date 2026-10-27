@@ -53,10 +53,8 @@ pub(super) enum Act {
     None,
     Leaky(f32),
     Prelu,
-    Relu,
     Gelu,
     Sigmoid,
-    Silu,
 }
 
 impl Act {
@@ -65,10 +63,8 @@ impl Act {
             Act::None => (0, 0.0),
             Act::Leaky(a) => (1, a),
             Act::Prelu => (2, 0.0),
-            Act::Relu => (3, 0.0),
             Act::Gelu => (4, 0.0),
             Act::Sigmoid => (5, 0.0),
-            Act::Silu => (6, 0.0),
         }
     }
 }
@@ -219,8 +215,6 @@ pub(super) struct Kernels {
     window: wgpu::ComputePipeline,
     cor: wgpu::ComputePipeline,
     attend: wgpu::ComputePipeline,
-    scan: wgpu::ComputePipeline,
-    pool: wgpu::ComputePipeline,
     pub(super) dummy: wgpu::Buffer,
 }
 
@@ -255,10 +249,8 @@ fn act(v: f32, code: u32, a: f32, pa: f32) -> f32 {
     switch code {
         case 1u: { return select(v * a, v, v >= 0.0); }
         case 2u: { return select(v * pa, v, v >= 0.0); }
-        case 3u: { return max(v, 0.0); }
         case 4u: { return 0.5 * v * (1.0 + erf(v * 0.7071067811865476)); }
         case 5u: { return 1.0 / (1.0 + exp(-v)); }
-        case 6u: { return v / (1.0 + exp(-v)); }
         default: { return v; }
     }
 }
@@ -376,9 +368,6 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
                 v += res[rb + ((b * oh + y) * ow + x) * rstr + rat + c];
             }
             v = act(v, code, la, alpha[co]);
-            if (rmode == 2u) {
-                v += res[rb + ((b * oh + y) * ow + x) * rstr + rat + c];
-            }
             dst[ob + ((b * oh + y) * ow + x) * ostr + oat + c] = v;
         }
     }
@@ -554,28 +543,19 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
 const ADD: &str = r#"
 @group(0) @binding(1) var<storage, read> src: array<f32>;
 @group(0) @binding(2) var<storage, read_write> dst: array<f32>;
-@group(0) @binding(3) var<storage, read> scale: array<f32>;
 
 @compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
     let n = u(0u);
     let ib = u(1u); let h = u(2u); let w = u(3u); let istr = u(4u); let iat = u(5u); let c = u(6u);
     let ob = u(7u); let ostr = u(10u); let oat = u(11u);
-    let mode = u(13u);
     let i = gid(wg, nw) * 256u + li;
     if (i >= n * h * w * c) {
         return;
     }
     let ch = i % c;
     let px = i / c;
-    let o = ob + px * ostr + oat + ch;
-    let v = src[ib + px * istr + iat + ch];
-    switch mode {
-        case 1u: { dst[o] = dst[o] * scale[ch] + v; }
-        case 2u: { dst[o] = dst[o] * v; }
-        case 3u: { dst[o] = dst[o] * scale[(px / (h * w)) * c + ch]; }
-        default: { dst[o] = dst[o] + v; }
-    }
+    dst[ob + px * ostr + oat + ch] += src[ib + px * istr + iat + ch];
 }
 "#;
 
@@ -1001,134 +981,6 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
 }
 "#;
 
-const SCAN: &str = r#"
-@group(0) @binding(1) var<storage, read> xu: array<f32>;
-@group(0) @binding(2) var<storage, read> proj: array<f32>;
-@group(0) @binding(3) var<storage, read> dtw: array<f32>;
-@group(0) @binding(4) var<storage, read> dtb: array<f32>;
-@group(0) @binding(5) var<storage, read> amat: array<f32>;
-@group(0) @binding(6) var<storage, read> dvec: array<f32>;
-@group(0) @binding(7) var<storage, read_write> ys: array<f32>;
-
-const N: u32 = 16u;
-
-var<workgroup> sp: array<f32, 64>;
-
-fn pixel(f: u32, h: u32, w: u32, hh: u32, ww: u32) -> u32 {
-    return (f * hh + h) * ww + w;
-}
-
-fn hw(s: u32, hh: u32, ww: u32) -> u32 {
-    let p = s / 2u;
-    return pixel(s % 2u, p / ww, p % ww, hh, ww);
-}
-
-fn wh(s: u32, hh: u32, ww: u32) -> u32 {
-    let p = s / 2u;
-    return pixel(s % 2u, p % hh, p / hh, hh, ww);
-}
-
-fn scrambled(s: u32, hh: u32, ww: u32) -> u32 {
-    let e = s / (ww * hh);
-    let r = s % (ww * hh);
-    return hw(e * hh * ww + (r % hh) * ww + r / hh, hh, ww);
-}
-
-fn softplus(x: f32) -> f32 {
-    if (x > 20.0) {
-        return x;
-    }
-    let e = exp(x);
-    if (e < 1e-4) {
-        return e - 0.5 * e * e;
-    }
-    return log(1.0 + e);
-}
-
-@compute @workgroup_size(64)
-fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
-    let ub = u(0u); let hh = u(1u); let ww = u(2u); let ustr = u(3u); let uat = u(4u); let dd = u(5u);
-    let pb = u(6u); let pstr = u(7u); let pat = u(8u);
-    let rank = u(9u); let yb = u(10u); let ystr = u(11u); let plane = u(12u);
-    let g = gid(wg, nw);
-    let per = dd / 64u;
-    let k = g / per;
-    if (k >= 4u) {
-        return;
-    }
-    let d = (g % per) * 64u + li;
-    let kd = k * dd + d;
-    let width = rank + 2u * N;
-    var wr: array<f32, 32>;
-    for (var r = 0u; r < rank; r++) {
-        wr[r] = dtw[kd * rank + r];
-    }
-    var a: array<f32, 16>;
-    var x: array<f32, 16>;
-    for (var n = 0u; n < N; n++) {
-        a[n] = amat[kd * N + n];
-    }
-    let bias = dtb[kd];
-    let dk = dvec[kd];
-    let total = 2u * hh * ww;
-    for (var l = 0u; l < total; l++) {
-        var s = l;
-        if (k >= 2u) {
-            s = total - 1u - l;
-        }
-        var src = 0u;
-        var dst = 0u;
-        if (k % 2u == 0u) {
-            src = hw(s, hh, ww);
-            dst = src;
-        } else {
-            src = wh(s, hh, ww);
-            dst = scrambled(s, hh, ww);
-        }
-        if (li < width) {
-            sp[li] = proj[pb + src * pstr + pat + k * width + li];
-        }
-        workgroupBarrier();
-        let uv = xu[ub + src * ustr + uat + d];
-        var dt = bias;
-        for (var r = 0u; r < rank; r++) {
-            dt = fma(wr[r], sp[r], dt);
-        }
-        let delta = softplus(dt);
-        var y = 0.0;
-        for (var n = 0u; n < N; n++) {
-            x[n] = exp(delta * a[n]) * x[n] + delta * sp[rank + n] * uv;
-            y = fma(x[n], sp[rank + N + n], y);
-        }
-        ys[yb + k * plane + dst * ystr + d] = y + dk * uv;
-        workgroupBarrier();
-    }
-}
-"#;
-
-const POOL: &str = r#"
-@group(0) @binding(1) var<storage, read> src: array<f32>;
-@group(0) @binding(2) var<storage, read_write> dst: array<f32>;
-
-@compute @workgroup_size(256)
-fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
-    let n = u(0u);
-    let ib = u(1u); let h = u(2u); let w = u(3u); let istr = u(4u); let iat = u(5u); let c = u(6u);
-    let ob = u(7u); let ostr = u(10u); let oat = u(11u);
-    let i = gid(wg, nw) * 256u + li;
-    if (i >= n * c) {
-        return;
-    }
-    let ch = i % c;
-    let b = i / c;
-    var sum = 0.0;
-    for (var p = 0u; p < h * w; p++) {
-        sum += src[ib + (b * h * w + p) * istr + iat + ch];
-    }
-    dst[ob + b * ostr + oat + ch] = sum / f32(h * w);
-}
-"#;
-
 fn groups(items: u64) -> u32 {
     items.div_ceil(256) as u32
 }
@@ -1154,8 +1006,6 @@ impl Kernels {
             window: make("interp-window", WINDOW),
             cor: make("interp-cor", COR),
             attend: make("interp-attend", ATTEND),
-            scan: make("interp-scan", SCAN),
-            pool: make("interp-pool", POOL),
             dummy: gpu.upload(&[0u8; 16]),
         }
     }
@@ -1170,7 +1020,6 @@ pub(super) struct Ops<'a, 'p> {
 pub(super) enum Res<'v> {
     None,
     Before(&'v View),
-    After(&'v View),
 }
 
 fn words(parts: &[&[u32]]) -> Vec<u32> {
@@ -1219,7 +1068,6 @@ impl Ops<'_, '_> {
         let (mode, r) = match res {
             Res::None => (0, self.k.dummy_view()),
             Res::Before(v) => (1, v.clone()),
-            Res::After(v) => (2, v.clone()),
         };
         let m = src.n * qh * qw;
         let mut p = words(&[
@@ -1351,40 +1199,14 @@ impl Ops<'_, '_> {
     }
 
     pub(super) fn add(&mut self, src: &View, dst: &View) {
-        self.add_mode(src, dst, 0, &self.k.dummy.clone());
-    }
-
-    pub(super) fn scale_add(&mut self, src: &View, dst: &View, scale: &wgpu::Buffer) {
-        self.add_mode(src, dst, 1, scale);
-    }
-
-    pub(super) fn mul(&mut self, src: &View, dst: &View) {
-        self.add_mode(src, dst, 2, &self.k.dummy.clone());
-    }
-
-    pub(super) fn mul_channels(&mut self, dst: &View, scale: &wgpu::Buffer) {
-        let k = self.k.dummy_view();
-        let p = words(&[&[dst.n], &dst.words(), &dst.words(), &[3]]);
-        let param = self.gpu.uniform(&p);
-        let items = dst.n as u64 * dst.h as u64 * dst.w as u64 * dst.c as u64;
-        self.gpu.dispatch(
-            self.pass,
-            &self.k.add,
-            param,
-            &[&k.buf, &dst.buf, scale],
-            groups(items),
-        );
-    }
-
-    fn add_mode(&mut self, src: &View, dst: &View, mode: u32, scale: &wgpu::Buffer) {
-        let p = words(&[&[src.n], &src.words(), &dst.words(), &[mode]]);
+        let p = words(&[&[src.n], &src.words(), &dst.words()]);
         let param = self.gpu.uniform(&p);
         let items = src.n as u64 * src.h as u64 * src.w as u64 * src.c as u64;
         self.gpu.dispatch(
             self.pass,
             &self.k.add,
             param,
-            &[&src.buf, &dst.buf, scale],
+            &[&src.buf, &dst.buf],
             groups(items),
         );
     }
@@ -1702,55 +1524,6 @@ impl Ops<'_, '_> {
             param,
             &[&q.buf, &kv.buf, &ce.buf, &g.ids, &xo.buf, &cr.buf],
             2 * nwin * heads,
-        );
-    }
-}
-
-pub(super) struct Scan<'b> {
-    pub(super) dtw: &'b wgpu::Buffer,
-    pub(super) dtb: &'b wgpu::Buffer,
-    pub(super) a: &'b wgpu::Buffer,
-    pub(super) d: &'b wgpu::Buffer,
-    pub(super) rank: u32,
-}
-
-impl Ops<'_, '_> {
-    pub(super) fn scan(&mut self, s: &Scan, u: &View, proj: &View, ys: &View) {
-        let plane = 2 * u.h * u.w * ys.stride;
-        let p = [
-            u.base,
-            u.h,
-            u.w,
-            u.stride,
-            u.at,
-            u.c,
-            proj.base,
-            proj.stride,
-            proj.at,
-            s.rank,
-            ys.base,
-            ys.stride,
-            plane,
-        ];
-        let param = self.gpu.uniform(&p);
-        self.gpu.dispatch(
-            self.pass,
-            &self.k.scan,
-            param,
-            &[&u.buf, &proj.buf, s.dtw, s.dtb, s.a, s.d, &ys.buf],
-            4 * u.c / 64,
-        );
-    }
-
-    pub(super) fn pool(&mut self, src: &View, dst: &View) {
-        let p = words(&[&[src.n], &src.words(), &dst.words()]);
-        let param = self.gpu.uniform(&p);
-        self.gpu.dispatch(
-            self.pass,
-            &self.k.pool,
-            param,
-            &[&src.buf, &dst.buf],
-            groups(u64::from(src.n * src.c)),
         );
     }
 }

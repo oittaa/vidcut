@@ -354,22 +354,19 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - `Ops::warp` is the backward warp of the models, as PyTorch's grid sample with border padding and corner alignment.
   - `Ops::norm` is a layer norm over the channels of each pixel.
   - `Ops::windows`, `Ops::attend` and `Ops::cor` are EMA-VFI's shifted and padded 7×7 windows, its attention between the frames, and its coordinate embedding.
-  - `Ops::scan` is VFIMamba's selective scan. One thread runs one channel of one scan direction over the whole sequence.
   - A tensor is a `View`: channels last, with a channel offset and a stride. Thus a layer writes into its part of a concatenation, and no copy joins the parts.
 - The weights come from the authors' PyTorch files (`weights::Torch`).
 - **RIFE 4.25** (`rife`):
   - The frames pad with zeros at the right and the bottom to a multiple of 128, as in the official code.
   - The encoder runs once for a pair. The five flow blocks run for each frame.
   - It finds the motion at half size for UHD, as its README says.
-- **EMA-VFI** (`ema`) and **VFIMamba** (`mamba`):
+- **EMA-VFI** (`ema`):
   - The frames pad with their edges, centered, as in the official padder. The multiple is 32 divided by the scale of the motion.
   - The motion is found at half size for frames of 1080 lines and at a quarter for UHD (`motion_scale`). The refinement runs at full size. These are the scales of the authors' tests.
   - The pair also runs turned by 180 degrees, and the two results are averaged, as in the authors' tests.
-  - The backbone runs once for a pair, at each size and each turn. The flow, the refinement and VFIMamba's local blocks run for each frame.
+  - The backbone runs once for a pair, at each size and each turn. The flow and the refinement run for each frame.
   - Both turns use the same scratch buffers for the backbone.
-  - VFIMamba follows the forward path of the official code. Its two local blocks run at full size, after the motion is enlarged.
-  - VFIMamba's scans keep the order of the official code. The column scans put their results back in that code's order, which is not the order of the pixels.
-- PyTorch versions of the three networks, written from the official code, give the same frames within 1 of 255 levels, on 1080p frames.
+- PyTorch versions of the two networks, written from the official code, give the same frames within 1 of 255 levels, on 1080p frames.
 - **The work report** (`interpolate::report`):
   - The device reports its GPU when it starts.
   - `interpolate::between` reports each made frame (`interpolate::Made`): the process, the size, the weight and the time.
