@@ -23,6 +23,8 @@ pub mod hdr;
 pub mod hw;
 pub mod interpolate;
 pub mod isolate;
+#[cfg(target_os = "macos")]
+pub(crate) mod lanczos;
 pub mod light;
 pub mod models;
 pub(crate) mod npy;

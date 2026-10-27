@@ -324,6 +324,18 @@ impl Frames {
         transfer: &Transfer,
         picture: &CVPixelBuffer,
         like: &Video,
+        shape: ((u32, u32), ffi::AVPixelFormat),
+        what: &str,
+    ) -> Result<Video> {
+        let out = self.fresh(like, shape, what)?;
+        let matrix = crate::color::colors_of(like).matrix;
+        transfer.run(picture, pixels(&out, what)?, matrix, what)?;
+        Ok(out)
+    }
+
+    pub(crate) fn fresh(
+        &mut self,
+        like: &Video,
         (size, format): ((u32, u32), ffi::AVPixelFormat),
         what: &str,
     ) -> Result<Video> {
@@ -339,8 +351,6 @@ impl Frames {
             self.0 = Some(Pool::new(like, key, what)?);
         }
         let mut out = self.0.as_ref().expect("a pool").frame(what)?;
-        let matrix = crate::color::colors_of(like).matrix;
-        transfer.run(picture, pixels(&out, what)?, matrix, what)?;
         out.set_pts(like.pts());
         // SAFETY: both frames are valid; plain fields.
         unsafe {

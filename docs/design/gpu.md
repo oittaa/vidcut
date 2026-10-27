@@ -117,11 +117,13 @@ In exports:
 | Vulkan | NVENC, copied into CUDA on the GPU; Vulkan's ProRes | libplacebo (`CudaPictures`) | `cuda::mix` | other encoders; alpha |
 | VA-API | VAAPI on its device | `transpose_vaapi`, `scale_vaapi`, `pad_vaapi`; colors unchanged | in memory | other encoders, QSV too; color changes; dissolves |
 | Direct3D 11 | AMF on its adapter | the video processor; colors unchanged, not 8-bit into 10-bit | in memory | other encoders, QSV too; color changes; dissolves |
-| VideoToolbox | its own encoders | `transpose_vt`, `scale_vt`, where colors and layout stay; a pixel transfer for another layout at the same size, without a turn | in memory | padding or color changes; another layout with a turn or another size; dissolves |
+| VideoToolbox | its own encoders | `transpose_vt`, lanczos on Metal, a pixel transfer for another layout (`vt::Fit`); colors unchanged | in memory | padding or color changes; dissolves |
 
-- A VideoToolbox frame in another layout than the encoder's goes through a pixel transfer of VideoToolbox (`vt::transfer`). It changes the layout, such as 4:2:0 into the 10-bit 4:2:2 of ProRes.
-  - The transfer does not turn a frame. A turned frame in another layout comes down.
-  - A frame in another layout that also changes size comes down. The scaling of VideoToolbox keeps less detail than lanczos on the CPU ([todo](../todo/macos.md#pictures-on-the-gpu)).
+- A VideoToolbox frame fits in up to three steps on the GPU (`vt::Fit`). A step that the frame does not need is left out.
+  1. `transpose_vt` turns it.
+  2. Lanczos on Metal scales it (`lanczos::Lanczos`). `MPSImageLanczosScale` scales each plane of its IOSurface as a texture, as the CPU's lanczos scales each plane.
+  3. A pixel transfer of VideoToolbox changes its layout, such as 4:2:0 into the 10-bit 4:2:2 of ProRes (`Transfer`).
+  - The scaling of VideoToolbox itself, which the pixel transfer and FFmpeg's scale_vt use, keeps less detail than lanczos. Thus no step scales with it.
 - A VideoToolbox frame that comes down is not copied. `hw::to_read` maps its pixel buffer (`av_hwframe_map`), and the CPU reads it in place.
   - The map is read-only. A step that writes into the picture copies it first (`av_frame_make_writable`).
   - The player still copies pictures down where it moves them out of video memory (`Picture::copied_down`).
@@ -138,7 +140,7 @@ Dissolves and overlays:
 Frames that come down:
 
 - Where a frame comes down and the output shows it smaller, the decoder's GPU shrinks it first.
-  - It uses `scale_cuda`, `scale_vulkan`, `scale_vaapi`, the video processor or `scale_vt`.
+  - It uses `scale_cuda`, `scale_vulkan`, `scale_vaapi`, the video processor or lanczos on Metal (`lanczos::Lanczos`).
 - The frames of any decoder come down for CPU encoders, renders and tiles.
 - In the player, frames come down in these cases:
   - The viewer cannot show that kind (`Gpu::gpu_pictures`).
@@ -337,7 +339,7 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
     - The scaler gets the frame before and its output too. The frames go in order (`Sequential`).
   - The output comes back to RGB in the same way. For 16-bit float, a table of all 65,536 values gives the 8-bit codes.
   - A VideoToolbox frame that needs no turn goes to the scaler without the CPU (`Run::takes`, `Run::push_frame`).
-    - A pixel transfer of VideoToolbox (`Transfer`) puts it into the source buffer, as for AI of Retime Process.
+    - Lanczos on Metal scales it where the run's size is another (`lanczos::sized`). A pixel transfer of VideoToolbox (`Transfer`) puts it into the source buffer, as for AI of Retime Process.
     - The output goes back into a VideoToolbox frame with the layout and the range of the source (`Frames`). It then goes on as a decoded frame does.
     - The frames that a run reads, or keeps until it takes them (`Source::miss`), stay on the GPU. For the other upscalers, they are read in memory.
   - `macos::check` refuses HDR media and pictures over 1920×1080 (`macos::MOST`), the limit of macOS for video.
@@ -389,7 +391,7 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - It keeps one session of `VTFrameProcessor` for each frame size. The session goes when the last `interpolate::User` goes.
   - The pair stays in the session. The frames between one pair tell macOS that the pair is the same, and the next pair tells it that the frames follow.
   - It shares the picture buffers, the pixel formats, the pixel transfer and the pool of made frames with the scaler of macOS (`frame_processor`).
-  - Two VideoToolbox frames that need no turn go to macOS without the CPU (`interpolate::takes_frames`). A pixel transfer of VideoToolbox scales and converts them on the GPU (`Transfer`).
+  - Two VideoToolbox frames that need no turn go to macOS without the CPU (`interpolate::takes_frames`). Lanczos on Metal scales them to the size of the session (`lanczos::sized`), and a pixel transfer of VideoToolbox converts them (`Transfer`).
     - The transfer takes the matrix that vidcut finds for the frame, and keeps the primaries and the transfer function of BT.709.
     - The made frame goes back into a VideoToolbox frame on the GPU, with the layout and the range of the source (`interpolate::between_frames`). It then goes on as a decoded frame does.
     - `hw::Fitter` keeps a filter graph for the frames of the decoder and one for the made frames. Thus it does not make a graph again for each frame.

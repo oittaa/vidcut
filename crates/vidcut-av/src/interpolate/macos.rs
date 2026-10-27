@@ -118,6 +118,7 @@ mod imp {
         sources: CFRetained<CVPixelBufferPool>,
         outputs: CFRetained<CVPixelBufferPool>,
         transfer: Transfer,
+        lanczos: Option<crate::lanczos::Lanczos>,
         format: u32,
         size: (u32, u32),
         pair: Option<Pair>,
@@ -184,6 +185,7 @@ mod imp {
                 sources,
                 outputs,
                 transfer: Transfer::new(WHAT)?,
+                lanczos: None,
                 format,
                 size,
                 pair: None,
@@ -191,11 +193,13 @@ mod imp {
             })
         }
 
-        fn frame(&self, input: &Input, at: CMTime) -> Result<Retained<VTFrameProcessorFrame>> {
+        fn frame(&mut self, input: &Input, at: CMTime) -> Result<Retained<VTFrameProcessorFrame>> {
             let picture = buffer(&self.sources, WHAT)?;
             match input {
                 Input::Rgb(rgb) => write(&picture, self.format, self.size, rgb)?,
                 Input::Frame(f) => {
+                    let scaled = crate::lanczos::sized(&mut self.lanczos, f, self.size)?;
+                    let f = scaled.as_ref().unwrap_or(*f);
                     let matrix = crate::color::colors_of(f).matrix;
                     self.transfer
                         .run(pixels(f, WHAT)?, &picture, matrix, WHAT)?;
