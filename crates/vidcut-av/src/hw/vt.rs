@@ -123,7 +123,8 @@ impl Fit {
             .transpose()?;
         let target = colors.flatten();
         let changed = colors.is_some() && !crate::color::kept(crate::color::Source::of(f), target);
-        let recolor = match crate::color::recoloring(f, target).filter(|_| changed) {
+        let deep = layout == ffmpeg::format::Pixel::P416LE && super::sw_format(f) != layout;
+        let recolor = match crate::color::recoloring(f, target).filter(|_| changed || deep) {
             Some(r) => Some(Box::new((crate::recolor::Recolor::new()?, r))),
             None => None,
         };
