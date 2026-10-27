@@ -127,6 +127,7 @@ impl Layout {
         let shift = match p {
             format::Pixel::NV12 | format::Pixel::P010LE => (1, 1),
             format::Pixel::NV16 | format::Pixel::P210LE => (1, 0),
+            format::Pixel::NV24 | format::Pixel::P416LE => (0, 0),
             other => return Err(refused(&format!("no planes for {other:?}"))),
         };
         let samples = Samples::of(p)?;
