@@ -1,6 +1,5 @@
 pub use ffmpeg_next as ffmpeg;
 
-pub mod ai;
 pub mod analysis;
 pub mod barcode;
 pub mod beep;
@@ -17,14 +16,12 @@ pub mod error;
 pub mod export;
 pub mod first;
 pub mod fixture;
-pub mod flashvsr;
 pub mod gpus;
 pub mod hdr;
 pub mod hw;
 pub mod interpolate;
 pub mod isolate;
 pub mod light;
-pub mod macos;
 pub mod models;
 pub(crate) mod npy;
 pub mod parts;
@@ -36,11 +33,11 @@ pub mod proxy;
 pub mod route;
 pub mod speech_api;
 pub(crate) mod stretch;
+pub mod super_scale;
 pub mod testdata;
 pub mod thumbs;
 pub mod transcribe;
 pub(crate) mod turns;
-pub mod upscale;
 pub mod waveform;
 pub(crate) mod weights;
 

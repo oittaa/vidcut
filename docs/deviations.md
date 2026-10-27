@@ -1885,10 +1885,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - Retime Process is a setting of a clip. The Speed section of the Inspector tab sets it, and `clip.set` sets it as `retime`.
   - The Change Clip Speed window (R) also sets it, for the selected clips with a picture.
-  - Its values are Nearest, Frame Blend, RIFE 4.25 and EMA-VFI. The default is Nearest. There is no project setting.
+  - Its values are Nearest, Frame Blend, AI Fast and AI Best. The default is Nearest. There is no project setting.
   - Nearest shows the source frame that the frame falls in (D48).
   - Frame Blend mixes the two source frames around the frame. Each frame has the weight of how near it is.
-  - RIFE 4.25 and EMA-VFI are AI models. Each makes the frame from the motion between the two source frames.
+  - AI Fast (RIFE 4.25) and AI Best (EMA-VFI) are AI models. Each makes the frame from the motion between the two source frames.
     - vidcut runs them with compute shaders of its own on the GPU, through wgpu.
     - Their weights download at their first use: 25 MB and 264 MB. vidcut does not ship them.
     - The models make a frame at any point between the two source frames.
@@ -1902,7 +1902,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The models run on this computer and need no account. Their code and weights are under MIT (RIFE) and Apache 2.0 (EMA-VFI).
   - The models make any point between two frames, not only the middle. A speed of 40% needs points such as 0.4 and 0.8.
-  - RIFE is fast and fits UHD frames. EMA-VFI makes frames nearer to the real ones, in more time.
+  - AI Fast is fast and fits UHD frames. AI Best makes frames nearer to the real ones, in more time.
   - A morph from one shot into the next looks wrong. Thus a shot change keeps the nearer source frame, as Nearest does.
   - A slow clip needs a process. Thus the window that sets the speed also sets the process.
   - Nearest is the behavior that vidcut had. Thus a clip keeps it until the user selects another process.

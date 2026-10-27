@@ -326,7 +326,8 @@ impl Env for AvEnv {
     }
 
     fn ai_upscaler(&self, upscaler: vidcut_core::model::Upscaler, download: bool) -> Result<()> {
-        vidcut_av::ai::get_ready(&paths::models_dir(), upscaler, download).map_err(av_error)
+        vidcut_av::super_scale::get_ready(&paths::models_dir(), upscaler, download)
+            .map_err(av_error)
     }
 
     fn interpolator(&self, retime: vidcut_core::model::Retime, download: bool) -> Result<()> {

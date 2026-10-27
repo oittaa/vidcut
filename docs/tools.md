@@ -131,7 +131,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `frameNNN.npy`: each output frame, 8-bit RGB.
 - `VIDCUT_INTERPOLATE_DUMP=DIR` makes Retime Process write each frame that it makes as `.npy` files into `DIR`, all 8-bit RGB `[H, W, 3]`.
   - `NNNN-a.npy` and `NNNN-b.npy`: the two source frames, at the size of the made frame.
-  - `NNNN-out-T-PROCESS.npy`: the made frame, with the weight `T` of the later frame and the process, such as `RIFE4.25`.
+  - `NNNN-out-T-PROCESS.npy`: the made frame, with the weight `T` of the later frame and the process, such as `AIFast`.
   - A check against a PyTorch version of a model reads them.
 - `vidcut models list` prints the catalog of models and speech services. `--json` gives all of it.
 - `vidcut models check MODEL` checks the SHA-256 of each file of a model, then loads it.

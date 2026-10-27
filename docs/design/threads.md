@@ -58,7 +58,7 @@ The values in the Priority column:
 | `vidcut-light-N`, `vidcut-scenes` | `light::analysis`, `analysis::picture_stats` | HDR light; frame scores | starter's |
 | `vidcut-cpu-N`, `vidcut-cpu-job-N` | the first `pool::run` or `pool::give` | the two CPU pools | inherited; lowest class |
 | `vidcut-give-back` | `buffers::give_back` | `malloc_trim` (Linux, glibc) | inherited |
-| `vidcut-upscale-rest` | `upscale::upscale` | the other frames of an AI chunk, after the asked frame | inherited |
+| `vidcut-upscale-rest` | `nanovsr::upscale` | the other frames of an AI chunk, after the asked frame | inherited |
 
 - On Windows, `look::watch` starts two `vidcut-look` threads. Linux and macOS start one.
 - A `notify` watcher that `Live` holds watches Omarchy's palette. This watcher has no thread of its own.

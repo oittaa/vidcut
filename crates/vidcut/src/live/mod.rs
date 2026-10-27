@@ -1619,7 +1619,7 @@ impl Live {
         };
         vidcut_core::ops::ai_upscalers(open.project(), media, &set)
             .into_iter()
-            .filter(|u| !vidcut_av::ai::needed(&paths::models_dir(), *u).is_empty())
+            .filter(|u| !vidcut_av::super_scale::needed(&paths::models_dir(), *u).is_empty())
             .collect()
     }
 
@@ -2960,13 +2960,15 @@ impl Live {
                 let wanted = self.ai_missing(&media.to_vec(), super_scale, upscaler);
                 let fetch = move || {
                     for u in wanted {
-                        vidcut_av::ai::get_ready(&paths::models_dir(), u, true).map_err(|e| {
-                            crate::export::av_error(
-                                &e,
-                                vidcut_core::ErrorCode::Media,
-                                String::new(),
-                            )
-                        })?;
+                        vidcut_av::super_scale::get_ready(&paths::models_dir(), u, true).map_err(
+                            |e| {
+                                crate::export::av_error(
+                                    &e,
+                                    vidcut_core::ErrorCode::Media,
+                                    String::new(),
+                                )
+                            },
+                        )?;
                     }
                     Ok(())
                 };

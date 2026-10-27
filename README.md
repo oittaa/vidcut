@@ -77,7 +77,7 @@ On a Mac, the full test gate and an app bundle are still open ([todo](docs/todo/
   - The library is 18 MB on Windows, 23 MB on Linux and 2.5 MB on a Mac with Apple silicon. Silero VAD is 1.2 MB.
   - vidcut checks each download against its SHA-256.
 - Voice Isolation runs DPDFNet on the CPU. vidcut downloads DPDFNet (10 MB) in the same way, the first time that you turn Voice Isolation on.
-- The AI models of Retime Process run on the GPU, with vidcut's own shaders. They are RIFE 4.25 (25 MB) and EMA-VFI (264 MB).
+- The AI models of Retime Process run on the GPU, with vidcut's own shaders. AI Fast is RIFE 4.25 (25 MB), and AI Best is EMA-VFI (264 MB).
   - vidcut downloads the weights of a model in the same way, the first time that you select it.
 - `rust-toolchain.toml` pins the Rust version. rustup gets it on the first build.
 

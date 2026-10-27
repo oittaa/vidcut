@@ -271,7 +271,7 @@ flowchart TD
   - These call it:
     - `speech_api::transcribe`: the length of a Gemini request, the size of an xAI request and xAI's words to listen for.
     - `speech_api::transcribe` also tests the speakers that a service tells apart.
-    - `ai::unfit`: the HDR pictures of the AI upscalers.
+    - `super_scale::unfit`: the HDR pictures of the AI upscalers.
     - `transcribe::short_of_memory`: the GPU memory of a speech model.
     - `transcript::channels_of`: the channels of a multichannel xAI file. The editor and the GUI refuse a file with more channels than `catalog::XAI` allows. They refuse it before they ask for `send`.
   - Sortformer's warning uses the most speakers in the catalog (`full`). `models.check` compares it with what transcribe.cpp reports.

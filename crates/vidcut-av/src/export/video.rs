@@ -99,7 +99,7 @@ struct Source {
     reversed: Vec<Reversed>,
     left: Option<Instant>,
     scale: SuperScale,
-    ai: Option<crate::ai::User>,
+    ai: Option<crate::super_scale::User>,
     told: bool,
     upright: bool,
     gpu: Option<crate::hw::GpuDecoder>,
@@ -208,7 +208,7 @@ impl Source {
             reversed: Vec::new(),
             left: None,
             scale: super_scale,
-            ai: crate::ai::User::of(super_scale),
+            ai: crate::super_scale::User::of(super_scale),
             told: false,
             upright: false,
             gpu: ahead_gpu,
@@ -406,7 +406,7 @@ impl Source {
     fn back(&mut self) {
         self.left = None;
         if self.ai.is_none() {
-            self.ai = crate::ai::User::of(self.scale);
+            self.ai = crate::super_scale::User::of(self.scale);
         }
         if self.retimer.is_none() {
             self.retimer = crate::interpolate::User::of(self.retime);
@@ -568,7 +568,7 @@ type Waiting = std::sync::Arc<std::sync::Mutex<Vec<(Key, frame::Video)>>>;
 const RUN_JUMP: i64 = 48;
 
 struct Session {
-    run: Box<dyn crate::ai::Run>,
+    run: Box<dyn crate::super_scale::Run>,
     id: PictureId,
     size: (u32, u32),
     first: i64,
@@ -613,7 +613,7 @@ impl Session {
         ahead && !self.ended && self.covers(id, size)
     }
 
-    fn keep(&mut self, outs: Vec<crate::ai::Out>) {
+    fn keep(&mut self, outs: Vec<crate::super_scale::Out>) {
         if let Some(o) = outs.iter().map(|o| o.index).max() {
             self.out_next = self.out_next.max(o + 1);
         }
@@ -652,7 +652,7 @@ impl Session {
 fn hold(
     waiting: &std::sync::Mutex<Vec<(Key, frame::Video)>>,
     base: &PictureId,
-    outs: Vec<crate::ai::Out>,
+    outs: Vec<crate::super_scale::Out>,
 ) {
     let mut waiting = waiting
         .lock()
@@ -765,7 +765,7 @@ impl Source {
             return Err(Error::Invalid(format!(
                 "{}: {} takes SDR pictures, and this one is HDR",
                 self.reader.path().display(),
-                crate::ai::name(upscaler)
+                crate::super_scale::name(upscaler)
             )));
         }
         let across = if sar.0 > 0 && sar.1 > 0 {
@@ -793,7 +793,7 @@ impl Source {
             reading,
             rotation,
             upscaler,
-            made: crate::ai::made_size(upscaler, size, up),
+            made: crate::super_scale::made_size(upscaler, size, up),
             key: match self.frame_index(pts) {
                 Some(i) => Key::Frame(i),
                 None => Key::Still(pts),
@@ -806,7 +806,7 @@ impl Source {
             self.run = None;
         }
         if self.run.is_some() {
-            crate::ai::settle(upscaler);
+            crate::super_scale::settle(upscaler);
             if let Some(p) = self.taken(&id)? {
                 return Ok(Some(p));
             }
@@ -840,7 +840,7 @@ impl Source {
             self.open_run(id, size, want, reading)?;
         }
         let clock = Instant::now();
-        let work = crate::ai::making(id.upscaler, size, id.made, (want, want));
+        let work = crate::super_scale::making(id.upscaler, size, id.made, (want, want));
         loop {
             crate::cancel::stop()?;
             if let Some(p) = self.taken(id)? {
@@ -852,7 +852,7 @@ impl Source {
                 crate::debug!(
                     "ai",
                     "{}: source frame {want} in {:.0} ms",
-                    crate::ai::name(id.upscaler),
+                    crate::super_scale::name(id.upscaler),
                     clock.elapsed().as_secs_f64() * 1e3
                 );
                 return Ok(p);
@@ -862,7 +862,7 @@ impl Source {
                 return Err(Error::Invalid(format!(
                     "{}: {} has no source frame {want}",
                     self.reader.path().display(),
-                    crate::ai::name(id.upscaler)
+                    crate::super_scale::name(id.upscaler)
                 )));
             }
             if !run.missed.is_empty() {
@@ -898,19 +898,19 @@ impl Source {
         want: i64,
         reading: Reading,
     ) -> Result<()> {
-        let first = crate::ai::first_frame(id.upscaler, want);
+        let first = crate::super_scale::first_frame(id.upscaler, want);
         let base = id.clone();
         let waiting = Waiting::default();
         let later = std::sync::Arc::downgrade(&waiting);
-        let sink: crate::ai::Sink = Box::new(move |outs| match outs {
+        let sink: crate::super_scale::Sink = Box::new(move |outs| match outs {
             Ok(outs) => {
                 if let Some(waiting) = later.upgrade() {
                     hold(&waiting, &base, outs);
                 }
             }
-            Err(e) => crate::debug!("ai", "{}: {e}", crate::ai::name(base.upscaler)),
+            Err(e) => crate::debug!("ai", "{}: {e}", crate::super_scale::name(base.upscaler)),
         });
-        let run = crate::ai::open(id.upscaler, size, id.made, want, sink)?;
+        let run = crate::super_scale::open(id.upscaler, size, id.made, want, sink)?;
         let current = self.current.as_ref().map(|(f, _)| f.pts());
         let at = current.and_then(|pts| self.frame_index(pts));
         let still = matches!(id.key, Key::Still(_));
@@ -920,7 +920,7 @@ impl Source {
             id: id.clone(),
             size,
             first,
-            last: crate::ai::last_frame(id.upscaler, first),
+            last: crate::super_scale::last_frame(id.upscaler, first),
             next: first,
             out_next: first,
             own,
@@ -981,7 +981,7 @@ impl Source {
         crate::debug!(
             "ai",
             "{}: frame {i}: to RGB in {:.1} ms, upscaler in {:.1} ms, kept in {:.1} ms",
-            crate::ai::name(run.id.upscaler),
+            crate::super_scale::name(run.id.upscaler),
             converted.as_secs_f64() * 1e3,
             (pushed - converted).as_secs_f64() * 1e3,
             (clock.elapsed() - pushed).as_secs_f64() * 1e3
@@ -2577,7 +2577,7 @@ impl VideoFrames {
             crate::debug!(
                 "interpolate",
                 "{}: a cut between the frames at {weight:.3}",
-                retime.title()
+                crate::interpolate::name(*retime)
             );
             crate::interpolate::kept_at_cut(*retime, size, weight);
             if weight < 0.5 { a } else { b }
@@ -2586,7 +2586,7 @@ impl VideoFrames {
             crate::debug!(
                 "interpolate",
                 "{}: {}x{} at {weight:.3} in {:.1} ms",
-                retime.title(),
+                crate::interpolate::name(*retime),
                 size.0,
                 size.1,
                 clock.elapsed().as_secs_f64() * 1e3
@@ -2680,7 +2680,7 @@ impl VideoFrames {
                 crate::debug!(
                     "ai",
                     "{}: fitted in {:.1} ms",
-                    crate::ai::name(super_scale.upscaler),
+                    crate::super_scale::name(super_scale.upscaler),
                     clock.elapsed().as_secs_f64() * 1e3
                 );
             }
@@ -2689,7 +2689,7 @@ impl VideoFrames {
             if big.is_some() && !src.told {
                 crate::progress::note(super::Note::Upscaled(super::UpscaleNote {
                     path: src.reader.path().to_path_buf(),
-                    how: crate::ai::name(super_scale.upscaler).into(),
+                    how: crate::super_scale::name(super_scale.upscaler).into(),
                 }));
                 src.told = true;
             }

@@ -61,7 +61,7 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
 }
 
 pub fn unfit(m: &Media) -> Option<&'static str> {
-    crate::ai::unfit(m, Upscaler::AiBest)
+    super::unfit(m, Upscaler::AiBest)
 }
 
 pub fn enlarged(m: &Media, (ow, oh): (u32, u32)) -> Option<((u32, u32), (u32, u32))> {
@@ -164,14 +164,14 @@ struct Engine {
     lent: Option<crate::player::Lent>,
 }
 
-static ENGINE: crate::ai::Slot<Engine> = crate::ai::Slot::new();
+static ENGINE: super::Slot<Engine> = super::Slot::new();
 
-impl crate::ai::Network for Engine {
+impl super::Network for Engine {
     const UPSCALER: Upscaler = Upscaler::AiBest;
 
     fn start() -> std::result::Result<Self, String> {
         let gpu = Gpu::start(WHAT, SHARED)?;
-        crate::ai::runs_on(Upscaler::AiBest, gpu.name.clone());
+        super::runs_on(Upscaler::AiBest, gpu.name.clone());
         Ok(Engine {
             gpu,
             model: None,
@@ -238,24 +238,24 @@ impl Run {
         })
     }
 
-    fn outs(&mut self, rgbs: Vec<Vec<u8>>) -> Vec<crate::ai::Out> {
+    fn outs(&mut self, rgbs: Vec<Vec<u8>>) -> Vec<super::Out> {
         rgbs.into_iter()
             .filter_map(|rgb| {
                 let (index, pts) = self.fed.pop_front()?;
-                Some(crate::ai::Out { index, pts, rgb })
+                Some(super::Out { index, pts, rgb })
             })
             .collect()
     }
 }
 
-impl crate::ai::Run for Run {
-    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<crate::ai::Out>> {
+impl super::Run for Run {
+    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<super::Out>> {
         let outs = self.stream.push(&rgb)?;
         self.fed.push_back((index, pts));
         Ok(self.outs(outs))
     }
 
-    fn finish(&mut self) -> Result<Vec<crate::ai::Out>> {
+    fn finish(&mut self) -> Result<Vec<super::Out>> {
         let outs = self.stream.finish()?;
         Ok(self.outs(outs))
     }
