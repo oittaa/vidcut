@@ -116,6 +116,10 @@ pub fn render(
         .map_err(|e| failed(&e.to_string()))?;
     vidcut_core::temp::write(out, &png).map_err(|e| failed(&e.to_string()))?;
     let picture = &shown.picture;
+    let layers: Vec<Value> = std::iter::once(&**picture)
+        .chain(picture.over().iter().map(|o| &*o.picture))
+        .map(layer)
+        .collect();
     Ok(json!({
         "path": out,
         "frame": t,
@@ -123,10 +127,13 @@ pub fn render(
         "height": image.height,
         "viewer": true,
         "renderer": format!("{:?} on {}", info.backend, info.name),
-        "picture": {
-            "layout": format!("{:?}", picture.layout()),
-            "held_in": picture.gpu().map_or("memory".into(), |k| format!("{k:?}")),
-            "layers": 1 + picture.over().len(),
-        },
+        "layers": layers,
     }))
+}
+
+fn layer(picture: &vidcut_av::player::Picture) -> Value {
+    json!({
+        "layout": format!("{:?}", picture.layout()),
+        "held_in": picture.gpu().map_or("memory".into(), |k| format!("{k:?}")),
+    })
 }

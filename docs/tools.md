@@ -126,7 +126,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - It uses the player, its GPU decoding, and the viewer's shader on a GPU device of its own (`gui::frame::render`).
 - It shows the cues of the shown subtitle track, as the viewer does.
 - Without `--viewer`, `frame render` draws the frame with the export's pipeline.
-- The answer names the renderer, and the layout, the place and the layers of the picture.
+- The answer names the renderer. It gives the layout and the place of each layer of the picture, from the bottom up.
 
 **Debugging:**
 

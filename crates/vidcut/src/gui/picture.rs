@@ -892,6 +892,7 @@ struct Slot {
     d3d11_used: Option<Arc<AtomicBool>>,
     imports: u64,
     last_shared: bool,
+    written: Option<Arc<Picture>>,
 }
 
 #[cfg(windows)]
@@ -1345,8 +1346,15 @@ impl Slot {
     fn upload(&mut self, gpu: &Gpu, picture: &Arc<Picture>, encoder: &mut wgpu::CommandEncoder) {
         self.make_planes(gpu, picture);
         self.last_shared = false;
+        let written = self.written.take();
         match picture.gpu() {
-            None => return self.write_planes(gpu, picture),
+            None => {
+                if !written.is_some_and(|w| same_data(&w, picture)) {
+                    self.write_planes(gpu, picture);
+                }
+                self.written = Some(Arc::clone(picture));
+                return;
+            }
             Some(Kind::Nvdec) => {}
             Some(kind) => {
                 let layout = picture.layout();
@@ -1867,6 +1875,7 @@ impl Slot {
         let alpha = picture.alpha_plane();
         let key = (layout, w, h, wide, alpha);
         if self.planes.as_ref().is_none_or(|p| p.key != key) {
+            self.written = None;
             let (one, two, four) = if wide {
                 (
                     wgpu::TextureFormat::R16Unorm,
@@ -2465,6 +2474,13 @@ fn sixteen(layout: Layout) -> bool {
         | Layout::P416
         | Layout::Ayuv64 => true,
     }
+}
+
+fn same_data(a: &Picture, b: &Picture) -> bool {
+    let (a, b) = (a.frame(), b.frame());
+    a.format() == b.format()
+        && (a.width(), a.height()) == (b.width(), b.height())
+        && (0..a.planes()).all(|i| a.data(i).as_ptr() == b.data(i).as_ptr())
 }
 
 fn packing(layout: Layout) -> u32 {

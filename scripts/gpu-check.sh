@@ -58,7 +58,7 @@ for name in plain zoom; do
   echo "  $encoder against the CPU encoder, 12 frames: $(apart "$work/$name.mov" "$work/$name-cpu.mov")"
   echo "== $name: the viewer's picture at 1 s"
   v -p "$p" --json frame render --at 1s --out "$work/$name-viewer.png" --viewer |
-    grep -E '"(renderer|held_in|layout|layers)"' | tr -d '",' | sed 's/^ */  /'
+    grep -E '"(renderer|held_in|layout)"' | tr -d '",' | sed 's/^ */  /'
   v -p "$p" frame render --at 1s --out "$work/$name-export.png" >/dev/null
   echo "  the viewer against the export pipeline: $(apart "$work/$name-viewer.png" "$work/$name-export.png")"
 done
