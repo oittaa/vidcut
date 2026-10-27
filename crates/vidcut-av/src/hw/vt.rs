@@ -3,6 +3,7 @@ use std::ffi::{c_int, c_void};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, frame};
 use crate::route::Ops;
+use vidcut_core::model::Hdr;
 
 pub(super) fn mapped(src: &frame::Video) -> Result<frame::Video> {
     let mut map = frame::Video::empty();
@@ -46,7 +47,7 @@ unsafe extern "C" fn unmap(held: *mut c_void, _data: *mut u8) {
 }
 
 pub(crate) fn can_fit(ops: &Ops) -> bool {
-    ops.colors_kept
+    !ops.rgb
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -70,6 +71,8 @@ pub(super) struct Fit {
         crate::frame_processor::Transfer,
         crate::frame_processor::Frames,
     )>,
+    recolor: Option<Box<(crate::recolor::Recolor, crate::color::Recoloring)>>,
+    target: Option<Hdr>,
     fitted: (u32, u32),
     out: (u32, u32),
     layout: ffmpeg::format::Pixel,
@@ -81,8 +84,30 @@ impl Fit {
         f: &frame::Video,
         frames: *mut ffi::AVBufferRef,
         rotation: u16,
+        sizes: ((u32, u32), (u32, u32)),
+        layout: ffmpeg::format::Pixel,
+    ) -> Result<Self> {
+        Self::made(f, frames, rotation, sizes, layout, None)
+    }
+
+    pub(super) fn with_colors(
+        f: &frame::Video,
+        frames: *mut ffi::AVBufferRef,
+        rotation: u16,
+        sizes: ((u32, u32), (u32, u32)),
+        layout: ffmpeg::format::Pixel,
+        target: Option<Hdr>,
+    ) -> Result<Self> {
+        Self::made(f, frames, rotation, sizes, layout, Some(target))
+    }
+
+    fn made(
+        f: &frame::Video,
+        frames: *mut ffi::AVBufferRef,
+        rotation: u16,
         (fitted, out): ((u32, u32), (u32, u32)),
         layout: ffmpeg::format::Pixel,
+        colors: Option<Option<Hdr>>,
     ) -> Result<Self> {
         let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
         let turn = turn_spec(rotation)
@@ -96,7 +121,13 @@ impl Fit {
         let lanczos = (upright != fitted || fitted != out)
             .then(crate::lanczos::Lanczos::new)
             .transpose()?;
-        let transfer = match super::sw_format(f) == layout {
+        let target = colors.flatten();
+        let changed = colors.is_some() && !crate::color::kept(crate::color::Source::of(f), target);
+        let recolor = match crate::color::recoloring(f, target).filter(|_| changed) {
+            Some(r) => Some(Box::new((crate::recolor::Recolor::new()?, r))),
+            None => None,
+        };
+        let transfer = match recolor.is_some() || super::sw_format(f) == layout {
             true => None,
             false => Some((
                 crate::frame_processor::Transfer::new(FITTING)?,
@@ -107,6 +138,8 @@ impl Fit {
             turn,
             lanczos,
             transfer,
+            recolor,
+            target,
             fitted,
             out,
             layout,
@@ -125,6 +158,9 @@ impl Fit {
             }
             None => turned,
         };
+        if let Some((recolor, colors)) = self.recolor.as_deref_mut() {
+            return recolor.run(&sized, colors, self.layout, self.target);
+        }
         match &mut self.transfer {
             Some((transfer, made)) => {
                 let from = crate::frame_processor::pixels(&sized, FITTING)?;
@@ -151,6 +187,17 @@ impl Fit {
         Err(Error::Invalid(
             "VideoToolbox frames fit on macOS only".into(),
         ))
+    }
+
+    pub(super) fn with_colors(
+        f: &frame::Video,
+        frames: *mut ffi::AVBufferRef,
+        rotation: u16,
+        sizes: ((u32, u32), (u32, u32)),
+        layout: ffmpeg::format::Pixel,
+        _target: Option<Hdr>,
+    ) -> Result<Self> {
+        Self::new(f, frames, rotation, sizes, layout)
     }
 
     pub(super) fn run(&mut self, _f: &frame::Video) -> Result<frame::Video> {
@@ -189,8 +236,8 @@ mod tests {
     }
 
     #[test]
-    fn frames_whose_colors_change_dont_fit() {
-        assert!(!can_fit(&Ops {
+    fn frames_whose_colors_change_fit() {
+        assert!(can_fit(&Ops {
             colors_kept: false,
             ..kept()
         }));
