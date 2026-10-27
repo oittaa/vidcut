@@ -2601,7 +2601,7 @@ impl VideoFrames {
         );
         let clock = Instant::now();
         let converted = clock - start;
-        let rgb = if src.cut()? {
+        let big = if src.cut()? {
             crate::debug!(
                 "interpolate",
                 "{}: a cut between the frames at {weight:.3}",
@@ -2609,7 +2609,7 @@ impl VideoFrames {
             );
             crate::interpolate::kept_at_cut(*retime, size, weight);
             let nearer = weight < 0.5;
-            match pictures {
+            let rgb = match pictures {
                 Some((a, b)) => {
                     if nearer {
                         a
@@ -2618,13 +2618,15 @@ impl VideoFrames {
                     }
                 }
                 None => src.rgb_of(nearer, size, reading)?.1,
-            }
+            };
+            big_picture(&rgb, size, pb)
         } else {
             let made = match &pair {
                 Some((a, b)) => crate::interpolate::between_frames(&key, a, b, size, weight)?,
                 None => {
                     let (a, b) = pictures.as_ref().expect("the pictures of the pair");
-                    crate::interpolate::between(*retime, &key, a, b, size, weight)?
+                    let rgb = crate::interpolate::between(*retime, &key, a, b, size, weight)?;
+                    big_picture(&rgb, size, pb)
                 }
             };
             crate::debug!(
@@ -2638,7 +2640,6 @@ impl VideoFrames {
             made
         };
         let between = clock.elapsed();
-        let big = big_picture(&rgb, size, pb);
         self.maker.size_layer(i, wanted);
         self.maker.sharpen_layer(i, sharpness(*super_scale));
         let src = &mut self.open[s];

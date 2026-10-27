@@ -459,9 +459,9 @@ pub(crate) fn between_frames(
     b: &frame::Video,
     size: (u32, u32),
     t: f64,
-) -> Result<Vec<u8>> {
+) -> Result<frame::Video> {
     let clock = Instant::now();
-    let made = macos::between(key, macos::Input::Frame(a), macos::Input::Frame(b), size, t)?;
+    let made = macos::between_frames(key, a, b, size, t)?;
     made_in(Retime::Macos, size, t, clock);
     Ok(made)
 }

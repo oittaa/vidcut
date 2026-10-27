@@ -382,6 +382,8 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - It shares the picture buffers and the pixel formats with the scaler of macOS (`frame_processor`).
   - Two VideoToolbox frames that need no turn go to macOS without the CPU (`interpolate::takes_frames`). A pixel transfer of VideoToolbox scales and converts them on the GPU (`Transfer`).
     - The transfer takes the matrix that vidcut finds for the frame, and keeps the primaries and the transfer function of BT.709.
+    - The made frame goes back into a VideoToolbox frame on the GPU, with the layout and the range of the source (`interpolate::between_frames`). It then goes on as a decoded frame does.
+    - `hw::Fitter` keeps a filter graph for the frames of the decoder and one for the made frames. Thus it does not make a graph again for each frame.
   - Other frames come as RGB from the CPU, and the CPU converts them.
 - **The work report** (`interpolate::report`):
   - The device reports its GPU when it starts. The session of macOS reports macOS.

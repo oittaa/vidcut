@@ -1,6 +1,6 @@
 # macOS
 
-**When:** zero copy for the AI processes is next. The other items come after the interchange and the smaller items ([roadmap](../roadmap.md)).
+**When:** zero copy for AI of Super Scale is next. The other items come after the interchange and the smaller items ([roadmap](../roadmap.md)).
 
 - `scripts/check.sh full` on a Mac.
 - ProRes proxies on VideoToolbox checked on a Mac with ProRes hardware and on one without.
@@ -10,8 +10,7 @@
 
 On macOS, VideoToolbox frames go to the viewer as Metal textures, and to the H.264 and HEVC encoders of VideoToolbox. A frame that comes down is read in place. These parts still go through the CPU:
 
-- **The AI processes of macOS:** AI of Retime Process takes VideoToolbox frames on the GPU. These parts still go through the CPU:
-  - The frame that AI of Retime Process makes comes back as RGB, and goes on in memory.
+- **The AI processes of macOS:** AI of Retime Process keeps VideoToolbox frames on the GPU, in and out. These parts still go through the CPU:
   - AI of Super Scale gets each picture as RGB from the CPU, and gives RGB back. Its scaling takes most of the time, but the copies take memory and CPU time.
   - The decoder, the processes of macOS and the compositor can all keep the picture in an IOSurface on the GPU.
 - **ProRes exports:** they use `prores_ks` on the CPU (`parts::PRORES`). `gpu_name` has no ProRes encoder of VideoToolbox.

@@ -12,7 +12,8 @@ use objc2_core_video::{
     CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRow,
     CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferIsPlanar, CVPixelBufferLockBaseAddress,
     CVPixelBufferLockFlags, CVPixelBufferPool, CVPixelBufferUnlockBaseAddress,
-    kCVImageBufferColorPrimaries_ITU_R_709_2, kCVImageBufferTransferFunction_ITU_R_709_2,
+    kCVImageBufferColorPrimaries_ITU_R_709_2, kCVImageBufferColorPrimariesKey,
+    kCVImageBufferTransferFunction_ITU_R_709_2, kCVImageBufferTransferFunctionKey,
     kCVImageBufferYCbCrMatrix_ITU_R_601_4, kCVImageBufferYCbCrMatrix_ITU_R_709_2,
     kCVImageBufferYCbCrMatrix_ITU_R_2020, kCVImageBufferYCbCrMatrixKey, kCVPixelBufferHeightKey,
     kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA,
@@ -24,6 +25,7 @@ use objc2_video_toolbox::{
     VTFrameProcessorFrame, VTPixelTransferSession, VTSessionSetProperty,
     kVTPixelTransferPropertyKey_DestinationColorPrimaries,
     kVTPixelTransferPropertyKey_DestinationTransferFunction,
+    kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
 };
 
 use crate::color::Matrix;
@@ -175,25 +177,40 @@ impl Transfer {
     pub(crate) fn run(
         &self,
         from: &CVPixelBuffer,
-        matrix: Matrix,
         to: &CVPixelBuffer,
+        matrix: Matrix,
         what: &str,
     ) -> Result<()> {
         // SAFETY: constant values of CoreVideo.
-        let value = unsafe {
+        let matrix = unsafe {
             match matrix {
                 Matrix::Bt601 => kCVImageBufferYCbCrMatrix_ITU_R_601_4,
                 Matrix::Bt709 => kCVImageBufferYCbCrMatrix_ITU_R_709_2,
                 Matrix::Bt2020 => kCVImageBufferYCbCrMatrix_ITU_R_2020,
             }
         };
-        let value: &CFType = value.as_ref();
-        // SAFETY: a live buffer, and a constant key of CoreVideo with a value of its kind.
+        let target: &CFType = (*self.0).as_ref();
+        // SAFETY: a live buffer and session, and constant keys of CoreVideo and VideoToolbox with values of their kinds.
         unsafe {
-            from.set_attachment(
-                kCVImageBufferYCbCrMatrixKey,
-                value,
-                CVAttachmentMode::ShouldPropagate,
+            for (key, value) in [
+                (kCVImageBufferYCbCrMatrixKey, matrix),
+                (
+                    kCVImageBufferColorPrimariesKey,
+                    kCVImageBufferColorPrimaries_ITU_R_709_2,
+                ),
+                (
+                    kCVImageBufferTransferFunctionKey,
+                    kCVImageBufferTransferFunction_ITU_R_709_2,
+                ),
+            ] {
+                let value: &CFType = value.as_ref();
+                from.set_attachment(key, value, CVAttachmentMode::ShouldPropagate);
+            }
+            let value: &CFType = matrix.as_ref();
+            VTSessionSetProperty(
+                target,
+                kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
+                Some(value),
             );
         }
         // SAFETY: a live session and two live buffers.
