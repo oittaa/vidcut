@@ -658,19 +658,22 @@ fn filmstrip(
     let tile_w = (rect.height() * aspect).max(8.0);
     let height = tiles::tile_height(rect.height() * painter.ctx().pixels_per_point());
     let width = (height as f32 * aspect).round().max(1.0) as u32;
-    let step = tiles::tile_step(f64::from(tile_w) / scale.ppf);
-    let speed = c.speed();
-    let last = c.source_at(c.start + c.duration - 1);
-    let (lo, hi) = (c.source_in.min(last), c.source_in.max(last));
+    let pace = c.pace();
+    let span = (f64::from(tile_w) / scale.ppf * pace.speed.abs())
+        .ceil()
+        .max(1.0) as i64;
     let clip_rect = painter.clip_rect().intersect(rect);
     let mut x = rect.left();
     if clip_rect.left() > x {
         x += ((clip_rect.left() - x) / tile_w).floor() * tile_w;
     }
     while x < rect.right().min(clip_rect.right()) {
-        let offset = f64::from(x - rect.left()) / scale.ppf;
-        let first = x <= rect.left();
-        let frame = tiles::tile_frame(c.source_in, offset, step, first, speed).clamp(lo, hi);
+        let edge = if x <= rect.left() {
+            0.0
+        } else {
+            scale.frame(x) - c.start as f64
+        };
+        let frame = tiles::tile_frame(c.source_in, pace, edge, c.duration);
         let key = TileKey {
             media: c.media.clone(),
             frame,
@@ -680,7 +683,7 @@ fn filmstrip(
             .tiles
             .and_then(|t| {
                 t.want(&key, || t.job(p, &key, width))
-                    .or_else(|| t.nearest(&c.media, height, frame, 2 * step.max(1)))
+                    .or_else(|| t.nearest(&c.media, height, frame, span))
             })
             .or_else(|| pool?.nearest(fps.frames_to_secs(frame)));
         if let Some(texture) = texture {

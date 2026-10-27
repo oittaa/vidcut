@@ -13,7 +13,7 @@ use vidcut_core::fingerprint::Origin;
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{Media, Project};
 use vidcut_core::preferences::Thumbnails;
-use vidcut_core::render::VideoPiece;
+use vidcut_core::render::{Pace, VideoPiece};
 use vidcut_core::time::Rational;
 
 use crate::paths;
@@ -398,17 +398,8 @@ pub fn tile_step(frames_per_tile: f64) -> i64 {
     1i64 << exp
 }
 
-pub fn tile_frame(source_in: i64, offset: f64, step: i64, first: bool, speed: f64) -> i64 {
-    if first || speed == 0.0 {
-        return source_in;
-    }
-    let left = (source_in as f64 + offset * speed) / step as f64;
-    let n = if speed < 0.0 {
-        left.floor()
-    } else {
-        left.ceil()
-    };
-    n as i64 * step
+pub fn tile_frame(source_in: i64, pace: Pace, edge: f64, frames: i64) -> i64 {
+    source_in + pace.offset((edge.floor() as i64).clamp(0, (frames - 1).max(0)))
 }
 
 pub fn media_aspect(m: &vidcut_core::model::Media) -> Option<f32> {
@@ -601,17 +592,13 @@ mod tests {
     }
 
     #[test]
-    fn a_tile_shows_a_grid_frame_inside_it() {
-        assert_eq!(tile_frame(100, 0.0, 64, true, 1.0), 100);
-        for (offset, want) in [(80.0, 192), (160.0, 320), (240.0, 384)] {
-            let f = tile_frame(100, offset, 64, false, 1.0);
-            assert_eq!(f, want);
-            assert!(f >= 100 + offset as i64 && f < 100 + offset as i64 + 80);
-        }
-        assert_eq!(tile_frame(100, 160.0, 128, false, 1.0), 384);
-        assert_eq!(tile_frame(100, 80.0, 64, false, 2.0), 320);
-        assert_eq!(tile_frame(500, 80.0, 64, false, -1.0), 384);
-        assert_eq!(tile_frame(500, 80.0, 64, false, 0.0), 500);
+    fn a_tile_shows_the_frame_under_its_left_edge() {
+        assert_eq!(tile_frame(100, Pace::of(1.0, 0), 0.0, 1000), 100);
+        assert_eq!(tile_frame(100, Pace::of(1.0, 0), 80.9, 1000), 180);
+        assert_eq!(tile_frame(100, Pace::of(1.0, 0), 2000.0, 1000), 1099);
+        assert_eq!(tile_frame(100, Pace::of(0.25, 0), 81.0, 1000), 120);
+        assert_eq!(tile_frame(500, Pace::of(-1.0, 0), 80.5, 1000), 420);
+        assert_eq!(tile_frame(500, Pace::of(0.0, 0), 80.0, 1000), 500);
     }
 
     #[test]
