@@ -79,6 +79,7 @@ On a Mac, the full test gate and an app bundle are still open ([todo](docs/todo/
 - Voice Isolation runs DPDFNet on the CPU. vidcut downloads DPDFNet (10 MB) in the same way, the first time that you turn Voice Isolation on.
 - The AI models of Retime Process run on the GPU, with vidcut's own shaders. AI Fast is RIFE 4.25 (25 MB), and AI Best is EMA-VFI (264 MB).
   - vidcut downloads the weights of a model in the same way, the first time that you select it.
+  - On macOS, Retime Process uses the frame rate conversion of macOS in their place. It needs no download.
 - `rust-toolchain.toml` pins the Rust version. rustup gets it on the first build.
 
 ## Build and run

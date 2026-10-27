@@ -12,6 +12,7 @@ use crate::error::{Error, Result};
 use crate::models::{self, Fetch, Need};
 
 mod ema;
+mod macos;
 mod ops;
 mod rife;
 
@@ -25,7 +26,7 @@ fn model(r: Retime) -> Option<&'static catalog::Model> {
     match r {
         Retime::AiFast => Some(&catalog::RIFE),
         Retime::AiBest => Some(&catalog::EMA_VFI),
-        Retime::Nearest | Retime::FrameBlend => None,
+        Retime::Nearest | Retime::FrameBlend | Retime::Macos => None,
     }
 }
 
@@ -33,7 +34,16 @@ pub fn name(r: Retime) -> &'static str {
     match r {
         Retime::AiFast => "AI Fast (RIFE 4.25)",
         Retime::AiBest => "AI Best (EMA-VFI)",
+        Retime::Macos => "AI (macOS frame rate conversion)",
         Retime::Nearest | Retime::FrameBlend => r.title(),
+    }
+}
+
+pub fn off_here(r: Retime) -> bool {
+    match r {
+        Retime::AiFast | Retime::AiBest => cfg!(target_os = "macos"),
+        Retime::Macos => !cfg!(target_os = "macos"),
+        Retime::Nearest | Retime::FrameBlend => false,
     }
 }
 
@@ -60,6 +70,9 @@ pub fn needed(dir: &Path, r: Retime) -> Vec<Need> {
 }
 
 pub fn get_ready(dir: &Path, r: Retime, download: bool) -> Result<()> {
+    if r == Retime::Macos {
+        return macos::ready();
+    }
     let missing = needed(dir, r);
     if missing.is_empty() {
         return Ok(());
@@ -81,6 +94,9 @@ pub fn get_ready(dir: &Path, r: Retime, download: bool) -> Result<()> {
 
 pub fn inspect(dir: &Path, r: Retime, download: bool) -> Result<()> {
     get_ready(dir, r, download)?;
+    if r == Retime::Macos {
+        return Ok(());
+    }
     models::verify(dir, files(r))?;
     with_engine(|e| e.net(r).map(drop))
 }
@@ -117,6 +133,24 @@ pub fn check<'a>(
                 }
             }
         }
+    }
+    let mut off: Vec<String> = used
+        .iter()
+        .filter(|(r, _)| off_here(*r))
+        .filter_map(|(_, id)| p.media(id).map(|m| m.name.clone()))
+        .collect();
+    off.sort();
+    off.dedup();
+    if !off.is_empty() {
+        let (which, instead) = if cfg!(target_os = "macos") {
+            ("AI Fast and AI Best are off on macOS for now", "AI")
+        } else {
+            ("AI of macOS is on macOS only", "AI Fast or AI Best")
+        };
+        return Err(Error::Invalid(format!(
+            "{which}: set the Retime Process of {} to {instead}",
+            off.join(", ")
+        )));
     }
     let refused: Vec<String> = used
         .iter()
@@ -198,6 +232,10 @@ pub fn report() -> Report {
     report_lock().clone()
 }
 
+pub(crate) fn runs_on(device: String) {
+    report_lock().runs_on = Some(device);
+}
+
 pub(crate) fn kept_at_cut(retime: Retime, size: (u32, u32), at: f64) {
     report_lock().made = Some(Made {
         retime,
@@ -242,6 +280,7 @@ impl Drop for User {
         };
         if last {
             *engine() = None;
+            macos::release();
         }
     }
 }
@@ -249,7 +288,7 @@ impl Drop for User {
 impl Engine {
     fn start() -> std::result::Result<Self, String> {
         let gpu = Gpu::start(WHAT, SHARED)?;
-        report_lock().runs_on = Some(gpu.name.clone());
+        runs_on(gpu.name.clone());
         let kernels = crate::compute::checked(&gpu.device, WHAT, || Ok(Kernels::new(&gpu)))
             .map_err(|e| e.to_string())?;
         Ok(Self {
@@ -414,10 +453,14 @@ pub(crate) fn between(
     t: f64,
 ) -> Result<Vec<u8>> {
     let clock = Instant::now();
-    let made = with_engine(|e| {
-        e.hold(r, key, a, b, size)?;
-        e.frame(r, t as f32)
-    })?;
+    let made = if r == Retime::Macos {
+        macos::between(key, a, b, size, t)?
+    } else {
+        with_engine(|e| {
+            e.hold(r, key, a, b, size)?;
+            e.frame(r, t as f32)
+        })?
+    };
     report_lock().made = Some(Made {
         retime: r,
         size,

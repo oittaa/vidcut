@@ -6,8 +6,7 @@ Retime Process makes the frames between source frames ([deviation X93](../deviat
 
 - **Memory:** AI Best keeps 32-bit values. An export of a UHD clip needs 9.5 GB of GPU memory, and a 1080p clip 4.2 GB.
   - 16-bit values for the shallow features and the attention buffers can make this smaller.
-- **macOS:** the frame rate conversion of VideoToolbox takes the place of AI Fast and AI Best on macOS. The scaler of macOS does the same for Super Scale.
-  - It comes in a PR after the first one. macOS then offers Nearest, Frame Blend and the system's process.
+- **macOS:** AI of macOS is not measured yet against the real frames, and its speed is not known.
 - **Speed:** the convolution kernel does not use the tensor cores.
 - **The viewer:** it shows the frames that an export makes. With AI Best, a frame can take seconds.
 - **Backward clips:** a clip played backward shows the nearest frames.

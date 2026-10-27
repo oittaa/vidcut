@@ -1886,6 +1886,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Retime Process is a setting of a clip. The Speed section of the Inspector tab sets it, and `clip.set` sets it as `retime`.
   - The Change Clip Speed window (R) also sets it, for the selected clips with a picture.
   - Its values are Nearest, Frame Blend, AI Fast and AI Best. The default is Nearest. There is no project setting.
+  - On macOS, the values are Nearest, Frame Blend and AI, `macos` in requests. AI Fast and AI Best are off on macOS.
+    - AI is the frame rate conversion of macOS (`VTFrameProcessor` of VideoToolbox). macOS does not download a model for it.
+    - An export on another system refuses AI, and an export on macOS refuses AI Fast and AI Best.
   - Nearest shows the source frame that the frame falls in (D48).
   - Frame Blend mixes the two source frames around the frame. Each frame has the weight of how near it is.
   - AI Fast (RIFE 4.25) and AI Best (EMA-VFI) are AI models. Each makes the frame from the motion between the two source frames.
@@ -1903,6 +1906,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The models run on this computer and need no account. Their code and weights are under MIT (RIFE) and Apache 2.0 (EMA-VFI).
   - The models make any point between two frames, not only the middle. A speed of 40% needs points such as 0.4 and 0.8.
   - AI Fast is fast and fits UHD frames. AI Best makes frames nearer to the real ones, in more time.
+  - On macOS, the system's own process runs on the Mac's own hardware, as AI of Super Scale does.
   - A morph from one shot into the next looks wrong. Thus a shot change keeps the nearer source frame, as Nearest does.
   - A slow clip needs a process. Thus the window that sets the speed also sets the process.
   - Nearest is the behavior that vidcut had. Thus a clip keeps it until the user selects another process.
