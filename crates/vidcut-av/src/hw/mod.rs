@@ -1188,7 +1188,8 @@ impl Fitter {
                         let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
                         Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
                     } else {
-                        vt::transfer(from, layout, rotation)?
+                        let scaled = (f.width(), f.height()) != fitted;
+                        vt::transfer(from, layout, rotation, scaled)?
                     }
                 }
                 #[cfg(windows)]

@@ -54,10 +54,17 @@ pub(super) fn transfer(
     from: ffmpeg::format::Pixel,
     to: ffmpeg::format::Pixel,
     rotation: u16,
+    scaled: bool,
 ) -> Result<super::Fitting> {
     if rotation != 0 {
         return Err(Error::Invalid(format!(
             "VideoToolbox doesn't change turned {from:?} frames into {to:?}"
+        )));
+    }
+    if scaled {
+        return Err(Error::Invalid(format!(
+            "VideoToolbox scales with less detail than the CPU's lanczos: the CPU fits {from:?} \
+             frames into {to:?}"
         )));
     }
     let what = "fitting a frame on the GPU";
@@ -72,6 +79,7 @@ pub(super) fn transfer(
     from: ffmpeg::format::Pixel,
     to: ffmpeg::format::Pixel,
     _rotation: u16,
+    _scaled: bool,
 ) -> Result<super::Fitting> {
     Err(Error::Invalid(format!(
         "VideoToolbox doesn't change {from:?} frames into {to:?}"
