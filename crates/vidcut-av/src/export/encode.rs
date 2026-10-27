@@ -258,7 +258,7 @@ pub fn abilities(v: &VideoSettings, available: &Availability) -> Abilities {
     let writes = |kind: EncoderChoice, ten: bool| match (kind, name(kind)) {
         (_, None) => false,
         (EncoderChoice::Cpu, Some(n)) => !ten || cpu_ten_bit(n),
-        (k, Some(n)) => available.find(n, gpu_pixel(k, ten)).is_some(),
+        (k, Some(n)) => available.find(n, gpu_pixel(v.codec, k, ten)).is_some(),
     };
     let first = kinds.iter().copied().find(|&k| writes(k, false));
     Abilities {
@@ -269,7 +269,15 @@ pub fn abilities(v: &VideoSettings, available: &Availability) -> Abilities {
 }
 
 fn gpu_encoder(v: &VideoSettings, kind: EncoderChoice) -> Option<&'static str> {
-    gpu_name(v.codec, kind).filter(|_| v.bitrate.is_some() || !bitrate_only(v.codec, kind))
+    gpu_name(v.codec, kind)
+        .filter(|_| v.bitrate.is_some() || !bitrate_only(v.codec, kind))
+        .filter(|_| !alpha_on_videotoolbox(v, kind))
+}
+
+fn alpha_on_videotoolbox(v: &VideoSettings, kind: EncoderChoice) -> bool {
+    v.codec == VideoCodec::Prores
+        && kind == EncoderChoice::VideoToolbox
+        && v.profile.as_deref() == Some("4444")
 }
 
 pub fn bitrate_only(codec: VideoCodec, kind: EncoderChoice) -> bool {
@@ -294,12 +302,14 @@ fn gpu_name(codec: VideoCodec, kind: EncoderChoice) -> Option<&'static str> {
         (VideoCodec::Vp9, EncoderChoice::Qsv) => "vp9_qsv",
         (VideoCodec::H264, EncoderChoice::VideoToolbox) => "h264_videotoolbox",
         (VideoCodec::Hevc, EncoderChoice::VideoToolbox) => "hevc_videotoolbox",
+        (VideoCodec::Prores, EncoderChoice::VideoToolbox) => "prores_videotoolbox",
         _ => return None,
     })
 }
 
-fn gpu_pixel(kind: EncoderChoice, ten: bool) -> format::Pixel {
+fn gpu_pixel(codec: VideoCodec, kind: EncoderChoice, ten: bool) -> format::Pixel {
     match (kind, ten) {
+        _ if codec == VideoCodec::Prores => format::Pixel::P210LE,
         (_, true) => format::Pixel::P010LE,
         (EncoderChoice::Nvenc, false) => format::Pixel::YUV420P,
         _ => format::Pixel::NV12,
@@ -386,7 +396,15 @@ fn video_encoder(
         }
         return Ok(None);
     };
-    let pixel = gpu_pixel(kind, ten);
+    if alpha_on_videotoolbox(v, kind) {
+        if asked {
+            return Err(Error::Invalid(format!(
+                "{title} doesn't encode ProRes 4444 in vidcut yet"
+            )));
+        }
+        return Ok(None);
+    }
+    let pixel = gpu_pixel(v.codec, kind, ten);
     let Some(status) = available.find(name, pixel) else {
         if asked {
             return Err(Error::Invalid(format!(
@@ -535,6 +553,9 @@ fn videotoolbox_options(
     ten: bool,
     c: &mut Chosen,
 ) -> Vec<(String, String)> {
+    if v.codec == VideoCodec::Prores {
+        return vec![c.profile("profile", v.profile.as_deref().unwrap_or("hq"))];
+    }
     let mut options = Vec::new();
     match v.bitrate {
         Some(b) => options.push(opt("b", b)),

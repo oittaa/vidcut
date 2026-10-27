@@ -240,14 +240,11 @@ pub(crate) fn pixels<'a>(f: &'a Video, what: &str) -> Result<&'a CVPixelBuffer> 
 
 type Like = (ffi::AVPixelFormat, ffi::AVColorRange, (u32, u32));
 
-fn like_of(f: &Video, size: (u32, u32)) -> Option<Like> {
-    // SAFETY: the frame's own fields, and its live frames context.
+fn sw_format(f: &Video) -> Option<ffi::AVPixelFormat> {
+    // SAFETY: the frame's own field, and its live frames context.
     unsafe {
         let of = (*f.as_ptr()).hw_frames_ctx;
-        (!of.is_null()).then(|| {
-            let of = &*((*of).data as *const ffi::AVHWFramesContext);
-            (of.sw_format, (*f.as_ptr()).color_range, size)
-        })
+        (!of.is_null()).then(|| (*((*of).data as *const ffi::AVHWFramesContext)).sw_format)
     }
 }
 
@@ -317,8 +314,26 @@ impl Frames {
         size: (u32, u32),
         what: &str,
     ) -> Result<Video> {
-        let key = like_of(like, size)
+        let format = sw_format(like)
             .ok_or_else(|| Error::Invalid(format!("{what}: a frame without GPU frames")))?;
+        self.made_as(transfer, picture, like, (size, format), what)
+    }
+
+    pub(crate) fn made_as(
+        &mut self,
+        transfer: &Transfer,
+        picture: &CVPixelBuffer,
+        like: &Video,
+        (size, format): ((u32, u32), ffi::AVPixelFormat),
+        what: &str,
+    ) -> Result<Video> {
+        if sw_format(like).is_none() {
+            return Err(Error::Invalid(format!(
+                "{what}: a frame without GPU frames"
+            )));
+        }
+        // SAFETY: a plain field of a valid frame.
+        let key = (format, unsafe { (*like.as_ptr()).color_range }, size);
         if self.0.as_ref().is_none_or(|p| p.like != key) {
             self.0 = None;
             self.0 = Some(Pool::new(like, key, what)?);
