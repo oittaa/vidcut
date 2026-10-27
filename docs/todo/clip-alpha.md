@@ -9,23 +9,22 @@ The spec:
 - Clip Attributes has Alpha Mode: None, Premultiplied or Straight, and Invert (p. 451).
 - An export writes alpha only with Export Alpha on, in a format that has alpha (p. 1205).
 - When a program renders as one file, its layers composite into one picture (p. 473).
+- Measured in Resolve Studio 21.1.1: a ProRes 4444 with alpha and no tags is Straight.
 
 In vidcut:
 
-- The viewer and the exports use only a clip's luma and chroma. A clip with alpha covers the tracks below it fully.
-  - Measured: red at an alpha of 0.25 over green exports as red (255, 0, 1), in H.264 and in ProRes 4444.
-- A ProRes 4444 export on the CPU (`prores_ks`) writes the alpha of the top clip as it is.
-  - Measured: a clip at an alpha of 0.27 exports at 0.27, also over a green clip on the track below.
-- A ProRes 4444 export on VideoToolbox writes no alpha plane (P416).
-- VideoToolbox decodes ProRes 4444 with alpha into AYUV64.
-  - The viewer shows it from GPU memory.
-  - The frame holds the alpha. The viewer does not use it.
+- A clip with alpha composites over the tracks below it by straight alpha, in the viewer and in the exports.
+  - Measured: red at an alpha of 0.25 over green exports as (62, 95, 0).
+- An export writes opaque frames. ProRes 4444 has an opaque alpha plane on the CPU, and no alpha plane on VideoToolbox.
+- A frame with a layer with alpha mixes on the CPU, also for CUDA and VideoToolbox.
+- Retime Process with Frame Blend or AI and Super Scale with AI drop the alpha.
+- An HDR conversion drops the alpha when FFmpeg has no zscale. Then the CPU converts the colors.
 
 To do:
 
-- **Composite by alpha** in the viewer, in the exports on the CPU, and in the mixes of CUDA and Metal.
-  - Measure in Resolve how it treats a ProRes 4444 clip whose tags say nothing of premultiplied or straight alpha.
 - **Alpha Mode** in the clip's attributes, with None, Premultiplied, Straight and Invert.
 - **Export Alpha** in the export settings, for formats with alpha.
   - ProRes 4444 on VideoToolbox needs AYUV64 for alpha.
   - With it off, the export composites over black. It writes opaque frames.
+- **Alpha on the GPU:** mix layers with alpha in the kernels of CUDA and Metal.
+- **Alpha through Retime Process, Super Scale and the HDR conversion on the CPU.**

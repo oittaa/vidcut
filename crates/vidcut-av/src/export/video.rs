@@ -497,6 +497,7 @@ pub(crate) struct Layer {
     placing: Option<(Placing, [f64; 4])>,
     crossing: bool,
     pub(crate) wipe: Option<Wipe>,
+    alpha: bool,
 }
 
 impl Layer {
@@ -511,6 +512,7 @@ impl Layer {
             placing: None,
             crossing: false,
             wipe: None,
+            alpha: false,
         }
     }
 }
@@ -1617,7 +1619,8 @@ impl VideoFrames {
 
     pub fn with_timeline(mut self, timeline: Option<Hdr>) -> Result<Self> {
         let target = self.maker.target();
-        if timeline == target
+        let rgb = crate::color::is_rgb(self.maker.out().2);
+        if (timeline == target && !rgb)
             || matches!(self.maker.output(), Output::Decoded { .. } | Output::Vulkan)
         {
             return Ok(self);
@@ -1850,7 +1853,8 @@ impl VideoFrames {
     }
 
     fn flat(&mut self, layers: Vec<Layer>) -> Result<frame::Video> {
-        if layers.len() != 1 {
+        let decoded = matches!(self.maker.output(), Output::Decoded { .. });
+        if layers.len() != 1 || (layers[0].alpha && !decoded) {
             return self.mix(layers);
         }
         match layers.into_iter().next().and_then(|l| l.frame) {
@@ -1958,6 +1962,7 @@ impl VideoFrames {
                             placing: None,
                             crossing: crosses.get(i).copied().unwrap_or(false),
                             wipe,
+                            alpha: false,
                         });
                     }
                     continue;
@@ -2009,6 +2014,10 @@ impl VideoFrames {
                     }
                     _ => None,
                 };
+                let alpha = self.open[s]
+                    .current
+                    .as_ref()
+                    .is_some_and(|(f, _)| super::normalize::has_alpha(crate::hw::sw_format(f)));
                 made.push(Layer {
                     frame: Some(frame),
                     weight,
@@ -2019,6 +2028,7 @@ impl VideoFrames {
                     placing,
                     crossing: crosses.get(i).copied().unwrap_or(false),
                     wipe,
+                    alpha,
                 });
             }
             return Ok(Some(picture.then_some(made)));
@@ -2069,9 +2079,10 @@ impl VideoFrames {
         let (w, h, _) = self.maker.out();
         let wiped = layers.iter().any(|l| l.wipe.is_some());
         let blended = layers.iter().any(|l| {
-            l.placing
-                .as_ref()
-                .is_some_and(|(p, _)| p.mode != CompositeMode::Normal)
+            l.alpha
+                || l.placing
+                    .as_ref()
+                    .is_some_and(|(p, _)| p.mode != CompositeMode::Normal)
         });
         let on_gpu = match self.maker.output() {
             Output::Cuda { frames, .. } if self.gpu_mixes() && !wiped && !blended => {
@@ -2116,7 +2127,11 @@ impl VideoFrames {
                         Some(f) => crate::hw::to_read(f),
                     }
                 };
-                let mut mixed = Canvas::of(&in_memory(layers[0].frame.as_ref())?)?;
+                let bottom = Canvas::of(&in_memory(layers[0].frame.as_ref())?)?;
+                let mut mixed = match layers[0].alpha {
+                    true => Canvas::of(&black)?.covered(&bottom, WHOLE)?,
+                    false => bottom,
+                };
                 let mut below: Option<Canvas> = None;
                 let mut i = 1;
                 while i < layers.len() {
@@ -2134,6 +2149,7 @@ impl VideoFrames {
                                         weight: WHOLE,
                                     },
                                 ),
+                                None if l.alpha => under.covered(&Canvas::of(over)?, WHOLE),
                                 None => Canvas::of(over),
                             };
                         let hold = layers
@@ -2168,6 +2184,7 @@ impl VideoFrames {
                                     weight,
                                 },
                             ),
+                            None if l.alpha => under.covered(&Canvas::of(&over)?, weight),
                             None => super::mix::mix(under, &Canvas::of(&over)?, weight),
                         }
                     };
@@ -2873,7 +2890,11 @@ impl VideoFrames {
     ) -> Result<frame::Video> {
         let src = &mut self.open[s];
         let mut out = match self.maker.output() {
-            Output::Cuda { frames, .. } if up && Place::of(&picture) == Place::Memory => {
+            Output::Cuda { frames, .. }
+                if up
+                    && Place::of(&picture) == Place::Memory
+                    && !super::normalize::has_alpha(picture.format()) =>
+            {
                 frames.upload(&picture)?
             }
             _ => picture,

@@ -374,7 +374,7 @@ pub fn upright_fit(
 
 pub fn fills(v: &VideoInfo, frame: (u32, u32)) -> bool {
     let sar = (v.sar[0], v.sar[1]);
-    upright_fit((v.width, v.height), sar, v.rotation, frame) == frame
+    !v.alpha && upright_fit((v.width, v.height), sar, v.rotation, frame) == frame
 }
 
 pub fn fitted((w, h): (u32, u32), (fw, fh): (u32, u32)) -> [f64; 4] {

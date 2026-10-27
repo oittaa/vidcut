@@ -107,6 +107,7 @@ impl Gpu {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                texture(7),
             ],
         });
         let below_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -511,10 +512,11 @@ fn shown_from_gpu(takes: &Takes) -> Vec<Kind> {
 }
 
 struct Planes {
-    key: (Layout, u32, u32, bool),
+    key: (Layout, u32, u32, bool, bool),
     y: wgpu::Texture,
     u: wgpu::Texture,
     v: wgpu::Texture,
+    a: wgpu::Texture,
 }
 
 struct Target {
@@ -1107,7 +1109,7 @@ impl Screen {
             self.mixing = Some(Mixing::new(gpu, size));
         }
         let blending = binds.iter().any(|b| b.3);
-        let floats = colors.is_some() || blending;
+        let floats = colors.is_some() || blending || n > 1;
         if !floats {
             self.wide = None;
         } else if self
@@ -1293,6 +1295,7 @@ impl Slot {
             .map(|(y, u, _)| (y, u))
             .unwrap_or_else(|| (view(&planes.y), view(&planes.u)));
         let v = self.v_view.take().unwrap_or_else(|| view(&planes.v));
+        let a = view(&planes.a);
         gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vidcut picture"),
             layout: &gpu.layout,
@@ -1316,6 +1319,10 @@ impl Slot {
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::Sampler(&gpu.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&a),
                 },
             ],
         })
@@ -1857,7 +1864,8 @@ impl Slot {
         let layout = picture.layout();
         let (cw, ch) = chroma_size(layout, w, h);
         let wide = gpu.wide && sixteen(layout);
-        let key = (layout, w, h, wide);
+        let alpha = picture.alpha_plane();
+        let key = (layout, w, h, wide, alpha);
         if self.planes.as_ref().is_none_or(|p| p.key != key) {
             let (one, two, four) = if wide {
                 (
@@ -1898,18 +1906,24 @@ impl Slot {
                     y: make((w, h), one),
                     u: make((cw, ch), one),
                     v: make((cw, ch), one),
+                    a: make(
+                        if alpha { (w, h) } else { (1, 1) },
+                        wgpu::TextureFormat::R8Unorm,
+                    ),
                 },
                 Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => Planes {
                     key,
                     y: make((w, h), one),
                     u: make((cw, ch), two),
                     v: make((1, 1), one),
+                    a: make((1, 1), wgpu::TextureFormat::R8Unorm),
                 },
                 Layout::Ayuv64 => Planes {
                     key,
                     y: make((w, h), four),
                     u: make((1, 1), one),
                     v: make((1, 1), one),
+                    a: make((1, 1), wgpu::TextureFormat::R8Unorm),
                 },
             });
         }
@@ -1938,9 +1952,15 @@ impl Slot {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 2);
                 put(&planes.v, 2, (cw, ch), 2);
+                if picture.alpha_plane() {
+                    write_alpha(gpu, &planes.a, frame, (w, h));
+                }
             }
             (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12, false) => {
                 let shift = if layout == Layout::Yuv444p12 { 4 } else { 2 };
+                if picture.alpha_plane() {
+                    write_alpha(gpu, &planes.a, frame, (w, h));
+                }
                 for (texture, plane, size) in [
                     (&planes.y, 0, (w, h)),
                     (&planes.u, 1, (cw, ch)),
@@ -2413,6 +2433,27 @@ fn lettering_of(
         .collect()
 }
 
+fn write_alpha(
+    gpu: &Gpu,
+    texture: &wgpu::Texture,
+    frame: &vidcut_av::ffmpeg::frame::Video,
+    (w, h): (u32, u32),
+) {
+    let (stride, data) = (frame.stride(3), frame.data(3));
+    let row = w as usize;
+    let mut top = Vec::with_capacity(row * h as usize);
+    for y in 0..h as usize {
+        let line = &data[y * stride..y * stride + row * 2];
+        top.extend(
+            line.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|s| (u16::from_le_bytes(*s) >> 4) as u8),
+        );
+    }
+    write_plane(&gpu.queue, texture, &top, row, (w, h), 1);
+}
+
 fn sixteen(layout: Layout) -> bool {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p => false,
@@ -2540,7 +2581,8 @@ fn params_of(
     let uv = packing(layout);
     let (across, down) = per_chroma(layout);
     let mixes_in = transfer_of(timeline) as u32;
-    for v in [hdr, turns, uv, kernel, across, down, mixes_in, 0] {
+    let alpha = u32::from(picture.alpha_plane());
+    for v in [hdr, turns, uv, kernel, across, down, mixes_in, alpha] {
         out.extend_from_slice(&v.to_le_bytes());
     }
     let levels = innermost(placing.map(|(p, _)| p));

@@ -38,6 +38,7 @@ pub fn media_info(secs: f64, fps: Rational, audio: bool) -> MediaInfo {
             mastering: None,
             light: None,
             hdr10plus: false,
+            alpha: false,
             dolby_vision: None,
         }),
         audio: if audio {
