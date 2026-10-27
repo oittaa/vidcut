@@ -42,12 +42,18 @@ pub struct Shortcut {
     pub explanation: Option<&'static str>,
 }
 
-pub fn key_name(key: &str, mac: bool) -> &str {
-    match (key, mac) {
-        ("Ctrl", true) => "Cmd",
-        ("Alt", true) => "Option",
+#[cfg(target_os = "macos")]
+pub fn key_name(key: &str) -> &str {
+    match key {
+        "Ctrl" => "Cmd",
+        "Alt" => "Option",
         _ => key,
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn key_name(key: &str) -> &str {
+    key
 }
 
 const fn key(
