@@ -212,21 +212,21 @@ fi
 if wanted scale; then
 say ""
 say "## Super Scale"
-say "Half a second of Big Buck Bunny (30 frames), made 960x540 first with H.264 on VideoToolbox, then shown in 1920x1080. Super Scale at Auto: macOS makes what its factors give, and vidcut fits it."
-project "$work/make-540.vidcut" 960 540 "$media" "${first}f..$((first + 30))f"
+say "A quarter second of Big Buck Bunny (15 frames), made 960x540 first with H.264 on VideoToolbox, then shown in 1920x1080. Super Scale at Auto: macOS makes what its factors give, and vidcut fits it."
+project "$work/make-540.vidcut" 960 540 "$media" "${first}f..$((first + 15))f"
 "$V" -p "$work/make-540.vidcut" --headless export start "$work/bbb-540.mov" --preset h264-master --overwrite >/dev/null
 table
 for pair in "540 1920 1080"; do
   set -- $pair
   for how in none classic macos; do
     name="scale-$1-to-$3-$how"
-    project "$work/$name.vidcut" "$2" "$3" "$work/bbb-$1.mov" "0f..30f"
+    project "$work/$name.vidcut" "$2" "$3" "$work/bbb-$1.mov" "0f..15f"
     if [[ $how == none ]]; then
       "$V" -p "$work/$name.vidcut" --headless media set m1 --super-scale none >/dev/null
     else
       "$V" -p "$work/$name.vidcut" --headless media set m1 --super-scale auto --upscaler "$how" --download >/dev/null
     fi
-    measure "$name" "$work/$name.vidcut" 30 || true
+    measure "$name" "$work/$name.vidcut" 15 || true
   done
 done
 say ""
@@ -263,15 +263,15 @@ fi
 if wanted viewer; then
 say ""
 say "## The viewer"
-say "The real player with a paced device at 60 presents each second, for 10 s, on 10 s of the 4K file at 25% in a 1920x1080 timeline."
-for p in nearest macos; do
+say "The real player with a paced device at 60 presents each second, for 5 s, on AI at 25% in a 1920x1080 timeline."
+for p in macos; do
   name="play-$p"
   project "$work/$name.vidcut" 1920 1080 "$media" "${first}f..$((first + 600))f"
   "$V" -p "$work/$name.vidcut" --headless edit change-speed c1 --speed 0.25 >/dev/null
   "$V" -p "$work/$name.vidcut" --headless clip set c1 --retime "$p" >/dev/null
   status=0
-  note "viewer: $p, about 40 s"
-  "$PL" "$work/$name.vidcut" 10 gpu >"$work/$name.txt" 2>&1 || status=$?
+  note "viewer: $p, about 20 s"
+  "$PL" "$work/$name.vidcut" 5 gpu >"$work/$name.txt" 2>&1 || status=$?
   say "- $p (status $status):"
   grep -v '^\[' "$work/$name.txt" | tail -n 30 | block
 done
