@@ -2565,6 +2565,7 @@ impl VideoFrames {
         let wanted = (!(placed.is_empty() || decoded))
             .then(|| layer_size((w, h), cur, rotation, placed, super_scale.factor));
         let size = between_size(cur, rotation, wanted.unwrap_or((w, h)));
+        let start = Instant::now();
         let (pa, a) = src.rgb_of(true, size, reading)?;
         let (pb, b) = src.rgb_of(false, size, reading)?;
         let key = (
@@ -2573,6 +2574,7 @@ impl VideoFrames {
             pb.unwrap_or(0),
         );
         let clock = Instant::now();
+        let converted = clock - start;
         let rgb = if src.cut()? {
             crate::debug!(
                 "interpolate",
@@ -2593,6 +2595,7 @@ impl VideoFrames {
             );
             made
         };
+        let between = clock.elapsed();
         let big = big_picture(&rgb, size, pb);
         self.maker.size_layer(i, wanted);
         self.maker.sharpen_layer(i, sharpness(*super_scale));
@@ -2603,7 +2606,15 @@ impl VideoFrames {
             .ok_or_else(no_picture)?;
         src.normalized = None;
         src.upright = true;
-        self.finished_layer(s, up, made)
+        let out = self.finished_layer(s, up, made)?;
+        crate::debug!(
+            "interpolate",
+            "steps: to RGB in {:.1} ms, made in {:.1} ms, handed on in {:.1} ms",
+            converted.as_secs_f64() * 1e3,
+            between.as_secs_f64() * 1e3,
+            (clock.elapsed() - between).as_secs_f64() * 1e3
+        );
+        Ok(out)
     }
 
     fn shown(
