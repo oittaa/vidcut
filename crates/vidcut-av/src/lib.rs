@@ -28,7 +28,6 @@ pub(crate) mod lanczos;
 pub mod light;
 #[cfg(target_os = "macos")]
 pub(crate) mod metal;
-#[cfg(target_os = "macos")]
 pub(crate) mod mixing;
 pub mod models;
 pub(crate) mod npy;

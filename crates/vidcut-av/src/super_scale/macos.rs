@@ -113,7 +113,7 @@ impl super::Run for Run {
     }
 
     fn takes(&self, f: &Video, rotation: u16) -> bool {
-        cfg!(target_os = "macos") && rotation == 0 && Place::of(f) == Place::VideoToolbox
+        rotation == 0 && Place::of(f) == Place::VideoToolbox
     }
 
     fn push_frame(&mut self, index: i64, f: &Video) -> Result<Vec<super::Out>> {

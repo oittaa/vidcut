@@ -1149,7 +1149,6 @@ pub struct VideoFrames {
         std::collections::HashMap<std::path::PathBuf, std::sync::Arc<crate::light::LightAnalysis>>,
     last_dolby_vision: frame::Video,
     gpu_mix_failed: Option<String>,
-    #[cfg(target_os = "macos")]
     metal_mix: Option<crate::mixing::Mixer>,
     sources: Vec<super::SourceNote>,
     burn: Option<Burner>,
@@ -1249,12 +1248,16 @@ struct Burner {
 
 type OnGpu = Option<(crate::cuda::burn::Overlay, crate::burn::Placing)>;
 
+type OnMetal = Option<(crate::mixing::Overlay, crate::burn::Placing)>;
+
 #[derive(Default)]
 struct Drawn {
     sprites: Vec<crate::burn::Sprite>,
     on_gpu: OnGpu,
+    on_metal: OnMetal,
     pops: Vec<crate::burn::Sprite>,
     pops_on_gpu: OnGpu,
+    pops_on_metal: OnMetal,
 }
 
 fn overlaid(
@@ -1269,6 +1272,22 @@ fn overlaid(
         *kept = Some((overlay, shift));
     }
     crate::cuda::burn::burn(frames, f, &kept.as_ref().expect("made").0)
+}
+
+fn covered(
+    kept: &mut OnMetal,
+    mixer: &mut crate::mixing::Mixer,
+    f: &frame::Video,
+    sprites: &[crate::burn::Sprite],
+    shift: crate::burn::Placing,
+) -> Result<frame::Video> {
+    if kept.as_ref().is_none_or(|(_, at)| *at != shift) {
+        let overlay = crate::mixing::Overlay::new(mixer, f, sprites, shift)?;
+        *kept = Some((overlay, shift));
+    }
+    mixer
+        .burn(Some(f), f, &kept.as_ref().expect("made").0)?
+        .ok_or_else(|| Error::Invalid("no picture under the drawing".into()))
 }
 
 impl Drawn {
@@ -1290,12 +1309,13 @@ impl Drawn {
     fn pops(&mut self, pops: Vec<crate::burn::Sprite>) {
         self.pops = pops;
         self.pops_on_gpu = None;
+        self.pops_on_metal = None;
     }
 
     fn over(
         &mut self,
         f: frame::Video,
-        output: &Output,
+        (output, metal): (&Output, &mut Option<crate::mixing::Mixer>),
         gpu_failed: &mut bool,
         what: &str,
         shift: crate::burn::Placing,
@@ -1324,7 +1344,41 @@ impl Drawn {
                 }
             }
             (_, Output::Cuda { frames, .. }) => self.in_memory(&f, Some(frames), shift),
+            (
+                Place::VideoToolbox,
+                Output::FittedOnGpu {
+                    place: Place::VideoToolbox,
+                    ..
+                },
+            ) if !*gpu_failed => match self.on_metal(metal, &f, shift) {
+                Ok(out) => Ok(out),
+                Err(e) => {
+                    crate::debug!(
+                        "decoding",
+                        "the GPU won't draw {what}, the CPU draws them: {e}"
+                    );
+                    *gpu_failed = true;
+                    self.in_memory(&f, None, shift)
+                }
+            },
             _ => self.in_memory(&f, None, shift),
+        }
+    }
+
+    fn on_metal(
+        &mut self,
+        metal: &mut Option<crate::mixing::Mixer>,
+        f: &frame::Video,
+        shift: crate::burn::Placing,
+    ) -> Result<frame::Video> {
+        if metal.is_none() {
+            *metal = Some(crate::mixing::Mixer::new()?);
+        }
+        let mixer = metal.as_mut().expect("made above");
+        let lined = covered(&mut self.on_metal, mixer, f, &self.sprites, shift)?;
+        match self.pops.is_empty() {
+            true => Ok(lined),
+            false => covered(&mut self.pops_on_metal, mixer, &lined, &self.pops, shift),
         }
     }
 
@@ -1358,7 +1412,11 @@ impl Drawn {
 }
 
 impl Burner {
-    fn burn(&mut self, f: frame::Video, output: &Output) -> Result<frame::Video> {
+    fn burn(
+        &mut self,
+        f: frame::Video,
+        output: (&Output, &mut Option<crate::mixing::Mixer>),
+    ) -> Result<frame::Video> {
         let j = self.frame;
         self.frame += 1;
         let shown: Vec<(usize, vidcut_core::subtitles::Shown, SubtitleStyle)> = self
@@ -1435,7 +1493,7 @@ impl Titles {
         &mut self,
         mut f: frame::Video,
         titles: &[ShownTitle],
-        output: &Output,
+        (output, metal): (&Output, &mut Option<crate::mixing::Mixer>),
     ) -> Result<frame::Video> {
         let size = (f.width(), f.height());
         for shown in titles {
@@ -1471,9 +1529,13 @@ impl Titles {
             };
             let alpha = shown.alpha() as f32;
             if !upright {
-                f = k
-                    .drawn
-                    .over(f, output, &mut self.gpu_failed, "titles", ((0, dy), alpha))?;
+                f = k.drawn.over(
+                    f,
+                    (output, &mut *metal),
+                    &mut self.gpu_failed,
+                    "titles",
+                    ((0, dy), alpha),
+                )?;
                 continue;
             }
             if k.laid
@@ -1488,7 +1550,13 @@ impl Titles {
                 k.laid = Some((shown.placed.clone(), dy, drawn));
             }
             if let Some((_, _, drawn)) = k.laid.as_mut() {
-                f = drawn.over(f, output, &mut self.gpu_failed, "titles", ((0, 0), alpha))?;
+                f = drawn.over(
+                    f,
+                    (output, &mut *metal),
+                    &mut self.gpu_failed,
+                    "titles",
+                    ((0, 0), alpha),
+                )?;
             }
         }
         Ok(f)
@@ -1536,7 +1604,6 @@ impl VideoFrames {
             light: Default::default(),
             last_dolby_vision: frame::Video::empty(),
             gpu_mix_failed: None,
-            #[cfg(target_os = "macos")]
             metal_mix: None,
             sources: Vec::new(),
             burn: None,
@@ -1741,7 +1808,7 @@ impl VideoFrames {
         let f = self.compose(layers, &titles)?;
         self.titles.shown();
         let f = match self.burn.as_mut() {
-            Some(b) => b.burn(f, self.maker.output())?,
+            Some(b) => b.burn(f, (self.maker.output(), &mut self.metal_mix))?,
             None => f,
         };
         self.finished(f).map(Some)
@@ -1770,7 +1837,9 @@ impl VideoFrames {
                 .collect();
             taken = n.max(taken);
             let f = self.flat(parts)?;
-            let f = self.titles.draw(f, &group, self.maker.output())?;
+            let f = self
+                .titles
+                .draw(f, &group, (self.maker.output(), &mut self.metal_mix))?;
             below = Some(Layer::whole(f));
         }
         let parts: Vec<Layer> = below.into_iter().chain(rest).collect();
@@ -2015,12 +2084,11 @@ impl VideoFrames {
                     }
                 }
             }
-            #[cfg(target_os = "macos")]
             Output::FittedOnGpu {
                 place: Place::VideoToolbox,
                 ..
-            } if self.gpu_mixes() && !wiped && on_metal(&layers) => {
-                match metal_mix(&mut self.metal_mix, &layers) {
+            } if self.gpu_mixes() && !wiped && !blended && on_metal(&layers) => {
+                match metal_mix(&mut self.metal_mix, &layers, (w, h)) {
                     Ok(mixed) => mixed,
                     Err(e) => {
                         crate::debug!(
@@ -2885,30 +2953,50 @@ fn cuda_mix(
     mixed.ok_or_else(|| Error::Invalid("a mix of black alone".into()))
 }
 
-#[cfg(target_os = "macos")]
 fn on_metal(layers: &[Layer]) -> bool {
     layers.iter().all(|l| {
-        l.placing.is_none()
-            && l.frame
+        l.placing.is_some()
+            || l.frame
                 .as_ref()
                 .is_none_or(|f| Place::of(f) == Place::VideoToolbox)
     })
 }
 
-#[cfg(target_os = "macos")]
 fn metal_mix(
     mixer: &mut Option<crate::mixing::Mixer>,
     layers: &[Layer],
+    size: (u32, u32),
 ) -> Result<Option<frame::Video>> {
+    let Some(like) = layers
+        .iter()
+        .filter(|l| l.placing.is_none())
+        .find_map(|l| l.frame.as_ref())
+    else {
+        return Ok(None);
+    };
     if mixer.is_none() {
         *mixer = Some(crate::mixing::Mixer::new()?);
     }
     let mixer = mixer.as_mut().expect("made above");
-    let laid = |mixer: &mut crate::mixing::Mixer, under: Option<&frame::Video>, l: &Layer| match (
-        under, l.weight,
-    ) {
-        (None, None) => l.frame.as_ref().map(frame_ref).transpose(),
-        (under, w) => mixer.mix(under, l.frame.as_ref(), w.unwrap_or(WHOLE)),
+    let laid = |mixer: &mut crate::mixing::Mixer, under: Option<&frame::Video>, l: &Layer| {
+        if let (Some((placing, fitted)), Some(f)) = (&l.placing, &l.frame) {
+            let picture = match Place::of(f) {
+                Place::Memory => frame_ref(f)?,
+                _ => crate::hw::to_read(f)?,
+            };
+            let layer = super::place::Layer {
+                picture: &picture,
+                placing,
+                fitted: *fitted,
+                weight: l.weight.unwrap_or(WHOLE),
+            };
+            let overlay = crate::mixing::Overlay::of(mixer, like, &layer, size)?;
+            return mixer.burn(under, like, &overlay);
+        }
+        match (under, l.weight) {
+            (None, None) => l.frame.as_ref().map(frame_ref).transpose(),
+            (under, w) => mixer.mix(under, l.frame.as_ref(), w.unwrap_or(WHOLE)),
+        }
     };
     let mut mixed: Option<frame::Video> = None;
     let mut below: Option<Option<frame::Video>> = None;
