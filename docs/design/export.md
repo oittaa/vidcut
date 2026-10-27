@@ -164,6 +164,7 @@ Notes:
 Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)):
 
 - A source piece carries the Retime Process of its clip (`Retime`). With Nearest, the rules above apply.
+- A piece carries Nearest when each of its frames lands on a source frame (`render::retime_of`). Then its speed, times the rate of the source over the rate of the project, is a whole number.
 - With another process, `VideoFrames::retimed_frame` takes the exact source position of the frame (`VideoPiece::exact`, `Pace::exact`). That time has no half frame.
 - While its process is not Nearest, a `Source` keeps the two frames before its current frame (`prev`, `prev2`).
 - The source advances to the first frame at or after the time. When that frame is later, the frame before it and this frame are the pair.

@@ -176,7 +176,7 @@ pub enum VideoPiece {
         #[serde(default, skip_serializing_if = "SuperScale::is_off")]
         super_scale: SuperScale,
         /// How it makes a frame between two source frames: its clip's
-        /// `retime`.
+        /// `retime`, or nearest when each frame lands on a source frame.
         #[serde(default, skip_serializing_if = "Retime::is_nearest")]
         retime: Retime,
         /// Where its picture goes over the frame: its clip's picture, then
@@ -975,6 +975,14 @@ fn origin_of(m: &Media) -> (PathBuf, f64) {
     (m.path.clone(), origin)
 }
 
+fn retime_of(c: &Clip, m: &Media, fps: Rational) -> Retime {
+    let lands = m.info.video.as_ref().is_some_and(|v| {
+        let step = c.speed() * v.fps.as_f64() / fps.as_f64();
+        (step - step.round()).abs() < 1e-9
+    });
+    if lands { Retime::Nearest } else { c.retime }
+}
+
 fn image_of(m: &Media) -> Option<Image> {
     let v = m.info.video.as_ref()?;
     match &m.sequence {
@@ -1281,7 +1289,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 pace: c.pace().after(x - c.start),
                 color_space: m.color_space,
                 super_scale: m.super_scale,
-                retime: c.retime,
+                retime: retime_of(c, m, s.fps),
                 placed: placed_of(c, nest, over, x),
             })
         };

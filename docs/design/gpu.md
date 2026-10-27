@@ -389,7 +389,7 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - The device reports its GPU when it starts. The session of macOS reports macOS.
   - `interpolate::between` reports each made frame (`interpolate::Made`): the process, the size, the weight and the time.
   - A shot change reports the kept source frame, without a time.
-  - The Retime Process group of the stats panel shows the report (`RetimeStats`). It shows when the clip under the playhead has a process other than Nearest.
+  - The Retime Process group of the stats panel shows the report (`RetimeStats`). It shows when the piece under the playhead has a process other than Nearest ([export](export.md#which-source-frame)).
 
 ## Deinterlacing and HDR
 
