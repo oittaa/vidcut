@@ -1,11 +1,9 @@
 # Playback
 
 - Playback turns the timeline or a source clip, from its playhead, into pictures in the viewer and sound.
-- The live core builds a render plan.
-- The engine in `crates/vidcut-av/src/player/` decodes and mixes the plan with the export's own reader and mixer.
-- The viewer thread draws the plan in one shader pass.
-- The audio device is the clock.
-- See also [live](live.md) and [threads](threads.md).
+- The live core builds a render plan. The engine in `crates/vidcut-av/src/player/` decodes and mixes the plan with the reader and the mixer of the export.
+- The viewer thread draws the plan in one shader pass. The audio device is the clock.
+- [live](live.md) has the threads around the player, and [threads](threads.md) their priorities.
 
 ```mermaid
 flowchart TD
@@ -38,151 +36,103 @@ flowchart TD
 
 ## The plan
 
-- `render::flatten_lanes` makes the `RenderPlan` of the timeline:
-  - video pieces: a `VideoPiece::Mix` during a dissolve or under a placed picture, and a `VideoPiece::Titled` under a title
-  - audio lanes
-  - a `LaneTrack` per lane
+- `render::flatten_lanes` makes the `RenderPlan` of the timeline: video pieces, audio lanes, and a `LaneTrack` for each lane.
+  - A dissolve or a placed picture is a `VideoPiece::Mix`. A title is a `VideoPiece::Titled`.
 - The source viewer plays `render::tape`.
-- Where the project plays proxies (spec D41), `preview::apply_proxies` puts in the video of fresh proxies.
-- Proxy frames keep the timestamps of their sources. Thus the player picks the same frames. The sound stays on the originals.
+- Where the project plays proxies (spec D41), `preview::apply_proxies` puts in the video of fresh proxies. Proxy frames keep the timestamps of their sources, so the player picks the same frames. The sound stays on the originals.
 - After each edit or file reload, `Live::project_changed` reloads the source plan and schedules `Live::refresh_timeline_at`. Thus a burst of edits makes one plan.
 
 ## The session's player
 
 - `live::player::Player` runs on `vidcut-session`. It keeps the plan and playhead of `PlayerId::Source` and `PlayerId::Timeline`.
-- It runs one engine, for the player that shows.
-- The engine keeps the frame of the other player ready (`Player::prepare`). It decodes that frame when idle and holds it outside the budget.
-- Thus a switch (`Player::set_plan_at`) shows that frame at once.
+- It runs one engine, for the player that shows. The engine keeps the frame of the other player ready (`Player::prepare`). Thus a switch (`Player::set_plan_at`) shows that frame at once.
 - `Renderer::attach` hands the engine to the viewer thread.
-- A new engine comes for another sample rate or channel count, because its device opened at these values. A new engine also comes for another audio device or GPU.
+- A new engine comes for another sample rate, channel count, audio device or GPU. Why: its device opened at these values.
 - With no device, the engine plays to a silent `PacedOutput`.
-
-Motions:
-
 - Each seek, step, load and switch is a numbered motion.
-- `Player::present_due` asks the renderer to present when the engine has its picture, or plays.
-- The `Msg::Presented` answer marks the motion as on screen if the frame asked for was drawn. While playing, any frame counts.
+  - `Player::present_due` asks the renderer to present when the engine has its picture, or plays.
+  - The `Msg::Presented` answer marks the motion as on screen when the frame asked for was drawn. While playing, any frame counts.
 
 ## The engine
 
 - `vidcut_av::player::Player::new` starts `vidcut-play-video` and `vidcut-play-audio`. Its audio output adds `vidcut-audio-out`.
-- Methods return at once. Each method changes `Control`, the wanted state behind a mutex and condvar.
-- The threads read `Control` again at each turn. Thus a burst of seeks collapses into the last seek.
-- `Control` holds:
-  - the plan
-  - the `mode`: `Mode::Paused` at a frame, or `Mode::Playing` from a sample at a speed (negative for backward)
-  - the fader `trims` and the mute
-  - a `scrub` request
-  - a position that the caller moves itself (`Player::follow`)
-  - the `prepared` frame
-- A change cancels the decoding that it makes unnecessary.
-- A `looping` range (`Player::set_loop`, spec D51) keeps `Mode::Playing` going past the end of the range:
-  - The audio thread reads on from the start of the range.
-  - It queues the `Marker` of the jump before the sound that comes after the jump. Thus the ring and the clock run on.
-  - Decoding reads ahead across the jump.
-- `player::plan::Plan` gives each frame an `Id`. The `Id` names what the picture shows (file, how its colors are read, source position, layers over it), not where it shows.
-- Thus kept pictures survive edits that move them.
+- Its methods return at once. Each method changes `Control`, the wanted state behind a mutex and condvar.
+- The threads read `Control` again at each turn. Thus a burst of seeks collapses into the last seek. A change cancels the decoding that it makes unnecessary.
+- `Control` holds the plan and the `mode`: `Mode::Paused` at a frame, or `Mode::Playing` from a sample at a speed.
+- It also holds the fader `trims`, the mute, a `scrub` request, a followed position (`Player::follow`) and the `prepared` frame.
+- A `looping` range (`Player::set_loop`, spec D51) keeps `Mode::Playing` going past its end. The audio thread reads on from the start, and queues the `Marker` of the jump. Thus the ring and the clock run on.
+- `player::plan::Plan` gives each frame an `Id`. The `Id` names what the picture shows (file, color reading, source position, layers over it), not where it shows. Thus kept pictures survive edits that move them.
 
 **Decoding**
 
-- Decoding uses the export's reader, `VideoFrames`, with `Output::Decoded`: YUV frames at their own size.
+- Decoding uses the reader of the export, `VideoFrames`, with `Output::Decoded`: YUV frames at their own size.
 - Each turn does the first of these:
   1. the viewer's frame
   2. pictures ahead in the direction of play
   3. when playing backward, whole windows from a keyframe
   4. when idle, the prepared frame and a window behind the playhead
-- Each piece of the plan says which frames the player may decode before they are asked for (`player::plan::Fill`).
-  - By default, the player fills frames ahead of the playhead and behind it.
-  - A piece with an AI upscaler fills no frames behind the playhead. An AI picture takes much GPU time. A frame before the current run starts a new run of the upscaler ([gpu](gpu.md)).
-  - A play that does not find the frame at the playhead decodes a frame ahead of the clock. The lead is the mean time of the recent seeks (`seek_cost`).
-  - A piece with an AI upscaler gives no lead, and its frames do not change `seek_cost`. An AI picture takes much longer than a seek. Thus after an AI clip, a jump in another clip does not land seconds ahead of the clock.
-  - Where layers overlap, a fill is allowed only when each layer allows it (`Plan::fill_at`).
-  - The viewer's frame, play backward and steps back still decode the frames that they need.
-  - The prepared frame is made also with an AI upscaler. Thus the next clip can show its first frame at once.
+- Each piece of the plan tells which frames the player may decode before they are asked for (`player::plan::Fill`). Where layers overlap, each layer must allow it (`Plan::fill_at`).
+- A play that does not find the frame at the playhead decodes a frame ahead of the clock. The lead is the mean time of the recent seeks (`seek_cost`).
+- A piece with an AI upscaler or an AI Retime Process fills no frames behind the playhead (`Fill::of`). Why: an AI picture takes much GPU time, and a frame before the current run starts a new run of the upscaler ([gpu](gpu.md)).
+- Such a piece gives no lead, and does not change `seek_cost`. Why: after an AI clip, a jump in another clip does not land far ahead of the clock.
+- The viewer's frame, play backward and steps back decode the frames that they need. The prepared frame is made with an AI upscaler too, so the next clip shows its first frame at once.
 - While it plays, or while its viewer waits, the decoding thread holds a `first::Claim`. Thus jobs yield.
 
 **Kept pictures**
 
 - Kept pictures live in one cache for the whole process (`store::global`, a `player::store::Store`). The engine of the viewer and the engines of the two-up share it.
 - The cache has a memory budget and a video-memory budget (`player.memory_mb`, `player.video_memory_mb`). `player::set_budget` sets them.
-- By default, the video budget is half the memory of the GPU that decodes (`Gpu::memory_mb`, [gpu](gpu.md)). It is at least 1 GB (`Budget::gpu_video`).
-- Thus the small dedicated share of an integrated GPU does not make the budget small.
+- The default video budget is a share of the memory of the GPU that decodes, with a floor (`Budget::gpu_video`, `Gpu::memory_mb`). Why: the small dedicated share of an integrated GPU does not make the budget small.
 - Apple silicon has one shared budget.
 - While an AI upscaler holds GPU memory, the video budget is smaller (`store::Lent`, [gpu](gpu.md)).
-- The least recently used pictures go first, whichever engine decoded them.
-- The prepared picture of each engine never goes (`Store::hold`).
-- An `Id` names what a picture shows. Thus an engine can show a picture that another engine decoded.
-- A small picture of the two-up names the engine that made it (`Id::small`). Only that engine shows it. The picture goes when that engine changes its size or ends.
-- Each engine plans its decoding with its part of the budget (`Config::part`).
-- When the last engine ends, the cache empties.
+- The least recently used pictures go first, whichever engine decoded them. The prepared picture of each engine never goes (`Store::hold`).
+- An engine can show a picture that another engine decoded, by its `Id`. A small picture of the two-up names its engine (`Id::small`), and only that engine shows it.
+- Each engine plans its decoding with its part of the budget (`Config::part`). When the last engine ends, the cache empties.
 
-**Dissolves**
+**Dissolves and placed pictures**
 
-- The engine does not mix dissolves.
-- A `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) on top for each layer. Each layer is as decoded.
-- The viewer blends the layers as it draws, in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). An export mixes in the same colors ([export](export.md#timeline-colors)).
-- `Shown::colors` carries the timeline color space of the plan (`RenderPlan::colors`) to the viewer.
-- A wipe is mixed on the CPU (`Picture::at_wipe`), in the timeline color space too.
+- The engine does not mix. A `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) for each layer on top. Each layer is as decoded.
+- The viewer blends the layers as it draws, in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), as an export does ([export](export.md#timeline-colors)). `Shown::colors` carries that space (`RenderPlan::colors`).
+- A wipe mixes on the CPU (`Picture::at_wipe`), in the timeline color space too.
+- Placed pictures ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) are layers of a `VideoPiece::Mix`. Their placement is not in the kept pictures.
+  - `Player::present` hands the `Placed` pictures of each layer with the frame (`Shown`, `Plan::placed_at`). Thus a move or a zoom keeps the frames decoded.
+  - For a Dynamic Zoom, `Plan::placed_at` moves the `Run` of each `Placed` picture to the frame.
+  - `Shown::crosses` marks the side of a dissolve that mixes with the side before it (`Over::cross`).
+- While pictures are dragged, `Player::preview_pictures` puts each dragged picture in place of the picture of its clip.
+  - The live core then plans the timeline again with them (`Msg::PreviewPictures`), at most once each `RELOAD_EVERY`. Why: a picture that stops filling the frame needs the tracks below it decoded.
 
-**Placed pictures**
+**Super Scale and Retime Process**
 
-- Placed pictures ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) are layers of a `VideoPiece::Mix`, as the layers of a dissolve are.
-- Their placement is not in the kept pictures.
-- `Player::present` hands the `Placed` pictures of each layer with the frame, in `Shown` (`Plan::placed_at`). Thus a move or zoom of a placed picture keeps the frames decoded.
-- For a Dynamic Zoom, `Plan::placed_at` moves the `Run` of each `Placed` picture to the frame. Thus the box of that frame places the picture.
-- `Shown::crosses` marks the side of a dissolve that mixes with the side before it (`Over::cross`).
-- `Shown::scales` gives the Super Scale of each layer (`Plan::scales_at`).
-  - With `viewer.super_scale` on, the shader enlarges such a layer with a sharper kernel (`sharp`). Its Sharpness selects the kernel.
-  - It does this only where the viewer enlarges the picture.
-- With AI Fast or AI Best, `VideoFrames` runs `Source::ai_picture` for the viewer too, as an export does. The viewer then gets the large upright picture of the AI upscaler.
-  - With AI Fast, a seek must decode the whole chunk of 15 frames first. The AI upscaler then makes the asked frame first. The rest of the chunk follows.
-  - While playing, the player skips the frames it cannot make in time. The frames that it made stay in its kept pictures, as other frames do. A replay computes again the frames that it skipped, and the frames that left its kept pictures.
-  - With AI Best, a seek starts a new stream at the asked frame. Its first picture comes after the stream's first chunk of 17 frames.
-  - Whether the picture is enlarged depends on its placement and on the timeline size, as in an export.
-  - Thus the key of its kept frames holds its Super Scale, its placement and the timeline size (`source_key`).
+- `Shown::scales` gives the Super Scale of each layer (`Plan::scales_at`). With `viewer.super_scale` on, the shader enlarges such a layer with a sharper kernel (`sharp`), by its Sharpness, where the viewer enlarges the picture.
+- With AI Fast or AI Best, `VideoFrames` runs `Source::ai_picture` for the viewer too. The viewer then gets the large upright picture of the AI upscaler.
+  - A seek with AI Fast decodes the whole chunk first. The upscaler makes the asked frame first, and the rest of the chunk follows.
+  - A seek with AI Best starts a new stream at the asked frame. Its first picture comes after the first chunk of the stream.
+  - While playing, the player skips the frames that it cannot make in time. A replay makes again the frames that it skipped.
+  - The key of the kept frames holds the Super Scale, the placement and the timeline size (`source_key`). Why: they decide whether the picture is enlarged.
 - With `viewer.super_scale` off, the live core plans the viewer without Super Scale (`preview_plan`).
-- With a Retime Process other than Nearest, `VideoFrames` makes the frames between the source frames for the viewer too, as an export does ([export](export.md#which-source-frame)).
-  - With AI Best, a frame can take seconds.
-  - The key of such a frame holds the process (`source_key`), and its exact source position in millionths of a frame (`Plan::id`). Thus each made frame is a kept picture of its own.
-  - With an AI process, the player fills no frames behind the playhead (`Fill::of`).
-  - A frame of an AI process that the player must make aims ahead of the clock. The lead is the mean time of the recent made frames (`make_cost`).
-    - On the way to that frame, the player skips the frames between, and makes none of them. They would be late.
-    - Ahead of the playhead, it also makes only frames that are past the clock by the lead, and only frames after the reader. Thus slow frames are spread evenly, and the reader never seeks back.
-  - A skipped frame of such a clip moves the reader to its exact source time, as a made frame does (`exact_at`). Thus the reader never steps back between the two, which would seek.
-- While pictures are dragged, `Player::preview_pictures` at once puts each dragged picture in place of the picture of its clip.
-- The live core then plans the timeline again with the dragged pictures (`Msg::PreviewPictures`), `RELOAD_EVERY` apart at most.
-- This is necessary because a picture that stops filling the frame needs the tracks below it decoded.
+- With a Retime Process other than Nearest, `VideoFrames` makes the frames between the source frames for the viewer too ([export](export.md#which-source-frame)).
+  - The key of such a frame holds the process (`source_key`), and its exact source position (`Plan::id`). Thus each made frame is a kept picture of its own.
+  - A frame of an AI process aims ahead of the clock by the mean time of the recent made frames (`make_cost`). On the way, the player skips the frames between. Why: they would be late.
+  - Ahead of the playhead, it makes only frames past the clock by the lead, and after the reader. Thus slow frames spread evenly, and the reader never seeks back.
+  - A skipped frame moves the reader to its exact source time, as a made frame does (`exact_at`). Why: a step back between the two would seek.
 
-**Titles**
+**Titles and subtitles**
 
-- Titles are not in the kept pictures. Thus an edit of a title keeps the frames decoded.
-- `player::titles` draws each title of the plan at the size of the plan. It uses `burn::title`, the export's drawing, on the decoding thread.
-- It draws the titles at these times, and then wakes the viewer:
-  - before it keeps a frame that the title shows over
-  - for the prepared frame
-  - for the frame at the playhead, when the titles of that frame are not drawn yet
-- It keeps the drawings used last (an `Lru`).
-- Each drawing is where its kind puts it, without its own place, opacity or rotation. Thus a moved or turned title is not drawn again.
-- `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan. The decoding thread draws it next.
-- `Player::present` hands the titles of a frame with the frame, in `Shown`. Each title is a `TitleOver`. It holds:
-  - the picture, in premultiplied RGBA
-  - how many layers go under it
-  - how it is moved, scaled and turned from how it was drawn: its place, zoom and rotation, or the `Run::top` of a scroll. The viewer's shader does the transform.
-  - the level at which a fade or its opacity draws it (in the shader's `Lettering`)
-  - the pictures of the compound clips that it plays inside (`ShownTitle::placed`). A picture that `Player::preview_pictures` drags takes the place of its own.
-- Until a title is drawn, the newest drawing of its clip shows, moved to its place. Thus a drag, a new color or new text does not blink.
-- The frame is not exact until the title is drawn.
-
-**Subtitles**
-
-- Subtitles come the same way, without a plan.
-- `Player::set_subtitles` takes the shown track (`SubtitleView`). The `color` of each cue is already set: its own color, or the color of its person (`Speakers::color_of`).
-- `player::subtitles` draws what shows at a frame with `burn::draw`, on the decoding thread, at the times when titles are drawn.
-- It keeps the drawings used last (an `Lru`), by what they show: the pieces of each cue at that frame (`subtitles::shown`).
-- Thus a track whose words show as they are spoken is drawn again at each word, and at each step of a pop.
-- A cue edit decodes nothing again.
-- `Player::present` hands the subtitles with the titles, above every layer.
-- A subtitle that is not drawn yet shows the newest drawing.
+- Titles and subtitles are not in the kept pictures. Thus an edit of a title or a cue keeps the frames decoded.
+- `player::titles` draws each title of the plan at the size of the plan, with `burn::title`, on the decoding thread. Then it wakes the viewer.
+  - It draws before it keeps a frame under the title, for the prepared frame, and for the frame at the playhead.
+  - It keeps the drawings used last (an `Lru`).
+  - Each drawing is where its kind puts it, without its own place, opacity or rotation. Thus a moved or turned title is not drawn again.
+- `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan.
+- `Player::present` hands each title of a frame as a `TitleOver`:
+  - the picture, in premultiplied RGBA, and how many layers go under it
+  - its move from how it was drawn: its place, zoom and rotation, or the `Run::top` of a scroll. The viewer's shader does the transform.
+  - its level, from a fade or its opacity (`Lettering`)
+  - the pictures of the compound clips around it (`ShownTitle::placed`)
+- Until a title is drawn, the newest drawing of its clip shows, moved to its place. Thus a drag, a new color or new text does not blink. The frame is not exact until then.
+- `Player::set_subtitles` takes the shown track (`SubtitleView`), each cue with its color set (`Speakers::color_of`).
+- `player::subtitles` draws what shows at a frame with `burn::draw`, at the times when titles draw. It keeps the drawings by what they show (`subtitles::shown`, an `Lru`).
+- `Player::present` hands the subtitles with the titles, above each layer. A subtitle that is not drawn yet shows the newest drawing.
 
 ## The clock
 
@@ -211,72 +161,51 @@ flowchart TD
   pres -- "Plan::id(frame)" --> store["Store"]
 ```
 
-- Each time the callback of the device takes sound, `Heard::record` notes the ring position and when that sound will be heard. That time is the time of the callback plus the output latency of cpal.
+- Each time the callback of the device takes sound, `Heard::record` notes the ring position, and when that sound is heard. That is the time of the callback plus the output latency of cpal.
 - Each run that the audio thread queues carries a `Marker`: from this ring position, this timeline sample, at this speed, for this play request.
-- `Shared::clock_frame` chains `Heard::counter_at`, `Markers::sample_at` and the plan into the frame that is heard at this moment.
-- Until the sound of a play request is heard, the clock stands at its start.
-- When the ring runs dry, the clock stops.
-- `Player::present` returns the kept picture of that frame.
-- Until that picture is decoded, `Player::present` returns the newest picture that a seek landed on, or the last picture shown. It marks this picture as not exact.
-- `Player::next_change` says when the next frame is due.
+- `Shared::clock_frame` chains `Heard::counter_at`, `Markers::sample_at` and the plan into the frame heard at this moment.
+- Until the sound of a play request is heard, the clock stands at its start. When the ring runs dry, the clock stops.
+- `Player::present` returns the kept picture of that frame. Until it is decoded, it returns the newest picture that a seek landed on, or the last picture shown, marked as not exact.
+- `Player::next_change` tells when the next frame is due.
+- Without a device, the silent `PacedOutput` pulls the ring in real time. Thus the clock runs.
 
 **Why:** pictures follow the sound as it is heard, latency included. A late mix holds the picture, and the picture does not drift.
 
-- Without a device, the silent `PacedOutput` pulls the ring in real time. Thus the clock still runs.
-
 The audio device:
 
-- `CpalOutput` plays on the device chosen in Preferences. Without a chosen device, it plays on the default device of the system.
-- cpal can say that a stream on the default must be rebuilt, or that it has lost its device (`answer`). Then `follow` on `vidcut-audio-out` opens a stream on the new default.
-- The new stream plays silence until `Turns::switch` gives it the turn. Then it takes the ring where the old stream left off.
-- Only one stream takes sound at a time.
-- After the new stream opens, the old stream plays out what it holds for a moment, however long the open took.
-- When there is no default yet, as when the default is unplugged, it tries again for a moment.
-- It gives up after a few tries in a row with no sound between them.
-- A chosen device that is lost fails at once.
-- After a failure, the viewer says so until a stream plays again.
+- `CpalOutput` plays on the device chosen in Preferences, else on the default device of the system.
+- cpal can say that a stream on the default must be rebuilt, or that it lost its device (`answer`). Then `follow` on `vidcut-audio-out` opens a stream on the new default.
+- The new stream plays silence until `Turns::switch` gives it the turn. Then it takes the ring where the old stream left off. Only one stream takes sound at a time.
+- The old stream plays out what it holds for a moment after the new stream opens.
+- When there is no default yet, as when the default is unplugged, it tries again a few times.
+- A chosen device that is lost fails at once. After a failure, the viewer says so until a stream plays again.
 
 **Why:**
 
 - WASAPI does not move a stream to a new default ([gotchas](../gotchas.md#operating-systems-and-libraries)).
-- The new stream opens before the old one stops. Thus the gap in the clock is only the difference between the latencies of the two devices.
-- `VIDCUT_DEBUG` reports this gap.
+- The new stream opens before the old one stops. Thus the gap in the clock is only the difference between the latencies of the two devices. `VIDCUT_DEBUG` reports this gap.
 
 ## The viewer thread
 
-- `Viewer::start` spawns `vidcut-viewer`.
-- The thread wakes when the session notifies or asks, when the size changes, or when `next_change` comes due.
-- Each turn calls `Player::present`, then `Screen::draw` into an RGBA target. The target has the size of the viewer's picture in physical pixels.
-- With an SDR timeline, one render pass of `crates/vidcut/src/gui/picture.wgsl` does all the drawing into the target.
-- With an HDR timeline, the passes draw into a picture of 16-bit floats (`Wide`) in the PQ or HLG code values of the timeline:
-  - Each layer is converted to linear light, then to BT.2020 colors, then to the PQ or HLG curve of the timeline. Titles and subtitles are converted the same way from sRGB.
-  - Then one more draw (`fs_screen`) converts that picture to the target: to BT.709, tone-mapped with the export's math.
-  - Thus the layers, titles and subtitles mix in the timeline's code values, as in an export.
-- With an SDR timeline and a layer with a composite mode, the passes also draw into `Wide`, in the SDR code values:
-  - Thus a color above 1 or below 0 stays between the layers, as in an export.
-  - Then `fs_screen` only cuts each value to the range from 0 to 1.
+- `Viewer::start` spawns `vidcut-viewer`. The thread wakes when the session notifies or asks, when the size changes, or when `next_change` comes due.
+- Each turn calls `Player::present`, then `Screen::draw` into an RGBA target the size of the viewer's picture in physical pixels.
+- With an SDR timeline, one render pass of `crates/vidcut/src/gui/picture.wgsl` draws it all.
+- With an HDR timeline, the passes draw into a picture of 16-bit floats (`Wide`), in the PQ or HLG code values of the timeline.
+  - Each layer, title and subtitle goes to linear light, to BT.2020, and to the curve of the timeline.
+  - Then `fs_screen` converts that picture to the target: BT.709, tone-mapped with the math of the export.
+  - Thus the layers, titles and subtitles mix in the code values of the timeline, as in an export.
+- With an SDR timeline and a layer with a composite mode, the passes also draw into `Wide`, in SDR code values. Thus a color above 1 or below 0 stays between the layers. `fs_screen` then clips each value.
 - The drawing:
   - It fits the picture as the export does, and turns it upright.
-  - It scales in YUV and converts to RGB with the export's math (`shader_colors`). In an SDR timeline, it tone-maps HDR.
+  - It scales in YUV and converts to RGB with the math of the export (`shader_colors`). In an SDR timeline, it tone-maps HDR.
   - The layers of a dissolve are more draws in the pass.
-  - The draw of a placed layer maps each pixel back through its `place::Placing` levels to the decoded picture. It taps the picture as finely as it is shrunk.
-  - Each level also gives its soft crop edges and its opacity, as in the export ([export](export.md#placed-pictures)).
-  - The draw of a placed layer also covers its edges in part, and lays the layer over the layers below, premultiplied.
-  - A layer with a composite mode needs the layers below it. Before its draw, the pass ends and the canvas is copied (`Below`).
-  - Then `fs_mode` mixes the layer with that copy by the sums of `blend::mixed`, and writes the result.
-  - In a dissolve, `fs_mode` adds the mix into `Mixing`, premultiplied.
-  - Then `fs_paired` lays `Mixing` over the copy of the canvas, and writes the result. Thus a mix below 0 is not cut before it goes over.
-  - The two sides of a dissolve with a placed picture are added into a picture of their own (`Mixing`). That picture is then laid over the frame.
-  - Each title is one more draw after the layers under it (`fs_title`).
-  - Its `Lettering` holds one affine map from each pixel back to the drawing (`place::lettered`). The map also goes through the pictures of its compound clips (`Placing::inner`).
-  - `Lettering` also holds the `place::Placing` levels of these compound clips. They cover the edges of each compound clip in part, as for a placed layer.
-  - The draw taps the title as finely as it is shrunk. Outside the drawing, a tap is clear.
-  - For a title in a placed compound clip, these are the sums of the export (`export::place::title`).
+  - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
+  - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy by the sums of `blend::mixed`.
+  - The two sides of a dissolve with a placed picture add into a picture of their own (`Mixing`). `fs_paired` lays it over the copy of the canvas. Thus a mix below 0 is not clipped before it goes over.
+  - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips. These are the sums of the export (`export::place::title`).
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
-- A present answers with the frame drawn, if it is exact.
-- A `gui.screenshot` of the viewer reads the target back, to the pixel.
-- Submissions go through `Gate::pass`. They wait until the UI thread runs `logic` or `ui`, because eframe configures the window's surface outside these.
-- If the UI has been away for long, submissions do not wait.
+- A present answers with the frame drawn, if it is exact. A `gui.screenshot` of the viewer reads the target back, to the pixel.
+- Submissions go through `Gate::pass`. They wait until the UI thread runs `logic` or `ui`, because eframe configures the surface of the window outside these. If the UI is away for long, submissions do not wait.
 
 **Why:**
 
@@ -287,91 +216,66 @@ The audio device:
 ## GPU pictures
 
 - With `gpu.decoding` on, the reader decodes on `hw::GpuDecoder::best` where it can.
-- The viewer shows the pictures of some decoders from GPU memory (`Gpu::gpu_pictures`). These pictures stay there, in the video budget.
-- The pictures of the other decoders come down.
+- The viewer shows the pictures of some decoders from GPU memory (`Gpu::gpu_pictures`). These pictures stay there, in the video budget. The pictures of the other decoders come down.
 - [gpu](gpu.md) has the path of each decoder to the screen.
 
 ## Sound
 
-- `audio::run` reads `export::audio::AudioMix`, the export's mixer. It gives:
-  - lanes, sample-exact
-  - clip gains and cross fades
-  - de-click fades at cuts
-  - clips at other speeds, with their pitch kept (spec D48)
-- Fader gains (`AudioMix::set_lane_db`) and the mute go on top. When the sound is muted, the clock runs on.
+- `audio::run` reads `export::audio::AudioMix`, the mixer of the export ([export](export.md#sound)). It mixes the lanes sample-exact, with their gains, fades and speeds (spec D48).
+- Fader gains (`AudioMix::set_lane_db`) and the mute go on top. While the sound is muted, the clock runs on.
 - The ducking of the plan (`Dip`) goes on each lane as in an export ([export](export.md#sound)). A new plan brings its own (`AudioMix::replan`).
+- Other play speeds go through `Stretch`, which keeps the pitch. To play backward, `audio::run` reads blocks forward and reverses them.
+- The `Ring` holds a short queue, with one writer, one reader and no locks. A seek, pause or new plan empties it.
+- The callback of cpal calls `AudioSource::fill`. It pops the ring, pads with silence and records `Heard`. It never locks or allocates.
+  - Thus, while sound plays or a scrub snippet waits for room, the audio thread polls the ring. Else it sleeps until `Control` changes (`Shared::notify`).
 
 Ducking in the preview:
 
 - `Live::hear_ducking` hears the sources of the timeline's plan before the player gets it.
-- It takes only the measurements that this process keeps (`env::kept_measure`). Thus the session thread reads no file.
-- It measures the rest on `vidcut-measure`, as a job. Until then, those clips dip nothing.
+- It takes only the measurements that this process keeps (`env::kept_measure`). Why: the session thread reads no file.
+- It measures the rest on `vidcut-measure`, at job priority. Until then, those clips dip nothing.
 - `Msg::DuckHeard` then loads the timeline again. A measurement that failed shows as a notice, and is not tried again until the next `track.set` with `duck`.
-- Other play speeds go through `Stretch`, which keeps the pitch.
-- To play backward, `audio::run` reads blocks forward and reverses them.
-- The `Ring` holds a short queue, with one writer and one reader, and no locks. A seek, pause or new plan empties it.
-- The callback of cpal calls `AudioSource::fill`. It pops the ring, pads with silence and records `Heard`. It never locks or allocates.
-- Thus, while sound plays or a scrub snippet waits for room, the audio thread polls the ring.
-- When neither occurs, the audio thread sleeps until `Control` changes (`Shared::notify`).
 
 Faders:
 
-- A dragged mixer fader sends `mixer.preview`.
-- `Player::preview_fader` makes the fader value a lane gain (`Player::set_lane_gain`). The user hears it at once, with no new plan.
+- A dragged mixer fader sends `mixer.preview`. `Player::preview_fader` makes the value a lane gain (`Player::set_lane_gain`). The user hears it at once, with no new plan.
 
 [Audio scrubbing](../cut-page-spec.md#45-other-viewer-features) (spec D42):
 
-- A step, or a requested seek while paused, plays a short faded snippet of the sound of the frame.
-- The newest snippet replaces a snippet that still waits.
+- A step, or a requested seek while paused, plays a short faded snippet of the sound of the frame. The newest snippet replaces a snippet that still waits.
 - The moves that the session makes itself use `Player::seek_quietly`.
 
 ## The two-up
 
 - The Trim Editor and Dynamic Trim show two frames, or four while a slip or slide runs.
-- `Cells` gives each frame its own engine on the media of the clip (`render::tape`, no sound). Each engine has `ManualOutput`.
-- The engines keep their pictures in the cache of the viewer. Each plans its decoding with a quarter of the budget.
-- In every UI frame, `Player::follow` gives each engine its frame and the speed of the trim. The engine decodes ahead as if it plays.
+- `Cells` gives each frame its own engine on the media of the clip (`render::tape`, no sound), with `ManualOutput`. The engines keep their pictures in the cache of the viewer.
+- In each UI frame, `Player::follow` gives each engine its frame and the speed of the trim. The engine decodes ahead as if it plays.
 - `Player::shrink_to` keeps the pictures of a run at the size of the cell.
-- The windows behind decode on `vidcut-play-windows`: one at a time across the followed players, and none while any player moves forward.
+- The windows behind decode on `vidcut-play-windows`: one at a time across the followed players, and none while a player moves forward.
 - `Screens` draws the cells with `Screen` on the UI thread. This needs no gate.
 
 The sound of a Dynamic Trim run:
 
-- The sound of a Dynamic Trim run comes from the viewer's own engine.
-- The UI works out what a run plays (`heard`). It is a trimmed copy of the timeline.
-- In the copy, the clip whose frames change under the playhead goes on past the playhead, in the direction of the run.
-- The copy plays from the frame of that clip.
-- For a slip, the copy holds that clip alone, made longer past the playhead.
+- It comes from the viewer's own engine. The UI works out what a run plays (`heard`): a trimmed copy of the timeline.
+- In the copy, the clip whose frames change under the playhead goes on past the playhead, in the direction of the run. The copy plays from the frame of that clip.
+- For a slip, the copy holds that clip alone, made longer past the playhead. It plays the other way, because its media moves under the playhead against the run.
 - `Handle::audition` sends the copy. `Player::audition` plays it at the speed of the run, with black pictures and no loop. Thus only its sound is decoded.
-- A slip plays the other way, because its media moves under the playhead against the run.
-- The audition keeps the timeline's own plan and position.
-- When the run stops, `Player::end_audition` puts the plan and position back, the loop too. A seek, play or pause also does this.
+- The audition keeps the timeline's own plan and position. `Player::end_audition` puts them back, the loop too, when the run stops or a seek, play or pause comes.
 - A timeline reload during the audition only replaces the kept plan.
 
 Ripple Delete Silence:
 
-- While Ripple Delete Silence is open, the stripes that it still cuts reach the session (`Handle::skip`).
-- Then a play of the timeline is an audition too, with its pictures.
-- `Live::play_skipping` cuts the parts from a copy of the timeline (`ops::remove_parts`). It plays the copy at the speed asked, from the place of the playhead in it (`skipped_to`).
+- While Ripple Delete Silence is open, the stripes that it still cuts reach the session (`Handle::skip`). Then a play of the timeline is an audition too, with its pictures.
+- `Live::play_skipping` cuts the parts from a copy of the timeline (`ops::remove_parts`), and plays the copy from the place of the playhead in it (`skipped_to`).
 - A change of the stripes during play starts the play again from there (`Live::set_skipping`).
-- `ops::removed_time` gives the stretches of the timeline that the cuts take out.
-- During play, `Player::position` maps the position of the engine back past these stretches (`unskipped`).
-- Thus the timeline's playhead jumps what Remove closes up, and stays where the audition ends.
+- During play, `Player::position` maps the position of the engine back past the stretches that the cuts take out (`ops::removed_time`, `unskipped`). Thus the playhead jumps what Remove closes up.
 - A stripe on another track under the picture of Track 1 leaves a gap there, as Remove does. The playhead runs through the gap.
 
 ## Code
 
-- `crates/vidcut-core/src/render.rs`
-- `crates/vidcut-core/src/duck.rs`
-- `crates/vidcut-core/src/preview.rs`
-- `crates/vidcut/src/live/mod.rs`
-- `crates/vidcut/src/live/player.rs`
-- `crates/vidcut-av/src/player/`
-- `crates/vidcut-av/src/stretch.rs`
-- `crates/vidcut-av/src/export/video.rs`
-- `crates/vidcut-av/src/export/audio.rs`
-- `crates/vidcut/src/gui/video.rs`
-- `crates/vidcut/src/gui/picture.rs`
-- `crates/vidcut/src/gui/picture.wgsl`
-- `crates/vidcut/src/gui/gate.rs`
-- `crates/vidcut/src/gui/cells.rs`
+- `crates/vidcut-core/src/render.rs`, `crates/vidcut-core/src/duck.rs`, `crates/vidcut-core/src/preview.rs`
+- `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/player.rs`
+- `crates/vidcut-av/src/player/`, `crates/vidcut-av/src/stretch.rs`
+- `crates/vidcut-av/src/export/video.rs`, `crates/vidcut-av/src/export/audio.rs`
+- `crates/vidcut/src/gui/video.rs`, `crates/vidcut/src/gui/picture.rs`, `crates/vidcut/src/gui/picture.wgsl`
+- `crates/vidcut/src/gui/gate.rs`, `crates/vidcut/src/gui/cells.rs`
