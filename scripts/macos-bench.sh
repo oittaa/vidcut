@@ -40,6 +40,7 @@ report="$work/report.md"
 say() { printf '%s\n' "$*" | tee -a "$report"; }
 block() { printf '```\n' >>"$report"; cat >>"$report"; printf '```\n' >>"$report"; }
 now() { perl -MTime::HiRes=time -e 'printf "%.3f", time'; }
+note() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
 
 push_report() {
   local parent blob tree commit
@@ -140,9 +141,10 @@ step() {
 
 measure() {
   local name="$1" file="$2" frames="$3"
-  local i status secs cpu foot
+  local i status secs cpu foot times="$runs" once=""
   : >"$work/$name.runs"
-  for ((i = 1; i <= runs; i++)); do
+  for ((i = 1; i <= times; i++)); do
+    note "$name: run $i of $times"
     status=0
     VIDCUT_DEBUG=1 /usr/bin/time -l "$V" -p "$file" --headless export start "$work/$name.mov" \
       --preset h264-master --overwrite >/dev/null 2>"$work/$name-$i.log" || status=$?
@@ -155,6 +157,11 @@ measure() {
     cpu="$(awk '/ real / {printf "%.2f", $3 + $5}' "$work/$name-$i.log")"
     foot="$(awk '/peak memory footprint/ {printf "%.0f", $1 / 1048576}' "$work/$name-$i.log")"
     echo "$secs $cpu $foot" >>"$work/$name.runs"
+    note "$name: run $i took $secs s"
+    if [[ $i -eq 1 ]] && perl -e "exit($secs > 60 ? 0 : 1)"; then
+      times=1
+      once=" (one run: it took over a minute)"
+    fi
   done
   secs="$(awk '{print $1}' "$work/$name.runs" | median)"
   cpu="$(awk '{print $2}' "$work/$name.runs" | median)"
@@ -162,7 +169,7 @@ measure() {
   local fps per
   fps="$(perl -e "printf '%.1f', $frames / $secs")"
   per="$(perl -e "printf '%.1f', 1000 * $cpu / $frames")"
-  say "| $name | $frames | $secs s | $fps | $cpu s | $per ms | $foot MiB |"
+  say "| $name$once | $frames | $secs s | $fps | $cpu s | $per ms | $foot MiB |"
 }
 
 steps_retime() {
@@ -238,6 +245,7 @@ dir="$work/quality"
 mkdir -p "$dir/truth" "$dir/even"
 "$V" --headless project create "$dir/src.vidcut" --fps 60 --width 1920 --height 1080 >/dev/null
 "$V" -p "$dir/src.vidcut" --headless media add "$media" >/dev/null
+note "quality: rendering the real frames"
 for ((i = 0; i < 120; i++)); do
   "$V" -p "$dir/src.vidcut" --headless frame render --media m1 --at "$((first + i))f" \
     --width 1920 --out "$dir/truth/$(printf %04d "$i").png" >/dev/null
@@ -266,6 +274,7 @@ for p in nearest macos; do
   "$V" -p "$work/$name.vidcut" --headless edit change-speed c1 --speed 0.25 >/dev/null
   "$V" -p "$work/$name.vidcut" --headless clip set c1 --retime "$p" >/dev/null
   status=0
+  note "viewer: $p, about 40 s"
   "$PL" "$work/$name.vidcut" 10 gpu >"$work/$name.txt" 2>&1 || status=$?
   say "- $p (status $status):"
   grep -v '^\[' "$work/$name.txt" | tail -n 30 | block
