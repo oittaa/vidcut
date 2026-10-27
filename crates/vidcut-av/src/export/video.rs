@@ -3016,6 +3016,12 @@ fn metal_mix(
         .iter()
         .filter(|l| l.placing.is_none())
         .find_map(|l| l.frame.as_ref())
+        .or_else(|| {
+            layers
+                .iter()
+                .filter_map(|l| l.frame.as_ref())
+                .find(|f| Place::of(f) == Place::VideoToolbox && (f.width(), f.height()) == size)
+        })
     else {
         return Ok(None);
     };
@@ -3025,6 +3031,18 @@ fn metal_mix(
     let mixer = mixer.as_mut().expect("made above");
     let laid = |mixer: &mut crate::mixing::Mixer, under: Option<&frame::Video>, l: &Layer| {
         if let (Some((placing, fitted)), Some(f)) = (&l.placing, &l.frame) {
+            let weight = l.weight.unwrap_or(WHOLE);
+            if Place::of(f) == Place::VideoToolbox {
+                let layer = super::place::Layer {
+                    picture: f,
+                    placing,
+                    fitted: *fitted,
+                    weight,
+                };
+                if let Some(placed) = mixer.place(under, like, &layer, size)? {
+                    return Ok(Some(placed));
+                }
+            }
             let picture = match Place::of(f) {
                 Place::Memory => frame_ref(f)?,
                 _ => crate::hw::to_read(f)?,
@@ -3033,7 +3051,7 @@ fn metal_mix(
                 picture: &picture,
                 placing,
                 fitted: *fitted,
-                weight: l.weight.unwrap_or(WHOLE),
+                weight,
             };
             let overlay = crate::mixing::Overlay::of(mixer, like, &layer, size)?;
             return mixer.burn(under, like, &overlay);

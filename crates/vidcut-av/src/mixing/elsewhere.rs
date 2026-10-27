@@ -38,6 +38,16 @@ impl Mixer {
     ) -> Result<Option<Video>> {
         match self.0 {}
     }
+
+    pub(crate) fn place(
+        &mut self,
+        _under: Option<&Video>,
+        _like: &Video,
+        _layer: &crate::export::place::Layer,
+        _size: (u32, u32),
+    ) -> Result<Option<Video>> {
+        match self.0 {}
+    }
 }
 
 impl Overlay {
