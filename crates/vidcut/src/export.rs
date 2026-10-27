@@ -1135,6 +1135,7 @@ pub fn detected(refresh: bool) -> Availability {
         && let Ok(cached) = serde_json::from_str::<Value>(&text)
         && cached["key"] == key
         && let Ok(a) = serde_json::from_value::<Availability>(cached["availability"].clone())
+        && a.covers(&vidcut_av::export::encode::probes())
     {
         return a;
     }

@@ -30,10 +30,10 @@ fn refused(what: &str) -> Error {
 
 fn planes(layout: format::Pixel) -> Result<[MTLPixelFormat; 2]> {
     match layout {
-        format::Pixel::NV12 | format::Pixel::NV16 => {
+        format::Pixel::NV12 | format::Pixel::NV16 | format::Pixel::NV24 => {
             Ok([MTLPixelFormat::R8Unorm, MTLPixelFormat::RG8Unorm])
         }
-        format::Pixel::P010LE | format::Pixel::P210LE => {
+        format::Pixel::P010LE | format::Pixel::P210LE | format::Pixel::P416LE => {
             Ok([MTLPixelFormat::R16Unorm, MTLPixelFormat::RG16Unorm])
         }
         other => Err(refused(&format!("no planes for {other:?}"))),

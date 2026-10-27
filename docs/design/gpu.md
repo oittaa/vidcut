@@ -126,6 +126,8 @@ In exports:
      - As FFmpeg's pad filter, the place of the picture is rounded down to the grid of its chroma.
      - The clip rectangle of the kernel is the place of the picture, and its origin is the origin of the source. Thus the scale transform only scales.
   3. A pixel transfer of VideoToolbox changes its layout, such as 4:2:0 into the 10-bit 4:2:2 of ProRes (`Transfer`).
+     - ProRes 4444 takes 16-bit 4:4:4 (P416), with no alpha plane. The CPU's ProRes 4444 has an alpha plane, which is always opaque.
+     - The Metal kernel of step 4 writes P416, as the pixel transfer writes it off ([gotchas](../gotchas.md#gpu-drivers)).
   4. Where its colors change, a Metal kernel takes the place of step 3 (`recolor::Recolor`, `color::recoloring`). It reads the planes of the frame and writes the layout of the encoder.
      - SDR into SDR changes only the matrix and the range, as swscale does on the CPU.
      - To or from HDR, it goes to linear light, changes the gamut, tone-maps HDR into SDR (mobius) and encodes again, with the math of `CpuColors`.
@@ -167,11 +169,12 @@ Frames that come down:
 | VAAPI | Linux, not NVIDIA | H.264, HEVC, AV1, VP9 |
 | AMF | Windows, AMD | H.264, HEVC, AV1 |
 | QSV | Intel; frames from memory only | H.264, HEVC, AV1, VP9 at a bitrate |
-| VideoToolbox | macOS | H.264, HEVC; ProRes but 4444 (`prores_videotoolbox`) |
+| VideoToolbox | macOS | H.264, HEVC, ProRes (`prores_videotoolbox`) |
 | Vulkan | any listed GPU | ProRes (`prores_ks_vulkan`), proxies only |
 
 - `encode::detect` test-encodes with each encoder, pixel format and GPU.
 - `export::detected` keeps the result in `encoders.json`. The key is the FFmpeg versions, the system, and the GPUs and drivers.
+- It tests again when the file has no result for a test that `encode::probes` lists. Thus a new test runs once after an update.
 - `encoders.list` with `refresh` tests again.
 - `encoders.testing` names the process that tests. When a process dies during a test, it leaves this file. Then the next test skips the encoders of Vulkan.
 - Jobs take the encoders of the GPU in use (`Availability::in_use`).
