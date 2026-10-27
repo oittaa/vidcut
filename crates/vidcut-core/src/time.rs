@@ -102,7 +102,12 @@ impl Rational {
         STANDARD_RATES
             .iter()
             .map(|&(n, d)| Self { num: n, den: d })
-            .find(|r| ((r.as_f64() - rate) / r.as_f64()).abs() < 0.001)
+            .filter(|r| ((r.as_f64() - rate) / r.as_f64()).abs() < 0.001)
+            .min_by(|a, b| {
+                (rate - a.as_f64())
+                    .abs()
+                    .total_cmp(&(rate - b.as_f64()).abs())
+            })
     }
 
     pub fn frame_to_sample(self, frame: i64, sample_rate: u32) -> i64 {
