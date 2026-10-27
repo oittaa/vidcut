@@ -3,7 +3,8 @@
 # $VIDCUT_TEST_DATA/media/<name>/ (default ~/Downloads/vidcut-tmp/media). Media
 # never goes into git. Archives are extracted into a fresh empty directory and
 # nothing downloaded is executed. Prints each file's sha256; a mismatch with
-# the manifest is an error.
+# the manifest is an error. With names (`fetch-test-media.sh bbb-2160p60`), it
+# gets only those clips.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 root="${VIDCUT_TEST_DATA:-$HOME/Downloads/vidcut-tmp}/media"
@@ -36,6 +37,7 @@ clips() {
 }
 
 clips | while IFS=$'\t' read -r name file url sha; do
+  if [[ $# -gt 0 && " $* " != *" $name "* ]]; then continue; fi
   dir="$root/$name"
   target="$dir/$file"
   if [[ -f "$target" ]]; then
