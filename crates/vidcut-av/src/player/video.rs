@@ -450,9 +450,17 @@ impl Decoder {
                 let ahead = ((AHEAD_SECS * fps * speed).ceil() as i64).max(2);
                 let budget = store.budget(self.picture_kind);
                 let ahead = ahead.min(self.pictures_in(budget / 4).max(2));
-                (1..=ahead)
+                let made = plan.fill_at(focus).made;
+                let first = if made {
+                    let lead = (self.make_cost.as_secs_f64() * fps * speed).ceil() as i64;
+                    (focus + lead - anchor).max(1)
+                } else {
+                    1
+                };
+                let onward = |t: i64| !made || self.next.is_none_or(|n| t >= n);
+                (first..=ahead.max(first))
                     .map(|k| after(&plan, snap.looping, anchor, k))
-                    .find(|&t| t != anchor && missing(t))
+                    .find(|&t| t != anchor && missing(t) && onward(t))
                     .map(|t| (t, Reach::Forward))
             }
             Direction::Back if snap.followed => return Ok(false),
@@ -471,7 +479,11 @@ impl Decoder {
                 .map(|t| (t, Reach::Forward)),
         };
         if let Some((t, reach)) = wanted {
+            let started = Instant::now();
             self.decode(snap, t, reach)?;
+            if plan.fill_at(t).made {
+                self.make_cost = (self.make_cost * 3 + started.elapsed()) / 4;
+            }
             return Ok(true);
         }
         if dir != Direction::Paused {
@@ -730,6 +742,7 @@ impl Decoder {
         );
         let started = Instant::now();
         let mut seek_keeps: Option<i64> = None;
+        let made = keep == Keep::Ahead && plan.fill_at(t).made;
         for i in r..=t {
             let window = match keep {
                 Keep::Ahead => false,
@@ -738,7 +751,9 @@ impl Decoder {
             };
             let kept = i == t
                 || window
-                || ((i >= snap.focus || snap.followed) && !self.shared.store.contains(&plan.id(i)));
+                || (!made
+                    && (i >= snap.focus || snap.followed)
+                    && !self.shared.store.contains(&plan.id(i)));
             let whole =
                 snap.motion == 0.0 && matches!(snap.mode, Mode::Paused { .. }) && i >= snap.focus;
             let small = snap.small.filter(|_| !whole);
