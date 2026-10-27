@@ -76,15 +76,19 @@ pub fn canonical(path: &Path) -> std::io::Result<PathBuf> {
     )))
 }
 
+#[cfg(windows)]
 fn replaced(path: &Path) -> bool {
     use std::path::Component;
     let mut names = path.components().filter_map(|c| match c {
         Component::Normal(name) => Some(name),
         _ => None,
     });
-    cfg!(windows)
-        && names.next().is_some_and(|n| n == "$Extend")
-        && names.next().is_some_and(|n| n == "$Deleted")
+    names.next().is_some_and(|n| n == "$Extend") && names.next().is_some_and(|n| n == "$Deleted")
+}
+
+#[cfg(not(windows))]
+fn replaced(_path: &Path) -> bool {
+    false
 }
 
 fn plain(path: &Path) -> PathBuf {

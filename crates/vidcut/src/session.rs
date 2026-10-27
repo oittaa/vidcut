@@ -14,7 +14,6 @@ use crate::threads::Work;
 
 fn shortcuts() -> Value {
     use vidcut_core::shortcuts::{SHORTCUTS, key_name};
-    let mac = cfg!(target_os = "macos");
     let list: Vec<Value> = SHORTCUTS
         .iter()
         .map(|s| {
@@ -22,7 +21,7 @@ fn shortcuts() -> Value {
                 "group": s.group,
                 "group_title": s.group.title(),
                 "action": s.action,
-                "keys": s.keys.iter().map(|k| key_name(k, mac)).collect::<Vec<_>>(),
+                "keys": s.keys.iter().map(|k| key_name(k)).collect::<Vec<_>>(),
                 "explanation": s.explanation.map(crate::gui::keys),
             })
         })

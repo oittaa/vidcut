@@ -241,13 +241,12 @@ pub(crate) fn cpu_ten_bit(name: &str) -> bool {
         .is_some_and(|mut f| f.any(|p| matches!(p, Pixel::YUV420P10LE | Pixel::YUV422P10LE)))
 }
 
-const AUTO_GPU: &[EncoderChoice] = if cfg!(windows) {
-    &[EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv]
-} else if cfg!(target_os = "macos") {
-    &[EncoderChoice::VideoToolbox]
-} else {
-    &[EncoderChoice::Nvenc, EncoderChoice::Vaapi]
-};
+#[cfg(windows)]
+const AUTO_GPU: &[EncoderChoice] = &[EncoderChoice::Nvenc, EncoderChoice::Amf, EncoderChoice::Qsv];
+#[cfg(target_os = "macos")]
+const AUTO_GPU: &[EncoderChoice] = &[EncoderChoice::VideoToolbox];
+#[cfg(not(any(windows, target_os = "macos")))]
+const AUTO_GPU: &[EncoderChoice] = &[EncoderChoice::Nvenc, EncoderChoice::Vaapi];
 
 fn kinds(choice: EncoderChoice) -> Vec<EncoderChoice> {
     match choice {
@@ -1339,7 +1338,8 @@ pub fn probes() -> Vec<Probe> {
         })
     };
     let nv12_p010 = &[format::Pixel::NV12, format::Pixel::P010LE][..];
-    if cfg!(target_os = "macos") {
+    #[cfg(target_os = "macos")]
+    {
         check(
             "h264_videotoolbox",
             EncoderChoice::VideoToolbox,

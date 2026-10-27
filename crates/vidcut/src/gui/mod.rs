@@ -121,26 +121,22 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
     })
 }
 
+#[cfg(target_os = "macos")]
 pub fn keys(text: &str) -> String {
-    keys_on(text, cfg!(target_os = "macos"))
+    text.replace("Ctrl+", "Cmd+").replace("Alt+", "Option+")
 }
 
-fn keys_on(text: &str, mac: bool) -> String {
-    if mac {
-        text.replace("Ctrl+", "Cmd+").replace("Alt+", "Option+")
-    } else {
-        text.to_string()
-    }
+#[cfg(not(target_os = "macos"))]
+pub fn keys(text: &str) -> String {
+    text.to_string()
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     #[test]
     fn macos_names_ctrl_and_alt_cmd_and_option() {
-        let text = "Lift (Alt+Delete), Shift+Ctrl+N";
-        assert_eq!(super::keys_on(text, false), text);
         assert_eq!(
-            super::keys_on(text, true),
+            super::keys("Lift (Alt+Delete), Shift+Ctrl+N"),
             "Lift (Option+Delete), Shift+Cmd+N"
         );
     }

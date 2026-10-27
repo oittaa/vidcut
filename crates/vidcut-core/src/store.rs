@@ -389,16 +389,17 @@ pub(crate) fn write_atomic(path: &Path, data: &str) -> std::io::Result<()> {
 }
 
 pub fn from_another_system(path: &Path) -> bool {
-    path.to_str()
-        .is_some_and(|s| absolute_elsewhere(s, cfg!(windows)))
+    path.to_str().is_some_and(absolute_elsewhere)
 }
 
-pub(crate) fn absolute_elsewhere(s: &str, windows: bool) -> bool {
-    if windows {
-        s.starts_with('/') && !s.starts_with("//")
-    } else {
-        windows_absolute(s)
-    }
+#[cfg(windows)]
+pub(crate) fn absolute_elsewhere(s: &str) -> bool {
+    s.starts_with('/') && !s.starts_with("//")
+}
+
+#[cfg(not(windows))]
+pub(crate) fn absolute_elsewhere(s: &str) -> bool {
+    windows_absolute(s)
 }
 
 pub(crate) fn windows_absolute(s: &str) -> bool {
@@ -524,17 +525,19 @@ mod tests {
         assert!(!windows_absolute("日本/a.mp4"));
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_path_from_the_root_names_nothing_on_windows() {
-        assert!(absolute_elsewhere("/Users/x/a.mp4", true));
-        assert!(!absolute_elsewhere("//server/share/a.mp4", true));
-        assert!(!absolute_elsewhere(r"C:\x\a.mp4", true));
+        assert!(absolute_elsewhere("/Users/x/a.mp4"));
+        assert!(!absolute_elsewhere("//server/share/a.mp4"));
+        assert!(!absolute_elsewhere(r"C:\x\a.mp4"));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_drive_or_server_path_names_nothing_elsewhere() {
-        assert!(absolute_elsewhere(r"C:\x\a.mp4", false));
-        assert!(absolute_elsewhere(r"\\server\share\a.mp4", false));
-        assert!(!absolute_elsewhere("/Users/x/a.mp4", false));
+        assert!(absolute_elsewhere(r"C:\x\a.mp4"));
+        assert!(absolute_elsewhere(r"\\server\share\a.mp4"));
+        assert!(!absolute_elsewhere("/Users/x/a.mp4"));
     }
 }

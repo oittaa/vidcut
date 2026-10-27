@@ -139,11 +139,15 @@ impl Gpu {
         match kind {
             E::Auto | E::Cpu => true,
             E::Nvenc => self.pci_vendor == NVIDIA,
-            E::Amf => cfg!(windows) && self.pci_vendor == AMD,
+            #[cfg(windows)]
+            E::Amf => self.pci_vendor == AMD,
             E::Qsv => self.pci_vendor == INTEL,
-            E::Vaapi => cfg!(target_os = "linux") && self.pci_vendor != NVIDIA,
-            E::VideoToolbox => cfg!(target_os = "macos"),
+            #[cfg(target_os = "linux")]
+            E::Vaapi => self.pci_vendor != NVIDIA,
+            #[cfg(target_os = "macos")]
+            E::VideoToolbox => true,
             E::Vulkan => self.cuda.is_some() || self.adapter.is_some() || self.node.is_some(),
+            _ => false,
         }
     }
 
@@ -477,13 +481,16 @@ fn with_cuda(gpus: &mut Vec<Gpu>, cuda: &[crate::cuda::Listed]) {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn pci_device((bus, device, function): Slot) -> Option<u32> {
-    if !cfg!(target_os = "linux") {
-        return None;
-    }
     let path = format!("/sys/bus/pci/devices/0000:{bus:02x}:{device:02x}.{function:x}/device");
     let text = std::fs::read_to_string(path).ok()?;
     u32::from_str_radix(text.trim().trim_start_matches("0x"), 16).ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn pci_device(_slot: Slot) -> Option<u32> {
+    None
 }
 
 #[cfg(test)]
