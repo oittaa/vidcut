@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Temporary check of dissolves on Metal for VideoToolbox frames, on a
+# Temporary check of turned frames in the AI processes of macOS, on a
 # Mac. One command:
 #
 #   scripts/macos-check.sh
 #
-# It pulls the branch claude/macos-gpu-dissolves, builds vidcut, and runs short
+# It pulls the branch claude/macos-ai-frames, builds vidcut, and runs short
 # exports, one run each, about a minute in all with the build. It pushes a
 # text report to the branch macos-test-results, where the agent reads it.
 # Big Buck Bunny is in $VIDCUT_TEST_DATA (default ~/Downloads/vidcut-tmp)
@@ -12,7 +12,7 @@
 # Runs with the bash 3.2 of macOS.
 set -euo pipefail
 
-branch=claude/macos-gpu-dissolves
+branch=claude/macos-ai-frames
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo"
 if [[ "${MACOS_CHECK_PULLED:-}" != 1 ]]; then
