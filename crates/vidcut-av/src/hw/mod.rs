@@ -1202,13 +1202,17 @@ impl Fitter {
         }
         let _ = into;
         let fitter = fitters.iter_mut().find(|x| x.input == input);
-        let mut out = match &mut fitter.expect("made above").fitting {
+        let fitting = &mut fitter.expect("made above").fitting;
+        let mut out = match fitting {
             Fitting::Filters(graph) => run_graph(graph, f, "fitting a frame on the GPU")?,
             #[cfg(windows)]
             Fitting::D3d11(scaler) => scaler.scale(f)?,
             Fitting::Vt(fit) => fit.run(f)?,
         };
         same_picture(&mut out, f);
+        if let Fitting::Vt(fit) = fitting {
+            fit.tag(&mut out);
+        }
         // SAFETY: a plain field of its own frame.
         unsafe { (*out.as_mut_ptr()).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 } };
         Ok(out)

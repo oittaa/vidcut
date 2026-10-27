@@ -133,10 +133,8 @@ impl Mixer {
             1 => [MTLPixelFormat::R8Uint, MTLPixelFormat::RG8Uint],
             _ => [MTLPixelFormat::R16Uint, MTLPixelFormat::RG16Uint],
         };
-        // SAFETY: a plain field of a valid frame.
-        let full = unsafe { (*like.as_ptr()).color_range } == ffi::AVColorRange::AVCOL_RANGE_JPEG;
         let unit = (samples.top + 1) / 256;
-        let black = [if full { 0 } else { 16 * unit }, 128 * unit];
+        let black = [16 * unit, 128 * unit];
         let out = self
             .frames
             .fresh(like, (size, ffi::AVPixelFormat::from(layout)), WHAT)?;

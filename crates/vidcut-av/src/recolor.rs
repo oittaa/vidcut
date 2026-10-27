@@ -257,14 +257,13 @@ impl Recolor {
         f: &Video,
         colors: &Recoloring,
         to: format::Pixel,
-        target: Option<Hdr>,
     ) -> Result<Video> {
         let clock = std::time::Instant::now();
         let (from, into) = (layout(crate::hw::sw_format(f))?, layout(to)?);
         let size = (f.width(), f.height());
         let limited = ffi::AVColorRange::AVCOL_RANGE_MPEG;
         let shape = (size, ffi::AVPixelFormat::from(to));
-        let mut out = self.frames.fresh_in(f, shape, limited, WHAT)?;
+        let out = self.frames.fresh_in(f, shape, limited, WHAT)?;
         let (a, b) = (surface(f, WHAT)?, surface(&out, WHAT)?);
         if a.plane_count() != 2 || b.plane_count() != 2 {
             return Err(refused("IOSurfaces of other than two planes"));
@@ -343,7 +342,6 @@ impl Recolor {
         buffer.waitUntilCompleted();
         drop(textures);
         crate::metal::ended(&buffer, WHAT)?;
-        crate::color::tag_frame(&mut out, target);
         crate::debug!(
             "lanczos",
             "colors of {}x{} into {to:?} in {:.1} ms",
