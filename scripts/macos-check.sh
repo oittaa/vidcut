@@ -176,6 +176,16 @@ measure bars-cpu "$work/bars.vidcut" 30 "VIDCUT_HWDEC=none" h264-master --encode
 say ""
 say "- GPU against CPU output: PSNR $(psnr "$work/bars-gpu.mov" "$work/bars-cpu.mov" 30) dB."
 grep -h "won't fit\|error" "$work/bars-gpu.log" | sort | uniq -c | sed -n 1,3p | sed 's/^/  - /' >>"$report" || true
+grep -h "^\[lanczos\]" "$work/bars-gpu.log" | sed 's/ in [0-9.]* ms//' | sort | uniq -c | sed -n 1,3p | sed 's/^/  - /' >>"$report" || true
+thumb() {
+  ffmpeg -v error -i "$1" -frames:v 1 -vf "scale=64:16,format=gray" -f rawvideo - |
+    perl -e 'local $/; my $d = <STDIN>; my @r = split //, " .:-=+*#%@"; for my $y (0..15) { my $l = ""; for my $x (0..63) { $l .= $r[int(ord(substr($d, $y * 64 + $x, 1)) * 10 / 256)]; } print "$l|\n"; }'
+}
+for how in gpu cpu; do
+  say ""
+  say "bars-$how, frame 1 at 64x16, and the picture that crop detection finds: $(ffmpeg -v info -i "$work/bars-$how.mov" -frames:v 5 -vf cropdetect=limit=0.1:round=2 -f null - 2>&1 | grep -o 'crop=[0-9:]*' | tail -n 1)"
+  thumb "$work/bars-$how.mov" | block
+done
 
 say ""
 say "Files on the Mac: $work"
