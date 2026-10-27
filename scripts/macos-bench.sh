@@ -175,7 +175,8 @@ measure() {
 steps_retime() {
   local log="$work/$1-1.log"
   say "- $1, each made frame, median (mean): to RGB $(step 'to RGB in' "$log") ms, made $(step ', made in' "$log") ms, handed on $(step ', handed on in' "$log") ms."
-  say "  - Inside macOS: pair written $(step 'pair in' "$log") ms, processed $(step ', processed in' "$log") ms, read $(step ', read in' "$log") ms."
+  say "  - Inside macOS: pair written $(step 'pair in' "$log") ms, processed $(step ', processed in' "$log") ms, written back $(step ', read in' "$log") ms."
+  grep -h "won't fit\|error" "$log" | sort | uniq -c | sed -n 1,3p | sed 's/^/  - /' >>"$report" || true
 }
 
 steps_scale() {
@@ -268,7 +269,7 @@ for how in gpu cpu; do
   ffmpeg -v error -i "$dir/out-$how.mov" -framerate 60 -i "$dir/truth/%04d.png" -lavfi \
     "[0:v]format=rgb24,select='mod(n\,2)*lt(n\,59)',setpts=N/TB[a];[1:v]format=rgb24,select='mod(n\,2)*lt(n\,59)',setpts=N/TB[b];[a][b]psnr=stats_file=$dir/psnr-$how.txt" \
     -f null - 2>>"$work/psnr.log" || true
-  say "- Decoding on the $how: $(awk -F'psnr_avg:' 'NF > 1 {split($2, a, " "); v = a[1]; if (v == "inf") v = 99; s += v; k++} END {if (k) printf "%.2f dB mean over %d made frames", s / k, k; else printf "no PSNR"}' "$dir/psnr-$how.txt"); to RGB $(step 'to RGB in' "$dir/$how.log") ms, pair written $(step 'pair in' "$dir/$how.log") ms."
+  say "- Decoding on the $how: $(awk -F'psnr_avg:' 'NF > 1 {split($2, a, " "); v = a[1]; if (v == "inf") v = 99; s += v; k++} END {if (k) printf "%.2f dB mean over %d made frames", s / k, k; else printf "no PSNR"}' "$dir/psnr-$how.txt"); to RGB $(step 'to RGB in' "$dir/$how.log") ms, pair written $(step 'pair in' "$dir/$how.log") ms, written back $(step ', read in' "$dir/$how.log") ms."
   grep -h 'error' "$dir/$how.log" | sed -n 1,3p | sed 's/^/  - /' >>"$report" || true
 done
 fi
