@@ -1128,6 +1128,11 @@ enum Fitting {
     Filters(GpuGraph),
     #[cfg(windows)]
     D3d11(d3d11::Scaler),
+    #[cfg(target_os = "macos")]
+    Transfer(
+        crate::frame_processor::Transfer,
+        crate::frame_processor::Frames,
+    ),
 }
 
 pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
@@ -1178,14 +1183,13 @@ impl Fitter {
                         ));
                     }
                     let from = sw_format(f);
-                    if from != layout {
-                        return Err(Error::Invalid(format!(
-                            "VideoToolbox doesn't change {from:?} frames into {layout:?}"
-                        )));
+                    if from == layout {
+                        let spec = vt::fit_spec(rotation, fitted);
+                        let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+                        Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
+                    } else {
+                        vt::transfer(from, layout, rotation)?
                     }
-                    let spec = vt::fit_spec(rotation, fitted);
-                    let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
-                    Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
                 }
                 #[cfg(windows)]
                 format::Pixel::D3D11 => {
@@ -1210,6 +1214,12 @@ impl Fitter {
             Fitting::Filters(graph) => run_graph(graph, f, "fitting a frame on the GPU")?,
             #[cfg(windows)]
             Fitting::D3d11(scaler) => scaler.scale(f)?,
+            #[cfg(target_os = "macos")]
+            Fitting::Transfer(transfer, made) => {
+                let what = "fitting a frame on the GPU";
+                let from = crate::frame_processor::pixels(f, what)?;
+                made.made_as(transfer, from, f, (fitted, layout.into()), what)?
+            }
         };
         same_picture(&mut out, f);
         // SAFETY: a plain field of its own frame.

@@ -46,7 +46,36 @@ unsafe extern "C" fn unmap(held: *mut c_void, _data: *mut u8) {
 }
 
 pub(crate) fn can_fit(ops: &Ops) -> bool {
-    ops.colors_kept && !ops.pads && ops.layout == ops.out_layout
+    ops.colors_kept && !ops.pads && (ops.layout == ops.out_layout || ops.rotation == 0)
+}
+
+#[cfg(target_os = "macos")]
+pub(super) fn transfer(
+    from: ffmpeg::format::Pixel,
+    to: ffmpeg::format::Pixel,
+    rotation: u16,
+) -> Result<super::Fitting> {
+    if rotation != 0 {
+        return Err(Error::Invalid(format!(
+            "VideoToolbox doesn't change turned {from:?} frames into {to:?}"
+        )));
+    }
+    let what = "fitting a frame on the GPU";
+    Ok(super::Fitting::Transfer(
+        crate::frame_processor::Transfer::new(what)?,
+        crate::frame_processor::Frames::default(),
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn transfer(
+    from: ffmpeg::format::Pixel,
+    to: ffmpeg::format::Pixel,
+    _rotation: u16,
+) -> Result<super::Fitting> {
+    Err(Error::Invalid(format!(
+        "VideoToolbox doesn't change {from:?} frames into {to:?}"
+    )))
 }
 
 pub(super) fn shrink_spec((w, h): (u32, u32)) -> String {
@@ -94,9 +123,10 @@ mod tests {
     }
 
     #[test]
-    fn ten_bit_frames_dont_fit_into_eight_bit_pictures() {
+    fn turned_frames_in_another_layout_dont_fit() {
         assert!(!can_fit(&Ops {
             layout: format::Pixel::P010LE,
+            rotation: 90,
             ..kept()
         }));
     }
