@@ -219,6 +219,10 @@ impl Maker {
         &self.output
     }
 
+    fn places_on_gpu(&self, size: (u32, u32)) -> bool {
+        matches!(self.output, Output::Cuda { .. }) && size == (self.out.0, self.out.1)
+    }
+
     pub(crate) fn into_output(self) -> Output {
         self.output
     }
@@ -317,7 +321,7 @@ impl Maker {
         let (out_w, out_h) = stage.size.unwrap_or((self.out.0, self.out.1));
         let out_fmt = self.out.2;
         let mut facts = self.facts(stage, fitting, frame, rotation);
-        if stage.size.is_some() {
+        if stage.size.is_some_and(|size| !self.places_on_gpu(size)) {
             facts.mixes = false;
         }
         let dest = self.dest(frame);

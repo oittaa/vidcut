@@ -10,6 +10,14 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - H.264 with B-frames has open GOPs.
 - `busy` adds new noise around the barcode in each frame. Thus the stream is heavy to decode.
 
+**GPU check:** `scripts/gpu-check.sh` (release build) shows what runs on the GPU in a 4K export and in the viewer.
+
+- It uses 5 s of the Big Buck Bunny 4K60 clip from 1:00, plain and at 150% zoom.
+- For each, it exports with the hardware encoder and prints the export's report, the time and the CPU time.
+- It prints the PSNR of 12 frames against the CPU encoder's frames.
+- It prints where the viewer's picture was held, and its PSNR against the export pipeline's frame.
+- `scripts/fetch-test-media.sh bbb-2160p60` gets the clip.
+
 **Project speed:** `scripts/history-speed.sh [EDITS]` (release builds).
 
 - It makes a project of 300 media and 2000 clips in a temporary folder, with `FILL` undo steps (100).
@@ -107,7 +115,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - The workers and the job yield to players, at the lowest priority.
   - One worker at a time decodes beside the player, as timeline tiles do.
   - It prints the presents that showed the previous picture, the tiles and job frames each second, the maximum thread count and the peak memory.
-- `decode_speed FILE [FRAMES]`: the decoding speed, the cores and the seek times, on the CPU and on each GPU decoder.
+- `decode_speed FILE [FRAMES] [START_S]`: the decoding speed, the cores and the seek times, on the CPU and on each GPU decoder.
+  - It starts at `START_S` seconds into the file. On Windows, it also prints the GPU memory that the decoding takes.
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build):
   - It exports a stretch at a bitrate (`qN`: constant quality), with `video.*` settings (`passes=2`).
   - It prints the bitrate that it reached, the time and the luma PSNR.
@@ -117,7 +126,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - It uses the player, its GPU decoding, and the viewer's shader on a GPU device of its own (`gui::frame::render`).
 - It shows the cues of the shown subtitle track, as the viewer does.
 - Without `--viewer`, `frame render` draws the frame with the export's pipeline.
-- The answer names the renderer, and the layout, the place and the layers of the picture.
+- The answer names the renderer. It gives the layout and the place of each layer of the picture, from the bottom up.
 
 **Debugging:**
 

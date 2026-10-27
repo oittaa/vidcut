@@ -199,7 +199,7 @@ fn kernel(cuda: &Cuda, ctx: CuContext) -> Result<*mut c_void> {
     kernel_of(cuda, ctx, PTX, c"vidcut_mix")
 }
 
-fn kernel_of(
+pub(super) fn kernel_of(
     cuda: &Cuda,
     ctx: CuContext,
     ptx: &str,
@@ -235,7 +235,7 @@ fn kernel_of(
     Ok(function)
 }
 
-fn frame_u32(width: i32, height: i32) -> Result<(u32, u32)> {
+pub(super) fn frame_u32(width: i32, height: i32) -> Result<(u32, u32)> {
     match (u32::try_from(width), u32::try_from(height)) {
         (Ok(width), Ok(height)) => Ok((width, height)),
         _ => Err(Error::Invalid(format!(
@@ -244,7 +244,7 @@ fn frame_u32(width: i32, height: i32) -> Result<(u32, u32)> {
     }
 }
 
-fn stride_u64(linesize: i32) -> Result<u64> {
+pub(super) fn stride_u64(linesize: i32) -> Result<u64> {
     u64::try_from(linesize)
         .map_err(|_| Error::Invalid(format!("a picture stride of {linesize} doesn't fit")))
 }

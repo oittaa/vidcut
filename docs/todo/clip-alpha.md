@@ -10,6 +10,13 @@ The spec:
 - An export writes alpha only with Export Alpha on, in a format that has alpha (p. 1205).
 - When a program renders as one file, its layers composite into one picture (p. 473).
 - Measured in Resolve Studio 21.1.1: a ProRes 4444 with alpha and no tags is Straight.
+- Measured in Resolve Studio 21.1.2, with 16-bit renders. A PNG of color c and alpha α is over a picture b.
+  - None: c. The PNG is opaque.
+  - Straight: b + (c − b) × α.
+  - Premultiplied: c + b × (1 − α), at most 1.
+  - The opacity and the Softness of the crop multiply α.
+  - A composite mode mixes first. Then α fades the mix M: b + (M − b) × α.
+  - Invert: b + (c − b) × (1 − α). It is the fourth choice of the Alpha Mode list.
 
 In vidcut:
 

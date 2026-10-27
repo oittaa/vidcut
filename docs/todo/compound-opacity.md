@@ -5,8 +5,9 @@
 - vidcut fades each picture and title inside a compound clip by the opacity and the soft edges of the compound clip (`place::Placing`).
 - Where two pictures inside it overlap, the lower picture thus shows through the upper picture.
 - A picture inside it at the Normal mode takes the composite mode of the compound clip.
-- Resolve possibly mixes the tracks of the compound clip first, and then fades or mixes the result. This is not measured.
-- To do:
-  - Measure it in Resolve Studio: a compound clip with two overlapping pictures, at an opacity of 50%.
-  - Measure a compound clip with a composite mode, for example Multiply, over a picture below it.
-  - If Resolve fades the mix, mix the tracks of the compound clip first. Then fade the mix, in the viewer and in the export.
+- Resolve mixes the tracks of the compound clip first. Then it fades the mix by the opacity, or mixes it by the composite mode.
+  - Measured in Resolve Studio 21.1.2, with 16-bit renders. Inside the compound clip, a picture cropped to its left half is over a full picture.
+  - At an opacity of 50% over white, the frame is 0.5 × the mix + 0.5.
+  - At Multiply over 50% gray, the frame is 0.5 × the mix.
+  - The soft edges of a compound clip are not measured.
+- To do: mix the tracks of the compound clip first. Then fade the mix, or mix it by its composite mode, in the viewer and in the export.
