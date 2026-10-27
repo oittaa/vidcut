@@ -716,7 +716,10 @@ pub(crate) fn overlay(
     size: (u32, u32),
     area: [u32; 4],
 ) -> Result<(frame::Video, frame::Video)> {
+    let own = comps(layer.picture.format())?;
     let comps = comps(pixel)?;
+    alike(&comps, &own)?;
+    let opaque = alpha_index(layer.picture.format()).map(|k| own[k]);
     let (w, h) = (area[2] - area[0], area[3] - area[1]);
     let mut color = frame::Video::new(pixel, w, h);
     let mut alpha = frame::Video::new(pixel, w, h);
@@ -726,15 +729,22 @@ pub(crate) fn overlay(
         }
     }
     for p in 0..color.planes() {
-        let mine: Vec<Shading> = comps
+        let mine: Vec<(Comp, Shading, Option<Shading>)> = comps
             .iter()
-            .filter(|c| c.plane == p)
-            .map(|c| Shading::of(*c, layer, size, area, c.grid()))
+            .zip(&own)
+            .filter(|(c, _)| c.plane == p)
+            .map(|(c, o)| {
+                (
+                    *c,
+                    Shading::of(*o, layer, size, area, c.grid()),
+                    opaque.map(|a| Shading::of(a, layer, size, area, c.grid())),
+                )
+            })
             .collect();
-        let Some(first) = mine.first() else {
+        let Some((first, _, _)) = mine.first() else {
             continue;
         };
-        let top = (area[1] >> first.comp.log2h) as usize;
+        let top = (area[1] >> first.log2h) as usize;
         let rows = top..top + color.plane_height(p) as usize;
         let (cs, as_) = (color.stride(p), alpha.stride(p));
         let mut colors = color.data_mut(p);
@@ -749,14 +759,17 @@ pub(crate) fn overlay(
                     for (k, y) in band.enumerate() {
                         let crow = &mut cc[k * cs..][..cs];
                         let arow = &mut ac[k * as_..][..as_];
-                        for s in mine {
-                            let left = (area[0] >> s.comp.log2w) as usize;
-                            let full = ((1u32 << s.comp.depth) - 1) as f32;
+                        for (c, s, opaque) in mine {
+                            let left = (area[0] >> c.log2w) as usize;
+                            let full = c.top() as f32;
                             for x in s.columns() {
                                 if let Some((shown, a)) = s.pixel(x, y) {
-                                    let to = (x - left) * s.comp.step + s.comp.offset;
-                                    s.comp.write(crow, to, shown);
-                                    s.comp.write(arow, to, a * full);
+                                    let opaque = opaque.as_ref().map_or(1.0, |o| {
+                                        o.pixel(x, y).map_or(0.0, |(v, _)| v / o.comp.top() as f32)
+                                    });
+                                    let to = (x - left) * c.step + c.offset;
+                                    c.write(crow, to, shown);
+                                    c.write(arow, to, a * opaque * full);
                                 }
                             }
                         }

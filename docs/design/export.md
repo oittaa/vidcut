@@ -331,6 +331,7 @@ The pictures:
   - It averages the components of the frame below over the same place. Thus a chroma sample takes the mean of the luma under it.
   - `place::Placing` takes the first mode other than Normal, from the picture out through its compound clips.
 - For NVENC and VideoToolbox, the frame below stays on the GPU. The CPU makes the colors and coverage of the picture (`cuda::burn::Overlay::of`, `mixing::Overlay::of`), and the GPU mixes them in, as for a title.
+  - `place::overlay` reads the picture in its own layout. The coverage includes the alpha of the picture.
   - A frame with a composite mode or a wipe mixes on the CPU.
 - A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once (`mix::crossed`, `cuda::mix::sum`, `Mixer::sum`).
 

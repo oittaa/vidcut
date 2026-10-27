@@ -2078,11 +2078,9 @@ impl VideoFrames {
         };
         let (w, h, _) = self.maker.out();
         let wiped = layers.iter().any(|l| l.wipe.is_some());
-        let blended = layers.iter().any(|l| {
-            l.alpha
-                || l.placing
-                    .as_ref()
-                    .is_some_and(|(p, _)| p.mode != CompositeMode::Normal)
+        let blended = layers.iter().any(|l| match &l.placing {
+            Some((p, _)) => p.mode != CompositeMode::Normal,
+            None => l.alpha,
         });
         let on_gpu = match self.maker.output() {
             Output::Cuda { frames, .. } if self.gpu_mixes() && !wiped && !blended => {

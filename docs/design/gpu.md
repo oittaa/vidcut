@@ -102,7 +102,8 @@ Mixing and overlays:
 - When the driver refuses the kernel of `cuda::mix`, the CPU mixes for the rest of the export. The result tells why.
 - CUDA and VideoToolbox draw subtitles, titles and placed pictures into the frame on the GPU (`cuda::burn`, `Mixer::burn`). The CPU draws the overlay.
 - For the other GPUs, a frame comes down while an overlay shows.
-- A wipe, a composite mode and a layer with alpha mix in memory.
+- A wipe, a composite mode and a layer with alpha and nothing below mix in memory.
+- A layer with alpha over other layers is a placed picture. The CPU draws its overlay with its alpha, and the GPU mixes it in.
 - A frame with alpha does not fit on the GPU (`hw::can_fit`). It comes down with its alpha.
 
 Frames that come down:
