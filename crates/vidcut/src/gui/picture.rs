@@ -1906,21 +1906,24 @@ impl Slot {
                     y: make((w, h), one),
                     u: make((cw, ch), one),
                     v: make((cw, ch), one),
-                    a: make(if alpha { (w, h) } else { (1, 1) }, one),
+                    a: make(
+                        if alpha { (w, h) } else { (1, 1) },
+                        wgpu::TextureFormat::R8Unorm,
+                    ),
                 },
                 Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => Planes {
                     key,
                     y: make((w, h), one),
                     u: make((cw, ch), two),
                     v: make((1, 1), one),
-                    a: make((1, 1), one),
+                    a: make((1, 1), wgpu::TextureFormat::R8Unorm),
                 },
                 Layout::Ayuv64 => Planes {
                     key,
                     y: make((w, h), four),
                     u: make((1, 1), one),
                     v: make((1, 1), one),
-                    a: make((1, 1), one),
+                    a: make((1, 1), wgpu::TextureFormat::R8Unorm),
                 },
             });
         }
@@ -1950,20 +1953,19 @@ impl Slot {
                 put(&planes.u, 1, (cw, ch), 2);
                 put(&planes.v, 2, (cw, ch), 2);
                 if picture.alpha_plane() {
-                    put(&planes.a, 3, (w, h), 2);
+                    write_alpha(gpu, &planes.a, frame, (w, h));
                 }
             }
             (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12, false) => {
                 let shift = if layout == Layout::Yuv444p12 { 4 } else { 2 };
-                let mut textures = vec![
+                if picture.alpha_plane() {
+                    write_alpha(gpu, &planes.a, frame, (w, h));
+                }
+                for (texture, plane, size) in [
                     (&planes.y, 0, (w, h)),
                     (&planes.u, 1, (cw, ch)),
                     (&planes.v, 2, (cw, ch)),
-                ];
-                if picture.alpha_plane() {
-                    textures.push((&planes.a, 3, (w, h)));
-                }
-                for (texture, plane, size) in textures {
+                ] {
                     let stride = frame.stride(plane);
                     let data = frame.data(plane);
                     let row = size.0 as usize;
@@ -2429,6 +2431,27 @@ fn lettering_of(
         .into_iter()
         .flat_map(|v| (v as f32).to_le_bytes())
         .collect()
+}
+
+fn write_alpha(
+    gpu: &Gpu,
+    texture: &wgpu::Texture,
+    frame: &vidcut_av::ffmpeg::frame::Video,
+    (w, h): (u32, u32),
+) {
+    let (stride, data) = (frame.stride(3), frame.data(3));
+    let row = w as usize;
+    let mut top = Vec::with_capacity(row * h as usize);
+    for y in 0..h as usize {
+        let line = &data[y * stride..y * stride + row * 2];
+        top.extend(
+            line.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|s| (u16::from_le_bytes(*s) >> 4) as u8),
+        );
+    }
+    write_plane(&gpu.queue, texture, &top, row, (w, h), 1);
 }
 
 fn sixteen(layout: Layout) -> bool {
