@@ -79,7 +79,7 @@ In exports:
 | Vulkan | NVENC; Vulkan's ProRes | libplacebo (`CudaPictures`) | `cuda::mix` | other encoders; alpha |
 | VA-API | VAAPI | `scale_vaapi`, `pad_vaapi`, `transpose_vaapi` | in memory | other encoders; color changes; dissolves |
 | Direct3D 11 | AMF | the video processor | in memory | other encoders; color changes; 8-bit into 10-bit; dissolves |
-| VideoToolbox | its own encoders | `vt::Fit` | `mixing::Mixer` | wipes; composite modes; timeline colors other than the output's |
+| VideoToolbox | its own encoders | `vt::Fit` | `mixing::Mixer` | wipes; composite modes; a timeline color space that is not the color space of the export |
 
 VideoToolbox (`vt::Fit`) fits a frame in these steps. It skips a step that the frame does not need.
 

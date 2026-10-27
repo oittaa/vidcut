@@ -16,7 +16,8 @@ In vidcut:
 - A clip with alpha composites over the tracks below it by straight alpha, in the viewer and in the exports.
   - Measured: red at an alpha of 0.25 over green exports as (62, 95, 0).
 - An export writes opaque frames. ProRes 4444 has an opaque alpha plane on the CPU, and no alpha plane on VideoToolbox.
-- For CUDA and VideoToolbox, a layer with alpha over other layers mixes on the GPU. The CPU makes its overlay (`place::overlay`).
+- For CUDA, a layer with alpha over other layers mixes on the GPU. The CPU makes its overlay (`place::overlay`).
+- For VideoToolbox, it mixes on the GPU only when the timeline color space is the color space of the export.
 - A layer with alpha and nothing below mixes on the CPU.
 - Retime Process with Frame Blend or AI and Super Scale with AI drop the alpha.
 - An HDR conversion drops the alpha when FFmpeg has no zscale. Then the CPU converts the colors.
