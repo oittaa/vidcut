@@ -130,14 +130,14 @@ step() {
 }
 
 measure() {
-  local name="$1" file="$2" frames="$3" env="${4:-}"
+  local name="$1" file="$2" frames="$3" env="${4:-}" preset="${5:-h264-master}"
   local i status secs cpu foot times="$runs" once=""
   : >"$work/$name.runs"
   for ((i = 1; i <= times; i++)); do
     note "$name: run $i of $times"
     status=0
     env $env VIDCUT_DEBUG=1 /usr/bin/time -l "$V" -p "$file" --headless export start "$work/$name.mov" \
-      --preset h264-master --overwrite >/dev/null 2>"$work/$name-$i.log" || status=$?
+      --preset "$preset" --overwrite >/dev/null 2>"$work/$name-$i.log" || status=$?
     if [[ $status -ne 0 ]]; then
       say "- **$name failed** (status $status). The end of its log:"
       tail -n 30 "$work/$name-$i.log" | block
@@ -170,25 +170,26 @@ table() {
 
 say ""
 say "## Super Scale"
-say "A quarter second of Big Buck Bunny (15 frames), made 960x540 first with H.264 on VideoToolbox, then shown in 1920x1080 with Super Scale on and the upscaler of Auto (AI of macOS). GPU decoding gives VideoToolbox frames; CPU decoding (VIDCUT_HWDEC=none) sends RGB from the CPU."
+say "A quarter second of Big Buck Bunny (15 frames), made 960x540 first as 10-bit HEVC (h265-master), then shown in 1920x1080 with Super Scale on and the upscaler of Auto (AI of macOS), and encoded with h265-master. GPU decoding gives VideoToolbox frames; CPU decoding (VIDCUT_HWDEC=none) sends RGB from the CPU. The CPU case runs first, so macOS's first start falls on it."
 note "making the 960x540 source"
 project "$work/make-540.vidcut" 960 540 "$media" "${first}f..$((first + 15))f"
-"$V" -p "$work/make-540.vidcut" --headless export start "$work/bbb-540.mov" --preset h264-master --overwrite >/dev/null
+"$V" -p "$work/make-540.vidcut" --headless export start "$work/bbb-540.mov" --preset h265-master --overwrite >/dev/null
 table
-for how in gpu cpu; do
+for how in cpu gpu; do
   name="scale-$how"
   project "$work/$name.vidcut" 1920 1080 "$work/bbb-540.mov" "0f..15f"
   "$V" -p "$work/$name.vidcut" --headless media set m1 --super-scale true --download >/dev/null
   env=""
   if [[ $how == cpu ]]; then env="VIDCUT_HWDEC=none"; fi
-  measure "$name" "$work/$name.vidcut" 15 "$env" || true
+  measure "$name" "$work/$name.vidcut" 15 "$env" h265-master || true
 done
 say ""
-for how in gpu cpu; do
+for how in cpu gpu; do
   log="$work/scale-$how-1.log"
   say "- scale-$how, each frame, median (mean): to RGB $(step 'to RGB in' "$log") ms, upscaler $(step 'upscaler in' "$log") ms, kept $(step 'kept in' "$log") ms, fitted $(step 'fitted in' "$log") ms."
   say "  - Inside macOS: in $(step ': in' "$log") ms, scaled $(step ', scaled in' "$log") ms, out $(step ', out in' "$log") ms."
   grep -h "won't fit\|error" "$log" | sort | uniq -c | sed -n 1,3p | sed 's/^/  - /' >>"$report" || true
+  grep -h "^\[decoding\].*first frame" "$log" | sed -E 's/^\[decoding\] [^,]*, //; s/; first frame [^;]*//' | sort | uniq -c | sed -n 1,3p | sed 's/^/  - /' >>"$report" || true
 done
 note "comparing the two outputs"
 psnr="$(ffmpeg -nostats -i "$work/scale-gpu.mov" -i "$work/scale-cpu.mov" -lavfi "[0:v][1:v]psnr" -f null - 2>&1 | grep -o 'average:[0-9.inf]*' | sed -n 1p || true)"
