@@ -2,8 +2,9 @@
 # Temporary benchmark of the macOS processes of Super Scale and Retime Process
 # (AI), for a Mac. One command:
 #
-#   scripts/macos-bench.sh
+#   scripts/macos-bench.sh [retime] [scale] [quality] [viewer]
 #
+# With no names, it runs every section; with names, only those.
 # It pulls the branch claude/macos-zero-copy, builds vidcut and the player
 # benchmark, fetches Big Buck Bunny (673 MB, once) into $VIDCUT_TEST_DATA
 # (default ~/Downloads/vidcut-tmp), and measures exports that VideoToolbox
@@ -27,6 +28,8 @@ if [[ "${MACOS_BENCH_PULLED:-}" != 1 ]]; then
 fi
 
 runs=3
+sections="${*:-retime scale quality viewer}"
+wanted() { [[ " $sections " == *" $1 "* ]]; }
 stamp="$(date +%Y%m%d-%H%M%S)"
 data="${VIDCUT_TEST_DATA:-$HOME/Downloads/vidcut-tmp}"
 work="$data/macos-bench/$stamp"
@@ -67,6 +70,7 @@ trap finish EXIT
 say "# macOS benchmark, $stamp"
 say ""
 say "- Commit: $(git rev-parse --short HEAD) on $branch"
+say "- Sections: $sections"
 say "- macOS: $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
 say "- Mac: $(sysctl -n hw.model), $(sysctl -n machdep.cpu.brand_string), $(( $(sysctl -n hw.memsize) / 1073741824 )) GB, $(sysctl -n hw.ncpu) cores"
 say "- Power: $(pmset -g batt 2>/dev/null | sed -n 1p | sed "s/^Now drawing from //")"
@@ -179,6 +183,7 @@ table() {
   say "|---|---|---|---|---|---|---|"
 }
 
+if wanted retime; then
 say ""
 say "## Retime Process"
 say "One second of the 4K file (frames $first to $((first + 59))) at 25%: 240 frames, a new pair every fourth frame. Encoded with H.264 on VideoToolbox (h264-master)."
@@ -195,10 +200,12 @@ for size in "1920 1080" "3840 2160"; do
 done
 say ""
 for h in 1080 2160; do steps_retime "retime-$h-macos"; done
+fi
 
+if wanted scale; then
 say ""
 say "## Super Scale"
-say "Two seconds of Big Buck Bunny, made smaller first with H.264 on VideoToolbox, then enlarged 2x: 960x540 to 1920x1080, and 1920x1080 to 3840x2160. 120 frames."
+say "Two seconds of Big Buck Bunny, made smaller first with H.264 on VideoToolbox, then shown 2x as large: 960x540 in 1920x1080, and 1920x1080 in 3840x2160. 120 frames. Super Scale at Auto: macOS makes what its factors give, and vidcut fits it."
 for size in "960 540" "1920 1080"; do
   set -- $size
   small="$work/bbb-$2.mov"
@@ -214,14 +221,17 @@ for pair in "540 1920 1080" "1080 3840 2160"; do
     if [[ $how == none ]]; then
       "$V" -p "$work/$name.vidcut" --headless media set m1 --super-scale none >/dev/null
     else
-      "$V" -p "$work/$name.vidcut" --headless media set m1 --super-scale 2x --upscaler "$how" --download >/dev/null
+      "$V" -p "$work/$name.vidcut" --headless media set m1 --super-scale auto --upscaler "$how" --download >/dev/null
     fi
     measure "$name" "$work/$name.vidcut" 120 || true
   done
 done
 say ""
 for n in "540-to-1080" "1080-to-2160"; do steps_scale "scale-$n-macos"; done
+grep -h 'macOS: [0-9]*x[0-9]* to' "$work"/scale-*-macos-1.log 2>/dev/null | sed -n 1,2p | sed 's/^/- /' >>"$report" || true
+fi
 
+if wanted quality; then
 say ""
 say "## Quality of AI in Retime Process"
 dir="$work/quality"
@@ -244,7 +254,9 @@ ffmpeg -v error -i "$dir/out.mov" -framerate 60 -i "$dir/truth/%04d.png" -lavfi 
   "[0:v]format=rgb24,select='mod(n\,2)*lt(n\,119)',setpts=N/TB[a];[1:v]format=rgb24,select='mod(n\,2)*lt(n\,119)',setpts=N/TB[b];[a][b]psnr=stats_file=$dir/psnr.txt" \
   -f null - 2>>"$work/psnr.log" || true
 say "1920x1080, every other frame made again (as in #571, where it was 31.39 dB): $(awk -F'psnr_avg:' 'NF > 1 {split($2, a, " "); v = a[1]; if (v == "inf") v = 99; s += v; k++} END {if (k) printf "%.2f dB mean over %d made frames", s / k, k; else printf "no PSNR"}' "$dir/psnr.txt")."
+fi
 
+if wanted viewer; then
 say ""
 say "## The viewer"
 say "The real player with a paced device at 60 presents each second, for 10 s, on 10 s of the 4K file at 25% in a 1920x1080 timeline."
@@ -253,10 +265,12 @@ for p in nearest macos; do
   project "$work/$name.vidcut" 1920 1080 "$media" "${first}f..$((first + 600))f"
   "$V" -p "$work/$name.vidcut" --headless edit change-speed c1 --speed 0.25 >/dev/null
   "$V" -p "$work/$name.vidcut" --headless clip set c1 --retime "$p" >/dev/null
-  say "- $p:"
-  "$PL" "$work/$name.vidcut" 10 gpu >"$work/$name.txt" 2>&1 || true
-  grep -E '^(alone|loaded):' "$work/$name.txt" | sed 's/^/  - /' >>"$report" || true
+  status=0
+  "$PL" "$work/$name.vidcut" 10 gpu >"$work/$name.txt" 2>&1 || status=$?
+  say "- $p (status $status):"
+  grep -v '^\[' "$work/$name.txt" | tail -n 30 | block
 done
+fi
 
 say ""
 say "Files on the Mac: $work"
