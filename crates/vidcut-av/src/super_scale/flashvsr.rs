@@ -242,7 +242,11 @@ impl Run {
         rgbs.into_iter()
             .filter_map(|rgb| {
                 let (index, pts) = self.fed.pop_front()?;
-                Some(super::Out { index, pts, rgb })
+                Some(super::Out {
+                    index,
+                    pts,
+                    picture: super::Picture::Rgb(rgb),
+                })
             })
             .collect()
     }

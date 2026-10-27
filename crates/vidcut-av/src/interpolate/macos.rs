@@ -86,9 +86,9 @@ mod imp {
 
     use super::{Input, Key, NEEDS};
     use crate::error::{Error, Result};
-    use crate::ffmpeg::{self, ffi, frame::Video};
+    use crate::ffmpeg::frame::Video;
     use crate::frame_processor::{
-        Transfer, buffer, failed, format_in, fourcc, frame, pool, read, write,
+        Frames, Transfer, buffer, failed, format_in, fourcc, frame, pixels, pool, read, write,
     };
 
     const WHAT: &str = "the frame rate conversion of macOS";
@@ -113,86 +113,6 @@ mod imp {
         next: Retained<VTFrameProcessorFrame>,
     }
 
-    struct Pool {
-        frames: *mut ffi::AVBufferRef,
-        like: (ffi::AVPixelFormat, ffi::AVColorRange),
-    }
-
-    fn like(f: &Video) -> Option<(ffi::AVPixelFormat, ffi::AVColorRange)> {
-        // SAFETY: the frame's own fields, and its live frames context.
-        unsafe {
-            let of = (*f.as_ptr()).hw_frames_ctx;
-            (!of.is_null()).then(|| {
-                let of = &*((*of).data as *const ffi::AVHWFramesContext);
-                (of.sw_format, (*f.as_ptr()).color_range)
-            })
-        }
-    }
-
-    impl Pool {
-        fn like(f: &Video, (w, h): (u32, u32)) -> Result<Self> {
-            // SAFETY: the frame's live frames context, and a new frames context on its device, freed on failure.
-            unsafe {
-                let of = (*f.as_ptr()).hw_frames_ctx;
-                if of.is_null() {
-                    return Err(Error::Invalid(format!(
-                        "{WHAT}: a frame without GPU frames"
-                    )));
-                }
-                let of = &*((*of).data as *const ffi::AVHWFramesContext);
-                let mut frames = ffi::av_hwframe_ctx_alloc(of.device_ref);
-                if frames.is_null() {
-                    return Err(Error::Invalid(format!("{WHAT}: no memory for GPU frames")));
-                }
-                let fc = &mut *((*frames).data as *mut ffi::AVHWFramesContext);
-                fc.format = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
-                fc.sw_format = of.sw_format;
-                fc.width = w as i32;
-                fc.height = h as i32;
-                let range = (*f.as_ptr()).color_range;
-                (*(fc.hwctx as *mut ffi::AVVTFramesContext)).color_range = range;
-                let ret = ffi::av_hwframe_ctx_init(frames);
-                if ret < 0 {
-                    ffi::av_buffer_unref(&mut frames);
-                    return Err(Error::Ffmpeg {
-                        context: format!("{WHAT}: setting up VideoToolbox frames"),
-                        source: ffmpeg::Error::from(ret),
-                    });
-                }
-                Ok(Self {
-                    frames,
-                    like: (of.sw_format, range),
-                })
-            }
-        }
-
-        fn frame(&self) -> Result<Video> {
-            let mut out = Video::empty();
-            // SAFETY: a fresh frame of this live pool.
-            let ret = unsafe { ffi::av_hwframe_get_buffer(self.frames, out.as_mut_ptr(), 0) };
-            if ret < 0 {
-                return Err(Error::Ffmpeg {
-                    context: format!("{WHAT}: getting a VideoToolbox frame"),
-                    source: ffmpeg::Error::from(ret),
-                });
-            }
-            Ok(out)
-        }
-    }
-
-    impl Drop for Pool {
-        fn drop(&mut self) {
-            // SAFETY: the reference that `like` made.
-            unsafe { ffi::av_buffer_unref(&mut self.frames) };
-        }
-    }
-
-    fn pixels(f: &Video) -> Result<&CVPixelBuffer> {
-        // SAFETY: a VideoToolbox frame's `data[3]` is its pixel buffer, alive as long as the frame.
-        unsafe { (*f.as_ptr()).data[3].cast::<CVPixelBuffer>().as_ref() }
-            .ok_or_else(|| Error::Invalid(format!("{WHAT}: a frame without a pixel buffer")))
-    }
-
     struct Session {
         processor: Retained<VTFrameProcessor>,
         sources: CFRetained<CVPixelBufferPool>,
@@ -201,7 +121,7 @@ mod imp {
         format: u32,
         size: (u32, u32),
         pair: Option<Pair>,
-        pool: Option<Pool>,
+        frames: Frames,
     }
 
     // SAFETY: the session sits behind a mutex, so one thread at a time uses it.
@@ -267,7 +187,7 @@ mod imp {
                 format,
                 size,
                 pair: None,
-                pool: None,
+                frames: Frames::default(),
             })
         }
 
@@ -277,7 +197,8 @@ mod imp {
                 Input::Rgb(rgb) => write(&picture, self.format, self.size, rgb)?,
                 Input::Frame(f) => {
                     let matrix = crate::color::colors_of(f).matrix;
-                    self.transfer.run(pixels(f)?, &picture, matrix, WHAT)?;
+                    self.transfer
+                        .run(pixels(f, WHAT)?, &picture, matrix, WHAT)?;
                 }
             }
             frame(&picture, at, WHAT)
@@ -352,23 +273,9 @@ mod imp {
         fn between_frames(&mut self, key: &Key, a: &Video, b: &Video, t: f64) -> Result<Video> {
             let (made, [wrote, processed]) = self.make(key, Input::Frame(a), Input::Frame(b), t)?;
             let clock = std::time::Instant::now();
-            if self.pool.as_ref().is_none_or(|p| Some(p.like) != like(b)) {
-                self.pool = None;
-                self.pool = Some(Pool::like(b, self.size)?);
-            }
-            let mut out = self.pool.as_ref().expect("a pool").frame()?;
-            let matrix = crate::color::colors_of(b).matrix;
-            self.transfer.run(&made, pixels(&out)?, matrix, WHAT)?;
-            out.set_pts(b.pts());
-            // SAFETY: both frames are valid; plain fields.
-            unsafe {
-                let (o, i) = (out.as_mut_ptr(), b.as_ptr());
-                (*o).color_range = (*i).color_range;
-                (*o).colorspace = (*i).colorspace;
-                (*o).color_primaries = (*i).color_primaries;
-                (*o).color_trc = (*i).color_trc;
-                (*o).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 };
-            }
+            let out = self
+                .frames
+                .made(&self.transfer, &made, b, self.size, WHAT)?;
             told(wrote, processed, clock);
             Ok(out)
         }

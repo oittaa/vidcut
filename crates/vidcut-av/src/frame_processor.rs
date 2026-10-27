@@ -30,6 +30,7 @@ use objc2_video_toolbox::{
 
 use crate::color::Matrix;
 use crate::error::{Error, Result};
+use crate::ffmpeg::{self, ffi, frame::Video};
 
 const BGRA: u32 = kCVPixelFormatType_32BGRA;
 const NV12: u32 = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
@@ -228,6 +229,114 @@ impl Drop for Transfer {
     fn drop(&mut self) {
         // SAFETY: the session that `new` made.
         unsafe { self.0.invalidate() };
+    }
+}
+
+pub(crate) fn pixels<'a>(f: &'a Video, what: &str) -> Result<&'a CVPixelBuffer> {
+    // SAFETY: a VideoToolbox frame's `data[3]` is its pixel buffer, alive as long as the frame.
+    unsafe { (*f.as_ptr()).data[3].cast::<CVPixelBuffer>().as_ref() }
+        .ok_or_else(|| Error::Invalid(format!("{what}: a frame without a pixel buffer")))
+}
+
+type Like = (ffi::AVPixelFormat, ffi::AVColorRange, (u32, u32));
+
+fn like_of(f: &Video, size: (u32, u32)) -> Option<Like> {
+    // SAFETY: the frame's own fields, and its live frames context.
+    unsafe {
+        let of = (*f.as_ptr()).hw_frames_ctx;
+        (!of.is_null()).then(|| {
+            let of = &*((*of).data as *const ffi::AVHWFramesContext);
+            (of.sw_format, (*f.as_ptr()).color_range, size)
+        })
+    }
+}
+
+struct Pool {
+    frames: *mut ffi::AVBufferRef,
+    like: Like,
+}
+
+impl Pool {
+    fn new(f: &Video, like: Like, what: &str) -> Result<Self> {
+        let (format, range, (w, h)) = like;
+        // SAFETY: the frame's live frames context, and a new frames context on its device, freed on failure.
+        unsafe {
+            let of = &*((*(*f.as_ptr()).hw_frames_ctx).data as *const ffi::AVHWFramesContext);
+            let mut frames = ffi::av_hwframe_ctx_alloc(of.device_ref);
+            if frames.is_null() {
+                return Err(Error::Invalid(format!("{what}: no memory for GPU frames")));
+            }
+            let fc = &mut *((*frames).data as *mut ffi::AVHWFramesContext);
+            fc.format = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+            fc.sw_format = format;
+            fc.width = w as i32;
+            fc.height = h as i32;
+            (*(fc.hwctx as *mut ffi::AVVTFramesContext)).color_range = range;
+            let ret = ffi::av_hwframe_ctx_init(frames);
+            if ret < 0 {
+                ffi::av_buffer_unref(&mut frames);
+                return Err(Error::Ffmpeg {
+                    context: format!("{what}: setting up VideoToolbox frames"),
+                    source: ffmpeg::Error::from(ret),
+                });
+            }
+            Ok(Self { frames, like })
+        }
+    }
+
+    fn frame(&self, what: &str) -> Result<Video> {
+        let mut out = Video::empty();
+        // SAFETY: a fresh frame of this live pool.
+        let ret = unsafe { ffi::av_hwframe_get_buffer(self.frames, out.as_mut_ptr(), 0) };
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: format!("{what}: getting a VideoToolbox frame"),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(out)
+    }
+}
+
+impl Drop for Pool {
+    fn drop(&mut self) {
+        // SAFETY: the reference that `new` made.
+        unsafe { ffi::av_buffer_unref(&mut self.frames) };
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct Frames(Option<Pool>);
+
+impl Frames {
+    pub(crate) fn made(
+        &mut self,
+        transfer: &Transfer,
+        picture: &CVPixelBuffer,
+        like: &Video,
+        size: (u32, u32),
+        what: &str,
+    ) -> Result<Video> {
+        let key = like_of(like, size)
+            .ok_or_else(|| Error::Invalid(format!("{what}: a frame without GPU frames")))?;
+        if self.0.as_ref().is_none_or(|p| p.like != key) {
+            self.0 = None;
+            self.0 = Some(Pool::new(like, key, what)?);
+        }
+        let mut out = self.0.as_ref().expect("a pool").frame(what)?;
+        let matrix = crate::color::colors_of(like).matrix;
+        transfer.run(picture, pixels(&out, what)?, matrix, what)?;
+        out.set_pts(like.pts());
+        // SAFETY: both frames are valid; plain fields.
+        unsafe {
+            let (o, i) = (out.as_mut_ptr(), like.as_ptr());
+            (*o).color_range = (*i).color_range;
+            (*o).colorspace = (*i).colorspace;
+            (*o).color_primaries = (*i).color_primaries;
+            (*o).color_trc = (*i).color_trc;
+            (*o).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 };
+        }
+        Ok(out)
     }
 }
 
