@@ -937,11 +937,7 @@ fn gpu_graph(
 
 #[cfg(target_os = "macos")]
 fn run_graph(graph: &mut GpuGraph, f: &frame::Video, doing: &str) -> Result<frame::Video> {
-    let mut given = frame::Video::empty();
-    // SAFETY: both frames are valid.
-    if unsafe { ffi::av_frame_ref(given.as_mut_ptr(), f.as_ptr()) } < 0 {
-        return Err(Error::Invalid("no memory for a frame".into()));
-    }
+    let given = crate::export::video::frame_ref(f)?;
     let failed = |source| Error::Ffmpeg {
         context: doing.to_string(),
         source,

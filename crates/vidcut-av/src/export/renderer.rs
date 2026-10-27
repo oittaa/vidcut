@@ -3,7 +3,7 @@ use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
 
 use crate::error::{Error, Result};
-use crate::ffmpeg::{format, frame};
+use crate::ffmpeg::format;
 use crate::thumbs::Image;
 
 use super::video::VideoFrames;
@@ -48,7 +48,7 @@ impl FrameReader {
         let frame = frames
             .next_frame()?
             .ok_or_else(|| Error::Invalid("no frame to render".into()))?;
-        Ok(image(&frame, width, height))
+        Ok(Image::of(&frame))
     }
 }
 
@@ -122,19 +122,4 @@ pub(crate) fn at(piece: &VideoPiece, pos: i64, frames: i64) -> VideoPiece {
         VideoPiece::Black { frames: n } => *n = frames,
     }
     p
-}
-
-fn image(frame: &frame::Video, width: u32, height: u32) -> Image {
-    let stride = frame.stride(0);
-    let row = width as usize * 4;
-    let data = frame.data(0);
-    let mut rgba = Vec::with_capacity(row * height as usize);
-    for y in 0..height as usize {
-        rgba.extend_from_slice(&data[y * stride..y * stride + row]);
-    }
-    Image {
-        width,
-        height,
-        rgba,
-    }
 }

@@ -635,21 +635,11 @@ fn shown_rgb(
         None => drawn.insert(Single::new(reading)?),
     };
     let rgb = single.draw(frame, rotation, (dw, dh), format::Pixel::RGB24, path)?;
-    let (w, h) = (rgb.width() as usize, rgb.height() as usize);
-    let stride = rgb.stride(0);
-    let mut packed = Vec::with_capacity(w * h * 3);
-    for y in 0..h {
-        packed.extend_from_slice(&rgb.data(0)[y * stride..y * stride + w * 3]);
-    }
-    Ok(packed)
+    Ok(crate::buffers::packed(&rgb, 3))
 }
 
 fn big_picture(out: &[u8], (w, h): (u32, u32), pts: Option<i64>) -> frame::Video {
-    let mut big = frame::Video::new(format::Pixel::RGB24, w, h);
-    let (row, into) = (w as usize * 3, big.stride(0));
-    for (y, line) in out.chunks_exact(row).enumerate() {
-        big.data_mut(0)[y * into..y * into + row].copy_from_slice(line);
-    }
+    let mut big = crate::buffers::unpacked(format::Pixel::RGB24, (w, h), 3, out);
     big.set_color_range(ffmpeg::util::color::Range::JPEG);
     big.set_color_space(ffmpeg::util::color::Space::RGB);
     big.set_color_primaries(ffmpeg::util::color::Primaries::BT709);

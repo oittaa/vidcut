@@ -3,9 +3,34 @@ use std::ffi::{c_int, c_void};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::error::{Error, Result};
-use crate::ffmpeg::{self, codec, ffi, frame};
+use crate::ffmpeg::{self, codec, ffi, format, frame};
 
 const SPARE: usize = 64 << 20;
+
+pub(crate) fn packed(f: &frame::Video, bytes: usize) -> Vec<u8> {
+    let (row, h) = (f.width() as usize * bytes, f.height() as usize);
+    let (stride, data) = (f.stride(0), f.data(0));
+    let mut out = Vec::with_capacity(row * h);
+    for y in 0..h {
+        out.extend_from_slice(&data[y * stride..y * stride + row]);
+    }
+    out
+}
+
+pub(crate) fn unpacked(
+    pixel: format::Pixel,
+    (w, h): (u32, u32),
+    bytes: usize,
+    rows: &[u8],
+) -> frame::Video {
+    let mut f = frame::Video::new(pixel, w, h);
+    let (row, stride) = (w as usize * bytes, f.stride(0));
+    let data = f.data_mut(0);
+    for (y, line) in rows.chunks_exact(row).enumerate() {
+        data[y * stride..y * stride + row].copy_from_slice(line);
+    }
+    f
+}
 
 static SPARES: Mutex<Spares> = Mutex::new(Spares::new());
 

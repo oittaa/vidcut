@@ -743,7 +743,7 @@ fn encode_into(
             let pts = src.pts();
             let made = maker.make(&mut fitting, &src, reader.path())?;
             if went.is_none() {
-                went = fitting.went.map(|w| match w {
+                went = fitting.went().map(|w| match w {
                     Went::Cpu if decoded_on_gpu => Went::Down,
                     w => w,
                 });

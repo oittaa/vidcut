@@ -8,15 +8,19 @@ use crate::route::{Facts, Route, Went, plan};
 
 pub(crate) struct Fitting {
     pub(crate) route: Option<Route>,
-    pub(crate) went: Option<Went>,
 }
 
 impl Fitting {
     pub(crate) fn none() -> Self {
-        Self {
-            route: None,
-            went: None,
-        }
+        Self { route: None }
+    }
+
+    pub(crate) fn went(&self) -> Option<Went> {
+        self.route.map(|route| match route {
+            Route::Kept => Went::Stayed,
+            Route::Whole => Went::Down,
+            Route::Cpu => Went::Cpu,
+        })
     }
 
     pub(crate) fn took(&mut self, route: Route, path: &Path) {
@@ -148,11 +152,6 @@ impl Maker {
             let frame = came_down.as_ref().unwrap_or(frame);
             break crate::buffers::owned(&stage.relayout.run(frame, reading)?)?;
         };
-        fitting.went = Some(match route {
-            Route::Kept => Went::Stayed,
-            Route::Whole => Went::Down,
-            Route::Cpu => Went::Cpu,
-        });
         fitting.took(route, path);
         Ok(picture)
     }
