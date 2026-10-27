@@ -336,7 +336,7 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - A VideoToolbox frame that needs no turn goes to the scaler without the CPU (`Run::takes`, `Run::push_frame`).
     - A pixel transfer of VideoToolbox (`Transfer`) puts it into the source buffer, as for AI of Retime Process.
     - The output goes back into a VideoToolbox frame with the layout and the range of the source (`Frames`). It then goes on as a decoded frame does.
-    - In a run that reads its own frames, these frames stay on the GPU. The frames of the other upscalers are read in memory.
+    - The frames that a run reads, or keeps until it takes them (`Source::miss`), stay on the GPU. For the other upscalers, they are read in memory.
   - `macos::check` refuses HDR media and pictures over 1920×1080 (`macos::MOST`), the limit of macOS for video.
   - A run does not download. It stops with an error when macOS does not have the model of its factor.
   - `macos::needed` reports the models while macOS lacks the model of a factor that it lists. Thus the GUI asks first, with the size unknown.

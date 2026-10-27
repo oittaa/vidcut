@@ -1016,6 +1016,7 @@ impl Source {
 
     fn miss(&mut self, f: &frame::Video) -> Result<()> {
         let at = self.frame_index(f.pts());
+        let rotation = self.reader.rotation();
         let Some(run) = self.run.as_mut().filter(|r| r.own && !r.lost && !r.ended) else {
             return Ok(());
         };
@@ -1027,7 +1028,11 @@ impl Source {
             run.lost = true;
             return Ok(());
         }
-        run.missed.push(in_memory(f)?);
+        let kept = match run.run.takes(f, rotation) {
+            true => frame_ref(f)?,
+            false => in_memory(f)?,
+        };
+        run.missed.push(kept);
         Ok(())
     }
 }
