@@ -5,19 +5,30 @@ use half::f16;
 use objc2::AllocAnyThread;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2_core_foundation::{CFDictionary, CFRetained};
+use objc2_core_foundation::{CFDictionary, CFRetained, CFType};
 use objc2_core_media::CMTime;
 use objc2_core_video::{
-    CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBaseAddressOfPlane,
-    CVPixelBufferGetBytesPerRow, CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferIsPlanar,
-    CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferPool,
-    CVPixelBufferUnlockBaseAddress, kCVPixelBufferHeightKey, kCVPixelBufferPixelFormatTypeKey,
-    kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA, kCVPixelFormatType_64RGBAHalf,
-    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVReturnSuccess,
+    CVAttachmentMode, CVPixelBuffer, CVPixelBufferGetBaseAddress,
+    CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRow,
+    CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferIsPlanar, CVPixelBufferLockBaseAddress,
+    CVPixelBufferLockFlags, CVPixelBufferPool, CVPixelBufferUnlockBaseAddress,
+    kCVImageBufferColorPrimaries_ITU_R_709_2, kCVImageBufferColorPrimariesKey,
+    kCVImageBufferTransferFunction_ITU_R_709_2, kCVImageBufferTransferFunctionKey,
+    kCVImageBufferYCbCrMatrix_ITU_R_601_4, kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+    kCVImageBufferYCbCrMatrix_ITU_R_2020, kCVImageBufferYCbCrMatrixKey, kCVPixelBufferHeightKey,
+    kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA,
+    kCVPixelFormatType_64RGBAHalf, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+    kCVReturnSuccess,
 };
 use objc2_foundation::{NSArray, NSDictionary, NSError, NSMutableDictionary, NSNumber, NSString};
-use objc2_video_toolbox::VTFrameProcessorFrame;
+use objc2_video_toolbox::{
+    VTFrameProcessorFrame, VTPixelTransferSession, VTSessionSetProperty,
+    kVTPixelTransferPropertyKey_DestinationColorPrimaries,
+    kVTPixelTransferPropertyKey_DestinationTransferFunction,
+    kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
+};
 
+use crate::color::Matrix;
 use crate::error::{Error, Result};
 
 const BGRA: u32 = kCVPixelFormatType_32BGRA;
@@ -124,6 +135,100 @@ pub(crate) fn frame(
         )
     }
     .ok_or_else(|| Error::Invalid(format!("{what} refused a picture buffer")))
+}
+
+pub(crate) struct Transfer(CFRetained<VTPixelTransferSession>);
+
+// SAFETY: one thread at a time uses a transfer, behind the mutex of its process.
+unsafe impl Send for Transfer {}
+
+impl Transfer {
+    pub(crate) fn new(what: &str) -> Result<Self> {
+        let mut out: *mut VTPixelTransferSession = std::ptr::null_mut();
+        // SAFETY: `out` is a valid place for the session.
+        let status = unsafe { VTPixelTransferSession::create(None, NonNull::from(&mut out)) };
+        let out = NonNull::new(out).filter(|_| status == 0).ok_or_else(|| {
+            Error::Invalid(format!(
+                "a pixel transfer for {what}: VideoToolbox error {status}"
+            ))
+        })?;
+        // SAFETY: VTPixelTransferSessionCreate gives the session with one retain, which this takes.
+        let session = unsafe { CFRetained::from_raw(out) };
+        let target: &CFType = (*session).as_ref();
+        // SAFETY: constant keys and values of VideoToolbox and CoreVideo, on a live session.
+        unsafe {
+            for (key, value) in [
+                (
+                    kVTPixelTransferPropertyKey_DestinationColorPrimaries,
+                    kCVImageBufferColorPrimaries_ITU_R_709_2,
+                ),
+                (
+                    kVTPixelTransferPropertyKey_DestinationTransferFunction,
+                    kCVImageBufferTransferFunction_ITU_R_709_2,
+                ),
+            ] {
+                let value: &CFType = value.as_ref();
+                VTSessionSetProperty(target, key, Some(value));
+            }
+        }
+        Ok(Self(session))
+    }
+
+    pub(crate) fn run(
+        &self,
+        from: &CVPixelBuffer,
+        to: &CVPixelBuffer,
+        matrix: Matrix,
+        what: &str,
+    ) -> Result<()> {
+        // SAFETY: constant values of CoreVideo.
+        let matrix = unsafe {
+            match matrix {
+                Matrix::Bt601 => kCVImageBufferYCbCrMatrix_ITU_R_601_4,
+                Matrix::Bt709 => kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+                Matrix::Bt2020 => kCVImageBufferYCbCrMatrix_ITU_R_2020,
+            }
+        };
+        let target: &CFType = (*self.0).as_ref();
+        // SAFETY: a live buffer and session, and constant keys of CoreVideo and VideoToolbox with values of their kinds.
+        unsafe {
+            for (key, value) in [
+                (kCVImageBufferYCbCrMatrixKey, matrix),
+                (
+                    kCVImageBufferColorPrimariesKey,
+                    kCVImageBufferColorPrimaries_ITU_R_709_2,
+                ),
+                (
+                    kCVImageBufferTransferFunctionKey,
+                    kCVImageBufferTransferFunction_ITU_R_709_2,
+                ),
+            ] {
+                let value: &CFType = value.as_ref();
+                from.set_attachment(key, value, CVAttachmentMode::ShouldPropagate);
+            }
+            let value: &CFType = matrix.as_ref();
+            VTSessionSetProperty(
+                target,
+                kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
+                Some(value),
+            );
+        }
+        // SAFETY: a live session and two live buffers.
+        let status = unsafe { self.0.transfer_image(from, to) };
+        if status != 0 {
+            return Err(Error::Invalid(format!(
+                "{what}: VideoToolbox error {status} in a pixel transfer"
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Transfer {
+    fn drop(&mut self) {
+        // SAFETY: the session that `new` made.
+        unsafe { self.0.invalidate() };
+    }
 }
 
 struct Locked<'a>(&'a CVPixelBuffer);

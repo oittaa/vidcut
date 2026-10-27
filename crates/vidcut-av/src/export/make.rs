@@ -137,7 +137,7 @@ struct Stage {
     relayout: Relayout,
     keeper: Option<crate::hw::Keeper>,
     unkept: bool,
-    fitter: Option<crate::hw::Fitter>,
+    fitters: Vec<crate::hw::Fitter>,
     reading: Option<Reading>,
     sharp: Option<Sharpness>,
 }
@@ -152,7 +152,7 @@ impl Default for Stage {
             relayout: Relayout::new(),
             keeper: None,
             unkept: false,
-            fitter: None,
+            fitters: Vec::new(),
             reading: None,
             sharp: None,
         }
@@ -357,7 +357,7 @@ impl Maker {
                     let (w, h) = shown_size(frame, rotation, (out_w, out_h));
                     let fitted = if rotation % 180 == 90 { (h, w) } else { (w, h) };
                     let fit = crate::hw::Fitter::fit(
-                        &mut stage.fitter,
+                        &mut stage.fitters,
                         frame,
                         rotation,
                         fitted,

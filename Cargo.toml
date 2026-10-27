@@ -159,6 +159,9 @@ objc2-video-toolbox = { version = "0.3", default-features = false, features = [
     "VTFrameProcessor_FrameRateConversion",
     "VTFrameProcessor_OpticalFlow",
     "VTFrameProcessor_SuperResolutionScaler",
+    "VTPixelTransferProperties",
+    "VTPixelTransferSession",
+    "VTSession",
 ] }
 # Loads CUDA's driver library for the calls FFmpeg doesn't make (memory a
 # display shares). ISC.

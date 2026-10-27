@@ -1117,6 +1117,8 @@ impl Drop for Frames {
     }
 }
 
+const FITTERS: usize = 2;
+
 pub(crate) struct Fitter {
     fitting: Fitting,
     input: (KeptLike, (u32, u32), u16),
@@ -1152,7 +1154,7 @@ pub(crate) fn reaches(from: Place, to: Place) -> bool {
 
 impl Fitter {
     pub(crate) fn fit(
-        fitter: &mut Option<Fitter>,
+        fitters: &mut Vec<Fitter>,
         f: &frame::Video,
         rotation: u16,
         fitted: (u32, u32),
@@ -1162,7 +1164,7 @@ impl Fitter {
     ) -> Result<frame::Video> {
         let (frames, of) = frames_of(f)?;
         let input = (of, fitted, rotation);
-        if fitter.as_ref().is_none_or(|x| x.input != input) {
+        if !fitters.iter().any(|x| x.input == input) {
             let fitting = match f.format() {
                 format::Pixel::VAAPI => {
                     let spec = vaapi::fit_spec(rotation, fitted, (w, h), layout);
@@ -1197,10 +1199,14 @@ impl Fitter {
                 }
                 other => return Err(Error::Invalid(format!("no fitting {other:?} frames"))),
             };
-            *fitter = Some(Self { fitting, input });
+            if fitters.len() == FITTERS {
+                fitters.remove(0);
+            }
+            fitters.push(Self { fitting, input });
         }
         let _ = into;
-        let mut out = match &mut fitter.as_mut().expect("made above").fitting {
+        let fitter = fitters.iter_mut().find(|x| x.input == input);
+        let mut out = match &mut fitter.expect("made above").fitting {
             Fitting::Filters(graph) => run_graph(graph, f, "fitting a frame on the GPU")?,
             #[cfg(windows)]
             Fitting::D3d11(scaler) => scaler.scale(f)?,

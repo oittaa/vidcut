@@ -9,7 +9,9 @@ use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use crate::compute::Gpu;
 use crate::error::{Error, Result};
+use crate::ffmpeg::frame;
 use crate::models::{self, Fetch, Need};
+use crate::route::Place;
 
 mod ema;
 mod macos;
@@ -444,6 +446,35 @@ fn dump(name: &str, size: (u32, u32), rgb: &[u8]) -> Result<()> {
     )
 }
 
+pub(crate) fn takes_frames(r: Retime, a: &frame::Video, b: &frame::Video, rotation: u16) -> bool {
+    r == Retime::Macos
+        && rotation == 0
+        && Place::of(a) == Place::VideoToolbox
+        && Place::of(b) == Place::VideoToolbox
+}
+
+pub(crate) fn between_frames(
+    key: &(PathBuf, i64, i64),
+    a: &frame::Video,
+    b: &frame::Video,
+    size: (u32, u32),
+    t: f64,
+) -> Result<frame::Video> {
+    let clock = Instant::now();
+    let made = macos::between_frames(key, a, b, size, t)?;
+    made_in(Retime::Macos, size, t, clock);
+    Ok(made)
+}
+
+fn made_in(retime: Retime, size: (u32, u32), at: f64, clock: Instant) {
+    report_lock().made = Some(Made {
+        retime,
+        size,
+        at,
+        took: Some(clock.elapsed()),
+    });
+}
+
 pub(crate) fn between(
     r: Retime,
     key: &(PathBuf, i64, i64),
@@ -454,19 +485,14 @@ pub(crate) fn between(
 ) -> Result<Vec<u8>> {
     let clock = Instant::now();
     let made = if r == Retime::Macos {
-        macos::between(key, a, b, size, t)?
+        macos::between(key, macos::Input::Rgb(a), macos::Input::Rgb(b), size, t)?
     } else {
         with_engine(|e| {
             e.hold(r, key, a, b, size)?;
             e.frame(r, t as f32)
         })?
     };
-    report_lock().made = Some(Made {
-        retime: r,
-        size,
-        at: t,
-        took: Some(clock.elapsed()),
-    });
+    made_in(r, size, t, clock);
     if std::env::var_os("VIDCUT_INTERPOLATE_DUMP").is_some() {
         let n = DUMPED.fetch_add(1, Ordering::Relaxed);
         let name = format!("{n:04}");
