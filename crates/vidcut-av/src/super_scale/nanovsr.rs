@@ -1634,13 +1634,21 @@ impl Run {
                 sink(big.map(|outs| {
                     meta.iter()
                         .zip(outs)
-                        .map(|(&(index, pts), rgb)| super::Out { index, pts, rgb })
+                        .map(|(&(index, pts), rgb)| super::Out {
+                            index,
+                            pts,
+                            picture: super::Picture::Rgb(rgb),
+                        })
                         .collect()
                 }));
             }
         };
         let rgb = upscale(&rgbs, self.size, (self.serial, wanted), rest)?;
-        Ok(vec![super::Out { index, pts, rgb }])
+        Ok(vec![super::Out {
+            index,
+            pts,
+            picture: super::Picture::Rgb(rgb),
+        }])
     }
 }
 

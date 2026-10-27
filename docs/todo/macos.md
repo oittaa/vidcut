@@ -1,6 +1,6 @@
 # macOS
 
-**When:** zero copy for AI of Super Scale is next. The other items come after the interchange and the smaller items ([roadmap](../roadmap.md)).
+**When:** the parts of Pictures on the GPU are next, one at a time. The other items come after the interchange and the smaller items ([roadmap](../roadmap.md)).
 
 - `scripts/check.sh full` on a Mac.
 - ProRes proxies on VideoToolbox checked on a Mac with ProRes hardware and on one without.
@@ -10,9 +10,7 @@
 
 On macOS, VideoToolbox frames go to the viewer as Metal textures, and to the H.264 and HEVC encoders of VideoToolbox. A frame that comes down is read in place. These parts still go through the CPU:
 
-- **The AI processes of macOS:** AI of Retime Process keeps VideoToolbox frames on the GPU, in and out. These parts still go through the CPU:
-  - AI of Super Scale gets each picture as RGB from the CPU, and gives RGB back. Its scaling takes most of the time, but the copies take memory and CPU time.
-  - The decoder, the processes of macOS and the compositor can all keep the picture in an IOSurface on the GPU.
+- **The AI processes of macOS:** they keep VideoToolbox frames on the GPU, in and out. Frames that the CPU decodes, and frames with a turn, go through RGB.
 - **ProRes exports:** they use `prores_ks` on the CPU (`parts::PRORES`). `gpu_name` has no ProRes encoder of VideoToolbox.
   - vidcut already tests `prores_videotoolbox`, and proxies use it. The M4 has an engine for ProRes.
   - First check that its profiles and its quality give what the settings of the export ask for.

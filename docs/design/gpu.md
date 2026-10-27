@@ -333,6 +333,10 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
     - On the owner's M4 with macOS 27, the scaler takes only 16-bit float RGBA.
     - The scaler gets the frame before and its output too. The frames go in order (`Sequential`).
   - The output comes back to RGB in the same way. For 16-bit float, a table of all 65,536 values gives the 8-bit codes.
+  - A VideoToolbox frame that needs no turn goes to the scaler without the CPU (`Run::takes`, `Run::push_frame`).
+    - A pixel transfer of VideoToolbox (`Transfer`) puts it into the source buffer, as for AI of Retime Process.
+    - The output goes back into a VideoToolbox frame with the layout and the range of the source (`Frames`). It then goes on as a decoded frame does.
+    - In a run that reads its own frames, these frames stay on the GPU. The frames of the other upscalers are read in memory.
   - `macos::check` refuses HDR media and pictures over 1920×1080 (`macos::MOST`), the limit of macOS for video.
   - A run does not download. It stops with an error when macOS does not have the model of its factor.
   - `macos::needed` reports the models while macOS lacks the model of a factor that it lists. Thus the GUI asks first, with the size unknown.
@@ -381,7 +385,7 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
 - **AI on macOS** (`interpolate::macos`): the frame rate conversion of macOS makes the frame, not wgpu.
   - It keeps one session of `VTFrameProcessor` for each frame size. The session goes when the last `interpolate::User` goes.
   - The pair stays in the session. The frames between one pair tell macOS that the pair is the same, and the next pair tells it that the frames follow.
-  - It shares the picture buffers and the pixel formats with the scaler of macOS (`frame_processor`).
+  - It shares the picture buffers, the pixel formats, the pixel transfer and the pool of made frames with the scaler of macOS (`frame_processor`).
   - Two VideoToolbox frames that need no turn go to macOS without the CPU (`interpolate::takes_frames`). A pixel transfer of VideoToolbox scales and converts them on the GPU (`Transfer`).
     - The transfer takes the matrix that vidcut finds for the frame, and keeps the primaries and the transfer function of BT.709.
     - The made frame goes back into a VideoToolbox frame on the GPU, with the layout and the range of the source (`interpolate::between_frames`). It then goes on as a decoded frame does.

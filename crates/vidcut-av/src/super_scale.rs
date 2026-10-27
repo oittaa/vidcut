@@ -251,16 +251,30 @@ impl<N: Network> Slot<N> {
     }
 }
 
+pub(crate) enum Picture {
+    Rgb(Vec<u8>),
+    Frame(crate::ffmpeg::frame::Video),
+}
+
 pub(crate) struct Out {
     pub(crate) index: i64,
     pub(crate) pts: Option<i64>,
-    pub(crate) rgb: Vec<u8>,
+    pub(crate) picture: Picture,
 }
 
 pub(crate) type Sink = Box<dyn FnOnce(Result<Vec<Out>>) + Send>;
 
 pub(crate) trait Run: Send {
     fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<Out>>;
+
+    fn takes(&self, _f: &crate::ffmpeg::frame::Video, _rotation: u16) -> bool {
+        false
+    }
+
+    fn push_frame(&mut self, index: i64, f: &crate::ffmpeg::frame::Video) -> Result<Vec<Out>> {
+        let _ = (index, f);
+        Err(Error::Invalid("this upscaler takes RGB pictures".into()))
+    }
 
     fn finish(&mut self) -> Result<Vec<Out>>;
 }

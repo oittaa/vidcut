@@ -2,6 +2,8 @@ use vidcut_core::model::{Media, Project, Upscaler};
 use vidcut_core::render::VideoPiece;
 
 use crate::error::{Error, Result};
+use crate::ffmpeg::frame::Video;
+use crate::route::Place;
 
 pub const MOST: (u32, u32) = (1920, 1080);
 
@@ -103,7 +105,24 @@ impl Run {
 impl super::Run for Run {
     fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<super::Out>> {
         let rgb = self.scaler.scale(index, &rgb)?;
-        Ok(vec![super::Out { index, pts, rgb }])
+        Ok(vec![super::Out {
+            index,
+            pts,
+            picture: super::Picture::Rgb(rgb),
+        }])
+    }
+
+    fn takes(&self, f: &Video, rotation: u16) -> bool {
+        cfg!(target_os = "macos") && rotation == 0 && Place::of(f) == Place::VideoToolbox
+    }
+
+    fn push_frame(&mut self, index: i64, f: &Video) -> Result<Vec<super::Out>> {
+        let made = self.scaler.scale_frame(index, f)?;
+        Ok(vec![super::Out {
+            index,
+            pts: f.pts(),
+            picture: super::Picture::Frame(made),
+        }])
     }
 
     fn finish(&mut self) -> Result<Vec<super::Out>> {
@@ -138,6 +157,14 @@ mod imp {
         pub(super) fn scale(&mut self, _index: i64, _rgb: &[u8]) -> Result<Vec<u8>> {
             match self.0 {}
         }
+
+        pub(super) fn scale_frame(
+            &mut self,
+            _index: i64,
+            _f: &crate::ffmpeg::frame::Video,
+        ) -> Result<crate::ffmpeg::frame::Video> {
+            match self.0 {}
+        }
     }
 }
 
@@ -151,7 +178,7 @@ mod imp {
     use objc2::runtime::{AnyClass, ProtocolObject};
     use objc2_core_foundation::CFRetained;
     use objc2_core_media::CMTime;
-    use objc2_core_video::CVPixelBufferPool;
+    use objc2_core_video::{CVPixelBuffer, CVPixelBufferPool};
     use objc2_foundation::NSError;
     use objc2_video_toolbox::{
         VTFrameProcessor, VTFrameProcessorFrame, VTSuperResolutionScalerConfiguration,
@@ -164,7 +191,10 @@ mod imp {
 
     use super::NEEDS;
     use crate::error::{Error, Result};
-    use crate::frame_processor::{buffer, format_in, fourcc, frame, numbers, pool, read, write};
+    use crate::ffmpeg::frame::Video;
+    use crate::frame_processor::{
+        Frames, Transfer, buffer, format_in, fourcc, frame, numbers, pixels, pool, read, write,
+    };
 
     const MISSING: &str = "macOS's super-resolution models aren't on this Mac yet: pass \
                            download (--download) to let macOS download them. macOS doesn't give \
@@ -287,6 +317,8 @@ mod imp {
         processor: Retained<VTFrameProcessor>,
         sources: CFRetained<CVPixelBufferPool>,
         outputs: CFRetained<CVPixelBufferPool>,
+        transfer: Transfer,
+        frames: Frames,
         format: u32,
         size: (u32, u32),
         made: (u32, u32),
@@ -337,6 +369,8 @@ mod imp {
                 processor,
                 sources,
                 outputs,
+                transfer: Transfer::new(WHAT)?,
+                frames: Frames::default(),
                 format,
                 size,
                 made,
@@ -348,11 +382,38 @@ mod imp {
             let clock = std::time::Instant::now();
             let source = buffer(&self.sources, WHAT)?;
             write(&source, self.format, self.size, rgb)?;
-            let enlarged = buffer(&self.outputs, WHAT)?;
             let wrote = clock.elapsed();
+            let enlarged = self.enlarge(index, &source)?;
+            let scaled = clock.elapsed();
+            let out = read(&enlarged, self.format, self.made)?;
+            told(index, wrote, scaled, clock);
+            Ok(out)
+        }
+
+        pub(super) fn scale_frame(&mut self, index: i64, f: &Video) -> Result<Video> {
+            let clock = std::time::Instant::now();
+            let source = buffer(&self.sources, WHAT)?;
+            let matrix = crate::color::colors_of(f).matrix;
+            self.transfer.run(pixels(f, WHAT)?, &source, matrix, WHAT)?;
+            let wrote = clock.elapsed();
+            let enlarged = self.enlarge(index, &source)?;
+            let scaled = clock.elapsed();
+            let out = self
+                .frames
+                .made(&self.transfer, &enlarged, f, self.made, WHAT)?;
+            told(index, wrote, scaled, clock);
+            Ok(out)
+        }
+
+        fn enlarge(
+            &mut self,
+            index: i64,
+            source: &CVPixelBuffer,
+        ) -> Result<CFRetained<CVPixelBuffer>> {
+            let enlarged = buffer(&self.outputs, WHAT)?;
             // SAFETY: a time of plain values.
             let time = unsafe { CMTime::new(index, 1) };
-            let source = frame(&source, time, WHAT)?;
+            let source = frame(source, time, WHAT)?;
             let destination = frame(&enlarged, time, WHAT)?;
             let (previous, previous_out) = match &self.last {
                 Some((s, d)) => (Some(&**s), Some(&**d)),
@@ -379,18 +440,24 @@ mod imp {
                     .processWithParameters_error(ProtocolObject::from_ref(&*parameters))
             }
             .map_err(failed)?;
-            let scaled = clock.elapsed();
-            let out = read(&enlarged, self.format, self.made)?;
-            crate::debug!(
-                "ai",
-                "macOS: frame {index}: in {:.1} ms, scaled in {:.1} ms, out in {:.1} ms",
-                wrote.as_secs_f64() * 1e3,
-                (scaled - wrote).as_secs_f64() * 1e3,
-                (clock.elapsed() - scaled).as_secs_f64() * 1e3
-            );
             self.last = Some((source, destination));
-            Ok(out)
+            Ok(enlarged)
         }
+    }
+
+    fn told(
+        index: i64,
+        wrote: std::time::Duration,
+        scaled: std::time::Duration,
+        clock: std::time::Instant,
+    ) {
+        crate::debug!(
+            "ai",
+            "macOS: frame {index}: in {:.1} ms, scaled in {:.1} ms, out in {:.1} ms",
+            wrote.as_secs_f64() * 1e3,
+            (scaled - wrote).as_secs_f64() * 1e3,
+            (clock.elapsed() - scaled).as_secs_f64() * 1e3
+        );
     }
 
     impl Drop for Scaler {

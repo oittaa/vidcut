@@ -662,7 +662,11 @@ fn hold(
             Key::Frame(_) => Key::Frame(o.index),
         };
         waiting.retain(|(k, _)| *k != key);
-        waiting.push((key, big_picture(&o.rgb, base.made, o.pts)));
+        let picture = match o.picture {
+            crate::super_scale::Picture::Rgb(rgb) => big_picture(&rgb, base.made, o.pts),
+            crate::super_scale::Picture::Frame(f) => f,
+        };
+        waiting.push((key, picture));
     }
 }
 
@@ -872,9 +876,11 @@ impl Source {
                 continue;
             }
             let next = if run.own {
+                let rotation = self.reader.rotation();
+                let takes = |f: &frame::Video| run.run.takes(f, rotation);
                 match self.reader.next_frame()? {
                     Some(f) => {
-                        let kept = in_memory(&f)?;
+                        let kept = if takes(&f) { f } else { in_memory(&f)? };
                         self.queued.push_back(frame_ref(&kept)?);
                         Some(kept)
                     }
@@ -971,9 +977,15 @@ impl Source {
             return self.end_run();
         }
         let clock = Instant::now();
-        let rgb = shown_rgb(f, rotation, run.size, reading)?;
+        let rgb = match run.run.takes(f, rotation) {
+            true => None,
+            false => Some(shown_rgb(f, rotation, run.size, reading)?),
+        };
         let converted = clock.elapsed();
-        let outs = run.run.push(i, f.pts(), rgb)?;
+        let outs = match rgb {
+            Some(rgb) => run.run.push(i, f.pts(), rgb)?,
+            None => run.run.push_frame(i, f)?,
+        };
         let pushed = clock.elapsed();
         run.next = i + 1;
         run.keep(outs);

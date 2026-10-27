@@ -9,7 +9,6 @@ Super Scale enlarges pictures with a better upscaler ([X91](../deviations.md#x91
   - Its `sharpness` option takes the Sharpness of the media.
 - **AI Fast and AI Best on macOS:** they are off. On the owner's M4, AI Fast took 11.5 s for each frame (480p to 1080p).
   - Find where the time goes on Metal. Turn them on again when they are fast enough.
-- **Zero copy on macOS:** AI of macOS gets its pictures through the CPU ([macos.md](macos.md#pictures-on-the-gpu)).
 - **The other GPUs** (VA-API, Direct3D 11 on Intel, Vulkan): they fit pictures as before. A picture with Super Scale could come down to the CPU, or use libplacebo where Vulkan works.
 - **The export's report:** it does not yet say which upscaler each file used.
 - **Placed pictures on NVENC:** they are made on the CPU. libplacebo could make them on the GPU.
