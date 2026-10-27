@@ -11,10 +11,9 @@
 On macOS, VideoToolbox frames go to the viewer as Metal textures, and to the H.264 and HEVC encoders of VideoToolbox. A frame that comes down is read in place. These parts still go through the CPU:
 
 - **The AI processes of macOS:** they keep VideoToolbox frames on the GPU, in and out. Frames that the CPU decodes, and frames with a turn, go through RGB.
-- **ProRes exports:** they use `prores_ks` on the CPU (`parts::PRORES`). `gpu_name` has no ProRes encoder of VideoToolbox.
-  - vidcut already tests `prores_videotoolbox`, and proxies use it. The M4 has an engine for ProRes.
-  - First check that its profiles and its quality give what the settings of the export ask for.
+- **ProRes 4444 exports:** they use `prores_ks` on the CPU. `prores_videotoolbox` takes 4:4:4 with alpha only as AYUV64, a layout that vidcut does not make.
 - **Padding and color changes:** `vt::can_fit` keeps a frame on the GPU only when its colors stay and it needs no padding. Other frames come down for the CPU.
+  - The pixel transfer of the fitter can pad a frame (`kVTScalingMode_Letterbox`). Check its colors against the CPU's first.
   - A Metal compute pass on the IOSurface of the frame can pad it and convert its colors, as for the dissolves below.
 - **Dissolves, burned-in subtitles, titles and placed pictures:** the frames come down while one of them shows.
   - [gpu-dissolves.md](gpu-dissolves.md), [gpu-burn-in.md](gpu-burn-in.md) and [gpu-placement.md](gpu-placement.md) plan a Metal pass for each.

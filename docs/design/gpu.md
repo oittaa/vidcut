@@ -117,8 +117,10 @@ In exports:
 | Vulkan | NVENC, copied into CUDA on the GPU; Vulkan's ProRes | libplacebo (`CudaPictures`) | `cuda::mix` | other encoders; alpha |
 | VA-API | VAAPI on its device | `transpose_vaapi`, `scale_vaapi`, `pad_vaapi`; colors unchanged | in memory | other encoders, QSV too; color changes; dissolves |
 | Direct3D 11 | AMF on its adapter | the video processor; colors unchanged, not 8-bit into 10-bit | in memory | other encoders, QSV too; color changes; dissolves |
-| VideoToolbox | its own encoders | `transpose_vt`, `scale_vt`, where colors and layout stay | in memory | padding, layout or color changes; dissolves |
+| VideoToolbox | its own encoders | `transpose_vt`, `scale_vt`, where colors and layout stay; a pixel transfer for another layout without a turn | in memory | padding or color changes; a turn with another layout; dissolves |
 
+- A VideoToolbox frame in another layout than the encoder's goes through a pixel transfer of VideoToolbox (`vt::transfer`). It scales the frame and changes its layout in one step, such as 4:2:0 into the 10-bit 4:2:2 of ProRes.
+  - The transfer does not turn a frame. A turned frame in another layout comes down.
 - A VideoToolbox frame that comes down is not copied. `hw::to_read` maps its pixel buffer (`av_hwframe_map`), and the CPU reads it in place.
   - The map is read-only. A step that writes into the picture copies it first (`av_frame_make_writable`).
   - The player still copies pictures down where it moves them out of video memory (`Picture::copied_down`).
@@ -152,7 +154,7 @@ Frames that come down:
 | VAAPI | Linux, not NVIDIA | H.264, HEVC, AV1, VP9 |
 | AMF | Windows, AMD | H.264, HEVC, AV1 |
 | QSV | Intel; frames from memory only | H.264, HEVC, AV1, VP9 at a bitrate |
-| VideoToolbox | macOS | H.264, HEVC; ProRes for proxies |
+| VideoToolbox | macOS | H.264, HEVC; ProRes but 4444 (`prores_videotoolbox`) |
 | Vulkan | any listed GPU | ProRes (`prores_ks_vulkan`), proxies only |
 
 - `encode::detect` test-encodes with each encoder, pixel format and GPU.
