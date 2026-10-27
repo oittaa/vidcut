@@ -53,7 +53,7 @@ fn chroma_shift(layout: format::Pixel) -> (u32, u32) {
 }
 
 fn black(format: MTLPixelFormat, full: bool) -> [[f64; 2]; 2] {
-    let (luma, chroma) = if format == MTLPixelFormat::R16Unorm {
+    let (luma, chroma) = if matches!(format, MTLPixelFormat::R16Unorm | MTLPixelFormat::RG16Unorm) {
         (4096.0 / 65535.0, 32768.0 / 65535.0)
     } else {
         (16.0 / 255.0, 128.0 / 255.0)
