@@ -121,39 +121,37 @@ fn visuals(t: &Theme) -> Visuals {
     v
 }
 
-const SYSTEM_UI: &[&str] = if cfg!(windows) {
-    &["Segoe UI Variable", "Segoe UI"]
-} else if cfg!(target_os = "macos") {
-    &[
-        "SF Pro",
-        "SF Pro Text",
-        "System Font",
-        ".SF NS",
-        "Helvetica Neue",
-    ]
-} else {
-    &[
-        "Ubuntu Sans",
-        "Adwaita Sans",
-        "Cantarell",
-        "Noto Sans",
-        "DejaVu Sans",
-    ]
-};
+#[cfg(windows)]
+const SYSTEM_UI: &[&str] = &["Segoe UI Variable", "Segoe UI"];
+#[cfg(target_os = "macos")]
+const SYSTEM_UI: &[&str] = &[
+    "SF Pro",
+    "SF Pro Text",
+    "System Font",
+    ".SF NS",
+    "Helvetica Neue",
+];
+#[cfg(not(any(windows, target_os = "macos")))]
+const SYSTEM_UI: &[&str] = &[
+    "Ubuntu Sans",
+    "Adwaita Sans",
+    "Cantarell",
+    "Noto Sans",
+    "DejaVu Sans",
+];
 
-const SYSTEM_MONO: &[&str] = if cfg!(windows) {
-    &["Cascadia Mono", "Consolas"]
-} else if cfg!(target_os = "macos") {
-    &["SF Mono", "Menlo"]
-} else {
-    &[
-        "Ubuntu Sans Mono",
-        "Ubuntu Mono",
-        "Adwaita Mono",
-        "Noto Sans Mono",
-        "DejaVu Sans Mono",
-    ]
-};
+#[cfg(windows)]
+const SYSTEM_MONO: &[&str] = &["Cascadia Mono", "Consolas"];
+#[cfg(target_os = "macos")]
+const SYSTEM_MONO: &[&str] = &["SF Mono", "Menlo"];
+#[cfg(not(any(windows, target_os = "macos")))]
+const SYSTEM_MONO: &[&str] = &[
+    "Ubuntu Sans Mono",
+    "Ubuntu Mono",
+    "Adwaita Mono",
+    "Noto Sans Mono",
+    "DejaVu Sans Mono",
+];
 
 fn font_definitions(f: &Fonts) -> egui::FontDefinitions {
     let mut defs = egui::FontDefinitions::default();

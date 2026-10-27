@@ -1328,20 +1328,24 @@ fn percent_decoded(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+#[cfg(windows)]
 fn is_local_absolute(s: &str) -> bool {
-    if cfg!(windows) {
-        windows_absolute(s) || s.starts_with("//")
-    } else {
-        s.starts_with('/')
-    }
+    windows_absolute(s) || s.starts_with("//")
 }
 
+#[cfg(not(windows))]
+fn is_local_absolute(s: &str) -> bool {
+    s.starts_with('/')
+}
+
+#[cfg(windows)]
 fn native(s: &str) -> PathBuf {
-    if cfg!(windows) {
-        PathBuf::from(s.replace('/', "\\"))
-    } else {
-        PathBuf::from(s)
-    }
+    PathBuf::from(s.replace('/', "\\"))
+}
+
+#[cfg(not(windows))]
+fn native(s: &str) -> PathBuf {
+    PathBuf::from(s)
 }
 
 fn bracketed(name: &str) -> Option<String> {
@@ -1401,10 +1405,11 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
     let mut paths: Vec<PathBuf> = Vec::new();
     for f in &forms {
         let local = is_local_absolute(f);
-        if !local && !absolute_elsewhere(f, cfg!(windows)) {
+        if !local && !absolute_elsewhere(f) {
             if let Some(b) = base {
                 paths.push(b.join(native(f)));
-                if !cfg!(windows) && f.contains('\\') {
+                #[cfg(not(windows))]
+                if f.contains('\\') {
                     paths.push(b.join(f.replace('\\', "/")));
                 }
             }
@@ -1412,7 +1417,9 @@ fn locate(url: &str, base: Option<&Path>, fps: Rational) -> Option<MediaRef> {
         }
         if local {
             paths.push(native(f));
-        } else if cfg!(windows) {
+        }
+        #[cfg(windows)]
+        if !local {
             paths.push(PathBuf::from(f));
         }
         if let Some(b) = base {

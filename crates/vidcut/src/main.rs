@@ -18,7 +18,8 @@ fn main() -> ExitCode {
         // SAFETY: single-threaded at this point.
         unsafe { std::env::set_var("SVT_LOG", "2") };
     }
-    if cfg!(target_os = "linux") && std::env::var_os("LIBVA_MESSAGING_LEVEL").is_none() {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("LIBVA_MESSAGING_LEVEL").is_none() {
         // SAFETY: single-threaded at this point.
         unsafe { std::env::set_var("LIBVA_MESSAGING_LEVEL", "1") };
     }

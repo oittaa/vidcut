@@ -367,14 +367,13 @@ fn apply_video_budget() {
         return;
     }
     let store = store::global();
-    if SHARED_MEMORY {
-        store.share(true);
-    } else {
-        store.set_budget(
-            store::Kind::Video,
-            Budget::gpu_video(GPU_MEMORY.get().copied()),
-        );
-    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    store.share(true);
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    store.set_budget(
+        store::Kind::Video,
+        Budget::gpu_video(GPU_MEMORY.get().copied()),
+    );
 }
 
 pub(crate) use store::{Lent, LentMemory};

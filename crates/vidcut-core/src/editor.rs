@@ -1170,7 +1170,8 @@ impl Editor {
             )));
         }
         let mut project = self.project.clone();
-        let mut json = cfg!(debug_assertions).then(|| to_json(&self.project));
+        #[cfg(debug_assertions)]
+        let mut json = to_json(&self.project);
         let fits = |e: String| Error::internal(format!("the undo history doesn't fit: {e}"));
         let mut history = match self.file {
             None => self.history.clone(),
@@ -1185,14 +1186,14 @@ impl Editor {
             };
             let entry = from.pop().expect("checked");
             undo_step(&mut project, &entry.change, !undo).map_err(fits)?;
-            if let Some(json) = json.as_mut() {
-                entry.change.apply(json, !undo).map_err(fits)?;
-            }
+            #[cfg(debug_assertions)]
+            entry.change.apply(&mut json, !undo).map_err(fits)?;
             moved.push(entry.step.clone());
             to.push(entry);
         }
-        debug_assert!(
-            json.is_none_or(|j| serde_json::from_value::<Project>(j).is_ok_and(|q| q == project)),
+        #[cfg(debug_assertions)]
+        assert!(
+            serde_json::from_value::<Project>(json).is_ok_and(|q| q == project),
             "the undo step makes another project as JSON"
         );
         Ok((project, history, moved))

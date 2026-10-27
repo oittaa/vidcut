@@ -268,13 +268,16 @@ fn memory_auto_mb() -> u64 {
     (vidcut_av::player::Budget::automatic().memory >> 20) as u64
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn video_memory_auto_mb(p: &Preferences) -> u64 {
-    if vidcut_av::player::SHARED_MEMORY {
-        return match p.player.memory_mb {
-            0 => memory_auto_mb(),
-            mb => mb,
-        };
+    match p.player.memory_mb {
+        0 => memory_auto_mb(),
+        mb => mb,
     }
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+fn video_memory_auto_mb(p: &Preferences) -> u64 {
     let gpu = vidcut_av::gpus::in_use()
         .filter(|_| p.gpu.acceleration && p.gpu.decoding)
         .and_then(|g| g.memory_mb);

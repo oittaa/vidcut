@@ -907,16 +907,25 @@ pub const RUNTIMES: [Runtime; 5] = [
     },
 ];
 
-pub const RUNTIME: Option<Runtime> = if cfg!(all(windows, target_arch = "x86_64")) {
-    Some(RUNTIMES[0])
-} else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-    Some(RUNTIMES[1])
-} else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-    Some(RUNTIMES[2])
-} else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-    Some(RUNTIMES[3])
-} else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
-    Some(RUNTIMES[4])
-} else {
-    None
-};
+#[cfg(all(windows, target_arch = "x86_64"))]
+pub const RUNTIME: Option<Runtime> = Some(RUNTIMES[0]);
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub const RUNTIME: Option<Runtime> = Some(RUNTIMES[1]);
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+pub const RUNTIME: Option<Runtime> = Some(RUNTIMES[2]);
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub const RUNTIME: Option<Runtime> = Some(RUNTIMES[3]);
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+pub const RUNTIME: Option<Runtime> = Some(RUNTIMES[4]);
+#[cfg(not(any(
+    all(windows, target_arch = "x86_64"),
+    all(
+        target_os = "macos",
+        any(target_arch = "aarch64", target_arch = "x86_64")
+    ),
+    all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ),
+)))]
+pub const RUNTIME: Option<Runtime> = None;

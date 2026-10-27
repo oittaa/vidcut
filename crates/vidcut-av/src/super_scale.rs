@@ -33,8 +33,14 @@ pub fn get_ready(dir: &Path, upscaler: Upscaler, download: bool) -> Result<()> {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub fn off_here(upscaler: Upscaler) -> bool {
-    cfg!(target_os = "macos") && matches!(upscaler, Upscaler::AiFast | Upscaler::AiBest)
+    matches!(upscaler, Upscaler::AiFast | Upscaler::AiBest)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn off_here(_upscaler: Upscaler) -> bool {
+    false
 }
 
 pub fn unfit(m: &Media, upscaler: Upscaler) -> Option<&'static str> {

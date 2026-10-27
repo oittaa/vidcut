@@ -231,11 +231,11 @@ fn peak_memory_mb() -> u64 {
         usage
     };
     let peak = usage.ru_maxrss as u64;
-    if cfg!(target_os = "macos") {
-        peak >> 20
-    } else {
-        peak >> 10
-    }
+    #[cfg(target_os = "macos")]
+    let mb = peak >> 20;
+    #[cfg(not(target_os = "macos"))]
+    let mb = peak >> 10;
+    mb
 }
 
 #[cfg(not(unix))]

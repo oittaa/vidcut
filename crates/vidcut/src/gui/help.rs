@@ -250,7 +250,6 @@ fn mark(ui: &mut egui::Ui, open: bool) -> egui::Response {
 }
 
 fn keys(ui: &mut egui::Ui, keys: &[&str]) {
-    let mac = cfg!(target_os = "macos");
     let c = theme::colors();
     for (i, key) in keys.iter().rev().enumerate() {
         if i > 0 {
@@ -261,7 +260,7 @@ fn keys(ui: &mut egui::Ui, keys: &[&str]) {
             "Right" => "→",
             "Up" => "↑",
             "Down" => "↓",
-            k => key_name(k, mac),
+            k => key_name(k),
         };
         egui::Frame::new()
             .fill(c.field)

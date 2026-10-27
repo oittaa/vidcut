@@ -41,12 +41,14 @@ pub fn name(r: Retime) -> &'static str {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub fn off_here(r: Retime) -> bool {
-    match r {
-        Retime::AiFast | Retime::AiBest => cfg!(target_os = "macos"),
-        Retime::Macos => !cfg!(target_os = "macos"),
-        Retime::Nearest | Retime::FrameBlend => false,
-    }
+    matches!(r, Retime::AiFast | Retime::AiBest)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn off_here(r: Retime) -> bool {
+    r == Retime::Macos
 }
 
 pub fn of(id: &str) -> Option<Retime> {
@@ -144,11 +146,10 @@ pub fn check<'a>(
     off.sort();
     off.dedup();
     if !off.is_empty() {
-        let (which, instead) = if cfg!(target_os = "macos") {
-            ("AI Fast and AI Best are off on macOS for now", "AI")
-        } else {
-            ("AI of macOS is on macOS only", "AI Fast or AI Best")
-        };
+        #[cfg(target_os = "macos")]
+        let (which, instead) = ("AI Fast and AI Best are off on macOS for now", "AI");
+        #[cfg(not(target_os = "macos"))]
+        let (which, instead) = ("AI of macOS is on macOS only", "AI Fast or AI Best");
         return Err(Error::Invalid(format!(
             "{which}: set the Retime Process of {} to {instead}",
             off.join(", ")

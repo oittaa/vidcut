@@ -827,6 +827,7 @@ const RELOAD_EVERY: Duration = Duration::from_millis(100);
 const OMARCHY_SETTLES: Duration = Duration::from_millis(150);
 
 const HEARS: [&str; 5] = ["subtitles", "words", "transcript", "word_times", "retime"];
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 const HEARING_VIDEO: usize = 1 << 30;
 
 struct Live {
@@ -1881,9 +1882,15 @@ impl Live {
         self.dirty = true;
     }
 
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    fn follow_budget(&mut self) {
+        vidcut_av::player::set_budget(crate::preferences::player_budget());
+    }
+
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     fn follow_budget(&mut self) {
         let mut budget = crate::preferences::player_budget();
-        if self.hearing > 0 && !vidcut_av::player::SHARED_MEMORY {
+        if self.hearing > 0 {
             budget.video = Some(budget.video.map_or(HEARING_VIDEO, |v| v.min(HEARING_VIDEO)));
         }
         vidcut_av::player::set_budget(budget);
