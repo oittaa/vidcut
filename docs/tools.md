@@ -8,7 +8,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 - `g=GOP` sets the keyframe spacing. `b=BFRAMES` sets the B-frames.
 - H.264 with B-frames has open GOPs.
-- `busy` adds noise around the barcode, new in each frame. At 4K60 this gives 260 to 400 Mbit/s, as heavy to decode as camera footage.
+- `busy` adds new noise around the barcode in each frame. Thus the stream is heavy to decode.
 
 **Project speed:** `scripts/history-speed.sh [EDITS]` (release builds).
 
@@ -40,7 +40,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - In the file that it writes, each function calls the library that vidcut loads at run time.
 - For a new transcribe.cpp, run it on the bindings of that version. Then put its version and the sizes and SHA-256 of its prebuilt libraries in the catalog (`catalog::TRANSCRIBE_CPP`, `catalog::RUNTIMES`).
 
-**Speech recognition speed:** `python3 scripts/stt-speed.py [--audio FILE] [--seconds S] [--devices KINDS] [MODEL[@PIECE]...]`.
+**Speech recognition speed:** `python3 scripts/stt-speed.py [--audio FILE] [--seconds S] [--devices KINDS] [--json FILE] [MODEL[@PIECE]...]`.
 
 - It times speech recognition models through transcribe.cpp, on each device of the computer.
 - It times the load and two runs over the first S seconds (600) of FILE. It also gives the device memory that the model holds.
@@ -50,6 +50,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - MODEL@30 gives the model 30 s pieces.
 - The first run puts two things into `$VIDCUT_TEST_DATA/stt-speed`: the prebuilt transcribe.cpp library for the system, and the Python packages that it needs.
 - It checks the clip, the library and the models against their SHA-256.
+- `--json FILE` also writes the results to FILE.
 
 **Threads:** `scripts/threads.sh [PID] [SECONDS]` (Linux).
 
@@ -77,8 +78,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - It sets a linker wrapper that searches the FFmpeg directory first. This is necessary because alsa-sys puts the directory of the system ahead of it.
   - Its FFmpeg runs with the libraries of this computer: Ubuntu 26.04's, as in the image.
 - The FFmpeg build (`scripts/ffmpeg/build-ffmpeg.sh`) is a cached image layer. `VIDCUT_FFMPEG_MASTER=COMMIT` pins master.
-- The build of each target takes about 5.5 GB, and the images take about 3 GB.
-  - To free the space: `docker volume rm $(docker volume ls -q -f name=vidcut-ffmpeg)` and `docker image rm vidcut-ffmpeg:lts vidcut-ffmpeg:release vidcut-ffmpeg:master`.
+- The builds and the images take GBs of disk. To free the space: `docker volume rm $(docker volume ls -q -f name=vidcut-ffmpeg)` and `docker image rm vidcut-ffmpeg:lts vidcut-ffmpeg:release vidcut-ffmpeg:master`.
 - For a newer release, put its version and tarball sha256 in `scripts/ffmpeg/release.env`. The steps are in that file.
 - Where those builds are already installed, `scripts/with-ffmpeg.sh 8.1 -- cargo test -p vidcut-av --lib` selects one. The other names are `9.0.2` and `lts`.
   - `lts` is Ubuntu 26.04's FFmpeg 8.0, the default that `pkg-config` finds.
@@ -117,7 +117,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `VIDCUT_DEBUG=1` prints to stderr what vidcut decodes and draws, and why.
   - The `[upscale]` lines give the time of each step of each AI Fast chunk.
   - The `[flashvsr]` lines give the time of each step of each AI Best chunk: the input projection, the blocks and the decoder. They also give how many caches are in main memory, how many GB go there and back, and how long AI Best waits for them.
-- A GUI that has not ended 10 s after its window closed tells the stage and the wait state of each thread.
+- A GUI that has not ended 10 s after its window closed (`EXIT_PATIENCE`) tells the stage and the wait state of each thread.
   - Then it aborts under `VIDCUT_DEBUG`. Without `VIDCUT_DEBUG`, it exits with 1.
   - `VIDCUT_DEBUG=1 gdb -q -batch -ex run -ex "thread apply all bt 15" --args target/debug/vidcut -p PROJECT` shows the stack of each thread at the hang.
 - `VIDCUT_AV_LOG=error` (or `warning`, `verbose`, `debug`) shows the messages of FFmpeg itself.
