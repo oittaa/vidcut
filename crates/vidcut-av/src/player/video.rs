@@ -409,6 +409,10 @@ impl Decoder {
                 }
                 _ => focus,
             };
+            let target = match self.next {
+                Some(n) if makes && n > target && missing(n) => n,
+                _ => target,
+            };
             let reach = match dir {
                 Direction::Back => Reach::Window {
                     min: 1,
