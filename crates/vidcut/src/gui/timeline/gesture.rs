@@ -1422,6 +1422,7 @@ mod tests {
                     mastering: None,
                     light: None,
                     hdr10plus: false,
+                    alpha: false,
                     dolby_vision: None,
                 }),
                 audio: vec![AudioInfo {

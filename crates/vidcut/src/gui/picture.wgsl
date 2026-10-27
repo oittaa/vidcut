@@ -18,6 +18,7 @@ struct Params {
 @group(0) @binding(2) var chroma_u: texture_2d<f32>;
 @group(0) @binding(3) var chroma_v: texture_2d<f32>;
 @group(0) @binding(4) var bilinear: sampler;
+@group(0) @binding(7) var alpha_plane: texture_2d<f32>;
 
 struct Out {
     @builtin(position) position: vec4<f32>,
@@ -56,6 +57,17 @@ fn yuv(u: vec2<f32>) -> vec3<f32> {
     let cb = textureSampleLevel(chroma_u, bilinear, c, 0.0).r;
     let cr = textureSampleLevel(chroma_v, bilinear, c, 0.0).r;
     return vec3<f32>(y, cb, cr);
+}
+
+fn opacity(u: vec2<f32>) -> f32 {
+    let s = stored(u) * p.upright.zw;
+    if p.flags.z == 2u {
+        return textureSampleLevel(luma, bilinear, s, 0.0).r;
+    }
+    if p.per.w == 1u {
+        return textureSampleLevel(alpha_plane, bilinear, s, 0.0).r;
+    }
+    return 1.0;
 }
 
 fn weight(x: f32, kind: u32) -> f32 {
@@ -217,7 +229,7 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     }
     let size = p.upright.xy;
     let spans = vec2<f32>(length(across * size), length(down * size));
-    let a = cover * p.placed.y;
+    let a = cover * p.placed.y * opacity(uv);
     if p.flags.w > 0u && max(spans.x, spans.y) < 1.0 {
         return vec4<f32>(rgb(sharp(uv)), a);
     }
@@ -351,8 +363,9 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0, 0.0, 0.0, 1.0);
     }
     let cover = p.upright.xy / p.place.zw;
+    let a = opacity(rel);
     if p.flags.w > 0u && max(cover.x, cover.y) < 1.0 {
-        return vec4<f32>(rgb(sharp(rel)), 1.0);
+        return vec4<f32>(rgb(sharp(rel)) * a, 1.0);
     }
     let taps = vec2<u32>(clamp(ceil(cover), vec2<f32>(1.0), vec2<f32>(8.0)));
     let step = vec2<f32>(1.0) / (p.place.zw * vec2<f32>(taps));
@@ -363,7 +376,7 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
             sum += yuv(first + vec2<f32>(f32(i), f32(j)) * step);
         }
     }
-    return vec4<f32>(rgb(sum / f32(taps.x * taps.y)), 1.0);
+    return vec4<f32>(rgb(sum / f32(taps.x * taps.y)) * a, 1.0);
 }
 
 struct Lettering {

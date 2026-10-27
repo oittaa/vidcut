@@ -290,6 +290,7 @@ The audio device:
 - The viewer shows the pictures of some decoders from GPU memory (`Gpu::gpu_pictures`). These pictures stay there, in the video budget.
 - The pictures of the other decoders come down.
 - [gpu](gpu.md) has the path of each decoder to the screen.
+- The shader lays a picture by its straight alpha. AYUV64 holds the alpha in its one texture. A picture in memory with alpha is `yuva444p12le`, with the alpha in a fourth texture (`Picture::alpha_plane`).
 
 ## Sound
 

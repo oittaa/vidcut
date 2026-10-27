@@ -110,6 +110,50 @@ fn comps(pixel: format::Pixel) -> Result<Vec<Comp>> {
     Ok(comps)
 }
 
+fn alpha_index(pixel: format::Pixel) -> Option<usize> {
+    let desc = pixel.descriptor()?;
+    // SAFETY: FFmpeg's static descriptor of the format.
+    let d = unsafe { &*desc.as_ptr() };
+    let alpha = d.flags & ffi::AV_PIX_FMT_FLAG_ALPHA as u64 != 0;
+    alpha.then(|| usize::from(d.nb_components).saturating_sub(1))
+}
+
+fn colored(comps: &[Comp]) -> usize {
+    if comps.len() >= 3 { 3 } else { 1 }
+}
+
+fn alike(under: &[Comp], over: &[Comp]) -> Result<()> {
+    let n = colored(under);
+    let same = over.len() >= n
+        && under[..n]
+            .iter()
+            .zip(over)
+            .all(|(a, b)| a.grid() == b.grid() && a.depth == b.depth);
+    match same {
+        true => Ok(()),
+        false => Err(Error::Invalid(
+            "pictures of different layouts can't be laid over each other".into(),
+        )),
+    }
+}
+
+fn mean(
+    values: &[f32],
+    width: usize,
+    height: usize,
+    (x0, x1): (usize, usize),
+    (y0, y1): (usize, usize),
+) -> f32 {
+    let (x1, y1) = (x1.min(width).max(x0 + 1), y1.min(height).max(y0 + 1));
+    let mut sum = 0.0;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            sum += values[y.min(height - 1) * width + x.min(width - 1)];
+        }
+    }
+    sum / ((x1 - x0) * (y1 - y0)) as f32
+}
+
 fn copy(under: &frame::Video) -> frame::Video {
     let mut out = frame::Video::new(under.format(), under.width(), under.height());
     for p in 0..under.planes() {
@@ -192,6 +236,47 @@ impl Canvas {
             ));
         }
         Ok(())
+    }
+
+    pub(crate) fn covered(&self, over: &Canvas, weight: u32) -> Result<Self> {
+        let size = self.size();
+        if over.size() != size {
+            return Err(Error::Invalid(
+                "pictures of different sizes can't be laid over each other".into(),
+            ));
+        }
+        alike(&self.comps, &over.comps)?;
+        let level = weight as f32 / WHOLE as f32;
+        let alpha = alpha_index(over.like.format()).map(|k| (over.comps[k], &over.values[k]));
+        let own = alpha_index(self.like.format());
+        let values = self
+            .comps
+            .iter()
+            .zip(&self.values)
+            .enumerate()
+            .map(|(k, (c, under))| {
+                if Some(k) == own || k >= colored(&self.comps) {
+                    return under.clone();
+                }
+                let (width, _) = c.size(size);
+                under
+                    .iter()
+                    .zip(&over.values[k])
+                    .enumerate()
+                    .map(|(i, (u, o))| {
+                        let a = alpha.map_or(1.0, |(ac, av)| {
+                            let (aw, ah) = ac.size(size);
+                            let (x, y) = (i % width, i / width);
+                            let xs = (x << c.log2w, (x + 1) << c.log2w);
+                            let ys = (y << c.log2h, (y + 1) << c.log2h);
+                            mean(av, aw, ah, xs, ys) / ac.top() as f32
+                        });
+                        u + (o - u) * level * a
+                    })
+                    .collect()
+            })
+            .collect();
+        self.holding(values)
     }
 
     pub(crate) fn zipped(&self, other: &Canvas, f: impl Fn(f32, f32) -> f32) -> Result<Self> {
@@ -287,11 +372,10 @@ fn bands(rows: std::ops::Range<usize>) -> Vec<std::ops::Range<usize>> {
 }
 
 pub(crate) fn over(under: &Canvas, layer: &Layer) -> Result<Canvas> {
-    if layer.picture.format() != under.like.format() {
-        return Err(Error::Invalid(
-            "pictures of different formats can't be placed over each other".into(),
-        ));
-    }
+    let own = comps(layer.picture.format())?;
+    alike(&under.comps, &own)?;
+    let alpha = alpha_index(layer.picture.format()).map(|k| own[k]);
+    let kept = alpha_index(under.like.format());
     let mut out = under.holding(under.values.clone())?;
     let size = under.size();
     let Some(area) = layer.placing.bounds((f64::from(size.0), f64::from(size.1))) else {
@@ -299,20 +383,24 @@ pub(crate) fn over(under: &Canvas, layer: &Layer) -> Result<Canvas> {
     };
     let comps = &under.comps;
     let mode = layer.placing.mode;
-    let colored = if comps.len() >= 3 { 3 } else { 1 };
+    let colored = colored(comps);
     let coding = Coding::of(&under.like, &comps[..colored]);
     let below: Vec<Below> = (0..colored).map(|k| Below::of(under, k)).collect();
     for (i, (c, values)) in comps.iter().zip(&mut out.values).enumerate() {
+        if Some(i) == kept || i >= own.len() {
+            continue;
+        }
         let m = Mixing {
             channel: i,
-            own: Shading::of(*c, layer, size, area, c.grid()),
+            own: Shading::of(own[i], layer, size, area, c.grid()),
             tops: match mode != CompositeMode::Normal && i < colored {
-                true => comps[..colored]
+                true => own[..colored]
                     .iter()
                     .map(|k| Shading::of(*k, layer, size, area, c.grid()))
                     .collect(),
                 false => Vec::new(),
             },
+            alpha: alpha.map(|a| Shading::of(a, layer, size, area, c.grid())),
         };
         let (width, height) = c.size(size);
         let (m, coding, below) = (&m, &coding, &below);
@@ -324,7 +412,10 @@ pub(crate) fn over(under: &Canvas, layer: &Layer) -> Result<Canvas> {
                     false => m.mixed(mode, coding, below, s.comp.grid(), x, y),
                 };
                 if let Some((shown, a)) = shown {
-                    row[x] += (shown - row[x]) * a;
+                    let opaque = m.alpha.as_ref().map_or(1.0, |s| {
+                        s.pixel(x, y).map_or(0.0, |(v, _)| v / s.comp.top() as f32)
+                    });
+                    row[x] += (shown - row[x]) * a * opaque;
                 }
             }
         });
@@ -336,6 +427,7 @@ struct Mixing<'a> {
     channel: usize,
     own: Shading<'a>,
     tops: Vec<Shading<'a>>,
+    alpha: Option<Shading<'a>>,
 }
 
 impl Mixing<'_> {

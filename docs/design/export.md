@@ -446,6 +446,7 @@ The plan:
 - In a dissolve with a placed side, the incoming side is marked `cross`.
 - A clip at its usual values is laid over the same way, where its fitted picture leaves bars and something is below it.
 - Where its fitted picture fills the frame, it takes the place of the layers below. `place::fills` tells this, by the `place::fit` that the export and the viewer fit with.
+- A picture with an alpha channel (`VideoInfo::alpha`) never fills the frame. It is laid over the layers below by its straight alpha ([todo](../todo/clip-alpha.md)).
 - Inside a placed compound clip, it takes the place of the layers of the compound.
 - With nothing below it, it is drawn with black bars, which costs less.
 

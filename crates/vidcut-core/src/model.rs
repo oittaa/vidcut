@@ -846,6 +846,10 @@ pub struct VideoInfo {
     /// HDR10+ dynamic metadata (SMPTE ST 2094-40) on the frames.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hdr10plus: bool,
+    /// The pictures have an alpha channel: they show the tracks below
+    /// where they are transparent.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub alpha: bool,
     /// Dolby Vision on the frames.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dolby_vision: Option<DolbyVision>,
