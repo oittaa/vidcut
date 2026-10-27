@@ -1,0 +1,287 @@
+use std::ptr::NonNull;
+use std::sync::OnceLock;
+
+use half::f16;
+use objc2::AllocAnyThread;
+use objc2::rc::Retained;
+use objc2::runtime::AnyObject;
+use objc2_core_foundation::{CFDictionary, CFRetained};
+use objc2_core_media::CMTime;
+use objc2_core_video::{
+    CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBaseAddressOfPlane,
+    CVPixelBufferGetBytesPerRow, CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferIsPlanar,
+    CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferPool,
+    CVPixelBufferUnlockBaseAddress, kCVPixelBufferHeightKey, kCVPixelBufferPixelFormatTypeKey,
+    kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA, kCVPixelFormatType_64RGBAHalf,
+    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVReturnSuccess,
+};
+use objc2_foundation::{NSArray, NSDictionary, NSError, NSMutableDictionary, NSNumber, NSString};
+use objc2_video_toolbox::VTFrameProcessorFrame;
+
+use crate::error::{Error, Result};
+
+const BGRA: u32 = kCVPixelFormatType_32BGRA;
+const NV12: u32 = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+const RGHA: u32 = kCVPixelFormatType_64RGBAHalf;
+
+pub(crate) fn numbers(list: &NSArray<NSNumber>) -> Vec<u32> {
+    (0..list.count())
+        .map(|i| list.objectAtIndex(i).unsignedIntValue())
+        .collect()
+}
+
+pub(crate) fn fourcc(format: u32) -> String {
+    format
+        .to_be_bytes()
+        .iter()
+        .map(|b| char::from(*b))
+        .collect()
+}
+
+pub(crate) fn failed(what: &str, e: Retained<NSError>) -> Error {
+    Error::Invalid(format!("{what}: {}", e.localizedDescription()))
+}
+
+pub(crate) fn format_in(list: &NSArray<NSNumber>, what: &str) -> Result<u32> {
+    let formats = numbers(list);
+    [BGRA, NV12, RGHA]
+        .into_iter()
+        .find(|f| formats.contains(f))
+        .ok_or_else(|| {
+            let names: Vec<String> = formats.iter().map(|f| fourcc(*f)).collect();
+            Error::Invalid(format!(
+                "{what} takes none of vidcut's pixel formats, only {}",
+                names.join(", ")
+            ))
+        })
+}
+
+pub(crate) fn pool(
+    (w, h): (u32, u32),
+    format: u32,
+    attributes: &NSDictionary<NSString, AnyObject>,
+    what: &str,
+) -> Result<CFRetained<CVPixelBufferPool>> {
+    let all = NSMutableDictionary::dictionaryWithDictionary(attributes);
+    // SAFETY: constant keys of CoreVideo.
+    let keys = unsafe {
+        [
+            (kCVPixelBufferWidthKey, w),
+            (kCVPixelBufferHeightKey, h),
+            (kCVPixelBufferPixelFormatTypeKey, format),
+        ]
+    };
+    for (key, value) in keys {
+        // SAFETY: a CFString is an NSString.
+        let key = unsafe { &*std::ptr::from_ref(key).cast::<NSString>() };
+        all.insert(key, NSNumber::new_u32(value).as_ref());
+    }
+    let attributes =
+        std::ptr::from_ref::<NSDictionary<NSString, AnyObject>>(&all).cast::<CFDictionary>();
+    let mut out: *mut CVPixelBufferPool = std::ptr::null_mut();
+    // SAFETY: an NSDictionary is a CFDictionary, and `out` is a valid place for the pool.
+    let status = unsafe {
+        CVPixelBufferPool::create(None, None, Some(&*attributes), NonNull::from(&mut out))
+    };
+    if status != kCVReturnSuccess {
+        return Err(Error::Invalid(format!(
+            "picture buffers for {what}: CoreVideo error {status}"
+        )));
+    }
+    let out = NonNull::new(out)
+        .ok_or_else(|| Error::Invalid(format!("no picture buffers for {what}")))?;
+    // SAFETY: CVPixelBufferPoolCreate gives the pool with one retain, which this takes.
+    Ok(unsafe { CFRetained::from_raw(out) })
+}
+
+pub(crate) fn buffer(pool: &CVPixelBufferPool, what: &str) -> Result<CFRetained<CVPixelBuffer>> {
+    let mut out: *mut CVPixelBuffer = std::ptr::null_mut();
+    // SAFETY: a live pool, and `out` is a valid place for the buffer.
+    let status =
+        unsafe { CVPixelBufferPool::create_pixel_buffer(None, pool, NonNull::from(&mut out)) };
+    if status != kCVReturnSuccess {
+        return Err(Error::Invalid(format!(
+            "a picture buffer for {what}: CoreVideo error {status}"
+        )));
+    }
+    let out =
+        NonNull::new(out).ok_or_else(|| Error::Invalid(format!("no picture buffer for {what}")))?;
+    // SAFETY: CVPixelBufferPoolCreatePixelBuffer gives the buffer with one retain, which this takes.
+    Ok(unsafe { CFRetained::from_raw(out) })
+}
+
+pub(crate) fn frame(
+    buffer: &CVPixelBuffer,
+    time: CMTime,
+    what: &str,
+) -> Result<Retained<VTFrameProcessorFrame>> {
+    // SAFETY: a live pixel buffer and a plain time.
+    unsafe {
+        VTFrameProcessorFrame::initWithBuffer_presentationTimeStamp(
+            VTFrameProcessorFrame::alloc(),
+            buffer,
+            time,
+        )
+    }
+    .ok_or_else(|| Error::Invalid(format!("{what} refused a picture buffer")))
+}
+
+struct Locked<'a>(&'a CVPixelBuffer);
+
+impl<'a> Locked<'a> {
+    fn new(buffer: &'a CVPixelBuffer) -> Result<Self> {
+        // SAFETY: a live buffer, unlocked when this drops.
+        let status = unsafe { CVPixelBufferLockBaseAddress(buffer, CVPixelBufferLockFlags(0)) };
+        if status != kCVReturnSuccess {
+            return Err(Error::Invalid(format!(
+                "a picture buffer of macOS: CoreVideo error {status}"
+            )));
+        }
+        Ok(Self(buffer))
+    }
+
+    fn plane(&self, i: usize) -> (*mut u8, usize) {
+        if !CVPixelBufferIsPlanar(self.0) {
+            return (
+                CVPixelBufferGetBaseAddress(self.0).cast(),
+                CVPixelBufferGetBytesPerRow(self.0),
+            );
+        }
+        (
+            CVPixelBufferGetBaseAddressOfPlane(self.0, i).cast(),
+            CVPixelBufferGetBytesPerRowOfPlane(self.0, i),
+        )
+    }
+
+    fn row(&mut self, plane: usize, y: usize, bytes: usize) -> &mut [u8] {
+        let (base, stride) = self.plane(plane);
+        // SAFETY: row y of a locked plane of `stride` bytes for each row.
+        unsafe { std::slice::from_raw_parts_mut(base.add(y * stride), bytes) }
+    }
+}
+
+impl Drop for Locked<'_> {
+    fn drop(&mut self) {
+        // SAFETY: the lock that `new` took.
+        let _ = unsafe { CVPixelBufferUnlockBaseAddress(self.0, CVPixelBufferLockFlags(0)) };
+    }
+}
+
+fn ycbcr(p: &[u8]) -> (f32, f32, f32) {
+    let [r, g, b] = [p[0], p[1], p[2]].map(|v| f32::from(v) / 255.0);
+    let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    (y, (b - y) / 1.8556, (r - y) / 1.5748)
+}
+
+fn code(v: f32) -> u8 {
+    v.round().clamp(0.0, 255.0) as u8
+}
+
+pub(crate) fn write(
+    buffer: &CVPixelBuffer,
+    format: u32,
+    (w, h): (u32, u32),
+    rgb: &[u8],
+) -> Result<()> {
+    let (w, h) = (w as usize, h as usize);
+    let mut locked = Locked::new(buffer)?;
+    let pixel = |x: usize, y: usize| &rgb[(y * w + x) * 3..(y * w + x) * 3 + 3];
+    if format == BGRA {
+        for y in 0..h {
+            let row = locked.row(0, y, w * 4);
+            for (x, px) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                let s = pixel(x, y);
+                *px = [s[2], s[1], s[0], 255];
+            }
+        }
+        return Ok(());
+    }
+    if format == RGHA {
+        let one = f16::from_f32(1.0).to_bits().to_le_bytes();
+        for y in 0..h {
+            let row = locked.row(0, y, w * 8);
+            for (x, px) in row.as_chunks_mut::<8>().0.iter_mut().enumerate() {
+                let s = pixel(x, y);
+                let [r, g, b] = [s[0], s[1], s[2]]
+                    .map(|v| f16::from_f32(f32::from(v) / 255.0).to_bits().to_le_bytes());
+                *px = [r[0], r[1], g[0], g[1], b[0], b[1], one[0], one[1]];
+            }
+        }
+        return Ok(());
+    }
+    for y in 0..h {
+        let row = locked.row(0, y, w);
+        for (x, v) in row.iter_mut().enumerate() {
+            *v = code(16.0 + 219.0 * ycbcr(pixel(x, y)).0);
+        }
+    }
+    for cy in 0..h / 2 {
+        let row = locked.row(1, cy, w);
+        for cx in 0..w / 2 {
+            let (mut cb, mut cr) = (0.0, 0.0);
+            for (x, y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let (_, b, r) = ycbcr(pixel(cx * 2 + x, cy * 2 + y));
+                cb += b / 4.0;
+                cr += r / 4.0;
+            }
+            row[cx * 2] = code(128.0 + 224.0 * cb);
+            row[cx * 2 + 1] = code(128.0 + 224.0 * cr);
+        }
+    }
+    Ok(())
+}
+
+fn halves() -> &'static [u8] {
+    static CODES: OnceLock<Vec<u8>> = OnceLock::new();
+    CODES.get_or_init(|| {
+        (0..=u16::MAX)
+            .map(|bits| code(255.0 * f16::from_bits(bits).to_f32()))
+            .collect()
+    })
+}
+
+pub(crate) fn read(buffer: &CVPixelBuffer, format: u32, (w, h): (u32, u32)) -> Result<Vec<u8>> {
+    let (w, h) = (w as usize, h as usize);
+    let mut locked = Locked::new(buffer)?;
+    if format == RGHA {
+        let codes = halves();
+        let mut out = vec![0; w * h * 3];
+        for (y, line) in out.chunks_exact_mut(w * 3).enumerate() {
+            let row = locked.row(0, y, w * 8);
+            for (to, px) in line
+                .as_chunks_mut::<3>()
+                .0
+                .iter_mut()
+                .zip(row.as_chunks::<8>().0)
+            {
+                let c = |i: usize| codes[usize::from(u16::from_le_bytes([px[i], px[i + 1]]))];
+                *to = [c(0), c(2), c(4)];
+            }
+        }
+        return Ok(out);
+    }
+    let mut out = Vec::with_capacity(w * h * 3);
+    if format == BGRA {
+        for y in 0..h {
+            for px in locked.row(0, y, w * 4).as_chunks::<4>().0 {
+                out.extend_from_slice(&[px[2], px[1], px[0]]);
+            }
+        }
+        return Ok(out);
+    }
+    for y in 0..h {
+        let luma = locked.row(0, y, w).to_vec();
+        let chroma = locked.row(1, y / 2, w).to_vec();
+        for (x, l) in luma.iter().enumerate() {
+            let y = (f32::from(*l) - 16.0) / 219.0;
+            let pb = (f32::from(chroma[x / 2 * 2]) - 128.0) / 224.0;
+            let pr = (f32::from(chroma[x / 2 * 2 + 1]) - 128.0) / 224.0;
+            out.extend_from_slice(&[
+                code(255.0 * (y + 1.5748 * pr)),
+                code(255.0 * (y - 0.1873 * pb - 0.4681 * pr)),
+                code(255.0 * (y + 1.8556 * pb)),
+            ]);
+        }
+    }
+    Ok(out)
+}

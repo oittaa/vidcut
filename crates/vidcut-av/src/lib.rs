@@ -16,6 +16,8 @@ pub mod error;
 pub mod export;
 pub mod first;
 pub mod fixture;
+#[cfg(target_os = "macos")]
+pub(crate) mod frame_processor;
 pub mod gpus;
 pub mod hdr;
 pub mod hw;
