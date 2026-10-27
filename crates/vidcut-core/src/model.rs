@@ -115,6 +115,14 @@ pub struct Settings {
     /// The timeline color space (decision D50); left out when `auto`.
     #[serde(default, skip_serializing_if = "TimelineColors::is_auto")]
     pub timeline_colors: TimelineColors,
+    /// The Retime Process of the clips that follow the project; left out
+    /// when `auto`.
+    #[serde(default, skip_serializing_if = "ProjectRetime::is_auto")]
+    pub retime: ProjectRetime,
+    /// The upscaler of Super Scale for the media that follow the project;
+    /// left out when `auto`.
+    #[serde(default, skip_serializing_if = "ProjectUpscaler::is_auto")]
+    pub upscaler: ProjectUpscaler,
 }
 
 impl Default for Settings {
@@ -133,6 +141,8 @@ impl Default for Settings {
             use_proxies: false,
             fillers: BTreeMap::new(),
             timeline_colors: TimelineColors::Auto,
+            retime: ProjectRetime::Auto,
+            upscaler: ProjectUpscaler::Auto,
         }
     }
 }
@@ -316,10 +326,11 @@ pub struct Media {
     /// says in their place, for a file whose tags are wrong.
     #[serde(default, skip_serializing_if = "ColorSpace::is_tagged")]
     pub color_space: ColorSpace,
-    /// Super Scale: its pictures are enlarged with the best upscaler that
-    /// the GPU has, before they are fitted. Absent while it is off.
-    #[serde(default, skip_serializing_if = "SuperScale::is_off")]
-    pub super_scale: SuperScale,
+    /// Super Scale: its pictures are enlarged with an AI upscaler or the
+    /// classic one, as much as they need, before they are fitted. Absent
+    /// while it is off.
+    #[serde(default, skip_serializing_if = "MediaSuperScale::is_off")]
+    pub super_scale: MediaSuperScale,
     /// Source frames left out of every edit of this media (`media.leave_out`,
     /// Delete in the Transcription window), each `[start, end)`, in order and
     /// apart.
@@ -420,21 +431,36 @@ pub fn uncovered(a: i64, b: i64, spans: &[(i64, i64)]) -> Vec<(i64, i64)> {
     out
 }
 
-/// How Super Scale enlarges a media item's pictures.
+/// Super Scale of a media item: on or off, and its upscaler.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub struct MediaSuperScale {
+    pub on: bool,
+    pub sharpness: Sharpness,
+    pub upscaler: MediaUpscaler,
+}
+
+impl MediaSuperScale {
+    pub fn is_off(&self) -> bool {
+        !self.on
+    }
+}
+
+/// How Super Scale enlarges a picture, with the upscaler that runs on this
+/// computer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct SuperScale {
-    pub factor: ScaleFactor,
+    pub on: bool,
     pub sharpness: Sharpness,
     pub upscaler: Upscaler,
 }
 
 impl SuperScale {
     pub fn is_off(&self) -> bool {
-        self.factor == ScaleFactor::None
+        !self.on
     }
 
     pub fn ai(&self) -> bool {
-        !self.is_off() && self.upscaler != Upscaler::Classic
+        self.on && self.upscaler != Upscaler::Classic
     }
 }
 
@@ -446,13 +472,13 @@ pub enum Upscaler {
     /// up to 1920x1080. It enlarges by a factor that macOS offers, and the
     /// result is fitted. It reads the frames of a clip in order from its
     /// first frame. macOS downloads its models only with `download`. The
-    /// default on macOS, where the app calls it AI.
+    /// upscaler of Auto on macOS, where the app calls it AI.
     Macos,
     /// A diffusion network (FlashVSR+ Turbo) on the GPU, for SDR pictures:
     /// slow, with more detail. It reads the frames of a clip in order from
     /// its first frame. Its weights (7.0 GB) download at their first use. An
-    /// export refuses media that it cannot take. The default elsewhere. Off
-    /// on macOS for now.
+    /// export refuses media that it cannot take. The upscaler of Auto
+    /// elsewhere. Off on macOS for now.
     AiBest,
     /// A neural network (NanoVSR 5.4M) on the GPU, for SDR pictures. It reads
     /// 15 frames at a time. Its weights (25 MB) download at their first use.
@@ -472,31 +498,66 @@ impl Default for Upscaler {
     }
 }
 
-/// How much Super Scale enlarges the pictures of a media item.
+/// The upscaler of a media item's Super Scale: the project's, or one of
+/// its own.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-pub enum ScaleFactor {
-    /// Off: the usual upscaler.
+#[serde(rename_all = "snake_case")]
+pub enum MediaUpscaler {
+    /// The upscaler of the project settings.
     #[default]
-    #[serde(rename = "none")]
-    None,
-    /// As much as the picture needs, up to 4x.
-    #[serde(rename = "auto")]
-    Auto,
-    #[serde(rename = "2x")]
-    X2,
-    #[serde(rename = "3x")]
-    X3,
-    #[serde(rename = "4x")]
-    X4,
+    Project,
+    /// The super-resolution scaler of macOS: on macOS only.
+    Macos,
+    /// FlashVSR+ Turbo on the GPU: off on macOS for now.
+    AiBest,
+    /// NanoVSR 5.4M on the GPU: off on macOS for now.
+    AiFast,
+    /// The classic upscalers.
+    Classic,
 }
 
-impl ScaleFactor {
-    pub fn times(self) -> Option<u32> {
+impl MediaUpscaler {
+    pub fn upscaler(self) -> Option<Upscaler> {
         match self {
-            Self::None | Self::Auto => None,
-            Self::X2 => Some(2),
-            Self::X3 => Some(3),
-            Self::X4 => Some(4),
+            Self::Project => None,
+            Self::Macos => Some(Upscaler::Macos),
+            Self::AiBest => Some(Upscaler::AiBest),
+            Self::AiFast => Some(Upscaler::AiFast),
+            Self::Classic => Some(Upscaler::Classic),
+        }
+    }
+}
+
+/// The project's upscaler of Super Scale, for the media that follow it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectUpscaler {
+    /// The AI upscaler of the computer that plays or exports: the scaler of
+    /// macOS on macOS, AI Best elsewhere.
+    #[default]
+    Auto,
+    /// The super-resolution scaler of macOS: on macOS only.
+    Macos,
+    /// FlashVSR+ Turbo on the GPU: off on macOS for now.
+    AiBest,
+    /// NanoVSR 5.4M on the GPU: off on macOS for now.
+    AiFast,
+    /// The classic upscalers.
+    Classic,
+}
+
+impl ProjectUpscaler {
+    pub fn is_auto(&self) -> bool {
+        *self == Self::Auto
+    }
+
+    pub fn upscaler(self) -> Upscaler {
+        match self {
+            Self::Auto => Upscaler::default(),
+            Self::Macos => Upscaler::Macos,
+            Self::AiBest => Upscaler::AiBest,
+            Self::AiFast => Upscaler::AiFast,
+            Self::Classic => Upscaler::Classic,
         }
     }
 }
@@ -1158,9 +1219,9 @@ pub struct Clip {
     pub speed: Option<Speed>,
     /// How it makes a frame that falls between two of its source frames:
     /// at a speed change, or where its media's frame rate isn't the
-    /// timeline's. Left out at `nearest`.
-    #[serde(default, skip_serializing_if = "Retime::is_nearest")]
-    pub retime: Retime,
+    /// timeline's. Left out at `project`, the Retime Process of the project.
+    #[serde(default, skip_serializing_if = "ClipRetime::is_project")]
+    pub retime: ClipRetime,
     /// Its own Clip Color (spec §3). Without one it shows its media's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -1266,6 +1327,14 @@ impl Retime {
         matches!(self, Retime::AiFast | Retime::AiBest | Retime::Macos)
     }
 
+    pub fn ai_here() -> Self {
+        if cfg!(target_os = "macos") {
+            Retime::Macos
+        } else {
+            Retime::AiFast
+        }
+    }
+
     pub fn title(&self) -> &'static str {
         match self {
             Retime::Nearest => "Nearest",
@@ -1274,6 +1343,88 @@ impl Retime {
             Retime::AiBest => "AI Best",
             Retime::Macos => "AI",
         }
+    }
+}
+
+/// A clip's Retime Process: the project's, or one of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipRetime {
+    /// The Retime Process of the project settings.
+    #[default]
+    Project,
+    /// The source frame that the frame falls in.
+    Nearest,
+    /// The two source frames around it, mixed by how near each is.
+    FrameBlend,
+    /// RIFE 4.25 on the GPU: off on macOS.
+    AiFast,
+    /// EMA-VFI on the GPU: off on macOS.
+    AiBest,
+    /// The frame rate conversion of macOS: on macOS only.
+    Macos,
+}
+
+impl ClipRetime {
+    pub fn is_project(&self) -> bool {
+        *self == Self::Project
+    }
+
+    pub fn process(self) -> Option<Retime> {
+        match self {
+            Self::Project => None,
+            Self::Nearest => Some(Retime::Nearest),
+            Self::FrameBlend => Some(Retime::FrameBlend),
+            Self::AiFast => Some(Retime::AiFast),
+            Self::AiBest => Some(Retime::AiBest),
+            Self::Macos => Some(Retime::Macos),
+        }
+    }
+
+    pub fn title(&self) -> &'static str {
+        self.process().map_or("Project Settings", |r| r.title())
+    }
+}
+
+/// The project's Retime Process, for the clips that follow it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectRetime {
+    /// The AI of the computer that plays or exports for slow motion: the
+    /// frame rate conversion of macOS on macOS, AI Fast elsewhere. Nearest
+    /// for the rest: other speeds, other frame rates and HDR pictures.
+    #[default]
+    Auto,
+    /// The source frame that the frame falls in.
+    Nearest,
+    /// The two source frames around it, mixed by how near each is.
+    FrameBlend,
+    /// RIFE 4.25 on the GPU: off on macOS.
+    AiFast,
+    /// EMA-VFI on the GPU: off on macOS.
+    AiBest,
+    /// The frame rate conversion of macOS: on macOS only.
+    Macos,
+}
+
+impl ProjectRetime {
+    pub fn is_auto(&self) -> bool {
+        *self == Self::Auto
+    }
+
+    pub fn process(self) -> Option<Retime> {
+        match self {
+            Self::Auto => None,
+            Self::Nearest => Some(Retime::Nearest),
+            Self::FrameBlend => Some(Retime::FrameBlend),
+            Self::AiFast => Some(Retime::AiFast),
+            Self::AiBest => Some(Retime::AiBest),
+            Self::Macos => Some(Retime::Macos),
+        }
+    }
+
+    pub fn title(&self) -> &'static str {
+        self.process().map_or("Auto", |r| r.title())
     }
 }
 

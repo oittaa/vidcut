@@ -1603,17 +1603,38 @@ impl Live {
         }
     }
 
+    fn models_missing(&self, request: &Request) -> vidcut_core::editor::Models {
+        let Some(open) = self.project.as_ref() else {
+            return Default::default();
+        };
+        let playhead = Some(self.player.position(TIMELINE));
+        let after =
+            vidcut_core::editor::models_after(open.project(), request, &AvEnv::new(), playhead);
+        let (retimes, upscalers) = after.unwrap_or_default();
+        let dir = paths::models_dir();
+        (
+            retimes
+                .into_iter()
+                .filter(|r| !vidcut_av::interpolate::needed(&dir, *r).is_empty())
+                .collect(),
+            upscalers
+                .into_iter()
+                .filter(|u| !vidcut_av::super_scale::needed(&dir, *u).is_empty())
+                .collect(),
+        )
+    }
+
     fn ai_missing(
         &self,
         media: &[String],
-        factor: Option<vidcut_core::model::ScaleFactor>,
-        upscaler: Option<vidcut_core::model::Upscaler>,
+        on: Option<bool>,
+        upscaler: Option<vidcut_core::model::MediaUpscaler>,
     ) -> Vec<vidcut_core::model::Upscaler> {
         let Some(open) = self.project.as_ref() else {
             return Vec::new();
         };
         let set = vidcut_core::ops::SuperScaleSet {
-            factor,
+            on,
             sharpness: None,
             upscaler,
         };
@@ -2974,6 +2995,26 @@ impl Live {
                 };
                 Step::Measure(Box::new(fetch), Box::new(envelope))
             }
+            _ if fetches(&envelope.request)
+                && !envelope.dry_run
+                && self.models_missing(&envelope.request) != Default::default() =>
+            {
+                let (retimes, upscalers) = self.models_missing(&envelope.request);
+                let fetch = move || {
+                    let dir = paths::models_dir();
+                    let failed = |e: vidcut_av::Error| {
+                        crate::export::av_error(&e, vidcut_core::ErrorCode::Media, String::new())
+                    };
+                    for r in retimes {
+                        vidcut_av::interpolate::get_ready(&dir, r, true).map_err(failed)?;
+                    }
+                    for u in upscalers {
+                        vidcut_av::super_scale::get_ready(&dir, u, true).map_err(failed)?;
+                    }
+                    Ok(())
+                };
+                Step::Measure(Box::new(fetch), Box::new(envelope))
+            }
             Request::ClipSet {
                 voice_isolation: Some(amount),
                 download: true,
@@ -4272,6 +4313,20 @@ fn scroll_by(piece: &mut render::VideoPiece, clip: &str, off: i64) {
             }
         }
         _ => {}
+    }
+}
+
+fn fetches(r: &Request) -> bool {
+    match r {
+        Request::ClipSet {
+            retime: Some(_),
+            download: true,
+            ..
+        }
+        | Request::EditChangeSpeed { download: true, .. }
+        | Request::ProjectSet(vidcut_core::request::ProjectSet { download: true, .. }) => true,
+        Request::Apply { commands, .. } => commands.iter().any(fetches),
+        _ => false,
     }
 }
 

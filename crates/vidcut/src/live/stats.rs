@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use vidcut_av::color::Matrix;
 use vidcut_av::player::{self as engine, Layout, PlaysOn};
 use vidcut_av::{interpolate, super_scale};
-use vidcut_core::model::{Hdr, Retime, ScaleFactor, Sharpness, SuperScale, Upscaler};
+use vidcut_core::model::{Hdr, Retime, Sharpness, SuperScale, Upscaler};
 
 pub type Group = (&'static str, Vec<(&'static str, String)>);
 
@@ -45,7 +45,6 @@ pub struct PictureStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SuperScaleStats {
     pub upscaler: Option<String>,
-    pub factor: String,
     pub runs_on: Option<String>,
     pub sizes: Option<String>,
     pub state: Option<String>,
@@ -336,11 +335,6 @@ impl SuperScaleStats {
         if s.is_none() && report.making.is_none() {
             return None;
         }
-        let factor = match s.map(|s| s.factor) {
-            None | Some(ScaleFactor::None) => "Off".to_string(),
-            Some(ScaleFactor::Auto) => "Auto".to_string(),
-            Some(f) => f.times().map_or_else(String::new, |n| format!("{n}x")),
-        };
         let upscaler = s.map(|s| match s.upscaler {
             Upscaler::Classic => format!(
                 "Classic, sharpness {}",
@@ -368,7 +362,6 @@ impl SuperScaleStats {
         let secs = |d: std::time::Duration| format!("{:.1} s", d.as_secs_f64());
         Some(Self {
             upscaler,
-            factor,
             runs_on: report
                 .devices
                 .iter()
@@ -408,7 +401,6 @@ impl SuperScaleStats {
         if let Some(u) = &self.upscaler {
             rows.push(("Upscaler", u.clone()));
         }
-        rows.push(("Factor", self.factor.clone()));
         for (label, fact) in [
             ("Runs on", &self.runs_on),
             ("Sizes", &self.sizes),

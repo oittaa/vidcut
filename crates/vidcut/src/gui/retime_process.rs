@@ -1,51 +1,58 @@
-use eframe::egui;
 use serde_json::json;
-use vidcut_core::model::Retime;
+use vidcut_core::model::{ClipRetime, ProjectRetime, Retime};
 
-use super::super_scale::field;
 use super::workspace::Workspace;
 
 #[cfg(target_os = "macos")]
-pub(super) const PROCESSES: [Retime; 3] = [Retime::Nearest, Retime::FrameBlend, Retime::Macos];
-
-#[cfg(not(target_os = "macos"))]
-pub(super) const PROCESSES: [Retime; 4] = [
-    Retime::Nearest,
-    Retime::FrameBlend,
-    Retime::AiFast,
-    Retime::AiBest,
+pub(super) const PROCESSES: [ClipRetime; 4] = [
+    ClipRetime::Project,
+    ClipRetime::Nearest,
+    ClipRetime::FrameBlend,
+    ClipRetime::Macos,
 ];
 
-impl Workspace {
-    pub(super) fn set_retime(&mut self, clips: &[String], retime: Retime) {
-        let params = json!({ "clips": clips, "retime": retime });
-        let dir = crate::paths::models_dir();
-        if vidcut_av::interpolate::needed(&dir, retime).is_empty() {
-            self.send("clip.set", params);
-        } else {
-            self.retime_asking = Some(params);
-        }
-    }
+#[cfg(not(target_os = "macos"))]
+pub(super) const PROCESSES: [ClipRetime; 5] = [
+    ClipRetime::Project,
+    ClipRetime::Nearest,
+    ClipRetime::FrameBlend,
+    ClipRetime::AiFast,
+    ClipRetime::AiBest,
+];
 
-    pub(super) fn retime_prompt(&mut self, ctx: &egui::Context) {
-        let Some(mut params) = self.retime_asking.clone() else {
-            return;
-        };
-        let retime = field(&params, "retime").unwrap_or_default();
-        let needs = vidcut_av::interpolate::needed(&crate::paths::models_dir(), retime);
-        if needs.is_empty() {
-            self.retime_asking = None;
-            self.send("clip.set", params);
-            return;
-        }
-        match super::speech::ask_download(ctx, "retime-download", &needs, "Download") {
-            Some(true) => {
-                self.retime_asking = None;
-                params["download"] = json!(true);
-                self.send("clip.set", params);
-            }
-            Some(false) => self.retime_asking = None,
-            None => {}
-        }
+#[cfg(target_os = "macos")]
+pub(super) const PROJECT_PROCESSES: [ProjectRetime; 4] = [
+    ProjectRetime::Auto,
+    ProjectRetime::Nearest,
+    ProjectRetime::FrameBlend,
+    ProjectRetime::Macos,
+];
+
+#[cfg(not(target_os = "macos"))]
+pub(super) const PROJECT_PROCESSES: [ProjectRetime; 5] = [
+    ProjectRetime::Auto,
+    ProjectRetime::Nearest,
+    ProjectRetime::FrameBlend,
+    ProjectRetime::AiFast,
+    ProjectRetime::AiBest,
+];
+
+pub(super) fn clip_text(r: ClipRetime, project: Retime) -> String {
+    match r {
+        ClipRetime::Project => format!("Project Settings ({})", project.title()),
+        r => r.title().into(),
+    }
+}
+
+pub(super) fn project_text(r: ProjectRetime) -> String {
+    match r {
+        ProjectRetime::Auto => format!("Auto ({} for slow motion)", Retime::ai_here().title()),
+        r => r.title().into(),
+    }
+}
+
+impl Workspace {
+    pub(super) fn set_retime(&mut self, clips: &[String], retime: ClipRetime) {
+        self.send_asking("clip.set", json!({ "clips": clips, "retime": retime }));
     }
 }

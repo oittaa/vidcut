@@ -2467,6 +2467,19 @@ fn mutate(
     Ok(match request {
         Request::ProjectSet(set) => {
             project_set(p, set)?;
+            if set.download && !dry_run {
+                let ids: Vec<String> = p
+                    .tracks
+                    .iter()
+                    .flat_map(|t| t.clips.iter().map(|c| c.id.clone()))
+                    .collect();
+                ready_retimes(env, p, &ids)?;
+                let media = crate::otio::used_media(p, None);
+                let set = ops::SuperScaleSet::default();
+                for upscaler in ops::ai_upscalers(p, &media, &set) {
+                    env.ai_upscaler(upscaler, true)?;
+                }
+            }
             Value::Null
         }
         Request::MediaAdd {
@@ -2671,7 +2684,7 @@ fn mutate(
             download,
         } => {
             let set = ops::SuperScaleSet {
-                factor: *super_scale,
+                on: *super_scale,
                 sharpness: *sharpness,
                 upscaler: *upscaler,
             };
@@ -3177,6 +3190,7 @@ fn mutate(
             speed,
             ripple,
             at,
+            download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let at = match at {
@@ -3184,6 +3198,9 @@ fn mutate(
                 None => playhead,
             };
             ops::change_speed(p, &ids, *speed, *ripple, at)?;
+            if *download && !dry_run {
+                ready_retimes(env, p, &ids)?;
+            }
             Value::Null
         }
         Request::ClipSet {
@@ -3209,9 +3226,6 @@ fn mutate(
             if voice_isolation.is_some_and(|v| v > 0.0) && !dry_run {
                 env.voice_isolation(*download)?;
             }
-            if let Some(r) = retime.filter(|r| r.ai() && *download && !dry_run) {
-                env.interpolator(r, true)?;
-            }
             let props = ClipProps {
                 enabled: *enabled,
                 muted: *muted,
@@ -3223,6 +3237,9 @@ fn mutate(
                 retime: *retime,
             };
             ops::set_clips(p, &ids, &props)?;
+            if retime.is_some() && *download && !dry_run {
+                ready_retimes(env, p, &ids)?;
+            }
             Value::Null
         }
         Request::ClipNormalize {
@@ -4990,7 +5007,7 @@ fn place_imported(
                 picture,
                 compound,
                 speed: c.speed.clone(),
-                retime: crate::model::Retime::Nearest,
+                retime: crate::model::ClipRetime::Project,
                 color: color(c),
             });
             placed.insert(track_of(&c.track));
@@ -5126,7 +5143,7 @@ fn place_imported(
             picture,
             compound: None,
             speed: c.speed.clone(),
-            retime: crate::model::Retime::Nearest,
+            retime: crate::model::ClipRetime::Project,
             color: color(c),
         });
         placed.insert(track_of(&c.track));
@@ -5960,6 +5977,54 @@ pub fn project_from_otio(
     Ok((p, warnings))
 }
 
+pub type Models = (Vec<crate::model::Retime>, Vec<crate::model::Upscaler>);
+
+fn models_used(p: &Project) -> Models {
+    let clips: Vec<String> = p
+        .tracks
+        .iter()
+        .flat_map(|t| t.clips.iter().map(|c| c.id.clone()))
+        .collect();
+    let media = otio::used_media(p, None);
+    (
+        ops::ai_retimes(p, &clips),
+        ops::ai_upscalers(p, &media, &ops::SuperScaleSet::default()),
+    )
+}
+
+pub fn models_after(
+    p: &Project,
+    request: &Request,
+    env: &dyn Env,
+    playhead: Option<i64>,
+) -> Result<Models> {
+    let mut working = p.clone();
+    match request {
+        Request::Apply { commands, .. } => {
+            batch(&mut working, commands, env, playhead, true, None)?;
+        }
+        _ => {
+            mutate(&mut working, request, env, playhead, true)?;
+        }
+    }
+    let (retimes, upscalers) = models_used(p);
+    let (after, scaled) = models_used(&working);
+    Ok((
+        after.into_iter().filter(|r| !retimes.contains(r)).collect(),
+        scaled
+            .into_iter()
+            .filter(|u| !upscalers.contains(u))
+            .collect(),
+    ))
+}
+
+fn ready_retimes(env: &dyn Env, p: &Project, ids: &[String]) -> Result<()> {
+    for r in ops::ai_retimes(p, ids) {
+        env.interpolator(r, true)?;
+    }
+    Ok(())
+}
+
 fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
     if let Some(fps) = set.fps {
         let has_clips = p.tracks.iter().any(|t| !t.clips.is_empty());
@@ -6020,6 +6085,12 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
     }
     if let Some(colors) = set.timeline_colors {
         p.settings.timeline_colors = colors;
+    }
+    if let Some(retime) = set.retime {
+        p.settings.retime = retime;
+    }
+    if let Some(upscaler) = set.upscaler {
+        p.settings.upscaler = upscaler;
     }
     if let Some(fillers) = &set.fillers {
         crate::preferences::set_fillers(&mut p.settings.fillers, fillers)?;

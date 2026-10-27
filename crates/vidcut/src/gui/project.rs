@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::Project;
-use vidcut_core::model::{Hdr, Settings, TimelineColors};
+use vidcut_core::model::{Hdr, ProjectRetime, ProjectUpscaler, Settings, TimelineColors};
 use vidcut_core::time::{Rational, STANDARD_RATES, TimeSpec};
 
 use super::export::{Ask, Picked, near_center};
@@ -34,6 +34,8 @@ pub(super) struct Format {
     start: String,
     colors: TimelineColors,
     auto: Option<Hdr>,
+    retime: ProjectRetime,
+    upscaler: ProjectUpscaler,
 }
 
 impl Default for Format {
@@ -46,6 +48,8 @@ impl Default for Format {
             start: "00:00:00:00".into(),
             colors: TimelineColors::Auto,
             auto: None,
+            retime: ProjectRetime::Auto,
+            upscaler: ProjectUpscaler::Auto,
         }
     }
 }
@@ -75,7 +79,45 @@ impl Format {
             start: p.settings.timecode(0),
             colors: p.settings.timeline_colors,
             auto: vidcut_core::render::auto_colors(p),
+            retime: p.settings.retime,
+            upscaler: p.settings.upscaler,
         }
+    }
+
+    fn edit_ai(&mut self, ui: &mut egui::Ui) {
+        use super::super_scale::{PROJECT_UPSCALERS, label_of, project_upscaler_text};
+        egui::Grid::new(ui.scope_id().with("ai"))
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                let label = ui.label("Retime Process");
+                let text = super::retime_process::project_text;
+                egui::ComboBox::from_id_salt("project retime")
+                    .selected_text(text(self.retime))
+                    .width(240.0)
+                    .show_ui(ui, |ui| {
+                        for r in super::retime_process::PROJECT_PROCESSES {
+                            ui.selectable_value(&mut self.retime, r, text(r));
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id);
+                ui.end_row();
+                let label = ui.label("Super Scale Upscaler");
+                let now = label_of(PROJECT_UPSCALERS, self.upscaler);
+                egui::ComboBox::from_id_salt("project upscaler")
+                    .selected_text(project_upscaler_text(self.upscaler, now))
+                    .width(240.0)
+                    .show_ui(ui, |ui| {
+                        for &(u, text) in PROJECT_UPSCALERS {
+                            let text = project_upscaler_text(u, text);
+                            ui.selectable_value(&mut self.upscaler, u, text);
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id);
+                ui.end_row();
+            });
     }
 
     fn colors_text(&self, colors: TimelineColors) -> String {
@@ -593,6 +635,7 @@ impl Workspace {
                 format.edit(ui, empty);
                 format.edit_start(ui);
                 format.edit_colors(ui);
+                format.edit_ai(ui);
                 if !empty {
                     ui.label(
                         RichText::new(
@@ -617,7 +660,7 @@ impl Workspace {
                 });
             });
         if let Some(changes) = apply {
-            self.send("project.set", changes);
+            self.send_asking("project.set", changes);
         } else if open && !cancel {
             self.project_ui.settings = Some((format, was));
         }
@@ -641,6 +684,12 @@ fn changes(now: &Format, was: &Format) -> Value {
     }
     if now.colors != was.colors {
         set.insert("timeline_colors".into(), json!(now.colors));
+    }
+    if now.retime != was.retime {
+        set.insert("retime".into(), json!(now.retime));
+    }
+    if now.upscaler != was.upscaler {
+        set.insert("upscaler".into(), json!(now.upscaler));
     }
     Value::Object(set)
 }

@@ -19,8 +19,8 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, ColorSpace, Marker, Project, ScaleFactor, Sharpness, Speed, Track, TrackClip,
-    TrackKind, Upscaler,
+    Clip, ClipAudio, ColorSpace, Marker, MediaUpscaler, Project, Sharpness, Speed, Track,
+    TrackClip, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -262,7 +262,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         picture: None,
         compound: None,
         speed: None,
-        retime: crate::model::Retime::Nearest,
+        retime: crate::model::ClipRetime::Project,
         color: None,
     })
 }
@@ -1612,7 +1612,7 @@ pub struct ClipProps {
     pub name: Option<Option<String>>,
     pub color: Option<Option<String>>,
     pub voice_isolation: Option<f64>,
-    pub retime: Option<crate::model::Retime>,
+    pub retime: Option<crate::model::ClipRetime>,
 }
 
 pub fn checked_isolation(amount: f64) -> Result<f64> {
@@ -1815,9 +1815,9 @@ pub fn set_media_color_space(p: &mut Project, ids: &[String], space: ColorSpace)
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SuperScaleSet {
-    pub factor: Option<ScaleFactor>,
+    pub on: Option<bool>,
     pub sharpness: Option<Sharpness>,
-    pub upscaler: Option<Upscaler>,
+    pub upscaler: Option<MediaUpscaler>,
 }
 
 impl SuperScaleSet {
@@ -1826,12 +1826,27 @@ impl SuperScaleSet {
     }
 }
 
+pub fn ai_retimes(p: &Project, ids: &[String]) -> Vec<crate::model::Retime> {
+    let mut out = Vec::new();
+    for c in ids.iter().filter_map(|id| p.clip(id)).filter(|c| c.video) {
+        let Some(m) = p.media(&c.media) else {
+            continue;
+        };
+        let r = crate::render::retime_of(c, m, &p.settings);
+        if r.ai() && !out.contains(&r) {
+            out.push(r);
+        }
+    }
+    out
+}
+
 pub fn ai_upscalers(p: &Project, ids: &[String], set: &SuperScaleSet) -> Vec<Upscaler> {
     let mut out = Vec::new();
     for m in ids.iter().filter_map(|id| p.media(id)) {
         let mut s = m.super_scale;
-        s.factor = set.factor.unwrap_or(s.factor);
+        s.on = set.on.unwrap_or(s.on);
         s.upscaler = set.upscaler.unwrap_or(s.upscaler);
+        let s = crate::render::super_scale_of(s, &p.settings);
         if s.ai() && !out.contains(&s.upscaler) {
             out.push(s.upscaler);
         }
@@ -1850,7 +1865,7 @@ pub fn set_media_super_scale(p: &mut Project, ids: &[String], set: SuperScaleSet
             return Err(Error::invalid(format!("{id} has no pictures")));
         }
         let s = &mut m.super_scale;
-        s.factor = set.factor.unwrap_or(s.factor);
+        s.on = set.on.unwrap_or(s.on);
         s.sharpness = set.sharpness.unwrap_or(s.sharpness);
         s.upscaler = set.upscaler.unwrap_or(s.upscaler);
     }

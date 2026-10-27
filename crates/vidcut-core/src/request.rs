@@ -340,28 +340,28 @@ pub enum Request {
         /// follow it.
         #[serde(default)]
         color_space: Option<crate::model::ColorSpace>,
-        /// Super Scale: `none` (off), `auto`, `2x`, `3x` or `4x`. Where its
-        /// pictures are enlarged, they get the upscaler that `upscaler`
-        /// names. The factor is the most that a zoomed picture is made larger
-        /// than its source; `auto` is as much as it needs, up to 4x.
+        /// Super Scale on or off. Where its pictures are enlarged, they get
+        /// the upscaler that `upscaler` names, as much as they need, up to 4
+        /// times their source.
         #[serde(default)]
-        super_scale: Option<crate::model::ScaleFactor>,
+        super_scale: Option<bool>,
         /// The detail of the classic upscaler: `low`, `medium` or `high`.
         #[serde(default)]
         sharpness: Option<crate::model::Sharpness>,
-        /// The upscaler of Super Scale: `macos` (the default on macOS 26 and
-        /// later, called AI there), `ai_best` (the default elsewhere),
-        /// `ai_fast` or `classic`. `ai_best` and `ai_fast` are off on macOS
-        /// for now.
+        /// The upscaler of Super Scale: `project` (the default: the upscaler
+        /// of the project settings), `macos` (macOS 26 and later, called AI
+        /// there), `ai_best`, `ai_fast` or `classic`. `ai_best` and `ai_fast`
+        /// are off on macOS for now.
         /// An export refuses `macos`, `ai_best` and `ai_fast` for HDR
         /// media, and `macos` for pictures over 1920x1080 or without
         /// macOS 26.
         #[serde(default)]
-        upscaler: Option<crate::model::Upscaler>,
-        /// Download the AI upscaler's weights, each checked against its
-        /// SHA-256, or let macOS download its super-resolution models, if
-        /// this computer doesn't have them yet. Without them, an export with
-        /// that upscaler is an error that says what would be downloaded.
+        upscaler: Option<crate::model::MediaUpscaler>,
+        /// Download the weights of the AI upscaler that the media then use,
+        /// each checked against its SHA-256, or let macOS download its
+        /// super-resolution models, if this computer doesn't have them yet.
+        /// Without them, an export with that upscaler is an error that says
+        /// what would be downloaded.
         #[serde(default)]
         download: bool,
     },
@@ -1008,6 +1008,11 @@ pub enum Request {
         ripple: Option<bool>,
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// Download the model of the Retime Process that the clips then use,
+        /// if this computer doesn't have it yet, checked against its SHA-256.
+        /// Without it, an export asks for it.
+        #[serde(default)]
+        download: bool,
     },
     /// Copy clips (Ctrl+C): returns them with their tracks as `clips`,
     /// ready for `edit.paste`. The GUI also keeps them on its clipboard.
@@ -1179,13 +1184,15 @@ pub enum Request {
         voice_isolation: Option<f64>,
         /// Retime Process: how the clips make a frame that falls between two
         /// of their source frames, at a speed change or where their media's
-        /// frame rate isn't the timeline's.
+        /// frame rate isn't the timeline's. `project` follows the Retime
+        /// Process of the project settings.
         #[serde(default)]
-        retime: Option<crate::model::Retime>,
-        /// Download Voice Isolation's model, or the model of `retime`, if
-        /// this computer doesn't have it yet, checked against its SHA-256.
-        /// Without it, a missing Voice Isolation model is an error that says
-        /// what would be downloaded; an export asks for the other.
+        retime: Option<crate::model::ClipRetime>,
+        /// Download Voice Isolation's model, or the model of the Retime
+        /// Process that the clips then use, if this computer doesn't have it
+        /// yet, checked against its SHA-256. Without it, a missing Voice
+        /// Isolation model is an error that says what would be downloaded;
+        /// an export asks for the other.
         #[serde(default)]
         download: bool,
     },
@@ -3438,6 +3445,21 @@ pub struct ProjectSet {
     /// converts to its own colors (decision D50).
     #[serde(default)]
     pub timeline_colors: Option<crate::model::TimelineColors>,
+    /// The Retime Process of the clips that follow the project: `auto`
+    /// (the default), `nearest`, `frame_blend`, `ai_fast`, `ai_best` or
+    /// `macos`. `auto` gives slow motion the AI of the computer that plays
+    /// or exports, and Nearest to the rest.
+    #[serde(default)]
+    pub retime: Option<crate::model::ProjectRetime>,
+    /// The upscaler of Super Scale for the media that follow the project:
+    /// `auto` (the default: the scaler of macOS on macOS, `ai_best`
+    /// elsewhere), `macos`, `ai_best`, `ai_fast` or `classic`.
+    #[serde(default)]
+    pub upscaler: Option<crate::model::ProjectUpscaler>,
+    /// Download the models of the Retime Process and the upscaler that the
+    /// timeline then uses, if this computer doesn't have them yet.
+    #[serde(default)]
+    pub download: bool,
     /// Filler words of this project, per language code (`{"en": ["um",
     /// "uh"]}`): a list replaces the preferences' or built-in one for that
     /// language, `null` goes back to them.

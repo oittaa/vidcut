@@ -1474,7 +1474,7 @@ mod tests {
             picture: None,
             compound: None,
             speed: None,
-            retime: vidcut_core::model::Retime::Nearest,
+            retime: vidcut_core::model::ClipRetime::Project,
             color: None,
         }
     }

@@ -1,16 +1,8 @@
 use eframe::egui;
 use serde_json::{Value, json};
-use vidcut_core::model::{ScaleFactor, Sharpness, SuperScale, Upscaler};
+use vidcut_core::model::{MediaUpscaler, ProjectUpscaler, Retime, Sharpness, SuperScale, Upscaler};
 
 use super::workspace::Workspace;
-
-pub(super) const FACTORS: [(ScaleFactor, &str); 5] = [
-    (ScaleFactor::None, "Off"),
-    (ScaleFactor::Auto, "Auto"),
-    (ScaleFactor::X2, "2x"),
-    (ScaleFactor::X3, "3x"),
-    (ScaleFactor::X4, "4x"),
-];
 
 const NAMES: [(Upscaler, &str); 4] = [
     (Upscaler::Macos, "AI"),
@@ -20,14 +12,33 @@ const NAMES: [(Upscaler, &str); 4] = [
 ];
 
 #[cfg(target_os = "macos")]
-pub(super) const UPSCALERS: &[(Upscaler, &str)] =
-    &[(Upscaler::Macos, "AI"), (Upscaler::Classic, "Classic")];
+pub(super) const UPSCALERS: &[(MediaUpscaler, &str)] = &[
+    (MediaUpscaler::Project, "Project Settings"),
+    (MediaUpscaler::Macos, "AI"),
+    (MediaUpscaler::Classic, "Classic"),
+];
 
 #[cfg(not(target_os = "macos"))]
-pub(super) const UPSCALERS: &[(Upscaler, &str)] = &[
-    (Upscaler::AiBest, "AI Best"),
-    (Upscaler::AiFast, "AI Fast"),
-    (Upscaler::Classic, "Classic"),
+pub(super) const UPSCALERS: &[(MediaUpscaler, &str)] = &[
+    (MediaUpscaler::Project, "Project Settings"),
+    (MediaUpscaler::AiBest, "AI Best"),
+    (MediaUpscaler::AiFast, "AI Fast"),
+    (MediaUpscaler::Classic, "Classic"),
+];
+
+#[cfg(target_os = "macos")]
+pub(super) const PROJECT_UPSCALERS: &[(ProjectUpscaler, &str)] = &[
+    (ProjectUpscaler::Auto, "Auto"),
+    (ProjectUpscaler::Macos, "AI"),
+    (ProjectUpscaler::Classic, "Classic"),
+];
+
+#[cfg(not(target_os = "macos"))]
+pub(super) const PROJECT_UPSCALERS: &[(ProjectUpscaler, &str)] = &[
+    (ProjectUpscaler::Auto, "Auto"),
+    (ProjectUpscaler::AiBest, "AI Best"),
+    (ProjectUpscaler::AiFast, "AI Fast"),
+    (ProjectUpscaler::Classic, "Classic"),
 ];
 
 pub(super) const SHARPNESS: [(Sharpness, &str); 3] = [
@@ -42,21 +53,30 @@ pub(super) fn label_of<T: PartialEq + Copy>(list: &[(T, &'static str)], value: T
         .map_or("", |(_, l)| *l)
 }
 
-pub(super) fn described(s: SuperScale) -> String {
-    let factor = label_of(&FACTORS, s.factor);
-    match s.upscaler {
-        Upscaler::Macos => format!("{factor}, AI"),
-        Upscaler::AiFast => format!("{factor}, AI Fast"),
-        Upscaler::AiBest => format!("{factor}, AI Best"),
-        Upscaler::Classic => format!(
-            "{factor}, Classic, Sharpness {}",
-            label_of(&SHARPNESS, s.sharpness)
-        ),
+pub(super) fn upscaler_text(u: MediaUpscaler, label: &str, project: ProjectUpscaler) -> String {
+    match u {
+        MediaUpscaler::Project => {
+            format!(
+                "Project Settings ({})",
+                label_of(&NAMES, project.upscaler())
+            )
+        }
+        _ => label.into(),
     }
 }
 
-pub(super) fn offered(s: SuperScale, factor: ScaleFactor) -> bool {
-    vidcut_av::super_scale::macos::offers(SuperScale { factor, ..s })
+pub(super) fn project_upscaler_text(u: ProjectUpscaler, label: &str) -> String {
+    match u {
+        ProjectUpscaler::Auto => format!("Auto ({})", label_of(&NAMES, u.upscaler())),
+        _ => label.into(),
+    }
+}
+
+pub(super) fn described(s: SuperScale) -> String {
+    match s.upscaler {
+        Upscaler::Classic => format!("Classic, Sharpness {}", label_of(&SHARPNESS, s.sharpness)),
+        u => label_of(&NAMES, u).to_string(),
+    }
 }
 
 pub(super) fn unfit<'a>(
@@ -78,54 +98,81 @@ pub(super) fn field<T: serde::de::DeserializeOwned>(params: &Value, key: &str) -
         .and_then(|v| serde_json::from_value(v.clone()).ok())
 }
 
-pub(super) fn needed(upscalers: &[Upscaler]) -> Vec<vidcut_av::models::Need> {
+pub(super) fn needed(retimes: &[Retime], upscalers: &[Upscaler]) -> Vec<vidcut_av::models::Need> {
     let dir = crate::paths::models_dir();
-    upscalers
+    retimes
         .iter()
-        .flat_map(|u| vidcut_av::super_scale::needed(&dir, *u))
+        .flat_map(|r| vidcut_av::interpolate::needed(&dir, *r))
+        .chain(
+            upscalers
+                .iter()
+                .flat_map(|u| vidcut_av::super_scale::needed(&dir, *u)),
+        )
         .collect()
 }
 
+fn with_download(method: &str, params: &mut Value) {
+    match params.get_mut("commands").and_then(Value::as_array_mut) {
+        Some(commands) if method == "apply" => {
+            for c in commands {
+                c["params"]["download"] = json!(true);
+            }
+        }
+        _ => params["download"] = json!(true),
+    }
+}
+
 impl Workspace {
-    fn ai_after(&self, params: &Value) -> Vec<Upscaler> {
-        let media: Vec<String> = field(params, "media").unwrap_or_default();
-        let set = vidcut_core::ops::SuperScaleSet {
-            factor: field(params, "super_scale"),
-            sharpness: None,
-            upscaler: field(params, "upscaler"),
+    fn models_of(&self, method: &str, params: &Value) -> vidcut_core::editor::Models {
+        let Some(p) = self.project_shared() else {
+            return Default::default();
         };
-        self.project_shared()
-            .map(|p| vidcut_core::ops::ai_upscalers(&p, &media, &set))
+        if method == "media.set" {
+            let media: Vec<String> = field(params, "media").unwrap_or_default();
+            let set = vidcut_core::ops::SuperScaleSet {
+                on: field(params, "super_scale"),
+                sharpness: None,
+                upscaler: field(params, "upscaler"),
+            };
+            return (Vec::new(), vidcut_core::ops::ai_upscalers(&p, &media, &set));
+        }
+        serde_json::from_value(json!({ "method": method, "params": params }))
+            .ok()
+            .and_then(|r| {
+                let env = crate::env::AvEnv::new();
+                vidcut_core::editor::models_after(&p, &r, &env, None).ok()
+            })
             .unwrap_or_default()
+    }
+
+    pub(super) fn send_asking(&mut self, method: &'static str, params: Value) {
+        let (retimes, upscalers) = self.models_of(method, &params);
+        let needs = needed(&retimes, &upscalers);
+        if needs.is_empty() {
+            self.send(method, params);
+        } else {
+            self.models_asking = Some((method, params, needs));
+        }
+    }
+
+    pub(super) fn models_prompt(&mut self, ctx: &egui::Context) {
+        let Some((method, params, needs)) = &self.models_asking else {
+            return;
+        };
+        match super::speech::ask_download(ctx, "models-download", needs, "Download") {
+            Some(true) => {
+                let (method, mut params) = (*method, params.clone());
+                self.models_asking = None;
+                with_download(method, &mut params);
+                self.send(method, params);
+            }
+            Some(false) => self.models_asking = None,
+            None => {}
+        }
     }
 
     pub(super) fn set_super_scale(&mut self, media: &[String], mut params: Value) {
         params["media"] = json!(media);
-        if needed(&self.ai_after(&params)).is_empty() {
-            self.send("media.set", params);
-        } else {
-            self.super_scale_asking = Some(params);
-        }
-    }
-
-    pub(super) fn super_scale_prompt(&mut self, ctx: &egui::Context) {
-        let Some(mut params) = self.super_scale_asking.clone() else {
-            return;
-        };
-        let needs = needed(&self.ai_after(&params));
-        if needs.is_empty() {
-            self.super_scale_asking = None;
-            self.send("media.set", params);
-            return;
-        }
-        match super::speech::ask_download(ctx, "super-scale-download", &needs, "Download") {
-            Some(true) => {
-                self.super_scale_asking = None;
-                params["download"] = json!(true);
-                self.send("media.set", params);
-            }
-            Some(false) => self.super_scale_asking = None,
-            None => {}
-        }
+        self.send_asking("media.set", params);
     }
 }

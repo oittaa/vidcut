@@ -9,8 +9,8 @@ use egui_phosphor::regular::{
 use serde_json::{Value, json};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Clip, CompositeMode, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, Retime,
-    ScaleFactor, TrackKind, Upscaler, ZoomBox,
+    Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project,
+    Retime, TrackKind, Upscaler, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, has_picture};
 use vidcut_core::place::upright_fit;
@@ -511,7 +511,8 @@ struct Paced {
     stored: Pace,
     shown: Pace,
     rate: f64,
-    retime: Retime,
+    retime: ClipRetime,
+    project: Retime,
     hdr: bool,
 }
 
@@ -574,7 +575,7 @@ enum Act {
     Direction(Direction),
     Ripple(bool),
     FullSpeed,
-    Retime(Retime),
+    Retime(ClipRetime),
     Mute(bool),
     Link(bool),
     Flips([Option<bool>; 2]),
@@ -1085,22 +1086,24 @@ fn speed_section(
             acts.push(Act::Ripple(on));
         }
         ui.end_row();
-        let retime = paced[0].retime;
-        label(ui, "Retime Process", !retime.is_nearest());
+        let (retime, project) = (paced[0].retime, paced[0].project);
+        let text = |r| super::retime_process::clip_text(r, project);
+        label(ui, "Retime Process", !retime.is_project());
         egui::ComboBox::from_id_salt("inspector-retime")
-            .selected_text(retime.title())
+            .selected_text(text(retime))
             .show_ui(ui, |ui| {
                 for r in super::retime_process::PROCESSES {
-                    if ui.selectable_label(retime == r, r.title()).clicked() && r != retime {
+                    if ui.selectable_label(retime == r, text(r)).clicked() && r != retime {
                         acts.push(Act::Retime(r));
                     }
                 }
             });
-        if reset(ui, !retime.is_nearest()) {
-            acts.push(Act::Retime(Retime::Nearest));
+        if reset(ui, !retime.is_project()) {
+            acts.push(Act::Retime(ClipRetime::Project));
         }
         ui.end_row();
-        if !retime.is_nearest() && paced.iter().any(|c| c.hdr) {
+        let chosen = retime.process().or(p.settings.retime.process());
+        if chosen.is_some_and(|r| !r.is_nearest()) && paced.iter().any(|c| c.hdr) {
             ui.label("");
             dialog::warn(ui, "Retime Process takes SDR pictures for now");
             ui.end_row();
@@ -1212,6 +1215,14 @@ impl Workspace {
                     shown,
                     rate: rate(p, c),
                     retime: c.retime,
+                    project: p.media(&c.media).map_or(Retime::Nearest, |m| {
+                        vidcut_core::render::retime_at(
+                            ClipRetime::Project,
+                            c.speed(),
+                            m,
+                            &p.settings,
+                        )
+                    }),
                     hdr: p
                         .media(&c.media)
                         .and_then(|m| m.video_as_read())
@@ -1260,13 +1271,13 @@ impl Workspace {
         let mut params: Vec<Value> = groups.iter().map(|(d, ids)| d.params(ids)).collect();
         match params.len() {
             0 => return,
-            1 => self.send("edit.change_speed", params.remove(0)),
+            1 => self.send_asking("edit.change_speed", params.remove(0)),
             _ => {
                 let commands: Vec<Value> = params
                     .into_iter()
                     .map(|p| json!({ "method": "edit.change_speed", "params": p }))
                     .collect();
-                self.send("apply", json!({ "commands": commands }));
+                self.send_asking("apply", json!({ "commands": commands }));
             }
         }
         self.inspector.retimed = Some(Retimed {
@@ -1619,7 +1630,7 @@ impl Workspace {
     }
 
     fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
-        use super::super_scale::{FACTORS, SHARPNESS, UPSCALERS, label_of, offered, unfit};
+        use super::super_scale::{SHARPNESS, UPSCALERS, label_of, unfit, upscaler_text};
         let mut media: Vec<String> = chosen
             .iter()
             .filter_map(|c| p.clip(&c.id))
@@ -1642,23 +1653,37 @@ impl Workspace {
             })
             .inner
         };
+        let shown = vidcut_core::render::super_scale_of(now, &p.settings);
         let cleared = group(ui, "Super Scale", header, |ui| {
-            label(ui, "Super Scale", !now.is_off());
-            egui::ComboBox::from_id_salt("inspector-super-scale")
-                .selected_text(label_of(&FACTORS, now.factor))
-                .show_ui(ui, |ui| {
-                    for (factor, text) in FACTORS {
-                        let pick = ui.add_enabled_ui(offered(now, factor), |ui| {
-                            ui.selectable_label(now.factor == factor, text)
-                        });
-                        if pick.inner.clicked() {
-                            put = Some(json!({ "super_scale": factor }));
-                        }
-                    }
-                });
-            ui.end_row();
             let on = !now.is_off();
-            let ai = now.upscaler != Upscaler::Classic;
+            label(ui, "Super Scale", on);
+            dialog::switch(ui, |ui| {
+                for (value, text) in [(false, "Off"), (true, "On")] {
+                    if ui.selectable_label(on == value, text).clicked() && on != value {
+                        put = Some(json!({ "super_scale": value }));
+                    }
+                }
+            });
+            ui.end_row();
+            label(ui, "Upscaler", on);
+            ui.add_enabled_ui(on, |ui| {
+                let project = p.settings.upscaler;
+                let text = |u, l| upscaler_text(u, l, project);
+                egui::ComboBox::from_id_salt("inspector-upscaler")
+                    .selected_text(text(now.upscaler, label_of(UPSCALERS, now.upscaler)))
+                    .show_ui(ui, |ui| {
+                        for &(upscaler, l) in UPSCALERS {
+                            if ui
+                                .selectable_label(now.upscaler == upscaler, text(upscaler, l))
+                                .clicked()
+                            {
+                                put = Some(json!({ "upscaler": upscaler }));
+                            }
+                        }
+                    });
+            });
+            ui.end_row();
+            let classic = on && shown.upscaler == Upscaler::Classic;
             let row = |ui: &mut egui::Ui,
                        name: &str,
                        enabled: bool,
@@ -1667,22 +1692,12 @@ impl Workspace {
                 ui.add_enabled_ui(enabled, |ui| dialog::switch(ui, |ui| pick(ui)));
                 ui.end_row();
             };
-            row(ui, "Upscaler", on, &mut |ui| {
-                for &(upscaler, text) in UPSCALERS {
-                    if ui
-                        .selectable_label(now.upscaler == upscaler, text)
-                        .clicked()
-                    {
-                        put = Some(json!({ "upscaler": upscaler }));
-                    }
-                }
-            });
-            if let Some(text) = unfit(now, media.iter().filter_map(|id| p.media(id))) {
+            if let Some(text) = unfit(shown, media.iter().filter_map(|id| p.media(id))) {
                 ui.label("");
                 dialog::warn(ui, text);
                 ui.end_row();
             }
-            row(ui, "Sharpness", on && !ai, &mut |ui| {
+            row(ui, "Sharpness", classic, &mut |ui| {
                 for (sharpness, text) in SHARPNESS {
                     if ui
                         .selectable_label(now.sharpness == sharpness, text)
@@ -1694,7 +1709,7 @@ impl Workspace {
             });
         });
         if cleared {
-            put = Some(json!({ "super_scale": ScaleFactor::None }));
+            put = Some(json!({ "super_scale": false }));
         }
         if let Some(params) = put {
             self.set_super_scale(&media, params);

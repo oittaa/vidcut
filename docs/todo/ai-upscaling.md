@@ -42,7 +42,7 @@ AI Best against the official code in bf16 with its Triton kernel, at 1920×1024 
 
 AI Best speed and memory on the owner's RTX 4080 SUPER (16 GB), on 2026-10-24:
 
-- Each vidcut run is a CLI export: `project create --fps F --width W --height H`, `media add`, `edit append m1 --range 0f..Nf`, `media set m1 --super-scale 4x --upscaler ai_best`, `export start out.mkv`.
+- Each vidcut run is a CLI export: `project create --fps F --width W --height H`, `media add`, `edit append m1 --range 0f..Nf`, `media set m1 --super-scale true --upscaler ai_best`, `export start out.mkv`.
 - The memory is the peak of the whole card, from `nvidia-smi` every 0.5 s, less the memory in use before.
 
 | Clip | vidcut | Official code, bf16, Triton |
