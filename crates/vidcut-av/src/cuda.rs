@@ -3,6 +3,7 @@
 pub(crate) mod burn;
 pub(crate) mod keep;
 pub(crate) mod mix;
+pub(crate) mod place;
 pub mod share;
 
 pub(crate) use share::{Listed, listed};

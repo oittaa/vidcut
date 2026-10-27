@@ -107,7 +107,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - The workers and the job yield to players, at the lowest priority.
   - One worker at a time decodes beside the player, as timeline tiles do.
   - It prints the presents that showed the previous picture, the tiles and job frames each second, the maximum thread count and the peak memory.
-- `decode_speed FILE [FRAMES]`: the decoding speed, the cores and the seek times, on the CPU and on each GPU decoder.
+- `decode_speed FILE [FRAMES] [START_S]`: the decoding speed, the cores and the seek times, on the CPU and on each GPU decoder.
+  - It starts at `START_S` seconds into the file. On Windows, it also prints the GPU memory that the decoding takes.
 - `passes FILE START_S SECONDS CODEC ENCODER MBPS [key=value…]` (release build):
   - It exports a stretch at a bitrate (`qN`: constant quality), with `video.*` settings (`passes=2`).
   - It prints the bitrate that it reached, the time and the luma PSNR.

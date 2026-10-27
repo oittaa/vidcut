@@ -322,7 +322,8 @@ The plan:
 The pictures:
 
 - `VideoFrames` fits a placed layer at the size that it shows, up to the size of its source (`layer_size`, `Maker::size_layer`). Why: a punch-in keeps the detail of the source.
-- `VideoFrames` makes the frames of a placed layer in memory. On a GPU, they come down shrunk.
+- For NVENC, a placed layer at the size of the frame stays on the GPU. `CudaPictures` fits it as it fits other clips (`Maker::places_on_gpu`).
+- `VideoFrames` makes the frames of the other placed layers in memory. On a GPU, they come down shrunk.
 - `place::Placing` maps each pixel of the frame back to the picture. `export::place::over` lays the picture over the `Canvas` of the layers below.
 - The coverage of a pixel is the product of `place::Placing::at` over the levels: smoothed edges, soft crop edges and opacity. The viewer's shader (`picture.wgsl`) does the same sums.
 - A level of a clip in a compound clip is left out where the clip fills the frame at its usual values. Thus the edges of the compound clip are covered once.
@@ -330,7 +331,12 @@ The pictures:
   - Each sample of the frame takes all three components of the picture at its place.
   - It averages the components of the frame below over the same place. Thus a chroma sample takes the mean of the luma under it.
   - `place::Placing` takes the first mode other than Normal, from the picture out through its compound clips.
-- For NVENC and VideoToolbox, the frame below stays on the GPU. The CPU makes the colors and coverage of the picture (`cuda::burn::Overlay::of`, `mixing::Overlay::of`), and the GPU mixes them in, as for a title.
+- For NVENC, a CUDA kernel places a picture that is in CUDA memory (`cuda::place`). It mixes the picture into the frame below in one pass.
+  - It uses the sums of `export::place::over`: the levels of `Placing::at`, the taps and the bilinear samples. It rounds once, at the end.
+  - It computes in 32-bit floats. The CPU computes the map in 64-bit floats. Why: GeForce GPUs run 64-bit floats much more slowly.
+  - It takes a picture in the layout of the frame, with up to `LEVELS` levels. Else the CPU makes the overlay.
+  - With nothing below, the picture goes over a black frame. For NVENC, that frame goes up once in each export (`black_on_gpu`).
+- For the other pictures on NVENC, and for VideoToolbox, the frame below stays on the GPU. The CPU makes the colors and coverage of the picture (`cuda::burn::Overlay::of`, `mixing::Overlay::of`), and the GPU mixes them in, as for a title.
   - `place::overlay` reads the picture in its own layout. The coverage includes the alpha of the picture.
   - A frame with a composite mode or a wipe mixes on the CPU.
 - A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once (`mix::crossed`, `cuda::mix::sum`, `Mixer::sum`).

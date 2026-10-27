@@ -1142,6 +1142,7 @@ pub struct VideoFrames {
     reading: Vec<Option<usize>>,
     ahead: Ahead<Source, (Input, u64, i64)>,
     black: Option<frame::Video>,
+    black_on_gpu: Option<frame::Video>,
     decoder: Option<crate::hw::GpuDecoder>,
     maker: Maker,
     gpu_made: i64,
@@ -1593,6 +1594,7 @@ impl VideoFrames {
             reading: Vec::new(),
             ahead: Ahead::new(),
             black: None,
+            black_on_gpu: None,
             decoder: None,
             maker: Maker::new(
                 (width, height, pixel),
@@ -1647,6 +1649,7 @@ impl VideoFrames {
             gpu_failed: false,
         });
         self.black = None;
+        self.black_on_gpu = None;
         Ok(self)
     }
 
@@ -2038,7 +2041,12 @@ impl VideoFrames {
     fn black_frame(&mut self) -> Result<frame::Video> {
         let black = frame_ref(self.black()?)?;
         let mut out = match self.maker.output() {
-            Output::Cuda { frames, .. } => frames.upload(&black)?,
+            Output::Cuda { frames, .. } => {
+                if self.black_on_gpu.is_none() {
+                    self.black_on_gpu = Some(frames.upload(&black)?);
+                }
+                frame_ref(self.black_on_gpu.as_ref().expect("just uploaded"))?
+            }
             _ => black,
         };
         self.black_metadata(&mut out)?;
@@ -2936,6 +2944,19 @@ fn cuda_mix(
     };
     let laid = |under: Option<&frame::Video>, l: &Layer| -> Result<Option<frame::Video>> {
         if let (Some((placing, fitted)), Some(f)) = (&l.placing, &l.frame) {
+            let weight = l.weight.unwrap_or(WHOLE);
+            if Place::of(f) == Place::Cuda {
+                let layer = super::place::Layer {
+                    picture: f,
+                    placing,
+                    fitted: *fitted,
+                    weight,
+                };
+                let below = solid(under)?;
+                if let Some(placed) = crate::cuda::place::place(frames, &below, &layer, size)? {
+                    return Ok(Some(placed));
+                }
+            }
             let picture = match Place::of(f) {
                 Place::Memory => frame_ref(f)?,
                 _ => crate::hw::download(f)?,
@@ -2944,7 +2965,7 @@ fn cuda_mix(
                 picture: &picture,
                 placing,
                 fitted: *fitted,
-                weight: l.weight.unwrap_or(WHOLE),
+                weight,
             };
             let overlay = crate::cuda::burn::Overlay::of(frames, &layer, size)?;
             let under = solid(under)?;

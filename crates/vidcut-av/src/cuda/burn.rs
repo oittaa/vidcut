@@ -160,7 +160,7 @@ pub(crate) struct Overlay {
     area: (u32, u32, u32, u32),
 }
 
-fn pool_frame(frames: &CudaFrames) -> Result<frame::Video> {
+pub(super) fn pool_frame(frames: &CudaFrames) -> Result<frame::Video> {
     let mut f = frame::Video::empty();
     // SAFETY: a frame of the pool, its planes in CUDA memory.
     let ret = unsafe { ffi::av_hwframe_get_buffer(frames.as_ptr(), f.as_mut_ptr(), 0) };

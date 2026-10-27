@@ -226,7 +226,9 @@ pub(crate) fn adapter_luid(index: u32) -> Option<[u8; 8]> {
 }
 
 #[cfg(windows)]
-pub(crate) fn spare(gpu: &Gpu) -> Option<u64> {
+fn video_memory(
+    gpu: &Gpu,
+) -> Option<::windows::Win32::Graphics::Dxgi::DXGI_QUERY_VIDEO_MEMORY_INFO> {
     use ::windows::Win32::Graphics::Dxgi::{
         CreateDXGIFactory1, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO,
         IDXGIAdapter3, IDXGIFactory1,
@@ -246,7 +248,22 @@ pub(crate) fn spare(gpu: &Gpu) -> Option<u64> {
             .QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut info)
             .ok()?;
     }
-    Some(info.Budget.saturating_sub(info.CurrentUsage))
+    Some(info)
+}
+
+#[cfg(windows)]
+pub(crate) fn spare(gpu: &Gpu) -> Option<u64> {
+    video_memory(gpu).map(|info| info.Budget.saturating_sub(info.CurrentUsage))
+}
+
+#[cfg(windows)]
+pub fn used_by_process(gpu: &Gpu) -> Option<u64> {
+    video_memory(gpu).map(|info| info.CurrentUsage)
+}
+
+#[cfg(not(windows))]
+pub fn used_by_process(_gpu: &Gpu) -> Option<u64> {
+    None
 }
 
 #[cfg(target_os = "linux")]

@@ -101,6 +101,7 @@ Mixing and overlays:
 - CUDA and VideoToolbox mix dissolves on the GPU. The other GPUs mix them in memory.
 - When the driver refuses the kernel of `cuda::mix`, the CPU mixes for the rest of the export. The result tells why.
 - CUDA and VideoToolbox draw subtitles, titles and placed pictures into the frame on the GPU (`cuda::burn`, `Mixer::burn`). The CPU draws the overlay.
+- CUDA places a picture in CUDA memory with a kernel of its own (`cuda::place`). Then the CPU draws no overlay ([export](export.md#placed-pictures)).
 - For the other GPUs, a frame comes down while an overlay shows.
 - A wipe, a composite mode and a layer with alpha and nothing below mix in memory.
 - A layer with alpha over other layers is a placed picture. The CPU draws its overlay with its alpha, and the GPU mixes it in.
