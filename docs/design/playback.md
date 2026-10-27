@@ -2,7 +2,7 @@
 
 - Playback turns the timeline or a source clip, from its playhead, into pictures in the viewer and sound.
 - The live core builds a render plan. The engine in `crates/vidcut-av/src/player/` decodes and mixes the plan with the reader and the mixer of the export.
-- The viewer thread draws the plan in one shader pass. The audio device is the clock.
+- The viewer thread draws each frame on the GPU ([the viewer thread](#the-viewer-thread)). The audio device is the clock.
 - [live](live.md) has the threads around the player, and [threads](threads.md) their priorities.
 
 ```mermaid
@@ -73,7 +73,7 @@ flowchart TD
   4. when idle, the prepared frame and a window behind the playhead
 - Each piece of the plan tells which frames the player may decode before they are asked for (`player::plan::Fill`). Where layers overlap, each layer must allow it (`Plan::fill_at`).
 - A play that does not find the frame at the playhead decodes a frame ahead of the clock. The lead is the mean time of the recent seeks (`seek_cost`).
-- A piece with an AI upscaler or an AI Retime Process fills no frames behind the playhead (`Fill::of`). Why: an AI picture takes much GPU time, and a frame before the current run starts a new run of the upscaler ([gpu](gpu.md)).
+- A piece with an AI upscaler or an AI Retime Process fills no frames behind the playhead (`Fill::of`). Why: an AI picture takes much GPU time. For an upscaler, a frame before the current run also starts a new run ([gpu](gpu.md)).
 - Such a piece gives no lead, and does not change `seek_cost`. Why: after an AI clip, a jump in another clip does not land far ahead of the clock.
 - The viewer's frame, play backward and steps back decode the frames that they need. The prepared frame is made with an AI upscaler too, so the next clip shows its first frame at once.
 - While it plays, or while its viewer waits, the decoding thread holds a `first::Claim`. Thus jobs yield.
