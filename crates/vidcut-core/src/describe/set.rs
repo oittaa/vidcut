@@ -286,6 +286,8 @@ fn ease(v: &Value) -> String {
 
 fn upscaler(v: &Value) -> String {
     match v.as_str() {
+        Some("project") => "Project Settings".into(),
+        Some("macos") => "AI".into(),
         Some("ai_fast") => "AI Fast".into(),
         Some("ai_best") => "AI Best".into(),
         _ => word(v),
@@ -293,8 +295,19 @@ fn upscaler(v: &Value) -> String {
 }
 
 fn retime(v: &Value) -> String {
-    serde_json::from_value::<crate::model::Retime>(v.clone())
+    if let Ok(r) = serde_json::from_value::<crate::model::ClipRetime>(v.clone()) {
+        return r.title().to_string();
+    }
+    serde_json::from_value::<crate::model::ProjectRetime>(v.clone())
         .map_or_else(|_| word(v), |r| r.title().to_string())
+}
+
+fn on_off(v: &Value) -> String {
+    match v.as_bool() {
+        Some(true) => "On".into(),
+        Some(false) => "Off".into(),
+        None => raw(v),
+    }
 }
 
 fn color_space(v: &Value) -> String {
@@ -717,8 +730,8 @@ impl Words<'_> {
         s.put("color_space", "Color Space", &color_space, |m| {
             json!(m.color_space)
         });
-        s.put("super_scale", "Super Scale", &word, |m| {
-            json!(m.super_scale.factor)
+        s.put("super_scale", "Super Scale", &on_off, |m| {
+            json!(m.super_scale.on)
         });
         s.put("sharpness", "Sharpness", &word, |m| {
             json!(m.super_scale.sharpness)
@@ -814,6 +827,8 @@ impl Words<'_> {
         s.put("timeline_colors", "Timeline Color Space", &colors, |x| {
             json!(x.timeline_colors)
         });
+        s.put("retime", "Retime Process", &retime, |x| json!(x.retime));
+        s.put("upscaler", "Upscaler", &upscaler, |x| json!(x.upscaler));
         let spec = |key: &str| serde_json::from_value::<TimeSpec>(p[key].clone()).ok();
         if !p["start_tc"].is_null() {
             let new = first.zip(spec("start_tc")).and_then(|(x, t)| {

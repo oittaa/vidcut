@@ -167,14 +167,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - Super Scale enlarges the pictures of a media item with a better upscaler before they are fitted.
   - It is a setting of the media item. Thus it applies to every clip of that item (p. 433).
   - Right-click the media in the pool, or use the Super Scale section of the Inspector.
-  - Super Scale is Off, Auto, 2x, 3x or 4x.
-  - Its Upscaler is AI, the default, or Classic.
+  - Super Scale is Off or On.
+  - Its Upscaler is Project Settings, the default, AI or Classic. Project Settings has the upscaler of the project: Auto, AI or Classic.
     - AI is a neural network on the GPU. It has no settings.
     - Classic has a Sharpness of Low, Medium or High, which selects the upscaler.
-  - The first time that AI is turned on, vidcut asks to download its weights (25 MB).
-  - AI takes SDR pictures of any size. For HDR media, an export refuses AI, and the Inspector shows a warning.
-  - The factor is the most that a placed picture is made larger than its source, before it is placed. Auto is as much as the picture needs, up to 4x.
-  - A picture that fills the frame takes the better upscaler for all of its enlargement. The factor does not change it.
+  - The first time that a change needs an AI upscaler, vidcut asks to download its weights.
+  - AI takes SDR pictures. For HDR media, an export refuses AI, and the Inspector shows a warning.
+  - A placed picture is made at most 4 times as large as its source, before it is placed.
+  - A picture that fills the frame takes the better upscaler for all of its enlargement.
   - Super Scale works only where a picture is enlarged. A picture that is made smaller is scaled as before.
   - View > Show Super Scale shows it in the viewer (`viewer.super_scale`). It is off by default, as it costs playback speed.
   - With AI, the viewer then shows the result of the AI upscaler, as the export makes it.
@@ -869,6 +869,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Dynamic Zoom has Ease and Swap.
   - Retime and Scaling has Retime Process, Motion Estimation, Scaling and Resize Filter (pp. 739–740).
   - vidcut: Retime Process is in its Speed section, with AI models in the place of Optical Flow (X93).
+  - vidcut: the project's Retime Process is in Project Settings. Its default is Auto, not Nearest (X93).
   - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).

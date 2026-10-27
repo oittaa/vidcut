@@ -3,8 +3,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vidcut_core::model::{
-    ColorSpace, CompositeMode, Hdr, Retime, ScaleFactor, Sharpness, SubtitleStyle, SuperScale,
-    Title, Upscaler,
+    ColorSpace, CompositeMode, Hdr, Retime, Sharpness, SubtitleStyle, SuperScale, Title, Upscaler,
 };
 use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Placed, Ramp, ShownTitle, VideoPiece, WHOLE, Wipe};
@@ -1047,11 +1046,8 @@ fn sharpness(super_scale: SuperScale) -> Option<Sharpness> {
     (!super_scale.is_off()).then_some(super_scale.sharpness)
 }
 
-fn reach(factor: ScaleFactor) -> f64 {
-    match factor {
-        ScaleFactor::Auto => 4.0,
-        f => f64::from(f.times().unwrap_or(1)),
-    }
+fn reach(super_scale: SuperScale) -> f64 {
+    if super_scale.on { 4.0 } else { 1.0 }
 }
 
 fn layer_size(
@@ -1059,7 +1055,7 @@ fn layer_size(
     f: &frame::Video,
     rotation: u16,
     placed: &[Placed],
-    factor: ScaleFactor,
+    super_scale: SuperScale,
 ) -> (u32, u32) {
     let (fw, fh) = upright_fit(f, rotation, out);
     let sar = f.aspect_ratio();
@@ -1075,7 +1071,7 @@ fn layer_size(
     let most = PLACED_MOST / ow.max(oh);
     let least = 2.0 / ow.min(oh);
     let scale = vidcut_core::place::detail(placed)
-        .min((native * reach(factor)).max(1.0))
+        .min((native * reach(super_scale)).max(1.0))
         .clamp(least, most.max(least));
     let even = |v: f64| ((v * scale / 2.0).round() as u32 * 2).max(2);
     let mut size = (even(ow), even(oh));
@@ -2574,7 +2570,7 @@ impl VideoFrames {
         let rotation = src.reader.rotation();
         let (cur, _) = src.current.as_ref().expect("a frame");
         let wanted = (!(placed.is_empty() || decoded))
-            .then(|| layer_size((w, h), cur, rotation, placed, super_scale.factor));
+            .then(|| layer_size((w, h), cur, rotation, placed, *super_scale));
         let size = between_size(cur, rotation, wanted.unwrap_or((w, h)));
         let start = Instant::now();
         let pair = match (&src.prev, &src.current) {
@@ -2685,7 +2681,7 @@ impl VideoFrames {
                 f,
                 src.reader.rotation(),
                 placed,
-                super_scale.factor,
+                super_scale,
             )),
             _ => None,
         };
@@ -2702,7 +2698,7 @@ impl VideoFrames {
             let big = if super_scale.ai() {
                 let aim = match (placed.is_empty(), &src.current) {
                     (false, Some((frame, _))) => {
-                        layer_size((w, h), frame, rotation, placed, super_scale.factor)
+                        layer_size((w, h), frame, rotation, placed, super_scale)
                     }
                     _ => (w, h),
                 };

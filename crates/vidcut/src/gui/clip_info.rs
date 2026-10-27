@@ -304,10 +304,13 @@ fn sections(app: &Workspace, m: &Media, read: Option<&MediaDetails>) -> Vec<Sect
                 format!("{:?}, in place of its tags", m.color_space),
             ));
         }
-        if !m.super_scale.is_off() {
+        if let Some(p) = app.project_shared().filter(|_| !m.super_scale.is_off()) {
             rows.push((
                 "Super Scale".into(),
-                super::super_scale::described(m.super_scale),
+                super::super_scale::described(vidcut_core::render::super_scale_of(
+                    m.super_scale,
+                    &p.settings,
+                )),
             ));
         }
         out.push(("Video".into(), rows));

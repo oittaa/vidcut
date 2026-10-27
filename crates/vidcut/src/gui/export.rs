@@ -787,7 +787,8 @@ impl Workspace {
             }
         }
         if s.weights {
-            let needs = super::super_scale::needed(&self.ai_upscalers());
+            let (retimes, upscalers) = self.ai_models();
+            let needs = super::super_scale::needed(&retimes, &upscalers);
             let answer = if needs.is_empty() {
                 Some(false)
             } else {
@@ -827,23 +828,26 @@ impl Workspace {
         self.export.starting = Some(s);
     }
 
-    fn ai_upscalers(&self) -> Vec<vidcut_core::model::Upscaler> {
-        let mut out = Vec::new();
-        if let Some(p) = self.project() {
-            for m in vidcut_core::otio::used_media(p, None)
-                .iter()
-                .filter_map(|id| p.media(id))
-            {
-                if m.super_scale.ai() && !out.contains(&m.super_scale.upscaler) {
-                    out.push(m.super_scale.upscaler);
-                }
-            }
-        }
-        out
+    fn ai_models(&self) -> vidcut_core::editor::Models {
+        let Some(p) = self.project() else {
+            return Default::default();
+        };
+        let clips: Vec<String> = p
+            .tracks
+            .iter()
+            .flat_map(|t| t.clips.iter().map(|c| c.id.clone()))
+            .collect();
+        let media = vidcut_core::otio::used_media(p, None);
+        let set = vidcut_core::ops::SuperScaleSet::default();
+        (
+            vidcut_core::ops::ai_retimes(p, &clips),
+            vidcut_core::ops::ai_upscalers(p, &media, &set),
+        )
     }
 
     fn send_start(&self, ctx: &egui::Context, s: &mut Starting) {
-        if !super::super_scale::needed(&self.ai_upscalers()).is_empty() {
+        let (retimes, upscalers) = self.ai_models();
+        if !super::super_scale::needed(&retimes, &upscalers).is_empty() {
             s.weights = true;
         } else {
             s.ask = Some(Ask::send(&self.live, ctx, "export.start", s.params.clone()));

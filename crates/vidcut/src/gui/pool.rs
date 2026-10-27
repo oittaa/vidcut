@@ -1588,15 +1588,15 @@ impl Workspace {
             });
             let mut put = None;
             ui.menu_button("Super Scale", |ui| {
-                use super::super_scale::{FACTORS, SHARPNESS, UPSCALERS};
+                use super::super_scale::{SHARPNESS, UPSCALERS};
                 use vidcut_core::model::Upscaler;
                 let now = m.super_scale;
-                for (factor, label) in FACTORS {
-                    let pick = ui.add_enabled_ui(super::super_scale::offered(now, factor), |ui| {
-                        ui.radio(now.factor == factor, label)
-                    });
-                    if pick.inner.clicked() {
-                        put = Some(json!({ "super_scale": factor }));
+                let shown = self.project_shared().map_or_else(Default::default, |p| {
+                    vidcut_core::render::super_scale_of(now, &p.settings)
+                });
+                for (on, label) in [(false, "Off"), (true, "On")] {
+                    if ui.radio(now.on == on, label).clicked() {
+                        put = Some(json!({ "super_scale": on }));
                     }
                 }
                 ui.separator();
@@ -1608,10 +1608,10 @@ impl Workspace {
                             }
                         }
                     });
-                    if let Some(text) = super::super_scale::unfit(now, [m]) {
+                    if let Some(text) = super::super_scale::unfit(shown, [m]) {
                         super::dialog::warn(ui, text);
                     }
-                    ui.add_enabled_ui(now.upscaler == Upscaler::Classic, |ui| {
+                    ui.add_enabled_ui(shown.upscaler == Upscaler::Classic, |ui| {
                         ui.menu_button("Sharpness", |ui| {
                             for (sharpness, label) in SHARPNESS {
                                 if ui.radio(now.sharpness == sharpness, label).clicked() {

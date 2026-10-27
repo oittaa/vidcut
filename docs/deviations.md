@@ -1785,16 +1785,19 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The project setting also has Auto (p. 149).
   - It makes a clip of a higher resolution, which often stops playback in real time (p. 288). The usual sizing then fits that clip.
 - **vidcut:**
-  - Super Scale is Off, Auto, 2x, 3x or 4x. Its Upscaler is AI Best, AI Fast or Classic. There is no Enhanced mode.
-  - On macOS, the Upscaler is AI or Classic. AI Fast and AI Best are off there for now: exports and the viewer refuse them.
-  - On macOS, AI is the default. It is the super-resolution scaler of macOS 26 and later (`VTFrameProcessor` of VideoToolbox), `macos` in requests.
+  - Super Scale is Off or On (`super_scale`). On enlarges a picture as much as it needs, up to 4 times its source. There is no Enhanced mode.
+  - Its Upscaler is Project Settings, the default, AI Best, AI Fast or Classic (`upscaler`).
+  - Project Settings has the upscaler of the media that follow the project (`upscaler` of `project.set`).
+    - It is Auto, the default, AI Best, AI Fast or Classic.
+    - Auto is AI on macOS, and AI Best elsewhere.
+  - On macOS, the upscalers are AI and Classic. AI Fast and AI Best are off there for now: exports and the viewer refuse them.
+  - On macOS, AI is the upscaler of Auto. It is the super-resolution scaler of macOS 26 and later (`VTFrameProcessor` of VideoToolbox), `macos` in requests.
     - It enlarges by a factor that macOS offers. It takes the smallest of these that reaches the shown size, and the result is fitted.
-    - The Inspector and the pool grey out the factors that macOS does not offer, and an export refuses them. Off and Auto are always there.
     - It reads the frames of a clip in order. Each output frame uses the frame and the output before it.
     - It takes SDR pictures up to 1920×1080, the limit of macOS for video.
     - macOS downloads its models only when the user agrees, as for the weights of AI Fast and AI Best. vidcut does not ship them.
     - macOS does not give their size, so the question says that the size is unknown. On the owner's Mac, the weight file of the 4x model is 66 MB.
-  - Elsewhere, AI Best is the default. It is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.
+  - Elsewhere, AI Best is the upscaler of Auto. It is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.
     - It is slow, and it adds more detail. It has no setting.
     - It reads the frames of a clip in order, from the first frame that is asked for. Each output frame uses the frames before it and the 4 frames after it.
     - It makes the picture at the size that it shows at, but not more than 4 times the source.
@@ -1812,8 +1815,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The Inspector and the pool show a warning under Upscaler for media that the AI upscaler cannot take.
     - The export's report names the files that an AI upscaler enlarged, and the upscaler.
   - Classic has a Sharpness of Low, Medium or High.
-  - The factor limits only how large a placed picture is made. A picture that fills the frame takes the better upscaler for all of its enlargement.
-  - Auto is as much as the picture needs, up to 4x.
+  - A placed picture is made at most 4 times as large as its source. A picture that fills the frame takes the better upscaler for all of its enlargement.
   - The Inspector of the Cut page has a Super Scale section for the media of the selected clips.
   - With Classic, an export enlarges a picture with the upscaler that its path has:
     - Pictures that NVIDIA's GPU fits for NVENC: libplacebo, in linear light. Low is `ewa_lanczos`, Medium `ewa_lanczossharp` and High `ewa_lanczos4sharpest`.
@@ -1825,7 +1827,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - A video model adds detail that a classic upscaler cannot. In side-by-side tests, the owner ranked NanoVSR 5.4M above Real-ESRGAN's compact model.
   - Some users wait a long time for the best pictures, and others want good pictures fast. Thus there is a fast AI upscaler and a slow one.
-  - AI Best is the default and the first choice, because Super Scale is mostly for the best pictures. AI Fast is the choice for speed.
+  - Auto takes AI Best off macOS, because Super Scale is mostly for the best pictures. AI Fast is the choice for speed.
+  - vidcut makes a picture only as large as the output shows it. A factor would only limit placed pictures. Thus On is sufficient.
+  - Auto lets a project move between macOS and other systems. Each computer uses its own AI.
   - On macOS, the scaler of macOS is the default because it is part of the system. vidcut needs no weights for it, and the owner chose it.
   - AI Fast and AI Best are off on macOS because they are too slow there. On the owner's M4 MacBook Air, AI Fast took 345 s for 30 frames, 854×480 enlarged to 1920×1080.
   - FlashVSR+ Turbo is one step of a diffusion model, with Apache 2.0 code and weights. It streams over the frames, so a clip has no chunk edges.
@@ -1880,13 +1884,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Retime Process is in the Retime and Scaling group of the Inspector (p. 739).
   - It applies to clips at another speed and to clips at another frame rate than the timeline.
   - Its values are Project Settings, Nearest, Frame Blend and Optical Flow. The default is Project Settings.
+  - The project's Retime Process is in Master Settings, Frame Interpolation (p. 145). In a new project of Resolve Studio 21.1, it is Nearest.
   - Optical Flow has a Motion Estimation mode (p. 740): Standard Faster or Better, Enhanced Faster or Better, and Speed Warp Faster or Better.
   - Speed Warp uses the DaVinci Neural Engine. AI Speed Warp Metal is a version of it for macOS only.
 - **vidcut:**
   - Retime Process is a setting of a clip. The Speed section of the Inspector tab sets it, and `clip.set` sets it as `retime`.
   - The Change Clip Speed window (R) also sets it, for the selected clips with a picture.
-  - Its values are Nearest, Frame Blend, AI Fast and AI Best. The default is Nearest. There is no project setting.
-  - On macOS, the values are Nearest, Frame Blend and AI, `macos` in requests. AI Fast and AI Best are off on macOS.
+  - Its values are Project Settings, the default, Nearest, Frame Blend, AI Fast and AI Best.
+  - Project Settings has the Retime Process of the project. `project.set` sets it as `retime`.
+    - Its values are Auto, the default, Nearest, Frame Blend, AI Fast and AI Best.
+    - Auto gives slow motion the AI of the computer that plays or exports: AI on macOS, AI Fast elsewhere.
+    - Auto gives Nearest to the rest: clips at 100% or faster, frozen and backward clips, and HDR pictures.
+  - On macOS, the processes are Nearest, Frame Blend and AI, `macos` in requests. AI Fast and AI Best are off on macOS.
     - AI is the frame rate conversion of macOS (`VTFrameProcessor` of VideoToolbox). macOS does not download a model for it.
     - An export on another system refuses AI, and an export on macOS refuses AI Fast and AI Best.
   - Nearest shows the source frame that the frame falls in (D48).
@@ -1902,6 +1911,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A clip played backward shows the nearest frames for now.
   - With an AI upscaler of Super Scale, a made frame is enlarged as with Classic.
   - The viewer shows the frames that an export makes. With the slower models, a frame can take seconds.
+  - Before a change that makes the timeline use a model that this computer does not have, the GUI asks to download it.
 - **Why:**
   - The models run on this computer and need no account. Their code and weights are under MIT (RIFE) and Apache 2.0 (EMA-VFI).
   - The models make any point between two frames, not only the middle. A speed of 40% needs points such as 0.4 and 0.8.
@@ -1909,4 +1919,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - On macOS, the system's own process runs on the Mac's own hardware, as AI of Super Scale does.
   - A morph from one shot into the next looks wrong. Thus a shot change keeps the nearer source frame, as Nearest does.
   - A slow clip needs a process. Thus the window that sets the speed also sets the process.
-  - Nearest is the behavior that vidcut had. Thus a clip keeps it until the user selects another process.
+  - The AI of vidcut needs no paid version. Thus slow motion gets it by default.
+  - Other speeds and frame rates gain less from made frames. Thus Auto keeps the speed of Nearest for them.
+  - Auto lets a project move between macOS and other systems. Each computer uses its own AI.

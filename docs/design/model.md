@@ -19,6 +19,7 @@ classDiagram
     start_tc, drop_frame
     auto_format, use_proxies
     fillers, timeline_colors
+    retime, upscaler
   }
   class Media {
     id

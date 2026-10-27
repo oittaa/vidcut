@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ColorSpace, DuckDetect, Hdr, Keyframe, Media, Picture, Project, Retime, SuperScale,
-    TimelineColors, Title, TrackKind, WipeDirection,
+    Clip, ColorSpace, DuckDetect, Hdr, Keyframe, Media, MediaSuperScale, Picture, Project, Retime,
+    Settings, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -172,11 +172,13 @@ pub enum VideoPiece {
         /// How its pictures' colors are read: the media's `color_space`.
         #[serde(default, skip_serializing_if = "ColorSpace::is_tagged")]
         color_space: ColorSpace,
-        /// How its pictures are enlarged: the media's `super_scale`.
+        /// How its pictures are enlarged: the media's `super_scale`, with
+        /// the upscaler that its setting gives on this computer.
         #[serde(default, skip_serializing_if = "SuperScale::is_off")]
         super_scale: SuperScale,
         /// How it makes a frame between two source frames: its clip's
-        /// `retime`, or nearest when each frame lands on a source frame.
+        /// `retime`, or the project's, as it runs on this computer. Nearest
+        /// when each frame lands on a source frame.
         #[serde(default, skip_serializing_if = "Retime::is_nearest")]
         retime: Retime,
         /// Where its picture goes over the frame: its clip's picture, then
@@ -975,12 +977,32 @@ fn origin_of(m: &Media) -> (PathBuf, f64) {
     (m.path.clone(), origin)
 }
 
-fn retime_of(c: &Clip, m: &Media, fps: Rational) -> Retime {
+pub fn retime_of(c: &Clip, m: &Media, s: &Settings) -> Retime {
     let lands = m.info.video.as_ref().is_some_and(|v| {
-        let step = c.speed() * v.fps.as_f64() / fps.as_f64();
+        let step = c.speed() * v.fps.as_f64() / s.fps.as_f64();
         (step - step.round()).abs() < 1e-9
     });
-    if lands { Retime::Nearest } else { c.retime }
+    if lands || m.is_still() {
+        return Retime::Nearest;
+    }
+    let slow = c.speed() > 0.0 && c.speed() < 1.0;
+    let sdr = m.video_as_read().is_some_and(|v| v.hdr.is_none());
+    c.retime
+        .process()
+        .or_else(|| s.retime.process())
+        .unwrap_or(if slow && sdr {
+            Retime::ai_here()
+        } else {
+            Retime::Nearest
+        })
+}
+
+pub fn super_scale_of(m: MediaSuperScale, s: &Settings) -> SuperScale {
+    SuperScale {
+        on: m.on,
+        sharpness: m.sharpness,
+        upscaler: m.upscaler.upscaler().unwrap_or(s.upscaler.upscaler()),
+    }
 }
 
 fn image_of(m: &Media) -> Option<Image> {
@@ -1288,8 +1310,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 image: image_of(m),
                 pace: c.pace().after(x - c.start),
                 color_space: m.color_space,
-                super_scale: m.super_scale,
-                retime: retime_of(c, m, s.fps),
+                super_scale: super_scale_of(m.super_scale, s),
+                retime: retime_of(c, m, s),
                 placed: placed_of(c, nest, over, x),
             })
         };
@@ -1665,7 +1687,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
             frames: 1,
             image: p.media_image(media),
             color_space: m.color_space,
-            super_scale: m.super_scale,
+            super_scale: super_scale_of(m.super_scale, &p.settings),
             retime: Retime::Nearest,
             placed: Vec::new(),
         },
@@ -1707,7 +1729,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     frames,
                     image: image_of(m),
                     color_space: m.color_space,
-                    super_scale: m.super_scale,
+                    super_scale: super_scale_of(m.super_scale, &p.settings),
                     retime: Retime::Nearest,
                     placed: Vec::new(),
                 },

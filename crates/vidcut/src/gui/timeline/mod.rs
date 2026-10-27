@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sense, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use vidcut_core::model::{Ease, PictureTool, Project, Retime, Track};
+use vidcut_core::model::{ClipRetime, Ease, PictureTool, Project, Track};
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::request::ViewerMode;
 
@@ -371,7 +371,7 @@ pub struct SpeedDialog {
     pub reverse: bool,
     pub freeze: bool,
     pub ripple: bool,
-    pub retime: Retime,
+    pub retime: ClipRetime,
 }
 
 impl SpeedDialog {
@@ -387,7 +387,7 @@ impl SpeedDialog {
             reverse: speed < 0.0,
             freeze: speed == 0.0,
             ripple,
-            retime: Retime::Nearest,
+            retime: ClipRetime::Project,
         }
     }
 
@@ -3169,7 +3169,7 @@ impl Workspace {
             .pictured(&self.snap.selection.clips)
             .first()
             .and_then(|id| p.clip(id))
-            .map_or(Retime::Nearest, |c| c.retime);
+            .map_or(ClipRetime::Project, |c| c.retime);
         self.timeline.speed_dialog = Some(SpeedDialog {
             retime,
             ..SpeedDialog::of(speed, p.settings.ripple_on)
@@ -3231,7 +3231,6 @@ impl Workspace {
                 let change = super::dialog::main_button(ui, "Change", true)
                     || ui.input(|i| i.key_pressed(Key::Enter));
                 if change {
-                    self.send("edit.change_speed", d.params(&clips));
                     let retimed: Vec<String> = self.project().map_or(Vec::new(), |p| {
                         pictured
                             .iter()
@@ -3239,8 +3238,15 @@ impl Workspace {
                             .cloned()
                             .collect()
                     });
-                    if !d.freeze && !retimed.is_empty() {
-                        self.set_retime(&retimed, d.retime);
+                    if d.freeze || retimed.is_empty() {
+                        self.send_asking("edit.change_speed", d.params(&clips));
+                    } else {
+                        let set = json!({ "clips": retimed, "retime": d.retime });
+                        let commands = json!([
+                            { "method": "edit.change_speed", "params": d.params(&clips) },
+                            { "method": "clip.set", "params": set },
+                        ]);
+                        self.send_asking("apply", json!({ "commands": commands }));
                     }
                     done = true;
                 }
@@ -3731,7 +3737,7 @@ mod tests {
             picture: None,
             compound: None,
             speed: None,
-            retime: vidcut_core::model::Retime::Nearest,
+            retime: vidcut_core::model::ClipRetime::Project,
             color: None,
         }
     }

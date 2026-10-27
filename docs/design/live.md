@@ -121,6 +121,12 @@ Ducking:
 - Alt+D sends a `track.set` for the track of the selected clip (`Workspace::toggle_duck`).
 - Before a change that needs the speech detector, the GUI asks to download it (`Workspace::duck`).
 
+AI models:
+
+- Before a change that makes the timeline use an AI model that this computer does not have, the GUI asks to download it (`Workspace::send_asking`).
+  - `editor::models_after` applies the change to a copy of the project. It gives the models that the timeline uses only after it.
+  - The change then goes with `download`. The live thread downloads the models in a step of its job before the change (`fetches`).
+
 ## The core
 
 - `live::start` runs `Live::run` on `vidcut-session`.

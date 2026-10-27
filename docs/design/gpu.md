@@ -169,7 +169,9 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - libplacebo then scales in linear light, with sigmoid upscaling. Without Super Scale, it scales in the code values, as the CPU does.
   - A picture with a color shader still scales in the code values.
 - **The CPU:** `Normalizer::upscaling` uses `spline` or `lanczos` in place of `bicubic`.
-- **Placed pictures:** `layer_size` lets a layer grow to the factor times its source size (`ScaleFactor`). Auto lets it grow to four times.
+- **The upscaler:** `render::super_scale_of` gives each piece the upscaler that runs on this computer. It is the media's own, or the project's (`MediaUpscaler`, `ProjectUpscaler`).
+  - Auto is the scaler of macOS on macOS, and AI Best elsewhere.
+- **Placed pictures:** `layer_size` lets a layer with Super Scale grow to four times its source size.
 - A `Source` is used again only for a piece with the same Super Scale.
 - **The work report** (`super_scale::report`):
   - `Source::ai_picture` reports what the AI upscaler makes now and its last finished work (`super_scale::Work`).
@@ -177,7 +179,7 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
   - Each AI upscaler reports the GPU that runs it when it starts.
   - The Super Scale group of the stats panel shows the report (`SuperScaleStats`).
   - When the clip under the playhead uses another upscaler, State names the AI upscaler that is at work.
-  - When the clip under the playhead has no Super Scale, the group shows while an AI upscaler is at work. Its Factor is then Off.
+  - When the clip under the playhead has no Super Scale, the group shows while an AI upscaler is at work.
 - **One path for the AI upscalers:** AI Fast, AI Best and the scaler of macOS use the same code in the reader. Only the parameters of the upscalers are different.
   - `Source::ai_picture` finds the shown source size and the size that the upscaler makes (`super_scale::made_size`).
     - AI Fast makes 4 times the source size.
@@ -323,7 +325,7 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
 - **The scaler of macOS** (`macos`), called AI in the app, on macOS 26 and later:
   - It is the super-resolution scaler of VideoToolbox: a `VTFrameProcessor` session with a `VTSuperResolutionScalerConfiguration` for video.
   - vidcut first checks that the class exists and that macOS supports it. Older macOS has no such class.
-  - The factors come from macOS (`supportedScaleFactors`, `macos::factors`). The Inspector and the pool grey out the others (`macos::offers`), and `macos::check` refuses them.
+  - The factors come from macOS (`supportedScaleFactors`, `macos::factors`).
   - Each run has a session of its own, for its source size and factor.
   - Each frame goes into a CoreVideo pixel buffer, with the attributes that the configuration asks for.
     - The buffers come from two pools of the run (`CVPixelBufferPool`), one for the source and one for the output. A pool reuses a buffer when no frame uses it.
