@@ -128,6 +128,8 @@ pub struct UpscaleNote {
 pub struct SourceNote {
     pub path: PathBuf,
     pub decoding: crate::decode::Decoding,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub went: Option<String>,
 }
 
 fn tried(encoder: Option<&str>, e: &Error) -> Tried {

@@ -2132,7 +2132,13 @@ fn detail_rows(j: &JobInfo, rate: Option<f64>) -> Vec<(&'static str, String)> {
                 || s.path.display().to_string(),
                 |n| n.to_string_lossy().into(),
             );
-            rows.push(("", format!("{name}: {}", s.decoding)));
+            rows.push((
+                "",
+                match &s.went {
+                    Some(went) => format!("{name}: {}, {went}", s.decoding),
+                    None => format!("{name}: {}", s.decoding),
+                },
+            ));
         }
     }
     for (i, u) in d.upscaled.iter().enumerate() {
@@ -3068,6 +3074,7 @@ mod tests {
                 gpu: gpu.map(String::from),
                 ..Default::default()
             },
+            went: None,
         };
         assert_eq!(
             decoded_on(&[file(Some("NVDEC")), file(None)]),

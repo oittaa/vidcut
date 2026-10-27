@@ -468,6 +468,7 @@ pub(crate) struct Layer {
     pub(crate) rotation: u16,
     pub(crate) decoder: Option<crate::hw::Kind>,
     pub(crate) decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
+    pub(crate) went: Option<crate::route::Went>,
     pub(crate) wipe: Option<Wipe>,
 }
 
@@ -1072,6 +1073,7 @@ pub struct VideoFrames {
     rotation: u16,
     last_decoder: Option<crate::hw::Kind>,
     last_decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
+    last_went: Option<crate::route::Went>,
     gpu_decoded: i64,
     dynamic: crate::hdr::Dynamic,
     light:
@@ -1236,6 +1238,7 @@ impl VideoFrames {
             rotation: 0,
             last_decoder: None,
             last_decoding: None,
+            last_went: None,
             gpu_decoded: 0,
             dynamic: Default::default(),
             light: Default::default(),
@@ -1274,10 +1277,16 @@ impl VideoFrames {
         &self.sources
     }
 
-    fn read_from(&mut self, path: &std::path::Path, decoding: &crate::decode::Decoding) {
+    fn read_from(
+        &mut self,
+        path: &std::path::Path,
+        decoding: &crate::decode::Decoding,
+        went: Option<crate::route::Went>,
+    ) {
         let source = super::SourceNote {
             path: path.to_path_buf(),
             decoding: decoding.clone(),
+            went: went.and_then(crate::route::Went::label),
         };
         match self.sources.iter_mut().find(|s| s.path == source.path) {
             Some(s) if *s == source => return,
@@ -1429,9 +1438,11 @@ impl VideoFrames {
             .decoding
             .as_ref()
             .filter(|d| {
-                self.last_decoding
-                    .as_ref()
-                    .is_none_or(|last| !std::sync::Arc::ptr_eq(last, d))
+                shown.went != self.last_went
+                    || self
+                        .last_decoding
+                        .as_ref()
+                        .is_none_or(|last| !std::sync::Arc::ptr_eq(last, d))
             })
             .and_then(
                 |d| match self.pieces.get(self.piece)?.layers().get(heaviest) {
@@ -1440,8 +1451,9 @@ impl VideoFrames {
                 },
             );
         if let Some((path, d)) = read {
-            self.read_from(&path, &d);
+            self.read_from(&path, &d, shown.went);
         }
+        self.last_went = shown.went;
         self.rotation = shown.rotation;
         self.last_decoder = shown.decoder;
         self.last_decoding = shown.decoding.clone();
@@ -1496,6 +1508,7 @@ impl VideoFrames {
                             rotation: 0,
                             decoder: None,
                             decoding: None,
+                            went: None,
                             wipe,
                         });
                     }
@@ -1536,6 +1549,7 @@ impl VideoFrames {
                     rotation: if self.open[s].upright { 0 } else { rotation },
                     decoder,
                     decoding: Some(decoding),
+                    went: self.open[s].fitting.went(),
                     wipe,
                 });
             }

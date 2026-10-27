@@ -386,6 +386,7 @@ pub fn write(
             crate::progress::note(crate::export::Note::Source(crate::export::SourceNote {
                 path: input.path().to_path_buf(),
                 decoding: (**reader.decoding()).clone(),
+                went: None,
             }));
         }
         match encode_into(

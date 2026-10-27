@@ -26,6 +26,3 @@
 4. **Capabilities tested, not written as rules.**
    - The code has rules for which encoders take the frames of which places (`encode::shares`).
    - Test these capabilities once for each GPU and FFmpeg, as vidcut tests the encoders. Keep the results with `encoders.json`.
-5. **The route in an export's result.**
-   - The result of a proxy tells how its frames went (`made_with`: `frames came down whole`).
-   - The result of an export gives its `copies` and `through_memory`, but not how the frames of each source went.

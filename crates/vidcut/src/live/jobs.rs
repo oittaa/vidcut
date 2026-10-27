@@ -327,6 +327,7 @@ mod tests {
                 decoder: decoder.into(),
                 ..Default::default()
             },
+            went: None,
         })
     }
 

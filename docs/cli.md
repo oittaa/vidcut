@@ -150,6 +150,8 @@ The schema describes the parameters, not the results. This list gives the result
     - `color` and `metadata`: what was chosen, and `why`.
     - `tried`: the video encoders that did not open, and why.
     - `sources`: each file, and how it was decoded.
+      - `went`: how the decoded frames of the file went to the draw: `frames stayed there` or `frames came down whole`.
+      - `went` is not there when the frames of the file come to the draw in memory.
   - `upscaled[]`: each file that an AI upscaler of Super Scale enlarged (`path`), and `how`: the upscaler and its model.
   - `notes[]`: `code`, `message`.
 - `export plan`:
