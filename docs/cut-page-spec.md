@@ -326,7 +326,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 
 **Track display:**
 - The combined video+audio tracks have numbers (1, 2, …). The audio-only tracks (A1, A2, …) are below them.
-- A video clip shows a filmstrip. Each picture is the frame under it, and the first picture is the first frame of the clip.
+- A video clip shows a filmstrip. Each picture is the frame under its left edge, and the first picture is the first frame of the clip.
+  - Thus a picture that starts before a cut in the source shows the shot before the cut.
 - Its audio shows as a waveform band along the bottom. The band becomes larger with the track (p. 647).
 - Its duration shows as seconds:frames, at the bottom left.
 - The clips of a locked track are stippled. The clips of a disabled track are dimmed.
