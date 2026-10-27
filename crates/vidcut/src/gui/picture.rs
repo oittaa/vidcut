@@ -1109,7 +1109,7 @@ impl Screen {
             self.mixing = Some(Mixing::new(gpu, size));
         }
         let blending = binds.iter().any(|b| b.3);
-        let floats = colors.is_some() || blending;
+        let floats = colors.is_some() || blending || n > 1;
         if !floats {
             self.wide = None;
         } else if self

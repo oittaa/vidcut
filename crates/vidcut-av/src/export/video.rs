@@ -1619,7 +1619,8 @@ impl VideoFrames {
 
     pub fn with_timeline(mut self, timeline: Option<Hdr>) -> Result<Self> {
         let target = self.maker.target();
-        if timeline == target
+        let rgb = crate::color::is_rgb(self.maker.out().2);
+        if (timeline == target && !rgb)
             || matches!(self.maker.output(), Output::Decoded { .. } | Output::Vulkan)
         {
             return Ok(self);

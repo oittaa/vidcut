@@ -189,7 +189,7 @@ pub(crate) fn pq_light(f: &frame::Video) -> PqLight {
     }
 }
 
-fn is_rgb(p: format::Pixel) -> bool {
+pub(crate) fn is_rgb(p: format::Pixel) -> bool {
     p.descriptor()
         .is_some_and(|d| unsafe { (*d.as_ptr()).flags } & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0)
 }
