@@ -87,15 +87,28 @@ ash = { version = "0.38", default-features = false, features = ["std"] }
 objc2-metal = { version = "0.3", default-features = false, features = [
     "std",
     "MTLAllocation",
+    "MTLCommandBuffer",
+    "MTLCommandQueue",
     "MTLDevice",
     "MTLPixelFormat",
     "MTLResource",
     "MTLTexture",
     "objc2-io-surface",
 ] }
+# Lanczos scaling of VideoToolbox's IOSurfaces on Metal (macOS). Zlib,
+# Apache-2.0 or MIT.
+objc2-metal-performance-shaders = { version = "0.3", default-features = false, features = [
+    "std",
+    "MPSCore",
+    "MPSImage",
+    "MPSImageKernel",
+    "MPSImageResampling",
+    "MPSKernel",
+] }
 objc2-io-surface = { version = "0.3", default-features = false, features = [
     "std",
     "IOSurfaceRef",
+    "objc2-core-foundation",
 ] }
 # macOS's appearance and accent color, for native themes.
 objc2-app-kit = { version = "0.3", default-features = false, features = [
@@ -137,8 +150,10 @@ objc2-core-video = { version = "0.3", default-features = false, features = [
     "CVBuffer",
     "CVImageBuffer",
     "CVPixelBuffer",
+    "CVPixelBufferIOSurface",
     "CVPixelBufferPool",
     "CVReturn",
+    "objc2-io-surface",
 ] }
 objc2-core-media = { version = "0.3", default-features = false, features = [
     "std",

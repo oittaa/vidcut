@@ -930,6 +930,7 @@ enum Scaling {
     Filters(GpuGraph),
     #[cfg(windows)]
     D3d11(d3d11::Scaler),
+    Vt(vt::Fit),
 }
 
 impl Scaling {
@@ -946,9 +947,7 @@ impl Scaling {
                 Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
             }
             format::Pixel::VIDEOTOOLBOX => {
-                let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
-                let spec = vt::shrink_spec((w, h));
-                Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
+                Ok(Self::Vt(vt::Fit::new(f, frames, 0, (w, h), sw_format(f))?))
             }
             format::Pixel::VULKAN => Ok(Self::Filters(vulkan_scale::scaler(f, frames, (w, h))?)),
             #[cfg(windows)]
@@ -1069,6 +1068,7 @@ impl Shrinker {
             Some(Scaling::Filters(graph)) => run_graph(graph, f, "scaling a frame on the GPU"),
             #[cfg(windows)]
             Some(Scaling::D3d11(scaler)) => scaler.scale(f),
+            Some(Scaling::Vt(fit)) => fit.run(f),
             None => return download(f),
         };
         match scaled.and_then(|scaled| download(&scaled)) {
@@ -1128,11 +1128,7 @@ enum Fitting {
     Filters(GpuGraph),
     #[cfg(windows)]
     D3d11(d3d11::Scaler),
-    #[cfg(target_os = "macos")]
-    Transfer(
-        crate::frame_processor::Transfer,
-        crate::frame_processor::Frames,
-    ),
+    Vt(vt::Fit),
 }
 
 pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
@@ -1182,15 +1178,7 @@ impl Fitter {
                             "VideoToolbox doesn't place pictures on black".into(),
                         ));
                     }
-                    let from = sw_format(f);
-                    if from == layout {
-                        let spec = vt::fit_spec(rotation, fitted);
-                        let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
-                        Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
-                    } else {
-                        let scaled = (f.width(), f.height()) != fitted;
-                        vt::transfer(from, layout, rotation, scaled)?
-                    }
+                    Fitting::Vt(vt::Fit::new(f, frames, rotation, fitted, layout)?)
                 }
                 #[cfg(windows)]
                 format::Pixel::D3D11 => {
@@ -1215,12 +1203,7 @@ impl Fitter {
             Fitting::Filters(graph) => run_graph(graph, f, "fitting a frame on the GPU")?,
             #[cfg(windows)]
             Fitting::D3d11(scaler) => scaler.scale(f)?,
-            #[cfg(target_os = "macos")]
-            Fitting::Transfer(transfer, made) => {
-                let what = "fitting a frame on the GPU";
-                let from = crate::frame_processor::pixels(f, what)?;
-                made.made_as(transfer, from, f, (fitted, layout.into()), what)?
-            }
+            Fitting::Vt(fit) => fit.run(f)?,
         };
         same_picture(&mut out, f);
         // SAFETY: a plain field of its own frame.

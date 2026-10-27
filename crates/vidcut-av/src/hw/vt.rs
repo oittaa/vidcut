@@ -46,58 +46,111 @@ unsafe extern "C" fn unmap(held: *mut c_void, _data: *mut u8) {
 }
 
 pub(crate) fn can_fit(ops: &Ops) -> bool {
-    ops.colors_kept && !ops.pads && (ops.layout == ops.out_layout || ops.rotation == 0)
+    ops.colors_kept && !ops.pads
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn turn_spec(rotation: u16) -> Option<&'static str> {
+    match rotation {
+        90 => Some("transpose_vt=dir=clock"),
+        180 => Some("transpose_vt=dir=reversal"),
+        270 => Some("transpose_vt=dir=cclock"),
+        _ => None,
+    }
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn transfer(
-    from: ffmpeg::format::Pixel,
-    to: ffmpeg::format::Pixel,
-    rotation: u16,
-    scaled: bool,
-) -> Result<super::Fitting> {
-    if rotation != 0 {
-        return Err(Error::Invalid(format!(
-            "VideoToolbox doesn't change turned {from:?} frames into {to:?}"
-        )));
+const FITTING: &str = "fitting a frame on the GPU";
+
+#[cfg(target_os = "macos")]
+pub(super) struct Fit {
+    turn: Option<super::GpuGraph>,
+    lanczos: Option<crate::lanczos::Lanczos>,
+    transfer: Option<(
+        crate::frame_processor::Transfer,
+        crate::frame_processor::Frames,
+    )>,
+    fitted: (u32, u32),
+    layout: ffmpeg::format::Pixel,
+}
+
+#[cfg(target_os = "macos")]
+impl Fit {
+    pub(super) fn new(
+        f: &frame::Video,
+        frames: *mut ffi::AVBufferRef,
+        rotation: u16,
+        fitted: (u32, u32),
+        layout: ffmpeg::format::Pixel,
+    ) -> Result<Self> {
+        let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
+        let turn = turn_spec(rotation)
+            .map(|spec| super::gpu_graph(f, frames, pixel, spec))
+            .transpose()?;
+        let upright = if rotation % 180 == 90 {
+            (f.height(), f.width())
+        } else {
+            (f.width(), f.height())
+        };
+        let lanczos = (upright != fitted)
+            .then(crate::lanczos::Lanczos::new)
+            .transpose()?;
+        let transfer = match super::sw_format(f) == layout {
+            true => None,
+            false => Some((
+                crate::frame_processor::Transfer::new(FITTING)?,
+                Default::default(),
+            )),
+        };
+        Ok(Self {
+            turn,
+            lanczos,
+            transfer,
+            fitted,
+            layout,
+        })
     }
-    if scaled {
-        return Err(Error::Invalid(format!(
-            "VideoToolbox scales with less detail than the CPU's lanczos: the CPU fits {from:?} \
-             frames into {to:?}"
-        )));
+
+    pub(super) fn run(&mut self, f: &frame::Video) -> Result<frame::Video> {
+        let turned = match &mut self.turn {
+            Some(graph) => super::run_graph(graph, f, FITTING)?,
+            None => crate::export::video::frame_ref(f)?,
+        };
+        let sized = match &mut self.lanczos {
+            Some(lanczos) => lanczos.scale(&turned, self.fitted)?,
+            None => turned,
+        };
+        match &mut self.transfer {
+            Some((transfer, made)) => {
+                let from = crate::frame_processor::pixels(&sized, FITTING)?;
+                let shape = (self.fitted, self.layout.into());
+                made.made_as(transfer, from, &sized, shape, FITTING)
+            }
+            None => Ok(sized),
+        }
     }
-    let what = "fitting a frame on the GPU";
-    Ok(super::Fitting::Transfer(
-        crate::frame_processor::Transfer::new(what)?,
-        crate::frame_processor::Frames::default(),
-    ))
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn transfer(
-    from: ffmpeg::format::Pixel,
-    to: ffmpeg::format::Pixel,
-    _rotation: u16,
-    _scaled: bool,
-) -> Result<super::Fitting> {
-    Err(Error::Invalid(format!(
-        "VideoToolbox doesn't change {from:?} frames into {to:?}"
-    )))
-}
+pub(super) struct Fit(std::convert::Infallible);
 
-pub(super) fn shrink_spec((w, h): (u32, u32)) -> String {
-    format!("scale_vt=w={w}:h={h}")
-}
+#[cfg(not(target_os = "macos"))]
+impl Fit {
+    pub(super) fn new(
+        _f: &frame::Video,
+        _frames: *mut ffi::AVBufferRef,
+        _rotation: u16,
+        _fitted: (u32, u32),
+        _layout: ffmpeg::format::Pixel,
+    ) -> Result<Self> {
+        Err(Error::Invalid(
+            "VideoToolbox frames fit on macOS only".into(),
+        ))
+    }
 
-pub(super) fn fit_spec(rotation: u16, (fw, fh): (u32, u32)) -> String {
-    let turn = match rotation {
-        90 => "transpose_vt=dir=clock,",
-        180 => "transpose_vt=dir=reversal,",
-        270 => "transpose_vt=dir=cclock,",
-        _ => "",
-    };
-    format!("{turn}scale_vt=w={fw}:h={fh}")
+    pub(super) fn run(&mut self, _f: &frame::Video) -> Result<frame::Video> {
+        match self.0 {}
+    }
 }
 
 #[cfg(test)]
@@ -131,15 +184,6 @@ mod tests {
     }
 
     #[test]
-    fn turned_frames_in_another_layout_dont_fit() {
-        assert!(!can_fit(&Ops {
-            layout: format::Pixel::P010LE,
-            rotation: 90,
-            ..kept()
-        }));
-    }
-
-    #[test]
     fn frames_whose_colors_change_dont_fit() {
         assert!(!can_fit(&Ops {
             colors_kept: false,
@@ -148,20 +192,12 @@ mod tests {
     }
 
     #[test]
-    fn shrinking_scales_to_the_size() {
-        assert_eq!(shrink_spec((960, 540)), "scale_vt=w=960:h=540");
-    }
-
-    #[test]
-    fn fitting_an_upright_frame_only_scales_it() {
-        assert_eq!(fit_spec(0, (1920, 1080)), "scale_vt=w=1920:h=1080");
+    fn fitting_an_upright_frame_turns_nothing() {
+        assert_eq!(turn_spec(0), None);
     }
 
     #[test]
     fn fitting_a_frame_turned_a_quarter_turns_it_first() {
-        assert_eq!(
-            fit_spec(90, (608, 1080)),
-            "transpose_vt=dir=clock,scale_vt=w=608:h=1080"
-        );
+        assert_eq!(turn_spec(90), Some("transpose_vt=dir=clock"));
     }
 }

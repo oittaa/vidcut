@@ -318,6 +318,7 @@ mod imp {
         sources: CFRetained<CVPixelBufferPool>,
         outputs: CFRetained<CVPixelBufferPool>,
         transfer: Transfer,
+        lanczos: Option<crate::lanczos::Lanczos>,
         frames: Frames,
         format: u32,
         size: (u32, u32),
@@ -370,6 +371,7 @@ mod imp {
                 sources,
                 outputs,
                 transfer: Transfer::new(WHAT)?,
+                lanczos: None,
                 frames: Frames::default(),
                 format,
                 size,
@@ -393,14 +395,18 @@ mod imp {
         pub(super) fn scale_frame(&mut self, index: i64, f: &Video) -> Result<Video> {
             let clock = std::time::Instant::now();
             let source = buffer(&self.sources, WHAT)?;
+            let scaled = crate::lanczos::sized(&mut self.lanczos, f, self.size)?;
+            let f = scaled.as_ref().unwrap_or(f);
             let matrix = crate::color::colors_of(f).matrix;
             self.transfer.run(pixels(f, WHAT)?, &source, matrix, WHAT)?;
+            source.remove_all_attachments();
             let wrote = clock.elapsed();
             let enlarged = self.enlarge(index, &source)?;
             let scaled = clock.elapsed();
             let out = self
                 .frames
                 .made(&self.transfer, &enlarged, f, self.made, WHAT)?;
+            enlarged.remove_all_attachments();
             told(index, wrote, scaled, clock);
             Ok(out)
         }
