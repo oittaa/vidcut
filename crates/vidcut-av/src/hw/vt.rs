@@ -71,7 +71,7 @@ pub(super) struct Fit {
         crate::frame_processor::Transfer,
         crate::frame_processor::Frames,
     )>,
-    recolor: Option<(crate::recolor::Recolor, crate::color::Recoloring)>,
+    recolor: Option<Box<(crate::recolor::Recolor, crate::color::Recoloring)>>,
     target: Option<Hdr>,
     fitted: (u32, u32),
     out: (u32, u32),
@@ -124,7 +124,7 @@ impl Fit {
         let target = colors.flatten();
         let changed = colors.is_some() && !crate::color::kept(crate::color::Source::of(f), target);
         let recolor = match crate::color::recoloring(f, target).filter(|_| changed) {
-            Some(r) => Some((crate::recolor::Recolor::new()?, r)),
+            Some(r) => Some(Box::new((crate::recolor::Recolor::new()?, r))),
             None => None,
         };
         let transfer = match recolor.is_some() || super::sw_format(f) == layout {
@@ -158,7 +158,7 @@ impl Fit {
             }
             None => turned,
         };
-        if let Some((recolor, colors)) = &mut self.recolor {
+        if let Some((recolor, colors)) = self.recolor.as_deref_mut() {
             return recolor.run(&sized, colors, self.layout, self.target);
         }
         match &mut self.transfer {
