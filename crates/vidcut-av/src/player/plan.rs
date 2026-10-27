@@ -241,6 +241,25 @@ impl Plan {
             .collect()
     }
 
+    pub(crate) fn retimes_at(&self, t: i64) -> Vec<vidcut_core::model::Retime> {
+        let (i, _) = self.locate(t);
+        let Some(piece) = self.plan.video.get(i) else {
+            return Vec::new();
+        };
+        piece
+            .layers()
+            .into_iter()
+            .filter_map(|(l, _)| match l {
+                VideoPiece::Source { image, retime, .. }
+                    if !matches!(image, Some(Image::Still)) && !retime.is_nearest() =>
+                {
+                    Some(*retime)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     pub(crate) fn fill_at(&self, t: i64) -> Fill {
         let (i, _) = self.locate(t);
         self.plan.video.get(i).map_or(Fill::ALL, |piece| {

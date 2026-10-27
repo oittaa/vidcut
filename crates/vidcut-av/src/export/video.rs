@@ -2579,6 +2579,7 @@ impl VideoFrames {
                 "{}: a cut between the frames at {weight:.3}",
                 retime.title()
             );
+            crate::interpolate::kept_at_cut(*retime, size, weight);
             if weight < 0.5 { a } else { b }
         } else {
             let made = crate::interpolate::between(*retime, &key, &a, &b, size, weight)?;

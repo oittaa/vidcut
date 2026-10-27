@@ -370,6 +370,11 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - VFIMamba follows the forward path of the official code. Its two local blocks run at full size, after the motion is enlarged.
   - VFIMamba's scans keep the order of the official code. The column scans put their results back in that code's order, which is not the order of the pixels.
 - PyTorch versions of the three networks, written from the official code, give the same frames within 1 of 255 levels, on 1080p frames.
+- **The work report** (`interpolate::report`):
+  - The device reports its GPU when it starts.
+  - `interpolate::between` reports each made frame (`interpolate::Made`): the process, the size, the weight and the time.
+  - A shot change reports the kept source frame, without a time.
+  - The Retime Process group of the stats panel shows the report (`RetimeStats`). It shows when the clip under the playhead has a process other than Nearest.
 
 ## Deinterlacing and HDR
 

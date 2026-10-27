@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use vidcut_core::catalog::{self, Measure};
 use vidcut_core::model::{Media, Project, Retime};
@@ -291,6 +292,42 @@ static ENGINE: Mutex<Option<std::result::Result<Engine, String>>> = Mutex::new(N
 static USERS: Mutex<usize> = Mutex::new(0);
 static DUMPED: AtomicU64 = AtomicU64::new(0);
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Made {
+    pub retime: Retime,
+    pub size: (u32, u32),
+    pub at: f64,
+    pub took: Option<Duration>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Report {
+    pub runs_on: Option<String>,
+    pub made: Option<Made>,
+}
+
+static REPORT: Mutex<Report> = Mutex::new(Report {
+    runs_on: None,
+    made: None,
+});
+
+fn report_lock() -> MutexGuard<'static, Report> {
+    REPORT.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+pub fn report() -> Report {
+    report_lock().clone()
+}
+
+pub(crate) fn kept_at_cut(retime: Retime, size: (u32, u32), at: f64) {
+    report_lock().made = Some(Made {
+        retime,
+        size,
+        at,
+        took: None,
+    });
+}
+
 fn engine() -> MutexGuard<'static, Option<std::result::Result<Engine, String>>> {
     ENGINE.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -333,6 +370,7 @@ impl Drop for User {
 impl Engine {
     fn start() -> std::result::Result<Self, String> {
         let gpu = Gpu::start(WHAT, SHARED)?;
+        report_lock().runs_on = Some(gpu.name.clone());
         let kernels = crate::compute::checked(&gpu.device, WHAT, || Ok(Kernels::new(&gpu)))
             .map_err(|e| e.to_string())?;
         Ok(Self {
@@ -576,10 +614,17 @@ pub(crate) fn between(
     size: (u32, u32),
     t: f64,
 ) -> Result<Vec<u8>> {
+    let clock = Instant::now();
     let made = with_engine(|e| {
         e.hold(r, key, a, b, size)?;
         e.frame(r, t as f32)
     })?;
+    report_lock().made = Some(Made {
+        retime: r,
+        size,
+        at: t,
+        took: Some(clock.elapsed()),
+    });
     if std::env::var_os("VIDCUT_INTERPOLATE_DUMP").is_some() {
         let n = DUMPED.fetch_add(1, Ordering::Relaxed);
         let name = format!("{n:04}");
