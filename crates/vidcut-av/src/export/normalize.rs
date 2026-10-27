@@ -228,7 +228,7 @@ impl Normalizer {
         } else {
             (crate::color::conversion(color, out_fmt, target), None)
         };
-        let kept = has_alpha(fmt) && cpu.is_none() && conv.after.is_empty();
+        let kept = has_alpha(fmt) && cpu.is_none();
         let alpha = kept.then(|| with_alpha(out_fmt)).flatten();
         let conv = match alpha {
             Some(alpha) => crate::color::conversion(color, alpha, target),
