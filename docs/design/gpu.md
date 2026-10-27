@@ -117,7 +117,7 @@ In exports:
 | Vulkan | NVENC, copied into CUDA on the GPU; Vulkan's ProRes | libplacebo (`CudaPictures`) | `cuda::mix` | other encoders; alpha |
 | VA-API | VAAPI on its device | `transpose_vaapi`, `scale_vaapi`, `pad_vaapi`; colors unchanged | in memory | other encoders, QSV too; color changes; dissolves |
 | Direct3D 11 | AMF on its adapter | the video processor; colors unchanged, not 8-bit into 10-bit | in memory | other encoders, QSV too; color changes; dissolves |
-| VideoToolbox | its own encoders | `transpose_vt`, lanczos on Metal with black bars, a pixel transfer for another layout (`vt::Fit`); colors unchanged | in memory | color changes; dissolves |
+| VideoToolbox | its own encoders | `transpose_vt`, lanczos on Metal with black bars, a pixel transfer for another layout, a Metal kernel for other colors (`vt::Fit`) | in memory | dissolves |
 
 - A VideoToolbox frame fits in up to three steps on the GPU (`vt::Fit`). A step that the frame does not need is left out.
   1. `transpose_vt` turns it.
@@ -126,6 +126,10 @@ In exports:
      - As FFmpeg's pad filter, the place of the picture is rounded down to the grid of its chroma.
      - The clip rectangle of the kernel is the place of the picture, and its origin is the origin of the source. Thus the scale transform only scales.
   3. A pixel transfer of VideoToolbox changes its layout, such as 4:2:0 into the 10-bit 4:2:2 of ProRes (`Transfer`).
+  4. Where its colors change, a Metal kernel takes the place of step 3 (`recolor::Recolor`, `color::recoloring`). It reads the planes of the frame and writes the layout of the encoder.
+     - SDR into SDR changes only the matrix and the range, as swscale does on the CPU.
+     - To or from HDR, it goes to linear light, changes the gamut, tone-maps HDR into SDR (mobius) and encodes again, with the math of `CpuColors`.
+     - It reads chroma bilinearly at each pixel, and averages the chroma of each block that it writes.
   - The scaling of VideoToolbox itself, which the pixel transfer and FFmpeg's scale_vt use, keeps less detail than lanczos. Thus no step scales with it.
 - A VideoToolbox frame that comes down is not copied. `hw::to_read` maps its pixel buffer (`av_hwframe_map`), and the CPU reads it in place.
   - The map is read-only. A step that writes into the picture copies it first (`av_frame_make_writable`).
@@ -420,7 +424,7 @@ HDR:
 - libplacebo (`CudaPictures`) converts HDR to SDR, or into PQ or HLG, for NVENC and the ProRes encoder of Vulkan.
 - It uses the math of the CPU in a shader (`color::gpu_color`).
 - For NVENC, it also converts mixed frames from the timeline color space to the output's colors ([export](export.md#timeline-colors)).
-- The other GPUs fit pictures only where their colors stay (`color::kept`). Thus a conversion comes down to `Normalizer`.
+- VideoToolbox converts on Metal (`recolor::Recolor`). The other GPUs fit pictures only where their colors stay (`color::kept`). Thus a conversion comes down to `Normalizer`.
 - The viewer's shader converts each picture into the timeline color space with the math of the export (`color::shader_colors`). It tone-maps HDR for the screen.
 
 ## Why

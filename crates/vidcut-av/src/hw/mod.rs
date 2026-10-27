@@ -1164,7 +1164,7 @@ impl Fitter {
         rotation: u16,
         fitted: (u32, u32),
         (w, h): (u32, u32),
-        layout: format::Pixel,
+        (layout, target): (format::Pixel, Option<vidcut_core::model::Hdr>),
         into: Option<&Frames>,
     ) -> Result<frame::Video> {
         let (frames, of) = frames_of(f)?;
@@ -1177,7 +1177,10 @@ impl Fitter {
                     Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
                 }
                 format::Pixel::VIDEOTOOLBOX => {
-                    Fitting::Vt(vt::Fit::new(f, frames, rotation, (fitted, (w, h)), layout)?)
+                    let sizes = (fitted, (w, h));
+                    Fitting::Vt(vt::Fit::with_colors(
+                        f, frames, rotation, sizes, layout, target,
+                    )?)
                 }
                 #[cfg(windows)]
                 format::Pixel::D3D11 => {

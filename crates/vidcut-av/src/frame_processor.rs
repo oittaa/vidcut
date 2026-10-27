@@ -336,7 +336,19 @@ impl Frames {
     pub(crate) fn fresh(
         &mut self,
         like: &Video,
+        shape: ((u32, u32), ffi::AVPixelFormat),
+        what: &str,
+    ) -> Result<Video> {
+        // SAFETY: a plain field of a valid frame.
+        let range = unsafe { (*like.as_ptr()).color_range };
+        self.fresh_in(like, shape, range, what)
+    }
+
+    pub(crate) fn fresh_in(
+        &mut self,
+        like: &Video,
         (size, format): ((u32, u32), ffi::AVPixelFormat),
+        range: ffi::AVColorRange,
         what: &str,
     ) -> Result<Video> {
         if sw_format(like).is_none() {
@@ -344,8 +356,7 @@ impl Frames {
                 "{what}: a frame without GPU frames"
             )));
         }
-        // SAFETY: a plain field of a valid frame.
-        let key = (format, unsafe { (*like.as_ptr()).color_range }, size);
+        let key = (format, range, size);
         if self.0.as_ref().is_none_or(|p| p.like != key) {
             self.0 = None;
             self.0 = Some(Pool::new(like, key, what)?);
@@ -355,7 +366,7 @@ impl Frames {
         // SAFETY: both frames are valid; plain fields.
         unsafe {
             let (o, i) = (out.as_mut_ptr(), like.as_ptr());
-            (*o).color_range = (*i).color_range;
+            (*o).color_range = range;
             (*o).colorspace = (*i).colorspace;
             (*o).color_primaries = (*i).color_primaries;
             (*o).color_trc = (*i).color_trc;

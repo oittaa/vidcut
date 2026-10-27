@@ -362,7 +362,7 @@ impl Maker {
                         rotation,
                         fitted,
                         (out_w, out_h),
-                        out_fmt,
+                        (out_fmt, self.target),
                         into,
                     );
                     match fit {

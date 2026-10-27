@@ -249,6 +249,71 @@ pub(crate) fn tag_frame(f: &mut frame::Video, hdr: Option<Hdr>) {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) struct Recoloring {
+    pub matrix: Matrix,
+    pub full_range: bool,
+    pub linear: Option<Linear>,
+    pub out_matrix: Matrix,
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) struct Linear {
+    pub from: Option<Hdr>,
+    pub from_scale: f64,
+    pub gamut: [[f64; 3]; 3],
+    pub tone: Option<[f64; 4]>,
+    pub to: Option<Hdr>,
+    pub to_scale: f64,
+}
+
+#[cfg(target_os = "macos")]
+fn linear_scale(hdr: Option<Hdr>) -> f64 {
+    match hdr {
+        Some(Hdr::Pq) => 10000.0 / REFERENCE_WHITE,
+        Some(Hdr::Hlg) => 1000.0 / REFERENCE_WHITE,
+        None => 1.0,
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn recoloring(f: &frame::Video, target: Option<Hdr>) -> Option<Recoloring> {
+    let src = Source::of(f);
+    if src.rgb {
+        return None;
+    }
+    let to = if target.is_some() {
+        Primaries::Bt2020
+    } else {
+        Primaries::Bt709
+    };
+    let linear = match (src.hdr, target) {
+        (None, None) => None,
+        (Some(s), Some(t)) if s == t && src.matrix == Matrix::Bt2020 => None,
+        _ => Some(Linear {
+            from: src.hdr,
+            from_scale: linear_scale(src.hdr),
+            gamut: gamut(Primaries::of(src), to),
+            tone: (src.hdr.is_some() && target.is_none()).then(|| {
+                let (scale, a, b) = mobius();
+                [KNEE, scale, a, b]
+            }),
+            to: target,
+            to_scale: 1.0 / linear_scale(target),
+        }),
+    };
+    Some(Recoloring {
+        matrix: src.matrix,
+        full_range: src.full_range,
+        linear,
+        out_matrix: if target.is_some() {
+            Matrix::Bt2020
+        } else {
+            Matrix::Bt709
+        },
+    })
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GpuColor {
     pub input: Tags,
