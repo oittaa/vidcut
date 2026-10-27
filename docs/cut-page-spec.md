@@ -2370,8 +2370,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - They lean the picture about its middle, in its own axes.
   - The lean comes before the zoom and the turn about the anchor, and before the move.
   - The lean is a projective divide about the middle. There is no cosine foreshortening.
-  - The renders do not show where the lean comes relative to the flips, the crop and the Dynamic Zoom.
-  - vidcut leans the picture as it shows after them.
+  - The flips and the crop come before the lean ([gotchas](gotchas.md#resolves-otio-files)). The renders do not show where the Dynamic Zoom comes.
+  - vidcut leans the picture as it shows after the flips, the crop and the Dynamic Zoom.
   - Positive pitch puts the top farther away, and the bottom closer.
   - Positive yaw puts the left closer, and the right farther.
   - With no rotation, yaw keeps vertical edges vertical.
