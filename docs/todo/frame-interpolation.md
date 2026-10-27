@@ -6,7 +6,7 @@ Retime Process makes the frames between source frames ([deviation X93](../deviat
 
 - **Memory:** AI Best keeps 32-bit values. An export of a UHD clip needs 9.5 GB of GPU memory, and a 1080p clip 4.2 GB.
   - 16-bit values for the shallow features and the attention buffers can make this smaller.
-- **Zero copy on macOS:** [macos.md](macos.md#pictures-on-the-gpu).
+- **Zero copy on macOS:** [macos.md](macos.md#work-that-still-uses-the-cpu).
 - **The first frame on macOS:** the first frame of each size takes some seconds while macOS starts its session. The viewer waits that long.
 - **Speed:** the convolution kernel does not use the tensor cores.
 - **The viewer:** it shows the frames that an export makes. With AI Best, a frame can take seconds.

@@ -1,14 +1,16 @@
 # macOS
 
-**When:** the parts of Pictures on the GPU are next, one at a time. The other items come after the interchange and the smaller items ([roadmap](../roadmap.md)).
+**When:** after the interchange and the smaller items ([roadmap](../roadmap.md)).
 
-- `scripts/check.sh full` on a Mac.
-- ProRes proxies on VideoToolbox checked on a Mac with ProRes hardware and on one without.
-- An `.app` bundle with FFmpeg's libraries in it, signed.
+To do:
 
-## Pictures on the GPU
+- Run `scripts/check.sh full` on a Mac.
+- Test ProRes proxies on a Mac with ProRes hardware and on a Mac without it.
+- Make a signed `.app` bundle that includes FFmpeg's libraries.
 
-On macOS, VideoToolbox frames go to the viewer as Metal textures, and to the H.264, HEVC and ProRes encoders of VideoToolbox. A frame that comes down is read in place. These parts still go through the CPU:
+## Work that still uses the CPU
 
-- **The AI processes of macOS:** they keep VideoToolbox frames on the GPU, in and out, turned frames too. Frames that the CPU decodes go through RGB.
-- **Placed pictures:** the frames of the picture come down to be placed, as on NVIDIA. The frame below stays on the GPU ([gpu-placement.md](gpu-placement.md)).
+Most frames stay on the GPU from the decoder to the viewer or the encoder. Two cases still use the CPU:
+
+- **Super Scale and Retime Process on frames that the CPU decoded.** The CPU converts these frames to RGB first. Frames that VideoToolbox decoded stay on the GPU.
+- **Placed pictures.** The CPU draws a moved, zoomed or cropped picture. The frame under it stays on the GPU ([gpu-placement.md](gpu-placement.md)).
