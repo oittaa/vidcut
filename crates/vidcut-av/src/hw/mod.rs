@@ -855,6 +855,47 @@ impl Keeper {
     }
 }
 
+pub(crate) struct Turner {
+    input: (KeptLike, u16),
+    fit: vt::Fit,
+}
+
+// SAFETY: one thread at a time uses a turner, as the run or the source that holds it.
+unsafe impl Send for Turner {}
+
+impl Turner {
+    pub(crate) fn turn(
+        turner: &mut Option<Turner>,
+        f: &frame::Video,
+        rotation: u16,
+    ) -> Result<frame::Video> {
+        if rotation == 0 {
+            return crate::export::video::frame_ref(f);
+        }
+        let (frames, like) = frames_of(f)?;
+        let input = (like, rotation);
+        if turner.as_ref().is_none_or(|t| t.input != input) {
+            let upright = match rotation % 180 {
+                90 => (f.height(), f.width()),
+                _ => (f.width(), f.height()),
+            };
+            let fit = vt::Fit::new(f, frames, rotation, (upright, upright), sw_format(f))?;
+            *turner = Some(Self { input, fit });
+        }
+        let clock = std::time::Instant::now();
+        let mut out = turner.as_mut().expect("made above").fit.run(f)?;
+        same_picture(&mut out, f);
+        crate::debug!(
+            "ai",
+            "turned {}x{} by {rotation} degrees on the GPU in {:.1} ms",
+            f.width(),
+            f.height(),
+            clock.elapsed().as_secs_f64() * 1e3
+        );
+        Ok(out)
+    }
+}
+
 fn same_picture(to: &mut frame::Video, from: &frame::Video) {
     // SAFETY: both frames are valid; plain fields.
     unsafe {

@@ -105,6 +105,7 @@ struct Source {
     ahead: Option<VideoReader>,
     run: Option<Session>,
     queued: VecDeque<frame::Video>,
+    turner: Option<crate::hw::Turner>,
 }
 
 #[derive(Clone)]
@@ -214,6 +215,7 @@ impl Source {
             ahead: None,
             run: None,
             queued: VecDeque::new(),
+            turner: None,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -276,6 +278,7 @@ impl Source {
             ahead: None,
             run: None,
             queued: VecDeque::new(),
+            turner: None,
         })
     }
 
@@ -984,7 +987,7 @@ impl Source {
         let converted = clock.elapsed();
         let outs = match rgb {
             Some(rgb) => run.run.push(i, f.pts(), rgb)?,
-            None => run.run.push_frame(i, f)?,
+            None => run.run.push_frame(i, f, rotation)?,
         };
         let pushed = clock.elapsed();
         run.next = i + 1;
@@ -2686,10 +2689,12 @@ impl VideoFrames {
         let size = between_size(cur, rotation, wanted.unwrap_or((w, h)));
         let start = Instant::now();
         let pair = match (&src.prev, &src.current) {
-            (Some((a, _)), Some((b, _)))
-                if crate::interpolate::takes_frames(*retime, a, b, rotation) =>
-            {
-                Some((frame_ref(a)?, frame_ref(b)?))
+            (Some((a, _)), Some((b, _))) if crate::interpolate::takes_frames(*retime, a, b) => {
+                let turner = &mut src.turner;
+                Some((
+                    crate::hw::Turner::turn(turner, a, rotation)?,
+                    crate::hw::Turner::turn(turner, b, rotation)?,
+                ))
             }
             _ => None,
         };

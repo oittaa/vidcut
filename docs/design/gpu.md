@@ -93,7 +93,7 @@ In playback:
 | Vulkan | NVIDIA, beside NVDEC | ProRes, where FFmpeg decodes it on Vulkan | `vulkan::keep`: kept as decoded | images imported into wgpu |
 | VA-API | Linux, not NVIDIA | FFmpeg's VA-API decoders | `vaapi::Keeper`: `vaCopy` into surfaces of its own | exported as DMA-BUFs and imported |
 | Direct3D 11 | Windows, not NVIDIA | FFmpeg's D3D11VA decoders; on AMD not open-GOP H.264 | `d3d11::Keeper`: copied into shareable textures | copied on its GPU into a few shared textures (`d3d11::Shared`), each imported once |
-| VideoToolbox | macOS | FFmpeg's VideoToolbox decoders; not open-GOP H.264 | as decoded | IOSurface planes as Metal textures; the one packed plane of AYUV64 too |
+| VideoToolbox | macOS | FFmpeg's VideoToolbox decoders; not open-GOP H.264 | as decoded | IOSurface planes as Metal textures; AYUV64 as one RGBA texture |
 
 - The viewer shows VA-API pictures from GPU memory only when VA-API decodes on the viewer's own GPU (`player::set_viewer_gpu`, `gpus::adapter_id`).
   - The reader checks this when it opens, so it also holds after a change of the GPU in use.
@@ -126,15 +126,17 @@ In exports:
      - As FFmpeg's pad filter, the place of the picture is rounded down to the grid of its chroma.
      - The clip rectangle of the kernel is the place of the picture, and its origin is the origin of the source. Thus the scale transform only scales.
   3. A pixel transfer of VideoToolbox changes its layout, such as 4:2:0 into the 10-bit 4:2:2 of ProRes (`Transfer`).
-     - ProRes 4444 takes 16-bit 4:4:4 (P416), with no alpha plane. The CPU's ProRes 4444 has the alpha of the top clip ([todo](../todo/clip-alpha.md)).
-     - The Metal kernel of step 4 writes P416, as the pixel transfer writes it off ([gotchas](../gotchas.md#gpu-drivers)).
-  4. Where its colors change, a Metal kernel takes the place of step 3 (`recolor::Recolor`, `color::recoloring`). It reads the planes of the frame and writes the layout of the encoder.
-     - SDR into SDR changes only the matrix and the range, as swscale does on the CPU.
-     - To or from HDR, it goes to linear light, changes the gamut, tone-maps HDR into SDR (mobius) and encodes again, with the math of `CpuColors`.
-     - It reads chroma bilinearly at each pixel, and averages the chroma of each block that it writes.
+     - For ProRes 4444, the frames go into 16-bit 4:4:4 (P416).
+     - P416 has no alpha plane. The ProRes 4444 of the CPU has the alpha of the top clip ([todo](../todo/clip-alpha.md)).
+     - The Metal kernel of step 4 writes P416. The pixel transfer gives wrong levels in P416 ([gotchas](../gotchas.md#gpu-drivers)).
+  4. Where the colors change, a Metal kernel takes the place of step 3 (`recolor::Recolor`, `color::recoloring`). The kernel also writes P416.
+     - The kernel reads the planes of the frame. It writes the layout of the encoder.
+     - From SDR into SDR, it changes only the matrix and the range. swscale does the same on the CPU.
+     - To or from HDR, it uses the math of `CpuColors`. It decodes to linear light, changes the gamut, tone-maps HDR into SDR (mobius) and encodes the result.
+     - It reads the chroma at each pixel bilinearly. It writes the mean chroma of each block.
   - The scaling of VideoToolbox itself, which the pixel transfer and FFmpeg's scale_vt use, keeps less detail than lanczos. Thus no step scales with it.
-- A dissolve of VideoToolbox frames mixes on Metal (`mixing::Mixer`), by the integer sums of `cuda::mix`.
-- Subtitles, titles and placed pictures go into VideoToolbox frames on Metal too (`mixing::Overlay`, `Mixer::burn`), by the sums of `cuda::burn`.
+- A dissolve of VideoToolbox frames mixes on Metal (`mixing::Mixer`). The kernel uses the integer sums of `cuda::mix`.
+- Subtitles, titles and placed pictures go into VideoToolbox frames on Metal (`mixing::Overlay`, `Mixer::burn`). The kernel uses the sums of `cuda::burn`.
 - A wipe or a composite mode mixes in memory.
 - A VideoToolbox frame that comes down is not copied. `hw::to_read` maps its pixel buffer (`av_hwframe_map`), and the CPU reads it in place.
   - The map is read-only. A step that writes into the picture copies it first (`av_frame_make_writable`).
@@ -351,7 +353,7 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
     - On the owner's M4 with macOS 27, the scaler takes only 16-bit float RGBA.
     - The scaler gets the frame before and its output too. The frames go in order (`Sequential`).
   - The output comes back to RGB in the same way. For 16-bit float, a table of all 65,536 values gives the 8-bit codes.
-  - A VideoToolbox frame that needs no turn goes to the scaler without the CPU (`Run::takes`, `Run::push_frame`).
+  - A VideoToolbox frame goes to the scaler without the CPU (`Run::takes`, `Run::push_frame`). A turned frame turns on the GPU first (`hw::Turner`).
     - Lanczos on Metal scales it where the run's size is another (`lanczos::sized`). A pixel transfer of VideoToolbox (`Transfer`) puts it into the source buffer, as for AI of Retime Process.
     - The output goes back into a VideoToolbox frame with the layout and the range of the source (`Frames`). It then goes on as a decoded frame does.
     - The source buffer and the output lose the color labels of the transfers. The scaler then gets pictures as the CPU path gives them.
@@ -406,7 +408,7 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - It keeps one session of `VTFrameProcessor` for each frame size. The session goes when the last `interpolate::User` goes.
   - The pair stays in the session. The frames between one pair tell macOS that the pair is the same, and the next pair tells it that the frames follow.
   - It shares the picture buffers, the pixel formats, the pixel transfer and the pool of made frames with the scaler of macOS (`frame_processor`).
-  - Two VideoToolbox frames that need no turn go to macOS without the CPU (`interpolate::takes_frames`). Lanczos on Metal scales them to the size of the session (`lanczos::sized`), and a pixel transfer of VideoToolbox converts them (`Transfer`).
+  - Two VideoToolbox frames go to macOS without the CPU (`interpolate::takes_frames`). Turned frames turn on the GPU first (`hw::Turner`). Lanczos on Metal scales them to the size of the session (`lanczos::sized`). A pixel transfer of VideoToolbox converts them (`Transfer`).
     - The transfer takes the matrix that vidcut finds for the frame, and keeps the primaries and the transfer function of BT.709.
     - The made frame goes back into a VideoToolbox frame on the GPU, with the layout and the range of the source (`interpolate::between_frames`). It then goes on as a decoded frame does.
     - `hw::Fitter` keeps a filter graph for the frames of the decoder and one for the made frames. Thus it does not make a graph again for each frame.
@@ -430,7 +432,8 @@ HDR:
 - libplacebo (`CudaPictures`) converts HDR to SDR, or into PQ or HLG, for NVENC and the ProRes encoder of Vulkan.
 - It uses the math of the CPU in a shader (`color::gpu_color`).
 - For NVENC, it also converts mixed frames from the timeline color space to the output's colors ([export](export.md#timeline-colors)).
-- VideoToolbox converts on Metal (`recolor::Recolor`). The other GPUs fit pictures only where their colors stay (`color::kept`). Thus a conversion comes down to `Normalizer`.
+- VideoToolbox converts on Metal (`recolor::Recolor`).
+- The other GPUs fit pictures only where their colors stay (`color::kept`). On these GPUs, a frame with other colors comes down to `Normalizer`.
 - The viewer's shader converts each picture into the timeline color space with the math of the export (`color::shader_colors`). It tone-maps HDR for the screen.
 
 ## Why

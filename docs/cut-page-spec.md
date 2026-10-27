@@ -846,7 +846,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Opacity goes from 0 to 100. The tracks below show through the rest.
   - The composite modes mix the clip with the tracks below in other ways (pp. 1199–1203).
   - vidcut: Foreground and the mask modes come later ([todo](todo/composite-masks.md)).
-  - A clip with an alpha channel composites over the tracks below it (p. 769). vidcut: not yet ([todo](todo/clip-alpha.md)).
+  - A clip with an alpha channel composites over the tracks below it (p. 769).
+  - vidcut: a clip's alpha channel has no effect ([todo](todo/clip-alpha.md)).
   - Details: D75.
 - **How they play:** a clip covers the tracks below it only where its picture covers the frame. Its composite mode mixes it with them. Its opacity and its soft edges let them show through. Details: D75.
 - **Keyframes** (D75):

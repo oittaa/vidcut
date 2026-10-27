@@ -92,12 +92,14 @@ pub fn check<'a>(
 
 pub(crate) struct Run {
     scaler: imp::Scaler,
+    turner: Option<crate::hw::Turner>,
 }
 
 impl Run {
     pub(crate) fn open(size: (u32, u32), made: (u32, u32)) -> Result<Self> {
         Ok(Self {
             scaler: imp::Scaler::open(size, made)?,
+            turner: None,
         })
     }
 }
@@ -112,12 +114,13 @@ impl super::Run for Run {
         }])
     }
 
-    fn takes(&self, f: &Video, rotation: u16) -> bool {
-        rotation == 0 && Place::of(f) == Place::VideoToolbox
+    fn takes(&self, f: &Video, _rotation: u16) -> bool {
+        Place::of(f) == Place::VideoToolbox
     }
 
-    fn push_frame(&mut self, index: i64, f: &Video) -> Result<Vec<super::Out>> {
-        let made = self.scaler.scale_frame(index, f)?;
+    fn push_frame(&mut self, index: i64, f: &Video, rotation: u16) -> Result<Vec<super::Out>> {
+        let upright = crate::hw::Turner::turn(&mut self.turner, f, rotation)?;
+        let made = self.scaler.scale_frame(index, &upright)?;
         Ok(vec![super::Out {
             index,
             pts: f.pts(),
