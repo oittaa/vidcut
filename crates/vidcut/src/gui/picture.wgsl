@@ -336,8 +336,8 @@ fn mixed(mode: u32, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
 fn fs_mode(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
     let top = shown(px);
-    let b = clamp(textureLoad(below, vec2<i32>(px), 0).rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    let m = mixed(u32(p.placed.z + 0.5), clamp(top.rgb, vec3<f32>(0.0), vec3<f32>(1.0)), b);
+    let b = textureLoad(below, vec2<i32>(px), 0).rgb;
+    let m = mixed(u32(p.placed.z + 0.5), top.rgb, b);
     if p.placed.w > 0.5 {
         return vec4<f32>(m * top.a, top.a);
     }
