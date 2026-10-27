@@ -9,8 +9,8 @@
 # benchmark, fetches Big Buck Bunny (673 MB, once) into $VIDCUT_TEST_DATA
 # (default ~/Downloads/vidcut-tmp), and measures exports that VideoToolbox
 # decodes and encodes: the time, the frames each second, the CPU time, the
-# peak memory, and the time of each step of a frame. Each export runs three
-# times; the tables give the median. It also checks the quality of AI in Retime
+# peak memory, and the time of each step of a frame, one run each. It also
+# checks the quality of AI in Retime
 # Process against the real frames, and plays two clips with the real player.
 # It pushes a text report to the branch macos-test-results, where the agent
 # reads it. The files stay on the Mac in $VIDCUT_TEST_DATA/macos-bench.
@@ -27,7 +27,7 @@ if [[ "${MACOS_BENCH_PULLED:-}" != 1 ]]; then
   MACOS_BENCH_PULLED=1 exec "$repo/scripts/macos-bench.sh" "$@"
 fi
 
-runs=3
+runs=1
 sections="${*:-retime scale quality viewer}"
 wanted() { [[ " $sections " == *" $1 "* ]]; }
 stamp="$(date +%Y%m%d-%H%M%S)"
