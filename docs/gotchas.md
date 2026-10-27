@@ -12,7 +12,7 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - Then the default handler panics.
   - eframe configures on each resize. Thus the viewer thread submits through `Gate::pass` ([playback](design/playback.md#the-viewer-thread), [todo](todo/wgpu-configure-gate.md)).
 - **egui-wgpu shows an `Rgba8Unorm` native texture's values as they are**, with no sRGB conversion.
-  - The target of the viewer (`TARGET` in `gui/picture.rs`) holds gamma-encoded BT.709 RGB.
+  - The target of the viewer (`TARGET` in `screen/mod.rs`) holds gamma-encoded BT.709 RGB.
 
 ## FFmpeg: reading and decoding
 

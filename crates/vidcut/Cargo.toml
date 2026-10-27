@@ -50,7 +50,6 @@ objc2-foundation.workspace = true
 zbus.workspace = true
 
 [dev-dependencies]
-naga.workspace = true
 tempfile.workspace = true
 
 [lints]

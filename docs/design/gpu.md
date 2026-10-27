@@ -8,15 +8,17 @@
 ```mermaid
 flowchart LR
   dec["hw::GpuDecoder"] --> frame["frame on a route::Place"]
-  frame -->|"Route::Kept"| store["player::store::Store"]
-  store --> shown["viewer textures<br>gui/picture.rs"]
-  frame -->|"Route::Gpu"| fitted["CudaPictures, hw::Fitter"]
-  fitted -->|"a dissolve"| mixed["cuda::mix, mixing::Mixer"]
-  fitted --> genc["GPU encoder"]
-  mixed --> genc
+  frame -->|"Route::Kept"| kept["kept as decoded"]
   frame -->|"Route::Shrunk, Route::Whole"| mem["memory"]
-  mem --> cpu["Normalizer, CPU encoders"]
-  mem -->|"uploaded"| genc
+  kept --> screen["screen::Screen<br>picture.wgsl"]
+  mem --> screen
+  screen --> shown["viewer"]
+  screen -->|"fs_encode"| planes["the encoder's planes"]
+  planes -->|"CUDA, IOSurface"| genc["GPU encoder"]
+  planes -->|"read back"| cpu["CPU encoders"]
+  cpu -.->|"uploaded"| genc
+  frame -->|"Route::Gpu, proxies"| fitted["CudaPictures, hw::Fitter"]
+  fitted --> genc
 ```
 
 ## The GPU and the decoder
@@ -41,14 +43,14 @@ flowchart LR
 - `route::Facts` holds what the planner knows of a frame and its `route::Dest`:
   - `hw::can_fit`: its GPU fits it for that encoder.
   - `hw::reaches`: its GPU hands it to the place of the encoder. CUDA and Vulkan reach each other.
-  - `hw::can_mix`: its GPU mixes dissolves. CUDA and VideoToolbox do.
   - What failed before.
+- Exports and the viewer go to the display (`Dest::Display`). Proxies go to the encoder (`Dest::Encoder`).
 - `route::plan` gives the `Route`. A GPU route wins.
 
 | `Route` | The picture is |
 |---|---|
 | `Route::Gpu` | fitted on the GPU and handed on there |
-| `Route::Kept` | kept as decoded, for the viewer |
+| `Route::Kept` | kept as decoded, for the draw |
 | `Route::Shrunk` | scaled down on the GPU, then copied down |
 | `Route::Whole` | copied down whole |
 | `Route::Cpu` | already in memory |
@@ -57,9 +59,9 @@ flowchart LR
 
 ## Each decoder's frames
 
-In playback:
+In playback and in exports:
 
-| Decoder | Kept in the player | Shown by the viewer |
+| Decoder | Kept | Read by the draw |
 |---|---|---|
 | NVDEC (CUDA) | `cuda::keep`: a copy | through a buffer shared with wgpu (`SharedBuffer`) |
 | Vulkan | `vulkan::keep`: as decoded | images imported into wgpu |
@@ -71,15 +73,15 @@ In playback:
   - Why: the viewer cannot import the pictures of another GPU.
 - vidcut keeps facts of each VA-API device. `NO_COPY` and `WAYS` are kept by the address of the display. `SIZES` is kept by the device, the layout and the size.
 
-In exports:
+In proxies:
 
-| Decoder | Fitted for | With | Dissolves | Comes down for |
-|---|---|---|---|---|
-| NVDEC (CUDA) | NVENC; Vulkan's ProRes | `CudaPictures`: `scale_cuda`, `pad_cuda`, libplacebo | `cuda::mix` | other encoders |
-| Vulkan | NVENC; Vulkan's ProRes | libplacebo (`CudaPictures`) | `cuda::mix` | other encoders; alpha |
-| VA-API | VAAPI | `scale_vaapi`, `pad_vaapi`, `transpose_vaapi` | in memory | other encoders; color changes; dissolves |
-| Direct3D 11 | AMF | the video processor | in memory | other encoders; color changes; 8-bit into 10-bit; dissolves |
-| VideoToolbox | its own encoders | `vt::Fit` | `mixing::Mixer` | wipes; composite modes; a timeline color space that is not the color space of the export |
+| Decoder | Fitted for | With | Comes down for |
+|---|---|---|---|
+| NVDEC (CUDA) | NVENC; Vulkan's ProRes | `CudaPictures`: `scale_cuda`, `pad_cuda`, libplacebo | other encoders |
+| Vulkan | NVENC; Vulkan's ProRes | libplacebo (`CudaPictures`) | other encoders; alpha |
+| VA-API | VAAPI | `scale_vaapi`, `pad_vaapi`, `transpose_vaapi` | other encoders; color changes |
+| Direct3D 11 | AMF | the video processor | other encoders; color changes; 8-bit into 10-bit |
+| VideoToolbox | its own encoders | `vt::Fit` | other encoders |
 
 VideoToolbox (`vt::Fit`) fits a frame in these steps. It skips a step that the frame does not need.
 
@@ -92,20 +94,16 @@ VideoToolbox (`vt::Fit`) fits a frame in these steps. It skips a step that the f
    - Why P416: the pixel transfer gives wrong levels in P416 ([gotchas](../gotchas.md#gpu-drivers)).
 
 - ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
-- Metal mixes dissolves (`mixing::Mixer`) with the sums of `cuda::mix`.
-- Metal draws subtitles, titles and placed pictures into the frame (`Mixer::burn`) with the sums of `cuda::burn`.
 - A VideoToolbox frame that comes down is mapped, not copied (`hw::to_read`).
 
-Mixing and overlays:
+The draw:
 
-- CUDA and VideoToolbox mix dissolves on the GPU. The other GPUs mix them in memory.
-- When the driver refuses the kernel of `cuda::mix`, the CPU mixes for the rest of the export. The result tells why.
-- CUDA and VideoToolbox draw subtitles, titles and placed pictures into the frame on the GPU (`cuda::burn`, `Mixer::burn`). The CPU draws the overlay.
-- CUDA and VideoToolbox place a picture on the GPU with a kernel of their own (`cuda::place`, `Mixer::place`). Then the CPU draws no overlay ([export](export.md#placed-pictures)).
-- For the other GPUs, a frame comes down while an overlay shows.
-- A wipe, a composite mode and a layer with alpha and nothing below mix in memory.
-- A layer with alpha over other layers is a placed picture. The CPU draws its overlay with its alpha, and the GPU mixes it in.
-- A frame with alpha does not fit on the GPU (`hw::can_fit`). It comes down with its alpha.
+- The viewer and the export draw each frame with one shader (`screen::Screen`, `picture.wgsl`).
+- It mixes the dissolves, the wipes, the composite modes, the placed pictures, the titles and the subtitles.
+- In an export, `fs_encode` then writes the planes of the encoder ([export](export.md#timeline-colors)).
+  - NVENC takes them through memory that Vulkan shares with CUDA (`Shared::out`).
+  - VideoToolbox takes them in the IOSurfaces of its own frames (`Sink::Surface`).
+  - The other encoders take them from memory (`Sink::Memory`).
 
 Frames that come down:
 
@@ -136,9 +134,8 @@ Frames that come down:
 Super Scale (`SuperScale`) sets the upscaler of a picture that is enlarged.
 
 - `render::super_scale_of` gives each piece its upscaler: its own, or the project's (`MediaUpscaler`, `ProjectUpscaler`). Auto is the scaler of macOS on macOS, and AI Best elsewhere.
-- For NVENC, libplacebo enlarges with the upscaler of the picture's `Sharpness` (`CudaPictures`). It scales in linear light with sigmoid, unless the picture has a color shader.
-- On the CPU, `Normalizer::upscaling` uses `spline` or `lanczos`.
-- `layer_size` lets a placed layer grow past its source size.
+- Classic enlarges in the shader of the viewer and the export, with the kernel of the picture's `Sharpness` (`screen::kernel`).
+- `layer_size` lets the picture of an AI upscaler grow past its source size.
 - The result of an AI upscaler is its own. It is not meant to match the CPU.
 
 The AI upscalers share one path in the reader:
@@ -232,7 +229,7 @@ On macOS (`interpolate::macos`):
 - `crates/vidcut-av/src/cuda/`
 - `crates/vidcut-av/src/lanczos.rs`
 - `crates/vidcut-av/src/recolor.rs`
-- `crates/vidcut-av/src/mixing/`
+- `crates/vidcut-av/src/screen/`
 - `crates/vidcut-av/src/metal.rs`
 - `crates/vidcut-av/src/super_scale/`
 - `crates/vidcut-av/src/interpolate/`
@@ -241,4 +238,3 @@ On macOS (`interpolate::macos`):
 - `crates/vidcut-av/src/color.rs`
 - `crates/vidcut-av/src/export/make.rs`
 - `crates/vidcut-av/src/export/encode.rs`
-- `crates/vidcut/src/gui/picture.rs`

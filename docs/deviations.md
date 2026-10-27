@@ -1818,13 +1818,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Classic has a Sharpness of Low, Medium or High.
   - A placed picture is made at most 4 times as large as its source. A picture that fills the frame takes the better upscaler for all of its enlargement.
   - The Inspector of the Cut page has a Super Scale section for the media of the selected clips.
-  - With Classic, an export enlarges a picture with the upscaler that its path has:
-    - Pictures that NVIDIA's GPU fits for NVENC: libplacebo, in linear light. Low is `ewa_lanczos`, Medium `ewa_lanczossharp` and High `ewa_lanczos4sharpest`.
-    - Pictures that the CPU makes, also placed pictures: swscale. Low is `spline`, Medium `lanczos` and High `lanczos` with four lobes.
-    - The other GPUs fit the picture as before. They have no Super Scale yet ([todo](todo/super-scale.md)).
+  - With Classic, the viewer and the exports enlarge with the kernels of their shader. This is the same on each GPU.
+    - Low is Catmull-Rom. Medium is Lanczos with 3 lobes, and High is Lanczos with 4 lobes.
   - The viewer shows Super Scale only with View > Show Super Scale, which is off by default.
   - With an AI upscaler, the viewer runs the upscaler of the export on each picture that the export enlarges. Playback is then slower. With AI Best, a picture can take seconds.
-  - With Classic, the viewer enlarges with its own kernels: Catmull-Rom (Low), Lanczos with 3 lobes (Medium) and with 4 lobes (High).
 - **Why:**
   - A video model adds detail that a classic upscaler cannot. In side-by-side tests, the owner ranked NanoVSR 5.4M above Real-ESRGAN's compact model.
   - Some users wait a long time for the best pictures, and others want good pictures fast. Thus there is a fast AI upscaler and a slow one.

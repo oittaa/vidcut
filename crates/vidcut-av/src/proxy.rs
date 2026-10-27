@@ -746,11 +746,9 @@ fn encode_into(
     let scaled = match enc.kind {
         EncoderChoice::Nvenc => {
             let layout = cuda_layout(pixel);
-            Fitting::on_gpu(reader, size, layout, target, false, Place::Cuda, None)
+            Fitting::on_gpu(reader, size, layout, target, false, Place::Cuda)
         }
-        EncoderChoice::Vulkan => {
-            Fitting::on_gpu(reader, size, pixel, target, false, Place::Vulkan, None)
-        }
+        EncoderChoice::Vulkan => Fitting::on_gpu(reader, size, pixel, target, false, Place::Vulkan),
         _ => Fitting::none(),
     };
     let made_on = match (enc.kind, &scaled.scaler) {

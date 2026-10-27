@@ -3,8 +3,6 @@ use std::sync::Arc;
 use crate::color::{Colors, colors_of};
 use crate::decode::Decoding;
 use crate::error::Result;
-use crate::export::normalize::Normalizer;
-use crate::export::place::Canvas;
 use crate::ffmpeg::{self, format, frame};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,176 +191,6 @@ impl Picture {
             .chain(self.over.iter().flat_map(|o| o.picture.layers()))
             .collect()
     }
-
-    pub fn at_wipe(
-        &self,
-        width: u32,
-        height: u32,
-        placed: &[Vec<vidcut_core::render::Placed>],
-        crosses: &[bool],
-        colors: Option<vidcut_core::model::Hdr>,
-    ) -> Result<Option<Self>> {
-        if self.over.iter().all(|o| o.wipe.is_none()) {
-            return Ok(None);
-        }
-        let width = width.max(2) & !1;
-        let height = height.max(2) & !1;
-        let mut mixed = Canvas::of(&fitted(self, width, height, colors)?)?;
-        let mut below: Option<Canvas> = None;
-        let mut i = 0;
-        while i < self.over.len() {
-            let hold = self.over.get(i + 1).is_some_and(|n| n.wipe.is_some())
-                && crosses.get(i + 2).copied().unwrap_or(false);
-            let o = &self.over[i];
-            let mine = placed.get(i + 1).map(Vec::as_slice).unwrap_or(&[][..]);
-            let crossing = crosses.get(i + 1).copied().unwrap_or(false);
-            if let Some(mask) = o.wipe {
-                let covered = |under: &Canvas| -> Result<Canvas> {
-                    if mine.is_empty() {
-                        let (w, h) = under.size();
-                        Canvas::of(&fitted(&o.picture, w, h, colors)?)
-                    } else {
-                        placed_on(under, &o.picture, mine, vidcut_core::render::WHOLE, colors)
-                    }
-                };
-                if hold {
-                    let full = covered(&mixed)?;
-                    below = Some(std::mem::replace(&mut mixed, full));
-                } else if crossing {
-                    let full = match &below {
-                        Some(bg) => covered(bg)?,
-                        None => covered(&mixed)?,
-                    };
-                    mixed = crate::export::mix::wipe(&mixed, &full, mask)?;
-                } else {
-                    let top = covered(&mixed)?;
-                    let next = crate::export::mix::wipe(&mixed, &top, mask)?;
-                    below = Some(std::mem::replace(&mut mixed, next));
-                }
-                i += 1;
-                continue;
-            }
-            let weight = o.weight;
-            let laid = |under: &Canvas| -> Result<Canvas> {
-                if mine.is_empty() {
-                    let (w, h) = under.size();
-                    let top = Canvas::of(&fitted(&o.picture, w, h, colors)?)?;
-                    crate::export::mix::mix(under, &top, weight)
-                } else {
-                    placed_on(under, &o.picture, mine, weight, colors)
-                }
-            };
-            if crossing && let Some(b) = &below {
-                mixed = crate::export::mix::crossed(&mixed, &laid(b)?, b)?;
-            } else {
-                let next = laid(&mixed)?;
-                below = Some(std::mem::replace(&mut mixed, next));
-            }
-            i += 1;
-        }
-        let mut mixed = mixed.frame();
-        crate::color::tag_frame(&mut mixed, colors);
-        Ok(Some(Self::new(mixed, 0, None, None)))
-    }
-}
-
-fn placed_on(
-    under: &Canvas,
-    picture: &Picture,
-    placed: &[vidcut_core::render::Placed],
-    weight: u32,
-    colors: Option<vidcut_core::model::Hdr>,
-) -> Result<Canvas> {
-    let shown = source_frame(picture, colors)?;
-    let (placing, at) = crate::export::video::placing_of(
-        picture.frame(),
-        picture.rotation(),
-        (shown.width(), shown.height()),
-        under.size(),
-        placed,
-    );
-    crate::export::place::over(
-        under,
-        &crate::export::place::Layer {
-            picture: &shown,
-            placing: &placing,
-            fitted: at,
-            weight,
-        },
-    )
-}
-
-fn source_frame(
-    picture: &Picture,
-    colors: Option<vidcut_core::model::Hdr>,
-) -> Result<frame::Video> {
-    let frame = match picture.gpu() {
-        None => crate::export::video::frame_ref(picture.frame())?,
-        Some(_) => crate::hw::to_read(picture.frame())?,
-    };
-    let rotation = picture.rotation();
-    let sar = frame.aspect_ratio();
-    let (n, d) = (sar.numerator(), sar.denominator());
-    let square = n <= 0 || d <= 0 || n == d;
-    if colors.is_none()
-        && frame.format() == format::Pixel::YUV420P
-        && rotation.is_multiple_of(360)
-        && square
-    {
-        return Ok(frame);
-    }
-    let (w, h) = if rotation % 180 == 90 {
-        (frame.height(), frame.width())
-    } else {
-        (frame.width(), frame.height())
-    };
-    let mut normalizer = Normalizer::new(
-        &frame,
-        rotation,
-        w,
-        h,
-        wipe_pixel(colors),
-        colors,
-        crate::decode::Reading::Stream,
-    )?;
-    normalizer.run(&frame)
-}
-
-fn wipe_pixel(colors: Option<vidcut_core::model::Hdr>) -> format::Pixel {
-    match colors {
-        Some(_) => format::Pixel::YUV420P10LE,
-        None => format::Pixel::YUV420P,
-    }
-}
-
-fn fitted(
-    picture: &Picture,
-    width: u32,
-    height: u32,
-    colors: Option<vidcut_core::model::Hdr>,
-) -> Result<frame::Video> {
-    let frame = match picture.gpu() {
-        None => crate::export::video::frame_ref(picture.frame())?,
-        Some(_) => crate::hw::to_read(picture.frame())?,
-    };
-    if colors.is_none()
-        && frame.format() == format::Pixel::YUV420P
-        && frame.width() == width
-        && frame.height() == height
-        && picture.rotation().is_multiple_of(360)
-    {
-        return Ok(frame);
-    }
-    let mut normalizer = Normalizer::new(
-        &frame,
-        picture.rotation(),
-        width,
-        height,
-        wipe_pixel(colors),
-        colors,
-        crate::decode::Reading::Stream,
-    )?;
-    normalizer.run(&frame)
 }
 
 fn bytes_of(frame: &frame::Video) -> usize {
@@ -428,12 +256,9 @@ pub struct TitleOver {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use super::{Layout, Over, Picture};
+    use super::{Layout, Picture};
     use crate::ffmpeg::{ffi, format::Pixel, frame};
-    use vidcut_core::model::WipeDirection;
-    use vidcut_core::render::{Pace, Placed, WHOLE, Wipe};
 
     #[test]
     fn a_picture_in_cuda_memory_takes_what_its_buffer_holds() {
@@ -484,89 +309,5 @@ mod tests {
     #[test]
     fn p416le_pictures_are_16_bit_interleaved_4_4_4() {
         assert_eq!(Layout::of(Pixel::P416LE), Layout::P416);
-    }
-
-    fn filled(y: u8) -> frame::Video {
-        let mut f = frame::Video::new(Pixel::YUV420P, 16, 8);
-        crate::export::video::fill_black(&mut f).unwrap();
-        let stride = f.stride(0);
-        let data = f.data_mut(0);
-        for row in 0..8 {
-            data[row * stride..row * stride + 16].fill(y);
-        }
-        f
-    }
-
-    fn luma_rect(frame: &frame::Video, y: u8) -> [u32; 4] {
-        let (w, h) = (frame.width(), frame.height());
-        let stride = frame.stride(0);
-        let data = frame.data(0);
-        let mut rect = [w, h, 0, 0];
-        for row in 0..h {
-            for col in 0..w {
-                if data[row as usize * stride + col as usize] != y {
-                    continue;
-                }
-                rect[0] = rect[0].min(col);
-                rect[1] = rect[1].min(row);
-                rect[2] = rect[2].max(col + 1);
-                rect[3] = rect[3].max(row + 1);
-            }
-        }
-        rect
-    }
-
-    #[test]
-    fn a_zoomed_side_keeps_the_export_rect_at_the_middle_of_a_left_wipe() {
-        let mask = |falling| Wipe {
-            direction: WipeDirection::Left,
-            along: (1, 2),
-            falling,
-        };
-        let over = |y, falling| Over {
-            picture: Arc::new(Picture::new(filled(y), 0, None, None)),
-            weight: WHOLE,
-            wipe: Some(mask(falling)),
-        };
-        let picture = Picture::new(filled(16), 0, None, None)
-            .with_over(vec![over(80, true), over(200, false)]);
-        let placed = vec![
-            Vec::new(),
-            Vec::new(),
-            vec![Placed {
-                clip: "in".into(),
-                picture: vidcut_core::model::Picture {
-                    zoom: Some([0.5, 0.5]),
-                    position: Some([0.25, 0.5]),
-                    ..vidcut_core::model::Picture::default()
-                },
-                run: None,
-                source: 0,
-                pace: Pace::default(),
-                start: 0,
-                ready: true,
-            }],
-        ];
-        let out = picture
-            .at_wipe(16, 8, &placed, &[false, false, true], None)
-            .unwrap()
-            .unwrap();
-        assert_eq!(luma_rect(out.frame(), 200), [0, 2, 8, 6]);
-    }
-
-    #[test]
-    fn a_left_wipe_without_placement_still_splits_the_frame() {
-        let picture = Picture::new(filled(16), 0, None, None).with_over(vec![Over {
-            picture: Arc::new(Picture::new(filled(200), 0, None, None)),
-            weight: WHOLE,
-            wipe: Some(Wipe {
-                direction: WipeDirection::Left,
-                along: (1, 2),
-                falling: false,
-            }),
-        }]);
-        let out = picture.at_wipe(16, 8, &[], &[], None).unwrap().unwrap();
-        assert_eq!(luma_rect(out.frame(), 200), [0, 0, 8, 8]);
-        assert_eq!(luma_rect(out.frame(), 16), [8, 0, 16, 8]);
     }
 }

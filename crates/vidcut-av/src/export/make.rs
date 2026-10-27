@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use vidcut_core::export::EncoderChoice;
-use vidcut_core::model::{Hdr, Sharpness};
+use vidcut_core::model::Hdr;
 
 use super::normalize::{Normalizer, Relayout, down, shown_size};
 use crate::decode::Reading;
@@ -20,7 +20,6 @@ pub(crate) enum Output {
         into: Option<crate::hw::Frames>,
     },
     Cuda {
-        device: crate::cuda::CudaDevice,
         frames: crate::cuda::CudaFrames,
     },
     Vulkan,
@@ -34,7 +33,7 @@ impl Output {
         upload: Option<&super::encode::Upload>,
     ) -> Result<Output> {
         Ok(match (gpu, fit_on) {
-            (Some((device, frames)), _) => Output::Cuda { device, frames },
+            (Some((_, frames)), _) => Output::Cuda { frames },
             (None, Some(place)) => {
                 let into = match upload {
                     // SAFETY: `up.frames` is the encoder's live frames reference.
@@ -74,7 +73,6 @@ impl Fitting {
         target: Option<Hdr>,
         at_once: bool,
         place: Place,
-        sharp: Option<Sharpness>,
     ) -> Self {
         let dest = Dest::Encoder { place };
         let planned = reader
@@ -86,7 +84,7 @@ impl Fitting {
                 plan(&Facts::of(first, &ops, out, dest), dest) == Route::Gpu
             });
         let scaler = planned.and_then(|(d, _)| {
-            crate::cuda::CudaPictures::new(d, reader, out, format, target, (at_once, place), sharp)
+            crate::cuda::CudaPictures::new(d, reader, out, format, target, (at_once, place))
                 .inspect_err(|e| {
                     crate::debug!(
                         "decoding",
@@ -124,14 +122,12 @@ pub(crate) struct Maker {
     target: Option<Hdr>,
     output: Output,
     stages: Vec<Stage>,
-    mixing: bool,
     shrink: Option<(u32, u32)>,
     reading: Reading,
 }
 
 struct Stage {
     normalizer: Option<Normalizer>,
-    size: Option<(u32, u32)>,
     made_at: Option<(u32, u32)>,
     shrinker: Option<crate::hw::Shrinker>,
     relayout: Relayout,
@@ -139,14 +135,12 @@ struct Stage {
     unkept: bool,
     fitters: Vec<crate::hw::Fitter>,
     reading: Option<Reading>,
-    sharp: Option<Sharpness>,
 }
 
 impl Default for Stage {
     fn default() -> Self {
         Self {
             normalizer: None,
-            size: None,
             made_at: None,
             shrinker: None,
             relayout: Relayout::new(),
@@ -154,7 +148,6 @@ impl Default for Stage {
             unkept: false,
             fitters: Vec::new(),
             reading: None,
-            sharp: None,
         }
     }
 }
@@ -171,7 +164,6 @@ impl Maker {
             target,
             output,
             stages: Vec::new(),
-            mixing: false,
             shrink: None,
             reading,
         }
@@ -189,50 +181,8 @@ impl Maker {
         self.stages.clear();
     }
 
-    pub(crate) fn size_layer(&mut self, layer: usize, size: Option<(u32, u32)>) {
-        if self.stages.len() <= layer {
-            self.stages.resize_with(layer + 1, Stage::default);
-        }
-        self.stages[layer].size = size;
-    }
-
-    pub(crate) fn sharpen_layer(&mut self, layer: usize, sharp: Option<Sharpness>) {
-        if self.stages.len() <= layer {
-            self.stages.resize_with(layer + 1, Stage::default);
-        }
-        let stage = &mut self.stages[layer];
-        if stage.sharp != sharp {
-            stage.sharp = sharp;
-            stage.normalizer = None;
-        }
-    }
-
-    pub(crate) fn set_mixing(&mut self, mixing: bool) {
-        self.mixing = mixing;
-    }
-
-    pub(crate) fn mixing(&self) -> bool {
-        self.mixing
-    }
-
     pub(crate) fn output(&self) -> &Output {
         &self.output
-    }
-
-    fn places_on_gpu(&self, size: (u32, u32)) -> bool {
-        let gpu = matches!(
-            self.output,
-            Output::Cuda { .. }
-                | Output::FittedOnGpu {
-                    place: Place::VideoToolbox,
-                    ..
-                }
-        );
-        gpu && size == (self.out.0, self.out.1)
-    }
-
-    pub(crate) fn into_output(self) -> Output {
-        self.output
     }
 
     pub(crate) fn out(&self) -> (u32, u32, format::Pixel) {
@@ -280,7 +230,6 @@ impl Maker {
         Facts {
             fit_failed: fitting.fit_failed,
             keep_failed: stage.unkept,
-            mixed: self.mixing,
             ..Facts::of(frame, &ops, (w, h), self.dest(frame))
         }
     }
@@ -326,12 +275,9 @@ impl Maker {
             stage.normalizer = None;
             stage.relayout = Relayout::new();
         }
-        let (out_w, out_h) = stage.size.unwrap_or((self.out.0, self.out.1));
+        let (out_w, out_h) = (self.out.0, self.out.1);
         let out_fmt = self.out.2;
         let mut facts = self.facts(stage, fitting, frame, rotation);
-        if stage.size.is_some_and(|size| !self.places_on_gpu(size)) {
-            facts.mixes = false;
-        }
         let dest = self.dest(frame);
         let mut route;
         let mut came_down_at = None;
@@ -412,14 +358,14 @@ impl Maker {
                     .is_none_or(|n| !n.matches(frame, rotation));
             if rebuild {
                 stage.made_at = Some((out_w, out_h));
-                stage.normalizer = Some(Normalizer::upscaling(
+                stage.normalizer = Some(Normalizer::new(
                     frame,
                     rotation,
-                    (out_w, out_h),
+                    out_w,
+                    out_h,
                     out_fmt,
                     self.target,
                     reading,
-                    stage.sharp,
                 )?);
             }
             break stage.normalizer.as_mut().expect("built").run(frame)?;

@@ -1157,6 +1157,19 @@ impl Frames {
     pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
         self.0
     }
+
+    pub(crate) fn fresh(&self) -> Result<frame::Video> {
+        let mut f = frame::Video::empty();
+        // SAFETY: its own live frames reference, and an empty frame to fill.
+        let ret = unsafe { ffi::av_hwframe_get_buffer(self.0, f.as_mut_ptr(), 0) };
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: "getting a frame for the encoder".into(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(f)
+    }
 }
 
 impl Drop for Frames {
@@ -1192,10 +1205,6 @@ pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
         Place::VideoToolbox => vt::can_fit(ops),
         _ => false,
     }
-}
-
-pub(crate) fn can_mix(place: Place) -> bool {
-    matches!(place, Place::Cuda | Place::VideoToolbox)
 }
 
 pub(crate) fn reaches(from: Place, to: Place) -> bool {

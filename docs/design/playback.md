@@ -93,7 +93,7 @@ flowchart TD
 
 - The engine does not mix. A `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) for each layer on top. Each layer is as decoded.
 - The viewer blends the layers as it draws, in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), as an export does ([export](export.md#timeline-colors)). `Shown::colors` carries that space (`RenderPlan::colors`).
-- A wipe mixes on the CPU (`Picture::at_wipe`), in the timeline color space too.
+- A wipe draws a part of each side (`shown_part`), in the timeline color space too.
 - Placed pictures ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) are layers of a `VideoPiece::Mix`. Their placement is not in the kept pictures.
   - `Player::present` hands the `Placed` pictures of each layer with the frame (`Shown`, `Plan::placed_at`). Thus a move or a zoom keeps the frames decoded.
   - For a Dynamic Zoom, `Plan::placed_at` moves the `Run` of each `Placed` picture to the frame.
@@ -189,20 +189,22 @@ The audio device:
 
 - `Viewer::start` spawns `vidcut-viewer`. The thread wakes when the session notifies or asks, when the size changes, or when `next_change` comes due.
 - Each turn calls `Player::present`, then `Screen::draw` into an RGBA target the size of the viewer's picture in physical pixels.
-- With an SDR timeline and one layer, one render pass of `crates/vidcut/src/gui/picture.wgsl` draws it all.
+- With an SDR timeline and one layer, one render pass of `crates/vidcut-av/src/screen/picture.wgsl` draws it all.
 - With an HDR timeline, the passes draw into a picture of 16-bit floats (`Wide`), in the PQ or HLG code values of the timeline.
   - Each layer, title and subtitle goes to linear light, to BT.2020, and to the curve of the timeline.
-  - Then `fs_screen` converts that picture to the target: BT.709, tone-mapped with the math of the export.
-  - Thus the layers, titles and subtitles mix in the code values of the timeline, as in an export.
-- With an SDR timeline and more than one layer or a composite mode, the passes also draw into `Wide`, in SDR code values. Thus a color above 1 or below 0 stays between the layers and in the composite modes, as in an export. `fs_screen` then clips each value.
+  - Then `fs_screen` converts that picture to the target: BT.709, tone-mapped.
+  - Thus the layers, titles and subtitles mix in the code values of the timeline.
+- With an SDR timeline and more than one layer or a composite mode, the passes also draw into `Wide`, in SDR code values. Thus a color above 1 or below 0 stays between the layers and in the composite modes. `fs_screen` then clips each value.
+- An export draws with the same `Screen`, always into `Wide` (`Screen::for_export`). It writes the planes of its encoder from there ([export](export.md#timeline-colors)).
 - The drawing:
-  - It fits the picture as the export does, and turns it upright.
-  - It scales in YUV and converts to RGB with the math of the export (`shader_colors`). In an SDR timeline, it tone-maps HDR.
+  - It fits the picture and turns it upright.
+  - It scales in YUV and converts to RGB (`shader_colors`). In an SDR timeline, it tone-maps HDR.
   - The layers of a dissolve are more draws in the pass.
   - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
-  - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy by the sums of `blend::mixed`.
+  - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).
   - The two sides of a dissolve with a placed picture add into a picture of their own (`Mixing`). `fs_paired` lays it over the copy of the canvas. Thus a mix below 0 is not clipped before it goes over.
-  - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips. These are the sums of the export (`export::place::title`).
+  - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips.
+  - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
 - A present answers with the frame drawn, if it is exact. A `gui.screenshot` of the viewer reads the target back, to the pixel.
 - Submissions go through `Gate::pass`. They wait until the UI thread runs `logic` or `ui`, because eframe configures the surface of the window outside these. If the UI is away for long, submissions do not wait.
@@ -278,5 +280,4 @@ Ripple Delete Silence:
 - `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/player.rs`
 - `crates/vidcut-av/src/player/`, `crates/vidcut-av/src/stretch.rs`
 - `crates/vidcut-av/src/export/video.rs`, `crates/vidcut-av/src/export/audio.rs`
-- `crates/vidcut/src/gui/video.rs`, `crates/vidcut/src/gui/picture.rs`, `crates/vidcut/src/gui/picture.wgsl`
-- `crates/vidcut/src/gui/gate.rs`, `crates/vidcut/src/gui/cells.rs`
+- `crates/vidcut/src/gui/video.rs`, `crates/vidcut-av/src/screen/`, `crates/vidcut/src/gui/cells.rs`

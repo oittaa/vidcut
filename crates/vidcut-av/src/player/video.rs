@@ -870,7 +870,7 @@ fn after(plan: &Plan, looping: Option<(i64, i64)>, from: i64, k: i64) -> i64 {
     })
 }
 
-fn picture(layers: Vec<Layer>) -> Picture {
+pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
     let made = |l: Layer| {
         let decoder = l
             .decoding

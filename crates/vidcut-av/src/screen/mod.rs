@@ -2,18 +2,29 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use vidcut_av::color::shader_colors;
-use vidcut_av::cuda::{CudaDevice, PlaneCopy};
-use vidcut_av::hw::Kind;
-use vidcut_av::player::{Layout, Picture, TitleOver, TitlePicture};
-use vidcut_av::thumbs::Image;
-use vidcut_core::model::{CompositeMode, Hdr};
+use crate::color::shader_colors;
+use crate::cuda::{CudaDevice, PlaneCopy};
+use crate::hw::Kind;
+use crate::player::{Layout, Picture, TitleOver, TitlePicture};
+use crate::thumbs::Image;
+use vidcut_core::model::{CompositeMode, Hdr, WipeDirection};
 use vidcut_core::place::{Level, Placing, chain, lettered};
-use vidcut_core::render::Placed;
+use vidcut_core::render::{Placed, Wipe};
+
+#[cfg(any(target_os = "linux", windows))]
+mod acquire;
+mod gate;
+mod out;
+mod shared;
+#[cfg(any(target_os = "linux", windows))]
+mod vulkan;
+
+pub use gate::Gate;
+pub use out::Sink;
 
 pub struct Gpu {
     #[cfg(any(target_os = "linux", windows))]
-    acquirer: OnceLock<Result<super::acquire::Acquirer, String>>,
+    acquirer: OnceLock<Result<acquire::Acquirer, String>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     screen_drawing: Drawing,
@@ -41,7 +52,8 @@ pub struct Gpu {
     d3d11_shared: std::sync::Mutex<D3d11Pool>,
     metal: bool,
     cuda: OnceLock<Result<CudaDevice, String>>,
-    gate: Option<Arc<super::gate::Gate>>,
+    gate: Option<Arc<Gate>>,
+    encoders: out::Encoders,
 }
 
 struct Drawing {
@@ -67,6 +79,42 @@ pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
         | wgpu::Features::TEXTURE_FORMAT_NV12
         | wgpu::Features::TEXTURE_FORMAT_P010;
     adapter.features() & wanted
+}
+
+pub fn device(
+    label: &str,
+) -> std::result::Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue), String> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
+        ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
+    });
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference:
+            wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance),
+        ..Default::default()
+    }))
+    .map_err(|e| format!("no GPU for wgpu: {e}"))?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some(label),
+        required_features: features(&adapter),
+        required_limits: wgpu::Limits {
+            max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d,
+            ..wgpu::Limits::default()
+        },
+        ..Default::default()
+    }))
+    .map_err(|e| format!("no wgpu device: {e}"))?;
+    Ok((adapter, device, queue))
+}
+
+pub fn kernel(sharp: Option<vidcut_core::model::Sharpness>) -> u32 {
+    use vidcut_core::model::Sharpness;
+    match sharp {
+        None => 0,
+        Some(Sharpness::Low) => 1,
+        Some(Sharpness::Medium) => 2,
+        Some(Sharpness::High) => 3,
+    }
 }
 
 impl Gpu {
@@ -358,7 +406,7 @@ impl Gpu {
             wide: device
                 .features()
                 .contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM),
-            shares: super::shared::possible(device),
+            shares: shared::possible(device),
             dma_buf: device
                 .features()
                 .contains(wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF),
@@ -378,10 +426,11 @@ impl Gpu {
             metal: false,
             cuda: OnceLock::new(),
             gate: None,
+            encoders: out::Encoders::new(device, &shader),
         }
     }
 
-    pub(super) fn behind(mut self, gate: Arc<super::gate::Gate>) -> Self {
+    pub fn behind(mut self, gate: Arc<Gate>) -> Self {
         self.gate = Some(gate);
         self
     }
@@ -397,11 +446,11 @@ impl Gpu {
     }
 
     pub fn gpu_pictures(&self) -> Vec<Kind> {
-        let cudas = vidcut_av::gpus::in_use().and_then(|g| g.uuid());
+        let cudas = crate::gpus::in_use().and_then(|g| g.uuid());
         shown_from_gpu(&Takes {
             shares: self.shares,
             wide: self.wide,
-            on_cudas_gpu: cudas.is_some() && cudas == super::shared::uuid(&self.device),
+            on_cudas_gpu: cudas.is_some() && cudas == shared::uuid(&self.device),
             dma_buf: self.dma_buf,
             d3d11: self.d3d11,
             metal: self.metal,
@@ -415,7 +464,7 @@ impl Gpu {
         layout: ash::vk::ImageLayout,
         stage: ash::vk::PipelineStageFlags,
         access: ash::vk::AccessFlags,
-        source: super::acquire::Source,
+        source: acquire::Source,
     ) -> Result<wgpu::CommandBuffer, String> {
         // SAFETY: as the caller says.
         unsafe {
@@ -442,14 +491,14 @@ impl Gpu {
     #[cfg(any(target_os = "linux", windows))]
     unsafe fn barrier(
         &self,
-        record: impl FnOnce(&super::acquire::Acquirer, ash::vk::CommandBuffer),
+        record: impl FnOnce(&acquire::Acquirer, ash::vk::CommandBuffer),
     ) -> Result<wgpu::CommandBuffer, String> {
         let acquirer = self
             .acquirer
             .get_or_init(|| {
                 // SAFETY: wgpu's own device, only read here.
                 let hal = unsafe { self.device.as_hal::<wgpu::hal::api::Vulkan>() };
-                hal.map(|hal| super::acquire::Acquirer::new(&hal))
+                hal.map(|hal| acquire::Acquirer::new(&hal))
                     .ok_or_else(|| "not Vulkan".to_string())
             })
             .as_ref()?;
@@ -479,7 +528,7 @@ impl Gpu {
 
     fn cuda(&self) -> Result<&CudaDevice, String> {
         self.cuda
-            .get_or_init(|| super::shared::cuda_on(&self.device))
+            .get_or_init(|| shared::cuda_on(&self.device))
             .as_ref()
             .map_err(Clone::clone)
     }
@@ -548,12 +597,13 @@ impl Wide {
             format: MIXING,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
         let view = texture.create_view(&Default::default());
-        let colors = shader_colors(vidcut_av::color::Colors {
-            matrix: vidcut_av::color::Matrix::Bt2020,
+        let colors = shader_colors(crate::color::Colors {
+            matrix: crate::color::Matrix::Bt2020,
             full_range: false,
             hdr,
         });
@@ -621,7 +671,9 @@ impl Below {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&Default::default());
@@ -640,6 +692,34 @@ impl Below {
             bind,
         }
     }
+}
+
+fn shown_part(wipe: Wipe, (w, h): (u32, u32)) -> (u32, u32, u32, u32) {
+    let (n, d) = wipe.along;
+    if d <= 0 {
+        return if wipe.falling {
+            (0, 0, w, h)
+        } else {
+            (0, 0, 0, 0)
+        };
+    }
+    let n = n.clamp(0, d);
+    let edge = |size: u32, k: i64| {
+        ((i128::from(size) * i128::from(k) + i128::from(d) - 1) / i128::from(d)) as u32
+    };
+    let ((x0, x1), (y0, y1)) = match wipe.direction {
+        WipeDirection::Left => ((0, edge(w, n)), (0, h)),
+        WipeDirection::Right => ((edge(w, d - n), w), (0, h)),
+        WipeDirection::Up => ((0, w), (0, edge(h, n))),
+        WipeDirection::Down => ((0, w), (edge(h, d - n), h)),
+    };
+    let flip = |(a, b): (u32, u32), size: u32| if a == 0 { (b, size) } else { (0, a) };
+    let ((x0, x1), (y0, y1)) = match (wipe.falling, wipe.direction) {
+        (false, _) => ((x0, x1), (y0, y1)),
+        (true, WipeDirection::Left | WipeDirection::Right) => (flip((x0, x1), w), (y0, y1)),
+        (true, WipeDirection::Up | WipeDirection::Down) => ((x0, x1), flip((y0, y1), h)),
+    };
+    (x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0))
 }
 
 fn transfer_of(colors: Option<Hdr>) -> f64 {
@@ -665,7 +745,8 @@ pub struct Screen {
     slots: Vec<Slot>,
     letters: Vec<Letters>,
     imports_before: u64,
-    wiped: Option<Wiped>,
+    exported: bool,
+    encoded: out::Encoded,
 }
 
 struct Letters {
@@ -877,7 +958,7 @@ fn same_titles(a: &[TitleOver], b: &[TitleOver]) -> bool {
 struct Slot {
     planes: Option<Planes>,
     params: Option<wgpu::Buffer>,
-    shared: Vec<super::shared::Shared>,
+    shared: Vec<shared::Shared>,
     filled: Option<usize>,
     unshared: bool,
     unimported: Vec<Layout>,
@@ -886,7 +967,7 @@ struct Slot {
     v_view: Option<wgpu::TextureView>,
     acquired: Option<wgpu::CommandBuffer>,
     #[cfg(any(target_os = "linux", windows))]
-    kept: super::vulkan::Imports,
+    kept: vulkan::Imports,
     released: Option<wgpu::CommandBuffer>,
     #[cfg(windows)]
     d3d11_used: Option<Arc<AtomicBool>>,
@@ -897,7 +978,7 @@ struct Slot {
 
 #[cfg(windows)]
 struct D3d11Shared {
-    texture: vidcut_av::hw::d3d11::Shared,
+    texture: crate::hw::d3d11::Shared,
     image: ash::vk::Image,
     y: wgpu::TextureView,
     uv: wgpu::TextureView,
@@ -914,15 +995,6 @@ type D3d11Formats = (
     wgpu::TextureFormat,
     wgpu::TextureFormat,
 );
-
-struct Wiped {
-    picture: usize,
-    size: (u32, u32),
-    placed: Vec<Vec<Placed>>,
-    crosses: Vec<bool>,
-    colors: Option<Hdr>,
-    flat: Arc<Picture>,
-}
 
 pub type Layers<'a> = (&'a [Vec<Placed>], &'a [bool], &'a [u32], Option<Hdr>);
 
@@ -950,48 +1022,6 @@ impl Screen {
         self.imports_before + self.slots.iter().map(|s| s.imports).sum::<u64>()
     }
 
-    fn flat_wipe(
-        &mut self,
-        picture: Option<&Arc<Picture>>,
-        (placed, crosses, colors): (&[Vec<Placed>], &[bool], Option<Hdr>),
-        size: (u32, u32),
-    ) -> Option<Arc<Picture>> {
-        let picture = picture.filter(|p| p.over().iter().any(|o| o.wipe.is_some()))?;
-        let picture_id = Arc::as_ptr(picture) as usize;
-        if let Some(kept) = &self.wiped
-            && kept.picture == picture_id
-            && kept.size == size
-            && kept.placed == placed
-            && kept.crosses == crosses
-            && kept.colors == colors
-        {
-            return Some(kept.flat.clone());
-        }
-        match picture.at_wipe(size.0, size.1, placed, crosses, colors) {
-            Ok(Some(flat)) => {
-                let flat = Arc::new(flat);
-                self.wiped = Some(Wiped {
-                    picture: picture_id,
-                    size,
-                    placed: placed.to_vec(),
-                    crosses: crosses.to_vec(),
-                    colors,
-                    flat: flat.clone(),
-                });
-                Some(flat)
-            }
-            Ok(None) => {
-                self.wiped = None;
-                None
-            }
-            Err(e) => {
-                eprintln!("vidcut: a wipe did not draw: {e}");
-                self.wiped = None;
-                None
-            }
-        }
-    }
-
     pub fn draw(
         &mut self,
         gpu: &Gpu,
@@ -1003,13 +1033,6 @@ impl Screen {
     ) -> Drawn {
         let max = gpu.device.limits().max_texture_dimension_2d;
         let size = (width.clamp(2, max), height.clamp(2, max));
-        let flat = self.flat_wipe(picture, (placed, crosses, colors), size);
-        let picture = flat.as_ref().or(picture);
-        let (placed, crosses, kernels) = if flat.is_some() {
-            (&[][..], &[][..], &[][..])
-        } else {
-            (placed, crosses, kernels)
-        };
         let mut drawn = Drawn::Picture;
         if self.target.as_ref().is_none_or(|t| t.size != size) {
             self.target = Some(make_target(&gpu.device, size));
@@ -1031,14 +1054,17 @@ impl Screen {
         let limit = gpu.device.limits().max_texture_dimension_2d;
         let fits = |p: &Arc<Picture>| p.width() <= limit && p.height() <= limit;
         let picture = picture.filter(|p| fits(p));
-        let layers: Vec<(&Arc<Picture>, Option<f64>)> = picture
+        let layers: Vec<(&Arc<Picture>, Option<f64>, Option<Wipe>)> = picture
             .into_iter()
-            .map(|p| (p, None))
+            .map(|p| (p, None, None))
             .chain(picture.into_iter().flat_map(|p| {
                 p.over()
                     .iter()
                     .filter(|o| fits(&o.picture))
-                    .map(|o| (&o.picture, Some(f64::from(o.level()))))
+                    .map(|o| match o.wipe {
+                        Some(w) => (&o.picture, None, Some(w)),
+                        None => (&o.picture, Some(f64::from(o.level())), None),
+                    })
             }))
             .collect();
         if self.slots.len() < layers.len() {
@@ -1048,7 +1074,7 @@ impl Screen {
         for (i, slot) in self.slots.iter_mut().enumerate() {
             if layers
                 .get(i)
-                .is_none_or(|(p, _)| p.gpu() != Some(Kind::Vulkan))
+                .is_none_or(|(p, _, _)| p.gpu() != Some(Kind::Vulkan))
             {
                 slot.kept.clear();
             }
@@ -1060,7 +1086,15 @@ impl Screen {
             });
         let frame = (f64::from(size.0), f64::from(size.1));
         let n = layers.len();
-        let pair_at = |i: usize| i + 1 < n && crosses.get(i + 1).copied().unwrap_or(false);
+        let wipe_of = |i: usize| layers.get(i).and_then(|l| l.2);
+        let crossed = |i: usize| crosses.get(i).copied().unwrap_or(false);
+        let crossed_wipe = |i: usize| wipe_of(i).is_some() && crossed(i);
+        let holds = |i: usize| i + 1 < n && crossed_wipe(i + 1);
+        let part = |i: usize| match wipe_of(i) {
+            Some(w) if !holds(i) => Some(shown_part(w, size)),
+            _ => None,
+        };
+        let pair_at = |i: usize| i + 1 < n && crossed(i + 1) && wipe_of(i + 1).is_none();
         let mut paired = vec![false; n];
         let mut i = 0;
         while i < n {
@@ -1075,7 +1109,7 @@ impl Screen {
             .iter()
             .zip(&mut self.slots)
             .enumerate()
-            .map(|(i, (&(picture, level), slot))| {
+            .map(|(i, (&(picture, level, _), slot))| {
                 let placing = placed.get(i).filter(|p| !p.is_empty()).map(|p| {
                     let (x, y, w, h) = picture.placement(size.0, size.1);
                     let fitted = [x, y, w, h].map(f64::from);
@@ -1110,7 +1144,7 @@ impl Screen {
             self.mixing = Some(Mixing::new(gpu, size));
         }
         let blending = binds.iter().any(|b| b.3);
-        let floats = colors.is_some() || blending || n > 1;
+        let floats = self.exported || colors.is_some() || blending || n > 1;
         if !floats {
             self.wide = None;
         } else if self
@@ -1121,7 +1155,7 @@ impl Screen {
             self.wide = Some(Wide::new(gpu, size, colors));
         }
         let format = if floats { MIXING } else { TARGET };
-        if blending
+        if (blending || (0..n).any(holds))
             && self
                 .below
                 .as_ref()
@@ -1140,7 +1174,8 @@ impl Screen {
         };
         let mut clear = Some(wgpu::Color::BLACK);
         if n == 0 {
-            drop(begin(&mut encoder, &target.view, clear.take()));
+            drop(begin(&mut encoder, &target.view, clear));
+            drop(begin(&mut encoder, canvas, clear.take()));
         }
         let level_of = |l: f64| wgpu::Color {
             r: l,
@@ -1148,9 +1183,46 @@ impl Screen {
             b: l,
             a: l,
         };
+        let whole = wgpu::Extent3d {
+            width: size.0,
+            height: size.1,
+            depth_or_array_layers: 1,
+        };
+        let starts = |i: usize| blends(i) || crossed_wipe(i) || holds(i);
         let mut i = 0;
         while i < n {
-            if blends(i) || (pair_at(i) && blends(i + 1)) {
+            if crossed_wipe(i) || holds(i) {
+                if clear.is_some() {
+                    drop(begin(&mut encoder, canvas, clear.take()));
+                }
+                let below = self.below.as_ref().expect("made for a wipe");
+                if let Some((x, y, w, h)) = part(i).filter(|p| p.2 > 0 && p.3 > 0) {
+                    let at = wgpu::Origin3d { x, y, z: 0 };
+                    encoder.copy_texture_to_texture(
+                        wgpu::TexelCopyTextureInfo {
+                            origin: at,
+                            ..below.texture.as_image_copy()
+                        },
+                        wgpu::TexelCopyTextureInfo {
+                            origin: at,
+                            ..canvas_texture.as_image_copy()
+                        },
+                        wgpu::Extent3d {
+                            width: w,
+                            height: h,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                }
+                if holds(i) {
+                    encoder.copy_texture_to_texture(
+                        canvas_texture.as_image_copy(),
+                        below.texture.as_image_copy(),
+                        whole,
+                    );
+                }
+            }
+            if (blends(i) || (pair_at(i) && blends(i + 1))) && !holds(i) {
                 if clear.is_some() {
                     drop(begin(&mut encoder, canvas, clear.take()));
                 }
@@ -1202,29 +1274,39 @@ impl Screen {
             }
             let mut pass = begin(&mut encoder, canvas, clear.take());
             let first = i;
-            while i < n && !pair_at(i) && (i == first || !blends(i)) {
+            while i < n && !pair_at(i) && (i == first || !starts(i)) {
                 let (bind, level, placed, blended) = &binds[i];
-                match level {
-                    _ if *blended => {
-                        let below = self.below.as_ref().expect("made for a composite mode");
-                        pass.set_pipeline(&drawing.mode);
-                        pass.set_bind_group(1, &below.bind, &[]);
+                let shown = part(i);
+                if shown.is_none_or(|p| p.2 > 0 && p.3 > 0) {
+                    if let Some((x, y, w, h)) = shown {
+                        pass.set_scissor_rect(x, y, w, h);
                     }
-                    _ if *placed => pass.set_pipeline(&drawing.placed),
-                    None => pass.set_pipeline(&drawing.pipeline),
-                    Some(l) => {
-                        pass.set_pipeline(&drawing.blended);
-                        pass.set_blend_constant(level_of(*l));
+                    match level {
+                        _ if *blended => {
+                            let below = self.below.as_ref().expect("made for a composite mode");
+                            pass.set_pipeline(&drawing.mode);
+                            pass.set_bind_group(1, &below.bind, &[]);
+                        }
+                        _ if *placed => pass.set_pipeline(&drawing.placed),
+                        None => pass.set_pipeline(&drawing.pipeline),
+                        Some(l) => {
+                            pass.set_pipeline(&drawing.blended);
+                            pass.set_blend_constant(level_of(*l));
+                        }
+                    }
+                    pass.set_bind_group(0, bind, &[]);
+                    pass.draw(0..3, 0..1);
+                    if shown.is_some() {
+                        pass.set_scissor_rect(0, 0, size.0, size.1);
                     }
                 }
-                pass.set_bind_group(0, bind, &[]);
-                pass.draw(0..3, 0..1);
                 letter(&mut pass, lettering, &self.letters, titles, i + 1, n);
                 i += 1;
             }
         }
         if let Some(w) = wide
             && n > 0
+            && !self.exported
         {
             let mut pass = begin(&mut encoder, &target.view, Some(wgpu::Color::BLACK));
             pass.set_pipeline(&gpu.screen);
@@ -1439,8 +1521,7 @@ impl Slot {
                 return Err("planar pictures aren't VA-API's".into());
             }
         };
-        let drm =
-            vidcut_av::hw::vaapi::DrmFrame::export(picture.frame()).map_err(|e| e.to_string())?;
+        let drm = crate::hw::vaapi::DrmFrame::export(picture.frame()).map_err(|e| e.to_string())?;
         let planes = drm.planes();
         let [y, uv, ..] = planes[..] else {
             return Err(format!("a surface exported in {} planes", planes.len()));
@@ -1531,7 +1612,7 @@ impl Slot {
                 ash::vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                 ash::vk::PipelineStageFlags::TRANSFER,
                 ash::vk::AccessFlags::TRANSFER_READ,
-                super::acquire::Source::Api,
+                acquire::Source::Api,
             )?);
         }
         for (imported, size, texture) in textures {
@@ -1591,7 +1672,7 @@ impl Slot {
                     ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                     PipelineStageFlags::FRAGMENT_SHADER,
                     AccessFlags::SHADER_READ,
-                    super::acquire::Source::Api,
+                    acquire::Source::Api,
                 )?,
                 gpu.release(
                     &[shared.image],
@@ -1628,11 +1709,11 @@ impl Slot {
             | Layout::Yuv422p) => return Err(format!("{layout:?} pictures aren't Vulkan's")),
         }
         let frame = picture.frame();
-        let identity = vidcut_av::hw::vulkan::Identity::of(frame).map_err(|e| e.to_string())?;
+        let identity = crate::hw::vulkan::Identity::of(frame).map_err(|e| e.to_string())?;
         let (import, new) = self
             .kept
             .get_or_import(identity, || import_vulkan_frame(gpu, frame))?;
-        let left_in = vidcut_av::hw::vulkan::layout(frame).map_err(|e| e.to_string())?;
+        let left_in = crate::hw::vulkan::layout(frame).map_err(|e| e.to_string())?;
         // SAFETY: this device's images on FFmpeg's memory; wgpu left any it used shader-readable.
         let acquired = unsafe {
             gpu.acquire(
@@ -1640,17 +1721,14 @@ impl Slot {
                 ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 ash::vk::PipelineStageFlags::FRAGMENT_SHADER,
                 ash::vk::AccessFlags::SHADER_READ,
-                super::acquire::Source::Vulkan {
+                acquire::Source::Vulkan {
                     concurrent: import.concurrent,
                     layout: left_in,
                 },
             )?
         };
-        vidcut_av::hw::vulkan::acquired_outside(
-            frame,
-            ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        )
-        .map_err(|e| e.to_string())?;
+        crate::hw::vulkan::acquired_outside(frame, ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+            .map_err(|e| e.to_string())?;
         let [y, u, v] = &import.views;
         self.views = Some((y.clone(), u.clone(), import.size));
         self.v_view = Some(v.clone());
@@ -1822,7 +1900,7 @@ impl Slot {
         let need = uv.offset + uv.pitch * ch;
         self.shared
             .retain(|s| shared_kept(s.size(), need, s.free()));
-        let free = |shared: &[super::shared::Shared]| {
+        let free = |shared: &[shared::Shared]| {
             shared
                 .iter()
                 .position(|s| shared_usable(s.size(), need, s.free()))
@@ -1830,7 +1908,7 @@ impl Slot {
         let i = match free(&self.shared) {
             Some(i) => i,
             None if self.shared.len() < MAX_SHARED => {
-                let made = super::shared::Shared::new(&gpu.device, cuda, need)?;
+                let made = shared::Shared::new(&gpu.device, cuda, need)?;
                 self.shared.push(made);
                 self.shared.len() - 1
             }
@@ -1945,7 +2023,7 @@ impl Slot {
         let wide = gpu.wide && sixteen(layout);
         let planes = self.planes.as_ref().expect("made for it");
         let frame = picture.frame();
-        vidcut_av::copies::up(frame);
+        crate::copies::up(frame);
         let put = |texture: &wgpu::Texture, plane: usize, size: (u32, u32), bytes: u32| {
             let stride = frame.stride(plane);
             let data = frame.data(plane);
@@ -2113,7 +2191,7 @@ fn make_target(device: &wgpu::Device, size: (u32, u32)) -> Target {
 fn d3d11_shared_for(
     gpu: &Gpu,
     pool: &mut D3d11Pool,
-    frame: &vidcut_av::ffmpeg::frame::Video,
+    frame: &crate::ffmpeg::frame::Video,
     formats: D3d11Formats,
 ) -> Result<(ash::vk::Image, bool), String> {
     let free = |pool: &D3d11Pool| {
@@ -2142,7 +2220,7 @@ fn d3d11_shared_for(
     let shared = share_d3d11(gpu, frame, formats)?;
     let image = shared.image;
     pool.insert(image, shared);
-    vidcut_av::debug!(
+    crate::debug!(
         "viewer",
         "imported a {}x{} {:?} Direct3D 11 texture ({} in all)",
         frame.width(),
@@ -2156,7 +2234,7 @@ fn d3d11_shared_for(
 #[cfg(windows)]
 fn share_d3d11(
     gpu: &Gpu,
-    frame: &vidcut_av::ffmpeg::frame::Video,
+    frame: &crate::ffmpeg::frame::Video,
     (format, one, two): D3d11Formats,
 ) -> Result<D3d11Shared, String> {
     use ::windows::Win32::Foundation::CloseHandle;
@@ -2164,7 +2242,7 @@ fn share_d3d11(
     use ::windows::Win32::Graphics::Dxgi::{DXGI_SHARED_RESOURCE_READ, IDXGIResource1};
     use ::windows::core::Interface;
     use wgpu::hal::api::Vulkan;
-    let shared = vidcut_av::hw::d3d11::Shared::new(frame).map_err(|e| e.to_string())?;
+    let shared = crate::hw::d3d11::Shared::new(frame).map_err(|e| e.to_string())?;
     let raw_texture = shared.texture();
     // SAFETY: the shared texture, alive as long as `shared`.
     let texture = unsafe { ID3D11Texture2D::from_raw_borrowed(&raw_texture) }
@@ -2274,10 +2352,10 @@ fn share_d3d11(
 #[cfg(any(target_os = "linux", windows))]
 fn import_vulkan_frame(
     gpu: &Gpu,
-    frame: &vidcut_av::ffmpeg::frame::Video,
-) -> Result<super::vulkan::Import, String> {
+    frame: &crate::ffmpeg::frame::Video,
+) -> Result<vulkan::Import, String> {
     use wgpu::hal::api::Vulkan;
-    let exported = vidcut_av::hw::vulkan::Exported::of(frame).map_err(|e| e.to_string())?;
+    let exported = crate::hw::vulkan::Exported::of(frame).map_err(|e| e.to_string())?;
     if !(3..=4).contains(&exported.planes.len()) {
         return Err(format!("a picture of {} planes", exported.planes.len()));
     }
@@ -2287,7 +2365,7 @@ fn import_vulkan_frame(
     // SAFETY: `hal` is wgpu's live device, on the GPU and driver of FFmpeg's (checked first).
     let raws = unsafe {
         let hal = gpu.device.as_hal::<Vulkan>().ok_or("not Vulkan")?;
-        if super::vulkan::uuids(&hal) != (exported.device_uuid, exported.driver_uuid) {
+        if vulkan::uuids(&hal) != (exported.device_uuid, exported.driver_uuid) {
             return Err("FFmpeg's Vulkan device isn't on the display's GPU".into());
         }
         if concurrent && !families.contains(&hal.queue_family_index()) {
@@ -2296,7 +2374,7 @@ fn import_vulkan_frame(
         let imported = exported
             .planes
             .into_iter()
-            .map(|plane| super::vulkan::import(&hal, plane))
+            .map(|plane| vulkan::import(&hal, plane))
             .collect::<Result<Vec<_>, _>>()?;
         imported
             .into_iter()
@@ -2340,7 +2418,7 @@ fn import_vulkan_frame(
         return Err(format!("a picture of {} planes", textures.len()));
     };
     let view = |t: &wgpu::Texture| t.create_view(&Default::default());
-    Ok(super::vulkan::Import {
+    Ok(vulkan::Import {
         images,
         views: [view(y), view(u), view(v)],
         size: (y.width(), y.height()),
@@ -2445,7 +2523,7 @@ fn lettering_of(
 fn write_alpha(
     gpu: &Gpu,
     texture: &wgpu::Texture,
-    frame: &vidcut_av::ffmpeg::frame::Video,
+    frame: &crate::ffmpeg::frame::Video,
     (w, h): (u32, u32),
 ) {
     let (stride, data) = (frame.stride(3), frame.data(3));
@@ -2577,7 +2655,7 @@ fn params_of(
         Some(Hdr::Hlg) => 2,
     };
     let g = match timeline {
-        Some(_) => vidcut_av::color::to_bt2020(picture.colors()),
+        Some(_) => crate::color::to_bt2020(picture.colors()),
         None => colors.gamut,
     };
     let floats: [[f64; 4]; 8] = [

@@ -2,9 +2,7 @@ mod ahead;
 pub mod audio;
 pub mod encode;
 pub(crate) mod make;
-pub(crate) mod mix;
 pub(crate) mod normalize;
-pub(crate) mod place;
 pub mod renderer;
 pub mod still;
 pub mod subtitles;
@@ -29,7 +27,6 @@ use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use audio::AudioMix;
 use encode::{AudioEncoder, Availability, Upload};
-use make::Output;
 use subtitles::{BurnNote, StreamNote, SubtitleOut, Subtitles};
 use video::VideoFrames;
 use worker::{Inbox, Worker};
@@ -194,7 +191,7 @@ pub struct Report {
     pub metadata: Option<MetadataChoice>,
     pub copies: vidcut_core::editor::Copied,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mix_failed: Option<String>,
+    pub through_memory: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tried: Vec<Tried>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -892,7 +889,7 @@ fn encode(
                     Some(stats) => encode::Pass::First { stats },
                     None => encode::Pass::Only,
                 };
-                if decoder.is_some()
+                if stats.is_none()
                     && let Some((device, frames)) = gpu_output(&enc, w, h)
                     && let Ok(o) = encode::open_video(
                         &enc,
@@ -905,13 +902,13 @@ fn encode(
                         pass,
                     )
                 {
-                    opened = Some((enc, o, Some((device, frames)), None));
+                    opened = Some((enc, o, Some((device, frames))));
                     break;
                 }
                 let shared = decoder.filter(|d| encode::shares(enc.kind, enc.device.as_deref(), d));
                 match encode::open_video(&enc, w, h, times, global_header, None, shared, pass) {
                     Ok(o) => {
-                        opened = Some((enc, o, None, shared.map(|d| d.kind().place())));
+                        opened = Some((enc, o, None));
                         break;
                     }
                     Err(e) => {
@@ -920,7 +917,7 @@ fn encode(
                     }
                 }
             }
-            let Some((enc, (encoder, vaapi), gpu, fit_on)) = opened else {
+            let Some((enc, (encoder, vaapi), gpu)) = opened else {
                 if failed.len() == 1 {
                     return Err(failed.remove(0).1);
                 }
@@ -963,28 +960,37 @@ fn encode(
                 }
                 _ => (encoder, vaapi),
             };
+            let handoff = match (gpu, &vaapi) {
+                (Some((device, frames)), _) => Some(video::Handoff::Cuda(device, frames)),
+                (None, Some(up)) if enc.kind == EncoderChoice::VideoToolbox => {
+                    // SAFETY: `up.frames` is the encoder's live frames reference.
+                    Some(video::Handoff::Surfaces(unsafe {
+                        crate::hw::Frames::of(up.frames)?
+                    }))
+                }
+                _ => None,
+            };
             let mut ost = octx
                 .add_stream(encoder::find_by_name(&enc.name))
                 .ctx(|| "adding video stream".into())?;
             ost.set_parameters(&encoder);
             ost.set_time_base(fps.invert());
             ost.set_avg_frame_rate(fps);
-            let pixel = match gpu {
-                Some(_) => gpu_pixel(&enc),
-                None => enc.pixel,
-            };
-            let output = Output::for_encoder(enc.kind, gpu, fit_on, vaapi.as_ref())?;
             crate::progress::note(Note::Video(VideoNote {
                 encoder: enc.name.clone(),
                 device: enc.device.clone(),
                 pixel: encode::pixel_name(enc.pixel),
                 bits: encode::pixel_bits(enc.pixel),
                 passes: enc.passes.count(),
-                gpu_frames_in: !matches!(output, Output::Fitted),
+                gpu_frames_in: handoff.is_some(),
             }));
             let burned = burn();
+            let pixel = match handoff {
+                Some(video::Handoff::Cuda(..)) => gpu_pixel(&enc),
+                _ => enc.pixel,
+            };
             let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
-                .output(output)
+                .encode_on(handoff)
                 .with_timeline(plan.colors)?
                 .with_dynamic(enc.dynamic)
                 .with_light(light)
@@ -1211,9 +1217,9 @@ fn encode(
         },
         gpu_frames: video.as_ref().map_or(0, |v| v.frames.gpu_frames()),
         gpu_decoded: video.as_ref().map_or(0, |v| v.frames.gpu_decoded()),
-        mix_failed: video
+        through_memory: video
             .as_ref()
-            .and_then(|v| v.frames.mix_failed().map(String::from)),
+            .and_then(|v| v.frames.through_memory().map(String::from)),
         tried: tried_encoders,
         sources: video
             .as_ref()

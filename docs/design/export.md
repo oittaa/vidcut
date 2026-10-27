@@ -167,29 +167,39 @@ Seeks:
 
 Pictures:
 
-- `Maker` makes each picture by the route that `route::plan` gives its frame ([gpu](gpu.md#routes)).
-- A frame stays on the GPU where its GPU fits it for the encoder. Else it comes down, and `Normalizer` turns, scales, pads and converts it.
-- The encoder that opened sets the destination (`make::Output`). With GPU decoding on, NVENC takes CUDA frames, and VAAPI, AMF and VideoToolbox take frames of the decoder's device. Else the destination is memory.
-- A dissolve on the GPU uses the sums of the CPU (`export::mix`). `cuda::mix` mixes for NVENC, and `mixing::Mixer` for VideoToolbox.
-- On the CPU, the layers of a frame mix in a `Canvas`, as 32-bit floats in the code values of the frame.
-  - Why: a color above 1 or below 0 stays between the layers ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - After the last layer, `Canvas::frame` rounds the values and clips them to the code range.
-  - The layers under a title become a frame before the title is drawn. Thus a title clips the values ([todo](../todo/composite-masks.md)).
-  - A wipe in the viewer also mixes in a `Canvas` (`Picture::at_wipe`).
+- `VideoFrames::next_layers` gives the layers of each frame as they are decoded, as the player gets them.
+- `Maker` decodes by the route that `route::plan` gives each frame ([gpu](gpu.md#routes)). A frame stays on the GPU where the drawing reads it there (`Gpu::gpu_pictures`).
+- `player::picture` makes one `Picture` of the layers, as the player does.
+- `VideoFrames::next_frame` draws that picture with the viewer's `Screen`, on a wgpu device of its own (`screen::device`).
+- Thus the export and the viewer have one draw path: `crates/vidcut-av/src/screen/picture.wgsl` ([playback](playback.md#the-viewer-thread)).
 
 ## Timeline colors
 
-Each mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). When an output has other colors or is RGB, `VideoFrames::with_timeline` sets up two stages:
+Each mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
-1. `Maker` fits each picture to the timeline colors. `VideoFrames` mixes, draws the titles and burns in the subtitles in these colors.
-2. `Finish` converts each finished frame to the colors and the format of the encoder.
-
-- For NVENC, the timeline's frames are P010 in a pool of their own. libplacebo converts them on the GPU (`CudaPictures::converting`). When it fails, `Normalizer` converts the frame in memory.
-- For the other encoders, the timeline's frames are 12-bit 4:4:4 in memory (`MIXING`), and `Normalizer` converts them.
-- `color::tag_frame` gives the timeline's frames and the black frame their color tags. `burn::blend` and `Normalizer` read these tags.
-- The conversion keeps the HDR10+ and Dolby Vision metadata of the frame.
-- `frame.render` of a timeline frame and the storyboards use the same stages (`renderer::frames`, `FrameReader::rgba`). Their output is RGB. Thus their layers mix in YUV, as in an export.
+- `Screen::for_export` draws each frame into `Wide`: 16-bit floats in the code values of the timeline (`VideoFrames::with_timeline`).
+  - Each layer, title and subtitle goes there as in the viewer.
+  - Why: a color above 1 or below 0 stays between the layers ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- Then `fs_encode` writes each plane of the encoder's pixel format from `Wide` (`Screen::encoded`).
+  - It converts the timeline colors to the colors of the output. An SDR output is BT.709 and an HDR output is BT.2020, both in limited range.
+  - HDR to SDR tone-maps with the math of the viewer's `fs_screen`.
+  - A chroma sample is the mean of the pixels that it covers.
+  - The values are rounded once, at the end.
+- `color::tag_frame` gives the frame its color tags.
+- The frame keeps the HDR10+ and Dolby Vision metadata of its source.
+- `frame.render` of a timeline frame and the storyboards use the same draw (`renderer::frames`, `FrameReader::rgba`). Their output is RGB.
 - `frame.render` of a media and the tiles convert each picture of the file directly to RGB.
+
+To the encoder:
+
+- With NVENC, the encoder takes CUDA frames (`gpu_output`).
+  - wgpu copies the planes into a buffer that Vulkan shares with CUDA (`Shared::out`).
+  - CUDA copies them into the encoder's frame (`Shared::empty_into`).
+- With VideoToolbox and GPU decoding, the encoder takes frames of the decoder's device. `fs_encode_unorm` draws the planes into the IOSurface of the frame (`Sink::Surface`).
+- The other encoders take frames in memory. wgpu reads the planes back (`Sink::Memory`).
+  - VA-API frames, and AMF frames on the decoder's Direct3D 11 device, then go up to the encoder's device (`Upload`).
+- When a hand-off to the encoder fails, the frames go through memory to the end of the export. The report tells why (`through_memory`).
+- Why: a frame stays in GPU memory from the decoder to the encoder where this is possible (AGENTS.md rule 9).
 
 ## Sound
 
@@ -277,10 +287,9 @@ Cancel:
 - `subtitles::shown` gives what each cue draws at the frame ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It gives the pieces, the spoken word in its color, the words not yet spoken, and the size of a pop.
 - `burn::draw` lays out the cues with cosmic-text: shaping, right-to-left text, and system fonts for the scripts that the first font does not have.
 - `burn::paint` draws one picture for each run of cues that share a place and a style. A popping word is a picture of its own over it.
-- The last lines laid out stay in an `Lru` (`laid_line`), and the `Burner` keeps the pictures while the same pieces show. Thus a pop draws only its word again.
-- A picture in memory takes the drawing with `burn::blend`, in its own layout, matrix, range and transfer.
-- NVENC frames take it on the GPU (`cuda::burn`), and VideoToolbox frames on Metal (`Mixer::burn`). The frames of other GPUs come down while a cue shows ([gpu](gpu.md)).
-- While only the step of a pop changes, the NVENC overlay of the lines stays. The word goes over it as a second overlay ([todo](../todo/burn-in-ahead.md)).
+- The last lines laid out stay in an `Lru` (`laid_line`).
+- The player's `Subtitles` keeps the pictures while the same pieces show (`Subtitles::burned`). Thus a pop draws only its word again.
+- The pictures go onto the frame in the draw of the viewer ([todo](../todo/burn-in-ahead.md)).
 
 ## Titles
 
@@ -288,24 +297,20 @@ Cancel:
   - The picture is a source, black, or a `VideoPiece::Mix`.
   - A clip that fades in or out above a title nests the other way: its `Mix` is over the titled picture.
   - `VideoPiece::titles` tells how many of the `VideoPiece::layers` each title goes over.
-- `VideoFrames::next_frame` mixes the layers under a title, draws the title, mixes the layers over it, and then burns in the subtitles.
+- `Screen::draw` lays the layers under a title, then the title, then the layers over it, and then the subtitles.
 - `burn::title` lays out a title with the code of the burn-in (`lay_out`).
   - `lay_out` strokes the outlines of the glyphs with zeno. When a glyph has no outline, it grows the drawn letters instead (`dilate`).
   - A title has spans, each with its own face, size, weight, slant, underline and color.
   - Its kind aligns it, and title safe wraps it. It has one box behind the block, and its anchor places it.
 - Each title in the plan carries its clip, and where the piece is in that clip (`ShownTitle`, its `Run`). `Run::top` places a scrolling title on each frame.
 - A title in a dissolve at the edge of its clip fades by the `Ramp` of the dissolve (`fade`), on both sides of the edge. `ShownTitle::alpha` gives its level, with its opacity.
-- A title is drawn once for the size of the output, and kept while it shows. A `Placing` moves and fades it (`burn::blend_at`).
-- A title goes onto the frame as the cues of the burn-in do (`Drawn`). The frames of other GPUs come down while a title shows ([todo](../todo/gpu-burn-in.md)).
+- The player's `Titles` draws a title once for the size of the output, and keeps it while it shows. The shader moves and fades it.
 - Titles draw in each export and in `frame.render`, whatever the subtitle settings are.
 
 Titles in a placed compound clip:
 
 - `render::flatten_lanes` gives a title the pictures of the compound clips that it plays inside (`ShownTitle::placed`).
-- `export::place::title` maps each pixel of the frame back to the drawing with one affine map. The map goes through the compound clips (`Placing::inner`), then through the scroll, turn and zoom of the title (`place::lettered`).
-- It covers the edges of each compound clip in part (`Placing::at`). Thus the frame and the crop of each compound clip cut the title.
-- `VideoFrames` makes the result again only when the pictures or the scroll change.
-- The CPU makes this map ([todo](../todo/gpu-placement.md)). For NVENC, the mix into the frame stays on the GPU.
+- The shader maps each pixel of the frame back to the drawing with one affine map. The map goes through the compound clips (`Placing::inner`), then through the scroll, turn and zoom of the title (`place::lettered`).
 
 ## Placed pictures
 
@@ -316,30 +321,18 @@ The plan:
 - A clip at its usual values goes over the same way where its fitted picture leaves bars and something is below it.
 - Where its fitted picture fills the frame, it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.
 - A picture with an alpha channel (`VideoInfo::alpha`) never fills the frame. It goes over the layers below by its straight alpha ([todo](../todo/clip-alpha.md)).
-- `Normalizer` keeps the alpha through the conversion to the timeline colors. zscale converts only the color planes, and `mergeplanes` puts the alpha back ([gotchas](../gotchas.md#ffmpeg-filters-and-colors)).
 - With nothing below it, it is drawn with black bars. Why: this costs less.
 
 The pictures:
 
-- `VideoFrames` fits a placed layer at the size that it shows, up to the size of its source (`layer_size`, `Maker::size_layer`). Why: a punch-in keeps the detail of the source.
-- For NVENC and VideoToolbox, a placed layer at the size of the frame stays on the GPU. The GPU fits it as it fits other clips (`Maker::places_on_gpu`).
-- `VideoFrames` makes the frames of the other placed layers in memory. On a GPU, they come down shrunk.
-- `place::Placing` maps each pixel of the frame back to the picture. `export::place::over` lays the picture over the `Canvas` of the layers below.
-- The coverage of a pixel is the product of `place::Placing::at` over the levels: smoothed edges, soft crop edges and opacity. The viewer's shader (`picture.wgsl`) does the same sums.
+- `VideoFrames` decodes a placed layer as the player does. The shader places it at the size that it shows.
+- `place::Placing` maps each pixel of the frame back to the picture. The shader takes the map of each level (`chain`).
+- The coverage of a pixel is the product of the levels: smoothed edges, soft crop edges and opacity (`place::Placing::at`).
 - A level of a clip in a compound clip is left out where the clip fills the frame at its usual values. Thus the edges of the compound clip are covered once.
-- A composite mode (`Placing::mode`) mixes in R'G'B' by `blend::mixed` (D75).
-  - Each sample of the frame takes all three components of the picture at its place.
-  - It averages the components of the frame below over the same place. Thus a chroma sample takes the mean of the luma under it.
+- A composite mode (`Placing::mode`) mixes in R'G'B' (D75). The shader mixes it with the layers below (`mixed`).
   - `place::Placing` takes the first mode other than Normal, from the picture out through its compound clips.
-- A GPU kernel places a picture that is on the GPU: `cuda::place` for NVENC, `Mixer::place` on Metal for VideoToolbox. It mixes the picture into the frame below in one pass.
-  - Both kernels take the same sums (`Layer::gpu_planes`). These are the sums of `export::place::over`: the levels of `Placing::at`, the taps and the bilinear samples. The kernel rounds once, at the end.
-  - They compute in 32-bit floats. The CPU computes the map in 64-bit floats. Why: GeForce GPUs run 64-bit floats much more slowly.
-  - They take a picture in the layout of the frame, with up to `GPU_LEVELS` levels. Else the CPU makes the overlay.
-  - With nothing below, the picture goes over black. For NVENC, a black frame goes up once in each export (`black_on_gpu`). The Metal kernel writes black itself.
-- For the other pictures, the frame below stays on the GPU. The CPU makes the colors and coverage of the picture (`cuda::burn::Overlay::of`, `mixing::Overlay::of`), and the GPU mixes them in, as for a title.
-  - `place::overlay` reads the picture in its own layout. The coverage includes the alpha of the picture.
-  - A frame with a composite mode or a wipe mixes on the CPU.
-- A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once (`mix::crossed`, `cuda::mix::sum`, `Mixer::sum`).
+- A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once.
+- A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
 
 Dynamic Zoom and keyframes (D75):
 
@@ -380,5 +373,5 @@ Soft crop edges:
 - `crates/vidcut-core/src/export/`, `crates/vidcut-core/src/export.rs`
 - `crates/vidcut-core/src/render.rs`, `crates/vidcut-core/src/place.rs`, `crates/vidcut-core/src/duck.rs`, `crates/vidcut-core/src/subtitles.rs`
 - `crates/vidcut-av/src/export/`
-- `crates/vidcut-av/src/isolate.rs`, `crates/vidcut-av/src/burn.rs`, `crates/vidcut-av/src/cuda/burn.rs`
+- `crates/vidcut-av/src/isolate.rs`, `crates/vidcut-av/src/burn.rs`, `crates/vidcut-av/src/screen/`
 - `crates/vidcut-av/src/route.rs`, `crates/vidcut-av/src/light.rs`, `crates/vidcut-av/src/proxy.rs`

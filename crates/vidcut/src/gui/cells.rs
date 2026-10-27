@@ -9,7 +9,7 @@ use vidcut_av::player::{Config, ManualOutput, Picture, Player, Shown};
 use vidcut_core::model::Project;
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
-use super::picture::{Drawn, Gpu, Screen};
+use vidcut_av::screen::{Drawn, Gpu, Screen};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Counts {

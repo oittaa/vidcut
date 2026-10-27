@@ -464,3 +464,97 @@ fn fs_screen(in: Out) -> @location(0) vec4<f32> {
     c = vec3<f32>(dot(screen.gamut0.xyz, c), dot(screen.gamut1.xyz, c), dot(screen.gamut2.xyz, c));
     return vec4<f32>(clamp(tone_mapped(c, screen.tone), vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }
+
+struct Encoding {
+    tone: vec4<f32>,
+    gamut0: vec4<f32>,
+    gamut1: vec4<f32>,
+    gamut2: vec4<f32>,
+    matrix: vec4<f32>,
+    how: vec4<u32>,
+    plane: vec4<u32>,
+};
+
+@group(0) @binding(10) var<uniform> encoding: Encoding;
+
+fn encoded_rgb(code: vec3<f32>) -> vec3<f32> {
+    let coded = encoding.how.x;
+    let wanted = encoding.how.y;
+    if coded == wanted {
+        return clamp(code, vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    var c: vec3<f32>;
+    if coded == 0u {
+        c = pow(max(code, vec3<f32>(0.0)), vec3<f32>(2.4));
+    } else {
+        c = decode(code, coded, encoding.matrix.z);
+    }
+    c = vec3<f32>(dot(encoding.gamut0.xyz, c), dot(encoding.gamut1.xyz, c), dot(encoding.gamut2.xyz, c));
+    if wanted == 0u {
+        return clamp(tone_mapped(c, encoding.tone), vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    return clamp(encode(c, wanted), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+fn pixel_at(x: i32, y: i32) -> vec3<f32> {
+    let size = vec2<i32>(textureDimensions(timeline));
+    let at = clamp(vec2<i32>(x, y), vec2<i32>(0), size - vec2<i32>(1));
+    return encoded_rgb(textureLoad(timeline, at, 0).rgb);
+}
+
+fn output_ycc(c: vec3<f32>) -> vec3<f32> {
+    let kr = encoding.matrix.x;
+    let kb = encoding.matrix.y;
+    let y = kr * c.r + (1.0 - kr - kb) * c.g + kb * c.b;
+    return vec3<f32>(y, (c.b - y) / (2.0 - 2.0 * kb), (c.r - y) / (2.0 - 2.0 * kr));
+}
+
+fn code_of(v: f32, base: f32, span: f32) -> u32 {
+    let depth = encoding.how.z;
+    let scale = f32(1u << (depth - 8u));
+    let top = f32((1u << depth) - 1u);
+    return u32(clamp(round((base + span * v) * scale), 0.0, top)) << encoding.how.w;
+}
+
+fn chroma_at(px: vec2<i32>) -> vec2<f32> {
+    let bw = i32(1u << encoding.plane.y);
+    let bh = i32(1u << encoding.plane.z);
+    var sum = vec2<f32>(0.0);
+    for (var j = 0; j < bh; j++) {
+        for (var i = 0; i < bw; i++) {
+            sum += output_ycc(pixel_at(px.x * bw + i, px.y * bh + j)).yz;
+        }
+    }
+    return sum / f32(bw * bh);
+}
+
+fn encoded_at(px: vec2<i32>) -> vec4<u32> {
+    let kind = encoding.plane.x;
+    var out = vec4<u32>(0u);
+    if kind == 0u {
+        out.x = code_of(output_ycc(pixel_at(px.x, px.y)).x, 16.0, 219.0);
+    } else if kind <= 3u {
+        let c = chroma_at(px);
+        let cb = code_of(c.x, 128.0, 224.0);
+        let cr = code_of(c.y, 128.0, 224.0);
+        out = select(vec4<u32>(cb, cr, 0u, 0u), vec4<u32>(cr, 0u, 0u, 0u), kind == 3u);
+    } else if kind == 4u {
+        out.x = ((1u << encoding.how.z) - 1u) << encoding.how.w;
+    } else if kind == 5u {
+        out = vec4<u32>(vec3<u32>(round(pixel_at(px.x, px.y) * 255.0)), 255u);
+    } else {
+        let c = pixel_at(px.x / 3, px.y);
+        out.x = u32(round(c[px.x % 3] * 255.0));
+    }
+    return out;
+}
+
+@fragment
+fn fs_encode(in: Out) -> @location(0) vec4<u32> {
+    return encoded_at(vec2<i32>(in.position.xy));
+}
+
+@fragment
+fn fs_encode_unorm(in: Out) -> @location(0) vec4<f32> {
+    return vec4<f32>(encoded_at(vec2<i32>(in.position.xy))) / f32(encoding.plane.w);
+}

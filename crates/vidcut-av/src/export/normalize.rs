@@ -1,4 +1,4 @@
-use vidcut_core::model::{Hdr, Sharpness};
+use vidcut_core::model::Hdr;
 pub(crate) use vidcut_core::place::fit;
 
 use super::video::frame_ref;
@@ -139,14 +139,6 @@ pub(crate) fn enlarges(
     f64::from(fw) > sw + 0.5 || f64::from(fh) > sh + 0.5
 }
 
-fn kernel(sharp: Sharpness) -> (&'static str, &'static str) {
-    match sharp {
-        Sharpness::Low => ("spline", ""),
-        Sharpness::Medium => ("lanczos", ""),
-        Sharpness::High => ("lanczos", ":param0=4"),
-    }
-}
-
 impl Normalizer {
     pub(crate) fn new(
         src: &frame::Video,
@@ -164,28 +156,7 @@ impl Normalizer {
             (out_w, out_h),
             out_fmt,
             target,
-            (zscale, None),
-            reading,
-        )
-    }
-
-    pub(crate) fn upscaling(
-        src: &frame::Video,
-        rotation: u16,
-        out: (u32, u32),
-        out_fmt: format::Pixel,
-        target: Option<Hdr>,
-        reading: Reading,
-        sharp: Option<Sharpness>,
-    ) -> Result<Self> {
-        let zscale = crate::parts::has_filter("zscale");
-        Self::with(
-            src,
-            rotation,
-            out,
-            out_fmt,
-            target,
-            (zscale, sharp),
+            zscale,
             reading,
         )
     }
@@ -196,7 +167,7 @@ impl Normalizer {
         (out_w, out_h): (u32, u32),
         out_fmt: format::Pixel,
         target: Option<Hdr>,
-        (zscale, sharp): (bool, Option<Sharpness>),
+        zscale: bool,
         reading: Reading,
     ) -> Result<Self> {
         let (w, h, fmt) = (src.width(), src.height(), src.format());
@@ -274,15 +245,9 @@ impl Normalizer {
             Some(_) => String::new(),
             None => format!(",format={}", fmt_name(out_fmt)),
         };
-        let (flags, taps) = match sharp.filter(|_| enlarges((w, h), sar, rotation, (sw, sh))) {
-            Some(sharp) => {
-                let (name, taps) = kernel(sharp);
-                (conv.flags.replacen("bicubic", name, 1), taps)
-            }
-            None => (conv.flags.to_string(), ""),
-        };
+        let flags = &conv.flags;
         let spec = format!(
-            "{}scale={sw}:{sh}:flags={flags}{taps}{},pad={out_w}:{out_h}:{}:{}:color={bars},setsar=1{}{last}",
+            "{}scale={sw}:{sh}:flags={flags}{},pad={out_w}:{out_h}:{}:{}:color={bars},setsar=1{}{last}",
             upright(rotation),
             conv.scale,
             (out_w - sw) / 2,

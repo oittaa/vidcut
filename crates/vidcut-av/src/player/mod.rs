@@ -23,7 +23,11 @@ pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
 };
+pub(crate) use plan::{placed_of, scales_of, titles_of};
 pub use subtitles::SubtitleView;
+pub(crate) use subtitles::Subtitles;
+pub(crate) use titles::Titles;
+pub(crate) use video::picture;
 
 use crate::error::{Error, Result};
 use clock::{Heard, Markers};

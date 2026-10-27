@@ -341,7 +341,7 @@ Writing:
   - Each map zooms and turns the picture about its anchor point. `place::anchored` gives the pixel where the anchor point lands.
   - Pitch and yaw lean the picture about its middle, in its own axes, before the zoom and the turn ([spec D93](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). Thus `Level.back` is a projective map. Without a lean, it is affine.
   - An export and the viewer both draw by these maps ([export](export.md#placed-pictures), [playback](playback.md#the-engine)).
-- `blend::mixed` holds the sums of the composite modes (D75). The viewer's shader has the same sums.
+- The shader of the viewer and the export holds the sums of the composite modes (D75, `mixed` in `picture.wgsl`).
 
 ## Ducking
 

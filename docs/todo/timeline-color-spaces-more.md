@@ -19,7 +19,7 @@ The timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-an
   - The CPU (`CpuColors` in `crates/vidcut-av/src/color.rs`).
   - The shaders that libplacebo runs (`color::shader`).
   - The zscale filters of the CPU path (`color::conversion`).
-  - The viewer's shader (`crates/vidcut/src/gui/picture.wgsl`).
+  - The shader of the viewer and the export (`crates/vidcut-av/src/screen/picture.wgsl`).
 - The zscale documentation of FFmpeg 9.0.1 lists no P3 primaries and no DaVinci Intermediate transfer. Thus the CPU path needs math of vidcut's own for them.
 
 ## To do

@@ -1,9 +1,6 @@
 #![warn(clippy::undocumented_unsafe_blocks)]
 
-pub(crate) mod burn;
 pub(crate) mod keep;
-pub(crate) mod mix;
-pub(crate) mod place;
 pub mod share;
 
 pub(crate) use share::{Listed, listed};
@@ -21,7 +18,7 @@ use std::path::PathBuf;
 use std::ptr;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use vidcut_core::model::{Hdr, Sharpness};
+use vidcut_core::model::Hdr;
 
 use crate::color::{GpuColor, Tags};
 use crate::decode::VideoReader;
@@ -231,17 +228,23 @@ impl HwFrames {
         Ok(Self(frames))
     }
 
-    fn copy(&self, src: &frame::Video, what: &str) -> Result<frame::Video> {
+    fn fresh(&self) -> Result<frame::Video> {
         let mut hw = frame::Video::empty();
-        // SAFETY: a fresh frame of this live pool, given `src`'s picture.
+        // SAFETY: a fresh frame of this live pool.
+        let ret = unsafe { ffi::av_hwframe_get_buffer(self.0, hw.as_mut_ptr(), 0) };
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: "getting a GPU frame".into(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(hw)
+    }
+
+    fn copy(&self, src: &frame::Video, what: &str) -> Result<frame::Video> {
+        let mut hw = self.fresh()?;
+        // SAFETY: a frame of this live pool, given `src`'s picture.
         unsafe {
-            let ret = ffi::av_hwframe_get_buffer(self.0, hw.as_mut_ptr(), 0);
-            if ret < 0 {
-                return Err(Error::Ffmpeg {
-                    context: "getting a GPU frame".into(),
-                    source: ffmpeg::Error::from(ret),
-                });
-            }
             let ret = ffi::av_hwframe_transfer_data(hw.as_mut_ptr(), src.as_ptr(), 0);
             if ret < 0 {
                 return Err(Error::Ffmpeg {
@@ -277,6 +280,10 @@ impl CudaFrames {
 
     pub fn as_ptr(&self) -> *mut ffi::AVBufferRef {
         self.0.0
+    }
+
+    pub fn fresh(&self) -> Result<frame::Video> {
+        self.0.fresh()
     }
 
     pub fn upload(&self, src: &frame::Video) -> Result<frame::Video> {
@@ -495,7 +502,6 @@ fn placebo_options(
     out: &str,
     layout: Layout,
     color: &GpuColor,
-    up: Option<Sharpness>,
 ) -> Vec<(&'static str, String)> {
     let mut options: Vec<(&str, String)> = match layout {
         Layout::Upright if rotation % 180 == 90 => {
@@ -543,13 +549,6 @@ fn placebo_options(
             ffi::av_color_transfer_name(o.transfer),
         )
     };
-    let upscaler = match up {
-        None => "catmull_rom",
-        Some(Sharpness::Low) => "ewa_lanczos",
-        Some(Sharpness::Medium) => "ewa_lanczossharp",
-        Some(Sharpness::High) => "ewa_lanczos4sharpest",
-    };
-    let linear = up.is_some() && color.shader.is_none();
     options.extend([
         ("rotate", rotation.to_string()),
         ("format", out.into()),
@@ -557,10 +556,10 @@ fn placebo_options(
         ("color_primaries", name(primaries)),
         ("color_trc", name(transfer)),
         ("range", "tv".into()),
-        ("upscaler", upscaler.into()),
+        ("upscaler", "catmull_rom".into()),
         ("downscaler", "catmull_rom".into()),
-        ("disable_linear", if linear { "0" } else { "1" }.into()),
-        ("sigmoid", if linear { "1" } else { "0" }.into()),
+        ("disable_linear", "1".into()),
+        ("sigmoid", "0".into()),
         ("dithering", "none".into()),
         ("peak_detect", "0".into()),
         ("apply_filmgrain", "0".into()),
@@ -678,7 +677,6 @@ impl CudaPictures {
         format: format::Pixel,
         target: Option<Hdr>,
         (at_once, on): (bool, Place),
-        sharp: Option<Sharpness>,
     ) -> Result<Self> {
         let first = reader
             .peek()
@@ -692,27 +690,6 @@ impl CudaPictures {
             format,
             target,
             (at_once, on),
-            sharp,
-        )
-    }
-
-    pub(crate) fn converting(
-        device: &CudaDevice,
-        first: &frame::Video,
-        format: format::Pixel,
-        target: Option<Hdr>,
-    ) -> Result<Self> {
-        let size = (first.width(), first.height());
-        let timing = (ffmpeg::Rational(1, 1_000_000), 0);
-        Self::from_first(
-            device,
-            first,
-            timing,
-            size,
-            format,
-            target,
-            (true, Place::Cuda),
-            None,
         )
     }
 
@@ -725,7 +702,6 @@ impl CudaPictures {
         format: format::Pixel,
         target: Option<Hdr>,
         (at_once, on): (bool, Place),
-        sharp: Option<Sharpness>,
     ) -> Result<Self> {
         let vulkans = first.format() == format::Pixel::VULKAN;
         if !vulkans && first.format() != format::Pixel::CUDA {
@@ -772,14 +748,9 @@ impl CudaPictures {
             fitted,
             format,
         };
-        let up = sharp.filter(|_| {
-            let sar = (sar.numerator(), sar.denominator());
-            crate::export::normalize::enlarges(stored, sar, rotation, fitted)
-        });
         let layout = if on == Place::Vulkan
             || vulkans
             || color.shader.is_some()
-            || up.is_some()
             || (fitted != (width, height) && format == format::Pixel::P010LE)
         {
             Some(placed)
@@ -798,7 +769,6 @@ impl CudaPictures {
                     &color,
                     layout,
                     (at_once, on),
-                    up,
                 )?)
             }
             None => None,
@@ -921,7 +891,6 @@ impl Placebo {
         color: &GpuColor,
         layout: Layout,
         (at_once, on): (bool, Place),
-        up: Option<Sharpness>,
     ) -> Result<Self> {
         use ffi::AVPixelFormat::{AV_PIX_FMT_CUDA as CUDA, AV_PIX_FMT_VULKAN as VULKAN};
         let _one = converting();
@@ -1008,7 +977,7 @@ impl Placebo {
             Some((tags.matrix, tags.range)),
         )?;
         add_sink(&mut graph)?;
-        let options = placebo_options((width, height), rotation, out, layout, color, up);
+        let options = placebo_options((width, height), rotation, out, layout, color);
         // SAFETY: `ctx` lives in `graph` with the filters it links to; `vulkan` is a live device.
         unsafe {
             let ctx = ffi::avfilter_graph_alloc_filter(
@@ -1370,11 +1339,11 @@ mod tests {
 
     #[test]
     fn libplacebo_turns_pictures_upright() {
-        let options = placebo_options((1920, 1080), 90, "nv12", Layout::Upright, &sd(), None);
+        let options = placebo_options((1920, 1080), 90, "nv12", Layout::Upright, &sd());
         let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("1080"), Some("1920")));
         assert_eq!(get("rotate"), Some("90"));
-        let options = placebo_options((1920, 1080), 180, "nv12", Layout::Upright, &sd(), None);
+        let options = placebo_options((1920, 1080), 180, "nv12", Layout::Upright, &sd());
         let get = |k| option(&options, k);
         assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));
     }
@@ -1443,7 +1412,7 @@ mod tests {
             fitted: (1920, 800),
             format: Pixel::P010LE,
         };
-        let options = placebo_options((3840, 1600), 0, "p010le", placed, &sd(), None);
+        let options = placebo_options((3840, 1600), 0, "p010le", placed, &sd());
         let get = |k| option(&options, k);
         assert_eq!(get("inputs"), Some("2"));
         assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));
@@ -1456,7 +1425,7 @@ mod tests {
             fitted: (1920, 1080),
             format: Pixel::NV12,
         };
-        let options = placebo_options((3840, 2160), 0, "nv12", filled, &sd(), None);
+        let options = placebo_options((3840, 2160), 0, "nv12", filled, &sd());
         let get = |k| option(&options, k);
         assert_eq!(get("inputs"), None);
         assert_eq!((get("w"), get("h")), (Some("1920"), Some("1080")));

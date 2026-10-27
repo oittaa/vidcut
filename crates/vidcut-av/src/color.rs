@@ -414,6 +414,14 @@ fn mat_mul(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
     std::array::from_fn(|r| std::array::from_fn(|k| (0..3).map(|i| a[r][i] * b[i][k]).sum()))
 }
 
+pub fn output_gamut(from: Option<Hdr>, to: Option<Hdr>) -> [[f64; 3]; 3] {
+    let primaries = |hdr: Option<Hdr>| match hdr {
+        Some(_) => Primaries::Bt2020,
+        None => Primaries::Bt709,
+    };
+    gamut(primaries(from), primaries(to))
+}
+
 fn gamut(from: Primaries, to: Primaries) -> [[f64; 3]; 3] {
     if from == to {
         return [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];

@@ -76,17 +76,15 @@ pub struct Facts {
     pub shrinks: bool,
     pub displayable: bool,
     pub keep_failed: bool,
-    pub mixed: bool,
-    pub mixes: bool,
 }
 
 impl Facts {
     pub fn of(f: &frame::Video, ops: &Ops, out: (u32, u32), dest: Dest) -> Self {
         let place = Place::of(f);
         let (w, h) = crate::export::normalize::shown_size(f, ops.rotation, out);
-        let (reaches, mixes) = match dest {
-            Dest::Encoder { place: to } => (crate::hw::reaches(place, to), crate::hw::can_mix(to)),
-            _ => (false, false),
+        let reaches = match dest {
+            Dest::Encoder { place: to } => crate::hw::reaches(place, to),
+            _ => false,
         };
         Self {
             place,
@@ -96,8 +94,6 @@ impl Facts {
             shrinks: w < f.width() && h < f.height(),
             displayable: crate::export::normalize::displayable(ops.layout),
             keep_failed: false,
-            mixed: false,
-            mixes,
         }
     }
 }
@@ -124,10 +120,7 @@ pub fn plan(facts: &Facts, dest: Dest) -> Route {
             }
         }
         Dest::Encoder { place }
-            if (place == facts.place || facts.reaches)
-                && facts.fits
-                && !facts.fit_failed
-                && (facts.mixes || !facts.mixed) =>
+            if (place == facts.place || facts.reaches) && facts.fits && !facts.fit_failed =>
         {
             Route::Gpu
         }
@@ -168,8 +161,6 @@ mod tests {
             shrinks: false,
             displayable: true,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         let dest = Dest::Encoder { place: Place::Cuda };
         assert_eq!(plan(&facts, dest), Route::Cpu);
@@ -185,8 +176,6 @@ mod tests {
             shrinks: true,
             displayable: true,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         let dest = Dest::Encoder { place: Place::Cuda };
         assert_eq!(plan(&facts, dest), Route::Gpu);
@@ -202,8 +191,6 @@ mod tests {
             shrinks: true,
             displayable: true,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         let dest = Dest::Encoder { place: Place::Cuda };
         assert_eq!(plan(&facts, dest), Route::Shrunk);
@@ -219,8 +206,6 @@ mod tests {
             shrinks: false,
             displayable: true,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         let dest = Dest::Encoder {
             place: Place::Vaapi,
@@ -238,8 +223,6 @@ mod tests {
             shrinks: true,
             displayable: true,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         assert_eq!(plan(&facts, Dest::Memory), Route::Shrunk);
     }
@@ -254,8 +237,6 @@ mod tests {
             shrinks: false,
             displayable: true,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         assert_eq!(plan(&facts, Dest::Memory), Route::Whole);
     }
@@ -270,8 +251,6 @@ mod tests {
             shrinks: true,
             displayable: true,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         let dest = Dest::Encoder {
             place: Place::Vulkan,
@@ -289,8 +268,6 @@ mod tests {
             shrinks: true,
             displayable: true,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         let dest = Dest::Encoder {
             place: Place::Vulkan,
@@ -308,8 +285,6 @@ mod tests {
             shrinks: true,
             displayable: true,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         let dest = Dest::Encoder {
             place: Place::Vulkan,
@@ -327,8 +302,6 @@ mod tests {
             shrinks: true,
             displayable: true,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         assert_eq!(plan(&facts, Dest::Display { keep: true }), Route::Kept);
     }
@@ -343,8 +316,6 @@ mod tests {
             shrinks: true,
             displayable: true,
             keep_failed: true,
-            mixed: false,
-            mixes: false,
         };
         assert_eq!(plan(&facts, Dest::Display { keep: true }), Route::Whole);
     }
@@ -359,8 +330,6 @@ mod tests {
             shrinks: true,
             displayable: true,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         assert_eq!(plan(&facts, Dest::Display { keep: false }), Route::Whole);
     }
@@ -375,46 +344,8 @@ mod tests {
             shrinks: true,
             displayable: false,
             keep_failed: false,
-            mixed: false,
-            mixes: false,
         };
         assert_eq!(plan(&facts, Dest::Display { keep: true }), Route::Whole);
-    }
-
-    #[test]
-    fn a_mixed_frame_stays_on_a_gpu_that_mixes() {
-        let facts = Facts {
-            place: Place::Cuda,
-            fits: true,
-            reaches: false,
-            fit_failed: false,
-            shrinks: true,
-            displayable: true,
-            keep_failed: false,
-            mixed: true,
-            mixes: true,
-        };
-        let dest = Dest::Encoder { place: Place::Cuda };
-        assert_eq!(plan(&facts, dest), Route::Gpu);
-    }
-
-    #[test]
-    fn a_mixed_frame_comes_down_from_a_gpu_that_doesnt_mix() {
-        let facts = Facts {
-            place: Place::D3d11,
-            fits: true,
-            reaches: false,
-            fit_failed: false,
-            shrinks: true,
-            displayable: true,
-            keep_failed: false,
-            mixed: true,
-            mixes: false,
-        };
-        let dest = Dest::Encoder {
-            place: Place::D3d11,
-        };
-        assert_eq!(plan(&facts, dest), Route::Shrunk);
     }
 
     #[test]
