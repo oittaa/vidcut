@@ -69,7 +69,7 @@ In playback:
 
 - The viewer imports VA-API pictures only from its own GPU (`player::set_viewer_gpu`). From another GPU, the pictures come down.
   - Why: the viewer cannot import the pictures of another GPU.
-- The facts of a VA-API device (`NO_COPY`, `WAYS`, `SIZES`) are kept by the address of its display.
+- vidcut keeps facts of each VA-API device. `NO_COPY` and `WAYS` are kept by the address of the display. `SIZES` is kept by the device, the layout and the size.
 
 In exports:
 
@@ -133,7 +133,8 @@ Frames that come down:
 Super Scale (`SuperScale`) sets the upscaler of a picture that is enlarged.
 
 - `render::super_scale_of` gives each piece its upscaler: its own, or the project's (`MediaUpscaler`, `ProjectUpscaler`). Auto is the scaler of macOS on macOS, and AI Best elsewhere.
-- Classic: libplacebo with sigmoid upscaling for NVENC (`Layout::Placed`), and `spline` or `lanczos` on the CPU (`Normalizer::upscaling`).
+- For NVENC, libplacebo enlarges with the upscaler of the picture's `Sharpness` (`CudaPictures`). It scales in linear light with sigmoid, unless the picture has a color shader.
+- On the CPU, `Normalizer::upscaling` uses `spline` or `lanczos`.
 - `layer_size` lets a placed layer grow past its source size.
 - The result of an AI upscaler is its own. It is not meant to match the CPU.
 
