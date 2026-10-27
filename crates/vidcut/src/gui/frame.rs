@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use vidcut_av::player::{Config, ManualOutput, Player};
+use vidcut_av::player::{Config, ManualOutput, Player, SubtitleView};
 use vidcut_core::time::TimeSpec;
 use vidcut_core::{Error, Project, Result};
 
@@ -72,6 +72,16 @@ pub fn render(
     };
     let player = Player::new(plan, config, Box::new(ManualOutput::new()))
         .map_err(|e| failed(&e.to_string()))?;
+    player.set_subtitles(p.subtitles.iter().find(|t| t.shown).map(|t| {
+        let mut cues = t.cues.clone();
+        for c in &mut cues {
+            c.color = p.speakers.color_of(c);
+        }
+        SubtitleView {
+            style: t.style.clone(),
+            cues,
+        }
+    }));
     player.follow(t, 0.0);
     let started = Instant::now();
     let shown = loop {
