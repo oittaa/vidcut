@@ -12,9 +12,8 @@ On macOS, VideoToolbox frames go to the viewer as Metal textures, and to the H.2
 
 - **The AI processes of macOS:** they keep VideoToolbox frames on the GPU, in and out. Frames that the CPU decodes, and frames with a turn, go through RGB.
 - **ProRes 4444 exports:** they use `prores_ks` on the CPU. `prores_videotoolbox` takes 4:4:4 with alpha only as AYUV64, a layout that vidcut does not make.
-- **Padding and color changes:** `vt::can_fit` keeps a frame on the GPU only when its colors stay and it needs no padding. Other frames come down for the CPU.
-  - The pixel transfer of the fitter can pad a frame (`kVTScalingMode_Letterbox`). Check its colors against the CPU's first.
-  - A Metal compute pass on the IOSurface of the frame can pad it and convert its colors, as for the dissolves below.
+- **Color changes:** `vt::can_fit` keeps a frame on the GPU only when its colors stay. Other frames come down for the CPU.
+  - A Metal compute pass on the IOSurface of the frame can convert its colors, as for the dissolves below.
 - **Dissolves, burned-in subtitles, titles and placed pictures:** the frames come down while one of them shows.
   - [gpu-dissolves.md](gpu-dissolves.md), [gpu-burn-in.md](gpu-burn-in.md) and [gpu-placement.md](gpu-placement.md) plan a Metal pass for each.
 - **ProRes 4444 with alpha in the viewer:** VideoToolbox gives it as AYUV64, its samples packed in one plane. The shader of the viewer doesn't read this layout, so it comes down.
