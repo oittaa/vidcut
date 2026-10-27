@@ -159,7 +159,7 @@ impl Fit {
             None => turned,
         };
         if let Some((recolor, colors)) = self.recolor.as_deref_mut() {
-            return recolor.run(&sized, colors, self.layout, self.target);
+            return recolor.run(&sized, colors, self.layout);
         }
         match &mut self.transfer {
             Some((transfer, made)) => {
@@ -168,6 +168,12 @@ impl Fit {
                 made.made_as(transfer, from, &sized, shape, FITTING)
             }
             None => Ok(sized),
+        }
+    }
+
+    pub(super) fn tag(&self, out: &mut frame::Video) {
+        if self.recolor.is_some() {
+            crate::color::tag_frame(out, self.target);
         }
     }
 }
@@ -201,6 +207,10 @@ impl Fit {
     }
 
     pub(super) fn run(&mut self, _f: &frame::Video) -> Result<frame::Video> {
+        match self.0 {}
+    }
+
+    pub(super) fn tag(&self, _out: &mut frame::Video) {
         match self.0 {}
     }
 }

@@ -1,26 +1,22 @@
 use objc2::AllocAnyThread;
 use objc2::rc::Retained;
-use objc2::runtime::ProtocolObject;
-use objc2_core_foundation::CFRetained;
-use objc2_core_video::CVPixelBufferGetIOSurface;
-use objc2_io_surface::IOSurfaceRef;
 use objc2_metal::{
-    MTLClearColor, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
-    MTLCreateSystemDefaultDevice, MTLDevice, MTLLoadAction, MTLOrigin, MTLPixelFormat, MTLRegion,
-    MTLRenderPassDescriptor, MTLSize, MTLStoreAction, MTLTexture, MTLTextureDescriptor,
+    MTLClearColor, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLLoadAction, MTLOrigin,
+    MTLPixelFormat, MTLRegion, MTLRenderPassDescriptor, MTLSize, MTLStoreAction, MTLTexture,
     MTLTextureUsage,
 };
 use objc2_metal_performance_shaders::{MPSImageLanczosScale, MPSScaleTransform};
 
 use crate::error::{Error, Result};
 use crate::ffmpeg::{ffi, format, frame::Video};
-use crate::frame_processor::{Frames, pixels};
+use crate::frame_processor::Frames;
+use crate::metal::{Device, Queue, surface, texture};
 
 const WHAT: &str = "lanczos scaling on Metal";
 
 pub(crate) struct Lanczos {
-    device: Retained<ProtocolObject<dyn MTLDevice>>,
-    queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
+    device: Device,
+    queue: Queue,
     kernel: Retained<MPSImageLanczosScale>,
     frames: Frames,
 }
@@ -69,11 +65,6 @@ pub(crate) fn centered(f: &Video, out: (u32, u32), size: (u32, u32)) -> (u32, u3
     )
 }
 
-fn surface(f: &Video) -> Result<CFRetained<IOSurfaceRef>> {
-    CVPixelBufferGetIOSurface(Some(pixels(f, WHAT)?))
-        .ok_or_else(|| refused("a pixel buffer without an IOSurface"))
-}
-
 pub(crate) fn sized(
     lanczos: &mut Option<Lanczos>,
     f: &Video,
@@ -94,10 +85,7 @@ pub(crate) fn sized(
 
 impl Lanczos {
     pub(crate) fn new() -> Result<Self> {
-        let device = MTLCreateSystemDefaultDevice().ok_or_else(|| refused("no Metal device"))?;
-        let queue = device
-            .newCommandQueue()
-            .ok_or_else(|| refused("no command queue"))?;
+        let (device, queue) = crate::metal::device(WHAT)?;
         // SAFETY: a new kernel on a live device.
         let kernel =
             unsafe { MPSImageLanczosScale::initWithDevice(MPSImageLanczosScale::alloc(), &device) };
@@ -107,30 +95,6 @@ impl Lanczos {
             kernel,
             frames: Frames::default(),
         })
-    }
-
-    fn texture(
-        &self,
-        surface: &IOSurfaceRef,
-        plane: usize,
-        format: MTLPixelFormat,
-        usage: MTLTextureUsage,
-    ) -> Result<Retained<ProtocolObject<dyn MTLTexture>>> {
-        let (w, h) = (
-            surface.width_of_plane(plane),
-            surface.height_of_plane(plane),
-        );
-        // SAFETY: `desc` is the plane's size and format; Metal checks it against `surface`.
-        unsafe {
-            let desc =
-                MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                    format, w, h, false,
-                );
-            desc.setUsage(usage);
-            self.device
-                .newTextureWithDescriptor_iosurface_plane(&desc, surface, plane)
-        }
-        .ok_or_else(|| refused("Metal won't make a texture of the IOSurface"))
     }
 
     pub(crate) fn scale(&mut self, f: &Video, size: (u32, u32)) -> Result<Video> {
@@ -168,7 +132,7 @@ impl Lanczos {
         let out = self
             .frames
             .fresh(f, (size, ffi::AVPixelFormat::from(layout)), WHAT)?;
-        let (from, to) = (surface(f)?, surface(&out)?);
+        let (from, to) = (surface(f, WHAT)?, surface(&out, WHAT)?);
         if from.plane_count() != 2 || to.plane_count() != 2 {
             return Err(refused("IOSurfaces of other than two planes"));
         }
@@ -181,9 +145,10 @@ impl Lanczos {
             .ok_or_else(|| refused("no command buffer"))?;
         let mut held = Vec::with_capacity(4);
         for (plane, format) in formats.into_iter().enumerate() {
-            let a = self.texture(&from, plane, format, MTLTextureUsage::ShaderRead)?;
+            let read = MTLTextureUsage::ShaderRead;
+            let a = texture(&self.device, &from, (plane, format), read, WHAT)?;
             let usage = MTLTextureUsage::ShaderWrite | MTLTextureUsage::RenderTarget;
-            let b = self.texture(&to, plane, format, usage)?;
+            let b = texture(&self.device, &to, (plane, format), usage, WHAT)?;
             if padded {
                 let [r, g] = black(format, full)[plane];
                 let pass = MTLRenderPassDescriptor::renderPassDescriptor();
@@ -241,12 +206,7 @@ impl Lanczos {
         buffer.commit();
         buffer.waitUntilCompleted();
         drop(held);
-        if buffer.status() != MTLCommandBufferStatus::Completed {
-            return Err(buffer.error().map_or_else(
-                || refused("the scaling did not end"),
-                |e| crate::frame_processor::failed(WHAT, e),
-            ));
-        }
+        crate::metal::ended(&buffer, WHAT)?;
         Ok(out)
     }
 }
