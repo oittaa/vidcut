@@ -155,7 +155,8 @@ Folders:
 
 - `media.add_folder` lists the folder with `Env::read_folder` (`folder::read`).
   - It sorts the files and folders by name, without case, as the pool does.
-  - It leaves out names that start with a dot. It does not follow links.
+  - It leaves out names that start with a dot.
+  - It skips a link to a folder. A link to a file is added.
   - It skips a folder that is the same folder as one above it, for example a bind mount (`folder::LOOPS`).
 - It adds the media in that order, each into the bin of its folder. Each folder that it reads gets its bin.
 - A file is media by its extension (`folder::MEDIA_TYPES`, `folder::IMAGE_TYPES`). Why:
