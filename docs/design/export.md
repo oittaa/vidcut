@@ -54,10 +54,12 @@ Colors:
 
 - `export::choose_colors` picks the dynamic range and the bit depth that the settings leave open (spec D44).
 - The dynamic range follows the timeline color space of the plan (`RenderPlan::colors`).
+  - With Auto, 8 bits that are set, or that the codec or profile fixes, make the export SDR.
 - `render::timeline_colors` resolves the timeline color space. With Auto, the timeline is HDR when most of its picture is HDR.
   - A plan of the whole timeline counts its own pictures. For a plan of a range, `render::auto_colors` counts the pictures of the whole timeline.
 - The bit depth:
-  - A depth that is set, or that the codec or profile fixes, wins. HDR is 10-bit.
+  - HDR is 10-bit, also when 8 bits are set.
+  - Else a depth that is set, or that the codec or profile fixes, wins.
   - SDR is 10-bit when more than half of the picture has 10 bits or more.
   - SDR H.264 is 8-bit. Why: few players play 10-bit H.264.
   - SDR takes 10 bits only from the encoder that an 8-bit export starts with. Why: vidcut does not move to a slower encoder for 10 bits.
@@ -149,10 +151,10 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
 - At a shot change between the two frames, the nearer frame shows (`Source::cut`).
   - The test is the scene score of Detect Scene Cuts over three frames (`analysis::scene_score`, `SCENE_SCORE`).
   - A pair with no decoded frame before it is not a cut. Why: a false cut holds a frame here, but only marks a shot in Detect Scene Cuts.
-- The pair becomes RGB, upright, at the size that the picture shows at, at most the source size (`between_size`).
+- With the frame rate conversion of macOS and two VideoToolbox frames, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
+- Else the pair becomes RGB, upright, at the size that the picture shows at, at most the source size (`between_size`). `interpolate::between` makes the frame.
   - `Source::rgb_of` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next.
-  - VideoToolbox frames can stay on the GPU ([gpu](gpu.md#frame-interpolation)).
-- `interpolate::between` makes the frame. The picture then goes through the usual fitting.
+- The made frame then goes through the usual fitting.
 - An exact source frame, the first frame of a file, an HDR frame, a piece played backward and a still take the usual path.
 
 Seeks:
