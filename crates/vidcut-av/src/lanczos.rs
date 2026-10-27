@@ -217,8 +217,8 @@ impl Lanczos {
             let transform = MPSScaleTransform {
                 scaleX: pw as f64 / a.width() as f64,
                 scaleY: ph as f64 / a.height() as f64,
-                translateX: px as f64,
-                translateY: py as f64,
+                translateX: 0.0,
+                translateY: 0.0,
             };
             let clip = MTLRegion {
                 origin: MTLOrigin { x: px, y: py, z: 0 },

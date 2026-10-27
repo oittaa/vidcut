@@ -124,6 +124,7 @@ In exports:
   2. Lanczos on Metal scales it (`lanczos::Lanczos`). `MPSImageLanczosScale` scales each plane of its IOSurface as a texture, as the CPU's lanczos scales each plane.
      - A frame that needs bars goes into the middle of a frame of the output size (`lanczos::centered`). A render pass first clears each plane to black in the range of the frame.
      - As FFmpeg's pad filter, the place of the picture is rounded down to the grid of its chroma.
+     - The clip rectangle of the kernel is the place of the picture, and its origin is the origin of the source. Thus the scale transform only scales.
   3. A pixel transfer of VideoToolbox changes its layout, such as 4:2:0 into the 10-bit 4:2:2 of ProRes (`Transfer`).
   - The scaling of VideoToolbox itself, which the pixel transfer and FFmpeg's scale_vt use, keeps less detail than lanczos. Thus no step scales with it.
 - A VideoToolbox frame that comes down is not copied. `hw::to_read` maps its pixel buffer (`av_hwframe_map`), and the CPU reads it in place.
