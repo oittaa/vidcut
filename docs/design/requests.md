@@ -73,7 +73,8 @@ The registry and the client:
 - `session::run_with` refuses live requests, and answers projectless requests itself. For other requests, it opens the `Store` of the project.
 - A mutation runs in `Store::transact`: take the lock (`Store::lock`), load the project and its history, `Editor::apply`, and save if the revision moved.
 - A query needs no lock.
-- `proxy.generate` and `subtitles.transcribe` first do their work on a copy, outside the lock (`work_first`, spec D41). Inside the lock, the edit finds the work done.
+- `proxy.generate` (spec D41), the transcriptions and the re-timings first do their work on a copy, outside the lock (`work_first`). Inside the lock, the edit finds the work done.
+  - The transcriptions are `subtitles.transcribe`, `media.transcribe` and `analyze.words`. The re-timings are `subtitles.retime` and `subtitles.time_words`.
 
 ## Live
 
