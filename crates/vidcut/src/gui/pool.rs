@@ -1591,8 +1591,12 @@ impl Workspace {
                 use super::super_scale::{SHARPNESS, UPSCALERS};
                 use vidcut_core::model::Upscaler;
                 let now = m.super_scale;
-                let shown = self.project_shared().map_or_else(Default::default, |p| {
-                    vidcut_core::render::super_scale_of(now, &p.settings)
+                let settings = self.project_shared().map(|p| p.settings.clone());
+                let project = settings
+                    .as_ref()
+                    .map_or_else(Default::default, |s| s.upscaler);
+                let shown = settings.as_ref().map_or_else(Default::default, |s| {
+                    vidcut_core::render::super_scale_of(now, s)
                 });
                 for (on, label) in [(false, "Off"), (true, "On")] {
                     if ui.radio(now.on == on, label).clicked() {
@@ -1603,7 +1607,8 @@ impl Workspace {
                 ui.add_enabled_ui(!now.is_off(), |ui| {
                     ui.menu_button("Upscaler", |ui| {
                         for &(upscaler, label) in UPSCALERS {
-                            if ui.radio(now.upscaler == upscaler, label).clicked() {
+                            let text = super::super_scale::upscaler_text(upscaler, label, project);
+                            if ui.radio(now.upscaler == upscaler, text).clicked() {
                                 put = Some(json!({ "upscaler": upscaler }));
                             }
                         }

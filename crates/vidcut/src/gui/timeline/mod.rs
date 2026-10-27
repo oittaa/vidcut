@@ -3213,13 +3213,26 @@ impl Workspace {
                 });
                 super::dialog::row(ui, "Freeze Frame", |ui| ui.checkbox(&mut d.freeze, ""));
                 if !pictured.is_empty() {
+                    let project = self.project().and_then(|p| {
+                        let c = p.clip(&pictured[0])?;
+                        let m = p.media(&c.media)?;
+                        let chosen = ClipRetime::Project;
+                        Some(vidcut_core::render::retime_at(
+                            chosen,
+                            d.speed(),
+                            m,
+                            &p.settings,
+                        ))
+                    });
+                    let project = project.unwrap_or(vidcut_core::model::Retime::Nearest);
+                    let text = |r| super::retime_process::clip_text(r, project);
                     super::dialog::row(ui, "Retime Process", |ui| {
                         ui.add_enabled_ui(!d.freeze, |ui| {
                             egui::ComboBox::from_id_salt("speed-retime")
-                                .selected_text(d.retime.title())
+                                .selected_text(text(d.retime))
                                 .show_ui(ui, |ui| {
                                     for r in super::retime_process::PROCESSES {
-                                        ui.selectable_value(&mut d.retime, r, r.title());
+                                        ui.selectable_value(&mut d.retime, r, text(r));
                                     }
                                 });
                         });

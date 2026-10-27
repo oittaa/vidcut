@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ColorSpace, DuckDetect, Hdr, Keyframe, Media, MediaSuperScale, Picture, Project, Retime,
-    Settings, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
+    Clip, ClipRetime, ColorSpace, DuckDetect, Hdr, Keyframe, Media, MediaSuperScale, Picture,
+    Project, Retime, Settings, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -978,16 +978,20 @@ fn origin_of(m: &Media) -> (PathBuf, f64) {
 }
 
 pub fn retime_of(c: &Clip, m: &Media, s: &Settings) -> Retime {
+    retime_at(c.retime, c.speed(), m, s)
+}
+
+pub fn retime_at(chosen: ClipRetime, speed: f64, m: &Media, s: &Settings) -> Retime {
     let lands = m.info.video.as_ref().is_some_and(|v| {
-        let step = c.speed() * v.fps.as_f64() / s.fps.as_f64();
+        let step = speed * v.fps.as_f64() / s.fps.as_f64();
         (step - step.round()).abs() < 1e-9
     });
     if lands || m.is_still() {
         return Retime::Nearest;
     }
-    let slow = c.speed() > 0.0 && c.speed() < 1.0;
+    let slow = speed > 0.0 && speed < 1.0;
     let sdr = m.video_as_read().is_some_and(|v| v.hdr.is_none());
-    c.retime
+    chosen
         .process()
         .or_else(|| s.retime.process())
         .unwrap_or(if slow && sdr {

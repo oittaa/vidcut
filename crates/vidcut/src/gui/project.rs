@@ -85,29 +85,32 @@ impl Format {
     }
 
     fn edit_ai(&mut self, ui: &mut egui::Ui) {
-        use super::super_scale::{PROJECT_UPSCALERS, label_of};
+        use super::super_scale::{PROJECT_UPSCALERS, label_of, project_upscaler_text};
         egui::Grid::new(ui.scope_id().with("ai"))
             .num_columns(2)
             .spacing([12.0, 8.0])
             .show(ui, |ui| {
                 let label = ui.label("Retime Process");
+                let text = super::retime_process::project_text;
                 egui::ComboBox::from_id_salt("project retime")
-                    .selected_text(self.retime.title())
-                    .width(170.0)
+                    .selected_text(text(self.retime))
+                    .width(240.0)
                     .show_ui(ui, |ui| {
                         for r in super::retime_process::PROJECT_PROCESSES {
-                            ui.selectable_value(&mut self.retime, r, r.title());
+                            ui.selectable_value(&mut self.retime, r, text(r));
                         }
                     })
                     .response
                     .labelled_by(label.id);
                 ui.end_row();
                 let label = ui.label("Super Scale Upscaler");
+                let now = label_of(PROJECT_UPSCALERS, self.upscaler);
                 egui::ComboBox::from_id_salt("project upscaler")
-                    .selected_text(label_of(PROJECT_UPSCALERS, self.upscaler))
-                    .width(170.0)
+                    .selected_text(project_upscaler_text(self.upscaler, now))
+                    .width(240.0)
                     .show_ui(ui, |ui| {
                         for &(u, text) in PROJECT_UPSCALERS {
+                            let text = project_upscaler_text(u, text);
                             ui.selectable_value(&mut self.upscaler, u, text);
                         }
                     })

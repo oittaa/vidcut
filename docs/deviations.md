@@ -1790,6 +1790,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Project Settings has the upscaler of the media that follow the project (`upscaler` of `project.set`).
     - It is Auto, the default, AI Best, AI Fast or Classic.
     - Auto is AI on macOS, and AI Best elsewhere.
+  - The lists name the upscaler that Auto and Project Settings give on this computer, as in Auto (AI Best).
   - On macOS, the upscalers are AI and Classic. AI Fast and AI Best are off there for now: exports and the viewer refuse them.
   - On macOS, AI is the upscaler of Auto. It is the super-resolution scaler of macOS 26 and later (`VTFrameProcessor` of VideoToolbox), `macos` in requests.
     - It enlarges by a factor that macOS offers. It takes the smallest of these that reaches the shown size, and the result is fitted.
@@ -1895,6 +1896,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Its values are Auto, the default, Nearest, Frame Blend, AI Fast and AI Best.
     - Auto gives slow motion the AI of the computer that plays or exports: AI on macOS, AI Fast elsewhere.
     - Auto gives Nearest to the rest: clips at 100% or faster, frozen and backward clips, and HDR pictures.
+  - The lists name the process that Auto and Project Settings give on this computer, as in Project Settings (AI Fast).
   - On macOS, the processes are Nearest, Frame Blend and AI, `macos` in requests. AI Fast and AI Best are off on macOS.
     - AI is the frame rate conversion of macOS (`VTFrameProcessor` of VideoToolbox). macOS does not download a model for it.
     - An export on another system refuses AI, and an export on macOS refuses AI Fast and AI Best.

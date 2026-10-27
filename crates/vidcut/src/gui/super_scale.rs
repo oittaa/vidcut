@@ -53,6 +53,25 @@ pub(super) fn label_of<T: PartialEq + Copy>(list: &[(T, &'static str)], value: T
         .map_or("", |(_, l)| *l)
 }
 
+pub(super) fn upscaler_text(u: MediaUpscaler, label: &str, project: ProjectUpscaler) -> String {
+    match u {
+        MediaUpscaler::Project => {
+            format!(
+                "Project Settings ({})",
+                label_of(&NAMES, project.upscaler())
+            )
+        }
+        _ => label.into(),
+    }
+}
+
+pub(super) fn project_upscaler_text(u: ProjectUpscaler, label: &str) -> String {
+    match u {
+        ProjectUpscaler::Auto => format!("Auto ({})", label_of(&NAMES, u.upscaler())),
+        _ => label.into(),
+    }
+}
+
 pub(super) fn described(s: SuperScale) -> String {
     match s.upscaler {
         Upscaler::Classic => format!("Classic, Sharpness {}", label_of(&SHARPNESS, s.sharpness)),

@@ -1,5 +1,5 @@
 use serde_json::json;
-use vidcut_core::model::{ClipRetime, ProjectRetime};
+use vidcut_core::model::{ClipRetime, ProjectRetime, Retime};
 
 use super::workspace::Workspace;
 
@@ -36,6 +36,20 @@ pub(super) const PROJECT_PROCESSES: [ProjectRetime; 5] = [
     ProjectRetime::AiFast,
     ProjectRetime::AiBest,
 ];
+
+pub(super) fn clip_text(r: ClipRetime, project: Retime) -> String {
+    match r {
+        ClipRetime::Project => format!("Project Settings ({})", project.title()),
+        r => r.title().into(),
+    }
+}
+
+pub(super) fn project_text(r: ProjectRetime) -> String {
+    match r {
+        ProjectRetime::Auto => format!("Auto ({} for slow motion)", Retime::ai_here().title()),
+        r => r.title().into(),
+    }
+}
 
 impl Workspace {
     pub(super) fn set_retime(&mut self, clips: &[String], retime: ClipRetime) {

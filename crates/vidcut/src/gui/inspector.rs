@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project,
-    TrackKind, Upscaler, ZoomBox,
+    Retime, TrackKind, Upscaler, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, has_picture};
 use vidcut_core::place::upright_fit;
@@ -512,6 +512,7 @@ struct Paced {
     shown: Pace,
     rate: f64,
     retime: ClipRetime,
+    project: Retime,
     hdr: bool,
 }
 
@@ -1085,13 +1086,14 @@ fn speed_section(
             acts.push(Act::Ripple(on));
         }
         ui.end_row();
-        let retime = paced[0].retime;
+        let (retime, project) = (paced[0].retime, paced[0].project);
+        let text = |r| super::retime_process::clip_text(r, project);
         label(ui, "Retime Process", !retime.is_project());
         egui::ComboBox::from_id_salt("inspector-retime")
-            .selected_text(retime.title())
+            .selected_text(text(retime))
             .show_ui(ui, |ui| {
                 for r in super::retime_process::PROCESSES {
-                    if ui.selectable_label(retime == r, r.title()).clicked() && r != retime {
+                    if ui.selectable_label(retime == r, text(r)).clicked() && r != retime {
                         acts.push(Act::Retime(r));
                     }
                 }
@@ -1213,6 +1215,14 @@ impl Workspace {
                     shown,
                     rate: rate(p, c),
                     retime: c.retime,
+                    project: p.media(&c.media).map_or(Retime::Nearest, |m| {
+                        vidcut_core::render::retime_at(
+                            ClipRetime::Project,
+                            c.speed(),
+                            m,
+                            &p.settings,
+                        )
+                    }),
                     hdr: p
                         .media(&c.media)
                         .and_then(|m| m.video_as_read())
@@ -1620,7 +1630,7 @@ impl Workspace {
     }
 
     fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
-        use super::super_scale::{SHARPNESS, UPSCALERS, label_of, unfit};
+        use super::super_scale::{SHARPNESS, UPSCALERS, label_of, unfit, upscaler_text};
         let mut media: Vec<String> = chosen
             .iter()
             .filter_map(|c| p.clip(&c.id))
@@ -1657,12 +1667,14 @@ impl Workspace {
             ui.end_row();
             label(ui, "Upscaler", on);
             ui.add_enabled_ui(on, |ui| {
+                let project = p.settings.upscaler;
+                let text = |u, l| upscaler_text(u, l, project);
                 egui::ComboBox::from_id_salt("inspector-upscaler")
-                    .selected_text(label_of(UPSCALERS, now.upscaler))
+                    .selected_text(text(now.upscaler, label_of(UPSCALERS, now.upscaler)))
                     .show_ui(ui, |ui| {
-                        for &(upscaler, text) in UPSCALERS {
+                        for &(upscaler, l) in UPSCALERS {
                             if ui
-                                .selectable_label(now.upscaler == upscaler, text)
+                                .selectable_label(now.upscaler == upscaler, text(upscaler, l))
                                 .clicked()
                             {
                                 put = Some(json!({ "upscaler": upscaler }));
