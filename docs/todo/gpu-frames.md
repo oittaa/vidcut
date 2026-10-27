@@ -14,7 +14,6 @@
    - Thus a change of matrix or range, or HDR to SDR, brings every frame down.
    - VA-API's frames can get to libplacebo on Vulkan through FFmpeg. FFmpeg makes a Vulkan device from a VA-API or DRM device (`hw::Device::vulkan_on`).
    - Direct3D 11's frames need an import of vidcut's own, as the viewer has (`gui/picture.rs`).
-   - VideoToolbox's `scale_vt` converts colors, but no test compares it with the CPU's math (`vt::can_fit`).
    - Check each against the CPU's pictures on the barcode fixtures.
 2. **One backend for each place** (memory, CUDA, VA-API, Direct3D 11, VideoToolbox, Vulkan).
    - Each backend has `fit`, `down`, `up`, `keep` and `encoder_frames`.

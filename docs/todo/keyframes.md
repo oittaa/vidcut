@@ -4,11 +4,11 @@
 
 A keyframe is a value of a clip at one frame. Between two keyframes, the value goes from one to the other. In this file, a keyframe is never a video keyframe of a codec.
 
-- **Now:**
+- **In vidcut:**
   - A clip has volume keyframes on its volume line ([spec §9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
   - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` holds the volume keyframes.
-  - Stage 2 is built. Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
-  - Stage 3 is built. The Keyframes tab shows each value of the first selected clip that can have keyframes.
+  - Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
+  - The Keyframes tab shows each value of the first selected clip that can have keyframes.
   - Each value has a track. Its curve shows when the user turns it on. A drag moves a keyframe, a group or a handle.
   - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. Rotation is its own value. Each crop side, the crop softness and the opacity are values of their own.
   - The flips have no keyframes. Dynamic Zoom stays the two end boxes and has no Keyframe button.
@@ -116,9 +116,9 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 
 ## Scope
 
-**Stage 2 is built.** Transform, Crop and the volume line use `Keyframe`. The spec is [§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768) and D75. The buttons are in [X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels).
+**The values.** Transform, Crop and the volume line use `Keyframe`. The spec is [§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768) and D75. The buttons are in [X70](../deviations.md#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels).
 
-**Stage 3 is built.** The Keyframes tab sits beside the Inspector. The Timeline menu opens it. The spec is [§2](../cut-page-spec.md#2-layout-pp-636637) and [X87](../deviations.md#x87-the-keyframes-tab-has-an-ease-menu).
+**The Keyframes tab** sits beside the Inspector. The Timeline menu opens it. The spec is [§2](../cut-page-spec.md#2-layout-pp-636637) and [X87](../deviations.md#x87-the-keyframes-tab-has-an-ease-menu).
 
 - One track for each value that can have keyframes, in a group for its section. The ⋯ menu can hide the values without keyframes.
 - Each track has the curve button, the Keyframe button with its arrows, and Reset Keyframes.
@@ -141,7 +141,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - the Lock and Track Color controls (p. 1257)
   - the ruler in frames, Snap Keyframes to Grid, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
 
-**After stage 3:** keyframes of speed, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
+**Later:** keyframes of speed, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
 
 ## Model
 
@@ -157,21 +157,12 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 
 ## Playback and export
 
-**Now:**
-
-- `Placed` holds the clip's picture, the source frame of the piece and its pace.
-- `Placed::after` moves that source frame with the piece, as it moves a Dynamic Zoom.
-- `Picture::sampled` reads each keyed value at that source frame.
-- The curve of the key's own value is the volume Bezier curve.
-- Position Y and zoom Y keep the handle frames and use a value offset of 0.
-- `place::detail` uses the largest zoom key in the piece.
-- The viewer and the export take that placing. The GPU paths take it too.
-- Dynamic Zoom still uses its `Run` and `Placed::zoomed`.
-- The placed pictures are in [export](../design/export.md#placed-pictures).
+- [export](../design/export.md#placed-pictures) tells how the viewer and the export sample the keyed values (`Picture::sampled`).
+- The curve of a value between keys is the volume Bezier curve (`value_at`). Position Y and zoom Y keep the handle frames, with a value offset of 0 (`value_paired`).
 
 ## Interchange
 
-**What vidcut reads and writes now for the picture** (`otio::effects`, `otio::picture`):
+**What vidcut reads and writes for the picture** (`otio::effects`, `otio::picture`):
 
 - A clip effect is an OTIO `Effect.1` with the `effect_name` `Resolve Effect`.
 - Its data is in `metadata.Resolve_OTIO`: `Effect Name`, `Name`, `Type`, `Enabled`, `Display Type` and `Parameters`.
@@ -223,12 +214,12 @@ Rule 3: each GUI action has a request.
 
 - `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take the values of the picture in `param`.
 - `picture.set` takes an `at`. On a value with keyframes, it sets a keyframe at `at`, or at the playhead, as `clip.set` does for the volume ([D82](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-- `timeline.get` names the values of a clip that have keyframes, as it names `volume` now.
+- `timeline.get` names the values of a clip that have keyframes, as it names `volume`.
 - `gui.show keyframes` opens the Keyframes tab. `gui.close keyframes` closes it.
 
 ## Open questions
 
 - **Compound clips:** what does `edit.decompose` do with the keyframes of a compound clip for a clip inside that is frozen or plays backward?
 - **Dynamic Zoom:** can its boxes have times other than the ends of the clip?
-- **Keyframes alone:** copy and paste of selected keyframes (p. 1113). vidcut has none yet.
-- **Later stages:** do keyframes of speed (p. 737), the anchor point, or titles come in after stage 3?
+- **Keyframes alone:** copy and paste of selected keyframes (p. 1113). vidcut has none.
+- **Later work:** in which order do keyframes of speed (p. 737), the anchor point and titles come?

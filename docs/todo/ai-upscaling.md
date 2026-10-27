@@ -2,7 +2,7 @@
 
 **When:** next.
 
-Super Scale has an AI upscaler: NanoVSR 5.4M on shaders of vidcut's own ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). This file holds its measurements, the decisions and what is still to do.
+Super Scale has two AI upscalers on shaders of vidcut's own: NanoVSR 5.4M (AI Fast) and FlashVSR+ Turbo (AI Best) ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)). This file holds their measurements, the decisions and the open work.
 
 ## The model in vidcut
 
@@ -53,7 +53,7 @@ AI Best speed and memory on the owner's RTX 4080 SUPER (16 GB), on 2026-10-24:
 - The official time includes loading the model and compiling its Triton kernel. The official memory comes from `nvidia-smi` every 200 ms.
 - At 4K the official code kept the KV caches of its 5 global blocks in main memory.
 - At 4K, 30 frames take 3 chunks, so the DiT runs on 48 frames.
-- At 4K, `run::plan` planned about 12.1 GB, but the card's peak was 14.7 GB above idle. The plan does not count everything yet.
+- At 4K, `run::plan` planned about 12.1 GB, but the card's peak was 14.7 GB above idle. The plan does not count all of the memory.
 
 ## Decisions
 
@@ -69,7 +69,7 @@ AI Best speed and memory on the owner's RTX 4080 SUPER (16 GB), on 2026-10-24:
 
 ## Plan
 
-These parts are still to do:
+These parts are open:
 
 1. AI Best (FlashVSR+ Turbo). Its engine and its place in Super Scale are in the code.
    1. The memory plan: find the GPU memory that it does not count. At 4K the peak is 2.6 GB over the plan, near the size of the card.
@@ -77,26 +77,13 @@ These parts are still to do:
 2. A test of the chunk edges: each chunk starts from zero. A carried forward state or overlapping chunks may hide a change every 15 frames.
 3. Speed. The gain of each step is not known until it is measured.
    1. Measure where the time goes, with GPU timestamps: the network, the copies, the decoding and the encoding.
-   2. Use the tensor cores. PyTorch's convolutions use them through cuDNN; vidcut's shaders do not. wgpu's cooperative matrices take only 8×8 32-bit floats now.
+   2. Use the tensor cores. PyTorch's convolutions use them through cuDNN; vidcut's shaders do not. wgpu's cooperative matrices take only 8×8 32-bit floats.
    3. More sums in each thread of the Winograd shader. Reads of workgroup memory limit its main loop.
    4. 16-bit arithmetic in the shaders (`shader-f16`), on GPUs that run it faster than 32-bit.
    5. Make the bind groups once for each chunk, not for each pass.
    6. Decode each frame once. The chunk reader decodes the frames a second time.
-   7. Keep the frames on the GPU, from the decoder through the shaders to the encoder. They go through memory now. The viewer and the export both need it.
+   7. Keep the frames on the GPU, from the decoder through the shaders to the encoder. They go through memory. The viewer and the export both need it.
    8. Let the CPU decode and encode while the GPU runs the network.
-4. The shaders on the GPU that `gpu.device` names. They use the GPU that wgpu prefers now.
+4. The shaders on the GPU that `gpu.device` names. They use the high-performance GPU that wgpu picks.
 
-The weights are on NanoVSR's release v1.0:
-
-| File | Bytes | SHA-256 |
-|---|---|---|
-| `nanovsr_5.4m.pth` | 24624333 | `42a53e1dc9b928947ea9cea85d7dd6f7bd82b325e92374dc1946d2cbcadf31bc` |
-
-The weights of AI Best are on Hugging Face (`ruchangyao/FlashVSR_plus`, revision `46b79520946ac67dec94d1566490690953c7debc`) and in the code repo (`OpenImagingLab/FlashVSR_Plus`, commit `b548a2cc2c929d3d4676f2973abe27876ec4dee7`):
-
-| File | Bytes | SHA-256 |
-|---|---|---|
-| `turbo/dit.safetensors` | 5676070392 | `7862b92178176fa3aebc34c6c071daca6b56ab1dddb8e7ff9a01c47f5226ec8b` |
-| `turbo/lq_proj_in.safetensors` | 1151384272 | `e77b378ae12342eefbb58f924256f362a151b93ce73dd32808fcdaca9c051496` |
-| `TCDecoder.ckpt` | 189018333 | `e224bdcf2f52745cbf4d393ff5374c2ba09e90285d5d19062d2bf63b915b6161` |
-| `prompt_tensor/posi_prompt.pth` | 4195504 | `4601107a11e4e11a936a6b79df579e54dbc99872132bf542151f0ffd65b4b1ef` |
+The files of both models, with their sources, sizes and SHA-256, are in `crates/vidcut-core/src/catalog.rs`.
