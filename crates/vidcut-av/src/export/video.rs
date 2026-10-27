@@ -2577,8 +2577,23 @@ impl VideoFrames {
             .then(|| layer_size((w, h), cur, rotation, placed, super_scale.factor));
         let size = between_size(cur, rotation, wanted.unwrap_or((w, h)));
         let start = Instant::now();
-        let (pa, a) = src.rgb_of(true, size, reading)?;
-        let (pb, b) = src.rgb_of(false, size, reading)?;
+        let pair = match (&src.prev, &src.current) {
+            (Some((a, _)), Some((b, _)))
+                if crate::interpolate::takes_frames(*retime, a, b, rotation) =>
+            {
+                Some((frame_ref(a)?, frame_ref(b)?))
+            }
+            _ => None,
+        };
+        let pictures = match pair {
+            Some(_) => None,
+            None => Some((
+                src.rgb_of(true, size, reading)?.1,
+                src.rgb_of(false, size, reading)?.1,
+            )),
+        };
+        let pts = |f: &Option<(frame::Video, f64)>| f.as_ref().and_then(|(f, _)| f.pts());
+        let (pa, pb) = (pts(&src.prev), pts(&src.current));
         let key = (
             src.reader.path().to_path_buf(),
             pa.unwrap_or(0),
@@ -2593,9 +2608,25 @@ impl VideoFrames {
                 crate::interpolate::name(*retime)
             );
             crate::interpolate::kept_at_cut(*retime, size, weight);
-            if weight < 0.5 { a } else { b }
+            let nearer = weight < 0.5;
+            match pictures {
+                Some((a, b)) => {
+                    if nearer {
+                        a
+                    } else {
+                        b
+                    }
+                }
+                None => src.rgb_of(nearer, size, reading)?.1,
+            }
         } else {
-            let made = crate::interpolate::between(*retime, &key, &a, &b, size, weight)?;
+            let made = match &pair {
+                Some((a, b)) => crate::interpolate::between_frames(&key, a, b, size, weight)?,
+                None => {
+                    let (a, b) = pictures.as_ref().expect("the pictures of the pair");
+                    crate::interpolate::between(*retime, &key, a, b, size, weight)?
+                }
+            };
             crate::debug!(
                 "interpolate",
                 "{}: {}x{} at {weight:.3} in {:.1} ms",

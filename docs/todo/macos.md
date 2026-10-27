@@ -10,11 +10,10 @@
 
 On macOS, VideoToolbox frames go to the viewer as Metal textures, and to the H.264 and HEVC encoders of VideoToolbox. A frame that comes down is read in place. These parts still go through the CPU:
 
-- **The AI processes of macOS:** AI of Super Scale and AI of Retime Process get each picture as RGB from the CPU. They give RGB back.
-  - On the way, the CPU converts each picture to 16-bit float RGBA and back (`frame_processor`).
+- **The AI processes of macOS:** AI of Retime Process takes VideoToolbox frames on the GPU. These parts still go through the CPU:
+  - The frame that AI of Retime Process makes comes back as RGB, and goes on in memory.
+  - AI of Super Scale gets each picture as RGB from the CPU, and gives RGB back. Its scaling takes most of the time, but the copies take memory and CPU time.
   - The decoder, the processes of macOS and the compositor can all keep the picture in an IOSurface on the GPU.
-  - On an M4 with macOS 27, AI of Retime Process takes 170 ms for a new pair of UHD frames. It takes 24 ms when the pair stays.
-  - Thus the copies and the conversions can take most of the time. Measure each step first.
 - **ProRes exports:** they use `prores_ks` on the CPU (`parts::PRORES`). `gpu_name` has no ProRes encoder of VideoToolbox.
   - vidcut already tests `prores_videotoolbox`, and proxies use it. The M4 has an engine for ProRes.
   - First check that its profiles and its quality give what the settings of the export ask for.

@@ -1,8 +1,15 @@
 use std::path::PathBuf;
 
 use crate::error::Result;
+use crate::ffmpeg::frame;
 
 type Key = (PathBuf, i64, i64);
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(super) enum Input<'a> {
+    Rgb(&'a [u8]),
+    Frame(&'a frame::Video),
+}
 
 const NEEDS: &str = "the frame rate conversion of macOS isn't on this Mac";
 
@@ -10,7 +17,7 @@ pub(super) fn ready() -> Result<()> {
     imp::ready()
 }
 
-pub(super) fn between(key: &Key, a: &[u8], b: &[u8], size: (u32, u32), t: f64) -> Result<Vec<u8>> {
+pub(super) fn between(key: &Key, a: Input, b: Input, size: (u32, u32), t: f64) -> Result<Vec<u8>> {
     imp::between(key, a, b, size, t)
 }
 
@@ -20,7 +27,7 @@ pub(super) fn release() {
 
 #[cfg(not(target_os = "macos"))]
 mod imp {
-    use super::{Key, NEEDS};
+    use super::{Input, Key, NEEDS};
     use crate::error::{Error, Result};
 
     pub(super) fn ready() -> Result<()> {
@@ -29,8 +36,8 @@ mod imp {
 
     pub(super) fn between(
         _key: &Key,
-        _a: &[u8],
-        _b: &[u8],
+        _a: Input,
+        _b: Input,
         _size: (u32, u32),
         _t: f64,
     ) -> Result<Vec<u8>> {
@@ -49,7 +56,7 @@ mod imp {
     use objc2::runtime::{AnyClass, ProtocolObject};
     use objc2_core_foundation::CFRetained;
     use objc2_core_media::CMTime;
-    use objc2_core_video::CVPixelBufferPool;
+    use objc2_core_video::{CVPixelBuffer, CVPixelBufferPool};
     use objc2_foundation::{NSArray, NSNumber};
     use objc2_video_toolbox::{
         VTFrameProcessor, VTFrameProcessorFrame, VTFrameRateConversionConfiguration,
@@ -57,9 +64,11 @@ mod imp {
         VTFrameRateConversionParametersSubmissionMode as Mode,
     };
 
-    use super::{Key, NEEDS};
+    use super::{Input, Key, NEEDS};
     use crate::error::{Error, Result};
-    use crate::frame_processor::{buffer, failed, format_in, fourcc, frame, pool, read, write};
+    use crate::frame_processor::{
+        Transfer, buffer, failed, format_in, fourcc, frame, pool, read, write,
+    };
 
     const WHAT: &str = "the frame rate conversion of macOS";
 
@@ -87,6 +96,7 @@ mod imp {
         processor: Retained<VTFrameProcessor>,
         sources: CFRetained<CVPixelBufferPool>,
         outputs: CFRetained<CVPixelBufferPool>,
+        transfer: Transfer,
         format: u32,
         size: (u32, u32),
         pair: Option<Pair>,
@@ -151,19 +161,31 @@ mod imp {
                 processor,
                 sources,
                 outputs,
+                transfer: Transfer::new(WHAT)?,
                 format,
                 size,
                 pair: None,
             })
         }
 
-        fn frame(&self, rgb: &[u8], at: CMTime) -> Result<Retained<VTFrameProcessorFrame>> {
+        fn frame(&self, input: &Input, at: CMTime) -> Result<Retained<VTFrameProcessorFrame>> {
             let picture = buffer(&self.sources, WHAT)?;
-            write(&picture, self.format, self.size, rgb)?;
+            match input {
+                Input::Rgb(rgb) => write(&picture, self.format, self.size, rgb)?,
+                Input::Frame(f) => {
+                    // SAFETY: a VideoToolbox frame's `data[3]` is its pixel buffer, alive as long as the frame.
+                    let from = unsafe { (*f.as_ptr()).data[3].cast::<CVPixelBuffer>().as_ref() }
+                        .ok_or_else(|| {
+                            Error::Invalid(format!("{WHAT}: a frame without a pixel buffer"))
+                        })?;
+                    let matrix = crate::color::colors_of(f).matrix;
+                    self.transfer.run(from, matrix, &picture, WHAT)?;
+                }
+            }
             frame(&picture, at, WHAT)
         }
 
-        fn between(&mut self, key: &Key, a: &[u8], b: &[u8], t: f64) -> Result<Vec<u8>> {
+        fn between(&mut self, key: &Key, a: Input, b: Input, t: f64) -> Result<Vec<u8>> {
             let mode = match &self.pair {
                 Some(p) if p.key == *key => Mode::SequentialReferencesUnchanged,
                 Some(p) if p.key.0 == key.0 && p.key.2 == key.1 => Mode::Sequential,
@@ -173,8 +195,8 @@ mod imp {
             if mode != Mode::SequentialReferencesUnchanged {
                 self.pair = Some(Pair {
                     key: key.clone(),
-                    source: self.frame(a, time(key.1, 1))?,
-                    next: self.frame(b, time(key.2, 1))?,
+                    source: self.frame(&a, time(key.1, 1))?,
+                    next: self.frame(&b, time(key.2, 1))?,
                 });
             }
             let pair = self.pair.as_ref().expect("a pair");
@@ -231,8 +253,8 @@ mod imp {
 
     pub(super) fn between(
         key: &Key,
-        a: &[u8],
-        b: &[u8],
+        a: Input,
+        b: Input,
         size: (u32, u32),
         t: f64,
     ) -> Result<Vec<u8>> {

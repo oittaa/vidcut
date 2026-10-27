@@ -380,6 +380,9 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - It keeps one session of `VTFrameProcessor` for each frame size. The session goes when the last `interpolate::User` goes.
   - The pair stays in the session. The frames between one pair tell macOS that the pair is the same, and the next pair tells it that the frames follow.
   - It shares the picture buffers and the pixel formats with the scaler of macOS (`frame_processor`).
+  - Two VideoToolbox frames that need no turn go to macOS without the CPU (`interpolate::takes_frames`). A pixel transfer of VideoToolbox scales and converts them on the GPU (`Transfer`).
+    - The transfer takes the matrix that vidcut finds for the frame, and keeps the primaries and the transfer function of BT.709.
+  - Other frames come as RGB from the CPU, and the CPU converts them.
 - **The work report** (`interpolate::report`):
   - The device reports its GPU when it starts. The session of macOS reports macOS.
   - `interpolate::between` reports each made frame (`interpolate::Made`): the process, the size, the weight and the time.
