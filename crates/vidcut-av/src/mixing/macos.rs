@@ -93,24 +93,33 @@ struct Level {
     float opacity;
 };
 
+struct Source {
+    uint cols, rows, tx, ty;
+    float sa, sd;
+    float lo[2], hi[2];
+};
+
 struct Plane {
     uint width, height;
-    uint comps, bytes, shift, top;
+    uint plane, bytes, shift, top;
     uint x0, y0, x1, y1;
-    uint cols, rows;
-    uint tx, ty, count;
-    float across, down, sa, sd;
+    uint count, mode, full;
+    uint frame[2];
+    float across, down, level;
+    float kr, kb, unit;
     float fitted[4];
-    float lo[2], hi[2];
-    float level;
+    Source sources[2];
     Level levels[8];
 };
 
 struct Place {
     Plane p;
     uint black;
-    uint value;
+    uint values[2];
 };
+
+constant float3 BT709 = float3(0.2126f, 0.7152f, 0.0722f);
+constant float3 BT601 = float3(0.299f, 0.587f, 0.114f);
 
 float2 code(texture2d<uint, access::read> t, uint2 at, constant Plane& p) {
     return float2((t.read(at).xy >> uint2(p.shift)) & uint2(p.top));
@@ -158,40 +167,168 @@ bool covered(constant Plane& p, float x, float y, thread float& cover) {
     return true;
 }
 
-float2 sampled(texture2d<uint, access::read> src, constant Plane& p, uint2 g) {
+float2 sampled(texture2d<uint, access::read> src, constant Plane& p, uint q, uint2 g) {
+    constant Source& s = p.sources[q];
     constant Level& l = p.levels[p.count - 1];
     float2 sum = float2(0.0f);
-    for (uint j = 0; j < p.ty; j++) {
-        for (uint i = 0; i < p.tx; i++) {
-            float px = float(g.x) * p.across + (float(i) + 0.5f) / float(p.tx) * p.across;
-            float py = float(g.y) * p.down + (float(j) + 0.5f) / float(p.ty) * p.down;
+    for (uint j = 0; j < s.ty; j++) {
+        for (uint i = 0; i < s.tx; i++) {
+            float px = float(g.x) * p.across + (float(i) + 0.5f) / float(s.tx) * p.across;
+            float py = float(g.y) * p.down + (float(j) + 0.5f) / float(s.ty) * p.down;
             float w = l.back[6] * px + l.back[7] * py + 1.0f;
             if (!isfinite(w) || fabs(w) < 1e-12f) {
                 continue;
             }
             float u = (l.back[0] * px + l.back[1] * py + l.back[2]) / w;
             float v = (l.back[3] * px + l.back[4] * py + l.back[5]) / w;
-            float sx = clamp((p.fitted[0] + u * p.fitted[2]) / p.sa - 0.5f, p.lo[0],
-                             max(p.hi[0], p.lo[0]));
-            float sy = clamp((p.fitted[1] + v * p.fitted[3]) / p.sd - 0.5f, p.lo[1],
-                             max(p.hi[1], p.lo[1]));
+            float sx = clamp((p.fitted[0] + u * p.fitted[2]) / s.sa - 0.5f, s.lo[0],
+                             max(s.hi[0], s.lo[0]));
+            float sy = clamp((p.fitted[1] + v * p.fitted[3]) / s.sd - 0.5f, s.lo[1],
+                             max(s.hi[1], s.lo[1]));
             float kx = floor(sx), ky = floor(sy);
             float ax = sx - kx, ay = sy - ky;
             uint c0 = uint(kx), r0 = uint(ky);
-            uint c1 = min(c0 + 1u, p.cols - 1u);
-            uint r1 = min(r0 + 1u, p.rows - 1u);
+            uint c1 = min(c0 + 1u, s.cols - 1u);
+            uint r1 = min(r0 + 1u, s.rows - 1u);
             float2 top = code(src, uint2(c0, r0), p) * (1.0f - ax) + code(src, uint2(c1, r0), p) * ax;
             float2 bottom = code(src, uint2(c0, r1), p) * (1.0f - ax) + code(src, uint2(c1, r1), p) * ax;
             sum += top * (1.0f - ay) + bottom * ay;
         }
     }
-    return sum / float(p.tx * p.ty);
+    return sum / float(s.tx * s.ty);
+}
+
+float2 below(texture2d<uint, access::read> t, constant Place& q, uint plane, uint2 g) {
+    constant Plane& p = q.p;
+    if (q.black != 0u) {
+        return float2(float(q.values[plane]));
+    }
+    uint2 n = (uint2(p.frame[0], p.frame[1]) + uint2((1u << plane) - 1u)) >> uint2(plane);
+    uint2 a = min((g << uint2(p.plane)) >> uint2(plane), n - 1u);
+    uint2 e = clamp(((g + 1u) << uint2(p.plane)) >> uint2(plane), a + 1u, n);
+    float2 sum = float2(0.0f);
+    for (uint j = a.y; j < e.y; j++) {
+        for (uint i = a.x; i < e.x; i++) {
+            sum += code(t, uint2(i, j), p);
+        }
+    }
+    return sum / float((e.x - a.x) * (e.y - a.y));
+}
+
+float3 colors(constant Plane& p, float3 c) {
+    float3 v;
+    if (p.full != 0u) {
+        float top = float(p.top);
+        float mid = (top + 1.0f) / 2.0f;
+        v = float3(c.x / top, (c.y - mid) / top, (c.z - mid) / top);
+    } else {
+        float u = p.unit;
+        v = float3((c.x - 16.0f * u) / (219.0f * u), (c.y - 128.0f * u) / (224.0f * u),
+                   (c.z - 128.0f * u) / (224.0f * u));
+    }
+    float r = v.x + 2.0f * (1.0f - p.kr) * v.z;
+    float b = v.x + 2.0f * (1.0f - p.kb) * v.y;
+    return float3(r, (v.x - p.kr * r - p.kb * b) / (1.0f - p.kr - p.kb), b);
+}
+
+float3 codes(constant Plane& p, float3 c) {
+    float y = p.kr * c.x + (1.0f - p.kr - p.kb) * c.y + p.kb * c.z;
+    float cb = (c.z - y) / (2.0f * (1.0f - p.kb));
+    float cr = (c.x - y) / (2.0f * (1.0f - p.kr));
+    if (p.full != 0u) {
+        float top = float(p.top);
+        float mid = (top + 1.0f) / 2.0f;
+        return float3(y * top, cb * top + mid, cr * top + mid);
+    }
+    float u = p.unit;
+    return float3(16.0f * u + 219.0f * u * y, 128.0f * u + 224.0f * u * cb,
+                  128.0f * u + 224.0f * u * cr);
+}
+
+float spread(float3 c) {
+    float3 d = c - c.gbr;
+    return sqrt(dot(d, d));
+}
+
+float3 ycc(float3 c) {
+    float y = dot(c, BT601);
+    return float3(y, (c.b - y) / (2.0f * (1.0f - BT601.b)), (c.r - y) / (2.0f * (1.0f - BT601.r)));
+}
+
+float3 from_ycc(float3 c) {
+    return c.x + c.y * float3(-0.001336f, -0.343456f, 1.770592f)
+        + c.z * float3(1.402406f, -0.714457f, 0.002013f);
+}
+
+float3 dodge(float3 b, float3 a) {
+    return select(min(b / (1.0f - a), float3(1.0f)), float3(1.0f), a >= float3(1.0f));
+}
+
+float3 burn(float3 b, float3 a) {
+    return select(1.0f - min((1.0f - b) / a, float3(1.0f)), float3(0.0f), a <= float3(0.0f));
+}
+
+float3 hard(float3 by, float3 other) {
+    return select(1.0f - 2.0f * (1.0f - by) * (1.0f - other), 2.0f * by * other, by <= float3(0.5f));
+}
+
+float3 softlight(float3 a, float3 b) {
+    float3 d = select(sqrt(b), ((16.0f * b - 12.0f) * b + 4.0f) * b, b <= float3(0.25f));
+    return select(b + (2.0f * a - 1.0f) * (d - b), b - (1.0f - 2.0f * a) * b * (1.0f - b),
+                  a <= float3(0.5f));
+}
+
+float3 divide(float3 b, float3 a) {
+    float3 none = select(float3(0.0f), float3(1.0f), b > float3(0.0f));
+    return select(min(b / a, float3(1.0f)), none, a <= float3(0.0f));
+}
+
+float3 mixed(uint mode, float3 a, float3 b) {
+    switch (mode) {
+        case 1: case 19: return a + b;
+        case 2: return b - a;
+        case 3: return fabs(a - b);
+        case 4: return a * b;
+        case 5: return 1.0f - (1.0f - a) * (1.0f - b);
+        case 6: return hard(b, a);
+        case 7: return hard(a, b);
+        case 8: return softlight(a, b);
+        case 9: return min(a, b);
+        case 10: return max(a, b);
+        case 11: return dodge(b, a);
+        case 12: return burn(b, a);
+        case 13: return a + b - 2.0f * a * b;
+        case 14: {
+            float wide = spread(a);
+            float k = wide > 0.0f ? spread(b) / wide : 0.0f;
+            return dot(b, BT709) + k * (a - dot(a, BT709));
+        }
+        case 15: {
+            float wide = spread(b);
+            float k = wide > 0.0f ? spread(a) / wide : 0.0f;
+            float lb = dot(b, BT709);
+            return lb + k * (b - lb);
+        }
+        case 16: return from_ycc(float3(ycc(b).x, ycc(a).yz));
+        case 17: return from_ycc(float3(ycc(a).x, ycc(b).yz));
+        case 18: return divide(b, a);
+        case 20: return a + b - 1.0f;
+        case 21: return b + 2.0f * a - 1.0f;
+        case 22: return select(dodge(b, 2.0f * a - 1.0f), burn(b, 2.0f * a), a <= float3(0.5f));
+        case 23: return select(max(b, 2.0f * a - 1.0f), min(b, 2.0f * a), a <= float3(0.5f));
+        case 24: return select(float3(0.0f), float3(1.0f), a + b >= float3(1.0f));
+        case 25: return dot(a, float3(1.0f)) > dot(b, float3(1.0f)) ? a : b;
+        case 26: return dot(a, float3(1.0f)) < dot(b, float3(1.0f)) ? a : b;
+        default: return a;
+    }
 }
 
 kernel void place(
     texture2d<uint, access::read> under [[texture(0)]],
-    texture2d<uint, access::read> src [[texture(1)]],
-    texture2d<uint, access::write> out [[texture(2)]],
+    texture2d<uint, access::read> under_chroma [[texture(1)]],
+    texture2d<uint, access::read> src [[texture(2)]],
+    texture2d<uint, access::read> src_chroma [[texture(3)]],
+    texture2d<uint, access::write> out [[texture(4)]],
     constant Place& q [[buffer(0)]],
     uint2 g [[thread_position_in_grid]])
 {
@@ -199,11 +336,21 @@ kernel void place(
     if (g.x >= p.width || g.y >= p.height) {
         return;
     }
-    float2 v = q.black != 0u ? float2(float(q.value)) : code(under, g, p);
+    float2 v = below(p.plane == 0u ? under : under_chroma, q, p.plane, g);
     float cover = 0.0f;
     bool inside = g.x >= p.x0 && g.x < p.x1 && g.y >= p.y0 && g.y < p.y1;
     if (inside && covered(p, (float(g.x) + 0.5f) * p.across, (float(g.y) + 0.5f) * p.down, cover)) {
-        float2 shown = sampled(src, p, g);
+        float2 shown;
+        if (p.mode == 0u) {
+            shown = sampled(p.plane == 0u ? src : src_chroma, p, p.plane, g);
+        } else {
+            float2 luma = sampled(src, p, 0u, g);
+            float2 chroma = sampled(src_chroma, p, 1u, g);
+            float3 top = float3(luma.x, chroma);
+            float3 base = float3(below(under, q, 0u, g).x, below(under_chroma, q, 1u, g));
+            float3 c = codes(p, mixed(p.mode, colors(p, top), colors(p, base)));
+            shown = p.plane == 0u ? c.xx : c.yz;
+        }
         v = v + (shown - v) * (cover * p.level);
     }
     uint2 c = uint2(clamp(round(v), float2(0.0f), float2(float(p.top)))) << uint2(p.shift);
@@ -221,7 +368,7 @@ struct Sums {
 struct Place {
     plane: GpuPlane,
     black: u32,
-    value: u32,
+    values: [u32; 2],
 }
 
 #[repr(C)]
@@ -568,7 +715,7 @@ impl Mixer {
         let out_size = (like.width(), like.height());
         let layout = alike(like, under.into_iter().chain([layer.picture]))?;
         let area = layer.area(size).unwrap_or_default();
-        let Some(sums) = layer.gpu_planes(out_size, size, area)? else {
+        let Some(sums) = layer.gpu_planes(under.unwrap_or(like), out_size, size, area)? else {
             return Ok(None);
         };
         if self.place.is_none() {
@@ -591,26 +738,31 @@ impl Mixer {
             .computeCommandEncoder()
             .ok_or_else(|| refused("no compute encoder"))?;
         encoder.setComputePipelineState(pipeline);
-        let mut held = Vec::with_capacity(6);
+        let read = MTLTextureUsage::ShaderRead;
+        let mut below = Vec::with_capacity(2);
+        let mut shown = Vec::with_capacity(2);
         for (plane, format) in l.formats.into_iter().enumerate() {
-            let read = MTLTextureUsage::ShaderRead;
-            let below = from
-                .as_ref()
-                .map(|s| texture(&self.device, s, (plane, format), read, WHAT))
-                .transpose()?;
-            let shown = texture(&self.device, &src, (plane, format), read, WHAT)?;
+            shown.push(texture(&self.device, &src, (plane, format), read, WHAT)?);
+            below.push(match &from {
+                Some(s) => texture(&self.device, s, (plane, format), read, WHAT)?,
+                None => shown[plane].clone(),
+            });
+        }
+        let mut held = Vec::with_capacity(2);
+        for (plane, format) in l.formats.into_iter().enumerate() {
             let write = MTLTextureUsage::ShaderWrite;
             let into = texture(&self.device, &to, (plane, format), write, WHAT)?;
             let params = Place {
                 plane: sums[plane],
                 black: u32::from(under.is_none()),
-                value: black[plane],
+                values: black,
             };
             // SAFETY: live textures of this device, kept until the work ends, and parameters that the call copies.
             unsafe {
-                encoder.setTexture_atIndex(Some(below.as_ref().unwrap_or(&shown)), 0);
-                encoder.setTexture_atIndex(Some(&shown), 1);
-                encoder.setTexture_atIndex(Some(&into), 2);
+                for (i, t) in below.iter().chain(&shown).enumerate() {
+                    encoder.setTexture_atIndex(Some(t), i);
+                }
+                encoder.setTexture_atIndex(Some(&into), 4);
                 encoder.setBytes_length_atIndex(
                     NonNull::from(&params).cast(),
                     std::mem::size_of::<Place>(),
@@ -618,13 +770,12 @@ impl Mixer {
                 );
             }
             dispatch(&encoder, pipeline, &into);
-            held.extend(below);
-            held.extend([shown, into]);
+            held.push(into);
         }
         encoder.endEncoding();
         buffer.commit();
         buffer.waitUntilCompleted();
-        drop(held);
+        drop((held, below, shown));
         crate::metal::ended(&buffer, WHAT)?;
         // SAFETY: both are valid frames.
         unsafe { ffi::av_frame_copy_props(out.as_mut_ptr(), like.as_ptr()) };

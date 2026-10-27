@@ -2086,14 +2086,18 @@ impl VideoFrames {
         };
         let (w, h, _) = self.maker.out();
         let wiped = layers.iter().any(|l| l.wipe.is_some());
-        let blended = layers.iter().any(|l| match &l.placing {
-            Some((p, _)) => p.mode != CompositeMode::Normal,
-            None => l.alpha,
-        });
+        let (top, below) = blended_top(&layers);
+        let blended = below
+            .iter()
+            .chain(top.filter(|l| l.crossing))
+            .any(|l| match &l.placing {
+                Some((p, _)) => p.mode != CompositeMode::Normal,
+                None => l.alpha,
+            });
         let on_gpu = match self.maker.output() {
             Output::Cuda { frames, .. } if self.gpu_mixes() && !wiped && !blended => {
                 match cuda_mix(frames, &layers, black.as_ref(), (w, h)) {
-                    Ok(mixed) => Some(mixed),
+                    Ok(mixed) => mixed,
                     Err(e) => {
                         crate::debug!(
                             "decoding",
@@ -2932,30 +2936,53 @@ impl VideoFrames {
     }
 }
 
+fn blended_top(layers: &[Layer]) -> (Option<&Layer>, &[Layer]) {
+    match layers.split_last() {
+        Some((top, below))
+            if top
+                .placing
+                .as_ref()
+                .is_some_and(|(p, _)| p.mode != CompositeMode::Normal) =>
+        {
+            (Some(top), below)
+        }
+        _ => (None, layers),
+    }
+}
+
+fn frame_on(l: &Layer, place: Place) -> bool {
+    l.frame.as_ref().is_some_and(|f| Place::of(f) == place)
+}
+
 fn cuda_mix(
     frames: &crate::cuda::CudaFrames,
     layers: &[Layer],
     black: Option<&frame::Video>,
     size: (u32, u32),
-) -> Result<frame::Video> {
+) -> Result<Option<frame::Video>> {
     let solid = |f: Option<&frame::Video>| match (f, black) {
         (Some(f), _) | (None, Some(f)) => frame_ref(f),
         (None, None) => Err(Error::Invalid("nothing under a placed picture".into())),
     };
-    let laid = |under: Option<&frame::Video>, l: &Layer| -> Result<Option<frame::Video>> {
-        if let (Some((placing, fitted)), Some(f)) = (&l.placing, &l.frame) {
-            let weight = l.weight.unwrap_or(WHOLE);
-            if Place::of(f) == Place::Cuda {
+    let placed = |under: Option<&frame::Video>, l: &Layer| -> Result<Option<frame::Video>> {
+        match (&l.placing, &l.frame) {
+            (Some((placing, fitted)), Some(f)) if Place::of(f) == Place::Cuda => {
                 let layer = super::place::Layer {
                     picture: f,
                     placing,
                     fitted: *fitted,
-                    weight,
+                    weight: l.weight.unwrap_or(WHOLE),
                 };
-                let below = solid(under)?;
-                if let Some(placed) = crate::cuda::place::place(frames, &below, &layer, size)? {
-                    return Ok(Some(placed));
-                }
+                crate::cuda::place::place(frames, &solid(under)?, &layer, size)
+            }
+            _ => Ok(None),
+        }
+    };
+    let laid = |under: Option<&frame::Video>, l: &Layer| -> Result<Option<frame::Video>> {
+        if let (Some((placing, fitted)), Some(f)) = (&l.placing, &l.frame) {
+            let weight = l.weight.unwrap_or(WHOLE);
+            if let Some(placed) = placed(under, l)? {
+                return Ok(Some(placed));
             }
             let picture = match Place::of(f) {
                 Place::Memory => frame_ref(f)?,
@@ -2981,6 +3008,10 @@ fn cuda_mix(
             )?)),
         }
     };
+    let (top, layers) = blended_top(layers);
+    if top.is_some_and(|l| !frame_on(l, Place::Cuda)) {
+        return Ok(None);
+    }
     let mut mixed: Option<frame::Video> = None;
     let mut below: Option<Option<frame::Video>> = None;
     for l in layers {
@@ -2995,7 +3026,12 @@ fn cuda_mix(
             below = Some(std::mem::replace(&mut mixed, next));
         }
     }
-    mixed.ok_or_else(|| Error::Invalid("a mix of black alone".into()))
+    match top {
+        Some(l) => placed(mixed.as_ref(), l),
+        None => mixed
+            .ok_or_else(|| Error::Invalid("a mix of black alone".into()))
+            .map(Some),
+    }
 }
 
 fn on_metal(layers: &[Layer]) -> bool {
@@ -3029,19 +3065,25 @@ fn metal_mix(
         *mixer = Some(crate::mixing::Mixer::new()?);
     }
     let mixer = mixer.as_mut().expect("made above");
+    let placed = |mixer: &mut crate::mixing::Mixer, under: Option<&frame::Video>, l: &Layer| match (
+        &l.placing, &l.frame,
+    ) {
+        (Some((placing, fitted)), Some(f)) if Place::of(f) == Place::VideoToolbox => {
+            let layer = super::place::Layer {
+                picture: f,
+                placing,
+                fitted: *fitted,
+                weight: l.weight.unwrap_or(WHOLE),
+            };
+            mixer.place(under, like, &layer, size)
+        }
+        _ => Ok(None),
+    };
     let laid = |mixer: &mut crate::mixing::Mixer, under: Option<&frame::Video>, l: &Layer| {
         if let (Some((placing, fitted)), Some(f)) = (&l.placing, &l.frame) {
             let weight = l.weight.unwrap_or(WHOLE);
-            if Place::of(f) == Place::VideoToolbox {
-                let layer = super::place::Layer {
-                    picture: f,
-                    placing,
-                    fitted: *fitted,
-                    weight,
-                };
-                if let Some(placed) = mixer.place(under, like, &layer, size)? {
-                    return Ok(Some(placed));
-                }
+            if let Some(placed) = placed(mixer, under, l)? {
+                return Ok(Some(placed));
             }
             let picture = match Place::of(f) {
                 Place::Memory => frame_ref(f)?,
@@ -3061,6 +3103,10 @@ fn metal_mix(
             (under, w) => mixer.mix(under, l.frame.as_ref(), w.unwrap_or(WHOLE)),
         }
     };
+    let (top, layers) = blended_top(layers);
+    if top.is_some_and(|l| !frame_on(l, Place::VideoToolbox)) {
+        return Ok(None);
+    }
     let mut mixed: Option<frame::Video> = None;
     let mut below: Option<Option<frame::Video>> = None;
     for l in layers {
@@ -3074,7 +3120,10 @@ fn metal_mix(
             below = Some(std::mem::replace(&mut mixed, next));
         }
     }
-    Ok(mixed)
+    match top {
+        Some(l) => placed(mixer, mixed.as_ref(), l),
+        None => Ok(mixed),
+    }
 }
 
 fn no_picture() -> Error {
