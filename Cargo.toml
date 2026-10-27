@@ -88,11 +88,15 @@ objc2-metal = { version = "0.3", default-features = false, features = [
     "std",
     "MTLAllocation",
     "MTLCommandBuffer",
+    "MTLCommandEncoder",
     "MTLCommandQueue",
     "MTLDevice",
     "MTLPixelFormat",
+    "MTLRenderCommandEncoder",
+    "MTLRenderPass",
     "MTLResource",
     "MTLTexture",
+    "MTLTypes",
     "objc2-io-surface",
 ] }
 # Lanczos scaling of VideoToolbox's IOSurfaces on Metal (macOS). Zlib,
@@ -100,6 +104,7 @@ objc2-metal = { version = "0.3", default-features = false, features = [
 objc2-metal-performance-shaders = { version = "0.3", default-features = false, features = [
     "std",
     "MPSCore",
+    "MPSCoreTypes",
     "MPSImage",
     "MPSImageKernel",
     "MPSImageResampling",

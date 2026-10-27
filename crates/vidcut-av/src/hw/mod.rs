@@ -946,9 +946,13 @@ impl Scaling {
                 let spec = crate::cuda::scaling((f.width(), f.height()), (w, h), "").join(",");
                 Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
             }
-            format::Pixel::VIDEOTOOLBOX => {
-                Ok(Self::Vt(vt::Fit::new(f, frames, 0, (w, h), sw_format(f))?))
-            }
+            format::Pixel::VIDEOTOOLBOX => Ok(Self::Vt(vt::Fit::new(
+                f,
+                frames,
+                0,
+                ((w, h), (w, h)),
+                sw_format(f),
+            )?)),
             format::Pixel::VULKAN => Ok(Self::Filters(vulkan_scale::scaler(f, frames, (w, h))?)),
             #[cfg(windows)]
             format::Pixel::D3D11 => Ok(Self::D3d11(d3d11::Scaler::new(f, frames, (w, h))?)),
@@ -1173,12 +1177,7 @@ impl Fitter {
                     Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
                 }
                 format::Pixel::VIDEOTOOLBOX => {
-                    if fitted != (w, h) {
-                        return Err(Error::Invalid(
-                            "VideoToolbox doesn't place pictures on black".into(),
-                        ));
-                    }
-                    Fitting::Vt(vt::Fit::new(f, frames, rotation, fitted, layout)?)
+                    Fitting::Vt(vt::Fit::new(f, frames, rotation, (fitted, (w, h)), layout)?)
                 }
                 #[cfg(windows)]
                 format::Pixel::D3D11 => {

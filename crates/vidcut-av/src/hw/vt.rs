@@ -46,7 +46,7 @@ unsafe extern "C" fn unmap(held: *mut c_void, _data: *mut u8) {
 }
 
 pub(crate) fn can_fit(ops: &Ops) -> bool {
-    ops.colors_kept && !ops.pads
+    ops.colors_kept
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -71,6 +71,7 @@ pub(super) struct Fit {
         crate::frame_processor::Frames,
     )>,
     fitted: (u32, u32),
+    out: (u32, u32),
     layout: ffmpeg::format::Pixel,
 }
 
@@ -80,7 +81,7 @@ impl Fit {
         f: &frame::Video,
         frames: *mut ffi::AVBufferRef,
         rotation: u16,
-        fitted: (u32, u32),
+        (fitted, out): ((u32, u32), (u32, u32)),
         layout: ffmpeg::format::Pixel,
     ) -> Result<Self> {
         let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
@@ -92,7 +93,7 @@ impl Fit {
         } else {
             (f.width(), f.height())
         };
-        let lanczos = (upright != fitted)
+        let lanczos = (upright != fitted || fitted != out)
             .then(crate::lanczos::Lanczos::new)
             .transpose()?;
         let transfer = match super::sw_format(f) == layout {
@@ -107,6 +108,7 @@ impl Fit {
             lanczos,
             transfer,
             fitted,
+            out,
             layout,
         })
     }
@@ -117,13 +119,16 @@ impl Fit {
             None => crate::export::video::frame_ref(f)?,
         };
         let sized = match &mut self.lanczos {
-            Some(lanczos) => lanczos.scale(&turned, self.fitted)?,
+            Some(lanczos) => {
+                let at = crate::lanczos::centered(&turned, self.out, self.fitted);
+                lanczos.place(&turned, self.out, (at, self.fitted))?
+            }
             None => turned,
         };
         match &mut self.transfer {
             Some((transfer, made)) => {
                 let from = crate::frame_processor::pixels(&sized, FITTING)?;
-                let shape = (self.fitted, self.layout.into());
+                let shape = (self.out, self.layout.into());
                 made.made_as(transfer, from, &sized, shape, FITTING)
             }
             None => Ok(sized),
@@ -140,7 +145,7 @@ impl Fit {
         _f: &frame::Video,
         _frames: *mut ffi::AVBufferRef,
         _rotation: u16,
-        _fitted: (u32, u32),
+        _sizes: ((u32, u32), (u32, u32)),
         _layout: ffmpeg::format::Pixel,
     ) -> Result<Self> {
         Err(Error::Invalid(
@@ -176,8 +181,8 @@ mod tests {
     }
 
     #[test]
-    fn frames_placed_on_black_dont_fit() {
-        assert!(!can_fit(&Ops {
+    fn frames_placed_on_black_fit() {
+        assert!(can_fit(&Ops {
             pads: true,
             ..kept()
         }));
