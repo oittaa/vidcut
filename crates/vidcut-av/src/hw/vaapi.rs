@@ -491,10 +491,6 @@ pub(super) fn surface_bytes(f: &frame::Video) -> Option<usize> {
     })
 }
 
-pub(super) fn shrink_spec((w, h): (u32, u32)) -> String {
-    format!("scale_vaapi=w={w}:h={h}")
-}
-
 #[cfg(target_os = "linux")]
 pub struct DrmFrame(frame::Video);
 
@@ -588,12 +584,10 @@ impl DrmFrame {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[cfg(target_os = "linux")]
     #[test]
     fn a_copy_object_is_laid_out_as_va_h_has_it() {
-        assert_eq!(std::mem::size_of::<CopyObject>(), 40);
+        assert_eq!(std::mem::size_of::<super::CopyObject>(), 40);
     }
 
     #[cfg(target_os = "linux")]
@@ -606,10 +600,5 @@ mod tests {
     #[test]
     fn a_settled_copy_returns_the_kept_frame() {
         assert_eq!(super::handed_back(Ok::<(), &str>(()), 4u8).unwrap(), 4);
-    }
-
-    #[test]
-    fn shrinking_scales_to_the_size() {
-        assert_eq!(shrink_spec((960, 540)), "scale_vaapi=w=960:h=540");
     }
 }

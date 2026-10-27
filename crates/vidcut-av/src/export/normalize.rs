@@ -29,27 +29,6 @@ pub(crate) fn shown_size(
     }
 }
 
-pub(crate) fn down(
-    shrinker: &mut Option<crate::hw::Shrinker>,
-    src: &frame::Video,
-    rotation: u16,
-    out: (u32, u32),
-) -> Result<frame::Video> {
-    let size = shown_size(src, rotation, out);
-    let shrinks = size.0 < src.width() && size.1 < src.height();
-    if !shrinks {
-        return crate::hw::to_read(src);
-    }
-    let mut small = crate::hw::Shrinker::down(shrinker, src, size)?;
-    if (small.width(), small.height()) == size {
-        // SAFETY: a plain field of its own frame.
-        unsafe {
-            (*small.as_mut_ptr()).sample_aspect_ratio = ffmpeg::ffi::AVRational { num: 1, den: 1 }
-        };
-    }
-    Ok(small)
-}
-
 pub(crate) fn enlarges(
     (w, h): (u32, u32),
     (n, d): (i32, i32),

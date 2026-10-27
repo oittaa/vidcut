@@ -77,14 +77,7 @@ impl Cells {
         );
     }
 
-    pub fn show(
-        &mut self,
-        i: usize,
-        p: &Project,
-        piece: &VideoPiece,
-        size: [u32; 2],
-        speed: f64,
-    ) -> Option<Shown> {
+    pub fn show(&mut self, i: usize, p: &Project, piece: &VideoPiece, speed: f64) -> Option<Shown> {
         let (plan, frame) = plan(p, piece)?;
         let format = |plan: &RenderPlan| (plan.sample_rate, plan.channels);
         if self.cells[i]
@@ -133,7 +126,6 @@ impl Cells {
             c.asked = frame;
             c.speed = speed;
         }
-        c.player.shrink_to(Some((size[0], size[1])));
         let shown = c.player.present(Instant::now());
         c.shown |= shown.as_ref().is_some_and(|s| s.exact);
         shown

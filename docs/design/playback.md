@@ -87,7 +87,7 @@ flowchart TD
 - Apple silicon has one shared budget.
 - While an AI upscaler holds GPU memory, the video budget is smaller (`store::Lent`, [gpu](gpu.md)).
 - The least recently used pictures go first, whichever engine decoded them. The prepared picture of each engine never goes (`Store::hold`).
-- An engine can show a picture that another engine decoded, by its `Id`. A small picture of the two-up names its engine (`Id::small`), and only that engine shows it.
+- An engine can show a picture that another engine decoded, by its `Id`.
 - Each engine plans its decoding with its part of the budget (`Config::part`). When the last engine ends, the cache empties.
 
 **Dissolves and placed pictures**
@@ -254,7 +254,6 @@ Faders:
 - The Trim Editor and Dynamic Trim show two frames, or four while a slip or slide runs.
 - `Cells` gives each frame its own engine on the media of the clip (`render::tape`, no sound), with `ManualOutput`. The engines keep their pictures in the cache of the viewer.
 - In each UI frame, `Player::follow` gives each engine its frame and the speed of the trim. The engine decodes ahead as if it plays.
-- `Player::shrink_to` keeps the pictures of a run at the size of the cell.
 - The windows behind decode on `vidcut-play-windows`: one at a time across the followed players, and none while a player moves forward.
 - `Screens` draws the cells with `Screen` on the UI thread. This needs no gate.
 

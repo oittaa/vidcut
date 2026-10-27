@@ -14,7 +14,7 @@ pub struct PlaneCopy {
 }
 
 use std::ptr;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, format, frame};
@@ -339,41 +339,6 @@ struct SemaphoreWaitInfo {
     values: *const u64,
 }
 
-pub(crate) fn scaling(size: (u32, u32), fit: (u32, u32), options: &str) -> Vec<String> {
-    scaling_steps(size, fit, options, fixed_kernels())
-}
-
-fn fixed_kernels() -> &'static str {
-    static FIXED: OnceLock<&str> = OnceLock::new();
-    FIXED.get_or_init(|| {
-        if crate::parts::filter_has_option("scale_cuda", "use_filters") {
-            ":use_filters=0"
-        } else {
-            ""
-        }
-    })
-}
-
-fn scaling_steps(
-    (w, h): (u32, u32),
-    (fit_w, fit_h): (u32, u32),
-    options: &str,
-    fixed: &str,
-) -> Vec<String> {
-    let mut steps = Vec::new();
-    let (mut w, mut h) = (w, h);
-    while w >= 2 * fit_w && h >= 2 * fit_h && w >= 4 && h >= 4 {
-        (w, h) = ((w / 2) & !1, (h / 2) & !1);
-        steps.push(format!(
-            "scale_cuda=w={w}:h={h}:interp_algo=bilinear{fixed}"
-        ));
-    }
-    steps.push(format!(
-        "scale_cuda=w={fit_w}:h={fit_h}{options}:interp_algo=bicubic{fixed}"
-    ));
-    steps
-}
-
 pub(crate) fn add_source(
     graph: &mut GpuGraph,
     name: &std::ffi::CStr,
@@ -467,7 +432,7 @@ mod tests {
     #[test]
     fn a_gpu_source_rejects_a_side_past_i32() {
         crate::init();
-        let mut graph = super::GpuGraph::new();
+        let mut graph = super::GpuGraph::for_reading(crate::decode::Reading::Stream);
         let err = super::add_source(
             &mut graph,
             c"in",

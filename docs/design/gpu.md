@@ -48,7 +48,7 @@ flowchart LR
 | `Route` | The picture is |
 |---|---|
 | `Route::Kept` | kept as decoded, for the draw |
-| `Route::Whole` | copied down whole, or shrunk on the GPU and copied down |
+| `Route::Whole` | copied down whole |
 | `Route::Cpu` | already in memory |
 
 - `export::make::Maker` follows the plan. The viewer, exports, proxies, thumbnails and the AI inputs use it.
@@ -72,8 +72,8 @@ In the viewer, exports, proxies and thumbnails:
 
 - ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
 - A VideoToolbox frame that comes down is mapped, not copied (`hw::to_read`).
-- `vt::Fit` turns VideoToolbox frames (`transpose_vt`) and scales them with Lanczos on Metal (`lanczos::Lanczos`).
-  - `hw::Turner` and `hw::Shrinker` use it.
+- `hw::Turner` turns VideoToolbox frames for the scalers of macOS (`vt::Turn`, `transpose_vt`).
+- Lanczos on Metal scales the input of the scaler and the frame interpolation of macOS to the size of their session (`lanczos::sized`).
   - Why Lanczos: the scaler of VideoToolbox keeps less detail.
 
 The draw:
@@ -89,7 +89,6 @@ The draw:
 
 Frames that come down:
 
-- Where the output shows a frame smaller, the GPU shrinks it first (`hw::Shrinker`).
 - CPU encoders take frames in memory.
 - The player brings a frame down when the viewer cannot show its kind, when an import fails, or when its pool leaves the budget.
 - A picture in memory goes up into the frames of a GPU encoder (`Upload`, `CudaFrames::upload`).
@@ -199,7 +198,7 @@ On macOS (`interpolate::macos`):
 - `GpuDecoder::why_not` names the GPUs that give wrong results:
   - AMD's Direct3D 11 and VideoToolbox go wrong after a seek into H.264 with open GOPs.
   - vidcut trusts Vulkan on NVIDIA only.
-- vidcut checks GPU deinterlacers and some scalers against test pictures first.
+- vidcut checks GPU deinterlacers against test pictures first.
 - A GPU step that fails leaves its file to the CPU.
 
 ## Code

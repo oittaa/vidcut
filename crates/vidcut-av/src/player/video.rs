@@ -70,7 +70,6 @@ struct Decoder {
     back_low: Option<i64>,
     next_window: Option<(i64, i64)>,
     windows: bool,
-    small: bool,
 }
 
 static WINDOW: Mutex<()> = Mutex::new(());
@@ -259,12 +258,10 @@ impl Decoder {
             back_low: None,
             next_window: None,
             windows,
-            small: false,
         }
     }
 
     fn take(&mut self, snap: &Snap) -> Direction {
-        self.small = snap.small.is_some();
         if self.plan_gen != Some(snap.plan_gen) {
             self.plan = snap.plan.clone();
             self.plan_gen = Some(snap.plan_gen);
@@ -640,7 +637,6 @@ impl Decoder {
     fn chunk(&self) -> i64 {
         match self.picture_kind {
             Kind::Video => self.windows(2).1,
-            Kind::Memory if self.small => self.windows(2).1,
             Kind::Memory => self.memory_chunk(),
         }
     }
@@ -756,11 +752,7 @@ impl Decoder {
                 || (!made
                     && (i >= snap.focus || snap.followed)
                     && !self.shared.store.contains(&plan.id(i)));
-            let whole =
-                snap.motion == 0.0 && matches!(snap.mode, Mode::Paused { .. }) && i >= snap.focus;
-            let small = snap.small.filter(|_| !whole);
             let frames = self.reader();
-            frames.shrink_to(small);
             if kept {
                 let layers = frames
                     .next_layers()?
@@ -772,11 +764,7 @@ impl Decoder {
                 if keep == Keep::Seek && seek_keeps.is_none() {
                     seek_keeps = Some(t - self.chunk() + 1);
                 }
-                let id = if small.is_some() {
-                    self.shared.store.small(&plan.id(i))
-                } else {
-                    plan.id(i)
-                };
+                let id = plan.id(i);
                 self.shared.titles.draw(&plan, i);
                 self.shared.subtitles.draw(&plan, i);
                 self.shared.store.put(id.clone(), Arc::new(picture));

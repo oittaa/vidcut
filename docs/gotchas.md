@@ -66,18 +66,7 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 
 - **FFmpeg's `buffer` source takes the frame it is given** (`av_buffersrc_add_frame`, which ffmpeg-next's `Source::add` calls).
   - It moves the buffers out of the frame, and leaves the frame empty.
-  - Thus `hw::run_graph` gives each GPU graph a reference of its own (`av_frame_ref`).
-- **An untagged picture's matrix follows from its size** (decision D35, `color::untagged_matrix`).
-  - Thus a copy that is scaled on the GPU carries the matrix of the picture that it came from (`color::keep_matrix`).
-  - Without this, untagged 1280×720 shrunk to 640×360 would read as BT.601.
-- **FFmpeg 9's `scale_cuda` truncates in each pass of a shrink with filters** (`use_filters`, on by default for a shrink; `from_floatN` in vector_helpers.cuh).
-  - 4K shrunk to 192×108 comes out 8 to 9 levels low in red and blue.
-  - `cuda::scaling` asks for the fixed kernels (`use_filters=0`). These are within 1.2 levels of the CPU.
-- **`scale_d3d11` fails on AMD's driver.**
-  - Its output textures are bound for the video encoder too (`D3D11_BIND_VIDEO_ENCODER`). The driver refuses this for NV12 and P010 (`E_INVALIDARG`).
-  - It also needs `format=`.
-  - It scales the padding of the decoder into the picture (1080p decodes into 1088 lines).
-  - `hw::d3d11::Scaler` drives the video processor itself.
+  - Thus `hw::run_graph` gives the graph of a turn a reference of its own (`av_frame_ref`).
 - **FFmpeg's GPU deinterlacers aren't `bwdif`** (9.0.1).
   - `bwdif_vulkan` reads black past the top and bottom edges, and does not clip to the bits of the frame.
   - Thus its 10-bit edge rows come out at half level, or overshoot.
@@ -156,13 +145,6 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - `GpuDecoder::why_not` gives such H.264 to the CPU on these decoders.
   - `decode::h264_open_gop` looks for a keyframe that is not IDR.
   - x264 makes open GOPs with B-frames, unless told not to.
-- **AMD's video processor clips levels outside video range when told studio range** (to 16–235, chroma 16–240).
-  - When told full range in and out, it keeps these levels.
-  - Thus `hw::d3d11::Scaler` says full range where DXGI has such a color space. PQ has studio range only.
-  - The check of the scaler has bands outside video range.
-  - Where one pass fails the check, the scaler shrinks in halving passes, and checks each pass.
-  - On the Radeon iGPU, a single pass fails the check when it shrinks to under half each way.
-  - The check of a turned pass is turned too.
 - **AMD's Windows driver counts a Direct3D 11 texture imported into Vulkan again against the process for good** (32.0.21042.62, Radeon iGPU).
   - Each `vkAllocateMemory` from a shared NT handle of a texture that was imported before adds twice the texture's size.
   - It adds this to the dedicated GPU memory of the process: the `GPU Process Memory` counter that Task Manager shows.

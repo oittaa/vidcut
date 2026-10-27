@@ -55,56 +55,38 @@ fn turn_spec(rotation: u16) -> Option<&'static str> {
 }
 
 #[cfg(target_os = "macos")]
-const FITTING: &str = "fitting a frame on the GPU";
+pub(super) struct Turn(super::GpuGraph);
 
 #[cfg(target_os = "macos")]
-pub(super) struct Fit {
-    turn: Option<super::GpuGraph>,
-    lanczos: Option<crate::lanczos::Lanczos>,
-    size: (u32, u32),
-}
-
-#[cfg(target_os = "macos")]
-impl Fit {
+impl Turn {
     pub(super) fn new(
         f: &frame::Video,
         frames: *mut ffi::AVBufferRef,
         rotation: u16,
-        size: (u32, u32),
     ) -> Result<Self> {
         let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VIDEOTOOLBOX;
-        let turn = turn_spec(rotation)
-            .map(|spec| super::gpu_graph(f, frames, pixel, spec))
-            .transpose()?;
-        Ok(Self {
-            turn,
-            lanczos: None,
-            size,
-        })
+        let spec = turn_spec(rotation)
+            .ok_or_else(|| Error::Invalid(format!("no turn of {rotation} degrees")))?;
+        Ok(Self(super::gpu_graph(f, frames, pixel, spec)?))
     }
 
     pub(super) fn run(&mut self, f: &frame::Video) -> Result<frame::Video> {
-        let turned = match &mut self.turn {
-            Some(graph) => super::run_graph(graph, f, FITTING)?,
-            None => crate::export::video::frame_ref(f)?,
-        };
-        Ok(crate::lanczos::sized(&mut self.lanczos, &turned, self.size)?.unwrap_or(turned))
+        super::run_graph(&mut self.0, f, "turning a frame on the GPU")
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) struct Fit(std::convert::Infallible);
+pub(super) struct Turn(std::convert::Infallible);
 
 #[cfg(not(target_os = "macos"))]
-impl Fit {
+impl Turn {
     pub(super) fn new(
         _f: &frame::Video,
         _frames: *mut ffi::AVBufferRef,
         _rotation: u16,
-        _size: (u32, u32),
     ) -> Result<Self> {
         Err(Error::Invalid(
-            "VideoToolbox frames fit on macOS only".into(),
+            "VideoToolbox frames turn on macOS only".into(),
         ))
     }
 
@@ -118,12 +100,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fitting_an_upright_frame_turns_nothing() {
+    fn an_upright_frame_turns_nothing() {
         assert_eq!(turn_spec(0), None);
     }
 
     #[test]
-    fn fitting_a_frame_turned_a_quarter_turns_it_first() {
+    fn a_frame_turned_a_quarter_turns_clockwise() {
         assert_eq!(turn_spec(90), Some("transpose_vt=dir=clock"));
     }
 }

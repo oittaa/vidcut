@@ -20,13 +20,12 @@
 2. **One backend for each place** (memory, CUDA, VA-API, Direct3D 11, VideoToolbox, Vulkan).
    - Each backend has `down`, `up`, `keep` and `encoder_frames`.
    - Thus no code outside a backend asks on which kind of GPU a frame is.
-   - The backends replace the split by mechanism: `hw::Shrinker`, `hw::Keeper`, `Upload`, and `encoder_frames` for Direct3D 11 only.
-3. **Deinterlacing and the size of the output in `route::Facts`.**
+   - The backends replace the split by mechanism: `hw::Keeper`, `Upload`, and `encoder_frames` for Direct3D 11 only.
+3. **Deinterlacing in `route::Facts`.**
    - The reader deinterlaces before the planner sees a frame.
-   - The planner does not know the size of the output. The `Maker` shrinks only where the player asks (`Maker::shrink_to`).
 4. **Capabilities tested, not written as rules.**
    - The code has rules for which encoders take the frames of which places (`encode::shares`).
    - Test these capabilities once for each GPU and FFmpeg, as vidcut tests the encoders. Keep the results with `encoders.json`.
 5. **The route in an export's result.**
-   - The result of a proxy tells how its frames went (`made_with`: `frames came down at 960×540`).
+   - The result of a proxy tells how its frames went (`made_with`: `frames came down whole`).
    - The result of an export gives its `copies` and `through_memory`, but not how the frames of each source went.

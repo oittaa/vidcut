@@ -1210,7 +1210,7 @@ impl Single {
         pixel: format::Pixel,
         path: &Path,
     ) -> Result<frame::Video> {
-        let made = self.maker.make(&mut self.fitting, frame, rotation, path)?;
+        let made = self.maker.make(&mut self.fitting, frame, path)?;
         let picture = std::sync::Arc::new(crate::player::Picture::new(made, rotation, None, None));
         let layers = (&[][..], &[][..], &[][..], None);
         self.drawer
@@ -1305,15 +1305,6 @@ impl VideoFrames {
     pub fn single_frames(mut self) -> Self {
         self.maker.read_as(Reading::Frames);
         self
-    }
-
-    pub(crate) fn shrink_to(&mut self, size: Option<(u32, u32)>) {
-        if self.maker.shrinks() != size {
-            self.maker.shrink_to(size);
-            for s in &mut self.open {
-                s.normalized = None;
-            }
-        }
     }
 
     pub(crate) fn clear_stages(&mut self) {
@@ -2090,9 +2081,9 @@ impl VideoFrames {
         };
         let between = clock.elapsed();
         let src = &mut self.open[s];
-        let made =
-            self.maker
-                .make_layer(i, &mut src.fitting, &big, 0, src.reader.path(), reading)?;
+        let made = self
+            .maker
+            .make_layer(i, &mut src.fitting, &big, src.reader.path(), reading)?;
         src.normalized = None;
         src.upright = true;
         let out = self.finished_layer(s, made)?;
@@ -2140,22 +2131,14 @@ impl VideoFrames {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let clock = Instant::now();
             let made = match &big {
-                Some(big) => self.maker.make_layer(
-                    i,
-                    &mut src.fitting,
-                    big,
-                    0,
-                    src.reader.path(),
-                    reading,
-                )?,
-                None => self.maker.make_layer(
-                    i,
-                    &mut src.fitting,
-                    frame,
-                    rotation,
-                    src.reader.path(),
-                    reading,
-                )?,
+                Some(big) => {
+                    self.maker
+                        .make_layer(i, &mut src.fitting, big, src.reader.path(), reading)?
+                }
+                None => {
+                    self.maker
+                        .make_layer(i, &mut src.fitting, frame, src.reader.path(), reading)?
+                }
             };
             if big.is_some() {
                 crate::debug!(

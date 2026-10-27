@@ -5,7 +5,6 @@ mod gpu_graph;
 pub mod vaapi;
 pub(crate) mod vt;
 pub mod vulkan;
-mod vulkan_scale;
 
 pub(crate) use gpu_graph::GpuGraph;
 
@@ -857,7 +856,7 @@ impl Keeper {
 
 pub(crate) struct Turner {
     input: (KeptLike, u16),
-    fit: vt::Fit,
+    turn: vt::Turn,
 }
 
 // SAFETY: one thread at a time uses a turner, as the run or the source that holds it.
@@ -875,15 +874,11 @@ impl Turner {
         let (frames, like) = frames_of(f)?;
         let input = (like, rotation);
         if turner.as_ref().is_none_or(|t| t.input != input) {
-            let upright = match rotation % 180 {
-                90 => (f.height(), f.width()),
-                _ => (f.width(), f.height()),
-            };
-            let fit = vt::Fit::new(f, frames, rotation, upright)?;
-            *turner = Some(Self { input, fit });
+            let turn = vt::Turn::new(f, frames, rotation)?;
+            *turner = Some(Self { input, turn });
         }
         let clock = std::time::Instant::now();
-        let mut out = turner.as_mut().expect("made above").fit.run(f)?;
+        let mut out = turner.as_mut().expect("made above").turn.run(f)?;
         same_picture(&mut out, f);
         crate::debug!(
             "ai",
@@ -910,13 +905,14 @@ fn same_picture(to: &mut frame::Video, from: &frame::Video) {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn gpu_graph(
     f: &frame::Video,
     frames: *mut ffi::AVBufferRef,
     pixel: ffi::AVPixelFormat,
     spec: &str,
 ) -> Result<GpuGraph> {
-    let mut graph = GpuGraph::new();
+    let mut graph = GpuGraph::for_reading(crate::decode::Reading::Stream);
     let tb = ffi::AVRational { num: 1, den: 1000 };
     crate::cuda::add_source(
         &mut graph,
@@ -939,6 +935,7 @@ fn gpu_graph(
     Ok(graph)
 }
 
+#[cfg(target_os = "macos")]
 fn run_graph(graph: &mut GpuGraph, f: &frame::Video, doing: &str) -> Result<frame::Video> {
     let mut given = frame::Video::empty();
     // SAFETY: both frames are valid.
@@ -963,60 +960,6 @@ fn run_graph(graph: &mut GpuGraph, f: &frame::Video, doing: &str) -> Result<fram
         .frame(&mut out)
         .map_err(failed)?;
     Ok(out)
-}
-
-pub(crate) struct Shrinker {
-    scaling: Option<Scaling>,
-    input: (KeptLike, (u32, u32)),
-}
-
-// SAFETY: one thread at a time uses a shrinker, as the maker that holds it; Direct3D 11 work runs under the device's lock.
-unsafe impl Send for Shrinker {}
-
-enum Scaling {
-    Filters(GpuGraph),
-    #[cfg(windows)]
-    D3d11(d3d11::Scaler),
-    Vt(vt::Fit),
-}
-
-impl Scaling {
-    fn new(f: &frame::Video, frames: *mut ffi::AVBufferRef, (w, h): (u32, u32)) -> Result<Self> {
-        match f.format() {
-            format::Pixel::VAAPI => {
-                let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
-                let spec = vaapi::shrink_spec((w, h));
-                Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
-            }
-            format::Pixel::CUDA => {
-                let pixel = ffi::AVPixelFormat::AV_PIX_FMT_CUDA;
-                let spec = crate::cuda::scaling((f.width(), f.height()), (w, h), "").join(",");
-                Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
-            }
-            format::Pixel::VIDEOTOOLBOX => Ok(Self::Vt(vt::Fit::new(f, frames, 0, (w, h))?)),
-            format::Pixel::VULKAN => Ok(Self::Filters(vulkan_scale::scaler(f, frames, (w, h))?)),
-            #[cfg(windows)]
-            format::Pixel::D3D11 => Ok(Self::D3d11(d3d11::Scaler::new(f, frames, (w, h))?)),
-            other => Err(Error::Invalid(format!("no scaling {other:?} frames"))),
-        }
-    }
-}
-
-const BANDS: [[u16; 3]; 10] = [
-    [16, 128, 128],
-    [64, 128, 128],
-    [128, 128, 128],
-    [192, 128, 128],
-    [235, 128, 128],
-    [63, 102, 240],
-    [173, 42, 26],
-    [32, 240, 118],
-    [4, 8, 128],
-    [250, 128, 248],
-];
-
-fn readable((w, h): (u32, u32)) -> bool {
-    w as usize >= 4 * BANDS.len() && h >= 8
 }
 
 fn described(layout: format::Pixel) -> Option<&'static ffi::AVPixFmtDescriptor> {
@@ -1081,56 +1024,6 @@ fn write_line(picture: &mut frame::Video, c: i32, y: usize, line: &[u16]) {
             line.len() as i32,
             2,
         );
-    }
-}
-
-impl Shrinker {
-    pub(crate) fn down(
-        shrinker: &mut Option<Shrinker>,
-        f: &frame::Video,
-        size: (u32, u32),
-    ) -> Result<frame::Video> {
-        let (frames, of) = frames_of(f)?;
-        let input = (of, size);
-        if shrinker.as_ref().is_none_or(|s| s.input != input) {
-            let scaling = Scaling::new(f, frames, size)
-                .inspect_err(|e| {
-                    crate::debug!(
-                        "decoding",
-                        "{:?} frames {}x{} come down whole, not shrunk to {}x{} on the GPU: {e}",
-                        sw_format(f),
-                        f.width(),
-                        f.height(),
-                        size.0,
-                        size.1
-                    )
-                })
-                .ok();
-            *shrinker = Some(Self { scaling, input });
-        }
-        let shrinker = shrinker.as_mut().expect("made above");
-        let scaled = match &mut shrinker.scaling {
-            Some(Scaling::Filters(graph)) => run_graph(graph, f, "scaling a frame on the GPU"),
-            #[cfg(windows)]
-            Some(Scaling::D3d11(scaler)) => scaler.scale(f),
-            Some(Scaling::Vt(fit)) => fit.run(f),
-            None => return download(f),
-        };
-        match scaled.and_then(|scaled| download(&scaled)) {
-            Ok(mut small) => {
-                same_picture(&mut small, f);
-                crate::color::keep_matrix(&mut small, f);
-                Ok(small)
-            }
-            Err(e) => {
-                crate::debug!(
-                    "decoding",
-                    "shrinking on the GPU failed, frames come down whole from now on: {e}"
-                );
-                shrinker.scaling = None;
-                download(f)
-            }
-        }
     }
 }
 

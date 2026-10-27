@@ -740,14 +740,11 @@ fn encode_into(
     let mut went = None;
     let mut encoding = || -> Result<()> {
         while let Some(src) = reader.next_frame()? {
-            let (pts, frame_size) = (src.pts(), (src.width(), src.height()));
-            let made = maker.make(&mut fitting, &src, rotation, reader.path())?;
+            let pts = src.pts();
+            let made = maker.make(&mut fitting, &src, reader.path())?;
             if went.is_none() {
                 went = fitting.went.map(|w| match w {
-                    Went::Cpu if decoded_on_gpu => Went::Down {
-                        size: frame_size,
-                        whole: true,
-                    },
+                    Went::Cpu if decoded_on_gpu => Went::Down,
                     w => w,
                 });
             }

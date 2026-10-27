@@ -62,7 +62,7 @@ pub fn plan(facts: &Facts) -> Route {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Went {
     Stayed,
-    Down { size: (u32, u32), whole: bool },
+    Down,
     Cpu,
 }
 
@@ -70,8 +70,7 @@ impl Went {
     pub fn label(self) -> Option<String> {
         match self {
             Went::Stayed => Some("frames stayed there".into()),
-            Went::Down { whole: true, .. } => Some("frames came down whole".into()),
-            Went::Down { size: (w, h), .. } => Some(format!("frames came down at {w}×{h}")),
+            Went::Down => Some("frames came down whole".into()),
             Went::Cpu => None,
         }
     }

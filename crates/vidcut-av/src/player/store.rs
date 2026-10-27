@@ -51,7 +51,6 @@ struct Inner {
     pictures: Lru<Id, Arc<Picture>, { usize::MAX }>,
     kinds: [Order; 2],
     pools: HashMap<usize, HashSet<Id>>,
-    small: HashMap<u64, HashSet<Id>>,
     bytes: [usize; 2],
     budget: [usize; 2],
     shared: bool,
@@ -161,19 +160,19 @@ impl Share {
     }
 
     pub(crate) fn get(&self, id: &Id) -> Option<Arc<Picture>> {
-        GLOBAL.get(id, self.owner)
+        GLOBAL.get(id)
     }
 
     pub(crate) fn contains(&self, id: &Id) -> bool {
-        GLOBAL.contains(id, self.owner)
+        GLOBAL.contains(id)
     }
 
     pub(crate) fn kept_run(&self, ids: impl IntoIterator<Item = Id>) -> usize {
-        GLOBAL.kept_run(ids, self.owner)
+        GLOBAL.kept_run(ids)
     }
 
     pub(crate) fn touch(&self, ids: impl IntoIterator<Item = Id>) {
-        GLOBAL.touch(ids, self.owner);
+        GLOBAL.touch(ids);
     }
 
     pub(crate) fn hold(&self, id: Option<Id>) {
@@ -181,15 +180,7 @@ impl Share {
     }
 
     pub(crate) fn wait(&self, id: &Id, deadline: Instant) -> Option<Arc<Picture>> {
-        GLOBAL.wait(id, deadline, self.owner)
-    }
-
-    pub(crate) fn forget_small(&self) {
-        GLOBAL.forget_small(self.owner);
-    }
-
-    pub(crate) fn small(&self, id: &Id) -> Id {
-        id.small(self.owner)
+        GLOBAL.wait(id, deadline)
     }
 }
 
@@ -214,7 +205,6 @@ impl Store {
                 pictures: Lru::new(),
                 kinds: [Lru::new(), Lru::new()],
                 pools: HashMap::new(),
-                small: HashMap::new(),
                 bytes: [0; 2],
                 budget: [memory, video],
                 shared: false,
@@ -262,34 +252,25 @@ impl Store {
         self.bring_down(down, None);
     }
 
-    pub(crate) fn get(&self, id: &Id, owner: u64) -> Option<Arc<Picture>> {
-        let mut inner = self.lock();
-        let key = inner.key(id, owner)?;
-        inner.touch(&key)
+    pub(crate) fn get(&self, id: &Id) -> Option<Arc<Picture>> {
+        self.lock().touch(id)
     }
 
-    pub(crate) fn contains(&self, id: &Id, owner: u64) -> bool {
-        self.lock().key(id, owner).is_some()
+    pub(crate) fn contains(&self, id: &Id) -> bool {
+        self.lock().pictures.contains(id)
     }
 
-    pub(crate) fn kept_run(&self, ids: impl IntoIterator<Item = Id>, owner: u64) -> usize {
+    pub(crate) fn kept_run(&self, ids: impl IntoIterator<Item = Id>) -> usize {
         let inner = self.lock();
         ids.into_iter()
-            .take_while(|id| inner.key(id, owner).is_some())
+            .take_while(|id| inner.pictures.contains(id))
             .count()
     }
 
-    pub(crate) fn forget_small(&self, owner: u64) {
-        let gone = self.lock().forget_small(owner);
-        drop(gone);
-    }
-
-    pub(crate) fn touch(&self, ids: impl IntoIterator<Item = Id>, owner: u64) {
+    pub(crate) fn touch(&self, ids: impl IntoIterator<Item = Id>) {
         let mut inner = self.lock();
         for id in ids {
-            if let Some(key) = inner.key(&id, owner) {
-                inner.touch(&key);
-            }
+            inner.touch(&id);
         }
     }
 
@@ -305,11 +286,7 @@ impl Store {
         let mut inner = self.lock();
         inner.held.remove(&owner);
         inner.owners = inner.owners.saturating_sub(1);
-        let gone = if inner.owners == 0 {
-            inner.empty()
-        } else {
-            inner.forget_small(owner)
-        };
+        let gone = (inner.owners == 0).then(|| inner.empty());
         drop(inner);
         drop(gone);
     }
@@ -345,10 +322,10 @@ impl Store {
         }
     }
 
-    pub(crate) fn wait(&self, id: &Id, deadline: Instant, owner: u64) -> Option<Arc<Picture>> {
+    pub(crate) fn wait(&self, id: &Id, deadline: Instant) -> Option<Arc<Picture>> {
         let mut inner = self.lock();
         loop {
-            if let Some(picture) = inner.key(id, owner).and_then(|k| inner.pictures.peek(&k)) {
+            if let Some(picture) = inner.pictures.peek(id) {
                 return Some(picture.clone());
             }
             let left = deadline.checked_duration_since(Instant::now())?;
@@ -380,12 +357,6 @@ impl Store {
 }
 
 impl Inner {
-    fn key(&self, id: &Id, owner: u64) -> Option<Id> {
-        [id.clone(), id.small(owner)]
-            .into_iter()
-            .find(|k| self.pictures.contains(k))
-    }
-
     fn insert(&mut self, id: Id, picture: Arc<Picture>) {
         self.remove(&id);
         let charged = charges(&picture);
@@ -397,9 +368,6 @@ impl Inner {
         }
         for pool in picture.pools() {
             self.pools.entry(pool).or_default().insert(id.clone());
-        }
-        if let Some(owner) = id.small_owner() {
-            self.small.entry(owner).or_default().insert(id.clone());
         }
         self.pictures.insert(id, picture);
     }
@@ -418,14 +386,6 @@ impl Inner {
                 }
             }
         }
-        if let Some(owner) = id.small_owner()
-            && let Some(ids) = self.small.get_mut(&owner)
-        {
-            ids.remove(id);
-            if ids.is_empty() {
-                self.small.remove(&owner);
-            }
-        }
         Some(picture)
     }
 
@@ -439,7 +399,6 @@ impl Inner {
     fn empty(&mut self) -> Vec<Arc<Picture>> {
         self.kinds = [Lru::new(), Lru::new()];
         self.pools.clear();
-        self.small.clear();
         self.bytes = [0; 2];
         let all = std::mem::take(&mut self.pictures);
         all.iter().map(|(_, p)| p.clone()).collect()
@@ -447,11 +406,6 @@ impl Inner {
 
     fn is_held(&self, id: &Id) -> bool {
         self.held.values().any(|h| h == id)
-    }
-
-    fn forget_small(&mut self, owner: u64) -> Vec<Arc<Picture>> {
-        let ids = self.small.remove(&owner).unwrap_or_default();
-        ids.iter().filter_map(|id| self.remove(id)).collect()
     }
 
     fn uncharge(&mut self, old: &Picture) {
@@ -623,7 +577,7 @@ mod tests {
     }
 
     fn kept(store: &Store) -> [bool; 4] {
-        [0, 1, 2, 3].map(|pos| store.contains(&Id::at("clip", pos), 0))
+        [0, 1, 2, 3].map(|pos| store.contains(&Id::at("clip", pos)))
     }
 
     #[test]
@@ -697,7 +651,7 @@ mod tests {
         for (pos, gpu) in [(0, false), (1, true), (2, false), (3, true)] {
             store.put(Id::at("clip", pos), picture(gpu));
         }
-        let kept = [0, 1, 2, 3].map(|pos| store.contains(&Id::at("clip", pos), 0));
+        let kept = [0, 1, 2, 3].map(|pos| store.contains(&Id::at("clip", pos)));
         assert_eq!(kept, [false, true, true, true]);
     }
 }

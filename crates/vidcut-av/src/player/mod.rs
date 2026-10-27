@@ -200,7 +200,6 @@ pub(crate) struct Control {
     pub hardware: bool,
     pub motion: f64,
     pub followed: bool,
-    pub small: Option<(u32, u32)>,
     pub prepared: Option<(Arc<Plan>, i64)>,
     pub closed: bool,
     error: Option<String>,
@@ -276,7 +275,6 @@ pub(crate) struct Snap {
     pub hardware: bool,
     pub motion: f64,
     pub followed: bool,
-    pub small: Option<(u32, u32)>,
     pub prepared: Option<(Arc<Plan>, i64)>,
     pub looping: Option<(i64, i64)>,
 }
@@ -573,7 +571,6 @@ impl Shared {
             hardware: ctl.hardware,
             motion: ctl.motion,
             followed: ctl.followed,
-            small: ctl.small,
             prepared: ctl.prepared.clone(),
             looping: ctl.looping,
         })
@@ -725,7 +722,6 @@ impl Player {
                 hardware: config.hardware,
                 motion: 0.0,
                 followed: false,
-                small: None,
                 prepared: None,
                 closed: false,
                 error: None,
@@ -848,24 +844,6 @@ impl Player {
             ctl.motion = speed;
             ctl.followed = true;
         });
-    }
-
-    pub fn shrink_to(&self, size: Option<(u32, u32)>) {
-        let near = |a: u32, b: u32| a.abs_diff(b) * 8 <= b;
-        let mut ctl = self.shared.control();
-        let same = match (ctl.small, size) {
-            (Some((w0, h0)), Some((w, h))) => near(w, w0) && near(h, h0),
-            (was, now) => was == now,
-        };
-        if same {
-            return;
-        }
-        ctl.small = size;
-        ctl.version += 1;
-        ctl.changes += 1;
-        drop(ctl);
-        self.shared.store.forget_small();
-        self.shared.changed.notify_all();
     }
 
     fn seek_with(&self, frame: i64, sound: bool) {

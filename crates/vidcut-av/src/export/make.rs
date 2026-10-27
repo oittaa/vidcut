@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::normalize::{Relayout, down};
+use super::normalize::Relayout;
 use crate::decode::Reading;
 use crate::error::Result;
 use crate::ffmpeg::{format, frame};
@@ -31,12 +31,10 @@ pub(crate) struct Maker {
     out: (u32, u32, format::Pixel),
     keep: Vec<crate::hw::Kind>,
     stages: Vec<Stage>,
-    shrink: Option<(u32, u32)>,
     reading: Reading,
 }
 
 struct Stage {
-    shrinker: Option<crate::hw::Shrinker>,
     relayout: Relayout,
     keeper: Option<crate::hw::Keeper>,
     unkept: bool,
@@ -46,7 +44,6 @@ struct Stage {
 impl Default for Stage {
     fn default() -> Self {
         Self {
-            shrinker: None,
             relayout: Relayout::new(),
             keeper: None,
             unkept: false,
@@ -65,17 +62,8 @@ impl Maker {
             out,
             keep,
             stages: Vec::new(),
-            shrink: None,
             reading,
         }
-    }
-
-    pub(crate) fn shrink_to(&mut self, size: Option<(u32, u32)>) {
-        self.shrink = size;
-    }
-
-    pub(crate) fn shrinks(&self) -> Option<(u32, u32)> {
-        self.shrink
     }
 
     pub(crate) fn clear_stages(&mut self) {
@@ -96,18 +84,16 @@ impl Maker {
     }
 
     fn keeps(&self, frame: &frame::Video) -> bool {
-        self.shrink.is_none()
-            && crate::hw::Kind::of_frame(frame).is_some_and(|k| self.keep.contains(&k))
+        crate::hw::Kind::of_frame(frame).is_some_and(|k| self.keep.contains(&k))
     }
 
     pub(crate) fn make(
         &mut self,
         fitting: &mut Fitting,
         frame: &frame::Video,
-        rotation: u16,
         path: &Path,
     ) -> Result<frame::Video> {
-        self.make_layer(0, fitting, frame, rotation, path, self.reading)
+        self.make_layer(0, fitting, frame, path, self.reading)
     }
 
     pub(crate) fn make_layer(
@@ -115,7 +101,6 @@ impl Maker {
         layer: usize,
         fitting: &mut Fitting,
         frame: &frame::Video,
-        rotation: u16,
         path: &Path,
         reading: Reading,
     ) -> Result<frame::Video> {
@@ -123,7 +108,7 @@ impl Maker {
             self.stages.resize_with(layer + 1, Stage::default);
         }
         let mut stage = std::mem::take(&mut self.stages[layer]);
-        let made = self.make_with(&mut stage, fitting, frame, rotation, path, reading);
+        let made = self.make_with(&mut stage, fitting, frame, path, reading);
         self.stages[layer] = stage;
         made
     }
@@ -133,7 +118,6 @@ impl Maker {
         stage: &mut Stage,
         fitting: &mut Fitting,
         frame: &frame::Video,
-        rotation: u16,
         path: &Path,
         reading: Reading,
     ) -> Result<frame::Video> {
@@ -145,7 +129,6 @@ impl Maker {
             ..Facts::of(frame, self.keeps(frame))
         };
         let mut route;
-        let mut came_down_at = None;
         let picture = loop {
             route = plan(&facts);
             let came_down = match route {
@@ -159,23 +142,16 @@ impl Maker {
                         continue;
                     }
                 },
-                Route::Whole => Some(match self.shrink {
-                    Some(size) => down(&mut stage.shrinker, frame, rotation, size)?,
-                    None => crate::hw::to_read(frame)?,
-                }),
+                Route::Whole => Some(crate::hw::to_read(frame)?),
                 Route::Cpu => None,
             };
-            came_down_at = came_down.as_ref().map(|f| (f.width(), f.height()));
             let frame = came_down.as_ref().unwrap_or(frame);
             break crate::buffers::owned(&stage.relayout.run(frame, reading)?)?;
         };
-        fitting.went = Some(match came_down_at {
-            Some(size) => Went::Down {
-                size,
-                whole: size == (frame.width(), frame.height()),
-            },
-            None if route == Route::Cpu => Went::Cpu,
-            None => Went::Stayed,
+        fitting.went = Some(match route {
+            Route::Kept => Went::Stayed,
+            Route::Whole => Went::Down,
+            Route::Cpu => Went::Cpu,
         });
         fitting.took(route, path);
         Ok(picture)

@@ -139,17 +139,6 @@ pub fn colors_of(f: &frame::Video) -> Colors {
     }
 }
 
-pub(crate) fn keep_matrix(scaled: &mut frame::Video, f: &frame::Video) {
-    use ffi::AVColorSpace as S;
-    let matrix = match Source::of(f).matrix {
-        Matrix::Bt601 => S::AVCOL_SPC_SMPTE170M,
-        Matrix::Bt709 => S::AVCOL_SPC_BT709,
-        Matrix::Bt2020 => S::AVCOL_SPC_BT2020_NCL,
-    };
-    // SAFETY: a plain field of its own frame.
-    unsafe { (*scaled.as_mut_ptr()).colorspace = matrix };
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct PqLight {
     pub kr: f64,
@@ -397,36 +386,6 @@ pub(crate) fn tag(ctx: *mut ffi::AVCodecContext, hdr: Option<Hdr>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn picture(w: u32, h: u32, hdr: Option<Hdr>) -> frame::Video {
-        use ffi::AVColorTransferCharacteristic as T;
-        let mut f = frame::Video::new(format::Pixel::YUV420P10LE, w, h);
-        unsafe {
-            (*f.as_mut_ptr()).color_trc = match hdr {
-                Some(Hdr::Pq) => T::AVCOL_TRC_SMPTE2084,
-                Some(Hdr::Hlg) => T::AVCOL_TRC_ARIB_STD_B67,
-                None => T::AVCOL_TRC_UNSPECIFIED,
-            };
-        }
-        f
-    }
-
-    #[test]
-    fn shrunk_pictures_keep_their_sources_matrix() {
-        use ffi::AVColorSpace as S;
-        let shrunk = |w, h, tag| {
-            let mut f = picture(w, h, None);
-            unsafe { (*f.as_mut_ptr()).colorspace = tag };
-            let mut small = picture(320, 180, None);
-            keep_matrix(&mut small, &f);
-            Source::of(&small).matrix
-        };
-        assert_eq!(shrunk(1920, 1080, S::AVCOL_SPC_UNSPECIFIED), Matrix::Bt709);
-        assert_eq!(shrunk(720, 480, S::AVCOL_SPC_UNSPECIFIED), Matrix::Bt601);
-        assert_eq!(shrunk(720, 480, S::AVCOL_SPC_BT709), Matrix::Bt709);
-        assert_eq!(shrunk(3840, 2160, S::AVCOL_SPC_BT2020_NCL), Matrix::Bt2020);
-        assert_eq!(Source::of(&picture(320, 180, None)).matrix, Matrix::Bt601);
-    }
 
     #[test]
     fn the_gamut_matrix_is_bt2020_to_bt709s() {
