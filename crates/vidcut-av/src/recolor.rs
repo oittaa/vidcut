@@ -1,21 +1,15 @@
 use std::ptr::NonNull;
 
-use objc2::rc::Retained;
-use objc2::runtime::ProtocolObject;
-use objc2_core_foundation::CFRetained;
-use objc2_core_video::CVPixelBufferGetIOSurface;
-use objc2_foundation::NSString;
-use objc2_io_surface::IOSurfaceRef;
 use objc2_metal::{
-    MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder, MTLCommandQueue,
-    MTLComputeCommandEncoder, MTLComputePipelineState, MTLCreateSystemDefaultDevice, MTLDevice,
-    MTLLibrary, MTLPixelFormat, MTLSize, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+    MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLComputeCommandEncoder,
+    MTLComputePipelineState, MTLPixelFormat, MTLSize, MTLTexture, MTLTextureUsage,
 };
 
 use crate::color::{Matrix, Recoloring};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{ffi, format, frame::Video};
-use crate::frame_processor::{Frames, pixels};
+use crate::frame_processor::Frames;
+use crate::metal::{Device, Pipeline, Queue, surface, texture};
 use vidcut_core::model::Hdr;
 
 const WHAT: &str = "color conversion on Metal";
@@ -160,9 +154,9 @@ struct Params {
 }
 
 pub(crate) struct Recolor {
-    device: Retained<ProtocolObject<dyn MTLDevice>>,
-    queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
-    pipeline: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    device: Device,
+    queue: Queue,
+    pipeline: Pipeline,
     frames: Frames,
 }
 
@@ -246,56 +240,16 @@ fn transfer(hdr: Option<Hdr>) -> u32 {
     }
 }
 
-fn surface(f: &Video) -> Result<CFRetained<IOSurfaceRef>> {
-    CVPixelBufferGetIOSurface(Some(pixels(f, WHAT)?))
-        .ok_or_else(|| refused("a pixel buffer without an IOSurface"))
-}
-
 impl Recolor {
     pub(crate) fn new() -> Result<Self> {
-        let device = MTLCreateSystemDefaultDevice().ok_or_else(|| refused("no Metal device"))?;
-        let queue = device
-            .newCommandQueue()
-            .ok_or_else(|| refused("no command queue"))?;
-        let library = device
-            .newLibraryWithSource_options_error(&NSString::from_str(KERNEL), None)
-            .map_err(|e| crate::frame_processor::failed(WHAT, e))?;
-        let function = library
-            .newFunctionWithName(&NSString::from_str("recolor"))
-            .ok_or_else(|| refused("no kernel"))?;
-        let pipeline = device
-            .newComputePipelineStateWithFunction_error(&function)
-            .map_err(|e| crate::frame_processor::failed(WHAT, e))?;
+        let (device, queue) = crate::metal::device(WHAT)?;
+        let pipeline = crate::metal::kernel(&device, KERNEL, "recolor", WHAT)?;
         Ok(Self {
             device,
             queue,
             pipeline,
             frames: Frames::default(),
         })
-    }
-
-    fn texture(
-        &self,
-        surface: &IOSurfaceRef,
-        plane: usize,
-        format: MTLPixelFormat,
-        usage: MTLTextureUsage,
-    ) -> Result<Retained<ProtocolObject<dyn MTLTexture>>> {
-        let (w, h) = (
-            surface.width_of_plane(plane),
-            surface.height_of_plane(plane),
-        );
-        // SAFETY: `desc` is the plane's size and format; Metal checks it against `surface`.
-        unsafe {
-            let desc =
-                MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                    format, w, h, false,
-                );
-            desc.setUsage(usage);
-            self.device
-                .newTextureWithDescriptor_iosurface_plane(&desc, surface, plane)
-        }
-        .ok_or_else(|| refused("Metal won't make a texture of the IOSurface"))
     }
 
     pub(crate) fn run(
@@ -311,17 +265,17 @@ impl Recolor {
         let limited = ffi::AVColorRange::AVCOL_RANGE_MPEG;
         let shape = (size, ffi::AVPixelFormat::from(to));
         let mut out = self.frames.fresh_in(f, shape, limited, WHAT)?;
-        let (a, b) = (surface(f)?, surface(&out)?);
+        let (a, b) = (surface(f, WHAT)?, surface(&out, WHAT)?);
         if a.plane_count() != 2 || b.plane_count() != 2 {
             return Err(refused("IOSurfaces of other than two planes"));
         }
         let read = MTLTextureUsage::ShaderRead;
         let write = MTLTextureUsage::ShaderWrite;
         let textures = [
-            self.texture(&a, 0, from.planes[0], read)?,
-            self.texture(&a, 1, from.planes[1], read)?,
-            self.texture(&b, 0, into.planes[0], write)?,
-            self.texture(&b, 1, into.planes[1], write)?,
+            texture(&self.device, &a, (0, from.planes[0]), read, WHAT)?,
+            texture(&self.device, &a, (1, from.planes[1]), read, WHAT)?,
+            texture(&self.device, &b, (0, into.planes[0]), write, WHAT)?,
+            texture(&self.device, &b, (1, into.planes[1]), write, WHAT)?,
         ];
         let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
         let linear = colors.linear.as_ref();
@@ -388,12 +342,7 @@ impl Recolor {
         buffer.commit();
         buffer.waitUntilCompleted();
         drop(textures);
-        if buffer.status() != MTLCommandBufferStatus::Completed {
-            return Err(buffer.error().map_or_else(
-                || refused("the conversion did not end"),
-                |e| crate::frame_processor::failed(WHAT, e),
-            ));
-        }
+        crate::metal::ended(&buffer, WHAT)?;
         crate::color::tag_frame(&mut out, target);
         crate::debug!(
             "lanczos",

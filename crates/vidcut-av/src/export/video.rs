@@ -1148,7 +1148,9 @@ pub struct VideoFrames {
     light:
         std::collections::HashMap<std::path::PathBuf, std::sync::Arc<crate::light::LightAnalysis>>,
     last_dolby_vision: frame::Video,
-    cuda_mix_failed: Option<String>,
+    gpu_mix_failed: Option<String>,
+    #[cfg(target_os = "macos")]
+    metal_mix: Option<crate::mixing::Mixer>,
     sources: Vec<super::SourceNote>,
     burn: Option<Burner>,
     titles: Titles,
@@ -1533,7 +1535,9 @@ impl VideoFrames {
             dynamic: Default::default(),
             light: Default::default(),
             last_dolby_vision: frame::Video::empty(),
-            cuda_mix_failed: None,
+            gpu_mix_failed: None,
+            #[cfg(target_os = "macos")]
+            metal_mix: None,
             sources: Vec::new(),
             burn: None,
             titles: Titles::default(),
@@ -1619,13 +1623,19 @@ impl VideoFrames {
     }
 
     pub fn mix_failed(&self) -> Option<&str> {
-        self.cuda_mix_failed.as_deref()
+        self.gpu_mix_failed.as_deref()
     }
 
     fn gpu_mixes(&self) -> bool {
-        matches!(self.maker.output(), Output::Cuda { .. })
-            && crate::hw::can_mix(Place::Cuda)
-            && self.cuda_mix_failed.is_none()
+        let place = match self.maker.output() {
+            Output::Cuda { .. } => Place::Cuda,
+            Output::FittedOnGpu {
+                place: Place::VideoToolbox,
+                ..
+            } => Place::VideoToolbox,
+            _ => return false,
+        };
+        crate::hw::can_mix(place) && self.gpu_mix_failed.is_none()
     }
 
     pub(crate) fn output(mut self, output: Output) -> Self {
@@ -2000,7 +2010,24 @@ impl VideoFrames {
                             "decoding",
                             "the GPU won't mix a dissolve's pictures, the CPU mixes them: {e}"
                         );
-                        self.cuda_mix_failed = Some(e.to_string());
+                        self.gpu_mix_failed = Some(e.to_string());
+                        None
+                    }
+                }
+            }
+            #[cfg(target_os = "macos")]
+            Output::FittedOnGpu {
+                place: Place::VideoToolbox,
+                ..
+            } if self.gpu_mixes() && !wiped && on_metal(&layers) => {
+                match metal_mix(&mut self.metal_mix, &layers) {
+                    Ok(mixed) => mixed,
+                    Err(e) => {
+                        crate::debug!(
+                            "decoding",
+                            "the GPU won't mix a dissolve's pictures, the CPU mixes them: {e}"
+                        );
+                        self.gpu_mix_failed = Some(e.to_string());
                         None
                     }
                 }
@@ -2856,6 +2883,47 @@ fn cuda_mix(
         }
     }
     mixed.ok_or_else(|| Error::Invalid("a mix of black alone".into()))
+}
+
+#[cfg(target_os = "macos")]
+fn on_metal(layers: &[Layer]) -> bool {
+    layers.iter().all(|l| {
+        l.placing.is_none()
+            && l.frame
+                .as_ref()
+                .is_none_or(|f| Place::of(f) == Place::VideoToolbox)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn metal_mix(
+    mixer: &mut Option<crate::mixing::Mixer>,
+    layers: &[Layer],
+) -> Result<Option<frame::Video>> {
+    if mixer.is_none() {
+        *mixer = Some(crate::mixing::Mixer::new()?);
+    }
+    let mixer = mixer.as_mut().expect("made above");
+    let laid = |mixer: &mut crate::mixing::Mixer, under: Option<&frame::Video>, l: &Layer| match (
+        under, l.weight,
+    ) {
+        (None, None) => l.frame.as_ref().map(frame_ref).transpose(),
+        (under, w) => mixer.mix(under, l.frame.as_ref(), w.unwrap_or(WHOLE)),
+    };
+    let mut mixed: Option<frame::Video> = None;
+    let mut below: Option<Option<frame::Video>> = None;
+    for l in layers {
+        if l.crossing
+            && let Some(b) = &below
+        {
+            let then = laid(mixer, b.as_ref(), l)?;
+            mixed = mixer.sum(mixed.as_ref(), then.as_ref(), b.as_ref())?;
+        } else {
+            let next = laid(mixer, mixed.as_ref(), l)?;
+            below = Some(std::mem::replace(&mut mixed, next));
+        }
+    }
+    Ok(mixed)
 }
 
 fn no_picture() -> Error {

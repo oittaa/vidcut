@@ -1147,7 +1147,11 @@ pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
 }
 
 pub(crate) fn can_mix(place: Place) -> bool {
-    place == Place::Cuda
+    match place {
+        Place::Cuda => true,
+        Place::VideoToolbox => cfg!(target_os = "macos"),
+        _ => false,
+    }
 }
 
 pub(crate) fn reaches(from: Place, to: Place) -> bool {

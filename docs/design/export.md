@@ -205,7 +205,7 @@ flowchart TD
   plan -->|"Route::Whole"| down["hw::download"]
   shrink --> norm
   down --> norm
-  fit -->|"a dissolve: cuda::mix"| genc["GPU encoder<br>takes the frame as it is"]
+  fit -->|"a dissolve: cuda::mix, mixing::Mixer"| genc["GPU encoder<br>takes the frame as it is"]
   norm --> mem["picture in memory<br>a dissolve: export::mix"]
   mem -->|"uploaded"| genc
   mem --> cenc["CPU encoder"]
@@ -220,7 +220,7 @@ Pictures:
 - The encoder that opened sets the destination (`make::Output`):
   - With GPU decoding on: CUDA frames for NVENC, and the decoder's device for VAAPI, AMF and VideoToolbox on its GPU.
   - Else: memory.
-- A dissolve mixes by the same sums on the GPU for NVENC (`cuda::mix`) as on the CPU (`export::mix`).
+- A dissolve mixes by the same sums on the GPU for NVENC (`cuda::mix`) and VideoToolbox (`mixing::Mixer`) as on the CPU (`export::mix`).
 - On the CPU, the layers of a frame mix in a `Canvas`:
   - It holds each component of the frame as 32-bit floats, in the code values of the frame.
   - Thus a color above 1 or below 0 stays between the layers ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
@@ -463,7 +463,7 @@ The pictures:
   - `cuda::burn::Overlay::of` makes the colors and coverage of the placed picture in memory.
   - `cuda::burn` mixes them in, as for a title.
 - A crossing pair lays each side over what was below the first side, and adds the two. Then it takes that lower part away once.
-  - In memory, `mix::crossed` does this. On the GPU, `cuda::mix::sum` does this.
+  - In memory, `mix::crossed` does this. On the GPU, `cuda::mix::sum` and `Mixer::sum` do this.
 
 A picture with a Dynamic Zoom is placed on each frame by its own box:
 
