@@ -63,7 +63,7 @@ winget install LLVM.LLVM
 brew install ffmpeg-full rustup
 ```
 
-On a Mac, the full test gate and an app bundle are still open ([todo](docs/todo/macos.md)).
+On a Mac, the signed app bundle is open work ([todo](docs/todo/macos.md)).
 
 **All systems:**
 

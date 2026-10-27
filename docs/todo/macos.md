@@ -4,7 +4,6 @@
 
 To do:
 
-- Run `scripts/check.sh full` on a Mac.
 - Test ProRes proxies on a Mac with ProRes hardware and on a Mac without it.
 - Make a signed `.app` bundle that includes FFmpeg's libraries.
 
