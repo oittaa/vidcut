@@ -8,9 +8,9 @@ To do:
 - Test ProRes proxies on a Mac with ProRes hardware and on a Mac without it.
 - Make a signed `.app` bundle that includes FFmpeg's libraries.
 
-## Work that still uses the CPU
+## Work on the CPU
 
-Most frames stay on the GPU from the decoder to the viewer or the encoder. Two cases still use the CPU:
+Most frames stay on the GPU from the decoder to the viewer or the encoder. These two cases use the CPU:
 
-- **Super Scale and Retime Process on frames that the CPU decoded.** The CPU converts these frames to RGB first. Frames that VideoToolbox decoded stay on the GPU.
+- **Super Scale and Retime Process on frames that the CPU decodes.** The CPU converts these frames to RGB first. Frames that VideoToolbox decodes stay on the GPU.
 - **Placed pictures.** The CPU draws a moved, zoomed or cropped picture. The frame under it stays on the GPU ([gpu-placement.md](gpu-placement.md)).

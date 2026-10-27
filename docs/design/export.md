@@ -220,7 +220,9 @@ Pictures:
 - The encoder that opened sets the destination (`make::Output`):
   - With GPU decoding on: CUDA frames for NVENC, and the decoder's device for VAAPI, AMF and VideoToolbox on its GPU.
   - Else: memory.
-- A dissolve mixes by the same sums on the GPU for NVENC (`cuda::mix`) and VideoToolbox (`mixing::Mixer`) as on the CPU (`export::mix`).
+- A dissolve on the GPU uses the same sums as on the CPU (`export::mix`).
+  - For NVENC, `cuda::mix` mixes the frames.
+  - For VideoToolbox, `mixing::Mixer` mixes the frames.
 - On the CPU, the layers of a frame mix in a `Canvas`:
   - It holds each component of the frame as 32-bit floats, in the code values of the frame.
   - Thus a color above 1 or below 0 stays between the layers ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
@@ -383,7 +385,9 @@ Blending:
   - The colors and coverage of the area that the pictures cover (`burn::bounds`) go up into two frames of the pool (`Overlay`).
   - In these frames, each place is laid over the places before it, as `burn::blend` lays them.
   - A kernel mixes them into a copy of each frame inside that area, and copies the rest.
-- VideoToolbox frames take it on Metal by the same sums (`Mixer::burn`). The colors and coverage go up into textures (`mixing::Overlay`).
+- VideoToolbox frames take it on Metal (`Mixer::burn`):
+  - The colors and coverage go into textures (`mixing::Overlay`).
+  - A kernel mixes them with the sums of `cuda::burn`.
 - The frames of other GPUs come down while a cue shows ([gpu](gpu.md)).
 
 ## Titles
@@ -415,7 +419,7 @@ Drawing:
 
 - A title is drawn once for the size of the output, and kept while it shows.
 - A `Placing` moves and fades it (`burn::blend_at`). The CUDA overlay is made again for each placing.
-- As the cues of the burn-in do (`Drawn`), the title goes onto a picture in memory with `burn::blend`. It goes into the CUDA frames of NVENC with `cuda::burn`, and into VideoToolbox frames with `Mixer::burn`.
+- As the cues of the burn-in do (`Drawn`), the title goes onto a picture in memory with `burn::blend`. It goes into the CUDA frames of NVENC with `cuda::burn`. It goes into VideoToolbox frames with `Mixer::burn`.
 - The frames of other GPUs come down while a title shows ([todo](../todo/gpu-burn-in.md)).
 - Titles draw in every export and in `frame.render`, whatever the subtitle settings are.
 
@@ -473,7 +477,7 @@ A picture with a Dynamic Zoom is placed on each frame by its own box:
 - A clip inside a compound clip keeps the `Run` of its own frames, which `render::inside` gives.
 - In a reversed compound, that `Run` has a negative length and goes backward. In a frozen compound, it holds its frame (`Run::held`).
 - `layer_size` fits the layer for the smaller of the two boxes (`DynamicZoom::closest`).
-- The NVENC and VideoToolbox paths are the same, as `Overlay::of` takes the frame's `Placing`.
+- The NVENC and VideoToolbox paths do the same. Their `Overlay::of` takes the frame's `Placing`.
 
 A picture value with keyframes is sampled on that same `Placing` (D75):
 
