@@ -212,29 +212,25 @@ fi
 if wanted scale; then
 say ""
 say "## Super Scale"
-say "Two seconds of Big Buck Bunny, made smaller first with H.264 on VideoToolbox, then shown 2x as large: 960x540 in 1920x1080, and 1920x1080 in 3840x2160. 120 frames. Super Scale at Auto: macOS makes what its factors give, and vidcut fits it."
-for size in "960 540" "1920 1080"; do
-  set -- $size
-  small="$work/bbb-$2.mov"
-  project "$work/make-$2.vidcut" "$1" "$2" "$media" "${first}f..$((first + 120))f"
-  "$V" -p "$work/make-$2.vidcut" --headless export start "$small" --preset h264-master --overwrite >/dev/null
-done
+say "Half a second of Big Buck Bunny (30 frames), made 960x540 first with H.264 on VideoToolbox, then shown in 1920x1080. Super Scale at Auto: macOS makes what its factors give, and vidcut fits it."
+project "$work/make-540.vidcut" 960 540 "$media" "${first}f..$((first + 30))f"
+"$V" -p "$work/make-540.vidcut" --headless export start "$work/bbb-540.mov" --preset h264-master --overwrite >/dev/null
 table
-for pair in "540 1920 1080" "1080 3840 2160"; do
+for pair in "540 1920 1080"; do
   set -- $pair
   for how in none classic macos; do
     name="scale-$1-to-$3-$how"
-    project "$work/$name.vidcut" "$2" "$3" "$work/bbb-$1.mov" "0f..120f"
+    project "$work/$name.vidcut" "$2" "$3" "$work/bbb-$1.mov" "0f..30f"
     if [[ $how == none ]]; then
       "$V" -p "$work/$name.vidcut" --headless media set m1 --super-scale none >/dev/null
     else
       "$V" -p "$work/$name.vidcut" --headless media set m1 --super-scale auto --upscaler "$how" --download >/dev/null
     fi
-    measure "$name" "$work/$name.vidcut" 120 || true
+    measure "$name" "$work/$name.vidcut" 30 || true
   done
 done
 say ""
-for n in "540-to-1080" "1080-to-2160"; do steps_scale "scale-$n-macos"; done
+steps_scale "scale-540-to-1080-macos"
 grep -h 'macOS: [0-9]*x[0-9]* to' "$work"/scale-*-macos-1.log 2>/dev/null | sed -n 1,2p | sed 's/^/- /' >>"$report" || true
 fi
 
