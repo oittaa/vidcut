@@ -428,6 +428,11 @@ The bar and the Jobs button:
   - While the dialog is open, `Handle::skip` hands these stripes to the session. The session plays the timeline as Remove would leave it ([deviation X48](../deviations.md#x48-ripple-delete-silences-stripes-can-be-edited-before-remove)).
 - **Timeline tiles**
   - `Tiles` decodes them on `vidcut-tiles-N`.
+  - Each tile shows the source frame under its left edge (`tile_frame`). The clip's pace (`Clip::pace`) gives the frame, at each speed, backward and frozen.
+  - The first tile shows the first frame of the clip.
+  - A tile that is not decoded yet shows the nearest kept tile, within the source frames of one tile (`Tiles::nearest`).
+  - Without one, it shows the pool thumbnail nearest in time.
+  - This keeps the filmstrip full while a zoom or a scroll decodes new tiles.
   - The filmstrips of the Trim Editor use the same tiles. Their frames and handle reach come from `vidcut_core::ops::filmstrip`.
   - Their numbers come from the lengths of the clips when the editor opened (`TrimAnchor`).
 - **Imports.**
