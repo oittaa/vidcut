@@ -175,6 +175,11 @@ diffs() {
     -f null - 2>&1 | grep -oE 'signalstats\.(YAVG|YMAX)=[0-9.]*' |
     awk -F= '/YAVG/ {s += $2; n++} /YMAX/ {if ($2 > m) m = $2} END {if (n) printf "mean %.2f, largest %d", s / n, m; else printf "-"}'
 }
+avgs() {
+  ffmpeg -nostats -i "$1" -vf "format=yuv444p10le,signalstats,metadata=mode=print" -f null - 2>&1 |
+    grep -oE 'signalstats\.(YAVG|UAVG|VAVG)=[0-9.]*' |
+    awk -F= '/YAVG/ {y += $2; n++} /UAVG/ {u += $2} /VAVG/ {v += $2} END {if (n) printf "Y %.2f, U %.2f, V %.2f", y / n, u / n, v / n}'
+}
 encoded() { grep -oE ' with [a-z0-9_]+ ' "$1" | sed -n 1p | sed 's/ with //; s/ $//'; }
 stream() { ffprobe -v error -select_streams v:0 -show_entries stream=profile,pix_fmt -of csv=p=0 "$1"; }
 
@@ -192,7 +197,7 @@ facts() {
   say "  - Luma difference in 10-bit codes, each frame's mean averaged, and the largest anywhere: $(diffs "$work/$name-gpu.mov" "$work/$name-cpu.mov")."
   say "  - Metal: $(grep -c 'a mix of' "$work/$name-gpu.log" || true) mixes, $(grep -c 'colors of' "$work/$name-gpu.log" || true) color conversions, $(grep -c 'to [0-9]*x[0-9]* in [0-9]' "$work/$name-gpu.log" || true) lanczos scalings."
   for how in gpu cpu; do
-    say "  - $how: encoder $(encoded "$work/$name-$how.out"); stream $(stream "$work/$name-$how.mov")"
+    say "  - $how: encoder $(encoded "$work/$name-$how.out"); stream $(stream "$work/$name-$how.mov"); mean levels in 10-bit codes: $(avgs "$work/$name-$how.mov")"
     grep -h "won't\|error" "$work/$name-$how.log" | sort | uniq -c | sed -n 1,3p | sed "s/^/  - $how: /" >>"$report" || true
   done
 }
@@ -202,6 +207,13 @@ say ""
 say "## Encoders"
 say "The ProRes rows of encoders.list after the build:"
 "$V" encoders list 2>&1 | grep prores_videotoolbox | block || true
+
+say ""
+say "## The pixel transfer into P416"
+before="$data/macos-check/20261027-125920"
+say "The plain files of the run before, whose P416 came from the pixel transfer. Mean levels in 10-bit codes over the 30 frames:"
+say "- gpu: $(avgs "$before/plain-gpu.mov")"
+say "- cpu: $(avgs "$before/plain-cpu.mov")"
 
 say ""
 say "## ProRes 4444"
