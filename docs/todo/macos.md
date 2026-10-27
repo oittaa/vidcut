@@ -8,8 +8,7 @@
 
 ## Pictures on the GPU
 
-On macOS, VideoToolbox frames go to the viewer as Metal textures, and to the H.264 and HEVC encoders of VideoToolbox. A frame that comes down is read in place. These parts still go through the CPU:
+On macOS, VideoToolbox frames go to the viewer as Metal textures, and to the H.264, HEVC and ProRes encoders of VideoToolbox. A frame that comes down is read in place. These parts still go through the CPU:
 
 - **The AI processes of macOS:** they keep VideoToolbox frames on the GPU, in and out. Frames that the CPU decodes, and frames with a turn, go through RGB.
 - **Placed pictures:** the frames of the picture come down to be placed, as on NVIDIA. The frame below stays on the GPU ([gpu-placement.md](gpu-placement.md)).
-- **ProRes 4444 with alpha in the viewer:** VideoToolbox gives it as AYUV64, its samples packed in one plane. The shader of the viewer doesn't read this layout, so it comes down.
