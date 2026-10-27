@@ -277,8 +277,13 @@ pub(crate) trait Run: Send {
         false
     }
 
-    fn push_frame(&mut self, index: i64, f: &crate::ffmpeg::frame::Video) -> Result<Vec<Out>> {
-        let _ = (index, f);
+    fn push_frame(
+        &mut self,
+        index: i64,
+        f: &crate::ffmpeg::frame::Video,
+        rotation: u16,
+    ) -> Result<Vec<Out>> {
+        let _ = (index, f, rotation);
         Err(Error::Invalid("this upscaler takes RGB pictures".into()))
     }
 

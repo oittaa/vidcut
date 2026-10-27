@@ -447,11 +447,8 @@ fn dump(name: &str, size: (u32, u32), rgb: &[u8]) -> Result<()> {
     )
 }
 
-pub(crate) fn takes_frames(r: Retime, a: &frame::Video, b: &frame::Video, rotation: u16) -> bool {
-    r == Retime::Macos
-        && rotation == 0
-        && Place::of(a) == Place::VideoToolbox
-        && Place::of(b) == Place::VideoToolbox
+pub(crate) fn takes_frames(r: Retime, a: &frame::Video, b: &frame::Video) -> bool {
+    r == Retime::Macos && Place::of(a) == Place::VideoToolbox && Place::of(b) == Place::VideoToolbox
 }
 
 pub(crate) fn between_frames(
