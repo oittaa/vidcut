@@ -56,7 +56,7 @@ pub(super) fn described(s: SuperScale) -> String {
 }
 
 pub(super) fn offered(s: SuperScale, factor: ScaleFactor) -> bool {
-    vidcut_av::macos::offers(SuperScale { factor, ..s })
+    vidcut_av::super_scale::macos::offers(SuperScale { factor, ..s })
 }
 
 pub(super) fn unfit<'a>(
@@ -68,11 +68,11 @@ pub(super) fn unfit<'a>(
     }
     media
         .into_iter()
-        .find_map(|m| vidcut_av::ai::unfit(m, s.upscaler))
+        .find_map(|m| vidcut_av::super_scale::unfit(m, s.upscaler))
         .map(|why| format!("{} can't take {why}", label_of(&NAMES, s.upscaler)))
 }
 
-fn field<T: serde::de::DeserializeOwned>(params: &Value, key: &str) -> Option<T> {
+pub(super) fn field<T: serde::de::DeserializeOwned>(params: &Value, key: &str) -> Option<T> {
     params
         .get(key)
         .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -82,7 +82,7 @@ pub(super) fn needed(upscalers: &[Upscaler]) -> Vec<vidcut_av::models::Need> {
     let dir = crate::paths::models_dir();
     upscalers
         .iter()
-        .flat_map(|u| vidcut_av::ai::needed(&dir, *u))
+        .flat_map(|u| vidcut_av::super_scale::needed(&dir, *u))
         .collect()
 }
 
@@ -125,40 +125,6 @@ impl Workspace {
                 self.send("media.set", params);
             }
             Some(false) => self.super_scale_asking = None,
-            None => {}
-        }
-    }
-}
-
-impl Workspace {
-    pub(super) fn set_retime(&mut self, clips: &[String], retime: vidcut_core::model::Retime) {
-        let params = json!({ "clips": clips, "retime": retime });
-        let dir = crate::paths::models_dir();
-        if vidcut_av::interpolate::needed(&dir, retime).is_empty() {
-            self.send("clip.set", params);
-        } else {
-            self.retime_asking = Some(params);
-        }
-    }
-
-    pub(super) fn retime_prompt(&mut self, ctx: &egui::Context) {
-        let Some(mut params) = self.retime_asking.clone() else {
-            return;
-        };
-        let retime = field(&params, "retime").unwrap_or_default();
-        let needs = vidcut_av::interpolate::needed(&crate::paths::models_dir(), retime);
-        if needs.is_empty() {
-            self.retime_asking = None;
-            self.send("clip.set", params);
-            return;
-        }
-        match super::speech::ask_download(ctx, "retime-download", &needs, "Download") {
-            Some(true) => {
-                self.retime_asking = None;
-                params["download"] = json!(true);
-                self.send("clip.set", params);
-            }
-            Some(false) => self.retime_asking = None,
             None => {}
         }
     }

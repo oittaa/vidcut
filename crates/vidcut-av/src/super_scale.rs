@@ -1,3 +1,7 @@
+pub mod flashvsr;
+pub mod macos;
+pub mod nanovsr;
+
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -13,18 +17,18 @@ use crate::models::Need;
 
 pub fn needed(dir: &Path, upscaler: Upscaler) -> Vec<Need> {
     match upscaler {
-        Upscaler::AiFast => crate::upscale::needed(dir),
-        Upscaler::AiBest => crate::flashvsr::needed(dir),
-        Upscaler::Macos => crate::macos::needed(),
+        Upscaler::AiFast => nanovsr::needed(dir),
+        Upscaler::AiBest => flashvsr::needed(dir),
+        Upscaler::Macos => macos::needed(),
         Upscaler::Classic => Vec::new(),
     }
 }
 
 pub fn get_ready(dir: &Path, upscaler: Upscaler, download: bool) -> Result<()> {
     match upscaler {
-        Upscaler::AiFast => crate::upscale::get_ready(dir, download),
-        Upscaler::AiBest => crate::flashvsr::get_ready(dir, download),
-        Upscaler::Macos => crate::macos::get_ready(download),
+        Upscaler::AiFast => nanovsr::get_ready(dir, download),
+        Upscaler::AiBest => flashvsr::get_ready(dir, download),
+        Upscaler::Macos => macos::get_ready(download),
         Upscaler::Classic => Ok(()),
     }
 }
@@ -40,7 +44,7 @@ pub fn unfit(m: &Media, upscaler: Upscaler) -> Option<&'static str> {
     let model = match upscaler {
         Upscaler::AiFast => &catalog::NANOVSR,
         Upscaler::AiBest => &catalog::FLASHVSR,
-        Upscaler::Macos => return crate::macos::unfit(m),
+        Upscaler::Macos => return macos::unfit(m),
         Upscaler::Classic => return None,
     };
     let hdr = m.video_as_read()?.hdr.is_some();
@@ -164,8 +168,8 @@ impl Drop for User {
         };
         if last {
             match self.0 {
-                Upscaler::AiFast => crate::upscale::release(),
-                Upscaler::AiBest => crate::flashvsr::release(),
+                Upscaler::AiFast => nanovsr::release(),
+                Upscaler::AiBest => flashvsr::release(),
                 Upscaler::Macos | Upscaler::Classic => {}
             }
         }
@@ -263,16 +267,14 @@ pub(crate) trait Run: Send {
 
 pub(crate) fn first_frame(upscaler: Upscaler, want: i64) -> i64 {
     match upscaler {
-        Upscaler::AiFast | Upscaler::Classic => {
-            want - want.rem_euclid(crate::upscale::FRAMES as i64)
-        }
+        Upscaler::AiFast | Upscaler::Classic => want - want.rem_euclid(nanovsr::FRAMES as i64),
         Upscaler::AiBest | Upscaler::Macos => want,
     }
 }
 
 pub(crate) fn last_frame(upscaler: Upscaler, first: i64) -> Option<i64> {
     match upscaler {
-        Upscaler::AiFast | Upscaler::Classic => Some(first + crate::upscale::FRAMES as i64 - 1),
+        Upscaler::AiFast | Upscaler::Classic => Some(first + nanovsr::FRAMES as i64 - 1),
         Upscaler::AiBest | Upscaler::Macos => None,
     }
 }
@@ -280,20 +282,20 @@ pub(crate) fn last_frame(upscaler: Upscaler, first: i64) -> Option<i64> {
 pub(crate) fn made_size(upscaler: Upscaler, size: (u32, u32), shown: (u32, u32)) -> (u32, u32) {
     match upscaler {
         Upscaler::AiFast | Upscaler::Classic => {
-            let scale = crate::upscale::SCALE;
+            let scale = nanovsr::SCALE;
             (size.0 * scale, size.1 * scale)
         }
         Upscaler::AiBest => {
             let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
             let s = (f64::from(shown.0) / f64::from(size.0))
                 .min(f64::from(shown.1) / f64::from(size.1))
-                .min(f64::from(crate::flashvsr::SCALE));
+                .min(f64::from(flashvsr::SCALE));
             (
                 even(f64::from(size.0) * s).max(size.0),
                 even(f64::from(size.1) * s).max(size.1),
             )
         }
-        Upscaler::Macos => crate::macos::made_size(size, shown),
+        Upscaler::Macos => macos::made_size(size, shown),
     }
 }
 
@@ -311,17 +313,15 @@ pub(crate) fn open(
         )));
     }
     match upscaler {
-        Upscaler::AiFast | Upscaler::Classic => {
-            Ok(Box::new(crate::upscale::Run::new(size, want, sink)))
-        }
-        Upscaler::AiBest => Ok(Box::new(crate::flashvsr::Run::open(size, made)?)),
-        Upscaler::Macos => Ok(Box::new(crate::macos::Run::open(size, made)?)),
+        Upscaler::AiFast | Upscaler::Classic => Ok(Box::new(nanovsr::Run::new(size, want, sink))),
+        Upscaler::AiBest => Ok(Box::new(flashvsr::Run::open(size, made)?)),
+        Upscaler::Macos => Ok(Box::new(macos::Run::open(size, made)?)),
     }
 }
 
 pub(crate) fn settle(upscaler: Upscaler) {
     if upscaler == Upscaler::AiFast {
-        crate::upscale::settle();
+        nanovsr::settle();
     }
 }
 
@@ -363,7 +363,7 @@ pub fn check<'a>(
             off.join(", ")
         )));
     }
-    crate::upscale::check(p, plans.iter().flat_map(|plan| &plan.video), dir, download)?;
-    crate::flashvsr::check(p, plans.iter().copied(), dir, download)?;
-    crate::macos::check(p, plans.iter().flat_map(|plan| &plan.video), download)
+    nanovsr::check(p, plans.iter().flat_map(|plan| &plan.video), dir, download)?;
+    flashvsr::check(p, plans.iter().copied(), dir, download)?;
+    macos::check(p, plans.iter().flat_map(|plan| &plan.video), download)
 }

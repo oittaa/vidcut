@@ -115,14 +115,14 @@ pub fn inspect(
             })
         }
         "nanovsr" => {
-            crate::upscale::inspect(dir, download)?;
+            crate::super_scale::nanovsr::inspect(dir, download)?;
             Ok(Inspected {
                 found,
                 loaded: Some("vidcut"),
             })
         }
         "flashvsr" => {
-            crate::flashvsr::inspect(dir, download)?;
+            crate::super_scale::flashvsr::inspect(dir, download)?;
             Ok(Inspected {
                 found,
                 loaded: Some("vidcut, on the GPU"),

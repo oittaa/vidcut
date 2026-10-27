@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use vidcut_av::color::Matrix;
 use vidcut_av::player::{self as engine, Layout, PlaysOn};
-use vidcut_av::{ai, interpolate};
+use vidcut_av::{interpolate, super_scale};
 use vidcut_core::model::{Hdr, Retime, ScaleFactor, Sharpness, SuperScale, Upscaler};
 
 pub type Group = (&'static str, Vec<(&'static str, String)>);
@@ -186,7 +186,8 @@ impl PlayerStats {
             PlaysOn::Chosen(id) => id.clone(),
             PlaysOn::Missing(id) => format!("System default ({id} isn't connected)"),
         };
-        let super_scale = SuperScaleStats::of(s.super_scales.first().copied(), &ai::report());
+        let super_scale =
+            SuperScaleStats::of(s.super_scales.first().copied(), &super_scale::report());
         let retime = RetimeStats::of(s.retimes.first().copied(), &interpolate::report());
         Self {
             decoding,
@@ -331,7 +332,7 @@ impl RetimeStats {
 }
 
 impl SuperScaleStats {
-    fn of(s: Option<SuperScale>, report: &ai::Report) -> Option<Self> {
+    fn of(s: Option<SuperScale>, report: &super_scale::Report) -> Option<Self> {
         if s.is_none() && report.making.is_none() {
             return None;
         }
@@ -349,9 +350,9 @@ impl SuperScaleStats {
                     Sharpness::High => "high",
                 }
             ),
-            u => ai::name(u).to_string(),
+            u => super_scale::name(u).to_string(),
         });
-        let mine = |w: &Option<ai::Work>| {
+        let mine = |w: &Option<super_scale::Work>| {
             w.clone()
                 .filter(|w| s.map(|s| s.upscaler) == Some(w.upscaler))
         };
@@ -386,7 +387,7 @@ impl SuperScaleStats {
                 )),
                 (None, Some(w)) => Some(format!(
                     "{} still making {} · {} so far",
-                    ai::name(w.upscaler),
+                    super_scale::name(w.upscaler),
                     frames(w.frames).to_lowercase(),
                     secs(w.started.elapsed())
                 )),

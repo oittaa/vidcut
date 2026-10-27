@@ -171,42 +171,42 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
 - **The CPU:** `Normalizer::upscaling` uses `spline` or `lanczos` in place of `bicubic`.
 - **Placed pictures:** `layer_size` lets a layer grow to the factor times its source size (`ScaleFactor`). Auto lets it grow to four times.
 - A `Source` is used again only for a piece with the same Super Scale.
-- **The work report** (`ai::report`):
-  - `Source::ai_picture` reports what the AI upscaler makes now and its last finished work (`ai::Work`).
-  - `ai::Making` clears a report when the work fails or stops.
+- **The work report** (`super_scale::report`):
+  - `Source::ai_picture` reports what the AI upscaler makes now and its last finished work (`super_scale::Work`).
+  - `super_scale::Making` clears a report when the work fails or stops.
   - Each AI upscaler reports the GPU that runs it when it starts.
   - The Super Scale group of the stats panel shows the report (`SuperScaleStats`).
   - When the clip under the playhead uses another upscaler, State names the AI upscaler that is at work.
   - When the clip under the playhead has no Super Scale, the group shows while an AI upscaler is at work. Its Factor is then Off.
 - **One path for the AI upscalers:** AI Fast, AI Best and the scaler of macOS use the same code in the reader. Only the parameters of the upscalers are different.
-  - `Source::ai_picture` finds the shown source size and the size that the upscaler makes (`ai::made_size`).
+  - `Source::ai_picture` finds the shown source size and the size that the upscaler makes (`super_scale::made_size`).
     - AI Fast makes 4 times the source size.
     - AI Best makes the shown size, but not more than 4 times the source size (`flashvsr::SCALE`).
     - The scaler of macOS makes the smallest factor of macOS that reaches the shown size (`macos::made_size`).
   - Each picture has a key (`PictureId`): the file, the color space, the reading, the rotation, the upscaler, the made size and the frame.
-  - A picture comes from a run of the upscaler (`Session`). The run starts at the first frame that the upscaler needs (`ai::first_frame`).
+  - A picture comes from a run of the upscaler (`Session`). The run starts at the first frame that the upscaler needs (`super_scale::first_frame`).
   - A run holds the pictures that it made and that the reader did not take yet. A picture leaves the run when the reader takes it.
   - When the reader asks for a frame, the run drops the pictures before that frame. Thus frames that an export skips do not stay in memory.
   - The run also keeps the last picture that it gave. The reader asks for it again when the size of its layer changes.
   - The held pictures go when the run goes. Thus an AI picture stays in main memory only while its run needs it.
   - The viewer keeps the pictures that it shows with its other kept pictures ([playback](playback.md)).
-  - A run takes the frames in order and gives the pictures (`ai::Run`). `ai::open` opens the run of the upscaler.
+  - A run takes the frames in order and gives the pictures (`super_scale::Run`). `super_scale::open` opens the run of the upscaler.
     - When the reader is at the first frame of the run, the run takes the frames that the reader decodes. The reader then takes them from its queue.
     - It keeps these frames in main memory. The copies leave the GPU decoder's surfaces free.
     - Thus each frame is decoded once.
     - Else the run reads the frames with a second `VideoReader` on the same file (`Source::seek_ahead`). It uses the same GPU decoder. This also occurs when the run needs another reading of the frames than the reader.
     - When the reader reads past the run, the run gets those frames later (`Source::miss`).
     - Each frame becomes RGB at its shown size, upright. The GPU takes these 3 bytes for each pixel as they are.
-  - A run ends at its last frame (`ai::last_frame`) or at the end of the file.
+  - A run ends at its last frame (`super_scale::last_frame`) or at the end of the file.
   - The reader drops its run for a frame that the run does not give. This is a frame before the run, after its last frame, or more than 48 frames after the last frame read (`RUN_JUMP`).
   - A new run then starts at that frame.
   - A GPU error from too little memory gives the message "not enough GPU memory" (`compute::checked`).
-- **GPU memory of the AI upscalers** (`ai::User`):
-  - Each reader (`Source`) that uses an AI upscaler holds an `ai::User` of it.
-  - A reader gives its `ai::User` back when the viewer or the export stops using it. This occurs at the end of its clip, at a change of Super Scale and when it closes.
+- **GPU memory of the AI upscalers** (`super_scale::User`):
+  - Each reader (`Source`) that uses an AI upscaler holds an `super_scale::User` of it.
+  - A reader gives its `super_scale::User` back when the viewer or the export stops using it. This occurs at the end of its clip, at a change of Super Scale and when it closes.
   - It then drops its run too.
-  - Each AI upscaler keeps its GPU work in an `ai::Slot`. The slot starts the upscaler for its first picture (`ai::Network`).
-  - When the last `ai::User` of an upscaler goes, its slot frees the GPU memory of that upscaler (`ai::Slot::release`). AI Fast frees its buffers. AI Best frees its model.
+  - Each AI upscaler keeps its GPU work in an `super_scale::Slot`. The slot starts the upscaler for its first picture (`super_scale::Network`).
+  - When the last `super_scale::User` of an upscaler goes, its slot frees the GPU memory of that upscaler (`super_scale::Slot::release`). AI Fast frees its buffers. AI Best frees its model.
   - If the upscaler is at work at that time, the slot frees the memory when that work ends.
   - Thus the two AI upscalers do not hold their memory at the same time when the user switches from one to the other.
 - **The kept pictures give way to AI work** (`player::lend_on`):
@@ -228,13 +228,13 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - Each loan (`store::LentMemory`) makes the main-memory budget of the kept pictures smaller by the size of those caches. The oldest pictures go first.
     - The stream renews its loan when `Stream::fit` moves a cache to main memory. The loan ends with the stream.
     - Why: the AI caches and the kept pictures must fit in main memory together.
-- **AI Fast** (`upscale`):
-  - Before an export starts, `upscale::check` refuses media that AI Fast cannot take (`upscale::unfit`). It also refuses AI Fast without the weights or without a GPU that can run it.
-  - A run is a chunk of 15 frames (`upscale::FRAMES`). The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
-  - `upscale::upscale` returns the asked picture first. A thread (`vidcut-upscale-rest`) then makes the other 14 pictures, and puts them into the run.
-  - When the run of the reader can give the asked picture, `Source::ai_picture` first waits for the rest of the chunk (`ai::settle`). Then it looks in the run again.
+- **AI Fast** (`nanovsr`):
+  - Before an export starts, `nanovsr::check` refuses media that AI Fast cannot take (`nanovsr::unfit`). It also refuses AI Fast without the weights or without a GPU that can run it.
+  - A run is a chunk of 15 frames (`nanovsr::FRAMES`). The chunks lie on a fixed grid of the file's frames. Thus the viewer and an export get the same pictures.
+  - `nanovsr::upscale` returns the asked picture first. A thread (`vidcut-upscale-rest`) then makes the other 14 pictures, and puts them into the run.
+  - When the run of the reader can give the asked picture, `Source::ai_picture` first waits for the rest of the chunk (`super_scale::settle`). Then it looks in the run again.
   - When a reader drops its run, that thread stops before its next picture. Thus a jump does not wait for the rest of the old chunk.
-  - `upscale::upscale` runs NanoVSR 5.4M with WGSL compute shaders on wgpu. It gives each picture four times as large.
+  - `nanovsr::upscale` runs NanoVSR 5.4M with WGSL compute shaders on wgpu. It gives each picture four times as large.
     - At load, the batch norms of each block fold into one 3×3 convolution, as in the model's own deploy mode.
     - The 3×3 convolutions with 96 input channels use Winograd F(2×2, 3×3) (`wino_shader`). These are the 60 blocks and the first two convolutions of the 4× stage.
       - Each 2×2 block of output then needs 16 products for each pair of channels, in place of 36.
@@ -258,10 +258,10 @@ Super Scale (`SuperScale`) changes the upscaler of a picture that an export enla
     - Why Winograd: the 3×3 convolutions do most of the work. Winograd needs fewer products, and fewer reads of workgroup memory for each product.
   - The usual fitting then makes that picture the size it shows at.
   - The frames go through memory, also from a GPU decoder.
-  - `upscale` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines and weights stay.
-    - Its buffers stay for the next chunk of the same size. They go when the size changes, when the last `ai::User` of AI Fast goes, or when the process ends.
+  - `nanovsr` has a wgpu device of its own, on the GPU that wgpu prefers. Its pipelines and weights stay.
+    - Its buffers stay for the next chunk of the same size. They go when the size changes, when the last `super_scale::User` of AI Fast goes, or when the process ends.
     - Its bind groups stay with the buffers, and each pass takes them from a cache.
-  - `Note::Upscaled` names each file that an AI upscaler enlarged in the export's report (`ai::name`).
+  - `Note::Upscaled` names each file that an AI upscaler enlarged in the export's report (`super_scale::name`).
 - **AI Best** (`flashvsr`):
   - Before an export starts, `flashvsr::check` refuses media that AI Best cannot take (`flashvsr::unfit`). It also refuses AI Best without the weights or without a GPU that can run it. It loads the model then.
   - It also refuses a size that does not fit (`run::plan`). It takes the size from the media and the output size (`flashvsr::enlarged`). A zoomed picture can be larger; then `flashvsr::Stream::open` refuses it when the export reaches it.
@@ -336,7 +336,7 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - `macos::needed` reports the models while macOS lacks the model of a factor that it lists. Thus the GUI asks first, with the size unknown.
   - With `download`, `macos::get_ready` has macOS download each missing model, and waits. Without it, an export stops with an error.
   - Elsewhere, the same calls give the error that it needs macOS 26 or later.
-- **AI Fast and AI Best on macOS:** off for now (`ai::off_here`). `ai::check` and `ai::open` refuse them, and the Inspector and the pool do not offer them.
+- **AI Fast and AI Best on macOS:** off for now (`super_scale::off_here`). `super_scale::check` and `super_scale::open` refuse them, and the Inspector and the pool do not offer them.
 
 ## Frame interpolation
 

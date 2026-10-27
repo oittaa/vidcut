@@ -126,13 +126,13 @@ impl Run {
     }
 }
 
-impl crate::ai::Run for Run {
-    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<crate::ai::Out>> {
+impl super::Run for Run {
+    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<super::Out>> {
         let rgb = self.scaler.scale(index, &rgb)?;
-        Ok(vec![crate::ai::Out { index, pts, rgb }])
+        Ok(vec![super::Out { index, pts, rgb }])
     }
 
-    fn finish(&mut self) -> Result<Vec<crate::ai::Out>> {
+    fn finish(&mut self) -> Result<Vec<super::Out>> {
         Ok(Vec::new())
     }
 }
@@ -612,7 +612,7 @@ mod imp {
                 processor.startSessionWithConfiguration_error(ProtocolObject::from_ref(&*config))
             }
             .map_err(failed)?;
-            crate::ai::runs_on(Upscaler::Macos, "macOS".into());
+            super::runs_on(Upscaler::Macos, "macOS".into());
             crate::debug!(
                 "ai",
                 "macOS: {}x{} to {}x{} at {factor}x, pictures as {}",

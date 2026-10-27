@@ -29,6 +29,7 @@ mod preferences;
 mod project;
 mod relink;
 mod retime;
+mod retime_process;
 mod row;
 mod shared;
 mod shuttle;

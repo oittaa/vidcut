@@ -59,7 +59,7 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
 }
 
 pub fn unfit(m: &Media) -> Option<&'static str> {
-    crate::ai::unfit(m, Upscaler::AiFast)
+    super::unfit(m, Upscaler::AiFast)
 }
 
 pub fn check<'a>(
@@ -1036,7 +1036,7 @@ impl Engine {
         }
         let info = adapter.get_info();
         let listed = crate::gpus::of(info.vendor, info.device);
-        crate::ai::runs_on(Upscaler::AiFast, info.name);
+        super::runs_on(Upscaler::AiFast, info.name);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("vidcut-upscale"),
             required_limits: limits,
@@ -1565,9 +1565,9 @@ impl Engine {
     }
 }
 
-static ENGINE: crate::ai::Slot<Engine> = crate::ai::Slot::new();
+static ENGINE: super::Slot<Engine> = super::Slot::new();
 
-impl crate::ai::Network for Engine {
+impl super::Network for Engine {
     const UPSCALER: Upscaler = Upscaler::AiFast;
 
     fn start() -> std::result::Result<Self, String> {
@@ -1603,11 +1603,11 @@ pub(crate) struct Run {
     size: (usize, usize),
     want: i64,
     frames: Vec<(i64, Option<i64>, Vec<u8>)>,
-    sink: Option<crate::ai::Sink>,
+    sink: Option<super::Sink>,
 }
 
 impl Run {
-    pub(crate) fn new(size: (u32, u32), want: i64, sink: crate::ai::Sink) -> Self {
+    pub(crate) fn new(size: (u32, u32), want: i64, sink: super::Sink) -> Self {
         Self {
             serial: SERIALS.fetch_add(1, Ordering::Relaxed),
             size: (size.0 as usize, size.1 as usize),
@@ -1617,7 +1617,7 @@ impl Run {
         }
     }
 
-    fn run(&mut self) -> Result<Vec<crate::ai::Out>> {
+    fn run(&mut self) -> Result<Vec<super::Out>> {
         let frames = std::mem::take(&mut self.frames);
         let Some(wanted) = frames.iter().position(|f| f.0 == self.want) else {
             return Err(Error::Invalid(format!(
@@ -1634,13 +1634,13 @@ impl Run {
                 sink(big.map(|outs| {
                     meta.iter()
                         .zip(outs)
-                        .map(|(&(index, pts), rgb)| crate::ai::Out { index, pts, rgb })
+                        .map(|(&(index, pts), rgb)| super::Out { index, pts, rgb })
                         .collect()
                 }));
             }
         };
         let rgb = upscale(&rgbs, self.size, (self.serial, wanted), rest)?;
-        Ok(vec![crate::ai::Out { index, pts, rgb }])
+        Ok(vec![super::Out { index, pts, rgb }])
     }
 }
 
@@ -1652,8 +1652,8 @@ impl Drop for Run {
     }
 }
 
-impl crate::ai::Run for Run {
-    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<crate::ai::Out>> {
+impl super::Run for Run {
+    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<super::Out>> {
         self.frames.push((index, pts, rgb));
         if self.frames.len() == FRAMES {
             self.run()
@@ -1662,7 +1662,7 @@ impl crate::ai::Run for Run {
         }
     }
 
-    fn finish(&mut self) -> Result<Vec<crate::ai::Out>> {
+    fn finish(&mut self) -> Result<Vec<super::Out>> {
         if self.frames.is_empty() {
             Ok(Vec::new())
         } else {
