@@ -76,9 +76,9 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 - **An untagged picture's matrix follows from its size** (decision D35, `color::untagged_matrix`).
   - Thus a copy that is scaled on the GPU carries the matrix of the picture that it came from (`color::keep_matrix`).
   - Without this, untagged 1280×720 shrunk to 640×360 would read as BT.601.
-- **FFmpeg 9's `zscale` changes the color of a picture with straight alpha** (9.0.2, `format_init` in vf_zscale.c).
+- **From FFmpeg 8.1, `zscale` changes the color of a picture with straight alpha** (`format_init` in vf_zscale.c).
   - It gives zimg the alpha mode of the frame. zimg multiplies the color by the alpha, converts it, and divides again.
-  - Under a transfer curve, this gives another color. Red at an alpha of 0.498 came out at 0.377 in linear light, not 0.999.
+  - Under a transfer curve, this gives another color. On FFmpeg 9.0.2, red at an alpha of 0.498 came out at 0.377 in linear light, not 0.999.
   - FFmpeg 8.0 converts the color without the alpha.
   - Thus `Normalizer` gives zscale only the color planes. `mergeplanes` puts the alpha plane back after the conversion.
 - **FFmpeg 9's `scale_cuda` truncates in each pass of a shrink with filters** (`use_filters`, on by default for a shrink; `from_floatN` in vector_helpers.cuh).
