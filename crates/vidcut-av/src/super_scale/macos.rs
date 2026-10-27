@@ -399,12 +399,14 @@ mod imp {
             let f = scaled.as_ref().unwrap_or(f);
             let matrix = crate::color::colors_of(f).matrix;
             self.transfer.run(pixels(f, WHAT)?, &source, matrix, WHAT)?;
+            source.remove_all_attachments();
             let wrote = clock.elapsed();
             let enlarged = self.enlarge(index, &source)?;
             let scaled = clock.elapsed();
             let out = self
                 .frames
                 .made(&self.transfer, &enlarged, f, self.made, WHAT)?;
+            enlarged.remove_all_attachments();
             told(index, wrote, scaled, clock);
             Ok(out)
         }

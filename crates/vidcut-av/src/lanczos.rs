@@ -107,6 +107,21 @@ impl Lanczos {
     }
 
     pub(crate) fn scale(&mut self, f: &Video, size: (u32, u32)) -> Result<Video> {
+        let clock = std::time::Instant::now();
+        let out = self.scaled(f, size)?;
+        crate::debug!(
+            "lanczos",
+            "{}x{} to {}x{} in {:.1} ms",
+            f.width(),
+            f.height(),
+            size.0,
+            size.1,
+            clock.elapsed().as_secs_f64() * 1e3
+        );
+        Ok(out)
+    }
+
+    fn scaled(&mut self, f: &Video, size: (u32, u32)) -> Result<Video> {
         let layout = crate::hw::sw_format(f);
         let formats = planes(layout)?;
         let out = self

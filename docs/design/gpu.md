@@ -341,6 +341,8 @@ Why: the result of Super Scale is the upscaler's own. It is not meant to match t
   - A VideoToolbox frame that needs no turn goes to the scaler without the CPU (`Run::takes`, `Run::push_frame`).
     - Lanczos on Metal scales it where the run's size is another (`lanczos::sized`). A pixel transfer of VideoToolbox (`Transfer`) puts it into the source buffer, as for AI of Retime Process.
     - The output goes back into a VideoToolbox frame with the layout and the range of the source (`Frames`). It then goes on as a decoded frame does.
+    - The source buffer and the output lose the color labels of the transfers. The scaler then gets pictures as the CPU path gives them.
+    - With labels, it made less detail. With a labeled output as the reference of the next frame, its pictures became brighter from frame to frame.
     - The frames that a run reads, or keeps until it takes them (`Source::miss`), stay on the GPU. For the other upscalers, they are read in memory.
   - `macos::check` refuses HDR media and pictures over 1920×1080 (`macos::MOST`), the limit of macOS for video.
   - A run does not download. It stops with an error when macOS does not have the model of its factor.
