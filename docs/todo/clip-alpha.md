@@ -19,6 +19,7 @@ In vidcut:
 - A frame with a layer with alpha mixes on the CPU, also for CUDA and VideoToolbox.
 - Retime Process with Frame Blend or AI and Super Scale with AI drop the alpha.
 - An HDR conversion drops the alpha when FFmpeg has no zscale. Then the CPU converts the colors.
+- An HDR conversion into an RGB layout drops the alpha too, for example in `frame.render` of a media.
 
 To do:
 

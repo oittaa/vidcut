@@ -9,6 +9,7 @@ use crate::ffmpeg::{self, filter, format, frame};
 pub(crate) struct Normalizer {
     graph: filter::Graph,
     cpu: Option<CpuStage>,
+    tags: Option<Option<Hdr>>,
     input: (
         u32,
         u32,
@@ -62,6 +63,21 @@ pub(crate) fn with_alpha(p: format::Pixel) -> Option<format::Pixel> {
         P::GBRP12LE => P::GBRAP12LE,
         P::GBRP16LE => P::GBRAP16LE,
         p if has_alpha(p) => p,
+        _ => return None,
+    })
+}
+
+fn without_alpha(p: format::Pixel) -> Option<format::Pixel> {
+    use format::Pixel as P;
+    Some(match p {
+        P::YUVA420P => P::YUV420P,
+        P::YUVA420P10LE => P::YUV420P10LE,
+        P::YUVA422P => P::YUV422P,
+        P::YUVA422P10LE => P::YUV422P10LE,
+        P::YUVA444P => P::YUV444P,
+        P::YUVA444P10LE => P::YUV444P10LE,
+        P::YUVA444P12LE => P::YUV444P12LE,
+        P::YUVA444P16LE => P::YUV444P16LE,
         _ => return None,
     })
 }
@@ -229,10 +245,26 @@ impl Normalizer {
             (crate::color::conversion(color, out_fmt, target), None)
         };
         let kept = has_alpha(fmt) && cpu.is_none();
-        let alpha = kept.then(|| with_alpha(out_fmt)).flatten();
-        let conv = match alpha {
-            Some(alpha) => crate::color::conversion(color, alpha, target),
-            None => conv,
+        let zscaled = !conv.after.is_empty();
+        let alpha = kept
+            .then(|| with_alpha(out_fmt))
+            .flatten()
+            .filter(|&a| !zscaled || without_alpha(a).is_some());
+        let apart = alpha.and_then(without_alpha).filter(|_| zscaled);
+        let conv = match (alpha, apart) {
+            (_, Some(plain)) => crate::color::conversion(color, plain, target),
+            (Some(alpha), None) => crate::color::conversion(color, alpha, target),
+            (None, None) => conv,
+        };
+        let after = match (alpha, apart) {
+            (Some(alpha), Some(plain)) => format!(
+                ",format={a},split[c][a];[a]extractplanes=a[al];[c]format={p}{},format={p},\
+                 extractplanes=y+u+v[y][u][v];[y][u][v][al]mergeplanes=map1s=1:map2s=2:map3s=3:format={a}",
+                conv.after,
+                a = fmt_name(alpha),
+                p = fmt_name(plain),
+            ),
+            _ => conv.after.clone(),
         };
         let (out_fmt, bars) = match alpha {
             Some(alpha) => (alpha, "black@0"),
@@ -255,7 +287,7 @@ impl Normalizer {
             conv.scale,
             (out_w - sw) / 2,
             (out_h - sh) / 2,
-            conv.after,
+            after,
         );
         crate::parts::parse_filters(&mut graph, &spec)?;
         graph
@@ -284,6 +316,7 @@ impl Normalizer {
         Ok(Self {
             graph,
             cpu,
+            tags: apart.map(|_| target),
             input: (w, h, fmt, sar, rotation, color),
         })
     }
@@ -321,6 +354,9 @@ impl Normalizer {
             .sink()
             .frame(&mut out)
             .ctx(|| "filtering frame".into())?;
+        if let Some(target) = self.tags {
+            crate::color::tag_frame(&mut out, target);
+        }
         let Some(cpu) = self.cpu.as_mut() else {
             return Ok(out);
         };
