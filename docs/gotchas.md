@@ -175,8 +175,9 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - x264 makes open GOPs with B-frames, unless told not to.
 - **VideoToolbox's pixel transfer writes 16-bit 4:4:4 (P416) off the CPU's levels** (macOS 27.2, M4).
   - 30 frames of Big Buck Bunny went from 8-bit 4:2:0 into P416 for ProRes 4444.
-  - Their luma differs from the CPU's by 2.7 10-bit codes on average. The Metal kernel of `recolor::Recolor` gives 0.6.
-  - Into the 10-bit 4:2:2 of ProRes 422 HQ, the transfer gives 0.5.
+  - Their mean luma was 694.2 in 10-bit codes, against 691.7 on the CPU. Their chroma was within 0.6 of the CPU's.
+  - The Metal kernel of `recolor::Recolor` gives a mean luma of 691.5.
+  - Into the 10-bit 4:2:2 of ProRes 422 HQ, the transfer gives 691.5 too.
   - `vt::Fit` writes P416 with the Metal kernel.
 - **AMD's video processor clips levels outside video range when told studio range** (to 16–235, chroma 16–240).
   - When told full range in and out, it keeps these levels.
