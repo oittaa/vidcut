@@ -10,6 +10,7 @@ pub mod export;
 mod file_manager;
 mod fillers;
 mod folders;
+pub mod frame;
 mod gate;
 mod help;
 mod history;

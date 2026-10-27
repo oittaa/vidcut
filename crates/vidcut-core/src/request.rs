@@ -2012,6 +2012,10 @@ pub enum Request {
         /// Output width; height follows the picture's aspect. Default: full size.
         #[serde(default)]
         width: Option<u32>,
+        /// Draw the frame as the viewer draws it: the player's decoding and
+        /// the viewer's GPU drawing, with no window. The timeline only.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        viewer: bool,
     },
     /// A storyboard: one PNG with a picture of every shot (or every
     /// `every`), labeled with timecode and clip, to look at an edit at a

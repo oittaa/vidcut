@@ -46,6 +46,7 @@ pub struct VideoStreamInfo {
     pub top_field_first: Option<bool>,
     pub transfer: String,
     pub still: bool,
+    pub alpha: bool,
     pub hdr: crate::hdr::Metadata,
 }
 
@@ -410,6 +411,7 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
                     top_field_first,
                     transfer,
                     still,
+                    alpha: crate::export::normalize::has_alpha(pix_fmt),
                     hdr: crate::hdr::Metadata {
                         dolby_vision: crate::hdr::dolby_vision(&params),
                         ..first.map(|f| f.hdr).unwrap_or_default()

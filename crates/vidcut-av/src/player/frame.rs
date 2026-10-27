@@ -111,6 +111,10 @@ impl Picture {
         crate::hw::Kind::of_frame(&self.frame)
     }
 
+    pub fn alpha_plane(&self) -> bool {
+        self.frame.format() == format::Pixel::YUVA444P12LE
+    }
+
     pub(crate) fn in_video_memory(&self) -> Option<crate::hw::Kind> {
         self.gpu()
             .or_else(|| self.over.iter().find_map(|o| o.picture.in_video_memory()))

@@ -189,7 +189,7 @@ pub(crate) fn pq_light(f: &frame::Video) -> PqLight {
     }
 }
 
-fn is_rgb(p: format::Pixel) -> bool {
+pub(crate) fn is_rgb(p: format::Pixel) -> bool {
     p.descriptor()
         .is_some_and(|d| unsafe { (*d.as_ptr()).flags } & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0)
 }
@@ -645,6 +645,8 @@ pub(crate) fn keep(f: &frame::Video) -> String {
 
 pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -> Conversion {
     let rgb_out = is_rgb(out);
+    let alpha = crate::export::normalize::has_alpha(out);
+    let float = if alpha { "gbrapf32le" } else { "gbrpf32le" };
     let in_matrix = match src.matrix {
         Matrix::Bt601 => "bt601",
         Matrix::Bt709 => "bt709",
@@ -697,7 +699,8 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
         },
         (Some(_), None) => {
             let back = if rgb_out {
-                "zscale=t=709:p=709:r=full,format=gbrp16le".to_string()
+                let deep = if alpha { "gbrap16le" } else { "gbrp16le" };
+                format!("zscale=t=709:p=709:r=full,format={deep}")
             } else {
                 format!("zscale=t=709:m=709:r=limited{}", zscale_writes(out))
             };
@@ -705,7 +708,7 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
                 flags: RESAMPLE,
                 scale: keep,
                 after: format!(
-                    ",zscale={},format=gbrpf32le,zscale=p=709,\
+                    ",zscale={},format={float},zscale=p=709,\
                      tonemap=tonemap=mobius:param=0.8:desat=0:peak={:.4},{back}",
                     src.to_linear(),
                     PEAK / REFERENCE_WHITE
@@ -716,7 +719,7 @@ pub(crate) fn conversion(src: Source, out: format::Pixel, target: Option<Hdr>) -
             flags: RESAMPLE,
             scale: keep,
             after: format!(
-                ",zscale={},format=gbrpf32le,\
+                ",zscale={},format={float},\
                  zscale=p=2020:t={}:m=2020_ncl:r=limited:npl={REFERENCE_WHITE}{}",
                 src.to_linear(),
                 transfer(Some(t)),

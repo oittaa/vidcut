@@ -177,7 +177,7 @@ Pictures:
 
 ## Timeline colors
 
-Each mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). When an output has other colors, `VideoFrames::with_timeline` sets up two stages:
+Each mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). When an output has other colors or is RGB, `VideoFrames::with_timeline` sets up two stages:
 
 1. `Maker` fits each picture to the timeline colors. `VideoFrames` mixes, draws the titles and burns in the subtitles in these colors.
 2. `Finish` converts each finished frame to the colors and the format of the encoder.
@@ -186,7 +186,7 @@ Each mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-d
 - For the other encoders, the timeline's frames are 12-bit 4:4:4 in memory (`MIXING`), and `Normalizer` converts them.
 - `color::tag_frame` gives the timeline's frames and the black frame their color tags. `burn::blend` and `Normalizer` read these tags.
 - The conversion keeps the HDR10+ and Dolby Vision metadata of the frame.
-- `frame.render` of a timeline frame and the storyboards use the same stages (`renderer::frames`, `FrameReader::rgba`).
+- `frame.render` of a timeline frame and the storyboards use the same stages (`renderer::frames`, `FrameReader::rgba`). Their output is RGB. Thus their layers mix in YUV, as in an export.
 - `frame.render` of a media and the tiles convert each picture of the file directly to RGB.
 
 ## Sound
@@ -313,6 +313,8 @@ The plan:
 - `render::flatten_lanes` lays it over the tracks below, as an `Over` of a `VideoPiece::Mix` without a ramp. In a dissolve with a placed side, the incoming side is marked `cross`.
 - A clip at its usual values goes over the same way where its fitted picture leaves bars and something is below it.
 - Where its fitted picture fills the frame, it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.
+- A picture with an alpha channel (`VideoInfo::alpha`) never fills the frame. It goes over the layers below by its straight alpha ([todo](../todo/clip-alpha.md)).
+- `Normalizer` keeps the alpha through the conversion to the timeline colors. zscale and tonemap then work on `gbrapf32le`.
 - With nothing below it, it is drawn with black bars. Why: this costs less.
 
 The pictures:
