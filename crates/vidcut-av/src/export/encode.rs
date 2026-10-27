@@ -169,6 +169,17 @@ pub struct Availability {
 }
 
 impl Availability {
+    pub fn covers(&self, probes: &[Probe]) -> bool {
+        probes.iter().all(|p| {
+            self.encoders.iter().any(|e| {
+                e.encoder == p.encoder
+                    && e.kind == p.kind
+                    && e.device == p.device
+                    && e.pixel == pixel_name(p.pixel)
+            })
+        })
+    }
+
     pub fn in_use(&self) -> Self {
         match crate::gpus::in_use() {
             Some(gpu) => self.on(&gpu),
@@ -1310,29 +1321,23 @@ pub fn render_nodes() -> Vec<(String, String)> {
     nodes
 }
 
-pub fn detect(vulkan: bool) -> Availability {
-    crate::init();
-    let mut encoders = Vec::new();
-    let mut check =
-        |name: &str, kind: EncoderChoice, pixel: format::Pixel, device: Option<&str>| {
-            let result = if encoder::find_by_name(name).is_none() {
-                Err(Error::Invalid(format!("{name} not built into this FFmpeg")))
-            } else if kind == EncoderChoice::Vulkan && !vulkan {
-                Err(Error::Invalid(
-                    "not tested: vidcut stopped during the last test of the GPU encoders".into(),
-                ))
-            } else {
-                try_gpu(name, kind, pixel, device)
-            };
-            encoders.push(EncoderStatus {
-                encoder: name.into(),
-                kind,
-                device: device.map(String::from),
-                pixel: pixel_name(pixel),
-                ok: result.is_ok(),
-                error: result.err().map(|e| e.to_string()),
-            });
-        };
+pub struct Probe {
+    pub encoder: &'static str,
+    pub kind: EncoderChoice,
+    pub pixel: format::Pixel,
+    pub device: Option<String>,
+}
+
+pub fn probes() -> Vec<Probe> {
+    let mut probes = Vec::new();
+    let mut check = |encoder, kind, pixel, device: Option<&str>| {
+        probes.push(Probe {
+            encoder,
+            kind,
+            pixel,
+            device: device.map(String::from),
+        })
+    };
     let nv12_p010 = &[format::Pixel::NV12, format::Pixel::P010LE][..];
     if cfg!(target_os = "macos") {
         check(
@@ -1371,7 +1376,7 @@ pub fn detect(vulkan: bool) -> Availability {
             }
         }
         for (kind, on) in kinds {
-            let codecs: &[&str] = match kind {
+            let codecs: &[&'static str] = match kind {
                 EncoderChoice::Nvenc => &["h264_nvenc", "hevc_nvenc", "av1_nvenc"],
                 EncoderChoice::Amf => &["h264_amf", "hevc_amf", "av1_amf"],
                 EncoderChoice::Qsv => &["h264_qsv", "hevc_qsv", "av1_qsv", "vp9_qsv"],
@@ -1402,6 +1407,36 @@ pub fn detect(vulkan: bool) -> Availability {
             );
         }
     }
+    probes
+}
+
+pub fn detect(vulkan: bool) -> Availability {
+    crate::init();
+    let encoders = probes()
+        .into_iter()
+        .map(|p| {
+            let result = if encoder::find_by_name(p.encoder).is_none() {
+                Err(Error::Invalid(format!(
+                    "{} not built into this FFmpeg",
+                    p.encoder
+                )))
+            } else if p.kind == EncoderChoice::Vulkan && !vulkan {
+                Err(Error::Invalid(
+                    "not tested: vidcut stopped during the last test of the GPU encoders".into(),
+                ))
+            } else {
+                try_gpu(p.encoder, p.kind, p.pixel, p.device.as_deref())
+            };
+            EncoderStatus {
+                encoder: p.encoder.into(),
+                kind: p.kind,
+                device: p.device,
+                pixel: pixel_name(p.pixel),
+                ok: result.is_ok(),
+                error: result.err().map(|e| e.to_string()),
+            }
+        })
+        .collect();
     Availability { encoders }
 }
 

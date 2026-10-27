@@ -173,6 +173,7 @@ Frames that come down:
 
 - `encode::detect` test-encodes with each encoder, pixel format and GPU.
 - `export::detected` keeps the result in `encoders.json`. The key is the FFmpeg versions, the system, and the GPUs and drivers.
+- It tests again when the file has no result for a test that `encode::probes` lists. Thus a new test runs once after an update.
 - `encoders.list` with `refresh` tests again.
 - `encoders.testing` names the process that tests. When a process dies during a test, it leaves this file. Then the next test skips the encoders of Vulkan.
 - Jobs take the encoders of the GPU in use (`Availability::in_use`).
