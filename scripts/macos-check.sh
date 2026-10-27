@@ -210,7 +210,7 @@ one "$work/title.vidcut"
 "$V" -p "$work/title.vidcut" --headless titles add "A title over the picture" --at 0f --duration 30f >/dev/null
 one "$work/pip.vidcut"
 "$V" -p "$work/pip.vidcut" --headless edit append m1 --range "$((first + 3120))f..$((first + 3150))f" --track V2 >/dev/null
-"$V" -p "$work/pip.vidcut" --headless picture set c2 --zoom 0.5 0.5 --position 300 150 >/dev/null
+"$V" -p "$work/pip.vidcut" --headless picture set c2 --zoom 0.5 --position 0.7 0.3 >/dev/null
 measure subs-gpu "$work/subs.vidcut" 30 "" h264-master --subtitles-as burn || true
 measure subs-cpu "$work/subs.vidcut" 30 "VIDCUT_HWDEC=none" h264-master --subtitles-as burn || true
 measure subs-10-gpu "$work/subs.vidcut" 30 "" h265-master --subtitles-as burn || true
