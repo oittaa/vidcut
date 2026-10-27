@@ -271,9 +271,11 @@ for p in macos; do
   "$V" -p "$work/$name.vidcut" --headless clip set c1 --retime "$p" >/dev/null
   status=0
   note "viewer: $p, about 20 s"
-  "$PL" "$work/$name.vidcut" 5 gpu >"$work/$name.txt" 2>&1 || status=$?
+  VIDCUT_DEBUG=1 "$PL" "$work/$name.vidcut" 5 gpu >"$work/$name.txt" 2>"$work/$name.log" || status=$?
   say "- $p (status $status):"
-  grep -v '^\[' "$work/$name.txt" | tail -n 30 | block
+  tail -n 30 "$work/$name.txt" | block
+  say "- Frames made: $(grep -c 'AI (macOS frame rate conversion):' "$work/$name.log"); catch-ups: $(grep -c 'caught up' "$work/$name.log"). The first decode lines:"
+  grep -E '\[player\] (decode |decoded |caught up)|macOS: [0-9]' "$work/$name.log" | sed -n 1,60p | block
 done
 fi
 
