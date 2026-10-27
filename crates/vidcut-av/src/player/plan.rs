@@ -18,6 +18,7 @@ pub(crate) struct Fill {
     pub(crate) ahead: bool,
     pub(crate) behind: bool,
     pub(crate) lead: bool,
+    pub(crate) made: bool,
 }
 
 impl Fill {
@@ -25,17 +26,20 @@ impl Fill {
         ahead: true,
         behind: true,
         lead: true,
+        made: false,
     };
 
     fn of(piece: &VideoPiece) -> Self {
         match piece {
-            VideoPiece::Source {
-                super_scale,
-                retime,
-                ..
-            } if super_scale.ai() || retime.ai() => Self {
+            VideoPiece::Source { super_scale, .. } if super_scale.ai() => Self {
                 behind: false,
                 lead: false,
+                ..Self::ALL
+            },
+            VideoPiece::Source { retime, .. } if retime.ai() => Self {
+                behind: false,
+                lead: false,
+                made: true,
                 ..Self::ALL
             },
             _ => Self::ALL,
@@ -47,6 +51,7 @@ impl Fill {
             ahead: self.ahead && other.ahead,
             behind: self.behind && other.behind,
             lead: self.lead && other.lead,
+            made: self.made || other.made,
         }
     }
 }
