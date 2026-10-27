@@ -8,4 +8,4 @@ Open work, **one file per item**. The files in this folder are the list: there i
 
 Pull requests that touch different items change different files, so they never conflict over this list.
 
-Cut-page behavior the spec describes but vidcut doesn't have yet is listed in [cut-page-gaps.md](cut-page-gaps.md), one line each.
+Cut-page behavior that the spec describes and vidcut does not have is in [cut-page-gaps.md](cut-page-gaps.md), one line each.

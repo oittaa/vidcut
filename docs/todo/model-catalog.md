@@ -1,4 +1,4 @@
-# Model catalog: what is still open
+# Model catalog: open facts
 
 **When:** when a maker publishes the numbers.
 

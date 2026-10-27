@@ -1,6 +1,6 @@
-# Cut-page behavior not built yet
+# Cut-page behavior that vidcut does not have
 
-What [the spec](../cut-page-spec.md) describes and vidcut doesn't do yet.
+What [the spec](../cut-page-spec.md) describes and vidcut does not do.
 
 - Media Pool tab that hides and shows the pool ([§2](../cut-page-spec.md#2-layout-pp-636637))
 - Metadata view ([§3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675))

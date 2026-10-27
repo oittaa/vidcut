@@ -2,7 +2,7 @@
 
 **When:** not decided.
 
-The timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) has SDR (BT.709), HDR PQ and HDR HLG. Exports write only these colors now.
+The timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) has SDR (BT.709), HDR PQ and HDR HLG. Exports write only these colors.
 
 ## What Resolve has
 
@@ -14,7 +14,7 @@ The timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-an
 ## Why later
 
 - vidcut has no grading. Thus a timeline color space changes only the mixes.
-- A P3 or Rec.2020 SDR timeline is useful with an output in the same colors. Exports have no such output now.
+- A P3 or Rec.2020 SDR timeline is useful with an output in the same colors. Exports have no such output.
 - Each new color space needs its math in four places:
   - The CPU (`CpuColors` in `crates/vidcut-av/src/color.rs`).
   - The shaders that libplacebo runs (`color::shader`).
