@@ -35,6 +35,37 @@ fn upright(rotation: u16) -> &'static str {
     }
 }
 
+pub(crate) fn has_alpha(p: format::Pixel) -> bool {
+    p.descriptor().is_some_and(|d| {
+        // SAFETY: FFmpeg's static descriptor of the format.
+        let flags = unsafe { (*d.as_ptr()).flags };
+        flags & ffmpeg::ffi::AV_PIX_FMT_FLAG_ALPHA as u64 != 0
+    })
+}
+
+pub(crate) fn with_alpha(p: format::Pixel) -> Option<format::Pixel> {
+    use format::Pixel as P;
+    Some(match p {
+        P::YUV420P | P::NV12 => P::YUVA420P,
+        P::YUV420P10LE | P::P010LE => P::YUVA420P10LE,
+        P::YUV422P | P::NV16 => P::YUVA422P,
+        P::YUV422P10LE | P::P210LE => P::YUVA422P10LE,
+        P::YUV444P | P::NV24 => P::YUVA444P,
+        P::YUV444P10LE => P::YUVA444P10LE,
+        P::YUV444P12LE => P::YUVA444P12LE,
+        P::P416LE => P::YUVA444P16LE,
+        P::RGB24 => P::RGBA,
+        P::BGR24 => P::BGRA,
+        P::RGB48LE => P::RGBA64LE,
+        P::GBRP => P::GBRAP,
+        P::GBRP10LE => P::GBRAP10LE,
+        P::GBRP12LE => P::GBRAP12LE,
+        P::GBRP16LE => P::GBRAP16LE,
+        p if has_alpha(p) => p,
+        _ => return None,
+    })
+}
+
 pub(crate) fn shown_size(
     src: &frame::Video,
     rotation: u16,
@@ -197,6 +228,16 @@ impl Normalizer {
         } else {
             (crate::color::conversion(color, out_fmt, target), None)
         };
+        let kept = has_alpha(fmt) && cpu.is_none();
+        let alpha = kept.then(|| with_alpha(out_fmt)).flatten();
+        let conv = match alpha {
+            Some(alpha) => crate::color::conversion(color, alpha, target),
+            None => conv,
+        };
+        let (out_fmt, bars) = match alpha {
+            Some(alpha) => (alpha, "black@0"),
+            None => (out_fmt, "black"),
+        };
         let last = match cpu {
             Some(_) => String::new(),
             None => format!(",format={}", fmt_name(out_fmt)),
@@ -209,7 +250,7 @@ impl Normalizer {
             None => (conv.flags.to_string(), ""),
         };
         let spec = format!(
-            "{}scale={sw}:{sh}:flags={flags}{taps}{},pad={out_w}:{out_h}:{}:{}:color=black,setsar=1{}{last}",
+            "{}scale={sw}:{sh}:flags={flags}{taps}{},pad={out_w}:{out_h}:{}:{}:color={bars},setsar=1{}{last}",
             upright(rotation),
             conv.scale,
             (out_w - sw) / 2,
@@ -404,7 +445,11 @@ impl Relayout {
                 d.flags & (ffmpeg::ffi::AV_PIX_FMT_FLAG_RGB as u64) != 0,
             )
         };
-        let target = if depth > 8 { "p010le" } else { "yuv420p" };
+        let target = match (has_alpha(src.format()), depth > 8) {
+            (true, _) => "yuva444p12le",
+            (false, true) => "p010le",
+            (false, false) => "yuv420p",
+        };
         let spec = if rgb {
             let flags = crate::color::CONVERT;
             format!("scale=out_color_matrix=bt709:out_range=limited:flags={flags},format={target}")

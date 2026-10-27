@@ -691,6 +691,7 @@ fn convert(info: &vidcut_av::probe::MediaInfo) -> Result<MediaInfo> {
                 mastering: v.hdr.mastering,
                 light: v.hdr.light,
                 hdr10plus: v.hdr.hdr10plus,
+                alpha: v.alpha,
                 dolby_vision: v.hdr.dolby_vision,
             })
         }
@@ -826,6 +827,7 @@ mod tests {
             mastering: None,
             light: None,
             hdr10plus: false,
+            alpha: false,
             dolby_vision: None,
         };
         let tc = start_timecode(Some("00:00:00;00"), None, Some(&video), &[]);

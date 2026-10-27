@@ -1181,6 +1181,9 @@ enum Fitting {
 }
 
 pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
+    if crate::export::normalize::has_alpha(ops.layout) {
+        return false;
+    }
     match place {
         Place::Cuda | Place::Vulkan => crate::cuda::can_fit(ops),
         Place::Vaapi => vaapi::can_fit(ops),

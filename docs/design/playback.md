@@ -189,12 +189,12 @@ The audio device:
 
 - `Viewer::start` spawns `vidcut-viewer`. The thread wakes when the session notifies or asks, when the size changes, or when `next_change` comes due.
 - Each turn calls `Player::present`, then `Screen::draw` into an RGBA target the size of the viewer's picture in physical pixels.
-- With an SDR timeline, one render pass of `crates/vidcut/src/gui/picture.wgsl` draws it all.
+- With an SDR timeline and one layer, one render pass of `crates/vidcut/src/gui/picture.wgsl` draws it all.
 - With an HDR timeline, the passes draw into a picture of 16-bit floats (`Wide`), in the PQ or HLG code values of the timeline.
   - Each layer, title and subtitle goes to linear light, to BT.2020, and to the curve of the timeline.
   - Then `fs_screen` converts that picture to the target: BT.709, tone-mapped with the math of the export.
   - Thus the layers, titles and subtitles mix in the code values of the timeline, as in an export.
-- With an SDR timeline and a layer with a composite mode, the passes also draw into `Wide`, in SDR code values. Thus a color above 1 or below 0 stays between the layers. `fs_screen` then clips each value.
+- With an SDR timeline and more than one layer or a composite mode, the passes also draw into `Wide`, in SDR code values. Thus a color above 1 or below 0 stays between the layers and in the composite modes, as in an export. `fs_screen` then clips each value.
 - The drawing:
   - It fits the picture as the export does, and turns it upright.
   - It scales in YUV and converts to RGB with the math of the export (`shader_colors`). In an SDR timeline, it tone-maps HDR.
@@ -218,6 +218,7 @@ The audio device:
 - With `gpu.decoding` on, the reader decodes on `hw::GpuDecoder::best` where it can.
 - The viewer shows the pictures of some decoders from GPU memory (`Gpu::gpu_pictures`). These pictures stay there, in the video budget. The pictures of the other decoders come down.
 - [gpu](gpu.md) has the path of each decoder to the screen.
+- The shader lays a picture by its straight alpha. AYUV64 holds the alpha in its one texture. A picture in memory with alpha is `yuva444p12le`, with the alpha in a fourth texture (`Picture::alpha_plane`).
 
 ## Sound
 

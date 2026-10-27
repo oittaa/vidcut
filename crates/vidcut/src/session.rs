@@ -434,6 +434,21 @@ pub fn render(
             out,
             media,
             width,
+            viewer: true,
+        } => match media {
+            Some(_) => {
+                return Err(Error::invalid(
+                    "the viewer draws the timeline: leave out media",
+                ));
+            }
+            None => answer(crate::gui::frame::render(project, at, out, *width, None)?),
+        },
+        Request::FrameRender {
+            at,
+            out,
+            media,
+            width,
+            viewer: false,
         } => answer(export::frame(
             project,
             at,
