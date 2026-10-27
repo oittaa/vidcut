@@ -1177,9 +1177,15 @@ pub enum Request {
         /// and is downloaded once, when `download` allows it.
         #[serde(default)]
         voice_isolation: Option<f64>,
-        /// Download Voice Isolation's model if this computer doesn't have it
-        /// yet, checked against its SHA-256. Without it, a missing model is
-        /// an error that says what would be downloaded.
+        /// Retime Process: how the clips make a frame that falls between two
+        /// of their source frames, at a speed change or where their media's
+        /// frame rate isn't the timeline's.
+        #[serde(default)]
+        retime: Option<crate::model::Retime>,
+        /// Download Voice Isolation's model, or the model of `retime`, if
+        /// this computer doesn't have it yet, checked against its SHA-256.
+        /// Without it, a missing Voice Isolation model is an error that says
+        /// what would be downloaded; an export asks for the other.
         #[serde(default)]
         download: bool,
     },
@@ -3347,7 +3353,7 @@ fn silence_min() -> TimeSpec {
 }
 
 fn scene_threshold() -> f64 {
-    10.0
+    crate::analysis::SCENE_SCORE
 }
 
 fn black_share() -> f64 {

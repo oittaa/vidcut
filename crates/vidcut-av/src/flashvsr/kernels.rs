@@ -1,4 +1,4 @@
-use super::gpu::Gpu;
+use crate::compute::Gpu;
 
 const EPS: f32 = 1e-6;
 

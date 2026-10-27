@@ -7,17 +7,11 @@ use wgpu::util::DeviceExt;
 use crate::compute;
 use crate::error::Result;
 
-pub(super) const WHAT: &str = "the AI Best upscaler";
-pub(super) const SHARED: u32 = 32 * 1024;
 const MOST: u32 = 65535;
 const SLOT: u64 = 256;
 const SLOTS: usize = 16384;
 
-pub(super) fn gpu_error(e: impl std::fmt::Display) -> crate::error::Error {
-    compute::gpu_error(WHAT, e)
-}
-
-pub(super) struct Param {
+pub(crate) struct Param {
     buffer: wgpu::Buffer,
     at: u64,
 }
@@ -31,10 +25,12 @@ struct Ring {
     dirty: usize,
 }
 
-pub(super) struct Gpu {
-    pub(super) device: wgpu::Device,
-    pub(super) queue: wgpu::Queue,
-    pub(super) listed: Option<crate::gpus::Gpu>,
+pub(crate) struct Gpu {
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
+    pub(crate) listed: Option<crate::gpus::Gpu>,
+    pub(crate) name: String,
+    pub(crate) what: &'static str,
     uploaded: AtomicU64,
     pipes: Mutex<HashMap<String, wgpu::ComputePipeline>>,
     ring: Mutex<Ring>,
@@ -42,7 +38,7 @@ pub(super) struct Gpu {
     scratch: Mutex<Option<(wgpu::Buffer, wgpu::Buffer)>>,
 }
 
-pub(super) fn storage() -> wgpu::BufferUsages {
+pub(crate) fn storage() -> wgpu::BufferUsages {
     use wgpu::BufferUsages as U;
     U::STORAGE | U::COPY_DST | U::COPY_SRC
 }
@@ -74,11 +70,11 @@ fn layout(device: &wgpu::Device, source: &str) -> wgpu::PipelineLayout {
         })
         .collect();
     let group = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("flashvsr"),
+        label: Some("vidcut-compute"),
         entries: &entries,
     });
     device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("flashvsr"),
+        label: Some("vidcut-compute"),
         bind_group_layouts: &[Some(&group)],
         immediate_size: 0,
     })
@@ -87,11 +83,11 @@ fn layout(device: &wgpu::Device, source: &str) -> wgpu::PipelineLayout {
 fn pipeline(device: &wgpu::Device, source: String) -> wgpu::ComputePipeline {
     let layout = layout(device, &source);
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("flashvsr"),
+        label: Some("vidcut-compute"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
     });
     device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("flashvsr"),
+        label: Some("vidcut-compute"),
         layout: Some(&layout),
         module: &module,
         entry_point: Some("main"),
@@ -103,45 +99,44 @@ fn pipeline(device: &wgpu::Device, source: String) -> wgpu::ComputePipeline {
 fn slots(device: &wgpu::Device) -> wgpu::Buffer {
     compute::buffer(
         device,
-        "flashvsr-params",
+        "vidcut-compute-params",
         SLOTS * SLOT as usize,
         wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     )
 }
 
 impl Gpu {
-    pub(super) fn start() -> std::result::Result<Self, String> {
+    pub(crate) fn start(what: &'static str, shared: u32) -> std::result::Result<Self, String> {
         let instance = wgpu::Instance::default();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             ..Default::default()
         }))
-        .map_err(|e| format!("no GPU for the AI Best upscaler: {e}"))?;
+        .map_err(|e| format!("no GPU for {what}: {e}"))?;
         let limits = adapter.limits();
         let info = adapter.get_info();
         let listed = crate::gpus::of(info.vendor, info.device);
         let name = adapter.get_info().name;
-        if limits.max_compute_workgroup_storage_size < SHARED
+        if limits.max_compute_workgroup_storage_size < shared
             || limits.max_compute_invocations_per_workgroup < 256
             || limits.max_storage_buffers_per_shader_stage < 8
         {
-            return Err(format!(
-                "{name} has too little workgroup memory for the AI Best upscaler"
-            ));
+            return Err(format!("{name} has too little workgroup memory for {what}"));
         }
-        crate::ai::runs_on(vidcut_core::model::Upscaler::AiBest, name.clone());
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("vidcut-flashvsr"),
+            label: Some("vidcut-compute"),
             required_limits: limits,
             memory_hints: wgpu::MemoryHints::MemoryUsage,
             ..Default::default()
         }))
-        .map_err(|e| format!("the GPU did not open for the AI Best upscaler: {e}"))?;
+        .map_err(|e| format!("the GPU did not open for {what}: {e}"))?;
         let buffer = slots(&device);
         Ok(Self {
             device,
             queue,
             listed,
+            name,
+            what,
             uploaded: AtomicU64::new(0),
             pipes: Mutex::new(HashMap::new()),
             ring: Mutex::new(Ring {
@@ -155,7 +150,11 @@ impl Gpu {
         })
     }
 
-    pub(super) fn pipe(&self, key: &str, make: impl FnOnce() -> String) -> wgpu::ComputePipeline {
+    pub(crate) fn error(&self, e: impl std::fmt::Display) -> crate::error::Error {
+        compute::gpu_error(self.what, e)
+    }
+
+    pub(crate) fn pipe(&self, key: &str, make: impl FnOnce() -> String) -> wgpu::ComputePipeline {
         let mut pipes = self.pipes.lock().unwrap_or_else(PoisonError::into_inner);
         pipes
             .entry(key.to_string())
@@ -163,7 +162,7 @@ impl Gpu {
             .clone()
     }
 
-    pub(super) fn half(&self, body: &str) -> String {
+    pub(crate) fn half(&self, body: &str) -> String {
         format!(
             "fn h2(w: u32) -> vec2<f32> {{
     return unpack2x16float(w);
@@ -173,7 +172,7 @@ impl Gpu {
         )
     }
 
-    pub(super) fn scratch(&self, first: u64, second: u64) -> (wgpu::Buffer, wgpu::Buffer) {
+    pub(crate) fn scratch(&self, first: u64, second: u64) -> (wgpu::Buffer, wgpu::Buffer) {
         let mut s = self.scratch.lock().unwrap_or_else(PoisonError::into_inner);
         let fits = s
             .as_ref()
@@ -187,24 +186,24 @@ impl Gpu {
         s.clone().expect("made")
     }
 
-    pub(super) fn free_scratch(&self) {
+    pub(crate) fn free_scratch(&self) {
         *self.scratch.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 
-    pub(super) fn buffer(&self, size: usize) -> wgpu::Buffer {
-        compute::buffer(&self.device, "flashvsr", size, storage())
+    pub(crate) fn buffer(&self, size: usize) -> wgpu::Buffer {
+        compute::buffer(&self.device, "vidcut-compute", size, storage())
     }
 
-    pub(super) fn uploaded(&self) -> u64 {
+    pub(crate) fn uploaded(&self) -> u64 {
         self.uploaded.load(Ordering::Relaxed)
     }
 
-    pub(super) fn upload(&self, data: &[u8]) -> wgpu::Buffer {
+    pub(crate) fn upload(&self, data: &[u8]) -> wgpu::Buffer {
         self.uploaded
             .fetch_add(data.len() as u64, Ordering::Relaxed);
         self.device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("flashvsr"),
+                label: Some("vidcut-compute"),
                 contents: data,
                 usage: storage(),
             })
@@ -219,7 +218,7 @@ impl Gpu {
         ring.dirty = ring.next;
     }
 
-    pub(super) fn uniform(&self, values: &[u32]) -> Param {
+    pub(crate) fn uniform(&self, values: &[u32]) -> Param {
         let mut ring = self.ring.lock().unwrap_or_else(PoisonError::into_inner);
         if ring.next == SLOTS {
             self.write_dirty(&mut ring);
@@ -237,7 +236,7 @@ impl Gpu {
         }
     }
 
-    pub(super) fn flush(&self) {
+    pub(crate) fn flush(&self) {
         let mut ring = self.ring.lock().unwrap_or_else(PoisonError::into_inner);
         self.write_dirty(&mut ring);
         self.groups
@@ -246,7 +245,7 @@ impl Gpu {
             .clear();
     }
 
-    pub(super) fn set(
+    pub(crate) fn set(
         &self,
         pass: &mut wgpu::ComputePass,
         pipe: &wgpu::ComputePipeline,
@@ -299,7 +298,7 @@ impl Gpu {
         })
     }
 
-    pub(super) fn dispatch(
+    pub(crate) fn dispatch(
         &self,
         pass: &mut wgpu::ComputePass,
         pipe: &wgpu::ComputePipeline,
@@ -315,16 +314,16 @@ impl Gpu {
         pass.dispatch_workgroups(x, groups.div_ceil(x), 1);
     }
 
-    pub(super) fn staging(&self, size: u64) -> wgpu::Buffer {
+    pub(crate) fn staging(&self, size: u64) -> wgpu::Buffer {
         compute::buffer(
             &self.device,
-            "flashvsr-read",
+            "vidcut-compute-read",
             size as usize,
             wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         )
     }
 
-    pub(super) fn fetch(
+    pub(crate) fn fetch(
         &self,
         staging: &wgpu::Buffer,
         size: u64,
@@ -340,14 +339,19 @@ impl Gpu {
                 submission_index: done,
                 timeout: None,
             })
-            .map_err(gpu_error)?;
-        rx.recv().map_err(gpu_error)?.map_err(gpu_error)?;
-        let out = slice.get_mapped_range().map_err(gpu_error)?.to_vec();
+            .map_err(|e| self.error(e))?;
+        rx.recv()
+            .map_err(|e| self.error(e))?
+            .map_err(|e| self.error(e))?;
+        let out = slice
+            .get_mapped_range()
+            .map_err(|e| self.error(e))?
+            .to_vec();
         staging.unmap();
         Ok(out)
     }
 
-    pub(super) fn read(&self, src: &wgpu::Buffer, offset: u64, size: u64) -> Result<Vec<u8>> {
+    pub(crate) fn read(&self, src: &wgpu::Buffer, offset: u64, size: u64) -> Result<Vec<u8>> {
         let staging = self.staging(size);
         let mut enc = self.device.create_command_encoder(&Default::default());
         enc.copy_buffer_to_buffer(src, offset, &staging, 0, size);
@@ -356,25 +360,25 @@ impl Gpu {
         self.fetch(&staging, size, None)
     }
 
-    pub(super) fn wait_for(&self, done: wgpu::SubmissionIndex) -> Result<()> {
+    pub(crate) fn wait_for(&self, done: wgpu::SubmissionIndex) -> Result<()> {
         self.device
             .poll(wgpu::PollType::Wait {
                 submission_index: Some(done),
                 timeout: None,
             })
-            .map_err(gpu_error)?;
+            .map_err(|e| self.error(e))?;
         Ok(())
     }
 
-    pub(super) fn wait(&self) -> Result<()> {
+    pub(crate) fn wait(&self) -> Result<()> {
         self.device
             .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(gpu_error)?;
+            .map_err(|e| self.error(e))?;
         Ok(())
     }
 }
 
-pub(super) fn floats(raw: &[u8]) -> Vec<f32> {
+pub(crate) fn floats(raw: &[u8]) -> Vec<f32> {
     raw.as_chunks::<4>()
         .0
         .iter()

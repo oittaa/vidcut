@@ -201,6 +201,56 @@ fn stats_on(
     Ok(Some(stats))
 }
 
+pub(crate) fn small_luma(
+    scaler: &mut Option<scaling::Context>,
+    decoded: &frame::Video,
+) -> Result<Vec<u8>> {
+    let (w, h) = MEASURE;
+    let down;
+    let decoded = if crate::hw::on_gpu(decoded) {
+        down = crate::hw::to_read(decoded)?;
+        &down
+    } else {
+        decoded
+    };
+    let scaler = match scaler {
+        Some(s) if s.input().format == decoded.format() => s,
+        _ => scaler.insert(
+            scaling::Context::get(
+                decoded.format(),
+                decoded.width(),
+                decoded.height(),
+                format::Pixel::YUV420P,
+                w,
+                h,
+                scaling::Flags::AREA,
+            )
+            .ctx(|| "creating the measuring scaler".into())?,
+        ),
+    };
+    let mut small = frame::Video::empty();
+    scaler
+        .run(decoded, &mut small)
+        .ctx(|| "scaling a frame to measure".into())?;
+    let stride = small.stride(0);
+    Ok((0..h as usize)
+        .flat_map(|y| small.data(0)[y * stride..y * stride + w as usize].to_vec())
+        .collect())
+}
+
+pub(crate) fn mafd(a: &[u8], b: &[u8]) -> f64 {
+    let sad: u64 = a
+        .iter()
+        .zip(b)
+        .map(|(&x, &y)| u64::from(x.abs_diff(y)))
+        .sum();
+    sad as f64 * 100.0 / a.len() as f64 / 256.0
+}
+
+pub(crate) fn scene_score(mafd: f64, prev_mafd: f64) -> f32 {
+    mafd.min((mafd - prev_mafd).abs()).clamp(0.0, 100.0) as f32
+}
+
 struct Measuring {
     tick: f64,
     rate: f64,
@@ -223,52 +273,17 @@ impl Measuring {
     }
 
     fn add(&mut self, decoded: &frame::Video) -> Result<()> {
-        let (w, h) = MEASURE;
-        let count = (w * h) as usize;
-        let down;
-        let decoded = if crate::hw::on_gpu(decoded) {
-            down = crate::hw::to_read(decoded)?;
-            &down
-        } else {
-            decoded
-        };
-        let scaler = match &mut self.scaler {
-            Some(s) if s.input().format == decoded.format() => s,
-            _ => self.scaler.insert(
-                scaling::Context::get(
-                    decoded.format(),
-                    decoded.width(),
-                    decoded.height(),
-                    format::Pixel::YUV420P,
-                    w,
-                    h,
-                    scaling::Flags::AREA,
-                )
-                .ctx(|| "creating the measuring scaler".into())?,
-            ),
-        };
-        let mut small = frame::Video::empty();
-        scaler
-            .run(decoded, &mut small)
-            .ctx(|| "scaling a frame to measure".into())?;
-        let stride = small.stride(0);
-        let luma: Vec<u8> = (0..h as usize)
-            .flat_map(|y| small.data(0)[y * stride..y * stride + w as usize].to_vec())
-            .collect();
+        let count = (MEASURE.0 * MEASURE.1) as usize;
+        let luma = small_luma(&mut self.scaler, decoded)?;
         let full = decoded.color_range() == ffmpeg::color::Range::JPEG;
         let limit = if full { 25 } else { 16 + 22 };
         let black = luma.iter().filter(|&&y| y <= limit).count() as f32 / count as f32;
         let score = match &self.prev {
             Some(p) => {
-                let sad: u64 = luma
-                    .iter()
-                    .zip(p)
-                    .map(|(&a, &b)| u64::from(a.abs_diff(b)))
-                    .sum();
-                let mafd = sad as f64 * 100.0 / count as f64 / 256.0;
-                let diff = (mafd - self.prev_mafd).abs();
+                let mafd = mafd(p, &luma);
+                let score = scene_score(mafd, self.prev_mafd);
                 self.prev_mafd = mafd;
-                mafd.min(diff).clamp(0.0, 100.0) as f32
+                score
             }
             None => 0.0,
         };

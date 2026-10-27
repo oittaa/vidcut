@@ -127,6 +127,7 @@ pub struct Workspace {
     pub(super) speech: super::speech::SpeechUi,
     pub(super) isolation: super::isolation::IsolationUi,
     pub(super) super_scale_asking: Option<serde_json::Value>,
+    pub(super) retime_asking: Option<serde_json::Value>,
     pub(super) ducking: super::ducking::DuckingUi,
     pub(super) transcription: super::transcription::TranscriptionUi,
     pub(super) clip_info: super::clip_info::ClipInfo,
@@ -216,6 +217,7 @@ impl Workspace {
             speech: Default::default(),
             isolation: Default::default(),
             super_scale_asking: None,
+            retime_asking: None,
             ducking: Default::default(),
             transcription: Default::default(),
             clip_info: Default::default(),
@@ -1698,6 +1700,7 @@ impl Workspace {
         self.speech_window(&ctx);
         self.isolation_prompt(&ctx);
         self.super_scale_prompt(&ctx);
+        self.retime_prompt(&ctx);
         self.ducking_windows(&ctx);
         self.transcription_window(&ctx);
         self.clip_info_window(&ctx);

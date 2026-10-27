@@ -29,7 +29,11 @@ impl Fill {
 
     fn of(piece: &VideoPiece) -> Self {
         match piece {
-            VideoPiece::Source { super_scale, .. } if super_scale.ai() => Self {
+            VideoPiece::Source {
+                super_scale,
+                retime,
+                ..
+            } if super_scale.ai() || retime.ai() => Self {
                 behind: false,
                 lead: false,
                 ..Self::ALL
@@ -142,6 +146,11 @@ impl Plan {
             };
         };
         let pos = |l: &VideoPiece| match l {
+            VideoPiece::Source { image, retime, .. }
+                if !matches!(image, Some(Image::Still)) && !retime.is_nearest() =>
+            {
+                (l.exact(k) * 1_000_000.0).round() as i64
+            }
             VideoPiece::Source { image, .. } if !matches!(image, Some(Image::Still)) => {
                 l.position(k)
             }
@@ -232,6 +241,25 @@ impl Plan {
             .collect()
     }
 
+    pub(crate) fn retimes_at(&self, t: i64) -> Vec<vidcut_core::model::Retime> {
+        let (i, _) = self.locate(t);
+        let Some(piece) = self.plan.video.get(i) else {
+            return Vec::new();
+        };
+        piece
+            .layers()
+            .into_iter()
+            .filter_map(|(l, _)| match l {
+                VideoPiece::Source { image, retime, .. }
+                    if !matches!(image, Some(Image::Still)) && !retime.is_nearest() =>
+                {
+                    Some(*retime)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     pub(crate) fn fill_at(&self, t: i64) -> Fill {
         let (i, _) = self.locate(t);
         self.plan.video.get(i).map_or(Fill::ALL, |piece| {
@@ -307,6 +335,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             image,
             color_space,
             super_scale,
+            retime,
             placed,
             ..
         } => {
@@ -314,6 +343,11 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
                 format!("|{super_scale:?}|{}x{}|{placed:?}", plan.width, plan.height)
             } else {
                 String::new()
+            };
+            let ai = if retime.is_nearest() {
+                ai
+            } else {
+                format!("{ai}|{retime:?}")
             };
             format!(
                 "{}|{:x}|{image:?}|{}|{}{ai}",

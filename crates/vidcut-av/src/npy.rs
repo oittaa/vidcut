@@ -21,14 +21,14 @@ fn header(descr: &str, shape: &[usize]) -> Vec<u8> {
     out
 }
 
-pub(super) fn write(path: &Path, shape: &[usize], data: &[f32]) -> Result<()> {
+pub(crate) fn write(path: &Path, shape: &[usize], data: &[f32]) -> Result<()> {
     let mut out = std::fs::File::create(path)?;
     out.write_all(&header("<f4", shape))?;
     out.write_all(&crate::compute::bytes(data))?;
     Ok(())
 }
 
-pub(super) fn write_bytes(path: &Path, shape: &[usize], data: &[u8]) -> Result<()> {
+pub(crate) fn write_bytes(path: &Path, shape: &[usize], data: &[u8]) -> Result<()> {
     let mut out = std::fs::File::create(path)?;
     out.write_all(&header("|u1", shape))?;
     out.write_all(data)?;

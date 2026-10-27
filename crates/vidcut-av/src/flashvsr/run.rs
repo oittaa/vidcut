@@ -2,12 +2,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use super::gemm::{self, Act, Gemm, Load, Store};
-use super::gpu::{Gpu, floats};
 use super::kernels::{
     self, Attend, DecInput, Grid, Last, Norm, Resize, Unshuffle, WinoIn, WinoOut,
 };
 use super::model::{Block, Linear, MemBlock, Model, Wino};
-use super::{DIM, FFN, dump, resize};
+use super::{DIM, FFN, resize};
+use crate::compute::{Gpu, floats};
 use crate::compute::{bytes, words};
 use crate::error::{Error, Result};
 
@@ -775,7 +775,7 @@ impl Stream {
                 .iter()
                 .flat_map(|p| [p[0], p[1], p[2]])
                 .collect();
-            dump::write_bytes(
+            crate::npy::write_bytes(
                 &dir.join(format!("input{:03}.npy", self.fed)),
                 &[g.hm as usize, g.wm as usize, 3],
                 &rgb,
@@ -903,9 +903,9 @@ impl Stream {
         }
         if let Some(dir) = self.dump.as_ref() {
             let shape = [16, 4, g.h8 as usize, g.w8 as usize];
-            dump::write(&dir.join(format!("chunk{k}_noise.npy")), &shape, &noise_v)?;
+            crate::npy::write(&dir.join(format!("chunk{k}_noise.npy")), &shape, &noise_v)?;
             let raw = gpu.read(&latents, 0, u64::from(16 * 4 * p8 * 4))?;
-            dump::write(
+            crate::npy::write(
                 &dir.join(format!("chunk{k}_latents.npy")),
                 &shape,
                 &floats(&raw),
@@ -963,7 +963,7 @@ impl Stream {
             let at = (f * g.ht as usize + y) * g.wt as usize + x;
             raster[at * DIM..(at + 1) * DIM].copy_from_slice(&v[token * DIM..(token + 1) * DIM]);
         }
-        dump::write(
+        crate::npy::write(
             &dir.join(format!("chunk{}_{name}.npy", self.chunk)),
             &[tokens as usize, DIM],
             &raster,
@@ -1611,7 +1611,7 @@ impl Stream {
                     let mut rgb = gpu.read(&picture, 0, shown.next_multiple_of(4) as u64)?;
                     rgb.truncate(shown);
                     if let Some(dir) = self.dump.as_ref() {
-                        dump::write_bytes(
+                        crate::npy::write_bytes(
                             &dir.join(format!("frame{index:03}.npy")),
                             &[g.h as usize, g.w as usize, 3],
                             &rgb,

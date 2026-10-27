@@ -292,6 +292,11 @@ fn upscaler(v: &Value) -> String {
     }
 }
 
+fn retime(v: &Value) -> String {
+    serde_json::from_value::<crate::model::Retime>(v.clone())
+        .map_or_else(|_| word(v), |r| r.title().to_string())
+}
+
 fn color_space(v: &Value) -> String {
     match v.as_str() {
         Some("bt709") => "BT.709".into(),
@@ -690,6 +695,7 @@ impl Words<'_> {
         s.put("voice_isolation", "Voice Isolation", &number, |c| {
             audio(c, |a| json!(a.voice_isolation))
         });
+        s.put("retime", "Retime Process", &retime, |c| json!(c.retime));
         s.f.text()
     }
 

@@ -1,11 +1,13 @@
 use std::path::Path;
 
 use super::gemm::{self, Act, Gemm, Load, Store};
-use super::gpu::Gpu;
-use super::weights::{Safetensors, Torch};
 use super::{DIM, FFN, LAYERS};
+use crate::compute::Gpu;
 use crate::compute::{bytes, halves};
 use crate::error::Result;
+use crate::weights::{Safetensors, Torch};
+
+const TITLE: &str = vidcut_core::catalog::FLASHVSR.title;
 
 pub(super) struct Wino {
     pub(super) u: Vec<wgpu::Buffer>,
@@ -296,7 +298,7 @@ fn mem_block(t: &Torch, gpu: &Gpu, i: usize, n: usize) -> Result<MemBlock> {
 }
 
 fn decoder(gpu: &Gpu, path: &Path) -> Result<Decoder> {
-    let t = Torch::open(path)?;
+    let t = Torch::open(path, TITLE)?;
     let stage = |first: usize, n: usize| -> Result<Vec<MemBlock>> {
         (first..first + 3)
             .map(|i| mem_block(&t, gpu, i, n))
@@ -320,7 +322,7 @@ fn decoder(gpu: &Gpu, path: &Path) -> Result<Decoder> {
 }
 
 fn lq(gpu: &Gpu, path: &Path) -> Result<Lq> {
-    let mut st = Safetensors::open(path)?;
+    let mut st = Safetensors::open(path, TITLE)?;
     let w1 = st.floats("conv1.weight", &[2048, 768, 4, 3, 3])?;
     let w1 = conv_order(&w1, 2048, 768, 36);
     let b1 = st.floats("conv1.bias", &[2048])?;
@@ -353,7 +355,7 @@ pub(super) struct Paths<'a> {
 
 pub(super) fn load(gpu: &Gpu, paths: &Paths) -> Result<Model> {
     let before = gpu.uploaded();
-    let mut st = Safetensors::open(paths.dit)?;
+    let mut st = Safetensors::open(paths.dit, TITLE)?;
     let (t_emb, t_mod) = times(&mut st)?;
     let pw = st.floats("patch_embedding.weight", &[DIM, 16, 1, 2, 2])?;
     let pw = conv_order(&pw, DIM, 16, 4);
@@ -401,7 +403,7 @@ fn context(
     blocks: &mut [Block],
     zeros: &wgpu::Buffer,
 ) -> Result<()> {
-    let p = Torch::open(prompt)?.floats("", &[1, PROMPT, TEXT])?;
+    let p = Torch::open(prompt, TITLE)?.floats("", &[1, PROMPT, TEXT])?;
     let text = gpu.upload(&halves(&p));
     let lin = |st: &mut Safetensors, s: &str, n: usize, k: usize| -> Result<Linear> {
         let w = st.floats(&format!("{s}.weight"), &[n, k])?;

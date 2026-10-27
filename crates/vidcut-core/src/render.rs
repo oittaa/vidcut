@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ColorSpace, DuckDetect, Hdr, Keyframe, Media, Picture, Project, SuperScale,
+    Clip, ColorSpace, DuckDetect, Hdr, Keyframe, Media, Picture, Project, Retime, SuperScale,
     TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
@@ -175,6 +175,10 @@ pub enum VideoPiece {
         /// How its pictures are enlarged: the media's `super_scale`.
         #[serde(default, skip_serializing_if = "SuperScale::is_off")]
         super_scale: SuperScale,
+        /// How it makes a frame between two source frames: its clip's
+        /// `retime`.
+        #[serde(default, skip_serializing_if = "Retime::is_nearest")]
+        retime: Retime,
         /// Where its picture goes over the frame: its clip's picture, then
         /// that of each compound clip it plays inside, outward. Empty, it
         /// covers the whole frame, its bars black.
@@ -664,6 +668,7 @@ impl VideoPiece {
                 pace,
                 color_space,
                 super_scale,
+                retime,
                 placed,
                 ..
             } => {
@@ -678,6 +683,7 @@ impl VideoPiece {
                     pace: if still { *pace } else { pace.after(k) },
                     color_space: *color_space,
                     super_scale: *super_scale,
+                    retime: *retime,
                     placed: placed.iter().map(|p| p.after(k)).collect(),
                 }
             }
@@ -709,6 +715,7 @@ impl VideoPiece {
                     source_frame,
                     frames,
                     pace,
+                    retime,
                     placed,
                     ..
                 },
@@ -716,11 +723,13 @@ impl VideoPiece {
                     media: m2,
                     source_frame: s2,
                     pace: p2,
+                    retime: r2,
                     placed: l2,
                     ..
                 },
             ) => {
                 media == m2
+                    && retime == r2
                     && pace.is_normal()
                     && p2.is_normal()
                     && *source_frame + *frames == *s2
@@ -831,6 +840,15 @@ impl Pace {
         at(self.skip + k + back) - at(self.skip + back)
     }
 
+    pub fn exact(&self, k: i64) -> f64 {
+        if self.is_normal() {
+            return k as f64;
+        }
+        let at = |n: i64| (n as f64 * self.speed + 1e-9).floor() as i64;
+        let back = i64::from(self.speed < 0.0);
+        (self.skip + k + back) as f64 * self.speed - at(self.skip + back) as f64
+    }
+
     pub fn after(&self, k: i64) -> Self {
         Self::of(self.speed, self.skip + k)
     }
@@ -858,6 +876,16 @@ impl VideoPiece {
             } => source_frame + pace.offset(k),
             VideoPiece::Black { .. } => 0,
             VideoPiece::Mix { under, .. } | VideoPiece::Titled { under, .. } => under.position(k),
+        }
+    }
+
+    pub fn exact(&self, k: i64) -> f64 {
+        match self {
+            VideoPiece::Source {
+                source_frame, pace, ..
+            } => *source_frame as f64 + pace.exact(k),
+            VideoPiece::Black { .. } => 0.0,
+            VideoPiece::Mix { under, .. } | VideoPiece::Titled { under, .. } => under.exact(k),
         }
     }
 }
@@ -1253,6 +1281,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 pace: c.pace().after(x - c.start),
                 color_space: m.color_space,
                 super_scale: m.super_scale,
+                retime: c.retime,
                 placed: placed_of(c, nest, over, x),
             })
         };
@@ -1629,6 +1658,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
             image: p.media_image(media),
             color_space: m.color_space,
             super_scale: m.super_scale,
+            retime: Retime::Nearest,
             placed: Vec::new(),
         },
         None => VideoPiece::Black { frames: 1 },
@@ -1670,6 +1700,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     image: image_of(m),
                     color_space: m.color_space,
                     super_scale: m.super_scale,
+                    retime: Retime::Nearest,
                     placed: Vec::new(),
                 },
             );

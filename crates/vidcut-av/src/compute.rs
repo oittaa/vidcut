@@ -2,6 +2,10 @@ use std::sync::{Mutex, PoisonError};
 
 use crate::error::{Error, Result};
 
+mod gpu;
+
+pub(crate) use gpu::{Gpu, floats};
+
 pub(crate) fn gpu_error(what: &str, e: impl std::fmt::Display) -> Error {
     Error::Invalid(format!("{what} on the GPU: {e}"))
 }

@@ -161,6 +161,13 @@ pub trait Env {
         Err(Error::usage("the AI upscalers run in the vidcut program"))
     }
 
+    fn interpolator(&self, retime: crate::model::Retime, download: bool) -> Result<()> {
+        let _ = (retime, download);
+        Err(Error::usage(
+            "the frame interpolation models run in the vidcut program",
+        ))
+    }
+
     fn media_details(&self, media: &Media) -> Result<crate::model::MediaDetails> {
         let _ = media;
         Err(Error::usage("files are read by the vidcut program"))
@@ -3188,6 +3195,7 @@ fn mutate(
             name,
             color,
             voice_isolation,
+            retime,
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -3201,6 +3209,9 @@ fn mutate(
             if voice_isolation.is_some_and(|v| v > 0.0) && !dry_run {
                 env.voice_isolation(*download)?;
             }
+            if let Some(r) = retime.filter(|r| r.ai() && *download && !dry_run) {
+                env.interpolator(r, true)?;
+            }
             let props = ClipProps {
                 enabled: *enabled,
                 muted: *muted,
@@ -3209,6 +3220,7 @@ fn mutate(
                 name: or_none(name),
                 color: or_none(color),
                 voice_isolation,
+                retime: *retime,
             };
             ops::set_clips(p, &ids, &props)?;
             Value::Null
@@ -4978,6 +4990,7 @@ fn place_imported(
                 picture,
                 compound,
                 speed: c.speed.clone(),
+                retime: crate::model::Retime::Nearest,
                 color: color(c),
             });
             placed.insert(track_of(&c.track));
@@ -5113,6 +5126,7 @@ fn place_imported(
             picture,
             compound: None,
             speed: c.speed.clone(),
+            retime: crate::model::Retime::Nearest,
             color: color(c),
         });
         placed.insert(track_of(&c.track));

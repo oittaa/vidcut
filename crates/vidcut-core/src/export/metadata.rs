@@ -492,6 +492,7 @@ mod tests {
             image: None,
             color_space: Default::default(),
             super_scale: Default::default(),
+            retime: crate::model::Retime::Nearest,
             placed: Vec::new(),
         }
     }

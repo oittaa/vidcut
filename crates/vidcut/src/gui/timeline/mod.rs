@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sense, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use vidcut_core::model::{Ease, PictureTool, Project, Track};
+use vidcut_core::model::{Ease, PictureTool, Project, Retime, Track};
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::request::ViewerMode;
 
@@ -371,6 +371,7 @@ pub struct SpeedDialog {
     pub reverse: bool,
     pub freeze: bool,
     pub ripple: bool,
+    pub retime: Retime,
 }
 
 impl SpeedDialog {
@@ -386,6 +387,7 @@ impl SpeedDialog {
             reverse: speed < 0.0,
             freeze: speed == 0.0,
             ripple,
+            retime: Retime::Nearest,
         }
     }
 
@@ -3163,7 +3165,26 @@ impl Workspace {
             .first()
             .and_then(|id| p.clip(id))
             .map_or(1.0, |c| c.speed());
-        self.timeline.speed_dialog = Some(SpeedDialog::of(speed, p.settings.ripple_on));
+        let retime = self
+            .pictured(&self.snap.selection.clips)
+            .first()
+            .and_then(|id| p.clip(id))
+            .map_or(Retime::Nearest, |c| c.retime);
+        self.timeline.speed_dialog = Some(SpeedDialog {
+            retime,
+            ..SpeedDialog::of(speed, p.settings.ripple_on)
+        });
+    }
+
+    fn pictured(&self, clips: &[String]) -> Vec<String> {
+        let Some(p) = self.project() else {
+            return Vec::new();
+        };
+        clips
+            .iter()
+            .filter(|id| p.clip(id).is_some_and(|c| c.video && !c.media.is_empty()))
+            .cloned()
+            .collect()
     }
 
     fn speed_window(&mut self, ctx: &egui::Context) {
@@ -3171,6 +3192,7 @@ impl Workspace {
             return;
         };
         let clips = self.snap.selection.clips.clone();
+        let pictured = self.pictured(&clips);
         let mut open = !clips.is_empty();
         let mut done = false;
         super::dialog::window(ctx, "Change Clip Speed", &mut open, |ui| {
@@ -3190,6 +3212,19 @@ impl Workspace {
                     }
                 });
                 super::dialog::row(ui, "Freeze Frame", |ui| ui.checkbox(&mut d.freeze, ""));
+                if !pictured.is_empty() {
+                    super::dialog::row(ui, "Retime Process", |ui| {
+                        ui.add_enabled_ui(!d.freeze, |ui| {
+                            egui::ComboBox::from_id_salt("speed-retime")
+                                .selected_text(d.retime.title())
+                                .show_ui(ui, |ui| {
+                                    for r in Retime::ALL {
+                                        ui.selectable_value(&mut d.retime, r, r.title());
+                                    }
+                                });
+                        });
+                    });
+                }
                 super::dialog::row(ui, "Ripple Timeline", |ui| ui.checkbox(&mut d.ripple, ""));
             });
             super::dialog::footer(ui, |ui| {
@@ -3197,6 +3232,16 @@ impl Workspace {
                     || ui.input(|i| i.key_pressed(Key::Enter));
                 if change {
                     self.send("edit.change_speed", d.params(&clips));
+                    let retimed: Vec<String> = self.project().map_or(Vec::new(), |p| {
+                        pictured
+                            .iter()
+                            .filter(|id| p.clip(id).is_some_and(|c| c.retime != d.retime))
+                            .cloned()
+                            .collect()
+                    });
+                    if !d.freeze && !retimed.is_empty() {
+                        self.set_retime(&retimed, d.retime);
+                    }
                     done = true;
                 }
                 if ui.button("Cancel").clicked() {
@@ -3686,6 +3731,7 @@ mod tests {
             picture: None,
             compound: None,
             speed: None,
+            retime: vidcut_core::model::Retime::Nearest,
             color: None,
         }
     }

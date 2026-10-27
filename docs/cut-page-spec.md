@@ -518,6 +518,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Change Clip Speed** (R†): a speed, reversed or not, or a freeze frame, for each selected clip (D48).
   - The Speed Change controls of the Inspector set the same (pp. 736–737).
   - vidcut: the Speed section of the Inspector tab (X70).
+  - vidcut: the window also sets Retime Process (X93).
 - **Change Clip Duration** (Ctrl+D, p. 693; Resolve Studio 21.1.1):
   - It takes frames or a timecode, or 1, 5 or 15 seconds, for each selected clip.
   - End runs to the end of the media.
@@ -866,6 +867,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Transform has Zoom X and Y, linked or not, Position X and Y, Rotation Angle, Anchor Point, Pitch, Yaw and Flip.
   - Cropping has Left, Right, Top and Bottom in pixels, Softness, and Retain Image Position.
   - Dynamic Zoom has Ease and Swap.
+  - Retime and Scaling has Retime Process, Motion Estimation, Scaling and Resize Filter (pp. 739–740).
+  - vidcut: Retime Process is in its Speed section, with AI models in the place of Optical Flow (X93).
   - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
@@ -1348,7 +1351,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Without ripple, the clip keeps its length. With ripple, it keeps its source, and later clips follow.
   - Each frame shows the source frame in which its stretch of the source starts.
   - Backward, it shows the bottom of the stretch, as Resolve shows it.
-  - There is no blending.
+  - This is Retime Process at Nearest. The other processes make the frames between the source frames (deviation X93).
   - Sound keeps its pitch, and plays reversed when backward. A freeze is silent.
   - Edits count frames through the speed.
 - **D49. What Join Match Edit Clips joins** (pp. 646, 950).

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
-use vidcut_av::ai;
 use vidcut_av::color::Matrix;
 use vidcut_av::player::{self as engine, Layout, PlaysOn};
-use vidcut_core::model::{Hdr, ScaleFactor, Sharpness, SuperScale, Upscaler};
+use vidcut_av::{ai, interpolate};
+use vidcut_core::model::{Hdr, Retime, ScaleFactor, Sharpness, SuperScale, Upscaler};
 
 pub type Group = (&'static str, Vec<(&'static str, String)>);
 
@@ -11,6 +11,7 @@ pub struct PlayerStats {
     pub decoding: Option<DecodingStats>,
     pub picture: Option<PictureStats>,
     pub super_scale: Option<SuperScaleStats>,
+    pub retime: Option<RetimeStats>,
     pub viewer: Option<ViewerStats>,
     pub playback: PlaybackStats,
     pub kept: KeptStats,
@@ -48,6 +49,13 @@ pub struct SuperScaleStats {
     pub runs_on: Option<String>,
     pub sizes: Option<String>,
     pub state: Option<String>,
+    pub last: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetimeStats {
+    pub process: String,
+    pub runs_on: Option<String>,
     pub last: Option<String>,
 }
 
@@ -179,10 +187,12 @@ impl PlayerStats {
             PlaysOn::Missing(id) => format!("System default ({id} isn't connected)"),
         };
         let super_scale = SuperScaleStats::of(s.super_scales.first().copied(), &ai::report());
+        let retime = RetimeStats::of(s.retimes.first().copied(), &interpolate::report());
         Self {
             decoding,
             picture,
             super_scale,
+            retime,
             viewer,
             playback: PlaybackStats {
                 frames: s.frames,
@@ -224,6 +234,9 @@ impl PlayerStats {
         }
         if let Some(s) = &self.super_scale {
             groups.push(("Super Scale", s.rows()));
+        }
+        if let Some(r) = &self.retime {
+            groups.push(("Retime Process", r.rows()));
         }
         if let Some(v) = &self.viewer {
             groups.push(("Viewer", v.rows()));
@@ -277,6 +290,42 @@ impl PictureStats {
             rows.push(("HDR", hdr.clone()));
         }
         rows.push(("Held in", self.memory.clone()));
+        rows
+    }
+}
+
+impl RetimeStats {
+    fn of(retime: Option<Retime>, report: &interpolate::Report) -> Option<Self> {
+        let retime = retime?;
+        let last = report
+            .made
+            .as_ref()
+            .filter(|m| m.retime == retime)
+            .map(|m| {
+                let (w, h) = m.size;
+                match m.took {
+                    Some(took) => format!(
+                        "{w}×{h} at {:.2} in {:.0} ms",
+                        m.at,
+                        took.as_secs_f64() * 1e3
+                    ),
+                    None => format!("Nearer frame at {:.2}: a shot change", m.at),
+                }
+            });
+        Some(Self {
+            process: retime.title().to_string(),
+            runs_on: report.runs_on.clone(),
+            last,
+        })
+    }
+
+    fn rows(&self) -> Vec<(&'static str, String)> {
+        let mut rows = vec![("Process", self.process.clone())];
+        for (label, fact) in [("Runs on", &self.runs_on), ("Last made", &self.last)] {
+            if let Some(f) = fact {
+                rows.push((label, f.clone()));
+            }
+        }
         rows
     }
 }

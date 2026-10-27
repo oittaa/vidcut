@@ -1,18 +1,17 @@
 # Frame interpolation
 
-**When:** after Super Scale. The owner asks for it with an AI model where possible.
+**When:** after the first frame interpolation PR.
 
-A clip that plays slower than its source, or at another frame rate than the timeline, shows the nearest source frame. Frame interpolation makes the frames between them.
+Retime Process makes the frames between source frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow), [gpu](../design/gpu.md#frame-interpolation)). These parts are still to do.
 
-## What Resolve has
-
-- The Inspector of the Cut page has Retime Process: Nearest, Frame Blend and Optical Flow (pp. 739–740).
-- With Optical Flow, Motion Estimation has Standard Faster, Standard Better, Enhanced Faster and Enhanced Better (p. 740).
-- It also has Speed Warp Faster and Speed Warp Better, which use the DaVinci Neural Engine, and AI Speed Warp Metal on the Mac (p. 740).
-
-## To do
-
-1. Frame Blend, as Resolve has it: a shader that mixes two frames.
-2. An AI mode (Speed Warp) with RIFE 4.25 as shaders of vidcut's own, with a scene-cut check. A plan for the owner's OK comes first.
-3. A plan for Optical Flow, for the owner's OK: a classic block matcher in WGSL, or RIFE at a lower resolution.
-4. The GPU makers' interpolators, as extras later.
+- **Memory:** EMA-VFI keeps 32-bit values. An export of a UHD clip needs 9.5 GB of GPU memory, and a 1080p clip 4.2 GB.
+  - 16-bit values for the shallow features and the attention buffers can make this smaller.
+- **Names:** RIFE 4.25 and EMA-VFI then get names such as AI Fast and AI Best, as Super Scale has.
+- **macOS:** the frame rate conversion of VideoToolbox takes the place of RIFE 4.25 and EMA-VFI on macOS. The scaler of macOS does the same for Super Scale.
+  - It comes in a PR after the first one. macOS then offers Nearest, Frame Blend and the system's process.
+- **Speed:** the convolution kernel does not use the tensor cores.
+- **The viewer:** it shows the frames that an export makes. With EMA-VFI, a frame can take seconds.
+- **Backward clips:** a clip played backward shows the nearest frames.
+- **HDR:** Retime Process refuses HDR pictures. The frames go through 8-bit RGB.
+- **Super Scale:** with an AI upscaler, a made frame is enlarged as with Classic.
+- **OpenTimelineIO:** an OTIO file does not keep the Retime Process of a clip yet. How Resolve writes it in its files is not measured.

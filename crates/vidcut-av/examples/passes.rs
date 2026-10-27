@@ -51,6 +51,7 @@ fn main() {
         image: None,
         color_space: Default::default(),
         super_scale: Default::default(),
+        retime: vidcut_core::model::Retime::Nearest,
         placed: Vec::new(),
     };
     let plan = RenderPlan {

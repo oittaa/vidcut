@@ -3,18 +3,16 @@ use std::path::Path;
 use vidcut_core::model::{Media, Project, Upscaler};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
+use crate::compute::Gpu;
 use crate::error::{Error, Result};
 use crate::models::{self, Fetch, Need};
 use vidcut_core::catalog::{self, FLASHVSR_FILES as FILES};
 
-mod dump;
 mod gemm;
-mod gpu;
 mod kernels;
 mod model;
 mod resize;
 mod run;
-mod weights;
 
 const DIM: usize = 1536;
 const FFN: usize = 8960;
@@ -22,6 +20,9 @@ const LAYERS: usize = 30;
 const GLOBAL: [usize; 5] = [0, 6, 12, 18, 24];
 
 pub const SCALE: u32 = catalog::FLASHVSR_SCALE;
+
+const WHAT: &str = "the AI Best upscaler";
+const SHARED: u32 = 32 * 1024;
 
 pub fn needed(dir: &Path) -> Vec<Need> {
     FILES
@@ -158,7 +159,7 @@ pub fn inspect(dir: &Path, download: bool) -> Result<u64> {
 }
 
 struct Engine {
-    gpu: gpu::Gpu,
+    gpu: Gpu,
     model: Option<model::Model>,
     lent: Option<crate::player::Lent>,
 }
@@ -169,7 +170,9 @@ impl crate::ai::Network for Engine {
     const UPSCALER: Upscaler = Upscaler::AiBest;
 
     fn start() -> std::result::Result<Self, String> {
-        gpu::Gpu::start().map(|gpu| Engine {
+        let gpu = Gpu::start(WHAT, SHARED)?;
+        crate::ai::runs_on(Upscaler::AiBest, gpu.name.clone());
+        Ok(Engine {
             gpu,
             model: None,
             lent: None,
@@ -182,7 +185,7 @@ impl crate::ai::Network for Engine {
     }
 }
 
-fn with_engine<T>(run: impl FnOnce(&gpu::Gpu, &model::Model) -> Result<T>) -> Result<T> {
+fn with_engine<T>(run: impl FnOnce(&Gpu, &model::Model) -> Result<T>) -> Result<T> {
     ENGINE.with(|e| {
         if e.model.is_none() {
             let dir = vidcut_core::dirs::models();
@@ -198,15 +201,14 @@ fn with_engine<T>(run: impl FnOnce(&gpu::Gpu, &model::Model) -> Result<T>) -> Re
             let gpu = &e.gpu;
             let listed = gpu.listed.as_ref();
             let room = listed.and_then(crate::player::room_on);
-            let loaded =
-                crate::compute::checked(&gpu.device, gpu::WHAT, || model::load(gpu, &paths))?;
+            let loaded = crate::compute::checked(&gpu.device, WHAT, || model::load(gpu, &paths))?;
             e.lent = listed
                 .zip(room)
                 .and_then(|(on, room)| crate::player::lend_on(on, loaded.bytes, room));
             e.model = Some(loaded);
         }
         let model = e.model.as_ref().expect("loaded");
-        crate::compute::checked(&e.gpu.device, gpu::WHAT, || run(&e.gpu, model))
+        crate::compute::checked(&e.gpu.device, WHAT, || run(&e.gpu, model))
     })
 }
 

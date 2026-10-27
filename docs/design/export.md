@@ -161,6 +161,24 @@ Notes:
 - At other rates, the half frame is half of a project frame. The first source frame at or after that time is kept, and a tie can keep the earlier frame.
 - A piece at another speed steps through its source by `render::Pace`.
 
+Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)):
+
+- A source piece carries the Retime Process of its clip (`Retime`). With Nearest, the rules above apply.
+- With another process, `VideoFrames::retimed_frame` takes the exact source position of the frame (`VideoPiece::exact`, `Pace::exact`). That time has no half frame.
+- While its process is not Nearest, a `Source` keeps the two frames before its current frame (`prev`, `prev2`).
+- The source advances to the first frame at or after the time. When that frame is later, the frame before it and this frame are the pair.
+- When no frame before it was decoded, the source seeks a second earlier and decodes up to the time again.
+- The weight of the later frame is how far the time is from the earlier frame, in the times of the two frames.
+- A shot change between the two frames keeps the nearer frame (`Source::cut`).
+  - The test is the scene score of `analysis::picture_stats`, from the three frames at 96×54 luma (`analysis::small_luma`, `analysis::mafd`, `analysis::scene_score`).
+  - The limit is `SCENE_SCORE`, the default of Detect Scene Cuts.
+  - A pair without a decoded frame before it has no score, and is not a cut. Detect Scene Cuts scores such a pair by its difference alone, but there a false cut only marks a shot; here it would hold a frame.
+- Both frames become RGB, upright, at the size that the picture shows at (`between_size`). This size is at most the size of the source.
+  - `Source::rgb_of` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next.
+- `interpolate::between` makes the frame ([gpu](gpu.md)). The picture then goes through the usual fitting, upright, as an AI picture of Super Scale does.
+- An exact source frame, a weight of 0, and the first frame of a file take the usual path.
+- A piece played backward and a still take the usual path.
+
 Seeks:
 
 - A reader seeks exactly (`VideoReader::seek`):

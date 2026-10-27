@@ -9,8 +9,8 @@ use egui_phosphor::regular::{
 use serde_json::{Value, json};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Clip, CompositeMode, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, ScaleFactor,
-    TrackKind, Upscaler, ZoomBox,
+    Clip, CompositeMode, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project, Retime,
+    ScaleFactor, TrackKind, Upscaler, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, has_picture};
 use vidcut_core::place::upright_fit;
@@ -511,6 +511,8 @@ struct Paced {
     stored: Pace,
     shown: Pace,
     rate: f64,
+    retime: Retime,
+    hdr: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -572,6 +574,7 @@ enum Act {
     Direction(Direction),
     Ripple(bool),
     FullSpeed,
+    Retime(Retime),
     Mute(bool),
     Link(bool),
     Flips([Option<bool>; 2]),
@@ -1082,6 +1085,26 @@ fn speed_section(
             acts.push(Act::Ripple(on));
         }
         ui.end_row();
+        let retime = paced[0].retime;
+        label(ui, "Retime Process", !retime.is_nearest());
+        egui::ComboBox::from_id_salt("inspector-retime")
+            .selected_text(retime.title())
+            .show_ui(ui, |ui| {
+                for r in Retime::ALL {
+                    if ui.selectable_label(retime == r, r.title()).clicked() && r != retime {
+                        acts.push(Act::Retime(r));
+                    }
+                }
+            });
+        if reset(ui, !retime.is_nearest()) {
+            acts.push(Act::Retime(Retime::Nearest));
+        }
+        ui.end_row();
+        if !retime.is_nearest() && paced.iter().any(|c| c.hdr) {
+            ui.label("");
+            dialog::warn(ui, "Retime Process takes SDR pictures for now");
+            ui.end_row();
+        }
     });
     if whole {
         acts.push(Act::FullSpeed);
@@ -1188,6 +1211,11 @@ impl Workspace {
                     stored,
                     shown,
                     rate: rate(p, c),
+                    retime: c.retime,
+                    hdr: p
+                        .media(&c.media)
+                        .and_then(|m| m.video_as_read())
+                        .is_some_and(|v| v.hdr.is_some()),
                 })
             })
             .collect()
@@ -1794,6 +1822,10 @@ impl Workspace {
             }
             Act::Direction(to) => self.send_speeds(paced, None, |d, _| to.turn(d)),
             Act::Ripple(on) => self.inspector.ripple = Some(on),
+            Act::Retime(r) => {
+                let ids: Vec<String> = paced.iter().map(|c| c.id.clone()).collect();
+                self.set_retime(&ids, r);
+            }
             Act::FullSpeed => self.send_speeds(paced, None, |d, _| {
                 Direction::Forward.turn(d);
                 d.set_percent(Key::Speed.usual());
