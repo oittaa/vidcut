@@ -576,7 +576,7 @@ struct Takes {
 
 fn shown_from_gpu(takes: &Takes) -> Vec<Kind> {
     [
-        (Kind::Nvdec, takes.shares),
+        (Kind::Nvdec, takes.shares && takes.on_cudas_gpu),
         (
             Kind::Vulkan,
             takes.shares && takes.wide && takes.on_cudas_gpu,
