@@ -127,6 +127,7 @@ Frames that come down:
   - Why: a failure can be for a short time only, for example when an AI model holds the video memory.
   - They go to the viewer as RGB24, with no conversion on the CPU (`normalize::displayable`). An RGB24 still goes to the draw as it is too.
 - The cut test of a retime brings down a 96×54 luma picture of each frame, not the frame (`held::small_luma`, [export](export.md)).
+- The light meter brings SDR pictures down ([the light meter](#the-light-meter)).
 
 ## Encoders
 
@@ -239,6 +240,27 @@ On macOS (`interpolate::macos`):
 - The shader of the draw converts each picture into the timeline color space (`color::shader_colors`).
 - `fs_encode` converts the timeline color space into the color space of the output.
 
+## The light meter
+
+- An HDR export measures the light of its pictures for HDR10+ and MaxCLL ([export](export.md)).
+- The GPU measures HDR pictures that stay on the GPU (`screen::light::Meter`). It uses the shared off-screen device (`screen::offscreen`).
+  - It takes NV12 and P010 pictures of the kinds that the draw imports (`Gpu::gpu_pictures`).
+  - The measurement before an export uses it (`light::analysis`).
+  - The meter in the export uses it too, for a file with no measured light (`light::Meter`).
+- The GPU gives the values of the CPU, bit for bit. Thus the GPU does no color math.
+  - Why: f32 on the GPU does not round as f64 on the CPU. Some codes then give a different light.
+- The shader (`light.wgsl`) gives only codes:
+  - `peak`: for each Cr code, the highest luma code with it. The same for each Cb code.
+  - `peak`: for each luma code, the Cb and Cr pair that gives the most green.
+  - The CPU ranks all the Cb and Cr pairs by their green once (`light::ranks`).
+  - The luma of each 2×2 block is its highest luma, as on the CPU.
+  - `sample`: the luma and chroma codes of each point of the sample grid.
+- Then the CPU computes the light of these codes, with the code that measures frames in memory (`Spread`).
+- The CPU measures SDR pictures, other layouts and pictures in memory.
+  - Why: the matrix of an SDR picture to BT.2020 mixes the three channels. Thus the highest code of each channel does not give the peak.
+- After an error on the GPU, the CPU measures the rest of the file. vidcut prints the error.
+- `VIDCUT_DEBUG` tells whether the GPU or the CPU measures.
+
 ## Why
 
 - The GPU goes first wherever it gives correct results (AGENTS.md rule 9).
@@ -261,5 +283,6 @@ On macOS (`interpolate::macos`):
 - `crates/vidcut-av/src/route.rs`
 - `crates/vidcut-av/src/decode.rs`
 - `crates/vidcut-av/src/color.rs`
+- `crates/vidcut-av/src/light.rs`
 - `crates/vidcut-av/src/export/make.rs`
 - `crates/vidcut-av/src/export/encode.rs`
