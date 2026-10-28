@@ -1007,9 +1007,9 @@ impl Source {
         }
         let kept = match run.run.takes(f, rotation) {
             true => frame_ref(f)?,
-            false => in_memory(f)?,
+            false => self.kept(f)?,
         };
-        run.missed.push(kept);
+        self.run.as_mut().expect("opened").missed.push(kept);
         Ok(())
     }
 }

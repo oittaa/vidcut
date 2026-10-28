@@ -1950,7 +1950,7 @@ impl Slot {
                 self.shared.len() - 1
             }
             None => {
-                let _ = gpu.device.poll(wgpu::PollType::Poll);
+                let _ = gpu.device.poll(wgpu::PollType::wait_indefinitely());
                 match free(&self.shared) {
                     Some(i) => i,
                     None => return Ok(false),

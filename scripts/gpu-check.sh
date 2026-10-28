@@ -52,7 +52,7 @@ apart() {
   "$ffmpeg" -hide_banner -nostats -i "$1" -i "$2" -lavfi psnr=shortest=1 -f null - 2>&1 |
     grep -o 'PSNR.*'
 }
-keys() { grep -E "\"($1)\":" | tr -d '",' | sed 's/^ */  /'; }
+keys() { grep -E "\"($1)\": [^[{]" | tr -d '",' | sed 's/^ */  /'; }
 TIMEFORMAT='  took %R s, CPU time %U s user + %S s system'
 
 "$vidcut" --version
