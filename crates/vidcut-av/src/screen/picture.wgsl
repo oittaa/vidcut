@@ -503,6 +503,7 @@ struct Encoding {
     matrix: vec4<f32>,
     how: vec4<u32>,
     plane: vec4<u32>,
+    site: vec4<f32>,
 };
 
 @group(0) @binding(10) var<uniform> encoding: Encoding;
@@ -546,16 +547,27 @@ fn code_of(v: f32, base: f32, span: f32) -> u32 {
     return u32(clamp(round((base + span * v) * scale), 0.0, top)) << encoding.how.w;
 }
 
+fn covered(k: i32, at: f32, block: f32) -> f32 {
+    let x = f32(k);
+    return clamp(min(x + 0.5, at + block * 0.5) - max(x - 0.5, at - block * 0.5), 0.0, 1.0);
+}
+
 fn chroma_at(px: vec2<i32>) -> vec2<f32> {
-    let bw = i32(1u << encoding.plane.y);
-    let bh = i32(1u << encoding.plane.z);
+    let block = vec2<f32>(f32(1u << encoding.plane.y), f32(1u << encoding.plane.z));
+    let at = vec2<f32>(px) * block + encoding.site.xy;
+    let low = vec2<i32>(floor(at - block * 0.5 + 0.5));
+    let high = vec2<i32>(ceil(at + block * 0.5 - 0.5));
     var sum = vec2<f32>(0.0);
-    for (var j = 0; j < bh; j++) {
-        for (var i = 0; i < bw; i++) {
-            sum += output_ycc(pixel_at(px.x * bw + i, px.y * bh + j)).yz;
+    var total = 0.0;
+    for (var j = low.y; j <= high.y; j++) {
+        let wy = covered(j, at.y, block.y);
+        for (var i = low.x; i <= high.x; i++) {
+            let w = covered(i, at.x, block.x) * wy;
+            sum += output_ycc(pixel_at(i, j)).yz * w;
+            total += w;
         }
     }
-    return sum / f32(bw * bh);
+    return sum / total;
 }
 
 fn encoded_at(px: vec2<i32>) -> vec4<u32> {
