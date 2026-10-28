@@ -96,6 +96,19 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - Resolve's Inspector shows Pitch and Yaw with three decimals. vidcut does the same, so one step shows.
       - On Position, Zoom and the anchor point, the step goes to X and to Y.
       - A value stops at its limit. The rest of that step is lost.
+    - A click on the name of a value selects its row alone. Ctrl-click and Shift-click do the same.
+      - A click on a keyframe also adds its row to the selected rows. A click on an empty part does not change the rows.
+      - A selected row has a lighter background over its full width.
+      - The tab and the tray share the selected rows. A new clip in the tab clears them.
+    - Mark > Add Keyframe (Ctrl+[) adds a keyframe at the playhead on each selected row, at the value there. It sends `keyframes.add`.
+      - A row with a keyframe at the playhead does not change.
+      - The Volume row takes a keyframe only where the clip has sound. A held key adds once.
+      - The manual says that the context picks the value (pp. 1254–1255). In Resolve Studio 21.1.2, the selected row picks it.
+      - The value changed last in the Inspector and the curve in view do not pick it.
+    - Mark > Delete Keyframe (Alt+]) removes the selected keyframes. With none selected, it removes the keyframes of the selected rows at the playhead.
+    - Mark > Delete All Keyframes removes the selected keyframes. With none selected, it asks first. Then it removes all the keyframes of the selected rows.
+      - The question names the values, the number of keyframes and the clip ([X94](deviations.md#x94-the-mark-menus-keyframe-items-act-only-on-keyframes)). Cancel has the focus.
+    - These three items act on the clip that the tab shows. They are off when the tab and the tray are closed (X94).
     - After a click in the Keyframes tab or the keyframe tray, Ctrl+C and Ctrl+X copy or cut the selected keyframes (p. 1258).
     - Ctrl+V there pastes them on the selected clips (p. 1258).
       - The first keyframe goes at the playhead. The others keep their distance from it.
@@ -1041,6 +1054,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 
 | Alt+Delete | Lift the selection (D9) |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste; after a click in the Keyframes tab or the keyframe tray, the keyframes (§2) |
+| Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | V / U | Select nearest edit / cycle edit side |
