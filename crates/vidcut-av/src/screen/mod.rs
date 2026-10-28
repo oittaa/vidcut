@@ -98,22 +98,57 @@ pub struct Offscreen {
     pub gpu: Gpu,
 }
 
+type Made = (
+    Option<String>,
+    std::result::Result<&'static Offscreen, String>,
+);
+
 pub fn offscreen() -> std::result::Result<&'static Offscreen, String> {
-    static MADE: OnceLock<std::result::Result<Offscreen, String>> = OnceLock::new();
-    MADE.get_or_init(|| {
-        let (adapter, device, queue) = device("vidcut offscreen")?;
-        Ok(Offscreen {
+    static MADE: std::sync::Mutex<Vec<Made>> = std::sync::Mutex::new(Vec::new());
+    let wanted = crate::gpus::in_use();
+    let key = wanted.as_ref().map(|g| g.id.clone());
+    let mut made = MADE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, on)) = made.iter().find(|(k, _)| *k == key) {
+        return on.clone();
+    }
+    let on = device("vidcut offscreen", wanted.as_ref()).map(|(adapter, device, queue)| {
+        &*Box::leak(Box::new(Offscreen {
             adapter: adapter.get_info(),
             gpu: Gpu::new(&device, &queue),
-        })
-    })
-    .as_ref()
-    .map_err(Clone::clone)
+        }))
+    });
+    made.push((key, on.clone()));
+    on
 }
 
-fn device(label: &str) -> std::result::Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue), String> {
+pub(crate) type Started<N> = (Option<&'static Offscreen>, std::result::Result<N, String>);
+
+pub(crate) fn start_on_offscreen<N>(
+    engine: &mut Option<Started<N>>,
+    start: impl FnOnce() -> std::result::Result<N, String>,
+) -> &mut std::result::Result<N, String> {
+    let on = offscreen().ok();
+    if engine
+        .as_ref()
+        .is_some_and(|(was, _)| was.map(std::ptr::from_ref) != on.map(std::ptr::from_ref))
+    {
+        *engine = None;
+    }
+    &mut engine.get_or_insert_with(|| (on, start())).1
+}
+
+fn adapter_id(adapter: &wgpu::Adapter) -> String {
+    let info = adapter.get_info();
+    crate::gpus::adapter_id(info.vendor, info.device, &info.device_pci_bus_id)
+}
+
+fn device(
+    label: &str,
+    wanted: Option<&crate::gpus::Gpu>,
+) -> std::result::Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue), String> {
+    let backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY);
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
+        backends,
         ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
     });
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -122,6 +157,27 @@ fn device(label: &str) -> std::result::Result<(wgpu::Adapter, wgpu::Device, wgpu
         ..Default::default()
     }))
     .map_err(|e| format!("no GPU for wgpu: {e}"))?;
+    let adapter = match wanted {
+        Some(gpu) if !gpu.is_adapter(&adapter_id(&adapter)) => {
+            let backend = adapter.get_info().backend;
+            let on_it = pollster::block_on(instance.enumerate_adapters(backends))
+                .into_iter()
+                .filter(|a| gpu.is_adapter(&adapter_id(a)))
+                .min_by_key(|a| a.get_info().backend != backend);
+            match on_it {
+                Some(a) => a,
+                None => {
+                    eprintln!(
+                        "vidcut: wgpu has no adapter on {}; drawing on {}",
+                        gpu.name,
+                        adapter.get_info().name
+                    );
+                    adapter
+                }
+            }
+        }
+        _ => adapter,
+    };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some(label),
         required_features: features(&adapter),
@@ -992,6 +1048,7 @@ struct Slot {
     filled: Option<usize>,
     unshared: bool,
     unimported: Vec<Layout>,
+    source: Option<Arc<crate::decode::Decoding>>,
     imported: Option<Arc<Picture>>,
     views: Option<(wgpu::TextureView, wgpu::TextureView, (u32, u32))>,
     v_view: Option<wgpu::TextureView>,
@@ -1469,6 +1526,11 @@ impl Slot {
     }
 
     fn upload(&mut self, gpu: &Gpu, picture: &Arc<Picture>, encoder: &mut wgpu::CommandEncoder) {
+        if self.source.as_ref().map(Arc::as_ptr) != picture.decoding().map(Arc::as_ptr) {
+            self.source = picture.decoding().cloned();
+            self.unshared = false;
+            self.unimported.clear();
+        }
         self.make_planes(gpu, picture);
         self.last_shared = false;
         let written = self.written.take();
@@ -2569,7 +2631,7 @@ fn shader() -> String {
 
 const PER_LEVEL: usize = 5;
 
-const PARAMS: usize = (13 + PER_LEVEL * LEVELS) * 16;
+const PARAMS: usize = (14 + PER_LEVEL * LEVELS) * 16;
 
 const LETTERING: usize = (3 + PER_LEVEL * LEVELS) * 16;
 
@@ -2690,6 +2752,25 @@ fn per_chroma(layout: Layout) -> (u32, u32) {
     }
 }
 
+fn chroma_site(frame: &crate::ffmpeg::frame::Video, layout: Layout) -> [f64; 2] {
+    // SAFETY: a plain field of a live frame.
+    let at = unsafe { (*frame.as_ptr()).chroma_location };
+    let (mut x, mut y) = (0, 0);
+    // SAFETY: two plain out values, which FFmpeg sets only when it knows `at`.
+    if unsafe { crate::ffmpeg::ffi::av_chroma_location_enum_to_pos(&mut x, &mut y, at) } < 0 {
+        return [0.0; 2];
+    }
+    let (across, down) = per_chroma(layout);
+    let moved = |per: u32, at: i32| {
+        if per > 1 {
+            0.5 - (0.5 + f64::from(at) / 256.0) / f64::from(per)
+        } else {
+            0.0
+        }
+    };
+    [moved(across, x), moved(down, y)]
+}
+
 fn chroma_size(layout: Layout, w: u32, h: u32) -> (u32, u32) {
     let (across, down) = per_chroma(layout);
     (w.div_ceil(across), h.div_ceil(down))
@@ -2805,6 +2886,8 @@ fn params_of(
     };
     floats.extend(made);
     floats.extend(part);
+    let site = chroma_site(picture.frame(), layout);
+    floats.extend([site[0], site[1], 0.0, 0.0]);
     floats.extend(level_floats(levels));
     for v in floats {
         out.extend_from_slice(&(v as f32).to_le_bytes());

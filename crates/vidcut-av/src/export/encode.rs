@@ -1040,6 +1040,10 @@ pub(crate) fn open_video(
         ctx.set_frame_rate(Some(r));
     }
     crate::color::tag(unsafe { ctx.as_mut_ptr() }, enc.hdr);
+    // SAFETY: a plain field of the context made above.
+    unsafe {
+        (*ctx.as_mut_ptr()).chroma_sample_location = crate::color::chroma_location(enc.pixel)
+    };
     if enc.hdr.is_some() && !enc.metadata.is_empty() {
         unsafe { crate::hdr::set_on_encoder(ctx.as_mut_ptr(), &enc.metadata)? };
     }

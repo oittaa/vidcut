@@ -82,10 +82,16 @@ The draw:
 
 - The viewer, exports, proxies and thumbnails draw each frame with one shader (`screen::Screen`, `picture.wgsl`).
   - The AI upscalers and the frame interpolation take their RGB input from the same draw (`export::video::Single`).
-  - That input stays on the GPU (`Sink::Held`). `held::Pipes` packs the drawn RGB plane into a buffer (`rgb.wgsl`).
+  - That input stays on the GPU (`Sink::Held`).
+- The draw writes an RGB plane as RGBA. `held::Pipes` packs it to three bytes a pixel (`rgb.wgsl`). An RGB frame in memory is packed the same way.
+  - Why: a plane of one byte a texel is three times as wide as the picture. A wide picture then goes past the texture size limit of the GPU.
 - It mixes the dissolves, the wipes, the composite modes, the placed pictures, the titles and the subtitles.
 - `export::video::Drawer` draws for the export, proxies, thumbnails and the AI inputs.
-  - All of them share one wgpu device (`screen::offscreen`). vidcut makes it once, at the first draw.
+  - All of them share one wgpu device (`screen::offscreen`). It is on the GPU in use (`gpus::in_use`).
+    - Why: the frames of the decoder stay on the GPU only when the draw is on the same GPU.
+    - vidcut makes the device at the first draw on that GPU.
+    - When wgpu has no adapter on that GPU, the device opens on the adapter that wgpu picks. vidcut prints which.
+    - After a change of `gpu.device`, the AI upscalers and the frame interpolation start again on the new device (`start_on_offscreen`).
   - The viewer's frame render, the AI upscalers and the frame interpolation use that device too (`compute::Gpu`).
   - It opens with all the limits of the GPU. Why: the AI kernels need large buffers and much workgroup memory.
   - It is not the device of the viewer: a submit from another thread can make the viewer's surface fail ([gotchas](../gotchas.md#wgpu-and-egui)).
@@ -98,6 +104,8 @@ Frames that come down:
 
 - CPU encoders take frames in memory.
 - The player brings a frame down when the viewer cannot show its kind, when an import fails, or when its pool leaves the budget.
+  - After an import or a copy into the shared buffer fails, that layer's frames come down. When a new decoder opens for the layer, the draw tries again (`Decoding`).
+  - Why: a failure can be for a short time only, for example when an AI model holds the video memory.
 - A picture in memory goes up into the frames of a GPU encoder (`Upload`, `CudaFrames::upload`).
 - The player brings the pictures of the AI upscalers and the frame interpolation down (`held::in_memory`). Why: the viewer draws on another device.
   - They go to the viewer as RGB24, with no conversion on the CPU (`normalize::displayable`). An RGB24 still goes to the draw as it is too.

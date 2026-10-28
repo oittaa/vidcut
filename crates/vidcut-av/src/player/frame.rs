@@ -141,8 +141,8 @@ impl Picture {
         &self.over
     }
 
-    pub fn decoding(&self) -> Option<&Decoding> {
-        self.decoding.as_deref()
+    pub fn decoding(&self) -> Option<&Arc<Decoding>> {
+        self.decoding.as_ref()
     }
 
     pub fn decoder(&self) -> Option<super::Decoder> {
