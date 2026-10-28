@@ -121,6 +121,22 @@ pub fn offscreen() -> std::result::Result<&'static Offscreen, String> {
     on
 }
 
+pub(crate) type Started<N> = (Option<&'static Offscreen>, std::result::Result<N, String>);
+
+pub(crate) fn start_on_offscreen<N>(
+    engine: &mut Option<Started<N>>,
+    start: impl FnOnce() -> std::result::Result<N, String>,
+) -> &mut std::result::Result<N, String> {
+    let on = offscreen().ok();
+    if engine
+        .as_ref()
+        .is_some_and(|(was, _)| was.map(std::ptr::from_ref) != on.map(std::ptr::from_ref))
+    {
+        *engine = None;
+    }
+    &mut engine.get_or_insert_with(|| (on, start())).1
+}
+
 fn adapter_id(adapter: &wgpu::Adapter) -> String {
     let info = adapter.get_info();
     crate::gpus::adapter_id(info.vendor, info.device, &info.device_pci_bus_id)
