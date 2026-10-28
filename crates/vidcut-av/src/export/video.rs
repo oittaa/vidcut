@@ -441,11 +441,19 @@ impl Source {
         self.lumas.clear();
     }
 
+    fn follow_offscreen(&mut self) {
+        if self.drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
+            self.drawn = None;
+            self.rgb.clear();
+        }
+    }
+
     fn luma_of(&mut self, f: &frame::Video, size: (u32, u32), reading: Reading) -> Result<Vec<u8>> {
         let pts = f.pts();
         if let Some((_, l)) = self.lumas.iter().find(|(p, _)| *p == pts) {
             return Ok(l.clone());
         }
+        self.follow_offscreen();
         let held = self
             .rgb
             .iter()
@@ -509,6 +517,7 @@ impl Source {
         look: &Look,
         reading: Reading,
     ) -> Result<frame::Video> {
+        self.follow_offscreen();
         let pts = f.pts();
         if let Some((_, _, rgb)) = self.rgb.iter().find(|(p, l, _)| *p == pts && l == look) {
             return frame_ref(rgb);
@@ -739,9 +748,6 @@ fn shown_rgb(
     reading: Reading,
     path: &Path,
 ) -> Result<frame::Video> {
-    if drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
-        *drawn = None;
-    }
     let single = match drawn {
         Some(single) => single,
         None => drawn.insert(Single::new(reading)?),
@@ -1038,6 +1044,7 @@ impl Source {
         } else {
             self.frame_index(f.pts())
         };
+        self.follow_offscreen();
         let run = self.run.as_mut().expect("opened");
         let Some(i) = at.filter(|i| *i >= run.next) else {
             return Ok(());
