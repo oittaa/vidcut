@@ -23,7 +23,11 @@
 3. **Capabilities tested, not written as rules.**
    - The code has rules for which encoders take the frames of which places (`encode::shares`).
    - Test these capabilities once for each GPU and FFmpeg, as vidcut tests the encoders. Keep the results with `encoders.json`.
-4. **The HDR10+ light meter on the GPU.**
-   - The meter of an HDR export brings each frame down to measure it (`light::Meter`).
-   - A reduction on the GPU removes the last download of a whole frame in an HDR export.
+4. **The light meter on the GPU for SDR pictures.**
+   - The GPU measures the light of HDR pictures ([design/gpu.md](../design/gpu.md#the-light-meter)). An HDR export still brings SDR pictures down to measure them.
+   - The matrix to BT.2020 mixes the three channels of an SDR picture. Thus the GPU must give more than the highest code of each channel.
    - Check its values against the values that the CPU measures.
+5. **The light meter on Direct3D 11, VA-API and VideoToolbox pictures.**
+   - The GPU measures these pictures too, but its values on them are not checked. They are checked only on NVDEC pictures.
+   - Compare its values with the values that the CPU measures: on Windows with an AMD or Intel GPU, on Linux and on macOS.
+   - On an RTX 4080 SUPER, an export of Direct3D 11 pictures loses the GPU device, also with no light measured. Thus an NVIDIA GPU cannot check the Direct3D 11 path.

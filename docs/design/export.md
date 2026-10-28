@@ -66,6 +66,7 @@ Colors:
   - DNxHR HQ in 10 bits becomes HQX (`ColorChoice::apply`).
 - `export::choose_metadata` picks the HDR metadata, by the rules of `vidcut_core::export` (spec D46). With an SDR timeline, each picture counts as SDR.
 - An export first measures the light that the files do not state (`light::analysis`), and caches it.
+  - The GPU measures the HDR pictures that stay on the GPU ([gpu](gpu.md#the-light-meter)).
 
 The plan:
 
