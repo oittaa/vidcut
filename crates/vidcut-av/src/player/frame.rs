@@ -21,6 +21,20 @@ pub enum Layout {
 }
 
 impl Layout {
+    pub const ALL: [Self; 11] = [
+        Self::Yuv420p,
+        Self::Nv12,
+        Self::P010,
+        Self::Yuv420p10,
+        Self::Yuv422p,
+        Self::Yuv422p10,
+        Self::P210,
+        Self::Yuv444p12,
+        Self::P416,
+        Self::Ayuv64,
+        Self::Rgb,
+    ];
+
     pub(crate) fn of(p: format::Pixel) -> Self {
         use format::Pixel as P;
         match p {

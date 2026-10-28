@@ -7,7 +7,7 @@ type Key = (PathBuf, u64, i64, i64);
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(super) enum Input<'a> {
-    Rgb(&'a [u8]),
+    Held(&'a frame::Video),
     Frame(&'a frame::Video),
 }
 
@@ -196,7 +196,12 @@ mod imp {
         fn frame(&mut self, input: &Input, at: CMTime) -> Result<Retained<VTFrameProcessorFrame>> {
             let picture = buffer(&self.sources, WHAT)?;
             match input {
-                Input::Rgb(rgb) => write(&picture, self.format, self.size, rgb)?,
+                Input::Held(f) => write(
+                    &picture,
+                    self.format,
+                    self.size,
+                    &crate::screen::held::rgb(f)?,
+                )?,
                 Input::Frame(f) => {
                     let scaled = crate::lanczos::sized(&mut self.lanczos, f, self.size)?;
                     let f = scaled.as_ref().unwrap_or(*f);

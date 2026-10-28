@@ -485,11 +485,10 @@ pub(crate) fn between(
 ) -> Result<Picture> {
     let clock = Instant::now();
     let made = if r == Retime::Macos {
-        let (a, b) = (held::rgb(a)?, held::rgb(b)?);
         Picture::Rgb(macos::between(
             key,
-            macos::Input::Rgb(&a),
-            macos::Input::Rgb(&b),
+            macos::Input::Held(a),
+            macos::Input::Held(b),
             size,
             t,
         )?)

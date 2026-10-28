@@ -98,7 +98,7 @@ pub struct Config {
     pub audio_scrubbing: bool,
     pub on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
     pub hardware: bool,
-    pub gpu_pictures: Vec<crate::hw::Kind>,
+    pub gpu_pictures: crate::hw::GpuPictures,
 }
 
 impl Default for Config {
@@ -311,7 +311,7 @@ pub(crate) struct Shared {
     presenter: Mutex<Presenter>,
     device: Arc<Mutex<Option<String>>>,
     format: (u32, u16),
-    pub(crate) gpu_pictures: Vec<crate::hw::Kind>,
+    pub(crate) gpu_pictures: crate::hw::GpuPictures,
     copies: Arc<crate::copies::Copies>,
     heard_epoch: std::sync::atomic::AtomicU64,
     levels: Mutex<std::collections::VecDeque<Level>>,

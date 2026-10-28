@@ -60,7 +60,7 @@ impl Shared {
 
 pub struct Viewer {
     shared: Arc<Shared>,
-    gpu_pictures: Vec<vidcut_av::hw::Kind>,
+    gpu_pictures: vidcut_av::hw::GpuPictures,
     thread: Option<JoinHandle<()>>,
     texture: Option<(u64, egui::TextureId)>,
 }
@@ -125,7 +125,7 @@ impl Viewer {
         }
     }
 
-    pub fn gpu_pictures(&self) -> Vec<vidcut_av::hw::Kind> {
+    pub fn gpu_pictures(&self) -> vidcut_av::hw::GpuPictures {
         self.gpu_pictures.clone()
     }
 

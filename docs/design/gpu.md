@@ -40,7 +40,9 @@ flowchart LR
 - `route::Place` is where a picture is: `Memory`, or one of the GPU places of `hw::Kind`.
 - `route::Facts` holds what the planner knows of a frame:
   - Its place.
-  - The draw takes the frames of that place (`Gpu::gpu_pictures`).
+  - The draw takes the frames of that place in that layout (`Gpu::gpu_pictures`).
+    - Each import has its layout rules in one function, which the import and `gpu_pictures` both use (`nvdec_bytes`, `vulkan_layout`).
+    - Why: a frame that the draw cannot import comes down whole. The keeper does not copy it first.
   - The draw reads its layout (`normalize::displayable`).
   - Keeping the frames failed before.
 - `route::plan` gives the `Route`. `Route::Kept` wins.
@@ -60,12 +62,15 @@ In the viewer, exports, proxies and thumbnails:
 
 | Decoder | Kept | Read by the draw |
 |---|---|---|
-| NVDEC (CUDA) | `cuda::keep`: a copy | through a buffer shared with wgpu (`SharedBuffer`) |
+| NVDEC (CUDA) | `cuda::keep`: a copy, or as decoded for a draw at once | through a buffer shared with wgpu (`SharedBuffer`) |
 | Vulkan | `vulkan::keep`: as decoded | images imported into wgpu |
 | VA-API | `vaapi::Keeper`: a copy (`vaCopy`) | DMA-BUFs imported into wgpu |
 | Direct3D 11 | `d3d11::Keeper`: a copy in shareable textures | a few shared textures, each imported once (`d3d11::Shared`) |
 | VideoToolbox | as decoded | IOSurface planes as Metal textures; AYUV64 as one RGBA texture |
 
+- Exports, proxies and thumbnails draw each frame at once. They take NVDEC's frames as decoded (`Maker::drawing`).
+  - They first wait for the stream of the decoder, as the copy does (`wait_for`).
+  - Why: the copy packs the pictures that the viewer keeps. A picture that is drawn at once is not kept.
 - The viewer imports VA-API pictures only from its own GPU (`player::set_viewer_gpu`). From another GPU, the pictures come down.
   - Why: the viewer cannot import the pictures of another GPU.
 - The draw takes NVDEC pictures only when its wgpu device is on CUDA's GPU, as it does for Vulkan pictures. On another GPU, the pictures come down.
@@ -75,6 +80,7 @@ In the viewer, exports, proxies and thumbnails:
 - ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
 - A VideoToolbox frame that comes down is mapped, not copied (`hw::to_read`).
 - A layer keeps the picture that its planes hold: from memory, from NVDEC, or brought down. A redraw of the same picture copies nothing.
+- A Direct3D 11 texture of the viewer keeps the picture that it holds (`D3d11Shared`). A redraw of the same picture does not fill it again.
 - A layer that brings its picture down brings down only its own frame (`alone_copied_down`).
 - `hw::Turner` turns VideoToolbox frames for the scalers of macOS (`vt::Turn`, `transpose_vt`).
 - Lanczos on Metal scales the input of the scaler and the frame interpolation of macOS to the size of their session (`lanczos::sized`). It also scales the output of the scaler to the size that it shows at.
@@ -208,6 +214,8 @@ On macOS (`interpolate::macos`):
 - Lanczos sizes them to the size that the picture fills in the frame, before the frame is made.
 - The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
 - Frames that the CPU decoded, and the frames of a placed clip, go through RGB.
+  - The session reads a held picture down from the GPU only for a new pair (`Input::Held`).
+  - The next frame between the same pair uses the pair that the session has (`SequentialReferencesUnchanged`).
 
 `interpolate::report` tells what each process makes. The stats panel shows it (`RetimeStats`).
 

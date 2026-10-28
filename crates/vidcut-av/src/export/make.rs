@@ -33,8 +33,9 @@ impl Fitting {
 
 pub(crate) struct Maker {
     out: (u32, u32, format::Pixel),
-    keep: Vec<crate::hw::Kind>,
+    keep: crate::hw::GpuPictures,
     holds: bool,
+    draws: bool,
     stages: Vec<Stage>,
     reading: Reading,
 }
@@ -60,13 +61,14 @@ impl Default for Stage {
 impl Maker {
     pub(crate) fn new(
         out: (u32, u32, format::Pixel),
-        keep: Vec<crate::hw::Kind>,
+        keep: crate::hw::GpuPictures,
         reading: Reading,
     ) -> Self {
         Self {
             out,
             keep,
             holds: false,
+            draws: false,
             stages: Vec::new(),
             reading,
         }
@@ -75,6 +77,13 @@ impl Maker {
     pub(crate) fn holding(self) -> Self {
         Self {
             holds: true,
+            ..self
+        }
+    }
+
+    pub(crate) fn drawing(self) -> Self {
+        Self {
+            draws: true,
             ..self
         }
     }
@@ -97,7 +106,8 @@ impl Maker {
     }
 
     fn keeps(&self, frame: &frame::Video) -> bool {
-        crate::hw::Kind::of_frame(frame).is_some_and(|k| self.keep.contains(&k))
+        let layout = crate::player::Layout::of(crate::hw::sw_format(frame));
+        crate::hw::Kind::of_frame(frame).is_some_and(|k| self.keep.contains(&(k, layout)))
     }
 
     pub(crate) fn make(
@@ -154,6 +164,13 @@ impl Maker {
         let picture = loop {
             route = plan(&facts);
             let came_down = match route {
+                Route::Kept
+                    if self.draws
+                        && crate::hw::Kind::of_frame(frame) == Some(crate::hw::Kind::Nvdec) =>
+                {
+                    crate::cuda::share::wait_for(frame)?;
+                    break crate::export::video::frame_ref(frame)?;
+                }
                 Route::Kept => match crate::hw::Keeper::keep(&mut stage.keeper, frame) {
                     Ok(kept) => break kept,
                     Err(e) => {

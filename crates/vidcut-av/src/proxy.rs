@@ -742,7 +742,8 @@ fn encode_into(
         (width, height, format::Pixel::YUV420P),
         drawer.keeps(),
         crate::decode::Reading::Stream,
-    );
+    )
+    .drawing();
     let mut fitting = Fitting::none();
     let mut went = None;
     let mut encoding = || -> Result<()> {

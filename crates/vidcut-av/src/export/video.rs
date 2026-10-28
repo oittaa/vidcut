@@ -1318,7 +1318,7 @@ impl Drawer {
         })
     }
 
-    pub(crate) fn keeps(&self) -> Vec<crate::hw::Kind> {
+    pub(crate) fn keeps(&self) -> crate::hw::GpuPictures {
         self.gpu.gpu_pictures()
     }
 
@@ -1375,7 +1375,9 @@ pub(crate) struct Single {
 impl Single {
     pub(crate) fn new(reading: Reading) -> Result<Self> {
         let drawer = Drawer::new(None)?;
-        let maker = Maker::new((2, 2, format::Pixel::YUV420P), drawer.keeps(), reading).holding();
+        let maker = Maker::new((2, 2, format::Pixel::YUV420P), drawer.keeps(), reading)
+            .holding()
+            .drawing();
         Ok(Self {
             drawer,
             maker,
@@ -1547,7 +1549,7 @@ impl VideoFrames {
         crate::progress::note(super::Note::Source(source));
     }
 
-    pub(crate) fn keeping(mut self, keep: Vec<crate::hw::Kind>) -> Self {
+    pub(crate) fn keeping(mut self, keep: crate::hw::GpuPictures) -> Self {
         self.maker = Maker::new(self.maker.out(), keep, self.maker.reading());
         self
     }
@@ -1610,7 +1612,7 @@ impl VideoFrames {
         if self.drawer.is_none() {
             let drawer = Drawer::new(self.encoder.take())?;
             let (out, reading) = (self.maker.out(), self.maker.reading());
-            self.maker = Maker::new(out, drawer.keeps(), reading).holding();
+            self.maker = Maker::new(out, drawer.keeps(), reading).holding().drawing();
             self.drawer = Some(drawer);
         }
         let Some(layers) = self.next_layers()? else {

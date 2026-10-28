@@ -206,6 +206,9 @@ The audio device:
   - It reads the chroma of each frame at the site that the frame's chroma location gives (`chroma_site`). An H.264 or HEVC 4:2:0 frame with no chroma location is sited left, the default of these formats (`color::default_site`). Another frame with no chroma location is read as centered.
   - The viewer enlarges with one bilinear sample, and shrinks with a box of bilinear samples.
   - An export, a proxy and a thumbnail scale with a bicubic kernel (`sharp`). The kernel widens when the picture shrinks.
+  - The kernel widens up to 4 times. Above a shrink of 4:1, the draw first halves the picture into smaller levels (`halvings`, `fs_shrink`, `fs_halve`).
+  - The kernel then reads the level where the shrink is 4:1 or less. The larger shrink of the two axes selects the level.
+  - Why: each pixel has the same work at any shrink. A kernel that widens without a limit puts all the work of a small picture on few GPU threads.
   - Why: the viewer must be fast, and an export must keep the detail of the picture.
   - The layers of a dissolve are more draws in the pass.
   - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
