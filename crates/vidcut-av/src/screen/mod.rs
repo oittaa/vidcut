@@ -1913,9 +1913,10 @@ impl Slot {
         let layout = picture.layout();
         let bytes = match layout {
             Layout::Nv12 => 1,
-            Layout::P010 if gpu.wide => 2,
-            Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            Layout::P210 => return Ok(false),
+            Layout::P010 | Layout::P210 if gpu.wide => 2,
+            layout @ (Layout::P010 | Layout::P210) => {
+                return Err(format!("no 16-bit textures for {layout:?}"));
+            }
             layout @ (Layout::P416 | Layout::Ayuv64 | Layout::Rgb) => {
                 return Err(format!("{layout:?} pictures aren't NVDEC's"));
             }
@@ -1928,7 +1929,8 @@ impl Slot {
             }
         };
         let (w, h) = (u64::from(picture.width()), u64::from(picture.height()));
-        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+        let (cw, ch) = chroma_size(layout, picture.width(), picture.height());
+        let (cw, ch) = (u64::from(cw), u64::from(ch));
         let align = |n: u64| n.div_ceil(256) * 256;
         let y = PlaneCopy {
             offset: 0,
