@@ -1793,7 +1793,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The lists name the upscaler that Auto and Project Settings give on this computer, as in Auto (AI Best).
   - On macOS, the upscalers are AI and Classic. AI Fast and AI Best are off there for now: exports and the viewer refuse them.
   - On macOS, AI is the upscaler of Auto. It is the super-resolution scaler of macOS 26 and later (`VTFrameProcessor` of VideoToolbox), `macos` in requests.
-    - It enlarges by a factor that macOS offers. It takes the smallest of these that reaches the shown size, and the result is fitted.
+    - It enlarges by a factor that macOS offers. It takes the smallest of these that reaches the shown size.
+    - Then it makes the picture at the size that it shows at, as AI Best does.
     - It reads the frames of a clip in order. Each output frame uses the frame and the output before it.
     - It takes SDR pictures up to 1920×1080, the limit of macOS for video.
     - macOS downloads its models only when the user agrees, as for the weights of AI Fast and AI Best. vidcut does not ship them.

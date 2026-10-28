@@ -39,16 +39,15 @@ pub fn get_ready(download: bool) -> Result<()> {
     imp::ready(download)
 }
 
-pub(crate) fn made_size(size: (u32, u32), shown: (u32, u32)) -> (u32, u32) {
-    let need = (f64::from(shown.0) / f64::from(size.0)).min(f64::from(shown.1) / f64::from(size.1));
+pub(super) fn factor(size: (u32, u32), shown: (u32, u32)) -> u32 {
+    let need = super::need(size, shown);
     let factors = imp::factors();
-    let factor = factors
+    factors
         .iter()
         .copied()
         .find(|f| f64::from(*f) >= need)
         .or_else(|| factors.last().copied())
-        .unwrap_or(1);
-    (size.0 * factor, size.1 * factor)
+        .unwrap_or(1)
 }
 
 pub fn check<'a>(
@@ -193,8 +192,9 @@ mod imp {
     use vidcut_core::model::Upscaler;
 
     use super::NEEDS;
+    use crate::color::Matrix;
     use crate::error::{Error, Result};
-    use crate::ffmpeg::frame::Video;
+    use crate::ffmpeg::{ffi, format, frame::Video};
     use crate::frame_processor::{
         Frames, Transfer, buffer, format_in, fourcc, frame, numbers, pixels, pool, read, write,
     };
@@ -320,11 +320,14 @@ mod imp {
         processor: Retained<VTFrameProcessor>,
         sources: CFRetained<CVPixelBufferPool>,
         outputs: CFRetained<CVPixelBufferPool>,
+        shrunk: Option<CFRetained<CVPixelBufferPool>>,
         transfer: Transfer,
         lanczos: Option<crate::lanczos::Lanczos>,
+        shrink: Option<crate::lanczos::Lanczos>,
         frames: Frames,
         format: u32,
         size: (u32, u32),
+        enlarged: (u32, u32),
         made: (u32, u32),
         last: Option<(
             Retained<VTFrameProcessorFrame>,
@@ -337,7 +340,8 @@ mod imp {
 
     impl Scaler {
         pub(super) fn open(size: (u32, u32), made: (u32, u32)) -> Result<Self> {
-            let factor = made.0 / size.0;
+            let factor = super::factor(size, made);
+            let enlarged = (size.0 * factor, size.1 * factor);
             let config = configuration(size, factor)?;
             if !has_model(&config) {
                 return Err(Error::Missing(MISSING.into()));
@@ -351,7 +355,10 @@ mod imp {
                 )
             };
             let sources = pool(size, format, &from, WHAT)?;
-            let outputs = pool(made, format, &to, WHAT)?;
+            let outputs = pool(enlarged, format, &to, WHAT)?;
+            let shrunk = (made != enlarged)
+                .then(|| pool(made, format, &to, WHAT))
+                .transpose()?;
             // SAFETY: a new processor of the frame processor class.
             let processor = unsafe { VTFrameProcessor::new() };
             // SAFETY: a new processor and a live configuration.
@@ -362,9 +369,11 @@ mod imp {
             crate::super_scale::runs_on(Upscaler::Macos, "macOS".into());
             crate::debug!(
                 "ai",
-                "macOS: {}x{} to {}x{} at {factor}x, pictures as {}",
+                "macOS: {}x{} to {}x{} at {factor}x, then to {}x{}, pictures as {}",
                 size.0,
                 size.1,
+                enlarged.0,
+                enlarged.1,
                 made.0,
                 made.1,
                 fourcc(format)
@@ -373,11 +382,14 @@ mod imp {
                 processor,
                 sources,
                 outputs,
+                shrunk,
                 transfer: Transfer::new(WHAT)?,
                 lanczos: None,
+                shrink: None,
                 frames: Frames::default(),
                 format,
                 size,
+                enlarged,
                 made,
                 last: None,
             })
@@ -390,7 +402,15 @@ mod imp {
             let wrote = clock.elapsed();
             let enlarged = self.enlarge(index, &source)?;
             let scaled = clock.elapsed();
-            let out = read(&enlarged, self.format, self.made)?;
+            let out = match &self.shrunk {
+                Some(shrunk) => {
+                    let small = buffer(shrunk, WHAT)?;
+                    self.transfer.run(&enlarged, &small, Matrix::Bt709, WHAT)?;
+                    enlarged.remove_all_attachments();
+                    read(&small, self.format, self.made)?
+                }
+                None => read(&enlarged, self.format, self.made)?,
+            };
             told(index, wrote, scaled, clock);
             Ok(out)
         }
@@ -406,10 +426,21 @@ mod imp {
             let wrote = clock.elapsed();
             let enlarged = self.enlarge(index, &source)?;
             let scaled = clock.elapsed();
-            let out = self
+            let layout = crate::hw::sw_format(f);
+            let layout = if crate::lanczos::takes(layout) {
+                layout
+            } else {
+                format::Pixel::P416LE
+            };
+            let shape = (self.enlarged, ffi::AVPixelFormat::from(layout));
+            let big = self
                 .frames
-                .made(&self.transfer, &enlarged, f, self.made, WHAT)?;
+                .made_as(&self.transfer, &enlarged, f, shape, WHAT)?;
             enlarged.remove_all_attachments();
+            let out = match crate::lanczos::sized(&mut self.shrink, &big, self.made)? {
+                Some(small) => small,
+                None => big,
+            };
             told(index, wrote, scaled, clock);
             Ok(out)
         }

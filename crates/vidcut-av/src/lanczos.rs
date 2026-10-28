@@ -39,6 +39,10 @@ fn planes(layout: format::Pixel) -> Result<[MTLPixelFormat; 2]> {
     }
 }
 
+pub(crate) fn takes(layout: format::Pixel) -> bool {
+    planes(layout).is_ok()
+}
+
 fn chroma_shift(layout: format::Pixel) -> (u32, u32) {
     match layout {
         format::Pixel::NV12 | format::Pixel::P010LE => (1, 1),

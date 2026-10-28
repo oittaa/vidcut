@@ -73,7 +73,7 @@ In the viewer, exports, proxies and thumbnails:
 - ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
 - A VideoToolbox frame that comes down is mapped, not copied (`hw::to_read`).
 - `hw::Turner` turns VideoToolbox frames for the scalers of macOS (`vt::Turn`, `transpose_vt`).
-- Lanczos on Metal scales the input of the scaler and the frame interpolation of macOS to the size of their session (`lanczos::sized`).
+- Lanczos on Metal scales the input of the scaler and the frame interpolation of macOS to the size of their session (`lanczos::sized`). It also scales the output of the scaler to the size that it shows at.
   - Why Lanczos: the scaler of VideoToolbox keeps less detail.
 
 The draw:
@@ -169,6 +169,9 @@ The scaler of macOS (`macos`):
 - `macos::check` refuses HDR media and pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
 - A VideoToolbox frame reaches it on the GPU (`Run::push_frame`). A turned frame turns first (`hw::Turner`).
+- It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
+  - Why: a picture of 4 times the source fills the cache of the viewer.
+  - A picture of a layout that Lanczos cannot take comes out as P416 (`lanczos::takes`).
 - Its buffers lose the color labels of the transfers. Why: with labels, it makes less detail.
 - AI Fast and AI Best are off on macOS (`super_scale::off_here`).
 
