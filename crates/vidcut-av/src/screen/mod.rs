@@ -1048,6 +1048,7 @@ struct Slot {
     filled: Option<usize>,
     unshared: bool,
     unimported: Vec<Layout>,
+    source: Option<Arc<crate::decode::Decoding>>,
     imported: Option<Arc<Picture>>,
     views: Option<(wgpu::TextureView, wgpu::TextureView, (u32, u32))>,
     v_view: Option<wgpu::TextureView>,
@@ -1525,6 +1526,11 @@ impl Slot {
     }
 
     fn upload(&mut self, gpu: &Gpu, picture: &Arc<Picture>, encoder: &mut wgpu::CommandEncoder) {
+        if self.source.as_ref().map(Arc::as_ptr) != picture.decoding().map(Arc::as_ptr) {
+            self.source = picture.decoding().cloned();
+            self.unshared = false;
+            self.unimported.clear();
+        }
         self.make_planes(gpu, picture);
         self.last_shared = false;
         let written = self.written.take();
