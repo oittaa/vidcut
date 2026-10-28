@@ -81,7 +81,8 @@ fn checked<T>(device: &wgpu::Device, f: impl FnOnce() -> T) -> Result<T, String>
 }
 
 pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
-    let wanted = wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
+    let wanted = wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
+        | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
     #[cfg(target_os = "linux")]
     let wanted = wanted | wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF;
     #[cfg(windows)]

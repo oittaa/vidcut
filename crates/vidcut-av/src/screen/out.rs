@@ -384,10 +384,11 @@ impl Screen {
                 (None, Some(t)) => (t, plane.format),
                 (None, None) => return Err(Error::Invalid("a plane has nowhere to go".into())),
             };
+            let pipeline = gpu.encoders.pipeline(format)?;
             let view = texture.create_view(&Default::default());
             {
                 let mut pass = begin(&mut encoder, &view, Some(wgpu::Color::TRANSPARENT));
-                pass.set_pipeline(gpu.encoders.pipeline(format)?);
+                pass.set_pipeline(pipeline);
                 pass.set_bind_group(0, &bind, &[]);
                 pass.draw(0..3, 0..1);
             }

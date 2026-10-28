@@ -10,7 +10,9 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - The bindings of the shader change together with the layout in `Gpu::new`.
 - **wgpu does not let a pipeline draw into `R16Unorm` or `Rg16Unorm` by default.**
   - The 16-bit unorm feature lets a shader read these formats, but not draw into them.
-  - A pipeline that draws into them is a validation error, and the default handler panics.
+  - Thus the device also asks for the GPU's own format features (`TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`). Then wgpu permits what the GPU can do. Metal can draw into these formats.
+  - Without them, a pipeline or a view that draws into these formats is a validation error, and the default handler panics.
+  - The encoding finds the pipeline before it makes the view.
   - Thus `Encoders::new` makes each pipeline of the encoding under an error scope (`checked`). It keeps the pipelines that the device takes.
   - The VideoToolbox hand-off draws 10-bit planes into `R16Unorm` and `Rg16Unorm` IOSurfaces. Without these pipelines, those planes go through memory (`through_memory`).
 - **wgpu 30's `Surface::configure` fails when another thread submits while it waits for the device to go idle**.
