@@ -205,10 +205,7 @@ impl Picture {
     }
 
     pub fn copied_down(&self) -> Result<Picture> {
-        let frame = match self.gpu() {
-            None => crate::export::video::frame_ref(&self.frame)?,
-            Some(_) => crate::hw::download(&self.frame)?,
-        };
+        let alone = self.alone_copied_down()?;
         let over = self
             .over
             .iter()
@@ -220,9 +217,16 @@ impl Picture {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        Ok(alone.with_over(over))
+    }
+
+    pub(crate) fn alone_copied_down(&self) -> Result<Picture> {
+        let frame = match self.gpu() {
+            None => crate::export::video::frame_ref(&self.frame)?,
+            Some(_) => crate::hw::download(&self.frame)?,
+        };
         Ok(
             Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
-                .with_over(over)
                 .with_sampling(self.sampling.clone()),
         )
     }
