@@ -155,9 +155,13 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - A frame on the GPU, or a frame with its RGB on the GPU, gets its small picture on the GPU (`held::small_luma`). It is the area average of the BT.709 luma of the RGB, in TV range.
   - Only the small picture comes down. Why: the test does not need the whole frame.
   - A frame in memory gets its small picture from FFmpeg's scaler (`analysis::small_luma`).
+- With an AI upscaler of Super Scale, the upscaler enlarges the two frames of the pair first (`scaled_pair`). The frame is then made from the two enlarged pictures.
+  - Why: Super Scale works on the source, before the retime ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+  - The `Source` keeps the last two enlarged pictures (`Source::ai_picture`). Thus the later picture of one pair is the earlier picture of the next.
 - With the frame rate conversion of macOS and two VideoToolbox frames, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
-- Else the pair becomes RGB on the GPU, upright, at the size that the picture shows at, at most the source size (`between_size`). `interpolate::between` makes the frame.
-  - `Source::rgb_of` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next.
+- Else the pair becomes RGB on the GPU, upright, at the size that the picture shows at (`between_size`). `interpolate::between` makes the frame.
+  - This size is at most the size of the source, or of the enlarged pictures.
+  - `Source::rgb_from` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next.
 - The made frame then goes through the usual fitting.
 - An exact source frame, the first frame of a file, an HDR frame, a piece played backward and a still take the usual path.
 
