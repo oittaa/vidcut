@@ -100,6 +100,7 @@ Frames that come down:
 - The player brings a frame down when the viewer cannot show its kind, when an import fails, or when its pool leaves the budget.
 - A picture in memory goes up into the frames of a GPU encoder (`Upload`, `CudaFrames::upload`).
 - The player brings the pictures of the AI upscalers and the frame interpolation down (`held::in_memory`). Why: the viewer draws on another device.
+  - They go to the viewer as RGB24, with no conversion on the CPU (`normalize::displayable`). An RGB24 still goes to the draw as it is too.
 - The cut test of a retime brings down a 96×54 luma picture of each frame, not the frame (`held::small_luma`, [export](export.md)).
 
 ## Encoders
