@@ -17,6 +17,7 @@ use crate::ffmpeg::format;
 
 const PAUSED_AHEAD: i64 = 3;
 const FOLLOWED_AHEAD: i64 = 8;
+const SLOW_AHEAD: i64 = 1;
 
 const AHEAD_SECS: f64 = 0.25;
 
@@ -465,18 +466,17 @@ impl Decoder {
             }
             Direction::Back if snap.followed => return Ok(false),
             Direction::Back => return self.window_behind(snap),
-            Direction::Paused => (focus + 1
-                ..=plan.clamp(
-                    focus
-                        + if snap.followed {
-                            FOLLOWED_AHEAD
-                        } else {
-                            PAUSED_AHEAD
-                        },
-                ))
-                .find(|&t| missing(t))
-                .filter(|&t| self.next == Some(t) && plan.fill_at(t).ahead)
-                .map(|t| (t, Reach::Forward)),
+            Direction::Paused => {
+                let most = match (plan.fill_at(focus).behind, snap.followed) {
+                    (false, _) => SLOW_AHEAD,
+                    (true, true) => FOLLOWED_AHEAD,
+                    (true, false) => PAUSED_AHEAD,
+                };
+                (focus + 1..=plan.clamp(focus + most))
+                    .find(|&t| missing(t))
+                    .filter(|&t| self.next == Some(t) && plan.fill_at(t).ahead)
+                    .map(|t| (t, Reach::Forward))
+            }
         };
         if let Some((t, reach)) = wanted {
             let started = Instant::now();
@@ -741,6 +741,7 @@ impl Decoder {
         let started = Instant::now();
         let mut seek_keeps: Option<i64> = None;
         let made = keep == Keep::Ahead && plan.fill_at(t).made;
+        let only = keep == Keep::Seek && !plan.fill_at(t).behind;
         for i in r..=t {
             let window = match keep {
                 Keep::Ahead => false,
@@ -748,10 +749,11 @@ impl Decoder {
                 Keep::Seek => seek_keeps.is_none_or(|from| i >= from),
             };
             let kept = i == t
-                || window
-                || (!made
-                    && (i >= snap.focus || snap.followed)
-                    && !self.shared.store.contains(&plan.id(i)));
+                || (!only
+                    && (window
+                        || (!made
+                            && (i >= snap.focus || snap.followed)
+                            && !self.shared.store.contains(&plan.id(i)))));
             let frames = self.reader();
             if kept {
                 let layers = frames
