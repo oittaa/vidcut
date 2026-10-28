@@ -407,7 +407,7 @@ impl Default for Thumbnails {
 #[serde(default, deny_unknown_fields)]
 pub struct Cache {
     /// What sets the limit: `percent` (the default) or `gb`. Either way the
-    /// cache shrinks to keep 20% of its disk free.
+    /// cache shrinks to keep 10% of its disk free.
     pub limit: CacheLimit,
     /// The limit as a share of the disk the cache dir is on: 1 to 100
     /// percent.
