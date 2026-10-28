@@ -82,7 +82,9 @@ The draw:
 
 - The viewer, exports, proxies and thumbnails draw each frame with one shader (`screen::Screen`, `picture.wgsl`).
   - The AI upscalers and the frame interpolation take their RGB input from the same draw (`export::video::Single`).
-  - That input stays on the GPU (`Sink::Held`). `held::Pipes` packs the drawn RGB plane into a buffer (`rgb.wgsl`).
+  - That input stays on the GPU (`Sink::Held`).
+- The draw writes an RGB plane as RGBA. `held::Pipes` packs it to three bytes a pixel (`rgb.wgsl`). An RGB frame in memory is packed the same way.
+  - Why: a plane of one byte a texel is three times as wide as the picture. A wide picture then goes past the texture size limit of the GPU.
 - It mixes the dissolves, the wipes, the composite modes, the placed pictures, the titles and the subtitles.
 - `export::video::Drawer` draws for the export, proxies, thumbnails and the AI inputs.
   - All of them share one wgpu device (`screen::offscreen`). It is on the GPU in use (`gpus::in_use`).

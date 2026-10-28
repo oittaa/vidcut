@@ -568,11 +568,8 @@ fn encoded_at(px: vec2<i32>) -> vec4<u32> {
         out = select(vec4<u32>(cb, cr, 0u, 0u), vec4<u32>(cr, 0u, 0u, 0u), kind == 3u);
     } else if kind == 4u {
         out.x = ((1u << encoding.how.z) - 1u) << encoding.how.w;
-    } else if kind == 5u {
-        out = vec4<u32>(vec3<u32>(round(pixel_at(px.x, px.y) * 255.0)), 255u);
     } else {
-        let c = pixel_at(px.x / 3, px.y);
-        out.x = u32(round(c[px.x % 3] * 255.0));
+        out = vec4<u32>(vec3<u32>(round(pixel_at(px.x, px.y) * 255.0)), 255u);
     }
     return out;
 }
