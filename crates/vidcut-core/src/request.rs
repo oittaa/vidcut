@@ -1344,6 +1344,37 @@ pub enum Request {
         #[serde(default)]
         at: Option<OneOrMany<TimeSpec>>,
     },
+    /// Copy keyframes of `clip` (Ctrl+C in the Keyframes tab): returns them
+    /// as `keyframes`, ready for `keyframes.paste`. The GUI also keeps them
+    /// on its clipboard. Without `keys`, every keyframe of the clip.
+    #[serde(rename = "keyframes.copy")]
+    KeyframesCopy {
+        clip: ClipRef,
+        #[serde(default)]
+        keys: Option<Vec<KeyPicks>>,
+    },
+    /// Cut keyframes of `clip` (Ctrl+X in the Keyframes tab): copy them as
+    /// `keyframes.copy` does, then remove them.
+    #[serde(rename = "keyframes.cut")]
+    KeyframesCut {
+        clip: ClipRef,
+        #[serde(default)]
+        keys: Option<Vec<KeyPicks>>,
+    },
+    /// Paste keyframes (Ctrl+V in the Keyframes tab) on each of `clips`:
+    /// the first at `at`, each other one at its offset from it. Defaults:
+    /// the GUI's clipboard and the playhead. A keyframe goes on the source
+    /// frame under its time and takes the place of a keyframe there. Each
+    /// time needs a frame of the clip. Returns the `keyframes` with their
+    /// clip, value and source frame.
+    #[serde(rename = "keyframes.paste")]
+    KeyframesPaste {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(default)]
+        keyframes: Option<Vec<CopiedKey>>,
+    },
     /// The timeline's In and Out marks.
     #[serde(rename = "marks.get")]
     MarksGet {},
@@ -3029,6 +3060,55 @@ pub enum KeyParam {
     Opacity,
 }
 
+impl KeyParam {
+    pub const ALL: [KeyParam; 13] = [
+        KeyParam::Volume,
+        KeyParam::Position,
+        KeyParam::Zoom,
+        KeyParam::Rotation,
+        KeyParam::Anchor,
+        KeyParam::Pitch,
+        KeyParam::Yaw,
+        KeyParam::CropLeft,
+        KeyParam::CropRight,
+        KeyParam::CropTop,
+        KeyParam::CropBottom,
+        KeyParam::CropSoftness,
+        KeyParam::Opacity,
+    ];
+}
+
+/// The keyframes of one value to copy or cut.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct KeyPicks {
+    pub param: KeyParam,
+    /// The source frames of the keyframes. Without them, every keyframe of
+    /// the value.
+    #[serde(default)]
+    pub frames: Option<OneOrMany<i64>>,
+}
+
+/// A copied keyframe: what `keyframes.copy` returns and `keyframes.paste`
+/// takes.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CopiedKey {
+    pub param: KeyParam,
+    /// Timeline frames after the first copied keyframe.
+    pub offset: i64,
+    /// A number, or x and y for position, zoom and the anchor point.
+    pub value: KeyValue,
+    /// The ease. A paste sets its handles again for the new neighbors.
+    /// Without it, the paste keeps the handles as they are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ease: Option<Ease>,
+    /// The In handle, when the keyframe has one.
+    #[serde(rename = "in", default, skip_serializing_if = "Option::is_none")]
+    pub in_handle: Option<Handle>,
+    /// The Out handle, when the keyframe has one.
+    #[serde(rename = "out", default, skip_serializing_if = "Option::is_none")]
+    pub out_handle: Option<Handle>,
+}
+
 /// A keyframe value: one number, or x and y for position, zoom and the
 /// anchor point.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -3845,6 +3925,7 @@ impl Request {
                     | Self::BinsList {}
                     | Self::MarksGet {}
                     | Self::KeyframesList { .. }
+                    | Self::KeyframesCopy { .. }
                     | Self::MarkersList {}
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }

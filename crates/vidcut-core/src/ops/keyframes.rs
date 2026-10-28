@@ -6,7 +6,7 @@ use super::locate;
 use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, checked, checked_handle, ease_of, reshape};
 use crate::model::{Clip, ClipAudio, Ease, Handle, Keyframe, Picture, Project};
-use crate::request::{KeyParam, KeyValue};
+use crate::request::{CopiedKey, KeyParam, KeyPicks, KeyValue};
 use crate::validate::GAIN;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -402,6 +402,150 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
         }
     }
     Ok(json!({ "clips": clips }))
+}
+
+fn keys_of(c: &Clip, param: KeyParam) -> &[Keyframe] {
+    match picture_param(param) {
+        Some(v) => c.picture.as_ref().map_or(&[], |p| p.keys_of(v)),
+        None => c.audio.as_ref().map_or(&[], |a| a.gain_keys.as_slice()),
+    }
+}
+
+fn param_name(param: KeyParam) -> &'static str {
+    picture_param(param).map_or("volume", PictureValue::name)
+}
+
+pub fn chosen(
+    p: &Project,
+    id: &str,
+    picks: Option<&[KeyPicks]>,
+) -> Result<Vec<(KeyParam, Vec<i64>)>> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    let wanted: Vec<(KeyParam, Option<Vec<i64>>)> = match picks {
+        Some(picks) => picks
+            .iter()
+            .map(|k| (k.param, k.frames.as_ref().map(|f| f.to_vec())))
+            .collect(),
+        None => KeyParam::ALL
+            .into_iter()
+            .filter(|&param| !keys_of(c, param).is_empty())
+            .map(|param| (param, None))
+            .collect(),
+    };
+    let mut out: Vec<(KeyParam, Vec<i64>)> = Vec::new();
+    for (param, frames) in wanted {
+        let keys = keys_of(c, param);
+        if keys.is_empty() {
+            return Err(Error::invalid(format!(
+                "{id} has no {} keyframes",
+                param_name(param).replace('_', " ")
+            )));
+        }
+        let pick = Pick { frames, at: None };
+        let mut taken: Vec<i64> = match picture_param(param) {
+            Some(v) => picked_name(c, keys, &pick, v)?,
+            None => picked(c, keys, &pick)?,
+        }
+        .into_iter()
+        .collect();
+        taken.sort_unstable();
+        match out.iter_mut().find(|(q, _)| *q == param) {
+            Some((_, have)) => {
+                have.extend(taken);
+                have.sort_unstable();
+                have.dedup();
+            }
+            None => out.push((param, taken)),
+        }
+    }
+    if out.is_empty() {
+        return Err(Error::invalid(format!("{id} has no keyframes")));
+    }
+    Ok(out)
+}
+
+pub fn copy(p: &Project, id: &str, picks: &[(KeyParam, Vec<i64>)]) -> Result<Vec<CopiedKey>> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    let mut rows = Vec::new();
+    for (param, frames) in picks {
+        let keys = keys_of(c, *param);
+        for (i, k) in keys
+            .iter()
+            .enumerate()
+            .filter(|(_, k)| frames.contains(&k.frame))
+        {
+            let value = match (picture_param(*param), &c.picture) {
+                (Some(v), Some(picture)) if v.pair() => {
+                    KeyValue::Pair(picture.key_value(v, k.frame).unwrap_or([k.value, 0.0]))
+                }
+                _ => KeyValue::Scalar(k.value),
+            };
+            let at = c.key_time(k.frame).round() as i64;
+            rows.push((
+                at,
+                CopiedKey {
+                    param: *param,
+                    offset: 0,
+                    value,
+                    ease: ease_of(keys, i),
+                    in_handle: k.in_handle,
+                    out_handle: k.out_handle,
+                },
+            ));
+        }
+    }
+    let first = rows.iter().map(|(at, _)| *at).min().unwrap_or(0);
+    rows.sort_by_key(|(at, k)| (*at, k.param as u8));
+    Ok(rows
+        .into_iter()
+        .map(|(at, k)| CopiedKey {
+            offset: at - first,
+            ..k
+        })
+        .collect())
+}
+
+pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Result<Vec<Value>> {
+    let Some(first) = keys.iter().map(|k| k.offset).min() else {
+        return Err(Error::usage("keyframes.paste needs keyframes"));
+    };
+    if ids.is_empty() {
+        return Err(Error::usage("keyframes.paste needs clips"));
+    }
+    let mut out = Vec::new();
+    for id in ids {
+        let one = std::slice::from_ref(id);
+        let mut placed = Vec::new();
+        for k in keys {
+            let t = at + k.offset - first;
+            let added = add(p, one, k.param, t, Some(k.value), None)?;
+            for (_, frame) in added {
+                placed.push((*k, frame));
+            }
+        }
+        for (k, frame) in placed {
+            let pick = Pick {
+                frames: Some(vec![frame]),
+                at: None,
+            };
+            let change = match k.ease {
+                Some(e) => KeyChange {
+                    ease: Some(e),
+                    ..KeyChange::default()
+                },
+                None => KeyChange {
+                    in_handle: Some(k.in_handle),
+                    out_handle: Some(k.out_handle),
+                    ..KeyChange::default()
+                },
+            };
+            set(p, one, k.param, &pick, &change)?;
+            out.push(json!({ "clip": id, "param": k.param, "value": k.value, "frame": frame }));
+        }
+    }
+    Ok(out)
 }
 
 fn picture_param(param: KeyParam) -> Option<PictureValue> {

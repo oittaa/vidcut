@@ -273,18 +273,29 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Lift",
         Some("Removes the selected clips and leaves the gap, so nothing after them moves."),
     ),
-    key(Clips, &["Ctrl", "C"], "Copy", None),
+    key(
+        Clips,
+        &["Ctrl", "C"],
+        "Copy",
+        Some(
+            "Copies the selected clips. With keyframes selected in the Keyframes tab, it copies only them.",
+        ),
+    ),
     key(
         Clips,
         &["Ctrl", "X"],
         "Cut",
-        Some("Copies the selected clips and removes them. On Track 1 the gap closes."),
+        Some(
+            "Copies the selected clips and removes them. On Track 1 the gap closes. With              keyframes selected in the Keyframes tab, it cuts only them.",
+        ),
     ),
     key(
         Clips,
         &["Ctrl", "V"],
         "Paste",
-        Some("Pastes at the playhead on the clips' own track, over what is there."),
+        Some(
+            "Pastes at the playhead on the clips' own track, over what is there. Copied keyframes              go on the selected clip: the first at the playhead, the others at their distance.",
+        ),
     ),
     key(
         Clips,

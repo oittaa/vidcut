@@ -900,6 +900,18 @@ impl Workspace {
                     None => super::dialog::why(ui, "open a project for the rest"),
                 }
             });
+            ui.menu_button("Mark", |ui| {
+                let on = self.key_editor.has_selection();
+                for step in super::keyframe_editor::Nudge::ALL {
+                    if ui
+                        .add_enabled(on, egui::Button::new(step.label()))
+                        .clicked()
+                    {
+                        self.nudge_keys(step);
+                        ui.close();
+                    }
+                }
+            });
             ui.menu_button("View", |ui| {
                 ui.menu_button("Safe Area", |ui| self.safe_area_menu(ui));
                 let mut on = self.snap.show_super_scale;
@@ -1154,6 +1166,8 @@ impl Workspace {
 
         for e in &input.events {
             match e {
+                egui::Event::Copy | egui::Event::Cut
+                    if self.copy_editor_keys(matches!(e, egui::Event::Cut)) => {}
                 egui::Event::Copy | egui::Event::Cut if !self.snap.selection.clips.is_empty() => {
                     let clips = self.snap.selection.clips.clone();
                     if let Some(p) = self.project()
@@ -1168,6 +1182,7 @@ impl Workspace {
                     };
                     self.send(method, json!({ "clips": clips }));
                 }
+                egui::Event::Paste(_) if self.snap.key_clipboard > 0 => self.paste_editor_keys(),
                 egui::Event::Paste(_) => self.send("edit.paste", json!({})),
                 _ => {}
             }

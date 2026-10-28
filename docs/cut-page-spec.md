@@ -80,7 +80,19 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - A drag on an In or Out handle changes that handle. A handle value moves the key's own value.
     - On Position, Zoom and the anchor point, Y keeps the handle frames and uses a value offset of 0.
     - One click selects one keyframe. Shift or Ctrl adds to the selection. A click on an empty part clears it.
+    - A drag from an empty part of the tracks draws a box (p. 1257). On release, the keyframes in the box are selected.
+    - Shift or Ctrl with the box adds its keyframes to the selection.
     - Delete removes the selected keyframes (p. 1258).
+    - Mark > Move Selected Keyframes Left and Right move the selected keyframes by one frame (p. 1258). They send `keyframes.move`.
+    - Mark > Move Selected Keyframes Up and Down change their values by one step. They send `keyframes.set` with `by`.
+      - The manual does not give this step.
+      - vidcut's step is one unit of the Inspector field, for example 1 px, 1%, 1° or 1 dB. On Pitch and Yaw it is 0.01.
+      - On Position, Zoom and the anchor point, the step goes to X and to Y.
+      - A value stops at its limits.
+    - Ctrl+C and Ctrl+X copy or cut the selected keyframes (p. 1258). Ctrl+V pastes them on the selected clip.
+      - The first keyframe goes at the playhead. The others keep their distance from it.
+      - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do this.
+      - vidcut has one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
     - A right-click on a keyframe sets its ease (X87).
     - A double-click on an empty part of a track adds a keyframe there ([X90](deviations.md#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
     - The bar under the tracks shows the value, time and ease of the selected keyframe (X90).
@@ -934,8 +946,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Audio keyframes can be between frames (p. 1113).
   - The Cut page has a Keyframe Editor (p. 1255). Its timeline has no volume overlay.
   - vidcut: the volume line takes the keyframe controls of the Edit page (X73). Its eases are Bezier handles that drag (X74).
-  - vidcut: `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` (D81).
-  - A keyframe is on a whole source frame. vidcut has no copy and paste of keyframes alone (D81).
+  - vidcut: `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move`, `keyframes.remove`, `keyframes.copy`, `keyframes.cut` and `keyframes.paste` (D81).
+  - A keyframe is on a whole source frame (D81). The Keyframes tab copies and pastes keyframes alone (§2). On the volume line, Ctrl+C copies the clips.
   - A volume change on a clip with keyframes is in D82. Normalize Audio Levels with keyframes is in D83.
   - Ducking, Ripple Delete Silence and the meters follow the keyframes (D84). The keys are in D85.
 - **Ripple Delete Silence** (p. 773):
@@ -1007,7 +1019,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 | Alt+click on the volume line | Add a volume keyframe (X73) |
 
 | Alt+Delete | Lift the selection (D9) |
-| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste; the selected keyframes in the Keyframes tab (§2) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | V / U | Select nearest edit / cycle edit side |
@@ -1992,6 +2004,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `picture.set` takes `at`. With no `at`, it uses the playhead.
     - A value with no keyframes ignores `at`.
     - `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take these values in `param`.
+    - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` take them in `param` too.
     - `timeline.get` names each picture value that has keyframes, as it names `volume`.
     - The Inspector shows the value at the playhead. Its Keyframe button adds or removes the keyframe there (X70).
     - Previous and Next move the playhead to the keyframe before or after it, inside the clip.
@@ -2263,7 +2276,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A split gives all the keyframes to both parts. Thus `edit.join` gives back the clip.
     - A speed change keeps each keyframe at its frame of the clip (D48). Thus its source frame changes. A freeze keeps them as they are.
     - A clip that plays backward plays its keyframes backward.
-    - `edit.copy` and `edit.paste` carry the keyframes with the clip. vidcut has no copy and paste of keyframes alone.
+    - `edit.copy` and `edit.paste` carry the keyframes with the clip. `keyframes.copy` and `keyframes.paste` copy keyframes alone (§2).
     - Compound clips have no volume of their own. Thus they have no volume keyframes.
   - **Play and export:** each sample takes the volume of the curve at its source position. The player and the export use the same mixer.
   - **OTIO:**

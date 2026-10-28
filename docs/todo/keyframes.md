@@ -128,13 +128,15 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - Volume is a track in the Audio group.
 - The curve of a value shows under its track. A drag on an In or Out handle changes that handle.
 - One click selects one keyframe. Shift or Ctrl adds to the selection. Delete removes the selection.
+- A drag from an empty part draws a box. The box selects the keyframes in it.
+- Mark > Move Selected Keyframes moves the selection by one frame, or changes its values by one step.
+- Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the selection. A paste puts the first keyframe at the playhead.
 - A right-click sets that keyframe's ease, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
 - A bar shows the value, time and ease of the selected keyframe (X90).
 - The time ruler moves the playhead. Fit Clip, Detail Zoom, the zoom slider and Ctrl with the mouse wheel zoom.
 - A scroll bar under the tracks moves the range.
-- `keyframes.add`, `keyframes.remove`, `keyframes.set` and `keyframes.move` do these edits.
+- `keyframes.add`, `keyframes.remove`, `keyframes.set`, `keyframes.move`, `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do these edits.
 - **To do:**
-  - selection: a box around keyframes, a nudge by one frame, cut, copy and paste (pp. 1257–1258)
   - the keyframe tray on the timeline (p. 1259)
   - the motion path in the viewer (pp. 1252–1254)
   - Step, Loop, Ping Pong, Reverse and the Shape Box (pp. 1261–1267)
@@ -221,12 +223,14 @@ Rule 3: each GUI action has a request.
 - `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take the values of the picture in `param`.
 - `picture.set` takes an `at`. On a value with keyframes, it sets a keyframe at `at`, or at the playhead, as `clip.set` does for the volume ([D82](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - `timeline.get` names the values of a clip that have keyframes, as it names `volume`.
+- `keyframes.copy` returns the selected keyframes with their offsets. `keyframes.paste` puts them on clips. `keyframes.cut` copies, then removes.
 - `gui.show keyframes` opens the Keyframes tab. `gui.close keyframes` closes it.
 
 ## Open questions
 
 - **Compound clips:** what does `edit.decompose` do with the keyframes of a compound clip for a clip inside that is frozen or plays backward?
 - **Dynamic Zoom:** can its boxes have times other than the ends of the clip?
-- **Keyframes alone:** copy and paste of selected keyframes (p. 1113). vidcut has none.
+- **Move Up and Down:** what step does Resolve use for Mark > Move Selected Keyframes Up and Down? vidcut uses one unit of the Inspector field.
+- **The clipboard:** does Resolve keep copied keyframes apart from copied clips? vidcut has one clipboard for both.
 - **Later work:** in which order do keyframes of speed (p. 737) and titles come?
 - **Anchor point keys in Resolve:** does Resolve read `POINTF` keys on `transformationAnchorPoint`, and what is the form of their Bezier handles?
