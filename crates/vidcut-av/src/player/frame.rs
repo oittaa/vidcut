@@ -184,6 +184,11 @@ impl Picture {
             .or_else(|| self.over.iter().find_map(|o| o.picture.in_video_memory()))
     }
 
+    pub(crate) fn held_on_gpu(&self) -> bool {
+        crate::screen::held::of(&self.frame).is_some()
+            || self.over.iter().any(|o| o.picture.held_on_gpu())
+    }
+
     pub fn layout(&self) -> Layout {
         Layout::of(crate::hw::sw_format(&self.frame))
     }
@@ -235,9 +240,10 @@ impl Picture {
     }
 
     pub(crate) fn alone_copied_down(&self) -> Result<Picture> {
-        let frame = match self.gpu() {
-            None => crate::export::video::frame_ref(&self.frame)?,
-            Some(_) => crate::hw::download(&self.frame)?,
+        let frame = match (self.gpu(), crate::screen::held::of(&self.frame)) {
+            (Some(_), _) => crate::hw::download(&self.frame)?,
+            (None, Some(_)) => crate::screen::held::in_memory(&self.frame)?,
+            (None, None) => crate::export::video::frame_ref(&self.frame)?,
         };
         Ok(
             Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
@@ -270,14 +276,18 @@ impl Picture {
         self.bytes + self.over.iter().map(|o| o.picture.bytes()).sum::<usize>()
     }
 
-    pub(crate) fn layers(&self) -> Vec<(usize, Option<crate::hw::Kind>)> {
-        std::iter::once((self.bytes, self.gpu()))
+    pub(crate) fn layers(&self) -> Vec<(usize, Option<crate::hw::Kind>, bool)> {
+        let held = crate::screen::held::of(&self.frame).is_some();
+        std::iter::once((self.bytes, self.gpu(), held))
             .chain(self.over.iter().flat_map(|o| o.picture.layers()))
             .collect()
     }
 }
 
 fn bytes_of(frame: &frame::Video) -> usize {
+    if let Some(held) = crate::screen::held::of(frame) {
+        return held.buffer().size() as usize;
+    }
     // SAFETY: reads the frame's own buffer reference.
     let held = unsafe {
         let buf = (*frame.as_ptr()).buf[0];

@@ -1,3 +1,7 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use super::shared::HeldMemory;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, frame};
 
@@ -6,9 +10,12 @@ pub(crate) struct Held {
     buffer: wgpu::Buffer,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    memory: Option<Arc<HeldMemory>>,
 }
 
 static MARK: u8 = 0;
+
+static SHARES: AtomicBool = AtomicBool::new(true);
 
 impl Held {
     pub(crate) fn new(buffer: wgpu::Buffer, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
@@ -16,7 +23,16 @@ impl Held {
             buffer,
             device: device.clone(),
             queue: queue.clone(),
+            memory: None,
         }
+    }
+
+    pub(crate) fn imported_on(
+        &self,
+        device: &wgpu::Device,
+    ) -> Option<std::result::Result<wgpu::Buffer, String>> {
+        let memory = self.memory.as_ref()?;
+        Some(super::shared::held_on(device, &self.device, memory))
     }
 
     pub(crate) fn buffer(&self) -> &wgpu::Buffer {
@@ -101,6 +117,63 @@ pub(crate) fn rgb(f: &frame::Video) -> Result<Vec<u8>> {
     let bytes = held(f)?.read(f.width() as usize * f.height() as usize * 3)?;
     crate::copies::down(f);
     Ok(bytes)
+}
+
+pub(crate) fn stop_sharing(why: &str) {
+    if SHARES.swap(false, Ordering::Relaxed) {
+        eprintln!("vidcut: AI pictures come down from the GPU to be shown: {why}");
+    }
+}
+
+pub(crate) fn shared(f: &frame::Video) -> Option<frame::Video> {
+    let held = of(f)?;
+    if !SHARES.load(Ordering::Relaxed) || !for_the_viewer(held) {
+        return None;
+    }
+    match share(f, held) {
+        Ok(out) => Some(out),
+        Err(e) => {
+            stop_sharing(&e.to_string());
+            None
+        }
+    }
+}
+
+fn for_the_viewer(held: &Held) -> bool {
+    super::offscreen().is_ok_and(|o| {
+        let adapter = crate::gpus::adapter_id(
+            o.adapter.vendor,
+            o.adapter.device,
+            &o.adapter.device_pci_bus_id,
+        );
+        held.on(&o.gpu.device)
+            && super::shared::possible(&o.gpu.device)
+            && crate::player::viewer_on(&adapter)
+    })
+}
+
+fn share(f: &frame::Video, held: &Held) -> Result<frame::Video> {
+    let size = held.buffer.size();
+    let (buffer, memory) =
+        super::shared::held_buffer(&held.device, size).map_err(Error::Invalid)?;
+    let mut encoder = held.device.create_command_encoder(&Default::default());
+    encoder.copy_buffer_to_buffer(&held.buffer, 0, &buffer, 0, size);
+    let done = held.queue.submit([encoder.finish()]);
+    held.device
+        .poll(wgpu::PollType::Wait {
+            submission_index: Some(done),
+            timeout: None,
+        })
+        .map_err(|e| Error::Invalid(format!("the GPU did not finish a picture: {e}")))?;
+    let shared = Held {
+        buffer,
+        device: held.device.clone(),
+        queue: held.queue.clone(),
+        memory: Some(Arc::new(memory)),
+    };
+    let mut out = crate::export::video::frame_ref(f)?;
+    super::carried::carry(&mut out, shared, &MARK)?;
+    Ok(out)
 }
 
 pub(crate) fn in_memory(f: &frame::Video) -> Result<frame::Video> {

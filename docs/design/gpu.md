@@ -108,6 +108,12 @@ The draw:
   - NVENC takes them through memory that Vulkan shares with CUDA (`Shared::out`).
   - VideoToolbox takes them in the IOSurfaces of its own frames (`Sink::Surface`).
   - The other encoders take them from memory (`Sink::Memory`).
+- The pictures of the AI upscalers and the frame interpolation can stay on the GPU for the viewer (`held::shared`). The viewer must be on the same GPU.
+  - The player copies each picture into memory that Vulkan can share with another device (`shared::held_buffer`). It waits for the copy.
+  - The viewer's device imports that memory and draws from it (`shared::held_on`). Nothing comes down.
+  - The player's cache counts these pictures in video memory. When the cache brings one down, it becomes RGB24 in memory.
+  - This occurs on Linux and Windows, where Vulkan on both devices has the extension for external memory.
+  - Why: each picture went down to memory and up again before the viewer could show it.
 
 Frames that come down:
 
@@ -116,7 +122,8 @@ Frames that come down:
   - After an import or a copy into the shared buffer fails, that layer's frames come down. When a new decoder opens for the layer, the draw tries again (`Decoding`).
   - Why: a failure can be for a short time only, for example when an AI model holds the video memory.
 - A picture in memory goes up into the frames of a GPU encoder (`Upload`, `CudaFrames::upload`).
-- The player brings the pictures of the AI upscalers and the frame interpolation down (`held::in_memory`). Why: the viewer draws on another device.
+- In the other cases, the player brings the pictures of the AI upscalers and the frame interpolation down (`held::in_memory`).
+  - After a share fails once, these pictures come down until vidcut starts again (`held::stop_sharing`).
   - They go to the viewer as RGB24, with no conversion on the CPU (`normalize::displayable`). An RGB24 still goes to the draw as it is too.
 - The cut test of a retime brings down a 96×54 luma picture of each frame, not the frame (`held::small_luma`, [export](export.md)).
 
