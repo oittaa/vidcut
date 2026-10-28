@@ -216,11 +216,15 @@ impl Tags {
 
 pub(crate) fn tag_frame(f: &mut frame::Video, hdr: Option<Hdr>) {
     let tags = Tags::output(hdr);
+    let range = match f.format() {
+        format::Pixel::RGB24 | format::Pixel::RGBA => ffi::AVColorRange::AVCOL_RANGE_JPEG,
+        _ => tags.range,
+    };
     // SAFETY: plain fields of a frame the caller owns.
     unsafe {
         let f = &mut *f.as_mut_ptr();
         f.colorspace = tags.matrix;
-        f.color_range = tags.range;
+        f.color_range = range;
         f.color_primaries = tags.primaries;
         f.color_trc = tags.transfer;
     }
