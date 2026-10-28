@@ -4,7 +4,7 @@ vidcut copies the behavior of DaVinci Resolve's **Cut page** by default. This do
 
 It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most pages are in its Cut chapters (33–39, pp. 635–790). Pages of other chapters are marked. The printed page numbers are equal to the PDF page numbers.
 
-[deviations.md](deviations.md) lists where vidcut is different. §12 decides the points that the manual leaves open.
+[deviations.md](deviations.md) lists where vidcut is different. §12 decides the points that the manual leaves open. §13 gives the order in which a picture is processed.
 
 **Reading the manual:**
 - Extract the text with `pdftotext -f 635 -l 790 <manual>.pdf -`.
@@ -2381,3 +2381,53 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - `picture.set` takes `pitch` and `yaw`. `picture.clear` with `transform` puts both back to 0.
   - An import reads `transformationPitch` and `transformationYaw`. An export writes them back.
   - A plain value plays. Keyframes on either one leave the Transform unplayed (X9).
+
+## 13. Order of operations (pp. 287–296, 3407)
+
+The manual gives the order in which each picture is processed, on each page, as a chart (Ch. 144, p. 3407). vidcut keeps this order for the stages that it has.
+
+- A different order is a deviation, as for any other behavior.
+- [design](design/README.md#picture-order) gives the order of the code. [todo/processing-order.md](todo/processing-order.md) lists where it is still different.
+
+**Source processing**, for each clip:
+
+1. Camera Raw settings.
+2. Lens Correction.
+3. The input goes into the timeline color space: Resolve Color Management, or the ACES IDT.
+4. The input LUT.
+5. Deinterlace.
+6. Super Scale.
+
+Then the compositing of the Fusion page.
+
+**Timeline processing:**
+
+1. Edit Sizing: the Transform and Cropping values of the Inspector, and Dynamic Zoom (pp. 294–295).
+2. Input Sizing: the Sizing palette of the Color page. Image Stabilization comes between Edit Sizing and Input Sizing (p. 295).
+3. Fusion effects.
+4. The Pre-Clip grade of a group.
+5. The Open FX and Resolve FX of the Cut page and the Edit page.
+6. The clip grade.
+7. The Post-Clip grade of a group.
+8. Speed Effects.
+9. Track compositing: alpha, composite modes and opacity.
+10. The timeline grade.
+
+**After the timeline:**
+
+1. Subtitles.
+2. Output Sizing, then its Blanking (p. 296).
+3. The output LUT.
+4. The timeline color space goes into the output color space: Resolve Color Management, or the ACES RRT and ODT.
+5. Data Burn-In.
+6. The output of the Deliver page.
+
+The display LUT of the Color page is on a branch after Data Burn-In. The output of the Deliver page does not get it.
+
+**Sizing:**
+
+- Resolve combines the fit to the timeline, Edit Sizing and Input Sizing into one transform of the source (p. 287).
+- Thus a picture that one stage makes smaller and a later stage enlarges keeps the detail of its source (p. 290).
+- Output Sizing does not go back to the source. It enlarges the picture that the earlier stages give (p. 296).
+
+The chart does not show titles, generators or transitions.
