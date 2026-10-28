@@ -1470,8 +1470,12 @@ impl Slot {
 
     fn upload(&mut self, gpu: &Gpu, picture: &Arc<Picture>, encoder: &mut wgpu::CommandEncoder) {
         self.make_planes(gpu, picture);
-        self.last_shared = false;
         let written = self.written.take();
+        if picture.gpu().is_some() && written.as_ref().is_some_and(|w| Arc::ptr_eq(w, picture)) {
+            self.written = written;
+            return;
+        }
+        self.last_shared = false;
         match picture.gpu() {
             None => {
                 if !written.is_some_and(|w| same_data(&w, picture)) {
@@ -1515,6 +1519,7 @@ impl Slot {
             match self.copy_on_gpu(gpu, picture, encoder) {
                 Ok(true) => {
                     self.last_shared = true;
+                    self.written = Some(Arc::clone(picture));
                     return;
                 }
                 Ok(false) => {}
@@ -1528,9 +1533,12 @@ impl Slot {
         self.copy_down(gpu, picture, encoder);
     }
 
-    fn copy_down(&mut self, gpu: &Gpu, picture: &Picture, encoder: &mut wgpu::CommandEncoder) {
-        match picture.copied_down() {
-            Ok(down) => self.write_planes(gpu, &down, encoder),
+    fn copy_down(&mut self, gpu: &Gpu, picture: &Arc<Picture>, encoder: &mut wgpu::CommandEncoder) {
+        match picture.alone_copied_down() {
+            Ok(down) => {
+                self.write_planes(gpu, &down, encoder);
+                self.written = Some(Arc::clone(picture));
+            }
             Err(e) => eprintln!("vidcut: a picture didn't come down from the GPU: {e}"),
         }
     }
