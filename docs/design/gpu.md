@@ -190,9 +190,10 @@ The scaler of macOS (`macos`):
 On macOS (`interpolate::macos`):
 
 - The frame rate conversion of macOS makes the frame, in a `VTFrameProcessor` session.
-- Two VideoToolbox frames reach it on the GPU (`interpolate::takes_frames`). Turned frames turn first (`hw::Turner`).
+- Two VideoToolbox frames of a clip with no placed picture reach it on the GPU (`interpolate::takes_frames`). Turned frames turn first (`hw::Turner`).
+- Lanczos sizes them to the size that the picture fills in the frame, before the frame is made.
 - The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
-- Frames that the CPU decoded go through RGB.
+- Frames that the CPU decoded, and the frames of a placed clip, go through RGB.
 
 `interpolate::report` tells what each process makes. The stats panel shows it (`RetimeStats`).
 

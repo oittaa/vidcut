@@ -192,7 +192,7 @@ enum State {
 }
 
 struct Held {
-    key: (PathBuf, i64, i64),
+    key: (PathBuf, u64, i64, i64),
     retime: Retime,
     size: (u32, u32),
     state: State,
@@ -342,7 +342,7 @@ impl Engine {
     fn hold(
         &mut self,
         r: Retime,
-        key: &(PathBuf, i64, i64),
+        key: &(PathBuf, u64, i64, i64),
         (ua, ub): (&wgpu::Buffer, &wgpu::Buffer),
         size: (u32, u32),
     ) -> Result<()> {
@@ -454,7 +454,7 @@ pub(crate) fn takes_frames(r: Retime, a: &frame::Video, b: &frame::Video) -> boo
 }
 
 pub(crate) fn between_frames(
-    key: &(PathBuf, i64, i64),
+    key: &(PathBuf, u64, i64, i64),
     a: &frame::Video,
     b: &frame::Video,
     size: (u32, u32),
@@ -477,7 +477,7 @@ fn made_in(retime: Retime, size: (u32, u32), at: f64, clock: Instant) {
 
 pub(crate) fn between(
     r: Retime,
-    key: &(PathBuf, i64, i64),
+    key: &(PathBuf, u64, i64, i64),
     a: &frame::Video,
     b: &frame::Video,
     size: (u32, u32),
