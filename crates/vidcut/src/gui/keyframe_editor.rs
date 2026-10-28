@@ -1460,7 +1460,11 @@ impl Workspace {
         }
         match cmd {
             KeyCmd::Add if !t.rows.iter().any(|&r| t.takes(r)) => {
-                Some("Move the playhead over the clip")
+                Some(if t.rows.iter().all(|&r| r == KeyParam::Volume) {
+                    "Move the playhead over the clip's sound"
+                } else {
+                    "Move the playhead over the clip"
+                })
             }
             KeyCmd::Add if !t.rows.iter().any(|&r| t.takes(r) && !t.keyed_here(r)) => {
                 Some("Already keyed here. Move the playhead to add one.")
