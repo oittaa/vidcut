@@ -687,7 +687,7 @@ impl Decoder {
         let found = gpu.gpu();
         let mut shows = self.shared.gpu_pictures.clone();
         if !super::on_viewers_gpu(found) {
-            shows.retain(|k| *k != crate::hw::Kind::Vaapi);
+            shows.retain(|(k, _)| *k != crate::hw::Kind::Vaapi);
         }
         crate::debug!(
             "player",
@@ -865,7 +865,7 @@ pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
             .is_some()
             .then(|| l.decoder.map_or(Decoding::Cpu, Decoding::Gpu));
         let frame = l.frame.expect("frames as decoded, black too");
-        Picture::new(frame, l.rotation, decoder, l.decoding)
+        Picture::new(frame, l.rotation, decoder, l.decoding).with_sampling(l.sampling)
     };
     let mut layers = layers.into_iter();
     let under = made(layers.next().expect("a frame's picture"));

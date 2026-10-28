@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use vidcut_core::model::Title;
 use vidcut_core::render::RenderPlan;
 
-pub use frame::{Layout, Over, Picture, Shown, TitleOver, TitlePicture};
+pub use frame::{Fit, Layout, Over, Picture, Sampling, Shown, TitleOver, TitlePicture};
 pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
@@ -98,7 +98,7 @@ pub struct Config {
     pub audio_scrubbing: bool,
     pub on_picture: Option<Arc<dyn Fn() + Send + Sync>>,
     pub hardware: bool,
-    pub gpu_pictures: Vec<crate::hw::Kind>,
+    pub gpu_pictures: crate::hw::GpuPictures,
 }
 
 impl Default for Config {
@@ -311,7 +311,7 @@ pub(crate) struct Shared {
     presenter: Mutex<Presenter>,
     device: Arc<Mutex<Option<String>>>,
     format: (u32, u16),
-    pub(crate) gpu_pictures: Vec<crate::hw::Kind>,
+    pub(crate) gpu_pictures: crate::hw::GpuPictures,
     copies: Arc<crate::copies::Copies>,
     heard_epoch: std::sync::atomic::AtomicU64,
     levels: Mutex<std::collections::VecDeque<Level>>,
@@ -341,6 +341,10 @@ static VIEWER_GPU: Mutex<Option<String>> = Mutex::new(None);
 
 pub fn set_viewer_gpu(adapter: String) {
     *lock(&VIEWER_GPU) = Some(adapter);
+}
+
+pub(crate) fn viewer_on(adapter: &str) -> bool {
+    lock(&VIEWER_GPU).as_deref() == Some(adapter)
 }
 
 pub(crate) fn on_viewers_gpu(gpu: Option<&crate::gpus::Gpu>) -> bool {

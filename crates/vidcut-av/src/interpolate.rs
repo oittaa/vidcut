@@ -192,7 +192,7 @@ enum State {
 }
 
 struct Held {
-    key: (PathBuf, i64, i64),
+    key: (PathBuf, u64, i64, i64),
     retime: Retime,
     size: (u32, u32),
     state: State,
@@ -206,7 +206,7 @@ struct Engine {
     held: Option<Held>,
 }
 
-static ENGINE: Mutex<Option<std::result::Result<Engine, String>>> = Mutex::new(None);
+static ENGINE: Mutex<Option<crate::screen::Started<Engine>>> = Mutex::new(None);
 static USERS: Mutex<usize> = Mutex::new(0);
 static DUMPED: AtomicU64 = AtomicU64::new(0);
 
@@ -250,13 +250,13 @@ pub(crate) fn kept_at_cut(retime: Retime, size: (u32, u32), at: f64) {
     });
 }
 
-fn engine() -> MutexGuard<'static, Option<std::result::Result<Engine, String>>> {
+fn engine() -> MutexGuard<'static, Option<crate::screen::Started<Engine>>> {
     ENGINE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn with_engine<T>(run: impl FnOnce(&mut Engine) -> Result<T>) -> Result<T> {
     let mut slot = engine();
-    let e = match slot.get_or_insert_with(Engine::start) {
+    let e = match crate::screen::start_on_offscreen(&mut slot, Engine::start) {
         Ok(e) => e,
         Err(why) => return Err(Error::Invalid(why.clone())),
     };
@@ -272,6 +272,7 @@ impl User {
             return None;
         }
         *USERS.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        crate::screen::held::share_again();
         Some(Self)
     }
 }
@@ -342,7 +343,7 @@ impl Engine {
     fn hold(
         &mut self,
         r: Retime,
-        key: &(PathBuf, i64, i64),
+        key: &(PathBuf, u64, i64, i64),
         (ua, ub): (&wgpu::Buffer, &wgpu::Buffer),
         size: (u32, u32),
     ) -> Result<()> {
@@ -454,7 +455,7 @@ pub(crate) fn takes_frames(r: Retime, a: &frame::Video, b: &frame::Video) -> boo
 }
 
 pub(crate) fn between_frames(
-    key: &(PathBuf, i64, i64),
+    key: &(PathBuf, u64, i64, i64),
     a: &frame::Video,
     b: &frame::Video,
     size: (u32, u32),
@@ -477,7 +478,7 @@ fn made_in(retime: Retime, size: (u32, u32), at: f64, clock: Instant) {
 
 pub(crate) fn between(
     r: Retime,
-    key: &(PathBuf, i64, i64),
+    key: &(PathBuf, u64, i64, i64),
     a: &frame::Video,
     b: &frame::Video,
     size: (u32, u32),
@@ -485,11 +486,10 @@ pub(crate) fn between(
 ) -> Result<Picture> {
     let clock = Instant::now();
     let made = if r == Retime::Macos {
-        let (a, b) = (held::rgb(a)?, held::rgb(b)?);
         Picture::Rgb(macos::between(
             key,
-            macos::Input::Rgb(&a),
-            macos::Input::Rgb(&b),
+            macos::Input::Held(a),
+            macos::Input::Held(b),
             size,
             t,
         )?)

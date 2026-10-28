@@ -661,12 +661,13 @@ impl VideoOut {
         &mut self,
         octx: &mut format::context::Output,
         j: i64,
-        f: frame::Video,
+        mut f: frame::Video,
         t35: Option<Vec<u8>>,
     ) -> Result<()> {
         if let (Some((_, waiting)), Some(t35)) = (self.hdr10plus.as_mut(), t35) {
             waiting.insert(j, t35);
         }
+        crate::screen::filled(&mut f)?;
         crate::cuda::share::wait_for(&f)?;
         crate::copies::to_encoder(&f, self.kind);
         self.encoder

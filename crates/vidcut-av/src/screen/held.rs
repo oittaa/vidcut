@@ -1,5 +1,7 @@
-use std::ffi::c_void;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use super::shared::HeldMemory;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, frame};
 
@@ -8,13 +10,12 @@ pub(crate) struct Held {
     buffer: wgpu::Buffer,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    memory: Option<Arc<HeldMemory>>,
 }
 
 static MARK: u8 = 0;
 
-fn mark() -> *mut c_void {
-    (&raw const MARK).cast_mut().cast()
-}
+static SHARES: AtomicBool = AtomicBool::new(true);
 
 impl Held {
     pub(crate) fn new(buffer: wgpu::Buffer, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
@@ -22,7 +23,16 @@ impl Held {
             buffer,
             device: device.clone(),
             queue: queue.clone(),
+            memory: None,
         }
+    }
+
+    pub(crate) fn imported_on(
+        &self,
+        device: &wgpu::Device,
+    ) -> Option<std::result::Result<wgpu::Buffer, String>> {
+        let memory = self.memory.as_ref()?;
+        Some(super::shared::held_on(device, &self.device, memory))
     }
 
     pub(crate) fn buffer(&self) -> &wgpu::Buffer {
@@ -69,14 +79,9 @@ impl Held {
     }
 }
 
-unsafe extern "C" fn let_go(_: *mut c_void, data: *mut u8) {
-    // SAFETY: `data` is the box that `picture` made, freed once by its buffer.
-    drop(unsafe { Box::from_raw(data.cast::<Held>()) });
-}
-
 pub(crate) fn picture(held: Held, (w, h): (u32, u32), pts: Option<i64>) -> Result<frame::Video> {
     let mut f = frame::Video::empty();
-    // SAFETY: fresh `f` takes one zeroed row at no stride, and `held` as its opaque buffer.
+    // SAFETY: fresh `f` takes one zeroed row at no stride.
     unsafe {
         let raw = f.as_mut_ptr();
         (*raw).format = ffi::AVPixelFormat::AV_PIX_FMT_RGB24 as i32;
@@ -89,21 +94,9 @@ pub(crate) fn picture(held: Held, (w, h): (u32, u32), pts: Option<i64>) -> Resul
         (*raw).buf[0] = row;
         (*raw).data[0] = (*row).data;
         (*raw).linesize[0] = 0;
-        let boxed = Box::into_raw(Box::new(held));
-        let opaque = ffi::av_buffer_create(
-            boxed.cast(),
-            std::mem::size_of::<Held>(),
-            Some(let_go),
-            mark(),
-            ffi::AV_BUFFER_FLAG_READONLY,
-        );
-        if opaque.is_null() {
-            drop(Box::from_raw(boxed));
-            return Err(Error::Invalid("no memory for a picture on the GPU".into()));
-        }
-        (*raw).opaque_ref = opaque;
         (*raw).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 };
     }
+    super::carried::carry(&mut f, held, &MARK)?;
     f.set_color_range(ffmpeg::util::color::Range::JPEG);
     f.set_color_space(ffmpeg::util::color::Space::RGB);
     f.set_color_primaries(ffmpeg::util::color::Primaries::BT709);
@@ -113,14 +106,7 @@ pub(crate) fn picture(held: Held, (w, h): (u32, u32), pts: Option<i64>) -> Resul
 }
 
 pub(crate) fn of(f: &frame::Video) -> Option<&Held> {
-    // SAFETY: the frame's own reference; a marked one holds a `Held` while the frame lives.
-    unsafe {
-        let opaque = (*f.as_ptr()).opaque_ref;
-        if opaque.is_null() || ffi::av_buffer_get_opaque(opaque) != mark() {
-            return None;
-        }
-        Some(&*(*opaque).data.cast::<Held>())
-    }
+    super::carried::carried(f, &MARK)
 }
 
 pub(crate) fn held(f: &frame::Video) -> Result<&Held> {
@@ -133,6 +119,67 @@ pub(crate) fn rgb(f: &frame::Video) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+pub(crate) fn stop_sharing(why: &str) {
+    if SHARES.swap(false, Ordering::Relaxed) {
+        eprintln!("vidcut: AI pictures come down from the GPU to be shown: {why}");
+    }
+}
+
+pub(crate) fn share_again() {
+    SHARES.store(true, Ordering::Relaxed);
+}
+
+pub(crate) fn shared(f: &frame::Video) -> Option<frame::Video> {
+    let held = of(f)?;
+    if !SHARES.load(Ordering::Relaxed) || !for_the_viewer(held) {
+        return None;
+    }
+    match share(f, held) {
+        Ok(out) => Some(out),
+        Err(e) => {
+            stop_sharing(&e.to_string());
+            None
+        }
+    }
+}
+
+fn for_the_viewer(held: &Held) -> bool {
+    super::offscreen().is_ok_and(|o| {
+        let adapter = crate::gpus::adapter_id(
+            o.adapter.vendor,
+            o.adapter.device,
+            &o.adapter.device_pci_bus_id,
+        );
+        held.on(&o.gpu.device)
+            && super::shared::possible(&o.gpu.device)
+            && crate::player::viewer_on(&adapter)
+    })
+}
+
+fn share(f: &frame::Video, held: &Held) -> Result<frame::Video> {
+    let size = held.buffer.size();
+    let (buffer, memory) =
+        super::shared::held_buffer(&held.device, size).map_err(Error::Invalid)?;
+    let mut encoder = held.device.create_command_encoder(&Default::default());
+    encoder.copy_buffer_to_buffer(&held.buffer, 0, &buffer, 0, size);
+    let done = held.queue.submit([encoder.finish()]);
+    held.device
+        .poll(wgpu::PollType::Wait {
+            submission_index: Some(done),
+            timeout: None,
+        })
+        .map_err(|e| Error::Invalid(format!("the GPU did not finish a picture: {e}")))?;
+    let shared = Held {
+        buffer,
+        device: held.device.clone(),
+        queue: held.queue.clone(),
+        memory: Some(Arc::new(memory)),
+    };
+    let mut out = crate::export::video::frame_ref(f)?;
+    super::carried::carry(&mut out, shared, &MARK)?;
+    Ok(out)
+}
+
 pub(crate) fn in_memory(f: &frame::Video) -> Result<frame::Video> {
     let rgb = rgb(f)?;
     let mut out = crate::buffers::unpacked(
@@ -141,17 +188,15 @@ pub(crate) fn in_memory(f: &frame::Video) -> Result<frame::Video> {
         3,
         &rgb,
     );
-    // SAFETY: both frames are valid; `out` drops the reference to `f`'s held picture.
-    unsafe {
-        let ret = ffi::av_frame_copy_props(out.as_mut_ptr(), f.as_ptr());
-        if ret < 0 {
-            return Err(Error::Ffmpeg {
-                context: "copying a frame's properties".into(),
-                source: ffmpeg::Error::from(ret),
-            });
-        }
-        ffi::av_buffer_unref(&mut (*out.as_mut_ptr()).opaque_ref);
+    // SAFETY: both frames are valid.
+    let ret = unsafe { ffi::av_frame_copy_props(out.as_mut_ptr(), f.as_ptr()) };
+    if ret < 0 {
+        return Err(Error::Ffmpeg {
+            context: "copying a frame's properties".into(),
+            source: ffmpeg::Error::from(ret),
+        });
     }
+    super::carried::let_go_of(&mut out);
     Ok(out)
 }
 
@@ -175,6 +220,10 @@ pub(crate) fn small_luma(
         })
         .map_err(Error::Invalid)?;
     Held::new(small, &gpu.device, &gpu.queue).read(ow as usize * oh as usize)
+}
+
+fn packed_words(encoded: &wgpu::Texture) -> u64 {
+    (u64::from(encoded.width()) * u64::from(encoded.height()) * 3).div_ceil(4)
 }
 
 pub(super) struct Pipes {
@@ -212,15 +261,26 @@ impl Pipes {
         encoder: &mut wgpu::CommandEncoder,
         encoded: &wgpu::Texture,
     ) -> wgpu::Buffer {
-        let words = (u64::from(encoded.width()) * u64::from(encoded.height())).div_ceil(4);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vidcut held picture"),
-            size: words * 4,
+            size: packed_words(encoded) * 4,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        self.pack_into(device, encoder, encoded, &buffer);
+        buffer
+    }
+
+    pub(super) fn pack_into(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        encoded: &wgpu::Texture,
+        buffer: &wgpu::Buffer,
+    ) {
+        let words = packed_words(encoded);
         let view = encoded.create_view(&Default::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vidcut rgb"),
@@ -244,7 +304,6 @@ impl Pipes {
             pass.set_bind_group(0, &bind, &[]);
             pass.dispatch_workgroups(across, groups.div_ceil(across), 1);
         }
-        buffer
     }
 
     pub(super) fn unpack(

@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 use crate::color::shader_colors;
 use crate::cuda::{CudaDevice, PlaneCopy};
 use crate::hw::Kind;
-use crate::player::{Layout, Picture, TitleOver, TitlePicture};
+use crate::player::{Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
 use vidcut_core::model::{CompositeMode, Hdr, WipeDirection};
 use vidcut_core::place::{Level, Placing, chain, lettered};
@@ -13,6 +13,7 @@ use vidcut_core::render::{Placed, Wipe};
 
 #[cfg(any(target_os = "linux", windows))]
 mod acquire;
+mod carried;
 mod gate;
 pub(crate) mod held;
 mod out;
@@ -22,6 +23,7 @@ mod vulkan;
 
 pub use gate::Gate;
 pub use out::Sink;
+pub(crate) use out::filled;
 
 pub struct Gpu {
     #[cfg(any(target_os = "linux", windows))]
@@ -43,6 +45,9 @@ pub struct Gpu {
     screen: wgpu::RenderPipeline,
     screen_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    shrinking: wgpu::RenderPipeline,
+    halving: wgpu::RenderPipeline,
+    blank: wgpu::TextureView,
     wide: bool,
     shares: bool,
     dma_buf: bool,
@@ -98,22 +103,57 @@ pub struct Offscreen {
     pub gpu: Gpu,
 }
 
+type Made = (
+    Option<String>,
+    std::result::Result<&'static Offscreen, String>,
+);
+
 pub fn offscreen() -> std::result::Result<&'static Offscreen, String> {
-    static MADE: OnceLock<std::result::Result<Offscreen, String>> = OnceLock::new();
-    MADE.get_or_init(|| {
-        let (adapter, device, queue) = device("vidcut offscreen")?;
-        Ok(Offscreen {
+    static MADE: std::sync::Mutex<Vec<Made>> = std::sync::Mutex::new(Vec::new());
+    let wanted = crate::gpus::in_use();
+    let key = wanted.as_ref().map(|g| g.id.clone());
+    let mut made = MADE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, on)) = made.iter().find(|(k, _)| *k == key) {
+        return on.clone();
+    }
+    let on = device("vidcut offscreen", wanted.as_ref()).map(|(adapter, device, queue)| {
+        &*Box::leak(Box::new(Offscreen {
             adapter: adapter.get_info(),
             gpu: Gpu::new(&device, &queue),
-        })
-    })
-    .as_ref()
-    .map_err(Clone::clone)
+        }))
+    });
+    made.push((key, on.clone()));
+    on
 }
 
-fn device(label: &str) -> std::result::Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue), String> {
+pub(crate) type Started<N> = (Option<&'static Offscreen>, std::result::Result<N, String>);
+
+pub(crate) fn start_on_offscreen<N>(
+    engine: &mut Option<Started<N>>,
+    start: impl FnOnce() -> std::result::Result<N, String>,
+) -> &mut std::result::Result<N, String> {
+    let on = offscreen().ok();
+    if engine
+        .as_ref()
+        .is_some_and(|(was, _)| was.map(std::ptr::from_ref) != on.map(std::ptr::from_ref))
+    {
+        *engine = None;
+    }
+    &mut engine.get_or_insert_with(|| (on, start())).1
+}
+
+fn adapter_id(adapter: &wgpu::Adapter) -> String {
+    let info = adapter.get_info();
+    crate::gpus::adapter_id(info.vendor, info.device, &info.device_pci_bus_id)
+}
+
+fn device(
+    label: &str,
+    wanted: Option<&crate::gpus::Gpu>,
+) -> std::result::Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue), String> {
+    let backends = wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY);
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
+        backends,
         ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
     });
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -122,6 +162,27 @@ fn device(label: &str) -> std::result::Result<(wgpu::Adapter, wgpu::Device, wgpu
         ..Default::default()
     }))
     .map_err(|e| format!("no GPU for wgpu: {e}"))?;
+    let adapter = match wanted {
+        Some(gpu) if !gpu.is_adapter(&adapter_id(&adapter)) => {
+            let backend = adapter.get_info().backend;
+            let on_it = pollster::block_on(instance.enumerate_adapters(backends))
+                .into_iter()
+                .filter(|a| gpu.is_adapter(&adapter_id(a)))
+                .min_by_key(|a| a.get_info().backend != backend);
+            match on_it {
+                Some(a) => a,
+                None => {
+                    eprintln!(
+                        "vidcut: wgpu has no adapter on {}; drawing on {}",
+                        gpu.name,
+                        adapter.get_info().name
+                    );
+                    adapter
+                }
+            }
+        }
+        _ => adapter,
+    };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some(label),
         required_features: features(&adapter),
@@ -186,6 +247,7 @@ impl Gpu {
                     count: None,
                 },
                 texture(7),
+                texture(8),
             ],
         });
         let below_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -413,6 +475,24 @@ impl Gpu {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        let shrinking = made(&pipeline_layout, "fs_shrink", None, MIXING);
+        let halving = made(&pipeline_layout, "fs_halve", None, MIXING);
+        let blank = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("vidcut no halves"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: MIXING,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
         Self {
             #[cfg(any(target_os = "linux", windows))]
             acquirer: OnceLock::new(),
@@ -433,6 +513,9 @@ impl Gpu {
             screen,
             screen_layout,
             sampler,
+            shrinking,
+            halving,
+            blank,
             wide: device
                 .features()
                 .contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM),
@@ -480,7 +563,7 @@ impl Gpu {
         (&self.device, &self.queue)
     }
 
-    pub fn gpu_pictures(&self) -> Vec<Kind> {
+    pub fn gpu_pictures(&self) -> crate::hw::GpuPictures {
         let cudas = crate::gpus::in_use().and_then(|g| g.uuid());
         shown_from_gpu(&Takes {
             shares: self.shares,
@@ -490,6 +573,24 @@ impl Gpu {
             d3d11: self.d3d11,
             metal: self.metal,
         })
+        .into_iter()
+        .flat_map(|kind| Layout::ALL.map(|layout| (kind, layout)))
+        .filter(|&(kind, layout)| self.imports(kind, layout))
+        .collect()
+    }
+
+    fn imports(&self, kind: Kind, layout: Layout) -> bool {
+        match kind {
+            Kind::Nvdec => nvdec_bytes(self, layout).is_ok(),
+            #[cfg(target_os = "linux")]
+            Kind::Vaapi => vaapi_formats(self, layout).is_ok(),
+            #[cfg(windows)]
+            Kind::D3d11va => d3d11_formats(self, layout).is_ok(),
+            #[cfg(target_os = "macos")]
+            Kind::VideoToolbox => videotoolbox_formats(self, layout).is_ok(),
+            Kind::Vulkan => vulkan_layout(self, layout).is_ok(),
+            _ => false,
+        }
     }
 
     #[cfg(any(target_os = "linux", windows))]
@@ -576,7 +677,7 @@ struct Takes {
 
 fn shown_from_gpu(takes: &Takes) -> Vec<Kind> {
     [
-        (Kind::Nvdec, takes.shares),
+        (Kind::Nvdec, takes.shares && takes.on_cudas_gpu),
         (
             Kind::Vulkan,
             takes.shares && takes.wide && takes.on_cudas_gpu,
@@ -992,6 +1093,7 @@ struct Slot {
     filled: Option<usize>,
     unshared: bool,
     unimported: Vec<Layout>,
+    source: Option<Arc<crate::decode::Decoding>>,
     imported: Option<Arc<Picture>>,
     views: Option<(wgpu::TextureView, wgpu::TextureView, (u32, u32))>,
     v_view: Option<wgpu::TextureView>,
@@ -1005,6 +1107,7 @@ struct Slot {
     last_shared: bool,
     written: Option<Arc<Picture>>,
     rgb: Option<wgpu::Buffer>,
+    shrunk: Option<(wgpu::Texture, (u32, u32, u32))>,
 }
 
 #[cfg(windows)]
@@ -1015,6 +1118,7 @@ struct D3d11Shared {
     uv: wgpu::TextureView,
     size: (u32, u32),
     busy: Arc<AtomicBool>,
+    holds: std::sync::Weak<Picture>,
 }
 
 #[cfg(windows)]
@@ -1115,7 +1219,6 @@ impl Screen {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("vidcut picture"),
             });
-        let frame = (f64::from(size.0), f64::from(size.1));
         let n = layers.len();
         let wipe_of = |i: usize| layers.get(i).and_then(|l| l.2);
         let crossed = |i: usize| crosses.get(i).copied().unwrap_or(false);
@@ -1142,14 +1245,22 @@ impl Screen {
             .zip(&mut self.slots)
             .enumerate()
             .map(|(i, (&(picture, level, _), slot))| {
-                let placing = placed.get(i).filter(|p| !p.is_empty()).map(|p| {
-                    let (x, y, w, h) = picture.placement(size.0, size.1);
-                    let fitted = [x, y, w, h].map(f64::from);
-                    (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
-                });
-                let blended = placing
-                    .as_ref()
-                    .is_some_and(|(p, _)| p.mode != CompositeMode::Normal);
+                let made_with = match picture.sampling() {
+                    Sampling::Placed { placed, .. } => Some(&placed[..]),
+                    _ => None,
+                };
+                let placing = made_with
+                    .or(placed.get(i).map(Vec::as_slice))
+                    .filter(|p| !p.is_empty())
+                    .map(|p| {
+                        let (frame, fitted) = picture.placed_in(size);
+                        (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
+                    });
+                let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
+                let blended = !colors_only
+                    && placing
+                        .as_ref()
+                        .is_some_and(|(p, _)| p.mode != CompositeMode::Normal);
                 let kernel = match kernels.get(i).copied().unwrap_or(0) {
                     0 if exported => RESIZE | WIDENS,
                     k if exported => k | WIDENS,
@@ -1404,8 +1515,9 @@ impl Slot {
                 f64::from(picture.height()) / f64::from(h),
             )
         });
-        gpu.queue
-            .write_buffer(params, 0, &params_of(picture, size, gpu.wide, cover, how));
+        let halvings = halvings(picture, size, how);
+        let bytes = params_of(picture, size, gpu.wide, cover, how, halvings);
+        gpu.queue.write_buffer(params, 0, &bytes);
         let planes = self.planes.as_ref().expect("uploaded");
         let view = |t: &wgpu::Texture| t.create_view(&Default::default());
         let (y, u) = self
@@ -1415,36 +1527,88 @@ impl Slot {
             .unwrap_or_else(|| (view(&planes.y), view(&planes.u)));
         let v = self.v_view.take().unwrap_or_else(|| view(&planes.v));
         let a = view(&planes.a);
-        gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("vidcut picture"),
-            layout: &gpu.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: params.as_entire_binding(),
+        let bind = |halved: &wgpu::TextureView| {
+            gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("vidcut picture"),
+                layout: &gpu.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&y),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&u),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&v),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Sampler(&gpu.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::TextureView(&a),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::TextureView(halved),
+                    },
+                ],
+            })
+        };
+        if halvings == 0 {
+            return bind(&gpu.blank);
+        }
+        let wanted = (
+            picture.width().div_ceil(2),
+            picture.height().div_ceil(2),
+            halvings,
+        );
+        if self.shrunk.as_ref().is_none_or(|(_, k)| *k != wanted) {
+            let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("vidcut halves"),
+                size: wgpu::Extent3d {
+                    width: wanted.0,
+                    height: wanted.1,
+                    depth_or_array_layers: 1,
                 },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&y),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&u),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&v),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(&gpu.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::TextureView(&a),
-                },
-            ],
-        })
+                mip_level_count: halvings,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: MIXING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.shrunk = Some((texture, wanted));
+        }
+        let shrunk = &self.shrunk.as_ref().expect("made above").0;
+        let level = |k: u32| {
+            shrunk.create_view(&wgpu::TextureViewDescriptor {
+                base_mip_level: k,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        };
+        for k in 0..halvings {
+            let (pipeline, from) = match k {
+                0 => (&gpu.shrinking, bind(&gpu.blank)),
+                _ => (&gpu.halving, bind(&level(k - 1))),
+            };
+            let to = level(k);
+            let mut pass = begin(encoder, &to, Some(wgpu::Color::TRANSPARENT));
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &from, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        bind(&shrunk.create_view(&Default::default()))
     }
 
     fn submitted(&mut self, gpu: &Gpu) {
@@ -1462,9 +1626,18 @@ impl Slot {
     }
 
     fn upload(&mut self, gpu: &Gpu, picture: &Arc<Picture>, encoder: &mut wgpu::CommandEncoder) {
+        if self.source.as_ref().map(Arc::as_ptr) != picture.decoding().map(Arc::as_ptr) {
+            self.source = picture.decoding().cloned();
+            self.unshared = false;
+            self.unimported.clear();
+        }
         self.make_planes(gpu, picture);
-        self.last_shared = false;
         let written = self.written.take();
+        if picture.gpu().is_some() && written.as_ref().is_some_and(|w| Arc::ptr_eq(w, picture)) {
+            self.written = written;
+            return;
+        }
+        self.last_shared = false;
         match picture.gpu() {
             None => {
                 if !written.is_some_and(|w| same_data(&w, picture)) {
@@ -1508,6 +1681,7 @@ impl Slot {
             match self.copy_on_gpu(gpu, picture, encoder) {
                 Ok(true) => {
                     self.last_shared = true;
+                    self.written = Some(Arc::clone(picture));
                     return;
                 }
                 Ok(false) => {}
@@ -1521,9 +1695,12 @@ impl Slot {
         self.copy_down(gpu, picture, encoder);
     }
 
-    fn copy_down(&mut self, gpu: &Gpu, picture: &Picture, encoder: &mut wgpu::CommandEncoder) {
-        match picture.copied_down() {
-            Ok(down) => self.write_planes(gpu, &down, encoder),
+    fn copy_down(&mut self, gpu: &Gpu, picture: &Arc<Picture>, encoder: &mut wgpu::CommandEncoder) {
+        match picture.alone_copied_down() {
+            Ok(down) => {
+                self.write_planes(gpu, &down, encoder);
+                self.written = Some(Arc::clone(picture));
+            }
             Err(e) => eprintln!("vidcut: a picture didn't come down from the GPU: {e}"),
         }
     }
@@ -1539,24 +1716,7 @@ impl Slot {
         if !gpu.dma_buf {
             return Err("the display's device imports no DMA-BUFs".into());
         }
-        let (one, two) = match picture.layout() {
-            Layout::Nv12 => (wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Rg8Unorm),
-            Layout::P010 if gpu.wide => (
-                wgpu::TextureFormat::R16Unorm,
-                wgpu::TextureFormat::Rg16Unorm,
-            ),
-            Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            layout @ (Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb) => {
-                return Err(format!("{layout:?} pictures aren't VA-API's"));
-            }
-            Layout::Yuv420p
-            | Layout::Yuv420p10
-            | Layout::Yuv422p
-            | Layout::Yuv422p10
-            | Layout::Yuv444p12 => {
-                return Err("planar pictures aren't VA-API's".into());
-            }
-        };
+        let (one, two) = vaapi_formats(gpu, picture.layout())?;
         let drm = crate::hw::vaapi::DrmFrame::export(picture.frame()).map_err(|e| e.to_string())?;
         let planes = drm.planes();
         let [y, uv, ..] = planes[..] else {
@@ -1669,38 +1829,19 @@ impl Slot {
         if !gpu.d3d11 {
             return Err("the display's device imports no Direct3D 11 textures".into());
         }
-        let formats = match picture.layout() {
-            Layout::Nv12 => (
-                wgpu::TextureFormat::NV12,
-                wgpu::TextureFormat::R8Unorm,
-                wgpu::TextureFormat::Rg8Unorm,
-            ),
-            Layout::P010 if gpu.wide && gpu.p010 => (
-                wgpu::TextureFormat::P010,
-                wgpu::TextureFormat::R16Unorm,
-                wgpu::TextureFormat::Rg16Unorm,
-            ),
-            Layout::P010 => return Err("no P010 or 16-bit textures for P010".into()),
-            layout @ (Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb) => {
-                return Err(format!("{layout:?} pictures aren't Direct3D 11's"));
-            }
-            Layout::Yuv420p
-            | Layout::Yuv420p10
-            | Layout::Yuv422p
-            | Layout::Yuv422p10
-            | Layout::Yuv444p12 => {
-                return Err("planar pictures aren't Direct3D 11's".into());
-            }
-        };
+        let formats = d3d11_formats(gpu, picture.layout())?;
         let frame = picture.frame();
         let mut pool = gpu.d3d11_shared.lock().unwrap_or_else(|e| e.into_inner());
-        let (image, new) = d3d11_shared_for(gpu, &mut pool, frame, formats)?;
+        let (image, new) = d3d11_shared_for(gpu, &mut pool, picture, formats)?;
         if new {
             self.imports += 1;
         }
         let shared = pool.get_mut(&image).ok_or("no shared texture")?;
-        shared.texture.fill(frame).map_err(|e| e.to_string())?;
-        // SAFETY: this device's image, released to Direct3D 11 in `GENERAL`, which has just written it.
+        if !std::ptr::eq(shared.holds.as_ptr(), Arc::as_ptr(picture)) {
+            shared.texture.fill(frame).map_err(|e| e.to_string())?;
+            shared.holds = Arc::downgrade(picture);
+        }
+        // SAFETY: this device's image, released to Direct3D 11 in `GENERAL`, which wrote it last.
         let (acquired, released) = unsafe {
             (
                 gpu.acquire(
@@ -1731,20 +1872,7 @@ impl Slot {
         if !gpu.shares {
             return Err("the display's device imports no Vulkan memory".into());
         }
-        match picture.layout() {
-            Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 if gpu.wide => {}
-            Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 => {
-                return Err("no 16-bit textures for 10- and 12-bit planes".into());
-            }
-            layout @ (Layout::Nv12
-            | Layout::P010
-            | Layout::P210
-            | Layout::P416
-            | Layout::Ayuv64
-            | Layout::Rgb
-            | Layout::Yuv420p
-            | Layout::Yuv422p) => return Err(format!("{layout:?} pictures aren't Vulkan's")),
-        }
+        vulkan_layout(gpu, picture.layout())?;
         let frame = picture.frame();
         let identity = crate::hw::vulkan::Identity::of(frame).map_err(|e| e.to_string())?;
         let (import, new) = self
@@ -1780,10 +1908,7 @@ impl Slot {
     #[cfg(target_os = "macos")]
     fn import_videotoolbox(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
         use objc2_io_surface::IOSurfaceRef;
-        use objc2_metal::{
-            MTLDevice, MTLPixelFormat, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
-        };
-        use wgpu::TextureFormat as F;
+        use objc2_metal::{MTLDevice, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage};
         use wgpu::hal::api::Metal;
         #[link(name = "CoreVideo", kind = "framework")]
         unsafe extern "C" {
@@ -1792,28 +1917,7 @@ impl Slot {
         if !gpu.metal {
             return Err("the display's device isn't Metal".into());
         }
-        let formats: &[(MTLPixelFormat, F)] = match picture.layout() {
-            Layout::Nv12 => &[
-                (MTLPixelFormat::R8Unorm, F::R8Unorm),
-                (MTLPixelFormat::RG8Unorm, F::Rg8Unorm),
-            ],
-            Layout::P010 | Layout::P210 | Layout::P416 if gpu.wide => &[
-                (MTLPixelFormat::R16Unorm, F::R16Unorm),
-                (MTLPixelFormat::RG16Unorm, F::Rg16Unorm),
-            ],
-            Layout::Ayuv64 if gpu.wide => &[(MTLPixelFormat::RGBA16Unorm, F::Rgba16Unorm)],
-            layout @ (Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64) => {
-                return Err(format!("no 16-bit textures for {layout:?}"));
-            }
-            Layout::Rgb => return Err("RGB pictures aren't VideoToolbox's".into()),
-            Layout::Yuv420p
-            | Layout::Yuv420p10
-            | Layout::Yuv422p
-            | Layout::Yuv422p10
-            | Layout::Yuv444p12 => {
-                return Err("planar pictures aren't VideoToolbox's".into());
-            }
-        };
+        let formats = videotoolbox_formats(gpu, picture.layout())?;
         // SAFETY: a VideoToolbox frame's `data[3]` is its pixel buffer, alive as long as the frame.
         let surface = unsafe {
             let buffer = (*picture.frame().as_ptr()).data[3].cast();
@@ -1904,24 +2008,10 @@ impl Slot {
     ) -> Result<bool, String> {
         let cuda = gpu.cuda()?;
         let layout = picture.layout();
-        let bytes = match layout {
-            Layout::Nv12 => 1,
-            Layout::P010 if gpu.wide => 2,
-            Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            Layout::P210 => return Ok(false),
-            layout @ (Layout::P416 | Layout::Ayuv64 | Layout::Rgb) => {
-                return Err(format!("{layout:?} pictures aren't NVDEC's"));
-            }
-            Layout::Yuv420p
-            | Layout::Yuv420p10
-            | Layout::Yuv422p
-            | Layout::Yuv422p10
-            | Layout::Yuv444p12 => {
-                return Err("planar pictures aren't NVDEC's".into());
-            }
-        };
+        let bytes = nvdec_bytes(gpu, layout)?;
         let (w, h) = (u64::from(picture.width()), u64::from(picture.height()));
-        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+        let (cw, ch) = chroma_size(layout, picture.width(), picture.height());
+        let (cw, ch) = (u64::from(cw), u64::from(ch));
         let align = |n: u64| n.div_ceil(256) * 256;
         let y = PlaneCopy {
             offset: 0,
@@ -2160,9 +2250,22 @@ impl Slot {
         frame: &crate::ffmpeg::frame::Video,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        let source = match held::of(frame) {
-            Some(h) if h.on(&gpu.device) => h.buffer().clone(),
-            found => {
+        let found = held::of(frame);
+        let lent = match found {
+            Some(h) if h.on(&gpu.device) => Some(h.buffer().clone()),
+            Some(h) => match h.imported_on(&gpu.device) {
+                Some(Ok(buffer)) => Some(buffer),
+                Some(Err(e)) => {
+                    held::stop_sharing(&e);
+                    None
+                }
+                None => None,
+            },
+            None => None,
+        };
+        let source = match lent {
+            Some(buffer) => buffer,
+            None => {
                 let bytes = match found {
                     Some(_) => held::rgb(frame),
                     None => Ok(crate::buffers::packed(frame, 3)),
@@ -2284,9 +2387,19 @@ fn make_target(device: &wgpu::Device, size: (u32, u32)) -> Target {
 fn d3d11_shared_for(
     gpu: &Gpu,
     pool: &mut D3d11Pool,
-    frame: &crate::ffmpeg::frame::Video,
+    picture: &Arc<Picture>,
     formats: D3d11Formats,
 ) -> Result<(ash::vk::Image, bool), String> {
+    let frame = picture.frame();
+    let held = pool
+        .iter()
+        .find(|(_, s)| {
+            std::ptr::eq(s.holds.as_ptr(), Arc::as_ptr(picture)) && !s.busy.load(Ordering::Acquire)
+        })
+        .map(|(image, _)| *image);
+    if let Some(image) = held {
+        return Ok((image, false));
+    }
     let free = |pool: &D3d11Pool| {
         pool.iter()
             .find(|(_, s)| s.texture.fits(frame) && !s.busy.load(Ordering::Acquire))
@@ -2439,7 +2552,128 @@ fn share_d3d11(
         uv,
         size: (desc.Width, desc.Height),
         busy: Arc::default(),
+        holds: std::sync::Weak::new(),
     })
+}
+
+fn nvdec_bytes(gpu: &Gpu, layout: Layout) -> Result<u64, String> {
+    match layout {
+        Layout::Nv12 => Ok(1),
+        Layout::P010 | Layout::P210 if gpu.wide => Ok(2),
+        Layout::P010 | Layout::P210 => Err(format!("no 16-bit textures for {layout:?}")),
+        Layout::P416 | Layout::Ayuv64 | Layout::Rgb => {
+            Err(format!("{layout:?} pictures aren't NVDEC's"))
+        }
+        Layout::Yuv420p
+        | Layout::Yuv420p10
+        | Layout::Yuv422p
+        | Layout::Yuv422p10
+        | Layout::Yuv444p12 => Err("planar pictures aren't NVDEC's".into()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn vaapi_formats(
+    gpu: &Gpu,
+    layout: Layout,
+) -> Result<(wgpu::TextureFormat, wgpu::TextureFormat), String> {
+    match layout {
+        Layout::Nv12 => Ok((wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Rg8Unorm)),
+        Layout::P010 if gpu.wide => Ok((
+            wgpu::TextureFormat::R16Unorm,
+            wgpu::TextureFormat::Rg16Unorm,
+        )),
+        Layout::P010 => Err("no 16-bit textures for P010".into()),
+        Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb => {
+            Err(format!("{layout:?} pictures aren't VA-API's"))
+        }
+        Layout::Yuv420p
+        | Layout::Yuv420p10
+        | Layout::Yuv422p
+        | Layout::Yuv422p10
+        | Layout::Yuv444p12 => Err("planar pictures aren't VA-API's".into()),
+    }
+}
+
+#[cfg(windows)]
+fn d3d11_formats(
+    gpu: &Gpu,
+    layout: Layout,
+) -> Result<
+    (
+        wgpu::TextureFormat,
+        wgpu::TextureFormat,
+        wgpu::TextureFormat,
+    ),
+    String,
+> {
+    match layout {
+        Layout::Nv12 => Ok((
+            wgpu::TextureFormat::NV12,
+            wgpu::TextureFormat::R8Unorm,
+            wgpu::TextureFormat::Rg8Unorm,
+        )),
+        Layout::P010 if gpu.wide && gpu.p010 => Ok((
+            wgpu::TextureFormat::P010,
+            wgpu::TextureFormat::R16Unorm,
+            wgpu::TextureFormat::Rg16Unorm,
+        )),
+        Layout::P010 => Err("no P010 or 16-bit textures for P010".into()),
+        Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb => {
+            Err(format!("{layout:?} pictures aren't Direct3D 11's"))
+        }
+        Layout::Yuv420p
+        | Layout::Yuv420p10
+        | Layout::Yuv422p
+        | Layout::Yuv422p10
+        | Layout::Yuv444p12 => Err("planar pictures aren't Direct3D 11's".into()),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn videotoolbox_formats(
+    gpu: &Gpu,
+    layout: Layout,
+) -> Result<&'static [(objc2_metal::MTLPixelFormat, wgpu::TextureFormat)], String> {
+    use objc2_metal::MTLPixelFormat;
+    use wgpu::TextureFormat as F;
+    match layout {
+        Layout::Nv12 => Ok(&[
+            (MTLPixelFormat::R8Unorm, F::R8Unorm),
+            (MTLPixelFormat::RG8Unorm, F::Rg8Unorm),
+        ]),
+        Layout::P010 | Layout::P210 | Layout::P416 if gpu.wide => Ok(&[
+            (MTLPixelFormat::R16Unorm, F::R16Unorm),
+            (MTLPixelFormat::RG16Unorm, F::Rg16Unorm),
+        ]),
+        Layout::Ayuv64 if gpu.wide => Ok(&[(MTLPixelFormat::RGBA16Unorm, F::Rgba16Unorm)]),
+        Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64 => {
+            Err(format!("no 16-bit textures for {layout:?}"))
+        }
+        Layout::Rgb => Err("RGB pictures aren't VideoToolbox's".into()),
+        Layout::Yuv420p
+        | Layout::Yuv420p10
+        | Layout::Yuv422p
+        | Layout::Yuv422p10
+        | Layout::Yuv444p12 => Err("planar pictures aren't VideoToolbox's".into()),
+    }
+}
+
+fn vulkan_layout(gpu: &Gpu, layout: Layout) -> Result<(), String> {
+    match layout {
+        Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 if gpu.wide => Ok(()),
+        Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 => {
+            Err("no 16-bit textures for 10- and 12-bit planes".into())
+        }
+        Layout::Nv12
+        | Layout::P010
+        | Layout::P210
+        | Layout::P416
+        | Layout::Ayuv64
+        | Layout::Rgb
+        | Layout::Yuv420p
+        | Layout::Yuv422p => Err(format!("{layout:?} pictures aren't Vulkan's")),
+    }
 }
 
 #[cfg(any(target_os = "linux", windows))]
@@ -2560,9 +2794,64 @@ fn shader() -> String {
 
 const PER_LEVEL: usize = 5;
 
-const PARAMS: usize = (11 + PER_LEVEL * LEVELS) * 16;
+const PARAMS: usize = (15 + PER_LEVEL * LEVELS) * 16;
 
 const LETTERING: usize = (3 + PER_LEVEL * LEVELS) * 16;
+
+fn halvings(
+    picture: &Picture,
+    size: (u32, u32),
+    (placing, kernel, ..): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+) -> u32 {
+    if kernel & WIDENS == 0 || kernel & 7 == 0 {
+        return 0;
+    }
+    let origin = match picture.sampling() {
+        Sampling::Placed { .. } => return 0,
+        Sampling::Colors { origin, .. } => (f64::from(origin.0), f64::from(origin.1)),
+        Sampling::Own => (0.0, 0.0),
+    };
+    let (sw, sh) = (f64::from(picture.width()), f64::from(picture.height()));
+    let upright = if picture.rotation() % 180 == 90 {
+        (sh, sw)
+    } else {
+        (sw, sh)
+    };
+    let most = match innermost(placing.map(|(p, _)| p)).last() {
+        None => {
+            let (_, _, w, h) = picture.placement(size.0, size.1);
+            f64::max(upright.0 / f64::from(w), upright.1 / f64::from(h))
+        }
+        Some(l) => {
+            let [a, b, e, c, d, f, g, h] = l.back;
+            let (fw, fh) = (f64::from(size.0), f64::from(size.1));
+            [(0.0, 0.0), (fw, 0.0), (0.0, fh), (fw, fh)]
+                .into_iter()
+                .map(|(x, y)| {
+                    let (x, y) = (x + origin.0, y + origin.1);
+                    let w = g * x + h * y + 1.0;
+                    if w <= 0.0 {
+                        return f64::INFINITY;
+                    }
+                    let (u, v) = ((a * x + b * y + e) / w, (c * x + d * y + f) / w);
+                    let across = ((a - u * g) / w * upright.0, (c - v * g) / w * upright.1);
+                    let down = ((b - u * h) / w * upright.0, (d - v * h) / w * upright.1);
+                    f64::max(across.0.hypot(across.1), down.0.hypot(down.1))
+                })
+                .fold(0.0, f64::max)
+        }
+    };
+    if most.is_nan() || most <= 4.0 {
+        return 0;
+    }
+    let most_halvings = picture.width().max(picture.height()).max(1).ilog2();
+    let wanted = (most / 4.0).log2().ceil();
+    if wanted.is_finite() {
+        (wanted as u32).min(most_halvings)
+    } else {
+        most_halvings
+    }
+}
 
 fn innermost(placing: Option<&Placing>) -> &[Level] {
     placing.map_or(&[][..], |p| {
@@ -2681,6 +2970,25 @@ fn per_chroma(layout: Layout) -> (u32, u32) {
     }
 }
 
+fn chroma_site(frame: &crate::ffmpeg::frame::Video, layout: Layout) -> [f64; 2] {
+    // SAFETY: a plain field of a live frame.
+    let at = unsafe { (*frame.as_ptr()).chroma_location };
+    let (mut x, mut y) = (0, 0);
+    // SAFETY: two plain out values, which FFmpeg sets only when it knows `at`.
+    if unsafe { crate::ffmpeg::ffi::av_chroma_location_enum_to_pos(&mut x, &mut y, at) } < 0 {
+        return [0.0; 2];
+    }
+    let (across, down) = per_chroma(layout);
+    let moved = |per: u32, at: i32| {
+        if per > 1 {
+            0.5 - (0.5 + f64::from(at) / 256.0) / f64::from(per)
+        } else {
+            0.0
+        }
+    };
+    [moved(across, x), moved(down, y)]
+}
+
 fn chroma_size(layout: Layout, w: u32, h: u32) -> (u32, u32) {
     let (across, down) = per_chroma(layout);
     (w.div_ceil(across), h.div_ceil(down))
@@ -2726,6 +3034,7 @@ fn params_of(
     wide: bool,
     cover: (f64, f64),
     (placing, kernel, timeline, paired): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+    halvings: u32,
 ) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
     let (x, y, w, h) = picture.placement(size.0, size.1);
@@ -2786,6 +3095,19 @@ fn params_of(
         placing.map_or(0.0, |(p, _)| f64::from(p.mode.code())),
         f64::from(u8::from(paired)),
     ];
+    let (made, part) = match picture.sampling() {
+        Sampling::Own => ([0.0; 4], [0.0; 4]),
+        Sampling::Colors { origin, .. } => (
+            [1.0, 0.0, 0.0, 0.0],
+            [f64::from(origin.0), f64::from(origin.1), 0.0, 0.0],
+        ),
+        Sampling::Placed { part, .. } => ([2.0, f64::from(size.0), f64::from(size.1), 0.0], *part),
+    };
+    floats.extend(made);
+    floats.extend(part);
+    let site = chroma_site(picture.frame(), layout);
+    floats.extend([site[0], site[1], 0.0, 0.0]);
+    floats.extend([f64::from(halvings), 0.0, 0.0, 0.0]);
     floats.extend(level_floats(levels));
     for v in floats {
         out.extend_from_slice(&(v as f32).to_le_bytes());

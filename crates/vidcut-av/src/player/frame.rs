@@ -21,6 +21,20 @@ pub enum Layout {
 }
 
 impl Layout {
+    pub const ALL: [Self; 11] = [
+        Self::Yuv420p,
+        Self::Nv12,
+        Self::P010,
+        Self::Yuv420p10,
+        Self::Yuv422p,
+        Self::Yuv422p10,
+        Self::P210,
+        Self::Yuv444p12,
+        Self::P416,
+        Self::Ayuv64,
+        Self::Rgb,
+    ];
+
     pub(crate) fn of(p: format::Pixel) -> Self {
         use format::Pixel as P;
         match p {
@@ -39,6 +53,45 @@ impl Layout {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fit {
+    pub size: (u32, u32),
+    pub sar: (i32, i32),
+    pub rotation: u16,
+}
+
+impl Fit {
+    pub fn of(f: &frame::Video, rotation: u16) -> Self {
+        let sar = f.aspect_ratio();
+        Self {
+            size: (f.width(), f.height()),
+            sar: (sar.numerator(), sar.denominator()),
+            rotation,
+        }
+    }
+
+    pub fn placement(&self, (width, height): (u32, u32)) -> (u32, u32, u32, u32) {
+        let (w, h) =
+            vidcut_core::place::upright_fit(self.size, self.sar, self.rotation, (width, height));
+        ((width - w) / 2, (height - h) / 2, w, h)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Sampling {
+    #[default]
+    Own,
+    Colors {
+        frame: (u32, u32),
+        origin: (u32, u32),
+    },
+    Placed {
+        fit: Fit,
+        part: [f64; 4],
+        placed: Arc<[vidcut_core::render::Placed]>,
+    },
+}
+
 pub struct Picture {
     frame: frame::Video,
     rotation: u16,
@@ -47,6 +100,7 @@ pub struct Picture {
     decoder: Option<super::Decoder>,
     decoding: Option<Arc<Decoding>>,
     over: Vec<Over>,
+    sampling: Sampling,
 }
 
 #[derive(Clone)]
@@ -79,6 +133,7 @@ impl Picture {
             decoder,
             decoding,
             over: Vec::new(),
+            sampling: Sampling::Own,
         }
     }
 
@@ -87,12 +142,21 @@ impl Picture {
         self
     }
 
+    pub(crate) fn with_sampling(mut self, sampling: Sampling) -> Self {
+        self.sampling = sampling;
+        self
+    }
+
+    pub fn sampling(&self) -> &Sampling {
+        &self.sampling
+    }
+
     pub fn over(&self) -> &[Over] {
         &self.over
     }
 
-    pub fn decoding(&self) -> Option<&Decoding> {
-        self.decoding.as_deref()
+    pub fn decoding(&self) -> Option<&Arc<Decoding>> {
+        self.decoding.as_ref()
     }
 
     pub fn decoder(&self) -> Option<super::Decoder> {
@@ -120,6 +184,11 @@ impl Picture {
             .or_else(|| self.over.iter().find_map(|o| o.picture.in_video_memory()))
     }
 
+    pub(crate) fn held_on_gpu(&self) -> bool {
+        crate::screen::held::of(&self.frame).is_some()
+            || self.over.iter().any(|o| o.picture.held_on_gpu())
+    }
+
     pub fn layout(&self) -> Layout {
         Layout::of(crate::hw::sw_format(&self.frame))
     }
@@ -133,11 +202,21 @@ impl Picture {
     }
 
     pub fn placement(&self, width: u32, height: u32) -> (u32, u32, u32, u32) {
-        let sar = self.frame.aspect_ratio();
-        let sar = (sar.numerator(), sar.denominator());
-        let size = (self.width(), self.height());
-        let (w, h) = vidcut_core::place::upright_fit(size, sar, self.rotation, (width, height));
-        ((width - w) / 2, (height - h) / 2, w, h)
+        Fit::of(&self.frame, self.rotation).placement((width, height))
+    }
+
+    pub fn placed_in(&self, size: (u32, u32)) -> ((f64, f64), [f64; 4]) {
+        let own = Fit::of(&self.frame, self.rotation);
+        let (frame, fit) = match &self.sampling {
+            Sampling::Own => (size, own),
+            Sampling::Colors { frame, .. } => (*frame, own),
+            Sampling::Placed { fit, .. } => (size, *fit),
+        };
+        let (x, y, w, h) = fit.placement(frame);
+        (
+            (f64::from(frame.0), f64::from(frame.1)),
+            [x, y, w, h].map(f64::from),
+        )
     }
 
     pub fn frame(&self) -> &frame::Video {
@@ -145,10 +224,7 @@ impl Picture {
     }
 
     pub fn copied_down(&self) -> Result<Picture> {
-        let frame = match self.gpu() {
-            None => crate::export::video::frame_ref(&self.frame)?,
-            Some(_) => crate::hw::download(&self.frame)?,
-        };
+        let alone = self.alone_copied_down()?;
         let over = self
             .over
             .iter()
@@ -160,7 +236,19 @@ impl Picture {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(Self::new(frame, self.rotation, self.decoder, self.decoding.clone()).with_over(over))
+        Ok(alone.with_over(over))
+    }
+
+    pub(crate) fn alone_copied_down(&self) -> Result<Picture> {
+        let frame = match (self.gpu(), crate::screen::held::of(&self.frame)) {
+            (Some(_), _) => crate::hw::download(&self.frame)?,
+            (None, Some(_)) => crate::screen::held::in_memory(&self.frame)?,
+            (None, None) => crate::export::video::frame_ref(&self.frame)?,
+        };
+        Ok(
+            Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
+                .with_sampling(self.sampling.clone()),
+        )
     }
 
     pub(crate) fn pools(&self) -> Vec<usize> {
@@ -188,14 +276,18 @@ impl Picture {
         self.bytes + self.over.iter().map(|o| o.picture.bytes()).sum::<usize>()
     }
 
-    pub(crate) fn layers(&self) -> Vec<(usize, Option<crate::hw::Kind>)> {
-        std::iter::once((self.bytes, self.gpu()))
+    pub(crate) fn layers(&self) -> Vec<(usize, Option<crate::hw::Kind>, bool)> {
+        let held = crate::screen::held::of(&self.frame).is_some();
+        std::iter::once((self.bytes, self.gpu(), held))
             .chain(self.over.iter().flat_map(|o| o.picture.layers()))
             .collect()
     }
 }
 
 fn bytes_of(frame: &frame::Video) -> usize {
+    if let Some(held) = crate::screen::held::of(frame) {
+        return held.buffer().size() as usize;
+    }
     // SAFETY: reads the frame's own buffer reference.
     let held = unsafe {
         let buf = (*frame.as_ptr()).buf[0];

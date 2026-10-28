@@ -158,6 +158,7 @@ impl User {
     pub(crate) fn of(s: SuperScale) -> Option<Self> {
         let i = slot(s.upscaler).filter(|_| s.ai())?;
         users()[i] += 1;
+        crate::screen::held::share_again();
         Some(Self(s.upscaler))
     }
 }
@@ -207,7 +208,7 @@ pub(crate) trait Network: Send {
 }
 
 pub(crate) struct Slot<N> {
-    engine: Mutex<Option<std::result::Result<N, String>>>,
+    engine: Mutex<Option<crate::screen::Started<N>>>,
     later: AtomicBool,
 }
 
@@ -221,7 +222,7 @@ impl<N: Network> Slot<N> {
 
     pub(crate) fn with<T>(&self, run: impl FnOnce(&mut N) -> Result<T>) -> Result<T> {
         let mut engine = self.engine.lock().unwrap_or_else(PoisonError::into_inner);
-        let n = match engine.get_or_insert_with(N::start) {
+        let n = match crate::screen::start_on_offscreen(&mut engine, N::start) {
             Ok(n) => n,
             Err(why) => return Err(Error::Invalid(why.clone())),
         };
@@ -232,7 +233,7 @@ impl<N: Network> Slot<N> {
 
     pub(crate) fn started(&self, run: impl FnOnce(&mut N)) {
         let mut engine = self.engine.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(Ok(n)) = engine.as_mut() {
+        if let Some((_, Ok(n))) = engine.as_mut() {
             run(n);
             self.tidy(n);
         }
@@ -241,7 +242,7 @@ impl<N: Network> Slot<N> {
     pub(crate) fn release(&self) {
         self.later.store(true, Ordering::Relaxed);
         if let Ok(mut engine) = self.engine.try_lock()
-            && let Some(Ok(n)) = engine.as_mut()
+            && let Some((_, Ok(n))) = engine.as_mut()
         {
             self.tidy(n);
         }

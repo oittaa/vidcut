@@ -180,7 +180,7 @@ pub struct Config {
 pub struct PlayerConfig {
     pub audio: MakeOutput,
     pub budget: vidcut_av::player::Budget,
-    pub gpu_pictures: Vec<vidcut_av::hw::Kind>,
+    pub gpu_pictures: vidcut_av::hw::GpuPictures,
 }
 
 pub(crate) enum ReplyEvent {

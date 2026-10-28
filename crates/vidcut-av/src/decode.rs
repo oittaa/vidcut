@@ -1258,6 +1258,7 @@ impl VideoReader {
                 Ok(()) => {
                     let pts = frame.timestamp();
                     frame.set_pts(pts);
+                    crate::color::default_site(&mut frame, self.decoder.id());
                     DECODED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     return Ok(Some(frame));
                 }

@@ -107,7 +107,8 @@ flowchart TD
 
 - `Shown::scales` gives the Super Scale of each layer (`Plan::scales_at`). With `viewer.super_scale` on, the shader enlarges such a layer with a sharper kernel (`sharp`), by its Sharpness, where the viewer enlarges the picture.
 - With an AI upscaler, `VideoFrames` runs `Source::ai_picture` for the viewer too. The viewer then gets the large upright picture of the AI upscaler.
-  - With a Retime Process other than Nearest, a made frame comes from two enlarged pictures ([export](export.md#which-source-frame)).
+  - With a Retime Process other than Nearest, a made frame comes from two enlarged and placed pictures ([export](export.md#which-source-frame)).
+  - These two pictures always take the kernel of Super Scale, as an export does. `viewer.super_scale` does not change them.
   - A seek with AI Fast decodes the whole chunk first. The upscaler makes the asked frame first, and the rest of the chunk follows.
   - A seek with AI Best starts a new stream at the asked frame. Its first picture comes after the first chunk of the stream.
   - While playing, the player skips the frames that it cannot make in time. A replay makes again the frames that it skipped.
@@ -202,8 +203,12 @@ The audio device:
 - The drawing:
   - It fits the picture and turns it upright.
   - It scales in YUV and converts to RGB (`shader_colors`). In an SDR timeline, it tone-maps HDR.
+  - It reads the chroma of each frame at the site that the frame's chroma location gives (`chroma_site`). An H.264 or HEVC 4:2:0 frame with no chroma location is sited left, the default of these formats (`color::default_site`). Another frame with no chroma location is read as centered.
   - The viewer enlarges with one bilinear sample, and shrinks with a box of bilinear samples.
   - An export, a proxy and a thumbnail scale with a bicubic kernel (`sharp`). The kernel widens when the picture shrinks.
+  - The kernel widens up to 4 times. Above a shrink of 4:1, the draw first halves the picture into smaller levels (`halvings`, `fs_shrink`, `fs_halve`).
+  - The kernel then reads the level where the shrink is 4:1 or less. The larger shrink of the two axes selects the level.
+  - Why: each pixel has the same work at any shrink. A kernel that widens without a limit puts all the work of a small picture on few GPU threads.
   - Why: the viewer must be fast, and an export must keep the detail of the picture.
   - The layers of a dissolve are more draws in the pass.
   - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.

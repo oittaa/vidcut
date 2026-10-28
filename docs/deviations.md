@@ -1906,10 +1906,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The models make a frame at any point between the two source frames.
   - A frame comes from the exact source time of the frame. Thus a clip at another frame rate gets made frames too, also at 100%.
   - Between two source frames with a shot change, the frame is the nearer source frame. The test is that of Detect Scene Cuts, at its default score.
-  - The frames are made at the size they show at. This size is at most the size of the source, or of the source that Super Scale enlarges.
+  - The frame is made from two sized and placed pictures, as in Resolve (§13, p. 3407).
+    - Super Scale enlarges each of the two source frames.
+    - Then Transform, Crop and Dynamic Zoom place them, at the size that they show at.
   - Retime Process takes SDR pictures for now. An export refuses HDR media with a process other than Nearest, and the Inspector shows a warning.
   - A clip played backward shows the nearest frames for now.
-  - With an AI upscaler of Super Scale, the two source frames are enlarged first. The frame is made from the enlarged frames, as in Resolve (p. 3407).
   - The viewer shows the frames that an export makes. With the slower models, a frame can take seconds.
   - Before a change that makes the timeline use a model that this computer does not have, the GUI asks to download it.
 - **Why:**

@@ -12,6 +12,7 @@ use super::make::{Fitting, Maker};
 use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, format, frame};
+use crate::player::{Fit, Sampling};
 
 pub(crate) fn target(fps: Rational, origin: f64, pos: i64) -> f64 {
     origin + fps.frames_to_secs(pos) - 0.5 * fps.frames_to_secs(1)
@@ -69,7 +70,32 @@ pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
     Ok(dst)
 }
 
-type Rgb = (Option<i64>, (u32, u32), frame::Video);
+type Rgb = (Option<i64>, Look, frame::Video);
+
+#[derive(Clone, PartialEq)]
+struct Look {
+    size: (u32, u32),
+    kernel: u32,
+    placed: Vec<Placed>,
+    frame: (u32, u32),
+    origin: (u32, u32),
+}
+
+impl Look {
+    fn fitted(size: (u32, u32), kernel: u32) -> Self {
+        Self {
+            size,
+            kernel,
+            placed: Vec::new(),
+            frame: size,
+            origin: (0, 0),
+        }
+    }
+
+    fn plain(&self, size: (u32, u32)) -> bool {
+        self.placed.is_empty() && self.size == size
+    }
+}
 
 struct Source {
     reader: VideoReader,
@@ -97,6 +123,8 @@ struct Source {
     ai: Option<crate::super_scale::User>,
     told: bool,
     upright: bool,
+    sampling: Sampling,
+    looks: (Option<Look>, u64),
     scaled: Vec<(PictureId, frame::Video)>,
     gpu: Option<crate::hw::GpuDecoder>,
     ahead: Option<VideoReader>,
@@ -191,6 +219,8 @@ impl Source {
             ai: crate::super_scale::User::of(super_scale),
             told: false,
             upright: false,
+            sampling: Sampling::Own,
+            looks: (None, 0),
             scaled: Vec::new(),
             gpu: ahead_gpu,
             ahead: None,
@@ -250,6 +280,8 @@ impl Source {
             ai: None,
             told: false,
             upright: false,
+            sampling: Sampling::Own,
+            looks: (None, 0),
             scaled: Vec::new(),
             gpu: ahead_gpu,
             ahead: None,
@@ -409,15 +441,23 @@ impl Source {
         self.lumas.clear();
     }
 
+    fn follow_offscreen(&mut self) {
+        if self.drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
+            self.drawn = None;
+            self.rgb.clear();
+        }
+    }
+
     fn luma_of(&mut self, f: &frame::Video, size: (u32, u32), reading: Reading) -> Result<Vec<u8>> {
         let pts = f.pts();
         if let Some((_, l)) = self.lumas.iter().find(|(p, _)| *p == pts) {
             return Ok(l.clone());
         }
+        self.follow_offscreen();
         let held = self
             .rgb
             .iter()
-            .find(|(p, s, _)| *p == pts && *s == size)
+            .find(|(p, l, _)| *p == pts && l.plain(size))
             .map(|(_, _, rgb)| frame_ref(rgb))
             .transpose()?;
         let held = match held {
@@ -426,7 +466,7 @@ impl Source {
                 &mut self.drawn,
                 f,
                 self.reader.rotation(),
-                size,
+                &Look::fitted(size, 0),
                 reading,
                 self.reader.path(),
             )?),
@@ -459,7 +499,7 @@ impl Source {
         Ok(f64::from(score) >= vidcut_core::analysis::SCENE_SCORE)
     }
 
-    fn rgb_of(&mut self, prev: bool, size: (u32, u32), reading: Reading) -> Result<frame::Video> {
+    fn rgb_of(&mut self, prev: bool, look: &Look, reading: Reading) -> Result<frame::Video> {
         let rotation = self.reader.rotation();
         let (f, _) = match prev {
             true => self.prev.as_ref(),
@@ -467,34 +507,42 @@ impl Source {
         }
         .expect("a frame");
         let f = frame_ref(f)?;
-        self.rgb_from(&f, rotation, size, reading)
+        self.rgb_from(&f, rotation, look, reading)
     }
 
     fn rgb_from(
         &mut self,
         f: &frame::Video,
         rotation: u16,
-        size: (u32, u32),
+        look: &Look,
         reading: Reading,
     ) -> Result<frame::Video> {
+        self.follow_offscreen();
         let pts = f.pts();
-        if let Some((_, _, rgb)) = self.rgb.iter().find(|(p, s, _)| *p == pts && *s == size) {
+        if let Some((_, _, rgb)) = self.rgb.iter().find(|(p, l, _)| *p == pts && l == look) {
             return frame_ref(rgb);
         }
         let rgb = shown_rgb(
             &mut self.drawn,
             f,
             rotation,
-            size,
+            look,
             reading,
             self.reader.path(),
         )?;
-        self.rgb.retain(|(p, s, _)| *s == size && *p != pts);
+        self.rgb.retain(|(p, l, _)| l == look && *p != pts);
         if self.rgb.len() >= 2 {
             self.rgb.remove(0);
         }
-        self.rgb.push((pts, size, frame_ref(&rgb)?));
+        self.rgb.push((pts, look.clone(), frame_ref(&rgb)?));
         Ok(rgb)
+    }
+
+    fn look_id(&mut self, look: &Look) -> u64 {
+        if self.looks.0.as_ref() != Some(look) {
+            self.looks = (Some(look.clone()), self.looks.1 + 1);
+        }
+        self.looks.1
     }
 
     fn note_upscaled(&mut self, upscaler: Upscaler) {
@@ -522,6 +570,7 @@ pub(crate) struct Layer {
     pub(crate) frame: Option<frame::Video>,
     pub(crate) weight: Option<u32>,
     pub(crate) rotation: u16,
+    pub(crate) sampling: Sampling,
     pub(crate) decoder: Option<crate::hw::Kind>,
     pub(crate) decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
     pub(crate) went: Option<crate::route::Went>,
@@ -695,7 +744,7 @@ fn shown_rgb(
     drawn: &mut Option<Single>,
     frame: &frame::Video,
     rotation: u16,
-    (dw, dh): (u32, u32),
+    look: &Look,
     reading: Reading,
     path: &Path,
 ) -> Result<frame::Video> {
@@ -703,7 +752,10 @@ fn shown_rgb(
         Some(single) => single,
         None => drawn.insert(Single::new(reading)?),
     };
-    single.held(frame, rotation, (dw, dh), path)
+    match look.placed.is_empty() {
+        true => single.held(frame, rotation, look.size, look.kernel, path),
+        false => single.placed(frame, rotation, look, path),
+    }
 }
 
 fn big_picture(out: &[u8], (w, h): (u32, u32), pts: Option<i64>) -> frame::Video {
@@ -992,6 +1044,7 @@ impl Source {
         } else {
             self.frame_index(f.pts())
         };
+        self.follow_offscreen();
         let run = self.run.as_mut().expect("opened");
         let Some(i) = at.filter(|i| *i >= run.next) else {
             return Ok(());
@@ -1009,7 +1062,7 @@ impl Source {
                 &mut self.drawn,
                 f,
                 rotation,
-                run.size,
+                &Look::fitted(run.size, 0),
                 reading,
                 self.reader.path(),
             )?),
@@ -1107,6 +1160,31 @@ fn between_size(f: &frame::Video, rotation: u16, aim: (u32, u32)) -> (u32, u32) 
     } else {
         (even(f64::from(shown.0)), even(f64::from(shown.1)))
     }
+}
+
+fn fitted_size(fit: Fit, aim: (u32, u32)) -> (u32, u32) {
+    let (_, _, w, h) = fit.placement(aim);
+    let even = |v: u32| (v.div_ceil(2) * 2).max(2);
+    (even(w), even(h))
+}
+
+fn placed_look(placed: &[Placed], fit: Fit, frame: (u32, u32), kernel: u32) -> Option<Look> {
+    let (x, y, w, h) = fit.placement(frame);
+    let whole = (f64::from(frame.0), f64::from(frame.1));
+    let placing = Placing::new(placed, whole, [x, y, w, h].map(f64::from));
+    let [x0, y0, x1, y1] = placing.bounds(whole)?;
+    let (x0, y0) = (x0 / 2 * 2, y0 / 2 * 2);
+    let (x1, y1) = (
+        (x1.div_ceil(2) * 2).min(frame.0),
+        (y1.div_ceil(2) * 2).min(frame.1),
+    );
+    (x1 > x0 && y1 > y0).then(|| Look {
+        size: (x1 - x0, y1 - y0),
+        kernel,
+        placed: placed.to_vec(),
+        frame,
+        origin: (x0, y0),
+    })
 }
 
 fn reach(super_scale: SuperScale) -> f64 {
@@ -1240,7 +1318,7 @@ impl Drawer {
         })
     }
 
-    pub(crate) fn keeps(&self) -> Vec<crate::hw::Kind> {
+    pub(crate) fn keeps(&self) -> crate::hw::GpuPictures {
         self.gpu.gpu_pictures()
     }
 
@@ -1297,7 +1375,9 @@ pub(crate) struct Single {
 impl Single {
     pub(crate) fn new(reading: Reading) -> Result<Self> {
         let drawer = Drawer::new(None)?;
-        let maker = Maker::new((2, 2, format::Pixel::YUV420P), drawer.keeps(), reading).holding();
+        let maker = Maker::new((2, 2, format::Pixel::YUV420P), drawer.keeps(), reading)
+            .holding()
+            .drawing();
         Ok(Self {
             drawer,
             maker,
@@ -1320,6 +1400,10 @@ impl Single {
             .frame(&picture, &[], layers, size, (pixel, (None, None)))
     }
 
+    fn on_offscreen(&self) -> bool {
+        crate::screen::offscreen().is_ok_and(|o| std::ptr::eq(self.drawer.gpu, &o.gpu))
+    }
+
     pub(crate) fn small_luma(&self, picture: &frame::Video) -> Result<Vec<u8>> {
         crate::screen::held::small_luma(self.drawer.gpu, picture, crate::analysis::MEASURE)
     }
@@ -1329,12 +1413,47 @@ impl Single {
         frame: &frame::Video,
         rotation: u16,
         (w, h): (u32, u32),
+        kernel: u32,
         path: &Path,
     ) -> Result<frame::Video> {
         let made = self.maker.make(&mut self.fitting, frame, path)?;
         let picture = std::sync::Arc::new(crate::player::Picture::new(made, rotation, None, None));
         let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
-        screen.draw(gpu, Some(&picture), &[], (&[], &[], &[], None), w, h);
+        screen.draw(gpu, Some(&picture), &[], (&[], &[], &[kernel], None), w, h);
+        screen.encoded(
+            gpu,
+            format::Pixel::RGB24,
+            (None, None),
+            crate::screen::Sink::Held,
+        )
+    }
+
+    fn placed(
+        &mut self,
+        frame: &frame::Video,
+        rotation: u16,
+        look: &Look,
+        path: &Path,
+    ) -> Result<frame::Video> {
+        let made = self.maker.make(&mut self.fitting, frame, path)?;
+        let sampling = Sampling::Colors {
+            frame: look.frame,
+            origin: look.origin,
+        };
+        let picture =
+            crate::player::Picture::new(made, rotation, None, None).with_sampling(sampling);
+        let picture = std::sync::Arc::new(picture);
+        let placed = [look.placed.clone()];
+        let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
+        let (w, h) = look.size;
+        screen.draw(
+            gpu,
+            Some(&picture),
+            &[],
+            (&placed, &[], &[look.kernel], None),
+            w,
+            h,
+        );
         screen.encoded(
             gpu,
             format::Pixel::RGB24,
@@ -1430,7 +1549,7 @@ impl VideoFrames {
         crate::progress::note(super::Note::Source(source));
     }
 
-    pub(crate) fn keeping(mut self, keep: Vec<crate::hw::Kind>) -> Self {
+    pub(crate) fn keeping(mut self, keep: crate::hw::GpuPictures) -> Self {
         self.maker = Maker::new(self.maker.out(), keep, self.maker.reading());
         self
     }
@@ -1493,7 +1612,7 @@ impl VideoFrames {
         if self.drawer.is_none() {
             let drawer = Drawer::new(self.encoder.take())?;
             let (out, reading) = (self.maker.out(), self.maker.reading());
-            self.maker = Maker::new(out, drawer.keeps(), reading).holding();
+            self.maker = Maker::new(out, drawer.keeps(), reading).holding().drawing();
             self.drawer = Some(drawer);
         }
         let Some(layers) = self.next_layers()? else {
@@ -1641,6 +1760,7 @@ impl VideoFrames {
                             frame: Some(self.black_frame()?),
                             weight,
                             rotation: 0,
+                            sampling: Sampling::Own,
                             decoder: None,
                             decoding: None,
                             went: None,
@@ -1675,14 +1795,20 @@ impl VideoFrames {
                 let frame = if backward {
                     self.reversed_frame(i, s, layer, k)?
                 } else if retimed {
-                    self.retimed_frame(i, s, layer, k)?
+                    let placed = placed.get(i).map(Vec::as_slice).unwrap_or_default();
+                    self.retimed_frame(i, s, layer, k, placed)?
                 } else {
                     self.source_frame(i, s, layer, k)?
+                };
+                let sampling = match backward {
+                    true => Sampling::Own,
+                    false => self.open[s].sampling.clone(),
                 };
                 made.push(Layer {
                     frame: Some(frame),
                     weight,
                     rotation: if self.open[s].upright { 0 } else { rotation },
+                    sampling,
                     decoder,
                     decoding: Some(decoding),
                     went: self.open[s].fitting.went(),
@@ -2135,8 +2261,14 @@ impl VideoFrames {
         s: usize,
         layer: &VideoPiece,
         k: i64,
+        placed: &[Placed],
     ) -> Result<frame::Video> {
-        let VideoPiece::Source { retime, .. } = layer else {
+        let VideoPiece::Source {
+            retime,
+            super_scale,
+            ..
+        } = layer
+        else {
             return self.source_frame(i, s, layer, k);
         };
         let at = self.exact_at(s, layer, k);
@@ -2164,15 +2296,30 @@ impl VideoFrames {
         let (w, h, _) = self.maker.out();
         let reading = self.open[s].pictures.reading(self.maker.reading());
         let scaled = self.scaled_pair(s, layer, reading)?;
+        let kernel =
+            crate::screen::kernel((!super_scale.is_off()).then_some(super_scale.sharpness));
         let start = Instant::now();
         let src = &mut self.open[s];
         let rotation = src.reader.rotation();
         let (cur, _) = src.current.as_ref().expect("a frame");
-        let size = match &scaled {
-            Some((_, b, aim)) => between_size(b, 0, *aim),
-            None => between_size(cur, rotation, (w, h)),
+        let (fit, measured, aim) = match &scaled {
+            Some((_, b, aim)) => (Fit::of(b, 0), between_size(b, 0, *aim), *aim),
+            None => (
+                Fit::of(cur, rotation),
+                between_size(cur, rotation, (w, h)),
+                (w, h),
+            ),
         };
+        let look = match placed.is_empty() {
+            true => Some(Look::fitted(fitted_size(fit, aim), kernel)),
+            false => placed_look(placed, fit, (w, h), kernel),
+        };
+        let Some(look) = look else {
+            return self.shown(i, s, layer, changed);
+        };
+        let size = look.size;
         let pair = match (&scaled, &src.prev, &src.current) {
+            _ if !look.placed.is_empty() => None,
             (Some((a, b, _)), ..) if crate::interpolate::takes_frames(*retime, a, b) => {
                 Some((frame_ref(a)?, frame_ref(b)?))
             }
@@ -2187,53 +2334,43 @@ impl VideoFrames {
             }
             _ => None,
         };
-        let pictures = match (&pair, &scaled) {
-            (Some(_), _) => None,
-            (None, Some((a, b, _))) => Some((
-                src.rgb_from(a, 0, size, reading)?,
-                src.rgb_from(b, 0, size, reading)?,
-            )),
-            (None, None) => Some((
-                src.rgb_of(true, size, reading)?,
-                src.rgb_of(false, size, reading)?,
-            )),
+        let frames = pair.is_some();
+        let (a, b) = match (pair, &scaled) {
+            (Some(pair), _) => pair,
+            (None, Some((a, b, _))) => (
+                src.rgb_from(a, 0, &look, reading)?,
+                src.rgb_from(b, 0, &look, reading)?,
+            ),
+            (None, None) => (
+                src.rgb_of(true, &look, reading)?,
+                src.rgb_of(false, &look, reading)?,
+            ),
         };
         let pts = |f: &Option<(frame::Video, f64)>| f.as_ref().and_then(|(f, _)| f.pts());
         let (pa, pb) = (pts(&src.prev), pts(&src.current));
         let key = (
             src.reader.path().to_path_buf(),
+            src.look_id(&look),
             pa.unwrap_or(0),
             pb.unwrap_or(0),
         );
         let clock = Instant::now();
         let converted = clock - start;
-        let big = if src.cut(size, reading)? {
+        let big = if src.cut(measured, reading)? {
             crate::debug!(
                 "interpolate",
                 "{}: a cut between the frames at {weight:.3}",
                 crate::interpolate::name(*retime)
             );
             crate::interpolate::kept_at_cut(*retime, size, weight);
-            let nearer = weight < 0.5;
-            let mut picture = match (pictures, &scaled) {
-                (Some((a, b)), _) => {
-                    if nearer {
-                        a
-                    } else {
-                        b
-                    }
-                }
-                (None, Some((a, b, _))) => frame_ref(if nearer { a } else { b })?,
-                (None, None) => src.rgb_of(nearer, size, reading)?,
-            };
+            let mut picture = frame_ref(if weight < 0.5 { &a } else { &b })?;
             picture.set_pts(pb);
             picture
         } else {
-            let made = match &pair {
-                Some((a, b)) => crate::interpolate::between_frames(&key, a, b, size, weight)?,
-                None => {
-                    let (a, b) = pictures.as_ref().expect("the pictures of the pair");
-                    let made = crate::interpolate::between(*retime, &key, a, b, size, weight)?;
+            let made = match frames {
+                true => crate::interpolate::between_frames(&key, &a, &b, size, weight)?,
+                false => {
+                    let made = crate::interpolate::between(*retime, &key, &a, &b, size, weight)?;
                     made_picture(made, size, pb)?
                 }
             };
@@ -2254,6 +2391,23 @@ impl VideoFrames {
             .make_layer(i, &mut src.fitting, &big, src.reader.path(), reading)?;
         src.normalized = None;
         src.upright = true;
+        src.sampling = match look.placed.is_empty() {
+            true => Sampling::Own,
+            false => {
+                let (fw, fh) = (f64::from(w), f64::from(h));
+                let (x, y) = look.origin;
+                Sampling::Placed {
+                    fit,
+                    part: [
+                        f64::from(x) / fw,
+                        f64::from(y) / fh,
+                        f64::from(size.0) / fw,
+                        f64::from(size.1) / fh,
+                    ],
+                    placed: look.placed.into(),
+                }
+            }
+        };
         let out = self.finished_layer(s, made)?;
         crate::debug!(
             "interpolate",
@@ -2311,6 +2465,7 @@ impl VideoFrames {
             }
             src.normalized = Some(made);
             src.upright = big.is_some();
+            src.sampling = Sampling::Own;
             if big.is_some() {
                 src.note_upscaled(super_scale.upscaler);
             }

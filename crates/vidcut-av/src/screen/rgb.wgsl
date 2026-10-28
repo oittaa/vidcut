@@ -6,7 +6,7 @@
 @compute @workgroup_size(256)
 fn pack(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) groups: vec3<u32>) {
     let size = textureDimensions(encoded);
-    let bytes = size.x * size.y;
+    let bytes = size.x * size.y * 3u;
     let word = id.y * groups.x * 256u + id.x;
     if word * 4u >= bytes {
         return;
@@ -15,7 +15,9 @@ fn pack(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) g
     for (var k = 0u; k < 4u; k++) {
         let b = word * 4u + k;
         if b < bytes {
-            v = v | (textureLoad(encoded, vec2<u32>(b % size.x, b / size.x), 0).r << (k * 8u));
+            let p = b / 3u;
+            let texel = textureLoad(encoded, vec2<u32>(p % size.x, p / size.x), 0);
+            v = v | (texel[b % 3u] << (k * 8u));
         }
     }
     packed[word] = v;

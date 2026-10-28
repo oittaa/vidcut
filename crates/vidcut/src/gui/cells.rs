@@ -4,7 +4,6 @@ use std::time::Instant;
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 use eframe::wgpu;
-use vidcut_av::hw::Kind;
 use vidcut_av::player::{Config, ManualOutput, Picture, Player, Shown};
 use vidcut_core::model::Project;
 use vidcut_core::render::{RenderPlan, VideoPiece};
@@ -27,7 +26,7 @@ struct Cell {
 
 pub struct Cells {
     ctx: egui::Context,
-    gpu_pictures: Vec<Kind>,
+    gpu_pictures: vidcut_av::hw::GpuPictures,
     cells: [Option<Cell>; CELLS],
     counts: Counts,
 }
@@ -35,7 +34,7 @@ pub struct Cells {
 pub const CELLS: usize = 4;
 
 impl Cells {
-    pub fn new(ctx: egui::Context, gpu_pictures: Vec<Kind>) -> Self {
+    pub fn new(ctx: egui::Context, gpu_pictures: vidcut_av::hw::GpuPictures) -> Self {
         Self {
             ctx,
             gpu_pictures,
@@ -186,7 +185,7 @@ impl Screens {
         }
     }
 
-    pub fn gpu_pictures(&self) -> Vec<Kind> {
+    pub fn gpu_pictures(&self) -> vidcut_av::hw::GpuPictures {
         self.gpu.gpu_pictures()
     }
 

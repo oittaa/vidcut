@@ -214,15 +214,54 @@ impl Tags {
     }
 }
 
+pub(crate) fn chroma_location(pixel: format::Pixel) -> ffi::AVChromaLocation {
+    use ffi::AVChromaLocation as L;
+    // SAFETY: FFmpeg's table of formats; null for a format it does not know.
+    let d = unsafe { ffi::av_pix_fmt_desc_get(pixel.into()) };
+    if d.is_null() {
+        return L::AVCHROMA_LOC_UNSPECIFIED;
+    }
+    // SAFETY: a descriptor from that table.
+    let (w, h, flags) = unsafe { ((*d).log2_chroma_w, (*d).log2_chroma_h, (*d).flags) };
+    if flags & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0 {
+        return L::AVCHROMA_LOC_UNSPECIFIED;
+    }
+    match (w, h) {
+        (1, 1) => L::AVCHROMA_LOC_LEFT,
+        (1, 0) => L::AVCHROMA_LOC_TOPLEFT,
+        _ => L::AVCHROMA_LOC_UNSPECIFIED,
+    }
+}
+
+pub(crate) fn default_site(f: &mut frame::Video, codec: crate::ffmpeg::codec::Id) {
+    use crate::ffmpeg::codec::Id;
+    use ffi::AVChromaLocation as L;
+    if !matches!(codec, Id::H264 | Id::HEVC) {
+        return;
+    }
+    let left = chroma_location(crate::hw::sw_format(f)) == L::AVCHROMA_LOC_LEFT;
+    // SAFETY: a plain field of a frame the caller owns.
+    let f = unsafe { &mut *f.as_mut_ptr() };
+    if left && f.chroma_location == L::AVCHROMA_LOC_UNSPECIFIED {
+        f.chroma_location = L::AVCHROMA_LOC_LEFT;
+    }
+}
+
 pub(crate) fn tag_frame(f: &mut frame::Video, hdr: Option<Hdr>) {
+    let chroma = chroma_location(crate::hw::sw_format(f));
     let tags = Tags::output(hdr);
+    let range = match f.format() {
+        format::Pixel::RGB24 | format::Pixel::RGBA => ffi::AVColorRange::AVCOL_RANGE_JPEG,
+        _ => tags.range,
+    };
     // SAFETY: plain fields of a frame the caller owns.
     unsafe {
         let f = &mut *f.as_mut_ptr();
         f.colorspace = tags.matrix;
-        f.color_range = tags.range;
+        f.color_range = range;
         f.color_primaries = tags.primaries;
         f.color_trc = tags.transfer;
+        f.chroma_location = chroma;
     }
 }
 

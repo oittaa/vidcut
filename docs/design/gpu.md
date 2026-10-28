@@ -40,7 +40,9 @@ flowchart LR
 - `route::Place` is where a picture is: `Memory`, or one of the GPU places of `hw::Kind`.
 - `route::Facts` holds what the planner knows of a frame:
   - Its place.
-  - The draw takes the frames of that place (`Gpu::gpu_pictures`).
+  - The draw takes the frames of that place in that layout (`Gpu::gpu_pictures`).
+    - Each import has its layout rules in one function, which the import and `gpu_pictures` both use (`nvdec_bytes`, `vulkan_layout`).
+    - Why: a frame that the draw cannot import comes down whole. The keeper does not copy it first.
   - The draw reads its layout (`normalize::displayable`).
   - Keeping the frames failed before.
 - `route::plan` gives the `Route`. `Route::Kept` wins.
@@ -60,18 +62,26 @@ In the viewer, exports, proxies and thumbnails:
 
 | Decoder | Kept | Read by the draw |
 |---|---|---|
-| NVDEC (CUDA) | `cuda::keep`: a copy | through a buffer shared with wgpu (`SharedBuffer`) |
+| NVDEC (CUDA) | `cuda::keep`: a copy, or as decoded for a draw at once | through a buffer shared with wgpu (`SharedBuffer`) |
 | Vulkan | `vulkan::keep`: as decoded | images imported into wgpu |
 | VA-API | `vaapi::Keeper`: a copy (`vaCopy`) | DMA-BUFs imported into wgpu |
 | Direct3D 11 | `d3d11::Keeper`: a copy in shareable textures | a few shared textures, each imported once (`d3d11::Shared`) |
 | VideoToolbox | as decoded | IOSurface planes as Metal textures; AYUV64 as one RGBA texture |
 
+- Exports, proxies and thumbnails draw each frame at once. They take NVDEC's frames as decoded (`Maker::drawing`).
+  - They first wait for the stream of the decoder, as the copy does (`wait_for`).
+  - Why: the copy packs the pictures that the viewer keeps. A picture that is drawn at once is not kept.
 - The viewer imports VA-API pictures only from its own GPU (`player::set_viewer_gpu`). From another GPU, the pictures come down.
   - Why: the viewer cannot import the pictures of another GPU.
+- The draw takes NVDEC pictures only when its wgpu device is on CUDA's GPU, as it does for Vulkan pictures. On another GPU, the pictures come down.
+  - Why: the buffer that Vulkan shares with CUDA is on one GPU.
 - vidcut keeps facts of each VA-API device. `NO_COPY` and `WAYS` are kept by the address of the display. `SIZES` is kept by the device, the layout and the size.
 
 - ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
 - A VideoToolbox frame that comes down is mapped, not copied (`hw::to_read`).
+- A layer keeps the picture that its planes hold: from memory, from NVDEC, or brought down. A redraw of the same picture copies nothing.
+- A Direct3D 11 texture of the viewer keeps the picture that it holds (`D3d11Shared`). A redraw of the same picture does not fill it again.
+- A layer that brings its picture down brings down only its own frame (`alone_copied_down`).
 - `hw::Turner` turns VideoToolbox frames for the scalers of macOS (`vt::Turn`, `transpose_vt`).
 - Lanczos on Metal scales the input of the scaler and the frame interpolation of macOS to the size of their session (`lanczos::sized`). It also scales the output of the scaler to the size that it shows at.
   - Why Lanczos: the scaler of VideoToolbox keeps less detail.
@@ -80,10 +90,17 @@ The draw:
 
 - The viewer, exports, proxies and thumbnails draw each frame with one shader (`screen::Screen`, `picture.wgsl`).
   - The AI upscalers and the frame interpolation take their RGB input from the same draw (`export::video::Single`).
-  - That input stays on the GPU (`Sink::Held`). `held::Pipes` packs the drawn RGB plane into a buffer (`rgb.wgsl`).
+  - That input stays on the GPU (`Sink::Held`).
+- The draw writes an RGB plane as RGBA. `held::Pipes` packs it to three bytes a pixel (`rgb.wgsl`). An RGB frame in memory is packed the same way.
+  - Why: a plane of one byte a texel is three times as wide as the picture. A wide picture then goes past the texture size limit of the GPU.
 - It mixes the dissolves, the wipes, the composite modes, the placed pictures, the titles and the subtitles.
 - `export::video::Drawer` draws for the export, proxies, thumbnails and the AI inputs.
-  - All of them share one wgpu device (`screen::offscreen`). vidcut makes it once, at the first draw.
+  - All of them share one wgpu device (`screen::offscreen`). It is on the GPU in use (`gpus::in_use`).
+    - Why: the frames of the decoder stay on the GPU only when the draw is on the same GPU.
+    - vidcut makes the device at the first draw on that GPU.
+    - When wgpu has no adapter on that GPU, the device opens on the adapter that wgpu picks. vidcut prints which.
+    - After a change of `gpu.device`, the AI upscalers and the frame interpolation start again on the new device (`start_on_offscreen`).
+    - The draw that makes their input starts again on the new device too, with an empty cache of its pictures (`Single::on_offscreen`).
   - The viewer's frame render, the AI upscalers and the frame interpolation use that device too (`compute::Gpu`).
   - It opens with all the limits of the GPU. Why: the AI kernels need large buffers and much workgroup memory.
   - It is not the device of the viewer: a submit from another thread can make the viewer's surface fail ([gotchas](../gotchas.md#wgpu-and-egui)).
@@ -91,13 +108,24 @@ The draw:
   - NVENC takes them through memory that Vulkan shares with CUDA (`Shared::out`).
   - VideoToolbox takes them in the IOSurfaces of its own frames (`Sink::Surface`).
   - The other encoders take them from memory (`Sink::Memory`).
+- The pictures of the AI upscalers and the frame interpolation can stay on the GPU for the viewer (`held::shared`). The viewer must be on the same GPU.
+  - The player copies each picture into memory that Vulkan can share with another device (`shared::held_buffer`). It waits for the copy.
+  - The viewer's device imports that memory and draws from it (`shared::held_on`). Nothing comes down.
+  - The player's cache counts these pictures in video memory. When the cache brings one down, it becomes RGB24 in memory.
+  - This occurs on Linux and Windows, where Vulkan on both devices has the extension for external memory.
+  - Why: each picture went down to memory and up again before the viewer could show it.
 
 Frames that come down:
 
 - CPU encoders take frames in memory.
 - The player brings a frame down when the viewer cannot show its kind, when an import fails, or when its pool leaves the budget.
+  - After an import or a copy into the shared buffer fails, that layer's frames come down. When a new decoder opens for the layer, the draw tries again (`Decoding`).
+  - Why: a failure can be for a short time only, for example when an AI model holds the video memory.
 - A picture in memory goes up into the frames of a GPU encoder (`Upload`, `CudaFrames::upload`).
-- The player brings the pictures of the AI upscalers and the frame interpolation down (`held::in_memory`). Why: the viewer draws on another device.
+- In the other cases, the player brings the pictures of the AI upscalers and the frame interpolation down (`held::in_memory`).
+  - After a share fails, these pictures come down (`held::stop_sharing`). When a clip starts to use an AI model again, the player tries to share again (`held::share_again`).
+  - Why: a failure can be for a short time only, for example when an AI model holds the video memory.
+  - They go to the viewer as RGB24, with no conversion on the CPU (`normalize::displayable`). An RGB24 still goes to the draw as it is too.
 - The cut test of a retime brings down a 96×54 luma picture of each frame, not the frame (`held::small_luma`, [export](export.md)).
 
 ## Encoders
@@ -190,9 +218,12 @@ The scaler of macOS (`macos`):
 On macOS (`interpolate::macos`):
 
 - The frame rate conversion of macOS makes the frame, in a `VTFrameProcessor` session.
-- Two VideoToolbox frames reach it on the GPU (`interpolate::takes_frames`). Turned frames turn first (`hw::Turner`).
+- Two VideoToolbox frames of a clip with no placed picture reach it on the GPU (`interpolate::takes_frames`). Turned frames turn first (`hw::Turner`).
+- Lanczos sizes them to the size that the picture fills in the frame, before the frame is made.
 - The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
-- Frames that the CPU decoded go through RGB.
+- Frames that the CPU decoded, and the frames of a placed clip, go through RGB.
+  - The session reads a held picture down from the GPU only for a new pair (`Input::Held`).
+  - The next frame between the same pair uses the pair that the session has (`SequentialReferencesUnchanged`).
 
 `interpolate::report` tells what each process makes. The stats panel shows it (`RetimeStats`).
 

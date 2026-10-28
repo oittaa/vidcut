@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
 use vidcut_core::model::Hdr;
 
 use super::shared::Shared;
@@ -40,7 +42,6 @@ const BLUE: u32 = 2;
 const RED: u32 = 3;
 const ALPHA: u32 = 4;
 const RGBA: u32 = 5;
-const RGB: u32 = 6;
 
 pub(super) struct Encoders {
     layout: wgpu::BindGroupLayout,
@@ -132,7 +133,7 @@ struct Plane {
     format: wgpu::TextureFormat,
     texel: u32,
     sub: (u32, u32),
-    across: u32,
+    packed: bool,
 }
 
 struct Layout {
@@ -149,7 +150,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
         format,
         texel,
         sub,
-        across: 1,
+        packed: false,
     };
     let planar = |depth: u32, sub: (u32, u32), alpha: bool| {
         let (format, texel) = if depth > 8 {
@@ -216,8 +217,8 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
             depth: 8,
             shift: 0,
             planes: vec![Plane {
-                across: 3,
-                ..plane(RGB, T::R8Uint, 1, (0, 0))
+                packed: true,
+                ..plane(RGBA, T::Rgba8Uint, 4, (0, 0))
             }],
         },
         _ => return None,
@@ -226,7 +227,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
 
 fn plane_size(p: &Plane, (w, h): (u32, u32)) -> (u32, u32) {
     let sub = |n: u32, s: u32| (n + (1 << s) - 1) >> s;
-    (sub(w, p.sub.0) * p.across, sub(h, p.sub.1))
+    (sub(w, p.sub.0), sub(h, p.sub.1))
 }
 
 fn params(layout: &Layout, plane: &Plane, (from, to): (Option<Hdr>, Option<Hdr>)) -> Vec<u8> {
@@ -247,6 +248,7 @@ fn params(layout: &Layout, plane: &Plane, (from, to): (Option<Hdr>, Option<Hdr>)
         [g[2][0], g[2][1], g[2][2], 0.0],
         [kr, kb, colors.linear_scale, 0.0],
     ];
+    let site = output_site(plane);
     let words: [[u32; 4]; 2] = [
         [
             transfer_of(from) as u32,
@@ -261,7 +263,24 @@ fn params(layout: &Layout, plane: &Plane, (from, to): (Option<Hdr>, Option<Hdr>)
         .flatten()
         .flat_map(|v| (*v as f32).to_le_bytes())
         .chain(words.iter().flatten().flat_map(|v| v.to_le_bytes()))
+        .chain(site.iter().flat_map(|v| (*v as f32).to_le_bytes()))
         .collect()
+}
+
+fn output_site(plane: &Plane) -> [f64; 4] {
+    use crate::ffmpeg::ffi::AVChromaLocation as L;
+    let at = match plane.sub {
+        (1, 1) => L::AVCHROMA_LOC_LEFT,
+        (1, 0) => L::AVCHROMA_LOC_TOPLEFT,
+        _ => return [0.0; 4],
+    };
+    let (mut x, mut y) = (0, 0);
+    // SAFETY: two plain out values, which FFmpeg sets for a known location.
+    if unsafe { crate::ffmpeg::ffi::av_chroma_location_enum_to_pos(&mut x, &mut y, at) } < 0 {
+        return [0.0; 4];
+    }
+    let along = |sub: u32, at: i32| if sub > 0 { f64::from(at) / 256.0 } else { 0.0 };
+    [along(plane.sub.0, x), along(plane.sub.1, y), 0.0, 0.0]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -275,6 +294,7 @@ enum Target {
 struct Made {
     texture: Option<wgpu::Texture>,
     buffer: Option<wgpu::Buffer>,
+    packed: Option<wgpu::Buffer>,
     params: wgpu::Buffer,
     size: (u32, u32),
     padded: u32,
@@ -284,11 +304,67 @@ struct Made {
 
 type Key = (format::Pixel, (u32, u32), Option<Hdr>, Option<Hdr>, Target);
 
+const SLOTS: usize = 2;
+
 #[derive(Default)]
 pub(super) struct Encoded {
     key: Option<Key>,
     made: Vec<Made>,
-    shared: Option<Shared>,
+    slots: Vec<Slot>,
+    next: usize,
+    serial: u64,
+}
+
+type Slot = Arc<Mutex<Filling>>;
+
+struct Filling {
+    shared: Shared,
+    work: Option<Work>,
+}
+
+struct Work {
+    device: wgpu::Device,
+    submission: wgpu::SubmissionIndex,
+    planes: Vec<PlaneCopy>,
+    into: frame::Video,
+    serial: u64,
+}
+
+struct Handed {
+    slot: Slot,
+    serial: u64,
+}
+
+static HANDED: u8 = 0;
+
+fn lock(slot: &Slot) -> MutexGuard<'_, Filling> {
+    slot.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl Filling {
+    fn finish(&mut self, serial: Option<u64>) -> Result<()> {
+        let Some(work) = &self.work else {
+            return Ok(());
+        };
+        if serial.is_some_and(|s| s != work.serial) {
+            return Ok(());
+        }
+        wait(&work.device, work.submission.clone())?;
+        self.shared
+            .empty_into(&work.into, &work.planes)
+            .map_err(Error::Invalid)?;
+        self.work = None;
+        Ok(())
+    }
+}
+
+pub(crate) fn filled(f: &mut frame::Video) -> Result<()> {
+    let Some(handed) = super::carried::carried::<Handed>(f, &HANDED) else {
+        return Ok(());
+    };
+    lock(&handed.slot).finish(Some(handed.serial))?;
+    super::carried::let_go_of(f);
+    Ok(())
 }
 
 pub enum Sink<'a> {
@@ -340,7 +416,7 @@ impl Screen {
         let key = Some((pixel, size, colors.0, colors.1, target));
         if self.encoded.key != key {
             self.encoded.key = None;
-            self.encoded.shared = None;
+            self.encoded.slots.clear();
             let mut offset = 0;
             let mut made_all = Vec::new();
             for p in &layout.planes {
@@ -351,10 +427,32 @@ impl Screen {
             }
             self.encoded.made = made_all;
             if let Sink::Cuda(device, _) = &sink {
-                self.encoded.shared = Some(shared_out(gpu, device, offset)?);
+                for _ in 0..SLOTS {
+                    let shared = shared_out(gpu, device, offset)?;
+                    let filling = Filling { shared, work: None };
+                    self.encoded.slots.push(Arc::new(Mutex::new(filling)));
+                }
+                self.encoded.next = 0;
             }
             self.encoded.key = key;
         }
+        let slot = match &sink {
+            Sink::Cuda(..) => {
+                let slot = self
+                    .encoded
+                    .slots
+                    .get(self.encoded.next)
+                    .cloned()
+                    .ok_or_else(|| Error::Invalid("no memory is shared with CUDA".into()))?;
+                self.encoded.next = (self.encoded.next + 1) % self.encoded.slots.len();
+                let mut filling = lock(&slot);
+                filling.finish(None)?;
+                let buffer = filling.shared.buffer().clone();
+                drop(filling);
+                Some((slot, buffer))
+            }
+            _ => None,
+        };
         let surfaces = match &sink {
             Sink::Surface(f) => surface_textures(gpu, f, &layout.planes)?,
             _ => Vec::new(),
@@ -392,8 +490,14 @@ impl Screen {
                 pass.set_bind_group(0, &bind, &[]);
                 pass.draw(0..3, 0..1);
             }
-            let (buffer, offset) = match (&self.encoded.shared, &m.buffer) {
-                (Some(shared), _) => (shared.buffer(), m.offset),
+            if let (Some(packed), Some(buffer)) = (&m.packed, &m.buffer) {
+                gpu.held
+                    .pack_into(&gpu.device, &mut encoder, texture, packed);
+                encoder.copy_buffer_to_buffer(packed, 0, buffer, 0, packed.size());
+                continue;
+            }
+            let (buffer, offset) = match (&slot, &m.buffer) {
+                (Some((_, shared)), _) => (shared, m.offset),
                 (None, Some(buffer)) => (buffer, 0),
                 (None, None) => continue,
             };
@@ -425,10 +529,14 @@ impl Screen {
         };
         let submission = gpu.submit([encoder.finish()]);
         let mut out = match sink {
-            Sink::Cuda(_, frames) => self.handed(gpu, frames, submission)?,
+            Sink::Cuda(_, frames) => {
+                let (slot, _) =
+                    slot.ok_or_else(|| Error::Invalid("no memory is shared with CUDA".into()))?;
+                self.handed(gpu, frames, submission, slot)?
+            }
             Sink::Memory => self.read_back(gpu, pixel, size, submission)?,
             Sink::Surface(f) => {
-                wait(gpu, submission)?;
+                wait(&gpu.device, submission)?;
                 f
             }
             Sink::Held => {
@@ -442,18 +550,13 @@ impl Screen {
     }
 
     fn handed(
-        &self,
+        &mut self,
         gpu: &Gpu,
         frames: &CudaFrames,
         submission: wgpu::SubmissionIndex,
+        slot: Slot,
     ) -> Result<frame::Video> {
-        let shared = self
-            .encoded
-            .shared
-            .as_ref()
-            .ok_or_else(|| Error::Invalid("no memory is shared with CUDA".into()))?;
-        wait(gpu, submission)?;
-        let out = frames.fresh()?;
+        let mut out = frames.fresh()?;
         let planes: Vec<PlaneCopy> = self
             .encoded
             .made
@@ -465,7 +568,17 @@ impl Screen {
                 rows: u64::from(m.size.1),
             })
             .collect();
-        shared.empty_into(&out, &planes).map_err(Error::Invalid)?;
+        let into = crate::export::video::frame_ref(&out)?;
+        self.encoded.serial += 1;
+        let serial = self.encoded.serial;
+        lock(&slot).work = Some(Work {
+            device: gpu.device.clone(),
+            submission,
+            planes,
+            into,
+            serial,
+        });
+        super::carried::carry(&mut out, Handed { slot, serial }, &HANDED)?;
         Ok(out)
     }
 
@@ -491,7 +604,7 @@ impl Screen {
             });
         }
         drop(tx);
-        wait(gpu, submission)?;
+        wait(&gpu.device, submission)?;
         for r in rx {
             r.map_err(|e| Error::Invalid(format!("the GPU gave no frame back: {e}")))?;
         }
@@ -518,8 +631,8 @@ impl Screen {
     }
 }
 
-fn wait(gpu: &Gpu, submission: wgpu::SubmissionIndex) -> Result<()> {
-    gpu.device
+fn wait(device: &wgpu::Device, submission: wgpu::SubmissionIndex) -> Result<()> {
+    device
         .poll(wgpu::PollType::Wait {
             submission_index: Some(submission),
             timeout: None,
@@ -655,23 +768,36 @@ fn made(
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: plane.format,
-            usage: match target {
-                Target::Held => {
-                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
-                }
-                _ => wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage: if target == Target::Held || plane.packed {
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+            } else {
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC
             },
             view_formats: &[],
         })
     });
-    let row = size.0 * plane.texel;
-    let padded =
-        row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let (row, padded) = if plane.packed {
+        (size.0 * 3, size.0 * 3)
+    } else {
+        let row = size.0 * plane.texel;
+        let aligned = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        (row, row.div_ceil(aligned) * aligned)
+    };
+    let length =
+        (u64::from(padded) * u64::from(size.1)).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
     let buffer = (target == Target::Memory).then(|| {
         gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vidcut encoding"),
-            size: u64::from(padded) * u64::from(size.1),
+            size: length,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        })
+    });
+    let packed = (plane.packed && target == Target::Memory).then(|| {
+        gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vidcut encoding"),
+            size: length,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         })
     });
@@ -686,6 +812,7 @@ fn made(
     Made {
         texture,
         buffer,
+        packed,
         params,
         size,
         padded,

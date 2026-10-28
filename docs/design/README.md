@@ -62,10 +62,12 @@ vidcut processes each picture in this order. The [spec](../cut-page-spec.md#13-o
 2. The reader deinterlaces an interlaced frame (`Deinterlacer`, [gpu](gpu.md#deinterlacing-and-hdr)).
 3. An AI upscaler of Super Scale enlarges the frame (`Source::ai_picture`, [gpu](gpu.md#super-scale)).
 4. Retime Process makes a frame between two source frames (`VideoFrames::retimed_frame`, [export](export.md#which-source-frame)).
-   - The pair is upright, at the size that the picture shows at.
+   - The draw first sizes and places each frame of the pair: Classic Super Scale, Transform, Crop and Dynamic Zoom.
+   - The frame is made from the two placed pictures.
 5. The draw (`crates/vidcut-av/src/screen/picture.wgsl`) does the rest of the timeline, one layer after the other:
    - It samples each picture where `place::Placing` puts it: Transform, Crop and Dynamic Zoom ([export](export.md#placed-pictures)).
    - Classic Super Scale enlarges in the same sample (`screen::kernel`).
+   - A made frame of Retime Process is already placed (`Sampling::Placed`). The draw takes only its edges from `place::Placing`.
    - It converts each sample into the timeline color space (`color::shader_colors`).
    - It mixes the layer with the layers below, by its composite mode and opacity (`Placing::mode`).
    - Titles and dissolves are layers and mixes of the same draw.

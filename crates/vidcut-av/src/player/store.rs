@@ -16,6 +16,9 @@ pub(crate) enum Kind {
 
 impl Kind {
     pub(crate) fn of(picture: &Picture) -> Self {
+        if picture.held_on_gpu() {
+            return Self::Video;
+        }
         Self::kept_by(picture.in_video_memory())
     }
 
@@ -33,8 +36,13 @@ impl Kind {
 
 fn charges(picture: &Picture) -> [usize; 2] {
     let mut bytes = [0; 2];
-    for (n, gpu) in picture.layers() {
-        bytes[Kind::kept_by(gpu).index()] += n;
+    for (n, gpu, held) in picture.layers() {
+        let kind = if held {
+            Kind::Video
+        } else {
+            Kind::kept_by(gpu)
+        };
+        bytes[kind.index()] += n;
     }
     bytes
 }

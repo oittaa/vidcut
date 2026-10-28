@@ -158,11 +158,16 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
 - With an AI upscaler of Super Scale, the upscaler enlarges the two frames of the pair first (`scaled_pair`). The frame is then made from the two enlarged pictures.
   - Why: Super Scale works on the source, before the retime ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
   - The `Source` keeps the last two enlarged pictures (`Source::ai_picture`). Thus the later picture of one pair is the earlier picture of the next.
-- With the frame rate conversion of macOS and two VideoToolbox frames, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
-- Else the pair becomes RGB on the GPU, upright, at the size that the picture shows at (`between_size`). `interpolate::between` makes the frame.
-  - This size is at most the size of the source, or of the enlarged pictures.
-  - `Source::rgb_from` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next.
-- The made frame then goes through the usual fitting.
+- With the frame rate conversion of macOS, two VideoToolbox frames and no placed picture, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
+- The pair is sized and placed before the frame is made. Why: Edit Sizing comes before Speed Effects ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+  - A clip with no placed picture: each frame becomes RGB on the GPU, upright, at the size that it fills in the frame (`fitted_size`).
+  - A placed clip: the draw places each frame into RGB with its Transform, Crop and Dynamic Zoom (`Sampling::Colors`). The RGB covers only the bounds of the placed picture (`placed_look`).
+  - Super Scale enlarges each frame with the kernel of its Sharpness, as the draw of an export does (`screen::kernel`).
+  - `Source::rgb_from` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next, while the placing stays the same (`Look`).
+- `interpolate::between` makes the frame from the two RGB pictures.
+- The key of a pair names its placing (`Source::look_id`). Thus a new placing gets new features.
+- A made frame of a placed clip is already placed (`Sampling::Placed`). The draw takes only its edges, its opacity and its composite mode from `place::Placing`.
+  - The draw uses the placing that the frame was made with. Thus during a drag in the viewer, a made frame moves only when it is made again.
 - An exact source frame, the first frame of a file, an HDR frame, a piece played backward and a still take the usual path.
 
 Seeks:
@@ -189,9 +194,12 @@ Each mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-d
   - Each layer, title and subtitle goes there as in the viewer.
   - Why: a color above 1 or below 0 stays between the layers ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - Then `fs_encode` writes each plane of the encoder's pixel format from `Wide` (`Screen::encoded`).
-  - It converts the timeline colors to the colors of the output. An SDR output is BT.709 and an HDR output is BT.2020, both in limited range.
+  - It converts the timeline colors to the colors of the output. An SDR output is BT.709 and an HDR output is BT.2020.
+  - A YUV output is in limited range. An RGB output is in full range, and its tags say so (`color::tag_frame`).
   - HDR to SDR tone-maps with the math of the viewer's `fs_screen`.
-  - A chroma sample is the mean of the pixels that it covers.
+  - 4:2:0 chroma is sited left, and 4:2:2 chroma top-left (`color::chroma_location`). These are the default sites of H.264 4:2:0 and of MPEG-2 4:2:2.
+  - A chroma sample is the mean of the pixels in a box the size of its block, at its site. A pixel that the box covers in part has less weight.
+  - The frame and the encoder get that chroma location.
   - The values are rounded once, at the end.
 - `color::tag_frame` gives the frame its color tags.
 - The frame keeps the HDR10+ and Dolby Vision metadata of its source.
@@ -203,6 +211,9 @@ To the encoder:
 - With NVENC, the encoder takes CUDA frames (`gpu_output`).
   - wgpu copies the planes into a buffer that Vulkan shares with CUDA (`Shared::out`).
   - CUDA copies them into the encoder's frame (`Shared::empty_into`).
+  - The writer thread waits for the draw and makes that copy (`screen::filled`). Meanwhile the next frame decodes and draws.
+  - Two shared buffers take turns. Before a draw uses a buffer again, it makes the copy of that buffer's last frame if the writer has not made it yet.
+  - Why: the decode and the draw of a frame do not wait for the copy of the frame before it. The draw never waits for the writer thread.
 - With VideoToolbox and GPU decoding, the encoder takes frames of the decoder's device. `fs_encode_unorm` draws the planes into the IOSurface of the frame (`Sink::Surface`).
 - The other encoders take frames in memory. wgpu reads the planes back (`Sink::Memory`).
   - VA-API frames, and AMF frames on the decoder's Direct3D 11 device, then go up to the encoder's device (`Upload`).
