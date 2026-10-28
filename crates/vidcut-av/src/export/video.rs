@@ -97,6 +97,7 @@ struct Source {
     ai: Option<crate::super_scale::User>,
     told: bool,
     upright: bool,
+    scaled: Vec<(PictureId, frame::Video)>,
     gpu: Option<crate::hw::GpuDecoder>,
     ahead: Option<VideoReader>,
     run: Option<Session>,
@@ -106,6 +107,8 @@ struct Source {
     keeper: Option<crate::hw::Keeper>,
     unkept: bool,
 }
+
+type ScaledPair = (frame::Video, frame::Video, (u32, u32));
 
 const DECODE_AHEAD: f64 = 1.0;
 
@@ -188,6 +191,7 @@ impl Source {
             ai: crate::super_scale::User::of(super_scale),
             told: false,
             upright: false,
+            scaled: Vec::new(),
             gpu: ahead_gpu,
             ahead: None,
             run: None,
@@ -246,6 +250,7 @@ impl Source {
             ai: None,
             told: false,
             upright: false,
+            scaled: Vec::new(),
             gpu: ahead_gpu,
             ahead: None,
             run: None,
@@ -378,6 +383,7 @@ impl Source {
         self.ai = None;
         self.retimer = None;
         self.rgb.clear();
+        self.scaled.clear();
     }
 
     fn back(&mut self) {
@@ -399,6 +405,7 @@ impl Source {
         self.prev = None;
         self.prev2 = None;
         self.rgb.clear();
+        self.scaled.clear();
         self.lumas.clear();
     }
 
@@ -452,21 +459,27 @@ impl Source {
         Ok(f64::from(score) >= vidcut_core::analysis::SCENE_SCORE)
     }
 
-    fn rgb_of(
-        &mut self,
-        prev: bool,
-        size: (u32, u32),
-        reading: Reading,
-    ) -> Result<(Option<i64>, frame::Video)> {
+    fn rgb_of(&mut self, prev: bool, size: (u32, u32), reading: Reading) -> Result<frame::Video> {
         let rotation = self.reader.rotation();
         let (f, _) = match prev {
             true => self.prev.as_ref(),
             false => self.current.as_ref(),
         }
         .expect("a frame");
+        let f = frame_ref(f)?;
+        self.rgb_from(&f, rotation, size, reading)
+    }
+
+    fn rgb_from(
+        &mut self,
+        f: &frame::Video,
+        rotation: u16,
+        size: (u32, u32),
+        reading: Reading,
+    ) -> Result<frame::Video> {
         let pts = f.pts();
         if let Some((_, _, rgb)) = self.rgb.iter().find(|(p, s, _)| *p == pts && *s == size) {
-            return Ok((pts, frame_ref(rgb)?));
+            return frame_ref(rgb);
         }
         let rgb = shown_rgb(
             &mut self.drawn,
@@ -481,7 +494,18 @@ impl Source {
             self.rgb.remove(0);
         }
         self.rgb.push((pts, size, frame_ref(&rgb)?));
-        Ok((pts, rgb))
+        Ok(rgb)
+    }
+
+    fn note_upscaled(&mut self, upscaler: Upscaler) {
+        if self.told {
+            return;
+        }
+        crate::progress::note(super::Note::Upscaled(super::UpscaleNote {
+            path: self.reader.path().to_path_buf(),
+            how: crate::super_scale::name(upscaler).into(),
+        }));
+        self.told = true;
     }
 
     fn resume(&mut self, origin: f64, source_frame: i64, target: f64) -> Result<()> {
@@ -726,12 +750,17 @@ impl Source {
 
     fn ai_picture(
         &mut self,
+        prev: bool,
         target: (u32, u32),
         reading: Reading,
         upscaler: Upscaler,
     ) -> Result<Option<frame::Video>> {
         let rotation = self.reader.rotation();
-        let (frame, _) = self.current.as_ref().expect("have a frame");
+        let (frame, _) = match prev {
+            true => self.prev.as_ref(),
+            false => self.current.as_ref(),
+        }
+        .expect("have a frame");
         let sar = frame.aspect_ratio();
         let sar = (sar.numerator(), sar.denominator());
         let shown = super::normalize::shown_size(frame, rotation, target);
@@ -776,23 +805,42 @@ impl Source {
                 None => Key::Still(pts),
             },
         };
-        if let Some(p) = self.taken(&id)? {
-            return Ok(Some(p));
+        if let Some((_, p)) = self.scaled.iter().find(|(k, _)| *k == id) {
+            return frame_ref(p).map(Some);
         }
-        if self.run.as_ref().is_some_and(|r| !r.covers(&id, size)) {
+        let p = self.ai_made(&id, size, reading)?;
+        if !self.retime.is_nearest() {
+            if self.scaled.len() >= 2 {
+                self.scaled.remove(0);
+            }
+            self.scaled.push((id, frame_ref(&p)?));
+        }
+        Ok(Some(p))
+    }
+
+    fn ai_made(
+        &mut self,
+        id: &PictureId,
+        size: (u32, u32),
+        reading: Reading,
+    ) -> Result<frame::Video> {
+        if let Some(p) = self.taken(id)? {
+            return Ok(p);
+        }
+        if self.run.as_ref().is_some_and(|r| !r.covers(id, size)) {
             self.run = None;
         }
         if self.run.is_some() {
-            crate::super_scale::settle(upscaler);
-            if let Some(p) = self.taken(&id)? {
-                return Ok(Some(p));
+            crate::super_scale::settle(id.upscaler);
+            if let Some(p) = self.taken(id)? {
+                return Ok(p);
             }
         }
-        let made = self.ai_run(&id, size, reading);
+        let made = self.ai_run(id, size, reading);
         if made.is_err() {
             self.run = None;
         }
-        made.map(Some)
+        made
     }
 
     fn taken(&mut self, id: &PictureId) -> Result<Option<frame::Video>> {
@@ -2115,13 +2163,22 @@ impl VideoFrames {
         };
         let (w, h, _) = self.maker.out();
         let reading = self.open[s].pictures.reading(self.maker.reading());
+        let scaled = self.scaled_pair(s, layer, reading)?;
+        let start = Instant::now();
         let src = &mut self.open[s];
         let rotation = src.reader.rotation();
         let (cur, _) = src.current.as_ref().expect("a frame");
-        let size = between_size(cur, rotation, (w, h));
-        let start = Instant::now();
-        let pair = match (&src.prev, &src.current) {
-            (Some((a, _)), Some((b, _))) if crate::interpolate::takes_frames(*retime, a, b) => {
+        let size = match &scaled {
+            Some((_, b, aim)) => between_size(b, 0, *aim),
+            None => between_size(cur, rotation, (w, h)),
+        };
+        let pair = match (&scaled, &src.prev, &src.current) {
+            (Some((a, b, _)), ..) if crate::interpolate::takes_frames(*retime, a, b) => {
+                Some((frame_ref(a)?, frame_ref(b)?))
+            }
+            (None, Some((a, _)), Some((b, _)))
+                if crate::interpolate::takes_frames(*retime, a, b) =>
+            {
                 let turner = &mut src.turner;
                 Some((
                     crate::hw::Turner::turn(turner, a, rotation)?,
@@ -2130,11 +2187,15 @@ impl VideoFrames {
             }
             _ => None,
         };
-        let pictures = match pair {
-            Some(_) => None,
-            None => Some((
-                src.rgb_of(true, size, reading)?.1,
-                src.rgb_of(false, size, reading)?.1,
+        let pictures = match (&pair, &scaled) {
+            (Some(_), _) => None,
+            (None, Some((a, b, _))) => Some((
+                src.rgb_from(a, 0, size, reading)?,
+                src.rgb_from(b, 0, size, reading)?,
+            )),
+            (None, None) => Some((
+                src.rgb_of(true, size, reading)?,
+                src.rgb_of(false, size, reading)?,
             )),
         };
         let pts = |f: &Option<(frame::Video, f64)>| f.as_ref().and_then(|(f, _)| f.pts());
@@ -2154,15 +2215,16 @@ impl VideoFrames {
             );
             crate::interpolate::kept_at_cut(*retime, size, weight);
             let nearer = weight < 0.5;
-            let mut picture = match pictures {
-                Some((a, b)) => {
+            let mut picture = match (pictures, &scaled) {
+                (Some((a, b)), _) => {
                     if nearer {
                         a
                     } else {
                         b
                     }
                 }
-                None => src.rgb_of(nearer, size, reading)?.1,
+                (None, Some((a, b, _))) => frame_ref(if nearer { a } else { b })?,
+                (None, None) => src.rgb_of(nearer, size, reading)?,
             };
             picture.set_pts(pb);
             picture
@@ -2218,19 +2280,12 @@ impl VideoFrames {
             } => (placed.as_slice(), *super_scale),
             _ => (&[][..], SuperScale::default()),
         };
+        let aim = self.aim(s, placed, super_scale);
         let src = &mut self.open[s];
-        let (w, h, _) = self.maker.out();
         if changed || src.normalized.is_none() {
-            let rotation = src.reader.rotation();
             let reading = src.pictures.reading(self.maker.reading());
             let big = if super_scale.ai() {
-                let aim = match (placed.is_empty(), &src.current) {
-                    (false, Some((frame, _))) => {
-                        layer_size((w, h), frame, rotation, placed, super_scale)
-                    }
-                    _ => (w, h),
-                };
-                src.ai_picture(aim, reading, super_scale.upscaler)?
+                src.ai_picture(false, aim, reading, super_scale.upscaler)?
             } else {
                 None
             };
@@ -2256,16 +2311,52 @@ impl VideoFrames {
             }
             src.normalized = Some(made);
             src.upright = big.is_some();
-            if big.is_some() && !src.told {
-                crate::progress::note(super::Note::Upscaled(super::UpscaleNote {
-                    path: src.reader.path().to_path_buf(),
-                    how: crate::super_scale::name(super_scale.upscaler).into(),
-                }));
-                src.told = true;
+            if big.is_some() {
+                src.note_upscaled(super_scale.upscaler);
             }
         }
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
         self.finished_layer(s, picture)
+    }
+
+    fn aim(&self, s: usize, placed: &[Placed], super_scale: SuperScale) -> (u32, u32) {
+        let (w, h, _) = self.maker.out();
+        let src = &self.open[s];
+        match (placed.is_empty(), &src.current) {
+            (false, Some((frame, _))) => {
+                layer_size((w, h), frame, src.reader.rotation(), placed, super_scale)
+            }
+            _ => (w, h),
+        }
+    }
+
+    fn scaled_pair(
+        &mut self,
+        s: usize,
+        layer: &VideoPiece,
+        reading: Reading,
+    ) -> Result<Option<ScaledPair>> {
+        let VideoPiece::Source {
+            placed,
+            super_scale,
+            ..
+        } = layer
+        else {
+            return Ok(None);
+        };
+        if !super_scale.ai() {
+            return Ok(None);
+        }
+        let aim = self.aim(s, placed, *super_scale);
+        let src = &mut self.open[s];
+        let Some(a) = src.ai_picture(true, aim, reading, super_scale.upscaler)? else {
+            return Ok(None);
+        };
+        let Some(b) = src.ai_picture(false, aim, reading, super_scale.upscaler)? else {
+            return Ok(None);
+        };
+        src.note_upscaled(super_scale.upscaler);
+        Ok(Some((a, b, aim)))
     }
 
     fn finished_layer(&mut self, s: usize, mut out: frame::Video) -> Result<frame::Video> {
