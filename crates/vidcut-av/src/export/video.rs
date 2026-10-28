@@ -402,12 +402,33 @@ impl Source {
         self.lumas.clear();
     }
 
-    fn luma_of(&mut self, f: &frame::Video) -> Result<Vec<u8>> {
+    fn luma_of(&mut self, f: &frame::Video, size: (u32, u32), reading: Reading) -> Result<Vec<u8>> {
         let pts = f.pts();
         if let Some((_, l)) = self.lumas.iter().find(|(p, _)| *p == pts) {
             return Ok(l.clone());
         }
-        let l = crate::analysis::small_luma(&mut None, f)?;
+        let held = self
+            .rgb
+            .iter()
+            .find(|(p, s, _)| *p == pts && *s == size)
+            .map(|(_, _, rgb)| frame_ref(rgb))
+            .transpose()?;
+        let held = match held {
+            Some(rgb) => Some(rgb),
+            None if crate::hw::on_gpu(f) => Some(shown_rgb(
+                &mut self.drawn,
+                f,
+                self.reader.rotation(),
+                size,
+                reading,
+                self.reader.path(),
+            )?),
+            None => None,
+        };
+        let l = match (held, &self.drawn) {
+            (Some(rgb), Some(single)) => single.small_luma(&rgb)?,
+            _ => crate::analysis::small_luma(&mut None, f)?,
+        };
         if self.lumas.len() >= 3 {
             self.lumas.remove(0);
         }
@@ -415,13 +436,17 @@ impl Source {
         Ok(l)
     }
 
-    fn cut(&mut self) -> Result<bool> {
+    fn cut(&mut self, size: (u32, u32), reading: Reading) -> Result<bool> {
         let (Some((z, _)), Some((a, _)), Some((b, _))) = (&self.prev2, &self.prev, &self.current)
         else {
             return Ok(false);
         };
         let (z, a, b) = (frame_ref(z)?, frame_ref(a)?, frame_ref(b)?);
-        let (lz, la, lb) = (self.luma_of(&z)?, self.luma_of(&a)?, self.luma_of(&b)?);
+        let (lz, la, lb) = (
+            self.luma_of(&z, size, reading)?,
+            self.luma_of(&a, size, reading)?,
+            self.luma_of(&b, size, reading)?,
+        );
         let before = crate::analysis::mafd(&lz, &la);
         let score = crate::analysis::scene_score(crate::analysis::mafd(&la, &lb), before);
         Ok(f64::from(score) >= vidcut_core::analysis::SCENE_SCORE)
@@ -1245,6 +1270,10 @@ impl Single {
         let layers = (&[][..], &[][..], &[][..], None);
         self.drawer
             .frame(&picture, &[], layers, size, (pixel, (None, None)))
+    }
+
+    pub(crate) fn small_luma(&self, picture: &frame::Video) -> Result<Vec<u8>> {
+        crate::screen::held::small_luma(self.drawer.gpu, picture, crate::analysis::MEASURE)
     }
 
     pub(crate) fn held(
@@ -2117,7 +2146,7 @@ impl VideoFrames {
         );
         let clock = Instant::now();
         let converted = clock - start;
-        let big = if src.cut()? {
+        let big = if src.cut(size, reading)? {
             crate::debug!(
                 "interpolate",
                 "{}: a cut between the frames at {weight:.3}",

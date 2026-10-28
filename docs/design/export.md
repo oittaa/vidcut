@@ -151,6 +151,10 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
 - At a shot change between the two frames, the nearer frame shows (`Source::cut`).
   - The test is the scene score of Detect Scene Cuts over three frames (`analysis::scene_score`, `SCENE_SCORE`).
   - A pair with no decoded frame before it is not a cut. Why: a false cut holds a frame here, but only marks a shot in Detect Scene Cuts.
+  - The score compares small luma pictures of 96×54 (`analysis::MEASURE`).
+  - A frame on the GPU, or a frame with its RGB on the GPU, gets its small picture on the GPU (`held::small_luma`). It is the area average of the BT.709 luma of the RGB, in TV range.
+  - Only the small picture comes down. Why: the test does not need the whole frame.
+  - A frame in memory gets its small picture from FFmpeg's scaler (`analysis::small_luma`).
 - With the frame rate conversion of macOS and two VideoToolbox frames, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
 - Else the pair becomes RGB on the GPU, upright, at the size that the picture shows at, at most the source size (`between_size`). `interpolate::between` makes the frame.
   - `Source::rgb_of` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next.

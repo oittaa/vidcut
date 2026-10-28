@@ -155,9 +155,32 @@ pub(crate) fn in_memory(f: &frame::Video) -> Result<frame::Video> {
     Ok(out)
 }
 
+pub(crate) fn small_luma(
+    gpu: &super::Gpu,
+    f: &frame::Video,
+    (ow, oh): (u32, u32),
+) -> Result<Vec<u8>> {
+    let held = held(f)?;
+    let size = (f.width(), f.height());
+    let whole = u64::from(size.0) * u64::from(size.1) * 3;
+    if !held.on(&gpu.device) || held.buffer().size() < whole {
+        return Err(Error::Invalid(
+            "the picture to measure isn't held on the drawing's GPU".into(),
+        ));
+    }
+    let small = gpu
+        .checked(|| {
+            gpu.held
+                .luma((&gpu.device, &gpu.queue), held.buffer(), size, (ow, oh))
+        })
+        .map_err(Error::Invalid)?;
+    Held::new(small, &gpu.device, &gpu.queue).read(ow as usize * oh as usize)
+}
+
 pub(super) struct Pipes {
     pack: wgpu::ComputePipeline,
     unpack: wgpu::ComputePipeline,
+    luma: wgpu::ComputePipeline,
 }
 
 impl Pipes {
@@ -179,6 +202,7 @@ impl Pipes {
         Self {
             pack: made("pack"),
             unpack: made("unpack"),
+            luma: made("luma"),
         }
     }
 
@@ -253,5 +277,55 @@ impl Pipes {
             picture.height().div_ceil(16),
             1,
         );
+    }
+
+    fn luma(
+        &self,
+        (device, queue): (&wgpu::Device, &wgpu::Queue),
+        rgb: &wgpu::Buffer,
+        (w, h): (u32, u32),
+        (ow, oh): (u32, u32),
+    ) -> wgpu::Buffer {
+        let words = (u64::from(ow) * u64::from(oh)).div_ceil(4);
+        let small = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vidcut small luma"),
+            size: words * 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let sizes = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vidcut small luma"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&sizes, 0, &[w, h, ow, oh].map(u32::to_le_bytes).concat());
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vidcut rgb"),
+            layout: &self.luma.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: rgb.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: small.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: sizes.as_entire_binding(),
+                },
+            ],
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&self.luma);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.dispatch_workgroups(words.div_ceil(64) as u32, 1, 1);
+        }
+        queue.submit([encoder.finish()]);
+        small
     }
 }

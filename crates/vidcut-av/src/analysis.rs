@@ -90,7 +90,7 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
     })
 }
 
-const MEASURE: (u32, u32) = (96, 54);
+pub(crate) const MEASURE: (u32, u32) = (96, 54);
 
 pub fn picture_stats(
     source: &crate::decode::Input,
