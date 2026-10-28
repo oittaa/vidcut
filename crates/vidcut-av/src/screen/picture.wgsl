@@ -72,12 +72,13 @@ fn opacity(u: vec2<f32>) -> f32 {
 
 fn weight(x: f32, kind: u32) -> f32 {
     let a = abs(x);
-    if kind == 1u {
+    if kind == 1u || kind == 4u {
+        let k = select(-0.5, -0.6, kind == 4u);
         if a < 1.0 {
-            return (1.5 * a - 2.5) * a * a + 1.0;
+            return ((k + 2.0) * a - (k + 3.0)) * a * a + 1.0;
         }
         if a < 2.0 {
-            return ((-0.5 * a + 2.5) * a - 4.0) * a + 2.0;
+            return ((k * a - 5.0 * k) * a + 8.0 * k) * a - 4.0 * k;
         }
         return 0.0;
     }
@@ -92,20 +93,32 @@ fn weight(x: f32, kind: u32) -> f32 {
     return lobes * sin(t) * sin(t / lobes) / (t * t);
 }
 
-fn sharp(u: vec2<f32>) -> vec3<f32> {
-    let kind = p.flags.w;
+fn resamples(spans: vec2<f32>) -> bool {
+    if (p.flags.w & 7u) == 0u {
+        return false;
+    }
+    if (p.flags.w & 8u) != 0u {
+        return any(abs(spans - vec2<f32>(1.0)) > vec2<f32>(1e-4));
+    }
+    return max(spans.x, spans.y) < 1.0;
+}
+
+fn sharp(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
+    let kind = p.flags.w & 7u;
     let size = p.upright.xy;
-    let reach = select(select(4, 3, kind == 2u), 2, kind == 1u);
+    let lobes = select(select(4.0, 3.0, kind == 2u), 2.0, kind == 1u || kind == 4u);
+    let wide = clamp(spans, vec2<f32>(1.0), vec2<f32>(4.0));
+    let reach = vec2<i32>(ceil(lobes * wide));
     let t = u * size - 0.5;
     let base = floor(t);
     let f = t - base;
     let half = vec2<f32>(0.5) / size;
     var sum = vec3<f32>(0.0);
     var total = 0.0;
-    for (var j = 1 - reach; j <= reach; j++) {
-        let wy = weight(f32(j) - f.y, kind);
-        for (var i = 1 - reach; i <= reach; i++) {
-            let w = weight(f32(i) - f.x, kind) * wy;
+    for (var j = 1 - reach.y; j <= reach.y; j++) {
+        let wy = weight((f32(j) - f.y) / wide.y, kind);
+        for (var i = 1 - reach.x; i <= reach.x; i++) {
+            let w = weight((f32(i) - f.x) / wide.x, kind) * wy;
             let q = (base + vec2<f32>(f32(i), f32(j)) + 0.5) / size;
             sum += yuv(clamp(q, half, vec2<f32>(1.0) - half)) * w;
             total += w;
@@ -230,8 +243,8 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     let size = p.upright.xy;
     let spans = vec2<f32>(length(across * size), length(down * size));
     let a = cover * p.placed.y * opacity(uv);
-    if p.flags.w > 0u && max(spans.x, spans.y) < 1.0 {
-        return vec4<f32>(rgb(sharp(uv)), a);
+    if resamples(spans) {
+        return vec4<f32>(rgb(sharp(uv, spans)), a);
     }
     let taps = vec2<u32>(clamp(ceil(spans), vec2<f32>(1.0), vec2<f32>(8.0)));
     let half = vec2<f32>(0.5) / size;
@@ -364,8 +377,8 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     }
     let cover = p.upright.xy / p.place.zw;
     let a = opacity(rel);
-    if p.flags.w > 0u && max(cover.x, cover.y) < 1.0 {
-        return vec4<f32>(rgb(sharp(rel)) * a, 1.0);
+    if resamples(cover) {
+        return vec4<f32>(rgb(sharp(rel, cover)) * a, 1.0);
     }
     let taps = vec2<u32>(clamp(ceil(cover), vec2<f32>(1.0), vec2<f32>(8.0)));
     let step = vec2<f32>(1.0) / (p.place.zw * vec2<f32>(taps));

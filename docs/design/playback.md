@@ -200,6 +200,9 @@ The audio device:
 - The drawing:
   - It fits the picture and turns it upright.
   - It scales in YUV and converts to RGB (`shader_colors`). In an SDR timeline, it tone-maps HDR.
+  - The viewer enlarges with one bilinear sample, and shrinks with a box of bilinear samples.
+  - An export, a proxy and a thumbnail scale with a bicubic kernel (`sharp`). The kernel widens when the picture shrinks.
+  - Why: the viewer must be fast, and an export must keep the detail of the picture.
   - The layers of a dissolve are more draws in the pass.
   - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
   - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).
@@ -222,6 +225,7 @@ The audio device:
 - The viewer shows the pictures of some decoders from GPU memory (`Gpu::gpu_pictures`). These pictures stay there, in the video budget. The pictures of the other decoders come down.
 - [gpu](gpu.md) has the path of each decoder to the screen.
 - The shader lays a picture by its straight alpha. AYUV64 holds the alpha in its one texture. A picture in memory with alpha is `yuva444p12le`, with the alpha in a fourth texture (`Picture::alpha_plane`).
+- A picture in memory in RGB or 4:4:4 is `yuv444p12le`, and a 4:2:2 picture stays 4:2:2 (`Relayout`). Why: 4:2:0 loses color detail.
 
 ## Sound
 

@@ -132,6 +132,10 @@ fn device(label: &str) -> std::result::Result<(wgpu::Adapter, wgpu::Device, wgpu
     Ok((adapter, device, queue))
 }
 
+const RESIZE: u32 = 4;
+
+const WIDENS: u32 = 8;
+
 pub fn kernel(sharp: Option<vidcut_core::model::Sharpness>) -> u32 {
     use vidcut_core::model::Sharpness;
     match sharp {
@@ -1125,6 +1129,7 @@ impl Screen {
                 i += 1;
             }
         }
+        let exported = self.exported;
         let binds: Vec<(wgpu::BindGroup, Option<f64>, bool, bool)> = layers
             .iter()
             .zip(&mut self.slots)
@@ -1138,7 +1143,11 @@ impl Screen {
                 let blended = placing
                     .as_ref()
                     .is_some_and(|(p, _)| p.mode != CompositeMode::Normal);
-                let kernel = kernels.get(i).copied().unwrap_or(0);
+                let kernel = match kernels.get(i).copied().unwrap_or(0) {
+                    0 if exported => RESIZE | WIDENS,
+                    k if exported => k | WIDENS,
+                    k => k,
+                };
                 let how = (placing.as_ref(), kernel, colors, paired[i]);
                 let bind = slot.prepare(gpu, picture, size, how, &mut encoder);
                 (bind, level, placing.is_some(), blended)

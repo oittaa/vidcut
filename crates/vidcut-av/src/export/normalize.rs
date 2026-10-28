@@ -71,17 +71,22 @@ pub(crate) fn displayable(p: format::Pixel) -> bool {
 
 pub(crate) struct Relayout {
     passes: fn(format::Pixel) -> bool,
+    keeps_chroma: bool,
     graph: Option<(filter::Graph, (u32, u32, format::Pixel))>,
 }
 
 impl Relayout {
     pub(crate) fn new() -> Self {
-        Self::passing(displayable)
+        Self {
+            keeps_chroma: true,
+            ..Self::passing(displayable)
+        }
     }
 
     pub(crate) fn passing(passes: fn(format::Pixel) -> bool) -> Self {
         Self {
             passes,
+            keeps_chroma: false,
             graph: None,
         }
     }
@@ -93,7 +98,7 @@ impl Relayout {
         }
         let key = (src.width(), src.height(), fmt);
         if self.graph.as_ref().is_none_or(|(_, k)| *k != key) {
-            self.graph = Some((Self::build(src, reading)?, key));
+            self.graph = Some((Self::build(src, reading, self.keeps_chroma)?, key));
         }
         let (graph, _) = self.graph.as_mut().expect("built");
         graph
@@ -112,22 +117,33 @@ impl Relayout {
         Ok(out)
     }
 
-    fn build(src: &frame::Video, reading: Reading) -> Result<filter::Graph> {
+    fn build(src: &frame::Video, reading: Reading, keeps_chroma: bool) -> Result<filter::Graph> {
         let desc = src
             .format()
             .descriptor()
             .ok_or_else(|| Error::Invalid("unknown pixel format".into()))?;
-        let (depth, rgb) = unsafe {
+        let (depth, rgb, chroma) = unsafe {
             let d = &*desc.as_ptr();
             (
                 d.comp[0].depth,
                 d.flags & (ffmpeg::ffi::AV_PIX_FMT_FLAG_RGB as u64) != 0,
+                (d.log2_chroma_w, d.log2_chroma_h),
             )
         };
-        let target = match (has_alpha(src.format()), depth > 8) {
-            (true, _) => "yuva444p12le",
-            (false, true) => "p010le",
-            (false, false) => "yuv420p",
+        let full = rgb || chroma == (0, 0) || depth > 10;
+        let target = match (
+            has_alpha(src.format()),
+            keeps_chroma,
+            full,
+            chroma,
+            depth > 8,
+        ) {
+            (true, ..) => "yuva444p12le",
+            (false, true, true, ..) => "yuv444p12le",
+            (false, true, false, (1, 0), true) => "yuv422p10le",
+            (false, true, false, (1, 0), false) => "yuv422p",
+            (false, _, _, _, true) => "p010le",
+            (false, _, _, _, false) => "yuv420p",
         };
         let spec = if rgb {
             let flags = crate::color::CONVERT;
@@ -214,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn a_picture_brought_to_4_2_0_keeps_its_matrix_and_range() {
+    fn a_4_4_4_picture_keeps_its_chroma_matrix_and_range() {
         let mut f = frame::Video::new(Pixel::YUV444P, 64, 64);
         f.set_color_space(color::Space::BT709);
         f.set_color_range(color::Range::MPEG);
@@ -223,16 +239,23 @@ mod tests {
             f.data_mut(plane).fill(v);
         }
         let out = Relayout::new().run(&f, Reading::Stream).unwrap();
-        let samples = |plane: usize, side: usize| -> Vec<u8> {
+        let samples = |plane: usize, side: usize| -> Vec<u16> {
             let stride = out.stride(plane);
             (0..side)
-                .flat_map(|y| out.data(plane)[y * stride..y * stride + side].to_vec())
+                .flat_map(|y| {
+                    out.data(plane)[y * stride..y * stride + side * 2]
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|&b| u16::from_le_bytes(b))
+                        .collect::<Vec<_>>()
+                })
                 .collect()
         };
-        assert_eq!(out.format(), Pixel::YUV420P);
-        assert_eq!(samples(0, 64), vec![100; 64 * 64]);
-        assert_eq!(samples(1, 32), vec![90; 32 * 32]);
-        assert_eq!(samples(2, 32), vec![170; 32 * 32]);
+        assert_eq!(out.format(), Pixel::YUV444P12LE);
+        assert_eq!(samples(0, 64), vec![100 << 4; 64 * 64]);
+        assert_eq!(samples(1, 64), vec![90 << 4; 64 * 64]);
+        assert_eq!(samples(2, 64), vec![170 << 4; 64 * 64]);
     }
 
     #[test]
