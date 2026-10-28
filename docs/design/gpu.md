@@ -92,6 +92,7 @@ The draw:
     - vidcut makes the device at the first draw on that GPU.
     - When wgpu has no adapter on that GPU, the device opens on the adapter that wgpu picks. vidcut prints which.
     - After a change of `gpu.device`, the AI upscalers and the frame interpolation start again on the new device (`start_on_offscreen`).
+    - The draw that makes their input starts again on the new device too (`Single::on_offscreen`).
   - The viewer's frame render, the AI upscalers and the frame interpolation use that device too (`compute::Gpu`).
   - It opens with all the limits of the GPU. Why: the AI kernels need large buffers and much workgroup memory.
   - It is not the device of the viewer: a submit from another thread can make the viewer's surface fail ([gotchas](../gotchas.md#wgpu-and-egui)).

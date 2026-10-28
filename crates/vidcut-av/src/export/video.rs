@@ -739,6 +739,9 @@ fn shown_rgb(
     reading: Reading,
     path: &Path,
 ) -> Result<frame::Video> {
+    if drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
+        *drawn = None;
+    }
     let single = match drawn {
         Some(single) => single,
         None => drawn.insert(Single::new(reading)?),
@@ -1386,6 +1389,10 @@ impl Single {
         let layers = (&[][..], &[][..], &[][..], None);
         self.drawer
             .frame(&picture, &[], layers, size, (pixel, (None, None)))
+    }
+
+    fn on_offscreen(&self) -> bool {
+        crate::screen::offscreen().is_ok_and(|o| std::ptr::eq(self.drawer.gpu, &o.gpu))
     }
 
     pub(crate) fn small_luma(&self, picture: &frame::Video) -> Result<Vec<u8>> {
