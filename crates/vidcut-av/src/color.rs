@@ -233,6 +233,20 @@ pub(crate) fn chroma_location(pixel: format::Pixel) -> ffi::AVChromaLocation {
     }
 }
 
+pub(crate) fn default_site(f: &mut frame::Video, codec: crate::ffmpeg::codec::Id) {
+    use crate::ffmpeg::codec::Id;
+    use ffi::AVChromaLocation as L;
+    if !matches!(codec, Id::H264 | Id::HEVC) {
+        return;
+    }
+    let left = chroma_location(crate::hw::sw_format(f)) == L::AVCHROMA_LOC_LEFT;
+    // SAFETY: a plain field of a frame the caller owns.
+    let f = unsafe { &mut *f.as_mut_ptr() };
+    if left && f.chroma_location == L::AVCHROMA_LOC_UNSPECIFIED {
+        f.chroma_location = L::AVCHROMA_LOC_LEFT;
+    }
+}
+
 pub(crate) fn tag_frame(f: &mut frame::Video, hdr: Option<Hdr>) {
     let chroma = chroma_location(crate::hw::sw_format(f));
     let tags = Tags::output(hdr);
