@@ -40,7 +40,6 @@ const BLUE: u32 = 2;
 const RED: u32 = 3;
 const ALPHA: u32 = 4;
 const RGBA: u32 = 5;
-const RGB: u32 = 6;
 
 pub(super) struct Encoders {
     layout: wgpu::BindGroupLayout,
@@ -132,7 +131,7 @@ struct Plane {
     format: wgpu::TextureFormat,
     texel: u32,
     sub: (u32, u32),
-    across: u32,
+    packed: bool,
 }
 
 struct Layout {
@@ -149,7 +148,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
         format,
         texel,
         sub,
-        across: 1,
+        packed: false,
     };
     let planar = |depth: u32, sub: (u32, u32), alpha: bool| {
         let (format, texel) = if depth > 8 {
@@ -216,8 +215,8 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
             depth: 8,
             shift: 0,
             planes: vec![Plane {
-                across: 3,
-                ..plane(RGB, T::R8Uint, 1, (0, 0))
+                packed: true,
+                ..plane(RGBA, T::Rgba8Uint, 4, (0, 0))
             }],
         },
         _ => return None,
@@ -226,7 +225,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
 
 fn plane_size(p: &Plane, (w, h): (u32, u32)) -> (u32, u32) {
     let sub = |n: u32, s: u32| (n + (1 << s) - 1) >> s;
-    (sub(w, p.sub.0) * p.across, sub(h, p.sub.1))
+    (sub(w, p.sub.0), sub(h, p.sub.1))
 }
 
 fn params(layout: &Layout, plane: &Plane, (from, to): (Option<Hdr>, Option<Hdr>)) -> Vec<u8> {
@@ -275,6 +274,7 @@ enum Target {
 struct Made {
     texture: Option<wgpu::Texture>,
     buffer: Option<wgpu::Buffer>,
+    packed: Option<wgpu::Buffer>,
     params: wgpu::Buffer,
     size: (u32, u32),
     padded: u32,
@@ -391,6 +391,12 @@ impl Screen {
                 pass.set_pipeline(pipeline);
                 pass.set_bind_group(0, &bind, &[]);
                 pass.draw(0..3, 0..1);
+            }
+            if let (Some(packed), Some(buffer)) = (&m.packed, &m.buffer) {
+                gpu.held
+                    .pack_into(&gpu.device, &mut encoder, texture, packed);
+                encoder.copy_buffer_to_buffer(packed, 0, buffer, 0, packed.size());
+                continue;
             }
             let (buffer, offset) = match (&self.encoded.shared, &m.buffer) {
                 (Some(shared), _) => (shared.buffer(), m.offset),
@@ -655,23 +661,36 @@ fn made(
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: plane.format,
-            usage: match target {
-                Target::Held => {
-                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
-                }
-                _ => wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage: if target == Target::Held || plane.packed {
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+            } else {
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC
             },
             view_formats: &[],
         })
     });
-    let row = size.0 * plane.texel;
-    let padded =
-        row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let (row, padded) = if plane.packed {
+        (size.0 * 3, size.0 * 3)
+    } else {
+        let row = size.0 * plane.texel;
+        let aligned = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        (row, row.div_ceil(aligned) * aligned)
+    };
+    let length =
+        (u64::from(padded) * u64::from(size.1)).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
     let buffer = (target == Target::Memory).then(|| {
         gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vidcut encoding"),
-            size: u64::from(padded) * u64::from(size.1),
+            size: length,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        })
+    });
+    let packed = (plane.packed && target == Target::Memory).then(|| {
+        gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vidcut encoding"),
+            size: length,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         })
     });
@@ -686,6 +705,7 @@ fn made(
     Made {
         texture,
         buffer,
+        packed,
         params,
         size,
         padded,
