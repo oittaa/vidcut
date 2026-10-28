@@ -68,6 +68,8 @@ In the viewer, exports, proxies and thumbnails:
 
 - The viewer imports VA-API pictures only from its own GPU (`player::set_viewer_gpu`). From another GPU, the pictures come down.
   - Why: the viewer cannot import the pictures of another GPU.
+- The draw takes NVDEC pictures only when its wgpu device is on CUDA's GPU, as it does for Vulkan pictures. On another GPU, the pictures come down.
+  - Why: the buffer that Vulkan shares with CUDA is on one GPU.
 - vidcut keeps facts of each VA-API device. `NO_COPY` and `WAYS` are kept by the address of the display. `SIZES` is kept by the device, the layout and the size.
 
 - ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
