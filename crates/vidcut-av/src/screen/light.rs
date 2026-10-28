@@ -172,6 +172,9 @@ impl Meter {
             self.slot.computes = true;
         }
         self.slot.upload(gpu, &picture, &mut encoder);
+        if !self.slot.last_shared {
+            return Err("the picture came down from the GPU".into());
+        }
         let planes = self
             .slot
             .planes
