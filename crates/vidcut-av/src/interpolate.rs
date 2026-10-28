@@ -206,7 +206,7 @@ struct Engine {
     held: Option<Held>,
 }
 
-static ENGINE: Mutex<Option<std::result::Result<Engine, String>>> = Mutex::new(None);
+static ENGINE: Mutex<Option<crate::screen::Started<Engine>>> = Mutex::new(None);
 static USERS: Mutex<usize> = Mutex::new(0);
 static DUMPED: AtomicU64 = AtomicU64::new(0);
 
@@ -250,13 +250,13 @@ pub(crate) fn kept_at_cut(retime: Retime, size: (u32, u32), at: f64) {
     });
 }
 
-fn engine() -> MutexGuard<'static, Option<std::result::Result<Engine, String>>> {
+fn engine() -> MutexGuard<'static, Option<crate::screen::Started<Engine>>> {
     ENGINE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn with_engine<T>(run: impl FnOnce(&mut Engine) -> Result<T>) -> Result<T> {
     let mut slot = engine();
-    let e = match slot.get_or_insert_with(Engine::start) {
+    let e = match crate::screen::start_on_offscreen(&mut slot, Engine::start) {
         Ok(e) => e,
         Err(why) => return Err(Error::Invalid(why.clone())),
     };
