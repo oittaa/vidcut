@@ -881,6 +881,7 @@ pub struct Screen {
     imports_before: u64,
     exported: bool,
     encoded: out::Encoded,
+    spent: (std::time::Duration, std::time::Duration),
 }
 
 struct Letters {
@@ -1245,6 +1246,7 @@ impl Screen {
             }
         }
         let exported = self.exported;
+        let clock = std::time::Instant::now();
         let binds: Vec<(wgpu::BindGroup, Option<f64>, bool, bool)> = layers
             .iter()
             .zip(&mut self.slots)
@@ -1276,6 +1278,7 @@ impl Screen {
                 (bind, level, placing.is_some(), blended)
             })
             .collect();
+        self.spent.0 += clock.elapsed();
         self.letters
             .retain(|l| titles.iter().any(|t| Arc::ptr_eq(&t.picture, &l.picture)));
         for t in titles {

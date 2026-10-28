@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use vidcut_core::model::Hdr;
 
@@ -342,29 +343,32 @@ fn lock(slot: &Slot) -> MutexGuard<'_, Filling> {
 }
 
 impl Filling {
-    fn finish(&mut self, serial: Option<u64>) -> Result<()> {
+    fn finish(&mut self, serial: Option<u64>) -> Result<(Duration, Duration)> {
         let Some(work) = &self.work else {
-            return Ok(());
+            return Ok(Default::default());
         };
         if serial.is_some_and(|s| s != work.serial) {
-            return Ok(());
+            return Ok(Default::default());
         }
+        let clock = Instant::now();
         wait(&work.device, work.submission.clone())?;
+        let waited = clock.elapsed();
+        let clock = Instant::now();
         self.shared
             .empty_into(&work.into, &work.planes)
             .map_err(Error::Invalid)?;
         self.work = None;
-        Ok(())
+        Ok((waited, clock.elapsed()))
     }
 }
 
-pub(crate) fn filled(f: &mut frame::Video) -> Result<()> {
+pub(crate) fn filled(f: &mut frame::Video) -> Result<(Duration, Duration)> {
     let Some(handed) = super::carried::carried::<Handed>(f, &HANDED) else {
-        return Ok(());
+        return Ok(Default::default());
     };
-    lock(&handed.slot).finish(Some(handed.serial))?;
+    let spent = lock(&handed.slot).finish(Some(handed.serial))?;
     super::carried::let_go_of(f);
-    Ok(())
+    Ok(spent)
 }
 
 pub enum Sink<'a> {
@@ -391,6 +395,10 @@ impl Screen {
             exported: true,
             ..Self::default()
         }
+    }
+
+    pub(crate) fn spent(&self) -> (Duration, Duration) {
+        self.spent
     }
 
     pub fn encoded(
@@ -436,6 +444,7 @@ impl Screen {
             }
             self.encoded.key = key;
         }
+        let clock = Instant::now();
         let slot = match &sink {
             Sink::Cuda(..) => {
                 let slot = self
@@ -453,6 +462,7 @@ impl Screen {
             }
             _ => None,
         };
+        self.spent.1 += clock.elapsed();
         let surfaces = match &sink {
             Sink::Surface(f) => surface_textures(gpu, f, &layout.planes)?,
             _ => Vec::new(),

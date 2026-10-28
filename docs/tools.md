@@ -131,6 +131,11 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 **Debugging:**
 
 - `VIDCUT_DEBUG=1` prints to stderr what vidcut decodes and draws, and why.
+  - The `[export]` line comes at the end of each export. It tells where the time of the frames went, in seconds.
+    - On the export thread: decoding, drawing, mixing the sound, and waiting for the encoder's thread.
+    - The drawing has four parts: the decoded picture in, the draw, waiting for a free output buffer, and the encoder's planes.
+    - On the encoder's thread: waiting for frames, waiting for the draw, encoding the video and the sound, and the end (flush and trailer).
+    - The wait for the draw has two parts: the wait for the GPU, and the copy into the encoder's frame.
   - The `[upscale]` lines give the time of each step of each AI Fast chunk.
   - The `[flashvsr]` lines give the time of each step of each AI Best chunk: the input projection, the blocks and the decoder. They also give how many caches are in main memory, how many GB go there and back, and how long AI Best waits for them.
 - A GUI that has not ended 10 s after its window closed (`EXIT_PATIENCE`) tells the stage and the wait state of each thread.
