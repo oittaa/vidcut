@@ -343,6 +343,10 @@ pub fn set_viewer_gpu(adapter: String) {
     *lock(&VIEWER_GPU) = Some(adapter);
 }
 
+pub(crate) fn viewer_on(adapter: &str) -> bool {
+    lock(&VIEWER_GPU).as_deref() == Some(adapter)
+}
+
 pub(crate) fn on_viewers_gpu(gpu: Option<&crate::gpus::Gpu>) -> bool {
     let viewer = lock(&VIEWER_GPU);
     gpu.zip(viewer.as_deref())

@@ -2250,9 +2250,22 @@ impl Slot {
         frame: &crate::ffmpeg::frame::Video,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        let source = match held::of(frame) {
-            Some(h) if h.on(&gpu.device) => h.buffer().clone(),
-            found => {
+        let found = held::of(frame);
+        let lent = match found {
+            Some(h) if h.on(&gpu.device) => Some(h.buffer().clone()),
+            Some(h) => match h.imported_on(&gpu.device) {
+                Some(Ok(buffer)) => Some(buffer),
+                Some(Err(e)) => {
+                    held::stop_sharing(&e);
+                    None
+                }
+                None => None,
+            },
+            None => None,
+        };
+        let source = match lent {
+            Some(buffer) => buffer,
+            None => {
                 let bytes = match found {
                     Some(_) => held::rgb(frame),
                     None => Ok(crate::buffers::packed(frame, 3)),

@@ -152,6 +152,10 @@ impl Maker {
                 fitting.took(Route::Kept, path);
                 return crate::export::video::frame_ref(frame);
             }
+            if let Some(shared) = crate::screen::held::shared(frame) {
+                fitting.took(Route::Kept, path);
+                return Ok(shared);
+            }
             let down = crate::screen::held::in_memory(frame)?;
             fitting.took(Route::Whole, path);
             return crate::buffers::owned(&stage.relayout.run(&down, reading)?);
