@@ -62,12 +62,15 @@ In the viewer, exports, proxies and thumbnails:
 
 | Decoder | Kept | Read by the draw |
 |---|---|---|
-| NVDEC (CUDA) | `cuda::keep`: a copy | through a buffer shared with wgpu (`SharedBuffer`) |
+| NVDEC (CUDA) | `cuda::keep`: a copy, or as decoded for a draw at once | through a buffer shared with wgpu (`SharedBuffer`) |
 | Vulkan | `vulkan::keep`: as decoded | images imported into wgpu |
 | VA-API | `vaapi::Keeper`: a copy (`vaCopy`) | DMA-BUFs imported into wgpu |
 | Direct3D 11 | `d3d11::Keeper`: a copy in shareable textures | a few shared textures, each imported once (`d3d11::Shared`) |
 | VideoToolbox | as decoded | IOSurface planes as Metal textures; AYUV64 as one RGBA texture |
 
+- Exports, proxies and thumbnails draw each frame at once. They take NVDEC's frames as decoded (`Maker::drawing`).
+  - They first wait for the stream of the decoder, as the copy does (`wait_for`).
+  - Why: the copy packs the pictures that the viewer keeps. A picture that is drawn at once is not kept.
 - The viewer imports VA-API pictures only from its own GPU (`player::set_viewer_gpu`). From another GPU, the pictures come down.
   - Why: the viewer cannot import the pictures of another GPU.
 - The draw takes NVDEC pictures only when its wgpu device is on CUDA's GPU, as it does for Vulkan pictures. On another GPU, the pictures come down.
