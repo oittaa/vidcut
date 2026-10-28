@@ -203,6 +203,7 @@ The audio device:
 - The drawing:
   - It fits the picture and turns it upright.
   - It scales in YUV and converts to RGB (`shader_colors`). In an SDR timeline, it tone-maps HDR.
+  - It reads the chroma of each frame at the site that the frame's chroma location gives (`chroma_site`). A frame with no chroma location is read as centered.
   - The viewer enlarges with one bilinear sample, and shrinks with a box of bilinear samples.
   - An export, a proxy and a thumbnail scale with a bicubic kernel (`sharp`). The kernel widens when the picture shrinks.
   - Why: the viewer must be fast, and an export must keep the detail of the picture.
