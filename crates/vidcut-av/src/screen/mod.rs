@@ -43,6 +43,9 @@ pub struct Gpu {
     screen: wgpu::RenderPipeline,
     screen_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    shrinking: wgpu::RenderPipeline,
+    halving: wgpu::RenderPipeline,
+    blank: wgpu::TextureView,
     wide: bool,
     shares: bool,
     dma_buf: bool,
@@ -242,6 +245,7 @@ impl Gpu {
                     count: None,
                 },
                 texture(7),
+                texture(8),
             ],
         });
         let below_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -469,6 +473,24 @@ impl Gpu {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        let shrinking = made(&pipeline_layout, "fs_shrink", None, MIXING);
+        let halving = made(&pipeline_layout, "fs_halve", None, MIXING);
+        let blank = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("vidcut no halves"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: MIXING,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
         Self {
             #[cfg(any(target_os = "linux", windows))]
             acquirer: OnceLock::new(),
@@ -489,6 +511,9 @@ impl Gpu {
             screen,
             screen_layout,
             sampler,
+            shrinking,
+            halving,
+            blank,
             wide: device
                 .features()
                 .contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM),
@@ -1062,6 +1087,7 @@ struct Slot {
     last_shared: bool,
     written: Option<Arc<Picture>>,
     rgb: Option<wgpu::Buffer>,
+    shrunk: Option<(wgpu::Texture, (u32, u32, u32))>,
 }
 
 #[cfg(windows)]
@@ -1468,8 +1494,9 @@ impl Slot {
                 f64::from(picture.height()) / f64::from(h),
             )
         });
-        gpu.queue
-            .write_buffer(params, 0, &params_of(picture, size, gpu.wide, cover, how));
+        let halvings = halvings(picture, size, how);
+        let bytes = params_of(picture, size, gpu.wide, cover, how, halvings);
+        gpu.queue.write_buffer(params, 0, &bytes);
         let planes = self.planes.as_ref().expect("uploaded");
         let view = |t: &wgpu::Texture| t.create_view(&Default::default());
         let (y, u) = self
@@ -1479,36 +1506,88 @@ impl Slot {
             .unwrap_or_else(|| (view(&planes.y), view(&planes.u)));
         let v = self.v_view.take().unwrap_or_else(|| view(&planes.v));
         let a = view(&planes.a);
-        gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("vidcut picture"),
-            layout: &gpu.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: params.as_entire_binding(),
+        let bind = |halved: &wgpu::TextureView| {
+            gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("vidcut picture"),
+                layout: &gpu.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&y),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&u),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&v),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Sampler(&gpu.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::TextureView(&a),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: wgpu::BindingResource::TextureView(halved),
+                    },
+                ],
+            })
+        };
+        if halvings == 0 {
+            return bind(&gpu.blank);
+        }
+        let wanted = (
+            picture.width().div_ceil(2),
+            picture.height().div_ceil(2),
+            halvings,
+        );
+        if self.shrunk.as_ref().is_none_or(|(_, k)| *k != wanted) {
+            let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("vidcut halves"),
+                size: wgpu::Extent3d {
+                    width: wanted.0,
+                    height: wanted.1,
+                    depth_or_array_layers: 1,
                 },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&y),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&u),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&v),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::Sampler(&gpu.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 7,
-                    resource: wgpu::BindingResource::TextureView(&a),
-                },
-            ],
-        })
+                mip_level_count: halvings,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: MIXING,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            self.shrunk = Some((texture, wanted));
+        }
+        let shrunk = &self.shrunk.as_ref().expect("made above").0;
+        let level = |k: u32| {
+            shrunk.create_view(&wgpu::TextureViewDescriptor {
+                base_mip_level: k,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        };
+        for k in 0..halvings {
+            let (pipeline, from) = match k {
+                0 => (&gpu.shrinking, bind(&gpu.blank)),
+                _ => (&gpu.halving, bind(&level(k - 1))),
+            };
+            let to = level(k);
+            let mut pass = begin(encoder, &to, Some(wgpu::Color::TRANSPARENT));
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &from, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        bind(&shrunk.create_view(&Default::default()))
     }
 
     fn submitted(&mut self, gpu: &Gpu) {
@@ -2639,9 +2718,64 @@ fn shader() -> String {
 
 const PER_LEVEL: usize = 5;
 
-const PARAMS: usize = (14 + PER_LEVEL * LEVELS) * 16;
+const PARAMS: usize = (15 + PER_LEVEL * LEVELS) * 16;
 
 const LETTERING: usize = (3 + PER_LEVEL * LEVELS) * 16;
+
+fn halvings(
+    picture: &Picture,
+    size: (u32, u32),
+    (placing, kernel, ..): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+) -> u32 {
+    if kernel & WIDENS == 0 || kernel & 7 == 0 {
+        return 0;
+    }
+    let origin = match picture.sampling() {
+        Sampling::Placed { .. } => return 0,
+        Sampling::Colors { origin, .. } => (f64::from(origin.0), f64::from(origin.1)),
+        Sampling::Own => (0.0, 0.0),
+    };
+    let (sw, sh) = (f64::from(picture.width()), f64::from(picture.height()));
+    let upright = if picture.rotation() % 180 == 90 {
+        (sh, sw)
+    } else {
+        (sw, sh)
+    };
+    let most = match innermost(placing.map(|(p, _)| p)).last() {
+        None => {
+            let (_, _, w, h) = picture.placement(size.0, size.1);
+            f64::max(upright.0 / f64::from(w), upright.1 / f64::from(h))
+        }
+        Some(l) => {
+            let [a, b, e, c, d, f, g, h] = l.back;
+            let (fw, fh) = (f64::from(size.0), f64::from(size.1));
+            [(0.0, 0.0), (fw, 0.0), (0.0, fh), (fw, fh)]
+                .into_iter()
+                .map(|(x, y)| {
+                    let (x, y) = (x + origin.0, y + origin.1);
+                    let w = g * x + h * y + 1.0;
+                    if w <= 0.0 {
+                        return f64::INFINITY;
+                    }
+                    let (u, v) = ((a * x + b * y + e) / w, (c * x + d * y + f) / w);
+                    let across = ((a - u * g) / w * upright.0, (c - v * g) / w * upright.1);
+                    let down = ((b - u * h) / w * upright.0, (d - v * h) / w * upright.1);
+                    f64::max(across.0.hypot(across.1), down.0.hypot(down.1))
+                })
+                .fold(0.0, f64::max)
+        }
+    };
+    if most.is_nan() || most <= 4.0 {
+        return 0;
+    }
+    let most_halvings = picture.width().max(picture.height()).max(1).ilog2();
+    let wanted = (most / 4.0).log2().ceil();
+    if wanted.is_finite() {
+        (wanted as u32).min(most_halvings)
+    } else {
+        most_halvings
+    }
+}
 
 fn innermost(placing: Option<&Placing>) -> &[Level] {
     placing.map_or(&[][..], |p| {
@@ -2824,6 +2958,7 @@ fn params_of(
     wide: bool,
     cover: (f64, f64),
     (placing, kernel, timeline, paired): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+    halvings: u32,
 ) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
     let (x, y, w, h) = picture.placement(size.0, size.1);
@@ -2896,6 +3031,7 @@ fn params_of(
     floats.extend(part);
     let site = chroma_site(picture.frame(), layout);
     floats.extend([site[0], site[1], 0.0, 0.0]);
+    floats.extend([f64::from(halvings), 0.0, 0.0, 0.0]);
     floats.extend(level_floats(levels));
     for v in floats {
         out.extend_from_slice(&(v as f32).to_le_bytes());
