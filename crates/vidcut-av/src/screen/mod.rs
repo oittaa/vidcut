@@ -16,6 +16,7 @@ mod acquire;
 mod carried;
 mod gate;
 pub(crate) mod held;
+pub(crate) mod light;
 mod out;
 mod shared;
 #[cfg(any(target_os = "linux", windows))]
@@ -61,6 +62,7 @@ pub struct Gpu {
     gate: Option<Arc<Gate>>,
     encoders: out::Encoders,
     held: held::Pipes,
+    light: OnceLock<light::Pipes>,
 }
 
 struct Drawing {
@@ -541,6 +543,7 @@ impl Gpu {
             gate: None,
             encoders: out::Encoders::new(device, &shader),
             held: held::Pipes::new(device),
+            light: OnceLock::new(),
         }
     }
 
@@ -1100,6 +1103,8 @@ struct Slot {
     acquired: Option<wgpu::CommandBuffer>,
     #[cfg(any(target_os = "linux", windows))]
     kept: vulkan::Imports,
+    #[cfg(any(target_os = "linux", windows))]
+    computes: bool,
     released: Option<wgpu::CommandBuffer>,
     #[cfg(windows)]
     d3d11_used: Option<Arc<AtomicBool>>,
@@ -1823,9 +1828,18 @@ impl Slot {
         Ok(())
     }
 
+    #[cfg(any(target_os = "linux", windows))]
+    fn reading_stage(&self) -> ash::vk::PipelineStageFlags {
+        if self.computes {
+            ash::vk::PipelineStageFlags::COMPUTE_SHADER
+        } else {
+            ash::vk::PipelineStageFlags::FRAGMENT_SHADER
+        }
+    }
+
     #[cfg(windows)]
     fn import_d3d11(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
-        use ash::vk::{AccessFlags, ImageLayout, PipelineStageFlags};
+        use ash::vk::{AccessFlags, ImageLayout};
         if !gpu.d3d11 {
             return Err("the display's device imports no Direct3D 11 textures".into());
         }
@@ -1841,20 +1855,21 @@ impl Slot {
             shared.texture.fill(frame).map_err(|e| e.to_string())?;
             shared.holds = Arc::downgrade(picture);
         }
+        let stage = self.reading_stage();
         // SAFETY: this device's image, released to Direct3D 11 in `GENERAL`, which wrote it last.
         let (acquired, released) = unsafe {
             (
                 gpu.acquire(
                     &[shared.image],
                     ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                    PipelineStageFlags::FRAGMENT_SHADER,
+                    stage,
                     AccessFlags::SHADER_READ,
                     acquire::Source::Api,
                 )?,
                 gpu.release(
                     &[shared.image],
                     (ImageLayout::SHADER_READ_ONLY_OPTIMAL, ImageLayout::GENERAL),
-                    PipelineStageFlags::FRAGMENT_SHADER,
+                    stage,
                     AccessFlags::SHADER_READ,
                 )?,
             )
@@ -1875,6 +1890,7 @@ impl Slot {
         vulkan_layout(gpu, picture.layout())?;
         let frame = picture.frame();
         let identity = crate::hw::vulkan::Identity::of(frame).map_err(|e| e.to_string())?;
+        let stage = self.reading_stage();
         let (import, new) = self
             .kept
             .get_or_import(identity, || import_vulkan_frame(gpu, frame))?;
@@ -1884,7 +1900,7 @@ impl Slot {
             gpu.acquire(
                 &import.images,
                 ash::vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                ash::vk::PipelineStageFlags::FRAGMENT_SHADER,
+                stage,
                 ash::vk::AccessFlags::SHADER_READ,
                 acquire::Source::Vulkan {
                     concurrent: import.concurrent,

@@ -366,11 +366,29 @@ impl Reading {
         }
     }
 
+    fn red(&self, cr: u16) -> f64 {
+        self.cr_r * ((f64::from(cr) - self.mid) * self.to_c)
+    }
+
+    fn blue(&self, cb: u16) -> f64 {
+        self.cb_b * ((f64::from(cb) - self.mid) * self.to_c)
+    }
+
+    fn less_green(&self, r: f64, b: f64) -> f64 {
+        (self.kr * r + self.kb * b) * self.to_g
+    }
+
     fn codes(&self, y: u16, cb: u16, cr: u16) -> [f64; 3] {
         let yv = (f64::from(y) - self.y0) * self.to_y;
-        let r = self.cr_r * ((f64::from(cr) - self.mid) * self.to_c);
-        let b = self.cb_b * ((f64::from(cb) - self.mid) * self.to_c);
-        [yv + r, yv - (self.kr * r + self.kb * b) * self.to_g, yv + b]
+        let (r, b) = (self.red(cr), self.blue(cb));
+        [yv + r, yv - self.less_green(r, b), yv + b]
+    }
+
+    fn key(&self) -> [u64; 7] {
+        [
+            self.mid, self.to_c, self.cr_r, self.cb_b, self.kr, self.kb, self.to_g,
+        ]
+        .map(f64::to_bits)
     }
 
     fn light(&self, [r, g, b]: [f64; 3]) -> [f32; 3] {
@@ -471,6 +489,56 @@ fn reading(f: &frame::Video) -> Result<(Samples<'_>, Reading)> {
     Ok((s, Reading::of(&crate::color::pq_light(f), bits)))
 }
 
+fn step_of(w: usize, h: usize) -> usize {
+    let step = (((w * h) as f64 / 500_000.0).sqrt().ceil() as usize).max(1);
+    if step > 1 { step + step % 2 } else { 1 }
+}
+
+struct Spread {
+    hist: Vec<u32>,
+    sum: f64,
+    n: u64,
+}
+
+impl Spread {
+    fn new() -> Self {
+        Self {
+            hist: vec![0u32; bin(10_000.0) + 1],
+            sum: 0.0,
+            n: 0,
+        }
+    }
+
+    fn add(&mut self, r: &Reading, y: u16, cb: u16, cr: u16) {
+        let rgb = r.light(r.codes(y, cb, cr));
+        let m = rgb[0].max(rgb[1]).max(rgb[2]);
+        self.sum += f64::from(m);
+        self.n += 1;
+        self.hist[bin(m)] += 1;
+    }
+
+    fn light(self, maxscl: [f32; 3]) -> FrameLight {
+        let mut percentiles = [0f32; 9];
+        for (p, pct) in percentiles.iter_mut().zip(PERCENTAGES) {
+            let need = (self.n as f64 * f64::from(pct) / 100.0).ceil() as u64;
+            let mut seen = 0u64;
+            for (i, &count) in self.hist.iter().enumerate() {
+                seen += u64::from(count);
+                if seen >= need.max(1) {
+                    *p = bin_nits(i);
+                    break;
+                }
+            }
+        }
+        FrameLight {
+            max: maxscl[0].max(maxscl[1]).max(maxscl[2]),
+            average: (self.sum / self.n.max(1) as f64) as f32,
+            maxscl,
+            percentiles,
+        }
+    }
+}
+
 fn measure_with(
     f: &frame::Video,
     relayout: &mut crate::export::normalize::Relayout,
@@ -479,38 +547,153 @@ fn measure_with(
     let (s, r) = reading(&f)?;
     let maxscl = peak(&s, &r);
     let (w, h) = (s.w, s.h);
-    let step = (((w * h) as f64 / 500_000.0).sqrt().ceil() as usize).max(1);
-    let step = if step > 1 { step + step % 2 } else { 1 };
-    let mut hist = vec![0u32; bin(10_000.0) + 1];
-    let (mut sum, mut n) = (0f64, 0u64);
+    let step = step_of(w, h);
+    let mut spread = Spread::new();
     for y in (0..h).step_by(step) {
         for x in (0..w).step_by(step) {
             let (cb, cr) = s.chroma(x / 2, y / 2);
-            let rgb = r.light(r.codes(s.luma(x, y), cb, cr));
-            let m = rgb[0].max(rgb[1]).max(rgb[2]);
-            sum += f64::from(m);
-            n += 1;
-            hist[bin(m)] += 1;
+            spread.add(&r, s.luma(x, y), cb, cr);
         }
     }
-    let mut percentiles = [0f32; 9];
-    for (p, pct) in percentiles.iter_mut().zip(PERCENTAGES) {
-        let need = (n as f64 * f64::from(pct) / 100.0).ceil() as u64;
-        let mut seen = 0u64;
-        for (i, &count) in hist.iter().enumerate() {
-            seen += u64::from(count);
-            if seen >= need.max(1) {
-                *p = bin_nits(i);
-                break;
+    Ok(spread.light(maxscl))
+}
+
+struct Ranks {
+    rank: Arc<[u32]>,
+    pairs: Vec<u32>,
+}
+
+fn ranks(r: &Reading, bits: u32) -> Arc<Ranks> {
+    type Made = Mutex<HashMap<[u64; 7], Arc<Ranks>>>;
+    static MADE: OnceLock<Made> = OnceLock::new();
+    let mut made = MADE.get_or_init(Default::default).lock().unwrap();
+    made.entry(r.key())
+        .or_insert_with(|| {
+            let n = 1u16 << bits;
+            let reds: Vec<f64> = (0..n).map(|cr| r.red(cr)).collect();
+            let blues: Vec<f64> = (0..n).map(|cb| r.blue(cb)).collect();
+            let mut less: Vec<(f64, u32)> = (0..u32::from(n) * u32::from(n))
+                .map(|p| {
+                    let (cb, cr) = ((p >> bits) as usize, (p & u32::from(n - 1)) as usize);
+                    (r.less_green(reds[cr], blues[cb]), p)
+                })
+                .collect();
+            less.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+            let mut rank = vec![0u32; less.len()];
+            for (i, &(_, p)) in less.iter().enumerate() {
+                rank[p as usize] = i as u32;
+            }
+            Arc::new(Ranks {
+                rank: rank.into(),
+                pairs: less.into_iter().map(|(_, p)| p).collect(),
+            })
+        })
+        .clone()
+}
+
+struct Read {
+    readout: crate::screen::light::Readout,
+    reading: Reading,
+    ranks: Arc<Ranks>,
+    bits: u32,
+}
+
+impl Read {
+    fn light(self) -> FrameLight {
+        let (r, peaks) = (&self.reading, &self.readout.peaks);
+        let stride = crate::screen::light::STRIDE;
+        let n = 1u16 << self.bits;
+        let mut most = [f64::NEG_INFINITY; 3];
+        for c in 0..n {
+            let i = usize::from(c);
+            if let Some(y) = peaks[i].checked_sub(1) {
+                most[0] = most[0].max(r.codes(y as u16, 0, c)[0]);
+            }
+            if let Some(y) = peaks[stride + i].checked_sub(1) {
+                most[2] = most[2].max(r.codes(y as u16, c, 0)[2]);
+            }
+            if let Some(&p) = self.ranks.pairs.get(peaks[2 * stride + i] as usize) {
+                let (cb, cr) = ((p >> self.bits) as u16, (p & u32::from(n - 1)) as u16);
+                most[1] = most[1].max(r.codes(c, cb, cr)[1]);
+            }
+        }
+        let mut spread = Spread::new();
+        for &p in &self.readout.samples {
+            let at = |shift: u32| ((p >> shift) & 1023) as u16;
+            spread.add(r, at(0), at(10), at(20));
+        }
+        spread.light(r.light(most))
+    }
+}
+
+#[derive(Default)]
+struct OnGpu {
+    meter: Option<(
+        &'static crate::screen::Offscreen,
+        crate::screen::light::Meter,
+    )>,
+    failed: bool,
+    told: Option<bool>,
+}
+
+impl OnGpu {
+    fn read(&mut self, f: &frame::Video) -> Option<Read> {
+        let read = self.read_on_gpu(f);
+        if self.told != Some(read.is_some()) {
+            self.told = Some(read.is_some());
+            let on = if read.is_some() { "GPU" } else { "CPU" };
+            crate::debug!(
+                "decoding",
+                "the light of the pictures is measured on the {on}"
+            );
+        }
+        read
+    }
+
+    fn read_on_gpu(&mut self, f: &frame::Video) -> Option<Read> {
+        if self.failed || !crate::hw::on_gpu(f) {
+            return None;
+        }
+        let bits = crate::screen::light::bits(f)?;
+        let reading = Reading::of(&crate::color::pq_light(f), bits);
+        if reading.gamut.is_some() {
+            return None;
+        }
+        let on = crate::screen::offscreen().ok()?;
+        if self
+            .meter
+            .as_ref()
+            .is_some_and(|(was, _)| !std::ptr::eq(*was, on))
+        {
+            self.meter = None;
+        }
+        let (_, meter) = self.meter.get_or_insert_with(|| (on, Default::default()));
+        let gpu = &on.gpu;
+        if !meter.takes(gpu, f) {
+            return None;
+        }
+        let step = step_of(f.width() as usize, f.height() as usize) as u32;
+        let ranks = ranks(&reading, bits);
+        match meter.measure(gpu, f, step, &ranks.rank) {
+            Ok(readout) => Some(Read {
+                readout,
+                reading,
+                ranks,
+                bits,
+            }),
+            Err(e) => {
+                eprintln!("vidcut: the light of HDR pictures is measured on the CPU: {e}");
+                self.failed = true;
+                self.meter = None;
+                None
             }
         }
     }
-    Ok(FrameLight {
-        max: maxscl[0].max(maxscl[1]).max(maxscl[2]),
-        average: (sum / n.max(1) as f64) as f32,
-        maxscl,
-        percentiles,
-    })
+}
+
+enum Taken {
+    Frame(frame::Video),
+    Read(Box<Read>),
 }
 
 fn measure(
@@ -539,12 +722,17 @@ fn measure(
         threads,
         || crate::export::normalize::Relayout::passing(readable),
         |give| {
+            let mut gpu = OnGpu::default();
             while let Some(f) = reader.next_frame()? {
                 if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
                     return Err(Error::Invalid(crate::export::CANCELLED.into()));
                 }
                 let t = f.pts().unwrap_or(0) as f64 * tick;
-                if !give((t, crate::decode::in_memory(f)?)) {
+                let taken = match gpu.read(&f) {
+                    Some(read) => Taken::Read(Box::new(read)),
+                    None => Taken::Frame(crate::decode::in_memory(f)?),
+                };
+                if !give((t, taken)) {
                     return Ok(false);
                 }
                 if t >= span.to - EPS {
@@ -556,7 +744,10 @@ fn measure(
             }
             Ok(true)
         },
-        |relayout, (t, f): (f64, frame::Video)| Ok((t, measure_with(&f, relayout)?)),
+        |relayout, (t, taken): (f64, Taken)| match taken {
+            Taken::Frame(f) => Ok((t, measure_with(&f, relayout)?)),
+            Taken::Read(read) => Ok((t, read.light())),
+        },
     )?;
     frames.sort_by(|a, b| a.0.total_cmp(&b.0));
     Ok((frames, ended))
@@ -769,14 +960,20 @@ pub fn piece_level(
     Ok(a.and_then(|a| a.level(sampled(piece, fps))))
 }
 
-pub(crate) struct Meter(crate::export::normalize::Relayout);
+pub(crate) struct Meter(crate::export::normalize::Relayout, OnGpu);
 
 impl Meter {
     pub(crate) fn new() -> Self {
-        Self(crate::export::normalize::Relayout::passing(readable))
+        Self(
+            crate::export::normalize::Relayout::passing(readable),
+            OnGpu::default(),
+        )
     }
 
     pub(crate) fn measure(&mut self, f: &frame::Video) -> Result<FrameLight> {
+        if let Some(read) = self.1.read(f) {
+            return Ok(read.light());
+        }
         let f = if crate::hw::on_gpu(f) {
             crate::hw::to_read(f)?
         } else {
