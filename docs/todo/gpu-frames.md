@@ -4,7 +4,6 @@
 
 **The rule:** a frame stays in GPU memory from the decoder to the encoder or the display, where this is possible (AGENTS.md rule 9). This is also true where the CPU is a little faster.
 
-- For light measurements and analyses, frames come down whole on purpose: their values must be the CPU's values.
 - [design/gpu.md](../design/gpu.md) tells how frames go.
 
 ## Open
@@ -24,3 +23,7 @@
 3. **Capabilities tested, not written as rules.**
    - The code has rules for which encoders take the frames of which places (`encode::shares`).
    - Test these capabilities once for each GPU and FFmpeg, as vidcut tests the encoders. Keep the results with `encoders.json`.
+4. **The HDR10+ light meter on the GPU.**
+   - The meter of an HDR export brings each frame down to measure it (`light::Meter`).
+   - A reduction on the GPU removes the last download of a whole frame in an HDR export.
+   - Check its values against the values that the CPU measures.
