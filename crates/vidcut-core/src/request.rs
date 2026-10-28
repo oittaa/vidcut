@@ -3363,6 +3363,9 @@ pub enum GuiPanel {
     /// The Keyframes tab, in the Media Pool's place: the keyed values of
     /// the first selected clip.
     Keyframes,
+    /// The keyframe tray under the timeline's tracks: the keyed values of
+    /// the first selected clip, on the timeline's time.
+    KeyframeTray,
     /// The viewer's Transform handles on the selected clip: move, zoom,
     /// stretch and turn its picture.
     Transform,

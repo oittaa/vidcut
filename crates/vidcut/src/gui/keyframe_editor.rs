@@ -37,6 +37,7 @@ const DETAIL: f64 = 4.0;
 const HIT: f32 = 8.0;
 const TICK_GAP: f32 = 96.0;
 const FIELD_W: f32 = 72.0;
+const TRAY_ROWS: usize = 4;
 const GROUPS: [Group; 4] = [
     Group::Transform,
     Group::Crop,
@@ -138,8 +139,10 @@ struct Shown {
 struct Plot {
     lo: f64,
     hi: f64,
+    label: f32,
     width: f32,
     play: i64,
+    tray: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -179,6 +182,7 @@ struct Boxing {
     clip: String,
     origin: Pos2,
     add: bool,
+    tray: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -208,10 +212,12 @@ pub struct Editor {
     selected: Vec<Mark>,
     boxing: Option<Boxing>,
     seen: Vec<(Pos2, Mark)>,
+    tray: bool,
     drag: Option<Drag>,
     pending: Option<Pending>,
     menu: Option<Mark>,
     menu_curve: bool,
+    menu_tray: bool,
     keyed_only: bool,
     closed: Vec<Group>,
     curves: Vec<KeyParam>,
@@ -907,26 +913,19 @@ fn playhead(painter: &egui::Painter, map: TimeMap, rect: Rect, at: i64) {
 }
 
 impl Workspace {
-    pub(super) fn keyframe_panel(&mut self, ui: &mut egui::Ui) {
-        let Some(p) = self.project_shared() else {
-            ui.label(dim("Select a clip."));
-            return;
-        };
-        let Some(id) = self
-            .snap
+    fn first_clip(&self, p: &Project) -> Option<Clip> {
+        self.snap
             .selection
             .clips
             .iter()
-            .find(|id| p.clip(id).is_some())
+            .find_map(|id| p.clip(id))
             .cloned()
-        else {
-            ui.label(dim("Select a clip."));
-            return;
-        };
-        let Some(clip) = p.clip(&id).cloned() else {
-            ui.label(dim("Select a clip."));
-            return;
-        };
+    }
+
+    fn editor_clip(&mut self, p: &Project, tray: bool) -> Option<Clip> {
+        let clip = self.first_clip(p)?;
+        self.key_editor.tray = tray;
+        self.key_editor.seen.clear();
         if self.key_editor.clip.as_deref() != Some(clip.id.as_str()) {
             self.key_editor.clip = Some(clip.id.clone());
             self.key_editor.selected.clear();
@@ -940,6 +939,89 @@ impl Workspace {
             self.key_editor.fresh = None;
             self.key_editor.grab = None;
         }
+        Some(clip)
+    }
+
+    pub(super) fn tray_height(&self, ui: &egui::Ui) -> f32 {
+        if !self.key_tray {
+            return 0.0;
+        }
+        let rows = self
+            .project_shared()
+            .and_then(|p| self.first_clip(&p))
+            .map_or(0, |c| lanes_of(&c, true).len());
+        let gap = ui.spacing().item_spacing.y;
+        rows.clamp(1, TRAY_ROWS) as f32 * (TRACK_H + gap) + gap
+    }
+
+    pub(super) fn keyframe_tray(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        label: f32,
+        (lo, hi): (f64, f64),
+    ) {
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        child.set_clip_rect(rect.intersect(ui.clip_rect()));
+        let ui = &mut child;
+        ui.painter()
+            .rect_filled(rect, 2.0, theme::colors().panel_dark);
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let Some(clip) = self.editor_clip(&p, true) else {
+            ui.label(dim("Select a clip."));
+            return;
+        };
+        let lanes = lanes_of(&clip, true);
+        if lanes.is_empty() {
+            ui.label(dim("No Keyframes"));
+            return;
+        }
+        self.select_fresh(&clip, &lanes);
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.key_editor.drag = None;
+            self.key_editor.boxing = None;
+        }
+        self.expire_pending(&clip, p.rev);
+        let shift = self.shown_shift(ui, &clip, &lanes);
+        let gap = ui.spacing().item_spacing.x;
+        let plot = Plot {
+            lo,
+            hi,
+            label: label - gap,
+            width: (rect.width() - label).max(48.0),
+            play: self.snap.timeline.position,
+            tray: true,
+        };
+        egui::ScrollArea::vertical()
+            .id_salt("keyframe-tray")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for lane in &lanes {
+                    let rows = shown_lane(&clip, lane, shift.as_ref());
+                    self.track_row(ui, &clip, lane, &rows, plot);
+                }
+            });
+        self.box_select(ui, rect, &clip);
+        let live = live_marks(&clip, &lanes, shift.as_ref());
+        self.key_editor.selected.retain(|m| live.contains(m));
+        self.finish_drag(ui, &clip, &lanes, p.rev);
+    }
+
+    pub(super) fn keyframe_panel(&mut self, ui: &mut egui::Ui) {
+        let Some(p) = self.project_shared() else {
+            ui.label(dim("Select a clip."));
+            return;
+        };
+        let Some(clip) = self.editor_clip(&p, false) else {
+            ui.label(dim("Select a clip."));
+            return;
+        };
         let lanes = lanes_of(&clip, self.key_editor.keyed_only);
         self.select_fresh(&clip, &lanes);
         let rev = p.rev;
@@ -947,7 +1029,6 @@ impl Workspace {
             self.key_editor.drag = None;
             self.key_editor.boxing = None;
         }
-        self.key_editor.seen.clear();
         self.expire_pending(&clip, rev);
         let play = self.snap.timeline.position;
         let view = self.key_editor.view.unwrap_or_else(|| clip_span(&clip));
@@ -964,8 +1045,10 @@ impl Workspace {
         let plot = Plot {
             lo,
             hi,
+            label: LABEL,
             width,
             play,
+            tray: false,
         };
         self.ruler(ui, &p, &clip, plot);
         egui::ScrollArea::vertical()
@@ -1026,7 +1109,7 @@ impl Workspace {
     }
 
     fn keys_in_view(&self) -> bool {
-        self.left == LeftTab::Keyframes
+        self.left == LeftTab::Keyframes || self.key_tray
     }
 
     pub(super) fn copy_editor_keys(&mut self, cut: bool) -> bool {
@@ -1144,6 +1227,7 @@ impl Workspace {
             clip: clip.id.clone(),
             origin,
             add,
+            tray: self.key_editor.tray,
         });
     }
 
@@ -1153,6 +1237,9 @@ impl Workspace {
         };
         if b.clip != clip.id {
             self.key_editor.boxing = None;
+            return;
+        }
+        if b.tray != self.key_editor.tray {
             return;
         }
         let (pos, released) = ui.input(|i| (i.pointer.latest_pos(), i.pointer.any_released()));
@@ -1312,7 +1399,7 @@ impl Workspace {
 
     fn ruler(&mut self, ui: &mut egui::Ui, p: &Project, clip: &Clip, plot: Plot) {
         let now = p.settings.timecode(plot.play);
-        let (rect, resp) = row(ui, RULER_H, plot.width, |ui| {
+        let (rect, resp) = row(ui, RULER_H, plot, |ui| {
             ui.label(RichText::new(now).small().color(theme::colors().text_dim));
         });
         let map = TimeMap::of(plot.lo, plot.hi, rect);
@@ -1349,7 +1436,7 @@ impl Workspace {
     }
 
     fn key_scroll(&mut self, ui: &mut egui::Ui, clip: &Clip, lanes: &[Lane], plot: Plot) {
-        let (rect, resp) = row(ui, SCROLL_H, plot.width, |_| {});
+        let (rect, resp) = row(ui, SCROLL_H, plot, |_| {});
         let (mut lo, mut hi) = clip_span(clip);
         for k in lanes.iter().flat_map(|l| &l.keys) {
             let t = clip.key_time(k.frame);
@@ -1527,7 +1614,7 @@ impl Workspace {
         let group = group_of(members[0].param);
         let open = !self.key_editor.closed.contains(&group);
         let mut flip = false;
-        let (rect, resp) = row(ui, GROUP_H, plot.width, |ui| {
+        let (rect, resp) = row(ui, GROUP_H, plot, |ui| {
             let icon = if open { CARET_DOWN } else { CARET_RIGHT };
             let text = RichText::new(format!("{icon} {}", group_name(group))).small();
             if ui.add(egui::Button::new(text).frame(false)).clicked() {
@@ -1619,25 +1706,28 @@ impl Workspace {
         let curve = self.key_editor.curves.contains(&lane.param);
         let keyed = !lane.keys.is_empty();
         let mut act = None;
-        let (rect, resp) = row(ui, TRACK_H, plot.width, |ui| {
-            let c = ui
-                .add_enabled(
-                    keyed,
-                    egui::Button::selectable(curve && keyed, WAVE_SINE).frame(false),
-                )
-                .on_hover_text("Curve");
-            if c.clicked() {
-                act = Some(RowAct::Curve);
+        let (rect, resp) = row(ui, TRACK_H, plot, |ui| {
+            if !plot.tray {
+                let c = ui
+                    .add_enabled(
+                        keyed,
+                        egui::Button::selectable(curve && keyed, WAVE_SINE).frame(false),
+                    )
+                    .on_hover_text("Curve");
+                if c.clicked() {
+                    act = Some(RowAct::Curve);
+                }
             }
             ui.label(RichText::new(lane_name(lane.param)).small());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .add_enabled(
-                        keyed,
-                        egui::Button::new(ARROW_COUNTER_CLOCKWISE).frame(false),
-                    )
-                    .on_hover_text("Reset Keyframes")
-                    .clicked()
+                if !plot.tray
+                    && ui
+                        .add_enabled(
+                            keyed,
+                            egui::Button::new(ARROW_COUNTER_CLOCKWISE).frame(false),
+                        )
+                        .on_hover_text("Reset Keyframes")
+                        .clicked()
                 {
                     act = Some(RowAct::Reset);
                 }
@@ -1806,7 +1896,7 @@ impl Workspace {
         plot: Plot,
         frame: &Frame,
     ) {
-        let (rect, resp) = row(ui, CURVE_H, plot.width, |_| {});
+        let (rect, resp) = row(ui, CURVE_H, plot, |_| {});
         let map = TimeMap::of(plot.lo, plot.hi, rect);
         let (vlo, vhi) = value_ends(rows);
         let values = ValueMap::of(vlo, vhi, least_span(lane.param), rect);
@@ -2244,14 +2334,15 @@ impl Workspace {
             self.key_editor.selected = vec![mark];
             self.key_editor.menu = Some(mark);
             self.key_editor.menu_curve = curve;
+            self.key_editor.menu_tray = self.key_editor.tray;
         }
     }
 
     fn show_menu(&mut self, resp: &egui::Response, clip: &str, lane: &Lane, curve: bool) {
-        let open = self
-            .key_editor
-            .menu
-            .is_some_and(|m| m.param == lane.param && self.key_editor.menu_curve == curve);
+        let e = &self.key_editor;
+        let open = e.menu.is_some_and(|m| {
+            m.param == lane.param && e.menu_curve == curve && e.menu_tray == e.tray
+        });
         if !open {
             return;
         }
@@ -2282,15 +2373,16 @@ impl Workspace {
 fn row(
     ui: &mut egui::Ui,
     h: f32,
-    plot_w: f32,
+    plot: Plot,
     label: impl FnOnce(&mut egui::Ui),
 ) -> (Rect, egui::Response) {
     ui.horizontal(|ui| {
-        ui.allocate_ui_with_layout(vec2(LABEL, h), Layout::left_to_right(Align::Center), |ui| {
-            ui.set_min_size(vec2(LABEL, h));
+        let size = vec2(plot.label, h);
+        ui.allocate_ui_with_layout(size, Layout::left_to_right(Align::Center), |ui| {
+            ui.set_min_size(size);
             label(ui);
         });
-        ui.allocate_exact_size(vec2(plot_w, h), Sense::click_and_drag())
+        ui.allocate_exact_size(vec2(plot.width, h), Sense::click_and_drag())
     })
     .inner
 }

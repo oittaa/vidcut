@@ -333,6 +333,9 @@ The bar and the Jobs button:
 - Mark > Move Selected Keyframes (`Nudge`, `Workspace::nudge_keys`) sends what a drag of one frame or one step sends.
 - Ctrl+C and Ctrl+X send `keyframes.copy` or `keyframes.cut`. The core keeps the keyframes that come back as its clipboard, in place of the clips.
 - Ctrl+V sends `keyframes.paste` while the clipboard holds keyframes (`Snapshot::key_clipboard`).
+- The keyframe tray (`Workspace::keyframe_tray`) draws the same track rows under the lower timeline, on its `Scale`.
+  - The tray and the tab share one `Editor`. Thus a selection in one shows in the other.
+  - `Editor::tray` tells which of the two draws. A box and the ease menu stay in the one where they started.
 
 **Silence stripes** ([deviation X48](../deviations.md#x48-ripple-delete-silences-stripes-can-be-edited-before-remove)).
 

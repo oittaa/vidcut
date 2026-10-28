@@ -135,9 +135,9 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - A bar shows the value, time and ease of the selected keyframe (X90).
 - The time ruler moves the playhead. Fit Clip, Detail Zoom, the zoom slider and Ctrl with the mouse wheel zoom.
 - A scroll bar under the tracks moves the range.
+- The Keyframe Tray button of the timeline shows a tray under the tracks. It has the keyed tracks of the clip, on the time of the timeline.
 - `keyframes.add`, `keyframes.remove`, `keyframes.set`, `keyframes.move`, `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do these edits.
 - **To do:**
-  - the keyframe tray on the timeline (p. 1259)
   - the motion path in the viewer (pp. 1252–1254)
   - Step, Loop, Ping Pong, Reverse and the Shape Box (pp. 1261–1267)
   - keyframes of several selected clips at once (p. 1268)
@@ -225,12 +225,14 @@ Rule 3: each GUI action has a request.
 - `timeline.get` names the values of a clip that have keyframes, as it names `volume`.
 - `keyframes.copy` returns the selected keyframes with their offsets. `keyframes.paste` puts them on clips. `keyframes.cut` copies, then removes.
 - `gui.show keyframes` opens the Keyframes tab. `gui.close keyframes` closes it.
+- `gui.show keyframe_tray` opens the keyframe tray. `gui.close keyframe_tray` closes it.
 
 ## Open questions
 
 - **Compound clips:** what does `edit.decompose` do with the keyframes of a compound clip for a clip inside that is frozen or plays backward?
 - **Dynamic Zoom:** can its boxes have times other than the ends of the clip?
 - **Move Up and Down:** what step does Resolve use for Mark > Move Selected Keyframes Up and Down? vidcut uses one unit of the Inspector field.
+- **The keyframe tray:** where does Resolve put the tray in the timeline of the Cut page, and which tracks does it show?
 - **The clipboard:** does Resolve keep copied keyframes apart from copied clips? vidcut has one clipboard for both.
 - **Later work:** in which order do keyframes of speed (p. 737) and titles come?
 - **Anchor point keys in Resolve:** does Resolve read `POINTF` keys on `transformationAnchorPoint`, and what is the form of their Bezier handles?

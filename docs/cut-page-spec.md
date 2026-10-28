@@ -97,6 +97,12 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - A double-click on an empty part of a track adds a keyframe there ([X90](deviations.md#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
     - The bar under the tracks shows the value, time and ease of the selected keyframe (X90).
     - A keyframe that the Keyframe button or a double-click adds is selected. Thus the bar shows it at once.
+  - **Keyframe tray** (p. 1259):
+    - The Keyframe Tray button of the timeline toolbar shows a tray under the tracks of the lower timeline.
+    - The tray has a track for each value of the first selected clip that has keyframes. Its time is the time of the lower timeline.
+    - Its tracks work as the tracks of the Keyframes tab, without the curve and Reset Keyframes. They share the selection of the tab.
+    - `gui.show keyframe_tray` opens the tray. `gui.close keyframe_tray` closes it.
+    - The manual does not tell where the tray sits in the timeline.
   - Later: the Sync Bin, Transitions and Effects tabs.
   - vidcut's bar also has Import, Export and Jobs (deviation X3), and Help (X23).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
@@ -116,7 +122,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Detect Scene Cuts, Add Dissolve to All Edits, Clear Transition from All Edits.
     - vidcut also has Add Subtitle (deviation X44), Create Subtitles from Audio (X46), Re-time Subtitles to Speech (X49) and Ripple Delete Silence.
   - **Edit Actions:** Trim Start to Playhead, Trim End to Playhead.
-- **Timeline buttons** (p. 649): Ripple On, Dynamic Trim, Split, Marker.
+- **Timeline buttons** (p. 649): Ripple On, Dynamic Trim, Split, Marker. The Keyframe Tray button is there too (p. 1259).
 - **Upper timeline:**
   - The track-number buttons to its left select the target track.
   - The Audio Only and Video Only toggles are there too (pp. 643, 694).
