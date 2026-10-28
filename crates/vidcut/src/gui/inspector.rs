@@ -394,6 +394,7 @@ impl Key {
 
     fn decimals(self) -> (usize, usize) {
         match self {
+            Key::Picture(Field::Pitch | Field::Yaw) => (0, 3),
             Key::Picture(_) => (0, 2),
             Key::Volume => (1, 1),
             Key::Speed => (0, 2),
@@ -750,7 +751,8 @@ fn field(
             if diamond.clicked() {
                 acts.push(Act::Toggle(f));
             }
-            if keys.on {
+            let linear = matches!(f, Key::Picture(Field::AnchorX | Field::AnchorY));
+            if keys.on && !linear {
                 diamond.context_menu(|ui| {
                     for e in Ease::ALL {
                         if ui.button(ease_label(e)).clicked() {

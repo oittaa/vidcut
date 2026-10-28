@@ -1361,12 +1361,13 @@ pub enum Request {
         #[serde(default)]
         keys: Option<Vec<KeyPicks>>,
     },
-    /// Paste keyframes (Ctrl+V in the Keyframes tab) on each of `clips`:
-    /// the first at `at`, each other one at its offset from it. Defaults:
-    /// the GUI's clipboard and the playhead. A keyframe goes on the source
-    /// frame under its time and takes the place of a keyframe there. Each
-    /// time needs a frame of the clip. Returns the `keyframes` with their
-    /// clip, value and source frame.
+    /// Paste keyframes (Ctrl+V in the Keyframes tab or the keyframe tray)
+    /// on each of `clips`: the first at `at` in the earliest of `clips`,
+    /// each other one at its offset from it. Each clip takes the keyframes
+    /// at the same frames from its start. Defaults: the GUI's clipboard and
+    /// the playhead. A keyframe goes on the source frame under its time,
+    /// also past the clip's ends, and takes the place of a keyframe there.
+    /// Returns the `keyframes` with their clip, value and source frame.
     #[serde(rename = "keyframes.paste")]
     KeyframesPaste {
         clips: OneOrMany<ClipRef>,

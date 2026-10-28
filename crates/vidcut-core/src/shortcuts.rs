@@ -278,7 +278,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Ctrl", "C"],
         "Copy",
         Some(
-            "Copies the selected clips. With keyframes selected in the Keyframes tab, it copies only them.",
+            "Copies the selected clips. After a click in the Keyframes tab or the keyframe tray, it copies the selected keyframes. Keyframes and clips share one clipboard.",
         ),
     ),
     key(
@@ -286,7 +286,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Ctrl", "X"],
         "Cut",
         Some(
-            "Copies the selected clips and removes them. On Track 1 the gap closes. With              keyframes selected in the Keyframes tab, it cuts only them.",
+            "Copies the selected clips and removes them. On Track 1 the gap closes. After a click in the Keyframes tab or the keyframe tray, it cuts the selected keyframes.",
         ),
     ),
     key(
@@ -294,7 +294,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Ctrl", "V"],
         "Paste",
         Some(
-            "Pastes at the playhead on the clips' own track, over what is there. Copied keyframes              go on the selected clip: the first at the playhead, the others at their distance.",
+            "Pastes copied clips at the playhead on the clips' own track, over what is there. After a click in the Keyframes tab or the keyframe tray, it pastes copied keyframes on the selected clips: the first at the playhead, the others at their distance.",
         ),
     ),
     key(

@@ -1426,8 +1426,8 @@ impl Workspace {
             self.timeline.options.snapping = !self.timeline.options.snapping;
             self.timeline.options.save();
         }
-        if icon_toggle(ui, icon::KEYFRAMES, "Keyframe Tray", self.key_tray)
-            .on_hover_text("Keyframe Tray")
+        if icon_toggle(ui, icon::KEYFRAMES, "Keyframes", self.key_tray)
+            .on_hover_text("Keyframes")
             .clicked()
         {
             self.key_tray = !self.key_tray;

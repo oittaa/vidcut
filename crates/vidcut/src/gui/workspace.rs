@@ -1105,6 +1105,7 @@ impl Workspace {
     }
 
     fn keys(&mut self, ctx: &egui::Context) {
+        self.key_focus(ctx);
         if vidcut_av::debug() {
             ctx.input(|i| {
                 for e in &i.events {
@@ -1187,7 +1188,7 @@ impl Workspace {
                     };
                     self.send(method, json!({ "clips": clips }));
                 }
-                egui::Event::Paste(_) if self.snap.key_clipboard > 0 => self.paste_editor_keys(),
+                egui::Event::Paste(_) if self.paste_editor_keys() => {}
                 egui::Event::Paste(_) => self.send("edit.paste", json!({})),
                 _ => {}
             }

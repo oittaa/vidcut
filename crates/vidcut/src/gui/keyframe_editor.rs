@@ -181,7 +181,6 @@ enum RowAct {
 struct Boxing {
     clip: String,
     origin: Pos2,
-    add: bool,
     tray: bool,
 }
 
@@ -225,6 +224,9 @@ pub struct Editor {
     held: Option<Held>,
     fresh: Option<(KeyParam, i64, Instant)>,
     grab: Option<(f64, (f64, f64))>,
+    tray_area: Option<Rect>,
+    panel_area: Option<Rect>,
+    focused: bool,
 }
 
 impl Editor {
@@ -367,7 +369,8 @@ fn unit(param: KeyParam) -> &'static str {
 fn places(param: KeyParam) -> usize {
     match param {
         KeyParam::Volume | KeyParam::Zoom | KeyParam::Opacity => 1,
-        KeyParam::Rotation | KeyParam::CropSoftness | KeyParam::Pitch | KeyParam::Yaw => 2,
+        KeyParam::Rotation | KeyParam::CropSoftness => 2,
+        KeyParam::Pitch | KeyParam::Yaw => 3,
         _ => 0,
     }
 }
@@ -398,12 +401,22 @@ fn paired(param: KeyParam) -> bool {
     )
 }
 
-fn nudge_step(param: KeyParam, sign: f64, y: bool, f: &Frame) -> f64 {
+fn nudge_step(param: KeyParam, sign: f64, y: bool) -> f64 {
     let step = match param {
-        KeyParam::Pitch | KeyParam::Yaw => 0.01,
-        _ => 1.0,
-    } * sign;
-    stored_value(param, step, y, f) - stored_value(param, 0.0, y, f)
+        KeyParam::Zoom | KeyParam::Volume | KeyParam::CropSoftness => 0.2,
+        KeyParam::Rotation => 0.02,
+        KeyParam::Opacity => 0.002,
+        KeyParam::Position
+        | KeyParam::Anchor
+        | KeyParam::Pitch
+        | KeyParam::Yaw
+        | KeyParam::CropLeft
+        | KeyParam::CropRight
+        | KeyParam::CropTop
+        | KeyParam::CropBottom => 0.001,
+    };
+    let down = matches!(param, KeyParam::Position | KeyParam::Anchor) && y;
+    if down { -step * sign } else { step * sign }
 }
 
 fn place_value(param: KeyParam, v: f64) -> f64 {
@@ -411,16 +424,18 @@ fn place_value(param: KeyParam, v: f64) -> f64 {
     v.clamp(lo, hi)
 }
 
-fn choose(selected: &[Mark], hit: Mark, add: bool) -> Vec<Mark> {
-    if add {
-        let mut out = selected.to_vec();
-        if !out.contains(&hit) {
-            out.push(hit);
-        }
-        out
-    } else {
-        vec![hit]
+fn choose(selected: &[Mark], hit: Mark, toggle: bool) -> Vec<Mark> {
+    if !toggle {
+        return vec![hit];
     }
+    let mut out = selected.to_vec();
+    match out.iter().position(|m| *m == hit) {
+        Some(i) => {
+            out.remove(i);
+        }
+        None => out.push(hit),
+    }
+    out
 }
 
 fn dragged(selected: &[Mark], hit: Mark) -> Vec<Mark> {
@@ -968,6 +983,7 @@ impl Workspace {
         );
         child.set_clip_rect(rect.intersect(ui.clip_rect()));
         let ui = &mut child;
+        self.key_editor.tray_area = Some(rect);
         ui.painter()
             .rect_filled(rect, 2.0, theme::colors().panel_dark);
         let Some(p) = self.project_shared() else {
@@ -1014,6 +1030,7 @@ impl Workspace {
     }
 
     pub(super) fn keyframe_panel(&mut self, ui: &mut egui::Ui) {
+        self.key_editor.panel_area = Some(ui.max_rect());
         let Some(p) = self.project_shared() else {
             ui.label(dim("Select a clip."));
             return;
@@ -1112,8 +1129,22 @@ impl Workspace {
         self.left == LeftTab::Keyframes || self.key_tray
     }
 
+    pub(super) fn key_focus(&mut self, ctx: &egui::Context) {
+        let Some(at) = ctx.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()))
+        else {
+            return;
+        };
+        let tray = self.key_editor.tray_area.filter(|_| self.key_tray);
+        let panel = self
+            .key_editor
+            .panel_area
+            .filter(|_| self.left == LeftTab::Keyframes);
+        self.key_editor.focused =
+            at.is_some_and(|at| tray.into_iter().chain(panel).any(|r| r.contains(at)));
+    }
+
     pub(super) fn copy_editor_keys(&mut self, cut: bool) -> bool {
-        if !self.keys_in_view() || self.key_editor.selected.is_empty() {
+        if !self.key_editor.focused || self.key_editor.selected.is_empty() {
             return false;
         }
         let Some(id) = self.key_editor.clip.clone() else {
@@ -1134,9 +1165,15 @@ impl Workspace {
         true
     }
 
-    pub(super) fn paste_editor_keys(&mut self) {
+    pub(super) fn paste_editor_keys(&mut self) -> bool {
+        if !self.key_editor.focused {
+            return self.snap.key_clipboard > 0;
+        }
+        if self.snap.key_clipboard == 0 {
+            return true;
+        }
         let Some(p) = self.project_shared() else {
-            return;
+            return true;
         };
         let clips: Vec<&String> = self
             .snap
@@ -1144,9 +1181,9 @@ impl Workspace {
             .clips
             .iter()
             .filter(|id| p.clip(id).is_some())
-            .take(1)
             .collect();
         self.send("keyframes.paste", json!({ "clips": clips }));
+        true
     }
 
     pub(super) fn nudge_keys(&mut self, step: Nudge) {
@@ -1187,7 +1224,6 @@ impl Workspace {
             return;
         }
         let sign = if step == Nudge::Up { 1.0 } else { -1.0 };
-        let f = shape(&p, &clip);
         let mut parts = Vec::new();
         for param in unique_params(&marks) {
             let Some(lane) = lanes.iter().find(|l| l.param == param) else {
@@ -1195,7 +1231,7 @@ impl Workspace {
             };
             let d = |y: bool| {
                 let axis = if y { Axis::Y } else { Axis::X };
-                clamped_delta(&clip, lane, &marks, axis, nudge_step(param, sign, y, &f))
+                clamped_delta(&clip, lane, &marks, axis, nudge_step(param, sign, y))
             };
             let by = if paired(param) {
                 let (x, y) = (d(false), d(true));
@@ -1217,16 +1253,10 @@ impl Workspace {
     }
 
     fn start_box(&mut self, ui: &egui::Ui, clip: &Clip, pos: Pos2) {
-        let (origin, add) = ui.input(|i| {
-            (
-                i.pointer.press_origin().unwrap_or(pos),
-                i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl,
-            )
-        });
+        let origin = ui.input(|i| i.pointer.press_origin().unwrap_or(pos));
         self.key_editor.boxing = Some(Boxing {
             clip: clip.id.clone(),
             origin,
-            add,
             tray: self.key_editor.tray,
         });
     }
@@ -1260,11 +1290,7 @@ impl Workspace {
             ui.ctx().request_repaint();
             return;
         }
-        let mut chosen = if b.add {
-            self.key_editor.selected.clone()
-        } else {
-            Vec::new()
-        };
+        let mut chosen = Vec::new();
         for (at, m) in &self.key_editor.seen {
             if rect.contains(*at) && !chosen.contains(m) {
                 chosen.push(*m);
@@ -1710,7 +1736,7 @@ impl Workspace {
             if !plot.tray {
                 let c = ui
                     .add_enabled(
-                        keyed,
+                        keyed && lane.param != KeyParam::Anchor,
                         egui::Button::selectable(curve && keyed, WAVE_SINE).frame(false),
                     )
                     .on_hover_text("Curve");
@@ -1720,14 +1746,13 @@ impl Workspace {
             }
             ui.label(RichText::new(lane_name(lane.param)).small());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if !plot.tray
-                    && ui
-                        .add_enabled(
-                            keyed,
-                            egui::Button::new(ARROW_COUNTER_CLOCKWISE).frame(false),
-                        )
-                        .on_hover_text("Reset Keyframes")
-                        .clicked()
+                if ui
+                    .add_enabled(
+                        keyed,
+                        egui::Button::new(ARROW_COUNTER_CLOCKWISE).frame(false),
+                    )
+                    .on_hover_text("Reset Keyframes")
+                    .clicked()
                 {
                     act = Some(RowAct::Reset);
                 }
@@ -2092,6 +2117,9 @@ impl Workspace {
                     });
                 }
             }
+            if mark.param == KeyParam::Anchor {
+                return;
+            }
             let current = ease_of(&lane.keys, i);
             egui::ComboBox::from_id_salt(("key-ease", lane_name(mark.param), mark.frame))
                 .selected_text(current.map_or("Custom", ease_label))
@@ -2196,7 +2224,7 @@ impl Workspace {
             lane,
             map,
         } = press;
-        let add = ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
+        let toggle = ui.input(|i| i.modifiers.command);
         let Some(pos) = resp.interact_pointer_pos() else {
             return;
         };
@@ -2207,12 +2235,10 @@ impl Workspace {
         if resp.drag_started()
             && let Some(hit) = hit
         {
-            self.key_editor.selected = if add {
-                choose(&self.key_editor.selected, hit, true)
-            } else if self.key_editor.selected.contains(&hit) {
+            self.key_editor.selected = if self.key_editor.selected.contains(&hit) {
                 self.key_editor.selected.clone()
             } else {
-                vec![hit]
+                choose(&self.key_editor.selected, hit, toggle)
             };
             let marks = dragged(&self.key_editor.selected, hit);
             let (v_span, v_height) = values.map_or((0.0, 1.0), |v| (v.span(), v.height));
@@ -2230,7 +2256,7 @@ impl Workspace {
         } else if resp.clicked()
             && let Some(hit) = hit
         {
-            self.key_editor.selected = choose(&self.key_editor.selected, hit, add);
+            self.key_editor.selected = choose(&self.key_editor.selected, hit, toggle);
         }
     }
 
@@ -2258,14 +2284,14 @@ impl Workspace {
             (Some(_), None) => true,
             _ => false,
         };
-        let add = ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
+        let toggle = ui.input(|i| i.modifiers.command);
         if use_handle && let Some((_, frame, out, handle, neighbor)) = handle_hit {
             let mark = Mark {
                 param: lane.param,
                 frame: *frame,
             };
             if resp.clicked() {
-                self.key_editor.selected = choose(&self.key_editor.selected, mark, add);
+                self.key_editor.selected = choose(&self.key_editor.selected, mark, toggle);
             }
             if !resp.drag_started() {
                 return;
@@ -2344,6 +2370,10 @@ impl Workspace {
             m.param == lane.param && e.menu_curve == curve && e.menu_tray == e.tray
         });
         if !open {
+            return;
+        }
+        if lane.param == KeyParam::Anchor {
+            self.key_editor.menu = None;
             return;
         }
         let mark = self.key_editor.menu;
@@ -2570,19 +2600,6 @@ mod tests {
         let a = mark(KeyParam::Volume, 1);
         let b = mark(KeyParam::Volume, 4);
         assert_eq!(choose(&[a], b, false), vec![b]);
-    }
-
-    #[test]
-    fn shift_adds_a_keyframe() {
-        let a = mark(KeyParam::Zoom, 2);
-        let b = mark(KeyParam::Zoom, 6);
-        assert_eq!(choose(&[a], b, true), vec![a, b]);
-    }
-
-    #[test]
-    fn shift_does_not_add_the_same_keyframe_twice() {
-        let a = mark(KeyParam::Zoom, 2);
-        assert_eq!(choose(&[a], a, true), vec![a]);
     }
 
     #[test]

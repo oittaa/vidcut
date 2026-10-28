@@ -105,7 +105,9 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - The Inspector has a Keyframe button between Previous and Next arrows on each value and each group. Dynamic Zoom has no button.
   - The groups with buttons: Transform, Cropping, Composite, Speed Change, Lens Correction, Retime and Scaling, Volume and Pan.
 - The Keyframes tab shows the Keyframe Editor: a track for each value with its keyframes, Volume and Pan too.
-- The Mark menu has Add Keyframe (Ctrl+[), Delete Keyframe (Alt+[), Delete All Keyframes, and Move Selected Keyframes Left, Right, Up and Down.
+- The Mark menu has Add Keyframe (Ctrl+[), Delete Keyframe (Alt+]), Delete All Keyframes, and Move Selected Keyframes Left, Right, Up and Down.
+  - It also has Add Static Keyframe (Ctrl+]) and a Keyframe Timeline Mode submenu. Both are disabled on the Cut page.
+  - Resolve Studio 21.1.2 shows these items and shortcuts.
 - The speed tool of the viewer has its own Keyframe button.
 - A right-click on a keyframe in the Keyframe Editor opens no menu, on the Cut page and on the Edit page.
 
@@ -127,15 +129,16 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - A drag on a group track moves that group's keyframes at that time.
 - Volume is a track in the Audio group.
 - The curve of a value shows under its track. A drag on an In or Out handle changes that handle.
-- One click selects one keyframe. Shift or Ctrl adds to the selection. Delete removes the selection.
-- A drag from an empty part draws a box. The box selects the keyframes in it.
+- One click selects one keyframe. Ctrl-click adds a keyframe to the selection or removes it. Delete removes the selection.
+- A drag from an empty part draws a box. The box replaces the selection with the keyframes in it.
 - Mark > Move Selected Keyframes moves the selection by one frame, or changes its values by one step.
-- Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the selection. A paste puts the first keyframe at the playhead.
+- Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the selection. A paste puts the keyframes on the selected clips, the first at the playhead.
+- [§2](../cut-page-spec.md#2-layout-pp-636637) gives the measured rules of the clicks, the box, the steps, the paste and the clipboard.
 - A right-click sets that keyframe's ease, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
 - A bar shows the value, time and ease of the selected keyframe (X90).
 - The time ruler moves the playhead. Fit Clip, Detail Zoom, the zoom slider and Ctrl with the mouse wheel zoom.
 - A scroll bar under the tracks moves the range.
-- The Keyframe Tray button of the timeline shows a tray under the tracks. It has the keyed tracks of the clip, on the time of the timeline.
+- The Keyframes button of the lower timeline shows a tray under its tracks. It has the keyed tracks of the clip, on the time of the timeline.
 - `keyframes.add`, `keyframes.remove`, `keyframes.set`, `keyframes.move`, `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do these edits.
 - **To do:**
   - the motion path in the viewer (pp. 1252–1254)
@@ -143,6 +146,11 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - keyframes of several selected clips at once (p. 1268)
   - the Lock and Track Color controls (p. 1257)
   - the ruler in frames, Snap Keyframes to Grid, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
+  - Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes, with their shortcuts (pp. 1254–1255)
+  - Select all (Ctrl+A) and deselect all (Ctrl+Shift+A) in the Keyframes tab and the tray
+  - the parts of Resolve's tray that vidcut does not have ([§2](../cut-page-spec.md#2-layout-pp-636637), Keyframe tray)
+  - Zoom X and Zoom Y as two keyframes when the zoom is not linked
+    - Resolve then selects and steps Zoom X alone. vidcut's zoom is one keyframe for X and Y.
 
 **Later:** keyframes of speed and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
 
@@ -183,8 +191,9 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
   - Resolve writes them at −s and 1000 − s. s is the first source frame of the clip ([Measured](#measured-in-resolve-studio-2111)).
   - Resolve reads the earlier key as the start, whatever the times ([gotchas](../gotchas.md#resolves-otio-files)). Thus both forms play the same.
 - vidcut writes the keyframes of each keyed value in the `Key Frames` of its parameter. It writes the other picture parameters with an empty `Key Frames`.
-  - It writes the anchor point keys without Bezier handles. Resolve's form of a handle on a `POINTF` key is not known.
-  - Resolve's reading of anchor point, Pitch and Yaw keys was not measured.
+  - It writes the anchor point keys without Bezier handles. Resolve's anchor point keys are linear too ([D92](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Resolve Studio 21.1.2 imports its own file with anchor point, Pitch and Yaw keys and gives the same keys.
+  - Resolve's import of a file that vidcut writes with these keys is not measured.
 
 **The one test file:** `$VIDCUT_TEST_DATA/fixtures/resolve-titles/titles.otio` has Resolve's metadata, 24 fps and g = 86400.
 
@@ -231,8 +240,4 @@ Rule 3: each GUI action has a request.
 
 - **Compound clips:** what does `edit.decompose` do with the keyframes of a compound clip for a clip inside that is frozen or plays backward?
 - **Dynamic Zoom:** can its boxes have times other than the ends of the clip?
-- **Move Up and Down:** what step does Resolve use for Mark > Move Selected Keyframes Up and Down? vidcut uses one unit of the Inspector field.
-- **The keyframe tray:** where does Resolve put the tray in the timeline of the Cut page, and which tracks does it show?
-- **The clipboard:** does Resolve keep copied keyframes apart from copied clips? vidcut has one clipboard for both.
 - **Later work:** in which order do keyframes of speed (p. 737) and titles come?
-- **Anchor point keys in Resolve:** does Resolve read `POINTF` keys on `transformationAnchorPoint`, and what is the form of their Bezier handles?
