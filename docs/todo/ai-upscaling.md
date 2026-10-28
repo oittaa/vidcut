@@ -84,6 +84,5 @@ These parts are open:
    6. Decode each frame once. The chunk reader decodes the frames a second time.
    7. Keep the frames on the GPU, from the decoder through the shaders to the encoder. They go through memory. The viewer and the export both need it.
    8. Let the CPU decode and encode while the GPU runs the network.
-4. The shaders on the GPU that `gpu.device` names. They use the high-performance GPU that wgpu picks.
 
 The files of both models, with their sources, sizes and SHA-256, are in `crates/vidcut-core/src/catalog.rs`.

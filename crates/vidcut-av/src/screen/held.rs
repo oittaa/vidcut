@@ -177,6 +177,10 @@ pub(crate) fn small_luma(
     Held::new(small, &gpu.device, &gpu.queue).read(ow as usize * oh as usize)
 }
 
+fn packed_words(encoded: &wgpu::Texture) -> u64 {
+    (u64::from(encoded.width()) * u64::from(encoded.height()) * 3).div_ceil(4)
+}
+
 pub(super) struct Pipes {
     pack: wgpu::ComputePipeline,
     unpack: wgpu::ComputePipeline,
@@ -212,15 +216,26 @@ impl Pipes {
         encoder: &mut wgpu::CommandEncoder,
         encoded: &wgpu::Texture,
     ) -> wgpu::Buffer {
-        let words = (u64::from(encoded.width()) * u64::from(encoded.height())).div_ceil(4);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("vidcut held picture"),
-            size: words * 4,
+            size: packed_words(encoded) * 4,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        self.pack_into(device, encoder, encoded, &buffer);
+        buffer
+    }
+
+    pub(super) fn pack_into(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        encoded: &wgpu::Texture,
+        buffer: &wgpu::Buffer,
+    ) {
+        let words = packed_words(encoded);
         let view = encoded.create_view(&Default::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vidcut rgb"),
@@ -244,7 +259,6 @@ impl Pipes {
             pass.set_bind_group(0, &bind, &[]);
             pass.dispatch_workgroups(across, groups.div_ceil(across), 1);
         }
-        buffer
     }
 
     pub(super) fn unpack(
