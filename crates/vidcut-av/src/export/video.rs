@@ -812,12 +812,12 @@ impl Source {
             Key::Frame(i) => i,
             Key::Still(_) => 0,
         };
+        let clock = Instant::now();
+        let work = crate::super_scale::making(id.upscaler, size, id.made, (want, want));
         if !self.run.as_ref().is_some_and(|r| r.serves(id, size)) {
             self.run = None;
             self.open_run(id, size, want, reading)?;
         }
-        let clock = Instant::now();
-        let work = crate::super_scale::making(id.upscaler, size, id.made, (want, want));
         loop {
             crate::cancel::stop()?;
             if let Some(p) = self.taken(id)? {
