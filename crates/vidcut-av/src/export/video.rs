@@ -1277,6 +1277,7 @@ pub struct VideoFrames {
     drawer: Option<Drawer>,
     drawn: i64,
     encoder: Option<Handoff>,
+    spent: (Duration, Duration),
 }
 
 pub(crate) enum Handoff {
@@ -1306,6 +1307,15 @@ pub(crate) struct Drawer {
     screen: crate::screen::Screen,
     encoder: Option<Handoff>,
     through_memory: Option<String>,
+    spent: (Duration, Duration),
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Drawing {
+    pub(crate) picture_in: Duration,
+    pub(crate) draw: Duration,
+    pub(crate) buffer: Duration,
+    pub(crate) planes: Duration,
 }
 
 impl Drawer {
@@ -1315,6 +1325,7 @@ impl Drawer {
             screen: crate::screen::Screen::for_export(),
             encoder,
             through_memory: None,
+            spent: Default::default(),
         })
     }
 
@@ -1326,6 +1337,16 @@ impl Drawer {
         self.through_memory.as_deref()
     }
 
+    pub(crate) fn spent(&self) -> Drawing {
+        let (picture_in, buffer) = self.screen.spent();
+        Drawing {
+            picture_in,
+            draw: self.spent.0.saturating_sub(picture_in),
+            buffer,
+            planes: self.spent.1.saturating_sub(buffer),
+        }
+    }
+
     pub(crate) fn frame(
         &mut self,
         picture: &std::sync::Arc<crate::player::Picture>,
@@ -1334,8 +1355,22 @@ impl Drawer {
         (w, h): (u32, u32),
         (pixel, colors): (format::Pixel, (Option<Hdr>, Option<Hdr>)),
     ) -> Result<frame::Video> {
+        let clock = Instant::now();
+        self.screen
+            .draw(self.gpu, Some(picture), titles, layers, w, h);
+        self.spent.0 += clock.elapsed();
+        let clock = Instant::now();
+        let out = self.planes(pixel, colors);
+        self.spent.1 += clock.elapsed();
+        out
+    }
+
+    fn planes(
+        &mut self,
+        pixel: format::Pixel,
+        colors: (Option<Hdr>, Option<Hdr>),
+    ) -> Result<frame::Video> {
         let (gpu, screen) = (self.gpu, &mut self.screen);
-        screen.draw(gpu, Some(picture), titles, layers, w, h);
         let handed =
             match (&self.encoder, &self.through_memory) {
                 (Some(Handoff::Cuda(device, frames)), None) => Some(screen.encoded(
@@ -1504,6 +1539,7 @@ impl VideoFrames {
             drawer: None,
             drawn: 0,
             encoder: None,
+            spent: Default::default(),
         }
     }
 
@@ -1608,6 +1644,14 @@ impl VideoFrames {
         self.fps
     }
 
+    pub(crate) fn spent(&self) -> (Duration, Duration) {
+        self.spent
+    }
+
+    pub(crate) fn drawing(&self) -> Drawing {
+        self.drawer.as_ref().map(Drawer::spent).unwrap_or_default()
+    }
+
     pub fn next_frame(&mut self) -> Result<Option<frame::Video>> {
         if self.drawer.is_none() {
             let drawer = Drawer::new(self.encoder.take())?;
@@ -1615,9 +1659,19 @@ impl VideoFrames {
             self.maker = Maker::new(out, drawer.keeps(), reading).holding().drawing();
             self.drawer = Some(drawer);
         }
-        let Some(layers) = self.next_layers()? else {
+        let clock = Instant::now();
+        let layers = self.next_layers()?;
+        self.spent.0 += clock.elapsed();
+        let Some(layers) = layers else {
             return Ok(None);
         };
+        let clock = Instant::now();
+        let out = self.drawn_frame(layers);
+        self.spent.1 += clock.elapsed();
+        out
+    }
+
+    fn drawn_frame(&mut self, layers: Vec<Layer>) -> Result<Option<frame::Video>> {
         let k = (self.k - 1).max(0);
         let piece = self.pieces.get(self.piece).cloned();
         let (w, h, _) = self.maker.out();
