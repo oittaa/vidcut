@@ -125,6 +125,10 @@ pub(crate) fn stop_sharing(why: &str) {
     }
 }
 
+pub(crate) fn share_again() {
+    SHARES.store(true, Ordering::Relaxed);
+}
+
 pub(crate) fn shared(f: &frame::Video) -> Option<frame::Video> {
     let held = of(f)?;
     if !SHARES.load(Ordering::Relaxed) || !for_the_viewer(held) {

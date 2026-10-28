@@ -272,6 +272,7 @@ impl User {
             return None;
         }
         *USERS.lock().unwrap_or_else(PoisonError::into_inner) += 1;
+        crate::screen::held::share_again();
         Some(Self)
     }
 }

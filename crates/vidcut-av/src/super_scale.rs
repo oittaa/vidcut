@@ -158,6 +158,7 @@ impl User {
     pub(crate) fn of(s: SuperScale) -> Option<Self> {
         let i = slot(s.upscaler).filter(|_| s.ai())?;
         users()[i] += 1;
+        crate::screen::held::share_again();
         Some(Self(s.upscaler))
     }
 }
