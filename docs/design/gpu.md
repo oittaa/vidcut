@@ -123,7 +123,8 @@ Frames that come down:
   - Why: a failure can be for a short time only, for example when an AI model holds the video memory.
 - A picture in memory goes up into the frames of a GPU encoder (`Upload`, `CudaFrames::upload`).
 - In the other cases, the player brings the pictures of the AI upscalers and the frame interpolation down (`held::in_memory`).
-  - After a share fails once, these pictures come down until vidcut starts again (`held::stop_sharing`).
+  - After a share fails, these pictures come down (`held::stop_sharing`). When a clip starts to use an AI model again, the player tries to share again (`held::share_again`).
+  - Why: a failure can be for a short time only, for example when an AI model holds the video memory.
   - They go to the viewer as RGB24, with no conversion on the CPU (`normalize::displayable`). An RGB24 still goes to the draw as it is too.
 - The cut test of a retime brings down a 96×54 luma picture of each frame, not the frame (`held::small_luma`, [export](export.md)).
 
