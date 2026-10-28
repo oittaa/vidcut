@@ -142,10 +142,7 @@ const GROUPS: &[(&str, &str)] = &[
         "jobs",
         "Export, proxy and transcription jobs of the running GUI",
     ),
-    (
-        "keyframes",
-        "Volume, position, zoom, rotation and crop keyframes",
-    ),
+    ("keyframes", "Volume and picture keyframes"),
     ("keys", "Keyboard shortcuts"),
     (
         "looks",

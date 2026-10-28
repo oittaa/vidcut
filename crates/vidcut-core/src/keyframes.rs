@@ -355,6 +355,9 @@ pub enum PictureValue {
     Position,
     Zoom,
     Rotation,
+    Anchor,
+    Pitch,
+    Yaw,
     CropLeft,
     CropRight,
     CropTop,
@@ -364,10 +367,13 @@ pub enum PictureValue {
 }
 
 impl PictureValue {
-    pub const ALL: [PictureValue; 9] = [
+    pub const ALL: [PictureValue; 12] = [
         PictureValue::Position,
         PictureValue::Zoom,
         PictureValue::Rotation,
+        PictureValue::Anchor,
+        PictureValue::Pitch,
+        PictureValue::Yaw,
         PictureValue::CropLeft,
         PictureValue::CropRight,
         PictureValue::CropTop,
@@ -381,6 +387,9 @@ impl PictureValue {
             PictureValue::Position => "position",
             PictureValue::Zoom => "zoom",
             PictureValue::Rotation => "rotation",
+            PictureValue::Anchor => "anchor",
+            PictureValue::Pitch => "pitch",
+            PictureValue::Yaw => "yaw",
             PictureValue::CropLeft => "crop_left",
             PictureValue::CropRight => "crop_right",
             PictureValue::CropTop => "crop_top",
@@ -391,7 +400,10 @@ impl PictureValue {
     }
 
     pub fn pair(self) -> bool {
-        matches!(self, PictureValue::Position | PictureValue::Zoom)
+        matches!(
+            self,
+            PictureValue::Position | PictureValue::Zoom | PictureValue::Anchor
+        )
     }
 
     pub fn of_name(name: &str) -> Option<Self> {
@@ -410,11 +422,14 @@ fn one_at(keys: &[Keyframe], frame: f64) -> Option<f64> {
     (!keys.is_empty()).then(|| value_at(keys, frame)).flatten()
 }
 
-fn parts(p: &Picture) -> [(&Vec<Keyframe>, Option<&Vec<f64>>); 9] {
+fn parts(p: &Picture) -> [(&Vec<Keyframe>, Option<&Vec<f64>>); 12] {
     [
         (&p.position_keys, Some(&p.position_y)),
         (&p.zoom_keys, Some(&p.zoom_y)),
         (&p.rotation_keys, None),
+        (&p.anchor_keys, Some(&p.anchor_y)),
+        (&p.pitch_keys, None),
+        (&p.yaw_keys, None),
         (&p.crop_left_keys, None),
         (&p.crop_right_keys, None),
         (&p.crop_top_keys, None),
@@ -429,6 +444,9 @@ fn parts_mut(p: &mut Picture, v: PictureValue) -> (&mut Vec<Keyframe>, Option<&m
         PictureValue::Position => (&mut p.position_keys, Some(&mut p.position_y)),
         PictureValue::Zoom => (&mut p.zoom_keys, Some(&mut p.zoom_y)),
         PictureValue::Rotation => (&mut p.rotation_keys, None),
+        PictureValue::Anchor => (&mut p.anchor_keys, Some(&mut p.anchor_y)),
+        PictureValue::Pitch => (&mut p.pitch_keys, None),
+        PictureValue::Yaw => (&mut p.yaw_keys, None),
         PictureValue::CropLeft => (&mut p.crop_left_keys, None),
         PictureValue::CropRight => (&mut p.crop_right_keys, None),
         PictureValue::CropTop => (&mut p.crop_top_keys, None),
@@ -451,6 +469,9 @@ fn plain_of(p: &Picture, v: PictureValue) -> [f64; 2] {
         PictureValue::Position => p.place(),
         PictureValue::Zoom => p.scale(),
         PictureValue::Rotation => [p.turn(), 0.0],
+        PictureValue::Anchor => p.pivot(),
+        PictureValue::Pitch => [p.pitch(), 0.0],
+        PictureValue::Yaw => [p.yaw(), 0.0],
         PictureValue::CropLeft => [p.crop.left, 0.0],
         PictureValue::CropRight => [p.crop.right, 0.0],
         PictureValue::CropTop => [p.crop.top, 0.0],
@@ -465,6 +486,9 @@ fn write_plain(p: &mut Picture, v: PictureValue, value: [f64; 2]) {
         PictureValue::Position => p.position = Some(value).filter(|at| *at != Picture::MIDDLE),
         PictureValue::Zoom => p.zoom = Some(value).filter(|z| *z != [1.0, 1.0]),
         PictureValue::Rotation => p.rotation = Some(value[0]).filter(|r| *r != 0.0),
+        PictureValue::Anchor => p.anchor = Some(value).filter(|at| *at != Picture::MIDDLE),
+        PictureValue::Pitch => p.pitch = Some(value[0]).filter(|v| *v != 0.0),
+        PictureValue::Yaw => p.yaw = Some(value[0]).filter(|v| *v != 0.0),
         PictureValue::CropLeft => p.crop.left = value[0],
         PictureValue::CropRight => p.crop.right = value[0],
         PictureValue::CropTop => p.crop.top = value[0],
@@ -514,6 +538,10 @@ impl Picture {
 
     pub fn turn_at(&self, frame: f64) -> f64 {
         self.channel_at(PictureValue::Rotation, frame)[0]
+    }
+
+    pub fn pivot_at(&self, frame: f64) -> [f64; 2] {
+        self.channel_at(PictureValue::Anchor, frame)
     }
 
     pub fn crop_at(&self, frame: f64) -> Crop {
@@ -566,6 +594,9 @@ impl Picture {
             PictureValue::Position,
             PictureValue::Zoom,
             PictureValue::Rotation,
+            PictureValue::Anchor,
+            PictureValue::Pitch,
+            PictureValue::Yaw,
         ] {
             self.clear_channel(v);
         }
@@ -913,6 +944,8 @@ fn value_problem(v: PictureValue, value: [f64; 2], p: &Picture, frame: i64) -> O
             .iter()
             .all(|n| n.is_finite() && (0.01..=100.0).contains(n)),
         PictureValue::Rotation => !(value[0].is_finite() && value[0].abs() <= 3600.0),
+        PictureValue::Anchor => !value.iter().all(|n| n.is_finite() && n.abs() <= 100.0),
+        PictureValue::Pitch | PictureValue::Yaw => !(value[0].is_finite() && value[0].abs() <= 1.5),
         PictureValue::CropLeft
         | PictureValue::CropRight
         | PictureValue::CropTop
@@ -931,6 +964,11 @@ fn value_problem(v: PictureValue, value: [f64; 2], p: &Picture, frame: i64) -> O
         }
         PictureValue::Zoom => "a picture's zoom is from 1/100 to 100".into(),
         PictureValue::Rotation => "a picture's rotation is degrees, from -3600 to 3600".into(),
+        PictureValue::Anchor => {
+            "a picture's anchor is two fractions of the picture, each from -100 to 100".into()
+        }
+        PictureValue::Pitch => "a picture's pitch is from -1.5 to 1.5".into(),
+        PictureValue::Yaw => "a picture's yaw is from -1.5 to 1.5".into(),
         PictureValue::CropSoftness => "a picture's crop softness is from -100 to 100".into(),
         PictureValue::Opacity => "a picture's opacity is from 0 to 1".into(),
         _ => "a picture's crop is a fraction of it on each side, from 0, leaving some of it".into(),

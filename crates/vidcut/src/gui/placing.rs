@@ -375,7 +375,7 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
     let ends = [level_of(fixed(z.start))?, level_of(fixed(z.end))?];
     Some(Shown {
         clip: c.id.clone(),
-        anchor: anchored(&shown, (w, h), fit),
+        anchor: anchored(&shown.sampled(c.source_at(at) as f64), (w, h), fit),
         picture: shown,
         level,
         middle,

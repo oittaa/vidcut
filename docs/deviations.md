@@ -1510,11 +1510,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Volume is the gain of the clip, from −60 dB to +24 dB (D12). It shows one decimal and the unit.
     - On a clip with volume keyframes, Volume shows the volume at the playhead. A change sets a keyframe there ([D82](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - Volume has a Keyframe button between Previous and Next arrows. A right-click sets the ease (D75).
-    - The same button sits beside Zoom, Position X, Position Y, Rotation and each crop side.
-    - Position X and Y share one keyframe. Zoom X and Y share one keyframe.
+    - The same button sits beside Zoom, Position X, Position Y, Rotation, Anchor X, Anchor Y, Pitch, Yaw and each crop side.
+    - Position X and Y share one keyframe. Zoom X and Y share one keyframe. Anchor X and Y share one keyframe.
     - The button is lit on a keyframe. A click adds or removes the keyframe at the playhead.
     - Previous and Next move the playhead to the keyframe of that value inside the clip.
-    - Dynamic Zoom, the anchor, Pitch, Yaw and the flips have no Keyframe button.
+    - Dynamic Zoom and the flips have no Keyframe button.
     - The Reset of one of these values removes its keyframes. The Reset of Transform or Crop removes that section's keyframes.
     - The Reset of Volume sets 0 dB and removes the volume keyframes. The Audio section has no Reset of the whole section.
     - A drag on Volume sends one change on release. The sound does not change during the drag.

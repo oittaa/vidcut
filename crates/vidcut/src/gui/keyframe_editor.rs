@@ -199,7 +199,12 @@ impl Editor {
 
 fn group_of(param: KeyParam) -> Group {
     match param {
-        KeyParam::Position | KeyParam::Zoom | KeyParam::Rotation => Group::Transform,
+        KeyParam::Position
+        | KeyParam::Zoom
+        | KeyParam::Rotation
+        | KeyParam::Anchor
+        | KeyParam::Pitch
+        | KeyParam::Yaw => Group::Transform,
         KeyParam::Volume => Group::Audio,
         KeyParam::CropLeft
         | KeyParam::CropRight
@@ -225,6 +230,9 @@ fn lane_name(param: KeyParam) -> &'static str {
         KeyParam::Position => "Position",
         KeyParam::Zoom => "Zoom",
         KeyParam::Rotation => "Rotation",
+        KeyParam::Anchor => "Anchor Point",
+        KeyParam::Pitch => "Pitch",
+        KeyParam::Yaw => "Yaw",
         KeyParam::CropLeft => "Crop Left",
         KeyParam::CropRight => "Crop Right",
         KeyParam::CropTop => "Crop Top",
@@ -240,6 +248,8 @@ fn limits(param: KeyParam) -> (f64, f64) {
         KeyParam::Position => (-100.0, 100.0),
         KeyParam::Zoom => (0.01, 100.0),
         KeyParam::Rotation => (-3600.0, 3600.0),
+        KeyParam::Anchor => (-100.0, 100.0),
+        KeyParam::Pitch | KeyParam::Yaw => (-1.5, 1.5),
         KeyParam::CropLeft | KeyParam::CropRight | KeyParam::CropTop | KeyParam::CropBottom => {
             (0.0, 0.9999)
         }
@@ -263,6 +273,7 @@ fn least_span(param: KeyParam) -> f64 {
         KeyParam::Volume => 6.0,
         KeyParam::Zoom => 0.1,
         KeyParam::Rotation | KeyParam::CropSoftness => 10.0,
+        KeyParam::Pitch | KeyParam::Yaw => 0.1,
         _ => 0.05,
     }
 }
@@ -272,10 +283,16 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
     match param {
         KeyParam::Position if y => (0.5 - v) * h,
         KeyParam::Position => (v - 0.5) * w,
+        KeyParam::Anchor if y => (0.5 - v) * fh,
+        KeyParam::Anchor => (v - 0.5) * fw,
         KeyParam::Zoom | KeyParam::Opacity => v * 100.0,
         KeyParam::CropLeft | KeyParam::CropRight => v * fw,
         KeyParam::CropTop | KeyParam::CropBottom => v * fh,
-        KeyParam::Volume | KeyParam::Rotation | KeyParam::CropSoftness => v,
+        KeyParam::Volume
+        | KeyParam::Rotation
+        | KeyParam::Pitch
+        | KeyParam::Yaw
+        | KeyParam::CropSoftness => v,
     }
 }
 
@@ -284,10 +301,16 @@ fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
     match param {
         KeyParam::Position if y => 0.5 - v / h,
         KeyParam::Position => v / w + 0.5,
+        KeyParam::Anchor if y => 0.5 - v / fh,
+        KeyParam::Anchor => v / fw + 0.5,
         KeyParam::Zoom | KeyParam::Opacity => v / 100.0,
         KeyParam::CropLeft | KeyParam::CropRight => v / fw,
         KeyParam::CropTop | KeyParam::CropBottom => v / fh,
-        KeyParam::Volume | KeyParam::Rotation | KeyParam::CropSoftness => v,
+        KeyParam::Volume
+        | KeyParam::Rotation
+        | KeyParam::Pitch
+        | KeyParam::Yaw
+        | KeyParam::CropSoftness => v,
     }
 }
 
@@ -303,7 +326,7 @@ fn unit(param: KeyParam) -> &'static str {
 fn places(param: KeyParam) -> usize {
     match param {
         KeyParam::Volume | KeyParam::Zoom | KeyParam::Opacity => 1,
-        KeyParam::Rotation | KeyParam::CropSoftness => 2,
+        KeyParam::Rotation | KeyParam::CropSoftness | KeyParam::Pitch | KeyParam::Yaw => 2,
         _ => 0,
     }
 }
@@ -325,6 +348,13 @@ fn tick_step(ppf: f32, fps: f64) -> i64 {
         )
         .find(|&s| s >= need)
         .unwrap_or(3600.0 * fps) as i64
+}
+
+fn paired(param: KeyParam) -> bool {
+    matches!(
+        param,
+        KeyParam::Position | KeyParam::Zoom | KeyParam::Anchor
+    )
 }
 
 fn place_value(param: KeyParam, v: f64) -> f64 {
@@ -460,7 +490,7 @@ fn frames_of(marks: &[Mark], param: KeyParam) -> Vec<i64> {
 
 fn by_value(param: KeyParam, axis: Axis, d: f64) -> Value {
     match param {
-        KeyParam::Position | KeyParam::Zoom => match axis {
+        KeyParam::Position | KeyParam::Zoom | KeyParam::Anchor => match axis {
             Axis::Y => json!([0.0, d]),
             _ => json!([d, 0.0]),
         },
@@ -686,6 +716,9 @@ fn lane_from(picture: &Picture, v: PictureValue) -> Lane {
         PictureValue::Position => KeyParam::Position,
         PictureValue::Zoom => KeyParam::Zoom,
         PictureValue::Rotation => KeyParam::Rotation,
+        PictureValue::Anchor => KeyParam::Anchor,
+        PictureValue::Pitch => KeyParam::Pitch,
+        PictureValue::Yaw => KeyParam::Yaw,
         PictureValue::CropLeft => KeyParam::CropLeft,
         PictureValue::CropRight => KeyParam::CropRight,
         PictureValue::CropTop => KeyParam::CropTop,
@@ -696,6 +729,7 @@ fn lane_from(picture: &Picture, v: PictureValue) -> Lane {
     let extra = match v {
         PictureValue::Position => picture.position_y.clone(),
         PictureValue::Zoom => picture.zoom_y.clone(),
+        PictureValue::Anchor => picture.anchor_y.clone(),
         _ => Vec::new(),
     };
     Lane {
@@ -717,8 +751,7 @@ fn lane_items(clip: &Clip, lanes: &[&Lane]) -> Vec<(KeyParam, i64, i64)> {
 }
 
 fn shown_lane(clip: &Clip, lane: &Lane, shift: Option<&Shift>) -> Vec<Shown> {
-    let paired = matches!(lane.param, KeyParam::Position | KeyParam::Zoom)
-        && lane.extra.len() == lane.keys.len();
+    let paired = paired(lane.param) && lane.extra.len() == lane.keys.len();
     let extra: Vec<f64> = if paired {
         lane.extra.clone()
     } else {
@@ -1553,7 +1586,7 @@ impl Workspace {
         let painter = ui.painter_at(rect);
         let colors = theme::colors();
         painter.rect_filled(rect, 2.0, colors.panel_dark);
-        if lane.param != KeyParam::Position {
+        if !matches!(lane.param, KeyParam::Position | KeyParam::Anchor) {
             let font = TextStyle::Small.resolve(ui.style());
             for (v, y, align) in [
                 (values.hi, rect.top() + 1.0, Align2::LEFT_TOP),
@@ -1699,7 +1732,7 @@ impl Workspace {
         };
         let key = lane.keys[i];
         let y = (lane.extra.len() == lane.keys.len()).then(|| lane.extra[i]);
-        let paired = matches!(mark.param, KeyParam::Position | KeyParam::Zoom) && y.is_some();
+        let paired = paired(mark.param) && y.is_some();
         let at = p.settings.timecode(clip.key_time(key.frame).round() as i64);
         let mut gone = false;
         ui.horizontal(|ui| {
@@ -1778,6 +1811,7 @@ impl Workspace {
         let speed = match param {
             KeyParam::Volume => 0.1,
             KeyParam::Zoom | KeyParam::Rotation => 0.5,
+            KeyParam::Pitch | KeyParam::Yaw => 0.01,
             _ => 1.0,
         };
         let r = ui

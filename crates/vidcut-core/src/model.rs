@@ -1789,19 +1789,38 @@ pub struct Picture {
     /// The point of the picture that the zoom and the rotation work about,
     /// `[x, y]` as fractions of the picture from its top left, as it shows
     /// after the flips, each from -100 to 100. A Dynamic Zoom does not move
-    /// it. Usual: `[0.5, 0.5]`, the middle.
+    /// it. Usual: `[0.5, 0.5]`, the middle. With `anchor_keys`, the anchor
+    /// point at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<[f64; 2]>,
+    /// Anchor point keyframes, one for X and Y (decision D92). `value` is
+    /// X. `anchor_y` is Y, one number for each keyframe, in the same
+    /// order. A handle value moves X. Y keeps the handle frames and a
+    /// value offset of 0. Left out when the anchor point has no keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anchor_keys: Vec<Keyframe>,
+    /// Y of each `anchor_keys` entry. Left out with those keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anchor_y: Vec<f64>,
     /// Pitch about the middle of the picture, in its own axes, before the
     /// zoom and the rotation, from -1.5 to 1.5. Positive puts the top
-    /// farther away. Usual: 0.
+    /// farther away. Usual: 0. With `pitch_keys`, the pitch at a frame is
+    /// that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pitch: Option<f64>,
+    /// Pitch keyframes, from -1.5 to 1.5 (decision D93). Left out when the
+    /// pitch has no keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pitch_keys: Vec<Keyframe>,
     /// Yaw about the middle of the picture, in its own axes, before the
     /// zoom and the rotation, from -1.5 to 1.5. Positive puts the left
-    /// closer. Usual: 0.
+    /// closer. Usual: 0. With `yaw_keys`, the yaw at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yaw: Option<f64>,
+    /// Yaw keyframes, from -1.5 to 1.5 (decision D93). Left out when the
+    /// yaw has no keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub yaw_keys: Vec<Keyframe>,
     /// Mirrored left to right.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub flip_horizontal: bool,

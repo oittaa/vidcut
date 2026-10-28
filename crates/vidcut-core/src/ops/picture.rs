@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
+use crate::keyframes::PictureValue;
 use crate::model::{
     Clip, CompositeMode, Crop, DynamicZoom, Picture, PictureTool, Project, TrackKind, ZoomBox,
 };
@@ -158,6 +159,23 @@ impl PictureChange {
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
     }
+
+    fn names(&self, v: PictureValue) -> bool {
+        match v {
+            PictureValue::Position => self.position.is_some(),
+            PictureValue::Zoom => self.zoom.is_some(),
+            PictureValue::Rotation => self.rotation.is_some(),
+            PictureValue::Anchor => self.anchor.is_some(),
+            PictureValue::Pitch => self.pitch.is_some(),
+            PictureValue::Yaw => self.yaw.is_some(),
+            PictureValue::CropLeft => self.crop[0].is_some(),
+            PictureValue::CropRight => self.crop[1].is_some(),
+            PictureValue::CropTop => self.crop[2].is_some(),
+            PictureValue::CropBottom => self.crop[3].is_some(),
+            PictureValue::CropSoftness => self.crop_softness.is_some(),
+            PictureValue::Opacity => self.opacity.is_some(),
+        }
+    }
 }
 
 pub fn changed(old: &Picture, change: &PictureChange) -> Picture {
@@ -232,10 +250,11 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
             .map(|t| c.source_at(t));
         let mut picture = old.clone();
         let mut wrote = false;
-        for v in crate::keyframes::PictureValue::ALL {
+        for v in PictureValue::ALL {
             let was = crate::keyframes::plain_channel(&old, v);
             let now = crate::keyframes::plain_channel(&next, v);
             if was == now {
+                wrote |= !old.has_keys(v) && change.names(v);
                 continue;
             }
             if old.has_keys(v) {
@@ -250,18 +269,6 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
                 crate::keyframes::write_channel(&mut picture, v, now);
                 wrote = true;
             }
-        }
-        if next.anchor != old.anchor {
-            picture.anchor = next.anchor;
-            wrote = true;
-        }
-        if next.pitch != old.pitch {
-            picture.pitch = next.pitch;
-            wrote = true;
-        }
-        if next.yaw != old.yaw {
-            picture.yaw = next.yaw;
-            wrote = true;
         }
         if next.flip_horizontal != old.flip_horizontal {
             picture.flip_horizontal = next.flip_horizontal;

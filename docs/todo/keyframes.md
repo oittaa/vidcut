@@ -10,12 +10,13 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
   - The Keyframes tab shows each value of the first selected clip that can have keyframes.
   - Each value has a track. Its curve shows when the user turns it on. A drag moves a keyframe, a group or a handle.
-  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. Rotation is its own value. Each crop side, the crop softness and the opacity are values of their own.
+  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. The anchor point is one keyframe for X and Y.
+  - Rotation, Pitch and Yaw are values of their own. Each crop side, the crop softness and the opacity are values of their own.
   - The flips have no keyframes. Dynamic Zoom stays the two end boxes and has no Keyframe button.
   - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** keyframes of speed, Pitch, Yaw, the anchor point and titles.
+- **To do:** keyframes of speed and titles.
 
 ## What Resolve has
 
@@ -141,7 +142,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - the Lock and Track Color controls (p. 1257)
   - the ruler in frames, Snap Keyframes to Grid, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
 
-**Later:** keyframes of speed, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
+**Later:** keyframes of speed and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
 
 ## Model
 
@@ -171,12 +172,17 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - `effects::read` keeps an effect that is on when a parameter or a keyframe `Value` is off its default (`in_use`). It keeps a Dynamic Zoom that is on.
 - `carry` sets the `from` field of `Effects` to the first source frame of the clip, or of its sound. Thus the code takes time 0 as the first source frame of the item.
 - `Effects::written` moves the times by `from` less the first source frame of the written item.
-- `otio::picture` reads Transform, Cropping and Retime and Scaling as a `Picture` only when no parameter has keyframes.
+- `otio::picture` reads Transform, Cropping and Retime and Scaling as a `Picture` when each keyed parameter fits the model.
+  - The keyed parameters that it reads are Zoom, Pan, Tilt, Rotation, the anchor point, Pitch, Yaw, the crop sides, Crop Softness and Opacity.
+  - Each key of `transformationAnchorPoint` is a `POINTF`, as the keys of `dynamicZoomCenter` are. Keys with Bezier handles stay unplayed.
+  - Anchor point keys stay unplayed on a picture that Retime and Scaling sizes to another size than the fit. Its move would then go into `position`.
   - The center and scale of Dynamic Zoom need exactly two keyframes (`ends`). The earlier keyframe is the start box.
 - vidcut writes the two keyframes of Dynamic Zoom at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
   - Resolve writes them at −s and 1000 − s. s is the first source frame of the clip ([Measured](#measured-in-resolve-studio-2111)).
   - Resolve reads the earlier key as the start, whatever the times ([gotchas](../gotchas.md#resolves-otio-files)). Thus both forms play the same.
-- vidcut writes its other picture parameters with an empty `Key Frames`.
+- vidcut writes the keyframes of each keyed value in the `Key Frames` of its parameter. It writes the other picture parameters with an empty `Key Frames`.
+  - It writes the anchor point keys without Bezier handles. Resolve's form of a handle on a `POINTF` key is not known.
+  - Resolve's reading of anchor point, Pitch and Yaw keys was not measured.
 
 **The one test file:** `$VIDCUT_TEST_DATA/fixtures/resolve-titles/titles.otio` has Resolve's metadata, 24 fps and g = 86400.
 
@@ -206,7 +212,7 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - An import plays the keyframes of Transform and Cropping when they fit the model.
 - Some keyframes stay in the kept effects, unplayed, with the warning of the import:
   - Step
-  - an anchor point with keyed zoom or rotation
+  - anchor point keys with Bezier handles, or on a picture that is not at its fitted size
 
 ## Scripting
 
@@ -222,4 +228,5 @@ Rule 3: each GUI action has a request.
 - **Compound clips:** what does `edit.decompose` do with the keyframes of a compound clip for a clip inside that is frozen or plays backward?
 - **Dynamic Zoom:** can its boxes have times other than the ends of the clip?
 - **Keyframes alone:** copy and paste of selected keyframes (p. 1113). vidcut has none.
-- **Later work:** in which order do keyframes of speed (p. 737), the anchor point and titles come?
+- **Later work:** in which order do keyframes of speed (p. 737) and titles come?
+- **Anchor point keys in Resolve:** does Resolve read `POINTF` keys on `transformationAnchorPoint`, and what is the form of their Bezier handles?

@@ -199,6 +199,9 @@ impl Field {
             Field::Zoom | Field::ZoomX | Field::ZoomY => Some(PictureValue::Zoom),
             Field::X | Field::Y => Some(PictureValue::Position),
             Field::Rotation => Some(PictureValue::Rotation),
+            Field::AnchorX | Field::AnchorY => Some(PictureValue::Anchor),
+            Field::Pitch => Some(PictureValue::Pitch),
+            Field::Yaw => Some(PictureValue::Yaw),
             Field::Left => Some(PictureValue::CropLeft),
             Field::Right => Some(PictureValue::CropRight),
             Field::Top => Some(PictureValue::CropTop),
@@ -304,7 +307,11 @@ impl Field {
             .filter(|_| p.has_keys(PictureValue::Zoom))
             .map(|_| p.scale_at(at))
             .unwrap_or_else(|| p.scale());
-        let ([x, y], [zx, zy], [ax, ay]) = (place, scale, p.pivot());
+        let pivot = frame
+            .filter(|_| p.has_keys(PictureValue::Anchor))
+            .map(|_| p.pivot_at(at))
+            .unwrap_or_else(|| p.pivot());
+        let ([x, y], [zx, zy], [ax, ay]) = (place, scale, pivot);
         let ([w, h], [fw, fh]) = (s.frame, s.fitted);
         let zoom = |v: f64| (v / 100.0).clamp(ZOOM.0, ZOOM.1);
         let at = |v: f64| v.clamp(-REACH, REACH);

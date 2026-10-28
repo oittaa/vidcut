@@ -1257,10 +1257,10 @@ pub enum Request {
         #[serde(default)]
         at: Option<TimeSpec>,
         /// The value at the keyframe. A number for volume (dB, from -60
-        /// to 24), rotation (degrees), a crop side (a fraction), crop
-        /// softness (from -100 to 100) and opacity (from 0 to 1). For
-        /// position and zoom, two numbers, x then y, or one number for
-        /// both axes of zoom.
+        /// to 24), rotation (degrees), pitch and yaw (from -1.5 to 1.5), a
+        /// crop side (a fraction), crop softness (from -100 to 100) and
+        /// opacity (from 0 to 1). For position, zoom and the anchor point,
+        /// two numbers, x then y, or one number for both axes of zoom.
         #[serde(default)]
         value: Option<KeyValue>,
         #[serde(default)]
@@ -1279,12 +1279,13 @@ pub enum Request {
         frames: Option<OneOrMany<i64>>,
         #[serde(default)]
         at: Option<OneOrMany<TimeSpec>>,
-        /// The new value. A number, or two numbers for position and zoom.
+        /// The new value. A number, or two numbers for position, zoom and
+        /// the anchor point.
         #[serde(default)]
         value: Option<KeyValue>,
-        /// Added to each value. A number, or two numbers for position and
-        /// zoom. Volume stops at -60 and +24 dB. A picture value stops at
-        /// its own limits.
+        /// Added to each value. A number, or two numbers for position,
+        /// zoom and the anchor point. Volume stops at -60 and +24 dB. A
+        /// picture value stops at its own limits.
         #[serde(default)]
         by: Option<KeyValue>,
         /// Sets the handles: flat, a third of the way to the keyframe
@@ -3007,6 +3008,13 @@ pub enum KeyParam {
     Zoom,
     /// Rotation in degrees.
     Rotation,
+    /// The anchor point X and Y, one keyframe for both, as fractions of
+    /// the picture.
+    Anchor,
+    /// Pitch, from -1.5 to 1.5.
+    Pitch,
+    /// Yaw, from -1.5 to 1.5.
+    Yaw,
     /// Crop Left, as a fraction of the width.
     CropLeft,
     /// Crop Right, as a fraction of the width.
@@ -3021,7 +3029,8 @@ pub enum KeyParam {
     Opacity,
 }
 
-/// A keyframe value: one number, or x and y for position and zoom.
+/// A keyframe value: one number, or x and y for position, zoom and the
+/// anchor point.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum KeyValue {

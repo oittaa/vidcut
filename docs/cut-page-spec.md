@@ -57,7 +57,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The tab shows the first selected clip.
   - **Tracks** (pp. 1255–1256):
     - Each value that can have keyframes has a track, in a group for its section.
-    - Volume is a track. Position is one track. Zoom is one track.
+    - Volume is a track. Position is one track. Zoom is one track. The anchor point is one track.
     - The ⋯ menu has Display All Parameters and Display Parameters with Keyframes. All is the default.
     - A click on the name of a group opens or closes it. The ⋯ menu also has Expand All Parameters and Collapse All Parameters.
   - **Track controls** (p. 1257):
@@ -78,7 +78,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - A drag on a keyframe moves it in time. A drag on a curve point also changes the value.
     - A drag on a group track moves that group's keyframes at that time.
     - A drag on an In or Out handle changes that handle. A handle value moves the key's own value.
-    - On Position and Zoom, Y keeps the handle frames and uses a value offset of 0.
+    - On Position, Zoom and the anchor point, Y keeps the handle frames and uses a value offset of 0.
     - One click selects one keyframe. Shift or Ctrl adds to the selection. A click on an empty part clears it.
     - Delete removes the selected keyframes (p. 1258).
     - A right-click on a keyframe sets its ease (X87).
@@ -851,9 +851,9 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Details: D75.
 - **How they play:** a clip covers the tracks below it only where its picture covers the frame. Its composite mode mixes it with them. Its opacity and its soft edges let them show through. Details: D75.
 - **Keyframes** (D75):
-  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y.
-  - Rotation is its own value. Each crop side, Softness and Opacity are values of their own.
-  - The flips, the anchor, Pitch and Yaw have no keyframes.
+  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. The anchor point is one keyframe for X and Y.
+  - Rotation, Pitch and Yaw are values of their own. Each crop side, Softness and Opacity are values of their own.
+  - The flips have no keyframes.
   - Dynamic Zoom has no Keyframe button. Its two boxes stay at the ends of the clip.
   - A Keyframe button sits between Previous and Next arrows on each keyed value (X70).
   - A right-click on the button sets the ease. The ease is the volume curve (X74).
@@ -1977,13 +1977,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `opacity` is from 0 to 1. Usual: 1.
     - Values at their usual place are left out of the project file.
   - **Keyframes:**
-    - Position, zoom, rotation, each crop side, the crop softness and the opacity can have keyframes.
+    - Position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity can have keyframes.
     - A keyframe is the volume `Keyframe`: a source frame, a value, an In handle and an Out handle (D81).
     - Position stores X on the keyframe and Y beside it, one Y for each keyframe.
-    - Zoom does the same. Rotation, each crop side, the crop softness and the opacity store one value.
+    - Zoom and the anchor point do the same. The other values store one value.
     - The curve between two keyframes is the volume Bezier curve (X74).
     - A handle value moves the key's own value.
-    - Position Y and zoom Y keep the handle frames and use a value offset of 0.
+    - Position Y, zoom Y and anchor Y keep the handle frames and use a value offset of 0.
     - Before the first keyframe the value is the first. After the last it is the last.
     - With keyframes, that curve is the value. The plain value is not played.
     - When the last keyframes of a value go, the first of them stays as the plain value.
@@ -1999,7 +1999,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Reset of one value removes its keyframes and puts the usual value back.
     - The Reset of Transform, Crop or Composite removes the keyframes of that section.
     - A clip with any keyframes shows a mark on its timeline bar.
-    - Flips, the anchor, Pitch, Yaw, the composite mode and Dynamic Zoom have no keyframes.
+    - Flips, the composite mode and Dynamic Zoom have no keyframes.
     - A speed change keeps each keyframe at its frame of the clip, as volume does (D81).
     - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
@@ -2044,9 +2044,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It also goes in Resolve's Transform, Cropping and Retime and Scaling, fitted.
     - An import takes vidcut's own metadata. Else it reads those effects.
     - Resolve's crop, fill and stretch become a zoom, and its anchor point becomes the `anchor` ([gotchas](gotchas.md#resolves-otio-files)).
-    - Keyframes of position, zoom, rotation and crop are read and played when they fit this model.
+    - Keyframes of position, zoom, rotation, the anchor point, pitch, yaw and crop are read and played when they fit this model.
     - A parameter vidcut does not key, or a keyframe it cannot read, leaves Transform, Cropping and Retime and Scaling on the clip, unplayed (X9).
-    - Pitch and yaw on their own are played (D93).
+    - Pitch and yaw are played, with or without keyframes (D93).
+    - Anchor point keyframes are read only on a picture that Retime and Scaling leaves at its fitted size (D92).
     - This is also true when they make a picture that vidcut refuses, such as a crop that leaves nothing.
     - The export names the clips moved further than Resolve's Pan and Tilt go, 4 pictures, and writes them at 4.
   - **Dynamic Zoom.** The manual gives the boxes and the eases, not the units or the timing.
@@ -2361,6 +2362,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An anchor point on the content would move across the screen while the box moves.
   - **OTIO:** an import reads the anchor point of Resolve's Transform as `anchor`. An export writes it back.
   - With a crop, fill or stretch, the move that the scaling makes about the middle goes into `position` ([gotchas](gotchas.md#resolves-otio-files)).
+  - **Keyframes:** the anchor point is one keyframe for X and Y, as Position is (D75).
+    - Each key in the `Key Frames` of `transformationAnchorPoint` is a `POINTF`, as the keys of `dynamicZoomCenter` are.
+    - An import reads these keys only when Retime and Scaling leaves the picture at its fitted size, and only without Bezier handles.
+    - With a crop, fill or stretch, the move of the anchor point goes into `position`. Thus `position` would need keys of its own.
+    - Resolve's form of a Bezier handle on a `POINTF` key is not known. Thus an export writes the anchor point keys without handles.
+    - Resolve's reading of these keys was not measured.
   - `picture.set` takes `anchor`. `picture.clear` with `transform` puts it back in the middle.
 - **D93. Pitch and yaw** (§8.15; pp. 735, 767; deviation X83).
   - The manual lists Pitch and Yaw with the other Transform values (pp. 735, 767).
@@ -2380,7 +2387,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The Inspector sets them. The viewer handles do not set them (X83).
   - `picture.set` takes `pitch` and `yaw`. `picture.clear` with `transform` puts both back to 0.
   - An import reads `transformationPitch` and `transformationYaw`. An export writes them back.
-  - A plain value plays. Keyframes on either one leave the Transform unplayed (X9).
+  - Each can have keyframes (D75). Their keys have the form of the keys of the rotation, in the units of the plain value.
 
 ## 13. Order of operations (pp. 287–296, 3407)
 
