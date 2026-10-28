@@ -2419,7 +2419,7 @@ impl Workspace {
         out
     }
 
-    fn send_each(&self, method: &str, commands: Vec<Value>) {
+    pub(crate) fn send_each(&self, method: &str, commands: Vec<Value>) {
         match commands.as_slice() {
             [] => {}
             [only] => self.send(method, only.clone()),

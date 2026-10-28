@@ -906,6 +906,27 @@ impl Workspace {
                 }
             });
             ui.menu_button("Mark", |ui| {
+                let shared = self.key_menu_why();
+                for cmd in super::keyframe_editor::KeyCmd::ALL {
+                    let why = self.key_cmd_why(cmd);
+                    let mut button = egui::Button::new(cmd.label());
+                    if let Some(keys) = cmd.keys() {
+                        button = button.shortcut_text(super::keys(keys));
+                    }
+                    let r = ui.add_enabled(why.is_none(), button);
+                    let r = match why.filter(|_| shared.is_none()) {
+                        Some(why) => r.on_disabled_hover_text(why),
+                        None => r,
+                    };
+                    if r.clicked() {
+                        self.key_cmd(cmd);
+                        ui.close();
+                    }
+                }
+                if let Some(why) = shared {
+                    super::dialog::why(ui, why);
+                }
+                ui.separator();
                 let on = self.key_editor.has_selection();
                 for step in super::keyframe_editor::Nudge::ALL {
                     if ui
@@ -1073,7 +1094,10 @@ impl Workspace {
     }
 
     pub fn asking(&self) -> bool {
-        self.import.asking() || self.export.asking(&self.snap.jobs) || self.removing.is_some()
+        self.import.asking()
+            || self.export.asking(&self.snap.jobs)
+            || self.removing.is_some()
+            || self.key_editor.asking()
     }
 
     fn take_timecode_paste(&mut self, ctx: &egui::Context) {
@@ -1169,6 +1193,18 @@ impl Workspace {
         let player = self.snap.player(id).clone();
         let fps = self.fps().as_f64().round().max(1.0) as i64;
         self.timeline_keys(&input);
+        let struck = |k: Key| {
+            input.events.iter().any(|e| {
+                matches!(e, egui::Event::Key { key, physical_key, pressed: true, .. }
+                    if *key == k || *physical_key == Some(k))
+            })
+        };
+        if struck(Key::OpenBracket) && m.command && !m.alt && !m.shift {
+            self.key_cmd(super::keyframe_editor::KeyCmd::Add);
+        }
+        if struck(Key::CloseBracket) && m.alt && !m.command && !m.shift {
+            self.key_cmd(super::keyframe_editor::KeyCmd::Delete);
+        }
 
         for e in &input.events {
             match e {
@@ -1720,6 +1756,7 @@ impl Workspace {
         self.import_window(&ctx);
         self.relink_window(&ctx);
         self.remove_media_window(&ctx);
+        self.delete_all_window(&ctx);
         self.speech_window(&ctx);
         self.isolation_prompt(&ctx);
         self.models_prompt(&ctx);

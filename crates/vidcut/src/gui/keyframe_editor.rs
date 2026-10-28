@@ -205,10 +205,73 @@ impl Nudge {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum KeyCmd {
+    Add,
+    Delete,
+    DeleteAll,
+}
+
+impl KeyCmd {
+    pub(super) const ALL: [KeyCmd; 3] = [KeyCmd::Add, KeyCmd::Delete, KeyCmd::DeleteAll];
+
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            KeyCmd::Add => "Add Keyframe",
+            KeyCmd::Delete => "Delete Keyframe",
+            KeyCmd::DeleteAll => "Delete All Keyframes",
+        }
+    }
+
+    pub(super) fn keys(self) -> Option<&'static str> {
+        match self {
+            KeyCmd::Add => Some("Ctrl+["),
+            KeyCmd::Delete => Some("Alt+]"),
+            KeyCmd::DeleteAll => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Deleting {
+    clip: String,
+    rows: Vec<KeyParam>,
+    question: String,
+    fresh: bool,
+}
+
+struct Target {
+    clip: Clip,
+    marks: Vec<Mark>,
+    rows: Vec<KeyParam>,
+    lanes: Vec<Lane>,
+    play: i64,
+}
+
+impl Target {
+    fn keyed_here(&self, param: KeyParam) -> bool {
+        self.lane(param).is_some_and(|l| {
+            l.keys
+                .iter()
+                .any(|k| self.clip.key_time(k.frame).round() as i64 == self.play)
+        })
+    }
+
+    fn count(&self, param: KeyParam) -> usize {
+        self.lane(param).map_or(0, |l| l.keys.len())
+    }
+
+    fn lane(&self, param: KeyParam) -> Option<&Lane> {
+        self.lanes.iter().find(|l| l.param == param)
+    }
+}
+
 #[derive(Default)]
 pub struct Editor {
     clip: Option<String>,
     selected: Vec<Mark>,
+    rows: Vec<KeyParam>,
+    deleting: Option<Deleting>,
     boxing: Option<Boxing>,
     seen: Vec<(Pos2, Mark)>,
     tray: bool,
@@ -237,6 +300,10 @@ impl Editor {
 
     pub(super) fn has_selection(&self) -> bool {
         !self.selected.is_empty()
+    }
+
+    pub(super) fn asking(&self) -> bool {
+        self.deleting.is_some()
     }
 }
 
@@ -944,6 +1011,7 @@ impl Workspace {
         if self.key_editor.clip.as_deref() != Some(clip.id.as_str()) {
             self.key_editor.clip = Some(clip.id.clone());
             self.key_editor.selected.clear();
+            self.key_editor.rows.clear();
             self.key_editor.boxing = None;
             self.key_editor.drag = None;
             self.key_editor.pending = None;
@@ -1308,25 +1376,190 @@ impl Workspace {
             return false;
         };
         let marks = std::mem::take(&mut self.key_editor.selected);
-        let parts = unique_params(&marks)
+        self.remove_marks(&id, &marks);
+        true
+    }
+
+    fn remove_marks(&self, id: &str, marks: &[Mark]) {
+        let parts = unique_params(marks)
             .into_iter()
             .map(|param| {
-                let frames = frames_of(&marks, param);
+                let frames = frames_of(marks, param);
                 json!({ "clips": [id], "param": param, "frames": frames })
             })
-            .collect::<Vec<_>>();
-        match parts.as_slice() {
-            [] => return false,
-            [one] => self.send("keyframes.remove", one.clone()),
-            _ => {
-                let commands: Vec<Value> = parts
-                    .into_iter()
-                    .map(|params| json!({ "method": "keyframes.remove", "params": params }))
+            .collect();
+        self.send_each("keyframes.remove", parts);
+    }
+
+    fn key_target(&self) -> Result<Target, &'static str> {
+        let p = self.project_shared().ok_or("Open a project first")?;
+        let clip = self.first_clip(&p);
+        if !self.keys_in_view() {
+            return Err(match clip {
+                Some(_) => "Click a parameter name in Timeline > Keyframes",
+                None => "Select a clip, then click a parameter name in Timeline > Keyframes",
+            });
+        }
+        let clip = clip.ok_or("Select a clip first")?;
+        let e = &self.key_editor;
+        let mine = e.clip.as_deref() == Some(clip.id.as_str());
+        let mut shown = Vec::new();
+        if self.key_tray {
+            shown.extend(lanes_of(&clip, true).into_iter().map(|l| l.param));
+        }
+        if self.left == LeftTab::Keyframes {
+            shown.extend(lanes_of(&clip, e.keyed_only).into_iter().map(|l| l.param));
+        }
+        let rows = e
+            .rows
+            .iter()
+            .copied()
+            .filter(|r| mine && shown.contains(r))
+            .collect();
+        let marks = if mine { e.selected.clone() } else { Vec::new() };
+        Ok(Target {
+            lanes: lanes_of(&clip, false),
+            clip,
+            marks,
+            rows,
+            play: self.snap.timeline.position,
+        })
+    }
+
+    pub(super) fn key_menu_why(&self) -> Option<&'static str> {
+        self.key_target().err()
+    }
+
+    pub(super) fn key_cmd_why(&self, cmd: KeyCmd) -> Option<&'static str> {
+        let t = match self.key_target() {
+            Ok(t) => t,
+            Err(why) => return Some(why),
+        };
+        if cmd != KeyCmd::Add && !t.marks.is_empty() {
+            return None;
+        }
+        if t.rows.is_empty() {
+            return Some(match cmd {
+                KeyCmd::Add if self.left == LeftTab::Keyframes => {
+                    "Click a parameter name, such as Opacity"
+                }
+                KeyCmd::Add if lanes_of(&t.clip, true).is_empty() => {
+                    "Click a parameter name in Timeline > Keyframes"
+                }
+                KeyCmd::Add => "Click a parameter name in the keyframe tray",
+                KeyCmd::Delete => "Click a keyframe first",
+                KeyCmd::DeleteAll => "Click a keyframe or a parameter name first",
+            });
+        }
+        match cmd {
+            KeyCmd::Add if !(t.clip.start..t.clip.end()).contains(&t.play) => {
+                Some("Move the playhead over the clip")
+            }
+            KeyCmd::Add if t.rows.iter().all(|&r| t.keyed_here(r)) => {
+                Some("Already keyed here. Move the playhead to add one.")
+            }
+            KeyCmd::Delete if !t.rows.iter().any(|&r| t.keyed_here(r)) => {
+                Some("Click a keyframe, or move the playhead onto one")
+            }
+            KeyCmd::DeleteAll if t.rows.iter().all(|&r| t.count(r) == 0) => {
+                Some("Click a parameter name that has keyframes")
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn key_cmd(&mut self, cmd: KeyCmd) {
+        if self.key_cmd_why(cmd).is_some() {
+            return;
+        }
+        let Ok(t) = self.key_target() else {
+            return;
+        };
+        let id = t.clip.id.clone();
+        if cmd != KeyCmd::Add && !t.marks.is_empty() {
+            self.key_editor.selected.clear();
+            self.remove_marks(&id, &t.marks);
+            return;
+        }
+        match cmd {
+            KeyCmd::Add => {
+                let parts = t
+                    .rows
+                    .iter()
+                    .filter(|&&r| !t.keyed_here(r))
+                    .map(|r| json!({ "clips": [id], "param": r, "at": t.play }))
                     .collect();
-                self.send("apply", json!({ "commands": commands }));
+                self.send_each("keyframes.add", parts);
+            }
+            KeyCmd::Delete => {
+                let parts = t
+                    .rows
+                    .iter()
+                    .filter(|&&r| t.keyed_here(r))
+                    .map(|r| json!({ "clips": [id], "param": r, "at": [t.play] }))
+                    .collect();
+                self.send_each("keyframes.remove", parts);
+            }
+            KeyCmd::DeleteAll => {
+                let rows: Vec<KeyParam> =
+                    t.rows.iter().copied().filter(|&r| t.count(r) > 0).collect();
+                let count: usize = rows.iter().map(|&r| t.count(r)).sum();
+                let names: Vec<&str> = rows.iter().map(|&r| lane_name(r)).collect();
+                let name = self
+                    .project_shared()
+                    .map(|p| clip_name(&p, &t.clip))
+                    .unwrap_or_default();
+                let keyframes = if count == 1 { "keyframe" } else { "keyframes" };
+                self.key_editor.deleting = Some(Deleting {
+                    clip: id,
+                    rows,
+                    question: format!("Delete {count} {} {keyframes} of {name}?", listed(&names)),
+                    fresh: true,
+                });
             }
         }
-        true
+    }
+
+    pub(super) fn delete_all_window(&mut self, ctx: &egui::Context) {
+        let Some(ask) = self.key_editor.deleting.as_mut() else {
+            return;
+        };
+        let fresh = std::mem::take(&mut ask.fresh);
+        let question = ask.question.clone();
+        let mut done = None;
+        let modal = egui::Modal::new(egui::Id::unique("delete-all-keyframes")).show(ctx, |ui| {
+            ui.set_max_width(super::dialog::WIDTH);
+            ui.label(RichText::new(question).strong());
+            super::dialog::footer(ui, |ui| {
+                if super::dialog::main_button(ui, "Delete", true) {
+                    done = Some(true);
+                }
+                let cancel = ui.button("Cancel");
+                if fresh {
+                    cancel.request_focus();
+                }
+                if cancel.clicked() {
+                    done = Some(false);
+                }
+            });
+        });
+        if done.is_none() && super::workspace::escape_cancels(ctx, &modal) {
+            done = Some(false);
+        }
+        if done.is_none() {
+            return;
+        }
+        let Some(ask) = self.key_editor.deleting.take() else {
+            return;
+        };
+        if done == Some(true) {
+            let parts = ask
+                .rows
+                .iter()
+                .map(|r| json!({ "clips": [ask.clip], "param": r }))
+                .collect();
+            self.send_each("keyframes.remove", parts);
+        }
     }
 
     fn key_header(
@@ -1337,12 +1570,7 @@ impl Workspace {
         view: (f64, f64),
         play: i64,
     ) {
-        let name = clip
-            .name
-            .clone()
-            .filter(|s| !s.is_empty())
-            .or_else(|| p.media(&clip.media).map(|m| m.name.clone()))
-            .unwrap_or_default();
+        let name = clip_name(p, clip);
         let (whole_lo, whole_hi) = clip_span(clip);
         let length = whole_hi - whole_lo;
         let most = (length / LEAST_FRAMES).max(1.0);
@@ -1731,8 +1959,21 @@ impl Workspace {
         let next = times.iter().any(|&t| inside(t) && t > play);
         let curve = self.key_editor.curves.contains(&lane.param);
         let keyed = !lane.keys.is_empty();
+        let picked = self.key_editor.rows.contains(&lane.param);
         let mut act = None;
+        let mut named = false;
         let (rect, resp) = row(ui, TRACK_H, plot, |ui| {
+            let head = ui.max_rect();
+            named = ui
+                .interact(
+                    head,
+                    ui.scope_id().with(lane_name(lane.param)),
+                    Sense::click(),
+                )
+                .clicked();
+            if picked {
+                ui.painter().rect_filled(head, 2.0, theme::colors().line);
+            }
             if !plot.tray {
                 let c = ui
                     .add_enabled(
@@ -1744,7 +1985,9 @@ impl Workspace {
                     act = Some(RowAct::Curve);
                 }
             }
-            ui.label(RichText::new(lane_name(lane.param)).small());
+            ui.add(
+                egui::Label::new(RichText::new(lane_name(lane.param)).small()).selectable(false),
+            );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
                     .add_enabled(
@@ -1827,10 +2070,19 @@ impl Workspace {
             }
             None => {}
         }
+        if named {
+            self.key_editor.rows = vec![lane.param];
+        }
         let map = TimeMap::of(plot.lo, plot.hi, rect);
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 2.0, theme::colors().panel_dark);
-        painter.rect_filled(clip_band(map, clip, rect), 0.0, theme::colors().track);
+        let colors = theme::colors();
+        let (back, band) = if picked {
+            (colors.line, colors.faint)
+        } else {
+            (colors.panel_dark, colors.track)
+        };
+        painter.rect_filled(rect, 2.0, back);
+        painter.rect_filled(clip_band(map, clip, rect), 0.0, band);
         playhead(&painter, map, rect, plot.play);
         let mut spots = Vec::new();
         let mut shown = Vec::new();
@@ -2232,6 +2484,12 @@ impl Workspace {
             param: lane.param,
             frame: *frame,
         });
+        if (resp.drag_started() || resp.clicked())
+            && hit.is_some()
+            && !self.key_editor.rows.contains(&lane.param)
+        {
+            self.key_editor.rows.push(lane.param);
+        }
         if resp.drag_started()
             && let Some(hit) = hit
         {
@@ -2531,6 +2789,22 @@ fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
         dv,
         axis: drag.axis,
         handle: None,
+    }
+}
+
+fn clip_name(p: &Project, clip: &Clip) -> String {
+    clip.name
+        .clone()
+        .filter(|s| !s.is_empty())
+        .or_else(|| p.media(&clip.media).map(|m| m.name.clone()))
+        .unwrap_or_default()
+}
+
+fn listed(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => (*one).to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
     }
 }
 

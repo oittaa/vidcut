@@ -16,7 +16,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** keyframes of speed and titles.
+- **To do:** keyframes of speed ([speed-ramps.md](speed-ramps.md)) and titles.
 
 ## What Resolve has
 
@@ -132,6 +132,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - One click selects one keyframe. Ctrl-click adds a keyframe to the selection or removes it. Delete removes the selection.
 - A drag from an empty part draws a box. The box replaces the selection with the keyframes in it.
 - Mark > Move Selected Keyframes moves the selection by one frame, or changes its values by one step.
+- A click on the name of a value selects its row. Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes act on the selected rows.
 - Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the selection. A paste puts the keyframes on the selected clips, the first at the playhead.
 - [§2](../cut-page-spec.md#2-layout-pp-636637) gives the measured rules of the clicks, the box, the steps, the paste and the clipboard.
 - A right-click sets that keyframe's ease, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
@@ -146,7 +147,6 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - keyframes of several selected clips at once (p. 1268)
   - the Lock and Track Color controls (p. 1257)
   - the ruler in frames, Snap Keyframes to Grid, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
-  - Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes, with their shortcuts (pp. 1254–1255)
   - Select all (Ctrl+A) and deselect all (Ctrl+Shift+A) in the Keyframes tab and the tray
   - the parts of Resolve's tray that vidcut does not have ([§2](../cut-page-spec.md#2-layout-pp-636637), Keyframe tray)
   - Zoom X and Zoom Y as two keyframes when the zoom is not linked

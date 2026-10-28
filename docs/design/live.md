@@ -331,6 +331,12 @@ The bar and the Jobs button:
 - Each row records where it drew each keyframe (`Editor::seen`). A box drag (`Boxing`) selects the marks inside it on release.
 - A drag shows the moved keyframes (`Shift`) and sends one `apply` on release. The selection follows the moved frames (`Pending`).
 - Mark > Move Selected Keyframes (`Nudge`, `Workspace::nudge_keys`) sends what a drag of one frame or one step sends.
+- The selected rows are a list of values (`Editor::rows`). A click on a row's name or on a keyframe changes them.
+- Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes (`KeyCmd`, `Workspace::key_cmd`) act on the selected marks or the selected rows.
+  - `Workspace::key_target` takes only the rows that the open tab or tray shows.
+  - `Workspace::key_cmd_why` gives the next step for an item that is off. The menu shows it as the tooltip.
+  - `Workspace::key_menu_why` gives the step that the three items share. The menu shows it as a line under them.
+  - Delete All Keyframes keeps its question in `Editor::deleting` until the user answers (`Workspace::delete_all_window`).
 - A press in the tab or the tray gives them the keys. A press in another place takes the keys away (`Workspace::key_focus`, `Editor::focused`).
 - With the keys, Ctrl+C and Ctrl+X send `keyframes.copy` or `keyframes.cut`. The core keeps the keyframes that come back as its clipboard, in place of the clips.
 - With the keys, Ctrl+V sends `keyframes.paste` with the selected clips while the clipboard holds keyframes (`Snapshot::key_clipboard`). It never pastes clips there.
