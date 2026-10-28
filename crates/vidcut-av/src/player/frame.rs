@@ -39,6 +39,45 @@ impl Layout {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fit {
+    pub size: (u32, u32),
+    pub sar: (i32, i32),
+    pub rotation: u16,
+}
+
+impl Fit {
+    pub fn of(f: &frame::Video, rotation: u16) -> Self {
+        let sar = f.aspect_ratio();
+        Self {
+            size: (f.width(), f.height()),
+            sar: (sar.numerator(), sar.denominator()),
+            rotation,
+        }
+    }
+
+    pub fn placement(&self, (width, height): (u32, u32)) -> (u32, u32, u32, u32) {
+        let (w, h) =
+            vidcut_core::place::upright_fit(self.size, self.sar, self.rotation, (width, height));
+        ((width - w) / 2, (height - h) / 2, w, h)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Sampling {
+    #[default]
+    Own,
+    Colors {
+        frame: (u32, u32),
+        origin: (u32, u32),
+    },
+    Placed {
+        fit: Fit,
+        part: [f64; 4],
+        placed: Arc<[vidcut_core::render::Placed]>,
+    },
+}
+
 pub struct Picture {
     frame: frame::Video,
     rotation: u16,
@@ -47,6 +86,7 @@ pub struct Picture {
     decoder: Option<super::Decoder>,
     decoding: Option<Arc<Decoding>>,
     over: Vec<Over>,
+    sampling: Sampling,
 }
 
 #[derive(Clone)]
@@ -79,12 +119,22 @@ impl Picture {
             decoder,
             decoding,
             over: Vec::new(),
+            sampling: Sampling::Own,
         }
     }
 
     pub(crate) fn with_over(mut self, over: Vec<Over>) -> Self {
         self.over = over;
         self
+    }
+
+    pub(crate) fn with_sampling(mut self, sampling: Sampling) -> Self {
+        self.sampling = sampling;
+        self
+    }
+
+    pub fn sampling(&self) -> &Sampling {
+        &self.sampling
     }
 
     pub fn over(&self) -> &[Over] {
@@ -133,11 +183,21 @@ impl Picture {
     }
 
     pub fn placement(&self, width: u32, height: u32) -> (u32, u32, u32, u32) {
-        let sar = self.frame.aspect_ratio();
-        let sar = (sar.numerator(), sar.denominator());
-        let size = (self.width(), self.height());
-        let (w, h) = vidcut_core::place::upright_fit(size, sar, self.rotation, (width, height));
-        ((width - w) / 2, (height - h) / 2, w, h)
+        Fit::of(&self.frame, self.rotation).placement((width, height))
+    }
+
+    pub fn placed_in(&self, size: (u32, u32)) -> ((f64, f64), [f64; 4]) {
+        let own = Fit::of(&self.frame, self.rotation);
+        let (frame, fit) = match &self.sampling {
+            Sampling::Own => (size, own),
+            Sampling::Colors { frame, .. } => (*frame, own),
+            Sampling::Placed { fit, .. } => (size, *fit),
+        };
+        let (x, y, w, h) = fit.placement(frame);
+        (
+            (f64::from(frame.0), f64::from(frame.1)),
+            [x, y, w, h].map(f64::from),
+        )
     }
 
     pub fn frame(&self) -> &frame::Video {
@@ -160,7 +220,11 @@ impl Picture {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(Self::new(frame, self.rotation, self.decoder, self.decoding.clone()).with_over(over))
+        Ok(
+            Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
+                .with_over(over)
+                .with_sampling(self.sampling.clone()),
+        )
     }
 
     pub(crate) fn pools(&self) -> Vec<usize> {

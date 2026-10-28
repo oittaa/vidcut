@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::error::Result;
 use crate::ffmpeg::frame;
 
-type Key = (PathBuf, i64, i64);
+type Key = (PathBuf, u64, i64, i64);
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(super) enum Input<'a> {
@@ -217,21 +217,23 @@ mod imp {
         ) -> Result<(CFRetained<CVPixelBuffer>, [f64; 2])> {
             let mode = match &self.pair {
                 Some(p) if p.key == *key => Mode::SequentialReferencesUnchanged,
-                Some(p) if p.key.0 == key.0 && p.key.2 == key.1 => Mode::Sequential,
+                Some(p) if p.key.0 == key.0 && p.key.1 == key.1 && p.key.3 == key.2 => {
+                    Mode::Sequential
+                }
                 _ => Mode::Random,
             };
             let clock = std::time::Instant::now();
             if mode != Mode::SequentialReferencesUnchanged {
                 self.pair = Some(Pair {
                     key: key.clone(),
-                    source: self.frame(&a, time(key.1, 1))?,
-                    next: self.frame(&b, time(key.2, 1))?,
+                    source: self.frame(&a, time(key.2, 1))?,
+                    next: self.frame(&b, time(key.3, 1))?,
                 });
             }
             let pair = self.pair.as_ref().expect("a pair");
             let made = buffer(&self.outputs, WHAT)?;
             let at = time(
-                key.1 * 1000 + ((key.2 - key.1) as f64 * t * 1000.0).round() as i64,
+                key.2 * 1000 + ((key.3 - key.2) as f64 * t * 1000.0).round() as i64,
                 1000,
             );
             let destinations = NSArray::from_retained_slice(&[frame(&made, at, WHAT)?]);

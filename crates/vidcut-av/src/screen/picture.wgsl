@@ -10,6 +10,8 @@ struct Params {
     flags: vec4<u32>,
     per: vec4<u32>,
     placed: vec4<f32>,
+    made: vec4<f32>,
+    part: vec4<f32>,
     levels: array<vec4<f32>, 5u * LEVELS>,
 };
 
@@ -246,6 +248,10 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     if cover <= 0.0 {
         discard;
     }
+    if p.made.x > 1.5 {
+        let q = (px / p.made.yz - p.part.xy) / p.part.zw;
+        return vec4<f32>(rgb(yuv(q)), cover * p.placed.y);
+    }
     let size = p.upright.xy;
     let spans = vec2<f32>(length(across * size), length(down * size));
     let a = cover * p.placed.y * opacity(uv);
@@ -375,6 +381,9 @@ fn fs_paired(in: Out) -> @location(0) vec4<f32> {
 fn fs(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
     if p.placed.x > 0.5 {
+        if p.made.x > 0.5 && p.made.x < 1.5 {
+            return vec4<f32>(shown(px + p.part.xy).rgb, 1.0);
+        }
         return placed(px);
     }
     let rel = (px - p.place.xy) / p.place.zw;

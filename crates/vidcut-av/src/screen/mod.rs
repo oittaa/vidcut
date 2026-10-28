@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 use crate::color::shader_colors;
 use crate::cuda::{CudaDevice, PlaneCopy};
 use crate::hw::Kind;
-use crate::player::{Layout, Picture, TitleOver, TitlePicture};
+use crate::player::{Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
 use vidcut_core::model::{CompositeMode, Hdr, WipeDirection};
 use vidcut_core::place::{Level, Placing, chain, lettered};
@@ -1115,7 +1115,6 @@ impl Screen {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("vidcut picture"),
             });
-        let frame = (f64::from(size.0), f64::from(size.1));
         let n = layers.len();
         let wipe_of = |i: usize| layers.get(i).and_then(|l| l.2);
         let crossed = |i: usize| crosses.get(i).copied().unwrap_or(false);
@@ -1142,14 +1141,22 @@ impl Screen {
             .zip(&mut self.slots)
             .enumerate()
             .map(|(i, (&(picture, level, _), slot))| {
-                let placing = placed.get(i).filter(|p| !p.is_empty()).map(|p| {
-                    let (x, y, w, h) = picture.placement(size.0, size.1);
-                    let fitted = [x, y, w, h].map(f64::from);
-                    (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
-                });
-                let blended = placing
-                    .as_ref()
-                    .is_some_and(|(p, _)| p.mode != CompositeMode::Normal);
+                let made_with = match picture.sampling() {
+                    Sampling::Placed { placed, .. } => Some(&placed[..]),
+                    _ => None,
+                };
+                let placing = made_with
+                    .or(placed.get(i).map(Vec::as_slice))
+                    .filter(|p| !p.is_empty())
+                    .map(|p| {
+                        let (frame, fitted) = picture.placed_in(size);
+                        (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
+                    });
+                let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
+                let blended = !colors_only
+                    && placing
+                        .as_ref()
+                        .is_some_and(|(p, _)| p.mode != CompositeMode::Normal);
                 let kernel = match kernels.get(i).copied().unwrap_or(0) {
                     0 if exported => RESIZE | WIDENS,
                     k if exported => k | WIDENS,
@@ -2560,7 +2567,7 @@ fn shader() -> String {
 
 const PER_LEVEL: usize = 5;
 
-const PARAMS: usize = (11 + PER_LEVEL * LEVELS) * 16;
+const PARAMS: usize = (13 + PER_LEVEL * LEVELS) * 16;
 
 const LETTERING: usize = (3 + PER_LEVEL * LEVELS) * 16;
 
@@ -2786,6 +2793,16 @@ fn params_of(
         placing.map_or(0.0, |(p, _)| f64::from(p.mode.code())),
         f64::from(u8::from(paired)),
     ];
+    let (made, part) = match picture.sampling() {
+        Sampling::Own => ([0.0; 4], [0.0; 4]),
+        Sampling::Colors { origin, .. } => (
+            [1.0, 0.0, 0.0, 0.0],
+            [f64::from(origin.0), f64::from(origin.1), 0.0, 0.0],
+        ),
+        Sampling::Placed { part, .. } => ([2.0, f64::from(size.0), f64::from(size.1), 0.0], *part),
+    };
+    floats.extend(made);
+    floats.extend(part);
     floats.extend(level_floats(levels));
     for v in floats {
         out.extend_from_slice(&(v as f32).to_le_bytes());
