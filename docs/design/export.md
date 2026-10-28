@@ -170,7 +170,7 @@ Pictures:
 - `VideoFrames::next_layers` gives the layers of each frame as they are decoded, as the player gets them.
 - `Maker` decodes by the route that `route::plan` gives each frame ([gpu](gpu.md#routes)). A frame stays on the GPU where the drawing reads it there (`Gpu::gpu_pictures`).
 - `player::picture` makes one `Picture` of the layers, as the player does.
-- `VideoFrames::next_frame` draws that picture with the viewer's `Screen`, on a wgpu device of its own (`screen::device`).
+- `VideoFrames::next_frame` draws that picture with the viewer's `Screen`, on the shared off-screen wgpu device (`screen::offscreen`).
 - Thus the export and the viewer have one draw path: `crates/vidcut-av/src/screen/picture.wgsl` ([playback](playback.md#the-viewer-thread)).
 
 ## Timeline colors

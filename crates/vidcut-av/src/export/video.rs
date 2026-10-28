@@ -3,6 +3,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vidcut_core::model::{ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
+use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Placed, Ramp, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
 
@@ -470,6 +471,7 @@ pub(crate) struct Layer {
     pub(crate) decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
     pub(crate) went: Option<crate::route::Went>,
     pub(crate) wipe: Option<Wipe>,
+    pub(crate) share: f64,
 }
 
 fn mask_of(ramp: Option<Ramp>, k: i64) -> Option<Wipe> {
@@ -1048,7 +1050,7 @@ fn heaviest(layers: &[Layer]) -> usize {
     let mut left = u64::from(WHOLE);
     let mut best = (0, 0);
     for (i, l) in layers.iter().enumerate().rev() {
-        let w = u64::from(l.weight.unwrap_or(WHOLE));
+        let w = (f64::from(l.weight.unwrap_or(WHOLE)) * l.share) as u64;
         let shown = left * w;
         if shown > best.1 {
             best = (i, shown);
@@ -1112,7 +1114,7 @@ impl Handoff {
 }
 
 pub(crate) struct Drawer {
-    gpu: crate::screen::Gpu,
+    gpu: &'static crate::screen::Gpu,
     screen: crate::screen::Screen,
     encoder: Option<Handoff>,
     through_memory: Option<String>,
@@ -1120,9 +1122,8 @@ pub(crate) struct Drawer {
 
 impl Drawer {
     pub(crate) fn new(encoder: Option<Handoff>) -> Result<Self> {
-        let (_, device, queue) = crate::screen::device("vidcut export").map_err(Error::Invalid)?;
         Ok(Self {
-            gpu: crate::screen::Gpu::new(&device, &queue),
+            gpu: &crate::screen::offscreen().map_err(Error::Invalid)?.gpu,
             screen: crate::screen::Screen::for_export(),
             encoder,
             through_memory: None,
@@ -1145,7 +1146,7 @@ impl Drawer {
         (w, h): (u32, u32),
         (pixel, colors): (format::Pixel, (Option<Hdr>, Option<Hdr>)),
     ) -> Result<frame::Video> {
-        let (gpu, screen) = (&self.gpu, &mut self.screen);
+        let (gpu, screen) = (self.gpu, &mut self.screen);
         screen.draw(gpu, Some(picture), titles, layers, w, h);
         let handed =
             match (&self.encoder, &self.through_memory) {
@@ -1490,6 +1491,7 @@ impl VideoFrames {
             if k == 1 && files {
                 self.open_next();
             }
+            let placed = crate::player::placed_of(&piece, k, &[]);
             let mut made = Vec::with_capacity(layers.len());
             for (i, (layer, ramp)) in layers.into_iter().enumerate() {
                 let weight = ramp.map(|r| r.weight(k));
@@ -1510,6 +1512,7 @@ impl VideoFrames {
                             decoding: None,
                             went: None,
                             wipe,
+                            share: 1.0,
                         });
                     }
                     continue;
@@ -1551,9 +1554,22 @@ impl VideoFrames {
                     decoding: Some(decoding),
                     went: self.open[s].fitting.went(),
                     wipe,
+                    share: self.share_of(s, rotation, placed.get(i)),
                 });
             }
             return Ok(Some(picture.then_some(made)));
+        }
+    }
+
+    fn share_of(&self, s: usize, rotation: u16, placed: Option<&Vec<Placed>>) -> f64 {
+        match (&self.open[s].current, placed.filter(|p| !p.is_empty())) {
+            (Some((f, _)), Some(placed)) => {
+                let (w, h, _) = self.maker.out();
+                let size = (f64::from(w), f64::from(h));
+                let at = vidcut_core::place::fitted((w, h), upright_fit(f, rotation, (w, h)));
+                Placing::new(placed, size, at).share(size)
+            }
+            _ => 1.0,
         }
     }
 

@@ -82,6 +82,9 @@ The draw:
   - The AI upscalers and the frame interpolation take their RGB input from the same draw (`export::video::Single`).
 - It mixes the dissolves, the wipes, the composite modes, the placed pictures, the titles and the subtitles.
 - `export::video::Drawer` draws for the export, proxies, thumbnails and the AI inputs.
+  - All of them share one wgpu device (`screen::offscreen`). vidcut makes it once, at the first draw.
+  - The viewer's frame render uses that device too.
+  - It is not the device of the viewer: a submit from another thread can make the viewer's surface fail ([gotchas](../gotchas.md#wgpu-and-egui)).
 - There, `fs_encode` writes the planes of the encoder ([export](export.md#timeline-colors)).
   - NVENC takes them through memory that Vulkan shares with CUDA (`Shared::out`).
   - VideoToolbox takes them in the IOSurfaces of its own frames (`Sink::Surface`).

@@ -202,6 +202,7 @@ impl Keeper {
                 linesize.as_ptr(),
             );
         }
+        super::share::wait_for(&out)?;
         Ok(out)
     }
 }

@@ -90,9 +90,25 @@ pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
     adapter.features() & wanted
 }
 
-pub fn device(
-    label: &str,
-) -> std::result::Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue), String> {
+pub struct Offscreen {
+    pub adapter: wgpu::AdapterInfo,
+    pub gpu: Gpu,
+}
+
+pub fn offscreen() -> std::result::Result<&'static Offscreen, String> {
+    static MADE: OnceLock<std::result::Result<Offscreen, String>> = OnceLock::new();
+    MADE.get_or_init(|| {
+        let (adapter, device, queue) = device("vidcut offscreen")?;
+        Ok(Offscreen {
+            adapter: adapter.get_info(),
+            gpu: Gpu::new(&device, &queue),
+        })
+    })
+    .as_ref()
+    .map_err(Clone::clone)
+}
+
+fn device(label: &str) -> std::result::Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue), String> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
         ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
