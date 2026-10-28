@@ -59,7 +59,7 @@ pub struct Policy {
     pub proxies: PathBuf,
 }
 
-pub const KEEP_FREE_PERCENT: u64 = 20;
+pub const KEEP_FREE_PERCENT: u64 = 10;
 
 impl Policy {
     pub fn chosen(&self, disk: Option<Disk>) -> Option<u64> {
