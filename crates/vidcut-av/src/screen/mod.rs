@@ -13,6 +13,7 @@ use vidcut_core::render::{Placed, Wipe};
 
 #[cfg(any(target_os = "linux", windows))]
 mod acquire;
+mod carried;
 mod gate;
 pub(crate) mod held;
 mod out;
@@ -22,6 +23,7 @@ mod vulkan;
 
 pub use gate::Gate;
 pub use out::Sink;
+pub(crate) use out::filled;
 
 pub struct Gpu {
     #[cfg(any(target_os = "linux", windows))]

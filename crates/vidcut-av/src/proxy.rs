@@ -509,8 +509,14 @@ struct Encoding {
 impl Encoding {
     fn run(mut self, mut pictures: Inbox<Timed>) -> Result<u64> {
         let mut frames = 0;
-        while let Some(Timed { picture, pts, dur }) = pictures.recv()? {
+        while let Some(Timed {
+            mut picture,
+            pts,
+            dur,
+        }) = pictures.recv()?
+        {
             self.durations.insert(pts, dur);
+            crate::screen::filled(&mut picture)?;
             crate::cuda::share::wait_for(&picture)?;
             crate::copies::to_encoder(&picture, self.kind);
             self.encoder

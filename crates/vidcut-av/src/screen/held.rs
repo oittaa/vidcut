@@ -1,5 +1,3 @@
-use std::ffi::c_void;
-
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, frame};
 
@@ -11,10 +9,6 @@ pub(crate) struct Held {
 }
 
 static MARK: u8 = 0;
-
-fn mark() -> *mut c_void {
-    (&raw const MARK).cast_mut().cast()
-}
 
 impl Held {
     pub(crate) fn new(buffer: wgpu::Buffer, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
@@ -69,14 +63,9 @@ impl Held {
     }
 }
 
-unsafe extern "C" fn let_go(_: *mut c_void, data: *mut u8) {
-    // SAFETY: `data` is the box that `picture` made, freed once by its buffer.
-    drop(unsafe { Box::from_raw(data.cast::<Held>()) });
-}
-
 pub(crate) fn picture(held: Held, (w, h): (u32, u32), pts: Option<i64>) -> Result<frame::Video> {
     let mut f = frame::Video::empty();
-    // SAFETY: fresh `f` takes one zeroed row at no stride, and `held` as its opaque buffer.
+    // SAFETY: fresh `f` takes one zeroed row at no stride.
     unsafe {
         let raw = f.as_mut_ptr();
         (*raw).format = ffi::AVPixelFormat::AV_PIX_FMT_RGB24 as i32;
@@ -89,21 +78,9 @@ pub(crate) fn picture(held: Held, (w, h): (u32, u32), pts: Option<i64>) -> Resul
         (*raw).buf[0] = row;
         (*raw).data[0] = (*row).data;
         (*raw).linesize[0] = 0;
-        let boxed = Box::into_raw(Box::new(held));
-        let opaque = ffi::av_buffer_create(
-            boxed.cast(),
-            std::mem::size_of::<Held>(),
-            Some(let_go),
-            mark(),
-            ffi::AV_BUFFER_FLAG_READONLY,
-        );
-        if opaque.is_null() {
-            drop(Box::from_raw(boxed));
-            return Err(Error::Invalid("no memory for a picture on the GPU".into()));
-        }
-        (*raw).opaque_ref = opaque;
         (*raw).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 };
     }
+    super::carried::carry(&mut f, held, &MARK)?;
     f.set_color_range(ffmpeg::util::color::Range::JPEG);
     f.set_color_space(ffmpeg::util::color::Space::RGB);
     f.set_color_primaries(ffmpeg::util::color::Primaries::BT709);
@@ -113,14 +90,7 @@ pub(crate) fn picture(held: Held, (w, h): (u32, u32), pts: Option<i64>) -> Resul
 }
 
 pub(crate) fn of(f: &frame::Video) -> Option<&Held> {
-    // SAFETY: the frame's own reference; a marked one holds a `Held` while the frame lives.
-    unsafe {
-        let opaque = (*f.as_ptr()).opaque_ref;
-        if opaque.is_null() || ffi::av_buffer_get_opaque(opaque) != mark() {
-            return None;
-        }
-        Some(&*(*opaque).data.cast::<Held>())
-    }
+    super::carried::carried(f, &MARK)
 }
 
 pub(crate) fn held(f: &frame::Video) -> Result<&Held> {
@@ -141,17 +111,15 @@ pub(crate) fn in_memory(f: &frame::Video) -> Result<frame::Video> {
         3,
         &rgb,
     );
-    // SAFETY: both frames are valid; `out` drops the reference to `f`'s held picture.
-    unsafe {
-        let ret = ffi::av_frame_copy_props(out.as_mut_ptr(), f.as_ptr());
-        if ret < 0 {
-            return Err(Error::Ffmpeg {
-                context: "copying a frame's properties".into(),
-                source: ffmpeg::Error::from(ret),
-            });
-        }
-        ffi::av_buffer_unref(&mut (*out.as_mut_ptr()).opaque_ref);
+    // SAFETY: both frames are valid.
+    let ret = unsafe { ffi::av_frame_copy_props(out.as_mut_ptr(), f.as_ptr()) };
+    if ret < 0 {
+        return Err(Error::Ffmpeg {
+            context: "copying a frame's properties".into(),
+            source: ffmpeg::Error::from(ret),
+        });
     }
+    super::carried::let_go_of(&mut out);
     Ok(out)
 }
 

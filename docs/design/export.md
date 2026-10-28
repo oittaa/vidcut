@@ -211,6 +211,9 @@ To the encoder:
 - With NVENC, the encoder takes CUDA frames (`gpu_output`).
   - wgpu copies the planes into a buffer that Vulkan shares with CUDA (`Shared::out`).
   - CUDA copies them into the encoder's frame (`Shared::empty_into`).
+  - The writer thread waits for the draw and makes that copy (`screen::filled`). Meanwhile the next frame decodes and draws.
+  - Two shared buffers take turns. Before a draw uses a buffer again, it makes the copy of that buffer's last frame if the writer has not made it yet.
+  - Why: the decode and the draw of a frame do not wait for the copy of the frame before it. The draw never waits for the writer thread.
 - With VideoToolbox and GPU decoding, the encoder takes frames of the decoder's device. `fs_encode_unorm` draws the planes into the IOSurface of the frame (`Sink::Surface`).
 - The other encoders take frames in memory. wgpu reads the planes back (`Sink::Memory`).
   - VA-API frames, and AMF frames on the decoder's Direct3D 11 device, then go up to the encoder's device (`Upload`).
