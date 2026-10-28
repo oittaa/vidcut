@@ -249,6 +249,13 @@ struct Target {
 }
 
 impl Target {
+    fn takes(&self, param: KeyParam) -> bool {
+        match param {
+            KeyParam::Volume => self.clip.sounds_at(self.play),
+            _ => (self.clip.start..self.clip.end()).contains(&self.play),
+        }
+    }
+
     fn keyed_here(&self, param: KeyParam) -> bool {
         self.lane(param).is_some_and(|l| {
             l.keys
@@ -1452,10 +1459,10 @@ impl Workspace {
             });
         }
         match cmd {
-            KeyCmd::Add if !(t.clip.start..t.clip.end()).contains(&t.play) => {
+            KeyCmd::Add if !t.rows.iter().any(|&r| t.takes(r)) => {
                 Some("Move the playhead over the clip")
             }
-            KeyCmd::Add if t.rows.iter().all(|&r| t.keyed_here(r)) => {
+            KeyCmd::Add if !t.rows.iter().any(|&r| t.takes(r) && !t.keyed_here(r)) => {
                 Some("Already keyed here. Move the playhead to add one.")
             }
             KeyCmd::Delete if !t.rows.iter().any(|&r| t.keyed_here(r)) => {
@@ -1486,7 +1493,7 @@ impl Workspace {
                 let parts = t
                     .rows
                     .iter()
-                    .filter(|&&r| !t.keyed_here(r))
+                    .filter(|&&r| t.takes(r) && !t.keyed_here(r))
                     .map(|r| json!({ "clips": [id], "param": r, "at": t.play }))
                     .collect();
                 self.send_each("keyframes.add", parts);

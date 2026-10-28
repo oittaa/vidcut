@@ -1195,7 +1195,7 @@ impl Workspace {
         self.timeline_keys(&input);
         let struck = |k: Key| {
             input.events.iter().any(|e| {
-                matches!(e, egui::Event::Key { key, physical_key, pressed: true, .. }
+                matches!(e, egui::Event::Key { key, physical_key, pressed: true, repeat: false, .. }
                     if *key == k || *physical_key == Some(k))
             })
         };

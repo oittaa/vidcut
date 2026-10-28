@@ -102,6 +102,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - The tab and the tray share the selected rows. A new clip in the tab clears them.
     - Mark > Add Keyframe (Ctrl+[) adds a keyframe at the playhead on each selected row, at the value there. It sends `keyframes.add`.
       - A row with a keyframe at the playhead does not change.
+      - The Volume row takes a keyframe only where the clip has sound. A held key adds once.
       - The manual says that the context picks the value (pp. 1254–1255). In Resolve Studio 21.1.2, the selected row picks it.
       - The value changed last in the Inspector and the curve in view do not pick it.
     - Mark > Delete Keyframe (Alt+]) removes the selected keyframes. With none selected, it removes the keyframes of the selected rows at the playhead.
