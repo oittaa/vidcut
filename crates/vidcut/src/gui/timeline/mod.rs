@@ -444,9 +444,9 @@ const RING: f32 = 3.0;
 mod icon {
     pub use egui_phosphor::regular::{
         ARROWS_IN_LINE_VERTICAL as SHRINK, ARROWS_OUT_LINE_VERTICAL as ENLARGE,
-        BOOKMARK_SIMPLE as MARKER, EYE as VIDEO_ON, EYE_SLASH as VIDEO_OFF, LOCK_SIMPLE as LOCKED,
-        LOCK_SIMPLE_OPEN as UNLOCKED, MAGNET as SNAP, SCISSORS as SPLIT, SPEAKER_HIGH as AUDIO_ON,
-        SPEAKER_SLASH as AUDIO_OFF,
+        BOOKMARK_SIMPLE as MARKER, DIAMONDS_FOUR as KEYFRAMES, EYE as VIDEO_ON,
+        EYE_SLASH as VIDEO_OFF, LOCK_SIMPLE as LOCKED, LOCK_SIMPLE_OPEN as UNLOCKED,
+        MAGNET as SNAP, SCISSORS as SPLIT, SPEAKER_HIGH as AUDIO_ON, SPEAKER_SLASH as AUDIO_OFF,
     };
 }
 
@@ -644,6 +644,13 @@ impl Workspace {
         };
         let shape: &Project = before.as_deref().unwrap_or(&p);
         let full = ui.available_rect_before_wrap();
+        let tray_h = self.tray_height(ui).min(full.height() / 2.0);
+        let tray = (tray_h > 0.0)
+            .then(|| Rect::from_min_max(pos2(full.left(), full.bottom() - tray_h), full.max));
+        let full = match tray {
+            Some(t) => Rect::from_min_max(full.min, pos2(full.right(), t.top() - 4.0)),
+            None => full,
+        };
         let others = (shape.tracks.len().saturating_sub(1) + shape.subtitles.len()).min(6) as f32;
         let upper_rect = Rect::from_min_size(
             pos2(full.left() + HEADER, full.top()),
@@ -1205,6 +1212,11 @@ impl Workspace {
             paint::preview(&painter, rows, scale, &p, &d.preview);
             self.drag_tooltip(ui, &d.preview);
         }
+        if let Some(rect) = tray {
+            let scale = layout.lower_scale;
+            let span = (scale.frame(content.left()), scale.frame(content.right()));
+            self.keyframe_tray(ui, rect, HEADER, span);
+        }
         self.marker_window(ui.ctx());
         self.duration_window(ui.ctx());
         self.fade_window(ui.ctx());
@@ -1413,6 +1425,12 @@ impl Workspace {
         {
             self.timeline.options.snapping = !self.timeline.options.snapping;
             self.timeline.options.save();
+        }
+        if icon_toggle(ui, icon::KEYFRAMES, "Keyframes", self.key_tray)
+            .on_hover_text("Keyframes")
+            .clicked()
+        {
+            self.key_tray = !self.key_tray;
         }
     }
 

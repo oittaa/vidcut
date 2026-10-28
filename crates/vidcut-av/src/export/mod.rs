@@ -663,17 +663,25 @@ impl VideoOut {
         j: i64,
         mut f: frame::Video,
         t35: Option<Vec<u8>>,
+        spent: &mut Spent,
     ) -> Result<()> {
         if let (Some((_, waiting)), Some(t35)) = (self.hdr10plus.as_mut(), t35) {
             waiting.insert(j, t35);
         }
-        crate::screen::filled(&mut f)?;
+        let clock = Instant::now();
+        let (gpu, copy) = crate::screen::filled(&mut f)?;
         crate::cuda::share::wait_for(&f)?;
+        spent.draws += clock.elapsed();
+        spent.gpu += gpu;
+        spent.copy += copy;
+        let clock = Instant::now();
         crate::copies::to_encoder(&f, self.kind);
         self.encoder
             .send_frame(&f)
             .ctx(|| format!("encoding frame {j} with {}", self.name))?;
-        self.drain(octx)
+        let drained = self.drain(octx);
+        spent.video += clock.elapsed();
+        drained
     }
 
     fn drain(&mut self, octx: &mut format::context::Output) -> Result<()> {
@@ -793,6 +801,17 @@ struct Writer {
     subtitles: Vec<SubtitleOut>,
 }
 
+#[derive(Default)]
+struct Spent {
+    waiting: Duration,
+    draws: Duration,
+    gpu: Duration,
+    copy: Duration,
+    video: Duration,
+    sound: Duration,
+    end: Duration,
+}
+
 impl Writer {
     fn subtitles_until(&mut self, j: i64) -> Result<()> {
         for s in &mut self.subtitles {
@@ -801,22 +820,38 @@ impl Writer {
         Ok(())
     }
 
-    fn run(mut self, mut outs: Inbox<Out>) -> Result<()> {
-        while let Some(out) = outs.recv()? {
+    fn run(mut self, mut outs: Inbox<Out>) -> Result<Spent> {
+        let mut spent = Spent::default();
+        loop {
+            let clock = Instant::now();
+            let out = outs.recv()?;
+            spent.waiting += clock.elapsed();
+            let Some(out) = out else {
+                break;
+            };
             match out {
                 Out::Picture { j, picture, t35 } => {
                     self.subtitles_until(j)?;
                     let v = self.video.as_mut().expect("a video encoder");
-                    v.encode(&mut self.octx, j, picture, t35)?;
+                    v.encode(&mut self.octx, j, picture, t35, &mut spent)?;
                 }
                 Out::Sound(j, samples) => {
+                    let clock = Instant::now();
                     self.subtitles_until(j)?;
                     let a = self.audio.as_mut().expect("an audio encoder");
                     a.fifo.extend_from_slice(&samples);
                     a.encode(&mut self.octx, false)?;
+                    spent.sound += clock.elapsed();
                 }
             }
         }
+        let clock = Instant::now();
+        self.end()?;
+        spent.end = clock.elapsed();
+        Ok(spent)
+    }
+
+    fn end(&mut self) -> Result<()> {
         self.subtitles_until(i64::MAX)?;
         if let Some(a) = self.audio.as_mut() {
             a.encode(&mut self.octx, true)?;
@@ -1167,6 +1202,8 @@ fn encode(
     let mut writing = Worker::spawn(holds, move |outs| writer.run(outs))?;
     let mut produced = 0i64;
     let runs = video.as_ref().map_or(1, |v| v.passes.runs());
+    let looped = Instant::now();
+    let (mut sound, mut handing) = (Duration::ZERO, Duration::ZERO);
     let made = (|| -> Result<()> {
         for j in 0..plan.frames {
             if cancel.load(Ordering::Relaxed) {
@@ -1174,13 +1211,19 @@ fn encode(
             }
             if let Some(v) = video.as_mut() {
                 let (picture, t35) = v.next(j)?;
+                let clock = Instant::now();
                 writing.send(Out::Picture { j, picture, t35 })?;
+                handing += clock.elapsed();
             }
             if let Some(mix) = mix.as_mut() {
                 let until = plan.fps.frame_to_sample(j + 1, plan.sample_rate);
+                let clock = Instant::now();
                 let samples = mix.read((until - produced) as usize)?;
+                sound += clock.elapsed();
                 produced = until;
+                let clock = Instant::now();
                 writing.send(Out::Sound(j, samples))?;
+                handing += clock.elapsed();
             }
             progress(Progress {
                 frames: j + 1,
@@ -1197,10 +1240,47 @@ fn encode(
         }
         Ok(())
     })();
-    match made {
+    let clock = Instant::now();
+    let spent = match made {
         Ok(()) => writing.finish()?,
         Err(e) => return Err(writing.abandon(e)),
-    }
+    };
+    handing += clock.elapsed();
+    let (decoding, drawing) = video.as_ref().map(|v| v.frames.spent()).unwrap_or_default();
+    let parts = video
+        .as_ref()
+        .map(|v| v.frames.drawing())
+        .unwrap_or_default();
+    let total = looped.elapsed();
+    let other = total.saturating_sub(decoding + drawing + sound + handing);
+    let s = |d: Duration| d.as_secs_f64();
+    crate::debug!(
+        "export",
+        "{} frames in {:.2} s. Export thread: decoding {:.2} s, drawing {:.2} s \
+         (picture in {:.2} s, draw {:.2} s, waiting for an output buffer {:.2} s, \
+         output planes {:.2} s), sound {:.2} s, waiting for the encoder's thread {:.2} s, \
+         other {:.2} s. Encoder's thread: waiting for frames {:.2} s, waiting for the draw \
+         {:.2} s (the GPU {:.2} s, the copy to the encoder {:.2} s), video {:.2} s, \
+         sound {:.2} s, end {:.2} s",
+        plan.frames,
+        s(total),
+        s(decoding),
+        s(drawing),
+        s(parts.picture_in),
+        s(parts.draw),
+        s(parts.buffer),
+        s(parts.planes),
+        s(sound),
+        s(handing),
+        s(other),
+        s(spent.waiting),
+        s(spent.draws),
+        s(spent.gpu),
+        s(spent.copy),
+        s(spent.video),
+        s(spent.sound),
+        s(spent.end)
+    );
     Ok(Report {
         output: output.to_path_buf(),
         frames: plan.frames,

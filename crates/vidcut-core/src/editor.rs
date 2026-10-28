@@ -3355,6 +3355,34 @@ fn mutate(
             ops::keyframes::remove(p, &ids, *param, &pick)?;
             Value::Null
         }
+        Request::KeyframesCut { clip, keys } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let picks = ops::keyframes::chosen(p, &id, keys.as_deref())?;
+            let copied = ops::keyframes::copy(p, &id, &picks)?;
+            for (param, frames) in picks {
+                let pick = ops::keyframes::Pick {
+                    frames: Some(frames),
+                    at: None,
+                };
+                ops::keyframes::remove(p, std::slice::from_ref(&id), param, &pick)?;
+            }
+            json!({ "clip": id, "keyframes": copied })
+        }
+        Request::KeyframesPaste {
+            clips,
+            at,
+            keyframes,
+        } => {
+            let keys = keyframes.as_ref().ok_or_else(|| {
+                Error::usage("keyframes.paste needs `keyframes` (the GUI pastes its clipboard)")
+            })?;
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => need(playhead, "at")?,
+            };
+            json!({ "at": at, "keyframes": ops::keyframes::paste(p, &ids, at, keys)? })
+        }
         Request::EditCut { clips, range } => match (clips, range) {
             (Some(clips), None) => {
                 let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -6361,6 +6389,11 @@ pub fn query(
                 .map(|c| resolve_clips(p, &c.to_vec(), playhead))
                 .transpose()?;
             ops::keyframes::list(p, ids.as_deref())?
+        }
+        Request::KeyframesCopy { clip, keys } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let picks = ops::keyframes::chosen(p, &id, keys.as_deref())?;
+            json!({ "clip": id, "keyframes": ops::keyframes::copy(p, &id, &picks)? })
         }
         Request::TimelineEditPoints {} => {
             let points = p

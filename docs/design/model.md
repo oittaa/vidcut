@@ -328,8 +328,9 @@ Writing:
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
   - its `composite_mode` (`CompositeMode`, `Picture::mode`) and its `opacity` (`Picture::opaque`)
 - Each value is left out at its usual value. A picture that `Picture::is_usual` accepts is only fitted into the frame.
-- Position, zoom, rotation, each crop side, the crop softness and the opacity can hold `Keyframe`s beside the plain value. `Picture::is_usual` is false while a value has keyframes.
-  - `position_keys` holds X, and `position_y` holds Y, one number for each keyframe. Zoom does the same.
+- Each value of `keyframes::PictureValue` can hold `Keyframe`s beside the plain value. `Picture::is_usual` is false while a value has keyframes.
+  - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.
+  - `position_keys` holds X, and `position_y` holds Y, one number for each keyframe. Zoom and the anchor point do the same.
   - A handle `value` moves X. Y keeps the handle `frames`, with a value offset of 0 (`value_paired`).
 - `ops::picture` holds the edits:
   - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share.

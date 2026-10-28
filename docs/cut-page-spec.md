@@ -57,7 +57,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The tab shows the first selected clip.
   - **Tracks** (pp. 1255–1256):
     - Each value that can have keyframes has a track, in a group for its section.
-    - Volume is a track. Position is one track. Zoom is one track.
+    - Volume is a track. Position is one track. Zoom is one track. The anchor point is one track.
     - The ⋯ menu has Display All Parameters and Display Parameters with Keyframes. All is the default.
     - A click on the name of a group opens or closes it. The ⋯ menu also has Expand All Parameters and Collapse All Parameters.
   - **Track controls** (p. 1257):
@@ -75,16 +75,49 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - A click on the scroll bar outside that part moves the range to the click.
     - An arrow at the edge of a track marks its keyframes outside the range, for example after a trim.
   - **Edits:**
+    - The rules of the clicks, the box, the steps and the paste with no page number are measured in Resolve Studio 21.1.2.
     - A drag on a keyframe moves it in time. A drag on a curve point also changes the value.
     - A drag on a group track moves that group's keyframes at that time.
     - A drag on an In or Out handle changes that handle. A handle value moves the key's own value.
-    - On Position and Zoom, Y keeps the handle frames and uses a value offset of 0.
-    - One click selects one keyframe. Shift or Ctrl adds to the selection. A click on an empty part clears it.
+    - On Position, Zoom and the anchor point, Y keeps the handle frames and uses a value offset of 0.
+    - One click selects one keyframe. A click on an empty part clears the selection.
+    - Ctrl-click (Cmd-click on the Mac) adds a keyframe to the selection (p. 1257). Ctrl-click on a selected keyframe removes it from the selection.
+    - Shift-click selects that keyframe alone, as a plain click does.
+    - A drag from an empty part of the tracks draws a box (p. 1257). On release, the keyframes in the box are the selection.
+      - The box replaces the selection, also with Shift or Ctrl.
+      - One box takes the keyframes of all the values in it.
     - Delete removes the selected keyframes (p. 1258).
-    - A right-click on a keyframe sets its ease (X87).
+    - Mark > Move Selected Keyframes Left and Right move the selected keyframes by one frame (p. 1258). They send `keyframes.move`.
+    - Mark > Move Selected Keyframes Up and Down change their values by one step. They send `keyframes.set` with `by`.
+      - The manual says that a step is one unit (p. 4343). The step of each value is measured.
+      - Position, the anchor point and each crop side: 0.001 of the picture. On a 1920 px wide picture, this is 1.92 px.
+        - Position X counts in the timeline frame. The anchor point X and the crop count in the fitted picture.
+      - Zoom: 0.2, that is 20%. Rotation: 0.02°. Pitch and Yaw: 0.001. Crop softness: 0.2. Opacity: 0.2%. Volume: 0.2 dB.
+      - Resolve's Inspector shows Pitch and Yaw with three decimals. vidcut does the same, so one step shows.
+      - On Position, Zoom and the anchor point, the step goes to X and to Y.
+      - A value stops at its limit. The rest of that step is lost.
+    - After a click in the Keyframes tab or the keyframe tray, Ctrl+C and Ctrl+X copy or cut the selected keyframes (p. 1258).
+    - Ctrl+V there pastes them on the selected clips (p. 1258).
+      - The first keyframe goes at the playhead. The others keep their distance from it.
+      - With more than one clip selected, each clip takes the keyframes at the same frames from its start. The earliest selected clip sets these frames.
+      - A pasted keyframe can be past the clip's ends (p. 1258).
+      - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do this.
+    - Keyframes and clips share one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
+      - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
+    - A right-click on a keyframe sets its ease (X87). The anchor point's keyframes take no ease (D92).
     - A double-click on an empty part of a track adds a keyframe there ([X90](deviations.md#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
     - The bar under the tracks shows the value, time and ease of the selected keyframe (X90).
     - A keyframe that the Keyframe button or a double-click adds is selected. Thus the bar shows it at once.
+  - **Keyframe tray** (p. 1259):
+    - The Keyframes button of the lower timeline's toolbar shows a tray under the tracks of the lower timeline. The upper timeline does not change.
+    - The tray has a track for each value of the first selected clip that has keyframes. Its time is the time of the lower timeline.
+    - Its tracks work as the tracks of the Keyframes tab, with Reset Keyframes and without the curve. They share the selection of the tab.
+    - `gui.show keyframe_tray` opens the tray. `gui.close keyframe_tray` closes it.
+    - Resolve's tray has more. vidcut does not have these parts yet ([todo](todo/keyframes.md)):
+      - A divider that changes the height of the tray.
+      - Group tracks for each effect, under a track with the clip's name.
+      - A curve view, and a Parameters menu that chooses the shown values.
+      - With no clip selected, the clip under the playhead. With more than one clip selected, a group for each clip.
   - Later: the Sync Bin, Transitions and Effects tabs.
   - vidcut's bar also has Import, Export and Jobs (deviation X3), and Help (X23).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
@@ -104,7 +137,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Detect Scene Cuts, Add Dissolve to All Edits, Clear Transition from All Edits.
     - vidcut also has Add Subtitle (deviation X44), Create Subtitles from Audio (X46), Re-time Subtitles to Speech (X49) and Ripple Delete Silence.
   - **Edit Actions:** Trim Start to Playhead, Trim End to Playhead.
-- **Timeline buttons** (p. 649): Ripple On, Dynamic Trim, Split, Marker.
+- **Timeline buttons** (p. 649): Ripple On, Dynamic Trim, Split, Marker. After them is the Keyframes button, which shows the keyframe tray (p. 1259).
 - **Upper timeline:**
   - The track-number buttons to its left select the target track.
   - The Audio Only and Video Only toggles are there too (pp. 643, 694).
@@ -851,9 +884,9 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Details: D75.
 - **How they play:** a clip covers the tracks below it only where its picture covers the frame. Its composite mode mixes it with them. Its opacity and its soft edges let them show through. Details: D75.
 - **Keyframes** (D75):
-  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y.
-  - Rotation is its own value. Each crop side, Softness and Opacity are values of their own.
-  - The flips, the anchor, Pitch and Yaw have no keyframes.
+  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. The anchor point is one keyframe for X and Y.
+  - Rotation, Pitch and Yaw are values of their own. Each crop side, Softness and Opacity are values of their own.
+  - The flips have no keyframes.
   - Dynamic Zoom has no Keyframe button. Its two boxes stay at the ends of the clip.
   - A Keyframe button sits between Previous and Next arrows on each keyed value (X70).
   - A right-click on the button sets the ease. The ease is the volume curve (X74).
@@ -934,8 +967,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Audio keyframes can be between frames (p. 1113).
   - The Cut page has a Keyframe Editor (p. 1255). Its timeline has no volume overlay.
   - vidcut: the volume line takes the keyframe controls of the Edit page (X73). Its eases are Bezier handles that drag (X74).
-  - vidcut: `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` (D81).
-  - A keyframe is on a whole source frame. vidcut has no copy and paste of keyframes alone (D81).
+  - vidcut: `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move`, `keyframes.remove`, `keyframes.copy`, `keyframes.cut` and `keyframes.paste` (D81).
+  - A keyframe is on a whole source frame (D81). The Keyframes tab copies and pastes keyframes alone (§2). On the volume line, Ctrl+C copies the clips.
   - A volume change on a clip with keyframes is in D82. Normalize Audio Levels with keyframes is in D83.
   - Ducking, Ripple Delete Silence and the meters follow the keyframes (D84). The keys are in D85.
 - **Ripple Delete Silence** (p. 773):
@@ -1007,7 +1040,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 | Alt+click on the volume line | Add a volume keyframe (X73) |
 
 | Alt+Delete | Lift the selection (D9) |
-| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut / paste; after a click in the Keyframes tab or the keyframe tray, the keyframes (§2) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
 | V / U | Select nearest edit / cycle edit side |
@@ -1977,13 +2010,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `opacity` is from 0 to 1. Usual: 1.
     - Values at their usual place are left out of the project file.
   - **Keyframes:**
-    - Position, zoom, rotation, each crop side, the crop softness and the opacity can have keyframes.
+    - Position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity can have keyframes.
     - A keyframe is the volume `Keyframe`: a source frame, a value, an In handle and an Out handle (D81).
     - Position stores X on the keyframe and Y beside it, one Y for each keyframe.
-    - Zoom does the same. Rotation, each crop side, the crop softness and the opacity store one value.
+    - Zoom and the anchor point do the same. The other values store one value.
     - The curve between two keyframes is the volume Bezier curve (X74).
     - A handle value moves the key's own value.
-    - Position Y and zoom Y keep the handle frames and use a value offset of 0.
+    - Position Y, zoom Y and anchor Y keep the handle frames and use a value offset of 0.
     - Before the first keyframe the value is the first. After the last it is the last.
     - With keyframes, that curve is the value. The plain value is not played.
     - When the last keyframes of a value go, the first of them stays as the plain value.
@@ -1992,6 +2025,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `picture.set` takes `at`. With no `at`, it uses the playhead.
     - A value with no keyframes ignores `at`.
     - `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take these values in `param`.
+    - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` take them in `param` too.
     - `timeline.get` names each picture value that has keyframes, as it names `volume`.
     - The Inspector shows the value at the playhead. Its Keyframe button adds or removes the keyframe there (X70).
     - Previous and Next move the playhead to the keyframe before or after it, inside the clip.
@@ -1999,7 +2033,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Reset of one value removes its keyframes and puts the usual value back.
     - The Reset of Transform, Crop or Composite removes the keyframes of that section.
     - A clip with any keyframes shows a mark on its timeline bar.
-    - Flips, the anchor, Pitch, Yaw, the composite mode and Dynamic Zoom have no keyframes.
+    - Flips, the composite mode and Dynamic Zoom have no keyframes.
     - A speed change keeps each keyframe at its frame of the clip, as volume does (D81).
     - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
@@ -2044,9 +2078,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It also goes in Resolve's Transform, Cropping and Retime and Scaling, fitted.
     - An import takes vidcut's own metadata. Else it reads those effects.
     - Resolve's crop, fill and stretch become a zoom, and its anchor point becomes the `anchor` ([gotchas](gotchas.md#resolves-otio-files)).
-    - Keyframes of position, zoom, rotation and crop are read and played when they fit this model.
+    - Keyframes of position, zoom, rotation, the anchor point, pitch, yaw and crop are read and played when they fit this model.
     - A parameter vidcut does not key, or a keyframe it cannot read, leaves Transform, Cropping and Retime and Scaling on the clip, unplayed (X9).
-    - Pitch and yaw on their own are played (D93).
+    - Pitch and yaw are played, with or without keyframes (D93).
+    - Anchor point keyframes are read only on a picture that Retime and Scaling leaves at its fitted size (D92).
     - This is also true when they make a picture that vidcut refuses, such as a crop that leaves nothing.
     - The export names the clips moved further than Resolve's Pan and Tilt go, 4 pictures, and writes them at 4.
   - **Dynamic Zoom.** The manual gives the boxes and the eases, not the units or the timing.
@@ -2262,7 +2297,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A split gives all the keyframes to both parts. Thus `edit.join` gives back the clip.
     - A speed change keeps each keyframe at its frame of the clip (D48). Thus its source frame changes. A freeze keeps them as they are.
     - A clip that plays backward plays its keyframes backward.
-    - `edit.copy` and `edit.paste` carry the keyframes with the clip. vidcut has no copy and paste of keyframes alone.
+    - `edit.copy` and `edit.paste` carry the keyframes with the clip. `keyframes.copy` and `keyframes.paste` copy keyframes alone (§2).
     - Compound clips have no volume of their own. Thus they have no volume keyframes.
   - **Play and export:** each sample takes the volume of the curve at its source position. The player and the export use the same mixer.
   - **OTIO:**
@@ -2361,6 +2396,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An anchor point on the content would move across the screen while the box moves.
   - **OTIO:** an import reads the anchor point of Resolve's Transform as `anchor`. An export writes it back.
   - With a crop, fill or stretch, the move that the scaling makes about the middle goes into `position` ([gotchas](gotchas.md#resolves-otio-files)).
+  - **Keyframes:** the anchor point is one keyframe for X and Y, as Position is (D75).
+    - Each key in the `Key Frames` of `transformationAnchorPoint` is a `POINTF`, as the keys of `dynamicZoomCenter` are.
+    - On a 1920×1080 clip, the key's value is `[X / 1920, Y / 1080]`, with the signs of the Inspector.
+    - In Resolve, an anchor point keyframe stays linear. The ease menu of the Inspector and the curve tools of the tray do not change it.
+    - The tray draws no curve for the anchor point. Resolve writes no Bezier handles on these keys.
+    - Thus vidcut's anchor point keyframes are linear. `keyframes.add` and `keyframes.set` refuse an ease or handles on them.
+    - Resolve imports its own file with anchor point keys and gives the same keys.
+    - The facts about these keys are measured in Resolve Studio 21.1.2.
+    - An import reads these keys only when Retime and Scaling leaves the picture at its fitted size, and only without Bezier handles.
+    - With a crop, fill or stretch, the move of the anchor point goes into `position`. Thus `position` would need keys of its own.
   - `picture.set` takes `anchor`. `picture.clear` with `transform` puts it back in the middle.
 - **D93. Pitch and yaw** (§8.15; pp. 735, 767; deviation X83).
   - The manual lists Pitch and Yaw with the other Transform values (pp. 735, 767).
@@ -2380,7 +2425,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The Inspector sets them. The viewer handles do not set them (X83).
   - `picture.set` takes `pitch` and `yaw`. `picture.clear` with `transform` puts both back to 0.
   - An import reads `transformationPitch` and `transformationYaw`. An export writes them back.
-  - A plain value plays. Keyframes on either one leave the Transform unplayed (X9).
+  - Each can have keyframes (D75). Their keys have the form of the keys of the rotation, in the units of the plain value.
 
 ## 13. Order of operations (pp. 287–296, 3407)
 

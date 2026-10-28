@@ -209,6 +209,12 @@ pub fn describe_at(
         ),
         "keyframes.move" => format!("Move {} of {} {}", d.keyframes(), d.clips("clips"), d.by()),
         "keyframes.remove" => format!("Remove {} of {}", d.keyframes(), d.clips("clips")),
+        "keyframes.cut" => format!("Cut keyframes of {}", d.clips("clip")),
+        "keyframes.paste" => format!(
+            "Paste keyframes on {} at {}",
+            d.clips("clips"),
+            d.time("at")
+        ),
         "marks.set" => d.marks_set("Timeline marks".into(), project.map(|p| &p.marks)),
         "marks.clear" => "Clear the timeline marks".into(),
         "markers.add" => format!("Marker at {}{}", d.time("at"), d.named()),

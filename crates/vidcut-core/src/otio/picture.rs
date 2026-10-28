@@ -42,6 +42,7 @@ const LATER: i64 = 1000;
 const SIZES: (f64, f64) = (0.01, 100.0);
 const SOFT: f64 = 100.0;
 const PERCENT: f64 = 100.0;
+const SAME: f64 = 1e-6;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shape {
@@ -156,7 +157,10 @@ fn animated(name: &str, id: &str) -> bool {
 
 fn playable(name: &str, id: &str) -> bool {
     match name {
-        TRANSFORM => matches!(id, ZOOM_X | ZOOM_Y | PAN | TILT | ROTATION),
+        TRANSFORM => matches!(
+            id,
+            ZOOM_X | ZOOM_Y | PAN | TILT | ROTATION | PITCH | YAW | ANCHOR
+        ),
         CROPPING => CROPPED.contains(&id),
         COMPOSITE => id == OPACITY,
         _ => false,
@@ -409,6 +413,28 @@ impl Placement {
         let zoom = merge(keys(ZOOM_X)?, keys(ZOOM_Y)?, self.zoom[0], self.zoom[1])?;
         let [pw, ph] = shape.picture(self.scale);
         let [fw, fh] = shape.fitted;
+        (picture.anchor_keys, picture.anchor_y) = match values.iter().find(|(k, _)| *k == ANCHOR) {
+            None => (Vec::new(), Vec::new()),
+            Some((_, p)) => read_point_keys(p, timing, origin)?,
+        };
+        let scaled = (pw - fw).abs() > SAME || (ph - fh).abs() > SAME;
+        if scaled && !picture.anchor_keys.is_empty() {
+            return None;
+        }
+        picture.pitch_keys = keys(PITCH)?
+            .into_iter()
+            .map(|k| Keyframe {
+                value: rounded(k.value),
+                ..k
+            })
+            .collect();
+        picture.yaw_keys = keys(YAW)?
+            .into_iter()
+            .map(|k| Keyframe {
+                value: rounded(k.value),
+                ..k
+            })
+            .collect();
         (picture.zoom_keys, picture.zoom_y) = scaled_pair(zoom, pw / fw, ph / fh);
         let moved = merge(keys(PAN)?, keys(TILT)?, self.moved[0], self.moved[1])?;
         (picture.position_keys, picture.position_y) =
@@ -496,25 +522,26 @@ pub fn take(
     let Some(read) = placement(effects) else {
         return Ok((effects.to_vec(), None));
     };
+    let placing = || -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for n in effects
+            .iter()
+            .filter(|e| is_placing(e))
+            .map(super::effects::name)
+        {
+            if !names.contains(&n) {
+                names.push(n);
+            }
+        }
+        names
+    };
     let timing = super::effects::Timing { speed };
     let Some(picture) = read.with_keys(effects, shape, &timing, origin) else {
-        return Ok((effects.to_vec(), None));
+        return Err(placing());
     };
     match crate::ops::picture::checked(&picture) {
         Ok(picture) => Ok((rest(), picture)),
-        Err(_) => {
-            let mut names: Vec<String> = Vec::new();
-            for n in effects
-                .iter()
-                .filter(|e| is_placing(e))
-                .map(super::effects::name)
-            {
-                if !names.contains(&n) {
-                    names.push(n);
-                }
-            }
-            Err(names)
-        }
+        Err(_) => Err(placing()),
     }
 }
 
@@ -564,6 +591,36 @@ fn read_keys(p: &Value, timing: &super::effects::Timing, origin: i64) -> Option<
     out.sort_by_key(|k| k.frame);
     out.dedup_by_key(|k| k.frame);
     Some(out)
+}
+
+fn read_point_keys(
+    p: &Value,
+    timing: &super::effects::Timing,
+    origin: i64,
+) -> Option<(Vec<Keyframe>, Vec<f64>)> {
+    let Some(keys) = p.get("Key Frames").and_then(Value::as_object) else {
+        return Some((Vec::new(), Vec::new()));
+    };
+    let mut out: Vec<(Keyframe, f64)> = Vec::new();
+    for (t, k) in keys {
+        if k.get("InBez").is_some() || k.get("OutBez").is_some() {
+            return None;
+        }
+        let at = t.parse::<f64>().ok()?;
+        let frame = (timing.source(at) + origin as f64).round() as i64;
+        let a = k["Value"].as_array().filter(|a| a.len() == 2)?;
+        let x = |i: usize| a[i].as_f64().filter(|v| v.is_finite());
+        let key = Keyframe {
+            frame,
+            value: rounded(0.5 + x(0)?),
+            in_handle: None,
+            out_handle: None,
+        };
+        out.push((key, rounded(0.5 - x(1)?)));
+    }
+    out.sort_by_key(|(k, _)| k.frame);
+    out.dedup_by_key(|(k, _)| k.frame);
+    Some(out.into_iter().unzip())
 }
 
 fn merge(
@@ -683,12 +740,36 @@ fn file_curve(
         if let Some(h) = k.out_handle {
             v[after] = bez(after, h);
         }
-        let name = if at.fract() == 0.0 {
-            format!("{}", at as i64)
-        } else {
-            at.to_string()
-        };
-        out.insert(name, v);
+        out.insert(key_name(at), v);
+    }
+    Some(Value::Object(out))
+}
+
+fn key_name(at: f64) -> String {
+    if at.fract() == 0.0 {
+        format!("{}", at as i64)
+    } else {
+        at.to_string()
+    }
+}
+
+fn point_curve(
+    keys: &[Keyframe],
+    y: &[f64],
+    source: i64,
+    timing: &super::effects::Timing,
+) -> Option<Value> {
+    if keys.is_empty() {
+        return None;
+    }
+    let mut out = serde_json::Map::new();
+    for (k, ay) in keys.iter().zip(y) {
+        let at = timing.file((k.frame - source) as f64).round();
+        let value = [rounded(k.value - 0.5), rounded(0.5 - ay)];
+        out.insert(
+            key_name(at),
+            json!({ "Value": value, "Variant Type": "POINTF" }),
+        );
     }
     Some(Value::Object(out))
 }
@@ -722,8 +803,15 @@ fn boolean(id: &str, value: bool, usual: bool) -> Option<Value> {
     (value != usual).then(|| keyed(id, json!(value), json!(usual), "Bool"))
 }
 
-fn point(id: &str, value: [f64; 2], usual: [f64; 2]) -> Option<Value> {
-    (value != usual).then(|| keyed(id, json!(value), json!(usual), "POINTF"))
+fn point(id: &str, value: [f64; 2], usual: [f64; 2], frames: Option<Value>) -> Option<Value> {
+    match frames {
+        None => (value != usual).then(|| keyed(id, json!(value), json!(usual), "POINTF")),
+        Some(frames) => {
+            let mut p = keyed(id, json!(value), json!(usual), "POINTF");
+            p["Key Frames"] = frames;
+            Some(p)
+        }
+    }
 }
 
 fn zooming(z: &DynamicZoom, g: i64) -> Vec<Value> {
@@ -796,6 +884,15 @@ pub(crate) fn effects(
         .copied()
         .map_or(tilt, |y| moved_at([0.5, y], shape)[1]);
     let turn = p.rotation_keys.first().map_or(p.turn(), |k| k.value);
+    let anchor_keys = point_curve(&p.anchor_keys, &p.anchor_y, source, timing);
+    let (ax, ay) = match (p.anchor_keys.first(), p.anchor_y.first()) {
+        (Some(k), Some(y)) => (k.value, *y),
+        _ => (ax, ay),
+    };
+    let pitch_keys = file_curve(&p.pitch_keys, None, source, timing, |v| v, 1.0);
+    let pitch = p.pitch_keys.first().map_or(p.pitch(), |k| k.value);
+    let yaw_keys = file_curve(&p.yaw_keys, None, source, timing, |v| v, 1.0);
+    let yaw = p.yaw_keys.first().map_or(p.yaw(), |k| k.value);
     let linked = match p.zoom_keys.is_empty() {
         true => zx == zy,
         false => p
@@ -811,9 +908,14 @@ pub(crate) fn effects(
         double_frames(PAN, pan, 0.0, reach, pan_keys),
         double_frames(TILT, tilt, 0.0, reach, tilt_keys),
         double_frames(ROTATION, turn, 0.0, (-100000.0, 100000.0), turn_keys),
-        double(PITCH, p.pitch(), 0.0, (-LEAN, LEAN)),
-        double(YAW, p.yaw(), 0.0, (-LEAN, LEAN)),
-        point(ANCHOR, [rounded(ax - 0.5), rounded(0.5 - ay)], [0.0, 0.0]),
+        double_frames(PITCH, pitch, 0.0, (-LEAN, LEAN), pitch_keys),
+        double_frames(YAW, yaw, 0.0, (-LEAN, LEAN), yaw_keys),
+        point(
+            ANCHOR,
+            [rounded(ax - 0.5), rounded(0.5 - ay)],
+            [0.0, 0.0],
+            anchor_keys,
+        ),
         boolean(FLIP_X, p.flip_horizontal, false),
         boolean(FLIP_Y, p.flip_vertical, false),
     ]

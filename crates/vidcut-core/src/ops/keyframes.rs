@@ -6,8 +6,10 @@ use super::locate;
 use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, checked, checked_handle, ease_of, reshape};
 use crate::model::{Clip, ClipAudio, Ease, Handle, Keyframe, Picture, Project};
-use crate::request::{KeyParam, KeyValue};
+use crate::request::{CopiedKey, KeyParam, KeyPicks, KeyValue};
 use crate::validate::GAIN;
+
+const ANCHOR_LINEAR: &str = "the anchor point's keyframes are linear: they take no ease or handles";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Pick {
@@ -85,11 +87,23 @@ pub fn add(
     value: Option<KeyValue>,
     ease: Option<Ease>,
 ) -> Result<Vec<(String, i64)>> {
+    added(p, ids, param, at, value, ease, false)
+}
+
+fn added(
+    p: &mut Project,
+    ids: &[String],
+    param: KeyParam,
+    at: i64,
+    value: Option<KeyValue>,
+    ease: Option<Ease>,
+    past_ends: bool,
+) -> Result<Vec<(String, i64)>> {
     if let Some(v) = picture_param(param) {
-        return add_picture(p, ids, v, at, value, ease);
+        return add_picture(p, ids, v, at, value, ease, past_ends);
     }
     let value = scalar(param, value)?;
-    add_volume(p, ids, at, value, ease)
+    add_volume(p, ids, at, value, ease, past_ends)
 }
 
 fn add_volume(
@@ -98,19 +112,26 @@ fn add_volume(
     at: i64,
     value: Option<f64>,
     ease: Option<Ease>,
+    past_ends: bool,
 ) -> Result<Vec<(String, i64)>> {
     let value = value.map(checked).transpose()?;
+    let takes = |c: &Clip| c.sounds_at(at) || past_ends && c.audio_range().is_some();
     let targets: Vec<String> = ids
         .iter()
-        .filter(|id| p.clip(id).is_some_and(|c| c.sounds_at(at)))
+        .filter(|id| p.clip(id).is_some_and(takes))
         .cloned()
         .collect();
     if targets.is_empty() {
         for id in ids {
             locate(p, id)?;
         }
+        let at = if past_ends {
+            String::new()
+        } else {
+            format!(" at frame {at}")
+        };
         return Err(Error::invalid(format!(
-            "no clip of {} has sound at frame {at}",
+            "no clip of {} has sound{at}",
             ids.join(", ")
         )));
     }
@@ -404,12 +425,163 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
     Ok(json!({ "clips": clips }))
 }
 
+fn keys_of(c: &Clip, param: KeyParam) -> &[Keyframe] {
+    match picture_param(param) {
+        Some(v) => c.picture.as_ref().map_or(&[], |p| p.keys_of(v)),
+        None => c.audio.as_ref().map_or(&[], |a| a.gain_keys.as_slice()),
+    }
+}
+
+fn param_name(param: KeyParam) -> &'static str {
+    picture_param(param).map_or("volume", PictureValue::name)
+}
+
+pub fn chosen(
+    p: &Project,
+    id: &str,
+    picks: Option<&[KeyPicks]>,
+) -> Result<Vec<(KeyParam, Vec<i64>)>> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    let wanted: Vec<(KeyParam, Option<Vec<i64>>)> = match picks {
+        Some(picks) => picks
+            .iter()
+            .map(|k| (k.param, k.frames.as_ref().map(|f| f.to_vec())))
+            .collect(),
+        None => KeyParam::ALL
+            .into_iter()
+            .filter(|&param| !keys_of(c, param).is_empty())
+            .map(|param| (param, None))
+            .collect(),
+    };
+    let mut out: Vec<(KeyParam, Vec<i64>)> = Vec::new();
+    for (param, frames) in wanted {
+        let keys = keys_of(c, param);
+        if keys.is_empty() {
+            return Err(Error::invalid(format!(
+                "{id} has no {} keyframes",
+                param_name(param).replace('_', " ")
+            )));
+        }
+        let pick = Pick { frames, at: None };
+        let mut taken: Vec<i64> = match picture_param(param) {
+            Some(v) => picked_name(c, keys, &pick, v)?,
+            None => picked(c, keys, &pick)?,
+        }
+        .into_iter()
+        .collect();
+        taken.sort_unstable();
+        match out.iter_mut().find(|(q, _)| *q == param) {
+            Some((_, have)) => {
+                have.extend(taken);
+                have.sort_unstable();
+                have.dedup();
+            }
+            None => out.push((param, taken)),
+        }
+    }
+    if out.is_empty() {
+        return Err(Error::invalid(format!("{id} has no keyframes")));
+    }
+    Ok(out)
+}
+
+pub fn copy(p: &Project, id: &str, picks: &[(KeyParam, Vec<i64>)]) -> Result<Vec<CopiedKey>> {
+    let (ti, ci) = locate(p, id)?;
+    let c = &p.tracks[ti].clips[ci];
+    let mut rows = Vec::new();
+    for (param, frames) in picks {
+        let keys = keys_of(c, *param);
+        for (i, k) in keys
+            .iter()
+            .enumerate()
+            .filter(|(_, k)| frames.contains(&k.frame))
+        {
+            let value = match (picture_param(*param), &c.picture) {
+                (Some(v), Some(picture)) if v.pair() => {
+                    KeyValue::Pair(picture.key_value(v, k.frame).unwrap_or([k.value, 0.0]))
+                }
+                _ => KeyValue::Scalar(k.value),
+            };
+            let at = c.key_time(k.frame).round() as i64;
+            rows.push((
+                at,
+                CopiedKey {
+                    param: *param,
+                    offset: 0,
+                    value,
+                    ease: ease_of(keys, i),
+                    in_handle: k.in_handle,
+                    out_handle: k.out_handle,
+                },
+            ));
+        }
+    }
+    let first = rows.iter().map(|(at, _)| *at).min().unwrap_or(0);
+    rows.sort_by_key(|(at, k)| (*at, k.param as u8));
+    Ok(rows
+        .into_iter()
+        .map(|(at, k)| CopiedKey {
+            offset: at - first,
+            ..k
+        })
+        .collect())
+}
+
+pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Result<Vec<Value>> {
+    let Some(first) = keys.iter().map(|k| k.offset).min() else {
+        return Err(Error::usage("keyframes.paste needs keyframes"));
+    };
+    let mut starts = Vec::new();
+    for id in ids {
+        let (ti, ci) = locate(p, id)?;
+        starts.push(p.tracks[ti].clips[ci].start);
+    }
+    let Some(earliest) = starts.iter().copied().min() else {
+        return Err(Error::usage("keyframes.paste needs clips"));
+    };
+    let mut out = Vec::new();
+    for (id, start) in ids.iter().zip(starts) {
+        let one = std::slice::from_ref(id);
+        let mut placed = Vec::new();
+        for k in keys {
+            let t = start + at - earliest + k.offset - first;
+            for (_, frame) in added(p, one, k.param, t, Some(k.value), None, true)? {
+                placed.push((*k, frame));
+            }
+        }
+        for (k, frame) in placed {
+            let pick = Pick {
+                frames: Some(vec![frame]),
+                at: None,
+            };
+            let change = match k.ease {
+                Some(e) => KeyChange {
+                    ease: Some(e),
+                    ..KeyChange::default()
+                },
+                None => KeyChange {
+                    in_handle: Some(k.in_handle),
+                    out_handle: Some(k.out_handle),
+                    ..KeyChange::default()
+                },
+            };
+            set(p, one, k.param, &pick, &change)?;
+            out.push(json!({ "clip": id, "param": k.param, "value": k.value, "frame": frame }));
+        }
+    }
+    Ok(out)
+}
+
 fn picture_param(param: KeyParam) -> Option<PictureValue> {
     match param {
         KeyParam::Volume => None,
         KeyParam::Position => Some(PictureValue::Position),
         KeyParam::Zoom => Some(PictureValue::Zoom),
         KeyParam::Rotation => Some(PictureValue::Rotation),
+        KeyParam::Anchor => Some(PictureValue::Anchor),
+        KeyParam::Pitch => Some(PictureValue::Pitch),
+        KeyParam::Yaw => Some(PictureValue::Yaw),
         KeyParam::CropLeft => Some(PictureValue::CropLeft),
         KeyParam::CropRight => Some(PictureValue::CropRight),
         KeyParam::CropTop => Some(PictureValue::CropTop),
@@ -450,6 +622,8 @@ fn finite(v: PictureValue, value: [f64; 2]) -> Result<[f64; 2]> {
             .iter()
             .all(|n| n.is_finite() && (0.01..=100.0).contains(n)),
         PictureValue::Rotation => value[0].is_finite() && value[0].abs() <= 3600.0,
+        PictureValue::Anchor => value.iter().all(|n| n.is_finite() && n.abs() <= 100.0),
+        PictureValue::Pitch | PictureValue::Yaw => value[0].is_finite() && value[0].abs() <= 1.5,
         PictureValue::CropSoftness => value[0].is_finite() && value[0].abs() <= 100.0,
         PictureValue::Opacity => value[0].is_finite() && (0.0..=1.0).contains(&value[0]),
         _ => value[0].is_finite() && (0.0..1.0).contains(&value[0]),
@@ -463,6 +637,11 @@ fn finite(v: PictureValue, value: [f64; 2]) -> Result<[f64; 2]> {
             }
             PictureValue::Zoom => "a picture's zoom is from 1/100 to 100",
             PictureValue::Rotation => "a picture's rotation is degrees, from -3600 to 3600",
+            PictureValue::Anchor => {
+                "a picture's anchor is two fractions of the picture, each from -100 to 100"
+            }
+            PictureValue::Pitch => "a picture's pitch is from -1.5 to 1.5",
+            PictureValue::Yaw => "a picture's yaw is from -1.5 to 1.5",
             PictureValue::CropSoftness => "a picture's crop softness is from -100 to 100",
             PictureValue::Opacity => "a picture's opacity is from 0 to 1",
             _ => "a picture's crop is a fraction of it on each side, from 0, leaving some of it",
@@ -503,21 +682,31 @@ fn add_picture(
     at: i64,
     value: Option<KeyValue>,
     ease: Option<Ease>,
+    past_ends: bool,
 ) -> Result<Vec<(String, i64)>> {
+    if v == PictureValue::Anchor && ease.is_some_and(|e| !e.is_linear()) {
+        return Err(Error::invalid(ANCHOR_LINEAR));
+    }
     let value = value
         .map(|n| numbers(v, n).and_then(|n| finite(v, n)))
         .transpose()?;
+    let takes = |c: &Clip| shows(c, at) || past_ends && super::picture::has_picture(c);
     let targets: Vec<String> = ids
         .iter()
-        .filter(|id| p.clip(id).is_some_and(|c| shows(c, at)))
+        .filter(|id| p.clip(id).is_some_and(takes))
         .cloned()
         .collect();
     if targets.is_empty() {
         for id in ids {
             locate(p, id)?;
         }
+        let at = if past_ends {
+            String::new()
+        } else {
+            format!(" at frame {at}")
+        };
         return Err(Error::invalid(format!(
-            "no clip of {} shows a picture at frame {at}",
+            "no clip of {} shows a picture{at}",
             ids.join(", ")
         )));
     }
@@ -560,6 +749,12 @@ fn set_picture(
     let handles = change.in_handle.is_some() || change.out_handle.is_some();
     if change.ease.is_some() && handles {
         return Err(Error::usage("give `ease` or handles, not both"));
+    }
+    let curved = change.ease.is_some_and(|e| !e.is_linear())
+        || change.in_handle.flatten().is_some()
+        || change.out_handle.flatten().is_some();
+    if v == PictureValue::Anchor && curved {
+        return Err(Error::invalid(ANCHOR_LINEAR));
     }
     let in_handle = change
         .in_handle
