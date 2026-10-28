@@ -517,6 +517,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: 0,
+        key_clipboard: 0,
         notices: Arc::new(VecDeque::new()),
         thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
@@ -586,6 +587,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         selection: Selection::default(),
         pool: PoolView::default(),
         clipboard: Vec::new(),
+        key_clipboard: Vec::new(),
         log: VecDeque::new(),
         log_seq: 0,
         notices: Arc::new(VecDeque::new()),
@@ -861,6 +863,7 @@ struct Live {
     selection: Selection,
     pool: PoolView,
     clipboard: Vec<vidcut_core::model::TrackClip>,
+    key_clipboard: Vec<vidcut_core::request::CopiedKey>,
     log: VecDeque<LogEntry>,
     log_seq: u64,
     notices: Arc<VecDeque<Notice>>,
@@ -1395,6 +1398,7 @@ impl Live {
             selection: self.selection.clone(),
             pool: self.pool.clone(),
             clipboard: self.clipboard.len(),
+            key_clipboard: self.key_clipboard.len(),
             notices: self.notices.clone(),
             thumbs: self.thumbs.clone(),
             missing: self.missing.clone(),
@@ -3208,6 +3212,12 @@ impl Live {
                 }
                 *clips = Some(self.clipboard.clone());
             }
+            Request::KeyframesPaste { keyframes, .. } if keyframes.is_none() => {
+                if self.key_clipboard.is_empty() {
+                    return Err(Error::usage("the clipboard has no keyframes"));
+                }
+                *keyframes = Some(self.key_clipboard.clone());
+            }
             Request::MediaMarksSet {
                 media,
                 mark_in,
@@ -3279,6 +3289,13 @@ impl Live {
                 Request::EditCopy { .. } | Request::EditCut { .. } => {
                     if let Ok(clips) = serde_json::from_value(r.result["clips"].clone()) {
                         self.clipboard = clips;
+                        self.key_clipboard.clear();
+                    }
+                }
+                Request::KeyframesCopy { .. } | Request::KeyframesCut { .. } => {
+                    if let Ok(keys) = serde_json::from_value(r.result["keyframes"].clone()) {
+                        self.key_clipboard = keys;
+                        self.clipboard.clear();
                     }
                 }
                 _ => {}
@@ -4193,6 +4210,7 @@ impl Live {
             "guides": self.guides,
             "two_up": self.renderer.two_up(),
             "clipboard": self.clipboard.len(),
+            "keyframe_clipboard": self.key_clipboard.len(),
             "preview": self.preview_error.as_deref().map_or(json!(true), |e| json!(e)),
         })
     }

@@ -10,12 +10,13 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
   - The Keyframes tab shows each value of the first selected clip that can have keyframes.
   - Each value has a track. Its curve shows when the user turns it on. A drag moves a keyframe, a group or a handle.
-  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. Rotation is its own value. Each crop side, the crop softness and the opacity are values of their own.
+  - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. The anchor point is one keyframe for X and Y.
+  - Rotation, Pitch and Yaw are values of their own. Each crop side, the crop softness and the opacity are values of their own.
   - The flips have no keyframes. Dynamic Zoom stays the two end boxes and has no Keyframe button.
   - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** keyframes of speed, Pitch, Yaw, the anchor point and titles.
+- **To do:** keyframes of speed and titles.
 
 ## What Resolve has
 
@@ -104,7 +105,9 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - The Inspector has a Keyframe button between Previous and Next arrows on each value and each group. Dynamic Zoom has no button.
   - The groups with buttons: Transform, Cropping, Composite, Speed Change, Lens Correction, Retime and Scaling, Volume and Pan.
 - The Keyframes tab shows the Keyframe Editor: a track for each value with its keyframes, Volume and Pan too.
-- The Mark menu has Add Keyframe (Ctrl+[), Delete Keyframe (Alt+[), Delete All Keyframes, and Move Selected Keyframes Left, Right, Up and Down.
+- The Mark menu has Add Keyframe (Ctrl+[), Delete Keyframe (Alt+]), Delete All Keyframes, and Move Selected Keyframes Left, Right, Up and Down.
+  - It also has Add Static Keyframe (Ctrl+]) and a Keyframe Timeline Mode submenu. Both are disabled on the Cut page.
+  - Resolve Studio 21.1.2 shows these items and shortcuts.
 - The speed tool of the viewer has its own Keyframe button.
 - A right-click on a keyframe in the Keyframe Editor opens no menu, on the Cut page and on the Edit page.
 
@@ -126,22 +129,30 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - A drag on a group track moves that group's keyframes at that time.
 - Volume is a track in the Audio group.
 - The curve of a value shows under its track. A drag on an In or Out handle changes that handle.
-- One click selects one keyframe. Shift or Ctrl adds to the selection. Delete removes the selection.
+- One click selects one keyframe. Ctrl-click adds a keyframe to the selection or removes it. Delete removes the selection.
+- A drag from an empty part draws a box. The box replaces the selection with the keyframes in it.
+- Mark > Move Selected Keyframes moves the selection by one frame, or changes its values by one step.
+- Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the selection. A paste puts the keyframes on the selected clips, the first at the playhead.
+- [§2](../cut-page-spec.md#2-layout-pp-636637) gives the measured rules of the clicks, the box, the steps, the paste and the clipboard.
 - A right-click sets that keyframe's ease, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
 - A bar shows the value, time and ease of the selected keyframe (X90).
 - The time ruler moves the playhead. Fit Clip, Detail Zoom, the zoom slider and Ctrl with the mouse wheel zoom.
 - A scroll bar under the tracks moves the range.
-- `keyframes.add`, `keyframes.remove`, `keyframes.set` and `keyframes.move` do these edits.
+- The Keyframes button of the lower timeline shows a tray under its tracks. It has the keyed tracks of the clip, on the time of the timeline.
+- `keyframes.add`, `keyframes.remove`, `keyframes.set`, `keyframes.move`, `keyframes.copy`, `keyframes.cut` and `keyframes.paste` do these edits.
 - **To do:**
-  - selection: a box around keyframes, a nudge by one frame, cut, copy and paste (pp. 1257–1258)
-  - the keyframe tray on the timeline (p. 1259)
   - the motion path in the viewer (pp. 1252–1254)
   - Step, Loop, Ping Pong, Reverse and the Shape Box (pp. 1261–1267)
   - keyframes of several selected clips at once (p. 1268)
   - the Lock and Track Color controls (p. 1257)
   - the ruler in frames, Snap Keyframes to Grid, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
+  - Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes, with their shortcuts (pp. 1254–1255)
+  - Select all (Ctrl+A) and deselect all (Ctrl+Shift+A) in the Keyframes tab and the tray
+  - the parts of Resolve's tray that vidcut does not have ([§2](../cut-page-spec.md#2-layout-pp-636637), Keyframe tray)
+  - Zoom X and Zoom Y as two keyframes when the zoom is not linked
+    - Resolve then selects and steps Zoom X alone. vidcut's zoom is one keyframe for X and Y.
 
-**Later:** keyframes of speed, Pitch, Yaw, the anchor point and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
+**Later:** keyframes of speed and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
 
 ## Model
 
@@ -171,12 +182,18 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - `effects::read` keeps an effect that is on when a parameter or a keyframe `Value` is off its default (`in_use`). It keeps a Dynamic Zoom that is on.
 - `carry` sets the `from` field of `Effects` to the first source frame of the clip, or of its sound. Thus the code takes time 0 as the first source frame of the item.
 - `Effects::written` moves the times by `from` less the first source frame of the written item.
-- `otio::picture` reads Transform, Cropping and Retime and Scaling as a `Picture` only when no parameter has keyframes.
+- `otio::picture` reads Transform, Cropping and Retime and Scaling as a `Picture` when each keyed parameter fits the model.
+  - The keyed parameters that it reads are Zoom, Pan, Tilt, Rotation, the anchor point, Pitch, Yaw, the crop sides, Crop Softness and Opacity.
+  - Each key of `transformationAnchorPoint` is a `POINTF`, as the keys of `dynamicZoomCenter` are. Keys with Bezier handles stay unplayed.
+  - Anchor point keys stay unplayed on a picture that Retime and Scaling sizes to another size than the fit. Its move would then go into `position`.
   - The center and scale of Dynamic Zoom need exactly two keyframes (`ends`). The earlier keyframe is the start box.
 - vidcut writes the two keyframes of Dynamic Zoom at −g and 1000 − g. g is the timeline's `global_start_time` in frames.
   - Resolve writes them at −s and 1000 − s. s is the first source frame of the clip ([Measured](#measured-in-resolve-studio-2111)).
   - Resolve reads the earlier key as the start, whatever the times ([gotchas](../gotchas.md#resolves-otio-files)). Thus both forms play the same.
-- vidcut writes its other picture parameters with an empty `Key Frames`.
+- vidcut writes the keyframes of each keyed value in the `Key Frames` of its parameter. It writes the other picture parameters with an empty `Key Frames`.
+  - It writes the anchor point keys without Bezier handles. Resolve's anchor point keys are linear too ([D92](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - Resolve Studio 21.1.2 imports its own file with anchor point, Pitch and Yaw keys and gives the same keys.
+  - Resolve's import of a file that vidcut writes with these keys is not measured.
 
 **The one test file:** `$VIDCUT_TEST_DATA/fixtures/resolve-titles/titles.otio` has Resolve's metadata, 24 fps and g = 86400.
 
@@ -206,7 +223,7 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - An import plays the keyframes of Transform and Cropping when they fit the model.
 - Some keyframes stay in the kept effects, unplayed, with the warning of the import:
   - Step
-  - an anchor point with keyed zoom or rotation
+  - anchor point keys with Bezier handles, or on a picture that is not at its fitted size
 
 ## Scripting
 
@@ -215,11 +232,12 @@ Rule 3: each GUI action has a request.
 - `keyframes.list`, `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take the values of the picture in `param`.
 - `picture.set` takes an `at`. On a value with keyframes, it sets a keyframe at `at`, or at the playhead, as `clip.set` does for the volume ([D82](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - `timeline.get` names the values of a clip that have keyframes, as it names `volume`.
+- `keyframes.copy` returns the selected keyframes with their offsets. `keyframes.paste` puts them on clips. `keyframes.cut` copies, then removes.
 - `gui.show keyframes` opens the Keyframes tab. `gui.close keyframes` closes it.
+- `gui.show keyframe_tray` opens the keyframe tray. `gui.close keyframe_tray` closes it.
 
 ## Open questions
 
 - **Compound clips:** what does `edit.decompose` do with the keyframes of a compound clip for a clip inside that is frozen or plays backward?
 - **Dynamic Zoom:** can its boxes have times other than the ends of the clip?
-- **Keyframes alone:** copy and paste of selected keyframes (p. 1113). vidcut has none.
-- **Later work:** in which order do keyframes of speed (p. 737), the anchor point and titles come?
+- **Later work:** in which order do keyframes of speed (p. 737) and titles come?

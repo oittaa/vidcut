@@ -1257,10 +1257,10 @@ pub enum Request {
         #[serde(default)]
         at: Option<TimeSpec>,
         /// The value at the keyframe. A number for volume (dB, from -60
-        /// to 24), rotation (degrees), a crop side (a fraction), crop
-        /// softness (from -100 to 100) and opacity (from 0 to 1). For
-        /// position and zoom, two numbers, x then y, or one number for
-        /// both axes of zoom.
+        /// to 24), rotation (degrees), pitch and yaw (from -1.5 to 1.5), a
+        /// crop side (a fraction), crop softness (from -100 to 100) and
+        /// opacity (from 0 to 1). For position, zoom and the anchor point,
+        /// two numbers, x then y, or one number for both axes of zoom.
         #[serde(default)]
         value: Option<KeyValue>,
         #[serde(default)]
@@ -1279,12 +1279,13 @@ pub enum Request {
         frames: Option<OneOrMany<i64>>,
         #[serde(default)]
         at: Option<OneOrMany<TimeSpec>>,
-        /// The new value. A number, or two numbers for position and zoom.
+        /// The new value. A number, or two numbers for position, zoom and
+        /// the anchor point.
         #[serde(default)]
         value: Option<KeyValue>,
-        /// Added to each value. A number, or two numbers for position and
-        /// zoom. Volume stops at -60 and +24 dB. A picture value stops at
-        /// its own limits.
+        /// Added to each value. A number, or two numbers for position,
+        /// zoom and the anchor point. Volume stops at -60 and +24 dB. A
+        /// picture value stops at its own limits.
         #[serde(default)]
         by: Option<KeyValue>,
         /// Sets the handles: flat, a third of the way to the keyframe
@@ -1342,6 +1343,38 @@ pub enum Request {
         frames: Option<OneOrMany<i64>>,
         #[serde(default)]
         at: Option<OneOrMany<TimeSpec>>,
+    },
+    /// Copy keyframes of `clip` (Ctrl+C in the Keyframes tab): returns them
+    /// as `keyframes`, ready for `keyframes.paste`. The GUI also keeps them
+    /// on its clipboard. Without `keys`, every keyframe of the clip.
+    #[serde(rename = "keyframes.copy")]
+    KeyframesCopy {
+        clip: ClipRef,
+        #[serde(default)]
+        keys: Option<Vec<KeyPicks>>,
+    },
+    /// Cut keyframes of `clip` (Ctrl+X in the Keyframes tab): copy them as
+    /// `keyframes.copy` does, then remove them.
+    #[serde(rename = "keyframes.cut")]
+    KeyframesCut {
+        clip: ClipRef,
+        #[serde(default)]
+        keys: Option<Vec<KeyPicks>>,
+    },
+    /// Paste keyframes (Ctrl+V in the Keyframes tab or the keyframe tray)
+    /// on each of `clips`: the first at `at` in the earliest of `clips`,
+    /// each other one at its offset from it. Each clip takes the keyframes
+    /// at the same frames from its start. Defaults: the GUI's clipboard and
+    /// the playhead. A keyframe goes on the source frame under its time,
+    /// also past the clip's ends, and takes the place of a keyframe there.
+    /// Returns the `keyframes` with their clip, value and source frame.
+    #[serde(rename = "keyframes.paste")]
+    KeyframesPaste {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(default)]
+        keyframes: Option<Vec<CopiedKey>>,
     },
     /// The timeline's In and Out marks.
     #[serde(rename = "marks.get")]
@@ -3007,6 +3040,13 @@ pub enum KeyParam {
     Zoom,
     /// Rotation in degrees.
     Rotation,
+    /// The anchor point X and Y, one keyframe for both, as fractions of
+    /// the picture.
+    Anchor,
+    /// Pitch, from -1.5 to 1.5.
+    Pitch,
+    /// Yaw, from -1.5 to 1.5.
+    Yaw,
     /// Crop Left, as a fraction of the width.
     CropLeft,
     /// Crop Right, as a fraction of the width.
@@ -3021,7 +3061,57 @@ pub enum KeyParam {
     Opacity,
 }
 
-/// A keyframe value: one number, or x and y for position and zoom.
+impl KeyParam {
+    pub const ALL: [KeyParam; 13] = [
+        KeyParam::Volume,
+        KeyParam::Position,
+        KeyParam::Zoom,
+        KeyParam::Rotation,
+        KeyParam::Anchor,
+        KeyParam::Pitch,
+        KeyParam::Yaw,
+        KeyParam::CropLeft,
+        KeyParam::CropRight,
+        KeyParam::CropTop,
+        KeyParam::CropBottom,
+        KeyParam::CropSoftness,
+        KeyParam::Opacity,
+    ];
+}
+
+/// The keyframes of one value to copy or cut.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct KeyPicks {
+    pub param: KeyParam,
+    /// The source frames of the keyframes. Without them, every keyframe of
+    /// the value.
+    #[serde(default)]
+    pub frames: Option<OneOrMany<i64>>,
+}
+
+/// A copied keyframe: what `keyframes.copy` returns and `keyframes.paste`
+/// takes.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CopiedKey {
+    pub param: KeyParam,
+    /// Timeline frames after the first copied keyframe.
+    pub offset: i64,
+    /// A number, or x and y for position, zoom and the anchor point.
+    pub value: KeyValue,
+    /// The ease. A paste sets its handles again for the new neighbors.
+    /// Without it, the paste keeps the handles as they are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ease: Option<Ease>,
+    /// The In handle, when the keyframe has one.
+    #[serde(rename = "in", default, skip_serializing_if = "Option::is_none")]
+    pub in_handle: Option<Handle>,
+    /// The Out handle, when the keyframe has one.
+    #[serde(rename = "out", default, skip_serializing_if = "Option::is_none")]
+    pub out_handle: Option<Handle>,
+}
+
+/// A keyframe value: one number, or x and y for position, zoom and the
+/// anchor point.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum KeyValue {
@@ -3274,6 +3364,9 @@ pub enum GuiPanel {
     /// The Keyframes tab, in the Media Pool's place: the keyed values of
     /// the first selected clip.
     Keyframes,
+    /// The keyframe tray under the timeline's tracks: the keyed values of
+    /// the first selected clip, on the timeline's time.
+    KeyframeTray,
     /// The viewer's Transform handles on the selected clip: move, zoom,
     /// stretch and turn its picture.
     Transform,
@@ -3836,6 +3929,7 @@ impl Request {
                     | Self::BinsList {}
                     | Self::MarksGet {}
                     | Self::KeyframesList { .. }
+                    | Self::KeyframesCopy { .. }
                     | Self::MarkersList {}
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }

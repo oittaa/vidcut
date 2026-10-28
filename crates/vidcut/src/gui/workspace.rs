@@ -113,6 +113,7 @@ pub struct Workspace {
     pub(super) two_up: Option<TwoUp>,
     pub(super) export: super::export::ExportUi,
     pub(super) show_mixer: bool,
+    pub(super) key_tray: bool,
     pub(super) mixer: super::mixer::Mixer,
     pub(super) preferences: super::preferences::PreferencesUi,
     pub(super) help: super::help::HelpUi,
@@ -204,6 +205,7 @@ impl Workspace {
             two_up: None,
             export: Default::default(),
             show_mixer: false,
+            key_tray: false,
             mixer: Default::default(),
             preferences: Default::default(),
             help: Default::default(),
@@ -251,6 +253,7 @@ impl Workspace {
             GuiPanel::Export => self.open_export(ctx),
             GuiPanel::Jobs => self.export.show_jobs = true,
             GuiPanel::Mixer => self.show_mixer = true,
+            GuiPanel::KeyframeTray => self.key_tray = true,
             GuiPanel::Preferences => self.open_preferences(ctx),
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
@@ -306,6 +309,7 @@ impl Workspace {
             GuiPanel::Export => self.export.close_dialog(),
             GuiPanel::Jobs => self.export.show_jobs = false,
             GuiPanel::Mixer => self.show_mixer = false,
+            GuiPanel::KeyframeTray => self.key_tray = false,
             GuiPanel::Preferences => self.preferences.open = false,
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
@@ -346,6 +350,7 @@ impl Workspace {
             (GuiPanel::Export, dialog),
             (GuiPanel::Jobs, self.export.show_jobs),
             (GuiPanel::Mixer, self.show_mixer),
+            (GuiPanel::KeyframeTray, self.key_tray),
             (GuiPanel::Preferences, self.preferences.open),
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
@@ -900,6 +905,18 @@ impl Workspace {
                     None => super::dialog::why(ui, "open a project for the rest"),
                 }
             });
+            ui.menu_button("Mark", |ui| {
+                let on = self.key_editor.has_selection();
+                for step in super::keyframe_editor::Nudge::ALL {
+                    if ui
+                        .add_enabled(on, egui::Button::new(step.label()))
+                        .clicked()
+                    {
+                        self.nudge_keys(step);
+                        ui.close();
+                    }
+                }
+            });
             ui.menu_button("View", |ui| {
                 ui.menu_button("Safe Area", |ui| self.safe_area_menu(ui));
                 let mut on = self.snap.show_super_scale;
@@ -1088,6 +1105,7 @@ impl Workspace {
     }
 
     fn keys(&mut self, ctx: &egui::Context) {
+        self.key_focus(ctx);
         if vidcut_av::debug() {
             ctx.input(|i| {
                 for e in &i.events {
@@ -1154,6 +1172,8 @@ impl Workspace {
 
         for e in &input.events {
             match e {
+                egui::Event::Copy | egui::Event::Cut
+                    if self.copy_editor_keys(matches!(e, egui::Event::Cut)) => {}
                 egui::Event::Copy | egui::Event::Cut if !self.snap.selection.clips.is_empty() => {
                     let clips = self.snap.selection.clips.clone();
                     if let Some(p) = self.project()
@@ -1168,6 +1188,7 @@ impl Workspace {
                     };
                     self.send(method, json!({ "clips": clips }));
                 }
+                egui::Event::Paste(_) if self.paste_editor_keys() => {}
                 egui::Event::Paste(_) => self.send("edit.paste", json!({})),
                 _ => {}
             }
@@ -1765,7 +1786,7 @@ impl Workspace {
                     if self.left != LeftTab::Inspector {
                         self.leave_inspector();
                     }
-                    if self.left != LeftTab::Keyframes {
+                    if self.left != LeftTab::Keyframes && !self.key_tray {
                         self.key_editor.leave();
                     }
                     match self.left {

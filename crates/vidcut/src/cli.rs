@@ -45,6 +45,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("keyframes.set", &["clips"]),
     ("keyframes.move", &["clips"]),
     ("keyframes.remove", &["clips"]),
+    ("keyframes.copy", &["clip"]),
+    ("keyframes.cut", &["clip"]),
+    ("keyframes.paste", &["clips"]),
     ("markers.move", &["marker"]),
     ("markers.remove", &["marker"]),
     ("markers.set", &["marker"]),
@@ -142,10 +145,7 @@ const GROUPS: &[(&str, &str)] = &[
         "jobs",
         "Export, proxy and transcription jobs of the running GUI",
     ),
-    (
-        "keyframes",
-        "Volume, position, zoom, rotation and crop keyframes",
-    ),
+    ("keyframes", "Volume and picture keyframes"),
     ("keys", "Keyboard shortcuts"),
     (
         "looks",
