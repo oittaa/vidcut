@@ -522,25 +522,26 @@ pub fn take(
     let Some(read) = placement(effects) else {
         return Ok((effects.to_vec(), None));
     };
+    let placing = || -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for n in effects
+            .iter()
+            .filter(|e| is_placing(e))
+            .map(super::effects::name)
+        {
+            if !names.contains(&n) {
+                names.push(n);
+            }
+        }
+        names
+    };
     let timing = super::effects::Timing { speed };
     let Some(picture) = read.with_keys(effects, shape, &timing, origin) else {
-        return Ok((effects.to_vec(), None));
+        return Err(placing());
     };
     match crate::ops::picture::checked(&picture) {
         Ok(picture) => Ok((rest(), picture)),
-        Err(_) => {
-            let mut names: Vec<String> = Vec::new();
-            for n in effects
-                .iter()
-                .filter(|e| is_placing(e))
-                .map(super::effects::name)
-            {
-                if !names.contains(&n) {
-                    names.push(n);
-                }
-            }
-            Err(names)
-        }
+        Err(_) => Err(placing()),
     }
 }
 
