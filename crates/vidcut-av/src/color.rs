@@ -214,7 +214,27 @@ impl Tags {
     }
 }
 
+pub(crate) fn chroma_location(pixel: format::Pixel) -> ffi::AVChromaLocation {
+    use ffi::AVChromaLocation as L;
+    // SAFETY: FFmpeg's table of formats; null for a format it does not know.
+    let d = unsafe { ffi::av_pix_fmt_desc_get(pixel.into()) };
+    if d.is_null() {
+        return L::AVCHROMA_LOC_UNSPECIFIED;
+    }
+    // SAFETY: a descriptor from that table.
+    let (w, h, flags) = unsafe { ((*d).log2_chroma_w, (*d).log2_chroma_h, (*d).flags) };
+    if flags & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0 {
+        return L::AVCHROMA_LOC_UNSPECIFIED;
+    }
+    match (w, h) {
+        (1, 1) => L::AVCHROMA_LOC_LEFT,
+        (1, 0) => L::AVCHROMA_LOC_TOPLEFT,
+        _ => L::AVCHROMA_LOC_UNSPECIFIED,
+    }
+}
+
 pub(crate) fn tag_frame(f: &mut frame::Video, hdr: Option<Hdr>) {
+    let chroma = chroma_location(crate::hw::sw_format(f));
     let tags = Tags::output(hdr);
     // SAFETY: plain fields of a frame the caller owns.
     unsafe {
@@ -223,6 +243,7 @@ pub(crate) fn tag_frame(f: &mut frame::Video, hdr: Option<Hdr>) {
         f.color_range = tags.range;
         f.color_primaries = tags.primaries;
         f.color_trc = tags.transfer;
+        f.chroma_location = chroma;
     }
 }
 

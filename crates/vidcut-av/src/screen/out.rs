@@ -247,6 +247,7 @@ fn params(layout: &Layout, plane: &Plane, (from, to): (Option<Hdr>, Option<Hdr>)
         [g[2][0], g[2][1], g[2][2], 0.0],
         [kr, kb, colors.linear_scale, 0.0],
     ];
+    let site = output_site(plane);
     let words: [[u32; 4]; 2] = [
         [
             transfer_of(from) as u32,
@@ -261,7 +262,24 @@ fn params(layout: &Layout, plane: &Plane, (from, to): (Option<Hdr>, Option<Hdr>)
         .flatten()
         .flat_map(|v| (*v as f32).to_le_bytes())
         .chain(words.iter().flatten().flat_map(|v| v.to_le_bytes()))
+        .chain(site.iter().flat_map(|v| (*v as f32).to_le_bytes()))
         .collect()
+}
+
+fn output_site(plane: &Plane) -> [f64; 4] {
+    use crate::ffmpeg::ffi::AVChromaLocation as L;
+    let at = match plane.sub {
+        (1, 1) => L::AVCHROMA_LOC_LEFT,
+        (1, 0) => L::AVCHROMA_LOC_TOPLEFT,
+        _ => return [0.0; 4],
+    };
+    let (mut x, mut y) = (0, 0);
+    // SAFETY: two plain out values, which FFmpeg sets for a known location.
+    if unsafe { crate::ffmpeg::ffi::av_chroma_location_enum_to_pos(&mut x, &mut y, at) } < 0 {
+        return [0.0; 4];
+    }
+    let along = |sub: u32, at: i32| if sub > 0 { f64::from(at) / 256.0 } else { 0.0 };
+    [along(plane.sub.0, x), along(plane.sub.1, y), 0.0, 0.0]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
