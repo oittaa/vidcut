@@ -194,7 +194,8 @@ Each mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-d
   - Each layer, title and subtitle goes there as in the viewer.
   - Why: a color above 1 or below 0 stays between the layers ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - Then `fs_encode` writes each plane of the encoder's pixel format from `Wide` (`Screen::encoded`).
-  - It converts the timeline colors to the colors of the output. An SDR output is BT.709 and an HDR output is BT.2020, both in limited range.
+  - It converts the timeline colors to the colors of the output. An SDR output is BT.709 and an HDR output is BT.2020.
+  - A YUV output is in limited range. An RGB output is in full range, and its tags say so (`color::tag_frame`).
   - HDR to SDR tone-maps with the math of the viewer's `fs_screen`.
   - A chroma sample is the mean of the pixels that it covers.
   - The values are rounded once, at the end.
