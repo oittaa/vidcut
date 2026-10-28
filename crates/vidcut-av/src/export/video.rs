@@ -1375,7 +1375,9 @@ pub(crate) struct Single {
 impl Single {
     pub(crate) fn new(reading: Reading) -> Result<Self> {
         let drawer = Drawer::new(None)?;
-        let maker = Maker::new((2, 2, format::Pixel::YUV420P), drawer.keeps(), reading).holding();
+        let maker = Maker::new((2, 2, format::Pixel::YUV420P), drawer.keeps(), reading)
+            .holding()
+            .drawing();
         Ok(Self {
             drawer,
             maker,
@@ -1610,7 +1612,7 @@ impl VideoFrames {
         if self.drawer.is_none() {
             let drawer = Drawer::new(self.encoder.take())?;
             let (out, reading) = (self.maker.out(), self.maker.reading());
-            self.maker = Maker::new(out, drawer.keeps(), reading).holding();
+            self.maker = Maker::new(out, drawer.keeps(), reading).holding().drawing();
             self.drawer = Some(drawer);
         }
         let Some(layers) = self.next_layers()? else {
