@@ -208,6 +208,8 @@ On macOS (`interpolate::macos`):
 - Lanczos sizes them to the size that the picture fills in the frame, before the frame is made.
 - The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
 - Frames that the CPU decoded, and the frames of a placed clip, go through RGB.
+  - The session reads a held picture down from the GPU only for a new pair (`Input::Held`).
+  - The next frame between the same pair uses the pair that the session has (`SequentialReferencesUnchanged`).
 
 `interpolate::report` tells what each process makes. The stats panel shows it (`RetimeStats`).
 
