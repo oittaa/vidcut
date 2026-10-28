@@ -687,7 +687,7 @@ impl Decoder {
         let found = gpu.gpu();
         let mut shows = self.shared.gpu_pictures.clone();
         if !super::on_viewers_gpu(found) {
-            shows.retain(|k| *k != crate::hw::Kind::Vaapi);
+            shows.retain(|(k, _)| *k != crate::hw::Kind::Vaapi);
         }
         crate::debug!(
             "player",

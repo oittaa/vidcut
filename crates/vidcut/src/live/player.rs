@@ -35,7 +35,7 @@ pub struct Player {
     output: Option<MakeOutput>,
     renderer: Arc<dyn Renderer>,
     on_picture: Arc<dyn Fn() + Send + Sync>,
-    gpu_pictures: Vec<vidcut_av::hw::Kind>,
+    gpu_pictures: vidcut_av::hw::GpuPictures,
     engine: Option<Arc<engine::Player>>,
     plays: Option<PlayerId>,
     format: (u32, u16),
@@ -61,7 +61,7 @@ pub struct Player {
 impl Player {
     pub fn new(
         output: Option<MakeOutput>,
-        gpu_pictures: Vec<vidcut_av::hw::Kind>,
+        gpu_pictures: vidcut_av::hw::GpuPictures,
         renderer: Arc<dyn Renderer>,
         on_picture: Arc<dyn Fn() + Send + Sync>,
     ) -> Self {

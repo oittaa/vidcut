@@ -16,6 +16,8 @@ use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, format, frame};
 use crate::route::Place;
 
+pub type GpuPictures = Vec<(Kind, crate::player::Layout)>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
     Nvdec,
