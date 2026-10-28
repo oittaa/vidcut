@@ -79,49 +79,39 @@ impl Encoders {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let norm16 = device
-            .features()
-            .contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM);
         let uints = FORMATS.iter().map(|&f| (f, "fs_encode"));
-        let unorms = FORMATS
-            .iter()
-            .map(|&f| (unorm(f), "fs_encode_unorm"))
-            .filter(|(f, _)| {
-                norm16
-                    || !matches!(
-                        f,
-                        wgpu::TextureFormat::R16Unorm | wgpu::TextureFormat::Rg16Unorm
-                    )
-            });
+        let unorms = FORMATS.iter().map(|&f| (unorm(f), "fs_encode_unorm"));
         let pipelines = uints
             .chain(unorms)
-            .map(|(format, entry)| {
-                let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("vidcut encoding"),
-                    layout: Some(&pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: shader,
-                        entry_point: Some("vs"),
-                        compilation_options: Default::default(),
-                        buffers: &[],
-                    },
-                    primitive: wgpu::PrimitiveState::default(),
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    fragment: Some(wgpu::FragmentState {
-                        module: shader,
-                        entry_point: Some(entry),
-                        compilation_options: Default::default(),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format,
-                            blend: None,
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    multiview_mask: None,
-                    cache: None,
+            .filter_map(|(format, entry)| {
+                let made = super::checked(device, || {
+                    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some("vidcut encoding"),
+                        layout: Some(&pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: shader,
+                            entry_point: Some("vs"),
+                            compilation_options: Default::default(),
+                            buffers: &[],
+                        },
+                        primitive: wgpu::PrimitiveState::default(),
+                        depth_stencil: None,
+                        multisample: wgpu::MultisampleState::default(),
+                        fragment: Some(wgpu::FragmentState {
+                            module: shader,
+                            entry_point: Some(entry),
+                            compilation_options: Default::default(),
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format,
+                                blend: None,
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                        }),
+                        multiview_mask: None,
+                        cache: None,
+                    })
                 });
-                (format, pipeline)
+                made.ok().map(|pipeline| (format, pipeline))
             })
             .collect();
         Self { layout, pipelines }

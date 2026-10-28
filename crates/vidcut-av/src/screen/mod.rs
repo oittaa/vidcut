@@ -69,6 +69,15 @@ const TARGET: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 const MIXING: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
+fn checked<T>(device: &wgpu::Device, f: impl FnOnce() -> T) -> Result<T, String> {
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let made = f();
+    match pollster::block_on(scope.pop()) {
+        Some(e) => Err(format!("the display's device refused it: {e}")),
+        None => Ok(made),
+    }
+}
+
 pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
     let wanted = wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
     #[cfg(target_os = "linux")]
@@ -518,12 +527,7 @@ impl Gpu {
     }
 
     fn checked<T>(&self, f: impl FnOnce() -> T) -> Result<T, String> {
-        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let made = f();
-        match pollster::block_on(scope.pop()) {
-            Some(e) => Err(format!("the display's device refused it: {e}")),
-            None => Ok(made),
-        }
+        checked(&self.device, f)
     }
 
     fn cuda(&self) -> Result<&CudaDevice, String> {
