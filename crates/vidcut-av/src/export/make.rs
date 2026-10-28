@@ -33,7 +33,7 @@ impl Fitting {
 
 pub(crate) struct Maker {
     out: (u32, u32, format::Pixel),
-    keep: Vec<crate::hw::Kind>,
+    keep: crate::hw::GpuPictures,
     holds: bool,
     stages: Vec<Stage>,
     reading: Reading,
@@ -60,7 +60,7 @@ impl Default for Stage {
 impl Maker {
     pub(crate) fn new(
         out: (u32, u32, format::Pixel),
-        keep: Vec<crate::hw::Kind>,
+        keep: crate::hw::GpuPictures,
         reading: Reading,
     ) -> Self {
         Self {
@@ -97,7 +97,8 @@ impl Maker {
     }
 
     fn keeps(&self, frame: &frame::Video) -> bool {
-        crate::hw::Kind::of_frame(frame).is_some_and(|k| self.keep.contains(&k))
+        let layout = crate::player::Layout::of(crate::hw::sw_format(frame));
+        crate::hw::Kind::of_frame(frame).is_some_and(|k| self.keep.contains(&(k, layout)))
     }
 
     pub(crate) fn make(

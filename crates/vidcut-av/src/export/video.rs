@@ -1318,7 +1318,7 @@ impl Drawer {
         })
     }
 
-    pub(crate) fn keeps(&self) -> Vec<crate::hw::Kind> {
+    pub(crate) fn keeps(&self) -> crate::hw::GpuPictures {
         self.gpu.gpu_pictures()
     }
 
@@ -1547,7 +1547,7 @@ impl VideoFrames {
         crate::progress::note(super::Note::Source(source));
     }
 
-    pub(crate) fn keeping(mut self, keep: Vec<crate::hw::Kind>) -> Self {
+    pub(crate) fn keeping(mut self, keep: crate::hw::GpuPictures) -> Self {
         self.maker = Maker::new(self.maker.out(), keep, self.maker.reading());
         self
     }

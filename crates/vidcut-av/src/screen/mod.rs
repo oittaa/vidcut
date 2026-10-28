@@ -561,7 +561,7 @@ impl Gpu {
         (&self.device, &self.queue)
     }
 
-    pub fn gpu_pictures(&self) -> Vec<Kind> {
+    pub fn gpu_pictures(&self) -> crate::hw::GpuPictures {
         let cudas = crate::gpus::in_use().and_then(|g| g.uuid());
         shown_from_gpu(&Takes {
             shares: self.shares,
@@ -571,6 +571,24 @@ impl Gpu {
             d3d11: self.d3d11,
             metal: self.metal,
         })
+        .into_iter()
+        .flat_map(|kind| Layout::ALL.map(|layout| (kind, layout)))
+        .filter(|&(kind, layout)| self.imports(kind, layout))
+        .collect()
+    }
+
+    fn imports(&self, kind: Kind, layout: Layout) -> bool {
+        match kind {
+            Kind::Nvdec => nvdec_bytes(self, layout).is_ok(),
+            #[cfg(target_os = "linux")]
+            Kind::Vaapi => vaapi_formats(self, layout).is_ok(),
+            #[cfg(windows)]
+            Kind::D3d11va => d3d11_formats(self, layout).is_ok(),
+            #[cfg(target_os = "macos")]
+            Kind::VideoToolbox => videotoolbox_formats(self, layout).is_ok(),
+            Kind::Vulkan => vulkan_layout(self, layout).is_ok(),
+            _ => false,
+        }
     }
 
     #[cfg(any(target_os = "linux", windows))]
@@ -1695,24 +1713,7 @@ impl Slot {
         if !gpu.dma_buf {
             return Err("the display's device imports no DMA-BUFs".into());
         }
-        let (one, two) = match picture.layout() {
-            Layout::Nv12 => (wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Rg8Unorm),
-            Layout::P010 if gpu.wide => (
-                wgpu::TextureFormat::R16Unorm,
-                wgpu::TextureFormat::Rg16Unorm,
-            ),
-            Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            layout @ (Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb) => {
-                return Err(format!("{layout:?} pictures aren't VA-API's"));
-            }
-            Layout::Yuv420p
-            | Layout::Yuv420p10
-            | Layout::Yuv422p
-            | Layout::Yuv422p10
-            | Layout::Yuv444p12 => {
-                return Err("planar pictures aren't VA-API's".into());
-            }
-        };
+        let (one, two) = vaapi_formats(gpu, picture.layout())?;
         let drm = crate::hw::vaapi::DrmFrame::export(picture.frame()).map_err(|e| e.to_string())?;
         let planes = drm.planes();
         let [y, uv, ..] = planes[..] else {
@@ -1825,29 +1826,7 @@ impl Slot {
         if !gpu.d3d11 {
             return Err("the display's device imports no Direct3D 11 textures".into());
         }
-        let formats = match picture.layout() {
-            Layout::Nv12 => (
-                wgpu::TextureFormat::NV12,
-                wgpu::TextureFormat::R8Unorm,
-                wgpu::TextureFormat::Rg8Unorm,
-            ),
-            Layout::P010 if gpu.wide && gpu.p010 => (
-                wgpu::TextureFormat::P010,
-                wgpu::TextureFormat::R16Unorm,
-                wgpu::TextureFormat::Rg16Unorm,
-            ),
-            Layout::P010 => return Err("no P010 or 16-bit textures for P010".into()),
-            layout @ (Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb) => {
-                return Err(format!("{layout:?} pictures aren't Direct3D 11's"));
-            }
-            Layout::Yuv420p
-            | Layout::Yuv420p10
-            | Layout::Yuv422p
-            | Layout::Yuv422p10
-            | Layout::Yuv444p12 => {
-                return Err("planar pictures aren't Direct3D 11's".into());
-            }
-        };
+        let formats = d3d11_formats(gpu, picture.layout())?;
         let frame = picture.frame();
         let mut pool = gpu.d3d11_shared.lock().unwrap_or_else(|e| e.into_inner());
         let (image, new) = d3d11_shared_for(gpu, &mut pool, frame, formats)?;
@@ -1887,20 +1866,7 @@ impl Slot {
         if !gpu.shares {
             return Err("the display's device imports no Vulkan memory".into());
         }
-        match picture.layout() {
-            Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 if gpu.wide => {}
-            Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 => {
-                return Err("no 16-bit textures for 10- and 12-bit planes".into());
-            }
-            layout @ (Layout::Nv12
-            | Layout::P010
-            | Layout::P210
-            | Layout::P416
-            | Layout::Ayuv64
-            | Layout::Rgb
-            | Layout::Yuv420p
-            | Layout::Yuv422p) => return Err(format!("{layout:?} pictures aren't Vulkan's")),
-        }
+        vulkan_layout(gpu, picture.layout())?;
         let frame = picture.frame();
         let identity = crate::hw::vulkan::Identity::of(frame).map_err(|e| e.to_string())?;
         let (import, new) = self
@@ -1936,10 +1902,7 @@ impl Slot {
     #[cfg(target_os = "macos")]
     fn import_videotoolbox(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
         use objc2_io_surface::IOSurfaceRef;
-        use objc2_metal::{
-            MTLDevice, MTLPixelFormat, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
-        };
-        use wgpu::TextureFormat as F;
+        use objc2_metal::{MTLDevice, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage};
         use wgpu::hal::api::Metal;
         #[link(name = "CoreVideo", kind = "framework")]
         unsafe extern "C" {
@@ -1948,28 +1911,7 @@ impl Slot {
         if !gpu.metal {
             return Err("the display's device isn't Metal".into());
         }
-        let formats: &[(MTLPixelFormat, F)] = match picture.layout() {
-            Layout::Nv12 => &[
-                (MTLPixelFormat::R8Unorm, F::R8Unorm),
-                (MTLPixelFormat::RG8Unorm, F::Rg8Unorm),
-            ],
-            Layout::P010 | Layout::P210 | Layout::P416 if gpu.wide => &[
-                (MTLPixelFormat::R16Unorm, F::R16Unorm),
-                (MTLPixelFormat::RG16Unorm, F::Rg16Unorm),
-            ],
-            Layout::Ayuv64 if gpu.wide => &[(MTLPixelFormat::RGBA16Unorm, F::Rgba16Unorm)],
-            layout @ (Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64) => {
-                return Err(format!("no 16-bit textures for {layout:?}"));
-            }
-            Layout::Rgb => return Err("RGB pictures aren't VideoToolbox's".into()),
-            Layout::Yuv420p
-            | Layout::Yuv420p10
-            | Layout::Yuv422p
-            | Layout::Yuv422p10
-            | Layout::Yuv444p12 => {
-                return Err("planar pictures aren't VideoToolbox's".into());
-            }
-        };
+        let formats = videotoolbox_formats(gpu, picture.layout())?;
         // SAFETY: a VideoToolbox frame's `data[3]` is its pixel buffer, alive as long as the frame.
         let surface = unsafe {
             let buffer = (*picture.frame().as_ptr()).data[3].cast();
@@ -2060,23 +2002,7 @@ impl Slot {
     ) -> Result<bool, String> {
         let cuda = gpu.cuda()?;
         let layout = picture.layout();
-        let bytes = match layout {
-            Layout::Nv12 => 1,
-            Layout::P010 | Layout::P210 if gpu.wide => 2,
-            layout @ (Layout::P010 | Layout::P210) => {
-                return Err(format!("no 16-bit textures for {layout:?}"));
-            }
-            layout @ (Layout::P416 | Layout::Ayuv64 | Layout::Rgb) => {
-                return Err(format!("{layout:?} pictures aren't NVDEC's"));
-            }
-            Layout::Yuv420p
-            | Layout::Yuv420p10
-            | Layout::Yuv422p
-            | Layout::Yuv422p10
-            | Layout::Yuv444p12 => {
-                return Err("planar pictures aren't NVDEC's".into());
-            }
-        };
+        let bytes = nvdec_bytes(gpu, layout)?;
         let (w, h) = (u64::from(picture.width()), u64::from(picture.height()));
         let (cw, ch) = chroma_size(layout, picture.width(), picture.height());
         let (cw, ch) = (u64::from(cw), u64::from(ch));
@@ -2598,6 +2524,126 @@ fn share_d3d11(
         size: (desc.Width, desc.Height),
         busy: Arc::default(),
     })
+}
+
+fn nvdec_bytes(gpu: &Gpu, layout: Layout) -> Result<u64, String> {
+    match layout {
+        Layout::Nv12 => Ok(1),
+        Layout::P010 | Layout::P210 if gpu.wide => Ok(2),
+        Layout::P010 | Layout::P210 => Err(format!("no 16-bit textures for {layout:?}")),
+        Layout::P416 | Layout::Ayuv64 | Layout::Rgb => {
+            Err(format!("{layout:?} pictures aren't NVDEC's"))
+        }
+        Layout::Yuv420p
+        | Layout::Yuv420p10
+        | Layout::Yuv422p
+        | Layout::Yuv422p10
+        | Layout::Yuv444p12 => Err("planar pictures aren't NVDEC's".into()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn vaapi_formats(
+    gpu: &Gpu,
+    layout: Layout,
+) -> Result<(wgpu::TextureFormat, wgpu::TextureFormat), String> {
+    match layout {
+        Layout::Nv12 => Ok((wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Rg8Unorm)),
+        Layout::P010 if gpu.wide => Ok((
+            wgpu::TextureFormat::R16Unorm,
+            wgpu::TextureFormat::Rg16Unorm,
+        )),
+        Layout::P010 => Err("no 16-bit textures for P010".into()),
+        Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb => {
+            Err(format!("{layout:?} pictures aren't VA-API's"))
+        }
+        Layout::Yuv420p
+        | Layout::Yuv420p10
+        | Layout::Yuv422p
+        | Layout::Yuv422p10
+        | Layout::Yuv444p12 => Err("planar pictures aren't VA-API's".into()),
+    }
+}
+
+#[cfg(windows)]
+fn d3d11_formats(
+    gpu: &Gpu,
+    layout: Layout,
+) -> Result<
+    (
+        wgpu::TextureFormat,
+        wgpu::TextureFormat,
+        wgpu::TextureFormat,
+    ),
+    String,
+> {
+    match layout {
+        Layout::Nv12 => Ok((
+            wgpu::TextureFormat::NV12,
+            wgpu::TextureFormat::R8Unorm,
+            wgpu::TextureFormat::Rg8Unorm,
+        )),
+        Layout::P010 if gpu.wide && gpu.p010 => Ok((
+            wgpu::TextureFormat::P010,
+            wgpu::TextureFormat::R16Unorm,
+            wgpu::TextureFormat::Rg16Unorm,
+        )),
+        Layout::P010 => Err("no P010 or 16-bit textures for P010".into()),
+        Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb => {
+            Err(format!("{layout:?} pictures aren't Direct3D 11's"))
+        }
+        Layout::Yuv420p
+        | Layout::Yuv420p10
+        | Layout::Yuv422p
+        | Layout::Yuv422p10
+        | Layout::Yuv444p12 => Err("planar pictures aren't Direct3D 11's".into()),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn videotoolbox_formats(
+    gpu: &Gpu,
+    layout: Layout,
+) -> Result<&'static [(objc2_metal::MTLPixelFormat, wgpu::TextureFormat)], String> {
+    use objc2_metal::MTLPixelFormat;
+    use wgpu::TextureFormat as F;
+    match layout {
+        Layout::Nv12 => Ok(&[
+            (MTLPixelFormat::R8Unorm, F::R8Unorm),
+            (MTLPixelFormat::RG8Unorm, F::Rg8Unorm),
+        ]),
+        Layout::P010 | Layout::P210 | Layout::P416 if gpu.wide => Ok(&[
+            (MTLPixelFormat::R16Unorm, F::R16Unorm),
+            (MTLPixelFormat::RG16Unorm, F::Rg16Unorm),
+        ]),
+        Layout::Ayuv64 if gpu.wide => Ok(&[(MTLPixelFormat::RGBA16Unorm, F::Rgba16Unorm)]),
+        Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64 => {
+            Err(format!("no 16-bit textures for {layout:?}"))
+        }
+        Layout::Rgb => Err("RGB pictures aren't VideoToolbox's".into()),
+        Layout::Yuv420p
+        | Layout::Yuv420p10
+        | Layout::Yuv422p
+        | Layout::Yuv422p10
+        | Layout::Yuv444p12 => Err("planar pictures aren't VideoToolbox's".into()),
+    }
+}
+
+fn vulkan_layout(gpu: &Gpu, layout: Layout) -> Result<(), String> {
+    match layout {
+        Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 if gpu.wide => Ok(()),
+        Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 => {
+            Err("no 16-bit textures for 10- and 12-bit planes".into())
+        }
+        Layout::Nv12
+        | Layout::P010
+        | Layout::P210
+        | Layout::P416
+        | Layout::Ayuv64
+        | Layout::Rgb
+        | Layout::Yuv420p
+        | Layout::Yuv422p => Err(format!("{layout:?} pictures aren't Vulkan's")),
+    }
 }
 
 #[cfg(any(target_os = "linux", windows))]

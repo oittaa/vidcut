@@ -40,7 +40,9 @@ flowchart LR
 - `route::Place` is where a picture is: `Memory`, or one of the GPU places of `hw::Kind`.
 - `route::Facts` holds what the planner knows of a frame:
   - Its place.
-  - The draw takes the frames of that place (`Gpu::gpu_pictures`).
+  - The draw takes the frames of that place in that layout (`Gpu::gpu_pictures`).
+    - Each import has its layout rules in one function, which the import and `gpu_pictures` both use (`nvdec_bytes`, `vulkan_layout`).
+    - Why: a frame that the draw cannot import comes down whole. The keeper does not copy it first.
   - The draw reads its layout (`normalize::displayable`).
   - Keeping the frames failed before.
 - `route::plan` gives the `Route`. `Route::Kept` wins.
