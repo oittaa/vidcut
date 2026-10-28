@@ -44,6 +44,9 @@ fn stored(u: vec2<f32>) -> vec2<f32> {
 
 fn yuv(u: vec2<f32>) -> vec3<f32> {
     let s = stored(u) * p.upright.zw;
+    if p.flags.z == 3u {
+        return textureSampleLevel(luma, bilinear, s, 0.0).rgb;
+    }
     if p.flags.z == 2u {
         let ayuv = textureSampleLevel(luma, bilinear, s, 0.0);
         return ayuv.gba;
@@ -165,16 +168,19 @@ fn tone_mapped(c_in: vec3<f32>, tone: vec4<f32>) -> vec3<f32> {
 }
 
 fn rgb(s: vec3<f32>) -> vec3<f32> {
-    let y = (s.x - p.range.x) * p.range.y;
-    let cb = (s.y - p.range.z) * p.range.w;
-    let cr = (s.z - p.range.z) * p.range.w;
-    let kr = p.matrix.x;
-    let kb = p.matrix.y;
-    let kg = p.matrix.z;
-    let r = y + (2.0 - 2.0 * kr) * cr;
-    let b = y + (2.0 - 2.0 * kb) * cb;
-    let g = (y - kr * r - kb * b) / kg;
-    var c = vec3<f32>(r, g, b);
+    var c = s;
+    if p.flags.z != 3u {
+        let y = (s.x - p.range.x) * p.range.y;
+        let cb = (s.y - p.range.z) * p.range.w;
+        let cr = (s.z - p.range.z) * p.range.w;
+        let kr = p.matrix.x;
+        let kb = p.matrix.y;
+        let kg = p.matrix.z;
+        let r = y + (2.0 - 2.0 * kr) * cr;
+        let b = y + (2.0 - 2.0 * kb) * cb;
+        let g = (y - kr * r - kb * b) / kg;
+        c = vec3<f32>(r, g, b);
+    }
     if p.per.z != 0u {
         if p.flags.x != 0u {
             c = to_linear(c);

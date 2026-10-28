@@ -69,7 +69,7 @@ pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
     Ok(dst)
 }
 
-type Rgb = (Option<i64>, (u32, u32), Vec<u8>);
+type Rgb = (Option<i64>, (u32, u32), frame::Video);
 
 struct Source {
     reader: VideoReader,
@@ -103,6 +103,8 @@ struct Source {
     queued: VecDeque<frame::Video>,
     turner: Option<crate::hw::Turner>,
     drawn: Option<Single>,
+    keeper: Option<crate::hw::Keeper>,
+    unkept: bool,
 }
 
 const DECODE_AHEAD: f64 = 1.0;
@@ -192,6 +194,8 @@ impl Source {
             queued: VecDeque::new(),
             turner: None,
             drawn: None,
+            keeper: None,
+            unkept: false,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -248,6 +252,8 @@ impl Source {
             queued: VecDeque::new(),
             turner: None,
             drawn: None,
+            keeper: None,
+            unkept: false,
         })
     }
 
@@ -426,7 +432,7 @@ impl Source {
         prev: bool,
         size: (u32, u32),
         reading: Reading,
-    ) -> Result<(Option<i64>, Vec<u8>)> {
+    ) -> Result<(Option<i64>, frame::Video)> {
         let rotation = self.reader.rotation();
         let (f, _) = match prev {
             true => self.prev.as_ref(),
@@ -435,7 +441,7 @@ impl Source {
         .expect("a frame");
         let pts = f.pts();
         if let Some((_, _, rgb)) = self.rgb.iter().find(|(p, s, _)| *p == pts && *s == size) {
-            return Ok((pts, rgb.clone()));
+            return Ok((pts, frame_ref(rgb)?));
         }
         let rgb = shown_rgb(
             &mut self.drawn,
@@ -449,7 +455,7 @@ impl Source {
         if self.rgb.len() >= 2 {
             self.rgb.remove(0);
         }
-        self.rgb.push((pts, size, rgb.clone()));
+        self.rgb.push((pts, size, frame_ref(&rgb)?));
         Ok((pts, rgb))
     }
 
@@ -609,11 +615,22 @@ fn hold(
             Key::Frame(_) => Key::Frame(o.index),
         };
         waiting.retain(|(k, _)| *k != key);
-        let picture = match o.picture {
-            crate::super_scale::Picture::Rgb(rgb) => big_picture(&rgb, base.made, o.pts),
-            crate::super_scale::Picture::Frame(f) => f,
-        };
-        waiting.push((key, picture));
+        match made_picture(o.picture, base.made, o.pts) {
+            Ok(picture) => waiting.push((key, picture)),
+            Err(e) => crate::debug!("ai", "{}: {e}", crate::super_scale::name(base.upscaler)),
+        }
+    }
+}
+
+fn made_picture(
+    picture: crate::super_scale::Picture,
+    made: (u32, u32),
+    pts: Option<i64>,
+) -> Result<frame::Video> {
+    match picture {
+        crate::super_scale::Picture::Held(held) => crate::screen::held::picture(held, made, pts),
+        crate::super_scale::Picture::Rgb(rgb) => Ok(big_picture(&rgb, made, pts)),
+        crate::super_scale::Picture::Frame(f) => Ok(f),
     }
 }
 
@@ -632,13 +649,12 @@ fn shown_rgb(
     (dw, dh): (u32, u32),
     reading: Reading,
     path: &Path,
-) -> Result<Vec<u8>> {
+) -> Result<frame::Video> {
     let single = match drawn {
         Some(single) => single,
         None => drawn.insert(Single::new(reading)?),
     };
-    let rgb = single.draw(frame, rotation, (dw, dh), format::Pixel::RGB24, path)?;
-    Ok(crate::buffers::packed(&rgb, 3))
+    single.held(frame, rotation, (dw, dh), path)
 }
 
 fn big_picture(out: &[u8], (w, h): (u32, u32), pts: Option<i64>) -> frame::Video {
@@ -812,8 +828,12 @@ impl Source {
                 let rotation = self.reader.rotation();
                 let takes = |f: &frame::Video| run.run.takes(f, rotation);
                 match self.reader.next_frame()? {
+                    Some(f) if takes(&f) => {
+                        self.queued.push_back(frame_ref(&f)?);
+                        Some(f)
+                    }
                     Some(f) => {
-                        let kept = if takes(&f) { f } else { in_memory(&f)? };
+                        let kept = self.kept(&f)?;
                         self.queued.push_back(frame_ref(&kept)?);
                         Some(kept)
                     }
@@ -923,7 +943,7 @@ impl Source {
         };
         let converted = clock.elapsed();
         let outs = match rgb {
-            Some(rgb) => run.run.push(i, f.pts(), rgb)?,
+            Some(rgb) => run.run.push(i, f.pts(), &rgb)?,
             None => run.run.push_frame(i, f, rotation)?,
         };
         let pushed = clock.elapsed();
@@ -941,6 +961,23 @@ impl Source {
             return self.end_run();
         }
         Ok(())
+    }
+
+    fn kept(&mut self, f: &frame::Video) -> Result<frame::Video> {
+        if !crate::hw::on_gpu(f) {
+            return frame_ref(f);
+        }
+        if !self.unkept {
+            match crate::hw::Keeper::keep(&mut self.keeper, f) {
+                Ok(kept) => return Ok(kept),
+                Err(e) => {
+                    eprintln!("vidcut: GPU pictures come down for the upscaler: {e}");
+                    self.unkept = true;
+                    self.keeper = None;
+                }
+            }
+        }
+        in_memory(f)
     }
 
     fn end_run(&mut self) -> Result<()> {
@@ -1187,7 +1224,7 @@ pub(crate) struct Single {
 impl Single {
     pub(crate) fn new(reading: Reading) -> Result<Self> {
         let drawer = Drawer::new(None)?;
-        let maker = Maker::new((2, 2, format::Pixel::YUV420P), drawer.keeps(), reading);
+        let maker = Maker::new((2, 2, format::Pixel::YUV420P), drawer.keeps(), reading).holding();
         Ok(Self {
             drawer,
             maker,
@@ -1208,6 +1245,25 @@ impl Single {
         let layers = (&[][..], &[][..], &[][..], None);
         self.drawer
             .frame(&picture, &[], layers, size, (pixel, (None, None)))
+    }
+
+    pub(crate) fn held(
+        &mut self,
+        frame: &frame::Video,
+        rotation: u16,
+        (w, h): (u32, u32),
+        path: &Path,
+    ) -> Result<frame::Video> {
+        let made = self.maker.make(&mut self.fitting, frame, path)?;
+        let picture = std::sync::Arc::new(crate::player::Picture::new(made, rotation, None, None));
+        let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
+        screen.draw(gpu, Some(&picture), &[], (&[], &[], &[], None), w, h);
+        screen.encoded(
+            gpu,
+            format::Pixel::RGB24,
+            (None, None),
+            crate::screen::Sink::Held,
+        )
     }
 }
 
@@ -1360,7 +1416,7 @@ impl VideoFrames {
         if self.drawer.is_none() {
             let drawer = Drawer::new(self.encoder.take())?;
             let (out, reading) = (self.maker.out(), self.maker.reading());
-            self.maker = Maker::new(out, drawer.keeps(), reading);
+            self.maker = Maker::new(out, drawer.keeps(), reading).holding();
             self.drawer = Some(drawer);
         }
         let Some(layers) = self.next_layers()? else {
@@ -2069,7 +2125,7 @@ impl VideoFrames {
             );
             crate::interpolate::kept_at_cut(*retime, size, weight);
             let nearer = weight < 0.5;
-            let rgb = match pictures {
+            let mut picture = match pictures {
                 Some((a, b)) => {
                     if nearer {
                         a
@@ -2079,14 +2135,15 @@ impl VideoFrames {
                 }
                 None => src.rgb_of(nearer, size, reading)?.1,
             };
-            big_picture(&rgb, size, pb)
+            picture.set_pts(pb);
+            picture
         } else {
             let made = match &pair {
                 Some((a, b)) => crate::interpolate::between_frames(&key, a, b, size, weight)?,
                 None => {
                     let (a, b) = pictures.as_ref().expect("the pictures of the pair");
-                    let rgb = crate::interpolate::between(*retime, &key, a, b, size, weight)?;
-                    big_picture(&rgb, size, pb)
+                    let made = crate::interpolate::between(*retime, &key, a, b, size, weight)?;
+                    made_picture(made, size, pb)?
                 }
             };
             crate::debug!(

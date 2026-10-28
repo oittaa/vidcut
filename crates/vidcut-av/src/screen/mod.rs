@@ -14,6 +14,7 @@ use vidcut_core::render::{Placed, Wipe};
 #[cfg(any(target_os = "linux", windows))]
 mod acquire;
 mod gate;
+pub(crate) mod held;
 mod out;
 mod shared;
 #[cfg(any(target_os = "linux", windows))]
@@ -54,6 +55,7 @@ pub struct Gpu {
     cuda: OnceLock<Result<CudaDevice, String>>,
     gate: Option<Arc<Gate>>,
     encoders: out::Encoders,
+    held: held::Pipes,
 }
 
 struct Drawing {
@@ -122,10 +124,8 @@ fn device(label: &str) -> std::result::Result<(wgpu::Adapter, wgpu::Device, wgpu
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some(label),
         required_features: features(&adapter),
-        required_limits: wgpu::Limits {
-            max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d,
-            ..wgpu::Limits::default()
-        },
+        required_limits: adapter.limits(),
+        memory_hints: wgpu::MemoryHints::MemoryUsage,
         ..Default::default()
     }))
     .map_err(|e| format!("no wgpu device: {e}"))?;
@@ -456,6 +456,7 @@ impl Gpu {
             cuda: OnceLock::new(),
             gate: None,
             encoders: out::Encoders::new(device, &shader),
+            held: held::Pipes::new(device),
         }
     }
 
@@ -472,6 +473,10 @@ impl Gpu {
             Some(gate) => gate.pass(|| self.queue.submit(buffers)),
             None => self.queue.submit(buffers),
         }
+    }
+
+    pub(crate) fn handles(&self) -> (&wgpu::Device, &wgpu::Queue) {
+        (&self.device, &self.queue)
     }
 
     pub fn gpu_pictures(&self) -> Vec<Kind> {
@@ -998,6 +1003,7 @@ struct Slot {
     imports: u64,
     last_shared: bool,
     written: Option<Arc<Picture>>,
+    rgb: Option<wgpu::Buffer>,
 }
 
 #[cfg(windows)]
@@ -1461,7 +1467,7 @@ impl Slot {
         match picture.gpu() {
             None => {
                 if !written.is_some_and(|w| same_data(&w, picture)) {
-                    self.write_planes(gpu, picture);
+                    self.write_planes(gpu, picture, encoder);
                 }
                 self.written = Some(Arc::clone(picture));
                 return;
@@ -1494,7 +1500,7 @@ impl Slot {
                         }
                     }
                 }
-                return self.copy_down(gpu, picture);
+                return self.copy_down(gpu, picture, encoder);
             }
         }
         if !self.unshared {
@@ -1511,12 +1517,12 @@ impl Slot {
                 }
             }
         }
-        self.copy_down(gpu, picture);
+        self.copy_down(gpu, picture, encoder);
     }
 
-    fn copy_down(&mut self, gpu: &Gpu, picture: &Picture) {
+    fn copy_down(&mut self, gpu: &Gpu, picture: &Picture, encoder: &mut wgpu::CommandEncoder) {
         match picture.copied_down() {
-            Ok(down) => self.write_planes(gpu, &down),
+            Ok(down) => self.write_planes(gpu, &down, encoder),
             Err(e) => eprintln!("vidcut: a picture didn't come down from the GPU: {e}"),
         }
     }
@@ -1539,7 +1545,7 @@ impl Slot {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
-            layout @ (Layout::P210 | Layout::P416 | Layout::Ayuv64) => {
+            layout @ (Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb) => {
                 return Err(format!("{layout:?} pictures aren't VA-API's"));
             }
             Layout::Yuv420p
@@ -1674,7 +1680,7 @@ impl Slot {
                 wgpu::TextureFormat::Rg16Unorm,
             ),
             Layout::P010 => return Err("no P010 or 16-bit textures for P010".into()),
-            layout @ (Layout::P210 | Layout::P416 | Layout::Ayuv64) => {
+            layout @ (Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb) => {
                 return Err(format!("{layout:?} pictures aren't Direct3D 11's"));
             }
             Layout::Yuv420p
@@ -1734,6 +1740,7 @@ impl Slot {
             | Layout::P210
             | Layout::P416
             | Layout::Ayuv64
+            | Layout::Rgb
             | Layout::Yuv420p
             | Layout::Yuv422p) => return Err(format!("{layout:?} pictures aren't Vulkan's")),
         }
@@ -1797,6 +1804,7 @@ impl Slot {
             layout @ (Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64) => {
                 return Err(format!("no 16-bit textures for {layout:?}"));
             }
+            Layout::Rgb => return Err("RGB pictures aren't VideoToolbox's".into()),
             Layout::Yuv420p
             | Layout::Yuv420p10
             | Layout::Yuv422p
@@ -1900,7 +1908,7 @@ impl Slot {
             Layout::P010 if gpu.wide => 2,
             Layout::P010 => return Err("no 16-bit textures for P010".into()),
             Layout::P210 => return Ok(false),
-            layout @ (Layout::P416 | Layout::Ayuv64) => {
+            layout @ (Layout::P416 | Layout::Ayuv64 | Layout::Rgb) => {
                 return Err(format!("{layout:?} pictures aren't NVDEC's"));
             }
             Layout::Yuv420p
@@ -1996,7 +2004,7 @@ impl Slot {
                     wgpu::TextureFormat::Rgba8Unorm,
                 )
             };
-            let make = |size: (u32, u32), format| {
+            let made = |size: (u32, u32), format, usage| {
                 gpu.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("vidcut plane"),
                     size: wgpu::Extent3d {
@@ -2008,10 +2016,13 @@ impl Slot {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        | usage,
                     view_formats: &[],
                 })
             };
+            let make = |size: (u32, u32), format| made(size, format, wgpu::TextureUsages::empty());
             self.planes = Some(match layout {
                 Layout::Yuv420p
                 | Layout::Yuv420p10
@@ -2041,13 +2052,27 @@ impl Slot {
                     v: make((1, 1), one),
                     a: make((1, 1), wgpu::TextureFormat::R8Unorm),
                 },
+                Layout::Rgb => Planes {
+                    key,
+                    y: made(
+                        (w, h),
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        wgpu::TextureUsages::STORAGE_BINDING,
+                    ),
+                    u: make((1, 1), one),
+                    v: make((1, 1), one),
+                    a: make((1, 1), wgpu::TextureFormat::R8Unorm),
+                },
             });
         }
     }
 
-    fn write_planes(&self, gpu: &Gpu, picture: &Picture) {
+    fn write_planes(&mut self, gpu: &Gpu, picture: &Picture, encoder: &mut wgpu::CommandEncoder) {
         let (w, h) = (picture.width(), picture.height());
         let layout = picture.layout();
+        if layout == Layout::Rgb {
+            return self.write_rgb(gpu, picture.frame(), encoder);
+        }
         let (cw, ch) = chroma_size(layout, w, h);
         let wide = gpu.wide && sixteen(layout);
         let planes = self.planes.as_ref().expect("made for it");
@@ -2106,6 +2131,7 @@ impl Slot {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 4);
             }
+            (Layout::Rgb, _) => {}
             (Layout::Ayuv64, true) => put(&planes.y, 0, (w, h), 8),
             (Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64, false) => {
                 let textures = match layout {
@@ -2125,6 +2151,43 @@ impl Slot {
                 }
             }
         }
+    }
+
+    fn write_rgb(
+        &mut self,
+        gpu: &Gpu,
+        frame: &crate::ffmpeg::frame::Video,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        let source = match held::of(frame) {
+            Some(h) if h.on(&gpu.device) => h.buffer().clone(),
+            found => {
+                let bytes = match found {
+                    Some(_) => held::rgb(frame),
+                    None => Ok(crate::buffers::packed(frame, 3)),
+                };
+                let mut bytes = match bytes {
+                    Ok(bytes) => bytes,
+                    Err(e) => return eprintln!("vidcut: an RGB picture didn't reach the GPU: {e}"),
+                };
+                bytes.resize(bytes.len().next_multiple_of(4), 0);
+                let size = bytes.len() as u64;
+                if self.rgb.as_ref().is_none_or(|b| b.size() != size) {
+                    self.rgb = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("vidcut rgb picture"),
+                        size,
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }));
+                }
+                let buffer = self.rgb.clone().expect("made above");
+                gpu.queue.write_buffer(&buffer, 0, &bytes);
+                crate::copies::up(frame);
+                buffer
+            }
+        };
+        let planes = self.planes.as_ref().expect("made for it");
+        gpu.held.unpack(&gpu.device, encoder, &source, &planes.y);
     }
 }
 
@@ -2572,7 +2635,7 @@ fn write_alpha(
 
 fn sixteen(layout: Layout) -> bool {
     match layout {
-        Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p => false,
+        Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p | Layout::Rgb => false,
         Layout::P010
         | Layout::Yuv420p10
         | Layout::Yuv422p10
@@ -2585,9 +2648,15 @@ fn sixteen(layout: Layout) -> bool {
 
 fn same_data(a: &Picture, b: &Picture) -> bool {
     let (a, b) = (a.frame(), b.frame());
-    a.format() == b.format()
-        && (a.width(), a.height()) == (b.width(), b.height())
-        && (0..a.planes()).all(|i| a.data(i).as_ptr() == b.data(i).as_ptr())
+    match (held::of(a), held::of(b)) {
+        (Some(x), Some(y)) => x.buffer() == y.buffer(),
+        (None, None) => {
+            a.format() == b.format()
+                && (a.width(), a.height()) == (b.width(), b.height())
+                && (0..a.planes()).all(|i| a.data(i).as_ptr() == b.data(i).as_ptr())
+        }
+        _ => false,
+    }
 }
 
 fn packing(layout: Layout) -> u32 {
@@ -2599,6 +2668,7 @@ fn packing(layout: Layout) -> u32 {
         | Layout::Yuv444p12 => 0,
         Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => 1,
         Layout::Ayuv64 => 2,
+        Layout::Rgb => 3,
     }
 }
 
@@ -2606,7 +2676,7 @@ fn per_chroma(layout: Layout) -> (u32, u32) {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => (2, 2),
         Layout::Yuv422p | Layout::Yuv422p10 | Layout::P210 => (2, 1),
-        Layout::Yuv444p12 | Layout::P416 | Layout::Ayuv64 => (1, 1),
+        Layout::Yuv444p12 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb => (1, 1),
     }
 }
 

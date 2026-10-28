@@ -10,7 +10,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - H.264 with B-frames has open GOPs.
 - `busy` adds new noise around the barcode in each frame. Thus the stream is heavy to decode.
 
-**GPU check:** `scripts/gpu-check.sh` (release build) shows what runs on the GPU in a 4K export and in the viewer.
+**GPU check:** `scripts/gpu-check.sh` (release build) shows what runs on the GPU in four common exports and in the viewer.
 
 - It uses 5 s of the Big Buck Bunny 4K60 clip from 1:00, plain and at 150% zoom.
 - For each, it exports with the hardware encoder and prints the export's report, the time and the CPU time.

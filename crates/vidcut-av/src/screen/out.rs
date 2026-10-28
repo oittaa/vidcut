@@ -269,6 +269,7 @@ enum Target {
     Memory,
     Cuda,
     Surface,
+    Held,
 }
 
 struct Made {
@@ -294,6 +295,7 @@ pub enum Sink<'a> {
     Memory,
     Cuda(&'a CudaDevice, &'a CudaFrames),
     Surface(frame::Video),
+    Held,
 }
 
 impl Sink<'_> {
@@ -302,6 +304,7 @@ impl Sink<'_> {
             Sink::Memory => Target::Memory,
             Sink::Cuda(..) => Target::Cuda,
             Sink::Surface(_) => Target::Surface,
+            Sink::Held => Target::Held,
         }
     }
 }
@@ -329,6 +332,11 @@ impl Screen {
         let layout = layout_of(pixel)
             .ok_or_else(|| Error::Invalid(format!("the GPU can't make frames in {pixel:?}")))?;
         let target = sink.target();
+        if target == Target::Held && pixel != format::Pixel::RGB24 {
+            return Err(Error::Invalid(format!(
+                "the GPU holds RGB24 pictures, not {pixel:?}"
+            )));
+        }
         let key = Some((pixel, size, colors.0, colors.1, target));
         if self.encoded.key != key {
             self.encoded.key = None;
@@ -405,6 +413,15 @@ impl Screen {
                 },
             );
         }
+        let held = match (&sink, self.encoded.made.first()) {
+            (
+                Sink::Held,
+                Some(Made {
+                    texture: Some(t), ..
+                }),
+            ) => Some(gpu.held.pack(&gpu.device, &mut encoder, t)),
+            _ => None,
+        };
         let submission = gpu.submit([encoder.finish()]);
         let mut out = match sink {
             Sink::Cuda(_, frames) => self.handed(gpu, frames, submission)?,
@@ -412,6 +429,11 @@ impl Screen {
             Sink::Surface(f) => {
                 wait(gpu, submission)?;
                 f
+            }
+            Sink::Held => {
+                let buffer = held.ok_or_else(|| Error::Invalid("no RGB plane to hold".into()))?;
+                let held = super::held::Held::new(buffer, &gpu.device, &gpu.queue);
+                return super::held::picture(held, size, None);
             }
         };
         crate::color::tag_frame(&mut out, colors.1);
@@ -632,7 +654,12 @@ fn made(
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: plane.format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage: match target {
+                Target::Held => {
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+                }
+                _ => wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            },
             view_formats: &[],
         })
     });

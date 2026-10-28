@@ -105,8 +105,8 @@ impl Run {
 }
 
 impl super::Run for Run {
-    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<super::Out>> {
-        let rgb = self.scaler.scale(index, &rgb)?;
+    fn push(&mut self, index: i64, pts: Option<i64>, rgb: &Video) -> Result<Vec<super::Out>> {
+        let rgb = self.scaler.scale(index, &crate::screen::held::rgb(rgb)?)?;
         Ok(vec![super::Out {
             index,
             pts,

@@ -258,6 +258,7 @@ impl<N: Network> Slot<N> {
 }
 
 pub(crate) enum Picture {
+    Held(crate::screen::held::Held),
     Rgb(Vec<u8>),
     Frame(crate::ffmpeg::frame::Video),
 }
@@ -271,7 +272,12 @@ pub(crate) struct Out {
 pub(crate) type Sink = Box<dyn FnOnce(Result<Vec<Out>>) + Send>;
 
 pub(crate) trait Run: Send {
-    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<Out>>;
+    fn push(
+        &mut self,
+        index: i64,
+        pts: Option<i64>,
+        rgb: &crate::ffmpeg::frame::Video,
+    ) -> Result<Vec<Out>>;
 
     fn takes(&self, _f: &crate::ffmpeg::frame::Video, _rotation: u16) -> bool {
         false

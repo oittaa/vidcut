@@ -34,6 +34,7 @@ impl Fitting {
 pub(crate) struct Maker {
     out: (u32, u32, format::Pixel),
     keep: Vec<crate::hw::Kind>,
+    holds: bool,
     stages: Vec<Stage>,
     reading: Reading,
 }
@@ -65,8 +66,16 @@ impl Maker {
         Self {
             out,
             keep,
+            holds: false,
             stages: Vec::new(),
             reading,
+        }
+    }
+
+    pub(crate) fn holding(self) -> Self {
+        Self {
+            holds: true,
+            ..self
         }
     }
 
@@ -127,6 +136,15 @@ impl Maker {
     ) -> Result<frame::Video> {
         if stage.reading.replace(reading).is_some_and(|r| r != reading) {
             stage.relayout = Relayout::new();
+        }
+        if crate::screen::held::of(frame).is_some() {
+            if self.holds {
+                fitting.took(Route::Kept, path);
+                return crate::export::video::frame_ref(frame);
+            }
+            let down = crate::screen::held::in_memory(frame)?;
+            fitting.took(Route::Whole, path);
+            return crate::buffers::owned(&stage.relayout.run(&down, reading)?);
         }
         let mut facts = Facts {
             keep_failed: stage.unkept,

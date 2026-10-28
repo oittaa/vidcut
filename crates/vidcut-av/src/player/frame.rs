@@ -17,6 +17,7 @@ pub enum Layout {
     Yuv444p12,
     P416,
     Ayuv64,
+    Rgb,
 }
 
 impl Layout {
@@ -32,6 +33,7 @@ impl Layout {
             P::YUV444P12LE | P::YUVA444P12LE => Self::Yuv444p12,
             P::P416LE => Self::P416,
             P::AYUV64LE => Self::Ayuv64,
+            P::RGB24 => Self::Rgb,
             _ => Self::Yuv420p,
         }
     }

@@ -80,10 +80,12 @@ The draw:
 
 - The viewer, exports, proxies and thumbnails draw each frame with one shader (`screen::Screen`, `picture.wgsl`).
   - The AI upscalers and the frame interpolation take their RGB input from the same draw (`export::video::Single`).
+  - That input stays on the GPU (`Sink::Held`). `held::Pipes` packs the drawn RGB plane into a buffer (`rgb.wgsl`).
 - It mixes the dissolves, the wipes, the composite modes, the placed pictures, the titles and the subtitles.
 - `export::video::Drawer` draws for the export, proxies, thumbnails and the AI inputs.
   - All of them share one wgpu device (`screen::offscreen`). vidcut makes it once, at the first draw.
-  - The viewer's frame render uses that device too.
+  - The viewer's frame render, the AI upscalers and the frame interpolation use that device too (`compute::Gpu`).
+  - It opens with all the limits of the GPU. Why: the AI kernels need large buffers and much workgroup memory.
   - It is not the device of the viewer: a submit from another thread can make the viewer's surface fail ([gotchas](../gotchas.md#wgpu-and-egui)).
 - There, `fs_encode` writes the planes of the encoder ([export](export.md#timeline-colors)).
   - NVENC takes them through memory that Vulkan shares with CUDA (`Shared::out`).
@@ -95,6 +97,7 @@ Frames that come down:
 - CPU encoders take frames in memory.
 - The player brings a frame down when the viewer cannot show its kind, when an import fails, or when its pool leaves the budget.
 - A picture in memory goes up into the frames of a GPU encoder (`Upload`, `CudaFrames::upload`).
+- The player brings the pictures of the AI upscalers and the frame interpolation down (`held::in_memory`). Why: the viewer draws on another device.
 
 ## Encoders
 
@@ -128,6 +131,7 @@ The AI upscalers share one path in the reader:
 - A picture has a key (`PictureId`). It comes from a run of the upscaler (`Session`, `super_scale::Run`), which starts at `super_scale::first_frame`.
 - A run takes frames in order. It reads them from the reader's queue, or with a second `VideoReader` (`Source::seek_ahead`).
 - The run gives each picture once, and keeps the last one for a change of size.
+- A picture of AI Fast or AI Best stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`).
 - The reader drops a run for a frame that the run does not give (`RUN_JUMP`).
 - `super_scale::report` tells what the upscaler makes. The stats panel shows it (`SuperScaleStats`).
 
@@ -142,7 +146,7 @@ GPU memory:
 
 AI Fast (`nanovsr`):
 
-- NanoVSR 5.4M in WGSL shaders on a wgpu device of its own.
+- NanoVSR 5.4M in WGSL shaders on the shared off-screen device.
 - It works in chunks on a fixed grid of the file's frames (`nanovsr::FRAMES`). Thus the viewer and an export get the same pictures.
 - It gives the asked frame first. A thread (`vidcut-upscale-rest`) makes the rest of the chunk.
   - Why: the viewer shows the frame after about half the work.
@@ -151,7 +155,7 @@ AI Fast (`nanovsr`):
 
 AI Best (`flashvsr`):
 
-- FlashVSR+ Turbo on a wgpu device of its own. A run is a `flashvsr::Stream` with no last frame.
+- FlashVSR+ Turbo on the shared off-screen device. A run is a `flashvsr::Stream` with no last frame.
 - `flashvsr::check` refuses media that it cannot take, and sizes that do not fit (`run::plan`).
 - It looks at the stop flag (`cancel::stop`) before each block. Why: a picture that the viewer no longer needs stops soon.
 - Its KV caches stay on the GPU while they fit in the room (`run::plan`). Else some stay in main memory between chunks (`Keys::Host`).
@@ -171,9 +175,9 @@ The scaler of macOS (`macos`):
 
 `interpolate` makes the frames of Retime Process ([export](export.md#which-source-frame), [deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
 
-- `interpolate::between` takes two RGB frames and a weight. It gives an RGB frame.
-- It runs on a wgpu device of its own (`compute::Gpu`), with kernels of its own (`interpolate::ops`).
-  - The device goes when the last `interpolate::User` goes.
+- `interpolate::between` takes two RGB pictures on the GPU and a weight. It gives an RGB picture on the GPU.
+- It runs on the shared off-screen device (`compute::Gpu`), with kernels of its own (`interpolate::ops`).
+  - Its kernels and memory go when the last `interpolate::User` goes.
 - The last pair stays on the GPU with its features. Why: the frames between one pair share them.
 - AI Fast is RIFE 4.25 (`rife`). AI Best is EMA-VFI (`ema`). Frame Blend mixes on the same device (`Ops::combine`).
 - EMA-VFI plans its work buffers in a pool (`ops::arena`), and refines in bands of rows (`ema::Pair`).
