@@ -843,6 +843,9 @@ impl Workspace {
             d.mark();
             d.stripes[i].keep ^= true;
         }
+        if m.any() {
+            return;
+        }
         let struck = |k: egui::Key| {
             input.events.iter().any(|e| {
                 matches!(e, egui::Event::Key { key, physical_key, pressed: true, .. }
