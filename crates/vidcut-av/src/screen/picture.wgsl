@@ -12,6 +12,7 @@ struct Params {
     placed: vec4<f32>,
     made: vec4<f32>,
     part: vec4<f32>,
+    site: vec4<f32>,
     levels: array<vec4<f32>, 5u * LEVELS>,
 };
 
@@ -54,7 +55,8 @@ fn yuv(u: vec2<f32>) -> vec3<f32> {
         return ayuv.gba;
     }
     let y = textureSampleLevel(luma, bilinear, s, 0.0).r;
-    let c = s * vec2<f32>(textureDimensions(luma)) / vec2<f32>(p.per.xy * textureDimensions(chroma_u));
+    let chroma = vec2<f32>(textureDimensions(chroma_u));
+    let c = s * vec2<f32>(textureDimensions(luma)) / (vec2<f32>(p.per.xy) * chroma) + p.site.xy / chroma;
     if p.flags.z == 1u {
         let uv = textureSampleLevel(chroma_u, bilinear, c, 0.0).rg;
         return vec3<f32>(y, uv.x, uv.y);

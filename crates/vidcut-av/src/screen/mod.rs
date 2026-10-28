@@ -2625,7 +2625,7 @@ fn shader() -> String {
 
 const PER_LEVEL: usize = 5;
 
-const PARAMS: usize = (13 + PER_LEVEL * LEVELS) * 16;
+const PARAMS: usize = (14 + PER_LEVEL * LEVELS) * 16;
 
 const LETTERING: usize = (3 + PER_LEVEL * LEVELS) * 16;
 
@@ -2746,6 +2746,25 @@ fn per_chroma(layout: Layout) -> (u32, u32) {
     }
 }
 
+fn chroma_site(frame: &crate::ffmpeg::frame::Video, layout: Layout) -> [f64; 2] {
+    // SAFETY: a plain field of a live frame.
+    let at = unsafe { (*frame.as_ptr()).chroma_location };
+    let (mut x, mut y) = (0, 0);
+    // SAFETY: two plain out values, which FFmpeg sets only when it knows `at`.
+    if unsafe { crate::ffmpeg::ffi::av_chroma_location_enum_to_pos(&mut x, &mut y, at) } < 0 {
+        return [0.0; 2];
+    }
+    let (across, down) = per_chroma(layout);
+    let moved = |per: u32, at: i32| {
+        if per > 1 {
+            0.5 - (0.5 + f64::from(at) / 256.0) / f64::from(per)
+        } else {
+            0.0
+        }
+    };
+    [moved(across, x), moved(down, y)]
+}
+
 fn chroma_size(layout: Layout, w: u32, h: u32) -> (u32, u32) {
     let (across, down) = per_chroma(layout);
     (w.div_ceil(across), h.div_ceil(down))
@@ -2861,6 +2880,8 @@ fn params_of(
     };
     floats.extend(made);
     floats.extend(part);
+    let site = chroma_site(picture.frame(), layout);
+    floats.extend([site[0], site[1], 0.0, 0.0]);
     floats.extend(level_floats(levels));
     for v in floats {
         out.extend_from_slice(&(v as f32).to_le_bytes());
