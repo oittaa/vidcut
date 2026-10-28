@@ -442,7 +442,7 @@ sequenceDiagram
 ## Code
 
 - `crates/vidcut/src/gui/app.rs`, `crates/vidcut/src/gui/workspace.rs`, `crates/vidcut/src/gui/export.rs`
-- `crates/vidcut/src/gui/video.rs`, `crates/vidcut/src/gui/gate.rs`, `crates/vidcut/src/gui/cells.rs`, `crates/vidcut/src/gui/tiles.rs`
+- `crates/vidcut/src/gui/video.rs`, `crates/vidcut-av/src/screen/gate.rs`, `crates/vidcut/src/gui/cells.rs`, `crates/vidcut/src/gui/tiles.rs`
 - `crates/vidcut/src/gui/trim_strips.rs`, `crates/vidcut/src/gui/timeline/`
 - `crates/vidcut/src/gui/subtitles.rs`, `crates/vidcut/src/gui/titles.rs`
 - `crates/vidcut/src/gui/speech.rs`, `crates/vidcut/src/gui/retime.rs`

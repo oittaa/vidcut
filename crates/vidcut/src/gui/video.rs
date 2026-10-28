@@ -8,10 +8,10 @@ use eframe::wgpu;
 use vidcut_av::player::Player;
 use vidcut_core::Error;
 
-use super::gate::Gate;
-use super::picture::{Drawn, Gpu, Screen};
 use crate::live::stats::{PlayerStats, ViewerStats};
 use crate::live::{Capture, Presented};
+use vidcut_av::screen::Gate;
+use vidcut_av::screen::{Drawn, Gpu, Screen};
 
 type Engine = Arc<Player>;
 
@@ -255,16 +255,6 @@ impl Drop for Viewer {
     }
 }
 
-pub(super) fn kernel(sharp: Option<vidcut_core::model::Sharpness>) -> u32 {
-    use vidcut_core::model::Sharpness;
-    match sharp {
-        None => 0,
-        Some(Sharpness::Low) => 1,
-        Some(Sharpness::Medium) => 2,
-        Some(Sharpness::High) => 3,
-    }
-}
-
 fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
     let mut screen = Screen::new();
     let mut generation = 0u64;
@@ -303,7 +293,12 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
         let kernels: Vec<u32> = shown
             .as_ref()
             .filter(|_| super_scale)
-            .map(|s| s.scales.iter().map(|&k| kernel(k)).collect())
+            .map(|s| {
+                s.scales
+                    .iter()
+                    .map(|&k| vidcut_av::screen::kernel(k))
+                    .collect()
+            })
             .unwrap_or_default();
         let drawn = screen.draw(
             gpu,

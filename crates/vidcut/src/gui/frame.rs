@@ -3,39 +3,14 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use vidcut_av::player::{Config, ManualOutput, Player, SubtitleView};
+use vidcut_av::screen::Screen;
 use vidcut_core::time::TimeSpec;
 use vidcut_core::{Error, Project, Result};
-
-use super::picture::{self, Gpu, Screen};
 
 const WAIT: Duration = Duration::from_secs(60);
 
 fn failed(what: &str) -> Error {
     Error::internal(format!("the viewer's frame: {what}"))
-}
-
-fn device() -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
-        ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
-    });
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference:
-            wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance),
-        ..Default::default()
-    }))
-    .map_err(|e| failed(&format!("no GPU for wgpu: {e}")))?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("vidcut viewer frame"),
-        required_features: picture::features(&adapter),
-        required_limits: wgpu::Limits {
-            max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d,
-            ..wgpu::Limits::default()
-        },
-        ..Default::default()
-    }))
-    .map_err(|e| failed(&format!("no wgpu device: {e}")))?;
-    Ok((adapter, device, queue))
 }
 
 pub fn render(
@@ -55,14 +30,13 @@ pub fn render(
     let s = &p.settings;
     let w = width.unwrap_or(s.width).max(2);
     let h = ((u64::from(w) * u64::from(s.height) / u64::from(s.width.max(1))) as u32).max(2);
-    let (adapter, device, queue) = device()?;
-    let info = adapter.get_info();
+    let offscreen = vidcut_av::screen::offscreen().map_err(|e| failed(&e))?;
+    let (info, gpu) = (&offscreen.adapter, &offscreen.gpu);
     vidcut_av::player::set_viewer_gpu(vidcut_av::gpus::adapter_id(
         info.vendor,
         info.device,
         &info.device_pci_bus_id,
     ));
-    let gpu = Gpu::new(&device, &queue);
     let (plan, _) = vidcut_core::render::flatten_lanes(p, t, t + 1)?;
     let config = Config {
         audio_scrubbing: false,
@@ -96,13 +70,13 @@ pub fn render(
         true => shown
             .scales
             .iter()
-            .map(|&k| super::video::kernel(k))
+            .map(|&k| vidcut_av::screen::kernel(k))
             .collect(),
         false => Vec::new(),
     };
     let mut screen = Screen::new();
     screen.draw(
-        &gpu,
+        gpu,
         Some(&shown.picture),
         &shown.titles,
         (&shown.placed, &shown.crosses, &kernels, shown.colors),
@@ -110,7 +84,7 @@ pub fn render(
         h,
     );
     let image = screen
-        .read(&gpu)
+        .read(gpu)
         .ok_or_else(|| failed("the GPU gave no picture back"))?;
     let png = vidcut_av::export::still::png_rgba(image.width, image.height, &image.rgba)
         .map_err(|e| failed(&e.to_string()))?;

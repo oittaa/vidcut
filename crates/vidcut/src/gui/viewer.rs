@@ -606,7 +606,7 @@ impl Workspace {
             let piece = vidcut_core::render::clip_frame(p, &c.id, frame).ok();
             if let Some(piece) = piece {
                 let size = [picture.width(), picture.height()].map(|x| (x * ppp).round() as u32);
-                let got = players.show(i, p, &piece, size, speed);
+                let got = players.show(i, p, &piece, speed);
                 let texture = got
                     .as_ref()
                     .zip(self.screens.as_mut())

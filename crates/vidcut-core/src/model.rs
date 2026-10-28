@@ -486,7 +486,7 @@ pub enum Upscaler {
     /// 15 frames at a time. Its weights (25 MB) download at their first use.
     /// An export refuses media that it cannot take. Off on macOS for now.
     AiFast,
-    /// The classic upscalers: libplacebo on the GPU, swscale on the CPU.
+    /// The classic upscalers, on the GPU.
     Classic,
 }
 

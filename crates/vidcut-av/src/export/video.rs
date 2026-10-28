@@ -2,20 +2,16 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use vidcut_core::model::{
-    ColorSpace, CompositeMode, Hdr, Retime, Sharpness, SubtitleStyle, SuperScale, Title, Upscaler,
-};
+use vidcut_core::model::{ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
 use vidcut_core::place::Placing;
-use vidcut_core::render::{Image, Placed, Ramp, ShownTitle, VideoPiece, WHOLE, Wipe};
+use vidcut_core::render::{Image, Placed, Ramp, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
-use super::make::{Fitting, Maker, Output};
-use super::place::Canvas;
+use super::make::{Fitting, Maker};
 use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, format, frame};
-use crate::route::{Place, Route};
 
 pub(crate) fn target(fps: Rational, origin: f64, pos: i64) -> f64 {
     origin + fps.frames_to_secs(pos) - 0.5 * fps.frames_to_secs(1)
@@ -73,7 +69,7 @@ pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
     Ok(dst)
 }
 
-type Rgb = (Option<i64>, (u32, u32), Vec<u8>);
+type Rgb = (Option<i64>, (u32, u32), frame::Video);
 
 struct Source {
     reader: VideoReader,
@@ -106,21 +102,15 @@ struct Source {
     run: Option<Session>,
     queued: VecDeque<frame::Video>,
     turner: Option<crate::hw::Turner>,
-}
-
-#[derive(Clone)]
-pub(crate) struct GpuSide {
-    device: crate::cuda::CudaDevice,
-    out: (u32, u32),
-    format: format::Pixel,
-    target: Option<Hdr>,
+    drawn: Option<Single>,
+    keeper: Option<crate::hw::Keeper>,
+    unkept: bool,
 }
 
 const DECODE_AHEAD: f64 = 1.0;
 
 const REVERSED_BYTES: usize = 256 << 20;
 const REVERSED_MOST: i64 = 64;
-const REVERSED_ON_GPU: i64 = 4;
 
 const LEFT_FOR: Duration = Duration::from_secs(10);
 
@@ -159,30 +149,17 @@ impl Source {
         source_frame: i64,
         target: f64,
         pictures: Pictures,
-        gpu: Option<&GpuSide>,
         decoder: Option<&crate::hw::GpuDecoder>,
         reading: Reading,
         measure: bool,
         (color_space, super_scale): (ColorSpace, SuperScale),
     ) -> Result<Source> {
         let video = pictures == Pictures::Video;
-        let sharp = sharpness(super_scale);
-        let nvdec = gpu.filter(|_| video);
-        let nvdec = nvdec.and_then(|g| g.device.with_own_stream().ok());
-        let nvdec = nvdec.map(crate::hw::GpuDecoder::nvdec).transpose()?;
-        let mut reader = VideoReader::open_as(
-            input,
-            nvdec.as_ref().or(decoder).filter(|_| video),
-            pictures.reading(reading),
-        )?;
+        let mut reader =
+            VideoReader::open_as(input, decoder.filter(|_| video), pictures.reading(reading))?;
         reader.set_color_space(color_space);
         let ahead_gpu = decoder.filter(|_| video).cloned();
-        let fitting = match gpu {
-            Some(g) => {
-                Fitting::on_gpu(&reader, g.out, g.format, g.target, true, Place::Cuda, sharp)
-            }
-            None => Fitting::none(),
-        };
+        let fitting = Fitting::none();
         let decoder = reader.gpu();
         let tb = reader.time_base();
         let mut source = Source {
@@ -216,20 +193,15 @@ impl Source {
             run: None,
             queued: VecDeque::new(),
             turner: None,
+            drawn: None,
+            keeper: None,
+            unkept: false,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
         } else {
             source.seek(target)?;
             source.advance(target)?;
-        }
-        if source.fitting.scaler.is_some()
-            && !super_scale.ai()
-            && let Some((frame, _)) = source.current.as_ref()
-            && crate::hw::on_gpu(frame)
-        {
-            source.normalized = Some(source.fitting.scale(frame)?.ok_or_else(no_picture)?);
-            source.fitting.took(Route::Gpu, source.reader.path());
         }
         Ok(source)
     }
@@ -279,6 +251,9 @@ impl Source {
             run: None,
             queued: VecDeque::new(),
             turner: None,
+            drawn: None,
+            keeper: None,
+            unkept: false,
         })
     }
 
@@ -427,12 +402,33 @@ impl Source {
         self.lumas.clear();
     }
 
-    fn luma_of(&mut self, f: &frame::Video) -> Result<Vec<u8>> {
+    fn luma_of(&mut self, f: &frame::Video, size: (u32, u32), reading: Reading) -> Result<Vec<u8>> {
         let pts = f.pts();
         if let Some((_, l)) = self.lumas.iter().find(|(p, _)| *p == pts) {
             return Ok(l.clone());
         }
-        let l = crate::analysis::small_luma(&mut None, f)?;
+        let held = self
+            .rgb
+            .iter()
+            .find(|(p, s, _)| *p == pts && *s == size)
+            .map(|(_, _, rgb)| frame_ref(rgb))
+            .transpose()?;
+        let held = match held {
+            Some(rgb) => Some(rgb),
+            None if crate::hw::on_gpu(f) => Some(shown_rgb(
+                &mut self.drawn,
+                f,
+                self.reader.rotation(),
+                size,
+                reading,
+                self.reader.path(),
+            )?),
+            None => None,
+        };
+        let l = match (held, &self.drawn) {
+            (Some(rgb), Some(single)) => single.small_luma(&rgb)?,
+            _ => crate::analysis::small_luma(&mut None, f)?,
+        };
         if self.lumas.len() >= 3 {
             self.lumas.remove(0);
         }
@@ -440,13 +436,17 @@ impl Source {
         Ok(l)
     }
 
-    fn cut(&mut self) -> Result<bool> {
+    fn cut(&mut self, size: (u32, u32), reading: Reading) -> Result<bool> {
         let (Some((z, _)), Some((a, _)), Some((b, _))) = (&self.prev2, &self.prev, &self.current)
         else {
             return Ok(false);
         };
         let (z, a, b) = (frame_ref(z)?, frame_ref(a)?, frame_ref(b)?);
-        let (lz, la, lb) = (self.luma_of(&z)?, self.luma_of(&a)?, self.luma_of(&b)?);
+        let (lz, la, lb) = (
+            self.luma_of(&z, size, reading)?,
+            self.luma_of(&a, size, reading)?,
+            self.luma_of(&b, size, reading)?,
+        );
         let before = crate::analysis::mafd(&lz, &la);
         let score = crate::analysis::scene_score(crate::analysis::mafd(&la, &lb), before);
         Ok(f64::from(score) >= vidcut_core::analysis::SCENE_SCORE)
@@ -457,7 +457,7 @@ impl Source {
         prev: bool,
         size: (u32, u32),
         reading: Reading,
-    ) -> Result<(Option<i64>, Vec<u8>)> {
+    ) -> Result<(Option<i64>, frame::Video)> {
         let rotation = self.reader.rotation();
         let (f, _) = match prev {
             true => self.prev.as_ref(),
@@ -466,14 +466,21 @@ impl Source {
         .expect("a frame");
         let pts = f.pts();
         if let Some((_, _, rgb)) = self.rgb.iter().find(|(p, s, _)| *p == pts && *s == size) {
-            return Ok((pts, rgb.clone()));
+            return Ok((pts, frame_ref(rgb)?));
         }
-        let rgb = shown_rgb(f, rotation, size, reading)?;
+        let rgb = shown_rgb(
+            &mut self.drawn,
+            f,
+            rotation,
+            size,
+            reading,
+            self.reader.path(),
+        )?;
         self.rgb.retain(|(p, s, _)| *s == size && *p != pts);
         if self.rgb.len() >= 2 {
             self.rgb.remove(0);
         }
-        self.rgb.push((pts, size, rgb.clone()));
+        self.rgb.push((pts, size, frame_ref(&rgb)?));
         Ok((pts, rgb))
     }
 
@@ -493,28 +500,9 @@ pub(crate) struct Layer {
     pub(crate) rotation: u16,
     pub(crate) decoder: Option<crate::hw::Kind>,
     pub(crate) decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
-    made_on_gpu: bool,
-    placing: Option<(Placing, [f64; 4])>,
-    crossing: bool,
+    pub(crate) went: Option<crate::route::Went>,
     pub(crate) wipe: Option<Wipe>,
-    alpha: bool,
-}
-
-impl Layer {
-    fn whole(frame: frame::Video) -> Self {
-        Self {
-            frame: Some(frame),
-            weight: None,
-            rotation: 0,
-            decoder: None,
-            decoding: None,
-            made_on_gpu: false,
-            placing: None,
-            crossing: false,
-            wipe: None,
-            alpha: false,
-        }
-    }
+    pub(crate) share: f64,
 }
 
 fn mask_of(ramp: Option<Ramp>, k: i64) -> Option<Wipe> {
@@ -531,21 +519,6 @@ fn upright_fit(f: &frame::Video, rotation: u16, out: (u32, u32)) -> (u32, u32) {
     let sar = f.aspect_ratio();
     let sar = (sar.numerator(), sar.denominator());
     vidcut_core::place::upright_fit((f.width(), f.height()), sar, rotation, out)
-}
-
-pub(crate) fn placing_of(
-    source: &frame::Video,
-    rotation: u16,
-    layer: (u32, u32),
-    out: (u32, u32),
-    placed: &[Placed],
-) -> (Placing, [f64; 4]) {
-    let at_out = vidcut_core::place::fitted(out, upright_fit(source, rotation, out));
-    let at_layer = vidcut_core::place::fitted(layer, upright_fit(source, rotation, layer));
-    (
-        Placing::new(placed, (f64::from(out.0), f64::from(out.1)), at_out),
-        at_layer,
-    )
 }
 
 const PLACED_MOST: f64 = 16384.0;
@@ -667,11 +640,22 @@ fn hold(
             Key::Frame(_) => Key::Frame(o.index),
         };
         waiting.retain(|(k, _)| *k != key);
-        let picture = match o.picture {
-            crate::super_scale::Picture::Rgb(rgb) => big_picture(&rgb, base.made, o.pts),
-            crate::super_scale::Picture::Frame(f) => f,
-        };
-        waiting.push((key, picture));
+        match made_picture(o.picture, base.made, o.pts) {
+            Ok(picture) => waiting.push((key, picture)),
+            Err(e) => crate::debug!("ai", "{}: {e}", crate::super_scale::name(base.upscaler)),
+        }
+    }
+}
+
+fn made_picture(
+    picture: crate::super_scale::Picture,
+    made: (u32, u32),
+    pts: Option<i64>,
+) -> Result<frame::Video> {
+    match picture {
+        crate::super_scale::Picture::Held(held) => crate::screen::held::picture(held, made, pts),
+        crate::super_scale::Picture::Rgb(rgb) => Ok(big_picture(&rgb, made, pts)),
+        crate::super_scale::Picture::Frame(f) => Ok(f),
     }
 }
 
@@ -684,37 +668,22 @@ fn in_memory(frame: &frame::Video) -> Result<frame::Video> {
 }
 
 fn shown_rgb(
+    drawn: &mut Option<Single>,
     frame: &frame::Video,
     rotation: u16,
     (dw, dh): (u32, u32),
     reading: Reading,
-) -> Result<Vec<u8>> {
-    let mem = in_memory(frame)?;
-    let mut to_rgb = super::normalize::Normalizer::new(
-        &mem,
-        rotation,
-        dw,
-        dh,
-        format::Pixel::RGB24,
-        None,
-        reading,
-    )?;
-    let rgb = to_rgb.run(&mem)?;
-    let (w, h) = (rgb.width() as usize, rgb.height() as usize);
-    let stride = rgb.stride(0);
-    let mut packed = Vec::with_capacity(w * h * 3);
-    for y in 0..h {
-        packed.extend_from_slice(&rgb.data(0)[y * stride..y * stride + w * 3]);
-    }
-    Ok(packed)
+    path: &Path,
+) -> Result<frame::Video> {
+    let single = match drawn {
+        Some(single) => single,
+        None => drawn.insert(Single::new(reading)?),
+    };
+    single.held(frame, rotation, (dw, dh), path)
 }
 
 fn big_picture(out: &[u8], (w, h): (u32, u32), pts: Option<i64>) -> frame::Video {
-    let mut big = frame::Video::new(format::Pixel::RGB24, w, h);
-    let (row, into) = (w as usize * 3, big.stride(0));
-    for (y, line) in out.chunks_exact(row).enumerate() {
-        big.data_mut(0)[y * into..y * into + row].copy_from_slice(line);
-    }
+    let mut big = crate::buffers::unpacked(format::Pixel::RGB24, (w, h), 3, out);
     big.set_color_range(ffmpeg::util::color::Range::JPEG);
     big.set_color_space(ffmpeg::util::color::Space::RGB);
     big.set_color_primaries(ffmpeg::util::color::Primaries::BT709);
@@ -843,12 +812,12 @@ impl Source {
             Key::Frame(i) => i,
             Key::Still(_) => 0,
         };
+        let clock = Instant::now();
+        let work = crate::super_scale::making(id.upscaler, size, id.made, (want, want));
         if !self.run.as_ref().is_some_and(|r| r.serves(id, size)) {
             self.run = None;
             self.open_run(id, size, want, reading)?;
         }
-        let clock = Instant::now();
-        let work = crate::super_scale::making(id.upscaler, size, id.made, (want, want));
         loop {
             crate::cancel::stop()?;
             if let Some(p) = self.taken(id)? {
@@ -884,8 +853,12 @@ impl Source {
                 let rotation = self.reader.rotation();
                 let takes = |f: &frame::Video| run.run.takes(f, rotation);
                 match self.reader.next_frame()? {
+                    Some(f) if takes(&f) => {
+                        self.queued.push_back(frame_ref(&f)?);
+                        Some(f)
+                    }
                     Some(f) => {
-                        let kept = if takes(&f) { f } else { in_memory(&f)? };
+                        let kept = self.kept(&f)?;
                         self.queued.push_back(frame_ref(&kept)?);
                         Some(kept)
                     }
@@ -984,11 +957,18 @@ impl Source {
         let clock = Instant::now();
         let rgb = match run.run.takes(f, rotation) {
             true => None,
-            false => Some(shown_rgb(f, rotation, run.size, reading)?),
+            false => Some(shown_rgb(
+                &mut self.drawn,
+                f,
+                rotation,
+                run.size,
+                reading,
+                self.reader.path(),
+            )?),
         };
         let converted = clock.elapsed();
         let outs = match rgb {
-            Some(rgb) => run.run.push(i, f.pts(), rgb)?,
+            Some(rgb) => run.run.push(i, f.pts(), &rgb)?,
             None => run.run.push_frame(i, f, rotation)?,
         };
         let pushed = clock.elapsed();
@@ -1006,6 +986,23 @@ impl Source {
             return self.end_run();
         }
         Ok(())
+    }
+
+    fn kept(&mut self, f: &frame::Video) -> Result<frame::Video> {
+        if !crate::hw::on_gpu(f) {
+            return frame_ref(f);
+        }
+        if !self.unkept {
+            match crate::hw::Keeper::keep(&mut self.keeper, f) {
+                Ok(kept) => return Ok(kept),
+                Err(e) => {
+                    eprintln!("vidcut: GPU pictures come down for the upscaler: {e}");
+                    self.unkept = true;
+                    self.keeper = None;
+                }
+            }
+        }
+        in_memory(f)
     }
 
     fn end_run(&mut self) -> Result<()> {
@@ -1035,9 +1032,9 @@ impl Source {
         }
         let kept = match run.run.takes(f, rotation) {
             true => frame_ref(f)?,
-            false => in_memory(f)?,
+            false => self.kept(f)?,
         };
-        run.missed.push(kept);
+        self.run.as_mut().expect("opened").missed.push(kept);
         Ok(())
     }
 }
@@ -1062,10 +1059,6 @@ fn between_size(f: &frame::Video, rotation: u16, aim: (u32, u32)) -> (u32, u32) 
     } else {
         (even(f64::from(shown.0)), even(f64::from(shown.1)))
     }
-}
-
-fn sharpness(super_scale: SuperScale) -> Option<Sharpness> {
-    (!super_scale.is_off()).then_some(super_scale.sharpness)
 }
 
 fn reach(super_scale: SuperScale) -> f64 {
@@ -1115,15 +1108,11 @@ fn slot(piece: usize, layer: usize) -> usize {
     piece * LAYERS + layer.min(LAYERS - 1)
 }
 
-fn heaviest(layers: &[Layer], (fw, fh): (u32, u32)) -> usize {
+fn heaviest(layers: &[Layer]) -> usize {
     let mut left = u64::from(WHOLE);
     let mut best = (0, 0);
     for (i, l) in layers.iter().enumerate().rev() {
-        let share = l
-            .placing
-            .as_ref()
-            .map_or(1.0, |(p, _)| p.share((f64::from(fw), f64::from(fh))));
-        let w = (f64::from(l.weight.unwrap_or(WHOLE)) * share) as u64;
+        let w = (f64::from(l.weight.unwrap_or(WHOLE)) * l.share) as u64;
         let shown = left * w;
         if shown > best.1 {
             best = (i, shown);
@@ -1142,437 +1131,168 @@ pub struct VideoFrames {
     reading: Vec<Option<usize>>,
     ahead: Ahead<Source, (Input, u64, i64)>,
     black: Option<frame::Video>,
-    black_on_gpu: Option<frame::Video>,
     decoder: Option<crate::hw::GpuDecoder>,
     maker: Maker,
     gpu_made: i64,
     rotation: u16,
     last_decoder: Option<crate::hw::Kind>,
     last_decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
+    last_went: Option<crate::route::Went>,
     gpu_decoded: i64,
     dynamic: crate::hdr::Dynamic,
     light:
         std::collections::HashMap<std::path::PathBuf, std::sync::Arc<crate::light::LightAnalysis>>,
     last_dolby_vision: frame::Video,
-    gpu_mix_failed: Option<String>,
-    metal_mix: Option<crate::mixing::Mixer>,
     sources: Vec<super::SourceNote>,
-    burn: Option<Burner>,
-    titles: Titles,
-    finish: Option<Finish>,
+    out: (format::Pixel, Option<Hdr>),
+    timeline: Option<Hdr>,
+    titles: crate::player::Titles,
+    subtitles: crate::player::Subtitles,
+    drawer: Option<Drawer>,
+    drawn: i64,
+    encoder: Option<Handoff>,
 }
 
-const MIXING: format::Pixel = format::Pixel::YUV444P12LE;
-
-struct Finish {
-    target: Option<Hdr>,
-    pixel: format::Pixel,
-    output: Output,
-    normalizer: Option<super::normalize::Normalizer>,
-    gpu: Option<crate::cuda::CudaPictures>,
-    gpu_failed: bool,
+pub(crate) enum Handoff {
+    Cuda(crate::cuda::CudaDevice, crate::cuda::CudaFrames),
+    Surfaces(crate::hw::Frames),
 }
 
-impl Finish {
-    fn run(&mut self, f: &frame::Video, reading: Reading) -> Result<frame::Video> {
-        let on_cuda = Place::of(f) == Place::Cuda;
-        if let (true, Output::Cuda { device, frames }) = (on_cuda, &self.output) {
-            if !self.gpu_failed {
-                match converted_on_gpu(&mut self.gpu, device, f, self.pixel, self.target) {
-                    Ok(out) => return Ok(out),
-                    Err(e) => {
-                        crate::debug!(
-                            "decoding",
-                            "the GPU won't convert the timeline's colors, the CPU converts them: {e}"
-                        );
-                        self.gpu_failed = true;
-                    }
-                }
+impl Handoff {
+    pub(crate) fn of(
+        kind: vidcut_core::export::EncoderChoice,
+        cuda: Option<(crate::cuda::CudaDevice, crate::cuda::CudaFrames)>,
+        upload: Option<&super::encode::Upload>,
+    ) -> Result<Option<Self>> {
+        Ok(match (cuda, upload) {
+            (Some((device, frames)), _) => Some(Self::Cuda(device, frames)),
+            (None, Some(up)) if kind == vidcut_core::export::EncoderChoice::VideoToolbox => {
+                // SAFETY: `up.frames` is the encoder's live frames reference.
+                Some(Self::Surfaces(unsafe { crate::hw::Frames::of(up.frames)? }))
             }
-            let m = crate::hw::download(f)?;
-            let out =
-                converted_in_memory(&mut self.normalizer, &m, self.pixel, self.target, reading)?;
-            return frames.upload(&out);
-        }
-        let m = match Place::of(f) {
-            Place::Memory => frame_ref(f)?,
-            _ => crate::hw::to_read(f)?,
-        };
-        converted_in_memory(&mut self.normalizer, &m, self.pixel, self.target, reading)
+            _ => None,
+        })
     }
 }
 
-fn converted_on_gpu(
-    gpu: &mut Option<crate::cuda::CudaPictures>,
-    device: &crate::cuda::CudaDevice,
-    f: &frame::Video,
-    pixel: format::Pixel,
-    target: Option<Hdr>,
-) -> Result<frame::Video> {
-    if gpu.is_none() {
-        *gpu = Some(crate::cuda::CudaPictures::converting(
-            device, f, pixel, target,
-        )?);
-    }
-    let g = gpu.as_mut().expect("made above");
-    g.push(Some(&frame_ref(f)?))?;
-    g.pull()?
-        .ok_or_else(|| Error::Invalid("the GPU held back a converted frame".into()))
+pub(crate) struct Drawer {
+    gpu: &'static crate::screen::Gpu,
+    screen: crate::screen::Screen,
+    encoder: Option<Handoff>,
+    through_memory: Option<String>,
 }
 
-fn converted_in_memory(
-    normalizer: &mut Option<super::normalize::Normalizer>,
-    f: &frame::Video,
-    pixel: format::Pixel,
-    target: Option<Hdr>,
-    reading: Reading,
-) -> Result<frame::Video> {
-    if normalizer.as_ref().is_none_or(|n| !n.matches(f, 0)) {
-        *normalizer = Some(super::normalize::Normalizer::new(
-            f,
-            0,
-            f.width(),
-            f.height(),
-            pixel,
-            target,
-            reading,
-        )?);
-    }
-    normalizer.as_mut().expect("made above").run(f)
-}
-
-struct Burner {
-    cues: Vec<super::subtitles::Cue>,
-    style: SubtitleStyle,
-    fps: f64,
-    frame: i64,
-    showing: Vec<(usize, Option<usize>, Option<i64>)>,
-    size: (u32, u32),
-    drawn: Drawn,
-    gpu_failed: bool,
-}
-
-type OnGpu = Option<(crate::cuda::burn::Overlay, crate::burn::Placing)>;
-
-type OnMetal = Option<(crate::mixing::Overlay, crate::burn::Placing)>;
-
-#[derive(Default)]
-struct Drawn {
-    sprites: Vec<crate::burn::Sprite>,
-    on_gpu: OnGpu,
-    on_metal: OnMetal,
-    pops: Vec<crate::burn::Sprite>,
-    pops_on_gpu: OnGpu,
-    pops_on_metal: OnMetal,
-}
-
-fn overlaid(
-    kept: &mut OnGpu,
-    frames: &crate::cuda::CudaFrames,
-    f: &frame::Video,
-    sprites: &[crate::burn::Sprite],
-    shift: crate::burn::Placing,
-) -> Result<frame::Video> {
-    if kept.as_ref().is_none_or(|(_, at)| *at != shift) {
-        let overlay = crate::cuda::burn::Overlay::new(frames, f, sprites, shift)?;
-        *kept = Some((overlay, shift));
-    }
-    crate::cuda::burn::burn(frames, f, &kept.as_ref().expect("made").0)
-}
-
-fn covered(
-    kept: &mut OnMetal,
-    mixer: &mut crate::mixing::Mixer,
-    f: &frame::Video,
-    sprites: &[crate::burn::Sprite],
-    shift: crate::burn::Placing,
-) -> Result<frame::Video> {
-    if kept.as_ref().is_none_or(|(_, at)| *at != shift) {
-        let overlay = crate::mixing::Overlay::new(mixer, f, sprites, shift)?;
-        *kept = Some((overlay, shift));
-    }
-    mixer
-        .burn(Some(f), f, &kept.as_ref().expect("made").0)?
-        .ok_or_else(|| Error::Invalid("no picture under the drawing".into()))
-}
-
-impl Drawn {
-    fn of(sprites: Vec<crate::burn::Sprite>) -> Self {
-        Self {
-            sprites,
-            ..Self::default()
-        }
+impl Drawer {
+    pub(crate) fn new(encoder: Option<Handoff>) -> Result<Self> {
+        Ok(Self {
+            gpu: &crate::screen::offscreen().map_err(Error::Invalid)?.gpu,
+            screen: crate::screen::Screen::for_export(),
+            encoder,
+            through_memory: None,
+        })
     }
 
-    fn drawing(d: crate::burn::Drawing) -> Self {
-        Self {
-            sprites: d.lines,
-            pops: d.pops,
-            ..Self::default()
-        }
+    pub(crate) fn keeps(&self) -> Vec<crate::hw::Kind> {
+        self.gpu.gpu_pictures()
     }
 
-    fn pops(&mut self, pops: Vec<crate::burn::Sprite>) {
-        self.pops = pops;
-        self.pops_on_gpu = None;
-        self.pops_on_metal = None;
+    pub(crate) fn through_memory(&self) -> Option<&str> {
+        self.through_memory.as_deref()
     }
 
-    fn over(
+    pub(crate) fn frame(
         &mut self,
-        f: frame::Video,
-        (output, metal): (&Output, &mut Option<crate::mixing::Mixer>),
-        gpu_failed: &mut bool,
-        what: &str,
-        shift: crate::burn::Placing,
+        picture: &std::sync::Arc<crate::player::Picture>,
+        titles: &[crate::player::TitleOver],
+        layers: crate::screen::Layers<'_>,
+        (w, h): (u32, u32),
+        (pixel, colors): (format::Pixel, (Option<Hdr>, Option<Hdr>)),
     ) -> Result<frame::Video> {
-        if (self.sprites.is_empty() && self.pops.is_empty()) || shift.1 <= 0.0 {
-            return Ok(f);
-        }
-        match (Place::of(&f), output) {
-            (Place::Memory, _) => {
-                let mut f = f;
-                crate::burn::blend_at(&mut f, &self.sprites, shift)?;
-                crate::burn::blend_at(&mut f, &self.pops, shift)?;
-                Ok(f)
-            }
-            (Place::Cuda, Output::Cuda { frames, .. }) if !*gpu_failed => {
-                match self.on_cuda(frames, &f, shift) {
-                    Ok(out) => Ok(out),
-                    Err(e) => {
-                        crate::debug!(
-                            "decoding",
-                            "the GPU won't draw {what}, the CPU draws them: {e}"
-                        );
-                        *gpu_failed = true;
-                        self.in_memory(&f, Some(frames), shift)
-                    }
-                }
-            }
-            (_, Output::Cuda { frames, .. }) => self.in_memory(&f, Some(frames), shift),
-            (
-                Place::VideoToolbox,
-                Output::FittedOnGpu {
-                    place: Place::VideoToolbox,
-                    ..
-                },
-            ) if !*gpu_failed => match self.on_metal(metal, &f, shift) {
-                Ok(out) => Ok(out),
-                Err(e) => {
-                    crate::debug!(
-                        "decoding",
-                        "the GPU won't draw {what}, the CPU draws them: {e}"
-                    );
-                    *gpu_failed = true;
-                    self.in_memory(&f, None, shift)
-                }
-            },
-            _ => self.in_memory(&f, None, shift),
-        }
-    }
-
-    fn on_metal(
-        &mut self,
-        metal: &mut Option<crate::mixing::Mixer>,
-        f: &frame::Video,
-        shift: crate::burn::Placing,
-    ) -> Result<frame::Video> {
-        if metal.is_none() {
-            *metal = Some(crate::mixing::Mixer::new()?);
-        }
-        let mixer = metal.as_mut().expect("made above");
-        let lined = covered(&mut self.on_metal, mixer, f, &self.sprites, shift)?;
-        match self.pops.is_empty() {
-            true => Ok(lined),
-            false => covered(&mut self.pops_on_metal, mixer, &lined, &self.pops, shift),
-        }
-    }
-
-    fn on_cuda(
-        &mut self,
-        frames: &crate::cuda::CudaFrames,
-        f: &frame::Video,
-        shift: crate::burn::Placing,
-    ) -> Result<frame::Video> {
-        let lined = overlaid(&mut self.on_gpu, frames, f, &self.sprites, shift)?;
-        match self.pops.is_empty() {
-            true => Ok(lined),
-            false => overlaid(&mut self.pops_on_gpu, frames, &lined, &self.pops, shift),
-        }
-    }
-
-    fn in_memory(
-        &self,
-        f: &frame::Video,
-        up: Option<&crate::cuda::CudaFrames>,
-        shift: crate::burn::Placing,
-    ) -> Result<frame::Video> {
-        let mut m = crate::hw::download(f)?;
-        crate::burn::blend_at(&mut m, &self.sprites, shift)?;
-        crate::burn::blend_at(&mut m, &self.pops, shift)?;
-        match up {
-            Some(frames) => frames.upload(&m),
-            None => Ok(m),
-        }
-    }
-}
-
-impl Burner {
-    fn burn(
-        &mut self,
-        f: frame::Video,
-        output: (&Output, &mut Option<crate::mixing::Mixer>),
-    ) -> Result<frame::Video> {
-        let j = self.frame;
-        self.frame += 1;
-        let shown: Vec<(usize, vidcut_core::subtitles::Shown, SubtitleStyle)> = self
-            .cues
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.start <= j && j < c.end)
-            .map(|(i, c)| {
-                let style = self.style.for_cue(c.style.as_ref());
-                let s = vidcut_core::subtitles::shown(
-                    &c.text,
-                    &c.words,
-                    &c.word_styles,
-                    &style,
-                    j - c.start,
-                    self.fps,
-                    c.color.as_deref(),
-                );
-                (i, s, style)
-            })
-            .collect();
-        if shown.is_empty() {
-            return Ok(f);
-        }
-        let showing: Vec<(usize, Option<usize>, Option<i64>)> = shown
-            .iter()
-            .map(|(i, s, _)| (*i, s.spoken, s.step))
-            .collect();
-        let size = (f.width(), f.height());
-        if showing != self.showing || size != self.size {
-            let cues: Vec<crate::burn::Painted<'_>> = shown
-                .iter()
-                .map(|(i, s, style)| crate::burn::Painted {
-                    shown: s,
-                    place: self.cues[*i].place,
-                    style,
-                })
-                .collect();
-            let drawing = crate::burn::paint(&cues, size.0, size.1);
-            let steady = |s: &[(usize, Option<usize>, Option<i64>)]| -> Vec<_> {
-                s.iter()
-                    .map(|&(i, w, step)| (i, w, step.is_some()))
-                    .collect()
+        let (gpu, screen) = (self.gpu, &mut self.screen);
+        screen.draw(gpu, Some(picture), titles, layers, w, h);
+        let handed =
+            match (&self.encoder, &self.through_memory) {
+                (Some(Handoff::Cuda(device, frames)), None) => Some(screen.encoded(
+                    gpu,
+                    pixel,
+                    colors,
+                    crate::screen::Sink::Cuda(device, frames),
+                )),
+                (Some(Handoff::Surfaces(frames)), None) => Some(frames.fresh().and_then(|f| {
+                    screen.encoded(gpu, pixel, colors, crate::screen::Sink::Surface(f))
+                })),
+                _ => None,
             };
-            match size == self.size && steady(&showing) == steady(&self.showing) {
-                true => self.drawn.pops(drawing.pops),
-                false => self.drawn = Drawn::drawing(drawing),
-            }
-            self.showing = showing;
-            self.size = size;
+        match handed {
+            Some(Ok(out)) => return Ok(out),
+            Some(Err(e)) => self.through_memory = Some(e.to_string()),
+            None => {}
         }
-        self.drawn
-            .over(f, output, &mut self.gpu_failed, "subtitles", ((0, 0), 1.0))
+        let out = screen.encoded(gpu, pixel, colors, crate::screen::Sink::Memory)?;
+        match &self.encoder {
+            Some(Handoff::Cuda(_, frames)) => {
+                let mut up = frames.upload(&out)?;
+                crate::color::tag_frame(&mut up, colors.1);
+                Ok(up)
+            }
+            _ => Ok(out),
+        }
     }
 }
 
-struct KeptTitle {
-    title: Title,
-    size: (u32, u32),
-    upright: bool,
-    drawn: Drawn,
-    laid: Option<(Vec<Placed>, i32, Drawn)>,
-    used: bool,
+pub(crate) struct Single {
+    drawer: Drawer,
+    maker: Maker,
+    fitting: Fitting,
 }
 
-#[derive(Default)]
-struct Titles {
-    kept: Vec<KeptTitle>,
-    gpu_failed: bool,
-}
+impl Single {
+    pub(crate) fn new(reading: Reading) -> Result<Self> {
+        let drawer = Drawer::new(None)?;
+        let maker = Maker::new((2, 2, format::Pixel::YUV420P), drawer.keeps(), reading).holding();
+        Ok(Self {
+            drawer,
+            maker,
+            fitting: Fitting::none(),
+        })
+    }
 
-impl Titles {
-    fn draw(
+    pub(crate) fn draw(
         &mut self,
-        mut f: frame::Video,
-        titles: &[ShownTitle],
-        (output, metal): (&Output, &mut Option<crate::mixing::Mixer>),
+        frame: &frame::Video,
+        rotation: u16,
+        size: (u32, u32),
+        pixel: format::Pixel,
+        path: &Path,
     ) -> Result<frame::Video> {
-        let size = (f.width(), f.height());
-        for shown in titles {
-            let upright = !shown.placed.is_empty();
-            let at = self
-                .kept
-                .iter()
-                .position(|k| k.size == size && k.upright == upright && k.title == shown.title);
-            let at = at.unwrap_or_else(|| {
-                let rotation = shown.title.rotation.filter(|_| !upright);
-                let drawn = Title {
-                    rotation,
-                    ..shown.title.clone()
-                };
-                self.kept.push(KeptTitle {
-                    title: shown.title.clone(),
-                    size,
-                    upright,
-                    drawn: Drawn::of(crate::burn::title(&drawn, size.0, size.1)),
-                    laid: None,
-                    used: false,
-                });
-                self.kept.len() - 1
-            });
-            let k = &mut self.kept[at];
-            k.used = true;
-            let dy = match k.drawn.sprites.first() {
-                Some(s) if shown.title.moves() => {
-                    let top = shown.run.top(0, f64::from(size.1), f64::from(s.height));
-                    top.round() as i32 - s.y
-                }
-                _ => 0,
-            };
-            let alpha = shown.alpha() as f32;
-            if !upright {
-                f = k.drawn.over(
-                    f,
-                    (output, &mut *metal),
-                    &mut self.gpu_failed,
-                    "titles",
-                    ((0, dy), alpha),
-                )?;
-                continue;
-            }
-            if k.laid
-                .as_ref()
-                .is_none_or(|(placed, at, _)| *placed != shown.placed || *at != dy)
-            {
-                let sprite =
-                    k.drawn.sprites.first().and_then(|s| {
-                        super::place::title(s, &shown.title, &shown.placed, dy, size)
-                    });
-                let drawn = Drawn::of(sprite.into_iter().collect());
-                k.laid = Some((shown.placed.clone(), dy, drawn));
-            }
-            if let Some((_, _, drawn)) = k.laid.as_mut() {
-                f = drawn.over(
-                    f,
-                    (output, &mut *metal),
-                    &mut self.gpu_failed,
-                    "titles",
-                    ((0, 0), alpha),
-                )?;
-            }
-        }
-        Ok(f)
+        let made = self.maker.make(&mut self.fitting, frame, path)?;
+        let picture = std::sync::Arc::new(crate::player::Picture::new(made, rotation, None, None));
+        let layers = (&[][..], &[][..], &[][..], None);
+        self.drawer
+            .frame(&picture, &[], layers, size, (pixel, (None, None)))
     }
 
-    fn shown(&mut self) {
-        self.kept.retain(|k| k.used);
-        for k in &mut self.kept {
-            k.used = false;
-        }
+    pub(crate) fn small_luma(&self, picture: &frame::Video) -> Result<Vec<u8>> {
+        crate::screen::held::small_luma(self.drawer.gpu, picture, crate::analysis::MEASURE)
+    }
+
+    pub(crate) fn held(
+        &mut self,
+        frame: &frame::Video,
+        rotation: u16,
+        (w, h): (u32, u32),
+        path: &Path,
+    ) -> Result<frame::Video> {
+        let made = self.maker.make(&mut self.fitting, frame, path)?;
+        let picture = std::sync::Arc::new(crate::player::Picture::new(made, rotation, None, None));
+        let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
+        screen.draw(gpu, Some(&picture), &[], (&[], &[], &[], None), w, h);
+        screen.encoded(
+            gpu,
+            format::Pixel::RGB24,
+            (None, None),
+            crate::screen::Sink::Held,
+        )
     }
 }
 
@@ -1594,90 +1314,48 @@ impl VideoFrames {
             reading: Vec::new(),
             ahead: Ahead::new(),
             black: None,
-            black_on_gpu: None,
             decoder: None,
             maker: Maker::new(
-                (width, height, pixel),
-                target,
-                Output::Fitted,
+                (width, height, format::Pixel::YUV420P),
+                Vec::new(),
                 Reading::Stream,
             ),
             gpu_made: 0,
             rotation: 0,
             last_decoder: None,
             last_decoding: None,
+            last_went: None,
             gpu_decoded: 0,
             dynamic: Default::default(),
             light: Default::default(),
             last_dolby_vision: frame::Video::empty(),
-            gpu_mix_failed: None,
-            metal_mix: None,
             sources: Vec::new(),
-            burn: None,
-            titles: Titles::default(),
-            finish: None,
+            out: (pixel, target),
+            timeline: None,
+            titles: Default::default(),
+            subtitles: Default::default(),
+            drawer: None,
+            drawn: 0,
+            encoder: None,
         }
+    }
+
+    pub(crate) fn encode_on(mut self, encoder: Option<Handoff>) -> Self {
+        self.encoder = encoder;
+        self
+    }
+
+    pub fn through_memory(&self) -> Option<&str> {
+        self.drawer.as_ref().and_then(Drawer::through_memory)
     }
 
     pub fn with_timeline(mut self, timeline: Option<Hdr>) -> Result<Self> {
-        let target = self.maker.target();
-        let rgb = crate::color::is_rgb(self.maker.out().2);
-        if (timeline == target && !rgb)
-            || matches!(self.maker.output(), Output::Decoded { .. } | Output::Vulkan)
-        {
-            return Ok(self);
-        }
-        let (w, h, pixel) = self.maker.out();
-        let reading = self.maker.reading();
-        let (mixing, output) = match self.maker.output() {
-            Output::Cuda { device, .. } => {
-                let p010 = format::Pixel::P010LE;
-                let frames = crate::cuda::CudaFrames::new(device, p010, w, h)?;
-                let device = device.clone();
-                (p010, Output::Cuda { device, frames })
-            }
-            _ => (MIXING, Output::Fitted),
-        };
-        let maker = Maker::new((w, h, mixing), timeline, output, reading);
-        let encoder = std::mem::replace(&mut self.maker, maker).into_output();
-        self.finish = Some(Finish {
-            target,
-            pixel,
-            output: encoder,
-            normalizer: None,
-            gpu: None,
-            gpu_failed: false,
-        });
-        self.black = None;
-        self.black_on_gpu = None;
+        self.timeline = timeline;
         Ok(self)
     }
 
-    fn finished(&mut self, mut f: frame::Video) -> Result<frame::Video> {
-        let timeline = self.maker.target();
-        let reading = self.maker.reading();
-        let Some(finish) = self.finish.as_mut() else {
-            return Ok(f);
-        };
-        crate::color::tag_frame(&mut f, timeline);
-        let mut out = finish.run(&f, reading)?;
-        crate::hdr::strip(&mut out);
-        crate::hdr::copy_dynamic(&f, &mut out, self.dynamic)?;
-        out.set_pts(f.pts());
-        Ok(out)
-    }
-
-    pub fn with_burn(mut self, cues: Vec<super::subtitles::Cue>, style: SubtitleStyle) -> Self {
-        self.burn = (!cues.is_empty()).then(|| Burner {
-            cues,
-            style,
-            fps: self.fps.as_f64(),
-            frame: 0,
-            showing: Vec::new(),
-            size: (0, 0),
-            drawn: Drawn::default(),
-            gpu_failed: false,
-        });
+    pub fn with_burn(self, cues: Vec<super::subtitles::Cue>, style: SubtitleStyle) -> Self {
+        self.subtitles.burned(&cues, &style);
         self
     }
 
@@ -1685,10 +1363,16 @@ impl VideoFrames {
         &self.sources
     }
 
-    fn read_from(&mut self, path: &std::path::Path, decoding: &crate::decode::Decoding) {
+    fn read_from(
+        &mut self,
+        path: &std::path::Path,
+        decoding: &crate::decode::Decoding,
+        went: Option<crate::route::Went>,
+    ) {
         let source = super::SourceNote {
             path: path.to_path_buf(),
             decoding: decoding.clone(),
+            went: went.and_then(crate::route::Went::label),
         };
         match self.sources.iter_mut().find(|s| s.path == source.path) {
             Some(s) if *s == source => return,
@@ -1698,43 +1382,14 @@ impl VideoFrames {
         crate::progress::note(super::Note::Source(source));
     }
 
-    pub fn mix_failed(&self) -> Option<&str> {
-        self.gpu_mix_failed.as_deref()
-    }
-
-    fn gpu_mixes(&self) -> bool {
-        let place = match self.maker.output() {
-            Output::Cuda { .. } => Place::Cuda,
-            Output::FittedOnGpu {
-                place: Place::VideoToolbox,
-                ..
-            } => Place::VideoToolbox,
-            _ => return false,
-        };
-        crate::hw::can_mix(place) && self.gpu_mix_failed.is_none()
-    }
-
-    pub(crate) fn output(mut self, output: Output) -> Self {
-        let mut out = self.maker.out();
-        if matches!(output, Output::Decoded { .. }) {
-            out.2 = format::Pixel::YUV420P;
-        }
-        self.maker = Maker::new(out, self.maker.target(), output, self.maker.reading());
+    pub(crate) fn keeping(mut self, keep: Vec<crate::hw::Kind>) -> Self {
+        self.maker = Maker::new(self.maker.out(), keep, self.maker.reading());
         self
     }
 
     pub fn single_frames(mut self) -> Self {
         self.maker.read_as(Reading::Frames);
         self
-    }
-
-    pub(crate) fn shrink_to(&mut self, size: Option<(u32, u32)>) {
-        if self.maker.shrinks() != size {
-            self.maker.shrink_to(size);
-            for s in &mut self.open {
-                s.normalized = None;
-            }
-        }
     }
 
     pub(crate) fn clear_stages(&mut self) {
@@ -1778,19 +1433,6 @@ impl VideoFrames {
         self.gpu_made
     }
 
-    fn gpu_side(&self) -> Option<GpuSide> {
-        let Output::Cuda { device, .. } = self.maker.output() else {
-            return None;
-        };
-        let (w, h, format) = self.maker.out();
-        Some(GpuSide {
-            device: device.clone(),
-            out: (w, h),
-            format,
-            target: self.maker.target(),
-        })
-    }
-
     pub fn gpu_decoded(&self) -> i64 {
         self.gpu_decoded
     }
@@ -1800,70 +1442,75 @@ impl VideoFrames {
     }
 
     pub fn next_frame(&mut self) -> Result<Option<frame::Video>> {
+        if self.drawer.is_none() {
+            let drawer = Drawer::new(self.encoder.take())?;
+            let (out, reading) = (self.maker.out(), self.maker.reading());
+            self.maker = Maker::new(out, drawer.keeps(), reading).holding();
+            self.drawer = Some(drawer);
+        }
         let Some(layers) = self.next_layers()? else {
             return Ok(None);
         };
         let k = (self.k - 1).max(0);
-        let titles: Vec<(usize, ShownTitle)> = self
-            .pieces
-            .get(self.piece)
-            .map(|p| {
-                p.titles()
-                    .into_iter()
-                    .map(|(n, t)| (n, t.after(k)))
-                    .collect()
-            })
+        let piece = self.pieces.get(self.piece).cloned();
+        let (w, h, _) = self.maker.out();
+        let j = self.drawn;
+        self.drawn += 1;
+        let at = piece
+            .as_ref()
+            .map(|p| crate::player::titles_of(p, k))
             .unwrap_or_default();
-        let f = self.compose(layers, &titles)?;
-        self.titles.shown();
-        let f = match self.burn.as_mut() {
-            Some(b) => b.burn(f, (self.maker.output(), &mut self.metal_mix))?,
-            None => f,
-        };
-        self.finished(f).map(Some)
-    }
-
-    fn compose(
-        &mut self,
-        layers: Vec<Layer>,
-        titles: &[(usize, ShownTitle)],
-    ) -> Result<frame::Video> {
-        let mut rest = layers.into_iter();
-        let mut below: Option<Layer> = None;
-        let mut taken = 0;
-        let mut i = 0;
-        while i < titles.len() {
-            let n = titles[i].0;
-            let mut group = Vec::new();
-            while i < titles.len() && titles[i].0 == n {
-                group.push(titles[i].1.clone());
-                i += 1;
+        self.titles.draw_at(&at, (w, h));
+        let (mut titles, _) = self.titles.shown_at(&at, (w, h), &[]);
+        let fps = self.fps.as_f64();
+        self.subtitles.draw_at(fps, (w, h), j);
+        titles.extend(self.subtitles.shown_at(fps, (w, h), j).0);
+        let placed = piece
+            .as_ref()
+            .map(|p| crate::player::placed_of(p, k, &[]))
+            .unwrap_or_default();
+        let crosses = piece.as_ref().map(VideoPiece::crosses).unwrap_or_default();
+        let kernels: Vec<u32> = piece
+            .as_ref()
+            .map(crate::player::scales_of)
+            .unwrap_or_default()
+            .into_iter()
+            .map(crate::screen::kernel)
+            .collect();
+        let shown = heaviest(&layers);
+        let like = layers[shown].frame.as_ref().map(frame_ref).transpose()?;
+        let light = layers
+            .iter()
+            .filter_map(|l| l.frame.as_ref())
+            .filter_map(crate::hdr::Hdr10Plus::of_frame)
+            .reduce(|a, b| a.brightest(&b));
+        let picture = std::sync::Arc::new(crate::player::picture(layers));
+        let drawer = self.drawer.as_mut().expect("made above");
+        let mut out = drawer.frame(
+            &picture,
+            &titles,
+            (&placed, &crosses, &kernels, self.timeline),
+            (w, h),
+            (self.out.0, (self.timeline, self.out.1)),
+        )?;
+        self.gpu_made += 1;
+        if self.dynamic.dolby_vision {
+            let dv = crate::hdr::Dynamic {
+                hdr10plus: false,
+                dolby_vision: true,
+            };
+            let from = like.as_ref().unwrap_or(&self.last_dolby_vision);
+            crate::hdr::copy_dynamic(from, &mut out, dv)?;
+        }
+        if self.dynamic.hdr10plus {
+            match light {
+                Some(light) => light.attach(&mut out)?,
+                None => crate::light::FrameLight::default()
+                    .hdr10plus()
+                    .attach(&mut out)?,
             }
-            let parts: Vec<Layer> = below
-                .take()
-                .into_iter()
-                .chain(rest.by_ref().take(n.saturating_sub(taken)))
-                .collect();
-            taken = n.max(taken);
-            let f = self.flat(parts)?;
-            let f = self
-                .titles
-                .draw(f, &group, (self.maker.output(), &mut self.metal_mix))?;
-            below = Some(Layer::whole(f));
         }
-        let parts: Vec<Layer> = below.into_iter().chain(rest).collect();
-        self.flat(parts)
-    }
-
-    fn flat(&mut self, layers: Vec<Layer>) -> Result<frame::Video> {
-        let decoded = matches!(self.maker.output(), Output::Decoded { .. });
-        if layers.len() != 1 || (layers[0].alpha && !decoded) {
-            return self.mix(layers);
-        }
-        match layers.into_iter().next().and_then(|l| l.frame) {
-            Some(f) => Ok(f),
-            None => self.black_frame(),
-        }
+        Ok(Some(out))
     }
 
     pub(crate) fn next_layers(&mut self) -> Result<Option<Vec<Layer>>> {
@@ -1871,16 +1518,17 @@ impl VideoFrames {
             return Ok(None);
         };
         let layers = layers.expect("a picture was asked for");
-        let (w, h, _) = self.maker.out();
-        let heaviest = heaviest(&layers, (w, h));
+        let heaviest = heaviest(&layers);
         let shown = &layers[heaviest];
         let read = shown
             .decoding
             .as_ref()
             .filter(|d| {
-                self.last_decoding
-                    .as_ref()
-                    .is_none_or(|last| !std::sync::Arc::ptr_eq(last, d))
+                shown.went != self.last_went
+                    || self
+                        .last_decoding
+                        .as_ref()
+                        .is_none_or(|last| !std::sync::Arc::ptr_eq(last, d))
             })
             .and_then(
                 |d| match self.pieces.get(self.piece)?.layers().get(heaviest) {
@@ -1889,24 +1537,19 @@ impl VideoFrames {
                 },
             );
         if let Some((path, d)) = read {
-            self.read_from(&path, &d);
+            self.read_from(&path, &d, shown.went);
         }
+        self.last_went = shown.went;
         self.rotation = shown.rotation;
         self.last_decoder = shown.decoder;
         self.last_decoding = shown.decoding.clone();
         self.gpu_decoded += i64::from(shown.decoder.is_some());
-        let made_on_gpu = layers
-            .iter()
-            .all(|l| l.made_on_gpu || (l.frame.is_none() && layers.len() > 1));
-        self.gpu_made += i64::from(made_on_gpu);
         Ok(Some(layers))
     }
 
     pub fn skip_frame(&mut self) -> Result<bool> {
         let skipped = self.next(false)?.is_some();
-        if skipped && let Some(b) = self.burn.as_mut() {
-            b.frame += 1;
-        }
+        self.drawn += i64::from(skipped);
         Ok(skipped)
     }
 
@@ -1924,7 +1567,6 @@ impl VideoFrames {
             self.k += 1;
             let piece = piece.clone();
             let layers = piece.layers();
-            let crosses = piece.crosses();
             let files = layers
                 .iter()
                 .any(|(l, _)| matches!(l, VideoPiece::Source { .. }));
@@ -1934,8 +1576,7 @@ impl VideoFrames {
             if k == 1 && files {
                 self.open_next();
             }
-            let mixed = layers.len() > 1;
-            self.maker.set_mixing(mixed);
+            let placed = crate::player::placed_of(&piece, k, &[]);
             let mut made = Vec::with_capacity(layers.len());
             for (i, (layer, ramp)) in layers.into_iter().enumerate() {
                 let weight = ramp.map(|r| r.weight(k));
@@ -1943,34 +1584,24 @@ impl VideoFrames {
                 let VideoPiece::Source {
                     image,
                     pace,
-                    placed,
                     retime,
                     ..
                 } = layer
                 else {
                     if picture {
-                        let decoded = matches!(self.maker.output(), Output::Decoded { .. });
-                        let frame = if mixed && !decoded {
-                            None
-                        } else {
-                            Some(self.black_frame()?)
-                        };
                         made.push(Layer {
-                            frame,
+                            frame: Some(self.black_frame()?),
                             weight,
                             rotation: 0,
                             decoder: None,
                             decoding: None,
-                            made_on_gpu: false,
-                            placing: None,
-                            crossing: crosses.get(i).copied().unwrap_or(false),
+                            went: None,
                             wipe,
-                            alpha: false,
+                            share: 1.0,
                         });
                     }
                     continue;
                 };
-                let placed: Vec<Placed> = placed.iter().map(|p| p.after(k)).collect();
                 let still = Pictures::of(image.as_ref()) == Pictures::Still;
                 let backward = pace.speed < 0.0 && !still;
                 let retimed = !retime.is_nearest() && !still && pace.speed > 0.0;
@@ -1993,62 +1624,42 @@ impl VideoFrames {
                         src.reader.decoding().clone(),
                     )
                 };
-                let mut frame = if backward {
+                let frame = if backward {
                     self.reversed_frame(i, s, layer, k)?
                 } else if retimed {
                     self.retimed_frame(i, s, layer, k)?
                 } else {
                     self.source_frame(i, s, layer, k)?
                 };
-                if self.finish.is_some() && Place::of(&frame) == Place::Memory {
-                    crate::color::tag_frame(&mut frame, self.maker.target());
-                }
-                let decoded = matches!(self.maker.output(), Output::Decoded { .. });
-                let placing = match (&self.open[s].current, placed.is_empty() || decoded) {
-                    (Some((f, _)), false) => {
-                        let (w, h, _) = self.maker.out();
-                        Some(placing_of(
-                            f,
-                            rotation,
-                            (frame.width(), frame.height()),
-                            (w, h),
-                            &placed,
-                        ))
-                    }
-                    _ => None,
-                };
-                let alpha = self.open[s]
-                    .current
-                    .as_ref()
-                    .is_some_and(|(f, _)| super::normalize::has_alpha(crate::hw::sw_format(f)));
                 made.push(Layer {
                     frame: Some(frame),
                     weight,
                     rotation: if self.open[s].upright { 0 } else { rotation },
                     decoder,
                     decoding: Some(decoding),
-                    made_on_gpu: self.open[s].fitting.route == Some(Route::Gpu),
-                    placing,
-                    crossing: crosses.get(i).copied().unwrap_or(false),
+                    went: self.open[s].fitting.went(),
                     wipe,
-                    alpha,
+                    share: self.share_of(s, rotation, placed.get(i)),
                 });
             }
             return Ok(Some(picture.then_some(made)));
         }
     }
 
-    fn black_frame(&mut self) -> Result<frame::Video> {
-        let black = frame_ref(self.black()?)?;
-        let mut out = match self.maker.output() {
-            Output::Cuda { frames, .. } => {
-                if self.black_on_gpu.is_none() {
-                    self.black_on_gpu = Some(frames.upload(&black)?);
-                }
-                frame_ref(self.black_on_gpu.as_ref().expect("just uploaded"))?
+    fn share_of(&self, s: usize, rotation: u16, placed: Option<&Vec<Placed>>) -> f64 {
+        match (&self.open[s].current, placed.filter(|p| !p.is_empty())) {
+            (Some((f, _)), Some(placed)) => {
+                let (w, h, _) = self.maker.out();
+                let size = (f64::from(w), f64::from(h));
+                let at = vidcut_core::place::fitted((w, h), upright_fit(f, rotation, (w, h)));
+                Placing::new(placed, size, at).share(size)
             }
-            _ => black,
-        };
+            _ => 1.0,
+        }
+    }
+
+    fn black_frame(&mut self) -> Result<frame::Video> {
+        let mut out = frame_ref(self.black()?)?;
         self.black_metadata(&mut out)?;
         Ok(out)
     }
@@ -2067,186 +1678,6 @@ impl VideoFrames {
             crate::hdr::copy_dynamic(&self.last_dolby_vision, out, dv)?;
         }
         Ok(())
-    }
-
-    fn mix(&mut self, layers: Vec<Layer>) -> Result<frame::Video> {
-        if let Output::Decoded { .. } = self.maker.output() {
-            return Err(Error::Invalid(
-                "pictures as decoded come apart, not mixed".into(),
-            ));
-        }
-        let (w, h, _) = self.maker.out();
-        let shown = heaviest(&layers, (w, h));
-        let placed = layers.iter().any(|l| l.placing.is_some() || l.crossing);
-        let black = match self.maker.output() {
-            Output::Cuda { .. } if placed && self.gpu_mixes() && layers[0].frame.is_none() => {
-                Some(self.black_frame()?)
-            }
-            _ => None,
-        };
-        let (w, h, _) = self.maker.out();
-        let wiped = layers.iter().any(|l| l.wipe.is_some());
-        let blended = layers.iter().any(|l| match &l.placing {
-            Some((p, _)) => p.mode != CompositeMode::Normal,
-            None => l.alpha,
-        });
-        let on_gpu = match self.maker.output() {
-            Output::Cuda { frames, .. } if self.gpu_mixes() && !wiped && !blended => {
-                match cuda_mix(frames, &layers, black.as_ref(), (w, h)) {
-                    Ok(mixed) => Some(mixed),
-                    Err(e) => {
-                        crate::debug!(
-                            "decoding",
-                            "the GPU won't mix a dissolve's pictures, the CPU mixes them: {e}"
-                        );
-                        self.gpu_mix_failed = Some(e.to_string());
-                        None
-                    }
-                }
-            }
-            Output::FittedOnGpu {
-                place: Place::VideoToolbox,
-                ..
-            } if self.gpu_mixes() && !wiped && !blended && on_metal(&layers) => {
-                match metal_mix(&mut self.metal_mix, &layers, (w, h)) {
-                    Ok(mixed) => mixed,
-                    Err(e) => {
-                        crate::debug!(
-                            "decoding",
-                            "the GPU won't mix a dissolve's pictures, the CPU mixes them: {e}"
-                        );
-                        self.gpu_mix_failed = Some(e.to_string());
-                        None
-                    }
-                }
-            }
-            _ => None,
-        };
-        let mut out = match on_gpu {
-            Some(mixed) => mixed,
-            None => {
-                let black = frame_ref(self.black()?)?;
-                let in_memory = |f: Option<&frame::Video>| -> Result<frame::Video> {
-                    match f {
-                        None => frame_ref(&black),
-                        Some(f) if Place::of(f) == Place::Memory => frame_ref(f),
-                        Some(f) => crate::hw::to_read(f),
-                    }
-                };
-                let bottom = Canvas::of(&in_memory(layers[0].frame.as_ref())?)?;
-                let mut mixed = match layers[0].alpha {
-                    true => Canvas::of(&black)?.covered(&bottom, WHOLE)?,
-                    false => bottom,
-                };
-                let mut below: Option<Canvas> = None;
-                let mut i = 1;
-                while i < layers.len() {
-                    let l = &layers[i];
-                    let over = in_memory(l.frame.as_ref())?;
-                    if let Some(mask) = l.wipe {
-                        let covered =
-                            |under: &Canvas, over: &frame::Video, l: &Layer| match &l.placing {
-                                Some((placing, fitted)) => super::place::over(
-                                    under,
-                                    &super::place::Layer {
-                                        picture: over,
-                                        placing,
-                                        fitted: *fitted,
-                                        weight: WHOLE,
-                                    },
-                                ),
-                                None if l.alpha => under.covered(&Canvas::of(over)?, WHOLE),
-                                None => Canvas::of(over),
-                            };
-                        let hold = layers
-                            .get(i + 1)
-                            .is_some_and(|n| n.crossing && n.wipe.is_some());
-                        if hold {
-                            let full = covered(&mixed, &over, l)?;
-                            below = Some(std::mem::replace(&mut mixed, full));
-                        } else if l.crossing {
-                            let full = match &below {
-                                Some(bg) => covered(bg, &over, l)?,
-                                None => covered(&mixed, &over, l)?,
-                            };
-                            mixed = super::mix::wipe(&mixed, &full, mask)?;
-                        } else {
-                            let top = covered(&mixed, &over, l)?;
-                            let next = super::mix::wipe(&mixed, &top, mask)?;
-                            below = Some(std::mem::replace(&mut mixed, next));
-                        }
-                        i += 1;
-                        continue;
-                    }
-                    let weight = l.weight.unwrap_or(WHOLE);
-                    let laid = |under: &Canvas| -> Result<Canvas> {
-                        match &l.placing {
-                            Some((placing, fitted)) => super::place::over(
-                                under,
-                                &super::place::Layer {
-                                    picture: &over,
-                                    placing,
-                                    fitted: *fitted,
-                                    weight,
-                                },
-                            ),
-                            None if l.alpha => under.covered(&Canvas::of(&over)?, weight),
-                            None => super::mix::mix(under, &Canvas::of(&over)?, weight),
-                        }
-                    };
-                    if l.crossing
-                        && let Some(b) = &below
-                    {
-                        mixed = super::mix::crossed(&mixed, &laid(b)?, b)?;
-                    } else {
-                        let next = laid(&mixed)?;
-                        below = Some(std::mem::replace(&mut mixed, next));
-                    }
-                    i += 1;
-                }
-                let mixed = mixed.frame();
-                match self.maker.output() {
-                    Output::Cuda { frames, .. } => frames.upload(&mixed)?,
-                    _ => mixed,
-                }
-            }
-        };
-        let like = layers[shown]
-            .frame
-            .as_ref()
-            .or_else(|| layers.iter().find_map(|l| l.frame.as_ref()));
-        if let Some(like) = like {
-            // SAFETY: both are valid frames.
-            unsafe { ffmpeg::ffi::av_frame_copy_props(out.as_mut_ptr(), like.as_ptr()) };
-        }
-        crate::hdr::strip(&mut out);
-        if self.dynamic.dolby_vision {
-            let dv = crate::hdr::Dynamic {
-                hdr10plus: false,
-                dolby_vision: true,
-            };
-            let from = layers[shown]
-                .frame
-                .as_ref()
-                .unwrap_or(&self.last_dolby_vision);
-            crate::hdr::copy_dynamic(from, &mut out, dv)?;
-        }
-        if self.dynamic.hdr10plus {
-            let light = layers
-                .iter()
-                .filter_map(|l| l.frame.as_ref())
-                .filter_map(crate::hdr::Hdr10Plus::of_frame)
-                .reduce(|a, b| a.brightest(&b));
-            let black = layers.iter().all(|l| l.frame.is_none());
-            match light {
-                Some(light) => light.attach(&mut out)?,
-                None if black => crate::light::FrameLight::default()
-                    .hdr10plus()
-                    .attach(&mut out)?,
-                None => {}
-            }
-        }
-        Ok(out)
     }
 
     pub fn forget_position(&mut self) {
@@ -2314,7 +1745,7 @@ impl VideoFrames {
             let (w, h, pix) = self.maker.out();
             let mut f = frame::Video::new(pix, w, h);
             fill_black(&mut f)?;
-            crate::color::tag_frame(&mut f, self.maker.target());
+            crate::color::tag_frame(&mut f, None);
             self.black = Some(f);
         }
         Ok(self.black.as_ref().expect("just set"))
@@ -2394,7 +1825,6 @@ impl VideoFrames {
                                 from,
                                 target,
                                 pictures,
-                                self.gpu_side().as_ref(),
                                 self.decoder.as_ref(),
                                 self.maker.reading(),
                                 self.measures(&input),
@@ -2512,7 +1942,6 @@ impl VideoFrames {
             };
             let origin = *origin;
             let target = self.target(origin, from);
-            let gpu = self.gpu_side();
             let decoder = self.decoder.clone();
             let measure = self.measures(&input);
             let reading = self.maker.reading();
@@ -2533,7 +1962,6 @@ impl VideoFrames {
                     from,
                     target,
                     pictures,
-                    gpu.as_ref(),
                     decoder.as_ref(),
                     reading,
                     measure,
@@ -2632,21 +2060,12 @@ impl VideoFrames {
     }
 
     fn reversed_frames(&self, s: usize) -> i64 {
-        let current = self.open[s].current.as_ref();
-        let (w, h) = match (self.maker.output(), current) {
-            (Output::Decoded { .. }, Some((f, _))) => (f.width(), f.height()),
-            _ => (self.maker.out().0, self.maker.out().1),
+        let (w, h) = match self.open[s].current.as_ref() {
+            Some((f, _)) => (f.width(), f.height()),
+            None => (self.maker.out().0, self.maker.out().1),
         };
         let bytes = (w as usize * h as usize * 3).max(1);
-        let most = if matches!(
-            self.maker.output(),
-            Output::Cuda { .. } | Output::FittedOnGpu { .. }
-        ) {
-            REVERSED_ON_GPU
-        } else {
-            REVERSED_MOST
-        };
-        ((REVERSED_BYTES / bytes) as i64).clamp(1, most)
+        ((REVERSED_BYTES / bytes) as i64).clamp(1, REVERSED_MOST)
     }
 
     fn frame_at(
@@ -2669,13 +2088,7 @@ impl VideoFrames {
         layer: &VideoPiece,
         k: i64,
     ) -> Result<frame::Video> {
-        let VideoPiece::Source {
-            placed,
-            super_scale,
-            retime,
-            ..
-        } = layer
-        else {
+        let VideoPiece::Source { retime, .. } = layer else {
             return self.source_frame(i, s, layer, k);
         };
         let at = self.exact_at(s, layer, k);
@@ -2700,16 +2113,12 @@ impl VideoFrames {
         let Some(weight) = weight.filter(|w| *w > 1e-6 && !hdr) else {
             return self.shown(i, s, layer, changed);
         };
-        let decoded = matches!(self.maker.output(), Output::Decoded { .. });
-        let up = (!self.maker.mixing() || self.gpu_mixes()) && placed.is_empty();
         let (w, h, _) = self.maker.out();
         let reading = self.open[s].pictures.reading(self.maker.reading());
         let src = &mut self.open[s];
         let rotation = src.reader.rotation();
         let (cur, _) = src.current.as_ref().expect("a frame");
-        let wanted = (!(placed.is_empty() || decoded))
-            .then(|| layer_size((w, h), cur, rotation, placed, *super_scale));
-        let size = between_size(cur, rotation, wanted.unwrap_or((w, h)));
+        let size = between_size(cur, rotation, (w, h));
         let start = Instant::now();
         let pair = match (&src.prev, &src.current) {
             (Some((a, _)), Some((b, _))) if crate::interpolate::takes_frames(*retime, a, b) => {
@@ -2737,7 +2146,7 @@ impl VideoFrames {
         );
         let clock = Instant::now();
         let converted = clock - start;
-        let big = if src.cut()? {
+        let big = if src.cut(size, reading)? {
             crate::debug!(
                 "interpolate",
                 "{}: a cut between the frames at {weight:.3}",
@@ -2745,7 +2154,7 @@ impl VideoFrames {
             );
             crate::interpolate::kept_at_cut(*retime, size, weight);
             let nearer = weight < 0.5;
-            let rgb = match pictures {
+            let mut picture = match pictures {
                 Some((a, b)) => {
                     if nearer {
                         a
@@ -2755,14 +2164,15 @@ impl VideoFrames {
                 }
                 None => src.rgb_of(nearer, size, reading)?.1,
             };
-            big_picture(&rgb, size, pb)
+            picture.set_pts(pb);
+            picture
         } else {
             let made = match &pair {
                 Some((a, b)) => crate::interpolate::between_frames(&key, a, b, size, weight)?,
                 None => {
                     let (a, b) = pictures.as_ref().expect("the pictures of the pair");
-                    let rgb = crate::interpolate::between(*retime, &key, a, b, size, weight)?;
-                    big_picture(&rgb, size, pb)
+                    let made = crate::interpolate::between(*retime, &key, a, b, size, weight)?;
+                    made_picture(made, size, pb)?
                 }
             };
             crate::debug!(
@@ -2776,16 +2186,13 @@ impl VideoFrames {
             made
         };
         let between = clock.elapsed();
-        self.maker.size_layer(i, wanted);
-        self.maker.sharpen_layer(i, sharpness(*super_scale));
         let src = &mut self.open[s];
         let made = self
             .maker
-            .make_layer(i, &mut src.fitting, &big, 0, src.reader.path(), reading)?
-            .ok_or_else(no_picture)?;
+            .make_layer(i, &mut src.fitting, &big, src.reader.path(), reading)?;
         src.normalized = None;
         src.upright = true;
-        let out = self.finished_layer(s, up, made)?;
+        let out = self.finished_layer(s, made)?;
         crate::debug!(
             "interpolate",
             "steps: to RGB in {:.1} ms, made in {:.1} ms, handed on in {:.1} ms",
@@ -2811,28 +2218,9 @@ impl VideoFrames {
             } => (placed.as_slice(), *super_scale),
             _ => (&[][..], SuperScale::default()),
         };
-        let decoded = matches!(self.maker.output(), Output::Decoded { .. });
-        let up = (!self.maker.mixing() || self.gpu_mixes()) && placed.is_empty();
         let src = &mut self.open[s];
         let (w, h, _) = self.maker.out();
-        let wanted = match (&src.current, placed.is_empty() || decoded) {
-            (Some((f, _)), false) => Some(layer_size(
-                (w, h),
-                f,
-                src.reader.rotation(),
-                placed,
-                super_scale,
-            )),
-            _ => None,
-        };
-        self.maker.size_layer(i, wanted);
-        self.maker.sharpen_layer(i, sharpness(super_scale));
-        let stale = !decoded
-            && src
-                .normalized
-                .as_ref()
-                .is_some_and(|n| (n.width(), n.height()) != wanted.unwrap_or((w, h)));
-        if changed || stale || src.normalized.is_none() {
+        if changed || src.normalized.is_none() {
             let rotation = src.reader.rotation();
             let reading = src.pictures.reading(self.maker.reading());
             let big = if super_scale.ai() {
@@ -2849,22 +2237,14 @@ impl VideoFrames {
             let (frame, _) = src.current.as_ref().expect("have a frame");
             let clock = Instant::now();
             let made = match &big {
-                Some(big) => self.maker.make_layer(
-                    i,
-                    &mut src.fitting,
-                    big,
-                    0,
-                    src.reader.path(),
-                    reading,
-                )?,
-                None => self.maker.make_layer(
-                    i,
-                    &mut src.fitting,
-                    frame,
-                    rotation,
-                    src.reader.path(),
-                    reading,
-                )?,
+                Some(big) => {
+                    self.maker
+                        .make_layer(i, &mut src.fitting, big, src.reader.path(), reading)?
+                }
+                None => {
+                    self.maker
+                        .make_layer(i, &mut src.fitting, frame, src.reader.path(), reading)?
+                }
             };
             if big.is_some() {
                 crate::debug!(
@@ -2874,7 +2254,7 @@ impl VideoFrames {
                     clock.elapsed().as_secs_f64() * 1e3
                 );
             }
-            src.normalized = Some(made.ok_or_else(no_picture)?);
+            src.normalized = Some(made);
             src.upright = big.is_some();
             if big.is_some() && !src.told {
                 crate::progress::note(super::Note::Upscaled(super::UpscaleNote {
@@ -2885,26 +2265,11 @@ impl VideoFrames {
             }
         }
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
-        self.finished_layer(s, up, picture)
+        self.finished_layer(s, picture)
     }
 
-    fn finished_layer(
-        &mut self,
-        s: usize,
-        up: bool,
-        picture: frame::Video,
-    ) -> Result<frame::Video> {
+    fn finished_layer(&mut self, s: usize, mut out: frame::Video) -> Result<frame::Video> {
         let src = &mut self.open[s];
-        let mut out = match self.maker.output() {
-            Output::Cuda { frames, .. }
-                if up
-                    && Place::of(&picture) == Place::Memory
-                    && !super::normalize::has_alpha(picture.format()) =>
-            {
-                frames.upload(&picture)?
-            }
-            _ => picture,
-        };
         crate::hdr::strip(&mut out);
         if self.dynamic != crate::hdr::Dynamic::default() {
             crate::hdr::copy_dynamic(&src.dynamic, &mut out, self.dynamic)?;
@@ -2930,155 +2295,6 @@ impl VideoFrames {
         }
         Ok(out)
     }
-}
-
-fn cuda_mix(
-    frames: &crate::cuda::CudaFrames,
-    layers: &[Layer],
-    black: Option<&frame::Video>,
-    size: (u32, u32),
-) -> Result<frame::Video> {
-    let solid = |f: Option<&frame::Video>| match (f, black) {
-        (Some(f), _) | (None, Some(f)) => frame_ref(f),
-        (None, None) => Err(Error::Invalid("nothing under a placed picture".into())),
-    };
-    let laid = |under: Option<&frame::Video>, l: &Layer| -> Result<Option<frame::Video>> {
-        if let (Some((placing, fitted)), Some(f)) = (&l.placing, &l.frame) {
-            let weight = l.weight.unwrap_or(WHOLE);
-            if Place::of(f) == Place::Cuda {
-                let layer = super::place::Layer {
-                    picture: f,
-                    placing,
-                    fitted: *fitted,
-                    weight,
-                };
-                let below = solid(under)?;
-                if let Some(placed) = crate::cuda::place::place(frames, &below, &layer, size)? {
-                    return Ok(Some(placed));
-                }
-            }
-            let picture = match Place::of(f) {
-                Place::Memory => frame_ref(f)?,
-                _ => crate::hw::download(f)?,
-            };
-            let layer = super::place::Layer {
-                picture: &picture,
-                placing,
-                fitted: *fitted,
-                weight,
-            };
-            let overlay = crate::cuda::burn::Overlay::of(frames, &layer, size)?;
-            let under = solid(under)?;
-            return Ok(Some(crate::cuda::burn::burn(frames, &under, &overlay)?));
-        }
-        match (under, l.weight) {
-            (None, None) => l.frame.as_ref().map(frame_ref).transpose(),
-            (under, w) => Ok(Some(crate::cuda::mix::mix(
-                frames,
-                under,
-                l.frame.as_ref(),
-                w.unwrap_or(WHOLE),
-            )?)),
-        }
-    };
-    let mut mixed: Option<frame::Video> = None;
-    let mut below: Option<Option<frame::Video>> = None;
-    for l in layers {
-        if l.crossing
-            && let Some(b) = &below
-        {
-            let then = solid(laid(b.as_ref(), l)?.as_ref())?;
-            let (now, b) = (solid(mixed.as_ref())?, solid(b.as_ref())?);
-            mixed = Some(crate::cuda::mix::sum(frames, &now, &then, &b)?);
-        } else {
-            let next = laid(mixed.as_ref(), l)?;
-            below = Some(std::mem::replace(&mut mixed, next));
-        }
-    }
-    mixed.ok_or_else(|| Error::Invalid("a mix of black alone".into()))
-}
-
-fn on_metal(layers: &[Layer]) -> bool {
-    layers.iter().all(|l| {
-        l.placing.is_some()
-            || l.frame
-                .as_ref()
-                .is_none_or(|f| Place::of(f) == Place::VideoToolbox)
-    })
-}
-
-fn metal_mix(
-    mixer: &mut Option<crate::mixing::Mixer>,
-    layers: &[Layer],
-    size: (u32, u32),
-) -> Result<Option<frame::Video>> {
-    let Some(like) = layers
-        .iter()
-        .filter(|l| l.placing.is_none())
-        .find_map(|l| l.frame.as_ref())
-        .or_else(|| {
-            layers
-                .iter()
-                .filter_map(|l| l.frame.as_ref())
-                .find(|f| Place::of(f) == Place::VideoToolbox && (f.width(), f.height()) == size)
-        })
-    else {
-        return Ok(None);
-    };
-    if mixer.is_none() {
-        *mixer = Some(crate::mixing::Mixer::new()?);
-    }
-    let mixer = mixer.as_mut().expect("made above");
-    let laid = |mixer: &mut crate::mixing::Mixer, under: Option<&frame::Video>, l: &Layer| {
-        if let (Some((placing, fitted)), Some(f)) = (&l.placing, &l.frame) {
-            let weight = l.weight.unwrap_or(WHOLE);
-            if Place::of(f) == Place::VideoToolbox {
-                let layer = super::place::Layer {
-                    picture: f,
-                    placing,
-                    fitted: *fitted,
-                    weight,
-                };
-                if let Some(placed) = mixer.place(under, like, &layer, size)? {
-                    return Ok(Some(placed));
-                }
-            }
-            let picture = match Place::of(f) {
-                Place::Memory => frame_ref(f)?,
-                _ => crate::hw::to_read(f)?,
-            };
-            let layer = super::place::Layer {
-                picture: &picture,
-                placing,
-                fitted: *fitted,
-                weight,
-            };
-            let overlay = crate::mixing::Overlay::of(mixer, like, &layer, size)?;
-            return mixer.burn(under, like, &overlay);
-        }
-        match (under, l.weight) {
-            (None, None) => l.frame.as_ref().map(frame_ref).transpose(),
-            (under, w) => mixer.mix(under, l.frame.as_ref(), w.unwrap_or(WHOLE)),
-        }
-    };
-    let mut mixed: Option<frame::Video> = None;
-    let mut below: Option<Option<frame::Video>> = None;
-    for l in layers {
-        if l.crossing
-            && let Some(b) = &below
-        {
-            let then = laid(mixer, b.as_ref(), l)?;
-            mixed = mixer.sum(mixed.as_ref(), then.as_ref(), b.as_ref())?;
-        } else {
-            let next = laid(mixer, mixed.as_ref(), l)?;
-            below = Some(std::mem::replace(&mut mixed, next));
-        }
-    }
-    Ok(mixed)
-}
-
-fn no_picture() -> Error {
-    Error::Invalid("the GPU scaler gave no picture".into())
 }
 
 fn dolby_vision(f: &frame::Video) -> Result<frame::Video> {

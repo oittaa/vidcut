@@ -58,7 +58,6 @@ const HANDLE_TYPE: u32 = 1;
 #[cfg(windows)]
 const HANDLE_TYPE: u32 = 2;
 const DEDICATED: u32 = 1;
-const MEMORY_TYPE_HOST: u32 = 1;
 const MEMORY_TYPE_DEVICE: u32 = 2;
 const STREAM_NON_BLOCKING: u32 = 1;
 
@@ -86,23 +85,6 @@ pub(super) struct Cuda {
     pub(super) alloc_async:
         Option<unsafe extern "C" fn(*mut CuDevicePtr, usize, CuStream) -> CuResult>,
     pub(super) free_async: Option<unsafe extern "C" fn(CuDevicePtr, CuStream) -> CuResult>,
-    pub(super) module_load_data: unsafe extern "C" fn(*mut *mut c_void, *const c_void) -> CuResult,
-    pub(super) module_get_function:
-        unsafe extern "C" fn(*mut *mut c_void, *mut c_void, *const std::ffi::c_char) -> CuResult,
-    #[allow(clippy::type_complexity)]
-    pub(super) launch_kernel: unsafe extern "C" fn(
-        *mut c_void,
-        u32,
-        u32,
-        u32,
-        u32,
-        u32,
-        u32,
-        u32,
-        CuStream,
-        *mut *mut c_void,
-        *mut *mut c_void,
-    ) -> CuResult,
 }
 
 impl Cuda {
@@ -147,9 +129,6 @@ impl Cuda {
                 stream_destroy: call!("cuStreamDestroy_v2"),
                 alloc_async: lib.get(b"cuMemAllocAsync\0").ok().map(|f| *f),
                 free_async: lib.get(b"cuMemFreeAsync\0").ok().map(|f| *f),
-                module_load_data: call!("cuModuleLoadData"),
-                module_get_function: call!("cuModuleGetFunction"),
-                launch_kernel: call!("cuLaunchKernel"),
                 _lib: lib,
             })
         }
@@ -174,38 +153,6 @@ impl Cuda {
             src_pitch: from_pitch,
             dst_x_in_bytes: 0,
             dst_y: 0,
-            dst_memory_type: MEMORY_TYPE_DEVICE,
-            dst_host: std::ptr::null_mut(),
-            dst_device: to,
-            dst_array: std::ptr::null_mut(),
-            dst_pitch: to_pitch,
-            width_in_bytes: row_bytes,
-            height: rows,
-        };
-        // SAFETY: as the caller says.
-        unsafe { (self.copy_2d)(&copy, stream) }
-    }
-}
-
-impl Cuda {
-    pub(super) unsafe fn copy_up(
-        &self,
-        (from, from_pitch): (*const u8, usize),
-        (to, to_pitch): (CuDevicePtr, usize),
-        (x_bytes, y): (usize, usize),
-        (row_bytes, rows): (usize, usize),
-        stream: CuStream,
-    ) -> CuResult {
-        let copy = Memcpy2d {
-            src_x_in_bytes: 0,
-            src_y: 0,
-            src_memory_type: MEMORY_TYPE_HOST,
-            src_host: from.cast(),
-            src_device: 0,
-            src_array: std::ptr::null_mut(),
-            src_pitch: from_pitch,
-            dst_x_in_bytes: x_bytes,
-            dst_y: y,
             dst_memory_type: MEMORY_TYPE_DEVICE,
             dst_host: std::ptr::null_mut(),
             dst_device: to,
@@ -537,6 +484,14 @@ impl SharedBuffer {
     }
 
     pub fn copy_planes(&self, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<()> {
+        self.copied(frame, planes, false)
+    }
+
+    pub fn copy_into(&self, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<()> {
+        self.copied(frame, planes, true)
+    }
+
+    fn copied(&self, frame: &frame::Video, planes: &[PlaneCopy], into: bool) -> Result<()> {
         if frame.format() != format::Pixel::CUDA {
             return Err(Error::Invalid("the picture isn't in CUDA memory".into()));
         }
@@ -553,18 +508,19 @@ impl SharedBuffer {
                 if src.is_null() || pitch < 0 || (pitch as u64) < p.row_bytes {
                     return Err(Error::Invalid(format!("the picture has no plane {i}")));
                 }
-                let src_pitch = source_pitch(pitch)?;
-                let dst_pitch = copy_len(p.pitch)?;
+                let picture = (src as CuDevicePtr, source_pitch(pitch)?);
+                let shared = (self.ptr + p.offset, copy_len(p.pitch)?);
+                let (from, to) = if into {
+                    (shared, picture)
+                } else {
+                    (picture, shared)
+                };
                 let row_bytes = copy_len(p.row_bytes)?;
                 let rows = copy_len(p.rows)?;
                 // SAFETY: the context is current; plane `i` fits `frame` and the buffer, as checked.
                 check("copying a plane", unsafe {
-                    self.cuda.copy_rows(
-                        (src as CuDevicePtr, src_pitch),
-                        (self.ptr + p.offset, dst_pitch),
-                        (row_bytes, rows),
-                        self.stream,
-                    )
+                    self.cuda
+                        .copy_rows(from, to, (row_bytes, rows), self.stream)
                 })?;
             }
             // SAFETY: the context is current; this buffer's stream.

@@ -8,15 +8,15 @@
 ```mermaid
 flowchart LR
   dec["hw::GpuDecoder"] --> frame["frame on a route::Place"]
-  frame -->|"Route::Kept"| store["player::store::Store"]
-  store --> shown["viewer textures<br>gui/picture.rs"]
-  frame -->|"Route::Gpu"| fitted["CudaPictures, hw::Fitter"]
-  fitted -->|"a dissolve"| mixed["cuda::mix, mixing::Mixer"]
-  fitted --> genc["GPU encoder"]
-  mixed --> genc
-  frame -->|"Route::Shrunk, Route::Whole"| mem["memory"]
-  mem --> cpu["Normalizer, CPU encoders"]
-  mem -->|"uploaded"| genc
+  frame -->|"Route::Kept"| kept["kept as decoded"]
+  frame -->|"Route::Whole"| mem["memory"]
+  kept --> screen["screen::Screen<br>picture.wgsl"]
+  mem --> screen
+  screen --> shown["viewer"]
+  screen -->|"fs_encode"| planes["the encoder's planes"]
+  planes -->|"CUDA, IOSurface"| genc["GPU encoder"]
+  planes -->|"read back"| cpu["CPU encoders"]
+  cpu -.->|"uploaded"| genc
 ```
 
 ## The GPU and the decoder
@@ -38,28 +38,27 @@ flowchart LR
 ## Routes
 
 - `route::Place` is where a picture is: `Memory`, or one of the GPU places of `hw::Kind`.
-- `route::Facts` holds what the planner knows of a frame and its `route::Dest`:
-  - `hw::can_fit`: its GPU fits it for that encoder.
-  - `hw::reaches`: its GPU hands it to the place of the encoder. CUDA and Vulkan reach each other.
-  - `hw::can_mix`: its GPU mixes dissolves. CUDA and VideoToolbox do.
-  - What failed before.
-- `route::plan` gives the `Route`. A GPU route wins.
+- `route::Facts` holds what the planner knows of a frame:
+  - Its place.
+  - The draw takes the frames of that place (`Gpu::gpu_pictures`).
+  - The draw reads its layout (`normalize::displayable`).
+  - Keeping the frames failed before.
+- `route::plan` gives the `Route`. `Route::Kept` wins.
 
 | `Route` | The picture is |
 |---|---|
-| `Route::Gpu` | fitted on the GPU and handed on there |
-| `Route::Kept` | kept as decoded, for the viewer |
-| `Route::Shrunk` | scaled down on the GPU, then copied down |
+| `Route::Kept` | kept as decoded, for the draw |
 | `Route::Whole` | copied down whole |
 | `Route::Cpu` | already in memory |
 
-- A GPU route that fails becomes a fact. The planner then plans that file again without it.
+- `export::make::Maker` follows the plan. The viewer, exports, proxies, thumbnails and the AI inputs use it.
+- A keep that fails becomes a fact. After that, the frames of that layer come down.
 
 ## Each decoder's frames
 
-In playback:
+In the viewer, exports, proxies and thumbnails:
 
-| Decoder | Kept in the player | Shown by the viewer |
+| Decoder | Kept | Read by the draw |
 |---|---|---|
 | NVDEC (CUDA) | `cuda::keep`: a copy | through a buffer shared with wgpu (`SharedBuffer`) |
 | Vulkan | `vulkan::keep`: as decoded | images imported into wgpu |
@@ -71,48 +70,35 @@ In playback:
   - Why: the viewer cannot import the pictures of another GPU.
 - vidcut keeps facts of each VA-API device. `NO_COPY` and `WAYS` are kept by the address of the display. `SIZES` is kept by the device, the layout and the size.
 
-In exports:
-
-| Decoder | Fitted for | With | Dissolves | Comes down for |
-|---|---|---|---|---|
-| NVDEC (CUDA) | NVENC; Vulkan's ProRes | `CudaPictures`: `scale_cuda`, `pad_cuda`, libplacebo | `cuda::mix` | other encoders |
-| Vulkan | NVENC; Vulkan's ProRes | libplacebo (`CudaPictures`) | `cuda::mix` | other encoders; alpha |
-| VA-API | VAAPI | `scale_vaapi`, `pad_vaapi`, `transpose_vaapi` | in memory | other encoders; color changes; dissolves |
-| Direct3D 11 | AMF | the video processor | in memory | other encoders; color changes; 8-bit into 10-bit; dissolves |
-| VideoToolbox | its own encoders | `vt::Fit` | `mixing::Mixer` | wipes; composite modes; a timeline color space that is not the color space of the export |
-
-VideoToolbox (`vt::Fit`) fits a frame in these steps. It skips a step that the frame does not need.
-
-1. `transpose_vt` turns the frame.
-2. Lanczos on Metal scales it (`lanczos::Lanczos`). A render pass clears the bars to black.
-   - Why: the scaler of VideoToolbox keeps less detail.
-3. A pixel transfer changes the layout (`Transfer`).
-4. A Metal kernel changes the colors (`recolor::Recolor`). It also writes P416, in the place of step 3.
-   - It uses the math of the CPU (`color::recoloring`, `CpuColors`).
-   - Why P416: the pixel transfer gives wrong levels in P416 ([gotchas](../gotchas.md#gpu-drivers)).
-
 - ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
-- Metal mixes dissolves (`mixing::Mixer`) with the sums of `cuda::mix`.
-- Metal draws subtitles, titles and placed pictures into the frame (`Mixer::burn`) with the sums of `cuda::burn`.
 - A VideoToolbox frame that comes down is mapped, not copied (`hw::to_read`).
+- `hw::Turner` turns VideoToolbox frames for the scalers of macOS (`vt::Turn`, `transpose_vt`).
+- Lanczos on Metal scales the input of the scaler and the frame interpolation of macOS to the size of their session (`lanczos::sized`). It also scales the output of the scaler to the size that it shows at.
+  - Why Lanczos: the scaler of VideoToolbox keeps less detail.
 
-Mixing and overlays:
+The draw:
 
-- CUDA and VideoToolbox mix dissolves on the GPU. The other GPUs mix them in memory.
-- When the driver refuses the kernel of `cuda::mix`, the CPU mixes for the rest of the export. The result tells why.
-- CUDA and VideoToolbox draw subtitles, titles and placed pictures into the frame on the GPU (`cuda::burn`, `Mixer::burn`). The CPU draws the overlay.
-- CUDA and VideoToolbox place a picture on the GPU with a kernel of their own (`cuda::place`, `Mixer::place`). Then the CPU draws no overlay ([export](export.md#placed-pictures)).
-- For the other GPUs, a frame comes down while an overlay shows.
-- A wipe, a composite mode and a layer with alpha and nothing below mix in memory.
-- A layer with alpha over other layers is a placed picture. The CPU draws its overlay with its alpha, and the GPU mixes it in.
-- A frame with alpha does not fit on the GPU (`hw::can_fit`). It comes down with its alpha.
+- The viewer, exports, proxies and thumbnails draw each frame with one shader (`screen::Screen`, `picture.wgsl`).
+  - The AI upscalers and the frame interpolation take their RGB input from the same draw (`export::video::Single`).
+  - That input stays on the GPU (`Sink::Held`). `held::Pipes` packs the drawn RGB plane into a buffer (`rgb.wgsl`).
+- It mixes the dissolves, the wipes, the composite modes, the placed pictures, the titles and the subtitles.
+- `export::video::Drawer` draws for the export, proxies, thumbnails and the AI inputs.
+  - All of them share one wgpu device (`screen::offscreen`). vidcut makes it once, at the first draw.
+  - The viewer's frame render, the AI upscalers and the frame interpolation use that device too (`compute::Gpu`).
+  - It opens with all the limits of the GPU. Why: the AI kernels need large buffers and much workgroup memory.
+  - It is not the device of the viewer: a submit from another thread can make the viewer's surface fail ([gotchas](../gotchas.md#wgpu-and-egui)).
+- There, `fs_encode` writes the planes of the encoder ([export](export.md#timeline-colors)).
+  - NVENC takes them through memory that Vulkan shares with CUDA (`Shared::out`).
+  - VideoToolbox takes them in the IOSurfaces of its own frames (`Sink::Surface`).
+  - The other encoders take them from memory (`Sink::Memory`).
 
 Frames that come down:
 
-- Where the output shows a frame smaller, the GPU shrinks it first (`hw::Shrinker`).
-- CPU encoders, renders and tiles take frames in memory.
+- CPU encoders take frames in memory.
 - The player brings a frame down when the viewer cannot show its kind, when an import fails, or when its pool leaves the budget.
 - A picture in memory goes up into the frames of a GPU encoder (`Upload`, `CudaFrames::upload`).
+- The player brings the pictures of the AI upscalers and the frame interpolation down (`held::in_memory`). Why: the viewer draws on another device.
+- The cut test of a retime brings down a 96×54 luma picture of each frame, not the frame (`held::small_luma`, [export](export.md)).
 
 ## Encoders
 
@@ -136,9 +122,8 @@ Frames that come down:
 Super Scale (`SuperScale`) sets the upscaler of a picture that is enlarged.
 
 - `render::super_scale_of` gives each piece its upscaler: its own, or the project's (`MediaUpscaler`, `ProjectUpscaler`). Auto is the scaler of macOS on macOS, and AI Best elsewhere.
-- For NVENC, libplacebo enlarges with the upscaler of the picture's `Sharpness` (`CudaPictures`). It scales in linear light with sigmoid, unless the picture has a color shader.
-- On the CPU, `Normalizer::upscaling` uses `spline` or `lanczos`.
-- `layer_size` lets a placed layer grow past its source size.
+- Classic enlarges in the shader of the viewer and the export, with the kernel of the picture's `Sharpness` (`screen::kernel`).
+- `layer_size` lets the picture of an AI upscaler grow past its source size.
 - The result of an AI upscaler is its own. It is not meant to match the CPU.
 
 The AI upscalers share one path in the reader:
@@ -147,6 +132,7 @@ The AI upscalers share one path in the reader:
 - A picture has a key (`PictureId`). It comes from a run of the upscaler (`Session`, `super_scale::Run`), which starts at `super_scale::first_frame`.
 - A run takes frames in order. It reads them from the reader's queue, or with a second `VideoReader` (`Source::seek_ahead`).
 - The run gives each picture once, and keeps the last one for a change of size.
+- A picture of AI Fast or AI Best stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`).
 - The reader drops a run for a frame that the run does not give (`RUN_JUMP`).
 - `super_scale::report` tells what the upscaler makes. The stats panel shows it (`SuperScaleStats`).
 
@@ -161,7 +147,7 @@ GPU memory:
 
 AI Fast (`nanovsr`):
 
-- NanoVSR 5.4M in WGSL shaders on a wgpu device of its own.
+- NanoVSR 5.4M in WGSL shaders on the shared off-screen device.
 - It works in chunks on a fixed grid of the file's frames (`nanovsr::FRAMES`). Thus the viewer and an export get the same pictures.
 - It gives the asked frame first. A thread (`vidcut-upscale-rest`) makes the rest of the chunk.
   - Why: the viewer shows the frame after about half the work.
@@ -170,7 +156,7 @@ AI Fast (`nanovsr`):
 
 AI Best (`flashvsr`):
 
-- FlashVSR+ Turbo on a wgpu device of its own. A run is a `flashvsr::Stream` with no last frame.
+- FlashVSR+ Turbo on the shared off-screen device. A run is a `flashvsr::Stream` with no last frame.
 - `flashvsr::check` refuses media that it cannot take, and sizes that do not fit (`run::plan`).
 - It looks at the stop flag (`cancel::stop`) before each block. Why: a picture that the viewer no longer needs stops soon.
 - Its KV caches stay on the GPU while they fit in the room (`run::plan`). Else some stay in main memory between chunks (`Keys::Host`).
@@ -183,6 +169,9 @@ The scaler of macOS (`macos`):
 - `macos::check` refuses HDR media and pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
 - A VideoToolbox frame reaches it on the GPU (`Run::push_frame`). A turned frame turns first (`hw::Turner`).
+- It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
+  - Why: a picture of 4 times the source fills the cache of the viewer.
+  - A picture of a layout that Lanczos cannot take comes out as P416 (`lanczos::takes`).
 - Its buffers lose the color labels of the transfers. Why: with labels, it makes less detail.
 - AI Fast and AI Best are off on macOS (`super_scale::off_here`).
 
@@ -190,9 +179,9 @@ The scaler of macOS (`macos`):
 
 `interpolate` makes the frames of Retime Process ([export](export.md#which-source-frame), [deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
 
-- `interpolate::between` takes two RGB frames and a weight. It gives an RGB frame.
-- It runs on a wgpu device of its own (`compute::Gpu`), with kernels of its own (`interpolate::ops`).
-  - The device goes when the last `interpolate::User` goes.
+- `interpolate::between` takes two RGB pictures on the GPU and a weight. It gives an RGB picture on the GPU.
+- It runs on the shared off-screen device (`compute::Gpu`), with kernels of its own (`interpolate::ops`).
+  - Its kernels and memory go when the last `interpolate::User` goes.
 - The last pair stays on the GPU with its features. Why: the frames between one pair share them.
 - AI Fast is RIFE 4.25 (`rife`). AI Best is EMA-VFI (`ema`). Frame Blend mixes on the same device (`Ops::combine`).
 - EMA-VFI plans its work buffers in a pool (`ops::arena`), and refines in bands of rows (`ema::Pair`).
@@ -211,10 +200,13 @@ On macOS (`interpolate::macos`):
 
 - CUDA frames use `bwdif_cuda`, and Vulkan frames use `bwdif_vulkan`.
   - `hw::deinterlace` first checks that the filter gives the frames of `bwdif`. Else the frames come down for `bwdif`.
-- libplacebo converts HDR for NVENC and the ProRes of Vulkan (`CudaPictures`), with the math of the CPU (`color::gpu_color`).
-- VideoToolbox converts colors on Metal (`recolor::Recolor`).
-- The other GPUs fit pictures only where the colors stay (`color::kept`).
-- The viewer's shader converts each picture into the timeline color space (`color::shader_colors`).
+- `route::Facts::deinterlacing` gives the facts of a frame for the deinterlacer, and `route::plan` gives its route:
+  - `Route::Kept`: the GPU filter deinterlaces the frame.
+  - `Route::Whole`: the frame comes down for `bwdif`.
+  - `Route::Cpu`: `bwdif` deinterlaces the frame in memory.
+  - A GPU filter that does not build becomes a fact. After that, the frames come down.
+- The shader of the draw converts each picture into the timeline color space (`color::shader_colors`).
+- `fs_encode` converts the timeline color space into the color space of the output.
 
 ## Why
 
@@ -222,7 +214,7 @@ On macOS (`interpolate::macos`):
 - `GpuDecoder::why_not` names the GPUs that give wrong results:
   - AMD's Direct3D 11 and VideoToolbox go wrong after a seek into H.264 with open GOPs.
   - vidcut trusts Vulkan on NVIDIA only.
-- vidcut checks GPU deinterlacers and some scalers against test pictures first.
+- vidcut checks GPU deinterlacers against test pictures first.
 - A GPU step that fails leaves its file to the CPU.
 
 ## Code
@@ -231,8 +223,7 @@ On macOS (`interpolate::macos`):
 - `crates/vidcut-av/src/hw/`
 - `crates/vidcut-av/src/cuda/`
 - `crates/vidcut-av/src/lanczos.rs`
-- `crates/vidcut-av/src/recolor.rs`
-- `crates/vidcut-av/src/mixing/`
+- `crates/vidcut-av/src/screen/`
 - `crates/vidcut-av/src/metal.rs`
 - `crates/vidcut-av/src/super_scale/`
 - `crates/vidcut-av/src/interpolate/`
@@ -241,4 +232,3 @@ On macOS (`interpolate::macos`):
 - `crates/vidcut-av/src/color.rs`
 - `crates/vidcut-av/src/export/make.rs`
 - `crates/vidcut-av/src/export/encode.rs`
-- `crates/vidcut/src/gui/picture.rs`

@@ -1,5 +1,3 @@
-#[cfg(any(target_os = "linux", windows))]
-mod acquire;
 mod app;
 mod bar;
 mod cells;
@@ -11,7 +9,6 @@ mod file_manager;
 mod fillers;
 mod folders;
 pub mod frame;
-mod gate;
 mod help;
 mod history;
 mod import;
@@ -23,7 +20,6 @@ mod looks;
 mod mixer;
 mod normalize;
 mod onscreen;
-pub mod picture;
 mod placing;
 mod pool;
 mod preferences;
@@ -32,7 +28,6 @@ mod relink;
 mod retime;
 mod retime_process;
 mod row;
-mod shared;
 mod shuttle;
 mod speech;
 mod subtitles;
@@ -46,8 +41,6 @@ mod transcription;
 mod trim_strips;
 mod video;
 mod viewer;
-#[cfg(any(target_os = "linux", windows))]
-mod vulkan;
 mod window;
 pub mod workspace;
 
@@ -81,7 +74,7 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
                 },
                 device_descriptor: std::sync::Arc::new(|adapter| wgpu::DeviceDescriptor {
                     label: Some("vidcut"),
-                    required_features: picture::features(adapter),
+                    required_features: vidcut_av::screen::features(adapter),
                     required_limits: wgpu::Limits {
                         max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d,
                         ..wgpu::Limits::default()

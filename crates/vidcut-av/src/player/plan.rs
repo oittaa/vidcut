@@ -8,7 +8,6 @@ pub(crate) struct Id {
     source: Arc<str>,
     pos: i64,
     over: Option<Arc<[Layer]>>,
-    small: Option<u64>,
 }
 
 type Layer = (Arc<str>, i64, u32);
@@ -63,21 +62,7 @@ impl Id {
             source: source.into(),
             pos,
             over: None,
-            small: None,
         }
-    }
-}
-
-impl Id {
-    pub(crate) fn small(&self, owner: u64) -> Self {
-        Self {
-            small: Some(owner),
-            ..self.clone()
-        }
-    }
-
-    pub(crate) fn small_owner(&self) -> Option<u64> {
-        self.small
     }
 }
 
@@ -147,7 +132,6 @@ impl Plan {
                 source: "".into(),
                 pos: 0,
                 over: None,
-                small: None,
             };
         };
         let pos = |l: &VideoPiece| match l {
@@ -172,7 +156,6 @@ impl Plan {
             source: keys[0].clone(),
             pos: pos(layers[0].0),
             over: (!over.is_empty()).then(|| over.into()),
-            small: None,
         }
     }
 
@@ -181,12 +164,7 @@ impl Plan {
         self.plan
             .video
             .get(i)
-            .map(|p| {
-                p.titles()
-                    .into_iter()
-                    .map(|(n, s)| (n, s.after(k)))
-                    .collect()
-            })
+            .map(|p| titles_of(p, k))
             .unwrap_or_default()
     }
 
@@ -196,37 +174,16 @@ impl Plan {
         preview: &[(String, vidcut_core::model::Picture)],
     ) -> Vec<Vec<vidcut_core::render::Placed>> {
         let (i, k) = self.locate(t);
-        let Some(piece) = self.plan.video.get(i) else {
-            return Vec::new();
-        };
-        piece
-            .layers()
-            .into_iter()
-            .map(|(l, _)| match l {
-                VideoPiece::Source { placed, .. } => {
-                    let placed: Vec<Placed> = placed.iter().map(|p| p.after(k)).collect();
-                    previewed(&placed, preview)
-                }
-                _ => Vec::new(),
-            })
-            .collect()
+        self.plan
+            .video
+            .get(i)
+            .map(|p| placed_of(p, k, preview))
+            .unwrap_or_default()
     }
 
     pub(crate) fn scales_at(&self, t: i64) -> Vec<Option<vidcut_core::model::Sharpness>> {
         let (i, _) = self.locate(t);
-        let Some(piece) = self.plan.video.get(i) else {
-            return Vec::new();
-        };
-        piece
-            .layers()
-            .into_iter()
-            .map(|(l, _)| match l {
-                VideoPiece::Source { super_scale, .. } => {
-                    (!super_scale.is_off()).then_some(super_scale.sharpness)
-                }
-                _ => None,
-            })
-            .collect()
+        self.plan.video.get(i).map(scales_of).unwrap_or_default()
     }
 
     pub(crate) fn super_scales_at(&self, t: i64) -> Vec<vidcut_core::model::SuperScale> {
@@ -382,4 +339,43 @@ pub(crate) fn frame_of(fps: Rational, sample: i64, rate: u32) -> i64 {
         frame += 1;
     }
     frame
+}
+
+pub(crate) fn titles_of(piece: &VideoPiece, k: i64) -> Vec<(usize, ShownTitle)> {
+    piece
+        .titles()
+        .into_iter()
+        .map(|(n, s)| (n, s.after(k)))
+        .collect()
+}
+
+pub(crate) fn placed_of(
+    piece: &VideoPiece,
+    k: i64,
+    preview: &[(String, vidcut_core::model::Picture)],
+) -> Vec<Vec<Placed>> {
+    piece
+        .layers()
+        .into_iter()
+        .map(|(l, _)| match l {
+            VideoPiece::Source { placed, .. } => {
+                let placed: Vec<Placed> = placed.iter().map(|p| p.after(k)).collect();
+                previewed(&placed, preview)
+            }
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+pub(crate) fn scales_of(piece: &VideoPiece) -> Vec<Option<vidcut_core::model::Sharpness>> {
+    piece
+        .layers()
+        .into_iter()
+        .map(|(l, _)| match l {
+            VideoPiece::Source { super_scale, .. } => {
+                (!super_scale.is_off()).then_some(super_scale.sharpness)
+            }
+            _ => None,
+        })
+        .collect()
 }

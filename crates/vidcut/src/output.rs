@@ -269,8 +269,8 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 if let Some(n) = o["gpu_frames"].as_i64().filter(|n| *n > 0) {
                     println!("  {n} of the frames decoded and scaled on the GPU");
                 }
-                if let Some(why) = o["mix_failed"].as_str() {
-                    println!("  the GPU didn't mix the dissolves, so the CPU did: {why}");
+                if let Some(why) = o["through_memory"].as_str() {
+                    println!("  the frames went to the encoder through memory: {why}");
                 }
                 print_copies(&o["copies"]);
                 print_color(&o["color"]);

@@ -10,6 +10,16 @@ pub struct Image {
     pub rgba: Vec<u8>,
 }
 
+impl Image {
+    pub(crate) fn of(f: &frame::Video) -> Self {
+        Self {
+            width: f.width(),
+            height: f.height(),
+            rgba: crate::buffers::packed(f, 4),
+        }
+    }
+}
+
 pub fn filmstrip(
     source: &crate::decode::Input,
     count: usize,
@@ -99,8 +109,9 @@ fn strip_on(
         crate::export::normalize::fit(w, h, sar, max_w, max_h)
     };
     let mut fit = Fit {
+        drawn: None,
         space,
-        ..Fit::default()
+        path: path.to_path_buf(),
     };
 
     let rate = stream_rate(&input.stream(index).expect("found"));
@@ -211,11 +222,10 @@ fn keep(
     Ok(())
 }
 
-#[derive(Default)]
 struct Fit {
-    normalizer: Option<crate::export::normalize::Normalizer>,
-    shrinker: Option<crate::hw::Shrinker>,
+    drawn: Option<crate::export::video::Single>,
     space: ColorSpace,
+    path: std::path::PathBuf,
 }
 
 impl Fit {
@@ -225,33 +235,19 @@ impl Fit {
         let decoded = if self.space.is_tagged() {
             decoded
         } else {
-            // SAFETY: `decoded` is a live frame. A failed clone is an error.
-            let mut f = unsafe { cloned_frame(decoded.as_ptr())? };
+            let mut f = crate::export::video::frame_ref(decoded)?;
             crate::color::retag(&mut f, self.space);
             retagged = f;
             &retagged
         };
-        let down;
-        let decoded = if crate::hw::on_gpu(decoded) {
-            down = crate::export::normalize::down(&mut self.shrinker, decoded, rotation, (tw, th))?;
-            &down
-        } else {
-            decoded
-        };
-        let normalizer = &mut self.normalizer;
-        let n = match normalizer {
-            Some(n) if n.matches(decoded, rotation) => n,
-            _ => normalizer.insert(crate::export::normalize::Normalizer::new(
-                decoded,
-                rotation,
-                tw,
-                th,
-                format::Pixel::RGBA,
-                None,
+        let single = match &mut self.drawn {
+            Some(single) => single,
+            None => self.drawn.insert(crate::export::video::Single::new(
                 crate::decode::Reading::Frames,
             )?),
         };
-        Ok(packed(&n.run(decoded)?))
+        let out = single.draw(decoded, rotation, (tw, th), format::Pixel::RGBA, &self.path)?;
+        Ok(Image::of(&out))
     }
 }
 
@@ -382,12 +378,7 @@ pub fn from_bytes(bytes: &[u8]) -> Option<(Vec<Image>, Vec<f64>)> {
 
 fn jpeg(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
     crate::init();
-    let mut src = frame::Video::new(format::Pixel::RGBA, width, height);
-    let stride = src.stride(0);
-    let row = width as usize * 4;
-    for (y, line) in rgba.chunks_exact(row).enumerate() {
-        src.data_mut(0)[y * stride..y * stride + row].copy_from_slice(line);
-    }
+    let src = crate::buffers::unpacked(format::Pixel::RGBA, (width, height), 4, rgba);
     let mut yuv = frame::Video::empty();
     scaling::Context::get(
         format::Pixel::RGBA,
@@ -461,7 +452,7 @@ fn unjpeg(jpeg: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
     )
     .and_then(|mut s| s.run(&f, &mut rgba))
     .ok()?;
-    Some(packed(&rgba).rgba)
+    Some(crate::buffers::packed(&rgba, 4))
 }
 
 fn next_frame(
@@ -504,48 +495,6 @@ fn next_frame(
                     });
                 }
             }
-        }
-    }
-}
-
-fn cloned_frame(src: *const ffmpeg::ffi::AVFrame) -> Result<frame::Video> {
-    // SAFETY: `src` is a live frame. A null clone is refused before it is wrapped.
-    frame_from_clone(unsafe { ffmpeg::ffi::av_frame_clone(src) })
-}
-
-fn frame_from_clone(ptr: *mut ffmpeg::ffi::AVFrame) -> Result<frame::Video> {
-    if ptr.is_null() {
-        return Err(Error::Invalid("no memory for a thumbnail".into()));
-    }
-    // SAFETY: `ptr` is a new frame, freed when this value drops.
-    Ok(unsafe { frame::Video::wrap(ptr) })
-}
-
-fn packed(f: &frame::Video) -> Image {
-    let (w, h) = (f.width(), f.height());
-    let stride = f.stride(0);
-    let row = w as usize * 4;
-    let data = f.data(0);
-    let mut rgba = Vec::with_capacity(row * h as usize);
-    for y in 0..h as usize {
-        rgba.extend_from_slice(&data[y * stride..y * stride + row]);
-    }
-    Image {
-        width: w,
-        height: h,
-        rgba,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::frame_from_clone;
-
-    #[test]
-    fn a_failed_frame_clone_is_refused() {
-        match frame_from_clone(std::ptr::null_mut()) {
-            Err(err) => assert_eq!(err.to_string(), "no memory for a thumbnail"),
-            Ok(_) => panic!("a null clone was wrapped"),
         }
     }
 }

@@ -12,6 +12,8 @@ use crate::error::{Error, Result};
 use crate::ffmpeg::frame;
 use crate::models::{self, Fetch, Need};
 use crate::route::Place;
+use crate::screen::held;
+use crate::super_scale::Picture;
 
 mod ema;
 mod macos;
@@ -337,18 +339,11 @@ impl Engine {
         self.gpu.queue.submit([enc.finish()]);
     }
 
-    fn upload(&self, rgb: &[u8]) -> wgpu::Buffer {
-        let mut data = rgb.to_vec();
-        data.resize(rgb.len().next_multiple_of(4), 0);
-        self.gpu.upload(&data)
-    }
-
     fn hold(
         &mut self,
         r: Retime,
         key: &(PathBuf, i64, i64),
-        a: &[u8],
-        b: &[u8],
+        (ua, ub): (&wgpu::Buffer, &wgpu::Buffer),
         size: (u32, u32),
     ) -> Result<()> {
         if self
@@ -363,8 +358,13 @@ impl Engine {
             self.net(r)?;
         }
         let (w, h) = size;
-        let ua = self.upload(a);
-        let ub = self.upload(b);
+        let whole = u64::from(w) * u64::from(h) * 3;
+        if ua.size() < whole || ub.size() < whole {
+            return Err(Error::Invalid(format!(
+                "{} got pictures smaller than {w}x{h}",
+                r.title()
+            )));
+        }
         let gpu = &self.gpu;
         let (state, out) = match kept {
             Some(h) => (h.state, h.out),
@@ -386,16 +386,16 @@ impl Engine {
         };
         self.submit(|o| match (&state, self.loaded(r)) {
             (State::Blend(img, _), _) => {
-                o.load(&ua, size, (0, 0), false, &img.frame(0));
-                o.load(&ub, size, (0, 0), false, &img.frame(1));
+                o.load(ua, size, (0, 0), false, &img.frame(0));
+                o.load(ub, size, (0, 0), false, &img.frame(1));
             }
             (State::Rife(pair), Some(Net::Rife(net))) => {
-                o.load(&ua, size, (0, 0), false, &pair.img.frame(0));
-                o.load(&ub, size, (0, 0), false, &pair.img.frame(1));
+                o.load(ua, size, (0, 0), false, &pair.img.frame(0));
+                o.load(ub, size, (0, 0), false, &pair.img.frame(1));
                 net.features(o, pair);
             }
             (State::Ema(pair), Some(Net::Ema(net))) => {
-                pair.load(o, (&ua, &ub), size);
+                pair.load(o, (ua, ub), size);
                 pair.backbone(o, net);
             }
             _ => {}
@@ -410,7 +410,7 @@ impl Engine {
         Ok(())
     }
 
-    fn frame(&self, r: Retime, t: f32) -> Result<Vec<u8>> {
+    fn frame(&self, r: Retime, t: f32) -> Result<held::Held> {
         let held = self.held.as_ref().expect("held");
         let size = held.size;
         self.submit(|o| match (&held.state, self.loaded(r)) {
@@ -427,10 +427,12 @@ impl Engine {
             }
             _ => {}
         });
-        let bytes = size.0 as u64 * size.1 as u64 * 3;
-        let mut out = self.gpu.read(&held.out, 0, bytes.next_multiple_of(4))?;
-        out.truncate(bytes as usize);
-        Ok(out)
+        let whole = (size.0 as u64 * size.1 as u64 * 3).next_multiple_of(4);
+        let out = self.gpu.buffer(whole as usize);
+        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+        enc.copy_buffer_to_buffer(&held.out, 0, &out, 0, whole);
+        self.gpu.queue.submit([enc.finish()]);
+        Ok(held::Held::new(out, &self.gpu.device, &self.gpu.queue))
     }
 }
 
@@ -476,30 +478,43 @@ fn made_in(retime: Retime, size: (u32, u32), at: f64, clock: Instant) {
 pub(crate) fn between(
     r: Retime,
     key: &(PathBuf, i64, i64),
-    a: &[u8],
-    b: &[u8],
+    a: &frame::Video,
+    b: &frame::Video,
     size: (u32, u32),
     t: f64,
-) -> Result<Vec<u8>> {
+) -> Result<Picture> {
     let clock = Instant::now();
     let made = if r == Retime::Macos {
-        macos::between(key, macos::Input::Rgb(a), macos::Input::Rgb(b), size, t)?
+        let (a, b) = (held::rgb(a)?, held::rgb(b)?);
+        Picture::Rgb(macos::between(
+            key,
+            macos::Input::Rgb(&a),
+            macos::Input::Rgb(&b),
+            size,
+            t,
+        )?)
     } else {
-        with_engine(|e| {
-            e.hold(r, key, a, b, size)?;
+        let pair = (held::held(a)?.buffer(), held::held(b)?.buffer());
+        Picture::Held(with_engine(|e| {
+            e.hold(r, key, pair, size)?;
             e.frame(r, t as f32)
-        })?
+        })?)
     };
     made_in(r, size, t, clock);
     if std::env::var_os("VIDCUT_INTERPOLATE_DUMP").is_some() {
         let n = DUMPED.fetch_add(1, Ordering::Relaxed);
         let name = format!("{n:04}");
-        dump(&format!("{name}-a"), size, a)?;
-        dump(&format!("{name}-b"), size, b)?;
+        dump(&format!("{name}-a"), size, &held::rgb(a)?)?;
+        dump(&format!("{name}-b"), size, &held::rgb(b)?)?;
+        let out = match &made {
+            Picture::Held(h) => h.read(size.0 as usize * size.1 as usize * 3)?,
+            Picture::Rgb(rgb) => rgb.clone(),
+            Picture::Frame(_) => Vec::new(),
+        };
         dump(
             &format!("{name}-out-{t:.4}-{}", r.title().replace(' ', "")),
             size,
-            &made,
+            &out,
         )?;
     }
     Ok(made)

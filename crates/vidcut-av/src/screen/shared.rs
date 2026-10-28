@@ -2,9 +2,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(any(target_os = "linux", windows))]
-use vidcut_av::cuda::share::SharedBuffer;
-use vidcut_av::cuda::{CudaDevice, PlaneCopy};
-use vidcut_av::ffmpeg::frame;
+use crate::cuda::share::SharedBuffer;
+use crate::cuda::{CudaDevice, PlaneCopy};
+use crate::ffmpeg::frame;
 
 pub fn possible(device: &wgpu::Device) -> bool {
     #[cfg(any(target_os = "linux", windows))]
@@ -67,9 +67,22 @@ pub struct Shared {
 
 impl Shared {
     pub fn new(device: &wgpu::Device, cuda: &CudaDevice, size: u64) -> Result<Self, String> {
+        Self::made(device, cuda, size, wgpu::BufferUsages::COPY_SRC)
+    }
+
+    pub fn out(device: &wgpu::Device, cuda: &CudaDevice, size: u64) -> Result<Self, String> {
+        Self::made(device, cuda, size, wgpu::BufferUsages::COPY_DST)
+    }
+
+    fn made(
+        device: &wgpu::Device,
+        cuda: &CudaDevice,
+        size: u64,
+        usage: wgpu::BufferUsages,
+    ) -> Result<Self, String> {
         #[cfg(any(target_os = "linux", windows))]
         {
-            let (cuda, buffer) = make(device, cuda, size)?;
+            let (cuda, buffer) = make(device, cuda, size, usage)?;
             Ok(Self {
                 cuda,
                 buffer,
@@ -79,7 +92,7 @@ impl Shared {
         }
         #[cfg(not(any(target_os = "linux", windows)))]
         {
-            let _ = (device, cuda, size);
+            let _ = (device, cuda, size, usage);
             Err("sharing memory with CUDA needs Linux or Windows".into())
         }
     }
@@ -110,6 +123,20 @@ impl Shared {
         }
     }
 
+    pub fn empty_into(&self, frame: &frame::Video, planes: &[PlaneCopy]) -> Result<(), String> {
+        #[cfg(any(target_os = "linux", windows))]
+        {
+            self.cuda
+                .copy_into(frame, planes)
+                .map_err(|e| e.to_string())
+        }
+        #[cfg(not(any(target_os = "linux", windows)))]
+        {
+            let _ = (frame, planes);
+            Err("sharing memory with CUDA needs Linux or Windows".into())
+        }
+    }
+
     pub fn used(&mut self, queue: &wgpu::Queue) {
         self.busy.store(true, Ordering::Release);
         let busy = self.busy.clone();
@@ -122,6 +149,7 @@ fn make(
     device: &wgpu::Device,
     cuda: &CudaDevice,
     size: u64,
+    usage: wgpu::BufferUsages,
 ) -> Result<(SharedBuffer, wgpu::Buffer), String> {
     use ash::vk;
     use wgpu::hal::api::Vulkan;
@@ -204,7 +232,7 @@ fn make(
             &wgpu::BufferDescriptor {
                 label: Some("vidcut shared picture"),
                 size,
-                usage: wgpu::BufferUsages::COPY_SRC,
+                usage,
                 mapped_at_creation: false,
             },
         )
@@ -223,7 +251,7 @@ unsafe fn export_memory(
     raw: &ash::Device,
     memory: ash::vk::DeviceMemory,
     handle: ash::vk::ExternalMemoryHandleTypeFlags,
-) -> ash::prelude::VkResult<vidcut_av::cuda::share::Exported> {
+) -> ash::prelude::VkResult<crate::cuda::share::Exported> {
     use std::os::fd::FromRawFd;
     let fds = ash::khr::external_memory_fd::Device::new(instance, raw);
     let info = ash::vk::MemoryGetFdInfoKHR::default()
@@ -242,7 +270,7 @@ unsafe fn export_memory(
     raw: &ash::Device,
     memory: ash::vk::DeviceMemory,
     handle: ash::vk::ExternalMemoryHandleTypeFlags,
-) -> ash::prelude::VkResult<vidcut_av::cuda::share::Exported> {
+) -> ash::prelude::VkResult<crate::cuda::share::Exported> {
     use std::os::windows::io::FromRawHandle;
     let handles = ash::khr::external_memory_win32::Device::new(instance, raw);
     let info = ash::vk::MemoryGetWin32HandleInfoKHR::default()

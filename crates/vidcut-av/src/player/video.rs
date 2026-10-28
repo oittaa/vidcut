@@ -11,13 +11,13 @@ use super::store::Kind;
 use super::{Busy, Decoder as Decoding, Mode, Shared, Snap, lock, ms};
 use crate::error::{Error, Result};
 use crate::export::is_cancelled;
-use crate::export::make::Output;
 use crate::export::renderer::{at, window};
 use crate::export::video::{Layer, VideoFrames};
 use crate::ffmpeg::format;
 
 const PAUSED_AHEAD: i64 = 3;
 const FOLLOWED_AHEAD: i64 = 8;
+const SLOW_AHEAD: i64 = 1;
 
 const AHEAD_SECS: f64 = 0.25;
 
@@ -71,7 +71,6 @@ struct Decoder {
     back_low: Option<i64>,
     next_window: Option<(i64, i64)>,
     windows: bool,
-    small: bool,
 }
 
 static WINDOW: Mutex<()> = Mutex::new(());
@@ -260,12 +259,10 @@ impl Decoder {
             back_low: None,
             next_window: None,
             windows,
-            small: false,
         }
     }
 
     fn take(&mut self, snap: &Snap) -> Direction {
-        self.small = snap.small.is_some();
         if self.plan_gen != Some(snap.plan_gen) {
             self.plan = snap.plan.clone();
             self.plan_gen = Some(snap.plan_gen);
@@ -469,18 +466,17 @@ impl Decoder {
             }
             Direction::Back if snap.followed => return Ok(false),
             Direction::Back => return self.window_behind(snap),
-            Direction::Paused => (focus + 1
-                ..=plan.clamp(
-                    focus
-                        + if snap.followed {
-                            FOLLOWED_AHEAD
-                        } else {
-                            PAUSED_AHEAD
-                        },
-                ))
-                .find(|&t| missing(t))
-                .filter(|&t| self.next == Some(t) && plan.fill_at(t).ahead)
-                .map(|t| (t, Reach::Forward)),
+            Direction::Paused => {
+                let most = match (plan.fill_at(focus).behind, snap.followed) {
+                    (false, _) => SLOW_AHEAD,
+                    (true, true) => FOLLOWED_AHEAD,
+                    (true, false) => PAUSED_AHEAD,
+                };
+                (focus + 1..=plan.clamp(focus + most))
+                    .find(|&t| missing(t))
+                    .filter(|&t| self.next == Some(t) && plan.fill_at(t).ahead)
+                    .map(|t| (t, Reach::Forward))
+            }
         };
         if let Some((t, reach)) = wanted {
             let started = Instant::now();
@@ -641,7 +637,6 @@ impl Decoder {
     fn chunk(&self) -> i64 {
         match self.picture_kind {
             Kind::Video => self.windows(2).1,
-            Kind::Memory if self.small => self.windows(2).1,
             Kind::Memory => self.memory_chunk(),
         }
     }
@@ -671,14 +666,13 @@ impl Decoder {
 
     fn new_reader(&mut self, p: &RenderPlan) -> VideoFrames {
         let frames = VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None);
-        let decoded = |keep| Output::Decoded { keep };
         if !self.hardware {
             crate::debug!(
                 "player",
                 "a new reader decodes on the CPU: GPU decoding is off"
             );
             self.shared.decodes_on_cpu(Some("GPU decoding is off"));
-            return frames.output(decoded(Vec::new()));
+            return frames.keeping(Vec::new());
         }
         let gpu = self.gpu.get_or_insert_with(crate::hw::GpuDecoder::best);
         let Some(gpu) = gpu else {
@@ -687,7 +681,7 @@ impl Decoder {
                 "a new reader decodes on the CPU: no GPU decoder here"
             );
             self.shared.decodes_on_cpu(Some("no GPU decoder here"));
-            return frames.output(decoded(Vec::new()));
+            return frames.keeping(Vec::new());
         };
         self.shared.decodes_on_cpu(None);
         let found = gpu.gpu();
@@ -703,7 +697,7 @@ impl Decoder {
         if let Some(found) = found {
             self.shared.gpu_found(found);
         }
-        frames.output(decoded(shows)).decode_on(gpu.clone())
+        frames.keeping(shows).decode_on(gpu.clone())
     }
 
     fn decode(&mut self, snap: &Snap, t: i64, reach: Reach) -> Result<i64> {
@@ -747,6 +741,7 @@ impl Decoder {
         let started = Instant::now();
         let mut seek_keeps: Option<i64> = None;
         let made = keep == Keep::Ahead && plan.fill_at(t).made;
+        let only = keep == Keep::Seek && !plan.fill_at(t).behind;
         for i in r..=t {
             let window = match keep {
                 Keep::Ahead => false,
@@ -754,15 +749,12 @@ impl Decoder {
                 Keep::Seek => seek_keeps.is_none_or(|from| i >= from),
             };
             let kept = i == t
-                || window
-                || (!made
-                    && (i >= snap.focus || snap.followed)
-                    && !self.shared.store.contains(&plan.id(i)));
-            let whole =
-                snap.motion == 0.0 && matches!(snap.mode, Mode::Paused { .. }) && i >= snap.focus;
-            let small = snap.small.filter(|_| !whole);
+                || (!only
+                    && (window
+                        || (!made
+                            && (i >= snap.focus || snap.followed)
+                            && !self.shared.store.contains(&plan.id(i)))));
             let frames = self.reader();
-            frames.shrink_to(small);
             if kept {
                 let layers = frames
                     .next_layers()?
@@ -774,11 +766,7 @@ impl Decoder {
                 if keep == Keep::Seek && seek_keeps.is_none() {
                     seek_keeps = Some(t - self.chunk() + 1);
                 }
-                let id = if small.is_some() {
-                    self.shared.store.small(&plan.id(i))
-                } else {
-                    plan.id(i)
-                };
+                let id = plan.id(i);
                 self.shared.titles.draw(&plan, i);
                 self.shared.subtitles.draw(&plan, i);
                 self.shared.store.put(id.clone(), Arc::new(picture));
@@ -870,7 +858,7 @@ fn after(plan: &Plan, looping: Option<(i64, i64)>, from: i64, k: i64) -> i64 {
     })
 }
 
-fn picture(layers: Vec<Layer>) -> Picture {
+pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
     let made = |l: Layer| {
         let decoder = l
             .decoding

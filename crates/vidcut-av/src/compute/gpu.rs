@@ -107,33 +107,21 @@ fn slots(device: &wgpu::Device) -> wgpu::Buffer {
 
 impl Gpu {
     pub(crate) fn start(what: &'static str, shared: u32) -> std::result::Result<Self, String> {
-        let instance = wgpu::Instance::default();
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            ..Default::default()
-        }))
-        .map_err(|e| format!("no GPU for {what}: {e}"))?;
-        let limits = adapter.limits();
-        let info = adapter.get_info();
-        let listed = crate::gpus::of(info.vendor, info.device);
-        let name = adapter.get_info().name;
+        let on = crate::screen::offscreen().map_err(|e| format!("no GPU for {what}: {e}"))?;
+        let (device, queue) = on.gpu.handles();
+        let limits = device.limits();
+        let listed = crate::gpus::of(on.adapter.vendor, on.adapter.device);
+        let name = on.adapter.name.clone();
         if limits.max_compute_workgroup_storage_size < shared
             || limits.max_compute_invocations_per_workgroup < 256
             || limits.max_storage_buffers_per_shader_stage < 8
         {
             return Err(format!("{name} has too little workgroup memory for {what}"));
         }
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("vidcut-compute"),
-            required_limits: limits,
-            memory_hints: wgpu::MemoryHints::MemoryUsage,
-            ..Default::default()
-        }))
-        .map_err(|e| format!("the GPU did not open for {what}: {e}"))?;
-        let buffer = slots(&device);
+        let buffer = slots(device);
         Ok(Self {
-            device,
-            queue,
+            device: device.clone(),
+            queue: queue.clone(),
             listed,
             name,
             what,

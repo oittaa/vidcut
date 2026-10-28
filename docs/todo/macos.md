@@ -12,9 +12,9 @@ To do:
 Most frames stay on the GPU from the decoder to the viewer or the encoder. These cases use the CPU:
 
 - **Super Scale and Retime Process on frames that the CPU decodes.** The CPU converts these frames to RGB first. Frames that VideoToolbox decodes stay on the GPU.
-- **Placed pictures.** The CPU draws a moved, zoomed or cropped picture. The frame under it stays on the GPU ([gpu-placement.md](gpu-placement.md)).
-- **A timeline color space that is not the color space of the export.**
-  - The frames of the timeline are in memory (`Output::Fitted`).
-  - The CPU mixes these frames.
-  - NVENC keeps these frames on the GPU, in a P010 pool.
-  - VideoToolbox has no such pool.
+- **VideoToolbox exports without GPU decoding.** The encoder then has no frames of its own device. Thus the planes come back to memory.
+
+To check by hand on the Mac:
+
+- An export to VideoToolbox draws into the IOSurfaces of the encoder (`fs_encode_unorm`). Compare its frames with an export to the CPU encoder.
+- The export's report has no `through_memory`.

@@ -4,7 +4,6 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc;
 use std::time::Instant;
 
 use vidcut_core::model::{Media, Project, Upscaler};
@@ -14,6 +13,7 @@ use wgpu::util::DeviceExt;
 use crate::compute::{self, bytes, group, halves, words};
 use crate::error::{Error, Result};
 use crate::models::{self, Fetch, Need};
+use crate::screen::held::Held;
 use vidcut_core::catalog::{self, NANOVSR_WEIGHTS as WEIGHTS};
 
 pub const SCALE: u32 = catalog::NANOVSR_SCALE;
@@ -929,10 +929,6 @@ fn spans(n: usize) -> Vec<Span> {
 
 const WHAT: &str = "the AI Fast upscaler";
 
-fn gpu_error(e: impl std::fmt::Display) -> Error {
-    compute::gpu_error(WHAT, e)
-}
-
 fn checked<T>(device: &wgpu::Device, run: impl FnOnce() -> Result<T>) -> Result<T> {
     compute::checked(device, WHAT, run)
 }
@@ -975,7 +971,6 @@ struct Tiles {
     s1: wgpu::Buffer,
     s2: wgpu::Buffer,
     out: wgpu::Buffer,
-    read: [wgpu::Buffer; 2],
     shown: u64,
 }
 
@@ -993,7 +988,7 @@ struct Engine {
     lent: Option<crate::player::Lent>,
 }
 
-type Rest = Box<dyn FnOnce(Result<Vec<Vec<u8>>>) + Send>;
+type Rest = Box<dyn FnOnce(Result<Vec<Held>>) + Send>;
 
 type Groups = HashMap<u64, Vec<(wgpu::ComputePipeline, Vec<wgpu::Buffer>, wgpu::BindGroup)>>;
 
@@ -1001,7 +996,7 @@ struct Pending {
     serial: u64,
     wanted: usize,
     size: (usize, usize),
-    outs: Vec<Vec<u8>>,
+    outs: Vec<Option<Held>>,
     rest: Rest,
 }
 
@@ -1019,30 +1014,21 @@ fn blocks(n: usize) -> u32 {
 
 impl Engine {
     fn open() -> std::result::Result<Self, String> {
-        let instance = wgpu::Instance::default();
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            ..Default::default()
-        }))
-        .map_err(|e| format!("no GPU for the AI Fast upscaler: {e}"))?;
-        let limits = adapter.limits();
+        let on = crate::screen::offscreen()
+            .map_err(|e| format!("no GPU for the AI Fast upscaler: {e}"))?;
+        let (device, queue) = on.gpu.handles();
+        let (device, queue) = (device.clone(), queue.clone());
+        let limits = device.limits();
         if limits.max_compute_workgroup_storage_size < SHARED
             || limits.max_compute_invocations_per_workgroup < 256
         {
             return Err(format!(
                 "{} has too little workgroup memory for the AI Fast upscaler",
-                adapter.get_info().name
+                on.adapter.name
             ));
         }
-        let info = adapter.get_info();
-        let listed = crate::gpus::of(info.vendor, info.device);
-        super::runs_on(Upscaler::AiFast, info.name);
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("vidcut-upscale"),
-            required_limits: limits,
-            ..Default::default()
-        }))
-        .map_err(|e| format!("the GPU did not open for the AI Fast upscaler: {e}"))?;
+        let listed = crate::gpus::of(on.adapter.vendor, on.adapter.device);
+        super::runs_on(Upscaler::AiFast, on.adapter.name.clone());
         let made = checked(&device, || {
             let convs = [
                 Shape::new(PADDED, FEATURES, 3, true, false, false),
@@ -1255,10 +1241,6 @@ impl Engine {
             s1: buffer(d, p2 * FEATURES * 2, U::STORAGE),
             s2: buffer(d, p4 * 32 * 2, U::STORAGE),
             out: buffer(d, shown, U::STORAGE | U::COPY_SRC),
-            read: [
-                buffer(d, shown, U::MAP_READ | U::COPY_DST),
-                buffer(d, shown, U::MAP_READ | U::COPY_DST),
-            ],
             shown: shown as u64,
         });
     }
@@ -1368,10 +1350,10 @@ impl Engine {
 
     fn wanted_first(
         &mut self,
-        frames: &[Vec<u8>],
+        frames: &[wgpu::Buffer],
         (w, h): (usize, usize),
         wanted: usize,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Held> {
         let device = self.device.clone();
         checked(&device, || {
             let clock = Instant::now();
@@ -1396,18 +1378,18 @@ impl Engine {
                 0,
                 &words(&[w as u32, h as u32, w as u32, 0, 0, 0, 0, 0]),
             );
-            for (i, rgb) in frames.iter().enumerate() {
-                let whole = rgb.len() & !3;
-                self.queue.write_buffer(&f.rgb[i], 0, &rgb[..whole]);
-                if whole < rgb.len() {
-                    let mut tail = [0u8; 4];
-                    tail[..rgb.len() - whole].copy_from_slice(&rgb[whole..]);
-                    self.queue.write_buffer(&f.rgb[i], whole as u64, &tail);
-                }
-            }
             let net = self.net.as_ref().expect("loaded");
             let n = frames.len();
             let mut enc = self.device.create_command_encoder(&Default::default());
+            for (rgb, into) in frames.iter().zip(&f.rgb) {
+                if rgb.size() < into.size() {
+                    return Err(Error::Invalid(format!(
+                        "the AI Fast upscaler got a picture of {} bytes for {w}x{h}",
+                        rgb.size()
+                    )));
+                }
+                enc.copy_buffer_to_buffer(rgb, 0, into, 0, into.size());
+            }
             {
                 let mut pass = enc.begin_compute_pass(&Default::default());
                 for i in 0..=wanted {
@@ -1435,10 +1417,8 @@ impl Engine {
                 );
                 self.enlarge(&mut pass, wanted);
             }
-            let t = self.tiles.as_ref().expect("tiles made");
-            enc.copy_buffer_to_buffer(&t.out, 0, &t.read[0], 0, t.shown);
-            let done = self.queue.submit([enc.finish()]);
-            let first = self.take(0, done)?;
+            let first = self.kept(&mut enc);
+            self.queue.submit([enc.finish()]);
             crate::debug!(
                 "upscale",
                 "{n} frames at {w}x{h}: frame {wanted} in {:.0} ms",
@@ -1460,7 +1440,14 @@ impl Engine {
             return;
         };
         let device = self.device.clone();
-        let done = checked(&device, || self.others(serial, wanted, size, &mut outs)).map(|()| outs);
+        let done =
+            checked(&device, || self.others(serial, wanted, size, &mut outs)).and_then(|()| {
+                outs.into_iter()
+                    .map(|o| {
+                        o.ok_or_else(|| Error::Invalid("the AI Fast upscaler lost a frame".into()))
+                    })
+                    .collect()
+            });
         rest(done);
     }
 
@@ -1469,18 +1456,16 @@ impl Engine {
         serial: u64,
         wanted: usize,
         (w, h): (usize, usize),
-        outs: &mut [Vec<u8>],
+        outs: &mut [Option<Held>],
     ) -> Result<()> {
         let clock = Instant::now();
         let f = self.frame.as_ref().expect("frame made");
-        let t = self.tiles.as_ref().expect("tiles made");
         let net = self.net.as_ref().expect("loaded");
         let n = outs.len();
         let ahead = [&f.states[wanted], &f.back[1]];
         let later = (wanted + 1..n).map(|i| (i, true));
         let earlier = (0..wanted).rev().map(|i| (i, false));
-        let mut waiting = None;
-        for (k, (i, forward)) in later.chain(earlier).enumerate() {
+        for (i, forward) in later.chain(earlier) {
             if DROPPED.load(Ordering::Relaxed) == serial {
                 return Err(Error::Invalid(crate::export::CANCELLED.into()));
             }
@@ -1506,14 +1491,8 @@ impl Engine {
                 );
                 self.enlarge(&mut pass, i);
             }
-            enc.copy_buffer_to_buffer(&t.out, 0, &t.read[k % 2], 0, t.shown);
-            let done = self.queue.submit([enc.finish()]);
-            if let Some((j, slot, done)) = waiting.replace((i, k % 2, done)) {
-                outs[j] = self.take(slot, done)?;
-            }
-        }
-        if let Some((j, slot, done)) = waiting {
-            outs[j] = self.take(slot, done)?;
+            outs[i] = Some(self.kept(&mut enc));
+            self.queue.submit([enc.finish()]);
         }
         crate::debug!(
             "upscale",
@@ -1545,23 +1524,16 @@ impl Engine {
         }
     }
 
-    fn take(&self, slot: usize, done: wgpu::SubmissionIndex) -> Result<Vec<u8>> {
+    fn kept(&self, enc: &mut wgpu::CommandEncoder) -> Held {
+        use wgpu::BufferUsages as U;
         let t = self.tiles.as_ref().expect("tiles made");
-        let slice = t.read[slot].slice(..t.shown);
-        let (tx, rx) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        self.device
-            .poll(wgpu::PollType::Wait {
-                submission_index: Some(done),
-                timeout: None,
-            })
-            .map_err(gpu_error)?;
-        rx.recv().map_err(gpu_error)?.map_err(gpu_error)?;
-        let out = slice.get_mapped_range().map_err(gpu_error)?.to_vec();
-        t.read[slot].unmap();
-        Ok(out)
+        let out = buffer(
+            &self.device,
+            t.shown as usize,
+            U::STORAGE | U::COPY_SRC | U::COPY_DST,
+        );
+        enc.copy_buffer_to_buffer(&t.out, 0, &out, 0, t.shown);
+        Held::new(out, &self.device, &self.queue)
     }
 }
 
@@ -1602,7 +1574,7 @@ pub(crate) struct Run {
     serial: u64,
     size: (usize, usize),
     want: i64,
-    frames: Vec<(i64, Option<i64>, Vec<u8>)>,
+    frames: Vec<(i64, Option<i64>, wgpu::Buffer)>,
     sink: Option<super::Sink>,
 }
 
@@ -1626,28 +1598,28 @@ impl Run {
             )));
         };
         let meta: Vec<(i64, Option<i64>)> = frames.iter().map(|f| (f.0, f.1)).collect();
-        let rgbs: Vec<Vec<u8>> = frames.into_iter().map(|f| f.2).collect();
+        let rgbs: Vec<wgpu::Buffer> = frames.into_iter().map(|f| f.2).collect();
         let (index, pts) = meta[wanted];
         let sink = self.sink.take();
-        let rest = move |big: Result<Vec<Vec<u8>>>| {
+        let rest = move |big: Result<Vec<Held>>| {
             if let Some(sink) = sink {
                 sink(big.map(|outs| {
                     meta.iter()
                         .zip(outs)
-                        .map(|(&(index, pts), rgb)| super::Out {
+                        .map(|(&(index, pts), held)| super::Out {
                             index,
                             pts,
-                            picture: super::Picture::Rgb(rgb),
+                            picture: super::Picture::Held(held),
                         })
                         .collect()
                 }));
             }
         };
-        let rgb = upscale(&rgbs, self.size, (self.serial, wanted), rest)?;
+        let held = upscale(&rgbs, self.size, (self.serial, wanted), rest)?;
         Ok(vec![super::Out {
             index,
             pts,
-            picture: super::Picture::Rgb(rgb),
+            picture: super::Picture::Held(held),
         }])
     }
 }
@@ -1661,8 +1633,14 @@ impl Drop for Run {
 }
 
 impl super::Run for Run {
-    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<super::Out>> {
-        self.frames.push((index, pts, rgb));
+    fn push(
+        &mut self,
+        index: i64,
+        pts: Option<i64>,
+        rgb: &crate::ffmpeg::frame::Video,
+    ) -> Result<Vec<super::Out>> {
+        let held = crate::screen::held::held(rgb)?;
+        self.frames.push((index, pts, held.buffer().clone()));
         if self.frames.len() == FRAMES {
             self.run()
         } else {
@@ -1680,11 +1658,11 @@ impl super::Run for Run {
 }
 
 pub(crate) fn upscale(
-    frames: &[Vec<u8>],
+    frames: &[wgpu::Buffer],
     size: (usize, usize),
     (serial, wanted): (u64, usize),
-    rest: impl FnOnce(Result<Vec<Vec<u8>>>) + Send + 'static,
-) -> Result<Vec<u8>> {
+    rest: impl FnOnce(Result<Vec<Held>>) + Send + 'static,
+) -> Result<Held> {
     let first = with_engine(|e| {
         e.finish();
         let first = e.wanted_first(frames, size, wanted);
@@ -1695,8 +1673,8 @@ pub(crate) fn upscale(
             e.lent = None;
             return first;
         };
-        let mut outs = vec![Vec::new(); frames.len()];
-        outs[wanted].clone_from(&first);
+        let mut outs = vec![None; frames.len()];
+        outs[wanted] = Some(first.clone());
         e.pending = Some(Pending {
             serial,
             wanted,

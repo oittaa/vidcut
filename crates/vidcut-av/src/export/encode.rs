@@ -869,11 +869,6 @@ impl Upload {
         }
     }
 
-    pub(crate) fn is_on(&self, device: &crate::hw::Device) -> bool {
-        // SAFETY: `self.device` and `device` are live device references; only their `data` is read.
-        unsafe { (*self.device).data == (*device.as_ptr()).data }
-    }
-
     pub(crate) fn vulkan(gpu: &str, sw: format::Pixel, width: u32, height: u32) -> Result<Self> {
         let found = crate::gpus::list()
             .iter()

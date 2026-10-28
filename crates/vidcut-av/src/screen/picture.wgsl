@@ -44,6 +44,9 @@ fn stored(u: vec2<f32>) -> vec2<f32> {
 
 fn yuv(u: vec2<f32>) -> vec3<f32> {
     let s = stored(u) * p.upright.zw;
+    if p.flags.z == 3u {
+        return textureSampleLevel(luma, bilinear, s, 0.0).rgb;
+    }
     if p.flags.z == 2u {
         let ayuv = textureSampleLevel(luma, bilinear, s, 0.0);
         return ayuv.gba;
@@ -72,12 +75,13 @@ fn opacity(u: vec2<f32>) -> f32 {
 
 fn weight(x: f32, kind: u32) -> f32 {
     let a = abs(x);
-    if kind == 1u {
+    if kind == 1u || kind == 4u {
+        let k = select(-0.5, -0.6, kind == 4u);
         if a < 1.0 {
-            return (1.5 * a - 2.5) * a * a + 1.0;
+            return ((k + 2.0) * a - (k + 3.0)) * a * a + 1.0;
         }
         if a < 2.0 {
-            return ((-0.5 * a + 2.5) * a - 4.0) * a + 2.0;
+            return ((k * a - 5.0 * k) * a + 8.0 * k) * a - 4.0 * k;
         }
         return 0.0;
     }
@@ -92,20 +96,32 @@ fn weight(x: f32, kind: u32) -> f32 {
     return lobes * sin(t) * sin(t / lobes) / (t * t);
 }
 
-fn sharp(u: vec2<f32>) -> vec3<f32> {
-    let kind = p.flags.w;
+fn resamples(spans: vec2<f32>) -> bool {
+    if (p.flags.w & 7u) == 0u {
+        return false;
+    }
+    if (p.flags.w & 8u) != 0u {
+        return any(abs(spans - vec2<f32>(1.0)) > vec2<f32>(1e-4));
+    }
+    return max(spans.x, spans.y) < 1.0;
+}
+
+fn sharp(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
+    let kind = p.flags.w & 7u;
     let size = p.upright.xy;
-    let reach = select(select(4, 3, kind == 2u), 2, kind == 1u);
+    let lobes = select(select(4.0, 3.0, kind == 2u), 2.0, kind == 1u || kind == 4u);
+    let wide = clamp(spans, vec2<f32>(1.0), vec2<f32>(4.0));
+    let reach = vec2<i32>(ceil(lobes * wide));
     let t = u * size - 0.5;
     let base = floor(t);
     let f = t - base;
     let half = vec2<f32>(0.5) / size;
     var sum = vec3<f32>(0.0);
     var total = 0.0;
-    for (var j = 1 - reach; j <= reach; j++) {
-        let wy = weight(f32(j) - f.y, kind);
-        for (var i = 1 - reach; i <= reach; i++) {
-            let w = weight(f32(i) - f.x, kind) * wy;
+    for (var j = 1 - reach.y; j <= reach.y; j++) {
+        let wy = weight((f32(j) - f.y) / wide.y, kind);
+        for (var i = 1 - reach.x; i <= reach.x; i++) {
+            let w = weight((f32(i) - f.x) / wide.x, kind) * wy;
             let q = (base + vec2<f32>(f32(i), f32(j)) + 0.5) / size;
             sum += yuv(clamp(q, half, vec2<f32>(1.0) - half)) * w;
             total += w;
@@ -152,16 +168,19 @@ fn tone_mapped(c_in: vec3<f32>, tone: vec4<f32>) -> vec3<f32> {
 }
 
 fn rgb(s: vec3<f32>) -> vec3<f32> {
-    let y = (s.x - p.range.x) * p.range.y;
-    let cb = (s.y - p.range.z) * p.range.w;
-    let cr = (s.z - p.range.z) * p.range.w;
-    let kr = p.matrix.x;
-    let kb = p.matrix.y;
-    let kg = p.matrix.z;
-    let r = y + (2.0 - 2.0 * kr) * cr;
-    let b = y + (2.0 - 2.0 * kb) * cb;
-    let g = (y - kr * r - kb * b) / kg;
-    var c = vec3<f32>(r, g, b);
+    var c = s;
+    if p.flags.z != 3u {
+        let y = (s.x - p.range.x) * p.range.y;
+        let cb = (s.y - p.range.z) * p.range.w;
+        let cr = (s.z - p.range.z) * p.range.w;
+        let kr = p.matrix.x;
+        let kb = p.matrix.y;
+        let kg = p.matrix.z;
+        let r = y + (2.0 - 2.0 * kr) * cr;
+        let b = y + (2.0 - 2.0 * kb) * cb;
+        let g = (y - kr * r - kb * b) / kg;
+        c = vec3<f32>(r, g, b);
+    }
     if p.per.z != 0u {
         if p.flags.x != 0u {
             c = to_linear(c);
@@ -230,8 +249,8 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     let size = p.upright.xy;
     let spans = vec2<f32>(length(across * size), length(down * size));
     let a = cover * p.placed.y * opacity(uv);
-    if p.flags.w > 0u && max(spans.x, spans.y) < 1.0 {
-        return vec4<f32>(rgb(sharp(uv)), a);
+    if resamples(spans) {
+        return vec4<f32>(rgb(sharp(uv, spans)), a);
     }
     let taps = vec2<u32>(clamp(ceil(spans), vec2<f32>(1.0), vec2<f32>(8.0)));
     let half = vec2<f32>(0.5) / size;
@@ -364,8 +383,8 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     }
     let cover = p.upright.xy / p.place.zw;
     let a = opacity(rel);
-    if p.flags.w > 0u && max(cover.x, cover.y) < 1.0 {
-        return vec4<f32>(rgb(sharp(rel)) * a, 1.0);
+    if resamples(cover) {
+        return vec4<f32>(rgb(sharp(rel, cover)) * a, 1.0);
     }
     let taps = vec2<u32>(clamp(ceil(cover), vec2<f32>(1.0), vec2<f32>(8.0)));
     let step = vec2<f32>(1.0) / (p.place.zw * vec2<f32>(taps));
@@ -463,4 +482,98 @@ fn fs_screen(in: Out) -> @location(0) vec4<f32> {
     var c = decode(code, transfer, screen.mode.y);
     c = vec3<f32>(dot(screen.gamut0.xyz, c), dot(screen.gamut1.xyz, c), dot(screen.gamut2.xyz, c));
     return vec4<f32>(clamp(tone_mapped(c, screen.tone), vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+}
+
+struct Encoding {
+    tone: vec4<f32>,
+    gamut0: vec4<f32>,
+    gamut1: vec4<f32>,
+    gamut2: vec4<f32>,
+    matrix: vec4<f32>,
+    how: vec4<u32>,
+    plane: vec4<u32>,
+};
+
+@group(0) @binding(10) var<uniform> encoding: Encoding;
+
+fn encoded_rgb(code: vec3<f32>) -> vec3<f32> {
+    let coded = encoding.how.x;
+    let wanted = encoding.how.y;
+    if coded == wanted {
+        return clamp(code, vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    var c: vec3<f32>;
+    if coded == 0u {
+        c = pow(max(code, vec3<f32>(0.0)), vec3<f32>(2.4));
+    } else {
+        c = decode(code, coded, encoding.matrix.z);
+    }
+    c = vec3<f32>(dot(encoding.gamut0.xyz, c), dot(encoding.gamut1.xyz, c), dot(encoding.gamut2.xyz, c));
+    if wanted == 0u {
+        return clamp(tone_mapped(c, encoding.tone), vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    return clamp(encode(c, wanted), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+fn pixel_at(x: i32, y: i32) -> vec3<f32> {
+    let size = vec2<i32>(textureDimensions(timeline));
+    let at = clamp(vec2<i32>(x, y), vec2<i32>(0), size - vec2<i32>(1));
+    return encoded_rgb(textureLoad(timeline, at, 0).rgb);
+}
+
+fn output_ycc(c: vec3<f32>) -> vec3<f32> {
+    let kr = encoding.matrix.x;
+    let kb = encoding.matrix.y;
+    let y = kr * c.r + (1.0 - kr - kb) * c.g + kb * c.b;
+    return vec3<f32>(y, (c.b - y) / (2.0 - 2.0 * kb), (c.r - y) / (2.0 - 2.0 * kr));
+}
+
+fn code_of(v: f32, base: f32, span: f32) -> u32 {
+    let depth = encoding.how.z;
+    let scale = f32(1u << (depth - 8u));
+    let top = f32((1u << depth) - 1u);
+    return u32(clamp(round((base + span * v) * scale), 0.0, top)) << encoding.how.w;
+}
+
+fn chroma_at(px: vec2<i32>) -> vec2<f32> {
+    let bw = i32(1u << encoding.plane.y);
+    let bh = i32(1u << encoding.plane.z);
+    var sum = vec2<f32>(0.0);
+    for (var j = 0; j < bh; j++) {
+        for (var i = 0; i < bw; i++) {
+            sum += output_ycc(pixel_at(px.x * bw + i, px.y * bh + j)).yz;
+        }
+    }
+    return sum / f32(bw * bh);
+}
+
+fn encoded_at(px: vec2<i32>) -> vec4<u32> {
+    let kind = encoding.plane.x;
+    var out = vec4<u32>(0u);
+    if kind == 0u {
+        out.x = code_of(output_ycc(pixel_at(px.x, px.y)).x, 16.0, 219.0);
+    } else if kind <= 3u {
+        let c = chroma_at(px);
+        let cb = code_of(c.x, 128.0, 224.0);
+        let cr = code_of(c.y, 128.0, 224.0);
+        out = select(vec4<u32>(cb, cr, 0u, 0u), vec4<u32>(cr, 0u, 0u, 0u), kind == 3u);
+    } else if kind == 4u {
+        out.x = ((1u << encoding.how.z) - 1u) << encoding.how.w;
+    } else if kind == 5u {
+        out = vec4<u32>(vec3<u32>(round(pixel_at(px.x, px.y) * 255.0)), 255u);
+    } else {
+        let c = pixel_at(px.x / 3, px.y);
+        out.x = u32(round(c[px.x % 3] * 255.0));
+    }
+    return out;
+}
+
+@fragment
+fn fs_encode(in: Out) -> @location(0) vec4<u32> {
+    return encoded_at(vec2<i32>(in.position.xy));
+}
+
+@fragment
+fn fs_encode_unorm(in: Out) -> @location(0) vec4<f32> {
+    return vec4<f32>(encoded_at(vec2<i32>(in.position.xy))) / f32(encoding.plane.w);
 }

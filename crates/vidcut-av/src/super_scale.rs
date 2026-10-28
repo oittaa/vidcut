@@ -258,6 +258,7 @@ impl<N: Network> Slot<N> {
 }
 
 pub(crate) enum Picture {
+    Held(crate::screen::held::Held),
     Rgb(Vec<u8>),
     Frame(crate::ffmpeg::frame::Video),
 }
@@ -271,7 +272,12 @@ pub(crate) struct Out {
 pub(crate) type Sink = Box<dyn FnOnce(Result<Vec<Out>>) + Send>;
 
 pub(crate) trait Run: Send {
-    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<Out>>;
+    fn push(
+        &mut self,
+        index: i64,
+        pts: Option<i64>,
+        rgb: &crate::ffmpeg::frame::Video,
+    ) -> Result<Vec<Out>>;
 
     fn takes(&self, _f: &crate::ffmpeg::frame::Video, _rotation: u16) -> bool {
         false
@@ -304,23 +310,29 @@ pub(crate) fn last_frame(upscaler: Upscaler, first: i64) -> Option<i64> {
     }
 }
 
+fn need(size: (u32, u32), shown: (u32, u32)) -> f64 {
+    (f64::from(shown.0) / f64::from(size.0)).min(f64::from(shown.1) / f64::from(size.1))
+}
+
+fn scaled(size: (u32, u32), s: f64) -> (u32, u32) {
+    let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
+    (
+        even(f64::from(size.0) * s).max(size.0),
+        even(f64::from(size.1) * s).max(size.1),
+    )
+}
+
 pub(crate) fn made_size(upscaler: Upscaler, size: (u32, u32), shown: (u32, u32)) -> (u32, u32) {
     match upscaler {
         Upscaler::AiFast | Upscaler::Classic => {
             let scale = nanovsr::SCALE;
             (size.0 * scale, size.1 * scale)
         }
-        Upscaler::AiBest => {
-            let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
-            let s = (f64::from(shown.0) / f64::from(size.0))
-                .min(f64::from(shown.1) / f64::from(size.1))
-                .min(f64::from(flashvsr::SCALE));
-            (
-                even(f64::from(size.0) * s).max(size.0),
-                even(f64::from(size.1) * s).max(size.1),
-            )
-        }
-        Upscaler::Macos => macos::made_size(size, shown),
+        Upscaler::AiBest => scaled(size, need(size, shown).min(f64::from(flashvsr::SCALE))),
+        Upscaler::Macos => scaled(
+            size,
+            need(size, shown).min(f64::from(macos::factor(size, shown))),
+        ),
     }
 }
 

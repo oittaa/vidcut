@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use crate::hw::vulkan::{HANDLE, Identity, Plane};
 use ash::vk;
-use vidcut_av::hw::vulkan::{HANDLE, Identity, Plane};
 
 pub(super) struct Import {
     pub(super) images: Vec<vk::Image>,
@@ -40,11 +40,9 @@ impl Imports {
         if old.is_empty() {
             return;
         }
-        let _ = crate::threads::closing(
-            "vidcut-frees-imports",
-            crate::threads::Work::Interactive,
-            move || drop(old),
-        );
+        let _ = std::thread::Builder::new()
+            .name("vidcut-frees-imports".into())
+            .spawn(move || drop(old));
     }
 }
 

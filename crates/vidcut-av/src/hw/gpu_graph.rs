@@ -4,10 +4,6 @@ use crate::ffmpeg::{self, ffi};
 pub(crate) struct GpuGraph(ffmpeg::filter::Graph);
 
 impl GpuGraph {
-    pub(crate) fn new() -> Self {
-        Self::for_reading(crate::decode::Reading::Stream)
-    }
-
     pub(crate) fn for_reading(reading: crate::decode::Reading) -> Self {
         Self(crate::pool::graph(reading))
     }
@@ -73,7 +69,7 @@ mod tests {
 
     #[test]
     fn a_gpu_graph_frees_its_filters_from_the_sink_back() {
-        let mut graph = GpuGraph::new();
+        let mut graph = GpuGraph::for_reading(crate::decode::Reading::Stream);
         let find = |name| ffmpeg::filter::find(name).unwrap();
         let args = "video_size=64x64:pix_fmt=0:time_base=1/30:pixel_aspect=1/1";
         graph.add(&find("buffer"), "in", args).unwrap();

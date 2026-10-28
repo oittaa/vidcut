@@ -57,14 +57,22 @@ impl Titles {
         t: i64,
         placing: &[(String, Picture)],
     ) -> (Vec<TitleOver>, bool) {
+        self.shown_at(&plan.titles_at(t), plan.size(), placing)
+    }
+
+    pub(crate) fn shown_at(
+        &self,
+        at: &[(usize, ShownTitle)],
+        size: (u32, u32),
+        placing: &[(String, Picture)],
+    ) -> (Vec<TitleOver>, bool) {
         let preview = lock(&self.preview).clone();
-        let size = plan.size();
         let (w, h) = (f64::from(size.0), f64::from(size.1));
         let mut kept = lock(&self.kept);
         let mut out = Vec::new();
         let mut all = true;
-        for (above, shown) in plan.titles_at(t) {
-            let to = wanted(&preview, &shown);
+        for (above, shown) in at {
+            let to = wanted(&preview, shown);
             let exact = (steady(to), size);
             let key = if kept.pictures.contains(&exact) {
                 exact
@@ -87,7 +95,7 @@ impl Titles {
                     ((y - y0) * h).round() as i32
                 };
                 out.push(TitleOver {
-                    above,
+                    above: *above,
                     picture: p,
                     dx: ((x - x0) * w).round() as i32,
                     dy,
@@ -107,13 +115,16 @@ impl Titles {
     }
 
     pub(crate) fn draw(&self, plan: &Plan, t: i64) -> bool {
-        let size = plan.size();
+        self.draw_at(&plan.titles_at(t), plan.size())
+    }
+
+    pub(crate) fn draw_at(&self, at: &[(usize, ShownTitle)], size: (u32, u32)) -> bool {
         let preview = lock(&self.preview).clone();
         let missing: Vec<(String, Key)> = {
             let kept = lock(&self.kept);
             let mut keys: Vec<(String, Key)> = Vec::new();
-            for (_, shown) in plan.titles_at(t) {
-                let key = (steady(wanted(&preview, &shown)), size);
+            for (_, shown) in at {
+                let key = (steady(wanted(&preview, shown)), size);
                 if !kept.pictures.contains(&key) && !keys.iter().any(|(_, k)| *k == key) {
                     keys.push((shown.clip.clone(), key));
                 }

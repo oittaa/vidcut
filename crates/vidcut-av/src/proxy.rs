@@ -5,11 +5,11 @@ use vidcut_core::export::EncoderChoice;
 use vidcut_core::model::{ColorSpace, Hdr};
 use vidcut_core::preferences::ProxyCodec;
 
-use crate::cuda::CudaFrames;
 use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
 use crate::export::encode::{self, Availability, Pass, Passes, Upload, VideoEncoder};
-use crate::export::make::{Fitting, Maker, Output};
+use crate::export::make::{Fitting, Maker};
+use crate::export::video::{Drawer, Handoff};
 use crate::export::worker::{self, Inbox, Worker};
 use crate::ffmpeg::{self, encoder, ffi, format, frame};
 use crate::route::{Place, Went};
@@ -386,6 +386,7 @@ pub fn write(
             crate::progress::note(crate::export::Note::Source(crate::export::SourceNote {
                 path: input.path().to_path_buf(),
                 decoding: (**reader.decoding()).clone(),
+                went: None,
             }));
         }
         match encode_into(
@@ -478,11 +479,6 @@ enum Failed {
     Encoding(Error),
 }
 
-enum MadeOn<'a> {
-    Cuda(&'a crate::cuda::CudaDevice),
-    Vulkan(&'a crate::hw::Device),
-}
-
 struct Writer<'a> {
     writing: Worker<Timed, u64>,
     upload: Option<Upload>,
@@ -550,10 +546,9 @@ impl<'a> Writer<'a> {
         video: &VideoEncoder,
         (width, height): (u32, u32),
         (src_tb, rate): (ffmpeg::Rational, Option<ffmpeg::Rational>),
-        made_on: Option<MadeOn<'_>>,
         decoder: Option<&crate::hw::GpuDecoder>,
         shown: &'a Shown<'a>,
-    ) -> std::result::Result<(Self, Output), Failed> {
+    ) -> std::result::Result<(Self, Option<Handoff>), Failed> {
         let enc_tb = encode_time_base(src_tb);
         let mut octx = format::output_as(tmp, "matroska")
             .ctx(|| format!("creating {}", tmp.display()))
@@ -569,32 +564,24 @@ impl<'a> Writer<'a> {
             ))));
         }
         let times = (enc_tb, rate);
-        let cuda = match made_on {
-            Some(MadeOn::Cuda(cuda)) => Some(cuda),
-            _ => None,
-        };
-        let on_cuda = cuda.and_then(|cuda| {
-            let device = cuda.with_own_stream().ok()?;
-            let frames = CudaFrames::new(&device, cuda_layout(video.pixel), width, height).ok()?;
-            let gpu_frames = Some(frames.as_ptr());
-            let (opened, _) = encode::open_video(
-                video,
-                width,
-                height,
-                times,
-                global,
-                gpu_frames,
-                None,
-                Pass::Only,
-            )
-            .ok()?;
-            Some((opened, (device, frames)))
-        });
-        let (encoder, upload, output) = match on_cuda {
-            Some((opened, gpu)) => {
-                let output = Output::for_encoder(video.kind, Some(gpu), None, None);
-                (opened, None, output)
-            }
+        let on_cuda =
+            crate::export::gpu_output(video, width, height).and_then(|(device, frames)| {
+                let gpu_frames = Some(frames.as_ptr());
+                let (opened, _) = encode::open_video(
+                    video,
+                    width,
+                    height,
+                    times,
+                    global,
+                    gpu_frames,
+                    None,
+                    Pass::Only,
+                )
+                .ok()?;
+                Some((opened, (device, frames)))
+            });
+        let (encoder, upload, cuda) = match on_cuda {
+            Some((opened, gpu)) => (opened, None, Some(gpu)),
             None => {
                 let device = video.device.as_deref();
                 let shared = decoder.filter(|d| encode::shares(video.kind, device, d));
@@ -609,24 +596,17 @@ impl<'a> Writer<'a> {
                     Pass::Only,
                 )
                 .map_err(Failed::Opening)?;
-                let fit_on = shared.map(|d| d.kind().place());
-                let output = match (&made_on, &upload) {
-                    (Some(MadeOn::Vulkan(device)), Some(up)) if up.is_on(device) => {
-                        Ok(Output::Vulkan)
-                    }
-                    _ => Output::for_encoder(video.kind, None, fit_on, upload.as_ref()),
-                };
-                (opened, upload, output)
+                (opened, upload, None)
             }
         };
-        let output = output.map_err(Failed::Opening)?;
+        let handoff = Handoff::of(video.kind, cuda, upload.as_ref()).map_err(Failed::Opening)?;
         crate::progress::note(crate::export::Note::Video(crate::export::VideoNote {
             encoder: video.name.clone(),
             device: video.device.clone(),
             pixel: encode::pixel_name(video.pixel),
             bits: encode::pixel_bits(video.pixel),
             passes: 1,
-            gpu_frames_in: !matches!(output, Output::Fitted),
+            gpu_frames_in: handoff.is_some(),
         }));
         let mut header = || -> Result<()> {
             let mut ost = octx
@@ -661,7 +641,7 @@ impl<'a> Writer<'a> {
             shown,
             hdr,
         };
-        Ok((writer, output))
+        Ok((writer, handoff))
     }
 
     fn push(&mut self, picture: frame::Video, pts: Option<i64>) -> Result<()> {
@@ -742,67 +722,43 @@ fn encode_into(
     let size = (width, height);
     let decoded_on_gpu = reader.gpu().is_some();
     let video = enc.video_encoder(reader.peek());
-    let (pixel, target) = (video.pixel, video.hdr);
-    let scaled = match enc.kind {
-        EncoderChoice::Nvenc => {
-            let layout = cuda_layout(pixel);
-            Fitting::on_gpu(reader, size, layout, target, false, Place::Cuda, None)
-        }
-        EncoderChoice::Vulkan => {
-            Fitting::on_gpu(reader, size, pixel, target, false, Place::Vulkan, None)
-        }
-        _ => Fitting::none(),
+    let target = video.hdr;
+    let (mut writer, handoff) = Writer::new((tmp, origin), &video, size, times, decoder, shown)?;
+    let pixel = match handoff {
+        Some(Handoff::Cuda(..)) => crate::export::gpu_pixel(&video),
+        _ => video.pixel,
     };
-    let made_on = match (enc.kind, &scaled.scaler) {
-        (EncoderChoice::Nvenc, Some(_)) => reader.decoders_cuda().map(MadeOn::Cuda),
-        (EncoderChoice::Vulkan, Some(s)) => s.vulkan().map(MadeOn::Vulkan),
-        _ => None,
-    };
-    let (mut writer, output) =
-        Writer::new((tmp, origin), &video, size, times, made_on, decoder, shown)?;
-    let (layout, mut fitting) = match output {
-        Output::Cuda { .. } => (cuda_layout(pixel), scaled),
-        Output::Vulkan => (pixel, scaled),
-        _ => (pixel, Fitting::none()),
+    let mut drawer = match Drawer::new(handoff) {
+        Ok(drawer) => drawer,
+        Err(e) => return Err(Failed::Encoding(writer.abandon(e))),
     };
     let mut maker = Maker::new(
-        (width, height, layout),
-        target,
-        output,
+        (width, height, format::Pixel::YUV420P),
+        drawer.keeps(),
         crate::decode::Reading::Stream,
     );
+    let mut fitting = Fitting::none();
     let mut went = None;
     let mut encoding = || -> Result<()> {
         while let Some(src) = reader.next_frame()? {
-            let (pts, frame_size) = (src.pts(), (src.width(), src.height()));
-            let Some(picture) = maker.make(&mut fitting, &src, rotation, reader.path())? else {
-                continue;
-            };
+            let pts = src.pts();
+            let made = maker.make(&mut fitting, &src, reader.path())?;
             if went.is_none() {
-                went = fitting.went.map(|w| match w {
-                    Went::Cpu if decoded_on_gpu => Went::Down {
-                        size: frame_size,
-                        whole: true,
-                    },
+                went = fitting.went().map(|w| match w {
+                    Went::Cpu if decoded_on_gpu => Went::Down,
                     w => w,
                 });
             }
-            let pts = match Place::of(&picture) {
-                Place::Cuda | Place::Vulkan => picture.pts(),
-                _ => pts,
-            };
-            let picture = match maker.output() {
-                Output::Cuda { frames, .. } if Place::of(&picture) == Place::Memory => {
-                    frames.upload(&picture)?
-                }
-                _ => picture,
-            };
-            writer.push(picture, pts)?;
-        }
-        for picture in maker.rest(&mut fitting)? {
-            went.get_or_insert(Went::Stayed);
-            let pts = picture.pts();
-            writer.push(picture, pts)?;
+            let picture =
+                std::sync::Arc::new(crate::player::Picture::new(made, rotation, None, None));
+            let out = drawer.frame(
+                &picture,
+                &[],
+                (&[], &[], &[], target),
+                size,
+                (pixel, (target, target)),
+            )?;
+            writer.push(out, pts)?;
         }
         Ok(())
     };
@@ -811,13 +767,6 @@ fn encode_into(
     }
     let frames = writer.finish().map_err(Failed::Encoding)?;
     Ok((frames, went))
-}
-
-fn cuda_layout(pixel: format::Pixel) -> format::Pixel {
-    match pixel {
-        format::Pixel::P010LE => format::Pixel::P010LE,
-        _ => format::Pixel::NV12,
-    }
 }
 
 fn deep(pixel: format::Pixel) -> bool {

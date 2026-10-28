@@ -1793,7 +1793,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The lists name the upscaler that Auto and Project Settings give on this computer, as in Auto (AI Best).
   - On macOS, the upscalers are AI and Classic. AI Fast and AI Best are off there for now: exports and the viewer refuse them.
   - On macOS, AI is the upscaler of Auto. It is the super-resolution scaler of macOS 26 and later (`VTFrameProcessor` of VideoToolbox), `macos` in requests.
-    - It enlarges by a factor that macOS offers. It takes the smallest of these that reaches the shown size, and the result is fitted.
+    - It enlarges by a factor that macOS offers. It takes the smallest of these that reaches the shown size.
+    - Then it makes the picture at the size that it shows at, as AI Best does.
     - It reads the frames of a clip in order. Each output frame uses the frame and the output before it.
     - It takes SDR pictures up to 1920×1080, the limit of macOS for video.
     - macOS downloads its models only when the user agrees, as for the weights of AI Fast and AI Best. vidcut does not ship them.
@@ -1818,13 +1819,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Classic has a Sharpness of Low, Medium or High.
   - A placed picture is made at most 4 times as large as its source. A picture that fills the frame takes the better upscaler for all of its enlargement.
   - The Inspector of the Cut page has a Super Scale section for the media of the selected clips.
-  - With Classic, an export enlarges a picture with the upscaler that its path has:
-    - Pictures that NVIDIA's GPU fits for NVENC: libplacebo, in linear light. Low is `ewa_lanczos`, Medium `ewa_lanczossharp` and High `ewa_lanczos4sharpest`.
-    - Pictures that the CPU makes, also placed pictures: swscale. Low is `spline`, Medium `lanczos` and High `lanczos` with four lobes.
-    - The other GPUs fit the picture as before. They have no Super Scale yet ([todo](todo/super-scale.md)).
+  - With Classic, the viewer and the exports enlarge with the kernels of their shader. This is the same on each GPU.
+    - Low is Catmull-Rom. Medium is Lanczos with 3 lobes, and High is Lanczos with 4 lobes.
   - The viewer shows Super Scale only with View > Show Super Scale, which is off by default.
   - With an AI upscaler, the viewer runs the upscaler of the export on each picture that the export enlarges. Playback is then slower. With AI Best, a picture can take seconds.
-  - With Classic, the viewer enlarges with its own kernels: Catmull-Rom (Low), Lanczos with 3 lobes (Medium) and with 4 lobes (High).
 - **Why:**
   - A video model adds detail that a classic upscaler cannot. In side-by-side tests, the owner ranked NanoVSR 5.4M above Real-ESRGAN's compact model.
   - Some users wait a long time for the best pictures, and others want good pictures fast. Thus there is a fast AI upscaler and a slow one.

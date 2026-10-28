@@ -10,7 +10,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - H.264 with B-frames has open GOPs.
 - `busy` adds new noise around the barcode in each frame. Thus the stream is heavy to decode.
 
-**GPU check:** `scripts/gpu-check.sh` (release build) shows what runs on the GPU in a 4K export and in the viewer.
+**GPU check:** `scripts/gpu-check.sh` (release build) shows what runs on the GPU in four common exports and in the viewer.
 
 - It uses 5 s of the Big Buck Bunny 4K60 clip from 1:00, plain and at 150% zoom.
 - For each, it exports with the hardware encoder and prints the export's report, the time and the CPU time.
@@ -100,7 +100,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - With `FFMPEG_DIR` set as usual, it needs the C headers of macOS from Zig (`winget install zig.zig`).
 - Set `BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin="-isystem ZIG/lib/include -isystem ZIG/lib/libc/include/any-macos-any"`. ZIG is the folder with `zig.exe`.
 
-**A smaller FFmpeg:** `VIDCUT_FFMPEG_WITHOUT=zscale,libx264` makes vidcut operate as if those parts are missing.
+**A smaller FFmpeg:** `VIDCUT_FFMPEG_WITHOUT=libx264,libopus` makes vidcut operate as if those parts are missing.
 
 **Media inspection** (`crates/vidcut-av/examples/`):
 

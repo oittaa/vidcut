@@ -13,10 +13,7 @@ vidcut has the composite modes from Normal to Darker Color (spec D75). These par
   - The measurements of these modes are not complete.
   - Why: a pair of clips mixes in a way that a plan of one layer at a time cannot give. The plan needs the lower clip's mask when it draws the upper clip.
   - A Composite with these modes in an OTIO file stays a clip effect that does not play.
-- **A title between layers:**
-  - The export draws a title onto a frame in the code values of the frame. Thus it cuts the values of the layers below the title to the range of the code.
-  - A layer with a mode above the title then mixes with the cut values. The viewer keeps them.
+- **A title between layers, checked by hand:**
   - Measured in Resolve Studio 21.1.2: V2 is at Add over V1, V3 has a title, and V4 is 50% gray at Multiply.
   - Outside the title, the frame is (V1 + V2) × 0.5. The sum is not cut at 1.
-  - To do: draw a title onto the `Canvas` of the layers below it.
-- **NVENC:** a frame with a composite mode is mixed on the CPU. A CUDA kernel can mix it on the GPU ([gpu-placement.md](gpu-placement.md)).
+  - The viewer and the exports draw the title into the floats of the layers below it. Compare an export with these values.

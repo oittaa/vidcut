@@ -5,11 +5,11 @@ use std::time::Duration;
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
-use super::gate::Gate;
 use super::theme;
 use super::video::{Viewer, ViewerHandle};
 use super::workspace::{Picture, Workspace};
 use crate::live::{self, Capture, Image, Presented};
+use vidcut_av::screen::Gate;
 
 enum UiTask {
     CaptureWindow(Capture),

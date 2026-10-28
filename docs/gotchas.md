@@ -8,11 +8,18 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - A texture larger than `device.limits()` allows, or a binding of the wrong format, stops the GUI.
   - `Screen::draw` draws black for a picture past the limit.
   - The bindings of the shader change together with the layout in `Gpu::new`.
+- **wgpu does not let a pipeline draw into `R16Unorm` or `Rg16Unorm` by default.**
+  - The 16-bit unorm feature lets a shader read these formats, but not draw into them.
+  - Thus the device also asks for the GPU's own format features (`TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`). Then wgpu permits what the GPU can do. Metal can draw into these formats.
+  - Without them, a pipeline or a view that draws into these formats is a validation error, and the default handler panics.
+  - The encoding finds the pipeline before it makes the view.
+  - Thus `Encoders::new` makes each pipeline of the encoding under an error scope (`checked`). It keeps the pipelines that the device takes.
+  - The VideoToolbox hand-off draws 10-bit planes into `R16Unorm` and `Rg16Unorm` IOSurfaces. Without these pipelines, those planes go through memory (`through_memory`).
 - **wgpu 30's `Surface::configure` fails when another thread submits while it waits for the device to go idle**.
   - Then the default handler panics.
   - eframe configures on each resize. Thus the viewer thread submits through `Gate::pass` ([playback](design/playback.md#the-viewer-thread), [todo](todo/wgpu-configure-gate.md)).
 - **egui-wgpu shows an `Rgba8Unorm` native texture's values as they are**, with no sRGB conversion.
-  - The target of the viewer (`TARGET` in `gui/picture.rs`) holds gamma-encoded BT.709 RGB.
+  - The target of the viewer (`TARGET` in `screen/mod.rs`) holds gamma-encoded BT.709 RGB.
 
 ## FFmpeg: reading and decoding
 
@@ -66,29 +73,7 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 
 - **FFmpeg's `buffer` source takes the frame it is given** (`av_buffersrc_add_frame`, which ffmpeg-next's `Source::add` calls).
   - It moves the buffers out of the frame, and leaves the frame empty.
-  - `Fitting::scale` gives the CUDA scaler a reference of its own.
-  - Thus the decoded frame stays, for a placed picture that is fitted again at its own size.
-- **Tell FFmpeg's `buffer` source a picture's matrix and range** (`colorspace`, `range`).
-  - FFmpeg adds a conversion for a filter that does not take the layout (`transpose` and 4:2:2).
-  - That conversion reads the tags of the frame, and writes the tags of the source.
-  - If you tell the source nothing, it asks for BT.601.
-  - The `Normalizer` sets both values from `color::Source::yuv_tags`.
-- **An untagged picture's matrix follows from its size** (decision D35, `color::untagged_matrix`).
-  - Thus a copy that is scaled on the GPU carries the matrix of the picture that it came from (`color::keep_matrix`).
-  - Without this, untagged 1280×720 shrunk to 640×360 would read as BT.601.
-- **From FFmpeg 8.1, `zscale` changes the color of a picture with straight alpha** (`format_init` in vf_zscale.c).
-  - It gives zimg the alpha mode of the frame. zimg multiplies the color by the alpha, converts it, and divides again.
-  - Under a transfer curve, this gives another color. On FFmpeg 9.0.2, red at an alpha of 0.498 came out at 0.377 in linear light, not 0.999.
-  - FFmpeg 8.0 converts the color without the alpha.
-  - Thus `Normalizer` gives zscale only the color planes. `mergeplanes` puts the alpha plane back after the conversion.
-- **FFmpeg 9's `scale_cuda` truncates in each pass of a shrink with filters** (`use_filters`, on by default for a shrink; `from_floatN` in vector_helpers.cuh).
-  - 4K shrunk to 192×108 comes out 8 to 9 levels low in red and blue.
-  - `cuda::scaling` asks for the fixed kernels (`use_filters=0`). These are within 1.2 levels of the CPU.
-- **`scale_d3d11` fails on AMD's driver.**
-  - Its output textures are bound for the video encoder too (`D3D11_BIND_VIDEO_ENCODER`). The driver refuses this for NV12 and P010 (`E_INVALIDARG`).
-  - It also needs `format=`.
-  - It scales the padding of the decoder into the picture (1080p decodes into 1088 lines).
-  - `hw::d3d11::Scaler` drives the video processor itself.
+  - Thus `hw::run_graph` gives the graph of a turn a reference of its own (`av_frame_ref`).
 - **FFmpeg's GPU deinterlacers aren't `bwdif`** (9.0.1).
   - `bwdif_vulkan` reads black past the top and bottom edges, and does not clip to the bits of the frame.
   - Thus its 10-bit edge rows come out at half level, or overshoot.
@@ -134,17 +119,6 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 
 ## GPU drivers
 
-- **Never give libplacebo the same Vulkan frame twice at once.**
-  - libplacebo takes a frame at the semaphore value that FFmpeg's frame gives, and gives it back at the next value.
-  - Thus a frame held twice ends one step ahead of all that the GPU signals.
-  - Then FFmpeg waits for that value forever when it frees the frame.
-  - Also, a copy from CUDA can take its picture before the picture is there.
-  - `cuda::Blacks` gives a black frame again only after libplacebo has let go of it.
-- **libplacebo marks an input frame done before it has read it** (fixed in commit 2ba21c07, in no release yet).
-  - This can come before the CUDA copy into the frame finishes. Then the export shows the previous frame, or hangs.
-  - The late copy sets the semaphore of the frame back by one, and freeing the frame waits forever.
-  - `cuda::wait_done` waits for each copy before the frame goes to libplacebo.
-  - It also waits for the output of libplacebo before the next step ([todo](todo/libplacebo-handback-workaround.md)).
 - **NVIDIA's exit handlers break a close during the exit** (Linux, driver 580).
   - The handler of libnvcuvid runs from `_dl_fini`. If a decoder still lives, the handler joins a thread of the library.
   - A decoder that closes on another thread also joins that thread. Both wait forever.
@@ -178,20 +152,6 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - `GpuDecoder::why_not` gives such H.264 to the CPU on these decoders.
   - `decode::h264_open_gop` looks for a keyframe that is not IDR.
   - x264 makes open GOPs with B-frames, unless told not to.
-- **VideoToolbox's pixel transfer gives wrong levels in 16-bit 4:4:4 (P416)** (macOS 27.2, M4).
-  - The test: 30 frames of Big Buck Bunny go from 8-bit 4:2:0 into P416 for ProRes 4444.
-  - The mean luma is 694.2 in 10-bit codes. On the CPU, it is 691.7.
-  - The chroma is within 0.6 of the CPU's.
-  - The Metal kernel of `recolor::Recolor` gives a mean luma of 691.5.
-  - Into the 10-bit 4:2:2 of ProRes 422 HQ, the transfer gives 691.5.
-  - `vt::Fit` writes P416 with the Metal kernel.
-- **AMD's video processor clips levels outside video range when told studio range** (to 16–235, chroma 16–240).
-  - When told full range in and out, it keeps these levels.
-  - Thus `hw::d3d11::Scaler` says full range where DXGI has such a color space. PQ has studio range only.
-  - The check of the scaler has bands outside video range.
-  - Where one pass fails the check, the scaler shrinks in halving passes, and checks each pass.
-  - On the Radeon iGPU, a single pass fails the check when it shrinks to under half each way.
-  - The check of a turned pass is turned too.
 - **AMD's Windows driver counts a Direct3D 11 texture imported into Vulkan again against the process for good** (32.0.21042.62, Radeon iGPU).
   - Each `vkAllocateMemory` from a shared NT handle of a texture that was imported before adds twice the texture's size.
   - It adds this to the dedicated GPU memory of the process: the `GPU Process Memory` counter that Task Manager shows.

@@ -5,7 +5,6 @@ mod gpu_graph;
 pub mod vaapi;
 pub(crate) mod vt;
 pub mod vulkan;
-mod vulkan_scale;
 
 pub(crate) use gpu_graph::GpuGraph;
 
@@ -15,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use crate::cuda::CudaDevice;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, format, frame};
-use crate::route::{Ops, Place};
+use crate::route::Place;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {
@@ -857,7 +856,7 @@ impl Keeper {
 
 pub(crate) struct Turner {
     input: (KeptLike, u16),
-    fit: vt::Fit,
+    turn: vt::Turn,
 }
 
 // SAFETY: one thread at a time uses a turner, as the run or the source that holds it.
@@ -875,15 +874,11 @@ impl Turner {
         let (frames, like) = frames_of(f)?;
         let input = (like, rotation);
         if turner.as_ref().is_none_or(|t| t.input != input) {
-            let upright = match rotation % 180 {
-                90 => (f.height(), f.width()),
-                _ => (f.width(), f.height()),
-            };
-            let fit = vt::Fit::new(f, frames, rotation, (upright, upright), sw_format(f))?;
-            *turner = Some(Self { input, fit });
+            let turn = vt::Turn::new(f, frames, rotation)?;
+            *turner = Some(Self { input, turn });
         }
         let clock = std::time::Instant::now();
-        let mut out = turner.as_mut().expect("made above").fit.run(f)?;
+        let mut out = turner.as_mut().expect("made above").turn.run(f)?;
         same_picture(&mut out, f);
         crate::debug!(
             "ai",
@@ -910,13 +905,14 @@ fn same_picture(to: &mut frame::Video, from: &frame::Video) {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn gpu_graph(
     f: &frame::Video,
     frames: *mut ffi::AVBufferRef,
     pixel: ffi::AVPixelFormat,
     spec: &str,
 ) -> Result<GpuGraph> {
-    let mut graph = GpuGraph::new();
+    let mut graph = GpuGraph::for_reading(crate::decode::Reading::Stream);
     let tb = ffi::AVRational { num: 1, den: 1000 };
     crate::cuda::add_source(
         &mut graph,
@@ -925,7 +921,6 @@ fn gpu_graph(
         (f.width(), f.height()),
         (tb, f.aspect_ratio()),
         frames,
-        None,
     )?;
     let sink = ffmpeg::filter::find("buffersink")
         .ok_or_else(|| Error::Invalid("no buffersink filter".into()))?;
@@ -940,12 +935,9 @@ fn gpu_graph(
     Ok(graph)
 }
 
+#[cfg(target_os = "macos")]
 fn run_graph(graph: &mut GpuGraph, f: &frame::Video, doing: &str) -> Result<frame::Video> {
-    let mut given = frame::Video::empty();
-    // SAFETY: both frames are valid.
-    if unsafe { ffi::av_frame_ref(given.as_mut_ptr(), f.as_ptr()) } < 0 {
-        return Err(Error::Invalid("no memory for a frame".into()));
-    }
+    let given = crate::export::video::frame_ref(f)?;
     let failed = |source| Error::Ffmpeg {
         context: doing.to_string(),
         source,
@@ -964,63 +956,6 @@ fn run_graph(graph: &mut GpuGraph, f: &frame::Video, doing: &str) -> Result<fram
         .frame(&mut out)
         .map_err(failed)?;
     Ok(out)
-}
-
-pub(crate) struct Shrinker {
-    scaling: Option<Scaling>,
-    input: (KeptLike, (u32, u32)),
-}
-
-enum Scaling {
-    Filters(GpuGraph),
-    #[cfg(windows)]
-    D3d11(d3d11::Scaler),
-    Vt(vt::Fit),
-}
-
-impl Scaling {
-    fn new(f: &frame::Video, frames: *mut ffi::AVBufferRef, (w, h): (u32, u32)) -> Result<Self> {
-        match f.format() {
-            format::Pixel::VAAPI => {
-                let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
-                let spec = vaapi::shrink_spec((w, h));
-                Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
-            }
-            format::Pixel::CUDA => {
-                let pixel = ffi::AVPixelFormat::AV_PIX_FMT_CUDA;
-                let spec = crate::cuda::scaling((f.width(), f.height()), (w, h), "").join(",");
-                Ok(Self::Filters(gpu_graph(f, frames, pixel, &spec)?))
-            }
-            format::Pixel::VIDEOTOOLBOX => Ok(Self::Vt(vt::Fit::new(
-                f,
-                frames,
-                0,
-                ((w, h), (w, h)),
-                sw_format(f),
-            )?)),
-            format::Pixel::VULKAN => Ok(Self::Filters(vulkan_scale::scaler(f, frames, (w, h))?)),
-            #[cfg(windows)]
-            format::Pixel::D3D11 => Ok(Self::D3d11(d3d11::Scaler::new(f, frames, (w, h))?)),
-            other => Err(Error::Invalid(format!("no scaling {other:?} frames"))),
-        }
-    }
-}
-
-const BANDS: [[u16; 3]; 10] = [
-    [16, 128, 128],
-    [64, 128, 128],
-    [128, 128, 128],
-    [192, 128, 128],
-    [235, 128, 128],
-    [63, 102, 240],
-    [173, 42, 26],
-    [32, 240, 118],
-    [4, 8, 128],
-    [250, 128, 248],
-];
-
-fn readable((w, h): (u32, u32)) -> bool {
-    w as usize >= 4 * BANDS.len() && h >= 8
 }
 
 fn described(layout: format::Pixel) -> Option<&'static ffi::AVPixFmtDescriptor> {
@@ -1088,56 +1023,6 @@ fn write_line(picture: &mut frame::Video, c: i32, y: usize, line: &[u16]) {
     }
 }
 
-impl Shrinker {
-    pub(crate) fn down(
-        shrinker: &mut Option<Shrinker>,
-        f: &frame::Video,
-        size: (u32, u32),
-    ) -> Result<frame::Video> {
-        let (frames, of) = frames_of(f)?;
-        let input = (of, size);
-        if shrinker.as_ref().is_none_or(|s| s.input != input) {
-            let scaling = Scaling::new(f, frames, size)
-                .inspect_err(|e| {
-                    crate::debug!(
-                        "decoding",
-                        "{:?} frames {}x{} come down whole, not shrunk to {}x{} on the GPU: {e}",
-                        sw_format(f),
-                        f.width(),
-                        f.height(),
-                        size.0,
-                        size.1
-                    )
-                })
-                .ok();
-            *shrinker = Some(Self { scaling, input });
-        }
-        let shrinker = shrinker.as_mut().expect("made above");
-        let scaled = match &mut shrinker.scaling {
-            Some(Scaling::Filters(graph)) => run_graph(graph, f, "scaling a frame on the GPU"),
-            #[cfg(windows)]
-            Some(Scaling::D3d11(scaler)) => scaler.scale(f),
-            Some(Scaling::Vt(fit)) => fit.run(f),
-            None => return download(f),
-        };
-        match scaled.and_then(|scaled| download(&scaled)) {
-            Ok(mut small) => {
-                same_picture(&mut small, f);
-                crate::color::keep_matrix(&mut small, f);
-                Ok(small)
-            }
-            Err(e) => {
-                crate::debug!(
-                    "decoding",
-                    "shrinking on the GPU failed, frames come down whole from now on: {e}"
-                );
-                shrinker.scaling = None;
-                download(f)
-            }
-        }
-    }
-}
-
 pub(crate) struct Frames(*mut ffi::AVBufferRef);
 
 // SAFETY: FFmpeg's frames contexts are reference-counted and may be used on any thread.
@@ -1153,9 +1038,17 @@ impl Frames {
         Ok(Self(frames))
     }
 
-    #[cfg(windows)]
-    pub(crate) fn as_ptr(&self) -> *mut ffi::AVBufferRef {
-        self.0
+    pub(crate) fn fresh(&self) -> Result<frame::Video> {
+        let mut f = frame::Video::empty();
+        // SAFETY: its own live frames reference, and an empty frame to fill.
+        let ret = unsafe { ffi::av_hwframe_get_buffer(self.0, f.as_mut_ptr(), 0) };
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: "getting a frame for the encoder".into(),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(f)
     }
 }
 
@@ -1163,106 +1056,6 @@ impl Drop for Frames {
     fn drop(&mut self) {
         // SAFETY: its own reference.
         unsafe { ffi::av_buffer_unref(&mut self.0) };
-    }
-}
-
-const FITTERS: usize = 2;
-
-pub(crate) struct Fitter {
-    fitting: Fitting,
-    input: (KeptLike, (u32, u32), u16),
-}
-
-enum Fitting {
-    Filters(GpuGraph),
-    #[cfg(windows)]
-    D3d11(d3d11::Scaler),
-    Vt(vt::Fit),
-}
-
-pub(crate) fn can_fit(place: Place, ops: &Ops) -> bool {
-    if crate::export::normalize::has_alpha(ops.layout) {
-        return false;
-    }
-    match place {
-        Place::Cuda | Place::Vulkan => crate::cuda::can_fit(ops),
-        Place::Vaapi => vaapi::can_fit(ops),
-        #[cfg(windows)]
-        Place::D3d11 => d3d11::can_fit(ops),
-        Place::VideoToolbox => vt::can_fit(ops),
-        _ => false,
-    }
-}
-
-pub(crate) fn can_mix(place: Place) -> bool {
-    matches!(place, Place::Cuda | Place::VideoToolbox)
-}
-
-pub(crate) fn reaches(from: Place, to: Place) -> bool {
-    match from {
-        Place::Cuda | Place::Vulkan => crate::cuda::reaches(from, to),
-        _ => false,
-    }
-}
-
-impl Fitter {
-    pub(crate) fn fit(
-        fitters: &mut Vec<Fitter>,
-        f: &frame::Video,
-        rotation: u16,
-        fitted: (u32, u32),
-        (w, h): (u32, u32),
-        (layout, target): (format::Pixel, Option<vidcut_core::model::Hdr>),
-        into: Option<&Frames>,
-    ) -> Result<frame::Video> {
-        let (frames, of) = frames_of(f)?;
-        let input = (of, fitted, rotation);
-        if !fitters.iter().any(|x| x.input == input) {
-            let fitting = match f.format() {
-                format::Pixel::VAAPI => {
-                    let spec = vaapi::fit_spec(rotation, fitted, (w, h), layout);
-                    let pixel = ffi::AVPixelFormat::AV_PIX_FMT_VAAPI;
-                    Fitting::Filters(gpu_graph(f, frames, pixel, &spec)?)
-                }
-                format::Pixel::VIDEOTOOLBOX => {
-                    let sizes = (fitted, (w, h));
-                    Fitting::Vt(vt::Fit::with_colors(
-                        f, frames, rotation, sizes, layout, target,
-                    )?)
-                }
-                #[cfg(windows)]
-                format::Pixel::D3D11 => {
-                    let into = into.ok_or_else(|| {
-                        Error::Invalid("no frames to fit Direct3D 11's into".into())
-                    })?;
-                    // SAFETY: the encoder's frames, on the decoder's device.
-                    Fitting::D3d11(unsafe {
-                        d3d11::Scaler::into(f, frames, into.as_ptr(), fitted, rotation)?
-                    })
-                }
-                other => return Err(Error::Invalid(format!("no fitting {other:?} frames"))),
-            };
-            if fitters.len() == FITTERS {
-                fitters.remove(0);
-            }
-            fitters.push(Self { fitting, input });
-        }
-        let _ = into;
-        let fitter = fitters.iter_mut().find(|x| x.input == input);
-        let fitting = &mut fitter.expect("made above").fitting;
-        let mut out = match fitting {
-            Fitting::Filters(graph) => run_graph(graph, f, "fitting a frame on the GPU")?,
-            #[cfg(windows)]
-            Fitting::D3d11(scaler) => scaler.scale(f)?,
-            Fitting::Vt(fit) => fit.run(f)?,
-        };
-        same_picture(&mut out, f);
-        if let Fitting::Vt(fit) = fitting {
-            fit.tag(&mut out);
-        }
-        // SAFETY: a plain field of its own frame.
-        unsafe { (*out.as_mut_ptr()).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 } };
-        Ok(out)
     }
 }
 
@@ -1313,60 +1106,5 @@ mod tests {
     #[test]
     fn vulkan_is_labeled_vulkan() {
         assert_eq!(Kind::Vulkan.label(), "Vulkan");
-    }
-
-    #[test]
-    fn a_vulkan_frame_turned_a_quarter_fits() {
-        let ops = Ops {
-            rotation: 90,
-            layout: format::Pixel::YUV422P10LE,
-            out_layout: format::Pixel::YUV422P10LE,
-            rgb: false,
-            colors_kept: true,
-            pads: false,
-            into: false,
-        };
-        assert!(can_fit(Place::Vulkan, &ops));
-    }
-
-    #[test]
-    fn cudas_frames_reach_vulkans_encoder() {
-        assert!(reaches(Place::Cuda, Place::Vulkan));
-    }
-
-    #[test]
-    fn cudas_frames_reach_no_other_gpus_encoder() {
-        for to in [Place::Vaapi, Place::D3d11, Place::VideoToolbox] {
-            assert!(!reaches(Place::Cuda, to), "{to:?}");
-        }
-    }
-
-    #[test]
-    fn vulkans_frames_reach_nvencs_cuda_frames() {
-        assert!(reaches(Place::Vulkan, Place::Cuda));
-    }
-
-    #[test]
-    fn vulkans_frames_reach_no_other_gpus_encoder() {
-        for to in [Place::Vaapi, Place::D3d11, Place::VideoToolbox] {
-            assert!(!reaches(Place::Vulkan, to), "{to:?}");
-        }
-    }
-
-    #[test]
-    fn other_gpus_frames_reach_no_other_place() {
-        let gpus = [
-            Place::Cuda,
-            Place::Vaapi,
-            Place::D3d11,
-            Place::VideoToolbox,
-            Place::Vulkan,
-        ];
-        let others = [Place::Vaapi, Place::D3d11, Place::VideoToolbox];
-        for from in others {
-            for to in gpus.into_iter().filter(|&to| to != from) {
-                assert!(!reaches(from, to), "{from:?} to {to:?}");
-            }
-        }
     }
 }

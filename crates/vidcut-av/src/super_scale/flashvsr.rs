@@ -6,6 +6,7 @@ use vidcut_core::render::{RenderPlan, VideoPiece};
 use crate::compute::Gpu;
 use crate::error::{Error, Result};
 use crate::models::{self, Fetch, Need};
+use crate::screen::held::Held;
 use vidcut_core::catalog::{self, FLASHVSR_FILES as FILES};
 
 mod gemm;
@@ -238,14 +239,14 @@ impl Run {
         })
     }
 
-    fn outs(&mut self, rgbs: Vec<Vec<u8>>) -> Vec<super::Out> {
-        rgbs.into_iter()
-            .filter_map(|rgb| {
+    fn outs(&mut self, made: Vec<Held>) -> Vec<super::Out> {
+        made.into_iter()
+            .filter_map(|held| {
                 let (index, pts) = self.fed.pop_front()?;
                 Some(super::Out {
                     index,
                     pts,
-                    picture: super::Picture::Rgb(rgb),
+                    picture: super::Picture::Held(held),
                 })
             })
             .collect()
@@ -253,8 +254,13 @@ impl Run {
 }
 
 impl super::Run for Run {
-    fn push(&mut self, index: i64, pts: Option<i64>, rgb: Vec<u8>) -> Result<Vec<super::Out>> {
-        let outs = self.stream.push(&rgb)?;
+    fn push(
+        &mut self,
+        index: i64,
+        pts: Option<i64>,
+        rgb: &crate::ffmpeg::frame::Video,
+    ) -> Result<Vec<super::Out>> {
+        let outs = self.stream.push(crate::screen::held::held(rgb)?.buffer())?;
         self.fed.push_back((index, pts));
         Ok(self.outs(outs))
     }
@@ -290,11 +296,11 @@ impl Stream {
         Ok(Self { inner, _lent: lent })
     }
 
-    pub fn push(&mut self, rgb: &[u8]) -> Result<Vec<Vec<u8>>> {
+    pub(crate) fn push(&mut self, rgb: &wgpu::Buffer) -> Result<Vec<Held>> {
         with_engine(|gpu, model| self.inner.push(gpu, model, rgb))
     }
 
-    pub fn finish(&mut self) -> Result<Vec<Vec<u8>>> {
+    pub(crate) fn finish(&mut self) -> Result<Vec<Held>> {
         with_engine(|gpu, model| self.inner.finish(gpu, model))
     }
 

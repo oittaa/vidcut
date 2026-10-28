@@ -10,6 +10,7 @@ use super::{DIM, FFN, resize};
 use crate::compute::{Gpu, floats};
 use crate::compute::{bytes, words};
 use crate::error::{Error, Result};
+use crate::screen::held::Held;
 
 const RING: u64 = 20;
 const SLAB: u32 = 16384;
@@ -725,17 +726,21 @@ impl Stream {
         self.chunk * 16 + 17
     }
 
-    pub(super) fn push(&mut self, gpu: &Gpu, model: &Model, rgb: &[u8]) -> Result<Vec<Vec<u8>>> {
+    pub(super) fn push(
+        &mut self,
+        gpu: &Gpu,
+        model: &Model,
+        src: &wgpu::Buffer,
+    ) -> Result<Vec<Held>> {
         let g = self.g;
-        if rgb.len() != (g.sw * g.sh * 3) as usize {
+        if src.size() < u64::from(g.sw * g.sh * 3) {
             return Err(Error::Invalid(format!(
                 "the AI Best upscaler got a picture of {} bytes for {}x{}",
-                rgb.len(),
+                src.size(),
                 g.sw,
                 g.sh
             )));
         }
-        let src = gpu.upload(rgb);
         let temp = gpu.buffer((g.sh * g.w * 4) as usize);
         let mut e = Enc::new(gpu);
         let t = &self.tables;
@@ -745,7 +750,7 @@ impl Stream {
                 gpu,
                 pass,
                 &Resize {
-                    src: &src,
+                    src,
                     bounds: &t.hb,
                     coef: &t.hc,
                     out: &temp,
@@ -789,7 +794,7 @@ impl Stream {
         Ok(out)
     }
 
-    pub(super) fn finish(&mut self, gpu: &Gpu, model: &Model) -> Result<Vec<Vec<u8>>> {
+    pub(super) fn finish(&mut self, gpu: &Gpu, model: &Model) -> Result<Vec<Held>> {
         let real = self.fed;
         let mut out = Vec::new();
         if real == 0 {
@@ -822,7 +827,7 @@ impl Stream {
         }
     }
 
-    fn run_chunk(&mut self, gpu: &Gpu, model: &Model) -> Result<Vec<Vec<u8>>> {
+    fn run_chunk(&mut self, gpu: &Gpu, model: &Model) -> Result<Vec<Held>> {
         self.fit(gpu)?;
         let g = self.g;
         let k = self.chunk;
@@ -1408,7 +1413,7 @@ impl Stream {
         Ok(())
     }
 
-    fn decode(&mut self, gpu: &Gpu, model: &Model, latents: &wgpu::Buffer) -> Result<Vec<Vec<u8>>> {
+    fn decode(&mut self, gpu: &Gpu, model: &Model, latents: &wgpu::Buffer) -> Result<Vec<Held>> {
         let g = self.g;
         let d = &model.dec;
         let (w8, h8) = (g.w8, g.h8);
@@ -1608,16 +1613,20 @@ impl Stream {
                         )
                     });
                     self.last(gpu, model, &ct1, (&t1, &t2, &picture), &mut e);
-                    let mut rgb = gpu.read(&picture, 0, shown.next_multiple_of(4) as u64)?;
-                    rgb.truncate(shown);
+                    let whole = shown.next_multiple_of(4) as u64;
+                    let out = gpu.buffer(whole as usize);
+                    e.copy(&picture, 0, &out, 0, whole);
+                    e.submit();
                     if let Some(dir) = self.dump.as_ref() {
+                        let mut rgb = gpu.read(&out, 0, whole)?;
+                        rgb.truncate(shown);
                         crate::npy::write_bytes(
                             &dir.join(format!("frame{index:03}.npy")),
                             &[g.h as usize, g.w as usize, 3],
                             &rgb,
                         )?;
                     }
-                    frames.push(rgb);
+                    frames.push(Held::new(out, &gpu.device, &gpu.queue));
                 }
                 gpu.wait()?;
             }

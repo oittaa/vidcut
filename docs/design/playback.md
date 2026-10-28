@@ -65,7 +65,8 @@ flowchart TD
 
 **Decoding**
 
-- Decoding uses the reader of the export, `VideoFrames`, with `Output::Decoded`: YUV frames at their own size.
+- Decoding uses the reader of the export, `VideoFrames`, with `VideoFrames::keeping`: frames at their own size.
+  - GPU frames of the kinds that the viewer takes stay on the GPU.
 - Each turn does the first of these:
   1. the viewer's frame
   2. pictures ahead in the direction of play
@@ -75,6 +76,7 @@ flowchart TD
 - A play that does not find the frame at the playhead decodes a frame ahead of the clock. The lead is the mean time of the recent seeks (`seek_cost`).
 - A piece with an AI upscaler or an AI Retime Process fills no frames behind the playhead (`Fill::of`). Why: an AI picture takes much GPU time. For an upscaler, a frame before the current run also starts a new run ([gpu](gpu.md)).
 - Such a piece gives no lead, and does not change `seek_cost`. Why: after an AI clip, a jump in another clip does not land far ahead of the clock.
+- While paused in such a piece, a seek keeps only the asked frame. The player then makes only the next frame ahead (`SLOW_AHEAD`). Why: each AI picture takes much GPU time.
 - The viewer's frame, play backward and steps back decode the frames that they need. The prepared frame is made with an AI upscaler too, so the next clip shows its first frame at once.
 - While it plays, or while its viewer waits, the decoding thread holds a `first::Claim`. Thus jobs yield.
 
@@ -86,14 +88,14 @@ flowchart TD
 - Apple silicon has one shared budget.
 - While an AI upscaler holds GPU memory, the video budget is smaller (`store::Lent`, [gpu](gpu.md)).
 - The least recently used pictures go first, whichever engine decoded them. The prepared picture of each engine never goes (`Store::hold`).
-- An engine can show a picture that another engine decoded, by its `Id`. A small picture of the two-up names its engine (`Id::small`), and only that engine shows it.
+- An engine can show a picture that another engine decoded, by its `Id`.
 - Each engine plans its decoding with its part of the budget (`Config::part`). When the last engine ends, the cache empties.
 
 **Dissolves and placed pictures**
 
 - The engine does not mix. A `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) for each layer on top. Each layer is as decoded.
 - The viewer blends the layers as it draws, in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), as an export does ([export](export.md#timeline-colors)). `Shown::colors` carries that space (`RenderPlan::colors`).
-- A wipe mixes on the CPU (`Picture::at_wipe`), in the timeline color space too.
+- A wipe draws a part of each side (`shown_part`), in the timeline color space too.
 - Placed pictures ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) are layers of a `VideoPiece::Mix`. Their placement is not in the kept pictures.
   - `Player::present` hands the `Placed` pictures of each layer with the frame (`Shown`, `Plan::placed_at`). Thus a move or a zoom keeps the frames decoded.
   - For a Dynamic Zoom, `Plan::placed_at` moves the `Run` of each `Placed` picture to the frame.
@@ -104,7 +106,7 @@ flowchart TD
 **Super Scale and Retime Process**
 
 - `Shown::scales` gives the Super Scale of each layer (`Plan::scales_at`). With `viewer.super_scale` on, the shader enlarges such a layer with a sharper kernel (`sharp`), by its Sharpness, where the viewer enlarges the picture.
-- With AI Fast or AI Best, `VideoFrames` runs `Source::ai_picture` for the viewer too. The viewer then gets the large upright picture of the AI upscaler.
+- With an AI upscaler, `VideoFrames` runs `Source::ai_picture` for the viewer too. The viewer then gets the large upright picture of the AI upscaler.
   - A seek with AI Fast decodes the whole chunk first. The upscaler makes the asked frame first, and the rest of the chunk follows.
   - A seek with AI Best starts a new stream at the asked frame. Its first picture comes after the first chunk of the stream.
   - While playing, the player skips the frames that it cannot make in time. A replay makes again the frames that it skipped.
@@ -189,20 +191,25 @@ The audio device:
 
 - `Viewer::start` spawns `vidcut-viewer`. The thread wakes when the session notifies or asks, when the size changes, or when `next_change` comes due.
 - Each turn calls `Player::present`, then `Screen::draw` into an RGBA target the size of the viewer's picture in physical pixels.
-- With an SDR timeline and one layer, one render pass of `crates/vidcut/src/gui/picture.wgsl` draws it all.
+- With an SDR timeline and one layer, one render pass of `crates/vidcut-av/src/screen/picture.wgsl` draws it all.
 - With an HDR timeline, the passes draw into a picture of 16-bit floats (`Wide`), in the PQ or HLG code values of the timeline.
   - Each layer, title and subtitle goes to linear light, to BT.2020, and to the curve of the timeline.
-  - Then `fs_screen` converts that picture to the target: BT.709, tone-mapped with the math of the export.
-  - Thus the layers, titles and subtitles mix in the code values of the timeline, as in an export.
-- With an SDR timeline and more than one layer or a composite mode, the passes also draw into `Wide`, in SDR code values. Thus a color above 1 or below 0 stays between the layers and in the composite modes, as in an export. `fs_screen` then clips each value.
+  - Then `fs_screen` converts that picture to the target: BT.709, tone-mapped.
+  - Thus the layers, titles and subtitles mix in the code values of the timeline.
+- With an SDR timeline and more than one layer or a composite mode, the passes also draw into `Wide`, in SDR code values. Thus a color above 1 or below 0 stays between the layers and in the composite modes. `fs_screen` then clips each value.
+- An export, a proxy and a thumbnail draw with the same `Screen`, always into `Wide` (`Screen::for_export`). They write the planes of the output from there ([export](export.md#timeline-colors)).
 - The drawing:
-  - It fits the picture as the export does, and turns it upright.
-  - It scales in YUV and converts to RGB with the math of the export (`shader_colors`). In an SDR timeline, it tone-maps HDR.
+  - It fits the picture and turns it upright.
+  - It scales in YUV and converts to RGB (`shader_colors`). In an SDR timeline, it tone-maps HDR.
+  - The viewer enlarges with one bilinear sample, and shrinks with a box of bilinear samples.
+  - An export, a proxy and a thumbnail scale with a bicubic kernel (`sharp`). The kernel widens when the picture shrinks.
+  - Why: the viewer must be fast, and an export must keep the detail of the picture.
   - The layers of a dissolve are more draws in the pass.
   - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
-  - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy by the sums of `blend::mixed`.
+  - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).
   - The two sides of a dissolve with a placed picture add into a picture of their own (`Mixing`). `fs_paired` lays it over the copy of the canvas. Thus a mix below 0 is not clipped before it goes over.
-  - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips. These are the sums of the export (`export::place::title`).
+  - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips.
+  - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
 - A present answers with the frame drawn, if it is exact. A `gui.screenshot` of the viewer reads the target back, to the pixel.
 - Submissions go through `Gate::pass`. They wait until the UI thread runs `logic` or `ui`, because eframe configures the surface of the window outside these. If the UI is away for long, submissions do not wait.
@@ -219,6 +226,7 @@ The audio device:
 - The viewer shows the pictures of some decoders from GPU memory (`Gpu::gpu_pictures`). These pictures stay there, in the video budget. The pictures of the other decoders come down.
 - [gpu](gpu.md) has the path of each decoder to the screen.
 - The shader lays a picture by its straight alpha. AYUV64 holds the alpha in its one texture. A picture in memory with alpha is `yuva444p12le`, with the alpha in a fourth texture (`Picture::alpha_plane`).
+- A picture in memory in RGB or 4:4:4 is `yuv444p12le`, and a 4:2:2 picture stays 4:2:2 (`Relayout`). Why: 4:2:0 loses color detail.
 
 ## Sound
 
@@ -251,7 +259,6 @@ Faders:
 - The Trim Editor and Dynamic Trim show two frames, or four while a slip or slide runs.
 - `Cells` gives each frame its own engine on the media of the clip (`render::tape`, no sound), with `ManualOutput`. The engines keep their pictures in the cache of the viewer.
 - In each UI frame, `Player::follow` gives each engine its frame and the speed of the trim. The engine decodes ahead as if it plays.
-- `Player::shrink_to` keeps the pictures of a run at the size of the cell.
 - The windows behind decode on `vidcut-play-windows`: one at a time across the followed players, and none while a player moves forward.
 - `Screens` draws the cells with `Screen` on the UI thread. This needs no gate.
 
@@ -278,5 +285,4 @@ Ripple Delete Silence:
 - `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/player.rs`
 - `crates/vidcut-av/src/player/`, `crates/vidcut-av/src/stretch.rs`
 - `crates/vidcut-av/src/export/video.rs`, `crates/vidcut-av/src/export/audio.rs`
-- `crates/vidcut/src/gui/video.rs`, `crates/vidcut/src/gui/picture.rs`, `crates/vidcut/src/gui/picture.wgsl`
-- `crates/vidcut/src/gui/gate.rs`, `crates/vidcut/src/gui/cells.rs`
+- `crates/vidcut/src/gui/video.rs`, `crates/vidcut-av/src/screen/`, `crates/vidcut/src/gui/cells.rs`
