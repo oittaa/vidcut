@@ -1072,6 +1072,7 @@ struct D3d11Shared {
     uv: wgpu::TextureView,
     size: (u32, u32),
     busy: Arc<AtomicBool>,
+    holds: std::sync::Weak<Picture>,
 }
 
 #[cfg(windows)]
@@ -1771,13 +1772,16 @@ impl Slot {
         };
         let frame = picture.frame();
         let mut pool = gpu.d3d11_shared.lock().unwrap_or_else(|e| e.into_inner());
-        let (image, new) = d3d11_shared_for(gpu, &mut pool, frame, formats)?;
+        let (image, new) = d3d11_shared_for(gpu, &mut pool, picture, formats)?;
         if new {
             self.imports += 1;
         }
         let shared = pool.get_mut(&image).ok_or("no shared texture")?;
-        shared.texture.fill(frame).map_err(|e| e.to_string())?;
-        // SAFETY: this device's image, released to Direct3D 11 in `GENERAL`, which has just written it.
+        if !std::ptr::eq(shared.holds.as_ptr(), Arc::as_ptr(picture)) {
+            shared.texture.fill(frame).map_err(|e| e.to_string())?;
+            shared.holds = Arc::downgrade(picture);
+        }
+        // SAFETY: this device's image, released to Direct3D 11 in `GENERAL`, which wrote it last.
         let (acquired, released) = unsafe {
             (
                 gpu.acquire(
@@ -2363,9 +2367,19 @@ fn make_target(device: &wgpu::Device, size: (u32, u32)) -> Target {
 fn d3d11_shared_for(
     gpu: &Gpu,
     pool: &mut D3d11Pool,
-    frame: &crate::ffmpeg::frame::Video,
+    picture: &Arc<Picture>,
     formats: D3d11Formats,
 ) -> Result<(ash::vk::Image, bool), String> {
+    let frame = picture.frame();
+    let held = pool
+        .iter()
+        .find(|(_, s)| {
+            std::ptr::eq(s.holds.as_ptr(), Arc::as_ptr(picture)) && !s.busy.load(Ordering::Acquire)
+        })
+        .map(|(image, _)| *image);
+    if let Some(image) = held {
+        return Ok((image, false));
+    }
     let free = |pool: &D3d11Pool| {
         pool.iter()
             .find(|(_, s)| s.texture.fits(frame) && !s.busy.load(Ordering::Acquire))
@@ -2518,6 +2532,7 @@ fn share_d3d11(
         uv,
         size: (desc.Width, desc.Height),
         busy: Arc::default(),
+        holds: std::sync::Weak::new(),
     })
 }
 
