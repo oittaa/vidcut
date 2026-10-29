@@ -22,6 +22,15 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - Each wgpu instance counts its ids from the start. Thus the viewer's device and the offscreen device can have the same id.
   - Then `==` says that they are one device. wgpu looks for the buffer of one device in the other, and panics.
   - Thus each `Gpu` has its own id, and a held picture compares that id (`Held::on`).
+- **wgpu 30 drops the errors of a lost device.**
+  - A GPU can stop. For example, Windows resets a GPU when one piece of work runs for more than 2 seconds (TDR).
+  - Then wgpu marks the device lost. It drops each error of the type `DeviceLost`, and does not call the error handler.
+  - A buffer made after the loss is invalid. Its next use is a validation error, and the default handler panics.
+  - `create_buffer_init` panics on a lost device too, because it unwraps the mapped range.
+  - Thus the off-screen device watches for its loss (`Offscreen::watch`). After the loss, its error handler logs the errors and does not panic.
+  - `compute::buffer_with` fills a new buffer without that unwrap.
+- **Windows stops the computer after more than five GPU resets in one minute** (bug check 0x116, `TdrLimitCount` and `TdrLimitTime`).
+  - Thus vidcut makes a new device after a loss only on an action of the user, and only a few times in a minute (`screen::retry_lost`).
 - **egui-wgpu shows an `Rgba8Unorm` native texture's values as they are**, with no sRGB conversion.
   - The target of the viewer (`TARGET` in `screen/mod.rs`) holds gamma-encoded BT.709 RGB.
 

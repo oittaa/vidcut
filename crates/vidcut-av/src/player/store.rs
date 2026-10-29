@@ -350,6 +350,19 @@ impl Store {
         drop(gone);
     }
 
+    pub(crate) fn forget_held(&self) {
+        let mut inner = self.lock();
+        let held: Vec<Id> = inner
+            .pictures
+            .iter()
+            .filter(|(_, p)| p.held_on_gpu())
+            .map(|(id, _)| id.clone())
+            .collect();
+        let gone: Vec<_> = held.iter().filter_map(|id| inner.remove(id)).collect();
+        drop(inner);
+        drop(gone);
+    }
+
     pub(crate) fn bytes(&self, kind: Kind) -> usize {
         self.lock().bytes[kind.index()]
     }
