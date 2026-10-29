@@ -101,6 +101,20 @@ pub struct Picture {
     decoding: Option<Arc<Decoding>>,
     over: Vec<Over>,
     sampling: Sampling,
+    woven: Option<Woven>,
+}
+
+#[derive(Clone)]
+pub struct Woven {
+    pub top_first: bool,
+    pub before: Option<Arc<Picture>>,
+    pub after: Option<Arc<Picture>>,
+}
+
+impl Woven {
+    fn pictures(&self) -> impl Iterator<Item = &Arc<Picture>> {
+        self.before.iter().chain(&self.after)
+    }
 }
 
 #[derive(Clone)]
@@ -134,7 +148,24 @@ impl Picture {
             decoding,
             over: Vec::new(),
             sampling: Sampling::Own,
+            woven: None,
         }
+    }
+
+    pub(crate) fn with_woven(mut self, woven: Woven) -> Self {
+        self.woven = Some(woven);
+        self
+    }
+
+    pub fn woven(&self) -> Option<&Woven> {
+        self.woven.as_ref()
+    }
+
+    fn uses(&self) -> impl Iterator<Item = &Arc<Picture>> {
+        self.over
+            .iter()
+            .map(|o| &o.picture)
+            .chain(self.woven.iter().flat_map(Woven::pictures))
     }
 
     pub(crate) fn with_over(mut self, over: Vec<Over>) -> Self {
@@ -181,7 +212,7 @@ impl Picture {
 
     pub(crate) fn in_video_memory(&self) -> Option<crate::hw::Kind> {
         self.gpu()
-            .or_else(|| self.over.iter().find_map(|o| o.picture.in_video_memory()))
+            .or_else(|| self.uses().find_map(|p| p.in_video_memory()))
     }
 
     pub fn held(&self) -> bool {
@@ -189,7 +220,7 @@ impl Picture {
     }
 
     pub(crate) fn held_on_gpu(&self) -> bool {
-        self.held() || self.over.iter().any(|o| o.picture.held_on_gpu())
+        self.held() || self.uses().any(|p| p.held_on_gpu())
     }
 
     pub fn layout(&self) -> Layout {
@@ -239,7 +270,20 @@ impl Picture {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(alone.with_over(over))
+        let alone = alone.with_over(over);
+        let Some(w) = &self.woven else {
+            return Ok(alone);
+        };
+        let down = |p: &Option<Arc<Picture>>| {
+            p.as_ref()
+                .map(|p| p.alone_copied_down().map(Arc::new))
+                .transpose()
+        };
+        Ok(alone.with_woven(Woven {
+            top_first: w.top_first,
+            before: down(&w.before)?,
+            after: down(&w.after)?,
+        }))
     }
 
     pub(crate) fn alone_copied_down(&self) -> Result<Picture> {
@@ -258,7 +302,7 @@ impl Picture {
         let mut pools: Vec<usize> = self
             .pooled
             .into_iter()
-            .chain(self.over.iter().flat_map(|o| o.picture.pools()))
+            .chain(self.uses().flat_map(|p| p.pools()))
             .collect();
         pools.sort_unstable();
         pools.dedup();
@@ -266,7 +310,7 @@ impl Picture {
     }
 
     pub(crate) fn holds_a_pool(&self) -> bool {
-        self.pooled.is_some() || self.over.iter().any(|o| o.picture.holds_a_pool())
+        self.pooled.is_some() || self.uses().any(|p| p.holds_a_pool())
     }
 
     #[cfg(test)]

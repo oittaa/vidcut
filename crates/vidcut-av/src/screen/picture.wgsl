@@ -291,10 +291,107 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(sum / f32(taps.x * taps.y), a);
 }
 
+fn yuv_woven(px: vec2<f32>) -> vec3<f32> {
+    let size = stored_size();
+    let s = (px + 0.5) / size * p.upright.zw;
+    if p.shrunk.y < 0.5 || p.per.y < 2u || p.flags.z >= 2u {
+        return yuv_at(s);
+    }
+    let y = textureSampleLevel(luma, bilinear, s, 0.0).r;
+    let chroma = vec2<f32>(textureDimensions(chroma_u));
+    let line = u32(px.y);
+    let field = f32(line & 1u);
+    let rows = floor((ceil(size.y / f32(p.per.y)) - field + 1.0) * 0.5);
+    let at = (f32(line >> 1u) + 0.5) / f32(p.per.y) + p.site.y - 0.5;
+    let k = floor(at);
+    let v = (2.0 * clamp(vec2<f32>(k, k + 1.0), vec2<f32>(0.0), vec2<f32>(rows - 1.0)) + field + 0.5) / chroma.y;
+    let u = (s.x * f32(textureDimensions(luma).x) / f32(p.per.x) + p.site.x) / chroma.x;
+    var c0: vec2<f32>;
+    var c1: vec2<f32>;
+    if p.flags.z == 1u {
+        c0 = textureSampleLevel(chroma_u, bilinear, vec2<f32>(u, v.x), 0.0).rg;
+        c1 = textureSampleLevel(chroma_u, bilinear, vec2<f32>(u, v.y), 0.0).rg;
+    } else {
+        c0 = vec2<f32>(
+            textureSampleLevel(chroma_u, bilinear, vec2<f32>(u, v.x), 0.0).r,
+            textureSampleLevel(chroma_v, bilinear, vec2<f32>(u, v.x), 0.0).r,
+        );
+        c1 = vec2<f32>(
+            textureSampleLevel(chroma_u, bilinear, vec2<f32>(u, v.y), 0.0).r,
+            textureSampleLevel(chroma_v, bilinear, vec2<f32>(u, v.y), 0.0).r,
+        );
+    }
+    let c = mix(c0, c1, at - k);
+    return vec3<f32>(y, c.x, c.y);
+}
+
 @fragment
 fn fs_convert(in: Out) -> @location(0) vec4<f32> {
-    let at = (floor(in.position.xy) + 0.5) / stored_size();
-    return vec4<f32>(rgb(yuv_at(at * p.upright.zw)), 1.0);
+    return vec4<f32>(rgb(yuv_woven(floor(in.position.xy))), 1.0);
+}
+
+@group(0) @binding(1) var before: texture_2d<f32>;
+@group(0) @binding(2) var middle: texture_2d<f32>;
+@group(0) @binding(3) var after: texture_2d<f32>;
+
+const LOW = vec2<f32>(4309.0, 213.0) / 8192.0;
+const HIGH = vec3<f32>(5570.0, 3801.0, 1016.0) / 8192.0;
+const ALONE = vec2<f32>(5077.0, 981.0) / 8192.0;
+
+fn line_of(t: texture_2d<f32>, x: i32, y: i32) -> vec3<f32> {
+    let h = i32(textureDimensions(t).y);
+    return textureLoad(t, vec2<i32>(x, clamp(y, 0, h - 1)), 0).rgb;
+}
+
+fn both(x: i32, y: i32) -> vec3<f32> {
+    return line_of(before, x, y) + line_of(middle, x, y);
+}
+
+@fragment
+fn fs_bwdif(in: Out) -> @location(0) vec4<f32> {
+    let x = i32(in.position.x);
+    let y = i32(in.position.y);
+    let h = i32(textureDimensions(middle).y);
+    let kept = select(1, 0, p.shrunk.y < 1.5);
+    if (y & 1) == kept {
+        return vec4<f32>(line_of(middle, x, y), 1.0);
+    }
+    let up = select(1, -1, y > 0);
+    let down = select(-1, 1, y + 1 < h);
+    let c = line_of(middle, x, y + up);
+    let e = line_of(middle, x, y + down);
+    if p.shrunk.z < 0.5 {
+        let up3 = select(1, -3, y > 2);
+        let down3 = select(-1, 3, y + 3 < h);
+        let far = line_of(middle, x, y + up3) + line_of(middle, x, y + down3);
+        return vec4<f32>(ALONE.x * (c + e) - ALONE.y * far, 1.0);
+    }
+    let p0 = line_of(before, x, y);
+    let n0 = line_of(middle, x, y);
+    let d = (p0 + n0) * 0.5;
+    let t0 = abs(p0 - n0);
+    let t1 = (abs(line_of(before, x, y + up) - c) + abs(line_of(before, x, y + down) - e)) * 0.5;
+    let t2 = (abs(line_of(after, x, y + up) - c) + abs(line_of(after, x, y + down) - e)) * 0.5;
+    var diff = max(max(t0 * 0.5, t1), t2);
+    let edge = y < 4 || y + 5 > h;
+    if !edge || !(y < 2 || y + 3 > h) {
+        let b = both(x, y - 2) * 0.5 - c;
+        let f = both(x, y + 2) * 0.5 - e;
+        let hi = max(max(d - e, d - c), min(b, f));
+        let lo = min(min(d - e, d - c), max(b, f));
+        diff = max(max(diff, lo), -hi);
+    }
+    var made = (c + e) * 0.5;
+    if !edge {
+        let far = line_of(middle, x, y - 3) + line_of(middle, x, y + 3);
+        let high = HIGH.x * (p0 + n0) - HIGH.y * (both(x, y - 2) + both(x, y + 2))
+            + HIGH.z * (both(x, y - 4) + both(x, y + 4));
+        let moving = high * 0.25 + LOW.x * (c + e) - LOW.y * far;
+        let still = ALONE.x * (c + e) - ALONE.y * far;
+        made = select(still, moving, abs(c - e) > t0);
+    }
+    let held = clamp(made, d - diff, d + diff);
+    return vec4<f32>(select(held, d, diff == vec3<f32>(0.0)), 1.0);
 }
 
 @fragment

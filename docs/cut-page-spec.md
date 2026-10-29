@@ -1286,7 +1286,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Mirrored matrices count only as rotations.
 - **D34. Interlaced sources** (p. 741).
   - A stream is interlaced if its field order says so, or if its first frame has the interlaced flag.
-  - Frames with the flag are deinterlaced everywhere with `bwdif`, one frame for each frame (deviation X13).
+  - Frames with the flag are deinterlaced everywhere by the method of `bwdif`, one frame for each frame (deviation X13).
   - The deinterlacer keeps the first field.
   - Output is never interlaced, and never at the field rate.
 - **D35. HDR and color** (pp. 230–239).
@@ -2530,7 +2530,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 The manual gives the order in which each picture is processed, on each page, as a chart (Ch. 144, p. 3407). vidcut keeps this order for the stages that it has.
 
 - A different order is a deviation, as for any other behavior.
-- [design](design/README.md#picture-order) gives the order of the code. [todo/processing-order.md](todo/processing-order.md) lists where it is still different.
+- [design](design/README.md#picture-order) gives the order of the code. [Deviation X98](deviations.md#x98-in-an-hdr-timeline-the-ai-stages-work-before-the-conversion) tells where it is different.
 
 **Source processing**, for each clip:
 

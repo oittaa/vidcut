@@ -134,6 +134,16 @@ struct Source {
     drawn: Option<Single>,
     keeper: Option<crate::hw::Keeper>,
     unkept: bool,
+    before: Option<frame::Video>,
+    woven: Option<Weave>,
+    made: Vec<(Option<i64>, frame::Video)>,
+}
+
+type Weave = (bool, Option<frame::Video>, Option<frame::Video>);
+
+fn weave_ref(w: &Weave) -> Result<Weave> {
+    let copy = |f: &Option<frame::Video>| f.as_ref().map(frame_ref).transpose();
+    Ok((w.0, copy(&w.1)?, copy(&w.2)?))
 }
 
 type ScaledPair = (frame::Video, frame::Video, (u32, u32));
@@ -170,6 +180,7 @@ struct Reversed {
     pos: i64,
     frame: frame::Video,
     dolby_vision: frame::Video,
+    woven: Option<Weave>,
 }
 
 impl Source {
@@ -189,6 +200,7 @@ impl Source {
         let mut reader =
             VideoReader::open_as(input, decoder.filter(|_| video), pictures.reading(reading))?;
         reader.set_color_space(color_space);
+        reader.keep_fields();
         let ahead_gpu = decoder.filter(|_| video).cloned();
         let fitting = Fitting::none();
         let decoder = reader.gpu();
@@ -230,6 +242,9 @@ impl Source {
             drawn: None,
             keeper: None,
             unkept: false,
+            before: None,
+            woven: None,
+            made: Vec::new(),
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -251,6 +266,7 @@ impl Source {
     ) -> Result<Source> {
         let mut reader = VideoReader::open_as(input, decoder, pictures.reading(reading))?;
         reader.set_color_space(color_space);
+        reader.keep_fields();
         let ahead_gpu = decoder.cloned();
         let decoder = reader.gpu();
         let tb = reader.time_base();
@@ -291,6 +307,9 @@ impl Source {
             drawn: None,
             keeper: None,
             unkept: false,
+            before: None,
+            woven: None,
+            made: Vec::new(),
         })
     }
 
@@ -303,6 +322,9 @@ impl Source {
         self.prev2 = None;
         self.light = None;
         self.normalized = None;
+        self.before = None;
+        self.woven = None;
+        self.made.clear();
         Ok(())
     }
 
@@ -338,6 +360,10 @@ impl Source {
                         dolby_vision: true,
                     };
                     crate::hdr::copy_dynamic(&f, &mut self.dynamic, all)?;
+                    self.before = match &self.current {
+                        Some((f, _)) => Some(frame_ref(f)?),
+                        None => self.reader.take_skipped(),
+                    };
                     if !self.retime.is_nearest() {
                         self.prev2 = self.prev.take();
                         self.prev = self.current.take();
@@ -464,7 +490,7 @@ impl Source {
             Some(rgb) => Some(rgb),
             None if crate::hw::on_gpu(f) => Some(shown_rgb(
                 &mut self.drawn,
-                f,
+                (f, (None, None)),
                 self.reader.rotation(),
                 &Look::fitted(size, 0),
                 reading,
@@ -501,18 +527,24 @@ impl Source {
 
     fn rgb_of(&mut self, prev: bool, look: &Look, reading: Reading) -> Result<frame::Video> {
         let rotation = self.reader.rotation();
-        let (f, _) = match prev {
-            true => self.prev.as_ref(),
-            false => self.current.as_ref(),
-        }
-        .expect("a frame");
-        let f = frame_ref(f)?;
-        self.rgb_from(&f, rotation, look, reading)
+        let copy = |f: &Option<(frame::Video, f64)>| f.as_ref().map(|(f, _)| frame_ref(f));
+        let (before, f, after) = match prev {
+            true => (copy(&self.prev2), copy(&self.prev), copy(&self.current)),
+            false => (
+                copy(&self.prev),
+                copy(&self.current),
+                self.peek().transpose(),
+            ),
+        };
+        let f = f.expect("a frame")?;
+        let (before, after) = (before.transpose()?, after.transpose()?);
+        let around = (before.as_ref(), after.as_ref());
+        self.rgb_from((&f, around), rotation, look, reading)
     }
 
     fn rgb_from(
         &mut self,
-        f: &frame::Video,
+        (f, around): (&frame::Video, Around<'_>),
         rotation: u16,
         look: &Look,
         reading: Reading,
@@ -524,7 +556,7 @@ impl Source {
         }
         let rgb = shown_rgb(
             &mut self.drawn,
-            f,
+            (f, around),
             rotation,
             look,
             reading,
@@ -536,6 +568,46 @@ impl Source {
         }
         self.rgb.push((pts, look.clone(), frame_ref(&rgb)?));
         Ok(rgb)
+    }
+
+    fn peek(&mut self) -> Result<Option<frame::Video>> {
+        if self.queued.is_empty()
+            && let Some(f) = self.reader.next_frame()?
+        {
+            self.queued.push_back(f);
+        }
+        self.queued.front().map(frame_ref).transpose()
+    }
+
+    fn made_once(
+        &mut self,
+        maker: &mut Maker,
+        (layer, reading): (usize, Reading),
+        f: &frame::Video,
+    ) -> Result<frame::Video> {
+        if let Some((_, made)) = self.made.iter().find(|(pts, _)| *pts == f.pts()) {
+            return frame_ref(made);
+        }
+        let made = maker.make_layer(layer, &mut self.fitting, f, self.reader.path(), reading)?;
+        if self.made.len() >= 3 {
+            self.made.remove(0);
+        }
+        self.made.push((f.pts(), frame_ref(&made)?));
+        Ok(made)
+    }
+
+    fn weave(
+        &mut self,
+        maker: &mut Maker,
+        at: (usize, Reading),
+        (before, f, after): (Option<&frame::Video>, &frame::Video, Option<&frame::Video>),
+    ) -> Result<Option<Weave>> {
+        let Some(top_first) = crate::decode::FrameProps::of(f).top_field_first else {
+            return Ok(None);
+        };
+        let before = before.map(|b| self.made_once(maker, at, b)).transpose()?;
+        let after = after.map(|a| self.made_once(maker, at, a)).transpose()?;
+        Ok(Some((top_first, before, after)))
     }
 
     fn look_id(&mut self, look: &Look) -> u64 {
@@ -576,6 +648,7 @@ pub(crate) struct Layer {
     pub(crate) went: Option<crate::route::Went>,
     pub(crate) wipe: Option<Wipe>,
     pub(crate) share: f64,
+    pub(crate) woven: Option<Weave>,
 }
 
 fn mask_of(ramp: Option<Ramp>, k: i64) -> Option<Wipe> {
@@ -631,6 +704,8 @@ struct Session {
     ended: bool,
     waiting: Waiting,
     given: Option<(Key, frame::Video)>,
+    fed: Option<frame::Video>,
+    held: Option<frame::Video>,
 }
 
 impl Session {
@@ -740,9 +815,11 @@ fn in_memory(frame: &frame::Video) -> Result<frame::Video> {
     }
 }
 
+type Around<'a> = (Option<&'a frame::Video>, Option<&'a frame::Video>);
+
 fn shown_rgb(
     drawn: &mut Option<Single>,
-    frame: &frame::Video,
+    frames: (&frame::Video, Around<'_>),
     rotation: u16,
     look: &Look,
     reading: Reading,
@@ -753,8 +830,8 @@ fn shown_rgb(
         None => drawn.insert(Single::new(reading)?),
     };
     match look.placed.is_empty() {
-        true => single.held(frame, rotation, look.size, look.kernel, path),
-        false => single.placed(frame, rotation, look, path),
+        true => single.held(frames, rotation, look.size, look.kernel, path),
+        false => single.placed(frames, rotation, look, path),
     }
 }
 
@@ -791,6 +868,7 @@ impl Source {
         if self.ahead.is_none() {
             let mut r = VideoReader::open_as(&input, self.gpu.as_ref(), reading)?;
             r.set_color_space(space);
+            r.keep_fields();
             self.ahead = Some(r);
         }
         let tick = self.tick;
@@ -965,7 +1043,14 @@ impl Source {
                     None => None,
                 }
             } else {
-                self.ahead.as_mut().expect("opened").next_frame()?
+                let ahead = self.ahead.as_mut().expect("opened");
+                let next = ahead.next_frame()?;
+                if let Some(skipped) = ahead.take_skipped()
+                    && let Some(run) = self.run.as_mut().filter(|r| r.held.is_none())
+                {
+                    run.fed = Some(skipped);
+                }
+                next
             };
             match next {
                 Some(f) => self.feed(&f, reading)?,
@@ -1012,6 +1097,8 @@ impl Source {
             ended: false,
             waiting,
             given: None,
+            fed: None,
+            held: None,
         });
         if still {
             let (frame, _) = self.current.as_ref().expect("have a frame");
@@ -1020,6 +1107,8 @@ impl Source {
             return self.end_run();
         }
         if own {
+            let before = self.before.as_ref().map(frame_ref).transpose()?;
+            self.run.as_mut().expect("made above").fed = before;
             let mut known = vec![frame_ref(&self.current.as_ref().expect("have a frame").0)?];
             for f in &self.queued {
                 known.push(frame_ref(f)?);
@@ -1034,6 +1123,38 @@ impl Source {
     }
 
     fn feed(&mut self, f: &frame::Video, reading: Reading) -> Result<()> {
+        let at = self.frame_index(f.pts());
+        let run = self.run.as_mut().expect("opened");
+        let woven = !matches!(run.id.key, Key::Still(_))
+            && crate::decode::FrameProps::of(f).top_field_first.is_some();
+        let held_at = run.held.as_ref().and_then(|h| h.pts());
+        if !woven {
+            if let Some(h) = run.held.take() {
+                let before = run.fed.take();
+                self.push(&h, (before.as_ref(), Some(f)), reading)?;
+            }
+            let run = self.run.as_mut().expect("opened");
+            run.fed = None;
+            return self.push(f, (None, None), reading);
+        }
+        if run.ended
+            || at.is_none_or(|i| i < run.next)
+            || held_at.is_some_and(|h| f.pts().is_none_or(|p| p <= h))
+        {
+            return Ok(());
+        }
+        let Some(h) = run.held.replace(frame_ref(f)?) else {
+            return Ok(());
+        };
+        let before = run.fed.take();
+        self.push(&h, (before.as_ref(), Some(f)), reading)?;
+        if let Some(run) = self.run.as_mut() {
+            run.fed = Some(h);
+        }
+        Ok(())
+    }
+
+    fn push(&mut self, f: &frame::Video, around: Around<'_>, reading: Reading) -> Result<()> {
         let rotation = self.reader.rotation();
         let still = self
             .run
@@ -1056,11 +1177,12 @@ impl Source {
             return self.end_run();
         }
         let clock = Instant::now();
-        let rgb = match run.run.takes(f, rotation) {
+        let woven = crate::decode::FrameProps::of(f).top_field_first.is_some();
+        let rgb = match run.run.takes(f, rotation) && !woven {
             true => None,
             false => Some(shown_rgb(
                 &mut self.drawn,
-                f,
+                (f, around),
                 rotation,
                 &Look::fitted(run.size, 0),
                 reading,
@@ -1107,6 +1229,14 @@ impl Source {
     }
 
     fn end_run(&mut self) -> Result<()> {
+        let run = self.run.as_mut().expect("opened");
+        if run.ended {
+            return Ok(());
+        }
+        if let Some(h) = run.held.take() {
+            let (before, reading) = (run.fed.take(), run.id.reading);
+            self.push(&h, (before.as_ref(), None), reading)?;
+        }
         let run = self.run.as_mut().expect("opened");
         if run.ended {
             return Ok(());
@@ -1443,16 +1573,47 @@ impl Single {
         crate::screen::held::small_luma(self.drawer.gpu, picture, crate::analysis::MEASURE)
     }
 
+    fn woven(
+        &mut self,
+        (frame, (before, after)): (&frame::Video, Around<'_>),
+        rotation: u16,
+        path: &Path,
+    ) -> Result<crate::player::Picture> {
+        let made = self.maker.make(&mut self.fitting, frame, path)?;
+        let picture = crate::player::Picture::new(made, rotation, None, None);
+        let Some(top_first) = crate::decode::FrameProps::of(frame).top_field_first else {
+            return Ok(picture);
+        };
+        let mut field = |f: Option<&frame::Video>| -> Result<Option<std::sync::Arc<_>>> {
+            f.map(|f| {
+                let made = self.maker.make(&mut self.fitting, f, path)?;
+                let alone = crate::player::Woven {
+                    top_first,
+                    before: None,
+                    after: None,
+                };
+                let field = crate::player::Picture::new(made, rotation, None, None);
+                Ok(std::sync::Arc::new(field.with_woven(alone)))
+            })
+            .transpose()
+        };
+        let woven = crate::player::Woven {
+            top_first,
+            before: field(before)?,
+            after: field(after)?,
+        };
+        Ok(picture.with_woven(woven))
+    }
+
     pub(crate) fn held(
         &mut self,
-        frame: &frame::Video,
+        frames: (&frame::Video, Around<'_>),
         rotation: u16,
         (w, h): (u32, u32),
         kernel: u32,
         path: &Path,
     ) -> Result<frame::Video> {
-        let made = self.maker.make(&mut self.fitting, frame, path)?;
-        let picture = std::sync::Arc::new(crate::player::Picture::new(made, rotation, None, None));
+        let picture = std::sync::Arc::new(self.woven(frames, rotation, path)?);
         let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
         screen.draw(gpu, Some(&picture), &[], (&[], &[], &[kernel], None), w, h);
         screen.encoded(
@@ -1465,18 +1626,16 @@ impl Single {
 
     fn placed(
         &mut self,
-        frame: &frame::Video,
+        frames: (&frame::Video, Around<'_>),
         rotation: u16,
         look: &Look,
         path: &Path,
     ) -> Result<frame::Video> {
-        let made = self.maker.make(&mut self.fitting, frame, path)?;
         let sampling = Sampling::Colors {
             frame: look.frame,
             origin: look.origin,
         };
-        let picture =
-            crate::player::Picture::new(made, rotation, None, None).with_sampling(sampling);
+        let picture = self.woven(frames, rotation, path)?.with_sampling(sampling);
         let picture = std::sync::Arc::new(picture);
         let placed = [look.placed.clone()];
         let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
@@ -1820,6 +1979,7 @@ impl VideoFrames {
                             went: None,
                             wipe,
                             share: 1.0,
+                            woven: None,
                         });
                     }
                     continue;
@@ -1858,6 +2018,7 @@ impl VideoFrames {
                     true => Sampling::Own,
                     false => self.open[s].sampling.clone(),
                 };
+                let woven = self.open[s].woven.as_ref().map(weave_ref).transpose()?;
                 made.push(Layer {
                     frame: Some(frame),
                     weight,
@@ -1868,6 +2029,7 @@ impl VideoFrames {
                     went: self.open[s].fitting.went(),
                     wipe,
                     share: self.share_of(s, rotation, placed.get(i)),
+                    woven,
                 });
             }
             return Ok(Some(picture.then_some(made)));
@@ -1916,6 +2078,8 @@ impl VideoFrames {
         {
             s.current = None;
             s.normalized = None;
+            s.before = None;
+            s.woven = None;
         }
     }
 
@@ -2267,11 +2431,13 @@ impl VideoFrames {
                 if shown.contains(&p) {
                     let frame = self.frame_at(i, s, p, layer)?;
                     let dolby_vision = dolby_vision(&self.last_dolby_vision)?;
+                    let woven = self.open[s].woven.as_ref().map(weave_ref).transpose()?;
                     self.open[s].reversed.push(Reversed {
                         input: input.clone(),
                         pos: p,
                         frame,
                         dolby_vision,
+                        woven,
                     });
                 } else {
                     self.pass_at(s, p)?;
@@ -2284,7 +2450,9 @@ impl VideoFrames {
             .find(|r| made(r))
             .expect("just made");
         self.last_dolby_vision = dolby_vision(&r.dolby_vision)?;
-        frame_ref(&r.frame)
+        let (frame, woven) = (frame_ref(&r.frame)?, r.woven.as_ref().map(weave_ref));
+        self.open[s].woven = woven.transpose()?;
+        Ok(frame)
     }
 
     fn reversed_frames(&self, s: usize) -> i64 {
@@ -2393,8 +2561,8 @@ impl VideoFrames {
         let (a, b) = match (pair, &scaled) {
             (Some(pair), _) => pair,
             (None, Some((a, b, _))) => (
-                src.rgb_from(a, 0, &look, reading)?,
-                src.rgb_from(b, 0, &look, reading)?,
+                src.rgb_from((a, (None, None)), 0, &look, reading)?,
+                src.rgb_from((b, (None, None)), 0, &look, reading)?,
             ),
             (None, None) => (
                 src.rgb_of(true, &look, reading)?,
@@ -2445,6 +2613,7 @@ impl VideoFrames {
             .maker
             .make_layer(i, &mut src.fitting, &big, src.reader.path(), reading)?;
         src.normalized = None;
+        src.woven = None;
         src.upright = true;
         src.sampling = match look.placed.is_empty() {
             true => Sampling::Own,
@@ -2499,17 +2668,31 @@ impl VideoFrames {
             } else {
                 None
             };
-            let (frame, _) = src.current.as_ref().expect("have a frame");
+            let frame = frame_ref(&src.current.as_ref().expect("have a frame").0)?;
+            let woven = crate::decode::FrameProps::of(&frame)
+                .top_field_first
+                .is_some();
             let clock = Instant::now();
+            src.woven = None;
             let made = match &big {
                 Some(big) => {
                     self.maker
                         .make_layer(i, &mut src.fitting, big, src.reader.path(), reading)?
                 }
-                None => {
-                    self.maker
-                        .make_layer(i, &mut src.fitting, frame, src.reader.path(), reading)?
+                None if woven => {
+                    let before = src.before.as_ref().map(frame_ref).transpose()?;
+                    let after = src.peek()?;
+                    let around = (before.as_ref(), &frame, after.as_ref());
+                    src.woven = src.weave(&mut self.maker, (i, reading), around)?;
+                    src.made_once(&mut self.maker, (i, reading), &frame)?
                 }
+                None => self.maker.make_layer(
+                    i,
+                    &mut src.fitting,
+                    &frame,
+                    src.reader.path(),
+                    reading,
+                )?,
             };
             if big.is_some() {
                 crate::debug!(

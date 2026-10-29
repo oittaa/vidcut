@@ -49,6 +49,7 @@ pub struct Gpu {
     screen_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     converting: wgpu::RenderPipeline,
+    weaving: wgpu::RenderPipeline,
     halving: wgpu::RenderPipeline,
     blank: wgpu::TextureView,
     wide: bool,
@@ -551,6 +552,7 @@ impl Gpu {
             ..Default::default()
         });
         let converting = made(&pipeline_layout, "fs_convert", None, MIXING);
+        let weaving = made(&pipeline_layout, "fs_bwdif", None, MIXING);
         let halving = made(&pipeline_layout, "fs_halve", None, MIXING);
         let blank = device
             .create_texture(&wgpu::TextureDescriptor {
@@ -590,6 +592,7 @@ impl Gpu {
             screen_layout,
             sampler,
             converting,
+            weaving,
             halving,
             blank,
             wide: device
@@ -1194,6 +1197,8 @@ struct Slot {
     rgb: Option<wgpu::Buffer>,
     converted: Option<(wgpu::Texture, (u32, u32, u32))>,
     converted_from: Option<(std::sync::Weak<Picture>, Option<Hdr>)>,
+    own: Option<wgpu::Texture>,
+    around: Option<Box<[Slot; 2]>>,
 }
 
 #[cfg(windows)]
@@ -1244,7 +1249,7 @@ impl Screen {
     }
 
     pub fn imports(&self) -> u64 {
-        self.imports_before + self.slots.iter().map(|s| s.imports).sum::<u64>()
+        self.imports_before + self.slots.iter().map(Slot::all_imports).sum::<u64>()
     }
 
     pub fn draw(
@@ -1302,6 +1307,9 @@ impl Screen {
                 .is_none_or(|(p, _, _)| p.gpu() != Some(Kind::Vulkan))
             {
                 slot.kept.clear();
+                for sub in slot.around.iter_mut().flat_map(|a| a.iter_mut()) {
+                    sub.kept.clear();
+                }
             }
         }
         let mut encoder = gpu
@@ -1554,11 +1562,11 @@ impl Screen {
         }
         let acquired: Vec<wgpu::CommandBuffer> = self.slots[..layers.len()]
             .iter_mut()
-            .filter_map(|s| s.acquired.take())
+            .flat_map(Slot::take_acquired)
             .collect();
         let released: Vec<wgpu::CommandBuffer> = self.slots[..layers.len()]
             .iter_mut()
-            .filter_map(|s| s.released.take())
+            .flat_map(Slot::take_released)
             .collect();
         gpu.submit(
             acquired
@@ -1570,7 +1578,12 @@ impl Screen {
             slot.submitted(gpu);
         }
         let keep = layers.len().max(1);
-        self.imports_before += self.slots.iter().skip(keep).map(|s| s.imports).sum::<u64>();
+        self.imports_before += self
+            .slots
+            .iter()
+            .skip(keep)
+            .map(Slot::all_imports)
+            .sum::<u64>();
         self.slots.truncate(keep);
         self.drawn = Some(picture.cloned());
         self.drawn_titles = titles.to_vec();
@@ -1590,6 +1603,32 @@ impl Slot {
         size: (u32, u32),
         how: (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
         encoder: &mut wgpu::CommandEncoder,
+    ) -> wgpu::BindGroup {
+        self.prepare_with(gpu, picture, size, how, encoder, true)
+    }
+
+    fn converted_view(
+        &mut self,
+        gpu: &Gpu,
+        picture: &Arc<Picture>,
+        timeline: Option<Hdr>,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> wgpu::TextureView {
+        let size = (picture.width(), picture.height());
+        let how = (None, 0, timeline, false);
+        self.prepare_with(gpu, picture, size, how, encoder, false);
+        let converted = &self.converted.as_ref().expect("prepared").0;
+        converted.create_view(&Default::default())
+    }
+
+    fn prepare_with(
+        &mut self,
+        gpu: &Gpu,
+        picture: &Arc<Picture>,
+        size: (u32, u32),
+        how: (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+        encoder: &mut wgpu::CommandEncoder,
+        weave: bool,
     ) -> wgpu::BindGroup {
         self.filled = None;
         self.upload(gpu, picture, encoder);
@@ -1694,16 +1733,97 @@ impl Slot {
                 ..Default::default()
             })
         };
-        for k in 0..wanted.2 {
-            let (pipeline, from) = match k {
-                0 => (&gpu.converting, bind(&gpu.blank)),
-                _ => (&gpu.halving, bind(&level(k - 1))),
-            };
-            let to = level(k);
-            let mut pass = begin(encoder, &to, Some(wgpu::Color::TRANSPARENT));
+        let draw = |encoder: &mut wgpu::CommandEncoder,
+                    to: &wgpu::TextureView,
+                    pipeline: &wgpu::RenderPipeline,
+                    from: &wgpu::BindGroup| {
+            let mut pass = begin(encoder, to, Some(wgpu::Color::TRANSPARENT));
             pass.set_pipeline(pipeline);
-            pass.set_bind_group(0, &from, &[]);
+            pass.set_bind_group(0, from, &[]);
             pass.draw(0..3, 0..1);
+        };
+        match picture.woven().filter(|_| weave) {
+            Some(woven) => {
+                if self
+                    .own
+                    .as_ref()
+                    .is_none_or(|t| (t.width(), t.height()) != (wanted.0, wanted.1))
+                {
+                    self.own = Some(gpu.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("vidcut woven"),
+                        size: wgpu::Extent3d {
+                            width: wanted.0,
+                            height: wanted.1,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: MIXING,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    }));
+                }
+                let own = self
+                    .own
+                    .as_ref()
+                    .expect("made above")
+                    .create_view(&Default::default());
+                draw(encoder, &own, &gpu.converting, &bind(&gpu.blank));
+                let [first, last] = &mut **self.around.get_or_insert_with(Default::default);
+                let before = woven
+                    .before
+                    .as_ref()
+                    .map(|p| first.converted_view(gpu, p, how.2, encoder));
+                let after = woven
+                    .after
+                    .as_ref()
+                    .map(|p| last.converted_view(gpu, p, how.2, encoder));
+                let three = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("vidcut weave"),
+                    layout: &gpu.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: params.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(
+                                before.as_ref().unwrap_or(&own),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(&own),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(
+                                after.as_ref().unwrap_or(&own),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::Sampler(&gpu.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: wgpu::BindingResource::TextureView(&a),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: wgpu::BindingResource::TextureView(&gpu.blank),
+                        },
+                    ],
+                });
+                draw(encoder, &level(0), &gpu.weaving, &three);
+            }
+            None => draw(encoder, &level(0), &gpu.converting, &bind(&gpu.blank)),
+        }
+        for k in 1..wanted.2 {
+            draw(encoder, &level(k), &gpu.halving, &bind(&level(k - 1)));
         }
         self.converted_from = Some((Arc::downgrade(picture), how.2));
         bind(&converted.create_view(&Default::default()))
@@ -1721,6 +1841,28 @@ impl Slot {
         if let Some(held) = self.imported.take() {
             gpu.queue.on_submitted_work_done(move || drop(held));
         }
+        for sub in self.around.iter_mut().flat_map(|a| a.iter_mut()) {
+            sub.submitted(gpu);
+        }
+    }
+
+    fn take_acquired(&mut self) -> Vec<wgpu::CommandBuffer> {
+        let subs = self.around.iter_mut().flat_map(|a| a.iter_mut());
+        let mut taken: Vec<_> = subs.flat_map(Slot::take_acquired).collect();
+        taken.extend(self.acquired.take());
+        taken
+    }
+
+    fn take_released(&mut self) -> Vec<wgpu::CommandBuffer> {
+        let subs = self.around.iter_mut().flat_map(|a| a.iter_mut());
+        let mut taken: Vec<_> = subs.flat_map(Slot::take_released).collect();
+        taken.extend(self.released.take());
+        taken
+    }
+
+    fn all_imports(&self) -> u64 {
+        let subs = self.around.iter().flat_map(|a| a.iter());
+        self.imports + subs.map(Slot::all_imports).sum::<u64>()
     }
 
     fn upload(&mut self, gpu: &Gpu, picture: &Arc<Picture>, encoder: &mut wgpu::CommandEncoder) {
@@ -3217,7 +3359,13 @@ fn params_of(
     floats.extend(part);
     let site = chroma_site(picture.frame(), layout);
     floats.extend([site[0], site[1], 0.0, 0.0]);
-    floats.extend([f64::from(halvings), 0.0, 0.0, 0.0]);
+    let woven = picture.woven().map_or([0.0, 0.0], |w| {
+        [
+            if w.top_first { 1.0 } else { 2.0 },
+            f64::from(u8::from(w.before.is_some())),
+        ]
+    });
+    floats.extend([f64::from(halvings), woven[0], woven[1], 0.0]);
     floats.extend(level_floats(levels));
     for v in floats {
         out.extend_from_slice(&(v as f32).to_le_bytes());

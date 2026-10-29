@@ -222,7 +222,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Playback always uses Normal (p. 741).
   - Clip Attributes turn deinterlacing on or off for each clip (p. 451).
 - **vidcut:**
-  - vidcut always deinterlaces frames flagged as interlaced with `bwdif`, in the preview and in the export ([D34](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - vidcut always deinterlaces frames flagged as interlaced by the method of `bwdif`, in the preview and in the export ([D34](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - It deinterlaces after the conversion into the timeline color space, as Resolve does (§13, p. 3407).
   - [design/gpu.md](design/gpu.md#deinterlacing-and-hdr) tells how the GPU does it.
 - **Why:**
   - One method keeps the preview and the export frame-exact.

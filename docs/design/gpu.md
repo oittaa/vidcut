@@ -240,6 +240,19 @@ On macOS (`interpolate::macos`):
 
 ## Deinterlacing and HDR
 
+The viewer, the exports and the AI stages deinterlace in the draw, after the conversion ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)):
+
+- Their readers keep the fields (`VideoReader::keep_fields`). An interlaced frame goes to the draw with the frames before and after it (`Woven`).
+- `fs_convert` converts each of the three frames. It reads the chroma of 4:2:0 in the rows of the same field.
+- `fs_bwdif` makes the rows of the second field by the method of `bwdif`, from the three converted frames. It keeps the first field.
+  - A frame with no frame before it, as after a seek to a keyframe, takes only the rows of its own field.
+  - A frame with no frame after it takes itself in the place of that frame. FFmpeg's `bwdif` does the same.
+- After a seek, the reader keeps the last frame that it drops before the target (`VideoReader::take_skipped`). That frame is the frame before.
+- The AI upscalers get each interlaced frame one frame late, with the frame after it (`Source::feed`).
+- Thus the frames of every decoder stay on the GPU. Why: FFmpeg's GPU deinterlacers fail the check below ([gotchas](../gotchas.md)).
+
+The other readers (thumbnails, measurements and proxies) deinterlace before the conversion, with the filters of FFmpeg:
+
 - CUDA frames use `bwdif_cuda`, and Vulkan frames use `bwdif_vulkan`.
   - `hw::deinterlace` first checks that the filter gives the frames of `bwdif`. Else the frames come down for `bwdif`.
 - `route::Facts::deinterlacing` gives the facts of a frame for the deinterlacer, and `route::plan` gives its route:
