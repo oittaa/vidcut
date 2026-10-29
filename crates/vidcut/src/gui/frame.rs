@@ -30,6 +30,7 @@ pub fn render(
     let s = &p.settings;
     let w = width.unwrap_or(s.width).max(2);
     let h = ((u64::from(w) * u64::from(s.height) / u64::from(s.width.max(1))) as u32).max(2);
+    vidcut_av::screen::retry_lost();
     let offscreen = vidcut_av::screen::offscreen().map_err(|e| failed(&e))?;
     let (info, gpu) = (&offscreen.adapter, &offscreen.gpu);
     vidcut_av::player::set_viewer_gpu(vidcut_av::gpus::adapter_id(

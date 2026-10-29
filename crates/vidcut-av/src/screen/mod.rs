@@ -107,6 +107,51 @@ pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
 pub struct Offscreen {
     pub adapter: wgpu::AdapterInfo,
     pub gpu: Gpu,
+    lost: OnceLock<String>,
+}
+
+const RETRIES: usize = 3;
+
+const RETRY_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+
+static LOSSES: std::sync::Mutex<Vec<std::time::Instant>> = std::sync::Mutex::new(Vec::new());
+
+fn recent_losses() -> usize {
+    let mut losses = LOSSES.lock().unwrap_or_else(|e| e.into_inner());
+    losses.retain(|t| t.elapsed() < RETRY_WINDOW);
+    losses.len()
+}
+
+impl Offscreen {
+    fn watch(&'static self) {
+        self.gpu.device.set_device_lost_callback(move |_, why| {
+            eprintln!("vidcut: {} stopped: {why}", self.adapter.name);
+            LOSSES
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(std::time::Instant::now());
+            let _ = self.lost.set(why);
+        });
+        self.gpu.device.on_uncaptured_error(Arc::new(move |e| {
+            if self.lost.get().is_none() {
+                panic!("wgpu error: {e}");
+            }
+            crate::debug!("gpu", "{} after it stopped: {e}", self.adapter.name);
+        }));
+    }
+
+    fn usable(&'static self) -> std::result::Result<&'static Self, String> {
+        let name = &self.adapter.name;
+        match self.lost.get() {
+            None => Ok(self),
+            Some(why) if recent_losses() < RETRIES => {
+                Err(format!("{name} stopped ({why}); try again"))
+            }
+            Some(why) => Err(format!(
+                "{name} stopped ({why}) {RETRIES} times in a minute; try again later"
+            )),
+        }
+    }
 }
 
 type Made = (
@@ -114,22 +159,40 @@ type Made = (
     std::result::Result<&'static Offscreen, String>,
 );
 
+static MADE: std::sync::Mutex<Vec<Made>> = std::sync::Mutex::new(Vec::new());
+
+fn made() -> std::sync::MutexGuard<'static, Vec<Made>> {
+    MADE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub fn offscreen() -> std::result::Result<&'static Offscreen, String> {
-    static MADE: std::sync::Mutex<Vec<Made>> = std::sync::Mutex::new(Vec::new());
     let wanted = crate::gpus::in_use();
     let key = wanted.as_ref().map(|g| g.id.clone());
-    let mut made = MADE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut made = made();
     if let Some((_, on)) = made.iter().find(|(k, _)| *k == key) {
-        return on.clone();
+        return on.clone().and_then(Offscreen::usable);
     }
     let on = device("vidcut offscreen", wanted.as_ref()).map(|(adapter, device, queue)| {
-        &*Box::leak(Box::new(Offscreen {
+        let on: &'static Offscreen = Box::leak(Box::new(Offscreen {
             adapter: adapter.get_info(),
             gpu: Gpu::new(&device, &queue),
-        }))
+            lost: OnceLock::new(),
+        }));
+        on.watch();
+        on
     });
     made.push((key, on.clone()));
     on
+}
+
+pub fn retry_lost() -> bool {
+    if recent_losses() >= RETRIES {
+        return false;
+    }
+    let mut made = made();
+    let before = made.len();
+    made.retain(|(_, on)| !on.as_ref().is_ok_and(|o| o.lost.get().is_some()));
+    made.len() < before
 }
 
 pub(crate) type Started<N> = (Option<&'static Offscreen>, std::result::Result<N, String>);

@@ -72,6 +72,25 @@ pub(crate) fn buffer(
     })
 }
 
+pub(crate) fn buffer_with(
+    device: &wgpu::Device,
+    label: &str,
+    contents: &[u8],
+    usage: wgpu::BufferUsages,
+) -> wgpu::Buffer {
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: (contents.len().max(4) as u64).next_multiple_of(4),
+        usage,
+        mapped_at_creation: true,
+    });
+    if let Ok(mut mapped) = buffer.get_mapped_range_mut(..) {
+        mapped.slice(..contents.len()).copy_from_slice(contents);
+    }
+    buffer.unmap();
+    buffer
+}
+
 pub(crate) fn group(
     device: &wgpu::Device,
     pipeline: &wgpu::ComputePipeline,

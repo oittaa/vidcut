@@ -8,7 +8,6 @@ use std::time::Instant;
 
 use vidcut_core::model::{Media, Project, Upscaler};
 use vidcut_core::render::VideoPiece;
-use wgpu::util::DeviceExt;
 
 use crate::compute::{self, bytes, group, halves, words};
 use crate::error::{Error, Result};
@@ -1054,11 +1053,12 @@ impl Engine {
                 pack: pipeline(&device, PACK.into()),
                 last: pipeline(&device, last_shader()),
             };
-            let none = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("upscale-none"),
-                contents: &[0; 4],
-                usage: wgpu::BufferUsages::STORAGE,
-            });
+            let none = compute::buffer_with(
+                &device,
+                "upscale-none",
+                &[0; 4],
+                wgpu::BufferUsages::STORAGE,
+            );
             Ok((pipelines, none))
         });
         let (pipelines, none) = made.map_err(|e| e.to_string())?;
@@ -1093,12 +1093,12 @@ impl Engine {
     }
 
     fn storage(&self, data: &[u8]) -> wgpu::Buffer {
-        self.device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("upscale-weights"),
-                contents: data,
-                usage: wgpu::BufferUsages::STORAGE,
-            })
+        compute::buffer_with(
+            &self.device,
+            "upscale-weights",
+            data,
+            wgpu::BufferUsages::STORAGE,
+        )
     }
 
     fn layer(&self, c: &Conv, alpha: Option<f32>, sum: bool) -> Layer {
@@ -1157,13 +1157,12 @@ impl Engine {
             fusion: self.layer(&net.fusion, None, false),
             up1: self.layer(&net.up1, Some(net.up1_alpha), false),
             up2: self.layer(&net.up2, Some(net.up2_alpha), false),
-            last: self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("upscale-last"),
-                    contents: &bytes(&last_weights(&net.last)),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                }),
+            last: compute::buffer_with(
+                &self.device,
+                "upscale-last",
+                &bytes(&last_weights(&net.last)),
+                wgpu::BufferUsages::UNIFORM,
+            ),
         };
         self.net = Some(gpu);
         Ok(())
@@ -1209,12 +1208,7 @@ impl Engine {
         use wgpu::BufferUsages as U;
         let uniform = |v: &[usize]| {
             let v: Vec<u32> = v.iter().map(|&x| x as u32).collect();
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("upscale-tile"),
-                    contents: &words(&v),
-                    usage: U::UNIFORM,
-                })
+            compute::buffer_with(&self.device, "upscale-tile", &words(&v), U::UNIFORM)
         };
         let mut jobs = Vec::new();
         for row in spans(h) {

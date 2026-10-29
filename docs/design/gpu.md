@@ -101,6 +101,12 @@ The draw:
     - When wgpu has no adapter on that GPU, the device opens on the adapter that wgpu picks. vidcut prints which.
     - After a change of `gpu.device`, the AI upscalers and the frame interpolation start again on the new device (`start_on_offscreen`).
     - The draw that makes their input starts again on the new device too, with an empty cache of its pictures (`Single::on_offscreen`).
+    - A GPU can stop, for example after a reset by Windows. Then wgpu marks the device lost (`Offscreen::watch`).
+      - After the loss, `screen::offscreen` gives an error for that device. Thus no new work goes to it.
+      - The AI frames fail with that error, and the viewer shows it. The frames without AI play on.
+      - Play, seek, step, an export and a frame render make a new device (`screen::retry_lost`). Play, seek and step also clear the error of the player.
+      - Why: the cause can be gone, for example another program that used much of the GPU.
+      - After `RETRIES` losses in one minute, vidcut makes no new device until that minute ends. Why: Windows stops the computer after more than five resets in one minute ([gotchas](../gotchas.md#wgpu-and-egui)).
   - The viewer's frame render, the AI upscalers and the frame interpolation use that device too (`compute::Gpu`).
   - It opens with all the limits of the GPU. Why: the AI kernels need large buffers and much workgroup memory.
   - It is not the device of the viewer: a submit from another thread can make the viewer's surface fail ([gotchas](../gotchas.md#wgpu-and-egui)).

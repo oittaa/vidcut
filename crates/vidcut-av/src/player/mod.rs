@@ -851,12 +851,15 @@ impl Player {
     }
 
     fn seek_with(&self, frame: i64, sound: bool) {
-        self.shared
-            .change(true, |ctl, _, _| move_to(ctl, frame, sound));
+        self.shared.change(true, |ctl, _, _| {
+            retry_lost_gpu(ctl);
+            move_to(ctl, frame, sound);
+        });
     }
 
     pub fn step(&self, frames: i64) {
         self.shared.change(true, |ctl, pos, _| {
+            retry_lost_gpu(ctl);
             let t = ctl.plan.clamp(pos.saturating_add(frames));
             ctl.scrub(t);
             ctl.motion = 0.0;
@@ -887,6 +890,7 @@ impl Player {
             return self.pause();
         }
         self.shared.change(true, |ctl, pos, sample| {
+            retry_lost_gpu(ctl);
             let from = match (ctl.mode, sample) {
                 (Mode::Playing { .. }, Some(s)) => s.round() as i64,
                 _ => {
@@ -1215,6 +1219,12 @@ fn replace_plan(ctl: &mut Control, plan: RenderPlan) {
     ctl.error = None;
     ctl.trims.clear();
     ctl.trims_gen += 1;
+}
+
+fn retry_lost_gpu(ctl: &mut Control) {
+    if crate::screen::retry_lost() {
+        ctl.error = None;
+    }
 }
 
 fn move_to(ctl: &mut Control, frame: i64, sound: bool) {

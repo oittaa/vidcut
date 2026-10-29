@@ -420,6 +420,7 @@ pub fn run_decoding_on(
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Report> {
     crate::init();
+    crate::screen::retry_lost();
     validate(settings).map_err(|e| Error::Invalid(e.message))?;
     let copies = std::sync::Arc::new(crate::copies::Copies::default());
     let _counting = crate::copies::Guard::set(copies.clone());

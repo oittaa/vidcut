@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError, mpsc};
 
-use wgpu::util::DeviceExt;
-
 use crate::compute;
 use crate::error::Result;
 
@@ -191,12 +189,7 @@ impl Gpu {
     pub(crate) fn upload(&self, data: &[u8]) -> wgpu::Buffer {
         self.uploaded
             .fetch_add(data.len() as u64, Ordering::Relaxed);
-        self.device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("vidcut-compute"),
-                contents: data,
-                usage: storage(),
-            })
+        compute::buffer_with(&self.device, "vidcut-compute", data, storage())
     }
 
     fn write_dirty(&self, ring: &mut Ring) {
