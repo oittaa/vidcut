@@ -293,7 +293,7 @@ pub fn reverse(p: &mut Project, ids: &[String], t: i64, backward: bool) -> Resul
         let end = skip + c.duration;
         let i = index(&map, skip + t - c.start);
         let s = map[i];
-        let a = if i == 0 { s.at.max(skip) } else { s.at };
+        let a = if i == 0 { skip } else { s.at };
         let b = map.get(i + 1).map_or(end, |n| n.at);
         map[i] = Section {
             at: a,
