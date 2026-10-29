@@ -195,6 +195,17 @@ pub fn describe_at(
             },
             d.time("at")
         ),
+        "speed.ease" => format!(
+            "Ease of {} at {} to {}",
+            d.clips("clips"),
+            d.time("at"),
+            match d.params["ease"].as_str() {
+                Some("ease_in") => "Ease In",
+                Some("ease_out") => "Ease Out",
+                Some("ease_in_out") => "Ease In and Out",
+                _ => "Linear",
+            }
+        ),
         "edit.copy" => format!("Copy {}", d.clips("clips")),
         "edit.cut" if d.params["range"].is_string() => format!("Cut {}", d.range("range")),
         "edit.cut" => format!("Cut {}", d.clips("clips")),

@@ -583,6 +583,7 @@ enum Act {
     Edit(Key, f64),
     Release(Key),
     Direction(Direction),
+    SpeedEase(Ease),
     Ripple(bool),
     FullSpeed,
     Retime(ClipRetime),
@@ -1134,6 +1135,28 @@ fn speed_section(
             acts.push(Act::Direction(Direction::Forward));
         }
         ui.end_row();
+        let eases = p
+            .clip(&paced[0].id)
+            .filter(|c| c.compound.is_none())
+            .and_then(|c| vidcut_core::ops::speed::section_eases(c, paced[0].at));
+        if let Some((now, options)) = eases {
+            label(ui, "Ease", !now.is_linear());
+            ui.add_enabled_ui(options.len() > 1, |ui| {
+                egui::ComboBox::from_id_salt("inspector-speed-ease")
+                    .selected_text(ease_label(now))
+                    .show_ui(ui, |ui| {
+                        for &e in &options {
+                            if ui.selectable_label(e == now, ease_label(e)).clicked() && e != now {
+                                acts.push(Act::SpeedEase(e));
+                            }
+                        }
+                    });
+            });
+            if reset(ui, !now.is_linear()) {
+                acts.push(Act::SpeedEase(Ease::Linear));
+            }
+            ui.end_row();
+        }
         let moving = Look {
             off: frozen || back,
             why: (back && !frozen).then_some("Only a forward section takes a speed"),
@@ -1389,6 +1412,25 @@ impl Workspace {
             since: Instant::now(),
             clips,
         });
+    }
+
+    fn ease_sections(&mut self, paced: &[Paced], ease: Ease) {
+        let mut commands: Vec<Value> = paced
+            .iter()
+            .filter(|c| c.ramped)
+            .map(|c| {
+                let params = json!({ "clips": [c.id], "at": c.at, "ease": ease });
+                json!({ "method": "speed.ease", "params": params })
+            })
+            .collect();
+        match commands.len() {
+            0 => {}
+            1 => {
+                let c = commands.remove(0);
+                self.send("speed.ease", c["params"].clone());
+            }
+            _ => self.send("apply", json!({ "commands": commands })),
+        }
     }
 
     fn send_percent(
@@ -1880,6 +1922,7 @@ impl Workspace {
                 }
             }
             Act::Direction(to) => self.send_speeds((paced, false), None, |d, _| to.turn(d)),
+            Act::SpeedEase(ease) => self.ease_sections(paced, ease),
             Act::Ripple(on) => self.inspector.ripple = Some(on),
             Act::Retime(r) => {
                 let ids: Vec<String> = paced.iter().map(|c| c.id.clone()).collect();

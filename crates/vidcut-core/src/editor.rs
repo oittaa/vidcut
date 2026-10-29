@@ -3259,6 +3259,12 @@ fn mutate(
             ops::speed::reverse(p, &ids, at, *backward)?;
             Value::Null
         }
+        Request::SpeedEase { clips, at, ease } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = speed_at(p, at.as_ref(), playhead, "speed.ease")?;
+            ops::speed::ease(p, &ids, at, *ease)?;
+            Value::Null
+        }
         Request::ClipSet {
             clips,
             enabled,

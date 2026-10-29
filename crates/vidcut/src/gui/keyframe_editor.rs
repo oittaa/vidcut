@@ -296,6 +296,17 @@ fn fixed(param: KeyParam) -> bool {
     param == KeyParam::Speed
 }
 
+fn key_eases(clip: &Clip, lane: &Lane, i: usize) -> (Option<Ease>, Vec<Ease>) {
+    if !fixed(lane.param) {
+        return (ease_of(&lane.keys, i), eases(&lane.keys, i));
+    }
+    match vidcut_core::ops::speed::key_ease(clip, lane.keys[i].frame) {
+        Some((now, true)) => (Some(now), vec![Ease::Linear, Ease::EaseInOut]),
+        Some((now, false)) => (Some(now), vec![Ease::Linear]),
+        None => (None, Vec::new()),
+    }
+}
+
 struct Target {
     clip: Clip,
     marks: Vec<Mark>,
@@ -2320,7 +2331,7 @@ impl Workspace {
             Axis::None,
         );
         self.empty_press(ui, &resp, clip, lane.param, map, &spots);
-        self.show_menu(&resp, &clip.id, lane, false);
+        self.show_menu(&resp, clip, lane, false);
     }
 
     fn empty_press(
@@ -2487,7 +2498,7 @@ impl Workspace {
             .collect();
         self.empty_press(ui, &resp, clip, lane.param, map, &all);
         self.open_menu(&resp, lane.param, &flat, true);
-        self.show_menu(&resp, &clip.id, lane, true);
+        self.show_menu(&resp, clip, lane, true);
     }
 
     fn key_bar(&mut self, ui: &mut egui::Ui, p: &Project, clip: &Clip, lanes: &[Lane], f: &Frame) {
@@ -2562,14 +2573,14 @@ impl Workspace {
                     });
                 }
             }
-            if mark.param == KeyParam::Anchor || fixed(mark.param) {
+            if mark.param == KeyParam::Anchor {
                 return;
             }
-            let current = ease_of(&lane.keys, i);
+            let (current, options) = key_eases(clip, lane, i);
             egui::ComboBox::from_id_salt(("key-ease", lane_name(mark.param), mark.frame))
                 .selected_text(current.map_or("Custom", ease_label))
                 .show_ui(ui, |ui| {
-                    for e in eases(&lane.keys, i) {
+                    for e in options {
                         if ui
                             .selectable_label(current == Some(e), ease_label(e))
                             .clicked()
@@ -2830,7 +2841,7 @@ impl Workspace {
         }
     }
 
-    fn show_menu(&mut self, resp: &egui::Response, clip: &str, lane: &Lane, curve: bool) {
+    fn show_menu(&mut self, resp: &egui::Response, clip: &Clip, lane: &Lane, curve: bool) {
         let e = &self.key_editor;
         let open = e.menu.is_some_and(|m| {
             m.param == lane.param && e.menu_curve == curve && e.menu_tray == e.tray
@@ -2838,7 +2849,7 @@ impl Workspace {
         if !open {
             return;
         }
-        if lane.param == KeyParam::Anchor || fixed(lane.param) {
+        if lane.param == KeyParam::Anchor {
             self.key_editor.menu = None;
             return;
         }
@@ -2848,13 +2859,13 @@ impl Workspace {
             let Some(i) = lane.keys.iter().position(|k| k.frame == mark.frame) else {
                 return;
             };
-            let current = ease_of(&lane.keys, i);
-            for ease in eases(&lane.keys, i) {
+            let (current, options) = key_eases(clip, lane, i);
+            for ease in options {
                 if ui
                     .selectable_label(current == Some(ease), ease_label(ease))
                     .clicked()
                 {
-                    self.send("keyframes.set", ease_body(clip, mark, ease));
+                    self.send("keyframes.set", ease_body(&clip.id, mark, ease));
                     self.key_editor.menu = None;
                     ui.close();
                 }

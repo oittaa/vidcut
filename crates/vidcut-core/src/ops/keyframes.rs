@@ -11,7 +11,9 @@ use crate::validate::GAIN;
 
 const ANCHOR_LINEAR: &str = "the anchor point's keyframes are linear: they take no ease or handles";
 const SPEED_SET: &str =
-    "a speed keyframe takes no value or ease: speed.set sets the speed of a section";
+    "a speed keyframe takes no value or handles: speed.set sets the speed of a section";
+const SPEED_ADD: &str = "a new speed keyframe takes no value or ease: speed.set sets the speed \
+     of a section, and keyframes.set its ease";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Pick {
@@ -103,7 +105,7 @@ fn added(
 ) -> Result<Vec<(String, i64)>> {
     if param == KeyParam::Speed {
         if value.is_some() || ease.is_some() {
-            return Err(Error::usage(SPEED_SET));
+            return Err(Error::usage(SPEED_ADD));
         }
         return super::speed::add_keyframe(p, ids, at);
     }
@@ -235,7 +237,14 @@ pub fn set(
     change: &KeyChange,
 ) -> Result<()> {
     if param == KeyParam::Speed {
-        return Err(Error::usage(SPEED_SET));
+        let shaped = change.value.is_some()
+            || change.by.is_some()
+            || change.in_handle.is_some()
+            || change.out_handle.is_some();
+        return match change.ease.filter(|_| !shaped) {
+            Some(e) => super::speed::ease_keyframes(p, ids, pick, e),
+            None => Err(Error::usage(SPEED_SET)),
+        };
     }
     if let Some(v) = picture_param(param) {
         return set_picture(p, ids, v, pick, change);
@@ -426,16 +435,21 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
             }
             if let Some(speed) = c.speed.as_ref().filter(|s| s.sections.len() > 1) {
                 let keys: Vec<Value> = speed
-                    .keyframes()
+                    .sections
                     .iter()
-                    .map(|k| {
-                        let at = c.key_time(k.frame).round() as i64;
-                        json!({
-                            "frame": k.frame,
+                    .skip(1)
+                    .map(|s| {
+                        let at = c.key_time(s.at).round() as i64;
+                        let mut v = json!({
+                            "frame": s.at,
                             "at": at,
                             "at_tc": p.settings.timecode(at),
-                            "value": k.value,
-                        })
+                            "value": s.speed,
+                        });
+                        if s.ease.is_some() {
+                            v["ease"] = json!(Ease::EaseInOut);
+                        }
+                        v
                     })
                     .collect();
                 clips.push(

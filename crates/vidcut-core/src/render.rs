@@ -857,10 +857,91 @@ impl Pace {
         &self.map[i.saturating_sub(1)]
     }
 
-    fn frame(&self, u: i64) -> i64 {
+    fn index(&self, x: f64) -> usize {
+        self.map
+            .partition_point(|s| s.at as f64 <= x)
+            .saturating_sub(1)
+    }
+
+    fn linear(&self, i: usize, x: f64) -> f64 {
+        let s = &self.map[i];
+        s.from + (x - s.at as f64) * s.speed
+    }
+
+    fn eased(&self, i: usize) -> bool {
+        i > 0
+            && self
+                .map
+                .get(i)
+                .is_some_and(|s| s.ease.is_some() && s.speed >= 0.0 && self.map[i - 1].speed >= 0.0)
+    }
+
+    pub fn bend(&self, i: usize) -> Option<[f64; 2]> {
+        if !self.eased(i) {
+            return None;
+        }
+        let s = &self.map[i];
+        let [a, c] = s.ease?;
+        let a = if i > 1 {
+            a.max((self.map[i - 1].at - s.at) as f64)
+        } else {
+            a
+        };
+        let after = self.map.get(i + 1).map_or(f64::INFINITY, |n| {
+            let gap = (n.at - s.at) as f64;
+            n.ease.map_or(gap, |[b, _]| gap + b.max(-gap))
+        });
+        Some([a, c.min(after)])
+    }
+
+    fn bent(&self, i: usize, x: f64) -> Option<f64> {
+        let [a, c] = self.bend(i)?;
+        let s = &self.map[i];
+        let k = s.at as f64;
+        if x <= k + a || x >= k + c {
+            return None;
+        }
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..60 {
+            let t: f64 = (lo + hi) / 2.0;
+            if a * (1.0 - t).powi(3) + c * t.powi(3) < x - k {
+                lo = t;
+            } else {
+                hi = t;
+            }
+        }
+        let t: f64 = (lo + hi) / 2.0;
+        let head = self.linear(i - 1, k + a) - s.from;
+        Some(s.from + head * (1.0 - t).powi(3) + c * s.speed * t.powi(3))
+    }
+
+    pub fn position(&self, x: f64) -> f64 {
+        let i = self.index(x);
+        self.bent(i, x)
+            .or_else(|| self.bent(i + 1, x))
+            .unwrap_or_else(|| self.linear(i, x))
+    }
+
+    fn bends(&self, u: i64) -> bool {
+        let i = self.index(u as f64);
+        [i, i + 1].into_iter().any(|j| {
+            self.bend(j).is_some_and(|[a, c]| {
+                let k = self.map[j].at as f64;
+                (k + a).floor() as i64 <= u && u < (k + c).ceil() as i64
+            })
+        })
+    }
+
+    fn top(&self, u: i64) -> f64 {
         let s = self.section(u);
-        let back = i64::from(s.speed < 0.0);
-        (s.from + (u + back - s.at) as f64 * s.speed + 1e-9).floor() as i64
+        if s.speed < 0.0 {
+            return s.from + (u + 1 - s.at) as f64 * s.speed;
+        }
+        self.position(u as f64)
+    }
+
+    fn frame(&self, u: i64) -> i64 {
+        (self.top(u) + 1e-9).floor() as i64
     }
 
     pub fn speed(&self) -> f64 {
@@ -875,9 +956,29 @@ impl Pace {
         self.section(self.skip + k).speed
     }
 
+    pub fn rate(&self, k: i64) -> f64 {
+        let u = self.skip + k;
+        if self.bends(u) {
+            return self.position((u + 1) as f64) - self.position(u as f64);
+        }
+        self.section(u).speed
+    }
+
     pub fn steady(&self, k: i64) -> Option<i64> {
         let u = self.skip + k;
-        self.map.iter().skip(1).find(|s| s.at > u).map(|s| s.at - u)
+        if self.bends(u) {
+            return Some(1);
+        }
+        let (j, s) = self
+            .map
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find(|(_, s)| s.at > u)?;
+        let lo = self
+            .bend(j)
+            .map_or(s.at, |[a, _]| (s.at as f64 + a).floor() as i64);
+        Some(lo.max(u + 1) - u)
     }
 
     pub fn offset(&self, k: i64) -> i64 {
@@ -891,10 +992,7 @@ impl Pace {
         if self.is_normal() {
             return k as f64;
         }
-        let u = self.skip + k;
-        let s = self.section(u);
-        let back = i64::from(s.speed < 0.0);
-        s.from + (u + back - s.at) as f64 * s.speed - self.frame(self.skip) as f64
+        self.top(self.skip + k) - self.frame(self.skip) as f64
     }
 
     pub fn after(&self, k: i64) -> Self {
@@ -906,8 +1004,7 @@ impl Pace {
         if self.is_normal() || s.speed == 0.0 {
             return 0.0;
         }
-        let back = i64::from(s.speed < 0.0);
-        let x = s.from + (self.skip + back - s.at) as f64 * s.speed;
+        let x = self.top(self.skip);
         (x - (x + 1e-9).floor()).max(0.0)
     }
 
@@ -916,14 +1013,16 @@ impl Pace {
             let top = if s.speed < 0.0 { -s.speed } else { 0.0 };
             return self.phase() + top + x * s.speed;
         }
-        let y = self.skip as f64 + x;
-        let i = self.map.partition_point(|s| s.at as f64 <= y);
-        let s = &self.map[i.saturating_sub(1)];
-        s.from + (y - s.at as f64) * s.speed - self.frame(self.skip) as f64
+        self.position(self.skip as f64 + x) - self.frame(self.skip) as f64
     }
 
     pub fn sound_in(&self, k: i64, x: f64) -> f64 {
-        let s = self.section(self.skip + k);
+        let u = self.skip + k;
+        if self.bends(u) {
+            let at = self.position(u as f64) + (self.skip as f64 + x - u as f64) * self.rate(k);
+            return at - self.frame(self.skip) as f64;
+        }
+        let s = self.section(u);
         s.from + (self.skip as f64 + x - s.at as f64) * s.speed - self.frame(self.skip) as f64
     }
 }
@@ -1310,6 +1409,10 @@ fn composed(own: &crate::model::Speed, v: f64) -> crate::model::Speed {
             at: j,
             from: pos(u0 + j as f64 * v) - pos(u0),
             speed: map[i].speed * v,
+            ease: map[i]
+                .ease
+                .filter(|_| v > 0.0 && j > 0)
+                .map(|e| e.map(|x| x / v)),
         })
         .collect();
     crate::model::Speed {
@@ -1718,7 +1821,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         source_sample,
         samples,
         gain_db: if keyed.is_some() { 0.0 } else { audio.gain_db },
-        speed,
+        speed: c.pace().rate(x - c.start),
         joined: false,
         fade: None,
         isolation: audio.voice_isolation,
