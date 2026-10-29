@@ -113,9 +113,11 @@ flowchart TD
   - A seek with AI Best starts a new stream at the asked frame. Its first picture comes after the first chunk of the stream.
   - While playing, the player skips the frames that it cannot make in time. A replay makes again the frames that it skipped.
   - The key of the kept frames holds the Super Scale, the placement and the timeline size (`source_key`). Why: they decide whether the picture is enlarged.
+  - The placement in the key is its picture settings and its source position, not its clip or its timeline start. Thus a moved clip keeps its frames.
 - With `viewer.super_scale` off, the live core plans the viewer without Super Scale (`preview_plan`).
 - With a Retime Process other than Nearest, `VideoFrames` makes the frames between the source frames for the viewer too ([export](export.md#which-source-frame)).
-  - The key of such a frame holds the process (`source_key`), and its exact source position (`Plan::id`). Thus each made frame is a kept picture of its own.
+  - The key of such a frame holds the process, the Super Scale, the placement and the timeline size (`source_key`). Why: the frame is made at its placement, and the viewer draws it with that placement and its opacity.
+  - The `Id` also holds the exact source position (`Plan::id`). Thus each made frame is a kept picture of its own.
   - A frame of an AI process aims ahead of the clock by the mean time of the recent made frames (`make_cost`). On the way, the player skips the frames between. Why: they would be late.
   - Ahead of the playhead, it makes only frames past the clock by the lead, and after the reader. Thus slow frames spread evenly, and the reader never seeks back.
   - A skipped frame moves the reader to its exact source time, as a made frame does (`exact_at`). Why: a step back between the two would seek.
