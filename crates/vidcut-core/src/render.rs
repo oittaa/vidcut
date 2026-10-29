@@ -836,6 +836,10 @@ impl Default for Pace {
     }
 }
 
+pub fn source_frame(x: f64) -> i64 {
+    (x + 0.002).floor() as i64
+}
+
 impl Pace {
     pub fn of(speed: f64, skip: i64) -> Self {
         if speed == 1.0 {
@@ -869,11 +873,7 @@ impl Pace {
     }
 
     fn eased(&self, i: usize) -> bool {
-        i > 0
-            && self
-                .map
-                .get(i)
-                .is_some_and(|s| s.ease.is_some() && s.speed >= 0.0 && self.map[i - 1].speed >= 0.0)
+        i > 0 && self.map.get(i).is_some_and(|s| s.ease.is_some())
     }
 
     pub fn bend(&self, i: usize) -> Option<[f64; 2]> {
@@ -934,14 +934,14 @@ impl Pace {
 
     fn top(&self, u: i64) -> f64 {
         let s = self.section(u);
-        if s.speed < 0.0 {
+        if s.speed < 0.0 && self.map.len() == 1 {
             return s.from + (u + 1 - s.at) as f64 * s.speed;
         }
         self.position(u as f64)
     }
 
     fn frame(&self, u: i64) -> i64 {
-        (self.top(u) + 1e-9).floor() as i64
+        source_frame(self.top(u))
     }
 
     pub fn speed(&self) -> f64 {
@@ -1004,8 +1004,7 @@ impl Pace {
         if self.is_normal() || s.speed == 0.0 {
             return 0.0;
         }
-        let x = self.top(self.skip);
-        (x - (x + 1e-9).floor()).max(0.0)
+        (self.top(self.skip) - self.frame(self.skip) as f64).max(0.0)
     }
 
     pub fn sound(&self, x: f64) -> f64 {

@@ -1977,7 +1977,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - A speed change does not remove pictures from a clip. The lost frame is a fault in Resolve. vidcut does not copy it.
 
-## X96. Reverse plays the section's own frames backward
+## X96. Reverse keeps the speeds of the other sections
 
 - **Resolve:**
   - The Direction buttons of the Inspector act on the section under the playhead.
@@ -1986,14 +1986,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Frames 46 to 494 show source frames 2, 4 and so on to 898. The last section changes to 200%, and the clip has 495 frames.
   - The manual does not tell this.
 - **vidcut:**
-  - Reverse plays the section's own frames in the other order. Forward turns them back.
-  - The section goes from speed keyframe to speed keyframe, also outside the clip. The first and last sections end at the clip's edges. Thus no speed keyframe moves.
-  - The other sections and the clip's length stay (`speed.reverse`, [D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - A speed keyframe next to a section that plays backward takes no ease.
+  - Reverse turns the section at the speed keyframe where it starts, as Resolve does. Forward turns it back.
+  - The first section has no speed keyframe at its start. It turns at the speed keyframe where it ends.
+  - The sections after it go on from where it stops, at their own speeds. The speed keyframes and the clip's length stay (`speed.reverse`, [D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - When the turn needs frames that the media does not have, Reverse refuses.
 - **Why:**
-  - The user changes the direction of one section. The other sections keep their speeds and their frames.
-  - In Resolve, the next section changes its speed and shows the media again from the start. The clip then gets shorter.
-  - The picture jumps at a speed keyframe next to a section that plays backward. No curve joins the two sides of a jump.
+  - The user changes the direction of one section. The other sections keep their speeds.
+  - In Resolve, the next section changes its speed, and the clip gets shorter. vidcut does not copy this.
+  - The turn at a speed keyframe keeps the picture without a jump, as in Resolve. Thus an ease there gives the same smooth turn as in Resolve.
 
 ## X97. Ease In and Ease Out ease their own side of a section
 

@@ -1411,7 +1411,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Speed keyframes.** These facts come from Resolve Studio 21.1.2, from its renders and its OTIO files:
     - A speed keyframe cuts a clip into two sections. Each section has a speed of its own. The sound of the clip gets the same sections.
     - A new speed keyframe gives both sections the speed of the section that it cuts.
-    - Each timeline frame shows `floor` of the source position on the line of its section.
+    - Each timeline frame shows `floor` of its source position plus 0.002 frames. The source position is on the line of its section.
+      - Thus a position that is 0.002 frames or less below a whole number shows that number.
+      - The amount is in frames, at 25 fps and at 30 fps.
     - An eased speed keyframe changes the speed on a curve. Let k be its frame and s its source position.
       - v0 and v1 are the speeds before and after it. a and c are the frames of its handles, a before k and c after k.
       - From k + a to k + c, the curve is a cubic Bezier curve. Its points are (k + a, s + a × v0), (k, s), (k, s) and (k + c, s + c × v1).
@@ -1421,6 +1423,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - The clip's first frame and its end count as speed keyframes.
       - Where the handles of two eased speed keyframes overlap, the later speed keyframe's handle keeps its length, up to the section. The earlier handle gets the rest of the section.
       - The value of a handle changes with its length.
+    - A section that plays backward uses the same `floor`. Thus where the clip turns, the speed keyframe's own source frame shows once.
+    - An eased speed keyframe where the clip turns gives a smooth turn, on the same curve. The picture slows down, stops and goes back.
     - A change of a section's speed moves the later speed keyframes and the clip's end. Their sections keep their speeds.
     - The freeze button holds the frame under the playhead for 2 seconds of the timeline. It adds a section at 0% and a speed keyframe after it.
     - Delete Keyframe removes the speed keyframe at the playhead, or else the nearest one before the playhead.
@@ -1438,7 +1442,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Inspector:** these facts come from Resolve Studio 21.1.2:
     - The header of the Speed Change group has a keyframe diamond between < and > buttons. The diamond is red with the playhead on a speed keyframe.
     - Change Speed and Frames per Second show and change the speed of the section under the playhead.
-    - The Direction buttons act on that section. In one check, Reverse played it backward to the media's first frame ([X96](deviations.md#x96-reverse-plays-the-sections-own-frames-backward)).
+    - The Direction buttons act on that section. In one check, Reverse played it backward to the media's first frame ([X96](deviations.md#x96-reverse-keeps-the-speeds-of-the-other-sections)).
     - The Duration field shows the section's length in one check and the clip's length in two others. The reason is not measured.
     - The Ease list under Direction has Linear, Ease In, Ease Out and Ease In and Out.
       - In one check, each of the three eases set only the speed keyframe at the start of the section ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)).
@@ -1447,7 +1451,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Inspector's Speed section shows the section under the playhead. With the playhead outside the clip, it shows the nearest section.
       - Speed and Frames per Second send `speed.set`. They are off when the section is frozen or plays backward.
       - Freeze sends `speed.freeze`. Forward and Reverse send `speed.reverse`. They are off when the section is frozen.
-      - Reverse plays the section between its speed keyframes. The first and last sections end at the clip's edges.
+      - Reverse turns the section at the speed keyframe where it starts, and the first section at the one where it ends.
+      - The sections after it go on from where it stops, at their own speeds. Thus the picture does not jump.
       - Ease sends `speed.ease` ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)). Ease In eases the speed keyframe at the section's start, and Ease Out the one at its end.
         - The list shows the eases of the section's two speed keyframes. It offers only the eases that they can take.
       - An ease reaches 1/6 s before and after its speed keyframe, at each frame rate. Resolve's length at other rates than 30 fps is not measured.
@@ -1470,10 +1475,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Requests:** `keyframes.add` and `keyframes.remove` with the `param` `speed` add and remove speed keyframes.
     - `speed.set`, `speed.freeze`, `speed.reverse` and `speed.ease` change the sections. All six act at a time, the playhead by default.
     - `keyframes.add` skips a clip that cannot take a speed keyframe at `at`. It fails only when no clip can.
-    - `speed.reverse` plays a section's own frames in the other order ([X96](deviations.md#x96-reverse-plays-the-sections-own-frames-backward)).
+    - `speed.reverse` turns a section at its speed keyframe ([X96](deviations.md#x96-reverse-keeps-the-speeds-of-the-other-sections)).
     - `speed.set` takes 1% to 10000% forward, in a section that plays forward.
     - `speed.ease` eases the speed keyframes of a section. `keyframes.set` gives one speed keyframe `linear` or `ease_in_out`.
-    - A speed keyframe next to a section that plays backward takes no ease ([X96](deviations.md#x96-reverse-plays-the-sections-own-frames-backward)).
     - `keyframes.list` gives `ease` `ease_in_out` for an eased speed keyframe.
     - `keyframes.remove` without `frames` and `at` removes all the speed keyframes of the clips.
     - `keyframes.list` gives each speed keyframe with the speed of the section after it.

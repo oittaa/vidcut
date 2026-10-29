@@ -12,4 +12,4 @@ A speed keyframe marks a frame of a clip where its speed can change. The speed k
 
 ## To do
 
-- **OTIO import:** a speed keyframe on a compound clip, and a section that plays backward, are kept but play at 100%. The import warns.
+- **OTIO import:** a speed keyframe on a compound clip is kept but plays at 100%. The import warns.
