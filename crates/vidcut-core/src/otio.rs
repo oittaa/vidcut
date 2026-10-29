@@ -587,8 +587,8 @@ fn first_shown(start: i64, len: i64, speed: Option<&Speed>) -> (i64, i64) {
         return (start, 0);
     }
     let bottom = start as f64 + (len - 1) as f64 * -speed;
-    let first = (bottom + 1e-9).floor() as i64;
-    let phase = bottom - first as f64;
+    let first = crate::render::source_frame(bottom);
+    let phase = (bottom - first as f64).max(0.0);
     let skip = (0..1000)
         .find(|&k| (crate::render::Pace::of(speed, k).phase() - phase).abs() < 1e-6)
         .unwrap_or(0);
