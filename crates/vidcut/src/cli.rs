@@ -411,6 +411,7 @@ enum Kind {
 struct Param {
     name: String,
     kind: Kind,
+    scalar: bool,
     required: bool,
     help: String,
     position: Option<usize>,
@@ -457,6 +458,7 @@ fn methods() -> &'static [Method] {
                 .map(|(p, schema)| Param {
                     name: p.clone(),
                     kind: kind(schema, defs),
+                    scalar: number_or_tuple(schema, defs),
                     required: required.contains(&p.as_str()),
                     help: help(schema),
                     position: positional.iter().position(|x| x == p),
@@ -557,6 +559,20 @@ fn kind(schema: &Value, defs: &Map<String, Value>) -> Kind {
             Kind::Json
         }
     }
+}
+
+fn number_or_tuple(schema: &Value, defs: &Map<String, Value>) -> bool {
+    let base = not_null(schema);
+    let alts: Vec<&Value> = resolve_ref(&base, defs)["anyOf"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|a| resolve_ref(a, defs))
+        .collect();
+    alts.iter().any(|a| a["type"] == "number")
+        && alts
+            .iter()
+            .any(|a| a["minItems"].as_u64().is_some_and(|n| n > 1))
 }
 
 fn choices(s: &Value) -> Option<Vec<String>> {
@@ -803,9 +819,11 @@ fn arg(p: &Param, followed: bool) -> Arg {
     let one = |a: Arg, k: &Kind, hyphen: bool| match k {
         Kind::Int => a
             .value_parser(clap::value_parser!(i64))
+            .allow_negative_numbers(true)
             .allow_hyphen_values(hyphen),
         Kind::Float => a
             .value_parser(clap::value_parser!(f64))
+            .allow_negative_numbers(true)
             .allow_hyphen_values(hyphen),
         Kind::Choice(c) => a.value_parser(clap::builder::PossibleValuesParser::new(c.clone())),
         _ => a.allow_hyphen_values(hyphen),
@@ -970,7 +988,7 @@ impl Cli {
 
 fn value(m: &ArgMatches, p: &Param) -> Result<Option<Value>> {
     let id = p.name.as_str();
-    Ok(match &p.kind {
+    let v = match &p.kind {
         Kind::Flag => m.get_flag(id).then_some(Value::Bool(true)),
         Kind::Bool => m.get_one::<bool>(id).map(|b| json!(b)),
         Kind::Int => m.get_one::<i64>(id).map(|n| json!(n)),
@@ -991,6 +1009,10 @@ fn value(m: &ArgMatches, p: &Param) -> Result<Option<Value>> {
             Some(text) => Some(read_json_arg(text)?),
             None => None,
         },
+    };
+    Ok(match v {
+        Some(Value::Array(mut a)) if p.scalar && a.len() == 1 => a.pop(),
+        v => v,
     })
 }
 
