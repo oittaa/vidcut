@@ -869,11 +869,7 @@ impl Pace {
     }
 
     fn eased(&self, i: usize) -> bool {
-        i > 0
-            && self
-                .map
-                .get(i)
-                .is_some_and(|s| s.ease.is_some() && s.speed >= 0.0 && self.map[i - 1].speed >= 0.0)
+        i > 0 && self.map.get(i).is_some_and(|s| s.ease.is_some())
     }
 
     pub fn bend(&self, i: usize) -> Option<[f64; 2]> {
@@ -934,7 +930,7 @@ impl Pace {
 
     fn top(&self, u: i64) -> f64 {
         let s = self.section(u);
-        if s.speed < 0.0 {
+        if s.speed < 0.0 && self.map.len() == 1 {
             return s.from + (u + 1 - s.at) as f64 * s.speed;
         }
         self.position(u as f64)

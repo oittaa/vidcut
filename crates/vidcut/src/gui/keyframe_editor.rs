@@ -301,8 +301,7 @@ fn key_eases(clip: &Clip, lane: &Lane, i: usize) -> (Option<Ease>, Vec<Ease>) {
         return (ease_of(&lane.keys, i), eases(&lane.keys, i));
     }
     match vidcut_core::ops::speed::key_ease(clip, lane.keys[i].frame) {
-        Some((now, true)) => (Some(now), vec![Ease::Linear, Ease::EaseInOut]),
-        Some((now, false)) => (Some(now), vec![Ease::Linear]),
+        Some(now) => (Some(now), vec![Ease::Linear, Ease::EaseInOut]),
         None => (None, Vec::new()),
     }
 }
