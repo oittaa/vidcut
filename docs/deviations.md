@@ -1987,6 +1987,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The manual does not tell this.
 - **vidcut:**
   - Reverse plays the section's own frames in the other order. Forward turns them back.
+  - The section goes from speed keyframe to speed keyframe, also outside the clip. The first and last sections end at the clip's edges. Thus no speed keyframe moves.
   - The other sections and the clip's length stay (`speed.reverse`, [D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - The user changes the direction of one section. The other sections keep their speeds and their frames.

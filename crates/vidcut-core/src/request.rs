@@ -1047,9 +1047,11 @@ pub enum Request {
         ripple: Option<bool>,
     },
     /// Play the section under `at` (the playhead) in each clip backward, or
-    /// forward with `backward: false`. The section plays its own frames in
-    /// the other order. The other sections and the clip's length stay. A
-    /// freeze frame has no direction.
+    /// forward with `backward: false`. The section plays its own frames
+    /// between its speed keyframes in the other order. The first and last
+    /// sections end at the clip's edges. The speed keyframes, the other
+    /// sections and the clip's length stay. A freeze frame has no
+    /// direction.
     #[serde(rename = "speed.reverse")]
     SpeedReverse {
         clips: OneOrMany<ClipRef>,
@@ -3108,6 +3110,8 @@ pub enum KeyParam {
     /// sections one, at the speed between the keyframes on each side, and
     /// the clip keeps its length. It takes no `value` or `ease`:
     /// `speed.set` sets the speed of a section. It does not move or copy.
+    /// `keyframes.add` skips a clip that cannot take one at `at`, and
+    /// fails only when no clip can.
     Speed,
 }
 

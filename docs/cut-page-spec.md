@@ -1434,6 +1434,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Inspector's Speed section shows the section under the playhead. With the playhead outside the clip, it shows the nearest section.
       - Speed and Frames per Second send `speed.set`. They are off when the section is frozen or plays backward.
       - Freeze sends `speed.freeze`. Forward and Reverse send `speed.reverse`. They are off when the section is frozen.
+      - Reverse plays the section between its speed keyframes. The first and last sections end at the clip's edges.
       - Duration is off on a clip with speed keyframes.
       - Reset gives the whole clip 100%. Its speed keyframes go.
     - The diamond adds or removes a speed keyframe at the playhead. The arrows move the playhead to the previous or next speed keyframe.
@@ -1449,6 +1450,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Then Mark > Delete All Keyframes asks first. Then it removes all the speed keyframes of the selected clips.
   - **Requests:** `keyframes.add` and `keyframes.remove` with the `param` `speed` add and remove speed keyframes.
     - `speed.set`, `speed.freeze` and `speed.reverse` change the sections. All five act at a time, the playhead by default.
+    - `keyframes.add` skips a clip that cannot take a speed keyframe at `at`. It fails only when no clip can.
     - `speed.reverse` plays a section's own frames in the other order ([X96](deviations.md#x96-reverse-plays-the-sections-own-frames-backward)).
     - `speed.set` takes 1% to 10000% forward, in a section that plays forward.
     - `keyframes.remove` without `frames` and `at` removes all the speed keyframes of the clips.
