@@ -1613,7 +1613,8 @@ impl Workspace {
                             }
                         }
                     });
-                    if let Some(text) = super::super_scale::unfit(shown, [m]) {
+                    let timeline = self.timeline_colors();
+                    if let Some(text) = super::super_scale::unfit(shown, [m], timeline) {
                         super::dialog::warn(ui, text);
                     }
                     ui.add_enabled_ui(shown.upscaler == Upscaler::Classic, |ui| {

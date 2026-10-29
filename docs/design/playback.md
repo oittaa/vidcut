@@ -116,7 +116,8 @@ flowchart TD
   - The placement in the key is its picture settings and its source position, not its clip or its timeline start. Thus a moved clip keeps its frames.
 - With `viewer.super_scale` off, the live core plans the viewer without Super Scale (`preview_plan`).
 - With a Retime Process other than Nearest, `VideoFrames` makes the frames between the source frames for the viewer too ([export](export.md#which-source-frame)).
-  - The key of such a frame holds the process, the Super Scale, the placement and the timeline size (`source_key`). Why: the frame is made at its placement, and the viewer draws it with that placement and its opacity.
+  - The key of such a frame holds the process, the Super Scale, the placement, the timeline size and the timeline colors (`source_key`). Why: the frame is made at its placement, and the viewer draws it with that placement and its opacity.
+  - Why the timeline colors: an HDR picture goes to the AI stages only in an SDR timeline, tone-mapped.
   - The `Id` also holds the exact source position (`Plan::id`). Thus each made frame is a kept picture of its own.
   - A frame of an AI process aims ahead of the clock by the mean time of the recent made frames (`make_cost`). On the way, the player skips the frames between. Why: they would be late.
   - Ahead of the playhead, it makes only frames past the clock by the lead, and after the reader. Thus slow frames spread evenly, and the reader never seeks back.
@@ -204,11 +205,13 @@ The audio device:
 - An export, a proxy and a thumbnail draw with the same `Screen`, always into `Wide` (`Screen::for_export`). They write the planes of the output from there ([export](export.md#timeline-colors)).
 - The drawing:
   - It fits the picture and turns it upright.
-  - It scales in YUV and converts to RGB (`shader_colors`). In an SDR timeline, it tone-maps HDR.
+  - It first converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `shader_colors`). In an SDR timeline, it tone-maps HDR.
+    - The converted picture is 16-bit floats. The scaling below reads it.
+    - Why: the spec converts the input before the sizing ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)). A conversion that is not linear gives other edges after a scale.
   - It reads the chroma of each frame at the site that the frame's chroma location gives (`chroma_site`). An H.264 or HEVC 4:2:0 frame with no chroma location is sited left, the default of these formats (`color::default_site`). Another frame with no chroma location is read as centered.
   - The viewer enlarges with one bilinear sample, and shrinks with a box of bilinear samples.
   - An export, a proxy and a thumbnail scale with a bicubic kernel (`sharp`). The kernel widens when the picture shrinks.
-  - The kernel widens up to 4 times. Above a shrink of 4:1, the draw first halves the picture into smaller levels (`halvings`, `fs_shrink`, `fs_halve`).
+  - The kernel widens up to 4 times. Above a shrink of 4:1, the draw first halves the converted picture into smaller levels (`halvings`, `fs_halve`).
   - The kernel then reads the level where the shrink is 4:1 or less. The larger shrink of the two axes selects the level.
   - Why: each pixel has the same work at any shrink. A kernel that widens without a limit puts all the work of a small picture on few GPU threads.
   - Why: the viewer must be fast, and an export must keep the detail of the picture.

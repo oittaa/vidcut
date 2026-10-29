@@ -1811,6 +1811,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The weights (25 MB) download at their first use. vidcut does not ship them.
     - AI Fast takes SDR pictures of any size. Its memory grows with the size of the source picture.
   - The AI upscalers:
+    - In an SDR timeline, an HDR picture goes into the timeline color space first, as in Resolve (§13, p. 3407). The upscaler takes the tone-mapped SDR picture.
+    - In an HDR timeline, they refuse HDR media ([X98](#x98-in-an-hdr-timeline-the-ai-stages-work-before-the-conversion)).
     - Before an export starts, vidcut refuses media that the upscaler cannot take. The error names each file and the reason.
     - It also refuses an AI upscaler without its weights, or without a GPU that can run the network.
     - It refuses AI Best for a size that does not fit in the GPU's memory and main memory.
@@ -1909,7 +1911,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The frame is made from two sized and placed pictures, as in Resolve (§13, p. 3407).
     - Super Scale enlarges each of the two source frames.
     - Then Transform, Crop and Dynamic Zoom place them, at the size that they show at.
-  - Retime Process takes SDR pictures for now. An export refuses HDR media with a process other than Nearest, and the Inspector shows a warning.
+  - Retime Process takes SDR pictures.
+    - In an SDR timeline, an HDR picture goes into the timeline color space first, as in Resolve (§13, p. 3407). The process takes the tone-mapped SDR picture.
+    - In an HDR timeline, an export refuses HDR media with a process other than Nearest, and the Inspector shows a warning ([X98](#x98-in-an-hdr-timeline-the-ai-stages-work-before-the-conversion)).
   - A clip played backward shows the nearest frames for now.
   - The viewer shows the frames that an export makes. With the slower models, a frame can take seconds.
   - Before a change that makes the timeline use a model that this computer does not have, the GUI asks to download it.
@@ -2012,3 +2016,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Three choices that give the same result are a fault in Resolve. vidcut does not copy it.
   - Ease In and Ease Out then do what their names tell, as the Dynamic Zoom ease does. Ease In is slow at the start, Ease Out at the end.
   - A handle on one side of a speed keyframe alone gives a straight line. Thus one speed keyframe takes an ease on both sides or on none.
+
+## X98. In an HDR timeline, the AI stages work before the conversion
+
+- **Resolve:** the input goes into the timeline color space before Super Scale and before Speed Effects (§13, p. 3407).
+- **vidcut:**
+  - In an SDR timeline, vidcut keeps this order. The AI upscalers and Retime Process take the picture in the timeline color space. An HDR picture is tone-mapped first.
+  - In an HDR timeline, they take SDR media as SDR. The draw then converts their result into the timeline color space.
+  - In an HDR timeline, they refuse HDR media ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu), [X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+- **Why:**
+  - The AI models are made for SDR pictures. An HDR picture is out of the range that they know.
+  - SDR goes into an HDR timeline with no clipping. Thus the conversion after the stage keeps all of the picture.

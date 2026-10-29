@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use vidcut_core::model::{Media, Project, Upscaler};
+use vidcut_core::model::{Hdr, Media, Project, Upscaler};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use crate::compute::Gpu;
@@ -61,8 +61,8 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn unfit(m: &Media) -> Option<&'static str> {
-    super::unfit(m, Upscaler::AiBest)
+pub fn unfit(m: &Media, timeline: Option<Hdr>) -> Option<&'static str> {
+    super::unfit(m, Upscaler::AiBest, timeline)
 }
 
 pub fn enlarged(m: &Media, (ow, oh): (u32, u32)) -> Option<((u32, u32), (u32, u32))> {
@@ -102,7 +102,9 @@ pub fn check<'a>(
 ) -> Result<()> {
     let mut media: Vec<&str> = Vec::new();
     let mut sizes: Vec<((u32, u32), (u32, u32))> = Vec::new();
+    let mut timeline = None;
     for plan in plans {
+        timeline = timeline.or(plan.colors);
         for (layer, _) in plan.video.iter().flat_map(|piece| piece.layers()) {
             let VideoPiece::Source {
                 media: id,
@@ -133,7 +135,7 @@ pub fn check<'a>(
     let refused: Vec<String> = media
         .iter()
         .filter_map(|id| p.media(id))
-        .filter_map(|m| unfit(m).map(|why| format!("{} ({why})", m.name)))
+        .filter_map(|m| unfit(m, timeline).map(|why| format!("{} ({why})", m.name)))
         .collect();
     if !refused.is_empty() {
         return Err(Error::Invalid(format!(

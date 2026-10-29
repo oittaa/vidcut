@@ -1215,7 +1215,7 @@ fn speed_section(
         let chosen = retime.process().or(p.settings.retime.process());
         if chosen.is_some_and(|r| !r.is_nearest()) && paced.iter().any(|c| c.hdr) {
             ui.label("");
-            dialog::warn(ui, "Retime Process takes SDR pictures for now");
+            dialog::warn(ui, "Retime Process can't take HDR media in an HDR timeline");
             ui.end_row();
         }
     });
@@ -1333,10 +1333,9 @@ impl Workspace {
                             &p.settings,
                         )
                     }),
-                    hdr: p
-                        .media(&c.media)
-                        .and_then(|m| m.video_as_read())
-                        .is_some_and(|v| v.hdr.is_some()),
+                    hdr: p.media(&c.media).is_some_and(|m| {
+                        vidcut_av::super_scale::takes_hdr(m, self.timeline_colors()) == Some(true)
+                    }),
                     at,
                     ramped: c.speed.as_ref().is_some_and(|s| s.sections.len() > 1),
                 })
@@ -1778,7 +1777,8 @@ impl Workspace {
                 ui.add_enabled_ui(enabled, |ui| dialog::switch(ui, |ui| pick(ui)));
                 ui.end_row();
             };
-            if let Some(text) = unfit(shown, media.iter().filter_map(|id| p.media(id))) {
+            let files = media.iter().filter_map(|id| p.media(id));
+            if let Some(text) = unfit(shown, files, self.timeline_colors()) {
                 ui.label("");
                 dialog::warn(ui, text);
                 ui.end_row();

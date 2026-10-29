@@ -51,8 +51,8 @@ fn stored_size() -> vec2<f32> {
     return select(p.upright.xy, p.upright.yx, (p.flags.y & 1u) == 1u);
 }
 
-fn yuv(u: vec2<f32>) -> vec3<f32> {
-    return yuv_at(stored(u) * p.upright.zw);
+fn pixel(u: vec2<f32>) -> vec3<f32> {
+    return textureSampleLevel(halved, bilinear, stored(u), 0.0).rgb;
 }
 
 fn yuv_at(s: vec2<f32>) -> vec3<f32> {
@@ -120,13 +120,10 @@ fn resamples(spans: vec2<f32>) -> bool {
 }
 
 fn sample_at(q: vec2<f32>, level: f32) -> vec3<f32> {
-    if level < 1.0 {
-        return yuv(q);
-    }
-    let i = u32(level) - 1u;
+    let i = u32(level);
     let texels = vec2<f32>(textureDimensions(halved, i));
     let s = stored(q) * stored_size() / (exp2(level) * texels);
-    return textureSampleLevel(halved, bilinear, s, f32(i)).rgb;
+    return textureSampleLevel(halved, bilinear, s, level).rgb;
 }
 
 fn sharp(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
@@ -273,13 +270,13 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     }
     if p.made.x > 1.5 {
         let q = (px / p.made.yz - p.part.xy) / p.part.zw;
-        return vec4<f32>(rgb(yuv(q)), cover * p.placed.y);
+        return vec4<f32>(pixel(q), cover * p.placed.y);
     }
     let size = p.upright.xy;
     let spans = vec2<f32>(length(across * size), length(down * size));
     let a = cover * p.placed.y * opacity(uv);
     if resamples(spans) {
-        return vec4<f32>(rgb(sharp(uv, spans)), a);
+        return vec4<f32>(sharp(uv, spans), a);
     }
     let taps = vec2<u32>(clamp(ceil(spans), vec2<f32>(1.0), vec2<f32>(8.0)));
     let half = vec2<f32>(0.5) / size;
@@ -288,17 +285,16 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
         for (var i = 0u; i < taps.x; i++) {
             let o = (vec2<f32>(f32(i), f32(j)) + 0.5) / vec2<f32>(taps) - 0.5;
             let q = uv + across * o.x + down * o.y;
-            sum += yuv(clamp(q, half, vec2<f32>(1.0) - half));
+            sum += pixel(clamp(q, half, vec2<f32>(1.0) - half));
         }
     }
-    return vec4<f32>(rgb(sum / f32(taps.x * taps.y)), a);
+    return vec4<f32>(sum / f32(taps.x * taps.y), a);
 }
 
 @fragment
-fn fs_shrink(in: Out) -> @location(0) vec4<f32> {
-    let size = stored_size();
-    let at = min(floor(in.position.xy) * 2.0 + 1.0, size - 0.5);
-    return vec4<f32>(yuv_at(at / size * p.upright.zw), 1.0);
+fn fs_convert(in: Out) -> @location(0) vec4<f32> {
+    let at = (floor(in.position.xy) + 0.5) / stored_size();
+    return vec4<f32>(rgb(yuv_at(at * p.upright.zw)), 1.0);
 }
 
 @fragment
@@ -430,7 +426,7 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     let cover = p.upright.xy / p.place.zw;
     let a = opacity(rel);
     if resamples(cover) {
-        return vec4<f32>(rgb(sharp(rel, cover)) * a, 1.0);
+        return vec4<f32>(sharp(rel, cover) * a, 1.0);
     }
     let taps = vec2<u32>(clamp(ceil(cover), vec2<f32>(1.0), vec2<f32>(8.0)));
     let step = vec2<f32>(1.0) / (p.place.zw * vec2<f32>(taps));
@@ -438,10 +434,10 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     var sum = vec3<f32>(0.0);
     for (var j = 0u; j < taps.y; j++) {
         for (var i = 0u; i < taps.x; i++) {
-            sum += yuv(first + vec2<f32>(f32(i), f32(j)) * step);
+            sum += pixel(first + vec2<f32>(f32(i), f32(j)) * step);
         }
     }
-    return vec4<f32>(rgb(sum / f32(taps.x * taps.y)) * a, 1.0);
+    return vec4<f32>(sum / f32(taps.x * taps.y) * a, 1.0);
 }
 
 struct Lettering {

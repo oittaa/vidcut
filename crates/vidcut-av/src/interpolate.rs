@@ -4,7 +4,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use vidcut_core::catalog::{self, Measure};
-use vidcut_core::model::{Media, Project, Retime};
+use vidcut_core::model::{Hdr, Media, Project, Retime};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use crate::compute::Gpu;
@@ -107,18 +107,18 @@ pub fn inspect(dir: &Path, r: Retime, download: bool) -> Result<()> {
     with_engine(|e| e.net(r).map(drop))
 }
 
-pub fn unfit(m: &Media, r: Retime) -> Option<&'static str> {
+pub fn unfit(m: &Media, r: Retime, timeline: Option<Hdr>) -> Option<&'static str> {
     if r.is_nearest() {
         return None;
     }
-    let hdr = m.video_as_read()?.hdr.is_some();
+    let hdr = crate::super_scale::takes_hdr(m, timeline)?;
     let refused = match model(r) {
         Some(model) => !catalog::check(model, &[(Measure::HdrPictures, f64::from(u8::from(hdr)))])
             .refusals
             .is_empty(),
         None => hdr,
     };
-    refused.then_some("HDR pictures")
+    refused.then_some(crate::super_scale::HDR_IN_HDR)
 }
 
 pub fn check<'a>(
@@ -128,7 +128,9 @@ pub fn check<'a>(
     download: bool,
 ) -> Result<()> {
     let mut used: Vec<(Retime, String)> = Vec::new();
+    let mut timeline = None;
     for plan in plans {
+        timeline = timeline.or(plan.colors);
         for piece in &plan.video {
             for (layer, _) in piece.layers() {
                 if let VideoPiece::Source { media, retime, .. } = layer
@@ -161,13 +163,13 @@ pub fn check<'a>(
         .iter()
         .filter_map(|(r, id)| {
             let m = p.media(id)?;
-            unfit(m, *r).map(|why| format!("{} ({why}, {})", m.name, r.title()))
+            unfit(m, *r, timeline).map(|why| format!("{} ({why}, {})", m.name, r.title()))
         })
         .collect();
     if !refused.is_empty() {
         return Err(Error::Invalid(format!(
-            "Retime Process takes SDR pictures for now, so it can't take {}: set their clips' \
-             Retime Process to Nearest",
+            "Retime Process takes SDR pictures, so it can't take {}: set their clips' Retime \
+             Process to Nearest, or the Timeline Color Space to SDR",
             refused.join(", ")
         )));
     }
@@ -455,7 +457,10 @@ fn dump(name: &str, size: (u32, u32), rgb: &[u8]) -> Result<()> {
 }
 
 pub(crate) fn takes_frames(r: Retime, a: &frame::Video, b: &frame::Video) -> bool {
-    r == Retime::Macos && Place::of(a) == Place::VideoToolbox && Place::of(b) == Place::VideoToolbox
+    let sdr_on_gpu = |f: &frame::Video| {
+        Place::of(f) == Place::VideoToolbox && crate::color::Source::of(f).hdr.is_none()
+    };
+    r == Retime::Macos && sdr_on_gpu(a) && sdr_on_gpu(b)
 }
 
 pub(crate) fn between_frames(

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use vidcut_core::model::{Media, Project, SuperScale, Upscaler};
+use vidcut_core::model::{Hdr, Media, Project, SuperScale, Upscaler};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use vidcut_core::catalog::{self, Measure};
@@ -43,19 +43,25 @@ pub fn off_here(_upscaler: Upscaler) -> bool {
     false
 }
 
-pub fn unfit(m: &Media, upscaler: Upscaler) -> Option<&'static str> {
+pub fn unfit(m: &Media, upscaler: Upscaler, timeline: Option<Hdr>) -> Option<&'static str> {
     if off_here(upscaler) {
         return Some("pictures on macOS for now");
     }
     let model = match upscaler {
         Upscaler::AiFast => &catalog::NANOVSR,
         Upscaler::AiBest => &catalog::FLASHVSR,
-        Upscaler::Macos => return macos::unfit(m),
+        Upscaler::Macos => return macos::unfit(m, timeline),
         Upscaler::Classic => return None,
     };
-    let hdr = m.video_as_read()?.hdr.is_some();
+    let hdr = takes_hdr(m, timeline)?;
     let verdict = catalog::check(model, &[(Measure::HdrPictures, f64::from(u8::from(hdr)))]);
-    verdict.refusals.first().map(|_| "HDR pictures")
+    verdict.refusals.first().map(|_| HDR_IN_HDR)
+}
+
+pub const HDR_IN_HDR: &str = "HDR pictures in an HDR timeline";
+
+pub fn takes_hdr(m: &Media, timeline: Option<Hdr>) -> Option<bool> {
+    Some(m.video_as_read()?.hdr.is_some() && timeline.is_some())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -401,7 +407,9 @@ pub fn check<'a>(
             off.join(", ")
         )));
     }
-    nanovsr::check(p, plans.iter().flat_map(|plan| &plan.video), dir, download)?;
+    let timeline = plans.iter().find_map(|plan| plan.colors);
+    let pieces = || plans.iter().flat_map(|plan| &plan.video);
+    nanovsr::check(p, pieces(), timeline, dir, download)?;
     flashvsr::check(p, plans.iter().copied(), dir, download)?;
-    macos::check(p, plans.iter().flat_map(|plan| &plan.video), download)
+    macos::check(p, pieces(), timeline, download)
 }

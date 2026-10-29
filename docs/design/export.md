@@ -160,7 +160,7 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
 - With an AI upscaler of Super Scale, the upscaler enlarges the two frames of the pair first (`scaled_pair`). The frame is then made from the two enlarged pictures.
   - Why: Super Scale works on the source, before the retime ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
   - The `Source` keeps the last two enlarged pictures (`Source::ai_picture`). Thus the later picture of one pair is the earlier picture of the next.
-- With the frame rate conversion of macOS, two VideoToolbox frames and no placed picture, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
+- With the frame rate conversion of macOS, two SDR VideoToolbox frames and no placed picture, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
 - The pair is sized and placed before the frame is made. Why: Edit Sizing comes before Speed Effects ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
   - A clip with no placed picture: each frame becomes RGB on the GPU, upright, at the size that it fills in the frame (`fitted_size`).
   - A placed clip: the draw places each frame into RGB with its Transform, Crop and Dynamic Zoom (`Sampling::Colors`). The RGB covers only the bounds of the placed picture (`placed_look`).
@@ -170,7 +170,10 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
 - The key of a pair names its placing (`Source::look_id`). Thus a new placing gets new features.
 - A made frame of a placed clip is already placed (`Sampling::Placed`). The draw takes only its edges, its opacity and its composite mode from `place::Placing`.
   - The draw uses the placing that the frame was made with. Thus during a drag in the viewer, a made frame moves only when it is made again.
-- An exact source frame, the first frame of a file, an HDR frame, a piece played backward and a still take the usual path.
+- These take the usual path:
+  - an exact source frame, the first frame of a file, a piece played backward and a still;
+  - an HDR frame in an HDR timeline.
+- In an SDR timeline, an HDR frame is tone-mapped into the RGB of the pair. The timeline converts it in the same way ([X98](../deviations.md#x98-in-an-hdr-timeline-the-ai-stages-work-before-the-conversion)).
 
 Seeks:
 

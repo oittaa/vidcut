@@ -1,4 +1,4 @@
-use vidcut_core::model::{Media, Project, Upscaler};
+use vidcut_core::model::{Hdr, Media, Project, Upscaler};
 use vidcut_core::render::VideoPiece;
 
 use crate::error::{Error, Result};
@@ -22,10 +22,10 @@ pub fn needed() -> Vec<crate::models::Need> {
     }]
 }
 
-pub fn unfit(m: &Media) -> Option<&'static str> {
+pub fn unfit(m: &Media, timeline: Option<Hdr>) -> Option<&'static str> {
     let v = m.video_as_read()?;
-    if v.hdr.is_some() {
-        return Some("HDR pictures");
+    if super::takes_hdr(m, timeline)? {
+        return Some(super::HDR_IN_HDR);
     }
     let (w, h) = if v.rotation % 180 == 90 {
         (v.height, v.width)
@@ -53,6 +53,7 @@ pub(super) fn factor(size: (u32, u32), shown: (u32, u32)) -> u32 {
 pub fn check<'a>(
     p: &Project,
     pieces: impl IntoIterator<Item = &'a VideoPiece>,
+    timeline: Option<Hdr>,
     download: bool,
 ) -> Result<()> {
     let mut media: Vec<&str> = Vec::new();
@@ -77,7 +78,7 @@ pub fn check<'a>(
     let refused: Vec<String> = media
         .iter()
         .filter_map(|id| p.media(id))
-        .filter_map(|m| unfit(m).map(|why| format!("{} ({why})", m.name)))
+        .filter_map(|m| unfit(m, timeline).map(|why| format!("{} ({why})", m.name)))
         .collect();
     if !refused.is_empty() {
         return Err(Error::Invalid(format!(
@@ -114,7 +115,7 @@ impl super::Run for Run {
     }
 
     fn takes(&self, f: &Video, _rotation: u16) -> bool {
-        Place::of(f) == Place::VideoToolbox
+        Place::of(f) == Place::VideoToolbox && crate::color::Source::of(f).hdr.is_none()
     }
 
     fn push_frame(&mut self, index: i64, f: &Video, rotation: u16) -> Result<Vec<super::Out>> {

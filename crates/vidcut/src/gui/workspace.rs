@@ -459,6 +459,10 @@ impl Workspace {
         self.snap.project.as_ref().map(|s| s.project.clone())
     }
 
+    pub(super) fn timeline_colors(&self) -> Option<vidcut_core::model::Hdr> {
+        self.snap.project.as_ref().and_then(|s| s.colors)
+    }
+
     pub(super) fn fps(&self) -> Rational {
         self.project()
             .map_or(Rational::new(30, 1).expect("valid"), |p| p.settings.fps)

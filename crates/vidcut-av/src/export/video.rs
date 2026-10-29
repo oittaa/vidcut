@@ -805,7 +805,7 @@ impl Source {
         prev: bool,
         target: (u32, u32),
         reading: Reading,
-        upscaler: Upscaler,
+        (upscaler, timeline): (Upscaler, Option<Hdr>),
     ) -> Result<Option<frame::Video>> {
         let rotation = self.reader.rotation();
         let (frame, _) = match prev {
@@ -819,9 +819,9 @@ impl Source {
         if !super::normalize::enlarges((frame.width(), frame.height()), sar, 0, shown) {
             return Ok(None);
         }
-        if crate::color::Source::of(frame).hdr.is_some() {
+        if crate::color::Source::of(frame).hdr.is_some() && timeline.is_some() {
             return Err(Error::Invalid(format!(
-                "{}: {} takes SDR pictures, and this one is HDR",
+                "{}: {} takes SDR pictures, and this one is HDR in an HDR timeline",
                 self.reader.path().display(),
                 crate::super_scale::name(upscaler)
             )));
@@ -2340,10 +2340,11 @@ impl VideoFrames {
             }
             _ => None,
         };
-        let hdr = src
-            .current
-            .as_ref()
-            .is_some_and(|(f, _)| crate::color::Source::of(f).hdr.is_some());
+        let hdr = self.timeline.is_some()
+            && src
+                .current
+                .as_ref()
+                .is_some_and(|(f, _)| crate::color::Source::of(f).hdr.is_some());
         let Some(weight) = weight.filter(|w| *w > 1e-6 && !hdr) else {
             return self.shown(i, s, layer, changed);
         };
@@ -2489,11 +2490,12 @@ impl VideoFrames {
             _ => (&[][..], SuperScale::default()),
         };
         let aim = self.aim(s, placed, super_scale);
+        let timeline = self.timeline;
         let src = &mut self.open[s];
         if changed || src.normalized.is_none() {
             let reading = src.pictures.reading(self.maker.reading());
             let big = if super_scale.ai() {
-                src.ai_picture(false, aim, reading, super_scale.upscaler)?
+                src.ai_picture(false, aim, reading, (super_scale.upscaler, timeline))?
             } else {
                 None
             };
@@ -2558,10 +2560,11 @@ impl VideoFrames {
         }
         let aim = self.aim(s, placed, *super_scale);
         let src = &mut self.open[s];
-        let Some(a) = src.ai_picture(true, aim, reading, super_scale.upscaler)? else {
+        let ai = (super_scale.upscaler, self.timeline);
+        let Some(a) = src.ai_picture(true, aim, reading, ai)? else {
             return Ok(None);
         };
-        let Some(b) = src.ai_picture(false, aim, reading, super_scale.upscaler)? else {
+        let Some(b) = src.ai_picture(false, aim, reading, ai)? else {
             return Ok(None);
         };
         src.note_upscaled(super_scale.upscaler);
