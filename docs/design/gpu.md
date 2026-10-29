@@ -204,9 +204,10 @@ AI Best (`flashvsr`):
 The scaler of macOS (`macos`):
 
 - It is a `VTFrameProcessor` session with a `VTSuperResolutionScalerConfiguration`, on macOS 26 and later.
-- `macos::check` refuses HDR media and pictures over `macos::MOST`.
+- `macos::check` refuses HDR media in an HDR timeline, and pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
-- A VideoToolbox frame reaches it on the GPU (`Run::push_frame`). A turned frame turns first (`hw::Turner`).
+- An SDR VideoToolbox frame reaches it on the GPU (`Run::push_frame`). A turned frame turns first (`hw::Turner`).
+  - An HDR frame in an SDR timeline reaches it as tone-mapped RGB (`Run::push`).
 - It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
   - Why: a picture of 4 times the source fills the cache of the viewer.
   - A picture of a layout that Lanczos cannot take comes out as P416 (`lanczos::takes`).
@@ -228,7 +229,7 @@ The scaler of macOS (`macos`):
 On macOS (`interpolate::macos`):
 
 - The frame rate conversion of macOS makes the frame, in a `VTFrameProcessor` session.
-- Two VideoToolbox frames of a clip with no placed picture reach it on the GPU (`interpolate::takes_frames`). Turned frames turn first (`hw::Turner`).
+- Two SDR VideoToolbox frames of a clip with no placed picture reach it on the GPU (`interpolate::takes_frames`). Turned frames turn first (`hw::Turner`).
 - Lanczos sizes them to the size that the picture fills in the frame, before the frame is made.
 - The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
 - Frames that the CPU decoded, and the frames of a placed clip, go through RGB.

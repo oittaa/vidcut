@@ -82,13 +82,14 @@ pub(super) fn described(s: SuperScale) -> String {
 pub(super) fn unfit<'a>(
     s: SuperScale,
     media: impl IntoIterator<Item = &'a vidcut_core::model::Media>,
+    timeline: Option<vidcut_core::model::Hdr>,
 ) -> Option<String> {
     if !s.ai() {
         return None;
     }
     media
         .into_iter()
-        .find_map(|m| vidcut_av::super_scale::unfit(m, s.upscaler))
+        .find_map(|m| vidcut_av::super_scale::unfit(m, s.upscaler, timeline))
         .map(|why| format!("{} can't take {why}", label_of(&NAMES, s.upscaler)))
 }
 

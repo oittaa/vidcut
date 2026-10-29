@@ -306,7 +306,10 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
                     .iter()
                     .map(|p| (&p.picture, p.run, p.source))
                     .collect();
-                format!("|{super_scale:?}|{}x{}|{placed:?}", plan.width, plan.height)
+                format!(
+                    "|{super_scale:?}|{}x{}|{:?}|{placed:?}",
+                    plan.width, plan.height, plan.colors
+                )
             } else {
                 String::new()
             };

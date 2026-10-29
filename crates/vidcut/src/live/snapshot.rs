@@ -62,6 +62,7 @@ pub struct ProjectSnap {
     pub path: PathBuf,
     pub project: Arc<Project>,
     pub history: Arc<Steps>,
+    pub colors: Option<vidcut_core::model::Hdr>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

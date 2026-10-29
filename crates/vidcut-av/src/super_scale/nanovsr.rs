@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use vidcut_core::model::{Media, Project, Upscaler};
+use vidcut_core::model::{Hdr, Media, Project, Upscaler};
 use vidcut_core::render::VideoPiece;
 
 use crate::compute::{self, bytes, group, halves, words};
@@ -57,13 +57,14 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn unfit(m: &Media) -> Option<&'static str> {
-    super::unfit(m, Upscaler::AiFast)
+pub fn unfit(m: &Media, timeline: Option<Hdr>) -> Option<&'static str> {
+    super::unfit(m, Upscaler::AiFast, timeline)
 }
 
 pub fn check<'a>(
     p: &Project,
     pieces: impl IntoIterator<Item = &'a VideoPiece>,
+    timeline: Option<Hdr>,
     dir: &Path,
     download: bool,
 ) -> Result<()> {
@@ -89,7 +90,7 @@ pub fn check<'a>(
     let refused: Vec<String> = media
         .iter()
         .filter_map(|id| p.media(id))
-        .filter_map(|m| unfit(m).map(|why| format!("{} ({why})", m.name)))
+        .filter_map(|m| unfit(m, timeline).map(|why| format!("{} ({why})", m.name)))
         .collect();
     if !refused.is_empty() {
         return Err(Error::Invalid(format!(

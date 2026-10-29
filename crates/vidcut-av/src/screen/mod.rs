@@ -48,7 +48,7 @@ pub struct Gpu {
     screen: wgpu::RenderPipeline,
     screen_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    shrinking: wgpu::RenderPipeline,
+    converting: wgpu::RenderPipeline,
     halving: wgpu::RenderPipeline,
     blank: wgpu::TextureView,
     wide: bool,
@@ -550,7 +550,7 @@ impl Gpu {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let shrinking = made(&pipeline_layout, "fs_shrink", None, MIXING);
+        let converting = made(&pipeline_layout, "fs_convert", None, MIXING);
         let halving = made(&pipeline_layout, "fs_halve", None, MIXING);
         let blank = device
             .create_texture(&wgpu::TextureDescriptor {
@@ -589,7 +589,7 @@ impl Gpu {
             screen,
             screen_layout,
             sampler,
-            shrinking,
+            converting,
             halving,
             blank,
             wide: device
@@ -1192,7 +1192,8 @@ struct Slot {
     held_shared: bool,
     written: Option<Arc<Picture>>,
     rgb: Option<wgpu::Buffer>,
-    shrunk: Option<(wgpu::Texture, (u32, u32, u32))>,
+    converted: Option<(wgpu::Texture, (u32, u32, u32))>,
+    converted_from: Option<(std::sync::Weak<Picture>, Option<Hdr>)>,
 }
 
 #[cfg(windows)]
@@ -1654,23 +1655,20 @@ impl Slot {
                 ],
             })
         };
-        if halvings == 0 {
-            return bind(&gpu.blank);
-        }
         let wanted = (
-            picture.width().div_ceil(2),
-            picture.height().div_ceil(2),
-            halvings,
+            picture.width().max(1),
+            picture.height().max(1),
+            halvings + 1,
         );
-        if self.shrunk.as_ref().is_none_or(|(_, k)| *k != wanted) {
+        if self.converted.as_ref().is_none_or(|(_, k)| *k != wanted) {
             let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("vidcut halves"),
+                label: Some("vidcut converted"),
                 size: wgpu::Extent3d {
                     width: wanted.0,
                     height: wanted.1,
                     depth_or_array_layers: 1,
                 },
-                mip_level_count: halvings,
+                mip_level_count: wanted.2,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: MIXING,
@@ -1678,19 +1676,27 @@ impl Slot {
                     | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             });
-            self.shrunk = Some((texture, wanted));
+            self.converted = Some((texture, wanted));
+            self.converted_from = None;
         }
-        let shrunk = &self.shrunk.as_ref().expect("made above").0;
+        let converted = &self.converted.as_ref().expect("made above").0;
+        if self
+            .converted_from
+            .as_ref()
+            .is_some_and(|(p, t)| std::ptr::eq(p.as_ptr(), Arc::as_ptr(picture)) && *t == how.2)
+        {
+            return bind(&converted.create_view(&Default::default()));
+        }
         let level = |k: u32| {
-            shrunk.create_view(&wgpu::TextureViewDescriptor {
+            converted.create_view(&wgpu::TextureViewDescriptor {
                 base_mip_level: k,
                 mip_level_count: Some(1),
                 ..Default::default()
             })
         };
-        for k in 0..halvings {
+        for k in 0..wanted.2 {
             let (pipeline, from) = match k {
-                0 => (&gpu.shrinking, bind(&gpu.blank)),
+                0 => (&gpu.converting, bind(&gpu.blank)),
                 _ => (&gpu.halving, bind(&level(k - 1))),
             };
             let to = level(k);
@@ -1699,7 +1705,8 @@ impl Slot {
             pass.set_bind_group(0, &from, &[]);
             pass.draw(0..3, 0..1);
         }
-        bind(&shrunk.create_view(&Default::default()))
+        self.converted_from = Some((Arc::downgrade(picture), how.2));
+        bind(&converted.create_view(&Default::default()))
     }
 
     fn submitted(&mut self, gpu: &Gpu) {

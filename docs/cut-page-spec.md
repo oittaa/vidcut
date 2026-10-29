@@ -220,7 +220,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - AI is a neural network on the GPU. It has no settings.
     - Classic has a Sharpness of Low, Medium or High, which selects the upscaler.
   - The first time that a change needs an AI upscaler, vidcut asks to download its weights.
-  - AI takes SDR pictures. For HDR media, an export refuses AI, and the Inspector shows a warning.
+  - AI takes SDR pictures. In an SDR timeline, HDR media goes into the timeline color space first (§13), and AI takes the tone-mapped picture. In an HDR timeline, an export refuses AI for HDR media, and the Inspector shows a warning.
   - A placed picture is made at most 4 times as large as its source, before it is placed.
   - A picture that fills the frame takes the better upscaler for all of its enlargement.
   - Super Scale works only where a picture is enlarged. A picture that is made smaller is scaled as before.

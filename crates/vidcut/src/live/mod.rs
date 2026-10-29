@@ -3387,6 +3387,7 @@ impl Live {
         self.preview_wanted = None;
         self.project_snap = Some(ProjectSnap {
             path,
+            colors: vidcut_core::render::timeline_colors(&project),
             project: project.clone(),
             history,
         });
