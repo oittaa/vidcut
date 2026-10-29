@@ -1120,6 +1120,7 @@ struct Slot {
     d3d11_used: Option<Arc<AtomicBool>>,
     imports: u64,
     last_shared: bool,
+    held_shared: bool,
     written: Option<Arc<Picture>>,
     rgb: Option<wgpu::Buffer>,
     shrunk: Option<(wgpu::Texture, (u32, u32, u32))>,
@@ -1166,6 +1167,10 @@ impl Screen {
 
     pub fn shared(&self) -> bool {
         self.slots.first().is_some_and(|s| s.last_shared)
+    }
+
+    pub fn held_shared(&self) -> bool {
+        self.slots.first().is_some_and(|s| s.held_shared)
     }
 
     pub fn imports(&self) -> u64 {
@@ -2291,6 +2296,7 @@ impl Slot {
             },
             None => None,
         };
+        self.held_shared = lent.is_some();
         let source = match lent {
             Some(buffer) => buffer,
             None => {

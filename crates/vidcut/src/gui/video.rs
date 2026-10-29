@@ -360,10 +360,12 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
 }
 
 fn how(shown: &vidcut_av::player::Shown, screen: &Screen) -> &'static str {
-    match shown.picture.gpu() {
-        None => "uploaded",
-        Some(_) if screen.shared() => "shown from GPU memory",
-        Some(_) => "copied down and uploaded",
+    let p = &shown.picture;
+    match (p.gpu(), p.held()) {
+        (None, false) => "uploaded",
+        (Some(_), _) if screen.shared() => "shown from GPU memory",
+        (None, true) if screen.held_shared() => "shown from GPU memory",
+        _ => "copied down and uploaded",
     }
 }
 

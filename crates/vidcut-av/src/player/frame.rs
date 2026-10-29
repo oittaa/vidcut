@@ -184,9 +184,12 @@ impl Picture {
             .or_else(|| self.over.iter().find_map(|o| o.picture.in_video_memory()))
     }
 
-    pub(crate) fn held_on_gpu(&self) -> bool {
+    pub fn held(&self) -> bool {
         crate::screen::held::of(&self.frame).is_some()
-            || self.over.iter().any(|o| o.picture.held_on_gpu())
+    }
+
+    pub(crate) fn held_on_gpu(&self) -> bool {
+        self.held() || self.over.iter().any(|o| o.picture.held_on_gpu())
     }
 
     pub fn layout(&self) -> Layout {
@@ -277,8 +280,7 @@ impl Picture {
     }
 
     pub(crate) fn layers(&self) -> Vec<(usize, Option<crate::hw::Kind>, bool)> {
-        let held = crate::screen::held::of(&self.frame).is_some();
-        std::iter::once((self.bytes, self.gpu(), held))
+        std::iter::once((self.bytes, self.gpu(), self.held()))
             .chain(self.over.iter().flat_map(|o| o.picture.layers()))
             .collect()
     }
