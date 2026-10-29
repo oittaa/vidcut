@@ -10,6 +10,8 @@ use crate::request::{CopiedKey, KeyParam, KeyPicks, KeyValue};
 use crate::validate::GAIN;
 
 const ANCHOR_LINEAR: &str = "the anchor point's keyframes are linear: they take no ease or handles";
+const SPEED_SET: &str =
+    "a speed keyframe takes no value or ease: speed.set sets the speed of a section";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Pick {
@@ -99,6 +101,12 @@ fn added(
     ease: Option<Ease>,
     past_ends: bool,
 ) -> Result<Vec<(String, i64)>> {
+    if param == KeyParam::Speed {
+        if value.is_some() || ease.is_some() {
+            return Err(Error::usage(SPEED_SET));
+        }
+        return super::speed::add_keyframe(p, ids, at);
+    }
     if let Some(v) = picture_param(param) {
         return add_picture(p, ids, v, at, value, ease, past_ends);
     }
@@ -176,6 +184,15 @@ fn eased((k, mark): &mut (Keyframe, Option<Ease>), e: Ease) {
 }
 
 fn picked(c: &Clip, keys: &[Keyframe], pick: &Pick) -> Result<HashSet<i64>> {
+    picked_as(c, keys, pick, "volume")
+}
+
+pub(super) fn picked_as(
+    c: &Clip,
+    keys: &[Keyframe],
+    pick: &Pick,
+    name: &str,
+) -> Result<HashSet<i64>> {
     let mut out = HashSet::new();
     if pick.frames.is_none() && pick.at.is_none() {
         out.extend(keys.iter().map(|k| k.frame));
@@ -184,7 +201,7 @@ fn picked(c: &Clip, keys: &[Keyframe], pick: &Pick) -> Result<HashSet<i64>> {
     for &f in pick.frames.iter().flatten() {
         if !keys.iter().any(|k| k.frame == f) {
             return Err(Error::not_found(format!(
-                "{} has no volume keyframe on source frame {f}",
+                "{} has no {name} keyframe on source frame {f}",
                 c.id
             )));
         }
@@ -195,7 +212,7 @@ fn picked(c: &Clip, keys: &[Keyframe], pick: &Pick) -> Result<HashSet<i64>> {
             .iter()
             .find(|k| c.key_time(k.frame).round() as i64 == t)
             .ok_or_else(|| {
-                Error::not_found(format!("{} has no volume keyframe at frame {t}", c.id))
+                Error::not_found(format!("{} has no {name} keyframe at frame {t}", c.id))
             })?;
         out.insert(k.frame);
     }
@@ -217,6 +234,9 @@ pub fn set(
     pick: &Pick,
     change: &KeyChange,
 ) -> Result<()> {
+    if param == KeyParam::Speed {
+        return Err(Error::usage(SPEED_SET));
+    }
     if let Some(v) = picture_param(param) {
         return set_picture(p, ids, v, pick, change);
     }
@@ -284,6 +304,9 @@ pub fn shift(
     by: Option<i64>,
     to: Option<i64>,
 ) -> Result<()> {
+    if param == KeyParam::Speed {
+        return Err(Error::invalid("speed keyframes don't move"));
+    }
     if let Some(v) = picture_param(param) {
         return shift_picture(p, ids, v, pick, by, to);
     }
@@ -338,6 +361,9 @@ fn shift_volume(
 }
 
 pub fn remove(p: &mut Project, ids: &[String], param: KeyParam, pick: &Pick) -> Result<()> {
+    if param == KeyParam::Speed {
+        return super::speed::remove_keyframes(p, ids, pick);
+    }
     if let Some(v) = picture_param(param) {
         return remove_picture(p, ids, v, pick);
     }
@@ -398,6 +424,24 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                     json!({ "clip": c.id, "track": t.id, "param": "volume", "keyframes": keys }),
                 );
             }
+            if let Some(speed) = c.speed.as_ref().filter(|s| s.sections.len() > 1) {
+                let keys: Vec<Value> = speed
+                    .keyframes()
+                    .iter()
+                    .map(|k| {
+                        let at = c.key_time(k.frame).round() as i64;
+                        json!({
+                            "frame": k.frame,
+                            "at": at,
+                            "at_tc": p.settings.timecode(at),
+                            "value": k.value,
+                        })
+                    })
+                    .collect();
+                clips.push(
+                    json!({ "clip": c.id, "track": t.id, "param": "speed", "keyframes": keys }),
+                );
+            }
             if let Some(picture) = &c.picture {
                 for v in PictureValue::ALL {
                     if picture.has_keys(v) {
@@ -421,14 +465,18 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
 }
 
 fn keys_of(c: &Clip, param: KeyParam) -> &[Keyframe] {
-    match picture_param(param) {
-        Some(v) => c.picture.as_ref().map_or(&[], |p| p.keys_of(v)),
-        None => c.audio.as_ref().map_or(&[], |a| a.gain_keys.as_slice()),
+    match (param, picture_param(param)) {
+        (KeyParam::Speed, _) => &[],
+        (_, Some(v)) => c.picture.as_ref().map_or(&[], |p| p.keys_of(v)),
+        (_, None) => c.audio.as_ref().map_or(&[], |a| a.gain_keys.as_slice()),
     }
 }
 
 fn param_name(param: KeyParam) -> &'static str {
-    picture_param(param).map_or("volume", PictureValue::name)
+    match param {
+        KeyParam::Speed => "speed",
+        _ => picture_param(param).map_or("volume", PictureValue::name),
+    }
 }
 
 pub fn chosen(
@@ -451,6 +499,9 @@ pub fn chosen(
     };
     let mut out: Vec<(KeyParam, Vec<i64>)> = Vec::new();
     for (param, frames) in wanted {
+        if param == KeyParam::Speed {
+            return Err(Error::invalid("speed keyframes don't copy"));
+        }
         let keys = keys_of(c, param);
         if keys.is_empty() {
             return Err(Error::invalid(format!(
@@ -583,6 +634,7 @@ fn picture_param(param: KeyParam) -> Option<PictureValue> {
         KeyParam::CropBottom => Some(PictureValue::CropBottom),
         KeyParam::CropSoftness => Some(PictureValue::CropSoftness),
         KeyParam::Opacity => Some(PictureValue::Opacity),
+        KeyParam::Speed => None,
     }
 }
 
@@ -862,31 +914,7 @@ fn remove_picture(p: &mut Project, ids: &[String], v: PictureValue, pick: &Pick)
 }
 
 fn picked_name(c: &Clip, keys: &[Keyframe], pick: &Pick, v: PictureValue) -> Result<HashSet<i64>> {
-    let mut out = HashSet::new();
-    if pick.frames.is_none() && pick.at.is_none() {
-        out.extend(keys.iter().map(|k| k.frame));
-        return Ok(out);
-    }
-    let name = v.name().replace('_', " ");
-    for &f in pick.frames.iter().flatten() {
-        if !keys.iter().any(|k| k.frame == f) {
-            return Err(Error::not_found(format!(
-                "{} has no {name} keyframe on source frame {f}",
-                c.id
-            )));
-        }
-        out.insert(f);
-    }
-    for &t in pick.at.iter().flatten() {
-        let k = keys
-            .iter()
-            .find(|k| c.key_time(k.frame).round() as i64 == t)
-            .ok_or_else(|| {
-                Error::not_found(format!("{} has no {name} keyframe at frame {t}", c.id))
-            })?;
-        out.insert(k.frame);
-    }
-    Ok(out)
+    picked_as(c, keys, pick, &v.name().replace('_', " "))
 }
 
 fn listed(p: &Project, c: &Clip, picture: &Picture, v: PictureValue) -> Vec<Value> {

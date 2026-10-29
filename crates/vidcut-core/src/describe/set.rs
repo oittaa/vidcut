@@ -251,7 +251,7 @@ fn word(v: &Value) -> String {
     v.as_str().map_or_else(|| raw(v), title_case)
 }
 
-fn title_case(s: &str) -> String {
+pub(super) fn title_case(s: &str) -> String {
     s.split(['_', ' ', '.'])
         .filter(|w| !w.is_empty())
         .map(|w| {

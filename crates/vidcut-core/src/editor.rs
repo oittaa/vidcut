@@ -2222,7 +2222,7 @@ fn resolve(p: &Project, t: &TimeSpec, playhead: Option<i64>) -> Result<i64> {
     Ok(ctx(p, playhead).resolve(t)?)
 }
 
-fn speed_point_at(
+fn speed_at(
     p: &Project,
     at: Option<&TimeSpec>,
     playhead: Option<i64>,
@@ -3228,21 +3228,6 @@ fn mutate(
             }
             Value::Null
         }
-        Request::SpeedAddPoint { clips, at } => {
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let at = speed_point_at(p, at.as_ref(), playhead, "speed.add_point")?;
-            ops::speed::add_point(p, &ids, at)?;
-            Value::Null
-        }
-        Request::SpeedRemovePoint { clips, at, all } => {
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let at = match at {
-                Some(t) => Some(resolve(p, t, playhead)?),
-                None => playhead,
-            };
-            ops::speed::remove_point(p, &ids, at, *all)?;
-            Value::Null
-        }
         Request::SpeedSet {
             clips,
             at,
@@ -3251,7 +3236,7 @@ fn mutate(
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let at = speed_point_at(p, at.as_ref(), playhead, "speed.set")?;
+            let at = speed_at(p, at.as_ref(), playhead, "speed.set")?;
             ops::speed::set(p, &ids, at, *speed, *ripple)?;
             if *download && !dry_run {
                 ready_retimes(env, p, &ids)?;
@@ -3260,7 +3245,7 @@ fn mutate(
         }
         Request::SpeedFreeze { clips, at, ripple } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let at = speed_point_at(p, at.as_ref(), playhead, "speed.freeze")?;
+            let at = speed_at(p, at.as_ref(), playhead, "speed.freeze")?;
             ops::speed::freeze(p, &ids, at, *ripple)?;
             Value::Null
         }

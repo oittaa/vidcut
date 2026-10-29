@@ -438,10 +438,11 @@ pub fn speed_strip(tr: &TrackRect, scale: &Scale, c: &Clip) -> Option<Rect> {
         .then(|| Rect::from_x_y_ranges(band.x_range(), band.top()..=band.top() + SPEED_STRIP))
 }
 
-pub fn speed_points(c: &Clip) -> Vec<i64> {
+pub fn speed_keyframes(c: &Clip) -> Vec<i64> {
     c.speed.as_ref().map_or(Vec::new(), |s| {
-        s.points()
-            .map(|at| c.start + at - s.skip)
+        s.keyframes()
+            .iter()
+            .map(|k| c.start + k.frame - s.skip)
             .filter(|t| (c.start + 1..c.end()).contains(t))
             .collect()
     })

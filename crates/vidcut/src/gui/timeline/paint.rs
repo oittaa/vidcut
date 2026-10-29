@@ -13,7 +13,7 @@ use vidcut_core::time::Rational;
 
 use super::geometry::{
     Rows, Scale, TrackRect, chosen_on, clips_in, covered, curve_y, handle_point, key_point,
-    sound_band, speed_labels, speed_points, speed_strip, volume_y,
+    sound_band, speed_keyframes, speed_labels, speed_strip, volume_y,
 };
 use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
@@ -648,7 +648,7 @@ fn speed_marks(
 ) {
     painter.rect_filled(strip, CornerRadius::ZERO, Color32::BLACK);
     let line = Stroke::new(2.0, Color32::WHITE);
-    for t in speed_points(c) {
+    for t in speed_keyframes(c) {
         let x = scale.xf(t);
         painter.line_segment([pos2(x, strip.top()), pos2(x, bottom)], line);
         painter.rect_filled(

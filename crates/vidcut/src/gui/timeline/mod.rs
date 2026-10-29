@@ -2711,16 +2711,19 @@ impl Workspace {
             self.open_speed_dialog();
             ui.close();
         }
-        if super::keyframe_editor::takes_points(c) {
+        if super::keyframe_editor::takes_speed(c) {
             let play = self.snap.timeline.position;
-            let why = super::keyframe_editor::add_point_why(&[c], play);
-            let r = ui.add_enabled(why.is_none(), egui::Button::new("Add Speed Point"));
+            let why = super::keyframe_editor::add_speed_key_why(&[c], play);
+            let r = ui.add_enabled(why.is_none(), egui::Button::new("Add Speed Keyframe"));
             let r = match why {
                 Some(why) => r.on_disabled_hover_text(why),
                 None => r,
             };
             if r.clicked() {
-                self.send("speed.add_point", json!({ "clips": [c.id], "at": play }));
+                self.send(
+                    "keyframes.add",
+                    json!({ "clips": [c.id], "param": "speed", "at": play }),
+                );
                 ui.close();
             }
         }
