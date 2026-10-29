@@ -551,7 +551,7 @@ impl Screen {
             }
             Sink::Held => {
                 let buffer = held.ok_or_else(|| Error::Invalid("no RGB plane to hold".into()))?;
-                let held = super::held::Held::new(buffer, &gpu.device, &gpu.queue);
+                let held = super::held::Held::new(buffer, (&gpu.device, &gpu.queue), gpu.id);
                 return super::held::picture(held, size, None);
             }
         };

@@ -1,5 +1,6 @@
 #[cfg(windows)]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use crate::color::shader_colors;
@@ -31,6 +32,7 @@ pub struct Gpu {
     acquirer: OnceLock<Result<acquire::Acquirer, String>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    id: u64,
     screen_drawing: Drawing,
     wide_drawing: Drawing,
     adding: wgpu::RenderPipeline,
@@ -73,6 +75,8 @@ struct Drawing {
 }
 
 const MAX_SHARED: usize = 4;
+
+static IDS: AtomicU64 = AtomicU64::new(1);
 
 const TARGET: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
@@ -500,6 +504,7 @@ impl Gpu {
             acquirer: OnceLock::new(),
             device: device.clone(),
             queue: queue.clone(),
+            id: IDS.fetch_add(1, Ordering::Relaxed),
             screen_drawing,
             wide_drawing,
             adding,
@@ -564,6 +569,10 @@ impl Gpu {
 
     pub(crate) fn handles(&self) -> (&wgpu::Device, &wgpu::Queue) {
         (&self.device, &self.queue)
+    }
+
+    pub(crate) fn id(&self) -> u64 {
+        self.id
     }
 
     pub fn gpu_pictures(&self) -> crate::hw::GpuPictures {
@@ -2271,7 +2280,7 @@ impl Slot {
     ) {
         let found = held::of(frame);
         let lent = match found {
-            Some(h) if h.on(&gpu.device) => Some(h.buffer().clone()),
+            Some(h) if h.on(gpu) => Some(h.buffer().clone()),
             Some(h) => match h.imported_on(&gpu.device) {
                 Some(Ok(buffer)) => Some(buffer),
                 Some(Err(e)) => {

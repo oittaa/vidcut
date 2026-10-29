@@ -28,6 +28,7 @@ struct Ring {
 pub(crate) struct Gpu {
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
+    pub(crate) id: u64,
     pub(crate) listed: Option<crate::gpus::Gpu>,
     pub(crate) name: String,
     pub(crate) what: &'static str,
@@ -122,6 +123,7 @@ impl Gpu {
         Ok(Self {
             device: device.clone(),
             queue: queue.clone(),
+            id: on.gpu.id(),
             listed,
             name,
             what,
