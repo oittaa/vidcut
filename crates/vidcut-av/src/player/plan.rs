@@ -301,18 +301,22 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             placed,
             ..
         } => {
-            let ai = if super_scale.ai() {
+            let made = if super_scale.ai() || !retime.is_nearest() {
+                let placed: Vec<_> = placed
+                    .iter()
+                    .map(|p| (&p.picture, p.run, p.source))
+                    .collect();
                 format!("|{super_scale:?}|{}x{}|{placed:?}", plan.width, plan.height)
             } else {
                 String::new()
             };
-            let ai = if retime.is_nearest() {
-                ai
+            let made = if retime.is_nearest() {
+                made
             } else {
-                format!("{ai}|{retime:?}")
+                format!("{made}|{retime:?}")
             };
             format!(
-                "{}|{:x}|{image:?}|{}|{}{ai}",
+                "{}|{:x}|{image:?}|{}|{}{made}",
                 path.display(),
                 origin.to_bits(),
                 plan.fps,
@@ -378,4 +382,76 @@ pub(crate) fn scales_of(piece: &VideoPiece) -> Vec<Option<vidcut_core::model::Sh
             _ => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use vidcut_core::model::{Picture, Retime, SuperScale, Upscaler};
+    use vidcut_core::render::{Placed, RenderPlan, VideoPiece};
+    use vidcut_core::time::Rational;
+
+    use super::source_key;
+
+    fn plan() -> RenderPlan {
+        RenderPlan {
+            fps: Rational::new(30, 1).unwrap(),
+            width: 64,
+            height: 36,
+            sample_rate: 48_000,
+            channels: 2,
+            frames: 10,
+            video: Vec::new(),
+            audio: Vec::new(),
+            ducking: Vec::new(),
+            range: (0, 10),
+            name: "keys".into(),
+            colors: None,
+        }
+    }
+
+    fn piece(super_scale: SuperScale, retime: Retime, zoom: f64, start: i64) -> VideoPiece {
+        VideoPiece::Source {
+            media: "m".into(),
+            path: "clip.mp4".into(),
+            origin: 0.0,
+            source_frame: 0,
+            frames: 10,
+            image: None,
+            pace: Default::default(),
+            color_space: Default::default(),
+            super_scale,
+            retime,
+            placed: vec![Placed {
+                clip: "c".into(),
+                picture: Picture {
+                    zoom: Some([zoom, zoom]),
+                    ..Picture::default()
+                },
+                run: None,
+                source: 0,
+                start,
+                ready: true,
+            }],
+        }
+    }
+
+    #[test]
+    fn a_made_frame_misses_after_a_zoom() {
+        let off = SuperScale::default();
+        let before = source_key(&piece(off, Retime::FrameBlend, 2.0, 0), &plan());
+        let after = source_key(&piece(off, Retime::FrameBlend, 1.5, 0), &plan());
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn an_upscaled_frame_stays_kept_after_a_move() {
+        let ai = SuperScale {
+            on: true,
+            upscaler: Upscaler::AiFast,
+            ..SuperScale::default()
+        };
+        let before = source_key(&piece(ai, Retime::Nearest, 2.0, 0), &plan());
+        let after = source_key(&piece(ai, Retime::Nearest, 2.0, 48), &plan());
+        assert_eq!(before, after);
+    }
 }
