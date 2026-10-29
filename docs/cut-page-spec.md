@@ -107,8 +107,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - The value changed last in the Inspector and the curve in view do not pick it.
     - Mark > Delete Keyframe (Alt+]) removes the selected keyframes. With none selected, it removes the keyframes of the selected rows at the playhead.
     - Mark > Delete All Keyframes removes the selected keyframes. With none selected, it asks first. Then it removes all the keyframes of the selected rows.
-      - The question names the values, the number of keyframes and the clip ([X94](deviations.md#x94-the-mark-menus-keyframe-items-act-only-on-keyframes)). Cancel has the focus.
-    - These three items act on the clip that the tab shows. They are off when the tab and the tray are closed (X94).
+      - The question names the values, the number of keyframes and the clip ([X94](deviations.md#x94-the-mark-menus-items-on-speed-points)). Cancel has the focus.
+    - These three items act on the clip that the tab shows.
+    - With the tab and the tray closed, they act on speed points (D48, X94).
     - After a click in the Keyframes tab or the keyframe tray, Ctrl+C and Ctrl+X copy or cut the selected keyframes (p. 1258).
     - Ctrl+V there pastes them on the selected clips (p. 1258).
       - The first keyframe goes at the playhead. The others keep their distance from it.
@@ -1417,6 +1418,18 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Trims and splits keep all the points, also those outside the clip. The points stay on the retimed source.
     - A keyframe of the clip stays on its frame of the clip when a section's speed changes.
     - The OTIO export writes the points as the `Key Frames` of a `TimeEffect`, in seconds from the media's first frame.
+  - **Timeline:** a clip with speed points has a strip at its top. These facts come from Resolve Studio 21.1.2:
+    - The strip shows the speed of each section, and a line at each point.
+    - A click on a speed opens a list: 20%, 30%, 40%, 50%, 60%, 70%, 100% and Set.
+    - Set opens the Set Speed Change window, with a Speed field.
+    - The clip's right-click menu has Add Speed Point.
+    - With the Keyframes tab and the keyframe tray closed, the keyframe items of the Mark menu act on speed points ([X94](deviations.md#x94-the-mark-menus-items-on-speed-points)).
+  - **In vidcut:**
+    - The list opens only on a section that plays forward. `speed.set` changes only such a section.
+    - Add Speed Point in the right-click menu adds a point at the playhead.
+    - Mark > Add Speed Point (Ctrl+[) adds a point at the playhead to each selected clip under it.
+    - Mark > Delete Speed Point (Alt+]) removes the point at the playhead, or else the nearest point before it.
+    - Mark > Delete All Speed Points asks first. Then it removes all the points of the selected clips.
   - **Requests:** `speed.add_point`, `speed.remove_point`, `speed.set` and `speed.freeze` do these edits at a time, the playhead by default.
     - `speed.set` takes 1% to 10000% forward, in a section that plays forward.
     - `speed.remove_point` with `all` removes all the points of the clips.

@@ -1924,11 +1924,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Other speeds and frame rates gain less from made frames. Thus Auto keeps the speed of Nearest for them.
   - Auto lets a project move between macOS and other systems. Each computer uses its own AI.
 
-## X94. The Mark menu's keyframe items act only on keyframes
+## X94. The Mark menu's items on speed points
 
 - **Resolve:**
   - Add Keyframe, Delete Keyframe and Delete All Keyframes act on the selected values of the Keyframes panel or the keyframe tray (p. 4343).
-  - With the panel and the tray closed, they act on the speed points of the selected clips.
+  - With the panel and the tray closed, they act on the speed points of the selected clips. Their names do not change.
+  - Then Delete Keyframe and Delete All Keyframes do the same thing in Resolve Studio 21.1.2.
+    - Each removes one point: the point at the playhead, or else the nearest point before it. No question opens.
   - With the tray open and no row selected, Add Keyframe also adds a speed point.
   - In Resolve Studio 21.1.2, the three items are always on, also when they cannot act.
   - Delete All Keyframes with no keyframe selected asks "Delete All Keyframes?". The question names the value and the media file.
@@ -1937,15 +1939,20 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - In one check, this was the value keyed last with a button of the Inspector. Delete removed all its keyframes.
   - In one check, the question named no value. After Delete, a Position X with no keyframes also went back to 0.
 - **vidcut:**
-  - The three items act only on keyframes. Scripts edit speed points with the `speed.*` requests ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions), [todo](todo/speed-ramps.md)).
+  - With the Keyframes tab or the tray open, the three items act only on keyframes.
+  - With both closed, they act on the speed points of the selected clips ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+    - Their names are then Add Speed Point, Delete Speed Point and Delete All Speed Points.
+    - Delete All Speed Points asks first, for example "Delete 3 speed points of Clip 2?". Then it removes all the points.
   - An item that cannot act is off. Its tooltip tells the next click, for example "Click a parameter name, such as Opacity".
   - When the three items are off for one reason, a line in the menu tells the next step.
-    - An example is "Click a parameter name in Timeline > Keyframes".
+    - An example is "Select a clip first".
   - With no row and no keyframe selected, Delete All Keyframes is off.
   - The question of Delete All Keyframes names the values, the number of keyframes and the clip.
     - An example is "Delete 5 Yaw keyframes of Clip 3?".
   - Delete All Keyframes removes only the keyframes of the selected rows. A value with no keyframes keeps its value.
 - **Why:**
+  - The name of an item tells what the item acts on.
+  - A Delete All that removes one point is a fault in Resolve. vidcut does not copy it.
   - An item that does nothing gives the user no clue. The tooltip tells the next step.
   - The user sees which keyframes go before they go. A value that no row shows as selected is a hidden choice.
   - The number tells the user how much goes before the user agrees.

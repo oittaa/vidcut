@@ -223,6 +223,14 @@ impl KeyCmd {
         }
     }
 
+    pub(super) fn point_label(self) -> &'static str {
+        match self {
+            KeyCmd::Add => "Add Speed Point",
+            KeyCmd::Delete => "Delete Speed Point",
+            KeyCmd::DeleteAll => "Delete All Speed Points",
+        }
+    }
+
     pub(super) fn keys(self) -> Option<&'static str> {
         match self {
             KeyCmd::Add => Some("Ctrl+["),
@@ -233,11 +241,59 @@ impl KeyCmd {
 }
 
 #[derive(Clone, Debug)]
+enum Gone {
+    Keys(String, Vec<KeyParam>),
+    Points(Vec<String>),
+}
+
+#[derive(Clone, Debug)]
 struct Deleting {
-    clip: String,
-    rows: Vec<KeyParam>,
+    gone: Gone,
     question: String,
     fresh: bool,
+}
+
+pub(super) fn takes_points(c: &Clip) -> bool {
+    c.title.is_none() && c.compound.is_none() && !c.is_generator()
+}
+
+fn points_upto(c: &Clip, play: i64) -> bool {
+    c.speed.as_ref().is_some_and(|s| {
+        let u = s.skip + play - c.start;
+        s.points().any(|at| at <= u)
+    })
+}
+
+fn point_at(c: &Clip, play: i64) -> bool {
+    c.speed.as_ref().is_some_and(|s| {
+        let u = s.skip + play - c.start;
+        s.points().any(|at| at == u)
+    })
+}
+
+fn point_count(c: &Clip) -> usize {
+    c.speed.as_ref().map_or(0, |s| s.points().count())
+}
+
+pub(super) fn add_point_why(clips: &[&Clip], play: i64) -> Option<&'static str> {
+    let under: Vec<&&Clip> = clips
+        .iter()
+        .filter(|c| (c.start..c.end()).contains(&play))
+        .collect();
+    if under.is_empty() {
+        return Some("Move the playhead over the clip");
+    }
+    if under.iter().all(|c| c.start == play) {
+        return Some("Move the playhead past the clip's first frame");
+    }
+    if under.iter().all(|c| c.start == play || point_at(c, play)) {
+        return Some("Already a speed point here. Move the playhead.");
+    }
+    None
+}
+
+pub(super) fn adds_point(c: &Clip, play: i64) -> bool {
+    takes_points(c) && c.start < play && play < c.end() && !point_at(c, play)
 }
 
 struct Target {
@@ -1396,14 +1452,7 @@ impl Workspace {
 
     fn key_target(&self) -> Result<Target, &'static str> {
         let p = self.project_shared().ok_or("Open a project first")?;
-        let clip = self.first_clip(&p);
-        if !self.keys_in_view() {
-            return Err(match clip {
-                Some(_) => "Click a parameter name in Timeline > Keyframes",
-                None => "Select a clip, then click a parameter name in Timeline > Keyframes",
-            });
-        }
-        let clip = clip.ok_or("Select a clip first")?;
+        let clip = self.first_clip(&p).ok_or("Select a clip first")?;
         let e = &self.key_editor;
         let mine = e.clip.as_deref() == Some(clip.id.as_str());
         let mut shown = Vec::new();
@@ -1429,11 +1478,114 @@ impl Workspace {
         })
     }
 
+    fn point_clips(&self) -> Result<Vec<Clip>, &'static str> {
+        let p = self.project_shared().ok_or("Open a project first")?;
+        let picked: Vec<Clip> = self
+            .snap
+            .selection
+            .clips
+            .iter()
+            .filter_map(|id| p.clip(id))
+            .cloned()
+            .collect();
+        if picked.is_empty() {
+            return Err("Select a clip first");
+        }
+        let clips: Vec<Clip> = picked.into_iter().filter(takes_points).collect();
+        if clips.is_empty() {
+            return Err("Titles and compound clips have no speed points");
+        }
+        Ok(clips)
+    }
+
+    pub(super) fn key_label(&self, cmd: KeyCmd) -> &'static str {
+        if self.keys_in_view() {
+            cmd.label()
+        } else {
+            cmd.point_label()
+        }
+    }
+
     pub(super) fn key_menu_why(&self) -> Option<&'static str> {
-        self.key_target().err()
+        if self.keys_in_view() {
+            self.key_target().err()
+        } else {
+            self.point_clips().err()
+        }
+    }
+
+    fn point_cmd_why(&self, cmd: KeyCmd) -> Option<&'static str> {
+        let clips = match self.point_clips() {
+            Ok(c) => c,
+            Err(why) => return Some(why),
+        };
+        let play = self.snap.timeline.position;
+        let under = |c: &&Clip| (c.start..c.end()).contains(&play);
+        match cmd {
+            KeyCmd::Add => add_point_why(&clips.iter().collect::<Vec<_>>(), play),
+            KeyCmd::Delete if !clips.iter().any(|c| under(&c)) => {
+                Some("Move the playhead over the clip")
+            }
+            KeyCmd::Delete if !clips.iter().any(|c| under(&c) && points_upto(c, play)) => {
+                Some("No speed point at or before the playhead")
+            }
+            KeyCmd::DeleteAll if clips.iter().all(|c| point_count(c) == 0) => {
+                Some("The clip has no speed points")
+            }
+            _ => None,
+        }
+    }
+
+    fn point_cmd(&mut self, cmd: KeyCmd) {
+        let Ok(clips) = self.point_clips() else {
+            return;
+        };
+        let play = self.snap.timeline.position;
+        match cmd {
+            KeyCmd::Add => {
+                let ids: Vec<&str> = clips
+                    .iter()
+                    .filter(|c| adds_point(c, play))
+                    .map(|c| c.id.as_str())
+                    .collect();
+                self.send("speed.add_point", json!({ "clips": ids, "at": play }));
+            }
+            KeyCmd::Delete => {
+                let ids: Vec<&str> = clips
+                    .iter()
+                    .filter(|c| (c.start..c.end()).contains(&play) && points_upto(c, play))
+                    .map(|c| c.id.as_str())
+                    .collect();
+                self.send("speed.remove_point", json!({ "clips": ids, "at": play }));
+            }
+            KeyCmd::DeleteAll => {
+                let held: Vec<&Clip> = clips.iter().filter(|c| point_count(c) > 0).collect();
+                let count: usize = held.iter().map(|c| point_count(c)).sum();
+                let whose = match held.as_slice() {
+                    [one] => self
+                        .project_shared()
+                        .map(|p| clip_name(&p, one))
+                        .unwrap_or_default(),
+                    many => format!("{} clips", many.len()),
+                };
+                let points = if count == 1 {
+                    "speed point"
+                } else {
+                    "speed points"
+                };
+                self.key_editor.deleting = Some(Deleting {
+                    gone: Gone::Points(held.iter().map(|c| c.id.clone()).collect()),
+                    question: format!("Delete {count} {points} of {whose}?"),
+                    fresh: true,
+                });
+            }
+        }
     }
 
     pub(super) fn key_cmd_why(&self, cmd: KeyCmd) -> Option<&'static str> {
+        if !self.keys_in_view() {
+            return self.point_cmd_why(cmd);
+        }
         let t = match self.key_target() {
             Ok(t) => t,
             Err(why) => return Some(why),
@@ -1479,6 +1631,10 @@ impl Workspace {
         if self.key_cmd_why(cmd).is_some() {
             return;
         }
+        if !self.keys_in_view() {
+            self.point_cmd(cmd);
+            return;
+        }
         let Ok(t) = self.key_target() else {
             return;
         };
@@ -1518,8 +1674,7 @@ impl Workspace {
                     .unwrap_or_default();
                 let keyframes = if count == 1 { "keyframe" } else { "keyframes" };
                 self.key_editor.deleting = Some(Deleting {
-                    clip: id,
-                    rows,
+                    gone: Gone::Keys(id, rows),
                     question: format!("Delete {count} {} {keyframes} of {name}?", listed(&names)),
                     fresh: true,
                 });
@@ -1560,12 +1715,18 @@ impl Workspace {
             return;
         };
         if done == Some(true) {
-            let parts = ask
-                .rows
-                .iter()
-                .map(|r| json!({ "clips": [ask.clip], "param": r }))
-                .collect();
-            self.send_each("keyframes.remove", parts);
+            match ask.gone {
+                Gone::Keys(clip, rows) => {
+                    let parts = rows
+                        .iter()
+                        .map(|r| json!({ "clips": [clip], "param": r }))
+                        .collect();
+                    self.send_each("keyframes.remove", parts);
+                }
+                Gone::Points(clips) => {
+                    self.send("speed.remove_point", json!({ "clips": clips, "all": true }));
+                }
+            }
         }
     }
 

@@ -13,7 +13,7 @@ use vidcut_core::time::Rational;
 
 use super::geometry::{
     Rows, Scale, TrackRect, chosen_on, clips_in, covered, curve_y, handle_point, key_point,
-    sound_band, volume_y,
+    sound_band, speed_labels, speed_points, speed_strip, volume_y,
 };
 use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
@@ -401,16 +401,27 @@ fn clip(
         }
         if look.status
             && !c.video
+            && speed_strip(tr, scale, c).is_none()
             && let Some(speed) = &c.speed
         {
             speed_badge(&ap, audio, speed);
         }
     }
+    let strip = speed_strip(tr, scale, c);
+    if let Some(strip) = strip {
+        let bottom = if c.audio.is_some() {
+            rect.bottom()
+        } else {
+            video.bottom()
+        };
+        speed_marks(&painter, tr, scale, c, strip, bottom);
+    }
     if c.audio.as_ref().is_some_and(|a| a.is_keyed())
         || c.picture.as_ref().is_some_and(|p| p.is_keyed())
     {
         let band = if has_picture { video } else { rect };
-        let at = pos2(x0.max(painter.clip_rect().left()) + 8.0, band.top() + 8.0);
+        let top = strip.map_or(band.top(), |s| s.bottom());
+        let at = pos2(x0.max(painter.clip_rect().left()) + 8.0, top + 8.0);
         let diamond = vec![
             at + vec2(0.0, -3.5),
             at + vec2(3.5, 0.0),
@@ -439,7 +450,8 @@ fn clip(
         if told {
             label = format!("{} {label}", egui_phosphor::regular::CHAT_TEXT);
         }
-        let pos = pos2(left + 4.0, video.top().min(tr.audio_top) + 2.0);
+        let top = strip.map_or(video.top().min(tr.audio_top), |s| s.bottom());
+        let pos = pos2(left + 4.0, top + 2.0);
         let galley = painter.layout_no_wrap(label, FontId::proportional(11.0), Color32::WHITE);
         painter.rect_filled(
             Rect::from_min_size(pos - vec2(2.0, 0.0), galley.size() + vec2(4.0, 1.0)),
@@ -470,6 +482,7 @@ fn clip(
     }
     if look.status
         && has_picture
+        && strip.is_none()
         && let Some(speed) = &c.speed
     {
         speed_badge(&painter, video, speed);
@@ -623,6 +636,41 @@ fn speed_badge(painter: &Painter, band: Rect, speed: &Speed) {
     tag(painter, speed.label(), |size| {
         pos2(right - size.x - 4.0, band.top() + 2.0)
     });
+}
+
+fn speed_marks(
+    painter: &Painter,
+    tr: &TrackRect,
+    scale: &Scale,
+    c: &Clip,
+    strip: Rect,
+    bottom: f32,
+) {
+    painter.rect_filled(strip, CornerRadius::ZERO, Color32::from_black_alpha(150));
+    let line = Stroke::new(1.0, Color32::from_white_alpha(220));
+    for t in speed_points(c) {
+        let x = scale.xf(t);
+        painter.line_segment([pos2(x, strip.top()), pos2(x, bottom)], line);
+        painter.rect_filled(
+            Rect::from_center_size(pos2(x, strip.top() + 3.0), vec2(5.0, 6.0)),
+            CornerRadius::same(1),
+            Color32::WHITE,
+        );
+    }
+    for l in speed_labels(tr, scale, c) {
+        let color = if l.speed > 0.0 {
+            Color32::WHITE
+        } else {
+            theme::colors().text_dim
+        };
+        painter.text(
+            l.rect.center(),
+            Align2::CENTER_CENTER,
+            format!("{}%", (l.speed * 100.0).round()),
+            FontId::proportional(10.0),
+            color,
+        );
+    }
 }
 
 fn tag(painter: &Painter, text: String, at: impl FnOnce(egui::Vec2) -> Pos2) {

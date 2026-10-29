@@ -303,7 +303,8 @@ fn adjacent(a: &Clip, b: &Clip) -> bool {
     a.end() == b.start
 }
 
-pub fn slip_handle(tr: &TrackRect, x0: f32, x1: f32) -> Option<Rect> {
+pub fn slip_handle(tr: &TrackRect, scale: &Scale, c: &Clip) -> Option<Rect> {
+    let (x0, x1) = (scale.xf(c.start), scale.xf(c.end()));
     if x1 - x0 < 48.0 {
         return None;
     }
@@ -313,11 +314,12 @@ pub fn slip_handle(tr: &TrackRect, x0: f32, x1: f32) -> Option<Rect> {
     } else {
         tr.rect.bottom()
     };
-    let bottom = tr.rect.top() + (band_bottom - tr.rect.top()) * 0.45;
+    let top = speed_strip(tr, scale, c).map_or(tr.rect.top(), |s| s.bottom());
+    let bottom = (tr.rect.top() + (band_bottom - tr.rect.top()) * 0.45).max(top + 12.0);
     let center = (x0 + x1) / 2.0;
     Some(Rect::from_x_y_ranges(
         center - SLIP..=center + SLIP,
-        tr.rect.top()..=bottom,
+        top..=bottom,
     ))
 }
 
@@ -392,7 +394,13 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
         if pos.x < x0 || pos.x >= x1 {
             continue;
         }
-        if slip_handle(tr, x0, x1).is_some_and(|h| h.contains(pos)) {
+        if speed_labels(tr, scale, c)
+            .iter()
+            .any(|l| l.rect.contains(pos))
+        {
+            return Hit::Clip(c.id.clone());
+        }
+        if slip_handle(tr, scale, c).is_some_and(|h| h.contains(pos)) {
             return Hit::Slip(c.id.clone());
         }
         return Hit::Clip(c.id.clone());
@@ -407,6 +415,80 @@ pub fn sound_band(tr: &TrackRect, scale: &Scale, c: &Clip) -> Option<Rect> {
         a0..=a1,
         tr.audio_top..=tr.rect.bottom(),
     ))
+}
+
+pub const SPEED_STRIP: f32 = 14.0;
+const SPEED_LABEL: f32 = 44.0;
+
+pub struct SpeedLabel {
+    pub at: i64,
+    pub speed: f64,
+    pub rect: Rect,
+}
+
+pub fn speed_strip(tr: &TrackRect, scale: &Scale, c: &Clip) -> Option<Rect> {
+    c.speed.as_ref().filter(|s| s.sections.len() > 1)?;
+    let band = if c.video {
+        let (x0, x1) = (scale.xf(c.start), scale.xf(c.end()));
+        Rect::from_x_y_ranges(x0..=x1, tr.rect.top()..=tr.audio_top - 1.0)
+    } else {
+        sound_band(tr, scale, c)?
+    };
+    (band.height() >= 2.0 * SPEED_STRIP)
+        .then(|| Rect::from_x_y_ranges(band.x_range(), band.top()..=band.top() + SPEED_STRIP))
+}
+
+pub fn speed_points(c: &Clip) -> Vec<i64> {
+    c.speed.as_ref().map_or(Vec::new(), |s| {
+        s.points()
+            .map(|at| c.start + at - s.skip)
+            .filter(|t| (c.start + 1..c.end()).contains(t))
+            .collect()
+    })
+}
+
+pub fn speed_labels(tr: &TrackRect, scale: &Scale, c: &Clip) -> Vec<SpeedLabel> {
+    let (Some(strip), Some(s)) = (speed_strip(tr, scale, c), c.speed.as_ref()) else {
+        return Vec::new();
+    };
+    let (left, right) = (
+        strip.left().max(tr.rect.left()),
+        strip.right().min(tr.rect.right()),
+    );
+    let frame = |at: i64| (c.start + at - s.skip).clamp(c.start, c.end());
+    let map = &s.sections;
+    map.iter()
+        .enumerate()
+        .filter_map(|(i, x)| {
+            let a = if i == 0 { c.start } else { frame(x.at) };
+            let b = map.get(i + 1).map_or(c.end(), |n| frame(n.at));
+            let (l, r) = (scale.xf(a).max(left), scale.xf(b).min(right));
+            (b > a && r - l >= SPEED_LABEL + 4.0).then(|| SpeedLabel {
+                at: a,
+                speed: x.speed,
+                rect: Rect::from_center_size(
+                    pos2((l + r) / 2.0, strip.center().y),
+                    vec2(SPEED_LABEL, SPEED_STRIP),
+                ),
+            })
+        })
+        .collect()
+}
+
+pub fn speed_label_at(
+    p: &Project,
+    rows: &Rows,
+    scale: &Scale,
+    pos: Pos2,
+) -> Option<(String, SpeedLabel)> {
+    let r = rows.at(pos.y)?;
+    let t = p.track(&r.track)?;
+    let f = scale.under(pos.x);
+    let c = t.clips[clips_in(t, f, f + 1)].first()?;
+    speed_labels(&r.rect, scale, c)
+        .into_iter()
+        .find(|l| l.rect.contains(pos))
+        .map(|l| (c.id.clone(), l))
 }
 
 pub fn volume_level(gain_db: f64) -> f64 {

@@ -909,7 +909,7 @@ impl Workspace {
                 let shared = self.key_menu_why();
                 for cmd in super::keyframe_editor::KeyCmd::ALL {
                     let why = self.key_cmd_why(cmd);
-                    let mut button = egui::Button::new(cmd.label());
+                    let mut button = egui::Button::new(self.key_label(cmd));
                     if let Some(keys) = cmd.keys() {
                         button = button.shortcut_text(super::keys(keys));
                     }
