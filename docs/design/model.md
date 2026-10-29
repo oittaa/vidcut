@@ -139,7 +139,7 @@ Speeds ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
 - `render::Pace` gives the source frame at each frame of the retimed source. `source_in` is the first source frame that the clip shows.
 - A trim or a split moves only `skip` and `source_in` (`Clip::walk`). Thus all the speed keyframes stay.
 - The keyframes of a clip with a speed are on its retimed source (`Clip::content_at`). Thus they stay on their frames of the clip.
-- `ops::speed` adds and removes speed keyframes, and holds `speed.set` and `speed.freeze`. `ops::change_speed` gives a clip one speed.
+- `ops::speed` adds and removes speed keyframes, and holds `speed.set`, `speed.freeze` and `speed.reverse`. `ops::change_speed` gives a clip one speed.
 
 Stills ([D38](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
 

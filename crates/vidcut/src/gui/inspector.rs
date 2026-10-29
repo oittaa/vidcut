@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project,
-    Retime, TrackKind, Upscaler, ZoomBox,
+    Retime, Speed, TrackKind, Upscaler, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, has_picture};
 use vidcut_core::place::upright_fit;
@@ -522,6 +522,8 @@ struct Paced {
     retime: ClipRetime,
     project: Retime,
     hdr: bool,
+    at: i64,
+    ramped: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -604,8 +606,33 @@ fn param_name(key: Key) -> Option<&'static str> {
     match key {
         Key::Volume => Some("volume"),
         Key::Picture(f) => f.channel().map(PictureValue::name),
+        Key::Speed => Some("speed"),
         _ => None,
     }
+}
+
+fn key_clips(key: Key, (chosen, sounds, paced): Lists<'_>) -> Vec<String> {
+    match key {
+        Key::Volume => sounds.iter().map(|s| s.id.clone()).collect(),
+        Key::Picture(_) => chosen.iter().map(|c| c.id.clone()).collect(),
+        Key::Speed => paced.iter().map(|c| c.id.clone()).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn key_times(c: &Clip, key: Key) -> Vec<i64> {
+    let keys = match key {
+        Key::Volume => c.audio.as_ref().map(|a| a.gain_keys.clone()),
+        Key::Picture(f) => f
+            .channel()
+            .and_then(|v| c.picture.as_ref().map(|pic| pic.keys_of(v).to_vec())),
+        Key::Speed => c.speed.as_ref().map(Speed::keyframes),
+        _ => None,
+    };
+    keys.unwrap_or_default()
+        .iter()
+        .map(|k| c.key_time(k.frame).round() as i64)
+        .collect()
 }
 
 fn label(ui: &mut egui::Ui, text: &str, set: bool) {
@@ -1020,10 +1047,41 @@ fn dynamic_zoom(
     });
 }
 
+fn section_speed(c: &Paced, to: f64, ripple: bool) -> Option<(&'static str, Value)> {
+    let (from, clips, at) = (c.shown.0, [&c.id], c.at);
+    if to == 0.0 {
+        let params = json!({ "clips": clips, "at": at, "ripple": ripple });
+        return Some(("speed.freeze", params));
+    }
+    if (to < 0.0) != (from < 0.0) && from != 0.0 {
+        let params = json!({ "clips": clips, "at": at, "backward": to < 0.0 });
+        return Some(("speed.reverse", params));
+    }
+    let params = json!({ "clips": clips, "at": at, "speed": to, "ripple": ripple });
+    (from > 0.0).then_some(("speed.set", params))
+}
+
+fn speed_keys(ui: &mut egui::Ui, (keys, inside): (KeyMark, bool)) -> Option<Act> {
+    let mut act = None;
+    let prev = ui.add_enabled(keys.prev, egui::Button::new(CARET_LEFT).frame(false));
+    if prev.clicked() {
+        act = Some(Act::Step(Key::Speed, -1));
+    }
+    let diamond = egui::Button::selectable(keys.on, DIAMOND).frame(false);
+    if ui.add_enabled(inside || keys.on, diamond).clicked() {
+        act = Some(Act::Toggle(Key::Speed));
+    }
+    let next = ui.add_enabled(keys.next, egui::Button::new(CARET_RIGHT).frame(false));
+    if next.clicked() {
+        act = Some(Act::Step(Key::Speed, 1));
+    }
+    act
+}
+
 fn speed_section(
     ui: &mut egui::Ui,
     (i, p, dropped): (&Inspector, &Project, i64),
-    paced: &[Paced],
+    (paced, at): (&[Paced], i64),
     ripple: bool,
     acts: &mut Vec<Act>,
 ) {
@@ -1035,34 +1093,50 @@ fn speed_section(
     let sped = paced
         .iter()
         .any(|c| c.shown.0 != 0.0 && c.shown.0.abs() != 1.0);
+    let ramped = paced.iter().any(|c| c.ramped);
+    let stuck = paced.iter().any(|c| c.ramped && c.shown.0 == 0.0);
+    let back = paced.iter().any(|c| c.ramped && c.shown.0 < 0.0);
+    let keys = p
+        .clip(&paced[0].id)
+        .filter(|c| c.compound.is_none())
+        .map(|c| {
+            let keys = c.speed.as_ref().map(Speed::keyframes).unwrap_or_default();
+            (mark(c, &keys, at), c.start < at && at < c.end())
+        });
     let header = |ui: &mut egui::Ui| {
+        let mut act = keys.and_then(|k| speed_keys(ui, k));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let whole = ui
-                .add_enabled(turned || sped, egui::Button::new("Reset"))
-                .clicked();
+            let on = turned || sped || ramped;
+            if ui.add_enabled(on, egui::Button::new("Reset")).clicked() {
+                act = Some(Act::FullSpeed);
+            }
             if count > 1 {
                 ui.label(dim(format!("{count} clips")));
             }
-            whole
-        })
-        .inner
+        });
+        act
     };
-    let whole = group(ui, "Speed", header, |ui| {
+    let picked = group(ui, "Speed", header, |ui| {
         label(ui, "Direction", turned);
         dialog::switch(ui, |ui| {
             for d in Direction::ALL {
                 let on = Direction::of(speed) == d;
-                if ui.add(egui::Button::selectable(on, d.label())).clicked() && !on {
+                let free = !stuck || d == Direction::Freeze;
+                let b = ui
+                    .add_enabled(free, egui::Button::selectable(on, d.label()))
+                    .on_disabled_hover_text("A freeze between speed keyframes has no direction");
+                if b.clicked() && !on {
                     acts.push(Act::Direction(d));
                 }
             }
         });
-        if reset(ui, turned) {
+        if reset(ui, turned && !stuck) {
             acts.push(Act::Direction(Direction::Forward));
         }
         ui.end_row();
         let moving = Look {
-            off: frozen,
+            off: frozen || back,
+            why: (back && !frozen).then_some("Only a forward section takes a speed"),
             ..Look::default()
         };
         let (least, most) = (
@@ -1076,8 +1150,12 @@ fn speed_section(
         let span = length as f64 * speed.abs();
         let lengths = (span / most).ceil().max(1.0)..=(span / least).floor().max(1.0);
         let timed = Look {
-            off: frozen || !ripple,
-            why: (!frozen && !ripple).then_some("Needs Ripple Timeline"),
+            off: frozen || !ripple || ramped,
+            why: if ramped {
+                Some("Off on a clip with speed keyframes")
+            } else {
+                (!frozen && !ripple).then_some("Needs Ripple Timeline")
+            },
             timecode: Some((p, dropped)),
         };
         field(
@@ -1118,9 +1196,7 @@ fn speed_section(
             ui.end_row();
         }
     });
-    if whole {
-        acts.push(Act::FullSpeed);
-    }
+    acts.extend(picked);
 }
 
 impl Workspace {
@@ -1203,6 +1279,7 @@ impl Workspace {
             return Vec::new();
         };
         let retimed = self.inspector.retimed.as_ref();
+        let position = self.snap.timeline.position;
         self.snap
             .selection
             .clips
@@ -1211,7 +1288,8 @@ impl Workspace {
                 let c = p
                     .clip(id)
                     .filter(|c| !c.is_generator() && c.title.is_none())?;
-                let stored = (c.speed_at(c.start), c.duration);
+                let at = position.clamp(c.start, c.end() - 1);
+                let stored = (c.speed_at(at), c.duration);
                 let shown = retimed
                     .and_then(|r| {
                         let (_, from, to) = r.clips.iter().find(|(f, _, _)| f == id)?;
@@ -1227,7 +1305,7 @@ impl Workspace {
                     project: p.media(&c.media).map_or(Retime::Nearest, |m| {
                         vidcut_core::render::retime_at(
                             ClipRetime::Project,
-                            c.speed_at(c.start),
+                            c.speed_at(at),
                             m,
                             &p.settings,
                         )
@@ -1236,6 +1314,8 @@ impl Workspace {
                         .media(&c.media)
                         .and_then(|m| m.video_as_read())
                         .is_some_and(|v| v.hdr.is_some()),
+                    at,
+                    ramped: c.speed.as_ref().is_some_and(|s| s.sections.len() > 1),
                 })
             })
             .collect()
@@ -1249,42 +1329,58 @@ impl Workspace {
 
     fn send_speeds(
         &mut self,
-        paced: &[Paced],
+        (paced, whole): (&[Paced], bool),
         length: Option<i64>,
         change: impl Fn(&mut SpeedDialog, &Paced),
     ) {
         let ripple = self.ripple();
         let mut groups: Vec<(SpeedDialog, Vec<String>)> = Vec::new();
+        let mut sections = Vec::new();
         let mut clips = Vec::new();
         for c in paced {
             let mut d = SpeedDialog::of(c.shown.0, ripple);
             change(&mut d, c);
             let to = d.speed();
-            if (to - c.shown.0).abs() < SAME {
+            let section = c.ramped && !whole;
+            if (to - c.shown.0).abs() < SAME && (section || !c.ramped) {
                 continue;
             }
             let (from, frames) = c.shown;
-            let length = length.unwrap_or(if ripple && to != 0.0 && from != 0.0 {
+            let length = length.unwrap_or(if ripple && to != 0.0 && from != 0.0 && !c.ramped {
                 ((frames as f64 * from.abs() / to.abs()) + 1e-6)
                     .floor()
                     .max(1.0) as i64
             } else {
                 frames
             });
-            clips.push((c.id.clone(), c.stored, (to, length)));
-            match groups.iter_mut().find(|(g, _)| g.speed() == to) {
-                Some((_, ids)) => ids.push(c.id.clone()),
-                None => groups.push((d, vec![c.id.clone()])),
+            if section {
+                let Some(command) = section_speed(c, to, ripple) else {
+                    continue;
+                };
+                sections.push(command);
+            } else {
+                match groups.iter_mut().find(|(g, _)| g.speed() == to) {
+                    Some((_, ids)) => ids.push(c.id.clone()),
+                    None => groups.push((d, vec![c.id.clone()])),
+                }
             }
+            clips.push((c.id.clone(), c.stored, (to, length)));
         }
-        let mut params: Vec<Value> = groups.iter().map(|(d, ids)| d.params(ids)).collect();
-        match params.len() {
+        let mut commands: Vec<(&'static str, Value)> = groups
+            .iter()
+            .map(|(d, ids)| ("edit.change_speed", d.params(ids)))
+            .chain(sections)
+            .collect();
+        match commands.len() {
             0 => return,
-            1 => self.send_asking("edit.change_speed", params.remove(0)),
+            1 => {
+                let (method, params) = commands.remove(0);
+                self.send_asking(method, params);
+            }
             _ => {
-                let commands: Vec<Value> = params
+                let commands: Vec<Value> = commands
                     .into_iter()
-                    .map(|p| json!({ "method": "edit.change_speed", "params": p }))
+                    .map(|(m, p)| json!({ "method": m, "params": p }))
                     .collect();
                 self.send_asking("apply", json!({ "commands": commands }));
             }
@@ -1301,7 +1397,7 @@ impl Workspace {
         length: Option<i64>,
         percent: impl Fn(&Paced) -> f64,
     ) {
-        self.send_speeds(paced, length, |d, c| {
+        self.send_speeds((paced, false), length, |d, c| {
             if !d.freeze {
                 d.set_percent(percent(c));
             }
@@ -1422,61 +1518,27 @@ impl Workspace {
         });
     }
 
-    fn step_key(&mut self, key: Key, dir: i64, chosen: &[Chosen], sounds: &[Sound]) {
+    fn step_key(&mut self, key: Key, dir: i64, lists: Lists<'_>) {
         let at = self.snap.timeline.position;
         let Some(p) = self.project_shared() else {
             return;
         };
-        let id = match key {
-            Key::Volume => sounds.first().map(|s| s.id.clone()),
-            Key::Picture(_) => chosen.first().map(|c| c.id.clone()),
-            _ => None,
-        };
-        let Some(id) = id else {
+        let Some(c) = key_clips(key, lists).first().and_then(|id| p.clip(id)) else {
             return;
         };
-        let Some(c) = p.clip(&id) else {
-            return;
-        };
-        let times: Vec<i64> = match key {
-            Key::Volume => c
-                .audio
-                .as_ref()
-                .map(|a| {
-                    a.gain_keys
-                        .iter()
-                        .map(|k| c.key_time(k.frame).round() as i64)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            Key::Picture(f) => {
-                let Some(v) = f.channel() else {
-                    return;
-                };
-                c.picture
-                    .as_ref()
-                    .map(|pic| {
-                        pic.keys_of(v)
-                            .iter()
-                            .map(|k| c.key_time(k.frame).round() as i64)
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            }
-            _ => return,
-        };
-        let inside = |t: i64| c.start <= t && t < c.end();
+        let inside = |t: &i64| c.start <= *t && *t < c.end();
+        let times = key_times(c, key).into_iter().filter(inside);
         let target = if dir < 0 {
-            times.into_iter().filter(|t| inside(*t) && *t < at).max()
+            times.filter(|t| *t < at).max()
         } else {
-            times.into_iter().filter(|t| inside(*t) && *t > at).min()
+            times.filter(|t| *t > at).min()
         };
         if let Some(t) = target {
             self.seek(PlayerId::Timeline, t, false);
         }
     }
 
-    fn toggle_key(&mut self, key: Key, chosen: &[Chosen], sounds: &[Sound]) {
+    fn toggle_key(&mut self, key: Key, lists: Lists<'_>) {
         let Some(param) = param_name(key) else {
             return;
         };
@@ -1484,48 +1546,21 @@ impl Workspace {
         let Some(p) = self.project_shared() else {
             return;
         };
-        let ids: Vec<String> = match key {
-            Key::Volume => sounds.iter().map(|s| s.id.clone()).collect(),
-            Key::Picture(_) => chosen.iter().map(|c| c.id.clone()).collect(),
-            _ => return,
-        };
-        let on = ids.iter().any(|id| {
-            p.clip(id).is_some_and(|c| match key {
-                Key::Volume => c.audio.as_ref().is_some_and(|a| {
-                    a.gain_keys
-                        .iter()
-                        .any(|k| c.key_time(k.frame).round() as i64 == at)
-                }),
-                Key::Picture(f) => f.channel().is_some_and(|v| {
-                    c.picture.as_ref().is_some_and(|pic| {
-                        pic.keys_of(v)
-                            .iter()
-                            .any(|k| c.key_time(k.frame).round() as i64 == at)
-                    })
-                }),
-                _ => false,
-            })
-        });
-        if on {
-            let keyed: Vec<&str> = ids
+        let ids = key_clips(key, lists);
+        let times: Vec<(&str, Vec<i64>)> = ids
+            .iter()
+            .filter_map(|id| Some((id.as_str(), key_times(p.clip(id)?, key))))
+            .collect();
+        if times.iter().any(|(_, t)| t.contains(&at)) {
+            let keyed: Vec<&str> = times
                 .iter()
-                .filter(|id| {
-                    p.clip(id).is_some_and(|c| match key {
-                        Key::Volume => c.audio.as_ref().is_some_and(|a| a.is_keyed()),
-                        Key::Picture(f) => f
-                            .channel()
-                            .is_some_and(|v| c.picture.as_ref().is_some_and(|pic| pic.has_keys(v))),
-                        _ => false,
-                    })
-                })
-                .map(String::as_str)
+                .filter(|(_, t)| !t.is_empty())
+                .map(|(id, _)| *id)
                 .collect();
-            if !keyed.is_empty() {
-                self.send(
-                    "keyframes.remove",
-                    json!({ "clips": keyed, "param": param, "at": at }),
-                );
-            }
+            self.send(
+                "keyframes.remove",
+                json!({ "clips": keyed, "param": param, "at": at }),
+            );
         } else if !ids.is_empty() {
             self.send(
                 "keyframes.add",
@@ -1844,13 +1879,13 @@ impl Workspace {
                     self.inspector.held = None;
                 }
             }
-            Act::Direction(to) => self.send_speeds(paced, None, |d, _| to.turn(d)),
+            Act::Direction(to) => self.send_speeds((paced, false), None, |d, _| to.turn(d)),
             Act::Ripple(on) => self.inspector.ripple = Some(on),
             Act::Retime(r) => {
                 let ids: Vec<String> = paced.iter().map(|c| c.id.clone()).collect();
                 self.set_retime(&ids, r);
             }
-            Act::FullSpeed => self.send_speeds(paced, None, |d, _| {
+            Act::FullSpeed => self.send_speeds((paced, true), None, |d, _| {
                 Direction::Forward.turn(d);
                 d.set_percent(Key::Speed.usual());
             }),
@@ -1927,8 +1962,8 @@ impl Workspace {
                     self.send("clip.set", json!({ "clips": ids, "muted": on }));
                 }
             }
-            Act::Step(key, dir) => self.step_key(key, dir, chosen, sounds),
-            Act::Toggle(key) => self.toggle_key(key, chosen, sounds),
+            Act::Step(key, dir) => self.step_key(key, dir, (chosen, sounds, paced)),
+            Act::Toggle(key) => self.toggle_key(key, (chosen, sounds, paced)),
             Act::KeyEase(key, ease) => self.ease_key(key, ease, chosen, sounds),
             Act::ResetChannel(field) => self.reset_channel(field, chosen),
             Act::Unkey => {
@@ -2051,8 +2086,9 @@ impl Workspace {
                     self.super_scale_section(ui, &p, &chosen);
                 }
                 if !paced.is_empty() {
-                    let at = (&self.inspector, &*p, dropped);
-                    speed_section(ui, at, &paced, ripple, &mut acts);
+                    let state = (&self.inspector, &*p, dropped);
+                    let at = self.snap.timeline.position;
+                    speed_section(ui, state, (&paced, at), ripple, &mut acts);
                 }
                 if !sounds.is_empty() {
                     self.audio_section(ui, &p, &sounds, &mut acts);

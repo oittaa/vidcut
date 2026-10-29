@@ -99,27 +99,46 @@ fn with(c: &Clip, map: Vec<Section>, skip: i64) -> Clip {
     n
 }
 
+fn takes_keyframe(p: &Project, id: &str, t: i64) -> Result<Clip> {
+    let c = under(p, id, t)?;
+    let tc = p.settings.timecode(t);
+    if t == c.start {
+        return Err(Error::invalid(format!(
+            "{id} starts at {tc}: a speed keyframe goes after its first frame"
+        )));
+    }
+    let (map, skip) = sections(&c);
+    let u = skip + t - c.start;
+    if map.iter().skip(1).any(|s| s.at == u) {
+        return Err(Error::invalid(format!(
+            "{id} already has a speed keyframe at {tc}"
+        )));
+    }
+    Ok(c)
+}
+
 pub fn add_keyframe(p: &mut Project, ids: &[String], t: i64) -> Result<Vec<(String, i64)>> {
-    let mut out = Vec::new();
+    let mut why = None;
+    let mut targets = Vec::new();
     for id in ids {
-        let c = under(p, id, t)?;
-        let tc = p.settings.timecode(t);
-        if t == c.start {
-            return Err(Error::invalid(format!(
-                "{id} starts at {tc}: a speed keyframe goes after its first frame"
-            )));
+        match takes_keyframe(p, id, t) {
+            Ok(c) => targets.push(c),
+            Err(e) => {
+                why.get_or_insert(e);
+            }
         }
+    }
+    if targets.is_empty() {
+        return Err(why.unwrap_or_else(|| Error::invalid("no clips")));
+    }
+    let mut out = Vec::new();
+    for c in targets {
         let (mut map, skip) = sections(&c);
         let u = skip + t - c.start;
-        if map.iter().skip(1).any(|s| s.at == u) {
-            return Err(Error::invalid(format!(
-                "{id} already has a speed keyframe at {tc}"
-            )));
-        }
         split(&mut map, u);
         let n = with(&c, map, skip);
         retimed(p, &c, n, c.duration, false, "with this speed keyframe")?;
-        out.push((id.clone(), u));
+        out.push((c.id, u));
     }
     Ok(out)
 }
@@ -249,6 +268,41 @@ pub fn freeze(p: &mut Project, ids: &[String], t: i64, ripple: Option<bool>) -> 
         };
         let n = with(&c, map, skip);
         retimed(p, &c, n, want, ripple_on, "with a freeze frame")?;
+    }
+    Ok(())
+}
+
+pub fn reverse(p: &mut Project, ids: &[String], t: i64, backward: bool) -> Result<()> {
+    for id in ids {
+        let c = under(p, id, t)?;
+        let v = c.speed_at(t);
+        if v == 0.0 {
+            return Err(Error::invalid(format!(
+                "the section of {id} under {} is a freeze frame: it has no direction",
+                p.settings.timecode(t)
+            )));
+        }
+        if (v < 0.0) == backward {
+            continue;
+        }
+        if c.speed.as_ref().is_none_or(|s| s.sections.len() < 2) {
+            change_speed(p, std::slice::from_ref(id), -v, Some(false), Some(t))?;
+            continue;
+        }
+        let (mut map, skip) = sections(&c);
+        let end = skip + c.duration;
+        let i = index(&map, skip + t - c.start);
+        let s = map[i];
+        let a = if i == 0 { skip } else { s.at };
+        let b = map.get(i + 1).map_or(end, |n| n.at);
+        map[i] = Section {
+            at: a,
+            from: pos(&s, a) + (b - a) as f64 * s.speed,
+            speed: -s.speed,
+        };
+        let n = with(&c, map, skip);
+        let how = if backward { "backward" } else { "forward" };
+        retimed(p, &c, n, c.duration, false, how)?;
     }
     Ok(())
 }

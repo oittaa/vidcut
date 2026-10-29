@@ -1939,10 +1939,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - With no row and no keyframe selected, the question names a value that no row shows as selected.
     - In one check, this was the value keyed last with a button of the Inspector. Delete removed all its keyframes.
   - In one check, the question named no value. After Delete, a Position X with no keyframes also went back to 0.
+  - The keyframe tray has a Speed group with two rows, Retime Frame and Retime Speed. Each row has a key at each speed keyframe.
 - **vidcut:**
   - A point where the speed changes is a speed keyframe. The GUI, the requests and the docs use this one name.
     - The right-click menu has Add Speed Keyframe.
-  - The Keyframes tab and the keyframe tray have a Speed row, in a Speed group. It shows the speed keyframes of the clip.
+  - The Keyframes tab and the keyframe tray have one Speed row, in a Speed group. It shows the speed keyframes of the clip.
   - With the Keyframes tab or the tray open, the three items act only on the selected rows and keyframes. The Speed row is one of these rows.
     - Thus with the tray open and no row selected, Add Keyframe is off.
   - With both closed, they act on the speed keyframes of the selected clips ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
@@ -1957,6 +1958,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - One thing has one name. A speed keyframe is a keyframe of the clip's speed, and the keyframe items act on it.
   - The Speed row shows the speed keyframes with the other keyframes of the clip. Thus the Mark menu reaches them also with the Keyframes tab open.
+  - Retime Frame and Retime Speed show the same speed keyframes. One row is sufficient to select, step to and delete them.
   - A Delete All that removes one speed keyframe is a fault in Resolve. vidcut does not copy it.
   - An item that does nothing gives the user no clue. The tooltip tells the next step.
   - The user sees which keyframes go before they go. A value that no row shows as selected is a hidden choice.
@@ -1974,3 +1976,19 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The last section shows each source frame to the end of the media, the last frame too ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - A speed change does not remove pictures from a clip. The lost frame is a fault in Resolve. vidcut does not copy it.
+
+## X96. Reverse plays the section's own frames backward
+
+- **Resolve:**
+  - The Direction buttons of the Inspector act on the section under the playhead.
+  - Example in Resolve Studio 21.1.2: speed keyframes at frames 30 and 60. The middle section plays at 200%, and the last at 100%. The clip has 884 frames.
+    - After Reverse, frames 31 to 45 show source frames 28, 26 and so on to 0. The section plays backward to the media's first frame.
+    - Frames 46 to 494 show source frames 2, 4 and so on to 898. The last section changes to 200%, and the clip has 495 frames.
+  - The manual does not tell this.
+- **vidcut:**
+  - Reverse plays the section's own frames in the other order. Forward turns them back.
+  - The section goes from speed keyframe to speed keyframe, also outside the clip. The first and last sections end at the clip's edges. Thus no speed keyframe moves.
+  - The other sections and the clip's length stay (`speed.reverse`, [D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:**
+  - The user changes the direction of one section. The other sections keep their speeds and their frames.
+  - In Resolve, the next section changes its speed and shows the media again from the start. The clip then gets shorter.
