@@ -1626,7 +1626,7 @@ impl Stream {
                             &rgb,
                         )?;
                     }
-                    frames.push(Held::new(out, &gpu.device, &gpu.queue));
+                    frames.push(Held::new(out, (&gpu.device, &gpu.queue), gpu.id));
                 }
                 gpu.wait()?;
             }

@@ -18,6 +18,10 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 - **wgpu 30's `Surface::configure` fails when another thread submits while it waits for the device to go idle**.
   - Then the default handler panics.
   - eframe configures on each resize. Thus the viewer thread submits through `Gate::pass` ([playback](design/playback.md#the-viewer-thread), [todo](todo/wgpu-configure-gate.md)).
+- **wgpu 30 compares two devices by their id only.**
+  - Each wgpu instance counts its ids from the start. Thus the viewer's device and the offscreen device can have the same id.
+  - Then `==` says that they are one device. wgpu looks for the buffer of one device in the other, and panics.
+  - Thus each `Gpu` has its own id, and a held picture compares that id (`Held::on`).
 - **egui-wgpu shows an `Rgba8Unorm` native texture's values as they are**, with no sRGB conversion.
   - The target of the viewer (`TARGET` in `screen/mod.rs`) holds gamma-encoded BT.709 RGB.
 

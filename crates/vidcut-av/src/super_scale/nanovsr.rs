@@ -977,6 +977,7 @@ struct Tiles {
 struct Engine {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    id: u64,
     pipelines: Pipelines,
     none: wgpu::Buffer,
     net: Option<Gpu>,
@@ -1064,6 +1065,7 @@ impl Engine {
         Ok(Self {
             device,
             queue,
+            id: on.gpu.id(),
             pipelines,
             none,
             net: None,
@@ -1533,7 +1535,7 @@ impl Engine {
             U::STORAGE | U::COPY_SRC | U::COPY_DST,
         );
         enc.copy_buffer_to_buffer(&t.out, 0, &out, 0, t.shown);
-        Held::new(out, &self.device, &self.queue)
+        Held::new(out, (&self.device, &self.queue), self.id)
     }
 }
 

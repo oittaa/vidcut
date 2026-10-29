@@ -433,7 +433,11 @@ impl Engine {
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         enc.copy_buffer_to_buffer(&held.out, 0, &out, 0, whole);
         self.gpu.queue.submit([enc.finish()]);
-        Ok(held::Held::new(out, &self.gpu.device, &self.gpu.queue))
+        Ok(held::Held::new(
+            out,
+            (&self.gpu.device, &self.gpu.queue),
+            self.gpu.id,
+        ))
     }
 }
 

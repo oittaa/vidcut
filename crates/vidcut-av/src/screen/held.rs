@@ -10,6 +10,7 @@ pub(crate) struct Held {
     buffer: wgpu::Buffer,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    gpu: u64,
     memory: Option<Arc<HeldMemory>>,
 }
 
@@ -18,11 +19,16 @@ static MARK: u8 = 0;
 static SHARES: AtomicBool = AtomicBool::new(true);
 
 impl Held {
-    pub(crate) fn new(buffer: wgpu::Buffer, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub(crate) fn new(
+        buffer: wgpu::Buffer,
+        (device, queue): (&wgpu::Device, &wgpu::Queue),
+        gpu: u64,
+    ) -> Self {
         Self {
             buffer,
             device: device.clone(),
             queue: queue.clone(),
+            gpu,
             memory: None,
         }
     }
@@ -39,8 +45,8 @@ impl Held {
         &self.buffer
     }
 
-    pub(crate) fn on(&self, device: &wgpu::Device) -> bool {
-        self.device == *device
+    pub(crate) fn on(&self, gpu: &super::Gpu) -> bool {
+        self.gpu == gpu.id
     }
 
     pub(crate) fn read(&self, len: usize) -> Result<Vec<u8>> {
@@ -150,7 +156,7 @@ fn for_the_viewer(held: &Held) -> bool {
             o.adapter.device,
             &o.adapter.device_pci_bus_id,
         );
-        held.on(&o.gpu.device)
+        held.on(&o.gpu)
             && super::shared::possible(&o.gpu.device)
             && crate::player::viewer_on(&adapter)
     })
@@ -173,6 +179,7 @@ fn share(f: &frame::Video, held: &Held) -> Result<frame::Video> {
         buffer,
         device: held.device.clone(),
         queue: held.queue.clone(),
+        gpu: held.gpu,
         memory: Some(Arc::new(memory)),
     };
     let mut out = crate::export::video::frame_ref(f)?;
@@ -208,7 +215,7 @@ pub(crate) fn small_luma(
     let held = held(f)?;
     let size = (f.width(), f.height());
     let whole = u64::from(size.0) * u64::from(size.1) * 3;
-    if !held.on(&gpu.device) || held.buffer().size() < whole {
+    if !held.on(gpu) || held.buffer().size() < whole {
         return Err(Error::Invalid(
             "the picture to measure isn't held on the drawing's GPU".into(),
         ));
@@ -219,7 +226,7 @@ pub(crate) fn small_luma(
                 .luma((&gpu.device, &gpu.queue), held.buffer(), size, (ow, oh))
         })
         .map_err(Error::Invalid)?;
-    Held::new(small, &gpu.device, &gpu.queue).read(ow as usize * oh as usize)
+    Held::new(small, (&gpu.device, &gpu.queue), gpu.id).read(ow as usize * oh as usize)
 }
 
 fn packed_words(encoded: &wgpu::Texture) -> u64 {
