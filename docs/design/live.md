@@ -351,6 +351,7 @@ The bar and the Jobs button:
 - The Speed row shows `Speed::keyframes`: the first frame of each section after the first, with its speed.
   - `keyframes.add` and `keyframes.remove` with the `param` `speed` edit them in `ops::speed`.
   - A speed keyframe does not move, copy or take an ease (`fixed`). A change of its value sends `speed.set`.
+  - The value field is off when the section is frozen or plays backward. Why: `speed.set` changes only a forward section.
   - Why: a speed keyframe is a cut between two sections. Its frame and its value come from the sections.
 - A press in the tab or the tray gives them the keys. A press in another place takes the keys away (`Workspace::key_focus`, `Editor::focused`).
 - With the keys, Ctrl+C and Ctrl+X send `keyframes.copy` or `keyframes.cut`. The core keeps the keyframes that come back as its clipboard, in place of the clips.

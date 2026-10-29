@@ -1301,7 +1301,7 @@ impl Workspace {
             return true;
         }
         let method = if cut {
-            self.key_editor.selected.clear();
+            self.key_editor.selected.retain(|m| fixed(m.param));
             "keyframes.cut"
         } else {
             "keyframes.copy"
@@ -2621,17 +2621,23 @@ impl Workspace {
             KeyParam::Pitch | KeyParam::Yaw => 0.01,
             _ => 1.0,
         };
+        let forward = !fixed(param) || raw > 0.0;
         let r = ui
             .push_id(("key-value", lane_name(param), on_y), |ui| {
-                ui.add(
-                    egui::DragValue::new(&mut v)
-                        .update_while_editing(false)
-                        .speed(speed)
-                        .max_decimals(places(param).max(1))
-                        .prefix(prefix)
-                        .suffix(unit(param))
-                        .min_size(vec2(FIELD_W, ui.spacing().interact_size.y)),
-                )
+                let mut drag = egui::DragValue::new(&mut v)
+                    .update_while_editing(false)
+                    .speed(speed)
+                    .max_decimals(places(param).max(1))
+                    .prefix(prefix)
+                    .suffix(unit(param))
+                    .min_size(vec2(FIELD_W, ui.spacing().interact_size.y));
+                if fixed(param) && forward {
+                    let (lo, hi) = limits(param);
+                    drag = drag
+                        .range(shown_value(param, lo, on_y, f)..=shown_value(param, hi, on_y, f));
+                }
+                ui.add_enabled(forward, drag)
+                    .on_disabled_hover_text("Only a forward section takes a speed")
             })
             .inner;
         if r.drag_started() {

@@ -1430,7 +1430,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Add Speed Keyframe in the right-click menu adds a speed keyframe at the playhead.
     - The Speed row of the Keyframes tab and the keyframe tray shows the speed keyframes ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
       - A speed keyframe does not move, copy or take an ease. Its value is the speed of the section after it.
-      - A change of its value in the tab sends `speed.set`.
+      - Ctrl+X leaves the selected speed keyframes in place, and they stay selected.
+      - A change of its value in the tab sends `speed.set`. The field takes 1% to 10000%.
+      - The field is off when the section is frozen or plays backward.
     - With the tab and the tray closed, Mark > Add Keyframe (Ctrl+[) adds a speed keyframe at the playhead to each selected clip under it.
     - Then Mark > Delete Keyframe (Alt+]) removes the speed keyframe at the playhead, or else the nearest one before it.
     - Then Mark > Delete All Keyframes asks first. Then it removes all the speed keyframes of the selected clips.
