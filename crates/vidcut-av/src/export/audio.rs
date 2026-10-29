@@ -490,6 +490,7 @@ impl Paced {
     }
 
     fn mapped(
+        speed: f64,
         map: Vec<(f64, f64, f64)>,
         origin: f64,
         (next, bound): (i64, i64),
@@ -498,7 +499,7 @@ impl Paced {
         channels: u16,
     ) -> Self {
         Self {
-            speed: map[0].2,
+            speed,
             stretch: Some(Stretch::mapped(map, rate, usize::from(channels))),
             origin,
             next,
@@ -739,13 +740,13 @@ impl Lane {
                                 let skip = (-out).max(0);
                                 map.push((
                                     (out + skip) as f64,
-                                    (s - at) as f64 + skip as f64 * v,
-                                    v,
+                                    ((s - at) as f64 + skip as f64 * v).abs(),
+                                    v.abs(),
                                 ));
                                 out += n;
                                 bound = s + (n as f64 * v).round() as i64;
                             }
-                            Paced::mapped(map, *origin, (at, bound), drop, rate, channels)
+                            Paced::mapped(*speed, map, *origin, (at, bound), drop, rate, channels)
                         };
                         let start = paced.start(rate);
                         self.paced = Some(paced);
@@ -856,7 +857,7 @@ fn ramps_on(piece: &AudioPiece, next: &AudioPiece) -> bool {
                 joined: true,
                 ..
             },
-        ) => path == p2 && stream == s2 && *speed > 0.0 && *sp2 > 0.0,
+        ) => path == p2 && stream == s2 && speed * sp2 > 0.0,
         _ => false,
     }
 }
