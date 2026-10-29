@@ -417,8 +417,8 @@ pub fn sound_band(tr: &TrackRect, scale: &Scale, c: &Clip) -> Option<Rect> {
     ))
 }
 
-pub const SPEED_STRIP: f32 = 14.0;
-const SPEED_LABEL: f32 = 44.0;
+pub const SPEED_STRIP: f32 = 16.0;
+const SPEED_LABEL: f32 = 52.0;
 
 pub struct SpeedLabel {
     pub at: i64,

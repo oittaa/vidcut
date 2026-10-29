@@ -646,13 +646,13 @@ fn speed_marks(
     strip: Rect,
     bottom: f32,
 ) {
-    painter.rect_filled(strip, CornerRadius::ZERO, Color32::from_black_alpha(150));
-    let line = Stroke::new(1.0, Color32::from_white_alpha(220));
+    painter.rect_filled(strip, CornerRadius::ZERO, Color32::BLACK);
+    let line = Stroke::new(2.0, Color32::WHITE);
     for t in speed_points(c) {
         let x = scale.xf(t);
         painter.line_segment([pos2(x, strip.top()), pos2(x, bottom)], line);
         painter.rect_filled(
-            Rect::from_center_size(pos2(x, strip.top() + 3.0), vec2(5.0, 6.0)),
+            Rect::from_center_size(pos2(x, strip.top() + 4.0), vec2(9.0, 8.0)),
             CornerRadius::same(1),
             Color32::WHITE,
         );
@@ -663,13 +663,16 @@ fn speed_marks(
         } else {
             theme::colors().text_dim
         };
-        painter.text(
-            l.rect.center(),
-            Align2::CENTER_CENTER,
-            format!("{}%", (l.speed * 100.0).round()),
-            FontId::proportional(10.0),
-            color,
-        );
+        let text = format!("{}%", (l.speed * 100.0).round());
+        for dx in [0.0, 1.0] {
+            painter.text(
+                l.rect.center() + vec2(dx, 0.0),
+                Align2::CENTER_CENTER,
+                &text,
+                FontId::proportional(12.0),
+                color,
+            );
+        }
     }
 }
 
