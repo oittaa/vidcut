@@ -1411,7 +1411,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Speed keyframes.** These facts come from Resolve Studio 21.1.2, from its renders and its OTIO files:
     - A speed keyframe cuts a clip into two sections. Each section has a speed of its own. The sound of the clip gets the same sections.
     - A new speed keyframe gives both sections the speed of the section that it cuts.
-    - Each timeline frame shows `floor` of the source position on the line of its section.
+    - Each timeline frame shows `floor` of its source position plus 0.002 frames. The source position is on the line of its section.
+      - Thus a position that is 0.002 frames or less below a whole number shows that number.
+      - The amount is in frames, at 25 fps and at 30 fps.
     - An eased speed keyframe changes the speed on a curve. Let k be its frame and s its source position.
       - v0 and v1 are the speeds before and after it. a and c are the frames of its handles, a before k and c after k.
       - From k + a to k + c, the curve is a cubic Bezier curve. Its points are (k + a, s + a × v0), (k, s), (k, s) and (k + c, s + c × v1).
@@ -1421,7 +1423,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - The clip's first frame and its end count as speed keyframes.
       - Where the handles of two eased speed keyframes overlap, the later speed keyframe's handle keeps its length, up to the section. The earlier handle gets the rest of the section.
       - The value of a handle changes with its length.
-    - A section that plays backward also shows `floor` of its line. Thus where the clip turns, the speed keyframe's own source frame shows once.
+    - A section that plays backward uses the same `floor`. Thus where the clip turns, the speed keyframe's own source frame shows once.
     - An eased speed keyframe where the clip turns gives a smooth turn, on the same curve. The picture slows down, stops and goes back.
     - A change of a section's speed moves the later speed keyframes and the clip's end. Their sections keep their speeds.
     - The freeze button holds the frame under the playhead for 2 seconds of the timeline. It adds a section at 0% and a speed keyframe after it.
