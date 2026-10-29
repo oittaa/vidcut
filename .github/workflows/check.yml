@@ -140,7 +140,13 @@ jobs:
           brew install ffmpeg-full
           prefix=$(brew --prefix ffmpeg-full)
           export PKG_CONFIG_PATH="${prefix}/lib/pkgconfig"
-          echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+          # Homebrew names the Cellar directory with the bottle revision.
+          # pkg-config stores that directory, and the Rust cache keeps it.
+          revision=$(basename "$(cd "${prefix}" && pwd -P)")
+          {
+            echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH}"
+            echo "FFMPEG_BOTTLE=${revision}"
+          } >> "$GITHUB_ENV"
           pkg-config --exists --print-errors \
             libavcodec libavformat libavfilter libavutil libswscale libswresample
           pkg-config --modversion libavcodec libswresample
@@ -153,6 +159,9 @@ jobs:
       - name: Cache compiled dependencies
         uses: Swatinem/rust-cache@v2
         with:
+          # A new bottle revision removes the old Cellar directory. Without
+          # this, a restored link line still names that directory.
+          key: ffmpeg-${{ env.FFMPEG_BOTTLE }}
           save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Fast gate
