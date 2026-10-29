@@ -1,7 +1,7 @@
 use super::keyframes::{Pick, picked_as};
 use super::{change_speed, retimed};
 use crate::error::{Error, Result};
-use crate::model::{Clip, Project, Section, Speed};
+use crate::model::{Clip, Ease, Project, Section, Speed};
 
 fn clip_of(p: &Project, id: &str) -> Result<Clip> {
     let c = p
@@ -70,12 +70,14 @@ fn split(map: &mut Vec<Section>, u: i64) -> usize {
         at: u,
         from: pos(&s, u),
         speed: s.speed,
+        ease: None,
     };
     if i == 0 && u <= s.at {
         map[0] = Section {
             at: u - 1,
             from: pos(&s, u - 1),
             speed: s.speed,
+            ease: None,
         };
         map.insert(1, cut);
         return 1;
@@ -256,8 +258,16 @@ pub fn freeze(p: &mut Project, ids: &[String], t: i64, ripple: Option<bool>) -> 
             at: u,
             from: if s.speed < 0.0 { held } else { s.from },
             speed: 0.0,
+            ease: s.ease,
         };
-        map.insert(i + 1, Section { at: u + hold, ..s });
+        map.insert(
+            i + 1,
+            Section {
+                at: u + hold,
+                ease: None,
+                ..s
+            },
+        );
         for x in &mut map[i + 2..] {
             x.at += hold;
         }
@@ -299,10 +309,154 @@ pub fn reverse(p: &mut Project, ids: &[String], t: i64, backward: bool) -> Resul
             at: a,
             from: pos(&s, a) + (b - a) as f64 * s.speed,
             speed: -s.speed,
+            ease: s.ease,
         };
         let n = with(&c, map, skip);
         let how = if backward { "backward" } else { "forward" };
         retimed(p, &c, n, c.duration, false, how)?;
+    }
+    Ok(())
+}
+
+fn takes(map: &[Section], i: usize) -> bool {
+    i > 0 && i < map.len() && map[i - 1].speed >= 0.0 && map[i].speed >= 0.0
+}
+
+fn sides(ease: Ease) -> (bool, bool) {
+    match ease {
+        Ease::Linear => (false, false),
+        Ease::EaseIn => (true, false),
+        Ease::EaseOut => (false, true),
+        Ease::EaseInOut => (true, true),
+    }
+}
+
+pub fn section_eases(c: &Clip, t: i64) -> Option<(Ease, Vec<Ease>)> {
+    let speed = c.speed.as_ref().filter(|s| s.sections.len() > 1)?;
+    let map = &speed.sections;
+    let i = index(map, speed.skip + t - c.start);
+    let on = |j: usize| takes(map, j) && map[j].ease.is_some();
+    let now = Ease::ALL
+        .into_iter()
+        .find(|&e| sides(e) == (on(i), on(i + 1)))?;
+    let options = Ease::ALL
+        .into_iter()
+        .filter(|&e| {
+            let (start, end) = sides(e);
+            (!start || takes(map, i)) && (!end || takes(map, i + 1))
+        })
+        .collect();
+    Some((now, options))
+}
+
+pub fn key_ease(c: &Clip, frame: i64) -> Option<(Ease, bool)> {
+    let map = &c.speed.as_ref()?.sections;
+    let i = map.iter().position(|s| s.at == frame).filter(|&i| i > 0)?;
+    let on = takes(map, i) && map[i].ease.is_some();
+    let ease = if on { Ease::EaseInOut } else { Ease::Linear };
+    Some((ease, takes(map, i)))
+}
+
+fn eased(
+    p: &Project,
+    c: &Clip,
+    map: &mut [Section],
+    i: usize,
+    on: bool,
+    [start, end]: [i64; 2],
+) -> Result<()> {
+    if !on {
+        map[i].ease = None;
+        return Ok(());
+    }
+    if !takes(map, i) {
+        let at = c.key_time(map[i].at).round() as i64;
+        return Err(Error::invalid(format!(
+            "the speed keyframe of {} at {} is next to a section that plays backward: \
+             it takes no ease",
+            c.id,
+            p.settings.timecode(at)
+        )));
+    }
+    let h = p.settings.fps.as_f64() / 6.0;
+    let at = map[i].at;
+    let before = if at > start {
+        (-h).max((start - at) as f64)
+    } else {
+        -h
+    };
+    let after = if end > at {
+        h.min((end - at) as f64)
+    } else {
+        h
+    };
+    map[i].ease = map[i].ease.or(Some([before, after]));
+    Ok(())
+}
+
+fn keyed(c: &Clip) -> Result<()> {
+    if c.speed.as_ref().is_none_or(|s| s.sections.len() < 2) {
+        return Err(Error::invalid(format!("{} has no speed keyframes", c.id)));
+    }
+    Ok(())
+}
+
+pub fn ease(p: &mut Project, ids: &[String], t: i64, ease: Ease) -> Result<()> {
+    let (first, last) = sides(ease);
+    for id in ids {
+        let c = under(p, id, t)?;
+        keyed(&c)?;
+        let (mut map, skip) = sections(&c);
+        let i = index(&map, skip + t - c.start);
+        let tc = p.settings.timecode(t);
+        if first && i == 0 {
+            return Err(Error::invalid(format!(
+                "the section of {id} under {tc} has no speed keyframe at its start"
+            )));
+        }
+        if last && i + 1 == map.len() {
+            return Err(Error::invalid(format!(
+                "the section of {id} under {tc} has no speed keyframe at its end"
+            )));
+        }
+        let edges = [skip, skip + c.duration];
+        if i > 0 {
+            eased(p, &c, &mut map, i, first, edges)?;
+        }
+        if i + 1 < map.len() {
+            eased(p, &c, &mut map, i + 1, last, edges)?;
+        }
+        let n = with(&c, map, skip);
+        retimed(p, &c, n, c.duration, false, "with this ease")?;
+    }
+    Ok(())
+}
+
+pub fn ease_keyframes(p: &mut Project, ids: &[String], pick: &Pick, ease: Ease) -> Result<()> {
+    let on = match ease {
+        Ease::Linear => false,
+        Ease::EaseInOut => true,
+        Ease::EaseIn | Ease::EaseOut => {
+            return Err(Error::invalid(
+                "a speed keyframe takes `linear` or `ease_in_out`: speed.ease eases one side \
+                 of a section",
+            ));
+        }
+    };
+    for id in ids {
+        let c = clip_of(p, id)?;
+        keyed(&c)?;
+        let keys = c.speed.as_ref().map(Speed::keyframes).unwrap_or_default();
+        let chosen = picked_as(&c, &keys, pick, "speed")?;
+        let (mut map, skip) = sections(&c);
+        let edges = [skip, skip + c.duration];
+        for i in 1..map.len() {
+            if chosen.contains(&map[i].at) {
+                eased(p, &c, &mut map, i, on, edges)?;
+            }
+        }
+        let n = with(&c, map, skip);
+        retimed(p, &c, n, c.duration, false, "with this ease")?;
     }
     Ok(())
 }

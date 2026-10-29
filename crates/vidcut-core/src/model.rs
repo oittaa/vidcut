@@ -1457,6 +1457,12 @@ pub struct Section {
     /// Source frames for each frame: 2.0 twice as fast, 0.5 half, -1.0
     /// backward, 0 a freeze frame.
     pub speed: f64,
+    /// The ease of the speed keyframe at `at`: the frames before and after
+    /// it in which the speed changes on a curve. Left out, the speed
+    /// changes at once. Only between two sections that play forward or
+    /// freeze.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ease: Option<[f64; 2]>,
 }
 
 fn is_zero_frames(n: &i64) -> bool {
@@ -1470,6 +1476,7 @@ impl Speed {
                 at: 0,
                 from: 0.0,
                 speed,
+                ease: None,
             }]),
             skip: 0,
             effect: None,

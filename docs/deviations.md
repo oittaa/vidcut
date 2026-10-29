@@ -1989,6 +1989,26 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Reverse plays the section's own frames in the other order. Forward turns them back.
   - The section goes from speed keyframe to speed keyframe, also outside the clip. The first and last sections end at the clip's edges. Thus no speed keyframe moves.
   - The other sections and the clip's length stay (`speed.reverse`, [D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A speed keyframe next to a section that plays backward takes no ease.
 - **Why:**
   - The user changes the direction of one section. The other sections keep their speeds and their frames.
   - In Resolve, the next section changes its speed and shows the media again from the start. The clip then gets shorter.
+  - The picture jumps at a speed keyframe next to a section that plays backward. No curve joins the two sides of a jump.
+
+## X97. Ease In and Ease Out ease their own side of a section
+
+- **Resolve:**
+  - The Ease list of the Inspector acts on the section under the playhead. It has Linear, Ease In, Ease Out and Ease In and Out.
+  - Example in Resolve Studio 21.1.2: speed keyframes at frames 30 and 60, and 25% between them.
+    - Ease In, Ease Out and Ease In and Out each ease only the speed keyframe at frame 30. They give the same export and the same render.
+    - The speed keyframe at frame 60 stays linear. There, the speed changes at once.
+  - The manual does not tell this. Its Speed Change controls of the Cut page have no Ease list.
+- **vidcut:**
+  - Ease In eases the speed keyframe where the section starts. Ease Out eases the one where it ends. Ease In and Out eases both, and Linear neither.
+  - The list shows the eases of the two speed keyframes of the section (`speed.ease`, [D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The first section has no speed keyframe at its start, and the last none at its end. Their lists offer only the eases that apply.
+  - The Speed row of the Keyframes tab and the tray offers Linear and Ease In and Out for one speed keyframe.
+- **Why:**
+  - Three choices that give the same result are a fault in Resolve. vidcut does not copy it.
+  - Ease In and Ease Out then do what their names tell, as the Dynamic Zoom ease does. Ease In is slow at the start, Ease Out at the end.
+  - A handle on one side of a speed keyframe alone gives a straight line. Thus one speed keyframe takes an ease on both sides or on none.

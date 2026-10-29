@@ -1060,6 +1060,19 @@ pub enum Request {
         #[serde(default = "yes")]
         backward: bool,
     },
+    /// Ease the speed changes of the section under `at` (the playhead) in
+    /// each clip: `ease_in` at the speed keyframe where it starts,
+    /// `ease_out` at the one where it ends, `ease_in_out` at both and
+    /// `linear` at neither. An eased speed keyframe changes the speed on a
+    /// curve, from a sixth of a second before it to a sixth after it. A
+    /// speed keyframe next to a section that plays backward takes no ease.
+    #[serde(rename = "speed.ease")]
+    SpeedEase {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        ease: Ease,
+    },
     /// Copy clips (Ctrl+C): returns them with their tracks as `clips`,
     /// ready for `edit.paste`. The GUI also keeps them on its clipboard.
     /// With `range` instead of `clips`: the parts of the clips on the
@@ -3108,8 +3121,10 @@ pub enum KeyParam {
     /// The speed of a clip (decision D48). A speed keyframe cuts the speed
     /// section under it in two, at its speed. Its removal makes the two
     /// sections one, at the speed between the keyframes on each side, and
-    /// the clip keeps its length. It takes no `value` or `ease`:
-    /// `speed.set` sets the speed of a section. It does not move or copy.
+    /// the clip keeps its length. It takes no `value` or handles:
+    /// `speed.set` sets the speed of a section. `keyframes.set` gives it
+    /// `linear` or `ease_in_out`, as `speed.ease` does. It does not move or
+    /// copy.
     /// `keyframes.add` skips a clip that cannot take one at `at`, and
     /// fails only when no clip can.
     Speed,

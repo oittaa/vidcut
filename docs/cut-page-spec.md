@@ -1396,7 +1396,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It shows as `;` before the frames.
   - When you type a timecode, `;` means drop-frame. So does `:` in a drop-frame project.
   - A skipped label is refused. Digits that fill one land on the first frame of the minute.
-- **D48. Clips at another speed** (§1, §8.6; deviations X9, X95, X96).
+- **D48. Clips at another speed** (§1, §8.6; deviations X9, X95, X96, X97).
   - A clip's speed comes from Change Clip Speed, the Speed section of the Inspector, speed keyframes, or an OTIO file.
   - The speed applies wherever its pictures and sound go.
   - Change Clip Speed takes 1% to 10000%, forward or backward.
@@ -1412,6 +1412,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A speed keyframe cuts a clip into two sections. Each section has a speed of its own. The sound of the clip gets the same sections.
     - A new speed keyframe gives both sections the speed of the section that it cuts.
     - Each timeline frame shows `floor` of the source position on the line of its section.
+    - An eased speed keyframe changes the speed on a curve. Let k be its frame and s its source position.
+      - v0 and v1 are the speeds before and after it. a and c are the frames of its handles, a before k and c after k.
+      - From k + a to k + c, the curve is a cubic Bezier curve. Its points are (k + a, s + a × v0), (k, s), (k, s) and (k + c, s + c × v1).
+      - Outside that range, the curve stays on the lines of the sections.
+      - A handle on one side alone gives the straight line again.
+    - Resolve shortens a handle that reaches past the speed keyframe next to it. An OTIO import does this, and the export has the short handles.
+      - The clip's first frame and its end count as speed keyframes.
+      - Where the handles of two eased speed keyframes overlap, the later speed keyframe's handle keeps its length, up to the section. The earlier handle gets the rest of the section.
+      - The value of a handle changes with its length.
     - A change of a section's speed moves the later speed keyframes and the clip's end. Their sections keep their speeds.
     - The freeze button holds the frame under the playhead for 2 seconds of the timeline. It adds a section at 0% and a speed keyframe after it.
     - Delete Keyframe removes the speed keyframe at the playhead, or else the nearest one before the playhead.
@@ -1419,6 +1428,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Trims and splits keep all the speed keyframes, also those outside the clip. They stay on the retimed source.
     - A keyframe of the clip stays on its frame of the clip when a section's speed changes.
     - The OTIO export writes the speed keyframes as the `Key Frames` of a `TimeEffect`, in seconds from the media's first frame.
+      - An eased key is `[output, source, true, a, a × v0, c, c × v1]`, and `Retime Mode` is `SPEED`. The import uses only a and c.
   - **Timeline:** a clip with speed keyframes has a strip at its top. These facts come from Resolve Studio 21.1.2:
     - The strip shows the speed of each section, and a line at each speed keyframe.
     - A click on a speed opens a list: 20%, 30%, 40%, 50%, 60%, 70%, 100% and Set.
@@ -1430,18 +1440,27 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Change Speed and Frames per Second show and change the speed of the section under the playhead.
     - The Direction buttons act on that section. In one check, Reverse played it backward to the media's first frame ([X96](deviations.md#x96-reverse-plays-the-sections-own-frames-backward)).
     - The Duration field shows the section's length in one check and the clip's length in two others. The reason is not measured.
+    - The Ease list under Direction has Linear, Ease In, Ease Out and Ease In and Out.
+      - In one check, each of the three eases set only the speed keyframe at the start of the section ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)).
+      - Its handles are 1/6 s before and after the speed keyframe at 30 fps.
   - **In vidcut:**
     - The Inspector's Speed section shows the section under the playhead. With the playhead outside the clip, it shows the nearest section.
       - Speed and Frames per Second send `speed.set`. They are off when the section is frozen or plays backward.
       - Freeze sends `speed.freeze`. Forward and Reverse send `speed.reverse`. They are off when the section is frozen.
       - Reverse plays the section between its speed keyframes. The first and last sections end at the clip's edges.
+      - Ease sends `speed.ease` ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)). Ease In eases the speed keyframe at the section's start, and Ease Out the one at its end.
+        - The list shows the eases of the section's two speed keyframes. It offers only the eases that they can take.
+      - An ease reaches 1/6 s before and after its speed keyframe, at each frame rate. Resolve's length at other rates than 30 fps is not measured.
+      - An ease stops at the speed keyframes next to it and at the clip's edges, as in Resolve. Where two eases overlap, the later one keeps its length.
+      - vidcut applies this rule again after each edit that moves a speed keyframe.
       - Duration is off on a clip with speed keyframes.
       - Reset gives the whole clip 100%. Its speed keyframes go.
     - The diamond adds or removes a speed keyframe at the playhead. The arrows move the playhead to the previous or next speed keyframe.
     - The list opens only on a section that plays forward. `speed.set` changes only such a section.
     - Add Speed Keyframe in the right-click menu adds a speed keyframe at the playhead.
     - The Speed row of the Keyframes tab and the keyframe tray shows the speed keyframes ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
-      - A speed keyframe does not move, copy or take an ease. Its value is the speed of the section after it.
+      - A speed keyframe does not move or copy. Its value is the speed of the section after it.
+      - Its ease menu has Linear and Ease In and Out ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)).
       - Ctrl+X leaves the selected speed keyframes in place, and they stay selected.
       - A change of its value in the tab sends `speed.set`. The field takes 1% to 10000%.
       - The field is off when the section is frozen or plays backward.
@@ -1449,10 +1468,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Then Mark > Delete Keyframe (Alt+]) removes the speed keyframe at the playhead, or else the nearest one before it.
     - Then Mark > Delete All Keyframes asks first. Then it removes all the speed keyframes of the selected clips.
   - **Requests:** `keyframes.add` and `keyframes.remove` with the `param` `speed` add and remove speed keyframes.
-    - `speed.set`, `speed.freeze` and `speed.reverse` change the sections. All five act at a time, the playhead by default.
+    - `speed.set`, `speed.freeze`, `speed.reverse` and `speed.ease` change the sections. All six act at a time, the playhead by default.
     - `keyframes.add` skips a clip that cannot take a speed keyframe at `at`. It fails only when no clip can.
     - `speed.reverse` plays a section's own frames in the other order ([X96](deviations.md#x96-reverse-plays-the-sections-own-frames-backward)).
     - `speed.set` takes 1% to 10000% forward, in a section that plays forward.
+    - `speed.ease` eases the speed keyframes of a section. `keyframes.set` gives one speed keyframe `linear` or `ease_in_out`.
+    - A speed keyframe next to a section that plays backward takes no ease ([X96](deviations.md#x96-reverse-plays-the-sections-own-frames-backward)).
+    - `keyframes.list` gives `ease` `ease_in_out` for an eased speed keyframe.
     - `keyframes.remove` without `frames` and `at` removes all the speed keyframes of the clips.
     - `keyframes.list` gives each speed keyframe with the speed of the section after it.
     - With ripple, the clip's length follows a change. Without ripple, the clip keeps its length.
@@ -1460,6 +1482,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The retimed source has one frame for each timeline frame. A trim or a split moves only the clip's place on it (`skip`).
     - The keyframes of a clip with a speed are on its retimed source. Thus they stay on their frames of the clip.
     - The sound of a clip plays through all its sections in one stretch, with its pitch kept. Thus a speed keyframe makes no click and no dip.
+    - Over an ease, the sound follows the curve one frame at a time.
 - **D49. What Join Match Edit Clips joins** (pp. 646, 950).
   - The manual says only that it rejoins a split clip.
   - Two clips join when the second plays on from where the first stops. Thus nothing seen or heard changes.

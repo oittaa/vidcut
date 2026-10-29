@@ -139,6 +139,7 @@ Notes:
 - Output frame k shows the first source frame at or after this time.
 - At the project's rate, this is exact. At other rates, a tie can show the earlier frame.
 - A piece at another speed steps through its source by `render::Pace`. Each section of the speed is a piece of its own (`Clip::runs`).
+  - Over an ease, each frame is a piece of its own (`Pace::steady`).
 
 Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)):
 
@@ -229,6 +230,7 @@ To the encoder:
   - Thus the player and the export play the same curve ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - A clip with speed keyframes gives a sound piece for each section. A piece that plays on into the next section is `joined`.
   - `AudioMix` plays a run of joined pieces through one `Stretch`, with the speeds of all their sections (`Paced::mapped`).
+  - Over an ease, a piece has the speed of its frame on the curve (`Pace::rate`).
   - Thus a speed keyframe makes no de-click dip, and the pitch stays.
 - With `audio.loudness`, `analysis::mix_loudness` first measures the mix with its ducking. `loudness_gain` gives one gain (`AudioMix::set_gain_db`) that reaches the target, with the true peak under a ceiling.
 

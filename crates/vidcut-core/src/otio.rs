@@ -394,7 +394,6 @@ fn bundle_nested(
 #[derive(Default)]
 struct SpeedNotes {
     unplayed: Vec<String>,
-    eased: Vec<String>,
 }
 
 impl SpeedNotes {
@@ -427,20 +426,14 @@ fn speed_of(
     } else {
         let placed = ramp(&effect, fps.as_f64())
             .filter(|_| ramps)
-            .and_then(|(sections, eased)| {
+            .and_then(|sections| {
                 let skip = ramp_skip(&sections, exact_start(item, fps)?)?;
-                Some((sections, skip, eased))
+                Some((sections, skip))
             });
         match placed {
-            Some((sections, skip, eased)) => {
+            Some((sections, skip)) => {
                 speed.sections = sections.into();
                 speed.skip = skip;
-                if eased {
-                    SpeedNotes::add(
-                        &mut notes.eased,
-                        item["name"].as_str().unwrap_or_default().to_string(),
-                    );
-                }
             }
             None => SpeedNotes::add(
                 &mut notes.unplayed,
@@ -457,21 +450,33 @@ fn speed_of(
     Some(speed)
 }
 
-fn ramp(effect: &Value, fps: f64) -> Option<(Vec<Section>, bool)> {
+fn ramp(effect: &Value, fps: f64) -> Option<Vec<Section>> {
     let keys = effect["metadata"][EDITOR]["Key Frames"].as_array()?;
-    let mut eased = false;
     let mut points = Vec::new();
     for k in keys {
         let k = k.as_array()?;
-        eased |= k.get(2).and_then(Value::as_bool) == Some(true);
-        points.push((k.first()?.as_f64()? * fps, k.get(1)?.as_f64()? * fps));
+        let handle = |i: usize| k.get(i).and_then(Value::as_f64);
+        let ease = match (k.get(2).and_then(Value::as_bool), handle(3), handle(5)) {
+            (Some(true), Some(a), Some(c)) if a < 0.0 || c > 0.0 => {
+                Some([a.min(0.0) * fps, c.max(0.0) * fps])
+            }
+            _ => None,
+        };
+        points.push((k.first()?.as_f64()? * fps, k.get(1)?.as_f64()? * fps, ease));
     }
-    if points.first() != Some(&(0.0, 0.0)) || points.len() < 2 {
+    if points.first().map(|p| (p.0, p.1)) != Some((0.0, 0.0)) || points.len() < 2 {
         return None;
+    }
+    let ends: Vec<f64> = points.iter().map(|p| p.0).collect();
+    for (j, p) in points.iter_mut().enumerate().skip(1) {
+        if let (Some([a, c]), Some(&next)) = (&mut p.2, ends.get(j + 1)) {
+            *a = a.max(ends[j - 1] - p.0);
+            *c = c.min(next - p.0);
+        }
     }
     let mut out: Vec<Section> = Vec::new();
     for w in points.windows(2) {
-        let ((u0, s0), (u1, s1)) = (w[0], w[1]);
+        let ((u0, s0, ease), (u1, s1, _)) = (w[0], w[1]);
         let speed = ((s1 - s0) / (u1 - u0) * 1e9).round() / 1e9;
         if u1 <= u0 || !speed.is_finite() || speed < 0.0 {
             return None;
@@ -484,9 +489,10 @@ fn ramp(effect: &Value, fps: f64) -> Option<(Vec<Section>, bool)> {
             at,
             from: s0 + (at as f64 - u0) * speed,
             speed,
+            ease: ease.filter(|_| !out.is_empty()),
         });
     }
-    Some((out, eased))
+    Some(out)
 }
 
 fn ramp_skip(map: &[Section], at: f64) -> Option<i64> {
@@ -514,28 +520,28 @@ fn exact_start(item: &Value, fps: Rational) -> Option<f64> {
 
 fn kept_ramp(c: &Clip, effect: &Value, fps: f64) -> bool {
     let pace = c.pace();
-    c.source_in == pace.shown() && ramp(effect, fps).is_some_and(|(s, _)| s[..] == pace.map[..])
+    c.source_in == pace.shown() && ramp(effect, fps).is_some_and(|s| s[..] == pace.map[..])
 }
 
 fn ramp_effect(c: &Clip, end: Option<i64>, fps: f64) -> Value {
     let pace = c.pace();
     let map = &pace.map;
     let d = (c.source_in - pace.shown()) as f64;
-    let abs = |u: f64| {
-        let s = &map[map.partition_point(|s| s.at as f64 <= u).saturating_sub(1)];
-        d + s.from + (u - s.at as f64) * s.speed
-    };
+    let abs = |u: f64| d + pace.position(u);
     let lo = pace.skip.min(map[0].at) as f64;
-    let mut keys = vec![(0.0, 0.0)];
+    let mut keys = vec![(0.0, 0.0, None)];
     let first = map[0];
     let origin = if first.speed > 0.0 && abs(lo) >= 0.0 {
         first.at as f64 - (d + first.from) / first.speed
     } else {
-        keys.push((1.0, abs(lo)));
+        keys.push((1.0, abs(lo), None));
         lo - 1.0
     };
-    for s in map.iter().skip(1) {
-        keys.push((s.at as f64 - origin, d + s.from));
+    for (i, s) in map.iter().enumerate().skip(1) {
+        let ease = pace
+            .bend(i)
+            .map(|[a, c]| [a, a * map[i - 1].speed, c, c * s.speed]);
+        keys.push((s.at as f64 - origin, d + s.from, ease));
     }
     let last = map[map.len() - 1];
     let clip_end = (pace.skip + c.duration) as f64;
@@ -544,17 +550,21 @@ fn ramp_effect(c: &Clip, end: Option<i64>, fps: f64) -> Value {
         None => clip_end,
     }
     .max(last.at as f64 + 1.0);
-    keys.push((u_end - origin, abs(u_end)));
-    let (out, src) = keys[keys.len() - 1];
+    keys.push((u_end - origin, abs(u_end), None));
+    let (out, src, _) = keys[keys.len() - 1];
+    let eased = keys.iter().any(|k| k.2.is_some());
     json!({
         "OTIO_SCHEMA": "TimeEffect.1",
         "metadata": {
             EDITOR: {
                 "Key Frames": keys
                     .iter()
-                    .map(|(o, s)| json!([o / fps, s / fps, false, 0.0, 0.0, 0.0, 0.0]))
+                    .map(|(o, s, e)| {
+                        let [a, b, c, d] = e.unwrap_or_default().map(|x| x / fps);
+                        json!([o / fps, s / fps, e.is_some(), a, b, c, d])
+                    })
                     .collect::<Vec<_>>(),
-                "Retime Mode": "NONE",
+                "Retime Mode": if eased { "SPEED" } else { "NONE" },
                 "Speed Ratio": if out > 0.0 { src / out } else { 1.0 },
             }
         },
@@ -2314,12 +2324,6 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         warnings.push(format!(
             "time effects kept on their clips but played at normal speed: {}",
             notes.unplayed.join(", ")
-        ));
-    }
-    if !notes.eased.is_empty() {
-        warnings.push(format!(
-            "speed keyframes read without their ease: {}",
-            notes.eased.join(", ")
         ));
     }
     let mut nested: Vec<&str> = Vec::new();

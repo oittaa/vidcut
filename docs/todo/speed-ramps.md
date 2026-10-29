@@ -12,8 +12,4 @@ A speed keyframe marks a frame of a clip where its speed can change. The speed k
 
 ## To do
 
-- **Ease:** Ease In, Ease Out and Ease In and Out on a speed keyframe, in the ease menu of the Speed row.
-  - The ease formula is not known. A short check in Resolve comes first.
-- **OTIO import:**
-  - Eased keys play at the linear speeds of their sections. The import warns.
-  - A speed keyframe on a compound clip, and a section that plays backward, are kept but play at 100%. The import warns.
+- **OTIO import:** a speed keyframe on a compound clip, and a section that plays backward, are kept but play at 100%. The import warns.
