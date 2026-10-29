@@ -868,6 +868,7 @@ impl Player {
         ctl.gpu_losses = losses;
         ctl.error = None;
         drop(ctl);
+        lock(&self.shared.failed).take();
         self.shared.store.forget_held();
     }
 
