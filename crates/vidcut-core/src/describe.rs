@@ -185,6 +185,16 @@ pub fn describe_at(
             }
         ),
         "speed.freeze" => format!("Freeze frame in {} at {}", d.clips("clips"), d.time("at")),
+        "speed.reverse" => format!(
+            "Play {} {} at {}",
+            d.clips("clips"),
+            if d.params["backward"] == false {
+                "forward"
+            } else {
+                "backward"
+            },
+            d.time("at")
+        ),
         "edit.copy" => format!("Copy {}", d.clips("clips")),
         "edit.cut" if d.params["range"].is_string() => format!("Cut {}", d.range("range")),
         "edit.cut" => format!("Cut {}", d.clips("clips")),

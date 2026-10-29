@@ -1396,7 +1396,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It shows as `;` before the frames.
   - When you type a timecode, `;` means drop-frame. So does `:` in a drop-frame project.
   - A skipped label is refused. Digits that fill one land on the first frame of the minute.
-- **D48. Clips at another speed** (§1, §8.6; deviations X9, X95).
+- **D48. Clips at another speed** (§1, §8.6; deviations X9, X95, X96).
   - A clip's speed comes from Change Clip Speed, the Speed section of the Inspector, speed keyframes, or an OTIO file.
   - The speed applies wherever its pictures and sound go.
   - Change Clip Speed takes 1% to 10000%, forward or backward.
@@ -1425,7 +1425,18 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Set opens the Set Speed Change window, with a Speed field.
     - The clip's right-click menu adds a speed keyframe ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
     - With the Keyframes tab and the keyframe tray closed, the keyframe items of the Mark menu act on speed keyframes.
+  - **Inspector:** these facts come from Resolve Studio 21.1.2:
+    - The header of the Speed Change group has a keyframe diamond between < and > buttons. The diamond is red with the playhead on a speed keyframe.
+    - Change Speed and Frames per Second show and change the speed of the section under the playhead.
+    - The Direction buttons act on that section. In one check, Reverse played it backward to the media's first frame ([X96](deviations.md#x96-reverse-plays-the-sections-own-frames-backward)).
+    - The Duration field shows the section's length in one check and the clip's length in two others. The reason is not measured.
   - **In vidcut:**
+    - The Inspector's Speed section shows the section under the playhead. With the playhead outside the clip, it shows the nearest section.
+      - Speed and Frames per Second send `speed.set`. They are off when the section is frozen or plays backward.
+      - Freeze sends `speed.freeze`. Forward and Reverse send `speed.reverse`. They are off when the section is frozen.
+      - Duration is off on a clip with speed keyframes.
+      - Reset gives the whole clip 100%. Its speed keyframes go.
+    - The diamond adds or removes a speed keyframe at the playhead. The arrows move the playhead to the previous or next speed keyframe.
     - The list opens only on a section that plays forward. `speed.set` changes only such a section.
     - Add Speed Keyframe in the right-click menu adds a speed keyframe at the playhead.
     - The Speed row of the Keyframes tab and the keyframe tray shows the speed keyframes ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
@@ -1437,7 +1448,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Then Mark > Delete Keyframe (Alt+]) removes the speed keyframe at the playhead, or else the nearest one before it.
     - Then Mark > Delete All Keyframes asks first. Then it removes all the speed keyframes of the selected clips.
   - **Requests:** `keyframes.add` and `keyframes.remove` with the `param` `speed` add and remove speed keyframes.
-    - `speed.set` and `speed.freeze` change the sections. All four act at a time, the playhead by default.
+    - `speed.set`, `speed.freeze` and `speed.reverse` change the sections. All five act at a time, the playhead by default.
+    - `speed.reverse` plays a section's own frames in the other order ([X96](deviations.md#x96-reverse-plays-the-sections-own-frames-backward)).
     - `speed.set` takes 1% to 10000% forward, in a section that plays forward.
     - `keyframes.remove` without `frames` and `at` removes all the speed keyframes of the clips.
     - `keyframes.list` gives each speed keyframe with the speed of the section after it.

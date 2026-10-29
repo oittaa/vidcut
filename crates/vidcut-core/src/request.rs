@@ -1046,6 +1046,18 @@ pub enum Request {
         #[serde(default)]
         ripple: Option<bool>,
     },
+    /// Play the section under `at` (the playhead) in each clip backward, or
+    /// forward with `backward: false`. The section plays its own frames in
+    /// the other order. The other sections and the clip's length stay. A
+    /// freeze frame has no direction.
+    #[serde(rename = "speed.reverse")]
+    SpeedReverse {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(default = "yes")]
+        backward: bool,
+    },
     /// Copy clips (Ctrl+C): returns them with their tracks as `clips`,
     /// ready for `edit.paste`. The GUI also keeps them on its clipboard.
     /// With `range` instead of `clips`: the parts of the clips on the

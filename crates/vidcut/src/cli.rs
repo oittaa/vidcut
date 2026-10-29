@@ -93,6 +93,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("edit.change_speed", &["clips"]),
     ("speed.set", &["clips"]),
     ("speed.freeze", &["clips"]),
+    ("speed.reverse", &["clips"]),
     ("export.start", &["output"]),
     ("export.plan", &["output"]),
     ("jobs.get", &["job"]),
