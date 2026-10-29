@@ -104,7 +104,8 @@ The draw:
     - A GPU can stop, for example after a reset by Windows. Then wgpu marks the device lost (`Offscreen::watch`).
       - After the loss, `screen::offscreen` gives an error for that device. Thus no new work goes to it.
       - The AI frames fail with that error, and the viewer shows it. The frames without AI play on.
-      - Play, seek, step, an export and a frame render make a new device (`screen::retry_lost`). Play, seek and step also clear the error of the player.
+      - Play, seek, step, an export and a frame render make a new device (`screen::retry_lost`).
+      - After a loss, the next play, seek or step of a player clears its error. It also drops the pictures that a GPU held (`Store::forget_held`). The lost device cannot give them back.
       - Why: the cause can be gone, for example another program that used much of the GPU.
       - After `RETRIES` losses in one minute, vidcut makes no new device until that minute ends. Why: Windows stops the computer after more than five resets in one minute ([gotchas](../gotchas.md#wgpu-and-egui)).
   - The viewer's frame render, the AI upscalers and the frame interpolation use that device too (`compute::Gpu`).

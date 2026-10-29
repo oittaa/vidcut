@@ -116,20 +116,26 @@ const RETRY_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
 
 static LOSSES: std::sync::Mutex<Vec<std::time::Instant>> = std::sync::Mutex::new(Vec::new());
 
+fn lost_at() -> std::sync::MutexGuard<'static, Vec<std::time::Instant>> {
+    LOSSES.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn recent_losses() -> usize {
-    let mut losses = LOSSES.lock().unwrap_or_else(|e| e.into_inner());
-    losses.retain(|t| t.elapsed() < RETRY_WINDOW);
-    losses.len()
+    lost_at()
+        .iter()
+        .filter(|t| t.elapsed() < RETRY_WINDOW)
+        .count()
+}
+
+pub(crate) fn losses() -> usize {
+    lost_at().len()
 }
 
 impl Offscreen {
     fn watch(&'static self) {
         self.gpu.device.set_device_lost_callback(move |_, why| {
             eprintln!("vidcut: {} stopped: {why}", self.adapter.name);
-            LOSSES
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push(std::time::Instant::now());
+            lost_at().push(std::time::Instant::now());
             let _ = self.lost.set(why);
         });
         self.gpu.device.on_uncaptured_error(Arc::new(move |e| {

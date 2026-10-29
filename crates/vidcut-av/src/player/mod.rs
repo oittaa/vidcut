@@ -203,6 +203,7 @@ pub(crate) struct Control {
     pub prepared: Option<(Arc<Plan>, i64)>,
     pub closed: bool,
     error: Option<String>,
+    gpu_losses: usize,
 }
 
 impl Control {
@@ -729,6 +730,7 @@ impl Player {
                 prepared: None,
                 closed: false,
                 error: None,
+                gpu_losses: crate::screen::losses(),
             }),
             changed: Condvar::new(),
             store: Share::join(id, config.part),
@@ -851,15 +853,27 @@ impl Player {
     }
 
     fn seek_with(&self, frame: i64, sound: bool) {
-        self.shared.change(true, |ctl, _, _| {
-            retry_lost_gpu(ctl);
-            move_to(ctl, frame, sound);
-        });
+        self.retry_lost_gpu();
+        self.shared
+            .change(true, |ctl, _, _| move_to(ctl, frame, sound));
+    }
+
+    fn retry_lost_gpu(&self) {
+        let retried = crate::screen::retry_lost();
+        let losses = crate::screen::losses();
+        let mut ctl = self.shared.control();
+        if ctl.gpu_losses == losses && !retried {
+            return;
+        }
+        ctl.gpu_losses = losses;
+        ctl.error = None;
+        drop(ctl);
+        self.shared.store.forget_held();
     }
 
     pub fn step(&self, frames: i64) {
+        self.retry_lost_gpu();
         self.shared.change(true, |ctl, pos, _| {
-            retry_lost_gpu(ctl);
             let t = ctl.plan.clamp(pos.saturating_add(frames));
             ctl.scrub(t);
             ctl.motion = 0.0;
@@ -889,8 +903,8 @@ impl Player {
         if speed == 0.0 || !speed.is_finite() {
             return self.pause();
         }
+        self.retry_lost_gpu();
         self.shared.change(true, |ctl, pos, sample| {
-            retry_lost_gpu(ctl);
             let from = match (ctl.mode, sample) {
                 (Mode::Playing { .. }, Some(s)) => s.round() as i64,
                 _ => {
@@ -1219,12 +1233,6 @@ fn replace_plan(ctl: &mut Control, plan: RenderPlan) {
     ctl.error = None;
     ctl.trims.clear();
     ctl.trims_gen += 1;
-}
-
-fn retry_lost_gpu(ctl: &mut Control) {
-    if crate::screen::retry_lost() {
-        ctl.error = None;
-    }
 }
 
 fn move_to(ctl: &mut Control, frame: i64, sound: bool) {
