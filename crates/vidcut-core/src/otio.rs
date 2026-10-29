@@ -415,7 +415,7 @@ fn speed_of(
     let effect = effect?;
     let ours = serde_json::from_value::<Vec<Section>>(item["metadata"][VIDCUT]["sections"].clone())
         .ok()
-        .filter(|s| s.first().is_some_and(|f| f.at == 0));
+        .filter(|s| !s.is_empty());
     let mut speed = Speed {
         effect: None,
         ..Speed::constant(1.0)
@@ -424,9 +424,6 @@ fn speed_of(
         speed.sections = sections.into();
     } else if let Some(x) = effect["time_scalar"].as_f64() {
         speed = Speed::constant(x);
-        if effect == crate::ops::time_effect(None, x) {
-            return Some(speed);
-        }
     } else {
         let placed = ramp(&effect, fps.as_f64())
             .filter(|_| ramps)
@@ -455,7 +452,8 @@ fn speed_of(
             ),
         }
     }
-    speed.effect = Some(effect.into());
+    let plain = speed.scalar().map(|x| crate::ops::time_effect(None, x));
+    speed.effect = (plain.as_ref() != Some(&effect)).then(|| effect.into());
     Some(speed)
 }
 
@@ -613,7 +611,7 @@ fn own_pace(meta: &mut Value, c: &Clip, s: i64) {
     if let Some(speed) = &c.speed {
         meta["source_in"] = json!(c.source_at(s));
         meta["skip"] = json!(speed.skip + s - c.start);
-        if speed.scalar().is_none() {
+        if !matches!(&*speed.sections, [one] if one.at == 0 && one.from == 0.0) {
             meta["sections"] = json!(speed.sections);
         }
     }

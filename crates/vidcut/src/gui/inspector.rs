@@ -1147,7 +1147,7 @@ impl Workspace {
                         stored,
                         shown,
                         shape: shape(&p, c),
-                        frame: c.source_at(self.snap.timeline.position),
+                        frame: c.content_at(self.snap.timeline.position),
                     }
                 })
             })

@@ -997,8 +997,10 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             && stream == st2
             && gain_db == g2
             && isolation == i2
-            && keyed.as_ref().map(|k| (&k.keys, k.per_frame))
-                == k2.as_ref().map(|k| (&k.keys, k.per_frame))
+            && keyed
+                .as_ref()
+                .map(|k| (&k.keys, k.per_frame, k.at + *samples as f64))
+                == k2.as_ref().map(|k| (&k.keys, k.per_frame, k.at))
             && *speed == 1.0
             && *sp2 == 1.0
             && fade.is_none()
