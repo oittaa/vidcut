@@ -177,9 +177,11 @@ impl PlayerStats {
                     }
                     .into()
                 }),
-                memory: p
-                    .gpu()
-                    .map_or("memory".into(), |k| format!("{} memory", k.label())),
+                memory: match p.gpu() {
+                    Some(k) => format!("{} memory", k.label()),
+                    None if p.held() => "GPU memory".into(),
+                    None => "memory".into(),
+                },
             }
         });
         let device = match &s.plays_on {

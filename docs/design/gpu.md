@@ -112,6 +112,7 @@ The draw:
   - The player copies each picture into memory that Vulkan can share with another device (`shared::held_buffer`). It waits for the copy.
   - The viewer's device imports that memory and draws from it (`shared::held_on`). Nothing comes down.
   - A held picture keeps the id of its `Gpu`. Only that `Gpu` draws from its buffer directly (`Held::on`, [gotchas](../gotchas.md#wgpu-and-egui)).
+  - The stats panel shows a held picture in GPU memory (`Picture::held`). It tells whether the viewer drew it from GPU memory (`Screen::held_shared`).
   - The player's cache counts these pictures in video memory. When the cache brings one down, it becomes RGB24 in memory.
   - This occurs on Linux and Windows, where Vulkan on both devices has the extension for external memory.
   - Why: each picture went down to memory and up again before the viewer could show it.
