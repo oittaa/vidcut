@@ -1459,8 +1459,7 @@ pub struct Section {
     pub speed: f64,
     /// The ease of the speed keyframe at `at`: the frames before and after
     /// it in which the speed changes on a curve. Left out, the speed
-    /// changes at once. Only between two sections that play forward or
-    /// freeze.
+    /// changes at once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ease: Option<[f64; 2]>,
 }

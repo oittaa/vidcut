@@ -138,6 +138,8 @@ Speeds ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
   - Its `ease` holds the handles of the speed keyframe at its start, in frames before and after it.
 - `Pace::position` gives the source position on the curve. `Pace::bend` gives the handles that an ease uses, kept inside the sections.
   - `ops::speed` and the OTIO import stop a new ease at the clip's edges. `Pace::bend` stops it at the speed keyframes, at each render and export.
+- With speed keyframes, each frame shows `floor` of the curve, also backward. A clip with one backward speed shows the bottom of each stretch.
+  - `ops::speed` works on the curve form. `sections` and `with` change a clip with one backward speed to that form and back.
 - The retimed source has one frame for each timeline frame. `skip` is its frame at the clip's first frame.
 - `render::Pace` gives the source frame at each frame of the retimed source. `source_in` is the first source frame that the clip shows.
 - A trim or a split moves only `skip` and `source_in` (`Clip::walk`). Thus all the speed keyframes stay.

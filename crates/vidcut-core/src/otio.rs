@@ -478,7 +478,7 @@ fn ramp(effect: &Value, fps: f64) -> Option<Vec<Section>> {
     for w in points.windows(2) {
         let ((u0, s0, ease), (u1, s1, _)) = (w[0], w[1]);
         let speed = ((s1 - s0) / (u1 - u0) * 1e9).round() / 1e9;
-        if u1 <= u0 || !speed.is_finite() || speed < 0.0 {
+        if u1 <= u0 || !speed.is_finite() {
             return None;
         }
         let at = u0.round() as i64;
