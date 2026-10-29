@@ -1487,6 +1487,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The keyframes of a clip with a speed are on its retimed source. Thus they stay on their frames of the clip.
     - The sound of a clip plays through all its sections in one stretch, with its pitch kept. Thus a speed keyframe makes no click and no dip.
     - Over an ease, the sound follows the curve one frame at a time.
+    - Where the clip turns, the sound of each side plays in one stretch, also backward.
 - **D49. What Join Match Edit Clips joins** (pp. 646, 950).
   - The manual says only that it rejoins a split clip.
   - Two clips join when the second plays on from where the first stops. Thus nothing seen or heard changes.

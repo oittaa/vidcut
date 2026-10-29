@@ -230,6 +230,7 @@ To the encoder:
   - Thus the player and the export play the same curve ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - A clip with speed keyframes gives a sound piece for each section. A piece that plays on into the next section is `joined`.
   - `AudioMix` plays a run of joined pieces through one `Stretch`, with the speeds of all their sections (`Paced::mapped`).
+  - A run plays in one direction, forward or backward. Where the clip turns, a new run starts.
   - Over an ease, a piece has the speed of its frame on the curve (`Pace::rate`).
   - Thus a speed keyframe makes no de-click dip, and the pitch stays.
 - With `audio.loudness`, `analysis::mix_loudness` first measures the mix with its ducking. `loudness_gain` gives one gain (`AudioMix::set_gain_db`) that reaches the target, with the true peak under a ceiling.
