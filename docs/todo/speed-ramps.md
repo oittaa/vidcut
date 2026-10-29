@@ -1,6 +1,6 @@
 # Speed ramps
 
-**When:** in progress, in four pull requests.
+**When:** in progress, in four pull requests. The first is [oittaa/vidcut#643](https://github.com/oittaa/vidcut/pull/643).
 
 A speed point marks a frame of a clip where its speed can change. The points cut the clip into speed sections, and each section has a speed of its own.
 
