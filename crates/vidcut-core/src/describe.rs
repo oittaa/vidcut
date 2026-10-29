@@ -175,15 +175,6 @@ pub fn describe_at(
                 None => "?".to_string(),
             }
         ),
-        "speed.add_point" => format!("Speed point on {} at {}", d.clips("clips"), d.time("at")),
-        "speed.remove_point" if d.params["all"] == true => {
-            format!("Remove all speed points of {}", d.clips("clips"))
-        }
-        "speed.remove_point" => format!(
-            "Remove a speed point of {} at {}",
-            d.clips("clips"),
-            d.time("at")
-        ),
         "speed.set" => format!(
             "Speed of {} at {} to {}",
             d.clips("clips"),
@@ -212,12 +203,13 @@ pub fn describe_at(
         "clip.set" => d.clip_set(),
         "clip.normalize" => format!("Normalize the audio levels of {}", d.clips("clips")),
         "keyframes.add" => format!(
-            "Volume keyframe on {} at {}{}",
+            "{} keyframe on {} at {}{}",
+            set::title_case(&d.key_param()),
             d.clips("clips"),
             d.time("at"),
             match &d.params["value"] {
                 Value::Null => String::new(),
-                v => format!(", {}", db(v)),
+                v => format!(", {}", d.key_value(v)),
             }
         ),
         "keyframes.set" => format!(
@@ -852,11 +844,26 @@ impl Words<'_> {
             Value::Null => 0,
             _ => 1,
         };
+        let name = self.key_param();
         match (count("frames") + count("at"), count("at")) {
-            (0, _) => "the volume keyframes".into(),
-            (1, 1) => format!("the volume keyframe at {}", self.time("at")),
-            (1, _) => "a volume keyframe".into(),
-            (n, _) => format!("{n} volume keyframes"),
+            (0, _) => format!("the {name} keyframes"),
+            (1, 1) => format!("the {name} keyframe at {}", self.time("at")),
+            (1, _) => format!("a {name} keyframe"),
+            (n, _) => format!("{n} {name} keyframes"),
+        }
+    }
+
+    fn key_param(&self) -> String {
+        self.params["param"]
+            .as_str()
+            .unwrap_or("volume")
+            .replace('_', " ")
+    }
+
+    fn key_value(&self, v: &Value) -> String {
+        match self.params["param"].as_str() {
+            None | Some("volume") => db(v),
+            Some(_) => v.to_string(),
         }
     }
 
@@ -864,10 +871,10 @@ impl Words<'_> {
         let p = self.params;
         let mut parts = Vec::new();
         if !p["value"].is_null() {
-            parts.push(db(&p["value"]));
+            parts.push(self.key_value(&p["value"]));
         }
         if !p["by"].is_null() {
-            parts.push(format!("by {}", db(&p["by"])));
+            parts.push(format!("by {}", self.key_value(&p["by"])));
         }
         if let Some(e) = p["ease"].as_str() {
             parts.push(

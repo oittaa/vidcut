@@ -1924,12 +1924,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Other speeds and frame rates gain less from made frames. Thus Auto keeps the speed of Nearest for them.
   - Auto lets a project move between macOS and other systems. Each computer uses its own AI.
 
-## X94. The Mark menu's keyframe items act only on keyframes
+## X94. Speed keyframes and the Mark menu's keyframe items
 
 - **Resolve:**
+  - The clip's right-click menu calls a speed keyframe a speed point. Its item is Add Speed Point.
   - Add Keyframe, Delete Keyframe and Delete All Keyframes act on the selected values of the Keyframes panel or the keyframe tray (p. 4343).
-  - With the panel and the tray closed, they act on the speed points of the selected clips.
-  - With the tray open and no row selected, Add Keyframe also adds a speed point.
+  - With the panel and the tray closed, they act on the speed keyframes of the selected clips.
+  - Then Delete Keyframe and Delete All Keyframes do the same thing in Resolve Studio 21.1.2.
+    - Each removes one speed keyframe: the one at the playhead, or else the nearest one before it. No question opens.
+  - With the tray open and no row selected, Add Keyframe also adds a speed keyframe.
   - In Resolve Studio 21.1.2, the three items are always on, also when they cannot act.
   - Delete All Keyframes with no keyframe selected asks "Delete All Keyframes?". The question names the value and the media file.
   - It also asks when the value has no keyframes. Delete then changes nothing.
@@ -1937,15 +1940,24 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - In one check, this was the value keyed last with a button of the Inspector. Delete removed all its keyframes.
   - In one check, the question named no value. After Delete, a Position X with no keyframes also went back to 0.
 - **vidcut:**
-  - The three items act only on keyframes. Scripts edit speed points with the `speed.*` requests ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions), [todo](todo/speed-ramps.md)).
+  - A point where the speed changes is a speed keyframe. The GUI, the requests and the docs use this one name.
+    - The right-click menu has Add Speed Keyframe.
+  - The Keyframes tab and the keyframe tray have a Speed row, in a Speed group. It shows the speed keyframes of the clip.
+  - With the Keyframes tab or the tray open, the three items act only on the selected rows and keyframes. The Speed row is one of these rows.
+    - Thus with the tray open and no row selected, Add Keyframe is off.
+  - With both closed, they act on the speed keyframes of the selected clips ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+    - Delete All Keyframes then asks first, for example "Delete 3 Speed keyframes of Clip 2?". Then it removes all the speed keyframes.
   - An item that cannot act is off. Its tooltip tells the next click, for example "Click a parameter name, such as Opacity".
   - When the three items are off for one reason, a line in the menu tells the next step.
-    - An example is "Click a parameter name in Timeline > Keyframes".
+    - An example is "Select a clip first".
   - With no row and no keyframe selected, Delete All Keyframes is off.
   - The question of Delete All Keyframes names the values, the number of keyframes and the clip.
     - An example is "Delete 5 Yaw keyframes of Clip 3?".
   - Delete All Keyframes removes only the keyframes of the selected rows. A value with no keyframes keeps its value.
 - **Why:**
+  - One thing has one name. A speed keyframe is a keyframe of the clip's speed, and the keyframe items act on it.
+  - The Speed row shows the speed keyframes with the other keyframes of the clip. Thus the Mark menu reaches them also with the Keyframes tab open.
+  - A Delete All that removes one speed keyframe is a fault in Resolve. vidcut does not copy it.
   - An item that does nothing gives the user no clue. The tooltip tells the next step.
   - The user sees which keyframes go before they go. A value that no row shows as selected is a hidden choice.
   - The number tells the user how much goes before the user agrees.
@@ -1956,7 +1968,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - The last key of a clip's speed is one frame of the retimed media before the media's end. Its source time is the media's end less the speed of the last section.
   - Thus a section slower than 100% at the end of the media does not show the last source frame.
-  - Example in Resolve Studio 21.1.2: a 900-frame clip, a point at frame 30, and 50% after it. The clip shows source frames 0 to 898.
+  - Example in Resolve Studio 21.1.2: a 900-frame clip, a speed keyframe at frame 30, and 50% after it. The clip shows source frames 0 to 898.
   - The manual does not tell this.
 - **vidcut:**
   - The last section shows each source frame to the end of the media, the last frame too ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).

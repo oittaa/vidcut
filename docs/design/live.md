@@ -281,6 +281,15 @@ The bar and the Jobs button:
 - The drags are `Gesture::Volume`, `Gesture::Key` and `Gesture::KeyHandle`. They send `keyframes.set` and `keyframes.move`, in one `apply`.
 - `Preview::gains` draws the dragged gains. On release, `Workspace::trim_sent` shows them until the project has them.
 
+**Speed keyframes** ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+
+- `paint::speed_marks` draws the strip of a clip with speed keyframes (`geometry::speed_strip`): a line at each speed keyframe and the speed of each section.
+- `geometry::speed_labels` places the speeds. The paint, the pointer and the clicks use the same places (`geometry::speed_label_at`).
+  - Why: a click on a speed then opens the list of the speed that the user sees.
+- A click on the speed of a forward section keeps it in `TimelineView::section_list`. `Workspace::section_list` shows the list as a popup there.
+- Set opens `Workspace::section_window`. Both send `speed.set` at the first frame of the section (`SectionSpeed`).
+- The slip handle starts under the strip (`geometry::slip_handle`). Thus it does not cover the speeds.
+
 **Subtitles.**
 
 - `cues::placed` places the cues of a subtitle track, at half height where cues overlap. `cues::paint_track` draws them, and `cues::hit` finds the cue or edge under the pointer.
@@ -337,6 +346,13 @@ The bar and the Jobs button:
   - `Workspace::key_cmd_why` gives the next step for an item that is off. The menu shows it as the tooltip.
   - `Workspace::key_menu_why` gives the step that the three items share. The menu shows it as a line under them.
   - Delete All Keyframes keeps its question in `Editor::deleting` until the user answers (`Workspace::delete_all_window`).
+  - With the tab and the tray closed, `Workspace::speed_cmd` acts on the speed keyframes of the selected clips (`Workspace::speed_clips`).
+  - `Workspace::speed_cmd_why` then gives the next steps.
+- The Speed row shows `Speed::keyframes`: the first frame of each section after the first, with its speed.
+  - `keyframes.add` and `keyframes.remove` with the `param` `speed` edit them in `ops::speed`.
+  - A speed keyframe does not move, copy or take an ease (`fixed`). A change of its value sends `speed.set`.
+  - The value field is off when the section is frozen or plays backward. Why: `speed.set` changes only a forward section.
+  - Why: a speed keyframe is a cut between two sections. Its frame and its value come from the sections.
 - A press in the tab or the tray gives them the keys. A press in another place takes the keys away (`Workspace::key_focus`, `Editor::focused`).
 - With the keys, Ctrl+C and Ctrl+X send `keyframes.copy` or `keyframes.cut`. The core keeps the keyframes that come back as its clipboard, in place of the clips.
 - With the keys, Ctrl+V sends `keyframes.paste` with the selected clips while the clipboard holds keyframes (`Snapshot::key_clipboard`). It never pastes clips there.

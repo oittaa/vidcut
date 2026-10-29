@@ -91,8 +91,6 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("edit.cut", &["clips"]),
     ("edit.change_duration", &["clips"]),
     ("edit.change_speed", &["clips"]),
-    ("speed.add_point", &["clips"]),
-    ("speed.remove_point", &["clips"]),
     ("speed.set", &["clips"]),
     ("speed.freeze", &["clips"]),
     ("export.start", &["output"]),
@@ -194,10 +192,7 @@ const GROUPS: &[(&str, &str)] = &[
         "speakers",
         "Who speaks: names, colors, files' speakers joined, words reassigned",
     ),
-    (
-        "speed",
-        "Speed points: sections of a clip at their own speeds",
-    ),
+    ("speed", "Speed: sections of a clip at their own speeds"),
     ("storyboard", "Storyboards: a labeled picture of every shot"),
     (
         "subtitles",

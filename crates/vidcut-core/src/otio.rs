@@ -2318,7 +2318,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     }
     if !notes.eased.is_empty() {
         warnings.push(format!(
-            "speed points read without their ease: {}",
+            "speed keyframes read without their ease: {}",
             notes.eased.join(", ")
         ));
     }

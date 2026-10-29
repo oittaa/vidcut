@@ -1014,32 +1014,11 @@ pub enum Request {
         #[serde(default)]
         download: bool,
     },
-    /// Add a speed point to each clip at `at` (the playhead; decision D48):
-    /// the speed section there splits in two at its speed. The sound of the
-    /// clip follows its sections and keeps its pitch.
-    #[serde(rename = "speed.add_point")]
-    SpeedAddPoint {
-        clips: OneOrMany<ClipRef>,
-        #[serde(default)]
-        at: Option<TimeSpec>,
-    },
-    /// Remove a speed point from each clip: the point at `at` (the playhead),
-    /// else the nearest point before it. Its two sections become one, at the
-    /// speed between the points on each side. The other points stay, and the
-    /// clip keeps its length. With `all`, each point goes in this way.
-    #[serde(rename = "speed.remove_point")]
-    SpeedRemovePoint {
-        clips: OneOrMany<ClipRef>,
-        #[serde(default)]
-        at: Option<TimeSpec>,
-        #[serde(default)]
-        all: bool,
-    },
     /// Set the speed of the section under `at` (the playhead) in each clip:
     /// 2.0 twice as fast, 0.5 half. The section keeps its source frames, and
     /// the sections after it move. With ripple (Ripple On unless overridden)
     /// the clip's length changes and later clips follow; without, the clip
-    /// keeps its length. A clip with no speed points changes as with
+    /// keeps its length. A clip with no speed keyframes changes as with
     /// `edit.change_speed`.
     #[serde(rename = "speed.set")]
     SpeedSet {
@@ -1056,7 +1035,7 @@ pub enum Request {
         download: bool,
     },
     /// Freeze the frame at `at` (the playhead) in each clip for 2 seconds:
-    /// a freeze section between two new speed points. With ripple (Ripple On
+    /// a freeze section between two new speed keyframes. With ripple (Ripple On
     /// unless overridden) the clip grows by 2 seconds and later clips follow;
     /// without, the clip keeps its length.
     #[serde(rename = "speed.freeze")]
@@ -3112,10 +3091,16 @@ pub enum KeyParam {
     CropSoftness,
     /// Opacity, from 0 to 1.
     Opacity,
+    /// The speed of a clip (decision D48). A speed keyframe cuts the speed
+    /// section under it in two, at its speed. Its removal makes the two
+    /// sections one, at the speed between the keyframes on each side, and
+    /// the clip keeps its length. It takes no `value` or `ease`:
+    /// `speed.set` sets the speed of a section. It does not move or copy.
+    Speed,
 }
 
 impl KeyParam {
-    pub const ALL: [KeyParam; 13] = [
+    pub const ALL: [KeyParam; 14] = [
         KeyParam::Volume,
         KeyParam::Position,
         KeyParam::Zoom,
@@ -3129,6 +3114,7 @@ impl KeyParam {
         KeyParam::CropBottom,
         KeyParam::CropSoftness,
         KeyParam::Opacity,
+        KeyParam::Speed,
     ];
 }
 

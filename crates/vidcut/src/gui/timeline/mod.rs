@@ -241,6 +241,8 @@ pub struct TimelineView {
     pub marker_dialog: Option<MarkerDialog>,
     pub duration_dialog: Option<String>,
     pub speed_dialog: Option<SpeedDialog>,
+    pub section_list: Option<SectionSpeed>,
+    pub section_dialog: Option<SectionSpeed>,
     pub silence: Option<tools::SilenceDialog>,
     pub normalize: Option<super::normalize::NormalizeDialog>,
     pub normalize_last: Option<super::normalize::Choice>,
@@ -293,6 +295,8 @@ impl Default for TimelineView {
             marker_dialog: None,
             duration_dialog: None,
             speed_dialog: None,
+            section_list: None,
+            section_dialog: None,
             enlarged: None,
             silence: None,
             normalize: None,
@@ -408,6 +412,14 @@ impl SpeedDialog {
     pub fn params(&self, clips: &[String]) -> Value {
         json!({ "clips": clips, "speed": self.speed(), "ripple": self.ripple })
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SectionSpeed {
+    pub clip: String,
+    pub at: i64,
+    pub percent: f64,
+    pub anchor: Rect,
 }
 
 #[derive(Debug, Clone)]
@@ -1090,6 +1102,8 @@ impl Workspace {
                     .as_ref()
                     .is_some_and(|(_, _, on)| *on != geometry::OnVolume::Line);
                 let on_volume = on_volume.is_some();
+                let on_label = geometry::speed_label_at(&p, rows, scale, pos)
+                    .is_some_and(|(_, l)| l.speed > 0.0);
                 if let Hit::AudioEdit { outgoing, .. } = &what
                     && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
                     && let Some(c) = p.clip(outgoing)
@@ -1105,8 +1119,7 @@ impl Workspace {
                 if let Hit::Clip(id) | Hit::Slip(id) = &what
                     && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
                     && let Some(c) = p.clip(id)
-                    && let Some(handle) =
-                        geometry::slip_handle(&row.rect, scale.xf(c.start), scale.xf(c.end()))
+                    && let Some(handle) = geometry::slip_handle(&row.rect, scale, c)
                 {
                     let grabbed = matches!(what, Hit::Slip(_)) && !on_volume;
                     let (fill, ink) = if grabbed {
@@ -1165,7 +1178,9 @@ impl Workspace {
                     Hit::Roll { .. } | Hit::AudioEdit { .. } => Some(paint::TrimPointer::Roll),
                     _ => None,
                 };
-                if on_key {
+                if on_label {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                } else if on_key {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 } else if on_volume {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
@@ -1221,6 +1236,8 @@ impl Workspace {
         self.duration_window(ui.ctx());
         self.fade_window(ui.ctx());
         self.speed_window(ui.ctx());
+        self.section_list(ui);
+        self.section_window(ui.ctx());
         self.silence_window(ui.ctx());
         self.normalize_window(ui.ctx());
         self.boring_window(ui.ctx());
@@ -2295,6 +2312,19 @@ impl Workspace {
         if !on_ruler && self.cue_click(resp, p, (rows, &scale), pos, upper, mods) {
             return;
         }
+        if !on_ruler
+            && resp.clicked()
+            && let Some((clip, l)) =
+                geometry::speed_label_at(p, rows, &scale, pos).filter(|(_, l)| l.speed > 0.0)
+        {
+            self.timeline.section_list = Some(SectionSpeed {
+                clip,
+                at: l.at,
+                percent: l.speed * 100.0,
+                anchor: l.rect,
+            });
+            return;
+        }
         let what = hit_rows(p, rows, &scale, pos).1;
         let faded = rows
             .at(pos.y)
@@ -2680,6 +2710,22 @@ impl Workspace {
         if !c.is_generator() && ui.button(keys("Change Speed…  (R)")).clicked() {
             self.open_speed_dialog();
             ui.close();
+        }
+        if super::keyframe_editor::takes_speed(c) {
+            let play = self.snap.timeline.position;
+            let why = super::keyframe_editor::add_speed_key_why(&[c], play);
+            let r = ui.add_enabled(why.is_none(), egui::Button::new("Add Speed Keyframe"));
+            let r = match why {
+                Some(why) => r.on_disabled_hover_text(why),
+                None => r,
+            };
+            if r.clicked() {
+                self.send(
+                    "keyframes.add",
+                    json!({ "clips": [c.id], "param": "speed", "at": play }),
+                );
+                ui.close();
+            }
         }
         if c.audio.is_some() {
             let heard = self
@@ -3192,6 +3238,81 @@ impl Workspace {
             retime,
             ..SpeedDialog::of(speed, p.settings.ripple_on)
         });
+    }
+
+    fn section_list(&mut self, ui: &egui::Ui) {
+        let Some(s) = self.timeline.section_list.clone() else {
+            return;
+        };
+        let mut open = true;
+        let mut chosen = None;
+        egui::Popup::new(
+            egui::Id::unique("section-speeds"),
+            ui.ctx().clone(),
+            s.anchor,
+            ui.layer_id(),
+        )
+        .kind(egui::PopupKind::Menu)
+        .layout(egui::Layout::top_down_justified(egui::Align::Min))
+        .open_bool(&mut open)
+        .show(|ui| {
+            for percent in [20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 100.0] {
+                if ui.button(format!("{percent}%")).clicked() {
+                    chosen = Some(Some(percent));
+                }
+            }
+            ui.separator();
+            if ui.button("Set…").clicked() {
+                chosen = Some(None);
+            }
+        });
+        match chosen {
+            Some(Some(percent)) => self.set_section(&s, percent),
+            Some(None) => self.timeline.section_dialog = Some(s),
+            None => {}
+        }
+        if !open || chosen.is_some() {
+            self.timeline.section_list = None;
+        }
+    }
+
+    fn set_section(&mut self, s: &SectionSpeed, percent: f64) {
+        let params = json!({ "clips": [s.clip], "at": s.at, "speed": percent / 100.0 });
+        self.send_asking("speed.set", params);
+    }
+
+    fn section_window(&mut self, ctx: &egui::Context) {
+        let Some(mut s) = self.timeline.section_dialog.take() else {
+            return;
+        };
+        let mut open = true;
+        let mut done = false;
+        super::dialog::window(ctx, "Set Speed Change", &mut open, |ui| {
+            super::dialog::form(ui, "section-speed-form", |ui| {
+                super::dialog::row(ui, "Speed", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut s.percent)
+                            .range(SpeedDialog::PERCENT)
+                            .speed(1.0)
+                            .suffix(" %"),
+                    )
+                });
+            });
+            super::dialog::footer(ui, |ui| {
+                let set = super::dialog::main_button(ui, "Set", true)
+                    || ui.input(|i| i.key_pressed(Key::Enter));
+                if set {
+                    self.set_section(&s, s.percent);
+                    done = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    done = true;
+                }
+            });
+        });
+        if open && !done {
+            self.timeline.section_dialog = Some(s);
+        }
     }
 
     fn pictured(&self, clips: &[String]) -> Vec<String> {

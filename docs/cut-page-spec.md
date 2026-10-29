@@ -17,7 +17,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 
 **In scope:**
 - media pool, viewer, dual timeline
-- editing and trimming, speed changes and speed points (D48)
+- editing and trimming, speed changes and speed keyframes (D48)
 - dissolves: cross dissolves, fades to and from black, audio cross fades (§8.11)
 - clip/track audio levels and waveforms
 - volume keyframes of a clip (§9, D81)
@@ -58,6 +58,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - **Tracks** (pp. 1255–1256):
     - Each value that can have keyframes has a track, in a group for its section.
     - Volume is a track. Position is one track. Zoom is one track. The anchor point is one track.
+    - Speed is one track, in a Speed group. It shows the speed keyframes of the clip (D48, [X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
     - The ⋯ menu has Display All Parameters and Display Parameters with Keyframes. All is the default.
     - A click on the name of a group opens or closes it. The ⋯ menu also has Expand All Parameters and Collapse All Parameters.
   - **Track controls** (p. 1257):
@@ -107,8 +108,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - The value changed last in the Inspector and the curve in view do not pick it.
     - Mark > Delete Keyframe (Alt+]) removes the selected keyframes. With none selected, it removes the keyframes of the selected rows at the playhead.
     - Mark > Delete All Keyframes removes the selected keyframes. With none selected, it asks first. Then it removes all the keyframes of the selected rows.
-      - The question names the values, the number of keyframes and the clip ([X94](deviations.md#x94-the-mark-menus-keyframe-items-act-only-on-keyframes)). Cancel has the focus.
-    - These three items act on the clip that the tab shows. They are off when the tab and the tray are closed (X94).
+      - The question names the values, the number of keyframes and the clip ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)). Cancel has the focus.
+    - These three items act on the clip that the tab shows.
+    - With the tab and the tray closed, they act on the speed keyframes of the selected clips (D48, X94).
     - After a click in the Keyframes tab or the keyframe tray, Ctrl+C and Ctrl+X copy or cut the selected keyframes (p. 1258).
     - Ctrl+V there pastes them on the selected clips (p. 1258).
       - The first keyframe goes at the playhead. The others keep their distance from it.
@@ -1395,36 +1397,55 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - When you type a timecode, `;` means drop-frame. So does `:` in a drop-frame project.
   - A skipped label is refused. Digits that fill one land on the first frame of the minute.
 - **D48. Clips at another speed** (§1, §8.6; deviations X9, X95).
-  - A clip's speed comes from Change Clip Speed, the Speed section of the Inspector, speed points, or an OTIO file.
+  - A clip's speed comes from Change Clip Speed, the Speed section of the Inspector, speed keyframes, or an OTIO file.
   - The speed applies wherever its pictures and sound go.
   - Change Clip Speed takes 1% to 10000%, forward or backward.
   - It also takes 0, which freezes the frame under the playhead.
-  - It gives the whole clip one speed. The speed points of the clip go.
+  - It gives the whole clip one speed. The speed keyframes of the clip go.
   - Without ripple, the clip keeps its length. With ripple, it keeps its source, and later clips follow.
   - Each frame shows the source frame in which its stretch of the source starts.
   - Backward, it shows the bottom of the stretch, as Resolve shows it.
   - This is Retime Process at Nearest. The other processes make the frames between the source frames (deviation X93).
   - Sound keeps its pitch, and plays reversed when backward. A freeze is silent.
   - Edits count frames through the speed.
-  - **Speed points.** These facts come from Resolve Studio 21.1.2, from its renders and its OTIO files:
-    - A speed point cuts a clip into two sections. Each section has a speed of its own. The sound of the clip gets the same sections.
-    - A new point gives both sections the speed of the section that it cuts.
+  - **Speed keyframes.** These facts come from Resolve Studio 21.1.2, from its renders and its OTIO files:
+    - A speed keyframe cuts a clip into two sections. Each section has a speed of its own. The sound of the clip gets the same sections.
+    - A new speed keyframe gives both sections the speed of the section that it cuts.
     - Each timeline frame shows `floor` of the source position on the line of its section.
-    - A change of a section's speed moves the later points and the clip's end. Their sections keep their speeds.
-    - The freeze button holds the frame under the playhead for 2 seconds of the timeline. It adds a section at 0% and a point after it.
-    - Delete Keyframe removes the point at the playhead, or else the nearest point before the playhead.
-    - The section that is left goes in a straight line between the points on its two sides. The clip keeps its length.
-    - Trims and splits keep all the points, also those outside the clip. The points stay on the retimed source.
+    - A change of a section's speed moves the later speed keyframes and the clip's end. Their sections keep their speeds.
+    - The freeze button holds the frame under the playhead for 2 seconds of the timeline. It adds a section at 0% and a speed keyframe after it.
+    - Delete Keyframe removes the speed keyframe at the playhead, or else the nearest one before the playhead.
+    - The section that is left goes in a straight line between the speed keyframes on its two sides. The clip keeps its length.
+    - Trims and splits keep all the speed keyframes, also those outside the clip. They stay on the retimed source.
     - A keyframe of the clip stays on its frame of the clip when a section's speed changes.
-    - The OTIO export writes the points as the `Key Frames` of a `TimeEffect`, in seconds from the media's first frame.
-  - **Requests:** `speed.add_point`, `speed.remove_point`, `speed.set` and `speed.freeze` do these edits at a time, the playhead by default.
+    - The OTIO export writes the speed keyframes as the `Key Frames` of a `TimeEffect`, in seconds from the media's first frame.
+  - **Timeline:** a clip with speed keyframes has a strip at its top. These facts come from Resolve Studio 21.1.2:
+    - The strip shows the speed of each section, and a line at each speed keyframe.
+    - A click on a speed opens a list: 20%, 30%, 40%, 50%, 60%, 70%, 100% and Set.
+    - Set opens the Set Speed Change window, with a Speed field.
+    - The clip's right-click menu adds a speed keyframe ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
+    - With the Keyframes tab and the keyframe tray closed, the keyframe items of the Mark menu act on speed keyframes.
+  - **In vidcut:**
+    - The list opens only on a section that plays forward. `speed.set` changes only such a section.
+    - Add Speed Keyframe in the right-click menu adds a speed keyframe at the playhead.
+    - The Speed row of the Keyframes tab and the keyframe tray shows the speed keyframes ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).
+      - A speed keyframe does not move, copy or take an ease. Its value is the speed of the section after it.
+      - Ctrl+X leaves the selected speed keyframes in place, and they stay selected.
+      - A change of its value in the tab sends `speed.set`. The field takes 1% to 10000%.
+      - The field is off when the section is frozen or plays backward.
+    - With the tab and the tray closed, Mark > Add Keyframe (Ctrl+[) adds a speed keyframe at the playhead to each selected clip under it.
+    - Then Mark > Delete Keyframe (Alt+]) removes the speed keyframe at the playhead, or else the nearest one before it.
+    - Then Mark > Delete All Keyframes asks first. Then it removes all the speed keyframes of the selected clips.
+  - **Requests:** `keyframes.add` and `keyframes.remove` with the `param` `speed` add and remove speed keyframes.
+    - `speed.set` and `speed.freeze` change the sections. All four act at a time, the playhead by default.
     - `speed.set` takes 1% to 10000% forward, in a section that plays forward.
-    - `speed.remove_point` with `all` removes all the points of the clips.
+    - `keyframes.remove` without `frames` and `at` removes all the speed keyframes of the clips.
+    - `keyframes.list` gives each speed keyframe with the speed of the section after it.
     - With ripple, the clip's length follows a change. Without ripple, the clip keeps its length.
   - **Model:** a clip's speed is a list of sections on its retimed source (`Speed`, `Section`).
     - The retimed source has one frame for each timeline frame. A trim or a split moves only the clip's place on it (`skip`).
     - The keyframes of a clip with a speed are on its retimed source. Thus they stay on their frames of the clip.
-    - The sound of a clip plays through all its sections in one stretch, with its pitch kept. Thus a point makes no click and no dip.
+    - The sound of a clip plays through all its sections in one stretch, with its pitch kept. Thus a speed keyframe makes no click and no dip.
 - **D49. What Join Match Edit Clips joins** (pp. 646, 950).
   - The manual says only that it rejoins a split clip.
   - Two clips join when the second plays on from where the first stops. Thus nothing seen or heard changes.

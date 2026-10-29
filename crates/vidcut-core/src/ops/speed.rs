@@ -1,3 +1,4 @@
+use super::keyframes::{Pick, picked_as};
 use super::{change_speed, retimed};
 use crate::error::{Error, Result};
 use crate::model::{Clip, Project, Section, Speed};
@@ -16,7 +17,7 @@ fn clip_of(p: &Project, id: &str) -> Result<Clip> {
         return Ok(c.clone());
     };
     Err(Error::invalid(format!(
-        "{id} is {why}: it has no speed points"
+        "{id} is {why}: it has no speed keyframes"
     )))
 }
 
@@ -98,27 +99,29 @@ fn with(c: &Clip, map: Vec<Section>, skip: i64) -> Clip {
     n
 }
 
-pub fn add_point(p: &mut Project, ids: &[String], t: i64) -> Result<()> {
+pub fn add_keyframe(p: &mut Project, ids: &[String], t: i64) -> Result<Vec<(String, i64)>> {
+    let mut out = Vec::new();
     for id in ids {
         let c = under(p, id, t)?;
         let tc = p.settings.timecode(t);
         if t == c.start {
             return Err(Error::invalid(format!(
-                "{id} starts at {tc}: a speed point goes after its first frame"
+                "{id} starts at {tc}: a speed keyframe goes after its first frame"
             )));
         }
         let (mut map, skip) = sections(&c);
         let u = skip + t - c.start;
         if map.iter().skip(1).any(|s| s.at == u) {
             return Err(Error::invalid(format!(
-                "{id} already has a speed point at {tc}"
+                "{id} already has a speed keyframe at {tc}"
             )));
         }
         split(&mut map, u);
         let n = with(&c, map, skip);
-        retimed(p, &c, n, c.duration, false, "with this speed point")?;
+        retimed(p, &c, n, c.duration, false, "with this speed keyframe")?;
+        out.push((id.clone(), u));
     }
-    Ok(())
+    Ok(out)
 }
 
 fn merge(map: &mut Vec<Section>, i: usize, end: i64) {
@@ -133,37 +136,23 @@ fn merge(map: &mut Vec<Section>, i: usize, end: i64) {
     map.remove(i);
 }
 
-pub fn remove_point(p: &mut Project, ids: &[String], t: Option<i64>, all: bool) -> Result<()> {
+pub fn remove_keyframes(p: &mut Project, ids: &[String], pick: &Pick) -> Result<()> {
     for id in ids {
-        let c = match t.filter(|_| !all) {
-            Some(t) => under(p, id, t)?,
-            None => clip_of(p, id)?,
-        };
-        let (mut map, skip) = sections(&c);
-        if map.len() < 2 {
-            return Err(Error::invalid(format!("{id} has no speed points")));
+        let c = clip_of(p, id)?;
+        let keys = c.speed.as_ref().map(Speed::keyframes).unwrap_or_default();
+        if keys.is_empty() {
+            return Err(Error::invalid(format!("{id} has no speed keyframes")));
         }
+        let chosen = picked_as(&c, &keys, pick, "speed")?;
+        let (mut map, skip) = sections(&c);
         let end = skip + c.duration;
-        if all {
-            while map.len() > 1 {
-                let i = map.len() - 1;
+        for i in (1..map.len()).rev() {
+            if chosen.contains(&map[i].at) {
                 merge(&mut map, i, end);
-            }
-        } else {
-            let t = t.ok_or_else(|| Error::usage("speed.remove_point needs `at` (no playhead)"))?;
-            let u = skip + t - c.start;
-            match map.iter().rposition(|s| s.at <= u) {
-                Some(i) if i >= 1 => merge(&mut map, i, end),
-                _ => {
-                    return Err(Error::invalid(format!(
-                        "{id} has no speed point at or before {}",
-                        p.settings.timecode(t)
-                    )));
-                }
             }
         }
         let n = with(&c, map, skip);
-        retimed(p, &c, n, c.duration, false, "without this speed point")?;
+        retimed(p, &c, n, c.duration, false, "without these speed keyframes")?;
     }
     Ok(())
 }
@@ -185,7 +174,7 @@ pub fn set(
         if !speed.is_finite() || !(0.01..=100.0).contains(&speed) {
             return Err(Error::invalid(format!(
                 "speed {speed} isn't 1% to 10000% forward: a section between speed \
-                 points plays forward, and speed.freeze makes a freeze frame"
+                 keyframes plays forward, and speed.freeze makes a freeze frame"
             )));
         }
         let (mut map, skip) = sections(&c);

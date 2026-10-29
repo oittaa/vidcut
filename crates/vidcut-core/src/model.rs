@@ -1210,7 +1210,7 @@ pub struct Clip {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compound: Option<Compound>,
     /// Its speed, when not 100% forward: one speed, or sections between
-    /// speed points (decision D48). The clip plays and edits at it.
+    /// speed keyframes (decision D48). The clip plays and edits at it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
     /// How it makes a frame that falls between two of its source frames:
@@ -1427,11 +1427,12 @@ impl ProjectRetime {
 }
 
 /// A clip's speed (decision D48): sections that each play at one speed,
-/// on the clip's retimed source. A speed point starts each section after
-/// the first.
+/// on the clip's retimed source. A speed keyframe starts each section
+/// after the first.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Speed {
-    /// The sections in order. A speed point starts each one after the first.
+    /// The sections in order. A speed keyframe starts each one after the
+    /// first.
     /// The first also covers the frames before it, and the last the frames
     /// after it.
     pub sections: Arc<[Section]>,
@@ -1482,8 +1483,17 @@ impl Speed {
         }
     }
 
-    pub fn points(&self) -> impl Iterator<Item = i64> + '_ {
-        self.sections.iter().skip(1).map(|s| s.at)
+    pub fn keyframes(&self) -> Vec<Keyframe> {
+        self.sections
+            .iter()
+            .skip(1)
+            .map(|s| Keyframe {
+                frame: s.at,
+                value: s.speed,
+                in_handle: None,
+                out_handle: None,
+            })
+            .collect()
     }
 
     pub fn label(&self) -> String {
