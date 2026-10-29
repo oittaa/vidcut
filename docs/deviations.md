@@ -1937,7 +1937,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - In one check, this was the value keyed last with a button of the Inspector. Delete removed all its keyframes.
   - In one check, the question named no value. After Delete, a Position X with no keyframes also went back to 0.
 - **vidcut:**
-  - The three items act only on keyframes. vidcut has no speed points yet ([todo](todo/speed-ramps.md)).
+  - The three items act only on keyframes. Scripts edit speed points with the `speed.*` requests ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions), [todo](todo/speed-ramps.md)).
   - An item that cannot act is off. Its tooltip tells the next click, for example "Click a parameter name, such as Opacity".
   - When the three items are off for one reason, a line in the menu tells the next step.
     - An example is "Click a parameter name in Timeline > Keyframes".
@@ -1950,3 +1950,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The user sees which keyframes go before they go. A value that no row shows as selected is a hidden choice.
   - The number tells the user how much goes before the user agrees.
   - The reset of a value with no keyframes is a fault in Resolve. vidcut does not copy it.
+
+## X95. A speed change keeps the last source frame
+
+- **Resolve:**
+  - The last key of a clip's speed is one frame of the retimed media before the media's end. Its source time is the media's end less the speed of the last section.
+  - Thus a section slower than 100% at the end of the media does not show the last source frame.
+  - Example in Resolve Studio 21.1.2: a 900-frame clip, a point at frame 30, and 50% after it. The clip shows source frames 0 to 898.
+  - The manual does not tell this.
+- **vidcut:**
+  - The last section shows each source frame to the end of the media, the last frame too ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- **Why:**
+  - A speed change does not remove pictures from a clip. The lost frame is a fault in Resolve. vidcut does not copy it.

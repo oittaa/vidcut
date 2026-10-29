@@ -1045,19 +1045,15 @@ fn key_preview(
             None => per.push((c, vec![*f])),
         }
     }
-    let shifted = |c: &Clip, f: i64, dt: i64| c.sound_at(c.key_time(f) + dt as f64).round() as i64;
     let fits = |dt: i64| {
         per.iter().all(|(c, moving)| {
-            if c.speed() == 0.0 {
-                return dt == 0;
-            }
             let all = c.audio.as_ref().map_or(&[][..], |a| &a.gain_keys[..]);
             let still: Vec<i64> = all
                 .iter()
                 .map(|k| k.frame)
                 .filter(|f| !moving.contains(f))
                 .collect();
-            let mut new: Vec<i64> = moving.iter().map(|&f| shifted(c, f, dt)).collect();
+            let mut new: Vec<i64> = moving.iter().map(|&f| f + dt).collect();
             let kept_order = moving.iter().zip(&new).all(|(&f, &n)| {
                 let lo = still.iter().filter(|&&s| s < f).max();
                 let hi = still.iter().filter(|&&s| s > f).min();
@@ -1073,7 +1069,7 @@ fn key_preview(
     }
     let (mut commands, mut shown, mut picked) = (Vec::new(), Vec::new(), Vec::new());
     for (c, moving) in &per {
-        picked.extend(moving.iter().map(|&f| (c.id.clone(), shifted(c, f, dt))));
+        picked.extend(moving.iter().map(|&f| (c.id.clone(), f + dt)));
         let Some(a) = c.audio.as_ref() else {
             continue;
         };
@@ -1081,7 +1077,7 @@ fn key_preview(
         vidcut_core::keyframes::reshape(&mut next, |marked| {
             for (k, _) in marked.iter_mut().filter(|(k, _)| moving.contains(&k.frame)) {
                 k.value = kept((k.value + dv).clamp(*GAIN.start(), *GAIN.end()));
-                k.frame = shifted(c, k.frame, dt);
+                k.frame += dt;
             }
         });
         if dv != 0.0 {
@@ -1125,7 +1121,7 @@ fn handle_preview(ctx: &Ctx, pos: Pos2, clip: &str, frame: i64, out: bool) -> Pr
     };
     let k = keys[i];
     let len = (other.frame - k.frame).abs() as f64;
-    let along = c.sound_at(ctx.scale.frame(pos.x)) - k.frame as f64;
+    let along = c.key_at(ctx.scale.frame(pos.x)) - k.frame as f64;
     let frames = if out {
         along.clamp(0.0, len)
     } else {

@@ -397,17 +397,11 @@ impl Placement {
         }
     }
 
-    fn with_keys(
-        self,
-        effects: &[Value],
-        shape: &Shape,
-        timing: &super::effects::Timing,
-        origin: i64,
-    ) -> Option<Picture> {
+    fn with_keys(self, effects: &[Value], shape: &Shape, origin: i64) -> Option<Picture> {
         let (_, values) = parameters(effects)?;
         let keys = |id: &str| match values.iter().find(|(k, _)| *k == id) {
             None => Some(Vec::new()),
-            Some((_, p)) => read_keys(p, timing, origin),
+            Some((_, p)) => read_keys(p, origin),
         };
         let mut picture = self.picture(shape);
         let zoom = merge(keys(ZOOM_X)?, keys(ZOOM_Y)?, self.zoom[0], self.zoom[1])?;
@@ -415,7 +409,7 @@ impl Placement {
         let [fw, fh] = shape.fitted;
         (picture.anchor_keys, picture.anchor_y) = match values.iter().find(|(k, _)| *k == ANCHOR) {
             None => (Vec::new(), Vec::new()),
-            Some((_, p)) => read_point_keys(p, timing, origin)?,
+            Some((_, p)) => read_point_keys(p, origin)?,
         };
         let scaled = (pw - fw).abs() > SAME || (ph - fh).abs() > SAME;
         if scaled && !picture.anchor_keys.is_empty() {
@@ -513,7 +507,6 @@ pub fn take(
     ours: Option<&Picture>,
     shape: &Shape,
     origin: i64,
-    speed: f64,
 ) -> Result<(Vec<Value>, Option<Picture>), Vec<String>> {
     let rest = || -> Vec<Value> { effects.iter().filter(|e| !is_placing(e)).cloned().collect() };
     if let Some(p) = ours {
@@ -535,8 +528,7 @@ pub fn take(
         }
         names
     };
-    let timing = super::effects::Timing { speed };
-    let Some(picture) = read.with_keys(effects, shape, &timing, origin) else {
+    let Some(picture) = read.with_keys(effects, shape, origin) else {
         return Err(placing());
     };
     match crate::ops::picture::checked(&picture) {
@@ -560,23 +552,23 @@ fn moved_at([x, y]: [f64; 2], shape: &Shape) -> [f64; 2] {
     [rounded((x - 0.5) * w / fw), rounded(-(y - 0.5) * h / fh)]
 }
 
-fn read_keys(p: &Value, timing: &super::effects::Timing, origin: i64) -> Option<Vec<Keyframe>> {
+fn read_keys(p: &Value, origin: i64) -> Option<Vec<Keyframe>> {
     let Some(keys) = p.get("Key Frames").and_then(Value::as_object) else {
         return Some(Vec::new());
     };
     if keys.is_empty() {
         return Some(Vec::new());
     }
-    let [before, after] = timing.handle_names();
+    let [before, after] = ["InBez", "OutBez"];
     let mut out = Vec::new();
     for (t, k) in keys {
         let at = t.parse::<f64>().ok()?;
-        let frame = (timing.source(at) + origin as f64).round() as i64;
+        let frame = (at + origin as f64).round() as i64;
         let value = k["Value"].as_f64()?;
         let handle = |name: &str, before: bool| {
             let b = handle_point(k, name)?;
             let h = Handle {
-                frames: b.first()?.as_f64()? * timing.scale(),
+                frames: b.first()?.as_f64()?,
                 value: b.get(1)?.as_f64()?,
             };
             crate::keyframes::checked_handle(h, before).ok()
@@ -593,11 +585,7 @@ fn read_keys(p: &Value, timing: &super::effects::Timing, origin: i64) -> Option<
     Some(out)
 }
 
-fn read_point_keys(
-    p: &Value,
-    timing: &super::effects::Timing,
-    origin: i64,
-) -> Option<(Vec<Keyframe>, Vec<f64>)> {
+fn read_point_keys(p: &Value, origin: i64) -> Option<(Vec<Keyframe>, Vec<f64>)> {
     let Some(keys) = p.get("Key Frames").and_then(Value::as_object) else {
         return Some((Vec::new(), Vec::new()));
     };
@@ -607,7 +595,7 @@ fn read_point_keys(
             return None;
         }
         let at = t.parse::<f64>().ok()?;
-        let frame = (timing.source(at) + origin as f64).round() as i64;
+        let frame = (at + origin as f64).round() as i64;
         let a = k["Value"].as_array().filter(|a| a.len() == 2)?;
         let x = |i: usize| a[i].as_f64().filter(|v| v.is_finite());
         let key = Keyframe {
@@ -714,7 +702,6 @@ fn file_curve(
     keys: &[Keyframe],
     y: Option<&[f64]>,
     source: i64,
-    timing: &super::effects::Timing,
     map: impl Fn(f64) -> f64,
     slope: f64,
 ) -> Option<Value> {
@@ -723,7 +710,7 @@ fn file_curve(
     }
     let mut out = serde_json::Map::new();
     for (i, k) in keys.iter().enumerate() {
-        let at = timing.file((k.frame - source) as f64).round();
+        let at = (k.frame - source) as f64;
         let raw = y.and_then(|ys| ys.get(i).copied()).unwrap_or(k.value);
         let mut v = json!({ "Value": map(raw), "Variant Type": "Double" });
         let bez = |name: &str, h: Handle| {
@@ -731,9 +718,9 @@ fn file_curve(
                 Some(_) => 0.0,
                 None => h.value * slope,
             };
-            handle_value(name, h.frames / timing.scale(), value)
+            handle_value(name, h.frames, value)
         };
-        let [before, after] = timing.handle_names();
+        let [before, after] = ["InBez", "OutBez"];
         if let Some(h) = k.in_handle {
             v[before] = bez(before, h);
         }
@@ -753,18 +740,13 @@ fn key_name(at: f64) -> String {
     }
 }
 
-fn point_curve(
-    keys: &[Keyframe],
-    y: &[f64],
-    source: i64,
-    timing: &super::effects::Timing,
-) -> Option<Value> {
+fn point_curve(keys: &[Keyframe], y: &[f64], source: i64) -> Option<Value> {
     if keys.is_empty() {
         return None;
     }
     let mut out = serde_json::Map::new();
     for (k, ay) in keys.iter().zip(y) {
-        let at = timing.file((k.frame - source) as f64).round();
+        let at = (k.frame - source) as f64;
         let value = [rounded(k.value - 0.5), rounded(0.5 - ay)];
         out.insert(
             key_name(at),
@@ -838,13 +820,7 @@ fn zooming(z: &DynamicZoom, g: i64) -> Vec<Value> {
     vec![ease, center, size]
 }
 
-pub(crate) fn effects(
-    p: &Picture,
-    shape: &Shape,
-    g: i64,
-    source: i64,
-    timing: &super::effects::Timing,
-) -> Vec<Value> {
+pub(crate) fn effects(p: &Picture, shape: &Shape, g: i64, source: i64) -> Vec<Value> {
     let [zx, zy] = p.scale();
     let [ax, ay] = p.pivot();
     let [pan, tilt] = moved(p, shape).map(|v| v.clamp(-REACH, REACH));
@@ -853,13 +829,12 @@ pub(crate) fn effects(
         shape.frame[0] / shape.fitted[0],
         shape.frame[1] / shape.fitted[1],
     );
-    let zoom_x = file_curve(&p.zoom_keys, None, source, timing, |v| v, 1.0);
-    let zoom_y = file_curve(&p.zoom_keys, Some(&p.zoom_y), source, timing, |v| v, 1.0);
+    let zoom_x = file_curve(&p.zoom_keys, None, source, |v| v, 1.0);
+    let zoom_y = file_curve(&p.zoom_keys, Some(&p.zoom_y), source, |v| v, 1.0);
     let pan_keys = file_curve(
         &p.position_keys,
         None,
         source,
-        timing,
         |v| moved_at([v, 0.5], shape)[0],
         sx,
     );
@@ -867,11 +842,10 @@ pub(crate) fn effects(
         &p.position_keys,
         Some(&p.position_y),
         source,
-        timing,
         |v| moved_at([0.5, v], shape)[1],
         -sy,
     );
-    let turn_keys = file_curve(&p.rotation_keys, None, source, timing, |v| v, 1.0);
+    let turn_keys = file_curve(&p.rotation_keys, None, source, |v| v, 1.0);
     let zx = p.zoom_keys.first().map_or(zx, |k| k.value);
     let zy = p.zoom_y.first().copied().unwrap_or(zy);
     let pan = p
@@ -884,14 +858,14 @@ pub(crate) fn effects(
         .copied()
         .map_or(tilt, |y| moved_at([0.5, y], shape)[1]);
     let turn = p.rotation_keys.first().map_or(p.turn(), |k| k.value);
-    let anchor_keys = point_curve(&p.anchor_keys, &p.anchor_y, source, timing);
+    let anchor_keys = point_curve(&p.anchor_keys, &p.anchor_y, source);
     let (ax, ay) = match (p.anchor_keys.first(), p.anchor_y.first()) {
         (Some(k), Some(y)) => (k.value, *y),
         _ => (ax, ay),
     };
-    let pitch_keys = file_curve(&p.pitch_keys, None, source, timing, |v| v, 1.0);
+    let pitch_keys = file_curve(&p.pitch_keys, None, source, |v| v, 1.0);
     let pitch = p.pitch_keys.first().map_or(p.pitch(), |k| k.value);
-    let yaw_keys = file_curve(&p.yaw_keys, None, source, timing, |v| v, 1.0);
+    let yaw_keys = file_curve(&p.yaw_keys, None, source, |v| v, 1.0);
     let yaw = p.yaw_keys.first().map_or(p.yaw(), |k| k.value);
     let linked = match p.zoom_keys.is_empty() {
         true => zx == zy,
@@ -933,12 +907,12 @@ pub(crate) fn effects(
         .zip(p.crop.sides())
         .zip(crop_keys)
         .filter_map(|((id, v), keys)| {
-            let frames = file_curve(keys, None, source, timing, |n| n, 1.0);
+            let frames = file_curve(keys, None, source, |n| n, 1.0);
             let value = keys.first().map_or(v, |k| k.value);
             double_frames(id, value, 0.0, (0.0, 1.0), frames)
         })
         .collect();
-    let soft_keys = file_curve(&p.crop_softness_keys, None, source, timing, |n| n, 1.0);
+    let soft_keys = file_curve(&p.crop_softness_keys, None, source, |n| n, 1.0);
     let softness = p
         .crop_softness_keys
         .first()
@@ -956,7 +930,6 @@ pub(crate) fn effects(
         &p.opacity_keys,
         None,
         source,
-        timing,
         |n| rounded(n * PERCENT),
         PERCENT,
     );
@@ -1025,12 +998,8 @@ mod tests {
         given(&transform, 3)
     }
 
-    fn steady() -> crate::otio::effects::Timing {
-        crate::otio::effects::Timing { speed: 1.0 }
-    }
-
     fn read(effects: &[Value], shape: &Shape) -> Option<Picture> {
-        take(effects, None, shape, 0, 1.0).expect("read").1
+        take(effects, None, shape, 0).expect("read").1
     }
 
     #[test]
@@ -1073,7 +1042,6 @@ mod tests {
             picture,
             run: None,
             source: 0,
-            pace: crate::render::Pace::default(),
             start: 0,
             ready: true,
         };
@@ -1102,7 +1070,7 @@ mod tests {
             anchor: Some([0.75, 0.4]),
             ..Picture::default()
         };
-        let written = effects(&p, &Shape::whole((1920, 1080)), 0, 0, &steady());
+        let written = effects(&p, &Shape::whole((1920, 1080)), 0, 0);
         let anchor = written[0]["metadata"][EDITOR]["Parameters"]
             .as_array()
             .into_iter()
@@ -1122,7 +1090,7 @@ mod tests {
             ..Picture::default()
         };
         let shape = Shape::whole((1920, 1080));
-        assert_eq!(read(&effects(&p, &shape, 0, 0, &steady()), &shape), Some(p));
+        assert_eq!(read(&effects(&p, &shape, 0, 0), &shape), Some(p));
     }
 
     #[test]
@@ -1133,7 +1101,7 @@ mod tests {
             ..Picture::default()
         };
         let shape = Shape::whole((1920, 1080));
-        assert_eq!(read(&effects(&p, &shape, 0, 0, &steady()), &shape), Some(p));
+        assert_eq!(read(&effects(&p, &shape, 0, 0), &shape), Some(p));
     }
 
     #[test]
@@ -1156,7 +1124,7 @@ mod tests {
             ..Picture::default()
         };
         let v = still_info(960, 1080).video.expect("video");
-        let written = effects(&p, &Shape::of(&v, (1920, 1080)), 0, 0, &steady());
+        let written = effects(&p, &Shape::of(&v, (1920, 1080)), 0, 0);
         let out = |id: &str| {
             written[0]["metadata"][EDITOR]["Parameters"]
                 .as_array()

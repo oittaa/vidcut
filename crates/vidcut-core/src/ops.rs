@@ -4,6 +4,7 @@ mod follow;
 pub mod keyframes;
 pub mod normalize;
 pub mod picture;
+pub mod speed;
 pub mod subtitles;
 pub mod titles;
 mod tracks;
@@ -1516,68 +1517,90 @@ pub fn change_speed(
     targets.sort();
     for (_, id) in targets.into_iter().rev() {
         let c = p.clip(&id).expect("found").clone();
-        let old = c.speed();
         let mut n = c.clone();
         let (first, last) = (c.source_at(c.start), c.source_at(c.end() - 1));
-        let span = if old == 0.0 {
-            c.duration as f64
-        } else {
-            c.duration as f64 * old.abs()
+        let span: f64 = c
+            .runs(c.start, c.end())
+            .into_iter()
+            .map(|(a, b)| (b - a) as f64 * c.speed_at(a).abs())
+            .sum();
+        let frozen = span == 0.0;
+        let span = if frozen { c.duration as f64 } else { span };
+        let back = match c.constant_speed() {
+            Some(v) => v < 0.0,
+            None => last < first,
         };
         n.source_in = if speed == 0.0 {
             at.filter(|&t| c.start <= t && t < c.end())
                 .map_or(first, |t| c.source_at(t))
-        } else if (speed < 0.0) != (old < 0.0) {
+        } else if (speed < 0.0) != back {
             last
         } else {
             first
         };
         n.speed = (speed != 1.0).then(|| Speed {
-            effect: time_effect(c.speed.as_ref(), speed).into(),
-            skip: 0,
+            effect: c
+                .speed
+                .as_ref()
+                .and_then(|s| s.effect.as_ref())
+                .map(|_| time_effect(c.speed.as_ref(), speed).into()),
+            ..Speed::constant(speed)
         });
-        let want = if ripple && speed != 0.0 && old != 0.0 {
+        let want = if ripple && speed != 0.0 && !frozen {
             ((span / speed.abs()) + 1e-6).floor().max(1.0) as i64
         } else {
             c.duration
         };
-        let fits = |d: i64| {
-            let mut x = n.clone();
-            x.duration = d;
-            check_source(p, &x).is_ok()
-        };
-        if !fits(1) {
-            return Err(Error::invalid(format!(
-                "{id} has no media to play at {}%",
-                (speed * 100.0).round()
-            )));
+        let at_speed = format!("at {}%", (speed * 100.0).round());
+        retimed(p, &c, n, want, ripple, &at_speed)?;
+    }
+    Ok(())
+}
+
+fn retimed(
+    p: &mut Project,
+    c: &Clip,
+    mut n: Clip,
+    want: i64,
+    ripple: bool,
+    how: &str,
+) -> Result<()> {
+    let fits = |d: i64| {
+        let mut x = n.clone();
+        x.duration = d;
+        check_source(p, &x).is_ok()
+    };
+    if !fits(1) {
+        return Err(Error::invalid(format!(
+            "{} has no media to play {how}",
+            c.id
+        )));
+    }
+    let (mut lo, mut hi) = (1, want.max(1) + 1);
+    while hi - lo > 1 {
+        let mid = lo + (hi - lo) / 2;
+        if fits(mid) {
+            lo = mid;
+        } else {
+            hi = mid;
         }
-        let (mut lo, mut hi) = (1, want + 1);
-        while hi - lo > 1 {
-            let mid = lo + (hi - lo) / 2;
-            if fits(mid) {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-        }
-        let keys = n
-            .audio
-            .as_ref()
-            .map(|a| crate::keyframes::retimed(&a.gain_keys, &c, &n));
-        if let (Some(a), Some(keys)) = (n.audio.as_mut(), keys) {
-            a.gain_keys = keys;
-        }
-        if n.picture.as_ref().is_some_and(|pic| pic.is_keyed()) {
-            let mut pic = n.picture.take().expect("keyed");
-            pic.retimed_to(&c, &n);
-            n.picture = Some(pic);
-        }
-        let (ti, ci) = locate(p, &id)?;
-        p.tracks[ti].clips[ci] = n;
-        if lo != c.duration {
-            trim(p, &id, Edge::Tail, lo - c.duration, Some(ripple))?;
-        }
+    }
+    let keys = n
+        .audio
+        .as_ref()
+        .map(|a| crate::keyframes::retimed(&a.gain_keys, c, &n));
+    if let (Some(a), Some(keys)) = (n.audio.as_mut(), keys) {
+        a.gain_keys = keys;
+    }
+    if n.picture.as_ref().is_some_and(|pic| pic.is_keyed()) {
+        let mut pic = n.picture.take().expect("keyed");
+        pic.retimed_to(c, &n);
+        n.picture = Some(pic);
+    }
+    let (ti, ci) = locate(p, &c.id)?;
+    p.tracks[ti].clips[ci] = n;
+    if lo != c.duration {
+        trim(p, &c.id, Edge::Tail, lo - c.duration, Some(ripple))?;
     }
     Ok(())
 }
@@ -1588,7 +1611,7 @@ pub(crate) fn time_effect(old: Option<&Speed>, speed: f64) -> serde_json::Value 
     } else {
         "LinearTimeWarp.1"
     };
-    match old.map(|s| (*s.effect).clone()) {
+    match old.and_then(|s| s.effect.as_deref()).cloned() {
         Some(mut e) if e["OTIO_SCHEMA"] == schema => {
             e["time_scalar"] = json!(speed);
             e
@@ -1684,7 +1707,7 @@ pub fn extend_to_media_end(p: &mut Project, ids: &[String], ripple: Option<bool>
         let c = p
             .clip(id)
             .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-        if c.is_generator() || c.speed() == 0.0 {
+        if c.is_generator() || c.is_frozen() {
             continue;
         }
         let have = p
@@ -1832,9 +1855,11 @@ pub fn ai_retimes(p: &Project, ids: &[String]) -> Vec<crate::model::Retime> {
         let Some(m) = p.media(&c.media) else {
             continue;
         };
-        let r = crate::render::retime_of(c, m, &p.settings);
-        if r.ai() && !out.contains(&r) {
-            out.push(r);
+        for (a, _) in c.runs(c.start, c.end()) {
+            let r = crate::render::retime_of(c, a, m, &p.settings);
+            if r.ai() && !out.contains(&r) {
+                out.push(r);
+            }
         }
     }
     out

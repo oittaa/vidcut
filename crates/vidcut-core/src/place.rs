@@ -406,7 +406,6 @@ mod tests {
             picture,
             run: None,
             source: 0,
-            pace: crate::render::Pace::default(),
             start: 0,
             ready: true,
         };
@@ -440,7 +439,6 @@ mod tests {
             picture,
             run: None,
             source: 0,
-            pace: crate::render::Pace::default(),
             start: 0,
             ready: true,
         };

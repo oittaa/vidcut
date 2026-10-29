@@ -398,7 +398,7 @@ pub fn tile_step(frames_per_tile: f64) -> i64 {
     1i64 << exp
 }
 
-pub fn tile_frame(source_in: i64, pace: Pace, edge: f64, frames: i64) -> i64 {
+pub fn tile_frame(source_in: i64, pace: &Pace, edge: f64, frames: i64) -> i64 {
     source_in + pace.offset((edge.floor() as i64).clamp(0, (frames - 1).max(0)))
 }
 
@@ -593,12 +593,12 @@ mod tests {
 
     #[test]
     fn a_tile_shows_the_frame_under_its_left_edge() {
-        assert_eq!(tile_frame(100, Pace::of(1.0, 0), 0.0, 1000), 100);
-        assert_eq!(tile_frame(100, Pace::of(1.0, 0), 80.9, 1000), 180);
-        assert_eq!(tile_frame(100, Pace::of(1.0, 0), 2000.0, 1000), 1099);
-        assert_eq!(tile_frame(100, Pace::of(0.25, 0), 81.0, 1000), 120);
-        assert_eq!(tile_frame(500, Pace::of(-1.0, 0), 80.5, 1000), 420);
-        assert_eq!(tile_frame(500, Pace::of(0.0, 0), 80.0, 1000), 500);
+        assert_eq!(tile_frame(100, &Pace::of(1.0, 0), 0.0, 1000), 100);
+        assert_eq!(tile_frame(100, &Pace::of(1.0, 0), 80.9, 1000), 180);
+        assert_eq!(tile_frame(100, &Pace::of(1.0, 0), 2000.0, 1000), 1099);
+        assert_eq!(tile_frame(100, &Pace::of(0.25, 0), 81.0, 1000), 120);
+        assert_eq!(tile_frame(500, &Pace::of(-1.0, 0), 80.5, 1000), 420);
+        assert_eq!(tile_frame(500, &Pace::of(0.0, 0), 80.0, 1000), 500);
     }
 
     #[test]

@@ -1209,8 +1209,8 @@ pub struct Clip {
     /// (`video` false).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compound: Option<Compound>,
-    /// A speed change another editor made, carried (deviation X9): the clip
-    /// plays and edits at it (decision D48).
+    /// Its speed, when not 100% forward: one speed, or sections between
+    /// speed points (decision D48). The clip plays and edits at it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speed: Option<Speed>,
     /// How it makes a frame that falls between two of its source frames:
@@ -1426,16 +1426,36 @@ impl ProjectRetime {
     }
 }
 
-/// A speed change from another editor's file (deviation X9).
+/// A clip's speed (decision D48): sections that each play at one speed,
+/// on the clip's retimed source. A speed point starts each section after
+/// the first.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Speed {
-    /// The OTIO time effect as read: a `LinearTimeWarp` (`time_scalar` 2.0
-    /// for twice the speed, -1.0 reversed) or a `FreezeFrame`.
-    pub effect: Kept,
-    /// Frames of its pace before its first frame (decision D48): the parts
-    /// a split or trim leaves show the frames they showed.
+    /// The sections in order. A speed point starts each one after the first.
+    /// The first also covers the frames before it, and the last the frames
+    /// after it.
+    pub sections: Arc<[Section]>,
+    /// Frames of the retimed source before the clip's first frame: the
+    /// parts a split or trim leaves show the frames they showed.
     #[serde(default, skip_serializing_if = "is_zero_frames")]
     pub skip: i64,
+    /// The OTIO time effect as read from another editor's file (deviation
+    /// X9), written back while the clip keeps the speed that it gives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<Kept>,
+}
+
+/// A section of a clip's speed.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Section {
+    /// Its first frame on the retimed source.
+    pub at: i64,
+    /// The source position there, in source frames from the section list's
+    /// source 0.
+    pub from: f64,
+    /// Source frames for each frame: 2.0 twice as fast, 0.5 half, -1.0
+    /// backward, 0 a freeze frame.
+    pub speed: f64,
 }
 
 fn is_zero_frames(n: &i64) -> bool {
@@ -1443,19 +1463,34 @@ fn is_zero_frames(n: &i64) -> bool {
 }
 
 impl Speed {
+    pub fn constant(speed: f64) -> Self {
+        Self {
+            sections: Arc::from([Section {
+                at: 0,
+                from: 0.0,
+                speed,
+            }]),
+            skip: 0,
+            effect: None,
+        }
+    }
+
     pub fn scalar(&self) -> Option<f64> {
-        self.effect["time_scalar"].as_f64()
+        match &*self.sections {
+            [one] => Some(one.speed),
+            _ => None,
+        }
+    }
+
+    pub fn points(&self) -> impl Iterator<Item = i64> + '_ {
+        self.sections.iter().skip(1).map(|s| s.at)
     }
 
     pub fn label(&self) -> String {
         match self.scalar() {
             Some(0.0) => "freeze".to_string(),
             Some(x) => format!("{}%", (x * 100.0).round()),
-            None => self.effect["OTIO_SCHEMA"]
-                .as_str()
-                .and_then(|s| s.split('.').next())
-                .unwrap_or("speed")
-                .to_string(),
+            None => "ramp".to_string(),
         }
     }
 }
@@ -2187,9 +2222,10 @@ pub struct Compound {
 /// of its sound. `otio::effects` reads, cuts and writes them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Effects {
-    /// The source frame their keyframe times count from: the first of the
-    /// picture or sound when they were read. Keyframes stay on their source
-    /// frames through trims, slips and splits.
+    /// The frame their keyframe times count from, on the axis of the
+    /// keyframes (`Keyframe`'s `frame`): the first of the picture or sound
+    /// when they were read. Keyframes stay on their frames through trims,
+    /// slips and splits.
     pub from: i64,
     /// OTIO `Effect`s as read, keyframe times and fade lengths in project
     /// frames.
@@ -2204,8 +2240,10 @@ pub struct Effects {
 /// change is a straight line.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Keyframe {
-    /// The source frame, counted as a clip's `source_in` is: the keyframe
-    /// stays on its content through trims, slips and splits.
+    /// The source frame, counted as a clip's `source_in` is, or on a clip
+    /// with a speed, its frame on the retimed source, counted as the speed's
+    /// `skip` is. The keyframe stays on its content through trims, slips
+    /// and splits.
     pub frame: i64,
     /// The value there: the volume in dB, from -60 to 24.
     pub value: f64,
@@ -2292,11 +2330,29 @@ impl Clip {
     }
 
     pub fn pace(&self) -> crate::render::Pace {
-        crate::render::Pace::of(self.speed(), self.speed.as_ref().map_or(0, |s| s.skip))
+        match &self.speed {
+            None => crate::render::Pace::default(),
+            Some(s) => crate::render::Pace::mapped(s.sections.clone(), s.skip),
+        }
     }
 
     pub fn source_at(&self, t: i64) -> i64 {
-        self.source_in + self.pace().offset(t - self.start)
+        match &self.speed {
+            None => self.source_in + t - self.start,
+            Some(_) => self.source_in + self.pace().offset(t - self.start),
+        }
+    }
+
+    pub fn runs(&self, a: i64, b: i64) -> Vec<(i64, i64)> {
+        let pace = self.pace();
+        let mut out = Vec::new();
+        let mut x = a;
+        while x < b {
+            let y = pace.steady(x - self.start).map_or(b, |n| (x + n).min(b));
+            out.push((x, y));
+            x = y;
+        }
+        out
     }
 
     pub fn sound_at(&self, t: f64) -> f64 {
@@ -2317,24 +2373,41 @@ impl Clip {
     }
 
     pub fn shown(&self) -> (i64, i64) {
-        let (a, b) = (self.source_at(self.start), self.source_at(self.end() - 1));
-        (a.min(b), a.max(b) + 1)
+        let (mut lo, mut hi) = (i64::MAX, i64::MIN);
+        for (a, b) in self.runs(self.start, self.end()) {
+            for s in [self.source_at(a), self.source_at(b - 1)] {
+                (lo, hi) = (lo.min(s), hi.max(s));
+            }
+        }
+        (lo, hi + 1)
     }
 
     pub fn sound_span(&self) -> Option<(f64, f64)> {
         let (a, b) = self.audio_range()?;
-        if self.speed() == 0.0 {
-            return None;
+        if self.constant_speed().is_some() {
+            if self.speed_at(self.start) == 0.0 {
+                return None;
+            }
+            let (x, y) = (self.sound_at(a as f64), self.sound_at(b as f64));
+            return Some((x.min(y), x.max(y)));
         }
-        let (x, y) = (self.sound_at(a as f64), self.sound_at(b as f64));
-        Some((x.min(y), x.max(y)))
+        let pace = self.pace();
+        let base = self.source_in as f64;
+        let mut span: Option<(f64, f64)> = None;
+        for (x, y) in self.runs(a, b) {
+            let k = x - self.start;
+            if pace.speed_at(k) == 0.0 {
+                continue;
+            }
+            for t in [x, y] {
+                let s = base + pace.sound_in(k, (t - self.start) as f64);
+                span = Some(span.map_or((s, s), |(lo, hi)| (lo.min(s), hi.max(s))));
+            }
+        }
+        span
     }
 
     pub fn room(&self, tail: bool, have: Range<i64>) -> i64 {
-        let speed = self.speed();
-        if speed == 0.0 {
-            return i64::MAX / 4;
-        }
         let at = |n: i64| {
             let t = if tail {
                 self.end() - 1 + n
@@ -2344,8 +2417,25 @@ impl Clip {
             have.contains(&self.source_at(t))
         };
         let span = (have.end - have.start) as f64;
-        let far = ((span + 2.0) / speed.abs()).min((i64::MAX / 4) as f64);
-        let (mut lo, mut hi) = (0, far as i64 + 2);
+        let pace = self.pace();
+        let (reach, edge) = if tail {
+            let last = pace.map.last().expect("a section");
+            ((last.at - pace.skip - self.duration + 1).max(0), last.speed)
+        } else {
+            let reach = pace.map.get(1).map_or(0, |s| (pace.skip - s.at + 1).max(0));
+            (reach, pace.map[0].speed)
+        };
+        if edge == 0.0 && (reach == 0 || at(reach)) {
+            return i64::MAX / 4;
+        }
+        let slow = pace
+            .map
+            .iter()
+            .map(|s| s.speed.abs())
+            .filter(|&v| v > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        let far = ((span + 2.0) / slow).min((i64::MAX / 4) as f64);
+        let (mut lo, mut hi) = (0, (far as i64 + 2).saturating_add(reach));
         if !at(lo) {
             return 0;
         }
@@ -2371,15 +2461,32 @@ impl Clip {
         match (&self.speed, &other.speed) {
             (None, None) => true,
             (Some(a), Some(b)) => {
-                a.effect == b.effect
+                a.sections == b.sections
                     && other.source_in == self.source_in + self.pace().offset(b.skip - a.skip)
             }
             _ => false,
         }
     }
 
-    pub fn speed(&self) -> f64 {
-        self.speed.as_ref().and_then(Speed::scalar).unwrap_or(1.0)
+    pub fn constant_speed(&self) -> Option<f64> {
+        match &self.speed {
+            None => Some(1.0),
+            Some(s) => s.scalar(),
+        }
+    }
+
+    pub fn speed_at(&self, t: i64) -> f64 {
+        match &self.speed {
+            None => 1.0,
+            Some(s) => match s.scalar() {
+                Some(x) => x,
+                None => self.pace().speed_at(t - self.start),
+            },
+        }
+    }
+
+    pub fn is_frozen(&self) -> bool {
+        self.constant_speed() == Some(0.0)
     }
 }
 

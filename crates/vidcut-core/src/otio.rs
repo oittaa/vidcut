@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, Compound, ImageSequence, Keyframe, Marks, Media, Picture, Project, Speed, Title,
+    Clip, Compound, ImageSequence, Keyframe, Marks, Media, Picture, Project, Section, Speed, Title,
     TrackKind,
 };
 use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
@@ -291,12 +291,11 @@ fn with_picture(
     let Some(x) = &c.picture else {
         return effects;
     };
-    let timing = effects::Timing { speed: c.speed() };
     let kept = effects
         .into_iter()
         .filter(|e| !picture::is_placing(e))
         .collect();
-    picture::joined(kept, picture::effects(x, shape, g, source, &timing))
+    picture::joined(kept, picture::effects(x, shape, g, source))
 }
 
 pub fn out_of_reach(p: &Project, span: Option<(i64, i64)>) -> Vec<String> {
@@ -392,10 +391,177 @@ fn bundle_nested(
     }
 }
 
-fn speed_of(effect: Option<Value>) -> Option<Speed> {
-    effect.map(|effect| Speed {
-        effect: effect.into(),
-        skip: 0,
+#[derive(Default)]
+struct SpeedNotes {
+    unplayed: Vec<String>,
+    eased: Vec<String>,
+}
+
+impl SpeedNotes {
+    fn add(list: &mut Vec<String>, name: String) {
+        if !list.contains(&name) {
+            list.push(name);
+        }
+    }
+}
+
+fn speed_of(
+    effect: Option<Value>,
+    item: &Value,
+    fps: Rational,
+    ramps: bool,
+    notes: &mut SpeedNotes,
+) -> Option<Speed> {
+    let effect = effect?;
+    let ours = serde_json::from_value::<Vec<Section>>(item["metadata"][VIDCUT]["sections"].clone())
+        .ok()
+        .filter(|s| s.first().is_some_and(|f| f.at == 0));
+    let mut speed = Speed {
+        effect: None,
+        ..Speed::constant(1.0)
+    };
+    if let Some(sections) = ours.filter(|_| ramps) {
+        speed.sections = sections.into();
+    } else if let Some(x) = effect["time_scalar"].as_f64() {
+        speed = Speed::constant(x);
+        if effect == crate::ops::time_effect(None, x) {
+            return Some(speed);
+        }
+    } else {
+        let placed = ramp(&effect, fps.as_f64())
+            .filter(|_| ramps)
+            .and_then(|(sections, eased)| {
+                let skip = ramp_skip(&sections, exact_start(item, fps)?)?;
+                Some((sections, skip, eased))
+            });
+        match placed {
+            Some((sections, skip, eased)) => {
+                speed.sections = sections.into();
+                speed.skip = skip;
+                if eased {
+                    SpeedNotes::add(
+                        &mut notes.eased,
+                        item["name"].as_str().unwrap_or_default().to_string(),
+                    );
+                }
+            }
+            None => SpeedNotes::add(
+                &mut notes.unplayed,
+                schema(&effect)
+                    .split('.')
+                    .next()
+                    .unwrap_or("speed")
+                    .to_string(),
+            ),
+        }
+    }
+    speed.effect = Some(effect.into());
+    Some(speed)
+}
+
+fn ramp(effect: &Value, fps: f64) -> Option<(Vec<Section>, bool)> {
+    let keys = effect["metadata"][EDITOR]["Key Frames"].as_array()?;
+    let mut eased = false;
+    let mut points = Vec::new();
+    for k in keys {
+        let k = k.as_array()?;
+        eased |= k.get(2).and_then(Value::as_bool) == Some(true);
+        points.push((k.first()?.as_f64()? * fps, k.get(1)?.as_f64()? * fps));
+    }
+    if points.first() != Some(&(0.0, 0.0)) || points.len() < 2 {
+        return None;
+    }
+    let mut out: Vec<Section> = Vec::new();
+    for w in points.windows(2) {
+        let ((u0, s0), (u1, s1)) = (w[0], w[1]);
+        let speed = ((s1 - s0) / (u1 - u0) * 1e9).round() / 1e9;
+        if u1 <= u0 || !speed.is_finite() || speed < 0.0 {
+            return None;
+        }
+        let at = u0.round() as i64;
+        if out.last().is_some_and(|s| s.at >= at) {
+            return None;
+        }
+        out.push(Section {
+            at,
+            from: s0 + (at as f64 - u0) * speed,
+            speed,
+        });
+    }
+    Some((out, eased))
+}
+
+fn ramp_skip(map: &[Section], at: f64) -> Option<i64> {
+    for (i, s) in map.iter().enumerate() {
+        let next = map.get(i + 1).map_or(f64::INFINITY, |n| n.at as f64);
+        if s.speed == 0.0 {
+            if (s.from - at).abs() < 1e-6 {
+                return Some(s.at);
+            }
+            continue;
+        }
+        let u = s.at as f64 + (at - s.from) / s.speed;
+        if (i == 0 || u >= s.at as f64 - 1e-6) && u < next - 1e-6 {
+            return Some(u.round() as i64);
+        }
+    }
+    None
+}
+
+fn exact_start(item: &Value, fps: Rational) -> Option<f64> {
+    let (v, r) = time(&item["source_range"]["start_time"])?;
+    let (bv, br) = time(&media_reference_of(item)["available_range"]["start_time"])?;
+    Some((v / r - bv / br) * fps.as_f64())
+}
+
+fn kept_ramp(c: &Clip, effect: &Value, fps: f64) -> bool {
+    let pace = c.pace();
+    c.source_in == pace.shown() && ramp(effect, fps).is_some_and(|(s, _)| s[..] == pace.map[..])
+}
+
+fn ramp_effect(c: &Clip, end: Option<i64>, fps: f64) -> Value {
+    let pace = c.pace();
+    let map = &pace.map;
+    let d = (c.source_in - pace.shown()) as f64;
+    let abs = |u: f64| {
+        let s = &map[map.partition_point(|s| s.at as f64 <= u).saturating_sub(1)];
+        d + s.from + (u - s.at as f64) * s.speed
+    };
+    let lo = pace.skip.min(map[0].at) as f64;
+    let mut keys = vec![(0.0, 0.0)];
+    let first = map[0];
+    let origin = if first.speed > 0.0 && abs(lo) >= 0.0 {
+        first.at as f64 - (d + first.from) / first.speed
+    } else {
+        keys.push((1.0, abs(lo)));
+        lo - 1.0
+    };
+    for s in map.iter().skip(1) {
+        keys.push((s.at as f64 - origin, d + s.from));
+    }
+    let last = map[map.len() - 1];
+    let clip_end = (pace.skip + c.duration) as f64;
+    let u_end = match end.filter(|_| last.speed > 0.0) {
+        Some(n) => last.at as f64 + (n as f64 - last.speed - d - last.from) / last.speed,
+        None => clip_end,
+    }
+    .max(last.at as f64 + 1.0);
+    keys.push((u_end - origin, abs(u_end)));
+    let (out, src) = keys[keys.len() - 1];
+    json!({
+        "OTIO_SCHEMA": "TimeEffect.1",
+        "metadata": {
+            EDITOR: {
+                "Key Frames": keys
+                    .iter()
+                    .map(|(o, s)| json!([o / fps, s / fps, false, 0.0, 0.0, 0.0, 0.0]))
+                    .collect::<Vec<_>>(),
+                "Retime Mode": "NONE",
+                "Speed Ratio": if out > 0.0 { src / out } else { 1.0 },
+            }
+        },
+        "name": "",
+        "effect_name": "",
     })
 }
 
@@ -403,7 +569,12 @@ fn scalar(speed: Option<&Speed>) -> f64 {
     speed.and_then(Speed::scalar).unwrap_or(1.0)
 }
 
-fn first_shown(start: i64, len: i64, speed: f64) -> (i64, i64) {
+fn first_shown(start: i64, len: i64, speed: Option<&Speed>) -> (i64, i64) {
+    if let Some(s) = speed.filter(|s| s.scalar().is_none()) {
+        let pace = crate::render::Pace::mapped(s.sections.clone(), s.skip);
+        return (pace.shown(), s.skip);
+    }
+    let speed = scalar(speed);
     if speed >= 0.0 {
         return (start, 0);
     }
@@ -416,19 +587,20 @@ fn first_shown(start: i64, len: i64, speed: f64) -> (i64, i64) {
     (first, skip)
 }
 
-fn written_start(c: &Clip, s: i64, len: i64) -> i64 {
+fn written_start(c: &Clip, s: i64, len: i64) -> f64 {
     let first = c.source_at(s);
-    match c.speed() {
-        x if x < 0.0 => {
+    match c.constant_speed() {
+        None => c.source_in as f64 + c.pace().exact(s - c.start),
+        Some(x) if x < 0.0 => {
             let top = first as f64 + c.pace().after(s - c.start).sound(0.0);
-            (top + len as f64 * x).round() as i64
+            (top + len as f64 * x).round()
         }
-        _ => first,
+        Some(_) => first as f64,
     }
 }
 
 fn media_in(p: &Project, c: &Clip, m: Option<&Media>, s: i64) -> Option<f64> {
-    let x = c.speed();
+    let x = c.constant_speed()?;
     if x >= 0.0 {
         return None;
     }
@@ -441,6 +613,9 @@ fn own_pace(meta: &mut Value, c: &Clip, s: i64) {
     if let Some(speed) = &c.speed {
         meta["source_in"] = json!(c.source_at(s));
         meta["skip"] = json!(speed.skip + s - c.start);
+        if speed.scalar().is_none() {
+            meta["sections"] = json!(speed.sections);
+        }
     }
 }
 
@@ -448,9 +623,15 @@ fn our_keys(meta: &Value) -> Option<Vec<Keyframe>> {
     serde_json::from_value(meta.get("gain_keys")?.clone()).ok()
 }
 
-fn with_speed(c: &Clip, mut effects: Vec<Value>) -> Vec<Value> {
+fn with_speed(c: &Clip, end: Option<i64>, fps: f64, mut effects: Vec<Value>) -> Vec<Value> {
     if let Some(speed) = &c.speed {
-        effects.insert(0, (*speed.effect).clone());
+        let effect = match (speed.scalar(), &speed.effect) {
+            (Some(_), Some(e)) => (**e).clone(),
+            (Some(x), None) => crate::ops::time_effect(None, x),
+            (None, Some(e)) if kept_ramp(c, e, fps) => (**e).clone(),
+            (None, _) => ramp_effect(c, end, fps),
+        };
+        effects.insert(0, effect);
     }
     effects
 }
@@ -481,22 +662,20 @@ pub fn export_drawn(
     let item = |label: &str,
                 c: &Clip,
                 m: Option<&Media>,
-                source: i64,
+                source: f64,
                 frames: i64,
                 enabled: bool,
                 meta: Value,
                 effects: Vec<Value>| {
         let (start, reference) = match m {
             Some(m) if m.is_still() => (0.0, media_reference(p, m, locations, rate)),
-            Some(m) if m.sequence.is_some() => {
-                (source as f64, media_reference(p, m, locations, rate))
-            }
+            Some(m) if m.sequence.is_some() => (source, media_reference(p, m, locations, rate)),
             Some(m) => (
-                start_tc(m, fps) + source as f64,
+                start_tc(m, fps) + source,
                 media_reference(p, m, locations, rate),
             ),
             None => (
-                source as f64,
+                source,
                 match (&c.title, &c.generator) {
                     (Some(t), _) => titles::reference(t, p.settings.height, &drawn(t)),
                     (None, Some(g)) => (*g.reference).clone(),
@@ -615,7 +794,8 @@ pub fn export_drawn(
                     meta["stream"] = json!(au.stream);
                     meta["gain_db"] = json!(au.gain_db);
                     if au.is_keyed() {
-                        meta["gain_keys"] = json!(effects::relative(&au.gain_keys, c.source_at(s)));
+                        meta["gain_keys"] =
+                            json!(effects::relative(&au.gain_keys, c.content_at(s)));
                     }
                     meta["muted"] = json!(au.muted);
                     if let Some(v) = au.voice_isolation {
@@ -635,13 +815,15 @@ pub fn export_drawn(
                 }
                 let effects = with_speed(
                     c,
+                    m.map(|m| p.media_limit(m)),
+                    rate,
                     c.effects.as_ref().map_or_else(Vec::new, |x| {
                         x.written(c.source_at(s), s > c.start, e < c.end())
                     }),
                 );
                 let effects = match &c.title {
                     Some(t) => titles::with_opacity(t, effects),
-                    None => with_picture(c, &shape_of(p, c, m), effects, g, c.source_at(s)),
+                    None => with_picture(c, &shape_of(p, c, m), effects, g, c.content_at(s)),
                 };
                 let mut it = match &c.compound {
                     Some(k) => block(c, k, &label, c.source_at(s), e - s, effects),
@@ -683,7 +865,7 @@ pub fn export_drawn(
                     meta["voice_isolation"] = json!(v);
                 }
                 if au.is_keyed() {
-                    meta["gain_keys"] = json!(effects::relative(&au.gain_keys, c.source_at(s)));
+                    meta["gain_keys"] = json!(effects::relative(&au.gain_keys, c.content_at(s)));
                 }
                 own_pace(&mut meta, c, s);
                 let n = m
@@ -702,10 +884,16 @@ pub fn export_drawn(
                     editor["Media In"] = json!(x);
                 }
                 let whole = c.audio_range().expect("has audio");
-                let timing = effects::Timing { speed: c.speed() };
                 let effects = with_speed(
                     c,
-                    effects::sound(au, c.source_at(s), (s > whole.0, e < whole.1), &timing),
+                    m.map(|m| p.media_limit(m)),
+                    rate,
+                    effects::sound(
+                        au,
+                        c.source_at(s),
+                        (s > whole.0, e < whole.1),
+                        c.content_at(s),
+                    ),
                 );
                 let mut it = item(
                     &label,
@@ -734,6 +922,8 @@ pub fn export_drawn(
                     }
                     let effects = with_speed(
                         c,
+                        m.map(|m| p.media_limit(m)),
+                        rate,
                         c.effects.as_ref().map_or_else(Vec::new, |x| {
                             x.written(c.source_at(s), s > c.start, e < c.end())
                         }),
@@ -957,7 +1147,7 @@ fn compound_links(p: &Project, a: i64, b: i64) -> Links<'_> {
         let same = |(s, j): &(&Clip, &Compound)| {
             !links.contains_key(s.id.as_str())
                 && (s.start, s.duration, s.source_in) == (c.start, c.duration, c.source_in)
-                && s.speed().to_bits() == c.speed().to_bits()
+                && s.pace() == c.pace()
                 && sequence_id(j) == sequence_id(k)
         };
         if let Some((s, _)) = blocks(false).find(same) {
@@ -1056,10 +1246,20 @@ impl ImportedClip {
         self.start + self.duration
     }
 
+    pub fn pace(&self) -> crate::render::Pace {
+        self.speed
+            .as_ref()
+            .map_or_else(crate::render::Pace::default, |s| {
+                crate::render::Pace::mapped(s.sections.clone(), s.skip)
+            })
+    }
+
+    pub fn key_origin(&self) -> i64 {
+        self.speed.as_ref().map_or(self.source_in, |s| s.skip)
+    }
+
     pub fn walk(&mut self, k: i64) {
-        let skip = self.speed.as_ref().map_or(0, |s| s.skip);
-        let speed = self.speed.as_ref().and_then(Speed::scalar).unwrap_or(1.0);
-        self.source_in += crate::render::Pace::of(speed, skip).offset(k);
+        self.source_in += self.pace().offset(k);
         if let Some(s) = self.speed.as_mut() {
             s.skip += k;
         }
@@ -1744,6 +1944,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     let fps = file_rate(tl, &tracks)?;
     let start_tc = time(&tl["global_start_time"]).map_or(0, |(v, r)| frames(v, r, fps));
     let mut markers = Vec::new();
+    let mut notes = SpeedNotes::default();
 
     let mut clips: Vec<ImportedClip> = Vec::new();
     let mut found = Vec::new();
@@ -1759,10 +1960,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 continue;
             }
             let (effects, speed) = effects::read(item);
-            let mut speed = speed_of(speed);
-            let x = scalar(speed.as_ref());
             let reference = media_reference_of(item);
-            if stack || schema(reference).starts_with("GeneratorReference") {
+            let block = stack || schema(reference).starts_with("GeneratorReference");
+            let mut speed = speed_of(speed, item, fps, !block, &mut notes);
+            if block {
                 clip_markers(item, start, len, fps, &mut markers);
                 keys[i] = Some(clips.len());
                 let mut c = ImportedClip::block(clips.len(), &id, item, (start, len), fps);
@@ -1795,7 +1996,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             match clip_source(item, fps, base) {
                 Ok((media, source_in, timecoded)) => {
                     let meta = &item["metadata"][VIDCUT];
-                    let (first, skip) = first_shown(source_in, len, x);
+                    let (first, skip) = first_shown(source_in, len, speed.as_ref());
                     if let Some(s) = speed.as_mut() {
                         s.skip = meta["skip"].as_i64().unwrap_or(skip);
                     }
@@ -1859,7 +2060,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 continue;
             }
             let (mut effects, speed) = effects::read(item);
-            let mut speed = speed_of(speed);
+            let mut speed = speed_of(speed, item, fps, !stack, &mut notes);
             let x = scalar(speed.as_ref());
             if stack {
                 clip_markers(item, start, len, fps, &mut markers);
@@ -1881,19 +2082,17 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 clips.push(c);
                 continue;
             }
-            let (media, source_in, timecoded, timing) = match clip_source(item, fps, base) {
+            let (media, source_in, timecoded) = match clip_source(item, fps, base) {
                 Ok((media, start, timecoded)) => {
                     let meta = &item["metadata"][VIDCUT];
-                    let (first, skip) = first_shown(start, len, x);
+                    let (first, skip) = first_shown(start, len, speed.as_ref());
                     if let Some(s) = speed.as_mut() {
                         s.skip = meta["skip"].as_i64().unwrap_or(skip);
                     }
-                    let timing = effects::Timing { speed: x };
                     (
                         media,
                         meta["source_in"].as_i64().unwrap_or(first),
                         timecoded,
-                        timing,
                     )
                 }
                 Err(e) => {
@@ -1907,7 +2106,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let muted = item["enabled"].as_bool() == Some(false);
             let link = link_group(item);
             let gain = meta["gain_db"].as_f64().or_else(|| effects::gain(item));
-            let gain_keys = our_keys(meta).unwrap_or_else(|| effects::gain_keys(item, &timing));
+            let gain_keys = our_keys(meta).unwrap_or_else(|| effects::gain_keys(item));
             effects::drop_gain_keys(&mut effects);
             let voice_isolation = meta["voice_isolation"].as_f64();
             let stream = meta["stream"]
@@ -1919,11 +2118,18 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     && c.audio.is_none()
                     && c.media.url == media.url
                     && c.timecoded == timecoded
-                    && (c.source_in as f64
-                        - x * c.start as f64
-                        - (source_in as f64 - x * start as f64))
-                        .abs()
-                        < 1.0
+                    && match (&c.speed, &speed) {
+                        (Some(a), Some(b)) if a.scalar().is_none() || b.scalar().is_none() => {
+                            a.sections == b.sections && a.skip - c.start == b.skip - start
+                        }
+                        _ => {
+                            (c.source_in as f64
+                                - x * c.start as f64
+                                - (source_in as f64 - x * start as f64))
+                                .abs()
+                                < 1.0
+                        }
+                    }
                     && overlaps((c.start, c.end()), span)
                     && match (c.link, link) {
                         (Some(x), Some(y)) => x == y,
@@ -2106,21 +2312,16 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             made.join(", ")
         ));
     }
-    let mut speeds: Vec<String> = Vec::new();
-    for speed in clips
-        .iter()
-        .filter_map(|c| c.speed.as_ref())
-        .filter(|s| s.scalar().is_none())
-    {
-        let label = speed.label();
-        if !speeds.contains(&label) {
-            speeds.push(label);
-        }
-    }
-    if !speeds.is_empty() {
+    if !notes.unplayed.is_empty() {
         warnings.push(format!(
             "time effects kept on their clips but played at normal speed: {}",
-            speeds.join(", ")
+            notes.unplayed.join(", ")
+        ));
+    }
+    if !notes.eased.is_empty() {
+        warnings.push(format!(
+            "speed points read without their ease: {}",
+            notes.eased.join(", ")
         ));
     }
     let mut nested: Vec<&str> = Vec::new();

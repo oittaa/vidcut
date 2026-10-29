@@ -29,6 +29,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 | "track"
                 | "bins"
                 | "picture"
+                | "speed"
         )
     ) && !matches!(
         method,

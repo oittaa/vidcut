@@ -138,7 +138,7 @@ Notes:
 - `export::video::target` gives the time of output frame k of a piece: the position of the piece, plus k frames, less half a frame.
 - Output frame k shows the first source frame at or after this time.
 - At the project's rate, this is exact. At other rates, a tie can show the earlier frame.
-- A piece at another speed steps through its source by `render::Pace`.
+- A piece at another speed steps through its source by `render::Pace`. Each section of the speed is a piece of its own (`Clip::runs`).
 
 Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)):
 
@@ -225,8 +225,11 @@ To the encoder:
 
 - `AudioMix` mixes the lanes sample-exact: clip gains, cross fades, de-click fades at cuts, and clips at other speeds, stretched with their pitch kept.
 - A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` holds only the fader of the track.
-  - `AudioMix` multiplies each sample by `Keyed::gain` at the source time of the sample.
+  - `AudioMix` multiplies each sample by `Keyed::gain` at the place of the sample on the keyframes' frames (`Keyed::at`).
   - Thus the player and the export play the same curve ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- A clip with speed points gives a sound piece for each section. A piece that plays on into the next section is `joined`.
+  - `AudioMix` plays a run of joined pieces through one `Stretch`, with the speeds of all their sections (`Paced::mapped`).
+  - Thus a speed point makes no de-click dip, and the pitch stays.
 - With `audio.loudness`, `analysis::mix_loudness` first measures the mix with its ducking. `loudness_gain` gives one gain (`AudioMix::set_gain_db`) that reaches the target, with the true peak under a ceiling.
 
 Ducking ([spec D76](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
@@ -359,7 +362,8 @@ Dynamic Zoom and keyframes (D75):
 - The `render::Placed` of a piece has a `Run`: where the piece starts in its clip. `VideoPiece::part` and `Placed::after` move the `Run` with the piece.
 - `VideoFrames` gives `place::Placing` the `Run` of the frame. `Placed::zoomed` gives the Dynamic Zoom box of that frame.
 - A clip inside a compound clip keeps the `Run` of its own frames (`render::inside`). In a reversed compound clip, the `Run` goes backward. In a frozen one, it holds its frame (`Run::held`).
-- `Placed` also holds the source frame of the piece and its `Pace`. `Picture::sampled` reads each keyed value of the picture at that source frame.
+- `Placed` also holds the keyframe frame of the piece (`source`). On a clip with a speed, it is a frame of the retimed source.
+- `Picture::sampled` reads each keyed value of the picture at that frame.
 - `layer_size` fits the layer for the closer Dynamic Zoom box (`DynamicZoom::closest`) and the largest zoom key (`place::detail`).
 - The viewer and the export both take this `Placing`. Thus there is one draw path.
 

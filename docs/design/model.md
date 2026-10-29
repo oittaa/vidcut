@@ -126,10 +126,20 @@ classDiagram
 
 Volume keyframes ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
 
-- `ClipAudio::gain_keys` holds the volume keyframes of a clip, in order, on whole source frames.
+- `ClipAudio::gain_keys` holds the volume keyframes of a clip, in order, on whole source frames. On a clip with a speed, they are on its retimed source.
 - With keyframes, the volume is their curve (`keyframes::value_at`), and `gain_db` is not heard.
 - `keyframes::reshape` makes each change. It keeps the order, one keyframe on a frame, and the ease of each keyframe.
 - `ops::keyframes` holds the requests. `ops::change_speed` moves the keyframes with `keyframes::retimed`.
+
+Speeds ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+
+- `Speed` holds the `sections` of a clip's speed, and `skip`.
+- A `Section` starts at a frame of the clip's retimed source (`at`), at a source position (`from`). It has one `speed`.
+- The retimed source has one frame for each timeline frame. `skip` is its frame at the clip's first frame.
+- `render::Pace` gives the source frame at each frame of the retimed source. `source_in` is the first source frame that the clip shows.
+- A trim or a split moves only `skip` and `source_in` (`Clip::walk`). Thus all the points stay.
+- The keyframes of a clip with a speed are on its retimed source (`Clip::content_at`). Thus they stay on their frames of the clip.
+- `ops::speed` holds the speed point requests. `ops::change_speed` gives a clip one speed.
 
 Stills ([D38](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
 
@@ -408,7 +418,7 @@ The metadata:
 
 | Metadata | Holds |
 |---|---|
-| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `gain_keys` from the item's first source frame; `source_in` and `skip` for stills and speeds, which the source range rounds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects |
+| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `gain_keys` from the item's first source frame; `source_in`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`, a clip volume effect with the volume keyframes in its `Key Frames` (`effects::sound`), and `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Retime and Scaling, and Dynamic Zoom (`otio::picture`), fitted, in place of carried ones |
@@ -451,6 +461,7 @@ Kept data:
 | `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`), else `Generator`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
+| `TimeEffect` with `Key Frames` | `Speed`, a section for each key (`ramp`). It is written back while the sections stay, else made again (`ramp_effect`) |
 
 Which kept transitions play (`otio::transitions`):
 

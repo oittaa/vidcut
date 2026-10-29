@@ -659,9 +659,8 @@ fn filmstrip(
     let height = tiles::tile_height(rect.height() * painter.ctx().pixels_per_point());
     let width = (height as f32 * aspect).round().max(1.0) as u32;
     let pace = c.pace();
-    let span = (f64::from(tile_w) / scale.ppf * pace.speed.abs())
-        .ceil()
-        .max(1.0) as i64;
+    let fastest = pace.map.iter().map(|s| s.speed.abs()).fold(0.0, f64::max);
+    let span = (f64::from(tile_w) / scale.ppf * fastest).ceil().max(1.0) as i64;
     let clip_rect = painter.clip_rect().intersect(rect);
     let mut x = rect.left();
     if clip_rect.left() > x {
@@ -673,7 +672,7 @@ fn filmstrip(
         } else {
             scale.frame(x) - c.start as f64
         };
-        let frame = tiles::tile_frame(c.source_in, pace, edge, c.duration);
+        let frame = tiles::tile_frame(c.source_in, &pace, edge, c.duration);
         let key = TileKey {
             media: c.media.clone(),
             frame,
@@ -711,7 +710,7 @@ fn waveform(
     let Some(w) = assets.waveforms.get(&c.media) else {
         return;
     };
-    if c.speed() == 0.0 {
+    if c.is_frozen() {
         return;
     }
     let source = |at: f64| c.sound_at(at);
@@ -737,7 +736,9 @@ fn waveform(
     while x < visible.right() {
         let (a, b) = (source(scale.frame(x)), source(scale.frame(x + 1.0)));
         let (t0, t1) = (a.min(b), a.max(b));
-        if let Some((lo, hi)) = w.range(origin + t0 / f, origin + t1 / f) {
+        if c.speed_at(scale.frame(x).floor() as i64) != 0.0
+            && let Some((lo, hi)) = w.range(origin + t0 / f, origin + t1 / f)
+        {
             painter.line_segment(
                 [
                     pos2(x + 0.5, mid - hi * half),

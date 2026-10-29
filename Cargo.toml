@@ -16,7 +16,7 @@ vidcut-av = { path = "crates/vidcut-av" }
 
 anyhow = "1"
 thiserror = "2"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 schemars = "1"
 toml = "1.1"

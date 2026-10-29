@@ -489,6 +489,26 @@ impl Paced {
         }
     }
 
+    fn mapped(
+        map: Vec<(f64, f64, f64)>,
+        origin: f64,
+        (next, bound): (i64, i64),
+        drop: usize,
+        rate: u32,
+        channels: u16,
+    ) -> Self {
+        Self {
+            speed: map[0].2,
+            stretch: Some(Stretch::mapped(map, rate, usize::from(channels))),
+            origin,
+            next,
+            bound,
+            made: Vec::new(),
+            cursor: 0,
+            drop,
+        }
+    }
+
     fn start(&self, rate: u32) -> f64 {
         let first = if self.speed < 0.0 {
             (self.next - back_samples(rate)).max(self.bound)
@@ -684,29 +704,49 @@ impl Lane {
                 ..
             } = &piece
             {
-                let continues = self.started
-                    && self.isolator.is_some()
-                    && *speed > 0.0
-                    && self
-                        .piece
-                        .checked_sub(1)
-                        .map(|i| &self.pieces[i])
-                        .is_some_and(|b| plays_on(b, &piece) && isolation_of(b) == *isolation);
+                let before = self.piece.checked_sub(1).map(|i| &self.pieces[i]);
+                let ramps = self.started
+                    && self.paced.is_some()
+                    && before.is_some_and(|b| ramps_on(b, &piece));
+                let continues = ramps
+                    || self.started
+                        && self.isolator.is_some()
+                        && *speed > 0.0
+                        && before
+                            .is_some_and(|b| plays_on(b, &piece) && isolation_of(b) == *isolation);
                 if take > 0 && self.pos == 0 && continues {
-                    if let Some(paced) = self.paced.as_mut() {
+                    if let Some(paced) = self.paced.as_mut().filter(|_| !ramps) {
                         paced.bound = *source_sample + (len as f64 * speed).round() as i64;
                     }
                 } else if take > 0 && (self.pos == 0 || !self.started) {
                     self.paced = None;
-                    let start = if *speed == 1.0 {
+                    let run = ramp_run(&self.pieces, self.piece);
+                    let start = if *speed == 1.0 && run.len() == 1 {
                         origin + (*source_sample + self.pos) as f64 / f64::from(rate)
                     } else {
                         let preroll = (f64::from(rate) * PREROLL_SECS).round() as i64;
                         let from = (self.pos - preroll).max(0);
                         let at = *source_sample + (from as f64 * speed).round() as i64;
-                        let bound = *source_sample + (len as f64 * speed).round() as i64;
                         let drop = (self.pos - from) as usize;
-                        let paced = Paced::new(*speed, *origin, (at, bound), drop, rate, channels);
+                        let paced = if run.len() == 1 {
+                            let bound = *source_sample + (len as f64 * speed).round() as i64;
+                            Paced::new(*speed, *origin, (at, bound), drop, rate, channels)
+                        } else {
+                            let mut map = Vec::new();
+                            let mut out = -from;
+                            let mut bound = at;
+                            for (n, s, v) in run {
+                                let skip = (-out).max(0);
+                                map.push((
+                                    (out + skip) as f64,
+                                    (s - at) as f64 + skip as f64 * v,
+                                    v,
+                                ));
+                                out += n;
+                                bound = s + (n as f64 * v).round() as i64;
+                            }
+                            Paced::mapped(map, *origin, (at, bound), drop, rate, channels)
+                        };
                         let start = paced.start(rate);
                         self.paced = Some(paced);
                         start
@@ -755,9 +795,9 @@ impl Lane {
                 let fade = self.declick.min(len / 2).max(1);
                 let before = self.piece.checked_sub(1).map(|i| &self.pieces[i]);
                 let after = self.pieces.get(self.piece + 1);
-                let fade_in = before.is_some_and(|b| !plays_on(b, &piece))
+                let fade_in = before.is_some_and(|b| !plays_on(b, &piece) && !ramps_on(b, &piece))
                     && !cross.is_some_and(|f| f.starts_silent());
-                let fade_out = after.is_some_and(|n| !plays_on(&piece, n))
+                let fade_out = after.is_some_and(|n| !plays_on(&piece, n) && !ramps_on(&piece, n))
                     && !cross.is_some_and(|f| f.ends_silent(len));
                 for i in 0..take {
                     let p = self.pos + i as i64;
@@ -766,7 +806,7 @@ impl Lane {
                         g *= f.gain(p) as f32;
                     }
                     if let Some(k) = keyed {
-                        g *= k.gain(*source_sample as f64 + p as f64 * speed);
+                        g *= k.gain(k.at + p as f64);
                     }
                     if fade_in && p < fade {
                         g *= (p + 1) as f32 / fade as f32;
@@ -798,6 +838,46 @@ fn isolation_of(piece: &AudioPiece) -> Option<f64> {
         AudioPiece::Source { isolation, .. } => *isolation,
         AudioPiece::Silence { .. } => None,
     }
+}
+
+fn ramps_on(piece: &AudioPiece, next: &AudioPiece) -> bool {
+    match (piece, next) {
+        (
+            AudioPiece::Source {
+                path,
+                stream,
+                speed,
+                ..
+            },
+            AudioPiece::Source {
+                path: p2,
+                stream: s2,
+                speed: sp2,
+                joined: true,
+                ..
+            },
+        ) => path == p2 && stream == s2 && *speed > 0.0 && *sp2 > 0.0,
+        _ => false,
+    }
+}
+
+fn ramp_run(pieces: &[AudioPiece], i: usize) -> Vec<(i64, i64, f64)> {
+    let mut run = Vec::new();
+    for (j, piece) in pieces.iter().enumerate().skip(i) {
+        if j > i && !ramps_on(&pieces[j - 1], piece) {
+            break;
+        }
+        if let AudioPiece::Source {
+            samples,
+            source_sample,
+            speed,
+            ..
+        } = piece
+        {
+            run.push((*samples, *source_sample, *speed));
+        }
+    }
+    run
 }
 
 fn plays_on(piece: &AudioPiece, next: &AudioPiece) -> bool {

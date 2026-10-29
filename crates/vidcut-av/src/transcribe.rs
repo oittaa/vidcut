@@ -666,6 +666,7 @@ pub fn voice_activity(
         samples: total,
         gain_db: 0.0,
         speed: 1.0,
+        joined: false,
         fade: None,
         isolation: None,
         keyed: None,

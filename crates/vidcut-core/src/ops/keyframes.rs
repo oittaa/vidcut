@@ -138,7 +138,7 @@ fn add_volume(
     let mut added = Vec::new();
     for id in &targets {
         let (a, c) = audio_mut(p, id)?;
-        let frame = c.source_at(at);
+        let frame = c.content_at(at);
         let v = value.unwrap_or_else(|| a.db_at(frame as f64));
         reshape(&mut a.gain_keys, |marked| {
             let i = match marked.iter().position(|(k, _)| k.frame == frame) {
@@ -302,11 +302,6 @@ fn shift_volume(
     }
     for id in ids {
         let (a, c) = keyed_audio(p, id)?;
-        if c.speed() == 0.0 && by.is_some() {
-            return Err(Error::invalid(format!(
-                "{id} holds one frame: its keyframes have no time to move in"
-            )));
-        }
         let chosen = picked(&c, &a.gain_keys, pick)?;
         if to.is_some() && chosen.len() != 1 {
             return Err(Error::usage(format!(
@@ -315,8 +310,8 @@ fn shift_volume(
             )));
         }
         let moved = |f: i64| match (by, to) {
-            (Some(k), _) => c.sound_at(c.key_time(f) + k as f64).round() as i64,
-            (_, Some(t)) => c.source_at(t),
+            (Some(k), _) => c.key_at(c.key_time(f) + k as f64).round() as i64,
+            (_, Some(t)) => c.content_at(t),
             _ => f,
         };
         let mut taken: HashSet<i64> = a
@@ -713,7 +708,7 @@ fn add_picture(
     let mut added = Vec::new();
     for id in &targets {
         let (mut picture, c) = owned_picture(p, id)?;
-        let frame = c.source_at(at);
+        let frame = c.content_at(at);
         let n = value.unwrap_or_else(|| picture.channel_at(v, frame as f64));
         picture.put_channel(v, frame, n);
         if let Some(e) = ease {
@@ -817,11 +812,6 @@ fn shift_picture(
                 v.name().replace('_', " ")
             )));
         }
-        if c.speed() == 0.0 && by.is_some() {
-            return Err(Error::invalid(format!(
-                "{id} holds one frame: its keyframes have no time to move in"
-            )));
-        }
         let chosen = picked_name(&c, picture.keys_of(v), pick, v)?;
         if to.is_some() && chosen.len() != 1 {
             return Err(Error::usage(format!(
@@ -830,8 +820,8 @@ fn shift_picture(
             )));
         }
         let moved = |f: i64| match (by, to) {
-            (Some(k), _) => c.sound_at(c.key_time(f) + k as f64).round() as i64,
-            (_, Some(t)) => c.source_at(t),
+            (Some(k), _) => c.key_at(c.key_time(f) + k as f64).round() as i64,
+            (_, Some(t)) => c.content_at(t),
             _ => f,
         };
         let mut taken: HashSet<i64> = picture

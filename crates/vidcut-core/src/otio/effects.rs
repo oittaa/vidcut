@@ -105,59 +105,24 @@ fn is_volume(e: &Value) -> bool {
     e["metadata"][EDITOR]["Effect Name"] == VOLUME
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Timing {
-    pub speed: f64,
-}
-
-impl Timing {
-    fn moving(&self) -> bool {
-        self.speed != 0.0
-    }
-
-    pub(crate) fn file(&self, frames: f64) -> f64 {
-        if self.moving() {
-            frames / self.speed
-        } else {
-            frames
-        }
-    }
-
-    pub(crate) fn source(&self, at: f64) -> f64 {
-        if self.moving() { self.speed * at } else { at }
-    }
-
-    pub(crate) fn scale(&self) -> f64 {
-        if self.moving() { self.speed } else { 1.0 }
-    }
-
-    pub(crate) fn handle_names(&self) -> [&'static str; 2] {
-        if self.speed < 0.0 {
-            ["OutBez", "InBez"]
-        } else {
-            ["InBez", "OutBez"]
-        }
-    }
-}
-
-pub(super) fn gain_keys(item: &Value, timing: &Timing) -> Vec<Keyframe> {
+pub(super) fn gain_keys(item: &Value) -> Vec<Keyframe> {
     let Some(keys) = volume_param(item).and_then(|p| p["Key Frames"].as_object()) else {
         return Vec::new();
     };
     let handle = |k: &Value, name: &str, before: bool| {
         let b = handle_point(k, name)?;
         let h = Handle {
-            frames: b.first()?.as_f64()? * timing.scale(),
+            frames: b.first()?.as_f64()?,
             value: b.get(1)?.as_f64()?,
         };
         crate::keyframes::checked_handle(h, before).ok()
     };
-    let [before, after] = timing.handle_names();
+    let [before, after] = ["InBez", "OutBez"];
     let mut out: Vec<Keyframe> = keys
         .iter()
         .filter_map(|(t, k)| {
             Some(Keyframe {
-                frame: timing.source(t.parse::<f64>().ok()?).round() as i64,
+                frame: t.parse::<f64>().ok()?.round() as i64,
                 value: k["Value"].as_f64()?.clamp(*GAIN.start(), *GAIN.end()),
                 in_handle: handle(k, before, true),
                 out_handle: handle(k, after, false),
@@ -182,17 +147,17 @@ pub(super) fn drop_gain_keys(list: &mut Vec<Value>) {
     list.retain(|e| !is_volume(e) || in_use(e));
 }
 
-fn key_frames(keys: &[Keyframe], source: i64, timing: &Timing) -> Value {
-    let [before, after] = timing.handle_names();
+fn key_frames(keys: &[Keyframe], origin: i64) -> Value {
+    let [before, after] = ["InBez", "OutBez"];
     let mut out = serde_json::Map::new();
     for k in keys {
-        let at = timing.file((k.frame - source) as f64).round();
+        let at = (k.frame - origin) as f64;
         let mut v = json!({ "Value": k.value, "Variant Type": "Double" });
         if let Some(h) = k.in_handle {
-            v[before] = handle_value(before, h.frames / timing.scale(), h.value);
+            v[before] = handle_value(before, h.frames, h.value);
         }
         if let Some(h) = k.out_handle {
-            v[after] = handle_value(after, h.frames / timing.scale(), h.value);
+            v[after] = handle_value(after, h.frames, h.value);
         }
         out.insert(frame_key(at), v);
     }
@@ -445,7 +410,7 @@ pub(super) fn sound(
     au: &ClipAudio,
     source: i64,
     (head, tail): (bool, bool),
-    timing: &Timing,
+    origin: i64,
 ) -> Vec<Value> {
     let mut list = au
         .effects
@@ -454,7 +419,7 @@ pub(super) fn sound(
     let db = au.gain_keys.first().map_or(au.gain_db, |k| k.value);
     let mut level = volume(db)["metadata"][EDITOR]["Parameters"][0].clone();
     if au.is_keyed() {
-        level["Key Frames"] = key_frames(&au.gain_keys, source, timing);
+        level["Key Frames"] = key_frames(&au.gain_keys, origin);
     }
     let carried = list.iter_mut().find(|e| is_volume(e)).and_then(params_of);
     match carried {

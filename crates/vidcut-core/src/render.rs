@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -6,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::model::{
     Clip, ClipRetime, ColorSpace, DuckDetect, Hdr, Keyframe, Media, MediaSuperScale, Picture,
-    Project, Retime, Settings, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
+    Project, Retime, Section, Settings, SuperScale, TimelineColors, Title, TrackKind,
+    WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -115,6 +117,10 @@ pub struct DuckSource {
     /// The clip's volume keyframes (decision D81), on top of `gain_db`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<Keyframe>,
+    /// The frame of the keyframes' axis at `start`: its source frame, or on a
+    /// clip with a speed, its frame on the retimed source.
+    #[serde(default, skip_serializing_if = "zero_i64")]
+    pub key: i64,
 }
 
 impl Dip {
@@ -296,13 +302,11 @@ pub struct Placed {
     /// Dynamic Zoom.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<Run>,
-    /// Source frame this picture shows. Keyed values are read here.
-    /// `after` moves it with the piece (decision D75).
+    /// The keyframe position of this picture: its source frame, or on a
+    /// clip with a speed, its frame on the retimed source. Keyed values are
+    /// read here. `after` moves it with the piece (decision D75).
     #[serde(default, skip_serializing_if = "zero_i64")]
     pub source: i64,
-    /// How `after` moves `source`. A normal pace is left out.
-    #[serde(default, skip_serializing_if = "Pace::is_normal")]
-    pub pace: Pace,
     /// Timeline start of the clip, until the first `after` places it.
     #[serde(default, skip_serializing_if = "zero_i64")]
     pub start: i64,
@@ -321,22 +325,19 @@ impl Placed {
             clip: clip.id.clone(),
             run: picture.dynamic_zoom.map(|_| run),
             picture,
-            source: clip.source_in,
-            pace: clip.pace(),
+            source: clip.content_at(clip.start),
             start: clip.start,
             ready: false,
         }
     }
 
     pub fn at(clip: &Clip, picture: Picture, run: Run, time: i64) -> Self {
-        let into = time - clip.start;
         let run = picture.dynamic_zoom.map(|_| run);
         Self {
             clip: clip.id.clone(),
             picture,
             run,
-            source: clip.source_at(time),
-            pace: clip.pace().after(into),
+            source: clip.content_at(time),
             start: clip.start,
             ready: true,
         }
@@ -348,8 +349,7 @@ impl Placed {
             clip: self.clip.clone(),
             picture: self.picture.clone(),
             run: self.run.map(|r| r.after(k)),
-            source: self.source + self.pace.offset(into),
-            pace: self.pace.after(into),
+            source: self.source + into,
             start: self.start,
             ready: true,
         }
@@ -481,12 +481,16 @@ pub enum AudioPiece {
         /// below 0 the source plays backward from `source_sample`.
         #[serde(default = "normal_speed", skip_serializing_if = "is_normal_speed")]
         speed: f64,
+        /// It goes on from the piece before, in the next section of its
+        /// clip's speed: the sound plays on through the change.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        joined: bool,
         /// A cross fade over it (decision D50): its gain on top of
         /// `gain_db`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fade: Option<Fade>,
         /// Its clip's volume keyframes (decision D81): their gain at each
-        /// source sample, on top of `gain_db`, which then holds the
+        /// sample heard, on top of `gain_db`, which then holds the
         /// track's fader only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keyed: Option<Keyed>,
@@ -503,11 +507,14 @@ pub enum AudioPiece {
 /// A clip's volume keyframes over a piece of its sound.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Keyed {
-    /// The keyframes, their frames in project frames from the piece's
-    /// `origin`.
+    /// The keyframes, their frames on `at`'s axis in project frames.
     pub keys: Vec<Keyframe>,
     /// Plan samples in a project frame.
     pub per_frame: f64,
+    /// The piece's first sample on the keyframes' axis, in plan samples:
+    /// the source sample, or on a clip with a speed, the sample on the
+    /// retimed source.
+    pub at: f64,
 }
 
 impl Keyed {
@@ -682,7 +689,7 @@ impl VideoPiece {
                     source_frame: self.position(if still { 0 } else { k }),
                     frames,
                     image: image.clone(),
-                    pace: if still { *pace } else { pace.after(k) },
+                    pace: if still { pace.clone() } else { pace.after(k) },
                     color_space: *color_space,
                     super_scale: *super_scale,
                     retime: *retime,
@@ -809,14 +816,19 @@ impl RenderPlan {
 /// (export.md §2): at speed 2 every other frame, at 0.5 each twice, at -1
 /// backward, at 0 the first held. Each frame shows the source frame its
 /// stretch of the source starts in, counted forward: backward, the bottom
-/// of the stretch, as editors show it.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// of the stretch, as editors show it. Each section of the clip's speed
+/// keeps this rule.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Pace {
-    /// Source frames per output frame.
-    pub speed: f64,
-    /// Frames of its clip before the piece: where in its pace it starts.
+    /// The sections of the clip's speed.
+    pub map: Arc<[Section]>,
+    /// Frames of its clip's retimed source before the piece: where in its
+    /// pace it starts.
     pub skip: i64,
 }
+
+static NORMAL: std::sync::LazyLock<Arc<[Section]>> =
+    std::sync::LazyLock::new(|| crate::model::Speed::constant(1.0).sections);
 
 impl Default for Pace {
     fn default() -> Self {
@@ -826,47 +838,93 @@ impl Default for Pace {
 
 impl Pace {
     pub fn of(speed: f64, skip: i64) -> Self {
-        Self { speed, skip }
+        if speed == 1.0 {
+            return Self::mapped(NORMAL.clone(), skip);
+        }
+        Self::mapped(crate::model::Speed::constant(speed).sections, skip)
+    }
+
+    pub fn mapped(map: Arc<[Section]>, skip: i64) -> Self {
+        Self { map, skip }
     }
 
     pub fn is_normal(&self) -> bool {
-        self.speed == 1.0
+        matches!(&*self.map, [s] if s.speed == 1.0)
+    }
+
+    fn section(&self, u: i64) -> &Section {
+        let i = self.map.partition_point(|s| s.at <= u);
+        &self.map[i.saturating_sub(1)]
+    }
+
+    fn frame(&self, u: i64) -> i64 {
+        let s = self.section(u);
+        let back = i64::from(s.speed < 0.0);
+        (s.from + (u + back - s.at) as f64 * s.speed + 1e-9).floor() as i64
+    }
+
+    pub fn speed(&self) -> f64 {
+        self.section(self.skip).speed
+    }
+
+    pub fn shown(&self) -> i64 {
+        self.frame(self.skip)
+    }
+
+    pub fn speed_at(&self, k: i64) -> f64 {
+        self.section(self.skip + k).speed
+    }
+
+    pub fn steady(&self, k: i64) -> Option<i64> {
+        let u = self.skip + k;
+        self.map.iter().skip(1).find(|s| s.at > u).map(|s| s.at - u)
     }
 
     pub fn offset(&self, k: i64) -> i64 {
         if self.is_normal() {
             return k;
         }
-        let at = |n: i64| (n as f64 * self.speed + 1e-9).floor() as i64;
-        let back = i64::from(self.speed < 0.0);
-        at(self.skip + k + back) - at(self.skip + back)
+        self.frame(self.skip + k) - self.frame(self.skip)
     }
 
     pub fn exact(&self, k: i64) -> f64 {
         if self.is_normal() {
             return k as f64;
         }
-        let at = |n: i64| (n as f64 * self.speed + 1e-9).floor() as i64;
-        let back = i64::from(self.speed < 0.0);
-        (self.skip + k + back) as f64 * self.speed - at(self.skip + back) as f64
+        let u = self.skip + k;
+        let s = self.section(u);
+        let back = i64::from(s.speed < 0.0);
+        s.from + (u + back - s.at) as f64 * s.speed - self.frame(self.skip) as f64
     }
 
     pub fn after(&self, k: i64) -> Self {
-        Self::of(self.speed, self.skip + k)
+        Self::mapped(self.map.clone(), self.skip + k)
     }
 
     pub fn phase(&self) -> f64 {
-        if self.is_normal() || self.speed == 0.0 {
+        let s = self.section(self.skip);
+        if self.is_normal() || s.speed == 0.0 {
             return 0.0;
         }
-        let back = i64::from(self.speed < 0.0);
-        let x = (self.skip + back) as f64 * self.speed;
+        let back = i64::from(s.speed < 0.0);
+        let x = s.from + (self.skip + back - s.at) as f64 * s.speed;
         (x - (x + 1e-9).floor()).max(0.0)
     }
 
     pub fn sound(&self, x: f64) -> f64 {
-        let top = if self.speed < 0.0 { -self.speed } else { 0.0 };
-        self.phase() + top + x * self.speed
+        if let [s] = &*self.map {
+            let top = if s.speed < 0.0 { -s.speed } else { 0.0 };
+            return self.phase() + top + x * s.speed;
+        }
+        let y = self.skip as f64 + x;
+        let i = self.map.partition_point(|s| s.at as f64 <= y);
+        let s = &self.map[i.saturating_sub(1)];
+        s.from + (y - s.at as f64) * s.speed - self.frame(self.skip) as f64
+    }
+
+    pub fn sound_in(&self, k: i64, x: f64) -> f64 {
+        let s = self.section(self.skip + k);
+        s.from + (self.skip as f64 + x - s.at as f64) * s.speed - self.frame(self.skip) as f64
     }
 }
 
@@ -939,7 +997,8 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             && stream == st2
             && gain_db == g2
             && isolation == i2
-            && keyed == k2
+            && keyed.as_ref().map(|k| (&k.keys, k.per_frame))
+                == k2.as_ref().map(|k| (&k.keys, k.per_frame))
             && *speed == 1.0
             && *sp2 == 1.0
             && fade.is_none()
@@ -977,8 +1036,8 @@ fn origin_of(m: &Media) -> (PathBuf, f64) {
     (m.path.clone(), origin)
 }
 
-pub fn retime_of(c: &Clip, m: &Media, s: &Settings) -> Retime {
-    retime_at(c.retime, c.speed(), m, s)
+pub fn retime_of(c: &Clip, t: i64, m: &Media, s: &Settings) -> Retime {
+    retime_at(c.retime, c.speed_at(t), m, s)
 }
 
 pub fn retime_at(chosen: ClipRetime, speed: f64, m: &Media, s: &Settings) -> Retime {
@@ -1136,14 +1195,15 @@ fn placed_of(c: &Clip, nest: Option<&Nest>, over: bool, x: i64) -> Vec<Placed> {
 }
 
 fn inside(x: &Clip, c: &Clip) -> Option<(Clip, Run)> {
-    let speed = c.speed();
-    if speed != 1.0 {
+    if c.speed.is_some() {
+        let speed = c.pace().speed();
         let (k0, k1) = shown_between(c, x.start, x.end())?;
         let mut y = x.clone();
         let walked = c.source_at(c.start + k0) - x.start;
         y.walk(walked);
         (y.start, y.duration) = (c.start + k0, k1 - k0);
-        y.speed = paced(c, x.speed.as_ref(), k0);
+        let own = y.speed.take();
+        y.speed = paced(c, own.as_ref(), k0);
         if let Some(a) = y.audio.as_mut() {
             a.head = 0;
             a.tail = 0;
@@ -1199,15 +1259,62 @@ pub(crate) fn paced(
     own: Option<&crate::model::Speed>,
     k: i64,
 ) -> Option<crate::model::Speed> {
-    let speed = c.speed() * own.and_then(crate::model::Speed::scalar).unwrap_or(1.0);
+    let outer = c.pace().speed();
+    if let Some(s) = own.filter(|s| s.scalar().is_none() && outer != 0.0) {
+        return Some(composed(s, outer));
+    }
+    let speed = outer * own.and_then(crate::model::Speed::scalar).unwrap_or(1.0);
     (speed != 1.0).then(|| crate::model::Speed {
-        effect: crate::ops::time_effect(own.or(c.speed.as_ref()), speed).into(),
+        effect: Some(crate::ops::time_effect(own.or(c.speed.as_ref()), speed).into()),
         skip: if own.is_none() {
             c.pace().after(k).skip
         } else {
             0
         },
+        ..crate::model::Speed::constant(speed)
     })
+}
+
+fn composed(own: &crate::model::Speed, v: f64) -> crate::model::Speed {
+    let map = &own.sections;
+    let index = |u: f64| map.partition_point(|s| s.at as f64 <= u).saturating_sub(1);
+    let pos = |u: f64| {
+        let s = &map[index(u)];
+        s.from + (u - s.at as f64) * s.speed
+    };
+    let u0 = own.skip as f64;
+    let i0 = index(u0);
+    let mut bounds = vec![(0, i0)];
+    if v > 0.0 {
+        for (i, s) in map.iter().enumerate().skip(i0 + 1) {
+            bounds.push((((s.at as f64 - u0) / v - 1e-9).ceil() as i64, i));
+        }
+    } else {
+        for i in (1..=i0).rev() {
+            let at = ((u0 - map[i].at as f64) / -v + 1e-9).floor() as i64 + 1;
+            bounds.push((at, i - 1));
+        }
+    }
+    bounds.dedup_by(|b, a| {
+        let same = a.0 == b.0;
+        if same {
+            a.1 = b.1;
+        }
+        same
+    });
+    let sections: Vec<Section> = bounds
+        .into_iter()
+        .map(|(j, i)| Section {
+            at: j,
+            from: pos(u0 + j as f64 * v) - pos(u0),
+            speed: map[i].speed * v,
+        })
+        .collect();
+    crate::model::Speed {
+        sections: sections.into(),
+        skip: 0,
+        effect: None,
+    }
 }
 
 enum Layer {
@@ -1287,6 +1394,9 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         {
             cuts.push(c.start.max(a));
             cuts.push(c.end().min(b));
+            for (s, _) in c.runs(c.start.max(a), c.end().min(b)) {
+                cuts.push(s);
+            }
         }
         for d in played {
             cuts.extend([d.frames.0, d.frames.1].map(|f| f.clamp(a, b)));
@@ -1315,7 +1425,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 pace: c.pace().after(x - c.start),
                 color_space: m.color_space,
                 super_scale: super_scale_of(m.super_scale, s),
-                retime: retime_of(c, m, s),
+                retime: retime_of(c, x, m, s),
                 placed: placed_of(c, nest, over, x),
             })
         };
@@ -1514,19 +1624,24 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     );
                 } else {
                     let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
-                    let mut piece = source_audio(p, c, m, x, sample(y) - sample(x));
-                    if let AudioPiece::Source {
-                        gain_db,
-                        fade: f2,
-                        isolation,
-                        ..
-                    } = &mut piece
-                    {
-                        *gain_db += track.volume_db;
-                        *f2 = fade(f, x, falling);
-                        *isolation = isolation.or(track.voice_isolation).filter(|a| *a > 0.0);
+                    for (x, y) in c.runs(x, y) {
+                        let mut piece = source_audio(p, c, m, x, sample(y) - sample(x));
+                        if let AudioPiece::Source {
+                            gain_db,
+                            joined,
+                            fade: f2,
+                            isolation,
+                            ..
+                        } = &mut piece
+                        {
+                            *gain_db += track.volume_db;
+                            *joined =
+                                x > start.max(a) && c.pace().steady(x - 1 - c.start) == Some(1);
+                            *f2 = fade(f, x, falling);
+                            *isolation = isolation.or(track.voice_isolation).filter(|a| *a > 0.0);
+                        }
+                        push_audio(lane, piece);
                     }
-                    push_audio(lane, piece);
                 }
                 *t = y;
             }
@@ -1573,20 +1688,25 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
     let audio = c.audio.as_ref().expect("has audio");
     let (path, origin) = origin_of(m);
     let (fps, rate) = (p.settings.fps, p.settings.sample_rate);
-    let speed = c.speed();
-    let source_sample = if speed == 1.0 {
+    let speed = c.speed_at(x);
+    let per_frame = f64::from(rate) / fps.as_f64();
+    let since = fps.frame_to_sample(x, rate) - fps.frame_to_sample(c.start, rate);
+    let source_sample = if c.speed.is_none() {
         fps.frame_to_sample(c.source_at(x), rate)
     } else if speed == 0.0 {
         return AudioPiece::Silence { samples };
-    } else {
-        let per_frame = f64::from(rate) / fps.as_f64();
-        let since = fps.frame_to_sample(x, rate) - fps.frame_to_sample(c.start, rate);
+    } else if c.constant_speed().is_some() {
         fps.frame_to_sample(c.source_in, rate)
             + (c.pace().sound(0.0) * per_frame + since as f64 * speed).round() as i64
+    } else {
+        let k = x - c.start;
+        fps.frame_to_sample(c.source_in, rate)
+            + (c.pace().sound_in(k, since as f64 / per_frame) * per_frame).round() as i64
     };
     let keyed = audio.is_keyed().then(|| Keyed {
         keys: audio.gain_keys.clone(),
-        per_frame: f64::from(rate) / fps.as_f64(),
+        per_frame,
+        at: fps.frame_to_sample(c.content_at(c.start), rate) as f64 + since as f64,
     });
     AudioPiece::Source {
         media: c.media.clone(),
@@ -1597,6 +1717,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         samples,
         gain_db: if keyed.is_some() { 0.0 } else { audio.gain_db },
         speed,
+        joined: false,
         fade: None,
         isolation: audio.voice_isolation,
         keyed,
@@ -1749,6 +1870,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                 &mut lane,
                 AudioPiece::Source {
                     speed: 1.0,
+                    joined: false,
                     media: id.clone(),
                     path,
                     stream: 0,
