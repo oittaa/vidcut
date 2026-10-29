@@ -2385,7 +2385,7 @@ impl Workspace {
             return;
         };
         self.send("keyframes.add", json!({ "clips": [clip], "at": at }));
-        self.timeline.keys = vec![(clip.to_string(), c.source_at(at))];
+        self.timeline.keys = vec![(clip.to_string(), c.content_at(at))];
     }
 
     fn click_key(&mut self, clip: String, frame: i64, mods: egui::Modifiers) {
@@ -3182,7 +3182,7 @@ impl Workspace {
             .clips
             .first()
             .and_then(|id| p.clip(id))
-            .map_or(1.0, |c| c.speed());
+            .map_or(1.0, |c| c.speed_at(c.start));
         let retime = self
             .pictured(&self.snap.selection.clips)
             .first()

@@ -17,7 +17,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 
 **In scope:**
 - media pool, viewer, dual timeline
-- editing and trimming, constant speed changes (D48)
+- editing and trimming, speed changes and speed points (D48)
 - dissolves: cross dissolves, fades to and from black, audio cross fades (§8.11)
 - clip/track audio levels and waveforms
 - volume keyframes of a clip (§9, D81)
@@ -1394,17 +1394,37 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - It shows as `;` before the frames.
   - When you type a timecode, `;` means drop-frame. So does `:` in a drop-frame project.
   - A skipped label is refused. Digits that fill one land on the first frame of the minute.
-- **D48. Clips at another speed** (§1, §8.6; deviation X9).
-  - A clip's constant speed comes from Change Clip Speed, the Speed section of the Inspector, or an OTIO file.
+- **D48. Clips at another speed** (§1, §8.6; deviations X9, X95).
+  - A clip's speed comes from Change Clip Speed, the Speed section of the Inspector, speed points, or an OTIO file.
   - The speed applies wherever its pictures and sound go.
   - Change Clip Speed takes 1% to 10000%, forward or backward.
   - It also takes 0, which freezes the frame under the playhead.
+  - It gives the whole clip one speed. The speed points of the clip go.
   - Without ripple, the clip keeps its length. With ripple, it keeps its source, and later clips follow.
   - Each frame shows the source frame in which its stretch of the source starts.
   - Backward, it shows the bottom of the stretch, as Resolve shows it.
   - This is Retime Process at Nearest. The other processes make the frames between the source frames (deviation X93).
   - Sound keeps its pitch, and plays reversed when backward. A freeze is silent.
   - Edits count frames through the speed.
+  - **Speed points.** These facts come from Resolve Studio 21.1.2, from its renders and its OTIO files:
+    - A speed point cuts a clip into two sections. Each section has a speed of its own. The sound of the clip gets the same sections.
+    - A new point gives both sections the speed of the section that it cuts.
+    - Each timeline frame shows `floor` of the source position on the line of its section.
+    - A change of a section's speed moves the later points and the clip's end. Their sections keep their speeds.
+    - The freeze button holds the frame under the playhead for 2 seconds of the timeline. It adds a section at 0% and a point after it.
+    - Delete Keyframe removes the point at the playhead, or else the nearest point before the playhead.
+    - The section that is left goes in a straight line between the points on its two sides. The clip keeps its length.
+    - Trims and splits keep all the points, also those outside the clip. The points stay on the retimed source.
+    - A keyframe of the clip stays on its frame of the clip when a section's speed changes.
+    - The OTIO export writes the points as the `Key Frames` of a `TimeEffect`, in seconds from the media's first frame.
+  - **Requests:** `speed.add_point`, `speed.remove_point`, `speed.set` and `speed.freeze` do these edits at a time, the playhead by default.
+    - `speed.set` takes 1% to 10000% forward, in a section that plays forward.
+    - `speed.remove_point` with `all` removes all the points of the clips.
+    - With ripple, the clip's length follows a change. Without ripple, the clip keeps its length.
+  - **Model:** a clip's speed is a list of sections on its retimed source (`Speed`, `Section`).
+    - The retimed source has one frame for each timeline frame. A trim or a split moves only the clip's place on it (`skip`).
+    - The keyframes of a clip with a speed are on its retimed source. Thus they stay on their frames of the clip.
+    - The sound of a clip plays through all its sections in one stretch, with its pitch kept. Thus a point makes no click and no dip.
 - **D49. What Join Match Edit Clips joins** (pp. 646, 950).
   - The manual says only that it rejoins a split clip.
   - Two clips join when the second plays on from where the first stops. Thus nothing seen or heard changes.
@@ -2308,9 +2328,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A handle that was dragged or given (`in`, `out`) stays as it is. Its keyframe then has no ease of the four.
   - **Edits:**
     - Trims, slips, moves and ripples keep the keyframes on their source frames. A keyframe can be outside the clip.
+    - On a clip with a speed, a keyframe is on a frame of the retimed source (D48), not on a source frame.
     - A split gives all the keyframes to both parts. Thus `edit.join` gives back the clip.
-    - A speed change keeps each keyframe at its frame of the clip (D48). Thus its source frame changes. A freeze keeps them as they are.
-    - A clip that plays backward plays its keyframes backward.
+    - A speed change, a freeze too, keeps each keyframe at its frame of the clip (D48). Thus the source frame under it changes.
+    - A clip that plays backward plays its keyframes forward, on their frames of the clip.
     - `edit.copy` and `edit.paste` carry the keyframes with the clip. `keyframes.copy` and `keyframes.paste` copy keyframes alone (§2).
     - Compound clips have no volume of their own. Thus they have no volume keyframes.
   - **Play and export:** each sample takes the volume of the curve at its source position. The player and the export use the same mixer.

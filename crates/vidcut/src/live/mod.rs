@@ -4349,6 +4349,7 @@ fn fetches(r: &Request) -> bool {
             ..
         }
         | Request::EditChangeSpeed { download: true, .. }
+        | Request::SpeedSet { download: true, .. }
         | Request::ProjectSet(vidcut_core::request::ProjectSet { download: true, .. }) => true,
         Request::Apply { commands, .. } => commands.iter().any(fetches),
         _ => false,

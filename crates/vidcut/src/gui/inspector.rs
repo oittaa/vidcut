@@ -1147,7 +1147,7 @@ impl Workspace {
                         stored,
                         shown,
                         shape: shape(&p, c),
-                        frame: c.source_at(self.snap.timeline.position),
+                        frame: c.content_at(self.snap.timeline.position),
                     }
                 })
             })
@@ -1211,7 +1211,7 @@ impl Workspace {
                 let c = p
                     .clip(id)
                     .filter(|c| !c.is_generator() && c.title.is_none())?;
-                let stored = (c.speed(), c.duration);
+                let stored = (c.speed_at(c.start), c.duration);
                 let shown = retimed
                     .and_then(|r| {
                         let (_, from, to) = r.clips.iter().find(|(f, _, _)| f == id)?;
@@ -1227,7 +1227,7 @@ impl Workspace {
                     project: p.media(&c.media).map_or(Retime::Nearest, |m| {
                         vidcut_core::render::retime_at(
                             ClipRetime::Project,
-                            c.speed(),
+                            c.speed_at(c.start),
                             m,
                             &p.settings,
                         )

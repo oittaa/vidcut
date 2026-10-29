@@ -375,7 +375,7 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
     let ends = [level_of(fixed(z.start))?, level_of(fixed(z.end))?];
     Some(Shown {
         clip: c.id.clone(),
-        anchor: anchored(&shown.sampled(c.source_at(at) as f64), (w, h), fit),
+        anchor: anchored(&shown.sampled(c.content_at(at) as f64), (w, h), fit),
         picture: shown,
         level,
         middle,
@@ -526,7 +526,7 @@ impl Workspace {
                 return (id.to_string(), picture.clone());
             };
             let stored = c.picture.clone().unwrap_or_default();
-            let at = c.source_at(frame);
+            let at = c.content_at(frame);
             (id.to_string(), stored.preview(baseline, picture, at))
         };
         match self.grab_wanted() {
@@ -626,7 +626,7 @@ impl Workspace {
         let at = self.snap.player(crate::live::PlayerId::Timeline).position;
         let frame = self
             .project_shared()
-            .and_then(|p| p.clip(&s.clip).map(|c| c.source_at(at)));
+            .and_then(|p| p.clip(&s.clip).map(|c| c.content_at(at)));
         let adopted = frame
             .map(|f| s.picture.adopt(f as f64))
             .unwrap_or_else(|| s.picture.clone());
@@ -992,7 +992,7 @@ impl Workspace {
             let at = self.snap.player(crate::live::PlayerId::Timeline).position;
             let frame = self
                 .project_shared()
-                .and_then(|p| p.clip(&s.clip).map(|c| c.source_at(at)));
+                .and_then(|p| p.clip(&s.clip).map(|c| c.content_at(at)));
             let start = frame
                 .map(|f| s.picture.adopt(f as f64))
                 .unwrap_or_else(|| s.picture.clone());

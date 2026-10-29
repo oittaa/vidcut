@@ -287,7 +287,7 @@ pub(crate) fn planned(p: &Project, lanes: &[LaneTrack], a: i64, b: i64) -> Vec<D
                 let Some(au) = c.audio.as_ref().filter(|au| !au.muted) else {
                     continue;
                 };
-                if c.is_block() || c.speed() == 0.0 {
+                if c.is_block() || c.is_frozen() {
                     continue;
                 }
                 let Some((ra, rb)) = c.audio_range() else {
@@ -300,21 +300,28 @@ pub(crate) fn planned(p: &Project, lanes: &[LaneTrack], a: i64, b: i64) -> Vec<D
                 let Ok((_, origin)) = p.media_origin(&c.media) else {
                     continue;
                 };
-                sources.push(DuckSource {
-                    media: c.media.clone(),
-                    stream: au.stream,
-                    origin,
-                    frames: (x0, x1),
-                    start: c.start,
-                    source_in: c.source_in,
-                    pace: c.pace(),
-                    gain_db: if au.is_keyed() {
-                        x.volume_db
-                    } else {
-                        au.gain_db + x.volume_db
-                    },
-                    keys: au.gain_keys.clone(),
-                });
+                for (a, b) in c.runs(x0, x1) {
+                    let pace = c.pace().after(a - c.start);
+                    if pace.speed() == 0.0 {
+                        continue;
+                    }
+                    sources.push(DuckSource {
+                        media: c.media.clone(),
+                        stream: au.stream,
+                        origin,
+                        frames: (a, b),
+                        start: a,
+                        source_in: c.source_at(a),
+                        pace,
+                        gain_db: if au.is_keyed() {
+                            x.volume_db
+                        } else {
+                            au.gain_db + x.volume_db
+                        },
+                        keys: au.gain_keys.clone(),
+                        key: c.content_at(a),
+                    });
+                }
             }
         }
         out.push(Ducking {
@@ -371,7 +378,7 @@ pub fn hear(plan: &mut RenderPlan, p: &Project, measured: &mut Measure) -> Resul
                 source_in: s.source_in,
                 origin: s.origin,
                 fps,
-                pace: s.pace,
+                pace: s.pace.clone(),
             };
             let found = match measured(m, s.stream, d.detect)? {
                 Some(Measured::Speech(va)) => analysis::speech_frames(&span, s.frames, &va),
@@ -381,7 +388,8 @@ pub fn hear(plan: &mut RenderPlan, p: &Project, measured: &mut Measure) -> Resul
                         keys: &s.keys,
                         origin: s.origin,
                         fps: f,
-                    };
+                    }
+                    .retimed(&s.pace, s.source_in, s.key);
                     analysis::loud_frames(&span, s.frames, &l, d.threshold_db, &gain)
                 }
                 None => {

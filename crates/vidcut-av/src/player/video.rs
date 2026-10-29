@@ -816,14 +816,14 @@ impl Decoder {
         let VideoPiece::Source {
             source_frame: pos,
             image: None,
-            pace,
+            ref pace,
             ..
         } = piece
         else {
             return Ok(t);
         };
         if !pace.is_normal() {
-            if pace.speed == 0.0 {
+            if pace.speed() == 0.0 {
                 return Ok(t);
             }
             let n = ((plan.fps().as_f64() * WINDOW_SECS).round() as i64)

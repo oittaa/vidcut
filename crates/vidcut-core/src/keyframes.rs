@@ -182,30 +182,10 @@ pub fn reshape<R>(keys: &mut Vec<Keyframe>, change: impl FnOnce(&mut Marked) -> 
 }
 
 pub fn retimed(keys: &[Keyframe], old: &Clip, new: &Clip) -> Vec<Keyframe> {
-    let (from, to) = (old.speed(), new.speed());
-    if keys.is_empty() || from == 0.0 || to == 0.0 {
-        return keys.to_vec();
-    }
-    let ratio = to / from;
-    let scaled = |h: Option<Handle>| {
-        h.map(|h| Handle {
-            frames: h.frames * ratio,
-            value: h.value,
-        })
-    };
     let mut out = keys.to_vec();
     reshape(&mut out, |marked| {
-        for (k, e) in marked.iter_mut() {
-            k.frame = new.sound_at(old.key_time(k.frame)).round() as i64;
-            let (i, o) = (scaled(k.in_handle), scaled(k.out_handle));
-            (k.in_handle, k.out_handle) = if ratio < 0.0 { (o, i) } else { (i, o) };
-            if ratio < 0.0 {
-                *e = e.map(|e| match e {
-                    Ease::EaseIn => Ease::EaseOut,
-                    Ease::EaseOut => Ease::EaseIn,
-                    e => e,
-                });
-            }
+        for (k, _) in marked.iter_mut() {
+            k.frame = new.key_at(old.key_time(k.frame)).round() as i64;
         }
     });
     out
@@ -285,12 +265,12 @@ impl ClipAudio {
 }
 
 impl Clip {
+    pub fn key_at(&self, t: f64) -> f64 {
+        self.content_at(self.start) as f64 + t - self.start as f64
+    }
+
     pub fn time_of(&self, frame: f64) -> f64 {
-        let pace = self.pace();
-        if pace.speed == 0.0 {
-            return self.start as f64;
-        }
-        self.start as f64 + (frame - self.source_in as f64 - pace.sound(0.0)) / pace.speed
+        self.start as f64 + frame - self.content_at(self.start) as f64
     }
 
     pub fn key_time(&self, frame: i64) -> f64 {
@@ -298,7 +278,7 @@ impl Clip {
     }
 
     pub fn gain_at(&self, t: f64) -> Option<f64> {
-        self.audio.as_ref().map(|a| a.db_at(self.sound_at(t)))
+        self.audio.as_ref().map(|a| a.db_at(self.key_at(t)))
     }
 
     pub fn sounds_at(&self, t: i64) -> bool {
@@ -335,6 +315,19 @@ impl<'a> Gain<'a> {
             keys: &audio.gain_keys,
             origin,
             fps,
+        }
+    }
+
+    pub fn retimed(self, pace: &crate::render::Pace, source_in: i64, key: i64) -> Self {
+        let v = pace.speed();
+        if v == 0.0 {
+            return self;
+        }
+        let at = source_in as f64 + pace.sound(0.0);
+        Self {
+            origin: self.origin + (at - key as f64 * v) / self.fps,
+            fps: self.fps / v,
+            ..self
         }
     }
 
@@ -799,7 +792,7 @@ fn retime_channel(p: &mut Picture, v: PictureValue, old: &Clip, new: &Clip) {
         .enumerate()
         .map(|(i, k)| {
             (
-                new.sound_at(old.key_time(k.frame)).round() as i64,
+                new.key_at(old.key_time(k.frame)).round() as i64,
                 y_was.get(i).copied().unwrap_or(0.0),
             )
         })

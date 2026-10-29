@@ -1825,8 +1825,8 @@ impl VideoFrames {
                     continue;
                 };
                 let still = Pictures::of(image.as_ref()) == Pictures::Still;
-                let backward = pace.speed < 0.0 && !still;
-                let retimed = !retime.is_nearest() && !still && pace.speed > 0.0;
+                let backward = pace.speed() < 0.0 && !still;
+                let retimed = !retime.is_nearest() && !still && pace.speed() > 0.0;
                 let k = if still { 0 } else { k };
                 let s = self.reading[i].expect("a file's picture is read");
                 if !picture {
@@ -2067,7 +2067,7 @@ impl VideoFrames {
             };
             taken[s] = true;
             self.open[s].set_retime(*retime);
-            if !(pace.speed < 0.0 && !still) {
+            if !(pace.speed() < 0.0 && !still) {
                 self.open[s].reversed.clear();
             }
             reading.push(Some(s));

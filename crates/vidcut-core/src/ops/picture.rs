@@ -247,7 +247,7 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
         let next = changed(&old, change);
         let frame = at
             .filter(|&t| c.start <= t && t < c.end())
-            .map(|t| c.source_at(t));
+            .map(|t| c.content_at(t));
         let mut picture = old.clone();
         let mut wrote = false;
         for v in PictureValue::ALL {

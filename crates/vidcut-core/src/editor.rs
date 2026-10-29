@@ -1901,8 +1901,11 @@ fn clip_speech(
         };
         let timed = transcript::spoken(said).map_err(Error::invalid)?;
         let (_, origin) = p.media_origin(&c.media)?;
-        let span = Span::of_clip(c, origin, fps);
-        for (i, start, end) in analysis::words_between(&span, (from, to), &timed) {
+        let spans = Span::of_clip(c, origin, fps);
+        let words = spans
+            .iter()
+            .flat_map(|span| analysis::words_between(span, (from, to), &timed));
+        for (i, start, end) in words {
             let middle = (start + end) / 2;
             if (a..b).contains(&middle) {
                 let w = &timed[i];
@@ -2032,25 +2035,34 @@ fn quiet_edges(p: &Project, env: &dyn Env, spans: &[(i64, i64)]) -> Result<Vec<(
                 .media(&c.media)
                 .ok_or_else(|| Error::not_found(format!("no media {}", c.media)))?;
             let (_, origin) = p.media_origin(&c.media)?;
-            let span = Span::of_clip(c, origin, fps);
+            let spans = Span::of_clip(c, origin, fps);
             if let Some(chosen) = transcripts::read(env, m, a.stream)?
                 && let Ok(timed) = transcript::spoken(&chosen.speech)
             {
                 known.extend(
-                    analysis::words_in(&span, &timed)
-                        .into_iter()
+                    spans
+                        .iter()
+                        .flat_map(|span| analysis::words_in(span, &timed))
                         .map(|(_, a, b)| (a, b)),
                 );
             }
-            sources.push((span, env.audio_levels(m, a.stream)?, a));
+            let levels = env.audio_levels(m, a.stream)?;
+            sources.extend(spans.into_iter().map(|span| {
+                let key = c.content_at(span.start);
+                (span, levels.clone(), a, key)
+            }));
         }
     }
     let heard: Vec<analysis::Heard> = sources
         .iter()
-        .map(|(span, levels, a)| analysis::Heard {
+        .map(|(span, levels, a, key)| analysis::Heard {
             span,
             levels,
-            gain: crate::keyframes::Gain::of(a, 0.0, span.origin, fps.as_f64()),
+            gain: crate::keyframes::Gain::of(a, 0.0, span.origin, fps.as_f64()).retimed(
+                &span.pace,
+                span.source_in,
+                *key,
+            ),
         })
         .collect();
     Ok(spans
@@ -2208,6 +2220,18 @@ fn mark_duration(
 
 fn resolve(p: &Project, t: &TimeSpec, playhead: Option<i64>) -> Result<i64> {
     Ok(ctx(p, playhead).resolve(t)?)
+}
+
+fn speed_point_at(
+    p: &Project,
+    at: Option<&TimeSpec>,
+    playhead: Option<i64>,
+    method: &str,
+) -> Result<i64> {
+    match at {
+        Some(t) => resolve(p, t, playhead),
+        None => playhead.ok_or_else(|| Error::usage(format!("{method} needs `at` (no playhead)"))),
+    }
 }
 
 fn length(p: &Project, t: &TimeSpec) -> Result<i64> {
@@ -3091,7 +3115,7 @@ fn mutate(
                     let mut parts = Vec::new();
                     for id in &ids {
                         let c = p.clip(id).expect("resolved");
-                        if c.is_block() || c.speed() == 0.0 {
+                        if c.is_block() || c.is_frozen() {
                             continue;
                         }
                         let found = silent_parts(
@@ -3141,7 +3165,7 @@ fn mutate(
             let mut created = Vec::new();
             for id in &ids {
                 let c = p.clip(id).expect("resolved");
-                if c.is_block() || c.speed() == 0.0 {
+                if c.is_block() || c.is_frozen() {
                     continue;
                 }
                 let found = scene_cuts(p, env, &Target::Clip(c), *threshold)?;
@@ -3202,6 +3226,42 @@ fn mutate(
             if *download && !dry_run {
                 ready_retimes(env, p, &ids)?;
             }
+            Value::Null
+        }
+        Request::SpeedAddPoint { clips, at } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = speed_point_at(p, at.as_ref(), playhead, "speed.add_point")?;
+            ops::speed::add_point(p, &ids, at)?;
+            Value::Null
+        }
+        Request::SpeedRemovePoint { clips, at, all } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            ops::speed::remove_point(p, &ids, at, *all)?;
+            Value::Null
+        }
+        Request::SpeedSet {
+            clips,
+            at,
+            speed,
+            ripple,
+            download,
+        } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = speed_point_at(p, at.as_ref(), playhead, "speed.set")?;
+            ops::speed::set(p, &ids, at, *speed, *ripple)?;
+            if *download && !dry_run {
+                ready_retimes(env, p, &ids)?;
+            }
+            Value::Null
+        }
+        Request::SpeedFreeze { clips, at, ripple } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let at = speed_point_at(p, at.as_ref(), playhead, "speed.freeze")?;
+            ops::speed::freeze(p, &ids, at, *ripple)?;
             Value::Null
         }
         Request::ClipSet {
@@ -4905,14 +4965,11 @@ fn imported_picture(
 ) -> (Vec<Value>, Option<Picture>) {
     match shape.filter(|_| c.has_picture()) {
         None => (c.effects.clone(), c.picture.clone()),
-        Some(shape) => {
-            let speed = c.speed.as_ref().and_then(|s| s.scalar()).unwrap_or(1.0);
-            otio::picture::take(&c.effects, c.picture.as_ref(), &shape, c.source_in, speed)
-                .unwrap_or_else(|names| {
-                    otio::note_kept(warnings, &names);
-                    (c.effects.clone(), None)
-                })
-        }
+        Some(shape) => otio::picture::take(&c.effects, c.picture.as_ref(), &shape, c.key_origin())
+            .unwrap_or_else(|names| {
+                otio::note_kept(warnings, &names);
+                (c.effects.clone(), None)
+            }),
     }
 }
 
@@ -5049,6 +5106,7 @@ fn place_imported(
         let end = offset + c.end();
         let mut source_in = c.source_in;
         let sound_from = c.source_in + c.audio.map_or(0, |a| a.0);
+        let keys_from = c.key_origin() + c.audio.map_or(0, |a| a.0);
         if c.video && m.info.video.is_none() {
             warnings.push(format!("{label}: {} has no video; left out", m.name));
             continue;
@@ -5062,8 +5120,7 @@ fn place_imported(
             start -= source_in;
             source_in = 0;
         }
-        let speed = c.speed.as_ref().and_then(|s| s.scalar()).unwrap_or(1.0);
-        let pace = crate::render::Pace::of(speed, c.speed.as_ref().map_or(0, |s| s.skip));
+        let pace = c.pace();
         let inside = |k: i64| (0..frames).contains(&(source_in + pace.offset(k)));
         let duration = if still {
             (end - start).min(frames)
@@ -5071,7 +5128,7 @@ fn place_imported(
             reach(end - start, |d| d < 1 || inside(d - 1))
         };
         if duration < end - start {
-            let side = if speed < 0.0 {
+            let side = if pace.speed() < 0.0 {
                 "before the start"
             } else {
                 "past the end"
@@ -5119,7 +5176,7 @@ fn place_imported(
                         .gain_keys
                         .iter()
                         .map(|k| crate::model::Keyframe {
-                            frame: k.frame + sound_from,
+                            frame: k.frame + keys_from,
                             ..*k
                         })
                         .collect(),
@@ -5426,14 +5483,15 @@ fn decompose(
         },
     )?;
     at_project_rate(p, &mut t, &ids);
-    if block.speed() != 1.0 {
+    if block.speed.is_some() {
         t.clips.retain_mut(|c| {
             let Some((k0, k1)) = crate::render::shown_between(&block, c.start, c.end()) else {
                 return false;
             };
             c.walk(block.source_at(block.start + k0) - c.start);
             (c.start, c.duration) = (k0, k1 - k0);
-            c.speed = crate::render::paced(&block, c.speed.as_ref(), k0);
+            let own = c.speed.take();
+            c.speed = crate::render::paced(&block, own.as_ref(), k0);
             if let Some(a) = c.audio.as_mut() {
                 *a = (0, 0);
             }
@@ -6679,7 +6737,9 @@ pub fn query(
                     let timed = transcript::spoken(speech).map_err(Error::invalid)?;
                     let tongue = filler_language(language, speech);
                     let (fillers, fillers_from) = filler_words(p, env, tongue.as_deref());
-                    let placed = analysis::words_in(&target.span(p)?, &timed);
+                    let placed: Vec<_> = (target.spans(p)?.iter())
+                        .flat_map(|span| analysis::words_in(span, &timed))
+                        .collect();
                     let words: Vec<Value> = placed
                         .iter()
                         .map(|&(i, a, b)| {
@@ -6933,7 +6993,9 @@ pub fn query(
             for target in targets(p, media, clips, playhead, false)? {
                 let m = target.media(p)?;
                 let stats = env.picture_stats(m)?;
-                let ranges = analysis::black_parts(&target.span(p)?, &stats, *share, min);
+                let ranges = analysis::joined(&target.spans(p)?, |span| {
+                    analysis::black_parts(span, &stats, *share, min)
+                });
                 out.push(target.json(p, json!({ "ranges": target.ranges(p, &ranges) })));
             }
             json!(out)
@@ -7093,19 +7155,19 @@ impl Target<'_> {
             .ok_or_else(|| Error::not_found(format!("no media {id}")))
     }
 
-    fn span(&self, p: &Project) -> Result<Span> {
+    fn spans(&self, p: &Project) -> Result<Vec<Span>> {
         let fps = p.settings.fps;
         Ok(match self {
             Target::Media(m) => {
                 let (_, origin) = p.media_origin(&m.id)?;
-                Span {
+                vec![Span {
                     pace: Default::default(),
                     start: 0,
                     end: p.media_frames(m),
                     source_in: 0,
                     origin,
                     fps,
-                }
+                }]
             }
             Target::Clip(c) => {
                 let (_, origin) = p.media_origin(&c.media)?;
@@ -7279,15 +7341,25 @@ fn silent_parts(
     if m.info.audio.is_empty() {
         return Err(Error::invalid(format!("{} has no sound", m.id)));
     }
-    let span = target.span(p)?;
+    let spans = target.spans(p)?;
     Ok(match speech {
         Some(speech) => {
             let va = env.voice_activity(m, stream, download)?;
-            analysis::non_speech_parts(&span, &va, settings, speech)
+            analysis::joined(&spans, |span| {
+                analysis::non_speech_parts(span, &va, settings, speech)
+            })
         }
         None => {
             let levels = env.audio_levels(m, stream)?;
-            analysis::silent_parts(&span, &levels, &gain, settings)
+            analysis::joined(&spans, |span| {
+                let gain = match target {
+                    Target::Clip(c) => {
+                        gain.retimed(&span.pace, span.source_in, c.content_at(span.start))
+                    }
+                    Target::Media(_) => gain,
+                };
+                analysis::silent_parts(span, &levels, &gain, settings)
+            })
         }
     })
 }
@@ -7324,17 +7396,20 @@ fn heard_speech(
         let Some(m) = p.media(&c.media).filter(|m| !m.info.audio.is_empty()) else {
             continue;
         };
-        if c.is_block() || c.pace().speed == 0.0 {
+        if c.is_block() || c.is_frozen() {
             continue;
         }
         let (_, origin) = p.media_origin(&c.media)?;
-        let span = Span::of_clip(c, origin, fps);
+        let spans = Span::of_clip(c, origin, fps);
         let va = env.voice_activity(m, a.stream, download)?;
-        let mut at = span.start;
-        for (x, y) in analysis::non_speech_parts(&span, &va, &settings, &speech)
-            .into_iter()
-            .chain([(span.end, span.end)])
-        {
+        let mut at = c.start;
+        let quiet = analysis::joined(&spans, |span| {
+            if span.pace.speed() == 0.0 {
+                return vec![(span.start, span.end)];
+            }
+            analysis::non_speech_parts(span, &va, &settings, &speech)
+        });
+        for (x, y) in quiet.into_iter().chain([(c.end(), c.end())]) {
             if x > at {
                 found.push((at as f64 / f, x as f64 / f));
             }
@@ -7702,7 +7777,9 @@ fn scene_cuts(
         )));
     }
     let stats = env.picture_stats(m)?;
-    Ok(analysis::scene_cuts(&target.span(p)?, &stats, threshold))
+    Ok((target.spans(p)?.iter())
+        .flat_map(|span| analysis::scene_cuts(span, &stats, threshold))
+        .collect())
 }
 
 fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {

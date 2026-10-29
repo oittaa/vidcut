@@ -298,6 +298,7 @@ pub fn category(kind: &str) -> &'static str {
         | "edit.trim_to_playhead"
         | "edit.change_duration"
         | "edit.change_speed" => "Trims",
+        k if k.starts_with("speed.") => "Trims",
         "edit.delete"
         | "edit.delete_range"
         | "edit.close_gap"

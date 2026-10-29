@@ -152,7 +152,7 @@ fn linear(db: f64) -> f64 {
     10f64.powf(db / 20.0)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Span {
     pub start: i64,
     pub end: i64,
@@ -163,15 +163,18 @@ pub struct Span {
 }
 
 impl Span {
-    pub fn of_clip(c: &Clip, origin: f64, fps: Rational) -> Self {
-        Self {
-            start: c.start,
-            end: c.end(),
-            source_in: c.source_in,
-            origin,
-            fps,
-            pace: c.pace(),
-        }
+    pub fn of_clip(c: &Clip, origin: f64, fps: Rational) -> Vec<Self> {
+        c.runs(c.start, c.end())
+            .into_iter()
+            .map(|(a, b)| Self {
+                start: a,
+                end: b,
+                source_in: c.source_at(a),
+                origin,
+                fps,
+                pace: c.pace().after(a - c.start),
+            })
+            .collect()
     }
 
     fn at(&self, pos: f64) -> f64 {
@@ -184,7 +187,7 @@ impl Span {
 
     fn frame(&self, x: f64) -> f64 {
         let pos = (x - self.origin) * self.fps.as_f64() - self.source_in as f64;
-        self.start as f64 + (pos - self.pace.sound(0.0)) / self.pace.speed
+        self.start as f64 + (pos - self.pace.sound(0.0)) / self.pace.speed()
     }
 
     fn shown_time(&self, t: i64) -> f64 {
@@ -210,7 +213,7 @@ pub fn quietest(heard: &[Heard], at: i64, around: std::ops::RangeInclusive<i64>)
 fn level_at(heard: &[Heard], frame: i64) -> f64 {
     heard
         .iter()
-        .filter(|h| h.span.pace.speed != 0.0 && h.span.start <= frame && frame <= h.span.end)
+        .filter(|h| h.span.pace.speed() != 0.0 && h.span.start <= frame && frame <= h.span.end)
         .map(|h| {
             let rate = f64::from(h.levels.per_second.max(1));
             let at = h.span.time(frame as f64);
@@ -233,7 +236,7 @@ pub fn words_between(
     (from, to): (i64, i64),
     words: &[crate::transcript::Word],
 ) -> Vec<(usize, i64, i64)> {
-    if span.pace.speed == 0.0 {
+    if span.pace.speed() == 0.0 {
         return Vec::new();
     }
     words
@@ -426,6 +429,17 @@ pub struct SpeechSettings {
     pub min_speech: i64,
 }
 
+pub fn joined(spans: &[Span], f: impl Fn(&Span) -> Vec<(i64, i64)>) -> Vec<(i64, i64)> {
+    let mut out: Vec<(i64, i64)> = Vec::new();
+    for (a, b) in spans.iter().flat_map(f) {
+        match out.last_mut() {
+            Some(last) if last.1 == a => last.1 = b,
+            _ => out.push((a, b)),
+        }
+    }
+    out
+}
+
 pub fn silent_parts(
     span: &Span,
     levels: &AudioLevels,
@@ -443,7 +457,7 @@ pub fn non_speech_parts(
     s: &SilenceSettings,
     speech: &SpeechSettings,
 ) -> Vec<(i64, i64)> {
-    let min_speech = speech.min_speech as f64 * span.pace.speed.abs() / span.fps.as_f64();
+    let min_speech = speech.min_speech as f64 * span.pace.speed().abs() / span.fps.as_f64();
     parts_of(span, s, |from, to, min| {
         non_speech(va, from, to, speech.threshold, min_speech, min)
     })
@@ -510,7 +524,7 @@ fn sounding_frames(
     (from, to): (i64, i64),
     runs: impl FnOnce(f64, f64) -> Vec<(f64, f64)>,
 ) -> Vec<(f64, f64)> {
-    if span.pace.speed == 0.0 || to <= from {
+    if span.pace.speed() == 0.0 || to <= from {
         return Vec::new();
     }
     let (x, y) = (span.time(from as f64), span.time(to as f64));
@@ -529,7 +543,7 @@ fn parts_of(
     s: &SilenceSettings,
     quiet: impl FnOnce(f64, f64, f64) -> Vec<(f64, f64)>,
 ) -> Vec<(i64, i64)> {
-    if span.pace.speed == 0.0 {
+    if span.pace.speed() == 0.0 {
         return Vec::new();
     }
     let f = span.fps.as_f64();
@@ -537,7 +551,7 @@ fn parts_of(
     let quiet = quiet(
         from.min(to),
         from.max(to),
-        s.min as f64 * span.pace.speed.abs() / f,
+        s.min as f64 * span.pace.speed().abs() / f,
     );
     let mut parts = Vec::new();
     for (a, b) in quiet {

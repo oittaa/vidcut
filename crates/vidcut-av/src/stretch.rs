@@ -5,7 +5,7 @@ pub(crate) struct Block {
 }
 
 pub(crate) struct Stretch {
-    speed: f64,
+    map: Vec<(f64, f64, f64)>,
     channels: usize,
     window: usize,
     hop: usize,
@@ -21,6 +21,10 @@ pub(crate) struct Stretch {
 
 impl Stretch {
     pub(crate) fn new(speed: f64, rate: u32, channels: usize) -> Self {
+        Self::mapped(vec![(0.0, 0.0, speed)], rate, channels)
+    }
+
+    pub(crate) fn mapped(map: Vec<(f64, f64, f64)>, rate: u32, channels: usize) -> Self {
         let hop = (rate as usize / 96).max(8);
         let window = 2 * hop;
         let hann = (0..window)
@@ -30,7 +34,7 @@ impl Stretch {
             })
             .collect();
         Self {
-            speed,
+            map,
             channels: channels.max(1),
             window,
             hop,
@@ -50,7 +54,10 @@ impl Stretch {
     }
 
     fn ideal(&self, k: i64) -> i64 {
-        (k as f64 * self.hop as f64 * self.speed).round() as i64
+        let out = k as f64 * self.hop as f64;
+        let i = self.map.partition_point(|m| m.0 <= out).saturating_sub(1);
+        let (from, at, speed) = self.map[i];
+        (at + (out - from) * speed).round() as i64
     }
 
     pub(crate) fn push(&mut self, input: &[f32]) -> Vec<Block> {

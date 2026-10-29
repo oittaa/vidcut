@@ -175,6 +175,25 @@ pub fn describe_at(
                 None => "?".to_string(),
             }
         ),
+        "speed.add_point" => format!("Speed point on {} at {}", d.clips("clips"), d.time("at")),
+        "speed.remove_point" if d.params["all"] == true => {
+            format!("Remove all speed points of {}", d.clips("clips"))
+        }
+        "speed.remove_point" => format!(
+            "Remove a speed point of {} at {}",
+            d.clips("clips"),
+            d.time("at")
+        ),
+        "speed.set" => format!(
+            "Speed of {} at {} to {}",
+            d.clips("clips"),
+            d.time("at"),
+            match d.params["speed"].as_f64() {
+                Some(x) => format!("{}%", (x * 100.0).round()),
+                None => "?".to_string(),
+            }
+        ),
+        "speed.freeze" => format!("Freeze frame in {} at {}", d.clips("clips"), d.time("at")),
         "edit.copy" => format!("Copy {}", d.clips("clips")),
         "edit.cut" if d.params["range"].is_string() => format!("Cut {}", d.range("range")),
         "edit.cut" => format!("Cut {}", d.clips("clips")),

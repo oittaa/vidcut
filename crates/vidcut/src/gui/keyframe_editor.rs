@@ -532,11 +532,8 @@ fn frames_moved(dx: f32, ppf: f32) -> i64 {
     }
 }
 
-fn fits(clip: &Clip, keys: &[Keyframe], moving: &[i64], dt: i64) -> bool {
-    if clip.speed() == 0.0 {
-        return dt == 0;
-    }
-    let shifted = |f: i64| clip.sound_at(clip.key_time(f) + dt as f64).round() as i64;
+fn fits(keys: &[Keyframe], moving: &[i64], dt: i64) -> bool {
+    let shifted = |f: i64| f + dt;
     let still: Vec<i64> = keys
         .iter()
         .map(|k| k.frame)
@@ -552,7 +549,7 @@ fn fits(clip: &Clip, keys: &[Keyframe], moving: &[i64], dt: i64) -> bool {
     ordered && new.windows(2).all(|w| w[0] < w[1])
 }
 
-fn marks_fit(clip: &Clip, lanes: &[Lane], marks: &[Mark], dt: i64) -> bool {
+fn marks_fit(lanes: &[Lane], marks: &[Mark], dt: i64) -> bool {
     unique_params(marks).into_iter().all(|param| {
         let Some(lane) = lanes.iter().find(|l| l.param == param) else {
             return false;
@@ -562,19 +559,19 @@ fn marks_fit(clip: &Clip, lanes: &[Lane], marks: &[Mark], dt: i64) -> bool {
             .filter(|m| m.param == param)
             .map(|m| m.frame)
             .collect();
-        fits(clip, &lane.keys, &moving, dt)
+        fits(&lane.keys, &moving, dt)
     })
 }
 
-fn fitted(clip: &Clip, lanes: &[Lane], marks: &[Mark], by: i64) -> i64 {
-    if by == 0 || marks_fit(clip, lanes, marks, by) {
+fn fitted(lanes: &[Lane], marks: &[Mark], by: i64) -> i64 {
+    if by == 0 || marks_fit(lanes, marks, by) {
         return by;
     }
     let sign = by.signum();
     let (mut lo, mut hi) = (0, by.abs());
     while lo < hi {
         let mid = (lo + hi + 1) / 2;
-        if marks_fit(clip, lanes, marks, mid * sign) {
+        if marks_fit(lanes, marks, mid * sign) {
             lo = mid;
         } else {
             hi = mid - 1;
@@ -722,7 +719,7 @@ fn moved_handle(
 ) -> Handle {
     let origin_t = clip.time_of(fix.mark.frame as f64 + fix.frames);
     let new_t = origin_t + f64::from(dx) / f64::from(ppf.max(0.001));
-    let source = clip.sound_at(new_t);
+    let source = clip.key_at(new_t);
     let curve = fix.key_value + fix.value + d_value(span, height, dy);
     handle_of(
         fix.mark.frame,
@@ -734,13 +731,13 @@ fn moved_handle(
     )
 }
 
-fn retarget(marks: &mut [Mark], clip: &Clip, moved: &[Mark], dt: i64) {
+fn retarget(marks: &mut [Mark], moved: &[Mark], dt: i64) {
     if dt == 0 {
         return;
     }
     for m in marks {
         if moved.contains(m) {
-            m.frame = clip.sound_at(clip.key_time(m.frame) + dt as f64).round() as i64;
+            m.frame += dt;
         }
     }
 }
@@ -888,7 +885,7 @@ fn lane_items(clip: &Clip, lanes: &[&Lane]) -> Vec<(KeyParam, i64, i64)> {
         .collect()
 }
 
-fn shown_lane(clip: &Clip, lane: &Lane, shift: Option<&Shift>) -> Vec<Shown> {
+fn shown_lane(lane: &Lane, shift: Option<&Shift>) -> Vec<Shown> {
     let paired = paired(lane.param) && lane.extra.len() == lane.keys.len();
     let extra: Vec<f64> = if paired {
         lane.extra.clone()
@@ -933,8 +930,7 @@ fn shown_lane(clip: &Clip, lane: &Lane, shift: Option<&Shift>) -> Vec<Shown> {
             Axis::None => {}
         }
         if shift.dt != 0 {
-            let f = row.key.frame;
-            row.key.frame = clip.sound_at(clip.key_time(f) + shift.dt as f64).round() as i64;
+            row.key.frame += shift.dt;
         }
     }
     rows.sort_by_key(|r| r.key.frame);
@@ -1094,12 +1090,12 @@ impl Workspace {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for lane in &lanes {
-                    let rows = shown_lane(&clip, lane, shift.as_ref());
+                    let rows = shown_lane(lane, shift.as_ref());
                     self.track_row(ui, &clip, lane, &rows, plot);
                 }
             });
         self.box_select(ui, rect, &clip);
-        let live = live_marks(&clip, &lanes, shift.as_ref());
+        let live = live_marks(&lanes, shift.as_ref());
         self.key_editor.selected.retain(|m| live.contains(m));
         self.finish_drag(ui, &clip, &lanes, p.rev);
     }
@@ -1163,7 +1159,7 @@ impl Workspace {
                         continue;
                     }
                     for lane in &members {
-                        let rows = shown_lane(&clip, lane, shift.as_ref());
+                        let rows = shown_lane(lane, shift.as_ref());
                         self.track_row(ui, &clip, lane, &rows, plot);
                         if !lane.keys.is_empty() && self.key_editor.curves.contains(&lane.param) {
                             self.curve_row(ui, &clip, lane, &rows, plot, &frame);
@@ -1172,7 +1168,7 @@ impl Workspace {
                 }
             });
         self.box_select(ui, area, &clip);
-        let live = live_marks(&clip, &lanes, shift.as_ref());
+        let live = live_marks(&lanes, shift.as_ref());
         self.key_editor.selected.retain(|m| live.contains(m));
         self.key_scroll(ui, &clip, &lanes, plot);
         self.key_bar(ui, &p, &clip, &lanes, &frame);
@@ -1285,7 +1281,7 @@ impl Workspace {
             Nudge::Up | Nudge::Down => 0,
         };
         if by != 0 {
-            let dt = fitted(&clip, &lanes, &marks, by);
+            let dt = fitted(&lanes, &marks, by);
             if dt != 0 {
                 let shift = Shift {
                     marks,
@@ -1796,13 +1792,12 @@ impl Workspace {
         if rev != pending.rev {
             retarget(
                 &mut self.key_editor.selected,
-                clip,
                 &pending.shift.marks,
                 pending.shift.dt,
             );
             if let Some(menu) = self.key_editor.menu.as_mut() {
                 let mut one = [*menu];
-                retarget(&mut one, clip, &pending.shift.marks, pending.shift.dt);
+                retarget(&mut one, &pending.shift.marks, pending.shift.dt);
                 *menu = one[0];
             }
             self.key_editor.pending = None;
@@ -2686,11 +2681,11 @@ fn row(
     .inner
 }
 
-fn live_marks(clip: &Clip, lanes: &[Lane], shift: Option<&Shift>) -> Vec<Mark> {
+fn live_marks(lanes: &[Lane], shift: Option<&Shift>) -> Vec<Mark> {
     lanes
         .iter()
         .flat_map(|lane| {
-            shown_lane(clip, lane, shift).into_iter().map(|row| Mark {
+            shown_lane(lane, shift).into_iter().map(|row| Mark {
                 param: lane.param,
                 frame: row.from,
             })
@@ -2703,9 +2698,7 @@ fn shown_group_time(clip: &Clip, marks: &[Mark], shift: Option<&Shift>) -> f64 {
         return clip.start as f64;
     };
     let frame = match shift {
-        Some(shift) if shift.dt != 0 && shift.marks.contains(mark) => clip
-            .sound_at(clip.key_time(mark.frame) + shift.dt as f64)
-            .round() as i64,
+        Some(shift) if shift.dt != 0 && shift.marks.contains(mark) => mark.frame + shift.dt,
         _ => mark.frame,
     };
     clip.key_time(frame)
@@ -2744,7 +2737,7 @@ fn sample_curve(
     for i in 0..=n {
         let x = map.left + map.width * i as f32 / n as f32;
         let t = map.lo + f64::from((x - map.left) / map.width) * (map.hi - map.lo);
-        let source = clip.sound_at(t);
+        let source = clip.key_at(t);
         let Some(v) = at(source) else {
             continue;
         };
@@ -2777,7 +2770,7 @@ fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
         };
     }
     let by = frames_moved(dx, drag.ppf);
-    let dt = fitted(clip, lanes, &drag.marks, by);
+    let dt = fitted(lanes, &drag.marks, by);
     let dv = if drag.axis == Axis::None {
         0.0
     } else if let Some(lane) = lanes
@@ -2850,28 +2843,6 @@ mod tests {
         }
     }
 
-    fn clip() -> Clip {
-        Clip {
-            id: "c1".into(),
-            media: "m1".into(),
-            start: 0,
-            duration: 100,
-            source_in: 0,
-            video: true,
-            audio: None,
-            enabled: true,
-            name: None,
-            effects: None,
-            generator: None,
-            title: None,
-            picture: None,
-            compound: None,
-            speed: None,
-            retime: vidcut_core::model::ClipRetime::Project,
-            color: None,
-        }
-    }
-
     fn lane(param: KeyParam, frames: &[i64]) -> Lane {
         Lane {
             param,
@@ -2903,7 +2874,7 @@ mod tests {
     #[test]
     fn a_move_stops_one_frame_before_the_next_keyframe() {
         let lanes = [lane(KeyParam::Volume, &[0, 10])];
-        assert_eq!(fitted(&clip(), &lanes, &[mark(KeyParam::Volume, 0)], 10), 9);
+        assert_eq!(fitted(&lanes, &[mark(KeyParam::Volume, 0)], 10), 9);
     }
 
     #[test]
@@ -2913,7 +2884,7 @@ mod tests {
             lane(KeyParam::Zoom, &[0, 4]),
         ];
         let marks = [mark(KeyParam::Position, 0), mark(KeyParam::Zoom, 0)];
-        assert_eq!(fitted(&clip(), &lanes, &marks, 10), 3);
+        assert_eq!(fitted(&lanes, &marks, 10), 3);
     }
 
     #[test]

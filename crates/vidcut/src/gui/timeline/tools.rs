@@ -524,7 +524,7 @@ fn slip_heard(
         t.transitions.clear();
     }
     let media = q.media(&c.media).map_or(0, |m| q.media_frames(m));
-    let room = slip_room(media, c.speed(), c.duration);
+    let room = slip_room(media, c.speed_at(edge_frame), c.duration);
     let moved = q.tracks.iter_mut().flat_map(|t| t.clips.iter_mut());
     moved.filter(|x| x.id == c.id).for_each(|x| x.start += room);
     let (edge, dir) = match speed > 0.0 {
