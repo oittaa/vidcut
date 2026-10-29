@@ -836,6 +836,10 @@ impl Default for Pace {
     }
 }
 
+pub fn source_frame(x: f64) -> i64 {
+    (x + 0.002).floor() as i64
+}
+
 impl Pace {
     pub fn of(speed: f64, skip: i64) -> Self {
         if speed == 1.0 {
@@ -937,7 +941,7 @@ impl Pace {
     }
 
     fn frame(&self, u: i64) -> i64 {
-        (self.top(u) + 1e-9).floor() as i64
+        source_frame(self.top(u))
     }
 
     pub fn speed(&self) -> f64 {
@@ -1000,8 +1004,7 @@ impl Pace {
         if self.is_normal() || s.speed == 0.0 {
             return 0.0;
         }
-        let x = self.top(self.skip);
-        (x - (x + 1e-9).floor()).max(0.0)
+        (self.top(self.skip) - self.frame(self.skip) as f64).max(0.0)
     }
 
     pub fn sound(&self, x: f64) -> f64 {

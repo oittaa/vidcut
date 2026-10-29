@@ -2,6 +2,7 @@ use super::keyframes::{Pick, picked_as};
 use super::{change_speed, check_source, retimed};
 use crate::error::{Error, Result};
 use crate::model::{Clip, Ease, Project, Section, Speed};
+use crate::render::source_frame;
 
 fn clip_of(p: &Project, id: &str) -> Result<Clip> {
     let c = p
@@ -228,7 +229,7 @@ pub fn set(
             )));
         }
         let last = &map[index(&map, end - 1)];
-        let shown_end = (pos(last, end - 1) + 1e-9).floor() + 1.0;
+        let shown_end = (source_frame(pos(last, end - 1)) + 1) as f64;
         let inside = map.get(i + 1).is_none_or(|n| n.at >= end);
         let (span, old) = match map.get(i + 1) {
             Some(n) => (n.from - s.from, n.at - s.at),
