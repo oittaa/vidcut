@@ -1389,7 +1389,8 @@ impl ClipRetime {
 pub enum ProjectRetime {
     /// The AI of the computer that plays or exports for slow motion: the
     /// frame rate conversion of macOS on macOS, AI Fast elsewhere. Nearest
-    /// for the rest: other speeds, other frame rates and HDR pictures.
+    /// for the rest: other speeds, other frame rates and, on macOS, HDR
+    /// pictures.
     #[default]
     Auto,
     /// The source frame that the frame falls in.
