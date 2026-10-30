@@ -13,7 +13,7 @@ use super::EditSel;
 use super::edits::{Plan, Trim, applied};
 use super::geometry::{
     Hit, Rows, SNAP_PX, Scale, Snap, clip_edge_near, clips_in, edit_near, hit_rows, level_at,
-    sound_band, transition_at, transition_span, volume_gain, volume_level, volume_span, volume_y,
+    sound_band, transition_over, transition_span, volume_gain, volume_level, volume_span, volume_y,
 };
 
 pub const HOVER: Duration = Duration::from_millis(800);
@@ -767,7 +767,7 @@ fn transition_preview(ctx: &Ctx, pos: Pos2, kind: PictureTransition) -> Preview 
         return Preview::default();
     };
     let id = row.track.clone();
-    if let Some(at) = transition_at(ctx.project, track, &ctx.scale, &row.rect, pos) {
+    if let Some(at) = transition_over(ctx.project, track, &ctx.scale, pos.x) {
         return Preview {
             request: request(
                 "edit.transition",
@@ -1664,6 +1664,43 @@ mod tests {
             start,
             len,
         }
+    }
+
+    #[test]
+    fn a_transition_card_on_the_cut_of_a_transition_changes_its_type() {
+        let mut w = World::new();
+        let shape = vidcut_core::ops::Shape::Length(20, vidcut_core::ops::Align::Center);
+        vidcut_core::ops::dissolve(
+            &mut w.p,
+            "V1",
+            100,
+            shape,
+            true,
+            false,
+            false,
+            PictureTransition::Dissolve,
+        )
+        .unwrap();
+        let wipe = PictureTransition::Wipe {
+            direction: vidcut_core::model::WipeDirection::Down,
+        };
+        let r = w.drag(
+            Gesture::Transition {
+                kind: wipe,
+                label: "Edge Wipe",
+            },
+            pos2(200.0, 20.0),
+            &[pos2(200.0, 150.0)],
+            Duration::ZERO,
+        );
+        assert_eq!(
+            r,
+            Some(json!({"method": "edit.transition", "params": {
+                "at": 100,
+                "track": "V1",
+                "transition": {"type": "wipe", "direction": "down"},
+            }}))
+        );
     }
 
     #[test]

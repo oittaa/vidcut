@@ -674,6 +674,14 @@ pub fn transition_at(
     })
 }
 
+pub fn transition_over(p: &Project, track: &Track, scale: &Scale, x: f32) -> Option<i64> {
+    let cuts = Cuts::of(p, track);
+    track.transitions.iter().filter(|t| !t.sound).find_map(|t| {
+        let at = cuts.place(p, t)?;
+        (scale.xf(at - t.before) <= x && x <= scale.xf(at + t.after)).then_some(at)
+    })
+}
+
 pub fn transition_span(p: &Project, track: &Track, at: i64) -> Option<(i64, i64)> {
     let cuts = Cuts::of(p, track);
     track
