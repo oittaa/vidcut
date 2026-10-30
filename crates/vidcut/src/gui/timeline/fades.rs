@@ -268,7 +268,17 @@ impl Workspace {
         }
     }
 
+    fn transition_kind(&self, track: TrackRef, at: i64) -> Option<PictureTransition> {
+        let p = self.project()?;
+        p.track(&track.id())
+            .and_then(|t| geometry::picture_transition(p, t, at))
+            .and_then(vidcut_core::otio::transitions::kind_of)
+    }
+
     fn set_transition(&self, track: TrackRef, at: i64, k: &PictureTransition) {
+        if self.transition_kind(track, at).as_ref() == Some(k) {
+            return;
+        }
         self.send(
             "edit.transition",
             json!({ "at": at, "track": track.id(), "transition": k }),
@@ -276,21 +286,14 @@ impl Workspace {
     }
 
     fn recolor_transition(&self, track: TrackRef, at: i64, color: [u8; 3]) {
-        let Some(p) = self.project() else {
-            return;
-        };
-        let Some(mut now) = p
-            .track(&track.id())
-            .and_then(|t| geometry::picture_transition(p, t, at))
-            .and_then(vidcut_core::otio::transitions::kind_of)
-        else {
+        let Some(mut now) = self.transition_kind(track, at) else {
             return;
         };
         match &mut now {
-            PictureTransition::DipToColor { color: c } if *c != color => *c = color,
+            PictureTransition::DipToColor { color: c } => *c = color,
             k => match k.motion_mut() {
-                Some(m) if m.color != color => m.color = color,
-                _ => return,
+                Some(m) => m.color = color,
+                None => return,
             },
         }
         self.set_transition(track, at, &now);
