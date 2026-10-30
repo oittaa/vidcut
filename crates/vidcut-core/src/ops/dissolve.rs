@@ -581,6 +581,52 @@ mod tests {
     }
 
     #[test]
+    fn a_wipe_from_the_left_reads_back_as_that_wipe() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let wipe = json!({"type": "wipe", "direction": "left"});
+        req(
+            &mut f,
+            "edit.dissolve",
+            json!({"at": 50, "transition": wipe}),
+        );
+        let p = f.editor.project();
+        let t = p.track("V1").unwrap().transitions.iter().find(|t| !t.sound);
+        assert_eq!(
+            t.and_then(crate::otio::transitions::kind_of),
+            Some(crate::model::PictureTransition::Wipe {
+                direction: crate::model::WipeDirection::Left
+            })
+        );
+    }
+
+    fn kinds_after_a_dissolve() -> Vec<Option<crate::model::PictureTransition>> {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        req(&mut f, "edit.dissolve", json!({"at": 50}));
+        let p = f.editor.project();
+        let mut all = Vec::new();
+        for t in &p.tracks {
+            all.extend(t.transitions.iter().map(crate::otio::transitions::kind_of));
+        }
+        all
+    }
+
+    #[test]
+    fn a_cross_dissolve_reads_back_as_a_dissolve() {
+        assert!(
+            kinds_after_a_dissolve().contains(&Some(crate::model::PictureTransition::Dissolve))
+        );
+    }
+
+    #[test]
+    fn a_cross_fade_has_no_picture_type() {
+        assert!(kinds_after_a_dissolve().contains(&None));
+    }
+
+    #[test]
     fn a_centered_picture_transition_at_the_timeline_start_goes_after_it() {
         let mut f = fixture();
         f.append("m1", 0, 50);

@@ -1149,7 +1149,7 @@ impl PictureTransition {
 }
 
 /// The edge a wipe starts from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WipeDirection {
     /// From the left edge toward the right.

@@ -4,7 +4,7 @@ use std::ops::Range;
 use serde_json::{Value, json};
 
 use super::{EDITOR, VIDCUT, gap, rt, schema};
-use crate::model::{Clip, Media, Project, Track, Transition, WipeDirection};
+use crate::model::{Clip, Media, PictureTransition, Project, Track, Transition, WipeDirection};
 use crate::render::Curve;
 
 pub fn name(t: &Transition) -> String {
@@ -30,6 +30,13 @@ pub fn dissolves(t: &Transition) -> bool {
 
 pub fn wipe_of(t: &Transition) -> Option<WipeDirection> {
     (!t.sound).then(|| wipe_in(&t.otio)).flatten()
+}
+
+pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
+    match wipe_of(t) {
+        Some(direction) => Some(PictureTransition::Wipe { direction }),
+        None => (!t.sound && dissolves(t)).then_some(PictureTransition::Dissolve),
+    }
 }
 
 pub fn mixes(t: &Transition) -> bool {

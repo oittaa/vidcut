@@ -1873,6 +1873,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Right reveals from the right edge toward the left.
   - Up reveals from the top edge toward the bottom.
   - Down reveals from the bottom edge toward the top.
+  - The Inspector shows the direction as Edge: Left, Right, Top or Bottom.
   - The edge is the same fraction of the duration as a dissolve's level ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The viewer and the export use that fraction.
 - **Why:**

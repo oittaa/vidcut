@@ -1,6 +1,6 @@
-use eframe::egui::{self, Key};
-use serde_json::json;
-use vidcut_core::model::{Project, Transition};
+use eframe::egui::{self, Key, RichText};
+use serde_json::{Value, json};
+use vidcut_core::model::{PictureTransition, Project, Transition, WipeDirection};
 use vidcut_core::ops;
 use vidcut_core::time::{Rational, format_timecode, parse_media_timecode};
 
@@ -12,6 +12,55 @@ pub struct FadeDialog {
     pub track: TrackRef,
     pub at: i64,
     pub text: String,
+}
+
+const EDGES: [(WipeDirection, &str); 4] = [
+    (WipeDirection::Left, "Left"),
+    (WipeDirection::Right, "Right"),
+    (WipeDirection::Up, "Top"),
+    (WipeDirection::Down, "Bottom"),
+];
+
+const ALIGNMENTS: [(&str, &str); 3] = [
+    ("start", "Start on Edit"),
+    ("center", "Center on Edit"),
+    ("end", "End on Edit"),
+];
+
+fn same_type(a: PictureTransition, b: PictureTransition) -> bool {
+    std::mem::discriminant(&a) == std::mem::discriminant(&b)
+}
+
+pub fn kind(x: &Transition) -> PictureTransition {
+    vidcut_core::otio::transitions::kind_of(x).unwrap_or_default()
+}
+
+pub fn realigned(track: TrackRef, at: i64, (x, sound): (&Transition, bool), align: &str) -> Value {
+    json!({
+        "at": at,
+        "track": track.id(),
+        "length": format!("{}f", x.before + x.after),
+        "align": align,
+        "sound": sound,
+        "transition": kind(x),
+    })
+}
+
+pub fn resized(
+    track: &str,
+    at: i64,
+    (before, after): (i64, i64),
+    sound: bool,
+    transition: PictureTransition,
+) -> Value {
+    json!({
+        "at": at,
+        "track": track,
+        "before": format!("{before}f"),
+        "after": format!("{after}f"),
+        "sound": sound,
+        "transition": transition,
+    })
 }
 
 pub fn alignment(x: &Transition) -> &'static str {
@@ -77,16 +126,7 @@ impl Workspace {
         let Some((x, sound)) = self.project().and_then(|p| with_sound(p, track, at)) else {
             return;
         };
-        self.send(
-            "edit.dissolve",
-            json!({
-                "at": at,
-                "track": track.id(),
-                "length": format!("{}f", x.before + x.after),
-                "align": align,
-                "sound": sound,
-            }),
-        );
+        self.send("edit.dissolve", realigned(track, at, (&x, sound), align));
     }
 
     fn resize_transition(&self, track: TrackRef, at: i64, length: i64) {
@@ -103,13 +143,7 @@ impl Workspace {
         }
         self.send(
             "edit.dissolve",
-            json!({
-                "at": at,
-                "track": track.id(),
-                "before": format!("{before}f"),
-                "after": format!("{after}f"),
-                "sound": sound,
-            }),
+            resized(&track.id(), at, (before, after), sound, kind(&x)),
         );
     }
 
@@ -149,11 +183,7 @@ impl Workspace {
         }
         ui.separator();
         let now = alignment(&x);
-        for (align, label) in [
-            ("start", "Start on Edit"),
-            ("center", "Center on Edit"),
-            ("end", "End on Edit"),
-        ] {
+        for (align, label) in ALIGNMENTS {
             if ui
                 .add_enabled(now != align, egui::Button::new(label))
                 .clicked()
@@ -162,6 +192,97 @@ impl Workspace {
                 ui.close();
             }
         }
+    }
+
+    pub(crate) fn transition_form(&mut self, ui: &mut egui::Ui) -> bool {
+        use super::super::dialog;
+        use super::super::workspace::dim;
+        let Some((e, x)) = self.selected_transition() else {
+            self.timeline.transition_frames = None;
+            return false;
+        };
+        let Some(fps) = self.project().map(|p| p.settings.fps) else {
+            return false;
+        };
+        let kind = vidcut_core::otio::transitions::kind_of(&x);
+        let length = x.before + x.after;
+        let mut frames = match self.timeline.transition_frames {
+            Some((track, at, f)) if (track, at) == (e.track, e.at) => f,
+            _ => length,
+        };
+        let (mut set, mut align, mut dragged, mut commit) = (None, None, false, false);
+        ui.label(RichText::new("Transition").strong());
+        ui.label(dim(format!("{}   {}", e.track.id(), self.tc(e.at))));
+        dialog::form(ui, "transition-form", |ui| {
+            dialog::row(ui, "Transition Type", |ui| {
+                let name = vidcut_core::otio::transitions::name(&x);
+                egui::ComboBox::from_id_salt("transition-type")
+                    .selected_text(name)
+                    .show_ui(ui, |ui| {
+                        let cards = crate::gui::transition_browser::GROUPS
+                            .iter()
+                            .flat_map(|(_, cards)| cards.iter());
+                        for &(label, k) in cards {
+                            let same = kind.is_some_and(|c| same_type(c, k));
+                            if ui.selectable_label(same, label).clicked() && !same {
+                                set = Some(k);
+                            }
+                        }
+                    });
+            });
+            dialog::row(ui, "Duration", |ui| {
+                let r = ui.add(
+                    egui::DragValue::new(&mut frames)
+                        .range(1..=i64::MAX / 4)
+                        .suffix(" frames"),
+                );
+                dragged = r.changed();
+                commit = r.drag_stopped() || r.lost_focus();
+                ui.label(dim(shown(frames, fps, false)));
+            });
+            dialog::row(ui, "Alignment", |ui| {
+                dialog::switch(ui, |ui| {
+                    let now = alignment(&x);
+                    for (a, label) in ALIGNMENTS {
+                        if ui.selectable_label(now == a, label).clicked() && now != a {
+                            align = Some(a);
+                        }
+                    }
+                });
+            });
+            if let Some(PictureTransition::Wipe { direction }) = kind {
+                dialog::row(ui, "Edge", |ui| {
+                    let name = EDGES.iter().find(|(d, _)| *d == direction).map(|e| e.1);
+                    egui::ComboBox::from_id_salt("transition-edge")
+                        .selected_text(name.unwrap_or_default())
+                        .show_ui(ui, |ui| {
+                            for (d, label) in EDGES {
+                                if ui.selectable_label(d == direction, label).clicked()
+                                    && d != direction
+                                {
+                                    set = Some(PictureTransition::Wipe { direction: d });
+                                }
+                            }
+                        });
+                });
+            }
+        });
+        if dragged {
+            self.timeline.transition_frames = Some((e.track, e.at, frames));
+        }
+        if commit && let Some((track, at, f)) = self.timeline.transition_frames.take() {
+            self.resize_transition(track, at, f);
+        }
+        if let Some(k) = set {
+            self.send(
+                "edit.transition",
+                json!({ "at": e.at, "track": e.track.id(), "transition": k }),
+            );
+        }
+        if let Some(a) = align {
+            self.realign_transition(e.track, e.at, a);
+        }
+        true
     }
 
     pub(crate) fn fade_window(&mut self, ctx: &egui::Context) {
@@ -241,6 +362,25 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use vidcut_core::time::Rational;
+
+    #[test]
+    fn realigning_a_wipe_keeps_it_a_wipe() {
+        use vidcut_core::model::{Transition, WipeDirection};
+        let x = Transition {
+            id: "t1".into(),
+            sound: false,
+            from: Some("c1".into()),
+            to: Some("c2".into()),
+            before: 10,
+            after: 10,
+            otio: vidcut_core::otio::transitions::wipe_otio(WipeDirection::Left).into(),
+        };
+        let track = super::TrackRef::MAIN;
+        assert_eq!(
+            super::realigned(track, 100, (&x, false), "end")["transition"],
+            serde_json::json!({"type": "wipe", "direction": "left"})
+        );
+    }
 
     #[test]
     fn a_one_second_dissolve_reads_as_a_timecode_in_time_format() {

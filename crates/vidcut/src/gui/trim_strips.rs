@@ -2,7 +2,6 @@ use eframe::egui::{
     self, Align2, Color32, CornerRadius, CursorIcon, FontId, Painter, Pos2, Rect, Sense, Stroke,
     StrokeKind, pos2, vec2,
 };
-use serde_json::json;
 use vidcut_core::model::{Clip, Project};
 use vidcut_core::ops::filmstrip;
 
@@ -327,13 +326,13 @@ impl Workspace {
         {
             self.send(
                 "edit.dissolve",
-                json!({
-                    "at": e.at,
-                    "track": e.track.id(),
-                    "before": format!("{before}f"),
-                    "after": format!("{after}f"),
-                    "sound": sound,
-                }),
+                super::timeline::fades::resized(
+                    &e.track.id(),
+                    e.at,
+                    (before, after),
+                    sound,
+                    super::timeline::fades::kind(x),
+                ),
             );
         }
     }

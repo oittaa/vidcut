@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use vidcut_core::model::WipeDirection;
 use vidcut_core::render::{Image, Placed, RenderPlan, ShownTitle, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -10,7 +11,7 @@ pub(crate) struct Id {
     over: Option<Arc<[Layer]>>,
 }
 
-type Layer = (Arc<str>, i64, u32);
+type Layer = (Arc<str>, i64, u32, Option<WipeDirection>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Fill {
@@ -150,7 +151,10 @@ impl Plan {
         let over: Vec<Layer> = layers[1..]
             .iter()
             .zip(&keys[1..])
-            .map(|((l, ramp), key)| (key.clone(), pos(l), ramp.map_or(0, |r| r.weight(k))))
+            .map(|((l, ramp), key)| {
+                let (weight, wipe) = ramp.map_or((0, None), |r| (r.weight(k), r.wipe));
+                (key.clone(), pos(l), weight, wipe)
+            })
             .collect();
         Id {
             source: keys[0].clone(),
@@ -389,8 +393,8 @@ pub(crate) fn scales_of(piece: &VideoPiece) -> Vec<Option<vidcut_core::model::Sh
 
 #[cfg(test)]
 mod tests {
-    use vidcut_core::model::{Picture, Retime, SuperScale, Upscaler};
-    use vidcut_core::render::{Placed, RenderPlan, VideoPiece};
+    use vidcut_core::model::{Picture, Retime, SuperScale, Upscaler, WipeDirection};
+    use vidcut_core::render::{Over, Placed, Ramp, RenderPlan, VideoPiece};
     use vidcut_core::time::Rational;
 
     use super::source_key;
@@ -436,6 +440,33 @@ mod tests {
                 ready: true,
             }],
         }
+    }
+
+    fn wiped_in(direction: WipeDirection) -> super::Id {
+        let off = SuperScale::default();
+        let mixed = VideoPiece::Mix {
+            under: Box::new(VideoPiece::Black { frames: 10 }),
+            over: vec![Over {
+                piece: piece(off, Retime::Nearest, 1.0, 0),
+                ramp: Some(Ramp {
+                    at: 0,
+                    of: 10,
+                    falling: false,
+                    wipe: Some(direction),
+                }),
+                cross: false,
+            }],
+        };
+        super::Plan::new(RenderPlan {
+            video: vec![mixed],
+            ..plan()
+        })
+        .id(5)
+    }
+
+    #[test]
+    fn a_frame_of_a_wipe_misses_after_a_change_of_its_edge() {
+        assert_ne!(wiped_in(WipeDirection::Down), wiped_in(WipeDirection::Left));
     }
 
     #[test]
