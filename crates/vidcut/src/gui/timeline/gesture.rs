@@ -3,15 +3,17 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{Pos2, Rect};
 use serde_json::{Value, json};
-use vidcut_core::model::{Clip, Handle, Keyframe, Marks, Project, Track, TrackKind};
+use vidcut_core::model::{
+    Clip, Handle, Keyframe, Marks, PictureTransition, Project, Track, TrackKind,
+};
 use vidcut_core::ops::{Edge, MAIN};
 use vidcut_core::validate::GAIN;
 
 use super::EditSel;
 use super::edits::{Plan, Trim, applied};
 use super::geometry::{
-    Hit, Rows, SNAP_PX, Scale, Snap, clips_in, edit_near, hit_rows, level_at, sound_band,
-    volume_gain, volume_level, volume_span, volume_y,
+    Hit, Rows, SNAP_PX, Scale, Snap, clip_edge_near, clips_in, edit_near, hit_rows, level_at,
+    sound_band, transition_at, transition_span, volume_gain, volume_level, volume_span, volume_y,
 };
 
 pub const HOVER: Duration = Duration::from_millis(800);
@@ -25,6 +27,10 @@ pub const SAFE_EDIT_HOLD: Duration = Duration::from_millis(600);
 pub const HELD_FRAME: Duration = Duration::from_millis(16);
 
 const DROP_EDIT_PX: f32 = 6.0;
+
+const TRANSITION_EDGE_PX: f32 = 24.0;
+
+const TRANSITION_CENTER_PX: f32 = 6.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Gesture {
@@ -96,6 +102,10 @@ pub enum Gesture {
     Title {
         template: Box<crate::gui::title_browser::Template>,
         len: i64,
+    },
+    Transition {
+        kind: PictureTransition,
+        label: &'static str,
     },
     CueMove {
         cues: Vec<String>,
@@ -365,6 +375,7 @@ impl Drag {
 
             Gesture::Subtitles { media, cues } => subtitles_preview(ctx, pos, media, cues),
             Gesture::Title { template, len } => title_preview(ctx, pos, template, *len),
+            Gesture::Transition { kind, .. } => transition_preview(ctx, pos, *kind),
             Gesture::Trim {
                 clip,
                 edge,
@@ -744,6 +755,61 @@ fn title_preview(
         ghost: Some((at, at + len)),
         snapped,
         row: Some(dest),
+        ..Preview::default()
+    }
+}
+
+fn transition_preview(ctx: &Ctx, pos: Pos2, kind: PictureTransition) -> Preview {
+    let Some(row) = ctx.rows.at(pos.y).filter(|r| r.track.starts_with('V')) else {
+        return Preview::default();
+    };
+    let Some(track) = ctx.project.track(&row.track) else {
+        return Preview::default();
+    };
+    let id = row.track.clone();
+    if let Some(at) = transition_at(ctx.project, track, &ctx.scale, &row.rect, pos) {
+        return Preview {
+            request: request(
+                "edit.transition",
+                json!({ "at": at, "track": id, "transition": kind }),
+            ),
+            ghost: transition_span(ctx.project, track, at),
+            row: Some(id),
+            ..Preview::default()
+        };
+    }
+    let Some(at) = clip_edge_near(track, &ctx.scale, pos.x, TRANSITION_EDGE_PX) else {
+        return Preview::default();
+    };
+    let dx = pos.x - ctx.scale.xf(at);
+    let align = if dx.abs() <= TRANSITION_CENTER_PX {
+        vidcut_core::ops::Align::Center
+    } else if dx < 0.0 {
+        vidcut_core::ops::Align::End
+    } else {
+        vidcut_core::ops::Align::Start
+    };
+    let (room_before, room_after) =
+        vidcut_core::ops::dissolve_room(ctx.project, &id, at, false).unwrap_or((0, 0));
+    let length = ctx.project.settings.fps.as_f64().round() as i64;
+    let (before, after) = vidcut_core::ops::dissolve_frames(length, align);
+    let (before, after) = (before.min(room_before), after.min(room_after));
+    if before + after == 0 {
+        return Preview::default();
+    }
+    Preview {
+        request: request(
+            "edit.dissolve",
+            json!({
+                "at": at,
+                "track": id,
+                "align": align,
+                "transition": kind,
+                "sound": false,
+            }),
+        ),
+        ghost: Some((at - before, at + after)),
+        row: Some(id),
         ..Preview::default()
     }
 }

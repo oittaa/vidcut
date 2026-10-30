@@ -258,6 +258,7 @@ impl Workspace {
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
             GuiPanel::Transcription => self.transcription.open = true,
+            GuiPanel::Transitions => self.left = LeftTab::Transitions,
             GuiPanel::Titles => self.left = LeftTab::Titles,
             GuiPanel::Inspector => self.left = LeftTab::Inspector,
             GuiPanel::Keyframes => self.left = LeftTab::Keyframes,
@@ -314,8 +315,12 @@ impl Workspace {
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
-            GuiPanel::Titles | GuiPanel::Inspector | GuiPanel::Keyframes => {
+            GuiPanel::Transitions
+            | GuiPanel::Titles
+            | GuiPanel::Inspector
+            | GuiPanel::Keyframes => {
                 let tab = match panel {
+                    GuiPanel::Transitions => LeftTab::Transitions,
                     GuiPanel::Titles => LeftTab::Titles,
                     GuiPanel::Keyframes => LeftTab::Keyframes,
                     _ => LeftTab::Inspector,
@@ -355,6 +360,7 @@ impl Workspace {
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
+            (GuiPanel::Transitions, self.left == LeftTab::Transitions),
             (GuiPanel::Titles, self.left == LeftTab::Titles),
             (GuiPanel::Inspector, self.left == LeftTab::Inspector),
             (GuiPanel::Keyframes, self.left == LeftTab::Keyframes),
@@ -1832,6 +1838,10 @@ impl Workspace {
                     }
                     match self.left {
                         LeftTab::Pool => self.pool_panel(ui),
+                        LeftTab::Transitions => {
+                            self.pool_focus = false;
+                            self.transitions_panel(ui);
+                        }
                         LeftTab::Titles => {
                             self.pool_focus = false;
                             self.titles_panel(ui);

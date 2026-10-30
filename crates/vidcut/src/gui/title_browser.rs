@@ -154,6 +154,7 @@ struct Card {
 pub enum LeftTab {
     #[default]
     Pool,
+    Transitions,
     Titles,
     Inspector,
     Keyframes,
@@ -278,6 +279,7 @@ impl Workspace {
         ui.horizontal(|ui| {
             for (tab, label) in [
                 (LeftTab::Pool, "Media Pool"),
+                (LeftTab::Transitions, "Transitions"),
                 (LeftTab::Titles, "Titles"),
                 (LeftTab::Inspector, "Inspector"),
                 (LeftTab::Keyframes, "Keyframes"),

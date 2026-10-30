@@ -49,6 +49,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - On the left: the Media Pool and Mixer tabs (p. 649).
   - On the right: Quick Export and the Full Screen viewer.
     - vidcut's Full Screen button is on the viewer (deviation X86).
+  - A Transitions tab shows the transitions in the place of the Media Pool (p. 759, §8.11).
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X70).
   - A Keyframes tab sits beside the Inspector ([X87](deviations.md#x87-the-keyframes-tab-has-an-ease-menu)).
@@ -133,7 +134,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - Group tracks for each effect, under a track with the clip's name.
       - A curve view, and a Parameters menu that chooses the shown values.
       - With no clip selected, the clip under the playhead. With more than one clip selected, a group for each clip.
-  - Later: the Sync Bin, Transitions and Effects tabs.
+  - Later: the Sync Bin and Effects tabs.
   - vidcut's bar also has Import, Export and Jobs (deviation X3), and Help (X23).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
 - **Below the Media Pool:** the edit-function buttons (§7), and Cut and Dissolve (§8.11).
@@ -656,8 +657,21 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The edge moves in fractions of the duration (deviation X89).
   - A request can make a wipe.
   - A request can change a dissolve into a wipe, and a wipe into a dissolve.
+- **The Transitions tab** (pp. 759–761):
+  - It has a card for Cross Dissolve under Dissolve, and for Edge Wipe under Wipe.
+  - The Edge Wipe of the card comes in from the bottom, as Resolve's Edge Wipe at 0 degrees (X89).
+  - A drag of a card onto an edit of a video track adds that transition there, one second long.
+    - Left of the edit, it ends on the edit. Right of the edit, it starts on it. On the edit, it is centered.
+    - The length is shortened to the media (X27).
+  - A drag of a card onto a transition changes its type. The length stays.
+  - A double-click on a card adds it on the edit nearest the playhead, as the Dissolve button does.
+  - The right-click menu of a card has Add to Selected Edit Points and Clips.
+    - It acts on the selected edit. Else it acts on the edges of the selected clips.
+  - The cards add a picture transition only. They add no Cross Fade.
+  - `gui.show transitions` opens the tab.
 - **Later:**
-  - the Transitions browser and Smooth Cut
+  - Smooth Cut
+  - Hover Scrub Preview of a transition, and favorites
   - the Transition Inspector
   - moving a transition to another edit
   - Change Transition Type, Set as Default Transition

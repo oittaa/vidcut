@@ -1,21 +1,24 @@
 # Effects library
 
-**When:** not decided; before a second kind of effect joins the titles in a tab of its own.
+**When:** now, one pull request for each step below.
 
-The Titles tab ([spec §2](../cut-page-spec.md#2-layout-pp-636637), top bar; p. 762) becomes one Effects tab. It holds everything that the user adds from a browser: titles, transitions and effects.
+The Cut page has separate tabs for transitions, titles and effects (p. 636). vidcut follows it: the Transitions tab is there ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)), and an Effects tab comes next. If the bar gets too full, one Effects tab with categories can replace them, as the Edit page has (p. 802).
 
-- **Resolve:**
-  - The Cut page has separate tabs on the left for the Media Pool, Sync Bin, Keyframe Editor, Transitions, Titles and Effects (p. 636).
-  - The Edit page has one Effects Library instead (p. 802).
-  - The Effects Library has a list of categories at the left. Toolbox shows all of its Transitions, Titles, Generators and Effects at once.
-  - The contents of the chosen category are at the right.
-- **vidcut:**
-  - One Effects tab in the place of the Titles tab, with the shape of the Edit page's Effects Library.
-  - Its categories: All, Titles, Transitions, Effects. Generators, when vidcut has some.
-  - The user drags the cards of a category onto a timeline or double-clicks them, as with the title cards.
-  - With the effects that vidcut has, the tab holds the title kinds and Cross Dissolve.
-  - This is a deviation from the separate tabs of the Cut page. Record it when vidcut has the tab.
-  - The reasons for the deviation: one place to look, and a short tab bar.
-- **Open:**
-  - Which effects come first ([cut-page-gaps](cut-page-gaps.md)).
-  - How the card of a clip effect applies: dropped on a clip, or double-clicked onto the selected clips.
+Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
+
+1. **Transition Inspector and more transitions.**
+   - The Inspector shows the selected transition: its type, length, alignment and the edge of an Edge Wipe.
+   - New transitions: Dip to Color Dissolve, Push and Slide.
+2. **Smooth Cut** (p. 759). It hides a jump cut with the frame interpolation of Retime Process.
+3. **Effects tab and clip effects** (p. 765).
+   - A drag onto a clip adds the effect. A double-click adds it to the selected clip.
+   - The Inspector gets an Effects panel with the values of each effect.
+   - The effects come after Transform and Crop, and before compositing ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+   - First effects: Gaussian Blur, Mosaic, Sharpen, Vignette, Film Grain and Glow.
+4. **Generators** (p. 766): Solid Color, Color Bars and Gradient.
+5. **Later:**
+   - Audio effects: equalizer, compressor and reverb.
+   - Keyframes of effect values.
+   - Hover Scrub Preview of transitions and effects (pp. 759, 765).
+   - Onscreen controls of effects in the viewer (p. 766).
+   - Favorites (p. 760).

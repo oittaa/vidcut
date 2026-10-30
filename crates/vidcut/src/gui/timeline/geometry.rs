@@ -674,6 +674,28 @@ pub fn transition_at(
     })
 }
 
+pub fn transition_span(p: &Project, track: &Track, at: i64) -> Option<(i64, i64)> {
+    let cuts = Cuts::of(p, track);
+    track
+        .transitions
+        .iter()
+        .filter(|x| !x.sound)
+        .find(|x| cuts.place(p, x) == Some(at))
+        .map(|x| (at - x.before, at + x.after))
+}
+
+pub fn clip_edge_near(track: &Track, scale: &Scale, x: f32, px: f32) -> Option<i64> {
+    track
+        .edit_points()
+        .into_iter()
+        .filter(|&f| (scale.xf(f) - x).abs() <= px)
+        .min_by(|a, b| {
+            (scale.xf(*a) - x)
+                .abs()
+                .total_cmp(&(scale.xf(*b) - x).abs())
+        })
+}
+
 pub fn hit_rows(p: &Project, rows: &Rows, scale: &Scale, pos: Pos2) -> (Option<String>, Hit) {
     match rows.at(pos.y) {
         Some(r) => {

@@ -38,6 +38,7 @@ mod timeline;
 mod title_browser;
 mod titles;
 mod transcription;
+mod transition_browser;
 mod trim_strips;
 mod video;
 mod viewer;
