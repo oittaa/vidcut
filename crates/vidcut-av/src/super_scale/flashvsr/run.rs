@@ -153,12 +153,9 @@ pub(super) struct Stream {
     dump: Option<PathBuf>,
     host_wait: Duration,
     host_bytes: u64,
-    deep: bool,
 }
 
-fn texel(deep: bool) -> u64 {
-    if deep { 8 } else { 4 }
-}
+const TEXEL: u64 = 8;
 
 struct Enc<'a> {
     gpu: &'a Gpu,
@@ -452,7 +449,7 @@ fn persistent(g: &Geometry) -> u64 {
     let pooled: u64 = (0..super::LAYERS)
         .map(|i| u64::from(keep_of(i) * g.s) * 12 * 128 * 4)
         .sum();
-    RING * u64::from(g.plane()) * 4
+    RING * u64::from(g.plane()) * TEXEL
         + 6 * tf * 768 * 2
         + 4 * tf * 2048 * 2
         + 3 * (p8 * 512 + 4 * p8 * 256 + 16 * p8 * 128) * 2
@@ -629,7 +626,7 @@ impl Stream {
         let mem = |p: usize, n: usize| (0..3).map(|_| gpu.buffer(p * n * 2)).collect();
         let mut stream = Self {
             g,
-            frames: gpu.buffer((RING * u64::from(g.plane()) * 4) as usize),
+            frames: gpu.buffer((RING * u64::from(g.plane()) * TEXEL) as usize),
             tables,
             caches,
             in1: gpu.buffer((6 * g.tf * 768 * 2) as usize),
@@ -643,7 +640,6 @@ impl Stream {
             },
             loaner,
             upload: None,
-            deep: false,
             lent: None,
             fed: 0,
             chunk: 0,
@@ -736,19 +732,10 @@ impl Stream {
         &mut self,
         gpu: &Gpu,
         model: &Model,
-        (src, deep): (&wgpu::Buffer, bool),
+        src: &wgpu::Buffer,
     ) -> Result<Vec<Held>> {
         let g = self.g;
-        if deep != self.deep {
-            if self.fed > 0 {
-                return Err(Error::Invalid(
-                    "the AI Best upscaler got 8-bit and 16-bit pictures in one stream".into(),
-                ));
-            }
-            self.deep = deep;
-            self.frames = gpu.buffer((RING * u64::from(g.plane()) * texel(deep)) as usize);
-        }
-        if src.size() < u64::from(g.sw * g.sh) * crate::screen::held::rgb_pixel(deep).1 as u64 {
+        if src.size() < u64::from(g.sw * g.sh) * crate::screen::held::RGB48 as u64 {
             return Err(Error::Invalid(format!(
                 "the AI Best upscaler got a picture of {} bytes for {}x{}",
                 src.size(),
@@ -756,7 +743,7 @@ impl Stream {
                 g.sh
             )));
         }
-        let temp = gpu.buffer((u64::from(g.sh * g.w) * texel(deep)) as usize);
+        let temp = gpu.buffer((u64::from(g.sh * g.w) * TEXEL) as usize);
         let mut e = Enc::new(gpu);
         let t = &self.tables;
         let base = self.slot(self.fed) * g.plane();
@@ -769,20 +756,7 @@ impl Stream {
                     bounds: &t.hb,
                     coef: &t.hc,
                     out: &temp,
-                    values: [
-                        g.sw,
-                        g.sh,
-                        g.w,
-                        g.sh,
-                        t.hk,
-                        0,
-                        g.wm,
-                        g.hm,
-                        0,
-                        deep.into(),
-                        0,
-                        0,
-                    ],
+                    values: [g.sw, g.sh, g.w, g.sh, t.hk, 0, g.wm, g.hm, 0, 0, 0, 0],
                 },
                 (g.w, g.sh),
             );
@@ -794,33 +768,20 @@ impl Stream {
                     bounds: &t.vb,
                     coef: &t.vc,
                     out: &self.frames,
-                    values: [
-                        g.w,
-                        g.sh,
-                        g.w,
-                        g.h,
-                        t.vk,
-                        1,
-                        g.wm,
-                        g.hm,
-                        base,
-                        deep.into(),
-                        0,
-                        0,
-                    ],
+                    values: [g.w, g.sh, g.w, g.h, t.vk, 1, g.wm, g.hm, base, 0, 0, 0],
                 },
                 (g.wm, g.hm),
             );
         });
         e.submit();
         if let Some(dir) = self.dump.as_ref() {
-            let size = texel(deep);
+            let size = TEXEL;
             let raw = gpu.read(
                 &self.frames,
                 u64::from(base) * size,
                 u64::from(g.plane()) * size,
             )?;
-            let raw = crate::screen::held::eight(&raw, deep);
+            let raw = crate::screen::held::eight(&raw);
             let rgb: Vec<u8> = raw
                 .as_chunks::<4>()
                 .0
@@ -847,7 +808,7 @@ impl Stream {
         if real == 0 {
             return Ok(out);
         }
-        let plane = u64::from(self.g.plane()) * texel(self.deep);
+        let plane = u64::from(self.g.plane()) * TEXEL;
         while self.emitted() < real {
             let mut e = Enc::new(gpu);
             while self.fed < self.need() {
@@ -1067,7 +1028,6 @@ impl Stream {
                 gpu,
                 pass,
                 &Unshuffle {
-                    deep: s.deep,
                     frames: &s.frames,
                     out: &s.in1,
                     wt: g.wt,
@@ -1469,7 +1429,7 @@ impl Stream {
         let half = |count: u32, n: u32| gpu.buffer((count * n * 2) as usize);
         let t1 = gpu.buffer(((BAND + 4) * g.wm * 128 * 2) as usize);
         let t2 = gpu.buffer(((BAND + 2) * g.wm * 128 * 2) as usize);
-        let shown = (g.w * g.h) as usize * crate::screen::held::rgb_pixel(self.deep).1;
+        let shown = (g.w * g.h) as usize * crate::screen::held::RGB48;
         let picture = gpu.buffer(shown);
         let low = (g.w * g.h * 3 * 4) as usize;
         let low = (gpu.buffer(low), gpu.buffer(low));
@@ -1488,7 +1448,6 @@ impl Stream {
                         gpu,
                         pass,
                         &DecInput {
-                            deep: self.deep,
                             frames: &self.frames,
                             latents,
                             out: &din,
@@ -1667,7 +1626,6 @@ impl Stream {
                     let whole = shown.next_multiple_of(4) as u64;
                     let out = gpu.buffer(whole as usize);
                     let pictures = crate::super_scale::fix::Pictures::Packed {
-                        deep: self.deep,
                         frames: &self.frames,
                         made: &picture,
                         out: &out,
@@ -1687,7 +1645,7 @@ impl Stream {
                     if let Some(dir) = self.dump.as_ref() {
                         let mut rgb = gpu.read(&out, 0, whole)?;
                         rgb.truncate(shown);
-                        let rgb = crate::screen::held::eight(&rgb, self.deep);
+                        let rgb = crate::screen::held::eight(&rgb);
                         crate::npy::write_bytes(
                             &dir.join(format!("frame{index:03}.npy")),
                             &[g.h as usize, g.w as usize, 3],
@@ -1768,7 +1726,6 @@ impl Stream {
                     gpu,
                     pass,
                     &Last {
-                        deep: self.deep,
                         src: t2,
                         weights: &d.last2.w,
                         bias: &d.last2.b,

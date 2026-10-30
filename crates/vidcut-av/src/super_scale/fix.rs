@@ -4,7 +4,6 @@ pub(crate) const LEVELS: u32 = 5;
 
 pub(crate) enum Pictures<'a> {
     Packed {
-        deep: bool,
         frames: &'a wgpu::Buffer,
         made: &'a wgpu::Buffer,
         out: &'a wgpu::Buffer,
@@ -39,7 +38,6 @@ pub(crate) fn run(
     steps.push((3, 0, (a, b)));
     match pictures {
         Pictures::Packed {
-            deep,
             frames,
             made,
             out,
@@ -47,10 +45,10 @@ pub(crate) fn run(
             base,
         } => {
             let pipe = gpu.pipe("fix", || shader(include_str!("fix_packed.wgsl")));
-            let words = (pixels * 3 * if *deep { 2 } else { 1 }).div_ceil(4);
+            let words = (pixels * 3).div_ceil(2);
             for (stage, step, (low, lower)) in steps {
                 let count = if stage == 3 { words } else { pixels };
-                let p = gpu.uniform(&[w, h, *wm, *base, u32::from(*deep), stage, step, count]);
+                let p = gpu.uniform(&[w, h, *wm, *base, 0, stage, step, count]);
                 let buffers = [*frames, *made, low, lower, *out];
                 gpu.dispatch(pass, &pipe, p, &buffers, count.div_ceil(256));
             }

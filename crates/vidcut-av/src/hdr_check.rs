@@ -43,12 +43,11 @@ pub struct Row {
     pub frames: usize,
 }
 
-pub fn coding_name((deep, coding): (bool, Option<Hdr>)) -> &'static str {
-    match (deep, coding) {
-        (_, Some(Hdr::Pq)) => "PQ",
-        (_, Some(Hdr::Hlg)) => "HLG",
-        (true, None) => "SDR",
-        (false, None) => "SDR8",
+pub fn coding_name((_, coding): (bool, Option<Hdr>)) -> &'static str {
+    match coding {
+        Some(Hdr::Pq) => "PQ",
+        Some(Hdr::Hlg) => "HLG",
+        None => "SDR",
     }
 }
 
@@ -62,11 +61,7 @@ pub fn run(
     let hdr = crate::color::Source::of(&source[0]).hdr;
     let mut drawn = None;
     let mut rows = Vec::new();
-    let forms = [
-        (true, Some(hdr.unwrap_or(Hdr::Pq))),
-        (true, None),
-        (false, None),
-    ];
+    let forms = [(true, Some(hdr.unwrap_or(Hdr::Pq))), (true, None)];
     let sharp = crate::screen::kernel(Some(Sharpness::Medium));
     for form in forms {
         let coding = form.1;
@@ -77,13 +72,7 @@ pub fn run(
                 .collect::<Result<Vec<_>>>()
         };
         let refs = draw(&source, FULL, (0, form))?;
-        let truth = match form.0 {
-            true => refs.iter().map(bytes).collect::<Result<Vec<_>>>()?,
-            false => draw(&source, FULL, (0, (true, coding)))?
-                .iter()
-                .map(bytes)
-                .collect::<Result<Vec<_>>>()?,
-        };
+        let truth = refs.iter().map(bytes).collect::<Result<Vec<_>>>()?;
         let small = draw(&source, SMALL, (0, form))?;
         let inner: Vec<usize> = (2..count.saturating_sub(2)).collect();
         let base = match upscalers.is_empty() {
@@ -138,7 +127,7 @@ pub fn run(
                             (0, (true, coding)),
                         )?)
                     }
-                    false => read(between(r, clip, &refs, i)?, form.0),
+                    false => read(between(r, clip, &refs, i)?),
                 })
                 .collect::<Result<Vec<_>>>()
         };
@@ -225,32 +214,20 @@ fn decoded(clip: &Clip, count: usize) -> Result<Vec<frame::Video>> {
     Ok(frames)
 }
 
-fn wide(rgb: Vec<u8>, deep: bool) -> Vec<u8> {
-    match deep {
-        true => rgb,
-        false => crate::screen::held::sixteen(&rgb),
-    }
-}
-
 fn bytes(f: &frame::Video) -> Result<Vec<u8>> {
-    Ok(wide(
-        crate::screen::held::rgb(f)?,
-        crate::screen::held::deep(f),
-    ))
+    if !crate::screen::held::deep(f) {
+        return Err(Error::Invalid("an 8-bit picture in a 16-bit pipe".into()));
+    }
+    crate::screen::held::rgb(f)
 }
 
-fn read(picture: Picture, deep: bool) -> Result<Vec<u8>> {
-    let rgb = match picture {
-        Picture::Held(h) => {
-            h.read(FULL.0 as usize * FULL.1 as usize * crate::screen::held::rgb_pixel(deep).1)?
-        }
-        Picture::Frame(_) => {
-            return Err(Error::Invalid(
-                "a model gave a VideoToolbox frame for RGB input".into(),
-            ));
-        }
-    };
-    Ok(wide(rgb, deep))
+fn read(picture: Picture) -> Result<Vec<u8>> {
+    match picture {
+        Picture::Held(h) => h.read(FULL.0 as usize * FULL.1 as usize * crate::screen::held::RGB48),
+        Picture::Frame(_) => Err(Error::Invalid(
+            "a model gave a VideoToolbox frame for RGB input".into(),
+        )),
+    }
 }
 
 fn put(out: &mut [Option<Picture>], outs: Vec<Out>) {
@@ -276,16 +253,15 @@ fn by_macos(
         .into_iter()
         .map(|p| match p {
             Picture::Frame(f) => bytes(&rgb_picture(drawn, &f, path, FULL, (0, (true, form.1)))?),
-            p => read(p, true),
+            p => read(p),
         })
         .collect()
 }
 
 fn upscaled(u: Upscaler, small: &[frame::Video]) -> Result<Vec<Vec<u8>>> {
-    let deep = small.first().is_some_and(crate::screen::held::deep);
     upscaled_pictures(u, small, false)?
         .into_iter()
-        .map(|p| read(p, deep))
+        .map(read)
         .collect()
 }
 

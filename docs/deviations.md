@@ -1810,7 +1810,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - It reads the frames of a clip in order, from the first frame that is asked for. Each output frame uses the frames before it and the 4 frames after it.
     - It makes the picture at the size that it shows at, but not more than 4 times the source.
     - The weights (7.0 GB) download at their first use. vidcut does not ship them.
-    - It takes SDR pictures. Its memory grows with the size of the picture that it makes; parts of it go to main memory when the GPU's memory is not enough.
+    - It takes 16-bit SDR pictures. Its memory grows with the size of the picture that it makes; parts of it go to main memory when the GPU's memory is not enough.
   - Elsewhere, AI Fast is the upscaler of Auto. It is the video model NanoVSR 5.4M. vidcut runs it with its own compute shaders too.
     - It has no Noise Reduction and no other setting.
     - It reads the frames of a file in chunks of 15. Each output frame uses the frames before and after it in its chunk.
@@ -1841,7 +1841,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The ΔE of the means of 40×40 blocks was 60% to 87% of it. Thus most of the difference was in large areas, not in the detail.
     - On the Dolby Vision clip, its pictures had 1.21 times the light of the real frames.
     - In an export of 720p SDR video to 1080p, the network alone made each frame about 9 of 255 levels less red.
-  - With the color fix, AI Best's mean ΔE ITP in 8-bit SDR is 2.6 to 8.6. The ΔE of its block means is 1.2 to 1.5, and Classic's is 0.3 to 1.2.
+  - With the color fix, AI Best's mean ΔE ITP in SDR is 2.5 to 8.5. The ΔE of its block means is 1.1 to 1.5, and Classic's is 0.3 to 1.2.
     - On the Dolby Vision clip, AI Best comes nearer to the real frames than Classic. On the other two clips, it stays farther.
     - In the 720p export, the mean colors of each frame are those of its input picture. The fix added no time that the export measured.
     - The rest of its difference is in the detail that it makes.
@@ -2045,5 +2045,5 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - In the test of `hdr_models` ([tools](tools.md)), AI Best in PQ and HLG came far from the real frames, also with its color fix.
     - On the HDR10+ clip in PQ, its mean ΔE ITP was 8.6, and Classic's was 1.8. Its pictures had 1.09 times the light of the real frames.
     - On the Dolby Vision clip in HLG, its mean ΔE ITP was 4.2, and Classic's was 3.9. Its pictures had 1.03 times the light.
-    - In 8-bit SDR, the same clips gave 5.1 and 2.6.
+    - In SDR, the same clips gave 4.9 and 2.5.
   - SDR goes into an HDR timeline with no clipping. Thus the conversion after the stage keeps all of the picture.
