@@ -2,6 +2,7 @@ use serde_json::{Value, json};
 
 use super::effects::{effect, group, keyed, plain, ranged, rounded};
 use super::{EDITOR, VIDCUT};
+use crate::model::hex;
 use crate::model::{
     SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow,
     TitleStyle,
@@ -133,10 +134,6 @@ fn scrolling(t: &Title, family: &str, points: f64, color: &str) -> Vec<Value> {
             ],
         ),
     ]
-}
-
-fn hex([r, g, b]: [u8; 3]) -> String {
-    format!("#{r:02x}{g:02x}{b:02x}")
 }
 
 fn number(v: f64) -> String {

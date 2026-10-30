@@ -5,6 +5,7 @@ use roxmltree::{Document, Node, ParsingOptions};
 use super::text::{self, Tag, Token, escape_xml};
 use super::{Read, Timed, clock};
 use crate::error::{Error, Result};
+use crate::model::hex;
 use crate::model::{Place, SubtitleAlign, SubtitleStyle};
 
 const TTP: &str = "http://www.w3.org/ns/ttml#parameter";
@@ -645,10 +646,6 @@ fn plain_number(x: f64) -> String {
 
 fn percent(units: i64) -> String {
     plain_number(units as f64 / 1000.0)
-}
-
-fn hex([r, g, b]: [u8; 3]) -> String {
-    format!("#{r:02x}{g:02x}{b:02x}")
 }
 
 fn slot(place: Place) -> usize {

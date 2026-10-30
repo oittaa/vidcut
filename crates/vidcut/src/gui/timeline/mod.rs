@@ -234,7 +234,7 @@ pub struct TimelineView {
     pub fade_dialog: Option<fades::FadeDialog>,
     pub fade_in_frames: bool,
     pub transition_frames: Option<(TrackRef, i64, i64)>,
-    pub transition_color: Option<(TrackRef, i64, [u8; 3])>,
+    pub transition_color: Option<(TrackRef, i64, [u8; 3], egui::Id)>,
     pub clip_menu: Option<(bool, String)>,
     pub keys: Vec<(String, i64)>,
     pub key_menu: Option<(bool, String, i64)>,

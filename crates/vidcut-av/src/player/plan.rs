@@ -331,10 +331,13 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             )
             .into()
         }
-        VideoPiece::Black { color, .. } => {
-            let [r, g, b] = color;
-            format!("black|{}x{}|{r:02x}{g:02x}{b:02x}", plan.width, plan.height).into()
-        }
+        VideoPiece::Black { color, .. } => format!(
+            "black|{}x{}|{}",
+            plan.width,
+            plan.height,
+            vidcut_core::model::hex(*color)
+        )
+        .into(),
         VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => {
             format!("black|{}x{}", plan.width, plan.height).into()
         }
@@ -471,6 +474,18 @@ mod tests {
     #[test]
     fn a_frame_of_a_wipe_misses_after_a_change_of_its_edge() {
         assert_ne!(wiped_in(WipeDirection::Down), wiped_in(WipeDirection::Left));
+    }
+
+    #[test]
+    fn a_red_frame_is_kept_apart_from_a_black_one() {
+        let red = VideoPiece::Black {
+            frames: 10,
+            color: [255, 0, 0],
+        };
+        assert_ne!(
+            source_key(&VideoPiece::black(10), &plan()),
+            source_key(&red, &plan())
+        );
     }
 
     #[test]

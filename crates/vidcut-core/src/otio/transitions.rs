@@ -53,7 +53,6 @@ pub fn mixes(t: &Transition) -> bool {
 const DIP: &str = "Dip To Color Dissolve";
 
 pub fn dip_otio(color: [u8; 3]) -> Value {
-    let [r, g, b] = color;
     json!({
         "OTIO_SCHEMA": "Transition.1",
         "name": DIP,
@@ -69,7 +68,7 @@ pub fn dip_otio(color: [u8; 3]) -> Value {
                 },
                 "Transition Type": DIP,
             },
-            VIDCUT: {"color": format!("#{r:02x}{g:02x}{b:02x}")},
+            VIDCUT: {"color": crate::model::hex(color)},
         }
     })
 }

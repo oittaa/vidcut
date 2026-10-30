@@ -2421,6 +2421,15 @@ mod tests {
     }
 
     #[test]
+    fn black_and_red_frames_stay_two_pieces() {
+        let red = VideoPiece::Black {
+            frames: 5,
+            color: [255, 0, 0],
+        };
+        assert!(!VideoPiece::black(5).goes_on_as(&red));
+    }
+
+    #[test]
     fn a_dip_to_red_fades_out_over_red_then_in() {
         let mut f = fixture();
         f.append("m1", 0, 50);
