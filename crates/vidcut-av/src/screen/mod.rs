@@ -2525,7 +2525,7 @@ impl Slot {
                     Some(_) => held::rgb(frame),
                     None => Ok(crate::buffers::packed(
                         frame,
-                        if held::deep(frame) { 6 } else { 3 },
+                        held::rgb_pixel(held::deep(frame)).1,
                     )),
                 };
                 let mut bytes = match bytes {

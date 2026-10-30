@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use vidcut_core::model::{Hdr, Retime, Sharpness, Upscaler};
 
@@ -20,7 +22,7 @@ pub struct Clip {
     pub start: f64,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy)]
 pub struct Score {
     pub de: f64,
     pub psnr: f64,
@@ -61,27 +63,24 @@ pub fn run(
         (true, None),
         (false, None),
     ];
+    let sharp = crate::screen::kernel(Some(Sharpness::Medium));
     for form in forms {
         let coding = form.1;
-        let drawn_at = |drawn: &mut _, f: &frame::Video, size, kernel| {
-            rgb_picture(drawn, f, size, (kernel, form))
+        let mut draw = |frames: &[frame::Video], size, look: (u32, crate::export::video::Form)| {
+            frames
+                .iter()
+                .map(|f| rgb_picture(&mut drawn, (f, &clip.path), size, look))
+                .collect::<Result<Vec<_>>>()
         };
-        let refs = source
+        let refs = draw(&source, FULL, (0, form))?;
+        let truth = draw(&source, FULL, (0, (true, coding)))?
             .iter()
-            .map(|f| drawn_at(&mut drawn, f, FULL, 0))
+            .map(bytes)
             .collect::<Result<Vec<_>>>()?;
-        let truth = source
+        let small = draw(&source, SMALL, (0, form))?;
+        let classic = draw(&small, FULL, (sharp, form))?
             .iter()
-            .map(|f| rgb_picture(&mut drawn, f, FULL, (0, (true, coding))).and_then(|p| bytes(&p)))
-            .collect::<Result<Vec<_>>>()?;
-        let small = source
-            .iter()
-            .map(|f| drawn_at(&mut drawn, f, SMALL, 0))
-            .collect::<Result<Vec<_>>>()?;
-        let sharp = crate::screen::kernel(Some(Sharpness::Medium));
-        let classic = small
-            .iter()
-            .map(|f| drawn_at(&mut drawn, f, FULL, sharp).and_then(|p| bytes(&p)))
+            .map(bytes)
             .collect::<Result<Vec<_>>>()?;
         let inner: Vec<usize> = (2..count.saturating_sub(2)).collect();
         let base = mean(&inner, |i| score(&classic[i], &truth[i], coding));
@@ -103,7 +102,7 @@ pub fn run(
         let made_by = |r: Retime| {
             pairs
                 .iter()
-                .map(|&i| between(r, clip, &refs, i))
+                .map(|&i| read(between(r, clip, &refs, i)?, form.0))
                 .collect::<Result<Vec<_>>>()
         };
         let blend = made_by(Retime::FrameBlend)?;
@@ -129,20 +128,36 @@ pub fn run(
     Ok(rows)
 }
 
-pub fn pictures(clip: &Clip, count: usize, k: usize, dir: &Path) -> Result<Vec<(String, Vec<u8>)>> {
+pub fn pictures(
+    clip: &Clip,
+    (count, k): (usize, usize),
+    upscalers: &[Upscaler],
+    dir: &Path,
+) -> Result<Vec<(String, Vec<u8>)>> {
     let source = decoded(clip, count)?;
     let hdr = crate::color::Source::of(&source[0]).hdr;
     let form = (true, Some(hdr.unwrap_or(Hdr::Pq)));
     let mut drawn = None;
-    let truth = bytes(&rgb_picture(&mut drawn, &source[k], FULL, (0, form))?)?;
+    let path = clip.path.as_path();
+    let truth = bytes(&rgb_picture(
+        &mut drawn,
+        (&source[k], path),
+        FULL,
+        (0, form),
+    )?)?;
     let small = source
         .iter()
-        .map(|f| rgb_picture(&mut drawn, f, SMALL, (0, form)))
+        .map(|f| rgb_picture(&mut drawn, (f, path), SMALL, (0, form)))
         .collect::<Result<Vec<_>>>()?;
     let sharp = crate::screen::kernel(Some(Sharpness::Medium));
-    let classic = bytes(&rgb_picture(&mut drawn, &small[k], FULL, (sharp, form))?)?;
+    let classic = bytes(&rgb_picture(
+        &mut drawn,
+        (&small[k], path),
+        FULL,
+        (sharp, form),
+    )?)?;
     let mut out = vec![("truth".into(), truth), ("classic".into(), classic)];
-    for u in [Upscaler::AiFast, Upscaler::AiBest] {
+    for &u in upscalers {
         crate::super_scale::get_ready(dir, u, false)?;
         let mut made = upscaled(u, &small)?;
         out.push((crate::super_scale::name(u).into(), made.swap_remove(k)));
@@ -173,46 +188,50 @@ fn decoded(clip: &Clip, count: usize) -> Result<Vec<frame::Video>> {
     Ok(frames)
 }
 
+fn wide(rgb: Vec<u8>, deep: bool) -> Vec<u8> {
+    match deep {
+        true => rgb,
+        false => crate::screen::held::sixteen(&rgb),
+    }
+}
+
 fn bytes(f: &frame::Video) -> Result<Vec<u8>> {
-    crate::screen::held::rgb(f).map(sixteen)
+    Ok(wide(
+        crate::screen::held::rgb(f)?,
+        crate::screen::held::deep(f),
+    ))
 }
 
-fn sixteen(rgb: Vec<u8>) -> Vec<u8> {
-    match rgb.len() == whole() / 2 {
-        true => rgb
-            .iter()
-            .flat_map(|v| (u16::from(*v) * 257).to_le_bytes())
-            .collect(),
-        false => rgb,
-    }
+fn read(picture: Picture, deep: bool) -> Result<Vec<u8>> {
+    let rgb = match picture {
+        Picture::Held(h) => {
+            h.read(FULL.0 as usize * FULL.1 as usize * crate::screen::held::rgb_pixel(deep).1)?
+        }
+        Picture::Rgb(b) => b,
+        Picture::Frame(_) => {
+            return Err(Error::Invalid(
+                "a model gave a VideoToolbox frame for RGB input".into(),
+            ));
+        }
+    };
+    Ok(wide(rgb, deep))
 }
 
-fn whole() -> usize {
-    FULL.0 as usize * FULL.1 as usize * 6
-}
-
-fn read(picture: Picture) -> Result<Vec<u8>> {
-    match picture {
-        Picture::Held(h) => h.read(whole()).map(sixteen),
-        Picture::Rgb(b) => Ok(sixteen(b)),
-        Picture::Frame(_) => Err(Error::Invalid(
-            "a model gave a VideoToolbox frame for RGB input".into(),
-        )),
-    }
-}
-
-fn put(out: &mut [Option<Picture>], outs: Vec<Out>) -> Result<()> {
+fn put(out: &mut [Option<Picture>], outs: Vec<Out>) {
     for o in outs {
         let at = usize::try_from(o.index).unwrap_or(usize::MAX);
         if let Some(slot) = out.get_mut(at) {
             *slot = Some(o.picture);
         }
     }
-    Ok(())
 }
 
 fn upscaled(u: Upscaler, small: &[frame::Video]) -> Result<Vec<Vec<u8>>> {
-    upscaled_pictures(u, small)?.into_iter().map(read).collect()
+    let deep = small.first().is_some_and(crate::screen::held::deep);
+    upscaled_pictures(u, small)?
+        .into_iter()
+        .map(|p| read(p, deep))
+        .collect()
 }
 
 fn upscaled_pictures(u: Upscaler, small: &[frame::Video]) -> Result<Vec<Picture>> {
@@ -239,12 +258,12 @@ fn upscaled_pictures(u: Upscaler, small: &[frame::Video]) -> Result<Vec<Picture>
             outs.extend(run.push(i as i64, Some(i as i64), f)?);
         }
         outs.extend(run.finish()?);
-        put(&mut out, outs)?;
+        put(&mut out, outs);
         while out[first..=last].iter().any(Option::is_none) {
             let outs = rx
                 .recv_timeout(Duration::from_secs(600))
                 .map_err(|_| Error::Invalid(format!("{name} left frames out")))?;
-            put(&mut out, outs?)?;
+            put(&mut out, outs?);
         }
         drop(run);
         first = last + 1;
@@ -254,11 +273,7 @@ fn upscaled_pictures(u: Upscaler, small: &[frame::Video]) -> Result<Vec<Picture>
         .ok_or_else(|| Error::Invalid(format!("{name} left frames out")))
 }
 
-fn between(r: Retime, clip: &Clip, refs: &[frame::Video], i: usize) -> Result<Vec<u8>> {
-    read(between_picture(r, clip, refs, i)?)
-}
-
-fn between_picture(r: Retime, clip: &Clip, refs: &[frame::Video], i: usize) -> Result<Picture> {
+fn between(r: Retime, clip: &Clip, refs: &[frame::Video], i: usize) -> Result<Picture> {
     let key = (clip.path.clone(), i as u64, i as i64, i as i64 + 2);
     crate::interpolate::between(r, &key, &refs[i], &refs[i + 2], FULL, 0.5)
 }
@@ -308,7 +323,7 @@ pub fn speed(
     };
     let inputs = source
         .iter()
-        .map(|f| rgb_picture(&mut drawn, f, size, (0, form)))
+        .map(|f| rgb_picture(&mut drawn, (f, &clip.path), size, (0, form)))
         .collect::<Result<Vec<_>>>()?;
     let pairs: Vec<usize> = (0..count.saturating_sub(2)).step_by(2).collect();
     let once = || -> Result<(Vec<Picture>, usize)> {
@@ -321,7 +336,7 @@ pub fn speed(
                 crate::interpolate::get_ready(dir, r, false)?;
                 let made = pairs
                     .iter()
-                    .map(|&i| between_picture(r, clip, &inputs, i))
+                    .map(|&i| between(r, clip, &inputs, i))
                     .collect::<Result<Vec<_>>>()?;
                 Ok((made, pairs.len()))
             }
@@ -332,23 +347,23 @@ pub fn speed(
     drop(once()?);
     idle()?;
     let resident = allocated();
-    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let done = Arc::new(AtomicBool::new(false));
     let watch = {
         let done = done.clone();
         std::thread::spawn(move || {
             let mut peak = allocated();
-            while !done.load(std::sync::atomic::Ordering::Relaxed) {
+            while !done.load(Ordering::Relaxed) {
                 peak = peak.max(allocated());
                 std::thread::sleep(Duration::from_millis(2));
             }
             peak.max(allocated())
         })
     };
-    let clock = std::time::Instant::now();
+    let clock = Instant::now();
     let (made, frames) = once()?;
     idle()?;
     let spent = clock.elapsed();
-    done.store(true, std::sync::atomic::Ordering::Relaxed);
+    done.store(true, Ordering::Relaxed);
     let peak = watch.join().unwrap_or(None);
     drop(made);
     Ok(Speed {
@@ -361,10 +376,13 @@ pub fn speed(
 
 fn mean(at: &[usize], score: impl Fn(usize) -> Score) -> Score {
     let n = at.len().max(1) as f64;
-    let scores: Vec<Score> = at.iter().map(|&i| score(i)).collect();
+    let (de, psnr) = at
+        .iter()
+        .map(|&i| score(i))
+        .fold((0.0, 0.0), |(d, p), s| (d + s.de, p + s.psnr));
     Score {
-        de: scores.iter().map(|s| s.de).sum::<f64>() / n,
-        psnr: scores.iter().map(|s| s.psnr).sum::<f64>() / n,
+        de: de / n,
+        psnr: psnr / n,
     }
 }
 
@@ -396,7 +414,7 @@ const C1: f64 = 0.8359375;
 const C2: f64 = 18.8515625;
 const C3: f64 = 18.6875;
 
-pub fn pq_nits(code: f64) -> f64 {
+fn pq_nits(code: f64) -> f64 {
     let e = code.clamp(0.0, 1.0).powf(1.0 / M2);
     10000.0 * ((e - C1).max(0.0) / (C2 - C3 * e)).powf(1.0 / M1)
 }
@@ -448,7 +466,7 @@ fn itp(n: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-pub fn delta_itp(a: [f64; 3], b: [f64; 3], coding: Option<Hdr>) -> f64 {
+fn delta_itp(a: [f64; 3], b: [f64; 3], coding: Option<Hdr>) -> f64 {
     let (x, y) = (itp(nits(a, coding)), itp(nits(b, coding)));
     720.0 * (0..3).map(|i| (x[i] - y[i]).powi(2)).sum::<f64>().sqrt()
 }

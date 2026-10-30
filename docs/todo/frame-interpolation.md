@@ -11,8 +11,5 @@ Retime Process makes the frames between source frames ([deviation X93](../deviat
 - **Speed:** the convolution kernel does not use the tensor cores.
 - **The viewer:** it shows the frames that an export makes. With AI Best, a frame can take seconds.
 - **Backward clips:** a clip played backward shows the nearest frames.
-- **HDR on macOS:** in an HDR timeline, AI on macOS refuses HDR pictures, and its frames go through 8-bit RGB.
-  - Its processors take half floats, which can carry HDR.
-  - `hdr_models` on a Mac tells how near to the real frames they come ([tools](../tools.md)).
 - **Super Scale:** with an AI upscaler, a made frame is enlarged as with Classic.
 - **OpenTimelineIO:** an OTIO file does not keep the Retime Process of a clip. How Resolve writes it in its files is not measured.

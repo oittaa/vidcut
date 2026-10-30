@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use vidcut_core::model::Hdr;
+
 use super::shared::HeldMemory;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, frame};
@@ -89,19 +91,14 @@ pub(crate) fn picture(
     held: Held,
     (w, h): (u32, u32),
     pts: Option<i64>,
-    (deep, hdr): (bool, Option<vidcut_core::model::Hdr>),
+    (deep, hdr): (bool, Option<Hdr>),
 ) -> Result<frame::Video> {
-    use ffmpeg::util::color::{Primaries, TransferCharacteristic};
-    use vidcut_core::model::Hdr;
-    let (format, bytes) = match deep {
-        true => (ffi::AVPixelFormat::AV_PIX_FMT_RGB48LE, 6),
-        false => (ffi::AVPixelFormat::AV_PIX_FMT_RGB24, 3),
-    };
+    let (pixel, bytes) = rgb_pixel(deep);
     let mut f = frame::Video::empty();
     // SAFETY: fresh `f` takes one zeroed row at no stride.
     unsafe {
         let raw = f.as_mut_ptr();
-        (*raw).format = format as i32;
+        (*raw).format = ffi::AVPixelFormat::from(pixel) as i32;
         (*raw).width = w as i32;
         (*raw).height = h as i32;
         let row = ffi::av_buffer_allocz(w as usize * bytes);
@@ -114,17 +111,47 @@ pub(crate) fn picture(
         (*raw).sample_aspect_ratio = ffi::AVRational { num: 1, den: 1 };
     }
     super::carried::carry(&mut f, held, &MARK)?;
-    f.set_color_range(ffmpeg::util::color::Range::JPEG);
-    f.set_color_space(ffmpeg::util::color::Space::RGB);
+    tag(&mut f, hdr);
+    f.set_pts(pts);
+    Ok(f)
+}
+
+pub(crate) fn rgb_pixel(deep: bool) -> (ffmpeg::format::Pixel, usize) {
+    match deep {
+        true => (ffmpeg::format::Pixel::RGB48LE, 6),
+        false => (ffmpeg::format::Pixel::RGB24, 3),
+    }
+}
+
+pub(crate) fn eight(rgb: Vec<u8>, deep: bool) -> Vec<u8> {
+    match deep {
+        true => rgb
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| ((u32::from(u16::from_le_bytes(*c)) + 128) / 257) as u8)
+            .collect(),
+        false => rgb,
+    }
+}
+
+pub(crate) fn sixteen(rgb: &[u8]) -> Vec<u8> {
+    rgb.iter()
+        .flat_map(|v| (u16::from(*v) * 257).to_le_bytes())
+        .collect()
+}
+
+pub(crate) fn tag(f: &mut frame::Video, hdr: Option<Hdr>) {
+    use ffmpeg::util::color::{Primaries, Range, Space, TransferCharacteristic};
     let (primaries, transfer) = match hdr {
         None => (Primaries::BT709, TransferCharacteristic::BT709),
         Some(Hdr::Pq) => (Primaries::BT2020, TransferCharacteristic::SMPTE2084),
         Some(Hdr::Hlg) => (Primaries::BT2020, TransferCharacteristic::ARIB_STD_B67),
     };
+    f.set_color_range(Range::JPEG);
+    f.set_color_space(Space::RGB);
     f.set_color_primaries(primaries);
     f.set_color_transfer_characteristic(transfer);
-    f.set_pts(pts);
-    Ok(f)
 }
 
 pub(crate) fn deep(f: &frame::Video) -> bool {
@@ -132,7 +159,7 @@ pub(crate) fn deep(f: &frame::Video) -> bool {
 }
 
 fn bytes(f: &frame::Video) -> usize {
-    f.width() as usize * f.height() as usize * if deep(f) { 6 } else { 3 }
+    f.width() as usize * f.height() as usize * rgb_pixel(deep(f)).1
 }
 
 pub(crate) fn of(f: &frame::Video) -> Option<&Held> {
@@ -213,10 +240,7 @@ fn share(f: &frame::Video, held: &Held) -> Result<frame::Video> {
 
 pub(crate) fn in_memory(f: &frame::Video) -> Result<frame::Video> {
     let rgb = rgb(f)?;
-    let (pixel, size) = match deep(f) {
-        true => (ffmpeg::format::Pixel::RGB48LE, 6),
-        false => (ffmpeg::format::Pixel::RGB24, 3),
-    };
+    let (pixel, size) = rgb_pixel(deep(f));
     let mut out = crate::buffers::unpacked(pixel, (f.width(), f.height()), size, &rgb);
     // SAFETY: both frames are valid.
     let ret = unsafe { ffi::av_frame_copy_props(out.as_mut_ptr(), f.as_ptr()) };
@@ -255,16 +279,16 @@ pub(crate) fn small_luma(
     Held::new(small, (&gpu.device, &gpu.queue), gpu.id).read(ow as usize * oh as usize)
 }
 
-fn sixteen_float(picture: &wgpu::Texture) -> bool {
+fn half_float(picture: &wgpu::Texture) -> bool {
     picture.format() == wgpu::TextureFormat::Rgba16Float
 }
 
-fn sixteen(encoded: &wgpu::Texture) -> bool {
+fn sixteen_bit(encoded: &wgpu::Texture) -> bool {
     encoded.format() == wgpu::TextureFormat::Rgba16Uint
 }
 
 fn packed_words(encoded: &wgpu::Texture) -> u64 {
-    let per_word = if sixteen(encoded) { 2 } else { 4 };
+    let per_word = if sixteen_bit(encoded) { 2 } else { 4 };
     (u64::from(encoded.width()) * u64::from(encoded.height()) * 3).div_ceil(per_word)
 }
 
@@ -371,7 +395,7 @@ impl Pipes {
                     resource: rgb.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: if sixteen_float(picture) { 6 } else { 3 },
+                    binding: if half_float(picture) { 6 } else { 3 },
                     resource: wgpu::BindingResource::TextureView(&view),
                 },
             ],
@@ -387,7 +411,7 @@ impl Pipes {
     }
 
     fn packer(&self, encoded: &wgpu::Texture) -> &wgpu::ComputePipeline {
-        if sixteen(encoded) {
+        if sixteen_bit(encoded) {
             &self.pack16
         } else {
             &self.pack
@@ -395,7 +419,7 @@ impl Pipes {
     }
 
     fn unpacker(&self, picture: &wgpu::Texture) -> &wgpu::ComputePipeline {
-        if sixteen_float(picture) {
+        if half_float(picture) {
             &self.unpack16
         } else {
             &self.unpack
