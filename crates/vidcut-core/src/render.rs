@@ -499,8 +499,7 @@ fn zero_f64(n: &f64) -> bool {
 
 impl Move {
     fn of(d: &transitions::Playing) -> Option<Self> {
-        let kind = transitions::moving_of(d.transition)?;
-        let keys = transitions::progress_keys(&d.transition.otio, d.frames.1 - d.frames.0)?;
+        let (kind, keys) = transitions::moving_played(d.transition, d.frames.1 - d.frames.0)?;
         let (way, motion) = match kind {
             PictureTransition::Push { preset, motion } => (Way::Push(preset), motion),
             PictureTransition::Slide {

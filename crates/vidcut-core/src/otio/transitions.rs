@@ -291,6 +291,10 @@ fn moving_otio(
 }
 
 fn moving_in(o: &Value) -> Option<PictureTransition> {
+    moving_values(o).map(|(kind, _)| kind)
+}
+
+fn moving_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
     let index = |values: &[Value], id: &str| match value(values, id) {
         None => Some(0),
         Some(v) => usize::try_from(v.as_u64()?).ok(),
@@ -314,13 +318,14 @@ fn moving_in(o: &Value) -> Option<PictureTransition> {
         })
     };
     if let Some(values) = values(o, PUSH, 50) {
-        return Some(PictureTransition::Push {
+        let kind = PictureTransition::Push {
             preset: *PushPreset::ALL.get(index(values, "push style")?)?,
             motion: motion(values)?,
-        });
+        };
+        return Some((kind, values));
     }
     let values = values(o, SLIDE, 49)?;
-    Some(PictureTransition::Slide {
+    let kind = PictureTransition::Slide {
         preset: *SlidePreset::ALL.get(index(values, "slide style")?)?,
         out: match index(values, "transition direction")? {
             0 => false,
@@ -328,17 +333,17 @@ fn moving_in(o: &Value) -> Option<PictureTransition> {
             _ => return None,
         },
         motion: motion(values)?,
-    })
+    };
+    Some((kind, values))
 }
 
-pub fn progress_keys(o: &Value, frames: i64) -> Option<Vec<Keyframe>> {
-    let kind = moving_in(o)?;
-    let motion = kind.motion()?;
-    if motion.ease.is_none() {
-        return Some(eased(MotionEase::None, frames));
-    }
-    let values = values(o, PUSH, 50).or_else(|| values(o, SLIDE, 49))?;
-    Some(curve_in(values))
+pub fn moving_played(t: &Transition, frames: i64) -> Option<(PictureTransition, Vec<Keyframe>)> {
+    let (kind, values) = (!t.sound).then(|| moving_values(&t.otio)).flatten()?;
+    let keys = match kind.motion()?.ease {
+        MotionEase::None => eased(MotionEase::None, frames),
+        _ => curve_in(values),
+    };
+    Some((kind, keys))
 }
 
 const EDGE_WIPE: &str = "Edge Wipe";
