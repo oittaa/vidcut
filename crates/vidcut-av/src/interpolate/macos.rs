@@ -96,8 +96,8 @@ mod imp {
     use crate::error::{Error, Result};
     use crate::ffmpeg::frame::Video;
     use crate::frame_processor::{
-        Frames, Transfer, buffer, failed, format_in, fourcc, frame, numbers, pixels, pool, read,
-        write,
+        Frames, HALF_FIRST, Transfer, buffer, failed, format_in, fourcc, frame, numbers, pixels,
+        pool, read, write,
     };
 
     const WHAT: &str = "the frame rate conversion of macOS";
@@ -192,7 +192,7 @@ mod imp {
                     config.destinationPixelBufferAttributes(),
                 )
             };
-            let format = format_in(&formats, WHAT)?;
+            let format = format_in(&formats, HALF_FIRST, WHAT)?;
             let sources = pool(size, format, &from, WHAT)?;
             let outputs = pool(size, format, &to, WHAT)?;
             // SAFETY: a new processor of the frame processor class.

@@ -821,7 +821,7 @@ impl Stream {
                 u64::from(base) * size,
                 u64::from(g.plane()) * size,
             )?;
-            let raw = crate::screen::held::eight(raw, deep);
+            let raw = crate::screen::held::eight(&raw, deep);
             let rgb: Vec<u8> = raw
                 .as_chunks::<4>()
                 .0
@@ -1689,7 +1689,7 @@ impl Stream {
                     if let Some(dir) = self.dump.as_ref() {
                         let mut rgb = gpu.read(&out, 0, whole)?;
                         rgb.truncate(shown);
-                        let rgb = crate::screen::held::eight(rgb, self.deep);
+                        let rgb = crate::screen::held::eight(&rgb, self.deep);
                         crate::npy::write_bytes(
                             &dir.join(format!("frame{index:03}.npy")),
                             &[g.h as usize, g.w as usize, 3],

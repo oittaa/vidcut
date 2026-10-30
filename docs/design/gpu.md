@@ -210,6 +210,7 @@ AI Best (`flashvsr`):
 The scaler of macOS (`macos`):
 
 - It is a `VTFrameProcessor` session with a `VTSuperResolutionScalerConfiguration`, on macOS 26 and later.
+- It takes 8-bit SDR RGB, in the first of BGRA, NV12 and RGhA that it lists (`BYTES_FIRST`, [gotchas](../gotchas.md#operating-systems-and-libraries)).
 - `macos::check` refuses HDR media in an HDR timeline, and pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
 - An SDR VideoToolbox frame reaches it on the GPU (`Run::push_frame`). A turned frame turns first (`hw::Turner`).
@@ -236,6 +237,7 @@ The scaler of macOS (`macos`):
 On macOS (`interpolate::macos`):
 
 - The frame rate conversion of macOS makes the frame, in a `VTFrameProcessor` session.
+- Its buffers are RGhA when it lists RGhA (`HALF_FIRST`). Thus 16-bit and HDR pictures keep their depth ([gotchas](../gotchas.md#operating-systems-and-libraries)).
 - Two SDR VideoToolbox frames of a clip with no placed picture reach it on the GPU (`interpolate::takes_frames`). Turned frames turn first (`hw::Turner`).
 - Lanczos sizes them to the size that the picture fills in the frame, before the frame is made.
 - The made frame stays a VideoToolbox frame (`interpolate::between_frames`).

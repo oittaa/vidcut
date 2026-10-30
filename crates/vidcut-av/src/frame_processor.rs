@@ -35,6 +35,8 @@ use crate::ffmpeg::{self, ffi, frame::Video};
 const BGRA: u32 = kCVPixelFormatType_32BGRA;
 const NV12: u32 = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
 const RGHA: u32 = kCVPixelFormatType_64RGBAHalf;
+pub(crate) const HALF_FIRST: [u32; 3] = [RGHA, BGRA, NV12];
+pub(crate) const BYTES_FIRST: [u32; 3] = [BGRA, NV12, RGHA];
 
 pub(crate) fn numbers(list: &NSArray<NSNumber>) -> Vec<u32> {
     (0..list.count())
@@ -54,11 +56,11 @@ pub(crate) fn failed(what: &str, e: Retained<NSError>) -> Error {
     Error::Invalid(format!("{what}: {}", e.localizedDescription()))
 }
 
-pub(crate) fn format_in(list: &NSArray<NSNumber>, what: &str) -> Result<u32> {
+pub(crate) fn format_in(list: &NSArray<NSNumber>, order: [u32; 3], what: &str) -> Result<u32> {
     let formats = numbers(list);
     let names: Vec<String> = formats.iter().map(|f| fourcc(*f)).collect();
     crate::debug!("ai", "{what} takes {}", names.join(", "));
-    [BGRA, NV12, RGHA]
+    order
         .into_iter()
         .find(|f| formats.contains(f))
         .ok_or_else(|| {
@@ -453,13 +455,7 @@ pub(crate) fn write(
         }
         return Ok(());
     }
-    let eight;
-    let rgb = if deep {
-        eight = crate::screen::held::eight(rgb.to_vec(), true);
-        eight.as_slice()
-    } else {
-        rgb
-    };
+    let rgb = crate::screen::held::eight(rgb, deep);
     let pixel = |x: usize, y: usize| &rgb[(y * w + x) * 3..(y * w + x) * 3 + 3];
     if format == BGRA {
         for y in 0..h {

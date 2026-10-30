@@ -208,7 +208,8 @@ mod imp {
     use crate::error::{Error, Result};
     use crate::ffmpeg::{ffi, format, frame::Video};
     use crate::frame_processor::{
-        Frames, Transfer, buffer, format_in, fourcc, frame, numbers, pixels, pool, read, write,
+        BYTES_FIRST, Frames, Transfer, buffer, format_in, fourcc, frame, numbers, pixels, pool,
+        read, write,
     };
 
     const MISSING: &str = "macOS's super-resolution models aren't on this Mac yet: pass \
@@ -336,7 +337,7 @@ mod imp {
     fn format_of(config: &VTSuperResolutionScalerConfiguration) -> Result<u32> {
         // SAFETY: a property of a live configuration.
         let list = unsafe { config.frameSupportedPixelFormats() };
-        format_in(&list, WHAT)
+        format_in(&list, BYTES_FIRST, WHAT)
     }
 
     pub(super) struct Scaler {
