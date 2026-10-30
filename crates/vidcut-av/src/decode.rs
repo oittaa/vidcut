@@ -219,6 +219,7 @@ pub struct VideoReader {
     first_props: Option<FrameProps>,
     deinterlacer: Option<Deinterlacer>,
     interlaced: bool,
+    skipped: Option<frame::Video>,
     gpu: Option<crate::hw::GpuDecoder>,
     kind: Option<crate::hw::Kind>,
     decoding: Arc<Decoding>,
@@ -1020,6 +1021,7 @@ impl VideoReader {
             draining: false,
             min_pts: None,
             pending: None,
+            skipped: None,
             packet: None,
             first_pts: None,
             rotation,
@@ -1094,6 +1096,14 @@ impl VideoReader {
         }
     }
 
+    pub fn keep_fields(&mut self) {
+        self.deinterlacer = None;
+    }
+
+    pub fn take_skipped(&mut self) -> Option<frame::Video> {
+        self.skipped.take()
+    }
+
     pub fn set_color_space(&mut self, space: vidcut_core::model::ColorSpace) {
         self.color_space = space;
         if let Some(f) = self.pending.as_mut() {
@@ -1115,7 +1125,13 @@ impl VideoReader {
                 return Ok(None);
             };
             match (self.min_pts, frame.pts()) {
-                (Some(min), Some(pts)) if pts < min => continue,
+                (Some(min), Some(pts)) if pts < min => {
+                    if self.interlaced && self.deinterlacer.is_none() {
+                        crate::color::retag(&mut frame, self.color_space);
+                        self.skipped = Some(frame);
+                    }
+                    continue;
+                }
                 _ => {
                     crate::color::retag(&mut frame, self.color_space);
                     return Ok(Some(frame));
@@ -1154,6 +1170,7 @@ impl VideoReader {
             self.deinterlacer = Some(Deinterlacer::new(self.time_base, self.reading));
         }
         self.pending = None;
+        self.skipped = None;
         self.min_pts = None;
         let one_second = (i64::from(self.time_base.denominator())
             / i64::from(self.time_base.numerator().max(1)))

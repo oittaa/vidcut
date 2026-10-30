@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use vidcut_core::render::{RenderPlan, VideoPiece, WHOLE};
 use vidcut_core::time::Rational;
 
-use super::frame::{Over, Picture};
+use super::frame::{Over, Picture, Woven};
 use super::plan::Plan;
 use super::store::Kind;
 use super::{Busy, Decoder as Decoding, Mode, Shared, Snap, lock, ms};
@@ -865,7 +865,28 @@ pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
             .is_some()
             .then(|| l.decoder.map_or(Decoding::Cpu, Decoding::Gpu));
         let frame = l.frame.expect("frames as decoded, black too");
-        Picture::new(frame, l.rotation, decoder, l.decoding).with_sampling(l.sampling)
+        let picture =
+            Picture::new(frame, l.rotation, decoder, l.decoding).with_sampling(l.sampling);
+        match l.woven {
+            Some((top_first, before, after)) => {
+                let field = |f: Option<crate::ffmpeg::frame::Video>| {
+                    f.map(|f| {
+                        let alone = Woven {
+                            top_first,
+                            before: None,
+                            after: None,
+                        };
+                        Arc::new(Picture::new(f, l.rotation, None, None).with_woven(alone))
+                    })
+                };
+                picture.with_woven(Woven {
+                    top_first,
+                    before: field(before),
+                    after: field(after),
+                })
+            }
+            None => picture,
+        }
     };
     let mut layers = layers.into_iter();
     let under = made(layers.next().expect("a frame's picture"));
