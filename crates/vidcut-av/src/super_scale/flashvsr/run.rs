@@ -160,18 +160,6 @@ fn texel(deep: bool) -> u64 {
     if deep { 8 } else { 4 }
 }
 
-fn eight(raw: &[u8], deep: bool) -> Vec<u8> {
-    match deep {
-        true => raw
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|c| ((u32::from(u16::from_le_bytes(*c)) + 128) / 257) as u8)
-            .collect(),
-        false => raw.to_vec(),
-    }
-}
-
 struct Enc<'a> {
     gpu: &'a Gpu,
     enc: Option<wgpu::CommandEncoder>,
@@ -760,7 +748,7 @@ impl Stream {
             self.deep = deep;
             self.frames = gpu.buffer((RING * u64::from(g.plane()) * texel(deep)) as usize);
         }
-        if src.size() < u64::from(g.sw * g.sh * 3) * if deep { 2 } else { 1 } {
+        if src.size() < u64::from(g.sw * g.sh) * crate::screen::held::rgb_pixel(deep).1 as u64 {
             return Err(Error::Invalid(format!(
                 "the AI Best upscaler got a picture of {} bytes for {}x{}",
                 src.size(),
@@ -832,7 +820,7 @@ impl Stream {
                 u64::from(base) * size,
                 u64::from(g.plane()) * size,
             )?;
-            let raw = eight(&raw, deep);
+            let raw = crate::screen::held::eight(raw, deep);
             let rgb: Vec<u8> = raw
                 .as_chunks::<4>()
                 .0
@@ -1481,7 +1469,7 @@ impl Stream {
         let half = |count: u32, n: u32| gpu.buffer((count * n * 2) as usize);
         let t1 = gpu.buffer(((BAND + 4) * g.wm * 128 * 2) as usize);
         let t2 = gpu.buffer(((BAND + 2) * g.wm * 128 * 2) as usize);
-        let shown = (g.w * g.h * 3) as usize * if self.deep { 2 } else { 1 };
+        let shown = (g.w * g.h) as usize * crate::screen::held::rgb_pixel(self.deep).1;
         let picture = gpu.buffer(shown);
         let mut frames = Vec::new();
         for j in 0..4u32 {
@@ -1681,7 +1669,7 @@ impl Stream {
                     if let Some(dir) = self.dump.as_ref() {
                         let mut rgb = gpu.read(&out, 0, whole)?;
                         rgb.truncate(shown);
-                        let rgb = eight(&rgb, self.deep);
+                        let rgb = crate::screen::held::eight(rgb, self.deep);
                         crate::npy::write_bytes(
                             &dir.join(format!("frame{index:03}.npy")),
                             &[g.h as usize, g.w as usize, 3],

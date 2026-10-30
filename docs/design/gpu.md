@@ -221,7 +221,7 @@ The scaler of macOS (`macos`):
 `interpolate` makes the frames of Retime Process ([export](export.md#which-source-frame), [deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
 
 - `interpolate::between` takes two RGB pictures on the GPU and a weight. It gives an RGB picture on the GPU.
-- The pictures are 16-bit RGB in the timeline color space (`retime_form`). The kernels read and write 16-bit values (`Ops`).
+- The pictures are 16-bit RGB in the timeline color space (`Form`). The kernels read and write 16-bit values (`Ops`).
 - It runs on the shared off-screen device (`compute::Gpu`), with kernels of its own (`interpolate::ops`).
   - Its kernels and memory go when the last `interpolate::User` goes.
 - The last pair stays on the GPU with its features. Why: the frames between one pair share them.
@@ -235,7 +235,7 @@ On macOS (`interpolate::macos`):
 - Two SDR VideoToolbox frames of a clip with no placed picture reach it on the GPU (`interpolate::takes_frames`). Turned frames turn first (`hw::Turner`).
 - Lanczos sizes them to the size that the picture fills in the frame, before the frame is made.
 - The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
-- Frames that the CPU decoded, HDR frames and the frames of a placed clip go through 16-bit RGB in the timeline color space (`retime_form`).
+- Frames that the CPU decoded, HDR frames and the frames of a placed clip go through 16-bit RGB in the timeline color space (`Form`).
   - The session reads a held picture down from the GPU only for a new pair (`Input::Held`).
   - The next frame between the same pair uses the pair that the session has (`SequentialReferencesUnchanged`).
 

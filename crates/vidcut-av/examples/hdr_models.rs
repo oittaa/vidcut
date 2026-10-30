@@ -1,4 +1,4 @@
-use vidcut_av::hdr_check::{Clip, Model, Row, pictures, run, speed};
+use vidcut_av::hdr_check::{Clip, Model, Row, coding_name, pictures, run, speed};
 use vidcut_core::model::{Hdr, Retime, Upscaler};
 
 fn clips() -> Vec<Clip> {
@@ -23,7 +23,7 @@ fn clips() -> Vec<Clip> {
 
 fn line(r: &Row) {
     println!(
-        "{:<22} {:<11} {:<4} {:<24} {:>7.2} {:>7.2} | {:<11} {:>7.2} {:>7.2} | {:>3}",
+        "{:<22} {:<11} {:<4} {:<32} {:>7.2} {:>7.2} | {:<11} {:>7.2} {:>7.2} | {:>3}",
         r.clip,
         r.test,
         r.coding,
@@ -61,23 +61,45 @@ fn name(m: Model) -> &'static str {
     }
 }
 
+const FORMS: [(bool, Option<Hdr>); 3] = [(false, None), (true, None), (true, Some(Hdr::Pq))];
+
+fn upscalers() -> Vec<Upscaler> {
+    models()
+        .into_iter()
+        .filter_map(|m| match m {
+            Model::Upscaler(u) => Some(u),
+            Model::Retime(_) => None,
+        })
+        .collect()
+}
+
+fn retimes() -> Vec<Retime> {
+    models()
+        .into_iter()
+        .filter_map(|m| match m {
+            Model::Retime(r) if r != Retime::FrameBlend => Some(r),
+            _ => None,
+        })
+        .collect()
+}
+
 fn one_speed(k: usize, form: usize) {
     let clip = &clips()[0];
     let model = models()[k];
-    let forms = [(false, None), (true, None), (true, Some(Hdr::Pq))];
+    let pipe = coding_name(FORMS[form]);
     let dir = vidcut_core::dirs::models();
     let mb = |b: Option<u64>| b.map_or("n/a".into(), |b| format!("{:.0}", b as f64 / 1048576.0));
-    match speed(clip, 30, (model, forms[form]), &dir) {
+    match speed(clip, 30, (model, FORMS[form]), &dir) {
         Ok(s) => println!(
-            "{:<26} {:<10} {:>8.1} {:>9} {:>9} {:>3}",
+            "{:<32} {:<5} {:>8.1} {:>9} {:>9} {:>3}",
             name(model),
-            ["8-bit SDR", "16-bit SDR", "16-bit PQ"][form],
+            pipe,
             s.per_frame.as_secs_f64() * 1e3,
             mb(s.resident),
             mb(s.peak),
             s.frames
         ),
-        Err(e) => println!("{:<26} {:<10} error: {e}", name(model), form),
+        Err(e) => println!("{:<32} {:<5} error: {e}", name(model), pipe),
     }
 }
 
@@ -92,12 +114,12 @@ fn speeds() {
     println!("peak MB: highest GPU memory during the timed pass, with all its outputs held");
     println!("both above the level before the model first ran; Vulkan and DX12 only");
     println!(
-        "{:<26} {:<10} {:>8} {:>9} {:>9} {:>3}",
+        "{:<32} {:<5} {:>8} {:>9} {:>9} {:>3}",
         "model", "pipe", "ms/frame", "resident", "peak", "n"
     );
     let me = std::env::current_exe().expect("this program");
     for k in 0..models().len() {
-        for form in 0..3 {
+        for form in 0..FORMS.len() {
             let out = std::process::Command::new(&me)
                 .args(["speed", &k.to_string(), &form.to_string()])
                 .output()
@@ -122,7 +144,8 @@ fn main() {
         let out = std::path::Path::new(&args[2]);
         std::fs::create_dir_all(out).expect("a folder for the pictures");
         for clip in &clips()[..2] {
-            let made = pictures(clip, 30, 15, &vidcut_core::dirs::models()).expect("pictures");
+            let made = pictures(clip, (30, 15), &upscalers(), &vidcut_core::dirs::models())
+                .expect("pictures");
             for (name, rgb) in made {
                 let file = format!(
                     "{}-{}.rgb48",
@@ -135,21 +158,14 @@ fn main() {
         }
         return;
     }
-    let (upscalers, retimes) = if cfg!(target_os = "macos") {
-        (vec![Upscaler::Macos], vec![Retime::Macos])
-    } else {
-        (
-            vec![Upscaler::AiFast, Upscaler::AiBest],
-            vec![Retime::AiFast, Retime::AiBest],
-        )
-    };
+    let (upscalers, retimes) = (upscalers(), retimes());
     let dir = vidcut_core::dirs::models();
     println!("pipes: PQ or HLG and SDR at 16 bits, SDR8 at 8 bits; references drawn at 1920x1080");
     println!(
         "dE: mean dE ITP (BT.2124), lower is better; PSNR in dB on code values, higher is better"
     );
     println!(
-        "{:<22} {:<11} {:<4} {:<24} {:>7} {:>7} | {:<11} {:>7} {:>7} | {:>3}",
+        "{:<22} {:<11} {:<4} {:<32} {:>7} {:>7} | {:<11} {:>7} {:>7} | {:>3}",
         "clip", "test", "code", "model", "dE", "PSNR", "baseline", "dE", "PSNR", "n"
     );
     for clip in clips() {

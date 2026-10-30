@@ -83,10 +83,6 @@ fn form_of(f: &frame::Video) -> Form {
     )
 }
 
-fn retime_form(timeline: Option<Hdr>) -> Form {
-    (true, timeline)
-}
-
 fn upscale_form(upscaler: Upscaler, timeline: Option<Hdr>) -> Form {
     match upscaler {
         Upscaler::AiFast => (true, timeline),
@@ -849,12 +845,11 @@ type Around<'a> = (Option<&'a frame::Video>, Option<&'a frame::Video>);
 
 pub(crate) fn rgb_picture(
     drawn: &mut Option<Single>,
-    frame: &frame::Video,
+    (frame, path): (&frame::Video, &Path),
     size: (u32, u32),
     (kernel, form): (u32, Form),
 ) -> Result<frame::Video> {
     let look = Look::fitted(size, kernel, form);
-    let path = Path::new("hdr check");
     shown_rgb(
         drawn,
         (frame, (None, None)),
@@ -863,14 +858,6 @@ pub(crate) fn rgb_picture(
         Reading::Frames,
         path,
     )
-}
-
-fn pixel_of((deep, _): Form) -> format::Pixel {
-    if deep {
-        format::Pixel::RGB48LE
-    } else {
-        format::Pixel::RGB24
-    }
 }
 
 fn shown_rgb(
@@ -897,21 +884,9 @@ fn big_picture(
     pts: Option<i64>,
     (deep, hdr): Form,
 ) -> frame::Video {
-    use ffmpeg::util::color::{Primaries, TransferCharacteristic};
-    let (pixel, bytes) = match deep {
-        true => (format::Pixel::RGB48LE, 6),
-        false => (format::Pixel::RGB24, 3),
-    };
+    let (pixel, bytes) = crate::screen::held::rgb_pixel(deep);
     let mut big = crate::buffers::unpacked(pixel, (w, h), bytes, out);
-    big.set_color_range(ffmpeg::util::color::Range::JPEG);
-    big.set_color_space(ffmpeg::util::color::Space::RGB);
-    let (primaries, transfer) = match hdr {
-        None => (Primaries::BT709, TransferCharacteristic::BT709),
-        Some(Hdr::Pq) => (Primaries::BT2020, TransferCharacteristic::SMPTE2084),
-        Some(Hdr::Hlg) => (Primaries::BT2020, TransferCharacteristic::ARIB_STD_B67),
-    };
-    big.set_color_primaries(primaries);
-    big.set_color_transfer_characteristic(transfer);
+    crate::screen::held::tag(&mut big, hdr);
     // SAFETY: a plain field of its own frame.
     unsafe { (*big.as_mut_ptr()).sample_aspect_ratio = ffmpeg::ffi::AVRational { num: 1, den: 1 } };
     big.set_pts(pts);
@@ -1704,7 +1679,7 @@ impl Single {
         );
         screen.encoded(
             gpu,
-            pixel_of(form),
+            crate::screen::held::rgb_pixel(form.0).0,
             (form.1, form.1),
             crate::screen::Sink::Held,
         )
@@ -1737,7 +1712,7 @@ impl Single {
         let form = look.form;
         screen.encoded(
             gpu,
-            pixel_of(form),
+            crate::screen::held::rgb_pixel(form.0).0,
             (form.1, form.1),
             crate::screen::Sink::Held,
         )
@@ -2603,7 +2578,7 @@ impl VideoFrames {
         let scaled = self.scaled_pair(s, layer, reading)?;
         let kernel =
             crate::screen::kernel((!super_scale.is_off()).then_some(super_scale.sharpness));
-        let form = retime_form(self.timeline);
+        let form = (true, self.timeline);
         let start = Instant::now();
         let src = &mut self.open[s];
         let rotation = src.reader.rotation();
@@ -2947,7 +2922,7 @@ mod tests {
 
     use vidcut_core::model::{Hdr, Upscaler};
 
-    use super::{PLAIN, big_picture, fill_black, retime_form, staying, upscale_form};
+    use super::{PLAIN, big_picture, fill_black, staying, upscale_form};
     use crate::ffmpeg::util::color::{Primaries, TransferCharacteristic};
     use crate::ffmpeg::{format::Pixel, frame};
 
@@ -2988,11 +2963,6 @@ mod tests {
     #[test]
     fn ai_best_upscales_8_bit_sdr() {
         assert_eq!(upscale_form(Upscaler::AiBest, Some(Hdr::Pq)), PLAIN);
-    }
-
-    #[test]
-    fn retime_works_in_the_timeline_colors_at_16_bits() {
-        assert_eq!(retime_form(Some(Hdr::Hlg)), (true, Some(Hdr::Hlg)));
     }
 
     const fn secs(s: u64) -> Duration {

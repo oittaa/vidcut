@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use vidcut_core::catalog::{self, Measure};
-use vidcut_core::model::{Hdr, Media, Project, Retime};
+use vidcut_core::catalog;
+use vidcut_core::model::{Project, Retime};
 use vidcut_core::render::{RenderPlan, VideoPiece};
 
 use crate::compute::Gpu;
@@ -111,16 +111,6 @@ pub fn macos_formats() -> Result<Vec<String>> {
     macos::formats()
 }
 
-pub fn unfit(m: &Media, r: Retime, timeline: Option<Hdr>) -> Option<&'static str> {
-    let model = model(r)?;
-    let hdr = crate::super_scale::takes_hdr(m, timeline)?;
-    let verdict = catalog::check(model, &[(Measure::HdrPictures, f64::from(u8::from(hdr)))]);
-    verdict
-        .refusals
-        .first()
-        .map(|_| crate::super_scale::HDR_IN_HDR)
-}
-
 pub fn check<'a>(
     p: &Project,
     plans: impl IntoIterator<Item = &'a RenderPlan>,
@@ -128,9 +118,7 @@ pub fn check<'a>(
     download: bool,
 ) -> Result<()> {
     let mut used: Vec<(Retime, String)> = Vec::new();
-    let mut timeline = None;
     for plan in plans {
-        timeline = timeline.or(plan.colors);
         for piece in &plan.video {
             for (layer, _) in piece.layers() {
                 if let VideoPiece::Source { media, retime, .. } = layer
@@ -157,20 +145,6 @@ pub fn check<'a>(
         return Err(Error::Invalid(format!(
             "{which}: set the Retime Process of {} to {instead}",
             off.join(", ")
-        )));
-    }
-    let refused: Vec<String> = used
-        .iter()
-        .filter_map(|(r, id)| {
-            let m = p.media(id)?;
-            unfit(m, *r, timeline).map(|why| format!("{} ({why}, {})", m.name, r.title()))
-        })
-        .collect();
-    if !refused.is_empty() {
-        return Err(Error::Invalid(format!(
-            "Retime Process takes SDR pictures, so it can't take {}: set their clips' Retime \
-             Process to Nearest, or the Timeline Color Space to SDR",
-            refused.join(", ")
         )));
     }
     let mut models: Vec<Retime> = used.iter().map(|(r, _)| *r).filter(Retime::ai).collect();
@@ -203,7 +177,7 @@ struct Held {
 }
 
 fn rgb_bytes((w, h): (u32, u32), deep: bool) -> u64 {
-    u64::from(w) * u64::from(h) * if deep { 6 } else { 3 }
+    u64::from(w) * u64::from(h) * held::rgb_pixel(deep).1 as u64
 }
 
 struct Engine {
@@ -447,18 +421,6 @@ impl Engine {
     }
 }
 
-fn eight(rgb: Vec<u8>, deep: bool) -> Vec<u8> {
-    match deep {
-        true => rgb
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|c| ((u32::from(u16::from_le_bytes(*c)) + 128) / 257) as u8)
-            .collect(),
-        false => rgb,
-    }
-}
-
 fn dump(name: &str, size: (u32, u32), rgb: &[u8]) -> Result<()> {
     let Some(dir) = std::env::var_os("VIDCUT_INTERPOLATE_DUMP") else {
         return Ok(());
@@ -510,6 +472,13 @@ pub(crate) fn between(
     t: f64,
 ) -> Result<Picture> {
     let clock = Instant::now();
+    let deep = held::deep(a);
+    if deep != held::deep(b) {
+        return Err(Error::Invalid(format!(
+            "{} got an 8-bit and a 16-bit picture",
+            name(r)
+        )));
+    }
     let made = if r == Retime::Macos {
         Picture::Rgb(macos::between(
             key,
@@ -519,13 +488,6 @@ pub(crate) fn between(
             t,
         )?)
     } else {
-        let deep = held::deep(a);
-        if deep != held::deep(b) {
-            return Err(Error::Invalid(format!(
-                "{} got an 8-bit and a 16-bit picture",
-                name(r)
-            )));
-        }
         let pair = (held::held(a)?.buffer(), held::held(b)?.buffer());
         Picture::Held(with_engine(|e| {
             e.hold(r, key, pair, (size, deep))?;
@@ -536,12 +498,19 @@ pub(crate) fn between(
     if std::env::var_os("VIDCUT_INTERPOLATE_DUMP").is_some() {
         let n = DUMPED.fetch_add(1, Ordering::Relaxed);
         let name = format!("{n:04}");
-        let deep = held::deep(a) && held::deep(b);
-        dump(&format!("{name}-a"), size, &eight(held::rgb(a)?, deep))?;
-        dump(&format!("{name}-b"), size, &eight(held::rgb(b)?, deep))?;
+        dump(
+            &format!("{name}-a"),
+            size,
+            &held::eight(held::rgb(a)?, deep),
+        )?;
+        dump(
+            &format!("{name}-b"),
+            size,
+            &held::eight(held::rgb(b)?, deep),
+        )?;
         let out = match &made {
-            Picture::Held(h) => eight(h.read(rgb_bytes(size, deep) as usize)?, deep),
-            Picture::Rgb(rgb) => rgb.clone(),
+            Picture::Held(h) => held::eight(h.read(rgb_bytes(size, deep) as usize)?, deep),
+            Picture::Rgb(rgb) => held::eight(rgb.clone(), deep),
             Picture::Frame(_) => Vec::new(),
         };
         dump(

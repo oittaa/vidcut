@@ -221,7 +221,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Classic has a Sharpness of Low, Medium or High, which selects the upscaler.
   - The first time that a change needs an AI upscaler, vidcut asks to download its weights.
   - AI takes the picture in the timeline color space (§13). In an SDR timeline, HDR media is tone-mapped first.
-  - In an HDR timeline, AI Best and the AI of macOS refuse HDR media, and the Inspector shows a warning (X98).
+  - In an HDR timeline, AI Best and the scaler of macOS refuse HDR media, and the Inspector shows a warning (X98).
   - A placed picture is made at most 4 times as large as its source, before it is placed.
   - A picture that fills the frame takes the better upscaler for all of its enlargement.
   - Super Scale works only where a picture is enlarged. A picture that is made smaller is scaled as before.

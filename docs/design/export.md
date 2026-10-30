@@ -171,7 +171,7 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
 - A made frame of a placed clip is already placed (`Sampling::Placed`). The draw takes only its edges, its opacity and its composite mode from `place::Placing`.
   - The draw uses the placing that the frame was made with. Thus during a drag in the viewer, a made frame moves only when it is made again.
 - An exact source frame, the first frame of a file, a piece played backward and a still take the usual path.
-- The RGB of the pair is 16-bit, in the timeline color space (`retime_form`). In an SDR timeline, an HDR frame is tone-mapped into it.
+- The RGB of the pair is 16-bit, in the timeline color space (`Form`). In an SDR timeline, an HDR frame is tone-mapped into it.
 
 Seeks:
 
