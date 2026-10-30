@@ -56,11 +56,12 @@ pub(crate) fn failed(what: &str, e: Retained<NSError>) -> Error {
 
 pub(crate) fn format_in(list: &NSArray<NSNumber>, what: &str) -> Result<u32> {
     let formats = numbers(list);
+    let names: Vec<String> = formats.iter().map(|f| fourcc(*f)).collect();
+    crate::debug!("ai", "{what} takes {}", names.join(", "));
     [BGRA, NV12, RGHA]
         .into_iter()
         .find(|f| formats.contains(f))
         .ok_or_else(|| {
-            let names: Vec<String> = formats.iter().map(|f| fourcc(*f)).collect();
             Error::Invalid(format!(
                 "{what} takes none of vidcut's pixel formats, only {}",
                 names.join(", ")
