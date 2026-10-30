@@ -32,7 +32,7 @@ const CARD_HEIGHT: f32 = 68.0;
 
 fn paint(painter: &Painter, rect: Rect, kind: PictureTransition) {
     let colors = theme::colors();
-    let (from, to) = (colors.clip, colors.accent);
+    let (from, to) = (colors.track, colors.clip);
     match kind {
         PictureTransition::Dissolve => {
             let mut mesh = Mesh::default();
