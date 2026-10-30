@@ -141,6 +141,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
     - The line times only the last pass over the frames. It leaves out the first pass of a two-pass export and the HDR10+ light measurement.
   - The `[upscale]` lines give the time of each step of each AI Fast chunk.
   - The `[flashvsr]` lines give the time of each step of each AI Best chunk: the input projection, the blocks and the decoder. They also give how many caches are in main memory, how many GB go there and back, and how long AI Best waits for them.
+  - On macOS, an `[ai]` line names the pixel formats that each processor of macOS takes, as four-character codes (`format_in`). A 10-bit or half-float format can carry HDR.
 - A GUI that has not ended 10 s after its window closed (`EXIT_PATIENCE`) tells the stage and the wait state of each thread.
   - Then it aborts under `VIDCUT_DEBUG`. Without `VIDCUT_DEBUG`, it exits with 1.
   - `VIDCUT_DEBUG=1 gdb -q -batch -ex run -ex "thread apply all bt 15" --args target/debug/vidcut -p PROJECT` shows the stack of each thread at the hang.
