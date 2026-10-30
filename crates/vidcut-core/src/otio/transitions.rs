@@ -4,7 +4,10 @@ use std::ops::Range;
 use serde_json::{Value, json};
 
 use super::{EDITOR, VIDCUT, gap, rt, schema};
-use crate::model::{Clip, Media, PictureTransition, Project, Track, Transition, WipeDirection};
+use crate::model::{
+    Clip, Handle, Keyframe, MAX_BORDER, Media, Motion, MotionEase, PictureTransition, Project,
+    PushPreset, SlidePreset, Track, Transition, WHITE, WipeDirection,
+};
 use crate::render::Curve;
 
 pub fn name(t: &Transition) -> String {
@@ -36,6 +39,10 @@ pub fn dip_of(t: &Transition) -> Option<[u8; 3]> {
     (!t.sound).then(|| dip_in(&t.otio)).flatten()
 }
 
+pub fn moving_of(t: &Transition) -> Option<PictureTransition> {
+    (!t.sound).then(|| moving_in(&t.otio)).flatten()
+}
+
 pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
     if let Some(direction) = wipe_of(t) {
         return Some(PictureTransition::Wipe { direction });
@@ -43,43 +50,311 @@ pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
     if let Some(color) = dip_of(t) {
         return Some(PictureTransition::DipToColor { color });
     }
+    if let Some(kind) = moving_of(t) {
+        return Some(kind);
+    }
     (!t.sound && dissolves(t)).then_some(PictureTransition::Dissolve)
 }
 
 pub fn mixes(t: &Transition) -> bool {
-    dissolves(t) || wipe_of(t).is_some() || dip_of(t).is_some()
+    dissolves(t) || wipe_of(t).is_some() || dip_of(t).is_some() || moving_of(t).is_some()
+}
+
+fn custom(name: &str, kind: i64, parameters: Vec<Value>) -> Value {
+    json!({
+        "OTIO_SCHEMA": "Transition.1",
+        "name": name,
+        "transition_type": "Custom_Transition",
+        "metadata": { EDITOR: {
+            "Effects": {
+                "Display Type": 1,
+                "Effect Name": name,
+                "Enabled": true,
+                "Name": name,
+                "Parameters": parameters,
+                "Type": kind,
+            },
+            "Transition Type": name,
+        }}
+    })
+}
+
+fn values<'a>(o: &'a Value, name: &str, kind: i64) -> Option<&'a [Value]> {
+    let editor = &o["metadata"][EDITOR];
+    if !editor["Transition Type"]
+        .as_str()?
+        .eq_ignore_ascii_case(name)
+    {
+        return None;
+    }
+    let effects = &editor["Effects"];
+    Some(match effects["Type"].as_i64() {
+        Some(k) if k == kind => effects["Parameters"].as_array().map_or(&[], Vec::as_slice),
+        _ => &[],
+    })
+}
+
+fn value<'a>(values: &'a [Value], id: &str) -> Option<&'a Value> {
+    values
+        .iter()
+        .find(|p| p["Parameter ID"] == id)
+        .map(|p| &p["Parameter Value"])
+}
+
+fn uint(id: &str, value: usize) -> Value {
+    json!({
+        "Default Parameter Value": 0,
+        "Parameter ID": id,
+        "Parameter Value": value,
+        "Variant Type": "UInt",
+    })
+}
+
+fn double(id: &str, value: f64, max: f64) -> Value {
+    json!({
+        "Default Parameter Value": 0.0,
+        "Key Frames": {},
+        "Parameter ID": id,
+        "Parameter Value": value,
+        "Variant Type": "Double",
+        "maxValue": max,
+        "minValue": 0.0,
+    })
+}
+
+fn color(value: [u8; 3], default: [u8; 3]) -> Value {
+    json!({
+        "Default Parameter Value": crate::model::hex(default),
+        "Parameter ID": "color",
+        "Parameter Value": crate::model::hex(value),
+        "Variant Type": "Color",
+    })
 }
 
 const DIP: &str = "Dip To Color Dissolve";
 
-pub fn dip_otio(color: [u8; 3]) -> Value {
-    json!({
-        "OTIO_SCHEMA": "Transition.1",
-        "name": DIP,
-        "transition_type": "Custom_Transition",
-        "metadata": {
-            EDITOR: {
-                "Effects": {
-                    "Display Type": 1,
-                    "Effect Name": DIP,
-                    "Enabled": true,
-                    "Name": DIP,
-                    "Parameters": [],
-                },
-                "Transition Type": DIP,
-            },
-            VIDCUT: {"color": crate::model::hex(color)},
-        }
-    })
+pub fn dip_otio(c: [u8; 3]) -> Value {
+    let parameters = match c {
+        [0, 0, 0] => Vec::new(),
+        _ => vec![color(c, [0, 0, 0])],
+    };
+    custom(DIP, 11, parameters)
 }
 
 fn dip_in(o: &Value) -> Option<[u8; 3]> {
-    let kind = o["metadata"][EDITOR]["Transition Type"].as_str()?;
-    if !kind.eq_ignore_ascii_case(DIP) {
-        return None;
-    }
-    let color = o["metadata"][VIDCUT]["color"].as_str();
+    let values = values(o, DIP, 11)?;
+    let color = value(values, "color").and_then(Value::as_str);
     Some(color.and_then(crate::subtitles::rgb).unwrap_or([0, 0, 0]))
+}
+
+const PUSH: &str = "Push";
+
+const SLIDE: &str = "Slide";
+
+const PUSHES: [PushPreset; 4] = [
+    PushPreset::Left,
+    PushPreset::Right,
+    PushPreset::Up,
+    PushPreset::Down,
+];
+
+const SLIDES: [SlidePreset; 6] = [
+    SlidePreset::LeftRight,
+    SlidePreset::RightLeft,
+    SlidePreset::BottomUp,
+    SlidePreset::TopDown,
+    SlidePreset::TopLeft,
+    SlidePreset::BottomRight,
+];
+
+const CURVE: &str = "transitionCustomCurvesKeyframes";
+
+const HANDLE: f64 = 0.3;
+
+pub fn eased(ease: MotionEase, frames: i64) -> Vec<Keyframe> {
+    let reach = HANDLE * frames as f64;
+    let flat = |frames: f64| Some(Handle { frames, value: 0.0 });
+    let (slow_in, slow_out) = match ease {
+        MotionEase::In => (true, false),
+        MotionEase::Out => (false, true),
+        MotionEase::InOut => (true, true),
+        _ => (false, false),
+    };
+    vec![
+        Keyframe {
+            frame: 0,
+            value: 0.0,
+            in_handle: None,
+            out_handle: if slow_in { flat(reach) } else { None },
+        },
+        Keyframe {
+            frame: frames,
+            value: 1.0,
+            in_handle: if slow_out { flat(-reach) } else { None },
+            out_handle: None,
+        },
+    ]
+}
+
+fn curve_otio(keys: &[Keyframe]) -> Value {
+    let point =
+        |side: &str, h: &Handle| json!({side: [h.frames, h.value], "Variant Type": "POINTF"});
+    let frames: serde_json::Map<String, Value> = keys
+        .iter()
+        .map(|k| {
+            let mut key = json!({"Value": k.value, "Variant Type": "Double"});
+            if let Some(h) = &k.in_handle {
+                key["InBez"] = point("InBez", h);
+            }
+            if let Some(h) = &k.out_handle {
+                key["OutBez"] = point("OutBez", h);
+            }
+            (k.frame.to_string(), key)
+        })
+        .collect();
+    json!({
+        "Default Parameter Value": 0.0,
+        "Key Frames": frames,
+        "Parameter ID": CURVE,
+        "Parameter Value": 0.0,
+        "Variant Type": "Double",
+        "maxValue": 1.0,
+        "minValue": 0.0,
+    })
+}
+
+fn curve_in(values: &[Value]) -> Vec<Keyframe> {
+    let Some(frames) = values
+        .iter()
+        .find(|p| p["Parameter ID"] == CURVE)
+        .and_then(|p| p["Key Frames"].as_object())
+    else {
+        return Vec::new();
+    };
+    let handle = |key: &Value, side: &str| {
+        let point = key[side][side].as_array()?;
+        Some(Handle {
+            frames: point.first()?.as_f64()?,
+            value: point.get(1)?.as_f64()?,
+        })
+    };
+    let mut keys: Vec<Keyframe> = frames
+        .iter()
+        .filter_map(|(at, key)| {
+            Some(Keyframe {
+                frame: at.trim().parse::<f64>().ok()?.round() as i64,
+                value: key["Value"].as_f64()?,
+                in_handle: handle(key, "InBez"),
+                out_handle: handle(key, "OutBez"),
+            })
+        })
+        .collect();
+    keys.sort_by_key(|k| k.frame);
+    keys
+}
+
+pub fn push_otio(preset: PushPreset, motion: &Motion, frames: i64) -> Value {
+    let style = uint("push style", preset as usize);
+    moving_otio((PUSH, 50), style, None, motion, frames)
+}
+
+pub fn slide_otio(preset: SlidePreset, out: bool, motion: &Motion, frames: i64) -> Value {
+    let style = uint("slide style", preset as usize);
+    let way = out.then(|| uint("transition direction", 1));
+    moving_otio((SLIDE, 49), style, way, motion, frames)
+}
+
+fn moving_otio(
+    (name, type_of): (&str, i64),
+    style: Value,
+    way: Option<Value>,
+    motion: &Motion,
+    frames: i64,
+) -> Value {
+    let mut parameters = Vec::new();
+    if style["Parameter Value"].as_u64() != Some(0) {
+        parameters.push(style);
+    }
+    parameters.extend(way);
+    if motion.border != 0.0 {
+        parameters.push(double("border", motion.border, MAX_BORDER));
+    }
+    if motion.feather {
+        parameters.push(json!({
+            "Default Parameter Value": false,
+            "Parameter ID": "feather",
+            "Parameter Value": true,
+            "Variant Type": "Bool",
+        }));
+    }
+    if motion.color != WHITE {
+        parameters.push(color(motion.color, WHITE));
+    }
+    if motion.motion_blur != 0.0 {
+        parameters.push(double("motion blur", motion.motion_blur, 1.0));
+    }
+    if !motion.ease.is_none() {
+        parameters.push(uint("ease", motion.ease as usize));
+    }
+    let keys = match motion.ease {
+        MotionEase::Custom => motion.curve.clone(),
+        e => eased(e, frames),
+    };
+    if !keys.is_empty() {
+        parameters.push(curve_otio(&keys));
+    }
+    custom(name, type_of, parameters)
+}
+
+fn moving_in(o: &Value) -> Option<PictureTransition> {
+    let index = |values: &[Value], id: &str| match value(values, id) {
+        None => Some(0),
+        Some(v) => usize::try_from(v.as_u64()?).ok(),
+    };
+    let motion = |values: &[Value]| -> Option<Motion> {
+        let number = |id: &str| value(values, id).and_then(Value::as_f64).unwrap_or(0.0);
+        let ease = *MotionEase::ALL.get(index(values, "ease")?)?;
+        Some(Motion {
+            border: number("border"),
+            feather: value(values, "feather").and_then(Value::as_bool) == Some(true),
+            color: value(values, "color")
+                .and_then(Value::as_str)
+                .and_then(crate::subtitles::rgb)
+                .unwrap_or(WHITE),
+            motion_blur: number("motion blur"),
+            ease,
+            curve: match ease {
+                MotionEase::Custom => curve_in(values),
+                _ => Vec::new(),
+            },
+        })
+    };
+    if let Some(values) = values(o, PUSH, 50) {
+        return Some(PictureTransition::Push {
+            preset: *PUSHES.get(index(values, "push style")?)?,
+            motion: motion(values)?,
+        });
+    }
+    let values = values(o, SLIDE, 49)?;
+    Some(PictureTransition::Slide {
+        preset: *SLIDES.get(index(values, "slide style")?)?,
+        out: match index(values, "transition direction")? {
+            0 => false,
+            1 => true,
+            _ => return None,
+        },
+        motion: motion(values)?,
+    })
+}
+
+pub fn progress_keys(o: &Value, frames: i64) -> Option<Vec<Keyframe>> {
+    let kind = moving_in(o)?;
+    let motion = kind.motion()?;
+    if motion.ease.is_none() {
+        return Some(eased(MotionEase::None, frames));
+    }
+    let values = values(o, PUSH, 50).or_else(|| values(o, SLIDE, 49))?;
+    Some(curve_in(values))
 }
 
 const EDGE_WIPE: &str = "Edge Wipe";
@@ -154,7 +429,7 @@ pub(super) fn plays_in(o: &Value, sound: bool) -> bool {
     if sound {
         cross_fade_in(o).is_some()
     } else {
-        dissolves_in(o) || wipe_in(o).is_some() || dip_in(o).is_some()
+        dissolves_in(o) || wipe_in(o).is_some() || dip_in(o).is_some() || moving_in(o).is_some()
     }
 }
 

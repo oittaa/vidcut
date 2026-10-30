@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::model::{
     Clip, ClipRetime, ColorSpace, DuckDetect, Hdr, Keyframe, Media, MediaSuperScale, Picture,
-    Project, Retime, Section, Settings, SuperScale, TimelineColors, Title, TrackKind,
-    WipeDirection,
+    PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset, SuperScale,
+    TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -295,6 +295,11 @@ pub struct Over {
     /// below them together.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cross: bool,
+    /// A side of a Push or a Slide. The outgoing side and the incoming
+    /// side after it move over each other, then go over what is below them
+    /// together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion: Option<Move>,
 }
 
 /// A clip's picture as it goes over the frame.
@@ -453,6 +458,205 @@ pub fn wipe_shows_incoming(
         WipeDirection::Right => x * d >= (d - n) * w,
         WipeDirection::Up => y * d < n * h,
         WipeDirection::Down => y * d >= (d - n) * h,
+    }
+}
+
+/// The way the pictures of a Push or a Slide go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Way {
+    Push(PushPreset),
+    /// The incoming picture slides in.
+    Slide(SlidePreset),
+    /// The outgoing picture slides out.
+    SlideOut(SlidePreset),
+}
+
+/// How a Push or a Slide moves its two pictures.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Move {
+    pub way: Way,
+    /// The band on the moving edge, as a part of the shorter side of the
+    /// frame.
+    #[serde(default, skip_serializing_if = "zero_f64")]
+    pub border: f64,
+    /// The band fades one picture into the other.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub feather: bool,
+    pub color: [u8; 3],
+    /// The motion blur, from 0 to 1.
+    #[serde(default, skip_serializing_if = "zero_f64")]
+    pub blur: f64,
+    /// The progress of the move, from 0 to 1, at frames from the start of
+    /// the transition.
+    pub keys: Vec<Keyframe>,
+}
+
+fn zero_f64(n: &f64) -> bool {
+    *n == 0.0
+}
+
+impl Move {
+    fn of(d: &transitions::Playing) -> Option<Self> {
+        let kind = transitions::moving_of(d.transition)?;
+        let keys = transitions::progress_keys(&d.transition.otio, d.frames.1 - d.frames.0)?;
+        let (way, motion) = match kind {
+            PictureTransition::Push { preset, motion } => (Way::Push(preset), motion),
+            PictureTransition::Slide {
+                preset,
+                out,
+                motion,
+            } => match out {
+                false => (Way::Slide(preset), motion),
+                true => (Way::SlideOut(preset), motion),
+            },
+            _ => return None,
+        };
+        Some(Self {
+            way,
+            border: motion.border.clamp(0.0, crate::model::MAX_BORDER),
+            feather: motion.feather,
+            color: motion.color,
+            blur: motion.motion_blur.clamp(0.0, 1.0),
+            keys,
+        })
+    }
+
+    pub fn at(&self, ramp: &Ramp, k: i64) -> Moving {
+        let f = (ramp.at + k) as f64;
+        let p = |f: f64| crate::keyframes::value_at(&self.keys, f).unwrap_or(0.0);
+        Moving {
+            way: self.way,
+            progress: p(f),
+            step: p(f + 1.0) - p(f),
+            border: self.border,
+            feather: self.feather,
+            color: self.color,
+            blur: self.blur,
+        }
+    }
+}
+
+/// A frame of a [`Move`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Moving {
+    pub way: Way,
+    pub progress: f64,
+    pub step: f64,
+    pub border: f64,
+    pub feather: bool,
+    pub color: [u8; 3],
+    pub blur: f64,
+}
+
+pub type MovingKey = (Way, [u64; 4], bool, [u8; 3]);
+
+/// Where the two pictures of a [`Moving`] are, in pixels of the frame.
+/// The upper picture carries the band on the edges that face the lower
+/// picture.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shift {
+    pub upper_in: bool,
+    pub upper: [f64; 2],
+    pub lower: [f64; 2],
+    pub picture: [f64; 4],
+    pub band: [f64; 4],
+    pub facing: [f64; 2],
+    pub edge: [f64; 2],
+    pub border: f64,
+    pub feather: bool,
+    pub blur: [f64; 3],
+    pub mixes_blur: bool,
+    pub still: bool,
+}
+
+fn push_sign(preset: PushPreset) -> [f64; 2] {
+    match preset {
+        PushPreset::Left => [1.0, 0.0],
+        PushPreset::Right => [-1.0, 0.0],
+        PushPreset::Up => [0.0, -1.0],
+        PushPreset::Down => [0.0, 1.0],
+    }
+}
+
+fn slide_sign(preset: SlidePreset) -> [f64; 2] {
+    match preset {
+        SlidePreset::LeftRight => [1.0, 0.0],
+        SlidePreset::RightLeft => [-1.0, 0.0],
+        SlidePreset::BottomUp => [0.0, -1.0],
+        SlidePreset::TopDown => [0.0, 1.0],
+        SlidePreset::TopLeft => [1.0, 1.0],
+        SlidePreset::BottomRight => [-1.0, -1.0],
+    }
+}
+
+impl Moving {
+    pub fn key(&self) -> MovingKey {
+        let bits = [self.progress, self.step, self.border, self.blur].map(f64::to_bits);
+        (self.way, bits, self.feather, self.color)
+    }
+
+    pub fn shift(&self, (w, h): (u32, u32)) -> Shift {
+        let size = [f64::from(w), f64::from(h)];
+        let b = self.border * size[0].min(size[1]);
+        let p = self.progress;
+        let (sign, push, out) = match self.way {
+            Way::Push(preset) => (push_sign(preset), true, false),
+            Way::Slide(preset) => (slide_sign(preset), false, false),
+            Way::SlideOut(preset) => (slide_sign(preset), false, true),
+        };
+        let (mut upper, mut lower, mut facing) = ([0.0; 2], [0.0; 2], [0.0; 2]);
+        for a in 0..2 {
+            let s = sign[a];
+            if s == 0.0 {
+                continue;
+            }
+            let m = p * (size[a] + b);
+            facing[a] = if out { -s } else { s };
+            upper[a] = if out { s * m } else { s * (m - size[a] - b) };
+            lower[a] = if push { s * m } else { 0.0 };
+            if self.feather {
+                upper[a] += facing[a] * b;
+                if push {
+                    lower[a] -= facing[a] * b;
+                }
+            }
+        }
+        let picture = [upper[0], upper[1], upper[0] + size[0], upper[1] + size[1]];
+        let grown = |a: usize, side: f64| match self.feather {
+            false if facing[a] == side => b,
+            _ => 0.0,
+        };
+        let band = [
+            picture[0] - grown(0, -1.0),
+            picture[1] - grown(1, -1.0),
+            picture[2] + grown(0, 1.0),
+            picture[3] + grown(1, 1.0),
+        ];
+        let edge = [0, 1].map(|a| match facing[a] > 0.0 {
+            true => picture[a + 2],
+            false => picture[a],
+        });
+        let way = [sign[0], if sign[0] == 0.0 { -sign[1] } else { sign[1] }];
+        let reach = way[0].hypot(way[1]).max(1.0);
+        Shift {
+            upper_in: !out,
+            upper: upper.map(f64::trunc),
+            lower: lower.map(f64::trunc),
+            picture,
+            band,
+            facing,
+            edge,
+            border: b,
+            feather: self.feather,
+            blur: [
+                way[0] / reach,
+                way[1] / reach,
+                self.blur * 2.0 * size[1] * self.step.abs(),
+            ],
+            mixes_blur: !push,
+            still: self.feather && p <= 0.0,
+        }
     }
 }
 
@@ -630,6 +834,18 @@ impl VideoPiece {
         }
     }
 
+    pub fn motions(&self) -> Vec<Option<&Move>> {
+        match self {
+            Self::Mix { under, over } => under
+                .motions()
+                .into_iter()
+                .chain(over.iter().map(|o| o.motion.as_ref()))
+                .collect(),
+            Self::Titled { under, .. } => under.motions(),
+            _ => vec![None],
+        }
+    }
+
     pub fn crosses(&self) -> Vec<bool> {
         match self {
             Self::Mix { under, over } => under
@@ -724,6 +940,7 @@ impl VideoPiece {
                         piece: o.piece.part(k, frames),
                         ramp: o.ramp.map(|r| r.after(k)),
                         cross: o.cross,
+                        motion: o.motion.clone(),
                     })
                     .collect(),
             },
@@ -777,6 +994,7 @@ impl VideoPiece {
                     && over.iter().zip(o2).all(|(a, b)| {
                         a.ramp.map(|r| r.after(k)) == b.ramp
                             && a.cross == b.cross
+                            && a.motion == b.motion
                             && a.piece.goes_on_as(&b.piece)
                     })
             }
@@ -1443,6 +1661,7 @@ enum Layer {
     Picture(VideoPiece, Option<Ramp>),
     Placed(VideoPiece, Option<Ramp>),
     Crossing(VideoPiece, Option<Ramp>),
+    Moved(VideoPiece, Ramp, Move, bool),
     Title(Box<ShownTitle>),
 }
 
@@ -1450,7 +1669,8 @@ impl Layer {
     fn inside(&self, outer: &[Placed]) -> bool {
         match self {
             Layer::Placed(VideoPiece::Source { placed, .. }, _)
-            | Layer::Crossing(VideoPiece::Source { placed, .. }, _) => {
+            | Layer::Crossing(VideoPiece::Source { placed, .. }, _)
+            | Layer::Moved(VideoPiece::Source { placed, .. }, ..) => {
                 placed.len() > outer.len() && placed.ends_with(outer)
             }
             Layer::Title(t) => !outer.is_empty() && t.placed.ends_with(outer),
@@ -1598,6 +1818,31 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     };
                     stack = vec![Layer::Picture(backdrop, None), picture];
                 }
+                Some(d) if let Some(m) = Move::of(d) => {
+                    let ramp = |falling| Ramp {
+                        at: x - d.frames.0,
+                        of: d.frames.1 - d.frames.0,
+                        falling,
+                        wipe: None,
+                    };
+                    let below = !stack.is_empty();
+                    let side = |c: Option<&Clip>| -> Result<(VideoPiece, bool)> {
+                        Ok(match c.filter(shows) {
+                            Some(c) => match shown(c, None, below)? {
+                                Layer::Picture(p, _) => (p, true),
+                                Layer::Placed(p, _) => (p, false),
+                                _ => unreachable!("a clip shows as a picture"),
+                            },
+                            None => (VideoPiece::black(y - x), true),
+                        })
+                    };
+                    let ((f, whole_f), (g, whole_g)) = (side(d.before)?, side(d.after)?);
+                    if whole_f && whole_g {
+                        stack.clear();
+                    }
+                    stack.push(Layer::Moved(f, ramp(true), m.clone(), false));
+                    stack.push(Layer::Moved(g, ramp(false), m, true));
+                }
                 Some(d) => {
                     let wipe = transitions::wipe_of(d.transition);
                     let ramp = |falling| Ramp {
@@ -1700,11 +1945,19 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     piece: shown,
                     ramp,
                     cross: false,
+                    motion: None,
                 }),
                 Layer::Crossing(shown, ramp) => piece.with_over(Over {
                     piece: shown,
                     ramp,
                     cross: true,
+                    motion: None,
+                }),
+                Layer::Moved(shown, ramp, m, cross) => piece.with_over(Over {
+                    piece: shown,
+                    ramp: Some(ramp),
+                    cross,
+                    motion: Some(m),
                 }),
                 Layer::Title(t) => piece.with_title(*t),
             };

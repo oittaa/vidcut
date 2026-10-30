@@ -593,6 +593,7 @@ mod tests {
             picture: of_pool(pool),
             weight: 1,
             wipe: None,
+            moving: None,
         };
         Arc::new(on_gpu().with_over(vec![over]))
     }

@@ -39,6 +39,7 @@ flowchart TD
 - `render::flatten_lanes` makes the `RenderPlan` of the timeline: video pieces, audio lanes, and a `LaneTrack` for each lane.
   - A dissolve or a placed picture is a `VideoPiece::Mix`. A title is a `VideoPiece::Titled`.
   - A dip to color is two halves over a `VideoPiece::Black` of its color. The outgoing picture falls over the first half, the incoming one rises over the second.
+  - A Push or a Slide is two layers with the same `render::Move`: the outgoing side, then the incoming side marked `cross`. The `Move` holds the way, the values and the keys of the progress (`transitions::progress_keys`).
 - The source viewer plays `render::tape`.
 - Where the project plays proxies (spec D41), `preview::apply_proxies` puts in the video of fresh proxies. Proxy frames keep the timestamps of their sources, so the player picks the same frames. The sound stays on the originals.
 - After each edit or file reload, `Live::project_changed` reloads the source plan and schedules `Live::refresh_timeline_at`. Thus a burst of edits makes one plan.
@@ -63,7 +64,7 @@ flowchart TD
 - It also holds the fader `trims`, the mute, a `scrub` request, a followed position (`Player::follow`) and the `prepared` frame.
 - A `looping` range (`Player::set_loop`, spec D51) keeps `Mode::Playing` going past its end. The audio thread reads on from the start, and queues the `Marker` of the jump. Thus the ring and the clock run on.
 - `player::plan::Plan` gives each frame an `Id`. The `Id` names what the picture shows (file, color reading, source position, layers over it), not where it shows. Thus kept pictures survive edits that move them.
-  - Each layer over it adds its level and the edge of its wipe. Why: a change of a wipe's edge keeps the level, and the picture is a new one.
+  - Each layer over it adds its level, the edge of its wipe and the frame of its move (`Moving::key`). Why: a change of a wipe's edge or of a Border keeps the level, and the picture is a new one.
 
 **Decoding**
 
@@ -98,6 +99,7 @@ flowchart TD
 - The engine does not mix. A `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) for each layer on top. Each layer is as decoded.
 - The viewer blends the layers as it draws, in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), as an export does ([export](export.md#timeline-colors)). `Shown::colors` carries that space (`RenderPlan::colors`).
 - A wipe draws a part of each side (`shown_part`), in the timeline color space too.
+- A Push or a Slide gives each layer the frame of its move (`Move::at`, `Over::moving`). The viewer moves the two sides as it draws.
 - Placed pictures ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) are layers of a `VideoPiece::Mix`. Their placement is not in the kept pictures.
   - `Player::present` hands the `Placed` pictures of each layer with the frame (`Shown`, `Plan::placed_at`). Thus a move or a zoom keeps the frames decoded.
   - For a Dynamic Zoom, `Plan::placed_at` moves the `Run` of each `Placed` picture to the frame.
@@ -224,6 +226,13 @@ The audio device:
   - The two sides of a dissolve with a placed picture add into a picture of their own (`Mixing`). `fs_paired` lays it over the copy of the canvas. Thus a mix below 0 is not clipped before it goes over.
   - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips.
   - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
+  - The two sides of a Push or a Slide draw into two pictures of their own (`Moves`), each over transparent.
+    - `fs_motion` then lays them over the canvas, premultiplied. `Moving::shift` gives where each side is, in pixels of the frame.
+    - Each side moves by whole pixels. The band comes from the exact edges, on top.
+    - A feather fades the upper side linearly across the band. In a corner, the smaller of the two fades applies.
+    - The motion blur is a box along the move, with one tap for each pixel of its length, up to 512. Taps past the frame repeat its edge pixels.
+    - A Push blurs the whole result. A Slide mixes the blur in by the part of the box that the moving side covers.
+    - Why: these rules give Resolve's renders within about 1 pixel ([gotchas](../gotchas.md#resolves-otio-files)).
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
 - A present answers with the frame drawn, if it is exact. A `gui.screenshot` of the viewer reads the target back, to the pixel.
 - Submissions go through `Gate::pass`. They wait until the UI thread runs `logic` or `ui`, because eframe configures the surface of the window outside these. If the UI is away for long, submissions do not wait.

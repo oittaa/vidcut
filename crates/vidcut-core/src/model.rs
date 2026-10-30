@@ -1132,7 +1132,7 @@ pub struct Transition {
 }
 
 /// How the pictures of a transition meet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PictureTransition {
     /// A cross dissolve.
@@ -1147,6 +1147,135 @@ pub enum PictureTransition {
     },
     /// One wipe, from `direction`.
     Wipe { direction: WipeDirection },
+    /// The incoming picture pushes the outgoing picture out of the frame.
+    Push {
+        preset: PushPreset,
+        #[serde(flatten)]
+        motion: Motion,
+    },
+    /// The incoming picture slides in over the outgoing picture, or with
+    /// `out` the outgoing picture slides out over the incoming picture.
+    Slide {
+        preset: SlidePreset,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        out: bool,
+        #[serde(flatten)]
+        motion: Motion,
+    },
+}
+
+/// The way the pictures of a Push go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PushPreset {
+    /// The pictures move right: the incoming picture comes in from the left.
+    Left,
+    /// The pictures move left: the incoming picture comes in from the right.
+    Right,
+    /// The pictures move up: the incoming picture comes in from the bottom.
+    Up,
+    /// The pictures move down: the incoming picture comes in from the top.
+    Down,
+}
+
+/// The edge or the corner that a Slide comes in from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SlidePreset {
+    /// From the left edge toward the right.
+    LeftRight,
+    /// From the right edge toward the left.
+    RightLeft,
+    /// From the bottom edge toward the top.
+    BottomUp,
+    /// From the top edge toward the bottom.
+    TopDown,
+    /// From the top-left corner toward the bottom-right.
+    TopLeft,
+    /// From the bottom-right corner toward the top-left.
+    BottomRight,
+}
+
+/// The values of a Push or a Slide.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Motion {
+    /// A band of `color` on the moving edge, as a part of the shorter side
+    /// of the frame, from 0 to 0.25.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub border: f64,
+    /// The band fades one picture into the other and shows no color.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub feather: bool,
+    /// The color of the band, `#rrggbb`. White if left out.
+    #[serde(default = "white", with = "hex_rgb", skip_serializing_if = "is_white")]
+    #[schemars(with = "String")]
+    pub color: [u8; 3],
+    /// A blur along the move, from 0 to 1.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub motion_blur: f64,
+    /// How the move speeds up and slows down.
+    #[serde(default, skip_serializing_if = "MotionEase::is_none")]
+    pub ease: MotionEase,
+    /// With a `custom` ease, the keys of the move: from 0, the outgoing
+    /// picture, to 1, the incoming picture, at frames from the start of the
+    /// transition. Without keys, the transition stays on the outgoing
+    /// picture.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub curve: Vec<Keyframe>,
+}
+
+impl Motion {
+    pub const PLAIN: Motion = Motion {
+        border: 0.0,
+        feather: false,
+        color: WHITE,
+        motion_blur: 0.0,
+        ease: MotionEase::None,
+        curve: Vec::new(),
+    };
+}
+
+impl Default for Motion {
+    fn default() -> Self {
+        Self::PLAIN
+    }
+}
+
+pub const WHITE: [u8; 3] = [255, 255, 255];
+
+pub const MAX_BORDER: f64 = 0.25;
+
+fn white() -> [u8; 3] {
+    WHITE
+}
+
+fn is_white(c: &[u8; 3]) -> bool {
+    *c == WHITE
+}
+
+/// How the move of a Push or a Slide goes over its frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionEase {
+    /// At one speed.
+    #[default]
+    None,
+    /// Slow at the start.
+    In,
+    /// Slow at the end.
+    Out,
+    /// Slow at the start and at the end.
+    InOut,
+    /// As the keys of `curve` give.
+    Custom,
+}
+
+impl MotionEase {
+    pub const ALL: [MotionEase; 5] = [Self::None, Self::In, Self::Out, Self::InOut, Self::Custom];
+
+    pub fn is_none(&self) -> bool {
+        *self == Self::None
+    }
 }
 
 pub fn hex([r, g, b]: [u8; 3]) -> String {
@@ -1167,6 +1296,20 @@ mod hex_rgb {
 impl PictureTransition {
     pub fn is_dissolve(&self) -> bool {
         matches!(self, Self::Dissolve)
+    }
+
+    pub fn motion(&self) -> Option<&Motion> {
+        match self {
+            Self::Push { motion, .. } | Self::Slide { motion, .. } => Some(motion),
+            _ => None,
+        }
+    }
+
+    pub fn motion_mut(&mut self) -> Option<&mut Motion> {
+        match self {
+            Self::Push { motion, .. } | Self::Slide { motion, .. } => Some(motion),
+            _ => None,
+        }
     }
 }
 

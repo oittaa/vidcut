@@ -4,14 +4,14 @@
 
 The Cut page has separate tabs for transitions, titles and effects (p. 636). vidcut follows it.
 
-- The Transitions tab, the Transition Inspector and Dip To Color Dissolve are there ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)). An Effects tab comes next.
+- The Transitions tab, the Transition Inspector, Dip To Color Dissolve, Push and Slide are there ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)). An Effects tab comes next.
 - If the bar gets too full, one Effects tab with categories can replace the tabs, as the Edit page has (p. 802).
 
 Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
-1. **Push and Slide,** with their values in the Inspector.
-   - Resolve's OTIO for Push, Slide and the color of a Dip To Color Dissolve comes from a Resolve export. Until then, vidcut writes the dip's color in its own metadata.
-   - The direction of each Push and Slide preset comes from the same test.
+1. **The Transition Curve of Push and Slide** in the Inspector.
+   - A Custom ease plays the keys of its curve. A request and an OTIO file can give the keys.
+   - The Inspector has no curve editor yet. Thus a Custom ease set in the Inspector has no keys, and the transition stays on the outgoing picture, as in Resolve.
 2. **Smooth Cut** (p. 759). It hides a jump cut with the frame interpolation of Retime Process.
 3. **Effects tab and clip effects** (p. 765).
    - A drag onto a clip adds the effect. A double-click adds it to the selected clip.

@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, PictureTransition, Project, TrackKind, Transition};
+use crate::model::{
+    Clip, MAX_BORDER, MotionEase, PictureTransition, Project, TrackKind, Transition,
+};
 use crate::otio::transitions::{self, Cuts};
 
 /// Where a dissolve goes about its edit (decision D50).
@@ -52,7 +54,7 @@ fn wanted(shape: Shape, outgoing: bool, incoming: bool) -> Option<(i64, i64)> {
     }
 }
 
-fn otio(sound: bool, frames: i64, kind: PictureTransition) -> Value {
+fn otio(sound: bool, frames: i64, kind: &PictureTransition) -> Value {
     if sound {
         return json!({
             "OTIO_SCHEMA": "Transition.1",
@@ -103,9 +105,44 @@ fn otio(sound: bool, frames: i64, kind: PictureTransition) -> Value {
     });
     match kind {
         PictureTransition::Dissolve => dissolve,
-        PictureTransition::DipToColor { color } => crate::otio::transitions::dip_otio(color),
-        PictureTransition::Wipe { direction } => crate::otio::transitions::wipe_otio(direction),
+        PictureTransition::DipToColor { color } => transitions::dip_otio(*color),
+        PictureTransition::Wipe { direction } => transitions::wipe_otio(*direction),
+        PictureTransition::Push { preset, motion } => {
+            transitions::push_otio(*preset, motion, frames)
+        }
+        PictureTransition::Slide {
+            preset,
+            out,
+            motion,
+        } => transitions::slide_otio(*preset, *out, motion, frames),
     }
+}
+
+fn checked(kind: &PictureTransition) -> Result<()> {
+    let Some(m) = kind.motion() else {
+        return Ok(());
+    };
+    if !(0.0..=MAX_BORDER).contains(&m.border) {
+        return Err(Error::invalid(format!(
+            "a border is from 0 to {MAX_BORDER}"
+        )));
+    }
+    if !(0.0..=1.0).contains(&m.motion_blur) {
+        return Err(Error::invalid("a motion blur is from 0 to 1"));
+    }
+    if !m.curve.is_empty() && m.ease != MotionEase::Custom {
+        return Err(Error::invalid("a curve goes with the custom ease only"));
+    }
+    let finite = |h: &crate::model::Handle| h.frames.is_finite() && h.value.is_finite();
+    let fits = |k: &crate::model::Keyframe| {
+        (0.0..=1.0).contains(&k.value) && k.in_handle.iter().chain(&k.out_handle).all(finite)
+    };
+    if !m.curve.iter().all(fits) {
+        return Err(Error::invalid(
+            "a key of a curve is from 0 to 1, with finite handles",
+        ));
+    }
+    Ok(())
 }
 
 fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
@@ -248,7 +285,7 @@ fn put(
     sound: bool,
     e: i64,
     shape: Shape,
-    kind: PictureTransition,
+    kind: &PictureTransition,
 ) -> Option<Made> {
     let (from, to, before, after) = plan(p, ti, sound, e, shape)?;
     let mut t = Transition {
@@ -294,8 +331,9 @@ pub fn dissolve(
     picture: bool,
     sound: bool,
     all: bool,
-    kind: PictureTransition,
+    kind: &PictureTransition,
 ) -> Result<Vec<Made>> {
+    checked(kind)?;
     let ti = p
         .track_index(track)
         .ok_or_else(|| Error::not_found(format!("no track {track}")))?;
@@ -339,7 +377,7 @@ pub fn cross_fade_joins(p: &mut Project, joins: &[(usize, i64)]) -> Vec<Made> {
     let mut made = Vec::new();
     for &(ti, e) in joins {
         let shape = Shape::Length(2, Align::Center);
-        let Some(m) = put(p, ti, true, e, shape, PictureTransition::Dissolve) else {
+        let Some(m) = put(p, ti, true, e, shape, &PictureTransition::Dissolve) else {
             continue;
         };
         if let Some(t) = p.tracks[ti].transitions.iter_mut().find(|t| t.id == m.id) {
@@ -375,8 +413,9 @@ pub fn dissolve_clips(
     shape: Shape,
     picture: bool,
     sound: bool,
-    kind: PictureTransition,
+    kind: &PictureTransition,
 ) -> Result<Vec<Made>> {
+    checked(kind)?;
     let mut points: Vec<(usize, bool, i64)> = p
         .tracks
         .iter()
@@ -421,7 +460,7 @@ fn at_edit(
     sound: bool,
     e: i64,
     shape: Shape,
-    kind: PictureTransition,
+    kind: &PictureTransition,
 ) -> Vec<Made> {
     let mut made = Vec::new();
     let sound_e = if pictures {
@@ -455,8 +494,9 @@ pub fn set_transition(
     p: &mut Project,
     track: &str,
     at: i64,
-    kind: PictureTransition,
+    kind: &PictureTransition,
 ) -> Result<Made> {
+    checked(kind)?;
     let ti = p
         .track_index(track)
         .ok_or_else(|| Error::not_found(format!("no track {track}")))?;
@@ -889,7 +929,7 @@ mod tests {
             true,
             false,
             false,
-            crate::model::PictureTransition::Dissolve,
+            &crate::model::PictureTransition::Dissolve,
         );
         assert!(made.is_err());
     }
@@ -903,7 +943,7 @@ mod tests {
             super::Shape::Length(25, super::Align::Center),
             true,
             false,
-            crate::model::PictureTransition::Dissolve,
+            &crate::model::PictureTransition::Dissolve,
         )
         .unwrap_err();
         assert_eq!(
