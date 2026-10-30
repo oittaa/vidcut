@@ -1149,10 +1149,8 @@ pub fn retime_at(chosen: ClipRetime, speed: f64, m: &Media, s: &Settings) -> Ret
         return Retime::Nearest;
     }
     let slow = speed > 0.0 && speed < 1.0;
-    let sdr = m.video_as_read().is_some_and(|v| v.hdr.is_none());
-    let ai = Retime::ai_here();
-    let auto = match slow && (sdr || ai != Retime::Macos) {
-        true => ai,
+    let auto = match slow {
+        true => Retime::ai_here(),
         false => Retime::Nearest,
     };
     chosen
@@ -2228,16 +2226,15 @@ mod tests {
         assert_eq!(transitions::heard_at(&fades, &t.clips[1], 49), Some(0.5));
     }
 
-    #[cfg(not(target_os = "macos"))]
     #[test]
-    fn auto_gives_hdr_slow_motion_ai_fast() {
+    fn auto_gives_hdr_slow_motion_the_ai_of_this_computer() {
         let f = fixture();
         let p = f.editor.project();
         let mut m = p.media("m1").unwrap().clone();
         m.info.video.as_mut().unwrap().hdr = Some(crate::model::Hdr::Pq);
         assert_eq!(
             retime_at(ClipRetime::Project, 0.5, &m, &p.settings),
-            Retime::AiFast
+            Retime::ai_here()
         );
     }
 

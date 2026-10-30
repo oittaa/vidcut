@@ -170,11 +170,8 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
 - The key of a pair names its placing (`Source::look_id`). Thus a new placing gets new features.
 - A made frame of a placed clip is already placed (`Sampling::Placed`). The draw takes only its edges, its opacity and its composite mode from `place::Placing`.
   - The draw uses the placing that the frame was made with. Thus during a drag in the viewer, a made frame moves only when it is made again.
-- These take the usual path:
-  - an exact source frame, the first frame of a file, a piece played backward and a still;
-  - an HDR frame in an HDR timeline, with the AI of macOS.
-- The RGB of the pair is in the timeline color space (`retime_form`). In an SDR timeline, an HDR frame is tone-mapped into it.
-- With the AI of macOS, the RGB is 8-bit SDR. The draw converts the made frame into the timeline color space ([X98](../deviations.md#x98-in-an-hdr-timeline-ai-best-and-the-ai-of-macos-work-before-the-conversion)).
+- An exact source frame, the first frame of a file, a piece played backward and a still take the usual path.
+- The RGB of the pair is 16-bit, in the timeline color space (`retime_form`). In an SDR timeline, an HDR frame is tone-mapped into it.
 
 Seeks:
 

@@ -83,11 +83,8 @@ fn form_of(f: &frame::Video) -> Form {
     )
 }
 
-fn retime_form(r: Retime, timeline: Option<Hdr>) -> Form {
-    match r {
-        Retime::Macos => PLAIN,
-        _ => (true, timeline),
-    }
+fn retime_form(timeline: Option<Hdr>) -> Form {
+    (true, timeline)
 }
 
 fn upscale_form(upscaler: Upscaler, timeline: Option<Hdr>) -> Form {
@@ -2598,13 +2595,7 @@ impl VideoFrames {
             }
             _ => None,
         };
-        let hdr = *retime == Retime::Macos
-            && self.timeline.is_some()
-            && src
-                .current
-                .as_ref()
-                .is_some_and(|(f, _)| crate::color::Source::of(f).hdr.is_some());
-        let Some(weight) = weight.filter(|w| *w > 1e-6 && !hdr) else {
+        let Some(weight) = weight.filter(|w| *w > 1e-6) else {
             return self.shown(i, s, layer, changed);
         };
         let (w, h, _) = self.maker.out();
@@ -2612,7 +2603,7 @@ impl VideoFrames {
         let scaled = self.scaled_pair(s, layer, reading)?;
         let kernel =
             crate::screen::kernel((!super_scale.is_off()).then_some(super_scale.sharpness));
-        let form = retime_form(*retime, self.timeline);
+        let form = retime_form(self.timeline);
         let start = Instant::now();
         let src = &mut self.open[s];
         let rotation = src.reader.rotation();
@@ -2954,7 +2945,7 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
 mod tests {
     use std::time::Duration;
 
-    use vidcut_core::model::{Hdr, Retime, Upscaler};
+    use vidcut_core::model::{Hdr, Upscaler};
 
     use super::{PLAIN, big_picture, fill_black, retime_form, staying, upscale_form};
     use crate::ffmpeg::util::color::{Primaries, TransferCharacteristic};
@@ -3000,16 +2991,8 @@ mod tests {
     }
 
     #[test]
-    fn the_retime_of_macos_takes_8_bit_sdr() {
-        assert_eq!(retime_form(Retime::Macos, Some(Hdr::Hlg)), PLAIN);
-    }
-
-    #[test]
-    fn frame_blend_retimes_in_the_timeline_colors_at_16_bits() {
-        assert_eq!(
-            retime_form(Retime::FrameBlend, Some(Hdr::Hlg)),
-            (true, Some(Hdr::Hlg))
-        );
+    fn retime_works_in_the_timeline_colors_at_16_bits() {
+        assert_eq!(retime_form(Some(Hdr::Hlg)), (true, Some(Hdr::Hlg)));
     }
 
     const fn secs(s: u64) -> Duration {

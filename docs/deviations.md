@@ -1813,7 +1813,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - AI Fast takes SDR and HDR pictures of any size. Its memory grows with the size of the source picture.
   - The AI upscalers:
     - Each picture goes into the timeline color space first, as in Resolve (§13, p. 3407). In an SDR timeline, an HDR picture is tone-mapped.
-    - In an HDR timeline, AI Best and AI take SDR media only. They refuse HDR media ([X98](#x98-in-an-hdr-timeline-ai-best-and-the-ai-of-macos-work-before-the-conversion)).
+    - In an HDR timeline, AI Best and AI take SDR media only. They refuse HDR media ([X98](#x98-in-an-hdr-timeline-ai-best-and-the-scaler-of-macos-work-before-the-conversion)).
     - Before an export starts, vidcut refuses media that the upscaler cannot take. The error names each file and the reason.
     - It also refuses an AI upscaler without its weights, or without a GPU that can run the network.
     - It refuses AI Best for a size that does not fit in the GPU's memory and main memory.
@@ -1898,7 +1898,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Project Settings has the Retime Process of the project. `project.set` sets it as `retime`.
     - Its values are Auto, the default, Nearest, Frame Blend, AI Fast and AI Best.
     - Auto gives slow motion the AI of the computer that plays or exports: AI on macOS, AI Fast elsewhere.
-    - Auto gives Nearest to the rest: clips at 100% or faster, and frozen and backward clips. On macOS, it also gives Nearest to HDR pictures.
+    - Auto gives Nearest to the rest: clips at 100% or faster, and frozen and backward clips.
   - The lists name the process that Auto and Project Settings give on this computer, as in Project Settings (AI Fast).
   - On macOS, the processes are Nearest, Frame Blend and AI, `macos` in requests. AI Fast and AI Best are off on macOS.
     - AI is the frame rate conversion of macOS (`VTFrameProcessor` of VideoToolbox). macOS does not download a model for it.
@@ -1915,7 +1915,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Super Scale enlarges each of the two source frames.
     - Then Transform, Crop and Dynamic Zoom place them, at the size that they show at.
   - Each picture goes into the timeline color space first, as in Resolve (§13, p. 3407). In an SDR timeline, an HDR picture is tone-mapped.
-    - AI on macOS takes SDR pictures. In an HDR timeline, an export refuses HDR media with AI, and the Inspector shows a warning ([X98](#x98-in-an-hdr-timeline-ai-best-and-the-ai-of-macos-work-before-the-conversion)).
+    - In an HDR timeline, two SDR frames that reach AI on macOS on the GPU stay SDR ([X98](#x98-in-an-hdr-timeline-ai-best-and-the-scaler-of-macos-work-before-the-conversion)).
   - A clip played backward shows the nearest frames for now.
   - The viewer shows the frames that an export makes. With the slower models, a frame can take seconds.
   - Before a change that makes the timeline use a model that this computer does not have, the GUI asks to download it.
@@ -1924,6 +1924,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The models make any point between two frames, not only the middle. A speed of 40% needs points such as 0.4 and 0.8.
   - AI Fast is fast and fits UHD frames. AI Best makes frames nearer to the real ones, in more time.
   - In the test of `hdr_models` ([tools](tools.md)), AI Fast and AI Best came nearer to the real frames than Frame Blend, in SDR and in HDR.
+  - On the owner's Mac, AI on macOS also came nearer to the real frames than Frame Blend, in SDR and in HDR.
   - On macOS, the system's own process runs on the Mac's own hardware, as AI of Super Scale does.
   - A morph from one shot into the next looks wrong. Thus a shot change keeps the nearer source frame, as Nearest does.
   - A slow clip needs a process. Thus the window that sets the speed also sets the process.
@@ -2020,15 +2021,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Ease In and Ease Out then do what their names tell, as the Dynamic Zoom ease does. Ease In is slow at the start, Ease Out at the end.
   - A handle on one side of a speed keyframe alone gives a straight line. Thus one speed keyframe takes an ease on both sides or on none.
 
-## X98. In an HDR timeline, AI Best and the AI of macOS work before the conversion
+## X98. In an HDR timeline, AI Best and the scaler of macOS work before the conversion
 
 - **Resolve:** the input goes into the timeline color space before Super Scale and before Speed Effects (§13, p. 3407).
 - **vidcut:**
   - In an SDR timeline, vidcut keeps this order. The AI stages take the picture in the timeline color space. An HDR picture is tone-mapped first.
-  - In an HDR timeline, AI Fast of Super Scale and Retime Process keep this order too. The AI of macOS is the exception.
-  - In an HDR timeline, AI Best of Super Scale and AI on macOS take SDR media as SDR. The draw then converts their result into the timeline color space.
-  - These refuse HDR media in an HDR timeline ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu), [X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+  - In an HDR timeline, AI Fast of Super Scale and Retime Process keep this order too.
+    - The exception: two SDR frames that reach AI of Retime Process on macOS on the GPU stay SDR. The draw then converts the made frame ([X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+  - In an HDR timeline, AI Best and AI of Super Scale on macOS take SDR media as SDR. The draw then converts their result into the timeline color space.
+  - These two refuse HDR media in an HDR timeline ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
 - **Why:**
   - In the test of `hdr_models` ([tools](tools.md)), AI Best changed the light of HDR pictures. It made them brighter than the real frames.
-  - The AI of macOS takes half floats, which can carry HDR. It is not tested with HDR pictures yet ([todo](todo/frame-interpolation.md)).
+  - On the owner's Mac, the scaler of macOS came farther from the real frames in HDR than in SDR. In both, it came farther than Classic.
+  - The frame rate conversion of macOS takes SDR VideoToolbox frames with no copy. Why: it is faster than a copy into RGB.
   - SDR goes into an HDR timeline with no clipping. Thus the conversion after the stage keeps all of the picture.

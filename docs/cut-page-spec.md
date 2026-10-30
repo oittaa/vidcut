@@ -2531,7 +2531,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 The manual gives the order in which each picture is processed, on each page, as a chart (Ch. 144, p. 3407). vidcut keeps this order for the stages that it has.
 
 - A different order is a deviation, as for any other behavior.
-- [design](design/README.md#picture-order) gives the order of the code. [Deviation X98](deviations.md#x98-in-an-hdr-timeline-ai-best-and-the-ai-of-macos-work-before-the-conversion) tells where it is different.
+- [design](design/README.md#picture-order) gives the order of the code. [Deviation X98](deviations.md#x98-in-an-hdr-timeline-ai-best-and-the-scaler-of-macos-work-before-the-conversion) tells where it is different.
 
 **Source processing**, for each clip:
 

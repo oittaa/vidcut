@@ -112,17 +112,13 @@ pub fn macos_formats() -> Result<Vec<String>> {
 }
 
 pub fn unfit(m: &Media, r: Retime, timeline: Option<Hdr>) -> Option<&'static str> {
-    if r.is_nearest() {
-        return None;
-    }
+    let model = model(r)?;
     let hdr = crate::super_scale::takes_hdr(m, timeline)?;
-    let refused = match model(r) {
-        Some(model) => !catalog::check(model, &[(Measure::HdrPictures, f64::from(u8::from(hdr)))])
-            .refusals
-            .is_empty(),
-        None => hdr && r == Retime::Macos,
-    };
-    refused.then_some(crate::super_scale::HDR_IN_HDR)
+    let verdict = catalog::check(model, &[(Measure::HdrPictures, f64::from(u8::from(hdr)))]);
+    verdict
+        .refusals
+        .first()
+        .map(|_| crate::super_scale::HDR_IN_HDR)
 }
 
 pub fn check<'a>(
