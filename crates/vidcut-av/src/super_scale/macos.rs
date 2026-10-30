@@ -35,6 +35,10 @@ pub fn unfit(m: &Media, timeline: Option<Hdr>) -> Option<&'static str> {
     (w > MOST.0 || h > MOST.1).then_some("pictures over 1920x1080")
 }
 
+pub fn formats() -> Result<Vec<String>> {
+    imp::formats()
+}
+
 pub fn get_ready(download: bool) -> Result<()> {
     imp::ready(download)
 }
@@ -150,6 +154,10 @@ mod imp {
         Err(Error::Invalid(NEEDS.into()))
     }
 
+    pub(super) fn formats() -> Result<Vec<String>> {
+        Err(Error::Invalid(NEEDS.into()))
+    }
+
     pub(super) struct Scaler(std::convert::Infallible);
 
     impl Scaler {
@@ -231,6 +239,17 @@ mod imp {
                 out
             })
             .clone()
+    }
+
+    pub(super) fn formats() -> Result<Vec<String>> {
+        let factor = factors()
+            .first()
+            .copied()
+            .ok_or_else(|| Error::Invalid(NEEDS.into()))?;
+        let config = configuration((960, 540), factor)?;
+        // SAFETY: a property of a live configuration.
+        let list = unsafe { config.frameSupportedPixelFormats() };
+        Ok(numbers(&list).into_iter().map(fourcc).collect())
     }
 
     fn configuration(
