@@ -284,7 +284,8 @@ impl ShownTitle {
 }
 
 /// A picture over the others of a [`VideoPiece::Mix`]: a dissolve's, at
-/// the level its ramp gives each frame, or one placed over the frame.
+/// the level its ramp gives each frame, a side of a Push or a Slide, or one
+/// placed over the frame.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Over {
     pub piece: VideoPiece,
