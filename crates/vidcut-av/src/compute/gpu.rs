@@ -405,3 +405,56 @@ pub(crate) fn floats(raw: &[u8]) -> Vec<f32> {
         .map(|b| f32::from_le_bytes(*b))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::binding_type;
+
+    #[test]
+    fn a_storage_texture_is_written_as_rgba16float() {
+        assert_eq!(
+            binding_type(" var out: texture_storage_2d<rgba16float, write>;"),
+            wgpu::BindingType::StorageTexture {
+                access: wgpu::StorageTextureAccess::WriteOnly,
+                format: wgpu::TextureFormat::Rgba16Float,
+                view_dimension: wgpu::TextureViewDimension::D2,
+            }
+        );
+    }
+
+    #[test]
+    fn a_texture_is_read_without_a_filter() {
+        assert_eq!(
+            binding_type(" var made: texture_2d<f32>;"),
+            wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            }
+        );
+    }
+
+    #[test]
+    fn a_uniform_takes_a_dynamic_offset() {
+        assert_eq!(
+            binding_type(" var<uniform> p: P;"),
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: true,
+                min_binding_size: None,
+            }
+        );
+    }
+
+    #[test]
+    fn a_read_write_buffer_is_writable() {
+        assert_eq!(
+            binding_type(" var<storage, read_write> lower: array<f32>;"),
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            }
+        );
+    }
+}

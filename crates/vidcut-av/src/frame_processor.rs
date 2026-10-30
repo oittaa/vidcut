@@ -62,8 +62,10 @@ pub(crate) fn format_in(list: &NSArray<NSNumber>, order: &[u32], what: &str) -> 
         .copied()
         .find(|f| formats.contains(f))
         .ok_or_else(|| {
+            let wanted: Vec<String> = order.iter().map(|f| fourcc(*f)).collect();
             Error::Invalid(format!(
-                "{what} takes none of vidcut's pixel formats, only {}",
+                "{what} needs {}, and this Mac lists only {}",
+                wanted.join(" or "),
                 names.join(", ")
             ))
         })
