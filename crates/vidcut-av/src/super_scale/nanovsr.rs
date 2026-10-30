@@ -781,9 +781,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let p = id.y * size.w + id.x;
-    var v = unpack4x8unorm(texel(p)).xyz;
+    var v: vec3<f32>;
     if (size.deep == 1u) {
         v = vec3<f32>(half(p * 3u), half(p * 3u + 1u), half(p * 3u + 2u));
+    } else {
+        v = unpack4x8unorm(texel(p)).xyz;
     }
     dst[p * 4u] = pack2x16float(v.xy);
     dst[p * 4u + 1u] = pack2x16float(vec2<f32>(v.z, 0.0));
@@ -1706,7 +1708,13 @@ impl super::Run for Run {
         rgb: &crate::ffmpeg::frame::Video,
     ) -> Result<Vec<super::Out>> {
         let held = crate::screen::held::held(rgb)?;
-        self.deep = crate::screen::held::deep(rgb);
+        let deep = crate::screen::held::deep(rgb);
+        if !self.frames.is_empty() && deep != self.deep {
+            return Err(Error::Invalid(
+                "the AI Fast upscaler got 8-bit and 16-bit pictures in one chunk".into(),
+            ));
+        }
+        self.deep = deep;
         self.frames.push((index, pts, held.buffer().clone()));
         if self.frames.len() == FRAMES {
             self.run()

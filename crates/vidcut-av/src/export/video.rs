@@ -510,19 +510,21 @@ impl Source {
         let held = self
             .rgb
             .iter()
-            .find(|(p, l, _)| *p == pts && l.plain(size))
+            .find(|(p, l, _)| *p == pts && l.plain(size) && l.form.1.is_none())
             .map(|(_, _, rgb)| frame_ref(rgb))
             .transpose()?;
         let held = match held {
             Some(rgb) => Some(rgb),
-            None if crate::hw::on_gpu(f) => Some(shown_rgb(
-                &mut self.drawn,
-                (f, (None, None)),
-                self.reader.rotation(),
-                &Look::fitted(size, 0, PLAIN),
-                reading,
-                self.reader.path(),
-            )?),
+            None if crate::hw::on_gpu(f) || crate::color::Source::of(f).hdr.is_some() => {
+                Some(shown_rgb(
+                    &mut self.drawn,
+                    (f, (None, None)),
+                    self.reader.rotation(),
+                    &Look::fitted(size, 0, PLAIN),
+                    reading,
+                    self.reader.path(),
+                )?)
+            }
             None => None,
         };
         let l = match (held, &self.drawn) {
@@ -2952,8 +2954,63 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
 mod tests {
     use std::time::Duration;
 
-    use super::{fill_black, staying};
+    use vidcut_core::model::{Hdr, Retime, Upscaler};
+
+    use super::{PLAIN, big_picture, fill_black, retime_form, staying, upscale_form};
+    use crate::ffmpeg::util::color::{Primaries, TransferCharacteristic};
     use crate::ffmpeg::{format::Pixel, frame};
+
+    #[test]
+    fn a_16_bit_pq_picture_is_rgb48_in_bt_2020_pq() {
+        let f = big_picture(&[0; 24], (2, 2), None, (true, Some(Hdr::Pq)));
+        assert_eq!(
+            (
+                f.format(),
+                f.color_primaries(),
+                f.color_transfer_characteristic()
+            ),
+            (
+                Pixel::RGB48LE,
+                Primaries::BT2020,
+                TransferCharacteristic::SMPTE2084
+            )
+        );
+    }
+
+    #[test]
+    fn a_16_bit_hlg_picture_is_tagged_hlg() {
+        let f = big_picture(&[0; 24], (2, 2), None, (true, Some(Hdr::Hlg)));
+        assert_eq!(
+            f.color_transfer_characteristic(),
+            TransferCharacteristic::ARIB_STD_B67
+        );
+    }
+
+    #[test]
+    fn ai_fast_upscales_in_the_timeline_colors_at_16_bits() {
+        assert_eq!(
+            upscale_form(Upscaler::AiFast, Some(Hdr::Pq)),
+            (true, Some(Hdr::Pq))
+        );
+    }
+
+    #[test]
+    fn ai_best_upscales_8_bit_sdr() {
+        assert_eq!(upscale_form(Upscaler::AiBest, Some(Hdr::Pq)), PLAIN);
+    }
+
+    #[test]
+    fn the_retime_of_macos_takes_8_bit_sdr() {
+        assert_eq!(retime_form(Retime::Macos, Some(Hdr::Hlg)), PLAIN);
+    }
+
+    #[test]
+    fn frame_blend_retimes_in_the_timeline_colors_at_16_bits() {
+        assert_eq!(
+            retime_form(Retime::FrameBlend, Some(Hdr::Hlg)),
+            (true, Some(Hdr::Hlg))
+        );
+    }
 
     const fn secs(s: u64) -> Duration {
         Duration::from_secs(s)

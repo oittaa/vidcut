@@ -128,7 +128,8 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - Retime Process makes the frame half way between two frames. It compares it with the real frame between them, and with Frame Blend.
   - It leaves out pairs with a shot change.
 - It prints the mean ΔE ITP (BT.2124) and the PSNR of the code values.
-- Then it measures each model in a process of its own: the time per frame and the GPU memory, on Vulkan and DX12 only.
+- `hdr_models speeds` measures each model in a process of its own: the time per frame and the GPU memory, on Vulkan and DX12 only.
+  - Other work on the GPU makes the times longer. `nvidia-smi` shows it on NVIDIA.
 - `hdr_models pictures DIR` writes one frame of each upscaler as 1920×1080 RGB48 files.
 - On macOS, it tests the AI of macOS only.
 - The clips are in `tests/media-manifest.toml`. `scripts/fetch-test-media.sh NAME` gets each one.

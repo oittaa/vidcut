@@ -138,6 +138,15 @@ struct Plane {
     packed: bool,
 }
 
+impl Plane {
+    fn row(&self, width: u32) -> u32 {
+        match self.packed {
+            true => width * 3 * (self.texel / 4),
+            false => width * self.texel,
+        }
+    }
+}
+
 struct Layout {
     depth: u32,
     shift: u32,
@@ -796,13 +805,12 @@ fn made(
             view_formats: &[],
         })
     });
-    let (row, padded) = if plane.packed {
-        let row = size.0 * 3 * (plane.texel / 4);
-        (row, row)
-    } else {
-        let row = size.0 * plane.texel;
-        let aligned = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        (row, row.div_ceil(aligned) * aligned)
+    let row = plane.row(size.0);
+    let padded = match plane.packed {
+        true => row,
+        false => {
+            row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
+        }
     };
     let length =
         (u64::from(padded) * u64::from(size.1)).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
@@ -839,5 +847,17 @@ fn made(
         padded,
         row,
         offset,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::layout_of;
+    use crate::ffmpeg::format::Pixel;
+
+    #[test]
+    fn a_row_of_rgb48_packs_6_bytes_a_pixel() {
+        let layout = layout_of(Pixel::RGB48LE).expect("a layout");
+        assert_eq!(layout.planes[0].row(1920), 11_520);
     }
 }

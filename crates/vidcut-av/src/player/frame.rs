@@ -415,6 +415,11 @@ mod tests {
     }
 
     #[test]
+    fn rgb48le_pictures_are_16_bit_rgb() {
+        assert_eq!(Layout::of(Pixel::RGB48LE), Layout::Rgb48);
+    }
+
+    #[test]
     fn yuv420p10le_pictures_are_10_bit_planar_4_2_0() {
         assert_eq!(Layout::of(Pixel::YUV420P10LE), Layout::Yuv420p10);
     }

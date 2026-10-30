@@ -519,8 +519,14 @@ pub(crate) fn between(
             t,
         )?)
     } else {
+        let deep = held::deep(a);
+        if deep != held::deep(b) {
+            return Err(Error::Invalid(format!(
+                "{} got an 8-bit and a 16-bit picture",
+                name(r)
+            )));
+        }
         let pair = (held::held(a)?.buffer(), held::held(b)?.buffer());
-        let deep = held::deep(a) && held::deep(b);
         Picture::Held(with_engine(|e| {
             e.hold(r, key, pair, (size, deep))?;
             e.frame(r, t as f32)

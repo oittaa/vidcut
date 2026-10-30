@@ -2025,7 +2025,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:** the input goes into the timeline color space before Super Scale and before Speed Effects (§13, p. 3407).
 - **vidcut:**
   - In an SDR timeline, vidcut keeps this order. The AI stages take the picture in the timeline color space. An HDR picture is tone-mapped first.
-  - In an HDR timeline, AI Fast of Super Scale and Retime Process on Windows and Linux keep this order too.
+  - In an HDR timeline, AI Fast of Super Scale and Retime Process keep this order too. The AI of macOS is the exception.
   - In an HDR timeline, AI Best of Super Scale and AI on macOS take SDR media as SDR. The draw then converts their result into the timeline color space.
   - These refuse HDR media in an HDR timeline ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu), [X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
 - **Why:**

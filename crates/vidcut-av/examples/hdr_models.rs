@@ -166,5 +166,4 @@ fn main() {
             Err(e) => eprintln!("{}: {e}", clip.name),
         }
     }
-    speeds();
 }
