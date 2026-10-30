@@ -242,7 +242,7 @@ On macOS (`interpolate::macos`):
 - The draw puts each frame of the pair into a VideoToolbox frame (`Source::frame_of`).
   - The frame is 16-bit 4:4:4 (P416), in the timeline color space.
   - It is sized and placed as the RGB pair of the other processes is ([export](export.md#which-source-frame)).
-  - They come from a VideoToolbox pool of vidcut's own (`interpolate::blank`, `Surfaces`). Thus frames that the CPU decoded take this path too.
+  - They come from the VideoToolbox pools of vidcut's own (`interpolate::blank`, `Surfaces`). Thus frames that the CPU decoded take this path too.
   - Why: a Mac has unified memory. A copy of a picture through the CPU only costs time.
 - The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
 - The next frame between the same pair uses the pair that the session has (`SequentialReferencesUnchanged`).
