@@ -92,6 +92,7 @@ fn form_of(f: &frame::Video) -> Form {
 fn upscale_form(upscaler: Upscaler, timeline: Option<Hdr>) -> Form {
     match upscaler {
         Upscaler::AiFast => (true, timeline),
+        Upscaler::Macos => (timeline.is_some(), timeline),
         _ => PLAIN,
     }
 }
@@ -3011,6 +3012,14 @@ mod tests {
     fn a_16_bit_model_gets_p416() {
         let source = frame::Video::new(Pixel::YUV420P, 2, 2);
         assert_eq!(surface_pixel((true, None), &source), Pixel::P416LE);
+    }
+
+    #[test]
+    fn the_macos_scaler_upscales_an_hdr_timeline_in_its_colors_at_16_bits() {
+        assert_eq!(
+            upscale_form(Upscaler::Macos, Some(Hdr::Hlg)),
+            (true, Some(Hdr::Hlg))
+        );
     }
 
     #[test]

@@ -468,8 +468,8 @@ impl SuperScale {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Upscaler {
-    /// The super-resolution scaler of macOS 26 and later, for SDR pictures
-    /// up to 1920x1080. It enlarges by a factor that macOS offers, and the
+    /// The super-resolution scaler of macOS 26 and later, for pictures up
+    /// to 1920x1080. It enlarges by a factor that macOS offers, and the
     /// result is fitted. It reads the frames of a clip in order from its
     /// first frame. macOS downloads its models only with `download`. The
     /// upscaler of Auto on macOS, where the app calls it AI.

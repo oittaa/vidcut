@@ -10,8 +10,9 @@ use objc2_core_video::{
     kCVImageBufferColorPrimariesKey, kCVImageBufferTransferFunction_ITU_R_709_2,
     kCVImageBufferTransferFunctionKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4,
     kCVImageBufferYCbCrMatrix_ITU_R_709_2, kCVImageBufferYCbCrMatrix_ITU_R_2020,
-    kCVImageBufferYCbCrMatrixKey, kCVPixelBufferHeightKey, kCVPixelBufferPixelFormatTypeKey,
-    kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA, kCVPixelFormatType_64RGBAHalf,
+    kCVImageBufferYCbCrMatrixKey, kCVPixelBufferHeightKey, kCVPixelBufferIOSurfacePropertiesKey,
+    kCVPixelBufferMetalCompatibilityKey, kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferWidthKey,
+    kCVPixelFormatType_32BGRA, kCVPixelFormatType_64RGBAHalf,
     kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVReturnSuccess,
 };
 use objc2_foundation::{NSArray, NSDictionary, NSError, NSMutableDictionary, NSNumber, NSString};
@@ -32,7 +33,7 @@ const BGRA: u32 = kCVPixelFormatType_32BGRA;
 const NV12: u32 = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
 const RGHA: u32 = kCVPixelFormatType_64RGBAHalf;
 pub(crate) const HALF_FIRST: [u32; 3] = [RGHA, BGRA, NV12];
-pub(crate) const BYTES_FIRST: [u32; 3] = [BGRA, NV12, RGHA];
+pub(crate) const HALF: [u32; 1] = [RGHA];
 
 pub(crate) fn numbers(list: &NSArray<NSNumber>) -> Vec<u32> {
     (0..list.count())
@@ -52,12 +53,13 @@ pub(crate) fn failed(what: &str, e: Retained<NSError>) -> Error {
     Error::Invalid(format!("{what}: {}", e.localizedDescription()))
 }
 
-pub(crate) fn format_in(list: &NSArray<NSNumber>, order: [u32; 3], what: &str) -> Result<u32> {
+pub(crate) fn format_in(list: &NSArray<NSNumber>, order: &[u32], what: &str) -> Result<u32> {
     let formats = numbers(list);
     let names: Vec<String> = formats.iter().map(|f| fourcc(*f)).collect();
     crate::debug!("ai", "{what} takes {}", names.join(", "));
     order
-        .into_iter()
+        .iter()
+        .copied()
         .find(|f| formats.contains(f))
         .ok_or_else(|| {
             Error::Invalid(format!(
@@ -87,6 +89,15 @@ pub(crate) fn pool(
         let key = unsafe { &*std::ptr::from_ref(key).cast::<NSString>() };
         all.insert(key, NSNumber::new_u32(value).as_ref());
     }
+    // SAFETY: constant keys of CoreVideo, and a CFString is an NSString.
+    let (surface, metal) = unsafe {
+        (
+            &*std::ptr::from_ref(kCVPixelBufferIOSurfacePropertiesKey).cast::<NSString>(),
+            &*std::ptr::from_ref(kCVPixelBufferMetalCompatibilityKey).cast::<NSString>(),
+        )
+    };
+    all.insert(surface, NSDictionary::<NSString, AnyObject>::new().as_ref());
+    all.insert(metal, NSNumber::new_bool(true).as_ref());
     let attributes =
         std::ptr::from_ref::<NSDictionary<NSString, AnyObject>>(&all).cast::<CFDictionary>();
     let mut out: *mut CVPixelBufferPool = std::ptr::null_mut();

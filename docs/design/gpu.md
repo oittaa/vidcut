@@ -170,7 +170,7 @@ The AI upscalers share one path in the reader:
 - A run takes frames in order. It reads them from the reader's queue, or with a second `VideoReader` (`Source::seek_ahead`).
 - The run gives each picture once, and keeps the last one for a change of size.
 - A picture of AI Fast or AI Best stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`, `Layout::Rgb48`).
-- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best takes 8-bit SDR RGB. The scaler of macOS takes 8-bit SDR VideoToolbox frames.
+- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best takes 8-bit SDR RGB. The scaler of macOS takes VideoToolbox frames, of 16 bits in an HDR timeline.
   - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast came nearer to the real frames with 16 bits, in the same time.
 - The reader drops a run for a frame that the run does not give (`RUN_JUMP`).
 - `super_scale::report` tells what the upscaler makes. The stats panel shows it (`SuperScaleStats`).
@@ -209,13 +209,15 @@ AI Best (`flashvsr`):
 The scaler of macOS (`macos`):
 
 - It is a `VTFrameProcessor` session with a `VTSuperResolutionScalerConfiguration`, on macOS 26 and later.
-- Its own buffers are the first of BGRA, NV12 and RGhA that it lists (`BYTES_FIRST`, [gotchas](../gotchas.md#operating-systems-and-libraries)).
-- `macos::check` refuses HDR media in an HDR timeline, and pictures over `macos::MOST`.
+- Its own buffers are RGhA (`HALF`, [gotchas](../gotchas.md#operating-systems-and-libraries)). Their IOSurfaces are also Metal textures.
+- After the scaler, the color fix of AI Best runs on these buffers on the GPU, with no copy (`fix::on_buffers`).
+  - Its shader reads the buffers as textures. The shader of AI Best reads its own packed buffers.
+- `macos::check` refuses pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
-- The draw puts each frame into a VideoToolbox frame in SDR, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
+- The draw puts each frame into a VideoToolbox frame in the timeline color space, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
   - The frame keeps the depth and the chroma of the source: NV12, P010, P210 or P416 (`surface_pixel`). Retime Process gets P416 frames.
 - The drawn frames come from a few VideoToolbox pools of vidcut's own, one for each layout and size (`Surfaces`).
-  - The draw tone-maps an HDR frame and deinterlaces an interlaced frame.
+  - In an SDR timeline, the draw tone-maps an HDR frame. It deinterlaces an interlaced frame.
 - It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
   - Why: a picture of 4 times the source fills the cache of the viewer.
   - A picture of a layout that Lanczos cannot take comes out as P416 (`lanczos::takes`).

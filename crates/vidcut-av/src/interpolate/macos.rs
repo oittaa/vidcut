@@ -183,7 +183,7 @@ mod imp {
                     config.destinationPixelBufferAttributes(),
                 )
             };
-            let format = format_in(&formats, HALF_FIRST, WHAT)?;
+            let format = format_in(&formats, &HALF_FIRST, WHAT)?;
             let sources = pool(size, format, &from, WHAT)?;
             let outputs = pool(size, format, &to, WHAT)?;
             // SAFETY: a new processor of the frame processor class.
