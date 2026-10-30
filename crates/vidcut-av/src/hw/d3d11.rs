@@ -352,6 +352,20 @@ impl Shared {
     }
 }
 
+fn same_picture(to: &mut frame::Video, from: &frame::Video) {
+    // SAFETY: both frames are valid; plain fields.
+    unsafe {
+        let (o, i) = (to.as_mut_ptr(), from.as_ptr());
+        (*o).pts = (*i).pts;
+        (*o).color_range = (*i).color_range;
+        (*o).colorspace = (*i).colorspace;
+        (*o).color_primaries = (*i).color_primaries;
+        (*o).color_trc = (*i).color_trc;
+        (*o).chroma_location = (*i).chroma_location;
+        (*o).sample_aspect_ratio = (*i).sample_aspect_ratio;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
