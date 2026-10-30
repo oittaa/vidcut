@@ -1528,7 +1528,8 @@ impl Screen {
                 l.place(gpu, size, t, colors);
             }
         }
-        if (0..n).any(pair_at) && self.mixing.as_ref().is_none_or(|m| m.size != size) {
+        let mixes = |i: usize| pair_at(i) && moving_of(i + 1).is_none();
+        if (0..n).any(mixes) && self.mixing.as_ref().is_none_or(|m| m.size != size) {
             self.mixing = Some(Mixing::new(gpu, size));
         }
         self.moves.retain(|m| m.size == size);
