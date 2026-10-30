@@ -327,7 +327,6 @@ mod imp {
         transfer: Transfer,
         shrink: Option<crate::lanczos::Lanczos>,
         frames: Frames,
-        size: (u32, u32),
         enlarged: (u32, u32),
         made: (u32, u32),
         last: Option<(
@@ -383,7 +382,6 @@ mod imp {
                 transfer: Transfer::new(WHAT)?,
                 shrink: None,
                 frames: Frames::default(),
-                size,
                 enlarged,
                 made,
                 last: None,
