@@ -9,12 +9,13 @@ use crate::cuda::{CudaDevice, CudaFrames, PlaneCopy};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{format, frame};
 
-const FORMATS: [wgpu::TextureFormat; 5] = [
+const FORMATS: [wgpu::TextureFormat; 6] = [
     wgpu::TextureFormat::R8Uint,
     wgpu::TextureFormat::Rg8Uint,
     wgpu::TextureFormat::R16Uint,
     wgpu::TextureFormat::Rg16Uint,
     wgpu::TextureFormat::Rgba8Uint,
+    wgpu::TextureFormat::Rgba16Uint,
 ];
 
 fn unorm(format: wgpu::TextureFormat) -> wgpu::TextureFormat {
@@ -222,6 +223,14 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
                 ..plane(RGBA, T::Rgba8Uint, 4, (0, 0))
             }],
         },
+        P::RGB48LE => Layout {
+            depth: 16,
+            shift: 0,
+            planes: vec![Plane {
+                packed: true,
+                ..plane(RGBA, T::Rgba16Uint, 8, (0, 0))
+            }],
+        },
         _ => return None,
     })
 }
@@ -416,9 +425,10 @@ impl Screen {
         let layout = layout_of(pixel)
             .ok_or_else(|| Error::Invalid(format!("the GPU can't make frames in {pixel:?}")))?;
         let target = sink.target();
-        if target == Target::Held && pixel != format::Pixel::RGB24 {
+        let deep = pixel == format::Pixel::RGB48LE;
+        if target == Target::Held && pixel != format::Pixel::RGB24 && !deep {
             return Err(Error::Invalid(format!(
-                "the GPU holds RGB24 pictures, not {pixel:?}"
+                "the GPU holds RGB24 and RGB48 pictures, not {pixel:?}"
             )));
         }
         let key = Some((pixel, size, colors.0, colors.1, target));
@@ -552,7 +562,7 @@ impl Screen {
             Sink::Held => {
                 let buffer = held.ok_or_else(|| Error::Invalid("no RGB plane to hold".into()))?;
                 let held = super::held::Held::new(buffer, (&gpu.device, &gpu.queue), gpu.id);
-                return super::held::picture(held, size, None);
+                return super::held::picture(held, size, None, (deep, colors.1));
             }
         };
         crate::color::tag_frame(&mut out, colors.1);
@@ -787,7 +797,8 @@ fn made(
         })
     });
     let (row, padded) = if plane.packed {
-        (size.0 * 3, size.0 * 3)
+        let row = size.0 * 3 * (plane.texel / 4);
+        (row, row)
     } else {
         let row = size.0 * plane.texel;
         let aligned = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;

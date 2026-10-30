@@ -757,13 +757,17 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_index) l
 }
 
 const PACK: &str = r#"
-struct Size { w: u32, h: u32 }
+struct Size { w: u32, h: u32, sw: u32, ox: u32, oy: u32, deep: u32, p1: u32, p2: u32 }
 @group(0) @binding(0) var<uniform> size: Size;
 @group(0) @binding(1) var<storage, read> rgb: array<u32>;
 @group(0) @binding(2) var<storage, read_write> dst: array<u32>;
 
 fn byte(at: u32) -> u32 {
     return (rgb[at / 4u] >> (8u * (at % 4u))) & 255u;
+}
+
+fn half(at: u32) -> f32 {
+    return f32((rgb[at / 2u] >> (16u * (at % 2u))) & 65535u) / 65535.0;
 }
 
 fn texel(p: u32) -> u32 {
@@ -777,7 +781,10 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let p = id.y * size.w + id.x;
-    let v = unpack4x8unorm(texel(p));
+    var v = unpack4x8unorm(texel(p)).xyz;
+    if (size.deep == 1u) {
+        v = vec3<f32>(half(p * 3u), half(p * 3u + 1u), half(p * 3u + 2u));
+    }
     dst[p * 4u] = pack2x16float(v.xy);
     dst[p * 4u + 1u] = pack2x16float(vec2<f32>(v.z, 0.0));
     dst[p * 4u + 2u] = 0u;
@@ -815,7 +822,7 @@ fn last_shader() -> String {
     }
     format!(
         r#"
-struct Place {{ fw: u32, fh: u32, rx: u32, ry: u32, tw: u32, th: u32, cx: u32, cy: u32, cw: u32, ch: u32, p0: u32, p1: u32 }}
+struct Place {{ fw: u32, fh: u32, rx: u32, ry: u32, tw: u32, th: u32, cx: u32, cy: u32, cw: u32, ch: u32, deep: u32, p1: u32 }}
 struct Last {{ w: array<vec4<f32>, 288>, b: vec4<f32> }}
 @group(0) @binding(0) var<uniform> place: Place;
 @group(0) @binding(1) var<storage, read> src: array<vec4<u32>>;
@@ -827,8 +834,15 @@ fn byte(at: u32) -> u32 {{
     return (pixels[at / 4u] >> (8u * (at % 4u))) & 255u;
 }}
 
+fn half(at: u32) -> f32 {{
+    return f32((pixels[at / 2u] >> (16u * (at % 2u))) & 65535u) / 65535.0;
+}}
+
 fn px(x: u32, y: u32) -> vec3<f32> {{
     let at = (y * place.fw + x) * 3u;
+    if (place.deep == 1u) {{
+        return vec3<f32>(half(at), half(at + 1u), half(at + 2u));
+    }}
     return unpack4x8unorm(byte(at) | (byte(at + 1u) << 8u) | (byte(at + 2u) << 16u) | (255u << 24u)).xyz;
 }}
 
@@ -868,6 +882,16 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {{
     let b = rgb(s1, gx + 1u, gy);
     let c = rgb(s2, gx + 2u, gy);
     let d = rgb(s3, gx + 3u, gy);
+    if (place.deep == 1u) {{
+        let q = (gy * place.fw + place.cx + id.x) * 6u;
+        out[q] = pack2x16unorm(a.xy);
+        out[q + 1u] = pack2x16unorm(vec2<f32>(a.z, b.x));
+        out[q + 2u] = pack2x16unorm(b.yz);
+        out[q + 3u] = pack2x16unorm(c.xy);
+        out[q + 4u] = pack2x16unorm(vec2<f32>(c.z, d.x));
+        out[q + 5u] = pack2x16unorm(d.yz);
+        return;
+    }}
     let o = (gy * place.fw + place.cx + id.x) * 3u;
     out[o] = pack4x8unorm(vec4<f32>(a, b.x));
     out[o + 1u] = pack4x8unorm(vec4<f32>(b.yz, c.xy));
@@ -943,6 +967,7 @@ struct Frame {
     w: usize,
     h: usize,
     count: usize,
+    deep: bool,
     size: wgpu::Buffer,
     rgb: Vec<wgpu::Buffer>,
     input: wgpu::Buffer,
@@ -967,6 +992,7 @@ struct Job {
 
 struct Tiles {
     size: (usize, usize),
+    deep: bool,
     jobs: Vec<Job>,
     s1: wgpu::Buffer,
     s2: wgpu::Buffer,
@@ -987,6 +1013,11 @@ struct Engine {
     groups: RefCell<Groups>,
     listed: Option<crate::gpus::Gpu>,
     lent: Option<crate::player::Lent>,
+    deep: bool,
+}
+
+fn channels(deep: bool) -> usize {
+    if deep { 6 } else { 3 }
 }
 
 type Rest = Box<dyn FnOnce(Result<Vec<Held>>) + Send>;
@@ -1076,6 +1107,7 @@ impl Engine {
             groups: RefCell::default(),
             listed,
             lent: None,
+            deep: false,
         })
     }
 
@@ -1085,8 +1117,11 @@ impl Engine {
         let side = TILE + 2 * MARGIN;
         let tiles = side * side * 4 * FEATURES * 2
             + side * side * 16 * 32 * 2
-            + 3 * px * (SCALE * SCALE) as usize * 3;
-        let need = count * px * 3 + px * PADDED * 2 + (7 + count) * px * FEATURES * 2 + tiles;
+            + 3 * px * (SCALE * SCALE) as usize * channels(self.deep);
+        let need = count * px * channels(self.deep)
+            + px * PADDED * 2
+            + (7 + count) * px * FEATURES * 2
+            + tiles;
         self.lent = self.listed.as_ref().and_then(|on| {
             let room = crate::player::room_on(on)?;
             crate::player::lend_on(on, need as u64, room)
@@ -1173,7 +1208,7 @@ impl Engine {
         if self
             .frame
             .as_ref()
-            .is_some_and(|f| f.w == w && f.h == h && f.count >= count)
+            .is_some_and(|f| f.w == w && f.h == h && f.count >= count && f.deep == self.deep)
         {
             return;
         }
@@ -1187,9 +1222,10 @@ impl Engine {
             w,
             h,
             count,
+            deep: self.deep,
             size: buffer(d, 32, U::UNIFORM | U::COPY_DST),
             rgb: (0..count)
-                .map(|_| buffer(d, px * 3, U::STORAGE | U::COPY_DST))
+                .map(|_| buffer(d, px * channels(self.deep), U::STORAGE | U::COPY_DST))
                 .collect(),
             input: buffer(d, px * PADDED * 2, U::STORAGE),
             feats: buffer(d, feat, U::STORAGE),
@@ -1224,16 +1260,30 @@ impl Engine {
                     ch,
                     size1: uniform(&[tw, th, w, rx, ry, 0, 0, 0]),
                     size2: uniform(&[tw * 2, th * 2, tw * 2, 0, 0, 0, 0, 0]),
-                    place: uniform(&[w, h, rx, ry, tw, th, col.core.0, row.core.0, cw, ch, 0, 0]),
+                    place: uniform(&[
+                        w,
+                        h,
+                        rx,
+                        ry,
+                        tw,
+                        th,
+                        col.core.0,
+                        row.core.0,
+                        cw,
+                        ch,
+                        usize::from(self.deep),
+                        0,
+                    ]),
                 });
             }
         }
         let side = TILE + 2 * MARGIN;
         let (p2, p4) = (side * side * 4, side * side * 16);
-        let shown = w * h * (SCALE * SCALE) as usize * 3;
+        let shown = w * h * (SCALE * SCALE) as usize * channels(self.deep);
         let d = &self.device;
         self.tiles = Some(Tiles {
             size: (w, h),
+            deep: self.deep,
             jobs,
             s1: buffer(d, p2 * FEATURES * 2, U::STORAGE),
             s2: buffer(d, p4 * 32 * 2, U::STORAGE),
@@ -1359,21 +1409,38 @@ impl Engine {
                 .frame
                 .as_ref()
                 .is_some_and(|f| f.w == w && f.h == h && f.count >= frames.len())
-                && self.tiles.as_ref().is_some_and(|t| t.size == (w, h));
+                && self.frame.as_ref().is_some_and(|f| f.deep == self.deep)
+                && self
+                    .tiles
+                    .as_ref()
+                    .is_some_and(|t| t.size == (w, h) && t.deep == self.deep);
             if !fits {
                 self.frame = None;
                 self.tiles = None;
                 self.lend((w, h), frames.len());
             }
             self.make_frame((w, h), frames.len());
-            if self.tiles.as_ref().is_none_or(|t| t.size != (w, h)) {
+            if self
+                .tiles
+                .as_ref()
+                .is_none_or(|t| t.size != (w, h) || t.deep != self.deep)
+            {
                 self.make_tiles();
             }
             let f = self.frame.as_ref().expect("frame made");
             self.queue.write_buffer(
                 &f.size,
                 0,
-                &words(&[w as u32, h as u32, w as u32, 0, 0, 0, 0, 0]),
+                &words(&[
+                    w as u32,
+                    h as u32,
+                    w as u32,
+                    0,
+                    0,
+                    u32::from(self.deep),
+                    0,
+                    0,
+                ]),
             );
             let net = self.net.as_ref().expect("loaded");
             let n = frames.len();
@@ -1570,6 +1637,7 @@ static DROPPED: AtomicU64 = AtomicU64::new(0);
 pub(crate) struct Run {
     serial: u64,
     size: (usize, usize),
+    deep: bool,
     want: i64,
     frames: Vec<(i64, Option<i64>, wgpu::Buffer)>,
     sink: Option<super::Sink>,
@@ -1580,6 +1648,7 @@ impl Run {
         Self {
             serial: SERIALS.fetch_add(1, Ordering::Relaxed),
             size: (size.0 as usize, size.1 as usize),
+            deep: false,
             want,
             frames: Vec::new(),
             sink: Some(sink),
@@ -1612,7 +1681,7 @@ impl Run {
                 }));
             }
         };
-        let held = upscale(&rgbs, self.size, (self.serial, wanted), rest)?;
+        let held = upscale(&rgbs, (self.size, self.deep), (self.serial, wanted), rest)?;
         Ok(vec![super::Out {
             index,
             pts,
@@ -1637,6 +1706,7 @@ impl super::Run for Run {
         rgb: &crate::ffmpeg::frame::Video,
     ) -> Result<Vec<super::Out>> {
         let held = crate::screen::held::held(rgb)?;
+        self.deep = crate::screen::held::deep(rgb);
         self.frames.push((index, pts, held.buffer().clone()));
         if self.frames.len() == FRAMES {
             self.run()
@@ -1656,12 +1726,13 @@ impl super::Run for Run {
 
 pub(crate) fn upscale(
     frames: &[wgpu::Buffer],
-    size: (usize, usize),
+    (size, deep): ((usize, usize), bool),
     (serial, wanted): (u64, usize),
     rest: impl FnOnce(Result<Vec<Held>>) + Send + 'static,
 ) -> Result<Held> {
     let first = with_engine(|e| {
         e.finish();
+        e.deep = deep;
         let first = e.wanted_first(frames, size, wanted);
         let Ok(first) = first else {
             e.frame = None;

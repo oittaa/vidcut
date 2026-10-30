@@ -121,6 +121,18 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - It exports a stretch at a bitrate (`qN`: constant quality), with `video.*` settings (`passes=2`).
   - It prints the bitrate that it reached, the time and the luma PSNR.
 
+**The AI models and HDR:** `cargo run --release -p vidcut-av --example hdr_models` (`hdr_check`).
+
+- It runs each AI model through three pipes: 16-bit RGB in PQ or HLG, 16-bit SDR and 8-bit SDR.
+- Super Scale makes 1920×1080 from 480×270. It compares the result with the real frame, and with Classic.
+- Retime Process makes the frame half way between two frames. It compares it with the real frame between them, and with Frame Blend.
+  - It leaves out pairs with a shot change.
+- It prints the mean ΔE ITP (BT.2124) and the PSNR of the code values.
+- Then it measures each model in a process of its own: the time per frame and the GPU memory, on Vulkan and DX12 only.
+- `hdr_models pictures DIR` writes one frame of each upscaler as 1920×1080 RGB48 files.
+- On macOS, it tests the AI of macOS only.
+- The clips are in `tests/media-manifest.toml`. `scripts/fetch-test-media.sh NAME` gets each one.
+
 **The viewer's picture:** `vidcut frame render --at TIME --out F.png --viewer` draws a frame of the timeline as the viewer draws it, with no window.
 
 - It uses the player, its GPU decoding, and the viewer's shader on a GPU device of its own (`gui::frame::render`).

@@ -30,7 +30,7 @@ pub(crate) use out::filled;
 pub struct Gpu {
     #[cfg(any(target_os = "linux", windows))]
     acquirer: OnceLock<Result<acquire::Acquirer, String>>,
-    device: wgpu::Device,
+    pub(crate) device: wgpu::Device,
     queue: wgpu::Queue,
     id: u64,
     screen_drawing: Drawing,
@@ -2394,11 +2394,14 @@ impl Slot {
                     v: make((1, 1), one),
                     a: make((1, 1), wgpu::TextureFormat::R8Unorm),
                 },
-                Layout::Rgb => Planes {
+                Layout::Rgb | Layout::Rgb48 => Planes {
                     key,
                     y: made(
                         (w, h),
-                        wgpu::TextureFormat::Rgba8Unorm,
+                        match layout {
+                            Layout::Rgb48 => wgpu::TextureFormat::Rgba16Float,
+                            _ => wgpu::TextureFormat::Rgba8Unorm,
+                        },
                         wgpu::TextureUsages::STORAGE_BINDING,
                     ),
                     u: make((1, 1), one),
@@ -2412,7 +2415,7 @@ impl Slot {
     fn write_planes(&mut self, gpu: &Gpu, picture: &Picture, encoder: &mut wgpu::CommandEncoder) {
         let (w, h) = (picture.width(), picture.height());
         let layout = picture.layout();
-        if layout == Layout::Rgb {
+        if matches!(layout, Layout::Rgb | Layout::Rgb48) {
             return self.write_rgb(gpu, picture.frame(), encoder);
         }
         let (cw, ch) = chroma_size(layout, w, h);
@@ -2473,7 +2476,7 @@ impl Slot {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 4);
             }
-            (Layout::Rgb, _) => {}
+            (Layout::Rgb | Layout::Rgb48, _) => {}
             (Layout::Ayuv64, true) => put(&planes.y, 0, (w, h), 8),
             (Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64, false) => {
                 let textures = match layout {
@@ -2520,7 +2523,10 @@ impl Slot {
             None => {
                 let bytes = match found {
                     Some(_) => held::rgb(frame),
-                    None => Ok(crate::buffers::packed(frame, 3)),
+                    None => Ok(crate::buffers::packed(
+                        frame,
+                        if held::deep(frame) { 6 } else { 3 },
+                    )),
                 };
                 let mut bytes = match bytes {
                     Ok(bytes) => bytes,
@@ -2813,7 +2819,7 @@ fn nvdec_bytes(gpu: &Gpu, layout: Layout) -> Result<u64, String> {
         Layout::Nv12 => Ok(1),
         Layout::P010 | Layout::P210 if gpu.wide => Ok(2),
         Layout::P010 | Layout::P210 => Err(format!("no 16-bit textures for {layout:?}")),
-        Layout::P416 | Layout::Ayuv64 | Layout::Rgb => {
+        Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 => {
             Err(format!("{layout:?} pictures aren't NVDEC's"))
         }
         Layout::Yuv420p
@@ -2836,7 +2842,7 @@ fn vaapi_formats(
             wgpu::TextureFormat::Rg16Unorm,
         )),
         Layout::P010 => Err("no 16-bit textures for P010".into()),
-        Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb => {
+        Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 => {
             Err(format!("{layout:?} pictures aren't VA-API's"))
         }
         Layout::Yuv420p
@@ -2871,7 +2877,7 @@ fn d3d11_formats(
             wgpu::TextureFormat::Rg16Unorm,
         )),
         Layout::P010 => Err("no P010 or 16-bit textures for P010".into()),
-        Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb => {
+        Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 => {
             Err(format!("{layout:?} pictures aren't Direct3D 11's"))
         }
         Layout::Yuv420p
@@ -2902,7 +2908,7 @@ fn videotoolbox_formats(
         Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64 => {
             Err(format!("no 16-bit textures for {layout:?}"))
         }
-        Layout::Rgb => Err("RGB pictures aren't VideoToolbox's".into()),
+        Layout::Rgb | Layout::Rgb48 => Err("RGB pictures aren't VideoToolbox's".into()),
         Layout::Yuv420p
         | Layout::Yuv420p10
         | Layout::Yuv422p
@@ -2923,6 +2929,7 @@ fn vulkan_layout(gpu: &Gpu, layout: Layout) -> Result<(), String> {
         | Layout::P416
         | Layout::Ayuv64
         | Layout::Rgb
+        | Layout::Rgb48
         | Layout::Yuv420p
         | Layout::Yuv422p => Err(format!("{layout:?} pictures aren't Vulkan's")),
     }
@@ -3177,7 +3184,7 @@ fn write_alpha(
 
 fn sixteen(layout: Layout) -> bool {
     match layout {
-        Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p | Layout::Rgb => false,
+        Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p | Layout::Rgb | Layout::Rgb48 => false,
         Layout::P010
         | Layout::Yuv420p10
         | Layout::Yuv422p10
@@ -3210,7 +3217,7 @@ fn packing(layout: Layout) -> u32 {
         | Layout::Yuv444p12 => 0,
         Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => 1,
         Layout::Ayuv64 => 2,
-        Layout::Rgb => 3,
+        Layout::Rgb | Layout::Rgb48 => 3,
     }
 }
 
@@ -3218,7 +3225,7 @@ fn per_chroma(layout: Layout) -> (u32, u32) {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => (2, 2),
         Layout::Yuv422p | Layout::Yuv422p10 | Layout::P210 => (2, 1),
-        Layout::Yuv444p12 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb => (1, 1),
+        Layout::Yuv444p12 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 => (1, 1),
     }
 }
 

@@ -20,6 +20,7 @@ pub mod fixture;
 pub(crate) mod frame_processor;
 pub mod gpus;
 pub mod hdr;
+pub mod hdr_check;
 pub mod hw;
 pub mod interpolate;
 pub mod isolate;

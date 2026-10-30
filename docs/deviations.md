@@ -1790,8 +1790,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Its Upscaler is Project Settings, the default, AI Best, AI Fast or Classic (`upscaler`).
   - Project Settings has the upscaler of the media that follow the project (`upscaler` of `project.set`).
     - It is Auto, the default, AI Best, AI Fast or Classic.
-    - Auto is AI on macOS, and AI Best elsewhere.
-  - The lists name the upscaler that Auto and Project Settings give on this computer, as in Auto (AI Best).
+    - Auto is AI on macOS, and AI Fast elsewhere.
+  - The lists name the upscaler that Auto and Project Settings give on this computer, as in Auto (AI Fast).
   - On macOS, the upscalers are AI and Classic. AI Fast and AI Best are off there for now: exports and the viewer refuse them.
   - On macOS, AI is the upscaler of Auto. It is the super-resolution scaler of macOS 26 and later (`VTFrameProcessor` of VideoToolbox), `macos` in requests.
     - It enlarges by a factor that macOS offers. It takes the smallest of these that reaches the shown size.
@@ -1800,20 +1800,20 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - It takes SDR pictures up to 1920×1080, the limit of macOS for video.
     - macOS downloads its models only when the user agrees, as for the weights of AI Fast and AI Best. vidcut does not ship them.
     - macOS does not give their size, so the question says that the size is unknown. On the owner's Mac, the weight file of the 4x model is 66 MB.
-  - Elsewhere, AI Best is the upscaler of Auto. It is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.
+  - AI Best is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.
     - It is slow, and it adds more detail. It has no setting.
     - It reads the frames of a clip in order, from the first frame that is asked for. Each output frame uses the frames before it and the 4 frames after it.
     - It makes the picture at the size that it shows at, but not more than 4 times the source.
     - The weights (7.0 GB) download at their first use. vidcut does not ship them.
     - It takes SDR pictures. Its memory grows with the size of the picture that it makes; parts of it go to main memory when the GPU's memory is not enough.
-  - AI Fast is the video model NanoVSR 5.4M. vidcut runs it with its own compute shaders too.
+  - Elsewhere, AI Fast is the upscaler of Auto. It is the video model NanoVSR 5.4M. vidcut runs it with its own compute shaders too.
     - It has no Noise Reduction and no other setting.
     - It reads the frames of a file in chunks of 15. Each output frame uses the frames before and after it in its chunk.
     - The weights (25 MB) download at their first use. vidcut does not ship them.
-    - AI Fast takes SDR pictures of any size. Its memory grows with the size of the source picture.
+    - AI Fast takes SDR and HDR pictures of any size. Its memory grows with the size of the source picture.
   - The AI upscalers:
-    - In an SDR timeline, an HDR picture goes into the timeline color space first, as in Resolve (§13, p. 3407). The upscaler takes the tone-mapped SDR picture.
-    - In an HDR timeline, they refuse HDR media ([X98](#x98-in-an-hdr-timeline-the-ai-stages-work-before-the-conversion)).
+    - Each picture goes into the timeline color space first, as in Resolve (§13, p. 3407). In an SDR timeline, an HDR picture is tone-mapped.
+    - In an HDR timeline, AI Best and AI take SDR media only. They refuse HDR media ([X98](#x98-in-an-hdr-timeline-ai-best-and-the-ai-of-macos-work-before-the-conversion)).
     - Before an export starts, vidcut refuses media that the upscaler cannot take. The error names each file and the reason.
     - It also refuses an AI upscaler without its weights, or without a GPU that can run the network.
     - It refuses AI Best for a size that does not fit in the GPU's memory and main memory.
@@ -1829,7 +1829,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - A video model adds detail that a classic upscaler cannot. In side-by-side tests, the owner ranked NanoVSR 5.4M above Real-ESRGAN's compact model.
   - Some users wait a long time for the best pictures, and others want good pictures fast. Thus there is a fast AI upscaler and a slow one.
-  - Auto takes AI Best off macOS, because Super Scale is mostly for the best pictures. AI Fast is the choice for speed.
+  - On Windows and Linux, Auto takes AI Fast. It is fast, and it works in SDR and HDR timelines.
+  - In the test of `hdr_models` ([tools](tools.md)), AI Fast came nearer to the real frames than Classic, in SDR and in HDR.
+  - AI Best came farther from the real frames than Classic. It adds detail, but it also changes the light of the picture.
   - vidcut makes a picture only as large as the output shows it. A factor would only limit placed pictures. Thus On is sufficient.
   - Auto lets a project move between macOS and other systems. Each computer uses its own AI.
   - On macOS, the scaler of macOS is the default because it is part of the system. vidcut needs no weights for it, and the owner chose it.
@@ -1896,7 +1898,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Project Settings has the Retime Process of the project. `project.set` sets it as `retime`.
     - Its values are Auto, the default, Nearest, Frame Blend, AI Fast and AI Best.
     - Auto gives slow motion the AI of the computer that plays or exports: AI on macOS, AI Fast elsewhere.
-    - Auto gives Nearest to the rest: clips at 100% or faster, frozen and backward clips, and HDR pictures.
+    - Auto gives Nearest to the rest: clips at 100% or faster, and frozen and backward clips. On macOS, it also gives Nearest to HDR pictures.
   - The lists name the process that Auto and Project Settings give on this computer, as in Project Settings (AI Fast).
   - On macOS, the processes are Nearest, Frame Blend and AI, `macos` in requests. AI Fast and AI Best are off on macOS.
     - AI is the frame rate conversion of macOS (`VTFrameProcessor` of VideoToolbox). macOS does not download a model for it.
@@ -1912,9 +1914,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The frame is made from two sized and placed pictures, as in Resolve (§13, p. 3407).
     - Super Scale enlarges each of the two source frames.
     - Then Transform, Crop and Dynamic Zoom place them, at the size that they show at.
-  - Retime Process takes SDR pictures.
-    - In an SDR timeline, an HDR picture goes into the timeline color space first, as in Resolve (§13, p. 3407). The process takes the tone-mapped SDR picture.
-    - In an HDR timeline, an export refuses HDR media with a process other than Nearest, and the Inspector shows a warning ([X98](#x98-in-an-hdr-timeline-the-ai-stages-work-before-the-conversion)).
+  - Each picture goes into the timeline color space first, as in Resolve (§13, p. 3407). In an SDR timeline, an HDR picture is tone-mapped.
+    - AI on macOS takes SDR pictures. In an HDR timeline, an export refuses HDR media with AI, and the Inspector shows a warning ([X98](#x98-in-an-hdr-timeline-ai-best-and-the-ai-of-macos-work-before-the-conversion)).
   - A clip played backward shows the nearest frames for now.
   - The viewer shows the frames that an export makes. With the slower models, a frame can take seconds.
   - Before a change that makes the timeline use a model that this computer does not have, the GUI asks to download it.
@@ -1922,6 +1923,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The models run on this computer and need no account. Their code and weights are under MIT (RIFE) and Apache 2.0 (EMA-VFI).
   - The models make any point between two frames, not only the middle. A speed of 40% needs points such as 0.4 and 0.8.
   - AI Fast is fast and fits UHD frames. AI Best makes frames nearer to the real ones, in more time.
+  - In the test of `hdr_models` ([tools](tools.md)), AI Fast and AI Best came nearer to the real frames than Frame Blend, in SDR and in HDR.
   - On macOS, the system's own process runs on the Mac's own hardware, as AI of Super Scale does.
   - A morph from one shot into the next looks wrong. Thus a shot change keeps the nearer source frame, as Nearest does.
   - A slow clip needs a process. Thus the window that sets the speed also sets the process.
@@ -2018,13 +2020,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Ease In and Ease Out then do what their names tell, as the Dynamic Zoom ease does. Ease In is slow at the start, Ease Out at the end.
   - A handle on one side of a speed keyframe alone gives a straight line. Thus one speed keyframe takes an ease on both sides or on none.
 
-## X98. In an HDR timeline, the AI stages work before the conversion
+## X98. In an HDR timeline, AI Best and the AI of macOS work before the conversion
 
 - **Resolve:** the input goes into the timeline color space before Super Scale and before Speed Effects (§13, p. 3407).
 - **vidcut:**
-  - In an SDR timeline, vidcut keeps this order. The AI upscalers and Retime Process take the picture in the timeline color space. An HDR picture is tone-mapped first.
-  - In an HDR timeline, they take SDR media as SDR. The draw then converts their result into the timeline color space.
-  - In an HDR timeline, they refuse HDR media ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu), [X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+  - In an SDR timeline, vidcut keeps this order. The AI stages take the picture in the timeline color space. An HDR picture is tone-mapped first.
+  - In an HDR timeline, AI Fast of Super Scale and Retime Process on Windows and Linux keep this order too.
+  - In an HDR timeline, AI Best of Super Scale and AI on macOS take SDR media as SDR. The draw then converts their result into the timeline color space.
+  - These refuse HDR media in an HDR timeline ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu), [X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
 - **Why:**
-  - The AI models are made for SDR pictures. An HDR picture is out of the range that they know.
+  - In the test of `hdr_models` ([tools](tools.md)), AI Best changed the light of HDR pictures. It made them brighter than the real frames.
+  - The AI of macOS takes half floats, which can carry HDR. It is not tested with HDR pictures yet ([todo](todo/frame-interpolation.md)).
   - SDR goes into an HDR timeline with no clipping. Thus the conversion after the stage keeps all of the picture.

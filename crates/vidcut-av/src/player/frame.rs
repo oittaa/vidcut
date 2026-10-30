@@ -18,10 +18,11 @@ pub enum Layout {
     P416,
     Ayuv64,
     Rgb,
+    Rgb48,
 }
 
 impl Layout {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Yuv420p,
         Self::Nv12,
         Self::P010,
@@ -33,6 +34,7 @@ impl Layout {
         Self::P416,
         Self::Ayuv64,
         Self::Rgb,
+        Self::Rgb48,
     ];
 
     pub(crate) fn of(p: format::Pixel) -> Self {
@@ -48,6 +50,7 @@ impl Layout {
             P::P416LE => Self::P416,
             P::AYUV64LE => Self::Ayuv64,
             P::RGB24 => Self::Rgb,
+            P::RGB48LE => Self::Rgb48,
             _ => Self::Yuv420p,
         }
     }

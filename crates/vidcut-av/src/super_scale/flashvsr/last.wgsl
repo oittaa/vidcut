@@ -1,4 +1,4 @@
-struct P { wm: u32, hm: u32, r0: u32, rows: u32, sy0: u32, w: u32, pad0: u32, pad1: u32 }
+struct P { wm: u32, hm: u32, r0: u32, rows: u32, sy0: u32, w: u32, deep: u32, pad1: u32 }
 @group(0) @binding(0) var<uniform> p: P;
 @group(0) @binding(1) var<storage, read> src: array<u32>;
 @group(0) @binding(2) var<storage, read> wts: array<u32>;
@@ -18,8 +18,13 @@ fn level(v: f32) -> u32 {
     return u32(round(clamp(v, 0.0, 1.0) * 255.0));
 }
 
-fn put(at: u32, v: u32) {
-    atomicOr(&dst[at / 4u], v << (8u * (at % 4u)));
+fn put(at: u32, v: f32) {
+    if (p.deep == 1u) {
+        let code = u32(round(clamp(v, 0.0, 1.0) * 65535.0));
+        atomicOr(&dst[at / 2u], code << (16u * (at % 2u)));
+        return;
+    }
+    atomicOr(&dst[at / 4u], level(v) << (8u * (at % 4u)));
 }
 
 @compute @workgroup_size(16, 16)
@@ -56,7 +61,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_
         }
     }
     let at = (y * p.w + x) * 3u;
-    put(at, level(a0 + bias[0]));
-    put(at + 1u, level(a1 + bias[1]));
-    put(at + 2u, level(a2 + bias[2]));
+    put(at, a0 + bias[0]);
+    put(at + 1u, a1 + bias[1]);
+    put(at + 2u, a2 + bias[2]);
 }

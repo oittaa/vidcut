@@ -157,6 +157,7 @@ impl PlayerStats {
                 Layout::P416 => "P416",
                 Layout::Ayuv64 => "AYUV64",
                 Layout::Rgb => "RGB24",
+                Layout::Rgb48 => "RGB48",
             };
             let matrix = match c.matrix {
                 Matrix::Bt601 => "BT.601",

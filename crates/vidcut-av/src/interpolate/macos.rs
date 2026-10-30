@@ -200,7 +200,7 @@ mod imp {
                     &picture,
                     self.format,
                     self.size,
-                    &crate::screen::held::rgb(f)?,
+                    (&crate::screen::held::rgb(f)?, crate::screen::held::deep(f)),
                 )?,
                 Input::Frame(f) => {
                     let scaled = crate::lanczos::sized(&mut self.lanczos, f, self.size)?;
@@ -274,9 +274,10 @@ mod imp {
         }
 
         fn between(&mut self, key: &Key, a: Input, b: Input, t: f64) -> Result<Vec<u8>> {
+            let deep = matches!(&a, Input::Held(f) if crate::screen::held::deep(f));
             let (made, [wrote, processed]) = self.make(key, a, b, t)?;
             let clock = std::time::Instant::now();
-            let out = read(&made, self.format, self.size)?;
+            let out = read(&made, self.format, self.size, deep)?;
             told(wrote, processed, clock);
             Ok(out)
         }

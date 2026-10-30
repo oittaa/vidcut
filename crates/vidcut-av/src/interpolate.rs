@@ -116,7 +116,7 @@ pub fn unfit(m: &Media, r: Retime, timeline: Option<Hdr>) -> Option<&'static str
         Some(model) => !catalog::check(model, &[(Measure::HdrPictures, f64::from(u8::from(hdr)))])
             .refusals
             .is_empty(),
-        None => hdr,
+        None => hdr && r == Retime::Macos,
     };
     refused.then_some(crate::super_scale::HDR_IN_HDR)
 }
@@ -197,8 +197,13 @@ struct Held {
     key: (PathBuf, u64, i64, i64),
     retime: Retime,
     size: (u32, u32),
+    deep: bool,
     state: State,
     out: wgpu::Buffer,
+}
+
+fn rgb_bytes((w, h): (u32, u32), deep: bool) -> u64 {
+    u64::from(w) * u64::from(h) * if deep { 6 } else { 3 }
 }
 
 struct Engine {
@@ -327,7 +332,7 @@ impl Engine {
         Ok(self.loaded(r).expect("loaded"))
     }
 
-    fn submit(&self, run: impl FnOnce(&mut Ops)) {
+    fn submit(&self, deep: bool, run: impl FnOnce(&mut Ops)) {
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_compute_pass(&Default::default());
@@ -335,6 +340,7 @@ impl Engine {
                 gpu: &self.gpu,
                 k: &self.kernels,
                 pass: &mut pass,
+                deep,
             };
             run(&mut o);
         }
@@ -347,21 +353,18 @@ impl Engine {
         r: Retime,
         key: &(PathBuf, u64, i64, i64),
         (ua, ub): (&wgpu::Buffer, &wgpu::Buffer),
-        size: (u32, u32),
+        (size, deep): ((u32, u32), bool),
     ) -> Result<()> {
-        if self
-            .held
-            .as_ref()
-            .is_some_and(|h| h.key == *key && h.retime == r && h.size == size)
-        {
+        let same = |h: &Held| h.retime == r && h.size == size && h.deep == deep;
+        if self.held.as_ref().is_some_and(|h| h.key == *key && same(h)) {
             return Ok(());
         }
-        let kept = self.held.take().filter(|h| h.retime == r && h.size == size);
+        let kept = self.held.take().filter(same);
         if r.ai() {
             self.net(r)?;
         }
         let (w, h) = size;
-        let whole = u64::from(w) * u64::from(h) * 3;
+        let whole = rgb_bytes(size, deep);
         if ua.size() < whole || ub.size() < whole {
             return Err(Error::Invalid(format!(
                 "{} got pictures smaller than {w}x{h}",
@@ -372,7 +375,7 @@ impl Engine {
         let (state, out) = match kept {
             Some(h) => (h.state, h.out),
             None => {
-                let out = gpu.buffer((w as usize * h as usize * 3).next_multiple_of(4));
+                let out = gpu.buffer((whole as usize).next_multiple_of(4));
                 let state = match (r, self.loaded(r)) {
                     (Retime::FrameBlend, _) => {
                         State::Blend(tensor(gpu, 2, h, w, 3), tensor(gpu, 1, h, w, 3))
@@ -387,7 +390,7 @@ impl Engine {
                 (state, out)
             }
         };
-        self.submit(|o| match (&state, self.loaded(r)) {
+        self.submit(deep, |o| match (&state, self.loaded(r)) {
             (State::Blend(img, _), _) => {
                 o.load(ua, size, (0, 0), false, &img.frame(0));
                 o.load(ub, size, (0, 0), false, &img.frame(1));
@@ -407,6 +410,7 @@ impl Engine {
             key: key.clone(),
             retime: r,
             size,
+            deep,
             state,
             out,
         });
@@ -416,7 +420,7 @@ impl Engine {
     fn frame(&self, r: Retime, t: f32) -> Result<held::Held> {
         let held = self.held.as_ref().expect("held");
         let size = held.size;
-        self.submit(|o| match (&held.state, self.loaded(r)) {
+        self.submit(held.deep, |o| match (&held.state, self.loaded(r)) {
             (State::Blend(img, mixed), _) => {
                 o.combine(&img.frame(0), &img.frame(1), mixed, 1.0 - t, t);
                 o.store(mixed, (0, 0), size, &held.out);
@@ -430,7 +434,7 @@ impl Engine {
             }
             _ => {}
         });
-        let whole = (size.0 as u64 * size.1 as u64 * 3).next_multiple_of(4);
+        let whole = rgb_bytes(size, held.deep).next_multiple_of(4);
         let out = self.gpu.buffer(whole as usize);
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         enc.copy_buffer_to_buffer(&held.out, 0, &out, 0, whole);
@@ -440,6 +444,18 @@ impl Engine {
             (&self.gpu.device, &self.gpu.queue),
             self.gpu.id,
         ))
+    }
+}
+
+fn eight(rgb: Vec<u8>, deep: bool) -> Vec<u8> {
+    match deep {
+        true => rgb
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| ((u32::from(u16::from_le_bytes(*c)) + 128) / 257) as u8)
+            .collect(),
+        false => rgb,
     }
 }
 
@@ -504,8 +520,9 @@ pub(crate) fn between(
         )?)
     } else {
         let pair = (held::held(a)?.buffer(), held::held(b)?.buffer());
+        let deep = held::deep(a) && held::deep(b);
         Picture::Held(with_engine(|e| {
-            e.hold(r, key, pair, size)?;
+            e.hold(r, key, pair, (size, deep))?;
             e.frame(r, t as f32)
         })?)
     };
@@ -513,10 +530,11 @@ pub(crate) fn between(
     if std::env::var_os("VIDCUT_INTERPOLATE_DUMP").is_some() {
         let n = DUMPED.fetch_add(1, Ordering::Relaxed);
         let name = format!("{n:04}");
-        dump(&format!("{name}-a"), size, &held::rgb(a)?)?;
-        dump(&format!("{name}-b"), size, &held::rgb(b)?)?;
+        let deep = held::deep(a) && held::deep(b);
+        dump(&format!("{name}-a"), size, &eight(held::rgb(a)?, deep))?;
+        dump(&format!("{name}-b"), size, &eight(held::rgb(b)?, deep))?;
         let out = match &made {
-            Picture::Held(h) => h.read(size.0 as usize * size.1 as usize * 3)?,
+            Picture::Held(h) => eight(h.read(rgb_bytes(size, deep) as usize)?, deep),
             Picture::Rgb(rgb) => rgb.clone(),
             Picture::Frame(_) => Vec::new(),
         };
