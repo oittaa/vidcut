@@ -428,14 +428,6 @@ fn code(v: f32) -> u8 {
     v.round().clamp(0.0, 255.0) as u8
 }
 
-fn to_eight(rgb: &[u8]) -> Vec<u8> {
-    rgb.as_chunks::<2>()
-        .0
-        .iter()
-        .map(|c| code(f32::from(u16::from_le_bytes(*c)) / 257.0))
-        .collect()
-}
-
 pub(crate) fn write(
     buffer: &CVPixelBuffer,
     format: u32,
@@ -463,7 +455,7 @@ pub(crate) fn write(
     }
     let eight;
     let rgb = if deep {
-        eight = to_eight(rgb);
+        eight = crate::screen::held::eight(rgb.to_vec(), true);
         eight.as_slice()
     } else {
         rgb
@@ -535,10 +527,7 @@ pub(crate) fn read(
     let (w, h) = (w as usize, h as usize);
     if format != RGHA {
         let eight = read_eight(buffer, format, (w as u32, h as u32))?;
-        return Ok(eight
-            .iter()
-            .flat_map(|v| (u16::from(*v) * 257).to_le_bytes())
-            .collect());
+        return Ok(crate::screen::held::sixteen(&eight));
     }
     let mut locked = Locked::new(buffer)?;
     let mut out = vec![0; w * h * 6];

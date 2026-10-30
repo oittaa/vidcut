@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use vidcut_core::model::{Hdr, Media, Project, Upscaler};
+use vidcut_core::model::Upscaler;
 use vidcut_core::render::VideoPiece;
 
 use crate::compute::{self, bytes, group, halves, words};
@@ -57,47 +57,19 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn unfit(m: &Media, timeline: Option<Hdr>) -> Option<&'static str> {
-    super::unfit(m, Upscaler::AiFast, timeline)
-}
-
 pub fn check<'a>(
-    p: &Project,
     pieces: impl IntoIterator<Item = &'a VideoPiece>,
-    timeline: Option<Hdr>,
     dir: &Path,
     download: bool,
 ) -> Result<()> {
-    let mut media: Vec<&str> = Vec::new();
-    for piece in pieces {
-        for (layer, _) in piece.layers() {
-            if let VideoPiece::Source {
-                media: id,
-                super_scale,
-                ..
-            } = layer
-                && super_scale.ai()
-                && super_scale.upscaler == Upscaler::AiFast
-                && !media.contains(&id.as_str())
-            {
-                media.push(id);
-            }
-        }
-    }
-    if media.is_empty() {
+    let used = pieces.into_iter().any(|piece| {
+        piece.layers().iter().any(|(layer, _)| {
+            matches!(layer, VideoPiece::Source { super_scale, .. }
+                if super_scale.ai() && super_scale.upscaler == Upscaler::AiFast)
+        })
+    });
+    if !used {
         return Ok(());
-    }
-    let refused: Vec<String> = media
-        .iter()
-        .filter_map(|id| p.media(id))
-        .filter_map(|m| unfit(m, timeline).map(|why| format!("{} ({why})", m.name)))
-        .collect();
-    if !refused.is_empty() {
-        return Err(Error::Invalid(format!(
-            "the AI Fast upscaler of Super Scale can't take {}: set their Upscaler to Classic, \
-             or their Super Scale to Off",
-            refused.join(", ")
-        )));
     }
     get_ready(dir, download)?;
     with_engine(|_| Ok(()))
@@ -1018,10 +990,6 @@ struct Engine {
     deep: bool,
 }
 
-fn channels(deep: bool) -> usize {
-    if deep { 6 } else { 3 }
-}
-
 type Rest = Box<dyn FnOnce(Result<Vec<Held>>) + Send>;
 
 type Groups = HashMap<u64, Vec<(wgpu::ComputePipeline, Vec<wgpu::Buffer>, wgpu::BindGroup)>>;
@@ -1119,8 +1087,8 @@ impl Engine {
         let side = TILE + 2 * MARGIN;
         let tiles = side * side * 4 * FEATURES * 2
             + side * side * 16 * 32 * 2
-            + 3 * px * (SCALE * SCALE) as usize * channels(self.deep);
-        let need = count * px * channels(self.deep)
+            + 3 * px * (SCALE * SCALE) as usize * crate::screen::held::rgb_pixel(self.deep).1;
+        let need = count * px * crate::screen::held::rgb_pixel(self.deep).1
             + px * PADDED * 2
             + (7 + count) * px * FEATURES * 2
             + tiles;
@@ -1227,7 +1195,13 @@ impl Engine {
             deep: self.deep,
             size: buffer(d, 32, U::UNIFORM | U::COPY_DST),
             rgb: (0..count)
-                .map(|_| buffer(d, px * channels(self.deep), U::STORAGE | U::COPY_DST))
+                .map(|_| {
+                    buffer(
+                        d,
+                        px * crate::screen::held::rgb_pixel(self.deep).1,
+                        U::STORAGE | U::COPY_DST,
+                    )
+                })
                 .collect(),
             input: buffer(d, px * PADDED * 2, U::STORAGE),
             feats: buffer(d, feat, U::STORAGE),
@@ -1281,7 +1255,7 @@ impl Engine {
         }
         let side = TILE + 2 * MARGIN;
         let (p2, p4) = (side * side * 4, side * side * 16);
-        let shown = w * h * (SCALE * SCALE) as usize * channels(self.deep);
+        let shown = w * h * (SCALE * SCALE) as usize * crate::screen::held::rgb_pixel(self.deep).1;
         let d = &self.device;
         self.tiles = Some(Tiles {
             size: (w, h),

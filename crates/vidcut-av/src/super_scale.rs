@@ -48,10 +48,9 @@ pub fn unfit(m: &Media, upscaler: Upscaler, timeline: Option<Hdr>) -> Option<&'s
         return Some("pictures on macOS for now");
     }
     let model = match upscaler {
-        Upscaler::AiFast => &catalog::NANOVSR,
         Upscaler::AiBest => &catalog::FLASHVSR,
         Upscaler::Macos => return macos::unfit(m, timeline),
-        Upscaler::Classic => return None,
+        Upscaler::AiFast | Upscaler::Classic => return None,
     };
     let hdr = takes_hdr(m, timeline)?;
     let verdict = catalog::check(model, &[(Measure::HdrPictures, f64::from(u8::from(hdr)))]);
@@ -409,7 +408,7 @@ pub fn check<'a>(
     }
     let timeline = plans.iter().find_map(|plan| plan.colors);
     let pieces = || plans.iter().flat_map(|plan| &plan.video);
-    nanovsr::check(p, pieces(), timeline, dir, download)?;
+    nanovsr::check(pieces(), dir, download)?;
     flashvsr::check(p, plans.iter().copied(), dir, download)?;
     macos::check(p, pieces(), timeline, download)
 }
