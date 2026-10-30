@@ -257,12 +257,11 @@ struct Pool {
 }
 
 impl Pool {
-    fn new(f: &Video, like: Like, what: &str) -> Result<Self> {
+    fn new(device: *mut ffi::AVBufferRef, like: Like, what: &str) -> Result<Self> {
         let (format, range, (w, h)) = like;
-        // SAFETY: the frame's live frames context, and a new frames context on its device, freed on failure.
+        // SAFETY: a live device reference, and a new frames context on it, freed on failure.
         unsafe {
-            let of = &*((*(*f.as_ptr()).hw_frames_ctx).data as *const ffi::AVHWFramesContext);
-            let mut frames = ffi::av_hwframe_ctx_alloc(of.device_ref);
+            let mut frames = ffi::av_hwframe_ctx_alloc(device);
             if frames.is_null() {
                 return Err(Error::Invalid(format!("{what}: no memory for GPU frames")));
             }
@@ -302,6 +301,58 @@ impl Drop for Pool {
     fn drop(&mut self) {
         // SAFETY: the reference that `new` made.
         unsafe { ffi::av_buffer_unref(&mut self.frames) };
+    }
+}
+
+pub(crate) struct Surfaces {
+    device: *mut ffi::AVBufferRef,
+    pool: Option<Pool>,
+}
+
+// SAFETY: one thread at a time uses the surfaces, behind the mutex of their process.
+unsafe impl Send for Surfaces {}
+
+impl Surfaces {
+    pub(crate) fn new(what: &str) -> Result<Self> {
+        let mut device = std::ptr::null_mut();
+        // SAFETY: `device` is a valid place for the new device reference.
+        let ret = unsafe {
+            ffi::av_hwdevice_ctx_create(
+                &mut device,
+                ffi::AVHWDeviceType::AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if ret < 0 {
+            return Err(Error::Ffmpeg {
+                context: format!("{what}: opening VideoToolbox"),
+                source: ffmpeg::Error::from(ret),
+            });
+        }
+        Ok(Self { device, pool: None })
+    }
+
+    pub(crate) fn fresh(&mut self, size: (u32, u32), what: &str) -> Result<Video> {
+        let key = (
+            ffi::AVPixelFormat::AV_PIX_FMT_P416LE,
+            ffi::AVColorRange::AVCOL_RANGE_MPEG,
+            size,
+        );
+        if self.pool.as_ref().is_none_or(|p| p.like != key) {
+            self.pool = None;
+            self.pool = Some(Pool::new(self.device, key, what)?);
+        }
+        self.pool.as_ref().expect("a pool").frame(what)
+    }
+}
+
+impl Drop for Surfaces {
+    fn drop(&mut self) {
+        self.pool = None;
+        // SAFETY: the reference that `new` made.
+        unsafe { ffi::av_buffer_unref(&mut self.device) };
     }
 }
 
@@ -362,7 +413,12 @@ impl Frames {
         let key = (format, range, size);
         if self.0.as_ref().is_none_or(|p| p.like != key) {
             self.0 = None;
-            self.0 = Some(Pool::new(like, key, what)?);
+            // SAFETY: `like` has a live frames context, checked above.
+            let device = unsafe {
+                (*((*(*like.as_ptr()).hw_frames_ctx).data as *const ffi::AVHWFramesContext))
+                    .device_ref
+            };
+            self.0 = Some(Pool::new(device, key, what)?);
         }
         let mut out = self.0.as_ref().expect("a pool").frame(what)?;
         out.set_pts(like.pts());

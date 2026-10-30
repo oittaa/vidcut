@@ -35,6 +35,10 @@ pub(super) fn between_frames(
     imp::between_frames(key, a, b, size, t)
 }
 
+pub(super) fn blank(size: (u32, u32)) -> Result<frame::Video> {
+    imp::blank(size)
+}
+
 pub(super) fn release() {
     imp::release();
 }
@@ -72,6 +76,10 @@ mod imp {
         Err(Error::Invalid(NEEDS.into()))
     }
 
+    pub(super) fn blank(_size: (u32, u32)) -> Result<crate::ffmpeg::frame::Video> {
+        Err(Error::Invalid(NEEDS.into()))
+    }
+
     pub(super) fn release() {}
 }
 
@@ -96,8 +104,8 @@ mod imp {
     use crate::error::{Error, Result};
     use crate::ffmpeg::frame::Video;
     use crate::frame_processor::{
-        Frames, HALF_FIRST, Transfer, buffer, failed, format_in, fourcc, frame, numbers, pixels,
-        pool, read, write,
+        Frames, HALF_FIRST, Surfaces, Transfer, buffer, failed, format_in, fourcc, frame, numbers,
+        pixels, pool, read, write,
     };
 
     const WHAT: &str = "the frame rate conversion of macOS";
@@ -159,6 +167,8 @@ mod imp {
     unsafe impl Send for Session {}
 
     static SESSION: Mutex<Option<Session>> = Mutex::new(None);
+
+    static SURFACES: Mutex<Option<Surfaces>> = Mutex::new(None);
 
     fn time(value: i64, scale: i32) -> CMTime {
         // SAFETY: a time of plain values.
@@ -374,7 +384,16 @@ mod imp {
             .between_frames(key, a, b, t)
     }
 
+    pub(super) fn blank(size: (u32, u32)) -> Result<Video> {
+        let mut slot = SURFACES.lock().unwrap_or_else(PoisonError::into_inner);
+        if slot.is_none() {
+            *slot = Some(Surfaces::new(WHAT)?);
+        }
+        slot.as_mut().expect("surfaces").fresh(size, WHAT)
+    }
+
     pub(super) fn release() {
         *session() = None;
+        *SURFACES.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 }
