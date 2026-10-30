@@ -22,17 +22,24 @@ fn clips() -> Vec<Clip> {
 }
 
 fn line(r: &Row) {
+    let (s, b) = (&r.score, &r.base);
     println!(
-        "{:<22} {:<11} {:<4} {:<32} {:>7.2} {:>7.2} | {:<11} {:>7.2} {:>7.2} | {:>3}",
+        "{:<22} {:<11} {:<4} {:<32} {:>6.2} {:>6.2} {:>6.2} {:>5.3} {:>6.2} | {:<11} {:>6.2} {:>6.2} {:>6.2} {:>5.3} {:>6.2} | {:>3}",
         r.clip,
         r.test,
         r.coding,
         r.model,
-        r.score.de,
-        r.score.psnr,
+        s.de,
+        s.low,
+        s.mean,
+        s.light,
+        s.psnr,
         r.baseline,
-        r.base.de,
-        r.base.psnr,
+        b.de,
+        b.low,
+        b.mean,
+        b.light,
+        b.psnr,
         r.frames
     );
 }
@@ -164,9 +171,26 @@ fn main() {
     println!(
         "dE: mean dE ITP (BT.2124), lower is better; PSNR in dB on code values, higher is better"
     );
+    println!("low: mean dE ITP of the 40x40 block means; mean: dE ITP of the frame means");
+    println!("Y: mean luminance over the mean luminance of the real frame");
     println!(
-        "{:<22} {:<11} {:<4} {:<32} {:>7} {:>7} | {:<11} {:>7} {:>7} | {:>3}",
-        "clip", "test", "code", "model", "dE", "PSNR", "baseline", "dE", "PSNR", "n"
+        "{:<22} {:<11} {:<4} {:<32} {:>6} {:>6} {:>6} {:>5} {:>6} | {:<11} {:>6} {:>6} {:>6} {:>5} {:>6} | {:>3}",
+        "clip",
+        "test",
+        "code",
+        "model",
+        "dE",
+        "low",
+        "mean",
+        "Y",
+        "PSNR",
+        "baseline",
+        "dE",
+        "low",
+        "mean",
+        "Y",
+        "PSNR",
+        "n"
     );
     for clip in clips() {
         if !clip.path.exists() {

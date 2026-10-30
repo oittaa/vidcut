@@ -15,6 +15,7 @@ use crate::super_scale::{Out, Picture};
 const FULL: (u32, u32) = (1920, 1080);
 const SMALL: (u32, u32) = (480, 270);
 const CUT: f64 = 50.0;
+const BLOCK: usize = 40;
 
 pub struct Clip {
     pub name: String,
@@ -25,6 +26,9 @@ pub struct Clip {
 #[derive(Clone, Copy)]
 pub struct Score {
     pub de: f64,
+    pub low: f64,
+    pub mean: f64,
+    pub light: f64,
     pub psnr: f64,
 }
 
@@ -376,13 +380,21 @@ pub fn speed(
 
 fn mean(at: &[usize], score: impl Fn(usize) -> Score) -> Score {
     let n = at.len().max(1) as f64;
-    let (de, psnr) = at
-        .iter()
-        .map(|&i| score(i))
-        .fold((0.0, 0.0), |(d, p), s| (d + s.de, p + s.psnr));
+    let sum = at.iter().map(|&i| score(i)).fold([0.0; 5], |t, s| {
+        [
+            t[0] + s.de,
+            t[1] + s.low,
+            t[2] + s.mean,
+            t[3] + s.light,
+            t[4] + s.psnr,
+        ]
+    });
     Score {
-        de: de / n,
-        psnr: psnr / n,
+        de: sum[0] / n,
+        low: sum[1] / n,
+        mean: sum[2] / n,
+        light: sum[3] / n,
+        psnr: sum[4] / n,
     }
 }
 
@@ -395,15 +407,40 @@ fn sample(bytes: &[u8], p: usize) -> [f64; 3] {
 
 fn score(a: &[u8], b: &[u8], coding: Option<Hdr>) -> Score {
     let n = a.len().min(b.len()) / 6;
+    let wide = FULL.0 as usize;
+    let across = wide / BLOCK;
+    let mut blocks = vec![[[0.0; 3]; 2]; across * (FULL.1 as usize / BLOCK)];
     let (mut de, mut squared) = (0.0, 0.0);
     for p in 0..n {
         let (x, y) = (sample(a, p), sample(b, p));
         squared += (0..3).map(|c| (x[c] - y[c]).powi(2)).sum::<f64>();
-        de += delta_itp(x, y, coding);
+        let (x, y) = (nits(x, coding), nits(y, coding));
+        de += apart(x, y);
+        let (bx, by) = ((p % wide) / BLOCK, (p / wide) / BLOCK);
+        if let Some(sum) = blocks.get_mut(by * across + bx).filter(|_| bx < across) {
+            (0..3).for_each(|c| {
+                sum[0][c] += x[c];
+                sum[1][c] += y[c];
+            });
+        }
     }
     let mse = squared / (3 * n.max(1)) as f64;
+    let area = (BLOCK * BLOCK) as f64;
+    let count = blocks.len().max(1) as f64;
+    let whole = blocks.iter().fold([[0.0; 3]; 2], |mut t, s| {
+        (0..2).for_each(|i| (0..3).for_each(|c| t[i][c] += s[i][c] / area / count));
+        t
+    });
+    let luma = |c: [f64; 3]| 0.2627 * c[0] + 0.6780 * c[1] + 0.0593 * c[2];
     Score {
         de: de / n.max(1) as f64,
+        low: blocks
+            .iter()
+            .map(|s| apart(s[0].map(|v| v / area), s[1].map(|v| v / area)))
+            .sum::<f64>()
+            / count,
+        mean: apart(whole[0], whole[1]),
+        light: luma(whole[0]) / luma(whole[1]).max(1e-12),
         psnr: 10.0 * (1.0 / mse.max(1e-12)).log10(),
     }
 }
@@ -466,14 +503,14 @@ fn itp(n: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-fn delta_itp(a: [f64; 3], b: [f64; 3], coding: Option<Hdr>) -> f64 {
-    let (x, y) = (itp(nits(a, coding)), itp(nits(b, coding)));
+fn apart(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let (x, y) = (itp(a), itp(b));
     720.0 * (0..3).map(|i| (x[i] - y[i]).powi(2)).sum::<f64>().sqrt()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{delta_itp, pq_nits};
+    use super::{apart, nits, pq_nits, score};
     use vidcut_core::model::Hdr;
 
     #[test]
@@ -483,7 +520,16 @@ mod tests {
 
     #[test]
     fn a_color_is_no_distance_from_itself() {
-        let c = [0.4, 0.5, 0.6];
-        assert_eq!(delta_itp(c, c, Some(Hdr::Pq)), 0.0);
+        let c = nits([0.4, 0.5, 0.6], Some(Hdr::Pq));
+        assert_eq!(apart(c, c), 0.0);
+    }
+
+    #[test]
+    fn pixels_swapped_in_a_block_keep_the_means() {
+        let (white, black) = ([255u8; 6], [0u8; 6]);
+        let a = [white, black].concat();
+        let b = [black, white].concat();
+        let s = score(&a, &b, None);
+        assert_eq!((s.low, s.mean), (0.0, 0.0));
     }
 }

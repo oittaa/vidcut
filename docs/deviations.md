@@ -1802,6 +1802,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - macOS does not give their size, so the question says that the size is unknown. On the owner's Mac, the weight file of the 4x model is 66 MB.
   - AI Best is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.
     - It is slow, and it adds more detail. It has no setting.
+    - After the network, a color fix gives the picture the colors and the light of the large areas of its source. FlashVSR+ has this fix as an option, which is off by default.
     - It reads the frames of a clip in order, from the first frame that is asked for. Each output frame uses the frames before it and the 4 frames after it.
     - It makes the picture at the size that it shows at, but not more than 4 times the source.
     - The weights (7.0 GB) download at their first use. vidcut does not ship them.
@@ -1831,7 +1832,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Some users wait a long time for the best pictures, and others want good pictures fast. Thus there is a fast AI upscaler and a slow one.
   - On Windows and Linux, Auto takes AI Fast. It is fast, and it works in SDR and HDR timelines.
   - In the test of `hdr_models` ([tools](tools.md)), AI Fast came nearer to the real frames than Classic, in SDR and in HDR.
-  - AI Best came farther from the real frames than Classic. It adds detail, but it also changes the light of the picture.
+  - The network of AI Best alone shifts the colors and the light of large areas. Thus a color fix follows it.
+    - In 8-bit SDR, the network alone came to a mean ΔE ITP of 11.6 to 17.4. Classic came to 1.9 to 3.9.
+    - The ΔE of the means of 40×40 blocks was 60% to 87% of it. Thus most of the difference was in large areas, not in the detail.
+    - On the Dolby Vision clip, its pictures had 1.21 times the light of the real frames.
+    - In an export of 720p SDR video to 1080p, the network alone made each frame about 9 of 255 levels less red.
+  - With the color fix, AI Best's mean ΔE ITP in 8-bit SDR is 2.6 to 8.6. The ΔE of its block means is 1.2 to 1.5, and Classic's is 0.3 to 1.2.
+    - On the Dolby Vision clip, AI Best comes nearer to the real frames than Classic. On the other two clips, it stays farther.
+    - In the 720p export, the mean colors of each frame are those of its input picture. The fix added no time that the export measured.
+    - The rest of its difference is in the detail that it makes.
   - vidcut makes a picture only as large as the output shows it. A factor would only limit placed pictures. Thus On is sufficient.
   - Auto lets a project move between macOS and other systems. Each computer uses its own AI.
   - On macOS, the scaler of macOS is the default because it is part of the system. vidcut needs no weights for it, and the owner chose it.
@@ -2031,7 +2040,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - In an HDR timeline, AI Best and AI of Super Scale on macOS take SDR media as SDR. The draw then converts their result into the timeline color space.
   - These two refuse HDR media in an HDR timeline ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
 - **Why:**
-  - In the test of `hdr_models` ([tools](tools.md)), AI Best changed the light of HDR pictures. It made them brighter than the real frames.
+  - In the test of `hdr_models` ([tools](tools.md)), AI Best in PQ and HLG came far from the real frames, also with its color fix.
+    - On the HDR10+ clip in PQ, its mean ΔE ITP was 8.6, and Classic's was 1.8. Its pictures had 1.09 times the light of the real frames.
+    - On the Dolby Vision clip in HLG, its mean ΔE ITP was 4.2, and Classic's was 3.9. Its pictures had 1.03 times the light.
+    - In 8-bit SDR, the same clips gave 5.1 and 2.6.
   - On the owner's Mac, the scaler of macOS came farther from the real frames in HDR than in SDR. In both, it came farther than Classic.
   - The frame rate conversion of macOS takes SDR VideoToolbox frames with no copy. Why: it is faster than a copy into RGB.
   - SDR goes into an HDR timeline with no clipping. Thus the conversion after the stage keeps all of the picture.
