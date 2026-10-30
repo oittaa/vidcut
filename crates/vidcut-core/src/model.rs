@@ -1233,8 +1233,8 @@ pub struct Motion {
     pub ease: MotionEase,
     /// With a `custom` ease, the keys of the move: from 0, the outgoing
     /// picture, to 1, the incoming picture, at frames from the start of the
-    /// transition. Without keys, the transition stays on the outgoing
-    /// picture.
+    /// transition, in order and one on each frame. Without keys, the
+    /// transition stays on the outgoing picture.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub curve: Vec<Keyframe>,
 }

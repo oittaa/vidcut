@@ -133,6 +133,11 @@ fn checked(kind: &PictureTransition) -> Result<()> {
     if !m.curve.is_empty() && m.ease != MotionEase::Custom {
         return Err(Error::invalid("a curve goes with the custom ease only"));
     }
+    if m.curve.windows(2).any(|w| w[0].frame >= w[1].frame) {
+        return Err(Error::invalid(
+            "the keys of a curve go in order, one on each frame",
+        ));
+    }
     let finite = |h: &crate::model::Handle| h.frames.is_finite() && h.value.is_finite();
     let fits = |k: &crate::model::Keyframe| {
         (0.0..=1.0).contains(&k.value) && k.in_handle.iter().chain(&k.out_handle).all(finite)

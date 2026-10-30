@@ -16,6 +16,7 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
      - A gap on one side. vidcut shows black there.
      - Feather while the move is shorter than the band. In vidcut, a strip of black or of the still picture shows at one edge of the frame.
      - A Custom curve after a change of the length. vidcut keeps its keys at their frames.
+     - A side with a composite mode. vidcut mixes the side with the layers below before the move. Thus those layers move with the side, which is wrong.
 2. **Smooth Cut** (p. 759). It hides a jump cut with the frame interpolation of Retime Process.
 3. **Effects tab and clip effects** (p. 765).
    - A drag onto a clip adds the effect. A double-click adds it to the selected clip.
