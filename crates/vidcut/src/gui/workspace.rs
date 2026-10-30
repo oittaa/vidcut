@@ -443,6 +443,29 @@ impl Workspace {
         }
     }
 
+    pub(super) fn dissolve_target(&self) -> Value {
+        use super::timeline::Side;
+        match self.timeline.edit {
+            Some(e) => {
+                let align = match e.side {
+                    Side::Out => "end",
+                    Side::In => "start",
+                    Side::Both | Side::Audio => "center",
+                };
+                json!({
+                    "at": e.at,
+                    "track": e.track.id(),
+                    "align": align,
+                    "picture": e.side != Side::Audio,
+                })
+            }
+            None => json!({
+                "at": self.snap.timeline.position,
+                "clips": self.snap.selection.clips,
+            }),
+        }
+    }
+
     pub(super) fn send(&self, method: &str, params: Value) {
         self.live.request(method, params);
     }
@@ -1380,27 +1403,7 @@ impl Workspace {
             });
         }
         if pressed(Key::T) && m.command && !m.shift && !m.alt {
-            use super::timeline::Side;
-            let params = match self.timeline.edit {
-                Some(e) => {
-                    let align = match e.side {
-                        Side::Out => "end",
-                        Side::In => "start",
-                        Side::Both | Side::Audio => "center",
-                    };
-                    json!({
-                        "at": e.at,
-                        "track": e.track.id(),
-                        "align": align,
-                        "picture": e.side != Side::Audio,
-                    })
-                }
-                None => json!({
-                    "at": self.snap.timeline.position,
-                    "clips": self.snap.selection.clips,
-                }),
-            };
-            self.send("edit.dissolve", params);
+            self.send("edit.dissolve", self.dissolve_target());
         }
         if pressed(Key::T) && !m.command && !(m.alt && m.shift) {
             self.picture_tool(match (m.alt, m.shift) {

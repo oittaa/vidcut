@@ -64,29 +64,15 @@ fn paint(painter: &Painter, rect: Rect, kind: PictureTransition) {
 
 impl Workspace {
     fn selected_transition_params(&self, kind: PictureTransition) -> Option<Value> {
-        match self.timeline.edit {
-            Some(e) if e.side != Side::Audio => {
-                let align = match e.side {
-                    Side::Out => "end",
-                    Side::In => "start",
-                    Side::Both | Side::Audio => "center",
-                };
-                Some(json!({
-                    "at": e.at,
-                    "track": e.track.id(),
-                    "align": align,
-                    "transition": kind,
-                    "sound": false,
-                }))
-            }
-            _ if !self.snap.selection.clips.is_empty() => Some(json!({
-                "at": self.snap.timeline.position,
-                "clips": self.snap.selection.clips,
-                "transition": kind,
-                "sound": false,
-            })),
-            _ => None,
+        let audio = self.timeline.edit.is_some_and(|e| e.side == Side::Audio);
+        let none = self.timeline.edit.is_none() && self.snap.selection.clips.is_empty();
+        if audio || none {
+            return None;
         }
+        let mut params = self.dissolve_target();
+        params["transition"] = json!(kind);
+        params["sound"] = json!(false);
+        Some(params)
     }
 
     pub(super) fn transitions_panel(&mut self, ui: &mut egui::Ui) {
@@ -159,24 +145,5 @@ impl Workspace {
         if let Some(params) = to_selected.and_then(|k| self.selected_transition_params(k)) {
             self.send("edit.dissolve", params);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::GROUPS;
-    use vidcut_core::model::{PictureTransition, WipeDirection};
-
-    #[test]
-    fn the_edge_wipe_card_comes_in_from_the_bottom() {
-        assert_eq!(
-            GROUPS[1].1[0],
-            (
-                "Edge Wipe",
-                PictureTransition::Wipe {
-                    direction: WipeDirection::Down
-                }
-            )
-        );
     }
 }

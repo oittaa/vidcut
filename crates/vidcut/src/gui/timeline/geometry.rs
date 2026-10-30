@@ -666,12 +666,7 @@ pub fn transition_at(
     if !tr.rect.contains(pos) || (banded && tr.in_audio(pos.y)) {
         return None;
     }
-    let cuts = Cuts::of(p, track);
-    track.transitions.iter().filter(|x| !x.sound).find_map(|x| {
-        let at = cuts.place(p, x)?;
-        let over = scale.xf(at - x.before) <= pos.x && pos.x <= scale.xf(at + x.after);
-        (over && (pos.x - scale.xf(at)).abs() > ROLL).then_some(at)
-    })
+    transition_over(p, track, scale, pos.x).filter(|&at| (pos.x - scale.xf(at)).abs() > ROLL)
 }
 
 pub fn transition_over(p: &Project, track: &Track, scale: &Scale, x: f32) -> Option<i64> {
@@ -693,15 +688,15 @@ pub fn transition_span(p: &Project, track: &Track, at: i64) -> Option<(i64, i64)
 }
 
 pub fn clip_edge_near(track: &Track, scale: &Scale, x: f32, px: f32) -> Option<i64> {
-    track
-        .edit_points()
-        .into_iter()
-        .filter(|&f| (scale.xf(f) - x).abs() <= px)
-        .min_by(|a, b| {
-            (scale.xf(*a) - x)
-                .abs()
-                .total_cmp(&(scale.xf(*b) - x).abs())
-        })
+    let frame = scale.frame(x);
+    let slack = (f64::from(px) / scale.ppf).ceil() as i64 + 1;
+    let range = clips_in(
+        track,
+        frame.floor() as i64 - slack,
+        frame.ceil() as i64 + slack,
+    );
+    let edges = track.clips[range].iter().flat_map(|c| [c.start, c.end()]);
+    closest(std::iter::once(0).chain(edges), scale, x, px)
 }
 
 pub fn hit_rows(p: &Project, rows: &Rows, scale: &Scale, pos: Pos2) -> (Option<String>, Hit) {
@@ -734,6 +729,10 @@ pub fn edit_near(track: &Track, scale: &Scale, x: f32, px: f32) -> Option<i64> {
             points.push(w[0].end());
         }
     }
+    closest(points, scale, x, px)
+}
+
+fn closest(points: impl IntoIterator<Item = i64>, scale: &Scale, x: f32, px: f32) -> Option<i64> {
     points
         .into_iter()
         .filter(|&f| (scale.xf(f) - x).abs() <= px)

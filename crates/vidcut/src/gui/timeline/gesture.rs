@@ -760,7 +760,11 @@ fn title_preview(
 }
 
 fn transition_preview(ctx: &Ctx, pos: Pos2, kind: PictureTransition) -> Preview {
-    let Some(row) = ctx.rows.at(pos.y).filter(|r| r.track.starts_with('V')) else {
+    let Some(row) = ctx
+        .rows
+        .at(pos.y)
+        .filter(|r| r.track.starts_with('V') && ctx.rows.area.contains(pos))
+    else {
         return Preview::default();
     };
     let Some(track) = ctx.project.track(&row.track) else {
@@ -789,14 +793,12 @@ fn transition_preview(ctx: &Ctx, pos: Pos2, kind: PictureTransition) -> Preview 
     } else {
         vidcut_core::ops::Align::Start
     };
-    let (room_before, room_after) =
-        vidcut_core::ops::dissolve_room(ctx.project, &id, at, false).unwrap_or((0, 0));
     let length = ctx.project.settings.fps.as_f64().round() as i64;
-    let (before, after) = vidcut_core::ops::dissolve_frames(length, align);
-    let (before, after) = (before.min(room_before), after.min(room_after));
-    if before + after == 0 {
+    let shape = vidcut_core::ops::Shape::Length(length, align);
+    let Some((before, after)) = vidcut_core::ops::dissolve_sides(ctx.project, &id, at, shape)
+    else {
         return Preview::default();
-    }
+    };
     Preview {
         request: request(
             "edit.dissolve",
@@ -1701,6 +1703,45 @@ mod tests {
                 "transition": {"type": "wipe", "direction": "down"},
             }}))
         );
+    }
+
+    #[test]
+    fn a_transition_card_left_of_an_edit_ends_on_it() {
+        let w = World::new();
+        let r = w.drag(
+            Gesture::Transition {
+                kind: PictureTransition::Dissolve,
+                label: "Cross Dissolve",
+            },
+            pos2(185.0, 20.0),
+            &[pos2(185.0, 150.0)],
+            Duration::ZERO,
+        );
+        assert_eq!(
+            r,
+            Some(json!({"method": "edit.dissolve", "params": {
+                "at": 100,
+                "track": "V1",
+                "align": "end",
+                "transition": {"type": "dissolve"},
+                "sound": false,
+            }}))
+        );
+    }
+
+    #[test]
+    fn a_transition_card_left_of_the_lanes_adds_nothing() {
+        let w = World::new();
+        let r = w.drag(
+            Gesture::Transition {
+                kind: PictureTransition::Dissolve,
+                label: "Cross Dissolve",
+            },
+            pos2(-3.0, 20.0),
+            &[pos2(-3.0, 150.0)],
+            Duration::ZERO,
+        );
+        assert_eq!(r, None);
     }
 
     #[test]

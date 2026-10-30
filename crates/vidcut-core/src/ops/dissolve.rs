@@ -223,6 +223,24 @@ pub struct Made {
     pub after: i64,
 }
 
+type Plan = (Option<String>, Option<String>, i64, i64);
+
+fn plan(p: &Project, ti: usize, sound: bool, e: i64, shape: Shape) -> Option<Plan> {
+    let (from, to) = sides(p, ti, sound, e);
+    if from.is_none() && to.is_none() || compound_at(p, ti, sound, e).is_some() {
+        return None;
+    }
+    let (want_before, want_after) = wanted(shape, from.is_some(), to.is_some())?;
+    let (room_before, room_after) = room(p, ti, sound, e, from.as_deref(), to.as_deref());
+    let (before, after) = (want_before.min(room_before), want_after.min(room_after));
+    (before + after > 0).then_some((from, to, before, after))
+}
+
+pub fn planned(p: &Project, track: &str, e: i64, shape: Shape) -> Option<(i64, i64)> {
+    let ti = p.track_index(track)?;
+    plan(p, ti, false, e, shape).map(|(_, _, before, after)| (before, after))
+}
+
 fn put(
     p: &mut Project,
     ti: usize,
@@ -231,16 +249,7 @@ fn put(
     shape: Shape,
     kind: PictureTransition,
 ) -> Option<Made> {
-    let (from, to) = sides(p, ti, sound, e);
-    if from.is_none() && to.is_none() || compound_at(p, ti, sound, e).is_some() {
-        return None;
-    }
-    let (want_before, want_after) = wanted(shape, from.is_some(), to.is_some())?;
-    let (room_before, room_after) = room(p, ti, sound, e, from.as_deref(), to.as_deref());
-    let (before, after) = (want_before.min(room_before), want_after.min(room_after));
-    if before + after == 0 {
-        return None;
-    }
+    let (from, to, before, after) = plan(p, ti, sound, e, shape)?;
     let mut t = Transition {
         id: String::new(),
         sound,
@@ -569,6 +578,17 @@ mod tests {
         f.append("m2", 10, 60);
         let r = req(&mut f, "edit.dissolve", json!({"at": 48}));
         assert_eq!(made(&r), [(false, 50, 10, 12), (true, 50, 10, 12)]);
+    }
+
+    #[test]
+    fn a_centered_picture_transition_at_the_timeline_start_goes_after_it() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        let shape = super::Shape::Length(20, super::Align::Center);
+        assert_eq!(
+            super::planned(f.editor.project(), "V1", 0, shape),
+            Some((0, 20))
+        );
     }
 
     fn one_clip_on_v2(f: &mut Fixture) {
