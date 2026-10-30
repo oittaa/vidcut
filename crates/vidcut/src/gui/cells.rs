@@ -154,7 +154,7 @@ fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
                 sample_rate: s.sample_rate,
                 channels: s.channels,
                 frames: 1,
-                video: vec![VideoPiece::Black { frames: 1 }],
+                video: vec![VideoPiece::black(1)],
                 audio: Vec::new(),
                 ducking: Vec::new(),
                 range: (0, 1),

@@ -1324,7 +1324,7 @@ mod tests {
             sample_rate: 48_000,
             channels: 2,
             frames: 1,
-            video: vec![VideoPiece::Black { frames: 1 }],
+            video: vec![VideoPiece::black(1)],
             audio: Vec::new(),
             ducking: Vec::new(),
             range: (0, 1),

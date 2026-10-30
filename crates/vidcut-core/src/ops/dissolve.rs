@@ -103,6 +103,7 @@ fn otio(sound: bool, frames: i64, kind: PictureTransition) -> Value {
     });
     match kind {
         PictureTransition::Dissolve => dissolve,
+        PictureTransition::DipToColor { color } => crate::otio::transitions::dip_otio(color),
         PictureTransition::Wipe { direction } => crate::otio::transitions::wipe_otio(direction),
     }
 }
@@ -598,6 +599,35 @@ mod tests {
             Some(crate::model::PictureTransition::Wipe {
                 direction: crate::model::WipeDirection::Left
             })
+        );
+    }
+
+    #[test]
+    fn a_red_dip_reads_back_as_that_dip() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let dip = json!({"type": "dip_to_color", "color": "#ff0000"});
+        req(
+            &mut f,
+            "edit.dissolve",
+            json!({"at": 50, "transition": dip}),
+        );
+        let p = f.editor.project();
+        let t = p.track("V1").unwrap().transitions.iter().find(|t| !t.sound);
+        assert_eq!(
+            t.and_then(crate::otio::transitions::kind_of),
+            Some(crate::model::PictureTransition::DipToColor { color: [255, 0, 0] })
+        );
+    }
+
+    #[test]
+    fn a_dip_without_a_color_is_black() {
+        let dip: crate::model::PictureTransition =
+            serde_json::from_value(json!({"type": "dip_to_color"})).unwrap();
+        assert_eq!(
+            dip,
+            crate::model::PictureTransition::DipToColor { color: [0, 0, 0] }
         );
     }
 

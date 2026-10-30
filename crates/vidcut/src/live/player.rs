@@ -689,8 +689,8 @@ fn with_end(plan: &mut RenderPlan) {
     let samples = plan.fps.frame_to_sample(end + 1, plan.sample_rate)
         - plan.fps.frame_to_sample(end, plan.sample_rate);
     match plan.video.last_mut() {
-        Some(VideoPiece::Black { frames }) => *frames += 1,
-        _ => plan.video.push(VideoPiece::Black { frames: 1 }),
+        Some(VideoPiece::Black { frames, .. }) => *frames += 1,
+        _ => plan.video.push(VideoPiece::black(1)),
     }
     for lane in &mut plan.audio {
         lane.push(AudioPiece::Silence { samples });

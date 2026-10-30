@@ -331,7 +331,11 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             )
             .into()
         }
-        VideoPiece::Black { .. } | VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => {
+        VideoPiece::Black { color, .. } => {
+            let [r, g, b] = color;
+            format!("black|{}x{}|{r:02x}{g:02x}{b:02x}", plan.width, plan.height).into()
+        }
+        VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => {
             format!("black|{}x{}", plan.width, plan.height).into()
         }
     }
@@ -445,7 +449,7 @@ mod tests {
     fn wiped_in(direction: WipeDirection) -> super::Id {
         let off = SuperScale::default();
         let mixed = VideoPiece::Mix {
-            under: Box::new(VideoPiece::Black { frames: 10 }),
+            under: Box::new(VideoPiece::black(10)),
             over: vec![Over {
                 piece: piece(off, Retime::Nearest, 1.0, 0),
                 ramp: Some(Ramp {

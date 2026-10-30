@@ -1138,8 +1138,27 @@ pub enum PictureTransition {
     /// A cross dissolve.
     #[default]
     Dissolve,
+    /// A dissolve through `color` (`#rrggbb`, black if left out): the
+    /// outgoing picture fades to it, then the incoming picture fades in.
+    DipToColor {
+        #[serde(default, with = "hex_rgb")]
+        #[schemars(with = "String")]
+        color: [u8; 3],
+    },
     /// One wipe, from `direction`.
     Wipe { direction: WipeDirection },
+}
+
+mod hex_rgb {
+    pub fn serialize<S: serde::Serializer>(c: &[u8; 3], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]))
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[u8; 3], D::Error> {
+        let text = <String as serde::Deserialize>::deserialize(d)?;
+        crate::subtitles::rgb(&text.to_ascii_lowercase())
+            .ok_or_else(|| serde::de::Error::custom("a color is #rrggbb"))
+    }
 }
 
 impl PictureTransition {

@@ -32,15 +32,55 @@ pub fn wipe_of(t: &Transition) -> Option<WipeDirection> {
     (!t.sound).then(|| wipe_in(&t.otio)).flatten()
 }
 
+pub fn dip_of(t: &Transition) -> Option<[u8; 3]> {
+    (!t.sound).then(|| dip_in(&t.otio)).flatten()
+}
+
 pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
-    match wipe_of(t) {
-        Some(direction) => Some(PictureTransition::Wipe { direction }),
-        None => (!t.sound && dissolves(t)).then_some(PictureTransition::Dissolve),
+    if let Some(direction) = wipe_of(t) {
+        return Some(PictureTransition::Wipe { direction });
     }
+    if let Some(color) = dip_of(t) {
+        return Some(PictureTransition::DipToColor { color });
+    }
+    (!t.sound && dissolves(t)).then_some(PictureTransition::Dissolve)
 }
 
 pub fn mixes(t: &Transition) -> bool {
-    dissolves(t) || wipe_of(t).is_some()
+    dissolves(t) || wipe_of(t).is_some() || dip_of(t).is_some()
+}
+
+const DIP: &str = "Dip To Color Dissolve";
+
+pub fn dip_otio(color: [u8; 3]) -> Value {
+    let [r, g, b] = color;
+    json!({
+        "OTIO_SCHEMA": "Transition.1",
+        "name": DIP,
+        "transition_type": "Custom_Transition",
+        "metadata": {
+            EDITOR: {
+                "Effects": {
+                    "Display Type": 1,
+                    "Effect Name": DIP,
+                    "Enabled": true,
+                    "Name": DIP,
+                    "Parameters": [],
+                },
+                "Transition Type": DIP,
+            },
+            VIDCUT: {"color": format!("#{r:02x}{g:02x}{b:02x}")},
+        }
+    })
+}
+
+fn dip_in(o: &Value) -> Option<[u8; 3]> {
+    let kind = o["metadata"][EDITOR]["Transition Type"].as_str()?;
+    if !kind.eq_ignore_ascii_case(DIP) {
+        return None;
+    }
+    let color = o["metadata"][VIDCUT]["color"].as_str();
+    Some(color.and_then(crate::subtitles::rgb).unwrap_or([0, 0, 0]))
 }
 
 const EDGE_WIPE: &str = "Edge Wipe";
@@ -115,7 +155,7 @@ pub(super) fn plays_in(o: &Value, sound: bool) -> bool {
     if sound {
         cross_fade_in(o).is_some()
     } else {
-        dissolves_in(o) || wipe_in(o).is_some()
+        dissolves_in(o) || wipe_in(o).is_some() || dip_in(o).is_some()
     }
 }
 

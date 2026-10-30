@@ -290,7 +290,7 @@ pub fn choose(
     let black_in = |pieces: &mut dyn Iterator<Item = &VideoPiece>| -> i64 {
         pieces
             .map(|p| match p {
-                VideoPiece::Black { frames } => *frames,
+                VideoPiece::Black { frames, .. } => *frames,
                 _ => 0,
             })
             .sum()
@@ -552,10 +552,10 @@ mod tests {
             compatibility: 1,
         });
         dv.hdr10plus = true;
-        let video = vec![piece(30, "m0"), VideoPiece::Black { frames: 10 }];
+        let video = vec![piece(30, "m0"), VideoPiece::black(10)];
         let c = choose(&v, &video, |_| dv, true);
         assert_eq!(c.mode, HdrMetadata::All, "{:?}", c.why);
-        let video = vec![VideoPiece::Black { frames: 10 }, piece(30, "m0")];
+        let video = vec![VideoPiece::black(10), piece(30, "m0")];
         let c = choose(&v, &video, |_| dv, true);
         assert_eq!(c.mode, HdrMetadata::Hdr10plus, "{:?}", c.why);
         assert!(

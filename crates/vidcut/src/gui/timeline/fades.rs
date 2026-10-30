@@ -211,6 +211,11 @@ impl Workspace {
             _ => length,
         };
         let (mut set, mut align, mut dragged, mut commit) = (None, None, false, false);
+        let mut picked = None;
+        let drafted = match self.timeline.transition_color {
+            Some((track, at, c)) if (track, at) == (e.track, e.at) => Some(c),
+            _ => None,
+        };
         ui.label(RichText::new("Transition").strong());
         ui.label(dim(format!("{}   {}", e.track.id(), self.tc(e.at))));
         dialog::form(ui, "transition-form", |ui| {
@@ -250,6 +255,14 @@ impl Workspace {
                     }
                 });
             });
+            if let Some(PictureTransition::DipToColor { color }) = kind {
+                dialog::row(ui, "Color", |ui| {
+                    let mut rgb = drafted.unwrap_or(color);
+                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                        picked = Some(rgb);
+                    }
+                });
+            }
             if let Some(PictureTransition::Wipe { direction }) = kind {
                 dialog::row(ui, "Edge", |ui| {
                     let name = EDGES.iter().find(|(d, _)| *d == direction).map(|e| e.1);
@@ -272,6 +285,21 @@ impl Workspace {
         }
         if commit && let Some((track, at, f)) = self.timeline.transition_frames.take() {
             self.resize_transition(track, at, f);
+        }
+        if let Some(c) = picked {
+            self.timeline.transition_color = Some((e.track, e.at, c));
+        }
+        if !egui::Popup::is_any_open(ui.ctx())
+            && let Some((track, at, color)) = self.timeline.transition_color.take()
+        {
+            self.send(
+                "edit.transition",
+                json!({
+                    "at": at,
+                    "track": track.id(),
+                    "transition": PictureTransition::DipToColor { color },
+                }),
+            );
         }
         if let Some(k) = set {
             self.send(
