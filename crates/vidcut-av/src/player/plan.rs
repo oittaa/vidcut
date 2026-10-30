@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use vidcut_core::model::WipeDirection;
-use vidcut_core::render::{Image, Placed, RenderPlan, ShownTitle, VideoPiece};
+use vidcut_core::render::{Image, MovingKey, Placed, RenderPlan, ShownTitle, VideoPiece};
 use vidcut_core::time::Rational;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -11,7 +11,7 @@ pub(crate) struct Id {
     over: Option<Arc<[Layer]>>,
 }
 
-type Layer = (Arc<str>, i64, u32, Option<WipeDirection>);
+type Layer = (Arc<str>, i64, u32, Option<WipeDirection>, Option<MovingKey>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Fill {
@@ -148,12 +148,15 @@ impl Plan {
         };
         let keys = &self.sources[i];
         let layers = piece.layers();
+        let motions = piece.motions();
         let over: Vec<Layer> = layers[1..]
             .iter()
+            .zip(&motions[1..])
             .zip(&keys[1..])
-            .map(|((l, ramp), key)| {
+            .map(|(((l, ramp), motion), key)| {
                 let (weight, wipe) = ramp.map_or((0, None), |r| (r.weight(k), r.wipe));
-                (key.clone(), pos(l), weight, wipe)
+                let moving = motion.zip(*ramp).map(|(m, r)| m.at(&r, k).key());
+                (key.clone(), pos(l), weight, wipe, moving)
             })
             .collect();
         Id {
@@ -462,6 +465,7 @@ mod tests {
                     wipe: Some(direction),
                 }),
                 cross: false,
+                motion: None,
             }],
         };
         super::Plan::new(RenderPlan {

@@ -361,6 +361,7 @@ The pictures:
   - `place::Placing` takes the first mode other than Normal, from the picture out through its compound clips.
 - A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once.
 - A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
+- A Push or a Slide draws each side into its own picture. `fs_motion` moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
 
 Dynamic Zoom and keyframes (D75):
 

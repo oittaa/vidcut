@@ -653,7 +653,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - In the first half of the transition, the outgoing picture fades to its color. In the second half, the incoming picture fades in from it.
   - Its color is black unless it is set. Resolve's Start Ratio and End Ratio come later.
   - A request makes it: `{"type": "dip_to_color", "color": "#rrggbb"}`.
-  - An OTIO file holds it as a Dip To Color Dissolve, with the color in vidcut's own metadata ([todo](todo/effects-library.md)).
+  - An OTIO file holds it as a Dip To Color Dissolve, with the color as its `color` value ([gotchas](gotchas.md#resolves-otio-files)).
 - **A wipe:**
   - A wipe is another transition on an edit.
   - It uses the same length rules as a dissolve.
@@ -663,9 +663,24 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The edge moves in fractions of the duration (deviation X89).
   - A request can make a wipe.
   - A request can change a dissolve into a wipe, and a wipe into a dissolve.
+- **A Push and a Slide** (pp. 1166–1167):
+  - They use the same length rules as a dissolve.
+  - In a Push, the incoming picture pushes the outgoing picture out of the frame.
+  - The Preset of a Push is Push Left, Push Right, Push Up or Push Down. Push Left moves the pictures right, so the incoming picture comes in from the left.
+  - In a Slide with the Direction In, the incoming picture slides in over the outgoing picture. With Out, the outgoing picture slides out over the incoming picture.
+  - The Preset of a Slide is the edge or the corner that it comes in from: Left-Right, Right-Left, Bottom-Up, Top-Down, Top-Left or Bottom-Right.
+  - Border puts a band of Color on the moving edge. Its width is a part of the shorter side of the frame.
+  - Feather fades one picture into the other across the band. The band then shows no color.
+  - Motion Blur blurs along the move. A Push blurs the whole frame. A Slide blurs the moving picture only.
+  - Ease is None, In, Out, In & Out or Custom. A Custom ease plays the keys of its curve. Without keys, the transition stays on the outgoing picture.
+  - Resolve's measured geometry, blur and ease are in [gotchas](gotchas.md#resolves-otio-files).
+  - At a gap, the missing picture is black.
+  - A request makes one: `{"type": "push", "preset": "up", "border": 0.02}`, or `{"type": "slide", "preset": "top_left", "out": true}`.
+  - An OTIO file holds them as Resolve's Push and Slide, with their values.
 - **The Transitions tab** (pp. 759–761):
-  - It has cards for Cross Dissolve and Dip To Color Dissolve under Dissolve, and for Edge Wipe under Wipe.
+  - It has cards for Cross Dissolve and Dip To Color Dissolve under Dissolve, for Edge Wipe under Wipe, and for Push and Slide under Motion.
   - The Edge Wipe of the card comes in from the bottom, as Resolve's Edge Wipe at 0 degrees (X89).
+  - The Push of the card is Push Left. The Slide of the card is Left-Right, In.
   - A drag of a card onto an edit of a video track adds that transition there, one second long.
     - Left of the edit, it ends on the edit. Right of the edit, it starts on it. On the edit, it is centered.
     - The length is shortened to the media (X27).
@@ -682,11 +697,14 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Alignment is Start on Edit, Center on Edit or End on Edit.
   - An Edge Wipe also has Edge: Left, Right, Top or Bottom (X89).
   - A Dip To Color Dissolve also has Color. A change goes to the project when the color picker closes.
-  - Each change is a request: `edit.transition` for the type and the edge, `edit.dissolve` for the length and the alignment.
+  - A Push and a Slide also have Preset, Border, Feather, Color, Motion Blur and Ease. A Slide also has Direction: In or Out.
+  - Border shows the band in pixels of the timeline width, as Resolve shows it. A change of Border or Motion Blur goes to the project when the drag ends.
+  - Each change is a request: `edit.transition` for the type and its values, `edit.dissolve` for the length and the alignment.
 - **Later:**
   - Smooth Cut
   - Hover Scrub Preview of a transition, and favorites
   - the other values of each type, such as the Style of a dissolve and the border of a wipe
+  - the Transition Curve of a Push or a Slide in the Inspector, for the keys of a Custom ease ([todo](todo/effects-library.md))
   - moving a transition to another edit
   - Change Transition Type, Set as Default Transition
   - cutting, copying and pasting transitions

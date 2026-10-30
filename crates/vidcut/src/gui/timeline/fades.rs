@@ -1,6 +1,9 @@
 use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
-use vidcut_core::model::{PictureTransition, Project, Transition, WipeDirection};
+use vidcut_core::model::{
+    MAX_BORDER, MotionEase, PictureTransition, Project, PushPreset, SlidePreset, Transition,
+    WipeDirection,
+};
 use vidcut_core::ops;
 use vidcut_core::time::{Rational, format_timecode, parse_media_timecode};
 
@@ -21,14 +24,58 @@ const EDGES: [(WipeDirection, &str); 4] = [
     (WipeDirection::Down, "Bottom"),
 ];
 
+const PUSHES: [(PushPreset, &str); 4] = [
+    (PushPreset::Left, "Push Left"),
+    (PushPreset::Right, "Push Right"),
+    (PushPreset::Up, "Push Up"),
+    (PushPreset::Down, "Push Down"),
+];
+
+const SLIDES: [(SlidePreset, &str); 6] = [
+    (SlidePreset::LeftRight, "Left-Right"),
+    (SlidePreset::RightLeft, "Right-Left"),
+    (SlidePreset::BottomUp, "Bottom-Up"),
+    (SlidePreset::TopDown, "Top-Down"),
+    (SlidePreset::TopLeft, "Top-Left"),
+    (SlidePreset::BottomRight, "Bottom-Right"),
+];
+
+const EASES: [(MotionEase, &str); 5] = [
+    (MotionEase::None, "None"),
+    (MotionEase::In, "In"),
+    (MotionEase::Out, "Out"),
+    (MotionEase::InOut, "In & Out"),
+    (MotionEase::Custom, "Custom"),
+];
+
 const ALIGNMENTS: [(&str, &str); 3] = [
     ("start", "Start on Edit"),
     ("center", "Center on Edit"),
     ("end", "End on Edit"),
 ];
 
-fn same_type(a: PictureTransition, b: PictureTransition) -> bool {
-    std::mem::discriminant(&a) == std::mem::discriminant(&b)
+fn same_type(a: &PictureTransition, b: &PictureTransition) -> bool {
+    std::mem::discriminant(a) == std::mem::discriminant(b)
+}
+
+fn menu<T: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    id: &str,
+    now: T,
+    choices: &[(T, &str)],
+) -> Option<T> {
+    let name = choices.iter().find(|(c, _)| *c == now).map(|c| c.1);
+    let mut set = None;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(name.unwrap_or_default())
+        .show_ui(ui, |ui| {
+            for &(c, label) in choices {
+                if ui.selectable_label(c == now, label).clicked() && c != now {
+                    set = Some(c);
+                }
+            }
+        });
+    set
 }
 
 pub fn kind(x: &Transition) -> PictureTransition {
@@ -51,7 +98,7 @@ pub fn resized(
     at: i64,
     (before, after): (i64, i64),
     sound: bool,
-    transition: PictureTransition,
+    transition: &PictureTransition,
 ) -> Value {
     json!({
         "at": at,
@@ -143,7 +190,7 @@ impl Workspace {
         }
         self.send(
             "edit.dissolve",
-            resized(&track.id(), at, (before, after), sound, kind(&x)),
+            resized(&track.id(), at, (before, after), sound, &kind(&x)),
         );
     }
 
@@ -212,27 +259,41 @@ impl Workspace {
             egui::Popup::close_id(ctx, id);
             self.recolor_transition(track, at, color);
         }
+        if let Some((track, at, k)) = self.timeline.transition_values.take() {
+            if showing == Some((track, at)) {
+                self.timeline.transition_values = Some((track, at, k));
+            } else {
+                self.set_transition(track, at, &k);
+            }
+        }
+    }
+
+    fn set_transition(&self, track: TrackRef, at: i64, k: &PictureTransition) {
+        self.send(
+            "edit.transition",
+            json!({ "at": at, "track": track.id(), "transition": k }),
+        );
     }
 
     fn recolor_transition(&self, track: TrackRef, at: i64, color: [u8; 3]) {
         let Some(p) = self.project() else {
             return;
         };
-        let now = p
+        let Some(mut now) = p
             .track(&track.id())
             .and_then(|t| geometry::picture_transition(p, t, at))
-            .and_then(vidcut_core::otio::transitions::kind_of);
-        if !matches!(now, Some(PictureTransition::DipToColor { color: c }) if c != color) {
+            .and_then(vidcut_core::otio::transitions::kind_of)
+        else {
             return;
+        };
+        match &mut now {
+            PictureTransition::DipToColor { color: c } if *c != color => *c = color,
+            k => match k.motion_mut() {
+                Some(m) if m.color != color => m.color = color,
+                _ => return,
+            },
         }
-        self.send(
-            "edit.transition",
-            json!({
-                "at": at,
-                "track": track.id(),
-                "transition": PictureTransition::DipToColor { color },
-            }),
-        );
+        self.set_transition(track, at, &now);
     }
 
     pub(crate) fn transition_form(&mut self, ui: &mut egui::Ui) -> bool {
@@ -243,10 +304,18 @@ impl Workspace {
         let Some((e, x)) = selected else {
             return false;
         };
-        let Some(fps) = self.project().map(|p| p.settings.fps) else {
+        let Some((fps, width)) = self
+            .project()
+            .map(|p| (p.settings.fps, f64::from(p.settings.width.max(1))))
+        else {
             return false;
         };
         let kind = vidcut_core::otio::transitions::kind_of(&x);
+        let mut values = match &self.timeline.transition_values {
+            Some((track, at, k)) if (*track, *at) == (e.track, e.at) => Some(k.clone()),
+            _ => kind.clone().filter(|k| k.motion().is_some()),
+        };
+        let (mut drafted_values, mut committed) = (false, false);
         let length = x.before + x.after;
         let mut frames = match self.timeline.transition_frames {
             Some((track, at, f)) if (track, at) == (e.track, e.at) => f,
@@ -269,10 +338,10 @@ impl Workspace {
                         let cards = crate::gui::transition_browser::GROUPS
                             .iter()
                             .flat_map(|(_, cards)| cards.iter());
-                        for &(label, k) in cards {
-                            let same = kind.is_some_and(|c| same_type(c, k));
-                            if ui.selectable_label(same, label).clicked() && !same {
-                                set = Some(k);
+                        for (label, k) in cards {
+                            let same = kind.as_ref().is_some_and(|c| same_type(c, k));
+                            if ui.selectable_label(same, *label).clicked() && !same {
+                                set = Some(k.clone());
                             }
                         }
                     });
@@ -297,32 +366,39 @@ impl Workspace {
                     }
                 });
             });
-            if let Some(PictureTransition::DipToColor { color }) = kind {
+            if let Some(PictureTransition::DipToColor { color }) = &kind {
                 dialog::row(ui, "Color", |ui| {
-                    let mut rgb = drafted.unwrap_or(color);
+                    let mut rgb = drafted.unwrap_or(*color);
                     picker = Some(ui.auto_id_with("popup"));
                     if ui.color_edit_button_srgb(&mut rgb).changed() {
                         picked = Some(rgb);
                     }
                 });
             }
-            if let Some(PictureTransition::Wipe { direction }) = kind {
+            if let Some(PictureTransition::Wipe { direction }) = &kind {
                 dialog::row(ui, "Edge", |ui| {
-                    let name = EDGES.iter().find(|(d, _)| *d == direction).map(|e| e.1);
-                    egui::ComboBox::from_id_salt("transition-edge")
-                        .selected_text(name.unwrap_or_default())
-                        .show_ui(ui, |ui| {
-                            for (d, label) in EDGES {
-                                if ui.selectable_label(d == direction, label).clicked()
-                                    && d != direction
-                                {
-                                    set = Some(PictureTransition::Wipe { direction: d });
-                                }
-                            }
-                        });
+                    if let Some(d) = menu(ui, "transition-edge", *direction, &EDGES) {
+                        set = Some(PictureTransition::Wipe { direction: d });
+                    }
                 });
             }
+            if let Some(k) = &mut values {
+                let color = |ui: &mut egui::Ui, now: [u8; 3]| {
+                    let mut rgb = drafted.unwrap_or(now);
+                    picker = Some(ui.auto_id_with("popup"));
+                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                        picked = Some(rgb);
+                    }
+                };
+                (drafted_values, committed) = motion_rows(ui, k, width, color);
+            }
         });
+        if let Some(k) = values.filter(|_| drafted_values || committed) {
+            self.timeline.transition_values = Some((e.track, e.at, k));
+        }
+        if committed && let Some((track, at, k)) = self.timeline.transition_values.take() {
+            self.set_transition(track, at, &k);
+        }
         if dragged {
             self.timeline.transition_frames = Some((e.track, e.at, frames));
         }
@@ -339,10 +415,7 @@ impl Workspace {
             self.recolor_transition(track, at, color);
         }
         if let Some(k) = set {
-            self.send(
-                "edit.transition",
-                json!({ "at": e.at, "track": e.track.id(), "transition": k }),
-            );
+            self.set_transition(e.track, e.at, &k);
         }
         if let Some(a) = align {
             self.realign_transition(e.track, e.at, a);
@@ -422,6 +495,78 @@ impl Workspace {
             self.timeline.fade_dialog = Some(d);
         }
     }
+}
+
+fn motion_rows(
+    ui: &mut egui::Ui,
+    k: &mut PictureTransition,
+    width: f64,
+    color: impl FnOnce(&mut egui::Ui, [u8; 3]),
+) -> (bool, bool) {
+    use super::super::dialog;
+    let (mut changed, mut done) = (false, false);
+    dialog::row(ui, "Preset", |ui| match k {
+        PictureTransition::Push { preset, .. } => {
+            if let Some(p) = menu(ui, "transition-preset", *preset, &PUSHES) {
+                (*preset, done) = (p, true);
+            }
+        }
+        PictureTransition::Slide { preset, .. } => {
+            if let Some(p) = menu(ui, "transition-preset", *preset, &SLIDES) {
+                (*preset, done) = (p, true);
+            }
+        }
+        _ => {}
+    });
+    if let PictureTransition::Slide { out, .. } = k {
+        dialog::row(ui, "Direction", |ui| {
+            dialog::switch(ui, |ui| {
+                for (o, label) in [(false, "In"), (true, "Out")] {
+                    if ui.selectable_label(*out == o, label).clicked() && *out != o {
+                        (*out, done) = (o, true);
+                    }
+                }
+            });
+        });
+    }
+    let Some(m) = k.motion_mut() else {
+        return (changed, done);
+    };
+    dialog::row(ui, "Border", |ui| {
+        let mut shown = m.border * width;
+        let r = ui.add(
+            egui::DragValue::new(&mut shown)
+                .range(0.0..=MAX_BORDER * width)
+                .max_decimals(1),
+        );
+        if r.changed() {
+            m.border = shown / width;
+            changed = true;
+        }
+        done |= r.drag_stopped() || r.lost_focus();
+    });
+    dialog::row(ui, "Feather", |ui| {
+        done |= ui.checkbox(&mut m.feather, "").changed();
+    });
+    dialog::row(ui, "Color", |ui| color(ui, m.color));
+    dialog::row(ui, "Motion Blur", |ui| {
+        let r = ui.add(
+            egui::DragValue::new(&mut m.motion_blur)
+                .range(0.0..=1.0)
+                .speed(0.01)
+                .max_decimals(3),
+        );
+        changed |= r.changed();
+        done |= r.drag_stopped() || r.lost_focus();
+    });
+    dialog::row(ui, "Ease", |ui| {
+        if let Some(e) = menu(ui, "transition-ease", m.ease, &EASES) {
+            m.ease = e;
+            m.curve.clear();
+            done = true;
+        }
+    });
+    (changed, done)
 }
 
 #[cfg(test)]

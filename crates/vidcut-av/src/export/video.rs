@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
 use vidcut_core::place::Placing;
-use vidcut_core::render::{Image, Placed, Ramp, VideoPiece, WHOLE, Wipe};
+use vidcut_core::render::{Image, Moving, Placed, Ramp, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -689,6 +689,7 @@ pub(crate) struct Layer {
     pub(crate) decoding: Option<std::sync::Arc<crate::decode::Decoding>>,
     pub(crate) went: Option<crate::route::Went>,
     pub(crate) wipe: Option<Wipe>,
+    pub(crate) moving: Option<Moving>,
     pub(crate) share: f64,
     pub(crate) woven: Option<Weave>,
 }
@@ -2075,10 +2076,12 @@ impl VideoFrames {
                 self.open_next();
             }
             let placed = crate::player::placed_of(&piece, k, &[]);
+            let motions = piece.motions();
             let mut made = Vec::with_capacity(layers.len());
             for (i, (layer, ramp)) in layers.into_iter().enumerate() {
                 let weight = ramp.map(|r| r.weight(k));
                 let wipe = mask_of(ramp, k);
+                let moving = motions[i].zip(ramp).map(|(m, r)| m.at(&r, k));
                 let VideoPiece::Source {
                     image,
                     pace,
@@ -2100,6 +2103,7 @@ impl VideoFrames {
                             decoding: None,
                             went: None,
                             wipe,
+                            moving,
                             share: 1.0,
                             woven: None,
                         });
@@ -2150,6 +2154,7 @@ impl VideoFrames {
                     decoding: Some(decoding),
                     went: self.open[s].fitting.went(),
                     wipe,
+                    moving,
                     share: self.share_of(s, rotation, placed.get(i)),
                     woven,
                 });

@@ -331,7 +331,7 @@ impl Workspace {
                     e.at,
                     (before, after),
                     sound,
-                    super::timeline::fades::kind(x),
+                    &super::timeline::fades::kind(x),
                 ),
             );
         }

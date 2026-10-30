@@ -588,16 +588,142 @@ fn fs_title(in: Out) -> @location(0) vec4<f32> {
     var shown = sum / f32(taps.x * taps.y);
     let transfer = u32(lettering.tilt.z + 0.5);
     if transfer != 0u && shown.a > 0.0 {
-        let s = clamp(shown.rgb / shown.a, vec3<f32>(0.0), vec3<f32>(1.0));
-        let lin = select(pow((s + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4)), s / 12.92, s <= vec3<f32>(0.04045));
-        let wide = vec3<f32>(
-            dot(vec3<f32>(0.6274, 0.3293, 0.0433), lin),
-            dot(vec3<f32>(0.0691, 0.9195, 0.0114), lin),
-            dot(vec3<f32>(0.0164, 0.0880, 0.8956), lin),
-        );
-        shown = vec4<f32>(clamp(encode(wide, transfer), vec3<f32>(0.0), vec3<f32>(1.0)) * shown.a, shown.a);
+        shown = vec4<f32>(widened(shown.rgb / shown.a, transfer) * shown.a, shown.a);
     }
     return shown * (cover * m.w);
+}
+
+fn widened(rgb: vec3<f32>, transfer: u32) -> vec3<f32> {
+    let s = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    let lin = select(pow((s + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4)), s / 12.92, s <= vec3<f32>(0.04045));
+    let wide = vec3<f32>(
+        dot(vec3<f32>(0.6274, 0.3293, 0.0433), lin),
+        dot(vec3<f32>(0.0691, 0.9195, 0.0114), lin),
+        dot(vec3<f32>(0.0164, 0.0880, 0.8956), lin),
+    );
+    return clamp(encode(wide, transfer), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+struct Motion {
+    offsets: vec4<f32>,
+    picture: vec4<f32>,
+    band: vec4<f32>,
+    edge: vec4<f32>,
+    blur: vec4<f32>,
+    color: vec4<f32>,
+    flags: vec4<u32>,
+};
+
+@group(0) @binding(11) var<uniform> motion: Motion;
+@group(0) @binding(12) var outgoing: texture_2d<f32>;
+@group(0) @binding(13) var incoming: texture_2d<f32>;
+
+fn outgoing_at(q: vec2<f32>) -> vec4<f32> {
+    let size = vec2<f32>(textureDimensions(outgoing));
+    if any(q < vec2<f32>(0.0)) || any(q >= size) {
+        return vec4<f32>(0.0);
+    }
+    return textureLoad(outgoing, vec2<i32>(q), 0);
+}
+
+fn incoming_at(q: vec2<f32>) -> vec4<f32> {
+    let size = vec2<f32>(textureDimensions(incoming));
+    if any(q < vec2<f32>(0.0)) || any(q >= size) {
+        return vec4<f32>(0.0);
+    }
+    return textureLoad(incoming, vec2<i32>(q), 0);
+}
+
+fn inside(c: vec2<f32>, r: vec4<f32>) -> bool {
+    return all(c >= r.xy) && all(c < r.zw);
+}
+
+fn edge_ramp(q: f32, edge: f32, facing: f32, b: f32) -> f32 {
+    if facing > 0.0 {
+        return clamp((edge - q - 1.0) / b, 0.0, 1.0);
+    }
+    if facing < 0.0 {
+        return clamp((q - edge) / b, 0.0, 1.0);
+    }
+    return 1.0;
+}
+
+fn feathered(q: vec2<f32>) -> f32 {
+    let b = motion.blur.w;
+    if b <= 0.0 {
+        return 1.0;
+    }
+    let x = edge_ramp(q.x, motion.edge.x, motion.edge.z, b);
+    let y = edge_ramp(q.y, motion.edge.y, motion.edge.w, b);
+    return min(x, y);
+}
+
+struct Tap {
+    color: vec4<f32>,
+    cover: f32,
+};
+
+fn tap(q: vec2<f32>) -> Tap {
+    var t: Tap;
+    if motion.flags.w == 1u {
+        t.color = outgoing_at(q);
+        t.cover = 0.0;
+        return t;
+    }
+    let upper_in = motion.flags.x == 1u;
+    let u = q - motion.offsets.xy;
+    let l = q - motion.offsets.zw;
+    var upper: vec4<f32>;
+    var lower: vec4<f32>;
+    if upper_in {
+        upper = incoming_at(u);
+        lower = outgoing_at(l);
+    } else {
+        upper = outgoing_at(u);
+        lower = incoming_at(l);
+    }
+    let c = q + vec2<f32>(0.5);
+    if motion.flags.y == 1u {
+        upper *= feathered(q);
+    } else if inside(c, motion.band) && !inside(c, motion.picture) {
+        let transfer = u32(motion.color.w + 0.5);
+        var band = motion.color.rgb;
+        if transfer != 0u {
+            band = widened(band, transfer);
+        }
+        t.color = vec4<f32>(band, 1.0);
+        t.cover = 1.0;
+        return t;
+    }
+    t.color = upper + lower * (1.0 - upper.a);
+    t.cover = upper.a;
+    return t;
+}
+
+@fragment
+fn fs_motion(in: Out) -> @location(0) vec4<f32> {
+    let q = floor(in.position.xy);
+    let here = tap(q);
+    let len = motion.blur.z;
+    if len < 0.5 {
+        return here.color;
+    }
+    let size = vec2<f32>(textureDimensions(outgoing));
+    let n = u32(clamp(ceil(len) + 1.0, 2.0, 512.0));
+    var sum = vec4<f32>(0.0);
+    var cover = 0.0;
+    for (var i = 0u; i < n; i++) {
+        let s = len * f32(i) / f32(n - 1u);
+        let at = clamp(floor(q + vec2<f32>(0.5) - motion.blur.xy * s), vec2<f32>(0.0), size - vec2<f32>(1.0));
+        let t = tap(at);
+        sum += t.color;
+        cover += t.cover;
+    }
+    let boxed = sum / f32(n);
+    if motion.flags.z == 0u {
+        return boxed;
+    }
+    return mix(here.color, boxed, cover / f32(n));
 }
 
 struct Screen {

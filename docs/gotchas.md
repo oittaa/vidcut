@@ -383,6 +383,65 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - Without `Transition Type`, or with the name alone, Resolve makes a cross dissolve. It also does so for a transition with metadata it does not know.
   - Resolve refuses the whole timeline when an `Int` has a decimal point, for example `90.0`.
   - Measured with renders of 24-frame wipes at 0, 90, 180 and −90 degrees.
+- **Resolve reads the values of Push, Slide and Dip To Color Dissolve only with the type of their effect.**
+  - Each is a `Custom_Transition` with the name and the `Transition Type` of the transition.
+  - The `Type` of the effect is 50 for Push, 49 for Slide and 11 for Dip To Color Dissolve.
+  - Without `Type`, Resolve keeps the transition but drops its values. Thus a dip from such a file plays black.
+  - Resolve's own export also writes `transitionCustomCurvesKeyframes`, a straight curve from 0 to 1. Resolve reads a file without it.
+  - Resolve writes each preset as a `UInt`, with its default and value only.
+  - Resolve 21.1.2 reads an `Int` too, and plays it. But a click on that transition in the timeline closes Resolve.
+  - The value is the place of the preset in the Preset menu of the Inspector, from 0.
+  - `push style` gives Push Left, Push Right, Push Up and Push Down.
+  - Push Left moves the pictures right: the incoming picture comes in from the left edge. Push Right moves them left.
+  - Push Up moves them up, and Push Down moves them down. The incoming picture pushes the outgoing picture out.
+  - `slide style` gives Slide, Left-Right, Right-Left, Bottom-Up, Top-Down, Top-Left and Bottom-Right.
+  - Each one comes in from its first edge: left, right, bottom, top, the top-left corner or the bottom-right corner.
+  - `transition direction` gives the Direction: 0 In, 1 Out.
+  - With In, the incoming picture slides in over the outgoing picture. The outgoing picture stays still.
+  - With Out, the outgoing picture slides out the same way over the incoming picture. The incoming picture stays still.
+  - `color` (`Color`, `#rrggbb`) is the color of a dip.
+  - Resolve leaves out each value at its default: 0, or black.
+  - With Ease None, Push and Slide move at an even speed. At frame f of a transition of N frames, the move is f/N of the frame.
+  - Thus the first frame of a Push or a Slide shows no move.
+  - A dip mixes at (f + 0.5)/N, as a cross dissolve does.
+  - No border and no motion blur show at the defaults.
+  - Measured with renders of 24-frame transitions between two pictures that code the position of each pixel.
+- **Resolve gives Push and Slide a border, a feather, a motion blur and an ease.**
+  - The Inspector shows Border 0, Feather off, Color white, Motion Blur 0 and Ease None. Resolve leaves out each value at its default.
+  - `border` and `motion blur` are `Double`, with `Key Frames` `{}`, `minValue` 0 and a `maxValue`: 0.25 for the border, 1 for the blur.
+  - `feather` is `Bool`. `color` is `Color`, `#rrggbb`, with the default `#ffffff`. `ease` is `UInt`: 0 None, 1 In, 2 Out, 3 In & Out, 4 Custom.
+  - The Inspector shows `border` times the width of the timeline. Thus 0.05 shows 27 at 540 × 960 and 96 at 1920 × 1080.
+  - On a timeline of 960 × 540, a Border of 20 stores 0.0208. A larger number than the maximum stores 0.25.
+- **The border of a Push or a Slide is a band of its color on the moving edge.**
+  - The band is b = `border` × the shorter side of the frame. This is 27 pixels for 0.05 at 960 × 540, at 540 × 960, and 54 at 1920 × 1080.
+  - In a Push, the band is between the two pictures. In a Slide, it is on the edge of the moving picture that faces the still picture.
+  - On a diagonal Slide, the band is on the two edges of the moving picture, and it fills the corner.
+  - With the band, each move is p × (S + b) on its axis. p is the progress, and S is the width or the height of the frame.
+  - Thus a Push moves the outgoing picture, the band and the incoming picture as one strip. The positions agree within 1 pixel.
+- **With Feather, the band shows no color.**
+  - The moving picture moves b further, and it covers the band. Its alpha falls linearly from 1 to 0 across the band.
+  - In a Push, the two pictures overlap on the band. The band mixes them linearly, from one picture to the other.
+  - In the corner of a diagonal Slide, the alpha is the smaller of the two edge ramps.
+  - The first frame of the transition shows the outgoing picture with no move. From the second frame, the move above applies.
+- **Resolve's motion blur of Push and Slide is a box blur along the axis of the move.**
+  - At frame f, the box is `motion blur` × 2H × (p(f + 1) − p(f)) long, with H the height of the frame in pixels.
+  - Thus with Ease None, the box is 2H/N long at the value 1. It does not depend on the width of the frame or the axis of the move.
+  - Renders fit this within about 1 pixel at 960 × 540, 540 × 960 and 1920 × 1080. They had N of 12 and 24, the values 0.5 and 1, and an In & Out ease.
+  - For a diagonal Slide, the box goes at 45 degrees, with the length over √2 on each axis. The move itself is not at 45 degrees.
+  - The box starts at the sharp edge. For the left, right and diagonal presets, it spreads the way the picture moves.
+  - For Push Up, Push Down, Bottom-Up and Top-Down, it spreads against the move. This is so with In and with Out.
+  - In a Push, the blur covers the whole frame, the band too. A blurred edge mixes the two pictures linearly. The blur repeats the pixels at the edge of the frame.
+  - In a Slide, only the moving picture blurs, and the still picture stays sharp.
+  - Across a blurred edge of a Slide, the weight of the incoming picture is c², within 0.02. c is the part of the box that the incoming picture covers.
+- **Resolve plays the ease of a Push or a Slide from its curve.**
+  - With an ease other than None, Resolve plays the curve `transitionCustomCurvesKeyframes`. Without the curve, the transition stays at its start until its last frame.
+  - With Ease None, Resolve plays a straight line, also when the file has a curve.
+  - The curve has a key at frame 0 with the value 0 and a key at frame N with the value 1. Its handles are in Resolve's Bezier form.
+  - Ease In gives the first key a flat `OutBez` of 0.3 N frames. Ease Out gives the last key a flat `InBez` of −0.3 N. In & Out gives both.
+  - This is 7.2 frames for a 24-frame Push with In and In & Out, and 3.6 frames for a 12-frame Push with Out.
+  - The progress p(f) is the cubic Bezier curve through the keys and their handles, solved for the frame. Renders fit it within 0.0013.
+  - The Inspector shows the curve at the playhead as Transition Curve, with keyframe buttons.
+  - With Custom, Resolve writes `ease` 4 and no curve. Such a transition shows the outgoing picture until its last frame.
 
 ## transcribe.cpp and its models
 

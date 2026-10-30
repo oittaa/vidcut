@@ -893,11 +893,12 @@ pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
     let over = layers
         .map(|l| {
             let weight = l.weight.unwrap_or(WHOLE);
-            let wipe = l.wipe;
+            let (wipe, moving) = (l.wipe, l.moving);
             Over {
                 picture: Arc::new(made(l)),
                 weight,
                 wipe,
+                moving,
             }
         })
         .collect();

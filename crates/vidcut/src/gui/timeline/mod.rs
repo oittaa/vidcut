@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sense, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use vidcut_core::model::{ClipRetime, Ease, PictureTool, Project, Track};
+use vidcut_core::model::{ClipRetime, Ease, PictureTool, PictureTransition, Project, Track};
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::request::ViewerMode;
 
@@ -235,6 +235,7 @@ pub struct TimelineView {
     pub fade_in_frames: bool,
     pub transition_frames: Option<(TrackRef, i64, i64)>,
     pub transition_color: Option<(TrackRef, i64, [u8; 3], egui::Id)>,
+    pub transition_values: Option<(TrackRef, i64, PictureTransition)>,
     pub clip_menu: Option<(bool, String)>,
     pub keys: Vec<(String, i64)>,
     pub key_menu: Option<(bool, String, i64)>,
@@ -291,6 +292,7 @@ impl Default for TimelineView {
             fade_in_frames: false,
             transition_frames: None,
             transition_color: None,
+            transition_values: None,
             clip_menu: None,
             keys: Vec::new(),
             key_menu: None,

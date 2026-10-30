@@ -772,15 +772,15 @@ pub enum Request {
         sound: bool,
         #[serde(default)]
         all: bool,
-        /// A cross dissolve, a dip to color or one wipe. Left out, a cross
-        /// dissolve.
+        /// A cross dissolve, a dip to color, one wipe, a push or a slide.
+        /// Left out, a cross dissolve.
         #[serde(default, skip_serializing_if = "PictureTransition::is_dissolve")]
         transition: PictureTransition,
     },
     /// Sets the type of the picture transition on the edit of `track`
     /// (default V1) nearest `at` (default: the playhead). The length stays.
-    /// Any type can become any other: a cross dissolve, a dip to color or a
-    /// wipe.
+    /// Any type can become any other: a cross dissolve, a dip to color, a
+    /// wipe, a push or a slide.
     #[serde(rename = "edit.transition")]
     EditTransition {
         #[serde(default)]

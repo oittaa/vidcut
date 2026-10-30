@@ -10,7 +10,7 @@ use crate::player::{Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
 use vidcut_core::model::{CompositeMode, Hdr, WipeDirection};
 use vidcut_core::place::{Level, Placing, chain, lettered};
-use vidcut_core::render::{Placed, Wipe};
+use vidcut_core::render::{Moving, Placed, Shift, Wipe};
 
 #[cfg(any(target_os = "linux", windows))]
 mod acquire;
@@ -45,6 +45,8 @@ pub struct Gpu {
     lettering_layout: wgpu::BindGroupLayout,
     paired: wgpu::RenderPipeline,
     paired_wide: wgpu::RenderPipeline,
+    moving: wgpu::RenderPipeline,
+    moving_layout: wgpu::BindGroupLayout,
     screen: wgpu::RenderPipeline,
     screen_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -496,6 +498,38 @@ impl Gpu {
         });
         let paired = made(&paired_layout, "fs_paired", None, TARGET);
         let paired_wide = made(&paired_layout, "fs_paired", None, MIXING);
+        let moving_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("vidcut move"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                texture(12),
+                texture(13),
+            ],
+        });
+        let moving_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("vidcut move"),
+                bind_group_layouts: &[Some(&moving_layout)],
+                immediate_size: 0,
+            });
+        let moving = made(
+            &moving_pipeline_layout,
+            "fs_motion",
+            Some(wgpu::BlendState {
+                color: premultiplied,
+                alpha: premultiplied,
+            }),
+            MIXING,
+        );
         let screen_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut screen"),
             entries: &[
@@ -588,6 +622,8 @@ impl Gpu {
             lettering_layout,
             paired,
             paired_wide,
+            moving,
+            moving_layout,
             screen,
             screen_layout,
             sampler,
@@ -951,6 +987,7 @@ pub struct Screen {
     wide: Option<Wide>,
     drawn_colors: Option<Hdr>,
     mixing: Option<Mixing>,
+    moves: Vec<Moves>,
     below: Option<Below>,
     drawn_crosses: Vec<bool>,
     drawn_kernels: Vec<u32>,
@@ -1024,6 +1061,105 @@ impl Mixing {
         });
         Self { size, view, bind }
     }
+}
+
+struct Moves {
+    size: (u32, u32),
+    outgoing: wgpu::TextureView,
+    incoming: wgpu::TextureView,
+    params: wgpu::Buffer,
+    bind: wgpu::BindGroup,
+}
+
+impl Moves {
+    fn new(gpu: &Gpu, size: (u32, u32)) -> Self {
+        let side = || {
+            gpu.device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("vidcut move"),
+                    size: wgpu::Extent3d {
+                        width: size.0,
+                        height: size.1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: MIXING,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+        let (outgoing, incoming) = (side(), side());
+        let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vidcut move"),
+            size: MOVING as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vidcut move"),
+            layout: &gpu.moving_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: wgpu::BindingResource::TextureView(&outgoing),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 13,
+                    resource: wgpu::BindingResource::TextureView(&incoming),
+                },
+            ],
+        });
+        Self {
+            size,
+            outgoing,
+            incoming,
+            params,
+            bind,
+        }
+    }
+}
+
+const MOVING: usize = 7 * 16;
+
+fn motion_bytes(m: &Moving, size: (u32, u32), colors: Option<Hdr>) -> Vec<u8> {
+    let Shift {
+        upper_in,
+        upper,
+        lower,
+        picture,
+        band,
+        facing,
+        edge,
+        border,
+        feather,
+        blur,
+        mixes_blur,
+        still,
+    } = m.shift(size);
+    let [r, g, b] = m.color.map(|c| f64::from(c) / 255.0);
+    let floats: [[f64; 4]; 6] = [
+        [upper[0], upper[1], lower[0], lower[1]],
+        picture,
+        band,
+        [edge[0], edge[1], facing[0], facing[1]],
+        [blur[0], blur[1], blur[2], border],
+        [r, g, b, transfer_of(colors)],
+    ];
+    let flags = [upper_in, feather, mixes_blur, still].map(u32::from);
+    floats
+        .iter()
+        .flatten()
+        .flat_map(|v| (*v as f32).to_le_bytes())
+        .chain(flags.iter().flat_map(|v| v.to_le_bytes()))
+        .collect()
 }
 
 fn begin<'a>(
@@ -1284,16 +1420,18 @@ impl Screen {
         let limit = gpu.device.limits().max_texture_dimension_2d;
         let fits = |p: &Arc<Picture>| p.width() <= limit && p.height() <= limit;
         let picture = picture.filter(|p| fits(p));
-        let layers: Vec<(&Arc<Picture>, Option<f64>, Option<Wipe>)> = picture
+        type Shown<'a> = (&'a Arc<Picture>, Option<f64>, Option<Wipe>, Option<Moving>);
+        let layers: Vec<Shown> = picture
             .into_iter()
-            .map(|p| (p, None, None))
+            .map(|p| (p, None, None, None))
             .chain(picture.into_iter().flat_map(|p| {
                 p.over()
                     .iter()
                     .filter(|o| fits(&o.picture))
-                    .map(|o| match o.wipe {
-                        Some(w) => (&o.picture, None, Some(w)),
-                        None => (&o.picture, Some(f64::from(o.level())), None),
+                    .map(|o| match (o.wipe, o.moving) {
+                        (_, Some(m)) => (&o.picture, None, None, Some(m)),
+                        (Some(w), None) => (&o.picture, None, Some(w), None),
+                        (None, None) => (&o.picture, Some(f64::from(o.level())), None, None),
                     })
             }))
             .collect();
@@ -1304,7 +1442,7 @@ impl Screen {
         for (i, slot) in self.slots.iter_mut().enumerate() {
             if layers
                 .get(i)
-                .is_none_or(|(p, _, _)| p.gpu() != Some(Kind::Vulkan))
+                .is_none_or(|(p, ..)| p.gpu() != Some(Kind::Vulkan))
             {
                 slot.kept.clear();
                 for sub in slot.around.iter_mut().flat_map(|a| a.iter_mut()) {
@@ -1319,6 +1457,7 @@ impl Screen {
             });
         let n = layers.len();
         let wipe_of = |i: usize| layers.get(i).and_then(|l| l.2);
+        let moving_of = |i: usize| layers.get(i).and_then(|l| l.3);
         let crossed = |i: usize| crosses.get(i).copied().unwrap_or(false);
         let crossed_wipe = |i: usize| wipe_of(i).is_some() && crossed(i);
         let holds = |i: usize| i + 1 < n && crossed_wipe(i + 1);
@@ -1328,10 +1467,12 @@ impl Screen {
         };
         let pair_at = |i: usize| i + 1 < n && crossed(i + 1) && wipe_of(i + 1).is_none();
         let mut paired = vec![false; n];
+        let mut moved = 0;
         let mut i = 0;
         while i < n {
             if pair_at(i) {
                 paired[i..i + 2].fill(true);
+                moved += usize::from(moving_of(i + 1).is_some());
                 i += 2;
             } else {
                 i += 1;
@@ -1343,7 +1484,7 @@ impl Screen {
             .iter()
             .zip(&mut self.slots)
             .enumerate()
-            .map(|(i, (&(picture, level, _), slot))| {
+            .map(|(i, (&(picture, level, ..), slot))| {
                 let made_with = match picture.sampling() {
                     Sampling::Placed { placed, .. } => Some(&placed[..]),
                     _ => None,
@@ -1390,6 +1531,11 @@ impl Screen {
         if (0..n).any(pair_at) && self.mixing.as_ref().is_none_or(|m| m.size != size) {
             self.mixing = Some(Mixing::new(gpu, size));
         }
+        self.moves.retain(|m| m.size == size);
+        while self.moves.len() < moved {
+            self.moves.push(Moves::new(gpu, size));
+        }
+        let mut moves = self.moves.iter();
         let blending = binds.iter().any(|b| b.3);
         let floats = self.exported || colors.is_some() || blending || n > 1;
         if !floats {
@@ -1483,6 +1629,39 @@ impl Screen {
                         depth_or_array_layers: 1,
                     },
                 );
+            }
+            if pair_at(i)
+                && let Some(m) = moving_of(i + 1)
+            {
+                let moves = moves.next().expect("made for each move");
+                for (view, (bind, level, placed, blended)) in [&moves.outgoing, &moves.incoming]
+                    .into_iter()
+                    .zip(&binds[i..i + 2])
+                {
+                    let mut pass = begin(&mut encoder, view, Some(wgpu::Color::TRANSPARENT));
+                    if *blended {
+                        let below = self.below.as_ref().expect("made for a composite mode");
+                        pass.set_pipeline(&gpu.adding_mode);
+                        pass.set_bind_group(1, &below.bind, &[]);
+                    } else if *placed {
+                        pass.set_pipeline(&gpu.adding);
+                    } else {
+                        pass.set_pipeline(&gpu.adding_scaled);
+                        pass.set_blend_constant(level_of(level.unwrap_or(1.0)));
+                    }
+                    pass.set_bind_group(0, bind, &[]);
+                    pass.draw(0..3, 0..1);
+                }
+                gpu.queue
+                    .write_buffer(&moves.params, 0, &motion_bytes(&m, size, colors));
+                let mut pass = begin(&mut encoder, canvas, clear.take());
+                pass.set_pipeline(&gpu.moving);
+                pass.set_bind_group(0, &moves.bind, &[]);
+                pass.draw(0..3, 0..1);
+                letter(&mut pass, lettering, &self.letters, titles, i + 1, n);
+                letter(&mut pass, lettering, &self.letters, titles, i + 2, n);
+                i += 2;
+                continue;
             }
             if pair_at(i) {
                 let mixing = self.mixing.as_ref().expect("made for a dissolve");

@@ -2980,14 +2980,14 @@ fn mutate(
             }
             let made = if clips.is_empty() {
                 let track = track.as_deref().unwrap_or(ops::MAIN);
-                ops::dissolve(p, track, at, shape, *picture, *sound, *all, *transition)?
+                ops::dissolve(p, track, at, shape, *picture, *sound, *all, transition)?
             } else if track.is_some() || *all {
                 return Err(Error::usage(
                     "dissolves on `clips` go on their own edits; leave out `track` and `all`",
                 ));
             } else {
                 let ids = resolve_clips(p, clips, playhead)?;
-                ops::dissolve_clips(p, &ids, shape, *picture, *sound, *transition)?
+                ops::dissolve_clips(p, &ids, shape, *picture, *sound, transition)?
             };
             json!({ "transitions": made })
         }
@@ -3001,7 +3001,7 @@ fn mutate(
                 None => playhead.unwrap_or(0),
             };
             let track = track.as_deref().unwrap_or(ops::MAIN);
-            json!({ "transition": ops::set_transition(p, track, at, *transition)? })
+            json!({ "transition": ops::set_transition(p, track, at, transition)? })
         }
         Request::EditRemoveTransition {
             at,

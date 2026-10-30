@@ -375,7 +375,7 @@ impl Drag {
 
             Gesture::Subtitles { media, cues } => subtitles_preview(ctx, pos, media, cues),
             Gesture::Title { template, len } => title_preview(ctx, pos, template, *len),
-            Gesture::Transition { kind, .. } => transition_preview(ctx, pos, *kind),
+            Gesture::Transition { kind, .. } => transition_preview(ctx, pos, kind),
             Gesture::Trim {
                 clip,
                 edge,
@@ -415,7 +415,7 @@ impl Drag {
                 Preview {
                     request: ((b, a) != (*before, *after))
                         .then(|| {
-                            let params = super::fades::resized(track, *at, (b, a), *sound, kind);
+                            let params = super::fades::resized(track, *at, (b, a), *sound, &kind);
                             request("edit.dissolve", params)
                         })
                         .flatten(),
@@ -757,7 +757,7 @@ fn title_preview(
     }
 }
 
-fn transition_preview(ctx: &Ctx, pos: Pos2, kind: PictureTransition) -> Preview {
+fn transition_preview(ctx: &Ctx, pos: Pos2, kind: &PictureTransition) -> Preview {
     let Some(row) = ctx
         .rows
         .at(pos.y)
@@ -1678,7 +1678,7 @@ mod tests {
             true,
             false,
             false,
-            PictureTransition::Dissolve,
+            &PictureTransition::Dissolve,
         )
         .unwrap();
         let wipe = PictureTransition::Wipe {
@@ -1710,7 +1710,7 @@ mod tests {
             direction: vidcut_core::model::WipeDirection::Left,
         };
         let shape = vidcut_core::ops::Shape::Length(20, vidcut_core::ops::Align::Center);
-        vidcut_core::ops::dissolve(&mut w.p, "V1", 100, shape, true, false, false, wipe).unwrap();
+        vidcut_core::ops::dissolve(&mut w.p, "V1", 100, shape, true, false, false, &wipe).unwrap();
         let r = w.drag(
             Gesture::Fade {
                 track: "V1".into(),
