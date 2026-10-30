@@ -24,29 +24,35 @@ const EDGES: [(WipeDirection, &str); 4] = [
     (WipeDirection::Down, "Bottom"),
 ];
 
-const PUSHES: [(PushPreset, &str); 4] = [
-    (PushPreset::Left, "Push Left"),
-    (PushPreset::Right, "Push Right"),
-    (PushPreset::Up, "Push Up"),
-    (PushPreset::Down, "Push Down"),
-];
+fn push_label(p: PushPreset) -> &'static str {
+    match p {
+        PushPreset::Left => "Push Left",
+        PushPreset::Right => "Push Right",
+        PushPreset::Up => "Push Up",
+        PushPreset::Down => "Push Down",
+    }
+}
 
-const SLIDES: [(SlidePreset, &str); 6] = [
-    (SlidePreset::LeftRight, "Left-Right"),
-    (SlidePreset::RightLeft, "Right-Left"),
-    (SlidePreset::BottomUp, "Bottom-Up"),
-    (SlidePreset::TopDown, "Top-Down"),
-    (SlidePreset::TopLeft, "Top-Left"),
-    (SlidePreset::BottomRight, "Bottom-Right"),
-];
+fn slide_label(p: SlidePreset) -> &'static str {
+    match p {
+        SlidePreset::LeftRight => "Left-Right",
+        SlidePreset::RightLeft => "Right-Left",
+        SlidePreset::BottomUp => "Bottom-Up",
+        SlidePreset::TopDown => "Top-Down",
+        SlidePreset::TopLeft => "Top-Left",
+        SlidePreset::BottomRight => "Bottom-Right",
+    }
+}
 
-const EASES: [(MotionEase, &str); 5] = [
-    (MotionEase::None, "None"),
-    (MotionEase::In, "In"),
-    (MotionEase::Out, "Out"),
-    (MotionEase::InOut, "In & Out"),
-    (MotionEase::Custom, "Custom"),
-];
+fn ease_label(e: MotionEase) -> &'static str {
+    match e {
+        MotionEase::None => "None",
+        MotionEase::In => "In",
+        MotionEase::Out => "Out",
+        MotionEase::InOut => "In & Out",
+        MotionEase::Custom => "Custom",
+    }
+}
 
 const ALIGNMENTS: [(&str, &str); 3] = [
     ("start", "Start on Edit"),
@@ -510,12 +516,14 @@ fn motion_rows(
     let (mut changed, mut done) = (false, false);
     dialog::row(ui, "Preset", |ui| match k {
         PictureTransition::Push { preset, .. } => {
-            if let Some(p) = menu(ui, "transition-preset", *preset, &PUSHES) {
+            let pushes = PushPreset::ALL.map(|p| (p, push_label(p)));
+            if let Some(p) = menu(ui, "transition-preset", *preset, &pushes) {
                 (*preset, done) = (p, true);
             }
         }
         PictureTransition::Slide { preset, .. } => {
-            if let Some(p) = menu(ui, "transition-preset", *preset, &SLIDES) {
+            let slides = SlidePreset::ALL.map(|p| (p, slide_label(p)));
+            if let Some(p) = menu(ui, "transition-preset", *preset, &slides) {
                 (*preset, done) = (p, true);
             }
         }
@@ -563,7 +571,8 @@ fn motion_rows(
         done |= r.drag_stopped() || r.lost_focus();
     });
     dialog::row(ui, "Ease", |ui| {
-        if let Some(e) = menu(ui, "transition-ease", m.ease, &EASES) {
+        let eases = MotionEase::ALL.map(|e| (e, ease_label(e)));
+        if let Some(e) = menu(ui, "transition-ease", m.ease, &eases) {
             m.ease = e;
             m.curve.clear();
             done = true;

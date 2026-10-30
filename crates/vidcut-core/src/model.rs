@@ -1196,6 +1196,21 @@ pub enum SlidePreset {
     BottomRight,
 }
 
+impl PushPreset {
+    pub const ALL: [PushPreset; 4] = [Self::Left, Self::Right, Self::Up, Self::Down];
+}
+
+impl SlidePreset {
+    pub const ALL: [SlidePreset; 6] = [
+        Self::LeftRight,
+        Self::RightLeft,
+        Self::BottomUp,
+        Self::TopDown,
+        Self::TopLeft,
+        Self::BottomRight,
+    ];
+}
+
 /// The values of a Push or a Slide.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Motion {
