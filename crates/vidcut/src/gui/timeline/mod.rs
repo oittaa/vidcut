@@ -233,6 +233,7 @@ pub struct TimelineView {
     pub transition_menu: Option<bool>,
     pub fade_dialog: Option<fades::FadeDialog>,
     pub fade_in_frames: bool,
+    pub transition_frames: Option<(TrackRef, i64, i64)>,
     pub clip_menu: Option<(bool, String)>,
     pub keys: Vec<(String, i64)>,
     pub key_menu: Option<(bool, String, i64)>,
@@ -287,6 +288,7 @@ impl Default for TimelineView {
             transition_menu: None,
             fade_dialog: None,
             fade_in_frames: false,
+            transition_frames: None,
             clip_menu: None,
             keys: Vec::new(),
             key_menu: None,
@@ -2347,6 +2349,7 @@ impl Workspace {
                 }
             } else if let Some((track, at)) = faded {
                 self.select_transition(track, at);
+                self.left = crate::gui::title_browser::LeftTab::Inspector;
             } else if let Hit::Clip(id) | Hit::Slip(id) = &what
                 && p.clip(id).is_some_and(|c| c.title.is_some())
             {

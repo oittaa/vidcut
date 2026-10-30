@@ -406,6 +406,12 @@ impl Drag {
                     .unwrap_or((*before, *after));
                 let (b, a) = crate::gui::trim_strips::grown(*before, *after, grow, room);
                 let edge = if *end { a - after } else { before - b };
+                let kind = ctx
+                    .project
+                    .track(track)
+                    .and_then(|t| super::geometry::picture_transition(ctx.project, t, *at))
+                    .map(super::fades::kind)
+                    .unwrap_or_default();
                 Preview {
                     request: ((b, a) != (*before, *after))
                         .then(|| {
@@ -417,6 +423,7 @@ impl Drag {
                                     "before": format!("{b}f"),
                                     "after": format!("{a}f"),
                                     "sound": sound,
+                                    "transition": kind,
                                 }),
                             )
                         })
@@ -1702,6 +1709,33 @@ mod tests {
                 "track": "V1",
                 "transition": {"type": "wipe", "direction": "down"},
             }}))
+        );
+    }
+
+    #[test]
+    fn dragging_the_edge_of_a_wipe_keeps_it_a_wipe() {
+        let mut w = World::new();
+        let wipe = PictureTransition::Wipe {
+            direction: vidcut_core::model::WipeDirection::Left,
+        };
+        let shape = vidcut_core::ops::Shape::Length(20, vidcut_core::ops::Align::Center);
+        vidcut_core::ops::dissolve(&mut w.p, "V1", 100, shape, true, false, false, wipe).unwrap();
+        let r = w.drag(
+            Gesture::Fade {
+                track: "V1".into(),
+                at: 100,
+                end: true,
+                before: 10,
+                after: 10,
+                sound: false,
+            },
+            pos2(220.0, 150.0),
+            &[pos2(240.0, 150.0)],
+            Duration::ZERO,
+        );
+        assert_eq!(
+            r.map(|r| r["params"]["transition"].clone()),
+            Some(json!({"type": "wipe", "direction": "left"}))
         );
     }
 

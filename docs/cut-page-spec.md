@@ -640,6 +640,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The duration is shortened to the media (deviation X27).
   - Ctrl+D also opens Change Transition Duration.
   - Delete removes the dissolve.
+  - A change of its length or its alignment keeps its type: a wipe stays a wipe.
   - A drag on an edge of a dissolve, in either timeline, makes it longer or shorter evenly about the edit.
   - The drag works at the scale of that timeline. The length is shortened to the media (X27).
   - A tooltip shows the move of the edge and the new length. The drag also selects the dissolve.
@@ -669,10 +670,17 @@ Video Only and Audio Only limit what an edit takes (p. 694).
     - It acts on the selected edit. Else it acts on the edges of the selected clips.
   - The cards add a picture transition only. They add no Cross Fade.
   - `gui.show transitions` opens the tab.
+- **The Transition Inspector** (pp. 746–747):
+  - A double-click on a transition selects it and opens the Inspector.
+  - The Inspector shows the selected transition: Transition Type, Duration and Alignment.
+  - Duration is in frames, with the time beside it. A change keeps the alignment (X27).
+  - Alignment is Start on Edit, Center on Edit or End on Edit.
+  - An Edge Wipe also has Edge: Left, Right, Top or Bottom (X89).
+  - Each change is a request: `edit.transition` for the type and the edge, `edit.dissolve` for the length and the alignment.
 - **Later:**
   - Smooth Cut
   - Hover Scrub Preview of a transition, and favorites
-  - the Transition Inspector
+  - the other values of each type, such as the Style of a dissolve and the border of a wipe
   - moving a transition to another edit
   - Change Transition Type, Set as Default Transition
   - cutting, copying and pasting transitions

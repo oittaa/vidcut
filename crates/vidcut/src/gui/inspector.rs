@@ -2082,7 +2082,10 @@ impl Workspace {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_max_width(ui.available_width() - dialog::scroll_room(ui));
-                let forms = self.title_form(ui) | self.cue_form(ui) | self.track_form(ui);
+                let forms = self.title_form(ui)
+                    | self.cue_form(ui)
+                    | self.track_form(ui)
+                    | self.transition_form(ui);
                 let Some(p) = self.project_shared() else {
                     return;
                 };

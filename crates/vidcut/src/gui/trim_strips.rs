@@ -333,6 +333,7 @@ impl Workspace {
                     "before": format!("{before}f"),
                     "after": format!("{after}f"),
                     "sound": sound,
+                    "transition": super::timeline::fades::kind(x),
                 }),
             );
         }

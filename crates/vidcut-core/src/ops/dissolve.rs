@@ -581,6 +581,27 @@ mod tests {
     }
 
     #[test]
+    fn a_wipe_from_the_left_reads_back_as_that_wipe() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let wipe = json!({"type": "wipe", "direction": "left"});
+        req(
+            &mut f,
+            "edit.dissolve",
+            json!({"at": 50, "transition": wipe}),
+        );
+        let p = f.editor.project();
+        let t = p.track("V1").unwrap().transitions.iter().find(|t| !t.sound);
+        assert_eq!(
+            t.and_then(crate::otio::transitions::kind_of),
+            Some(crate::model::PictureTransition::Wipe {
+                direction: crate::model::WipeDirection::Left
+            })
+        );
+    }
+
+    #[test]
     fn a_centered_picture_transition_at_the_timeline_start_goes_after_it() {
         let mut f = fixture();
         f.append("m1", 0, 50);
