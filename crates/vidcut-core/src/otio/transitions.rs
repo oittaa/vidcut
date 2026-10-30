@@ -151,22 +151,6 @@ const PUSH: &str = "Push";
 
 const SLIDE: &str = "Slide";
 
-const PUSHES: [PushPreset; 4] = [
-    PushPreset::Left,
-    PushPreset::Right,
-    PushPreset::Up,
-    PushPreset::Down,
-];
-
-const SLIDES: [SlidePreset; 6] = [
-    SlidePreset::LeftRight,
-    SlidePreset::RightLeft,
-    SlidePreset::BottomUp,
-    SlidePreset::TopDown,
-    SlidePreset::TopLeft,
-    SlidePreset::BottomRight,
-];
-
 const CURVE: &str = "transitionCustomCurvesKeyframes";
 
 const HANDLE: f64 = 0.3;
@@ -331,13 +315,13 @@ fn moving_in(o: &Value) -> Option<PictureTransition> {
     };
     if let Some(values) = values(o, PUSH, 50) {
         return Some(PictureTransition::Push {
-            preset: *PUSHES.get(index(values, "push style")?)?,
+            preset: *PushPreset::ALL.get(index(values, "push style")?)?,
             motion: motion(values)?,
         });
     }
     let values = values(o, SLIDE, 49)?;
     Some(PictureTransition::Slide {
-        preset: *SLIDES.get(index(values, "slide style")?)?,
+        preset: *SlidePreset::ALL.get(index(values, "slide style")?)?,
         out: match index(values, "transition direction")? {
             0 => false,
             1 => true,
@@ -371,22 +355,7 @@ pub fn wipe_otio(direction: WipeDirection) -> Value {
             "minValue": -360.0,
         })],
     };
-    json!({
-        "OTIO_SCHEMA": "Transition.1",
-        "name": EDGE_WIPE,
-        "transition_type": "Custom_Transition",
-        "metadata": { EDITOR: {
-            "Effects": {
-                "Display Type": 1,
-                "Effect Name": EDGE_WIPE,
-                "Enabled": true,
-                "Name": EDGE_WIPE,
-                "Parameters": parameters,
-                "Type": 13,
-            },
-            "Transition Type": EDGE_WIPE,
-        }}
-    })
+    custom(EDGE_WIPE, 13, parameters)
 }
 
 fn edge_angle(direction: WipeDirection) -> i64 {
