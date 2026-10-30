@@ -1832,12 +1832,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Some users wait a long time for the best pictures, and others want good pictures fast. Thus there is a fast AI upscaler and a slow one.
   - On Windows and Linux, Auto takes AI Fast. It is fast, and it works in SDR and HDR timelines.
   - In the test of `hdr_models` ([tools](tools.md)), AI Fast came nearer to the real frames than Classic, in SDR and in HDR.
-  - Without a color fix, AI Best shifted the colors and the light of large areas.
-    - In 8-bit SDR, its mean ΔE ITP was 11.6 to 17.4, and Classic's was 1.9 to 3.9.
+  - The network of AI Best alone shifts the colors and the light of large areas. Thus a color fix follows it.
+    - In 8-bit SDR, the network alone came to a mean ΔE ITP of 11.6 to 17.4. Classic came to 1.9 to 3.9.
     - The ΔE of the means of 40×40 blocks was 60% to 87% of it. Thus most of the difference was in large areas, not in the detail.
     - On the Dolby Vision clip, its pictures had 1.21 times the light of the real frames.
+    - In an export of 720p SDR video to 1080p, the network alone made each frame about 9 of 255 levels less red.
   - With the color fix, AI Best's mean ΔE ITP in 8-bit SDR is 2.6 to 8.6. The ΔE of its block means is 1.2 to 1.5, and Classic's is 0.3 to 1.2.
-    - On the Dolby Vision clip, AI Best now comes nearer to the real frames than Classic. On the other two clips, it stays farther.
+    - On the Dolby Vision clip, AI Best comes nearer to the real frames than Classic. On the other two clips, it stays farther.
+    - In the 720p export, the mean colors of each frame are those of its input picture. The fix added no time that the export measured.
     - The rest of its difference is in the detail that it makes.
   - vidcut makes a picture only as large as the output shows it. A factor would only limit placed pictures. Thus On is sufficient.
   - Auto lets a project move between macOS and other systems. Each computer uses its own AI.
