@@ -5237,7 +5237,6 @@ dependencies = [
  "cpal",
  "ffmpeg-next",
  "flate2",
- "half",
  "libc",
  "libloading 0.9.0",
  "naga",

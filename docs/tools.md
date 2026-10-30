@@ -139,7 +139,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - Other work on the GPU makes the times longer. `nvidia-smi` shows it on NVIDIA.
 - `hdr_models pictures DIR` writes one frame of each upscaler as 1920×1080 RGB48 files.
 - On macOS, it tests the AI of macOS only.
-  - In the 16-bit pipes, the AI of macOS takes the P416 VideoToolbox frames of an export (`surface_picture`). The 8-bit pipe keeps RGB in memory.
+  - The AI of macOS takes the P416 VideoToolbox frames of an export in each pipe (`surface_picture`).
 - The clips are in `tests/media-manifest.toml`. `scripts/fetch-test-media.sh NAME` gets each one.
 
 **The viewer's picture:** `vidcut frame render --at TIME --out F.png --viewer` draws a frame of the timeline as the viewer draws it, with no window.

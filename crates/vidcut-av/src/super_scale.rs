@@ -265,7 +265,6 @@ impl<N: Network> Slot<N> {
 
 pub(crate) enum Picture {
     Held(crate::screen::held::Held),
-    Rgb(Vec<u8>),
     Frame(crate::ffmpeg::frame::Video),
 }
 

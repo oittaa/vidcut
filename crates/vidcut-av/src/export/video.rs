@@ -874,7 +874,6 @@ fn made_picture(
         crate::super_scale::Picture::Held(held) => {
             crate::screen::held::picture(held, made, pts, form)
         }
-        crate::super_scale::Picture::Rgb(rgb) => Ok(big_picture(&rgb, made, pts, form)),
         crate::super_scale::Picture::Frame(f) => Ok(f),
     }
 }
@@ -919,10 +918,7 @@ fn shown_rgb(
         Some(single) => single,
         None => drawn.insert(Single::new(reading)?),
     };
-    match look.placed.is_empty() {
-        true => single.held(frames, rotation, look, path),
-        false => single.placed(frames, rotation, look, path),
-    }
+    single.held(frames, rotation, look, path)
 }
 
 pub(crate) fn surface_picture(
@@ -955,21 +951,6 @@ fn shown_frame(
     };
     let out = crate::interpolate::blank(look.size)?;
     single.surface(frames, rotation, (look, path), out)
-}
-
-fn big_picture(
-    out: &[u8],
-    (w, h): (u32, u32),
-    pts: Option<i64>,
-    (deep, hdr): Form,
-) -> frame::Video {
-    let (pixel, bytes) = crate::screen::held::rgb_pixel(deep);
-    let mut big = crate::buffers::unpacked(pixel, (w, h), bytes, out);
-    crate::screen::held::tag(&mut big, hdr);
-    // SAFETY: a plain field of its own frame.
-    unsafe { (*big.as_mut_ptr()).sample_aspect_ratio = ffmpeg::ffi::AVRational { num: 1, den: 1 } };
-    big.set_pts(pts);
-    big
 }
 
 impl Source {
@@ -1751,7 +1732,7 @@ impl Single {
         path: &Path,
     ) -> Result<frame::Video> {
         let pixel = crate::screen::held::rgb_pixel(look.form.0).0;
-        self.fitted(
+        self.draw_to(
             frames,
             rotation,
             (look, path),
@@ -1769,63 +1750,42 @@ impl Single {
         let pts = frames.0.pts();
         let sink = crate::screen::Sink::Surface(out);
         let pixel = format::Pixel::P416LE;
-        let mut out = self.fitted(frames, rotation, (look, path), (pixel, sink))?;
+        let mut out = self.draw_to(frames, rotation, (look, path), (pixel, sink))?;
         out.set_pts(pts);
         Ok(out)
     }
 
-    fn fitted(
+    fn draw_to(
         &mut self,
         frames: (&frame::Video, Around<'_>),
         rotation: u16,
         (look, path): (&Look, &Path),
         (pixel, sink): (format::Pixel, crate::screen::Sink<'_>),
     ) -> Result<frame::Video> {
-        let ((w, h), kernel, form) = (look.size, look.kernel, look.form);
-        let picture = std::sync::Arc::new(self.woven(frames, rotation, path)?);
+        let picture = self.woven(frames, rotation, path)?;
+        let placed = [look.placed.clone()];
+        let (picture, placed) = match look.placed.is_empty() {
+            true => (picture, &placed[..0]),
+            false => {
+                let sampling = Sampling::Colors {
+                    frame: look.frame,
+                    origin: look.origin,
+                };
+                (picture.with_sampling(sampling), &placed[..])
+            }
+        };
+        let picture = std::sync::Arc::new(picture);
         let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
+        let ((w, h), form) = (look.size, look.form);
         screen.draw(
             gpu,
             Some(&picture),
             &[],
-            (&[], &[], &[kernel], form.1),
+            (placed, &[], &[look.kernel], form.1),
             w,
             h,
         );
         screen.encoded(gpu, pixel, (form.1, form.1), sink)
-    }
-
-    fn placed(
-        &mut self,
-        frames: (&frame::Video, Around<'_>),
-        rotation: u16,
-        look: &Look,
-        path: &Path,
-    ) -> Result<frame::Video> {
-        let sampling = Sampling::Colors {
-            frame: look.frame,
-            origin: look.origin,
-        };
-        let picture = self.woven(frames, rotation, path)?.with_sampling(sampling);
-        let picture = std::sync::Arc::new(picture);
-        let placed = [look.placed.clone()];
-        let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
-        let (w, h) = look.size;
-        screen.draw(
-            gpu,
-            Some(&picture),
-            &[],
-            (&placed, &[], &[look.kernel], look.form.1),
-            w,
-            h,
-        );
-        let form = look.form;
-        screen.encoded(
-            gpu,
-            crate::screen::held::rgb_pixel(form.0).0,
-            (form.1, form.1),
-            crate::screen::Sink::Held,
-        )
     }
 }
 
@@ -2709,7 +2669,7 @@ impl VideoFrames {
             return self.shown(i, s, layer, changed);
         };
         let size = look.size;
-        let pair = match (*retime == Retime::Macos && look.placed.is_empty(), &scaled) {
+        let pair = match (*retime == Retime::Macos, &scaled) {
             (false, _) => None,
             (true, Some((a, b, _))) => Some((
                 src.frame_from((a, (None, None)), 0, &look, reading)?,
@@ -3027,35 +2987,8 @@ mod tests {
 
     use vidcut_core::model::{Hdr, Upscaler};
 
-    use super::{PLAIN, big_picture, fill_black, staying, upscale_form};
-    use crate::ffmpeg::util::color::{Primaries, TransferCharacteristic};
+    use super::{PLAIN, fill_black, staying, upscale_form};
     use crate::ffmpeg::{format::Pixel, frame};
-
-    #[test]
-    fn a_16_bit_pq_picture_is_rgb48_in_bt_2020_pq() {
-        let f = big_picture(&[0; 24], (2, 2), None, (true, Some(Hdr::Pq)));
-        assert_eq!(
-            (
-                f.format(),
-                f.color_primaries(),
-                f.color_transfer_characteristic()
-            ),
-            (
-                Pixel::RGB48LE,
-                Primaries::BT2020,
-                TransferCharacteristic::SMPTE2084
-            )
-        );
-    }
-
-    #[test]
-    fn a_16_bit_hlg_picture_is_tagged_hlg() {
-        let f = big_picture(&[0; 24], (2, 2), None, (true, Some(Hdr::Hlg)));
-        assert_eq!(
-            f.color_transfer_characteristic(),
-            TransferCharacteristic::ARIB_STD_B67
-        );
-    }
 
     #[test]
     fn ai_fast_upscales_in_the_timeline_colors_at_16_bits() {

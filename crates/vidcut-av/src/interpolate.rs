@@ -476,21 +476,17 @@ pub(crate) fn between(
             name(r)
         )));
     }
-    let made = if r == Retime::Macos {
-        Picture::Rgb(macos::between(
-            key,
-            macos::Input::Held(a),
-            macos::Input::Held(b),
-            size,
-            t,
-        )?)
-    } else {
-        let pair = (held::held(a)?.buffer(), held::held(b)?.buffer());
-        Picture::Held(with_engine(|e| {
-            e.hold(r, key, pair, (size, deep))?;
-            e.frame(r, t as f32)
-        })?)
-    };
+    if r == Retime::Macos {
+        return Err(Error::Invalid(format!(
+            "{} takes VideoToolbox frames",
+            name(r)
+        )));
+    }
+    let pair = (held::held(a)?.buffer(), held::held(b)?.buffer());
+    let made = Picture::Held(with_engine(|e| {
+        e.hold(r, key, pair, (size, deep))?;
+        e.frame(r, t as f32)
+    })?);
     made_in(r, size, t, clock);
     if std::env::var_os("VIDCUT_INTERPOLATE_DUMP").is_some() {
         let n = DUMPED.fetch_add(1, Ordering::Relaxed);
@@ -509,7 +505,6 @@ pub(crate) fn between(
             Picture::Held(h) => {
                 Cow::Owned(held::eight(&h.read(rgb_bytes(size, deep) as usize)?, deep).into_owned())
             }
-            Picture::Rgb(rgb) => held::eight(rgb, deep),
             Picture::Frame(_) => Cow::Borrowed(&[][..]),
         };
         dump(

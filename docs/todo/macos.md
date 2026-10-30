@@ -11,7 +11,6 @@ To do:
 
 Most frames stay on the GPU from the decoder to the viewer or the encoder. These cases use the CPU:
 
-- **Retime Process on a placed clip.** The frames of its pair go through RGB in memory (`Input::Held`).
 - **VideoToolbox exports without GPU decoding.** The encoder then has no frames of its own device. Thus the planes come back to memory.
 
 To check by hand on the Mac:

@@ -117,7 +117,7 @@ pub fn run(
             continue;
         }
         let pairs: Vec<usize> = (0..count.saturating_sub(2)).step_by(2).collect();
-        let frames = match form.0 && retimes.contains(&Retime::Macos) {
+        let frames = match retimes.contains(&Retime::Macos) {
             true => source
                 .iter()
                 .map(|f| surface_picture(&mut drawn, f, &clip.path, FULL, form))
@@ -244,7 +244,6 @@ fn read(picture: Picture, deep: bool) -> Result<Vec<u8>> {
         Picture::Held(h) => {
             h.read(FULL.0 as usize * FULL.1 as usize * crate::screen::held::rgb_pixel(deep).1)?
         }
-        Picture::Rgb(b) => b,
         Picture::Frame(_) => {
             return Err(Error::Invalid(
                 "a model gave a VideoToolbox frame for RGB input".into(),
@@ -385,8 +384,10 @@ pub fn speed(
         Model::Upscaler(_) => SMALL,
         Model::Retime(_) => FULL,
     };
-    let framed = model == Model::Upscaler(Upscaler::Macos)
-        || (model == Model::Retime(Retime::Macos) && form.0);
+    let framed = matches!(
+        model,
+        Model::Upscaler(Upscaler::Macos) | Model::Retime(Retime::Macos)
+    );
     let inputs = source
         .iter()
         .map(|f| match framed {

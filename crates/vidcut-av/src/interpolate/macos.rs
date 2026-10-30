@@ -5,12 +5,6 @@ use crate::ffmpeg::frame;
 
 type Key = (PathBuf, u64, i64, i64);
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub(super) enum Input<'a> {
-    Held(&'a frame::Video),
-    Frame(&'a frame::Video),
-}
-
 const NEEDS: &str = "the frame rate conversion of macOS isn't on this Mac";
 
 pub(super) fn ready() -> Result<()> {
@@ -19,10 +13,6 @@ pub(super) fn ready() -> Result<()> {
 
 pub(super) fn formats() -> Result<Vec<String>> {
     imp::formats()
-}
-
-pub(super) fn between(key: &Key, a: Input, b: Input, size: (u32, u32), t: f64) -> Result<Vec<u8>> {
-    imp::between(key, a, b, size, t)
 }
 
 pub(super) fn between_frames(
@@ -45,7 +35,7 @@ pub(super) fn release() {
 
 #[cfg(not(target_os = "macos"))]
 mod imp {
-    use super::{Input, Key, NEEDS};
+    use super::{Key, NEEDS};
     use crate::error::{Error, Result};
 
     pub(super) fn ready() -> Result<()> {
@@ -53,16 +43,6 @@ mod imp {
     }
 
     pub(super) fn formats() -> Result<Vec<String>> {
-        Err(Error::Invalid(NEEDS.into()))
-    }
-
-    pub(super) fn between(
-        _key: &Key,
-        _a: Input,
-        _b: Input,
-        _size: (u32, u32),
-        _t: f64,
-    ) -> Result<Vec<u8>> {
         Err(Error::Invalid(NEEDS.into()))
     }
 
@@ -100,12 +80,12 @@ mod imp {
         VTFrameRateConversionParametersSubmissionMode as Mode,
     };
 
-    use super::{Input, Key, NEEDS};
+    use super::{Key, NEEDS};
     use crate::error::{Error, Result};
     use crate::ffmpeg::frame::Video;
     use crate::frame_processor::{
         Frames, HALF_FIRST, Surfaces, Transfer, buffer, failed, format_in, fourcc, frame, numbers,
-        pixels, pool, read, write,
+        pixels, pool,
     };
 
     const WHAT: &str = "the frame rate conversion of macOS";
@@ -157,7 +137,6 @@ mod imp {
         outputs: CFRetained<CVPixelBufferPool>,
         transfer: Transfer,
         lanczos: Option<crate::lanczos::Lanczos>,
-        format: u32,
         size: (u32, u32),
         pair: Option<Pair>,
         frames: Frames,
@@ -226,38 +205,26 @@ mod imp {
                 outputs,
                 transfer: Transfer::new(WHAT)?,
                 lanczos: None,
-                format,
                 size,
                 pair: None,
                 frames: Frames::default(),
             })
         }
 
-        fn frame(&mut self, input: &Input, at: CMTime) -> Result<Retained<VTFrameProcessorFrame>> {
+        fn frame(&mut self, f: &Video, at: CMTime) -> Result<Retained<VTFrameProcessorFrame>> {
             let picture = buffer(&self.sources, WHAT)?;
-            match input {
-                Input::Held(f) => write(
-                    &picture,
-                    self.format,
-                    self.size,
-                    (&crate::screen::held::rgb(f)?, crate::screen::held::deep(f)),
-                )?,
-                Input::Frame(f) => {
-                    let scaled = crate::lanczos::sized(&mut self.lanczos, f, self.size)?;
-                    let f = scaled.as_ref().unwrap_or(*f);
-                    let matrix = crate::color::colors_of(f).matrix;
-                    self.transfer
-                        .run(pixels(f, WHAT)?, &picture, matrix, WHAT)?;
-                }
-            }
+            let scaled = crate::lanczos::sized(&mut self.lanczos, f, self.size)?;
+            let f = scaled.as_ref().unwrap_or(f);
+            let matrix = crate::color::colors_of(f).matrix;
+            self.transfer
+                .run(pixels(f, WHAT)?, &picture, matrix, WHAT)?;
             frame(&picture, at, WHAT)
         }
 
         fn make(
             &mut self,
             key: &Key,
-            a: Input,
-            b: Input,
+            (a, b): (&Video, &Video),
             t: f64,
         ) -> Result<(CFRetained<CVPixelBuffer>, [f64; 2])> {
             let mode = match &self.pair {
@@ -271,8 +238,8 @@ mod imp {
             if mode != Mode::SequentialReferencesUnchanged {
                 self.pair = Some(Pair {
                     key: key.clone(),
-                    source: self.frame(&a, time(key.2, 1))?,
-                    next: self.frame(&b, time(key.3, 1))?,
+                    source: self.frame(a, time(key.2, 1))?,
+                    next: self.frame(b, time(key.3, 1))?,
                 });
             }
             let pair = self.pair.as_ref().expect("a pair");
@@ -313,17 +280,8 @@ mod imp {
             ))
         }
 
-        fn between(&mut self, key: &Key, a: Input, b: Input, t: f64) -> Result<Vec<u8>> {
-            let deep = matches!(&a, Input::Held(f) if crate::screen::held::deep(f));
-            let (made, [wrote, processed]) = self.make(key, a, b, t)?;
-            let clock = std::time::Instant::now();
-            let out = read(&made, self.format, self.size, deep)?;
-            told(wrote, processed, clock);
-            Ok(out)
-        }
-
         fn between_frames(&mut self, key: &Key, a: &Video, b: &Video, t: f64) -> Result<Video> {
-            let (made, [wrote, processed]) = self.make(key, Input::Frame(a), Input::Frame(b), t)?;
+            let (made, [wrote, processed]) = self.make(key, (a, b), t)?;
             let clock = std::time::Instant::now();
             let out = self
                 .frames
@@ -350,21 +308,6 @@ mod imp {
 
     fn session() -> std::sync::MutexGuard<'static, Option<Session>> {
         SESSION.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    pub(super) fn between(
-        key: &Key,
-        a: Input,
-        b: Input,
-        size: (u32, u32),
-        t: f64,
-    ) -> Result<Vec<u8>> {
-        let mut slot = session();
-        if slot.as_ref().is_none_or(|s| s.size != size) {
-            *slot = None;
-            *slot = Some(Session::open(size)?);
-        }
-        slot.as_mut().expect("a session").between(key, a, b, t)
     }
 
     pub(super) fn between_frames(
