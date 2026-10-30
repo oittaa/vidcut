@@ -415,17 +415,8 @@ impl Drag {
                 Preview {
                     request: ((b, a) != (*before, *after))
                         .then(|| {
-                            request(
-                                "edit.dissolve",
-                                json!({
-                                    "at": at,
-                                    "track": track,
-                                    "before": format!("{b}f"),
-                                    "after": format!("{a}f"),
-                                    "sound": sound,
-                                    "transition": kind,
-                                }),
-                            )
+                            let params = super::fades::resized(track, *at, (b, a), *sound, kind);
+                            request("edit.dissolve", params)
                         })
                         .flatten(),
                     delta: Some((edge, Some(b + a))),

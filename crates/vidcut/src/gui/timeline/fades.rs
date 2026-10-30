@@ -46,6 +46,23 @@ pub fn realigned(track: TrackRef, at: i64, (x, sound): (&Transition, bool), alig
     })
 }
 
+pub fn resized(
+    track: &str,
+    at: i64,
+    (before, after): (i64, i64),
+    sound: bool,
+    transition: PictureTransition,
+) -> Value {
+    json!({
+        "at": at,
+        "track": track,
+        "before": format!("{before}f"),
+        "after": format!("{after}f"),
+        "sound": sound,
+        "transition": transition,
+    })
+}
+
 pub fn alignment(x: &Transition) -> &'static str {
     match (x.before, x.after) {
         (0, _) => "start",
@@ -126,14 +143,7 @@ impl Workspace {
         }
         self.send(
             "edit.dissolve",
-            json!({
-                "at": at,
-                "track": track.id(),
-                "before": format!("{before}f"),
-                "after": format!("{after}f"),
-                "sound": sound,
-                "transition": kind(&x),
-            }),
+            resized(&track.id(), at, (before, after), sound, kind(&x)),
         );
     }
 
@@ -260,11 +270,8 @@ impl Workspace {
         if dragged {
             self.timeline.transition_frames = Some((e.track, e.at, frames));
         }
-        if commit
-            && let Some((_, _, f)) = self.timeline.transition_frames.take()
-            && f != length
-        {
-            self.resize_transition(e.track, e.at, f);
+        if commit && let Some((track, at, f)) = self.timeline.transition_frames.take() {
+            self.resize_transition(track, at, f);
         }
         if let Some(k) = set {
             self.send(

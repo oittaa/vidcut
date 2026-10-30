@@ -670,10 +670,10 @@ Video Only and Audio Only limit what an edit takes (p. 694).
     - It acts on the selected edit. Else it acts on the edges of the selected clips.
   - The cards add a picture transition only. They add no Cross Fade.
   - `gui.show transitions` opens the tab.
-- **The Transition Inspector** (pp. 746–747):
+- **The Transition Inspector** (pp. 747–748):
   - A double-click on a transition selects it and opens the Inspector.
   - The Inspector shows the selected transition: Transition Type, Duration and Alignment.
-  - Duration is in frames, with the time beside it. A change keeps the alignment (X27).
+  - Duration is in frames, with the time beside it. A change keeps the alignment. The length is shortened to the media (X27).
   - Alignment is Start on Edit, Center on Edit or End on Edit.
   - An Edge Wipe also has Edge: Left, Right, Top or Bottom (X89).
   - Each change is a request: `edit.transition` for the type and the edge, `edit.dissolve` for the length and the alignment.

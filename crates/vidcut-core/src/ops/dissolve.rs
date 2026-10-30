@@ -601,6 +601,31 @@ mod tests {
         );
     }
 
+    fn kinds_after_a_dissolve() -> Vec<Option<crate::model::PictureTransition>> {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        req(&mut f, "edit.dissolve", json!({"at": 50}));
+        let p = f.editor.project();
+        let mut all = Vec::new();
+        for t in &p.tracks {
+            all.extend(t.transitions.iter().map(crate::otio::transitions::kind_of));
+        }
+        all
+    }
+
+    #[test]
+    fn a_cross_dissolve_reads_back_as_a_dissolve() {
+        assert!(
+            kinds_after_a_dissolve().contains(&Some(crate::model::PictureTransition::Dissolve))
+        );
+    }
+
+    #[test]
+    fn a_cross_fade_has_no_picture_type() {
+        assert!(kinds_after_a_dissolve().contains(&None));
+    }
+
     #[test]
     fn a_centered_picture_transition_at_the_timeline_start_goes_after_it() {
         let mut f = fixture();
