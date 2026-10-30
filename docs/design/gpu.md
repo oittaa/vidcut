@@ -241,7 +241,10 @@ On macOS (`interpolate::macos`):
 - Two SDR VideoToolbox frames of a clip with no placed picture reach it on the GPU (`interpolate::takes_frames`). Turned frames turn first (`hw::Turner`).
 - Lanczos sizes them to the size that the picture fills in the frame, before the frame is made.
 - The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
-- Frames that the CPU decoded, HDR frames and the frames of a placed clip go through 16-bit RGB in the timeline color space (`Form`).
+- The draw puts the other frames of a clip with no placed picture into 16-bit 4:4:4 VideoToolbox frames (P416), in the timeline color space (`Source::frame_of`). They then take the same path.
+  - The frames come from a VideoToolbox pool of vidcut's own (`interpolate::blank`, `Surfaces`). Thus frames that the CPU decoded take this path too.
+  - Why: a Mac has unified memory. A copy of a picture through the CPU only costs time.
+- The frames of a placed clip go through 16-bit RGB in the timeline color space (`Form`).
   - The session reads a held picture down from the GPU only for a new pair (`Input::Held`).
   - The next frame between the same pair uses the pair that the session has (`SequentialReferencesUnchanged`).
 

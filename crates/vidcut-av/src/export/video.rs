@@ -152,6 +152,8 @@ struct Source {
     queued: VecDeque<frame::Video>,
     turner: Option<crate::hw::Turner>,
     drawn: Option<Single>,
+    framer: Option<Single>,
+    framed: Vec<Rgb>,
     keeper: Option<crate::hw::Keeper>,
     unkept: bool,
     before: Option<frame::Video>,
@@ -260,6 +262,8 @@ impl Source {
             queued: VecDeque::new(),
             turner: None,
             drawn: None,
+            framer: None,
+            framed: Vec::new(),
             keeper: None,
             unkept: false,
             before: None,
@@ -325,6 +329,8 @@ impl Source {
             queued: VecDeque::new(),
             turner: None,
             drawn: None,
+            framer: None,
+            framed: Vec::new(),
             keeper: None,
             unkept: false,
             before: None,
@@ -483,6 +489,7 @@ impl Source {
         self.prev = None;
         self.prev2 = None;
         self.rgb.clear();
+        self.framed.clear();
         self.scaled.clear();
         self.lumas.clear();
     }
@@ -491,6 +498,10 @@ impl Source {
         if self.drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
             self.drawn = None;
             self.rgb.clear();
+        }
+        if self.framer.as_ref().is_some_and(|s| !s.on_offscreen()) {
+            self.framer = None;
+            self.framed.clear();
         }
     }
 
@@ -547,8 +558,7 @@ impl Source {
         Ok(f64::from(score) >= vidcut_core::analysis::SCENE_SCORE)
     }
 
-    fn rgb_of(&mut self, prev: bool, look: &Look, reading: Reading) -> Result<frame::Video> {
-        let rotation = self.reader.rotation();
+    fn neighbors(&mut self, prev: bool) -> Result<[Option<frame::Video>; 3]> {
         let copy = |f: &Option<(frame::Video, f64)>| f.as_ref().map(|(f, _)| frame_ref(f));
         let (before, f, after) = match prev {
             true => (copy(&self.prev2), copy(&self.prev), copy(&self.current)),
@@ -558,10 +568,39 @@ impl Source {
                 self.peek().transpose(),
             ),
         };
-        let f = f.expect("a frame")?;
-        let (before, after) = (before.transpose()?, after.transpose()?);
+        Ok([before.transpose()?, f.transpose()?, after.transpose()?])
+    }
+
+    fn rgb_of(&mut self, prev: bool, look: &Look, reading: Reading) -> Result<frame::Video> {
+        let rotation = self.reader.rotation();
+        let [before, f, after] = self.neighbors(prev)?;
+        let f = f.expect("a frame");
         let around = (before.as_ref(), after.as_ref());
         self.rgb_from((&f, around), rotation, look, reading)
+    }
+
+    fn frame_of(&mut self, prev: bool, look: &Look, reading: Reading) -> Result<frame::Video> {
+        let rotation = self.reader.rotation();
+        let [before, f, after] = self.neighbors(prev)?;
+        let f = f.expect("a frame");
+        self.follow_offscreen();
+        let pts = f.pts();
+        if let Some((_, _, made)) = self.framed.iter().find(|(p, l, _)| *p == pts && l == look) {
+            return frame_ref(made);
+        }
+        let single = match &mut self.framer {
+            Some(single) => single,
+            None => self.framer.insert(Single::new(reading)?),
+        };
+        let out = crate::interpolate::blank(look.size)?;
+        let around = (before.as_ref(), after.as_ref());
+        let made = single.surface((&f, around), rotation, (look, self.reader.path()), out)?;
+        self.framed.retain(|(p, l, _)| l == look && *p != pts);
+        if self.framed.len() >= 2 {
+            self.framed.remove(0);
+        }
+        self.framed.push((pts, look.clone(), frame_ref(&made)?));
+        Ok(made)
     }
 
     fn rgb_from(
@@ -877,6 +916,22 @@ fn shown_rgb(
         true => single.held(frames, rotation, look, path),
         false => single.placed(frames, rotation, look, path),
     }
+}
+
+pub(crate) fn surface_picture(
+    drawn: &mut Option<Single>,
+    frame: &frame::Video,
+    path: &Path,
+    size: (u32, u32),
+    form: Form,
+) -> Result<frame::Video> {
+    let single = match drawn {
+        Some(single) => single,
+        None => drawn.insert(Single::new(Reading::Frames)?),
+    };
+    let look = Look::fitted(size, 0, form);
+    let out = crate::interpolate::blank(size)?;
+    single.surface((frame, (None, None)), 0, (&look, path), out)
 }
 
 fn big_picture(
@@ -1667,6 +1722,38 @@ impl Single {
         look: &Look,
         path: &Path,
     ) -> Result<frame::Video> {
+        let pixel = crate::screen::held::rgb_pixel(look.form.0).0;
+        self.fitted(
+            frames,
+            rotation,
+            (look, path),
+            (pixel, crate::screen::Sink::Held),
+        )
+    }
+
+    fn surface(
+        &mut self,
+        frames: (&frame::Video, Around<'_>),
+        rotation: u16,
+        (look, path): (&Look, &Path),
+        out: frame::Video,
+    ) -> Result<frame::Video> {
+        let sink = crate::screen::Sink::Surface(out);
+        self.fitted(
+            frames,
+            rotation,
+            (look, path),
+            (format::Pixel::P416LE, sink),
+        )
+    }
+
+    fn fitted(
+        &mut self,
+        frames: (&frame::Video, Around<'_>),
+        rotation: u16,
+        (look, path): (&Look, &Path),
+        (pixel, sink): (format::Pixel, crate::screen::Sink<'_>),
+    ) -> Result<frame::Video> {
         let ((w, h), kernel, form) = (look.size, look.kernel, look.form);
         let picture = std::sync::Arc::new(self.woven(frames, rotation, path)?);
         let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
@@ -1678,12 +1765,7 @@ impl Single {
             w,
             h,
         );
-        screen.encoded(
-            gpu,
-            crate::screen::held::rgb_pixel(form.0).0,
-            (form.1, form.1),
-            crate::screen::Sink::Held,
-        )
+        screen.encoded(gpu, pixel, (form.1, form.1), sink)
     }
 
     fn placed(
@@ -2615,6 +2697,14 @@ impl VideoFrames {
                 ))
             }
             _ => None,
+        };
+        let drawn = *retime == Retime::Macos && look.placed.is_empty() && scaled.is_none();
+        let pair = match pair {
+            None if drawn => Some((
+                src.frame_of(true, &look, reading)?,
+                src.frame_of(false, &look, reading)?,
+            )),
+            pair => pair,
         };
         let frames = pair.is_some();
         let (a, b) = match (pair, &scaled) {

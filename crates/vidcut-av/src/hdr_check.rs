@@ -8,7 +8,7 @@ use vidcut_core::model::{Hdr, Retime, Sharpness, Upscaler};
 
 use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Error, Result};
-use crate::export::video::rgb_picture;
+use crate::export::video::{rgb_picture, surface_picture};
 use crate::ffmpeg::frame;
 use crate::super_scale::{Out, Picture};
 
@@ -61,6 +61,7 @@ pub fn run(
     let source = decoded(clip, count)?;
     let hdr = crate::color::Source::of(&source[0]).hdr;
     let mut drawn = None;
+    let mut framer = None;
     let mut rows = Vec::new();
     let forms = [
         (true, Some(hdr.unwrap_or(Hdr::Pq))),
@@ -106,10 +107,29 @@ pub fn run(
             });
         }
         let pairs: Vec<usize> = (0..count.saturating_sub(2)).step_by(2).collect();
-        let made_by = |r: Retime| {
+        let frames = match form.0 && retimes.contains(&Retime::Macos) {
+            true => source
+                .iter()
+                .map(|f| surface_picture(&mut framer, f, &clip.path, FULL, form))
+                .collect::<Result<Vec<_>>>()?,
+            false => Vec::new(),
+        };
+        let mut made_by = |r: Retime| {
             pairs
                 .iter()
-                .map(|&i| read(between(r, clip, &refs, i)?, form.0))
+                .map(|&i| match r == Retime::Macos && !frames.is_empty() {
+                    true => {
+                        let made = between_frames(clip, &frames, i)?;
+                        bytes(&rgb_picture(
+                            &mut drawn,
+                            &made,
+                            &clip.path,
+                            FULL,
+                            (0, (true, coding)),
+                        )?)
+                    }
+                    false => read(between(r, clip, &refs, i)?, form.0),
+                })
                 .collect::<Result<Vec<_>>>()
         };
         let blend = made_by(Retime::FrameBlend)?;
@@ -282,6 +302,11 @@ fn between(r: Retime, clip: &Clip, refs: &[frame::Video], i: usize) -> Result<Pi
     crate::interpolate::between(r, &key, &refs[i], &refs[i + 2], FULL, 0.5)
 }
 
+fn between_frames(clip: &Clip, frames: &[frame::Video], i: usize) -> Result<frame::Video> {
+    let key = (clip.path.clone(), i as u64, i as i64, i as i64 + 2);
+    crate::interpolate::between_frames(&key, &frames[i], &frames[i + 2], FULL, 0.5)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Model {
     Upscaler(Upscaler),
@@ -320,14 +345,18 @@ pub fn speed(
     dir: &Path,
 ) -> Result<Speed> {
     let source = decoded(clip, count)?;
-    let mut drawn = None;
+    let (mut drawn, mut framer) = (None, None);
     let size = match model {
         Model::Upscaler(_) => SMALL,
         Model::Retime(_) => FULL,
     };
+    let framed = model == Model::Retime(Retime::Macos) && form.0;
     let inputs = source
         .iter()
-        .map(|f| rgb_picture(&mut drawn, f, &clip.path, size, (0, form)))
+        .map(|f| match framed {
+            true => surface_picture(&mut framer, f, &clip.path, size, form),
+            false => rgb_picture(&mut drawn, f, &clip.path, size, (0, form)),
+        })
         .collect::<Result<Vec<_>>>()?;
     let pairs: Vec<usize> = (0..count.saturating_sub(2)).step_by(2).collect();
     let once = || -> Result<(Vec<Picture>, usize)> {
@@ -340,7 +369,10 @@ pub fn speed(
                 crate::interpolate::get_ready(dir, r, false)?;
                 let made = pairs
                     .iter()
-                    .map(|&i| between(r, clip, &inputs, i))
+                    .map(|&i| match framed {
+                        true => between_frames(clip, &inputs, i).map(Picture::Frame),
+                        false => between(r, clip, &inputs, i),
+                    })
                     .collect::<Result<Vec<_>>>()?;
                 Ok((made, pairs.len()))
             }

@@ -442,6 +442,10 @@ pub(crate) fn takes_frames(r: Retime, a: &frame::Video, b: &frame::Video) -> boo
     r == Retime::Macos && sdr_on_gpu(a) && sdr_on_gpu(b)
 }
 
+pub(crate) fn blank(size: (u32, u32)) -> Result<frame::Video> {
+    macos::blank(size)
+}
+
 pub(crate) fn between_frames(
     key: &(PathBuf, u64, i64, i64),
     a: &frame::Video,
