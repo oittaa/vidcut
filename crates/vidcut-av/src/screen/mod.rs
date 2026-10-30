@@ -15,8 +15,6 @@ use vidcut_core::render::{Placed, Wipe};
 #[cfg(any(target_os = "linux", windows))]
 mod acquire;
 mod carried;
-#[cfg(target_os = "macos")]
-pub(crate) mod fix;
 mod gate;
 pub(crate) mod held;
 pub(crate) mod light;
@@ -68,8 +66,6 @@ pub struct Gpu {
     encoders: out::Encoders,
     held: held::Pipes,
     light: OnceLock<light::Pipes>,
-    #[cfg(target_os = "macos")]
-    fix: OnceLock<fix::Pipes>,
 }
 
 struct Drawing {
@@ -625,8 +621,6 @@ impl Gpu {
             encoders: out::Encoders::new(device, &shader),
             held: held::Pipes::new(device),
             light: OnceLock::new(),
-            #[cfg(target_os = "macos")]
-            fix: OnceLock::new(),
         }
     }
 

@@ -1,3 +1,4 @@
+pub(crate) mod fix;
 pub mod flashvsr;
 pub mod macos;
 pub mod nanovsr;

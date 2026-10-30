@@ -183,7 +183,7 @@ mod imp {
 
     use super::NEEDS;
     use crate::error::{Error, Result};
-    use crate::ffmpeg::{ffi, format, frame::Video};
+    use crate::ffmpeg::frame::Video;
     use crate::frame_processor::{
         Frames, HALF, Transfer, buffer, format_in, fourcc, frame, numbers, pixels, pool,
     };
@@ -321,6 +321,7 @@ mod imp {
         sources: CFRetained<CVPixelBufferPool>,
         outputs: CFRetained<CVPixelBufferPool>,
         transfer: Transfer,
+        fix: crate::compute::Gpu,
         shrink: Option<crate::lanczos::Lanczos>,
         frames: Frames,
         enlarged: (u32, u32),
@@ -376,6 +377,7 @@ mod imp {
                 sources,
                 outputs,
                 transfer: Transfer::new(WHAT)?,
+                fix: crate::compute::Gpu::start(WHAT, 0).map_err(Error::Invalid)?,
                 shrink: None,
                 frames: Frames::default(),
                 enlarged,
@@ -393,18 +395,11 @@ mod imp {
             let wrote = clock.elapsed();
             let enlarged = self.enlarge(index, &source)?;
             let fixed = buffer(&self.outputs, WHAT)?;
-            crate::screen::fix::on_buffers(&source, &enlarged, &fixed)?;
+            crate::super_scale::fix::on_buffers(&self.fix, (&source, &enlarged, &fixed))?;
             let scaled = clock.elapsed();
-            let layout = crate::hw::sw_format(f);
-            let layout = if crate::lanczos::takes(layout) {
-                layout
-            } else {
-                format::Pixel::P416LE
-            };
-            let shape = (self.enlarged, ffi::AVPixelFormat::from(layout));
             let big = self
                 .frames
-                .made_as(&self.transfer, &fixed, f, shape, WHAT)?;
+                .made(&self.transfer, &fixed, f, self.enlarged, WHAT)?;
             fixed.remove_all_attachments();
             let out = match crate::lanczos::sized(&mut self.shrink, &big, self.made)? {
                 Some(small) => small,

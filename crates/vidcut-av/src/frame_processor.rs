@@ -313,7 +313,7 @@ impl Drop for Pool {
 
 pub(crate) struct Surfaces {
     device: *mut ffi::AVBufferRef,
-    pools: Lru<(i32, i32, (u32, u32)), Pool, 4>,
+    pools: Lru<(u32, u32), Pool, 4>,
 }
 
 // SAFETY: one thread at a time uses the surfaces, behind the mutex of their process.
@@ -344,17 +344,13 @@ impl Surfaces {
         })
     }
 
-    pub(crate) fn fresh(
-        &mut self,
-        (size, pixel): ((u32, u32), ffmpeg::format::Pixel),
-        what: &str,
-    ) -> Result<Video> {
-        let like: Like = (pixel.into(), ffi::AVColorRange::AVCOL_RANGE_MPEG, size);
-        let key = (like.0 as i32, like.1 as i32, size);
-        if !self.pools.contains(&key) {
-            self.pools.insert(key, Pool::new(self.device, like, what)?);
+    pub(crate) fn fresh(&mut self, size: (u32, u32), what: &str) -> Result<Video> {
+        if !self.pools.contains(&size) {
+            let pixel: ffi::AVPixelFormat = ffmpeg::format::Pixel::P416LE.into();
+            let like: Like = (pixel, ffi::AVColorRange::AVCOL_RANGE_MPEG, size);
+            self.pools.insert(size, Pool::new(self.device, like, what)?);
         }
-        self.pools.get(&key).expect("a pool").frame(what)
+        self.pools.get(&size).expect("a pool").frame(what)
     }
 }
 

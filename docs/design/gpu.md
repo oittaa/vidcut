@@ -170,7 +170,7 @@ The AI upscalers share one path in the reader:
 - A run takes frames in order. It reads them from the reader's queue, or with a second `VideoReader` (`Source::seek_ahead`).
 - The run gives each picture once, and keeps the last one for a change of size.
 - A picture of AI Fast or AI Best stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`, `Layout::Rgb48`).
-- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best takes 8-bit SDR RGB. The scaler of macOS takes VideoToolbox frames, of 16 bits in an HDR timeline.
+- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best takes 8-bit SDR RGB. The scaler of macOS takes 16-bit 4:4:4 VideoToolbox frames (P416) in the timeline color space.
   - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast came nearer to the real frames with 16 bits, in the same time.
 - The reader drops a run for a frame that the run does not give (`RUN_JUMP`).
 - `super_scale::report` tells what the upscaler makes. The stats panel shows it (`SuperScaleStats`).
@@ -201,7 +201,7 @@ AI Best (`flashvsr`):
 - Its KV caches stay on the GPU while they fit in the room (`run::plan`). Else some stay in main memory between chunks (`Keys::Host`).
   - `Stream::fit` measures the room before each chunk. Why: the encoder takes GPU memory after the plan.
 - One matrix multiply shader runs its linear layers and most convolutions (`gemm::run`).
-- After the decoder, a color fix gives each picture the low frequencies of its enlarged input picture (`kernels::fix`).
+- After the decoder, a color fix gives each picture the low frequencies of its enlarged input picture (`fix::run`).
   - It is the wavelet color correction of FlashVSR+. That code has it as an option, which is off by default.
   - The blur is linear. Thus the shader blurs only the difference between the two pictures, and adds it to the result.
   - Why: the network shifts the colors and the light of large areas ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)).
@@ -211,16 +211,15 @@ The scaler of macOS (`macos`):
 - It is a `VTFrameProcessor` session with a `VTSuperResolutionScalerConfiguration`, on macOS 26 and later.
 - Its own buffers are RGhA (`HALF`, [gotchas](../gotchas.md#operating-systems-and-libraries)). Their IOSurfaces are also Metal textures.
 - After the scaler, the color fix of AI Best runs on these buffers on the GPU, with no copy (`fix::on_buffers`).
-  - Its shader reads the buffers as textures. The shader of AI Best reads its own packed buffers.
+  - The two upscalers use one shader for the fix. It reads packed buffers for AI Best and textures for the scaler (`fix::Pictures`).
 - `macos::check` refuses pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
 - The draw puts each frame into a VideoToolbox frame in the timeline color space, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
-  - The frame keeps the depth and the chroma of the source: NV12, P010, P210 or P416 (`surface_pixel`). Retime Process gets P416 frames.
-- The drawn frames come from a few VideoToolbox pools of vidcut's own, one for each layout and size (`Surfaces`).
+  - The frame is P416, as for Retime Process. Why: Super Scale gets the picture in full color ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+- The drawn frames come from a few VideoToolbox pools of vidcut's own, one for each size (`Surfaces`).
   - In an SDR timeline, the draw tone-maps an HDR frame. It deinterlaces an interlaced frame.
 - It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
   - Why: a picture of 4 times the source fills the cache of the viewer.
-  - A picture of a layout that Lanczos cannot take comes out as P416 (`lanczos::takes`).
 - Its buffers lose the color labels of the transfers. Why: with labels, it makes less detail.
 - AI Fast and AI Best are off on macOS (`super_scale::off_here`).
 

@@ -2533,6 +2533,8 @@ The manual gives the order in which each picture is processed, on each page, as 
 - A different order is a deviation, as for any other behavior.
 - [design](design/README.md#picture-order) gives the order of the code. [Deviation X98](deviations.md#x98-in-an-hdr-timeline-ai-best-works-before-the-conversion) tells where it is different.
 
+Resolve converts each clip into full-range, uncompressed 32-bit float data when it reads it (p. 221). All stages then work on that data.
+
 **Source processing**, for each clip:
 
 1. Camera Raw settings.
