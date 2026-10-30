@@ -1797,7 +1797,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - It enlarges by a factor that macOS offers. It takes the smallest of these that reaches the shown size.
     - Then it makes the picture at the size that it shows at, as AI Best does.
     - It reads the frames of a clip in order. Each output frame uses the frame and the output before it.
-    - It takes SDR pictures up to 1920×1080, the limit of macOS for video.
+    - It takes SDR and HDR pictures up to 1920×1080, the limit of macOS for video.
+    - After the scaler, the color fix of AI Best gives the picture the colors and the light of the large areas of its source.
+      - In the test of `hdr_models` on the owner's Mac, its light is within 1.2% of the real frames in PQ, HLG and SDR.
+      - Its mean ΔE ITP stays above that of Classic in each pipe. On the HDR10+ clip, it is 5.46 in PQ and 3.38 in SDR, against 1.85 and 1.53.
+      - Thus HDR does not shift its light or colors. It takes HDR media in an HDR timeline.
     - macOS downloads its models only when the user agrees, as for the weights of AI Fast and AI Best. vidcut does not ship them.
     - macOS does not give their size, so the question says that the size is unknown. On the owner's Mac, the weight file of the 4x model is 66 MB.
   - AI Best is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.
@@ -1814,7 +1818,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - AI Fast takes SDR and HDR pictures of any size. Its memory grows with the size of the source picture.
   - The AI upscalers:
     - Each picture goes into the timeline color space first, as in Resolve (§13, p. 3407). In an SDR timeline, an HDR picture is tone-mapped.
-    - In an HDR timeline, AI Best and AI take SDR media only. They refuse HDR media ([X98](#x98-in-an-hdr-timeline-ai-best-and-the-scaler-of-macos-work-before-the-conversion)).
+    - In an HDR timeline, AI Best takes SDR media only. It refuses HDR media ([X98](#x98-in-an-hdr-timeline-ai-best-works-before-the-conversion)).
     - Before an export starts, vidcut refuses media that the upscaler cannot take. The error names each file and the reason.
     - It also refuses an AI upscaler without its weights, or without a GPU that can run the network.
     - It refuses AI Best for a size that does not fit in the GPU's memory and main memory.
@@ -2029,18 +2033,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Ease In and Ease Out then do what their names tell, as the Dynamic Zoom ease does. Ease In is slow at the start, Ease Out at the end.
   - A handle on one side of a speed keyframe alone gives a straight line. Thus one speed keyframe takes an ease on both sides or on none.
 
-## X98. In an HDR timeline, AI Best and the scaler of macOS work before the conversion
+## X98. In an HDR timeline, AI Best works before the conversion
 
 - **Resolve:** the input goes into the timeline color space before Super Scale and before Speed Effects (§13, p. 3407).
 - **vidcut:**
   - In an SDR timeline, vidcut keeps this order. The AI stages take the picture in the timeline color space. An HDR picture is tone-mapped first.
-  - In an HDR timeline, AI Fast of Super Scale and Retime Process keep this order too.
-  - In an HDR timeline, AI Best and AI of Super Scale on macOS take SDR media as SDR. The draw then converts their result into the timeline color space.
-  - These two refuse HDR media in an HDR timeline ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
+  - In an HDR timeline, AI Fast and AI of Super Scale, and Retime Process, keep this order too.
+  - In an HDR timeline, AI Best takes SDR media as SDR. The draw then converts its result into the timeline color space.
+  - AI Best refuses HDR media in an HDR timeline ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
 - **Why:**
   - In the test of `hdr_models` ([tools](tools.md)), AI Best in PQ and HLG came far from the real frames, also with its color fix.
     - On the HDR10+ clip in PQ, its mean ΔE ITP was 8.6, and Classic's was 1.8. Its pictures had 1.09 times the light of the real frames.
     - On the Dolby Vision clip in HLG, its mean ΔE ITP was 4.2, and Classic's was 3.9. Its pictures had 1.03 times the light.
     - In 8-bit SDR, the same clips gave 5.1 and 2.6.
-  - On the owner's Mac, the scaler of macOS came farther from the real frames in HDR than in SDR. In both, it came farther than Classic.
   - SDR goes into an HDR timeline with no clipping. Thus the conversion after the stage keeps all of the picture.

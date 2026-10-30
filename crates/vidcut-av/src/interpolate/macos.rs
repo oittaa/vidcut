@@ -25,8 +25,8 @@ pub(super) fn between_frames(
     imp::between_frames(key, a, b, size, t)
 }
 
-pub(super) fn blank(size: (u32, u32), pixel: crate::ffmpeg::format::Pixel) -> Result<frame::Video> {
-    imp::blank(size, pixel)
+pub(super) fn blank(size: (u32, u32)) -> Result<frame::Video> {
+    imp::blank(size)
 }
 
 pub(super) fn release() {
@@ -56,10 +56,7 @@ mod imp {
         Err(Error::Invalid(NEEDS.into()))
     }
 
-    pub(super) fn blank(
-        _size: (u32, u32),
-        _pixel: crate::ffmpeg::format::Pixel,
-    ) -> Result<crate::ffmpeg::frame::Video> {
+    pub(super) fn blank(_size: (u32, u32)) -> Result<crate::ffmpeg::frame::Video> {
         Err(Error::Invalid(NEEDS.into()))
     }
 
@@ -183,7 +180,7 @@ mod imp {
                     config.destinationPixelBufferAttributes(),
                 )
             };
-            let format = format_in(&formats, HALF_FIRST, WHAT)?;
+            let format = format_in(&formats, &HALF_FIRST, WHAT)?;
             let sources = pool(size, format, &from, WHAT)?;
             let outputs = pool(size, format, &to, WHAT)?;
             // SAFETY: a new processor of the frame processor class.
@@ -326,12 +323,12 @@ mod imp {
             .between_frames(key, a, b, t)
     }
 
-    pub(super) fn blank(size: (u32, u32), pixel: crate::ffmpeg::format::Pixel) -> Result<Video> {
+    pub(super) fn blank(size: (u32, u32)) -> Result<Video> {
         let mut slot = SURFACES.lock().unwrap_or_else(PoisonError::into_inner);
         if slot.is_none() {
             *slot = Some(Surfaces::new(WHAT)?);
         }
-        slot.as_mut().expect("surfaces").fresh((size, pixel), WHAT)
+        slot.as_mut().expect("surfaces").fresh(size, WHAT)
     }
 
     pub(super) fn release() {

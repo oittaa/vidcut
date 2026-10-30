@@ -687,17 +687,13 @@ fn shared_out(gpu: &Gpu, device: &CudaDevice, size: u64) -> Result<Shared> {
 
 #[cfg(target_os = "macos")]
 fn surface_textures(gpu: &Gpu, f: &frame::Video, planes: &[Plane]) -> Result<Vec<wgpu::Texture>> {
-    use objc2_metal::{MTLPixelFormat, MTLTextureType, MTLTextureUsage};
+    use objc2_metal::{MTLPixelFormat, MTLTextureUsage};
     use wgpu::TextureFormat as F;
-    use wgpu::hal::api::Metal;
     const WHAT: &str = "handing a frame to the encoder";
     if !gpu.metal {
         return Err(Error::Invalid("the GPU isn't Metal".into()));
     }
     let surface = crate::metal::surface(f, WHAT)?;
-    // SAFETY: wgpu's own device, which makes textures here only.
-    let hal = unsafe { gpu.device.as_hal::<Metal>() }
-        .ok_or_else(|| Error::Invalid("the GPU isn't Metal".into()))?;
     let made = |index: usize, plane: &Plane| -> Result<wgpu::Texture> {
         let format = unorm(plane.format);
         let mtl = match format {
@@ -707,52 +703,17 @@ fn surface_textures(gpu: &Gpu, f: &frame::Video, planes: &[Plane]) -> Result<Vec
             F::Rg16Unorm => MTLPixelFormat::RG16Unorm,
             _ => return Err(Error::Invalid(format!("an IOSurface plane in {format:?}"))),
         };
-        let raw = crate::metal::texture(
-            hal.raw_device(),
+        crate::metal::imported(
+            &gpu.device,
             &surface,
-            (index, mtl),
-            MTLTextureUsage::RenderTarget,
-            WHAT,
-        )?;
-        let (width, height) = (
-            surface.width_of_plane(index) as u32,
-            surface.height_of_plane(index) as u32,
-        );
-        let extent = wgpu::hal::CopyExtent {
-            width,
-            height,
-            depth: 1,
-        };
-        // SAFETY: `raw` is a texture of this device, as described, which only render passes write.
-        Ok(unsafe {
-            let raw = wgpu::hal::metal::Device::texture_from_raw(
-                raw,
-                format,
-                MTLTextureType::Type2D,
-                1,
-                1,
-                extent,
-                None,
-            );
-            gpu.device.create_texture_from_hal::<Metal>(
-                raw,
-                &wgpu::TextureDescriptor {
-                    label: Some("vidcut encoder's picture"),
-                    size: wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    view_formats: &[],
-                },
+            (index, mtl, format),
+            (
+                MTLTextureUsage::RenderTarget,
+                wgpu::TextureUsages::RENDER_ATTACHMENT,
                 wgpu::TextureUses::COLOR_TARGET,
-            )
-        })
+            ),
+            WHAT,
+        )
     };
     if surface.plane_count() != planes.len() {
         return Err(Error::Invalid(format!(

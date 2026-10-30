@@ -10,8 +10,9 @@ use objc2_core_video::{
     kCVImageBufferColorPrimariesKey, kCVImageBufferTransferFunction_ITU_R_709_2,
     kCVImageBufferTransferFunctionKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4,
     kCVImageBufferYCbCrMatrix_ITU_R_709_2, kCVImageBufferYCbCrMatrix_ITU_R_2020,
-    kCVImageBufferYCbCrMatrixKey, kCVPixelBufferHeightKey, kCVPixelBufferPixelFormatTypeKey,
-    kCVPixelBufferWidthKey, kCVPixelFormatType_32BGRA, kCVPixelFormatType_64RGBAHalf,
+    kCVImageBufferYCbCrMatrixKey, kCVPixelBufferHeightKey, kCVPixelBufferIOSurfacePropertiesKey,
+    kCVPixelBufferMetalCompatibilityKey, kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferWidthKey,
+    kCVPixelFormatType_32BGRA, kCVPixelFormatType_64RGBAHalf,
     kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVReturnSuccess,
 };
 use objc2_foundation::{NSArray, NSDictionary, NSError, NSMutableDictionary, NSNumber, NSString};
@@ -32,7 +33,7 @@ const BGRA: u32 = kCVPixelFormatType_32BGRA;
 const NV12: u32 = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
 const RGHA: u32 = kCVPixelFormatType_64RGBAHalf;
 pub(crate) const HALF_FIRST: [u32; 3] = [RGHA, BGRA, NV12];
-pub(crate) const BYTES_FIRST: [u32; 3] = [BGRA, NV12, RGHA];
+pub(crate) const HALF: [u32; 1] = [RGHA];
 
 pub(crate) fn numbers(list: &NSArray<NSNumber>) -> Vec<u32> {
     (0..list.count())
@@ -52,16 +53,19 @@ pub(crate) fn failed(what: &str, e: Retained<NSError>) -> Error {
     Error::Invalid(format!("{what}: {}", e.localizedDescription()))
 }
 
-pub(crate) fn format_in(list: &NSArray<NSNumber>, order: [u32; 3], what: &str) -> Result<u32> {
+pub(crate) fn format_in(list: &NSArray<NSNumber>, order: &[u32], what: &str) -> Result<u32> {
     let formats = numbers(list);
     let names: Vec<String> = formats.iter().map(|f| fourcc(*f)).collect();
     crate::debug!("ai", "{what} takes {}", names.join(", "));
     order
-        .into_iter()
+        .iter()
+        .copied()
         .find(|f| formats.contains(f))
         .ok_or_else(|| {
+            let wanted: Vec<String> = order.iter().map(|f| fourcc(*f)).collect();
             Error::Invalid(format!(
-                "{what} takes none of vidcut's pixel formats, only {}",
+                "{what} needs {}, and this Mac lists only {}",
+                wanted.join(" or "),
                 names.join(", ")
             ))
         })
@@ -87,6 +91,15 @@ pub(crate) fn pool(
         let key = unsafe { &*std::ptr::from_ref(key).cast::<NSString>() };
         all.insert(key, NSNumber::new_u32(value).as_ref());
     }
+    // SAFETY: constant keys of CoreVideo, and a CFString is an NSString.
+    let (surface, metal) = unsafe {
+        (
+            &*std::ptr::from_ref(kCVPixelBufferIOSurfacePropertiesKey).cast::<NSString>(),
+            &*std::ptr::from_ref(kCVPixelBufferMetalCompatibilityKey).cast::<NSString>(),
+        )
+    };
+    all.insert(surface, NSDictionary::<NSString, AnyObject>::new().as_ref());
+    all.insert(metal, NSNumber::new_bool(true).as_ref());
     let attributes =
         std::ptr::from_ref::<NSDictionary<NSString, AnyObject>>(&all).cast::<CFDictionary>();
     let mut out: *mut CVPixelBufferPool = std::ptr::null_mut();
@@ -302,7 +315,7 @@ impl Drop for Pool {
 
 pub(crate) struct Surfaces {
     device: *mut ffi::AVBufferRef,
-    pools: Lru<(i32, i32, (u32, u32)), Pool, 4>,
+    pools: Lru<(u32, u32), Pool, 4>,
 }
 
 // SAFETY: one thread at a time uses the surfaces, behind the mutex of their process.
@@ -333,17 +346,13 @@ impl Surfaces {
         })
     }
 
-    pub(crate) fn fresh(
-        &mut self,
-        (size, pixel): ((u32, u32), ffmpeg::format::Pixel),
-        what: &str,
-    ) -> Result<Video> {
-        let like: Like = (pixel.into(), ffi::AVColorRange::AVCOL_RANGE_MPEG, size);
-        let key = (like.0 as i32, like.1 as i32, size);
-        if !self.pools.contains(&key) {
-            self.pools.insert(key, Pool::new(self.device, like, what)?);
+    pub(crate) fn fresh(&mut self, size: (u32, u32), what: &str) -> Result<Video> {
+        if !self.pools.contains(&size) {
+            let pixel: ffi::AVPixelFormat = ffmpeg::format::Pixel::P416LE.into();
+            let like: Like = (pixel, ffi::AVColorRange::AVCOL_RANGE_MPEG, size);
+            self.pools.insert(size, Pool::new(self.device, like, what)?);
         }
-        self.pools.get(&key).expect("a pool").frame(what)
+        self.pools.get(&size).expect("a pool").frame(what)
     }
 }
 

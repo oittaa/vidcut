@@ -2159,8 +2159,7 @@ impl Slot {
     #[cfg(target_os = "macos")]
     fn import_videotoolbox(&mut self, gpu: &Gpu, picture: &Arc<Picture>) -> Result<(), String> {
         use objc2_io_surface::IOSurfaceRef;
-        use objc2_metal::{MTLDevice, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage};
-        use wgpu::hal::api::Metal;
+        use objc2_metal::MTLTextureUsage;
         #[link(name = "CoreVideo", kind = "framework")]
         unsafe extern "C" {
             fn CVPixelBufferGetIOSurface(buffer: *mut std::ffi::c_void) -> *const IOSurfaceRef;
@@ -2175,70 +2174,25 @@ impl Slot {
             CVPixelBufferGetIOSurface(buffer).as_ref()
         }
         .ok_or("a pixel buffer without an IOSurface")?;
-        let planar = surface.plane_count() > 0;
         if surface.plane_count().max(1) != formats.len() {
             return Err(format!("an IOSurface of {} planes", surface.plane_count()));
         }
-        // SAFETY: wgpu's own device, which makes textures here only.
-        let hal = unsafe { gpu.device.as_hal::<Metal>() }.ok_or("not Metal")?;
-        let label = Some("vidcut VideoToolbox picture");
         let plane = |index: usize| -> Result<(wgpu::TextureView, (u32, u32)), String> {
             let (mtl, format) = formats[index];
-            let (w, h) = match planar {
-                true => (
-                    surface.width_of_plane(index),
-                    surface.height_of_plane(index),
-                ),
-                false => (surface.width(), surface.height()),
-            };
-            // SAFETY: `desc` is the plane's size and format; Metal checks it against `surface`.
-            let raw = unsafe {
-                let desc =
-                    MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                        mtl, w, h, false,
-                    );
-                desc.setUsage(MTLTextureUsage::ShaderRead);
-                hal.raw_device()
-                    .newTextureWithDescriptor_iosurface_plane(&desc, surface, index)
-            }
-            .ok_or("Metal won't make a texture of the IOSurface")?;
-            let (width, height) = (w as u32, h as u32);
-            let extent = wgpu::hal::CopyExtent {
-                width,
-                height,
-                depth: 1,
-            };
-            // SAFETY: `raw` is a texture of this device, as described, which only shaders read.
-            let texture = unsafe {
-                let raw = wgpu::hal::metal::Device::texture_from_raw(
-                    raw,
-                    format,
-                    MTLTextureType::Type2D,
-                    1,
-                    1,
-                    extent,
-                    None,
-                );
-                gpu.device.create_texture_from_hal::<Metal>(
-                    raw,
-                    &wgpu::TextureDescriptor {
-                        label,
-                        size: wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                        view_formats: &[],
-                    },
+            let texture = crate::metal::imported(
+                &gpu.device,
+                surface,
+                (index, mtl, format),
+                (
+                    MTLTextureUsage::ShaderRead,
+                    wgpu::TextureUsages::TEXTURE_BINDING,
                     wgpu::TextureUses::RESOURCE,
-                )
-            };
-            Ok((texture.create_view(&Default::default()), (width, height)))
+                ),
+                "vidcut VideoToolbox picture",
+            )
+            .map_err(|e| e.to_string())?;
+            let size = (texture.width(), texture.height());
+            Ok((texture.create_view(&Default::default()), size))
         };
         let mut planes = gpu
             .checked(|| (0..formats.len()).map(plane).collect::<Result<Vec<_>, _>>())??

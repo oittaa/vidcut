@@ -91,7 +91,7 @@ fn form_of(f: &frame::Video) -> Form {
 
 fn upscale_form(upscaler: Upscaler, timeline: Option<Hdr>) -> Form {
     match upscaler {
-        Upscaler::AiFast => (true, timeline),
+        Upscaler::AiFast | Upscaler::Macos => (true, timeline),
         _ => PLAIN,
     }
 }
@@ -936,21 +936,8 @@ fn shown_frame(
         Some(single) => single,
         None => drawn.insert(Single::new(reading)?),
     };
-    let out = crate::interpolate::blank(look.size, surface_pixel(look.form, frames.0))?;
+    let out = crate::interpolate::blank(look.size)?;
     single.surface(frames, rotation, (look, path), out)
-}
-
-fn surface_pixel((deep, _): Form, source: &frame::Video) -> format::Pixel {
-    use format::Pixel as P;
-    if deep {
-        return P::P416LE;
-    }
-    match crate::hw::sw_format(source) {
-        P::NV12 | P::YUV420P | P::YUVJ420P => P::NV12,
-        P::P010LE | P::YUV420P10LE => P::P010LE,
-        P::P210LE | P::YUV422P | P::YUVJ422P | P::YUV422P10LE => P::P210LE,
-        _ => P::P416LE,
-    }
 }
 
 impl Source {
@@ -2984,7 +2971,7 @@ mod tests {
 
     use vidcut_core::model::{Hdr, Upscaler};
 
-    use super::{PLAIN, fill_black, staying, surface_pixel, upscale_form};
+    use super::{PLAIN, fill_black, staying, upscale_form};
     use crate::ffmpeg::{format::Pixel, frame};
 
     #[test]
@@ -2996,21 +2983,8 @@ mod tests {
     }
 
     #[test]
-    fn an_8_bit_4_2_0_source_is_drawn_into_nv12_for_an_8_bit_model() {
-        let source = frame::Video::new(Pixel::YUV420P, 2, 2);
-        assert_eq!(surface_pixel(PLAIN, &source), Pixel::NV12);
-    }
-
-    #[test]
-    fn a_10_bit_4_2_2_source_is_drawn_into_p210_for_an_8_bit_model() {
-        let source = frame::Video::new(Pixel::YUV422P10LE, 2, 2);
-        assert_eq!(surface_pixel(PLAIN, &source), Pixel::P210LE);
-    }
-
-    #[test]
-    fn a_16_bit_model_gets_p416() {
-        let source = frame::Video::new(Pixel::YUV420P, 2, 2);
-        assert_eq!(surface_pixel((true, None), &source), Pixel::P416LE);
+    fn the_macos_scaler_upscales_an_sdr_timeline_at_16_bits() {
+        assert_eq!(upscale_form(Upscaler::Macos, None), (true, None));
     }
 
     #[test]

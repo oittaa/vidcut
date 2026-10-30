@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use super::gemm::{self, Act, Gemm, Load, Store};
 use super::kernels::{
-    self, Attend, DecInput, Fix, Grid, Last, Norm, Resize, Unshuffle, WinoIn, WinoOut,
+    self, Attend, DecInput, Grid, Last, Norm, Resize, Unshuffle, WinoIn, WinoOut,
 };
 use super::model::{Block, Linear, MemBlock, Model, Wino};
 use super::{DIM, FFN, resize};
@@ -24,7 +24,6 @@ const GLOBAL_KEEP: u32 = 3;
 const LOCAL_KEEP: u32 = 1;
 const TOPK_RATIO: f64 = 2.5;
 const SEED: u64 = 1;
-const LEVELS: u32 = 5;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Geometry {
@@ -1667,22 +1666,21 @@ impl Stream {
                     self.last(gpu, model, &ct1, (&t1, &t2, &picture), &mut e);
                     let whole = shown.next_multiple_of(4) as u64;
                     let out = gpu.buffer(whole as usize);
+                    let pictures = crate::super_scale::fix::Pictures::Packed {
+                        deep: self.deep,
+                        frames: &self.frames,
+                        made: &picture,
+                        out: &out,
+                        wm: g.wm,
+                        base: self.slot(index as u64) * g.plane(),
+                    };
                     e.pass(|pass| {
-                        kernels::fix(
+                        crate::super_scale::fix::run(
                             gpu,
                             pass,
-                            &Fix {
-                                deep: self.deep,
-                                frames: &self.frames,
-                                made: &picture,
-                                low: (&low.0, &low.1),
-                                out: &out,
-                                w: g.w,
-                                h: g.h,
-                                wm: g.wm,
-                                base: self.slot(index as u64) * g.plane(),
-                            },
-                            LEVELS,
+                            &pictures,
+                            (&low.0, &low.1),
+                            (g.w, g.h),
                         )
                     });
                     e.submit();

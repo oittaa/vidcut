@@ -434,8 +434,8 @@ fn dump(name: &str, size: (u32, u32), rgb: &[u8]) -> Result<()> {
     )
 }
 
-pub(crate) fn blank(size: (u32, u32), pixel: crate::ffmpeg::format::Pixel) -> Result<frame::Video> {
-    macos::blank(size, pixel)
+pub(crate) fn blank(size: (u32, u32)) -> Result<frame::Video> {
+    macos::blank(size)
 }
 
 pub(crate) fn between_frames(

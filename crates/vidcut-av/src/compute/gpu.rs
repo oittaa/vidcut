@@ -48,22 +48,10 @@ fn layout(device: &wgpu::Device, source: &str) -> wgpu::PipelineLayout {
         .filter_map(|line| {
             let rest = line.trim().strip_prefix("@group(0) @binding(")?;
             let (n, decl) = rest.split_once(')')?;
-            let uniform = decl.contains("var<uniform>");
-            let ty = if uniform {
-                wgpu::BufferBindingType::Uniform
-            } else {
-                wgpu::BufferBindingType::Storage {
-                    read_only: !decl.contains("read_write"),
-                }
-            };
             Some(wgpu::BindGroupLayoutEntry {
                 binding: n.parse().ok()?,
                 visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty,
-                    has_dynamic_offset: uniform,
-                    min_binding_size: None,
-                },
+                ty: binding_type(decl),
                 count: None,
             })
         })
@@ -77,6 +65,36 @@ fn layout(device: &wgpu::Device, source: &str) -> wgpu::PipelineLayout {
         bind_group_layouts: &[Some(&group)],
         immediate_size: 0,
     })
+}
+
+fn binding_type(decl: &str) -> wgpu::BindingType {
+    if decl.contains("texture_storage_2d<rgba16float") {
+        return wgpu::BindingType::StorageTexture {
+            access: wgpu::StorageTextureAccess::WriteOnly,
+            format: wgpu::TextureFormat::Rgba16Float,
+            view_dimension: wgpu::TextureViewDimension::D2,
+        };
+    }
+    if decl.contains("texture_2d<f32>") {
+        return wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        };
+    }
+    let uniform = decl.contains("var<uniform>");
+    let ty = if uniform {
+        wgpu::BufferBindingType::Uniform
+    } else {
+        wgpu::BufferBindingType::Storage {
+            read_only: !decl.contains("read_write"),
+        }
+    };
+    wgpu::BindingType::Buffer {
+        ty,
+        has_dynamic_offset: uniform,
+        min_binding_size: None,
+    }
 }
 
 fn pipeline(device: &wgpu::Device, source: String) -> wgpu::ComputePipeline {
@@ -245,17 +263,20 @@ impl Gpu {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .entry(key)
-            .or_insert_with(|| self.group(pipe, &param, buffers))
+            .or_insert_with(|| {
+                let resources = buffers.iter().map(|b| b.as_entire_binding());
+                self.group(pipe, &param, resources)
+            })
             .clone();
         pass.set_pipeline(pipe);
         pass.set_bind_group(0, &bind, &[param.at as u32]);
     }
 
-    fn group(
+    fn group<'a>(
         &self,
         pipe: &wgpu::ComputePipeline,
         param: &Param,
-        buffers: &[&wgpu::Buffer],
+        resources: impl IntoIterator<Item = wgpu::BindingResource<'a>>,
     ) -> wgpu::BindGroup {
         let mut entries = vec![wgpu::BindGroupEntry {
             binding: 0,
@@ -265,15 +286,12 @@ impl Gpu {
                 size: wgpu::BufferSize::new(SLOT),
             }),
         }];
-        entries.extend(
-            buffers
-                .iter()
-                .enumerate()
-                .map(|(i, b)| wgpu::BindGroupEntry {
-                    binding: i as u32 + 1,
-                    resource: b.as_entire_binding(),
-                }),
-        );
+        entries.extend(resources.into_iter().enumerate().map(|(i, resource)| {
+            wgpu::BindGroupEntry {
+                binding: i as u32 + 1,
+                resource,
+            }
+        }));
         self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &pipe.get_bind_group_layout(0),
@@ -293,6 +311,25 @@ impl Gpu {
             return;
         }
         self.set(pass, pipe, param, buffers);
+        let x = groups.min(MOST);
+        pass.dispatch_workgroups(x, groups.div_ceil(x), 1);
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn dispatch_bound(
+        &self,
+        pass: &mut wgpu::ComputePass,
+        pipe: &wgpu::ComputePipeline,
+        param: Param,
+        resources: Vec<wgpu::BindingResource<'_>>,
+        groups: u32,
+    ) {
+        if groups == 0 {
+            return;
+        }
+        let bind = self.group(pipe, &param, resources);
+        pass.set_pipeline(pipe);
+        pass.set_bind_group(0, &bind, &[param.at as u32]);
         let x = groups.min(MOST);
         pass.dispatch_workgroups(x, groups.div_ceil(x), 1);
     }
@@ -367,4 +404,57 @@ pub(crate) fn floats(raw: &[u8]) -> Vec<f32> {
         .iter()
         .map(|b| f32::from_le_bytes(*b))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::binding_type;
+
+    #[test]
+    fn a_storage_texture_is_written_as_rgba16float() {
+        assert_eq!(
+            binding_type(" var out: texture_storage_2d<rgba16float, write>;"),
+            wgpu::BindingType::StorageTexture {
+                access: wgpu::StorageTextureAccess::WriteOnly,
+                format: wgpu::TextureFormat::Rgba16Float,
+                view_dimension: wgpu::TextureViewDimension::D2,
+            }
+        );
+    }
+
+    #[test]
+    fn a_texture_is_read_without_a_filter() {
+        assert_eq!(
+            binding_type(" var made: texture_2d<f32>;"),
+            wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            }
+        );
+    }
+
+    #[test]
+    fn a_uniform_takes_a_dynamic_offset() {
+        assert_eq!(
+            binding_type(" var<uniform> p: P;"),
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: true,
+                min_binding_size: None,
+            }
+        );
+    }
+
+    #[test]
+    fn a_read_write_buffer_is_writable() {
+        assert_eq!(
+            binding_type(" var<storage, read_write> lower: array<f32>;"),
+            wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            }
+        );
+    }
 }

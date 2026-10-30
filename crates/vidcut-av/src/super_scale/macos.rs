@@ -1,4 +1,4 @@
-use vidcut_core::model::{Hdr, Media, Project, Upscaler};
+use vidcut_core::model::{Media, Project, Upscaler};
 use vidcut_core::render::VideoPiece;
 
 use crate::error::{Error, Result};
@@ -21,11 +21,8 @@ pub fn needed() -> Vec<crate::models::Need> {
     }]
 }
 
-pub fn unfit(m: &Media, timeline: Option<Hdr>) -> Option<&'static str> {
+pub fn unfit(m: &Media) -> Option<&'static str> {
     let v = m.video_as_read()?;
-    if super::takes_hdr(m, timeline)? {
-        return Some(super::HDR_IN_HDR);
-    }
     let (w, h) = if v.rotation % 180 == 90 {
         (v.height, v.width)
     } else {
@@ -56,7 +53,6 @@ pub(super) fn factor(size: (u32, u32), shown: (u32, u32)) -> u32 {
 pub fn check<'a>(
     p: &Project,
     pieces: impl IntoIterator<Item = &'a VideoPiece>,
-    timeline: Option<Hdr>,
     download: bool,
 ) -> Result<()> {
     let mut media: Vec<&str> = Vec::new();
@@ -81,7 +77,7 @@ pub fn check<'a>(
     let refused: Vec<String> = media
         .iter()
         .filter_map(|id| p.media(id))
-        .filter_map(|m| unfit(m, timeline).map(|why| format!("{} ({why})", m.name)))
+        .filter_map(|m| unfit(m).map(|why| format!("{} ({why})", m.name)))
         .collect();
     if !refused.is_empty() {
         return Err(Error::Invalid(format!(
@@ -187,9 +183,9 @@ mod imp {
 
     use super::NEEDS;
     use crate::error::{Error, Result};
-    use crate::ffmpeg::{ffi, format, frame::Video};
+    use crate::ffmpeg::frame::Video;
     use crate::frame_processor::{
-        BYTES_FIRST, Frames, Transfer, buffer, format_in, fourcc, frame, numbers, pixels, pool,
+        Frames, HALF, Transfer, buffer, format_in, fourcc, frame, numbers, pixels, pool,
     };
 
     const MISSING: &str = "macOS's super-resolution models aren't on this Mac yet: pass \
@@ -317,7 +313,7 @@ mod imp {
     fn format_of(config: &VTSuperResolutionScalerConfiguration) -> Result<u32> {
         // SAFETY: a property of a live configuration.
         let list = unsafe { config.frameSupportedPixelFormats() };
-        format_in(&list, BYTES_FIRST, WHAT)
+        format_in(&list, &HALF, WHAT)
     }
 
     pub(super) struct Scaler {
@@ -325,6 +321,7 @@ mod imp {
         sources: CFRetained<CVPixelBufferPool>,
         outputs: CFRetained<CVPixelBufferPool>,
         transfer: Transfer,
+        fix: crate::compute::Gpu,
         shrink: Option<crate::lanczos::Lanczos>,
         frames: Frames,
         enlarged: (u32, u32),
@@ -380,6 +377,7 @@ mod imp {
                 sources,
                 outputs,
                 transfer: Transfer::new(WHAT)?,
+                fix: crate::compute::Gpu::start(WHAT, 0).map_err(Error::Invalid)?,
                 shrink: None,
                 frames: Frames::default(),
                 enlarged,
@@ -396,18 +394,13 @@ mod imp {
             source.remove_all_attachments();
             let wrote = clock.elapsed();
             let enlarged = self.enlarge(index, &source)?;
+            let fixed = buffer(&self.outputs, WHAT)?;
+            crate::super_scale::fix::on_buffers(&self.fix, (&source, &enlarged, &fixed))?;
             let scaled = clock.elapsed();
-            let layout = crate::hw::sw_format(f);
-            let layout = if crate::lanczos::takes(layout) {
-                layout
-            } else {
-                format::Pixel::P416LE
-            };
-            let shape = (self.enlarged, ffi::AVPixelFormat::from(layout));
             let big = self
                 .frames
-                .made_as(&self.transfer, &enlarged, f, shape, WHAT)?;
-            enlarged.remove_all_attachments();
+                .made(&self.transfer, &fixed, f, self.enlarged, WHAT)?;
+            fixed.remove_all_attachments();
             let out = match crate::lanczos::sized(&mut self.shrink, &big, self.made)? {
                 Some(small) => small,
                 None => big,

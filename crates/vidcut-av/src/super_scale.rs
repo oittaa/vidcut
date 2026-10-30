@@ -1,3 +1,4 @@
+pub(crate) mod fix;
 pub mod flashvsr;
 pub mod macos;
 pub mod nanovsr;
@@ -49,7 +50,7 @@ pub fn unfit(m: &Media, upscaler: Upscaler, timeline: Option<Hdr>) -> Option<&'s
     }
     let model = match upscaler {
         Upscaler::AiBest => &catalog::FLASHVSR,
-        Upscaler::Macos => return macos::unfit(m, timeline),
+        Upscaler::Macos => return macos::unfit(m),
         Upscaler::AiFast | Upscaler::Classic => return None,
     };
     let hdr = takes_hdr(m, timeline)?;
@@ -396,9 +397,8 @@ pub fn check<'a>(
             off.join(", ")
         )));
     }
-    let timeline = plans.iter().find_map(|plan| plan.colors);
     let pieces = || plans.iter().flat_map(|plan| &plan.video);
     nanovsr::check(pieces(), dir, download)?;
     flashvsr::check(p, plans.iter().copied(), dir, download)?;
-    macos::check(p, pieces(), timeline, download)
+    macos::check(p, pieces(), download)
 }

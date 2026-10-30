@@ -235,7 +235,7 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - The frame rate conversion and the super-resolution scaler of `VTFrameProcessor` each list only RGhA, 64-bit RGBA in half floats.
   - Other Macs can list other formats. `vidcut doctor` shows the list of this Mac (`macos_frame_processors`).
   - The frame rate conversion takes RGhA first (`HALF_FIRST`). Why: an 8-bit format would cut 16-bit and HDR pictures to 8 bits.
-  - The scaler takes BGRA first (`BYTES_FIRST`). Its pictures are 8-bit SDR.
+  - The scaler takes only RGhA (`HALF`). Why: the color fix reads and writes its buffers as half floats.
 - **zeno's mask is placed one mask too low** (0.3) when it renders with the origin at the bottom left before it has measured itself.
   - The top that it reports is the bottom edge of the mask.
   - swash measures first. `stroked` in `burn.rs` calls `inspect` before `render` to do the same.

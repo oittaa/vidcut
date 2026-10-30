@@ -352,9 +352,8 @@ pub enum Request {
         /// of the project settings), `macos` (macOS 26 and later, called AI
         /// there), `ai_best`, `ai_fast` or `classic`. `ai_best` and `ai_fast`
         /// are off on macOS for now.
-        /// In an HDR timeline, an export refuses `macos` and `ai_best` for
-        /// HDR media. It refuses `macos` for pictures over 1920x1080 or
-        /// without macOS 26.
+        /// In an HDR timeline, an export refuses `ai_best` for HDR media. It
+        /// refuses `macos` for pictures over 1920x1080 or without macOS 26.
         #[serde(default)]
         upscaler: Option<crate::model::MediaUpscaler>,
         /// Download the weights of the AI upscaler that the media then use,
