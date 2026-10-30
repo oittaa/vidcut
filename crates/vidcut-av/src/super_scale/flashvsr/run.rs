@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use super::gemm::{self, Act, Gemm, Load, Store};
 use super::kernels::{
-    self, Attend, DecInput, Grid, Last, Norm, Resize, Unshuffle, WinoIn, WinoOut,
+    self, Attend, DecInput, Fix, Grid, Last, Norm, Resize, Unshuffle, WinoIn, WinoOut,
 };
 use super::model::{Block, Linear, MemBlock, Model, Wino};
 use super::{DIM, FFN, resize};
@@ -24,6 +24,7 @@ const GLOBAL_KEEP: u32 = 3;
 const LOCAL_KEEP: u32 = 1;
 const TOPK_RATIO: f64 = 2.5;
 const SEED: u64 = 1;
+const LEVELS: u32 = 5;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Geometry {
@@ -485,7 +486,7 @@ fn chunk_work(g: &Geometry) -> u64 {
     let wm = u64::from(g.wm);
     let bands = u64::from(BAND + 4) * wm * 128 * 2
         + u64::from(BAND + 2) * wm * 128 * 2
-        + u64::from(g.w * g.h) * 3;
+        + u64::from(g.w * g.h) * (6 + 2 * 12);
     let first = p8 * (784 + 3 * 512 + 4 * 256) * 2;
     let second = p8 * 4 * (2 * 256 + 512) * 2;
     let third = p8 * 4 * 512 * 2 + p8 * 16 * 2 * 128 * 2;
@@ -1483,6 +1484,8 @@ impl Stream {
         let t2 = gpu.buffer(((BAND + 2) * g.wm * 128 * 2) as usize);
         let shown = (g.w * g.h * 3) as usize * if self.deep { 2 } else { 1 };
         let picture = gpu.buffer(shown);
+        let low = (g.w * g.h * 3 * 4) as usize;
+        let low = (gpu.buffer(low), gpu.buffer(low));
         let mut frames = Vec::new();
         for j in 0..4u32 {
             crate::cancel::stop()?;
@@ -1676,7 +1679,24 @@ impl Stream {
                     self.last(gpu, model, &ct1, (&t1, &t2, &picture), &mut e);
                     let whole = shown.next_multiple_of(4) as u64;
                     let out = gpu.buffer(whole as usize);
-                    e.copy(&picture, 0, &out, 0, whole);
+                    e.pass(|pass| {
+                        kernels::fix(
+                            gpu,
+                            pass,
+                            &Fix {
+                                deep: self.deep,
+                                frames: &self.frames,
+                                made: &picture,
+                                low: (&low.0, &low.1),
+                                out: &out,
+                                w: g.w,
+                                h: g.h,
+                                wm: g.wm,
+                                base: self.slot(index as u64) * g.plane(),
+                            },
+                            LEVELS,
+                        )
+                    });
                     e.submit();
                     if let Some(dir) = self.dump.as_ref() {
                         let mut rgb = gpu.read(&out, 0, whole)?;

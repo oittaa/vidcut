@@ -299,3 +299,47 @@ pub(super) fn last(gpu: &Gpu, pass: &mut wgpu::ComputePass, l: &Last) {
     gpu.set(pass, &pipe, p, &[l.src, l.weights, l.bias, l.out]);
     pass.dispatch_workgroups(l.w.div_ceil(16), l.rows.div_ceil(16), 1);
 }
+
+pub(super) struct Fix<'a> {
+    pub(super) deep: bool,
+    pub(super) frames: &'a wgpu::Buffer,
+    pub(super) made: &'a wgpu::Buffer,
+    pub(super) low: (&'a wgpu::Buffer, &'a wgpu::Buffer),
+    pub(super) out: &'a wgpu::Buffer,
+    pub(super) w: u32,
+    pub(super) h: u32,
+    pub(super) wm: u32,
+    pub(super) base: u32,
+}
+
+pub(super) fn fix(gpu: &Gpu, pass: &mut wgpu::ComputePass, f: &Fix, levels: u32) {
+    let pipe = gpu.pipe("fix", || include_str!("fix.wgsl").into());
+    let pixels = f.w * f.h;
+    let words = (pixels * 3 * if f.deep { 2 } else { 1 }).div_ceil(4);
+    let (a, b) = f.low;
+    let mut stage = |stage: u32, step: u32, (src, dst): (&wgpu::Buffer, &wgpu::Buffer), count| {
+        let p = gpu.uniform(&[
+            f.w,
+            f.h,
+            f.wm,
+            f.base,
+            u32::from(f.deep),
+            stage,
+            step,
+            count,
+        ]);
+        gpu.dispatch(
+            pass,
+            &pipe,
+            p,
+            &[f.frames, f.made, src, dst, f.out],
+            threads(count, 256),
+        );
+    };
+    stage(0, 0, (b, a), pixels);
+    for level in 0..levels {
+        stage(1, 1 << level, (a, b), pixels);
+        stage(2, 1 << level, (b, a), pixels);
+    }
+    stage(3, 0, (a, b), words);
+}

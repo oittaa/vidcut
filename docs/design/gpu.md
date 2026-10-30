@@ -202,6 +202,10 @@ AI Best (`flashvsr`):
 - Its KV caches stay on the GPU while they fit in the room (`run::plan`). Else some stay in main memory between chunks (`Keys::Host`).
   - `Stream::fit` measures the room before each chunk. Why: the encoder takes GPU memory after the plan.
 - One matrix multiply shader runs its linear layers and most convolutions (`gemm::run`).
+- After the decoder, a color fix gives each picture the low frequencies of its enlarged input picture (`kernels::fix`).
+  - It is the wavelet color correction of FlashVSR+. That code has it as an option, which is off by default.
+  - The blur is linear. Thus the shader blurs only the difference between the two pictures, and adds it to the result.
+  - Why: the network shifts the colors and the light of large areas ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)).
 
 The scaler of macOS (`macos`):
 

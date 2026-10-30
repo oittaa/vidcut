@@ -40,6 +40,24 @@ AI Best against the official code in bf16 with its Triton kernel, at 1920×1024 
 - Thus vidcut is as far from the bf16 frames as the bf16 frames are from 32-bit floats.
 - A 32-bit run of the official code does not fit at this size: its dense attention masks need about 28 GB.
 
+AI Best against the real frames, with and without its color fix, on the owner's RTX 4080 SUPER, on 2026-10-30:
+
+- `hdr_models` ([tools](../tools.md)) enlarges 480×270 to 1920×1080. Each value is the mean of 26 frames.
+- Each cell gives the mean ΔE ITP, the ΔE of the 40×40 block means, the light over the real light, and the PSNR.
+
+| Clip, pipe | Without the fix | With the fix | Classic |
+|---|---|---|---|
+| HDR10+, 8-bit SDR | 11.64, 9.08, 0.993, 30.2 dB | 5.09, 1.19, 1.002, 33.4 dB | 1.90, 0.33, 0.997, 38.4 dB |
+| HDR10+, PQ | 22.70, 19.99, 1.387, 29.4 dB | 8.58, 4.06, 1.085, 34.9 dB | 1.84, 0.46, 0.992, 43.5 dB |
+| Dolby Vision, 8-bit SDR | 17.39, 15.11, 1.214, 26.1 dB | 2.64, 1.18, 1.005, 34.3 dB | 3.13, 1.18, 0.992, 30.3 dB |
+| Dolby Vision, HLG | 38.68, 42.35, 1.752, 20.1 dB | 4.23, 4.20, 1.033, 33.0 dB | 3.87, 1.23, 0.993, 32.0 dB |
+| Big Buck Bunny, 8-bit SDR | 13.57, 8.12, 1.096, 25.4 dB | 8.58, 1.51, 1.010, 28.6 dB | 3.90, 0.68, 0.994, 33.3 dB |
+| Big Buck Bunny, PQ | 76.43, 71.00, 3.836, 19.0 dB | 17.25, 10.13, 1.138, 28.4 dB | 4.35, 1.27, 0.988, 39.7 dB |
+
+- In the 16-bit SDR pipe, each mean ΔE ITP is within 0.16 of the 8-bit SDR pipe.
+- The fix brings the block means near Classic's in SDR. The rest of the difference is in the detail.
+- In PQ and HLG, the block means stay farther from the real frames, and the light stays higher.
+
 AI Best speed and memory on the owner's RTX 4080 SUPER (16 GB), on 2026-10-24:
 
 - Each vidcut run is a CLI export: `project create --fps F --width W --height H`, `media add`, `edit append m1 --range 0f..Nf`, `media set m1 --super-scale true --upscaler ai_best`, `export start out.mkv`.

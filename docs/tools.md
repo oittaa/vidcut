@@ -127,7 +127,12 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - Super Scale makes 1920×1080 from 480×270. It compares the result with the real frame, and with Classic.
 - Retime Process makes the frame half way between two frames. It compares it with the real frame between them, and with Frame Blend.
   - It leaves out pairs with a shot change.
-- It prints the mean ΔE ITP (BT.2124) and the PSNR of the code values.
+- It prints these measures of each result against the real frame:
+  - `dE`: the mean ΔE ITP (BT.2124) of the pixels.
+  - `low`: the mean ΔE ITP of the means of 40×40 blocks, in linear light. It shows the errors of large areas, without the detail.
+  - `mean`: the ΔE ITP of the means of the whole frames, in linear light. It shows a shift of all of the picture.
+  - `Y`: the mean luminance over the mean luminance of the real frame.
+  - `PSNR`: the PSNR of the code values.
 - `hdr_models speeds` measures each model in a process of its own: the time per frame and the GPU memory, on Vulkan and DX12 only.
   - Other work on the GPU makes the times longer. `nvidia-smi` shows it on NVIDIA.
 - `hdr_models pictures DIR` writes one frame of each upscaler as 1920×1080 RGB48 files.
@@ -167,7 +172,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
   - `inputNNN.npy`: each enlarged input frame, at the model size, 8-bit RGB.
   - `chunkK_noise.npy` and `chunkK_latents.npy`, for each chunk: the noise and the latents after the one step, `[16, 4, H/8, W/8]`.
   - `chunkK_x_in.npy` and `chunkK_x_blockN.npy` (N is 0, 6 and 29), for the first two chunks: the hidden state before block 0 and after block N, `[tokens, 1536]`. The tokens are in the order of the official code.
-  - `frameNNN.npy`: each output frame, 8-bit RGB.
+  - `frameNNN.npy`: each output frame after the color fix, 8-bit RGB. The official code makes these frames with `--cf`.
 - `VIDCUT_INTERPOLATE_DUMP=DIR` makes Retime Process write each frame that it makes as `.npy` files into `DIR`, all 8-bit RGB `[H, W, 3]`.
   - `NNNN-a.npy` and `NNNN-b.npy`: the two source frames, at the size of the made frame.
   - `NNNN-out-T-PROCESS.npy`: the made frame, with the weight `T` of the later frame and the process, such as `AIFast`.
