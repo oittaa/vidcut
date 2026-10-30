@@ -62,6 +62,7 @@ flowchart TD
 - It also holds the fader `trims`, the mute, a `scrub` request, a followed position (`Player::follow`) and the `prepared` frame.
 - A `looping` range (`Player::set_loop`, spec D51) keeps `Mode::Playing` going past its end. The audio thread reads on from the start, and queues the `Marker` of the jump. Thus the ring and the clock run on.
 - `player::plan::Plan` gives each frame an `Id`. The `Id` names what the picture shows (file, color reading, source position, layers over it), not where it shows. Thus kept pictures survive edits that move them.
+  - Each layer over it adds its level and the edge of its wipe. Why: a change of a wipe's edge keeps the level, and the picture is a new one.
 
 **Decoding**
 
