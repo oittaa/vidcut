@@ -1924,7 +1924,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Super Scale enlarges each of the two source frames.
     - Then Transform, Crop and Dynamic Zoom place them, at the size that they show at.
   - Each picture goes into the timeline color space first, as in Resolve (§13, p. 3407). In an SDR timeline, an HDR picture is tone-mapped.
-    - In an HDR timeline, two SDR frames that reach AI on macOS on the GPU stay SDR ([X98](#x98-in-an-hdr-timeline-ai-best-and-the-scaler-of-macos-work-before-the-conversion)).
   - A clip played backward shows the nearest frames for now.
   - The viewer shows the frames that an export makes. With the slower models, a frame can take seconds.
   - Before a change that makes the timeline use a model that this computer does not have, the GUI asks to download it.
@@ -2036,7 +2035,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - In an SDR timeline, vidcut keeps this order. The AI stages take the picture in the timeline color space. An HDR picture is tone-mapped first.
   - In an HDR timeline, AI Fast of Super Scale and Retime Process keep this order too.
-    - The exception: two SDR frames that reach AI of Retime Process on macOS on the GPU stay SDR. The draw then converts the made frame ([X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
   - In an HDR timeline, AI Best and AI of Super Scale on macOS take SDR media as SDR. The draw then converts their result into the timeline color space.
   - These two refuse HDR media in an HDR timeline ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
 - **Why:**
@@ -2045,5 +2043,4 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - On the Dolby Vision clip in HLG, its mean ΔE ITP was 4.2, and Classic's was 3.9. Its pictures had 1.03 times the light.
     - In 8-bit SDR, the same clips gave 5.1 and 2.6.
   - On the owner's Mac, the scaler of macOS came farther from the real frames in HDR than in SDR. In both, it came farther than Classic.
-  - The frame rate conversion of macOS takes SDR VideoToolbox frames with no copy. Why: it is faster than a copy into RGB.
   - SDR goes into an HDR timeline with no clipping. Thus the conversion after the stage keeps all of the picture.

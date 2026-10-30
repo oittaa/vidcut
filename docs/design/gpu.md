@@ -213,9 +213,8 @@ The scaler of macOS (`macos`):
 - It takes 8-bit SDR RGB, in the first of BGRA, NV12 and RGhA that it lists (`BYTES_FIRST`, [gotchas](../gotchas.md#operating-systems-and-libraries)).
 - `macos::check` refuses HDR media in an HDR timeline, and pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
-- An SDR VideoToolbox frame reaches it on the GPU (`Run::push_frame`). A turned frame turns first (`hw::Turner`).
-- The draw puts other frames into P416 VideoToolbox frames first, in SDR (`shown_frame`). They then reach it in the same way.
-  - These are HDR frames, which the draw tone-maps, interlaced frames and frames that the CPU decoded.
+- The draw puts each frame into a P416 VideoToolbox frame in SDR, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
+  - The draw tone-maps an HDR frame and deinterlaces an interlaced frame.
 - It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
   - Why: a picture of 4 times the source fills the cache of the viewer.
   - A picture of a layout that Lanczos cannot take comes out as P416 (`lanczos::takes`).
@@ -239,12 +238,12 @@ On macOS (`interpolate::macos`):
 
 - The frame rate conversion of macOS makes the frame, in a `VTFrameProcessor` session.
 - Its buffers are RGhA when it lists RGhA (`HALF_FIRST`). Thus 16-bit and HDR pictures keep their depth ([gotchas](../gotchas.md#operating-systems-and-libraries)).
-- Two SDR VideoToolbox frames of a clip with no placed picture reach it on the GPU (`interpolate::takes_frames`). Turned frames turn first (`hw::Turner`).
-- Lanczos sizes them to the size that the picture fills in the frame, before the frame is made.
-- The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
-- The draw puts the other frames of a clip with no placed picture into 16-bit 4:4:4 VideoToolbox frames (P416), in the timeline color space (`Source::frame_of`). They then take the same path.
-  - The frames come from a VideoToolbox pool of vidcut's own (`interpolate::blank`, `Surfaces`). Thus frames that the CPU decoded take this path too.
+- For a clip with no placed picture, the draw puts each frame of the pair into a VideoToolbox frame (`Source::frame_of`).
+  - The frame is 16-bit 4:4:4 (P416), in the timeline color space.
+  - The frames are upright, at the size that the picture fills in the frame.
+  - They come from a VideoToolbox pool of vidcut's own (`interpolate::blank`, `Surfaces`). Thus frames that the CPU decoded take this path too.
   - Why: a Mac has unified memory. A copy of a picture through the CPU only costs time.
+- The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
 - The frames of a placed clip go through 16-bit RGB in the timeline color space (`Form`).
   - The session reads a held picture down from the GPU only for a new pair (`Input::Held`).
   - The next frame between the same pair uses the pair that the session has (`SequentialReferencesUnchanged`).
