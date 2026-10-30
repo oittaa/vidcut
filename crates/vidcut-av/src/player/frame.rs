@@ -18,10 +18,11 @@ pub enum Layout {
     P416,
     Ayuv64,
     Rgb,
+    Rgb48,
 }
 
 impl Layout {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Yuv420p,
         Self::Nv12,
         Self::P010,
@@ -33,6 +34,7 @@ impl Layout {
         Self::P416,
         Self::Ayuv64,
         Self::Rgb,
+        Self::Rgb48,
     ];
 
     pub(crate) fn of(p: format::Pixel) -> Self {
@@ -48,6 +50,7 @@ impl Layout {
             P::P416LE => Self::P416,
             P::AYUV64LE => Self::Ayuv64,
             P::RGB24 => Self::Rgb,
+            P::RGB48LE => Self::Rgb48,
             _ => Self::Yuv420p,
         }
     }
@@ -409,6 +412,11 @@ mod tests {
         // SAFETY: a fresh frame given a buffer of its own.
         unsafe { (*f.as_mut_ptr()).buf[0] = ffi::av_buffer_alloc(1_658_880) };
         assert_eq!(Picture::new(f, 0, None, None).bytes(), 1_658_880);
+    }
+
+    #[test]
+    fn rgb48le_pictures_are_16_bit_rgb() {
+        assert_eq!(Layout::of(Pixel::RGB48LE), Layout::Rgb48);
     }
 
     #[test]

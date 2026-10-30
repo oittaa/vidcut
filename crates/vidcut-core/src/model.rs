@@ -478,13 +478,12 @@ pub enum Upscaler {
     /// A diffusion network (FlashVSR+ Turbo) on the GPU, for SDR pictures:
     /// slow, with more detail. It reads the frames of a clip in order from
     /// its first frame. Its weights (7.0 GB) download at their first use. An
-    /// export refuses media that it cannot take. The upscaler of Auto
-    /// elsewhere. Off on macOS for now.
-    #[cfg_attr(not(target_os = "macos"), default)]
+    /// export refuses media that it cannot take. Off on macOS for now.
     AiBest,
-    /// A neural network (NanoVSR 5.4M) on the GPU, for SDR pictures. It reads
-    /// 15 frames at a time. Its weights (25 MB) download at their first use.
-    /// An export refuses media that it cannot take. Off on macOS for now.
+    /// A neural network (NanoVSR 5.4M) on the GPU, for SDR and HDR pictures.
+    /// It reads 15 frames at a time. Its weights (25 MB) download at their
+    /// first use. The upscaler of Auto elsewhere. Off on macOS for now.
+    #[cfg_attr(not(target_os = "macos"), default)]
     AiFast,
     /// The classic upscalers, on the GPU.
     Classic,
@@ -525,7 +524,7 @@ impl MediaUpscaler {
 #[serde(rename_all = "snake_case")]
 pub enum ProjectUpscaler {
     /// The AI upscaler of the computer that plays or exports: the scaler of
-    /// macOS on macOS, AI Best elsewhere.
+    /// macOS on macOS, AI Fast elsewhere.
     #[default]
     Auto,
     /// The super-resolution scaler of macOS: on macOS only.
@@ -1390,7 +1389,8 @@ impl ClipRetime {
 pub enum ProjectRetime {
     /// The AI of the computer that plays or exports for slow motion: the
     /// frame rate conversion of macOS on macOS, AI Fast elsewhere. Nearest
-    /// for the rest: other speeds, other frame rates and HDR pictures.
+    /// for the rest: other speeds, other frame rates and, on macOS, HDR
+    /// pictures.
     #[default]
     Auto,
     /// The source frame that the frame falls in.

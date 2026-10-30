@@ -711,7 +711,8 @@ fn encoded_at(px: vec2<i32>) -> vec4<u32> {
     } else if kind == 4u {
         out.x = ((1u << encoding.how.z) - 1u) << encoding.how.w;
     } else {
-        out = vec4<u32>(vec3<u32>(round(pixel_at(px.x, px.y) * 255.0)), 255u);
+        let top = (1u << encoding.how.z) - 1u;
+        out = vec4<u32>(vec3<u32>(round(pixel_at(px.x, px.y) * f32(top))), top);
     }
     return out;
 }

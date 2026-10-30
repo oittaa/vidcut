@@ -691,7 +691,6 @@ pub static NANOVSR: Model = Model {
             Kind::Hard,
             Source::Vidcut,
         ),
-        limit(Measure::HdrPictures, 0.0, Kind::Hard, Source::Vidcut),
     ],
     price: None,
 };
@@ -763,7 +762,7 @@ pub static RIFE: Model = Model {
     files: &[RIFE_WEIGHTS],
     service: None,
     languages: &[],
-    limits: &[limit(Measure::HdrPictures, 0.0, Kind::Hard, Source::Vidcut)],
+    limits: &[],
     price: None,
 };
 
@@ -782,7 +781,7 @@ pub static EMA_VFI: Model = Model {
     files: &[EMA_VFI_WEIGHTS],
     service: None,
     languages: &[],
-    limits: &[limit(Measure::HdrPictures, 0.0, Kind::Hard, Source::Vidcut)],
+    limits: &[],
     price: None,
 };
 

@@ -56,12 +56,13 @@ flowchart LR
 
 ## Picture order
 
-vidcut processes each picture in this order. The [spec](../cut-page-spec.md#13-order-of-operations-pp-287296-3407) gives the order of Resolve. [Deviation X98](../deviations.md#x98-in-an-hdr-timeline-the-ai-stages-work-before-the-conversion) tells the one place where the two are different.
+vidcut processes each picture in this order. The [spec](../cut-page-spec.md#13-order-of-operations-pp-287296-3407) gives the order of Resolve. [Deviation X98](../deviations.md#x98-in-an-hdr-timeline-ai-best-and-the-ai-of-macos-work-before-the-conversion) tells the one place where the two are different.
 
 1. The reader decodes the frame, on the GPU or the CPU (`route::plan`, [gpu](gpu.md#routes)).
 2. The draw converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `color::shader_colors`). In an SDR timeline, it tone-maps HDR.
-   - The AI stages get an SDR picture (`Single`). In an SDR timeline, this is the picture in the timeline color space.
-   - In an HDR timeline, the AI stages get SDR media only. The draw converts their result into the timeline color space (X98).
+   - The AI stages get the picture in the timeline color space (`Single`).
+   - AI Fast of Super Scale and Retime Process get it as 16-bit RGB (`Form`). The AI of macOS is the exception.
+   - In an HDR timeline, AI Best and the AI of macOS get SDR media only, as 8-bit RGB. The draw converts their result into the timeline color space (X98).
 3. The draw deinterlaces an interlaced frame from the converted frames before, at and after it (`fs_bwdif`, [gpu](gpu.md#deinterlacing-and-hdr)).
 4. An AI upscaler of Super Scale enlarges the frame (`Source::ai_picture`, [gpu](gpu.md#super-scale)).
 5. Retime Process makes a frame between two source frames (`VideoFrames::retimed_frame`, [export](export.md#which-source-frame)).

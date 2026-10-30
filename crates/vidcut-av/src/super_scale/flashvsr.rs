@@ -262,7 +262,10 @@ impl super::Run for Run {
         pts: Option<i64>,
         rgb: &crate::ffmpeg::frame::Video,
     ) -> Result<Vec<super::Out>> {
-        let outs = self.stream.push(crate::screen::held::held(rgb)?.buffer())?;
+        let held = crate::screen::held::held(rgb)?;
+        let outs = self
+            .stream
+            .push(held.buffer(), crate::screen::held::deep(rgb))?;
         self.fed.push_back((index, pts));
         Ok(self.outs(outs))
     }
@@ -298,8 +301,8 @@ impl Stream {
         Ok(Self { inner, _lent: lent })
     }
 
-    pub(crate) fn push(&mut self, rgb: &wgpu::Buffer) -> Result<Vec<Held>> {
-        with_engine(|gpu, model| self.inner.push(gpu, model, rgb))
+    pub(crate) fn push(&mut self, rgb: &wgpu::Buffer, deep: bool) -> Result<Vec<Held>> {
+        with_engine(|gpu, model| self.inner.push(gpu, model, (rgb, deep)))
     }
 
     pub(crate) fn finish(&mut self) -> Result<Vec<Held>> {

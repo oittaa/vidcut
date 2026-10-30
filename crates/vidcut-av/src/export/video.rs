@@ -72,6 +72,31 @@ pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
 
 type Rgb = (Option<i64>, Look, frame::Video);
 
+pub type Form = (bool, Option<Hdr>);
+
+const PLAIN: Form = (false, None);
+
+fn form_of(f: &frame::Video) -> Form {
+    (
+        crate::screen::held::deep(f),
+        crate::color::Source::of(f).hdr,
+    )
+}
+
+fn retime_form(r: Retime, timeline: Option<Hdr>) -> Form {
+    match r {
+        Retime::Macos => PLAIN,
+        _ => (true, timeline),
+    }
+}
+
+fn upscale_form(upscaler: Upscaler, timeline: Option<Hdr>) -> Form {
+    match upscaler {
+        Upscaler::AiFast => (true, timeline),
+        _ => PLAIN,
+    }
+}
+
 #[derive(Clone, PartialEq)]
 struct Look {
     size: (u32, u32),
@@ -79,16 +104,18 @@ struct Look {
     placed: Vec<Placed>,
     frame: (u32, u32),
     origin: (u32, u32),
+    form: Form,
 }
 
 impl Look {
-    fn fitted(size: (u32, u32), kernel: u32) -> Self {
+    fn fitted(size: (u32, u32), kernel: u32, form: Form) -> Self {
         Self {
             size,
             kernel,
             placed: Vec::new(),
             frame: size,
             origin: (0, 0),
+            form,
         }
     }
 
@@ -483,19 +510,21 @@ impl Source {
         let held = self
             .rgb
             .iter()
-            .find(|(p, l, _)| *p == pts && l.plain(size))
+            .find(|(p, l, _)| *p == pts && l.plain(size) && l.form.1.is_none())
             .map(|(_, _, rgb)| frame_ref(rgb))
             .transpose()?;
         let held = match held {
             Some(rgb) => Some(rgb),
-            None if crate::hw::on_gpu(f) => Some(shown_rgb(
-                &mut self.drawn,
-                (f, (None, None)),
-                self.reader.rotation(),
-                &Look::fitted(size, 0),
-                reading,
-                self.reader.path(),
-            )?),
+            None if crate::hw::on_gpu(f) || crate::color::Source::of(f).hdr.is_some() => {
+                Some(shown_rgb(
+                    &mut self.drawn,
+                    (f, (None, None)),
+                    self.reader.rotation(),
+                    &Look::fitted(size, 0, PLAIN),
+                    reading,
+                    self.reader.path(),
+                )?)
+            }
             None => None,
         };
         let l = match (held, &self.drawn) {
@@ -684,6 +713,7 @@ struct PictureId {
     upscaler: Upscaler,
     made: (u32, u32),
     key: Key,
+    form: Form,
 }
 
 type Waiting = std::sync::Arc<std::sync::Mutex<Vec<(Key, frame::Video)>>>;
@@ -788,7 +818,7 @@ fn hold(
             Key::Frame(_) => Key::Frame(o.index),
         };
         waiting.retain(|(k, _)| *k != key);
-        match made_picture(o.picture, base.made, o.pts) {
+        match made_picture(o.picture, base.made, o.pts, base.form) {
             Ok(picture) => waiting.push((key, picture)),
             Err(e) => crate::debug!("ai", "{}: {e}", crate::super_scale::name(base.upscaler)),
         }
@@ -799,10 +829,13 @@ fn made_picture(
     picture: crate::super_scale::Picture,
     made: (u32, u32),
     pts: Option<i64>,
+    form: Form,
 ) -> Result<frame::Video> {
     match picture {
-        crate::super_scale::Picture::Held(held) => crate::screen::held::picture(held, made, pts),
-        crate::super_scale::Picture::Rgb(rgb) => Ok(big_picture(&rgb, made, pts)),
+        crate::super_scale::Picture::Held(held) => {
+            crate::screen::held::picture(held, made, pts, form)
+        }
+        crate::super_scale::Picture::Rgb(rgb) => Ok(big_picture(&rgb, made, pts, form)),
         crate::super_scale::Picture::Frame(f) => Ok(f),
     }
 }
@@ -817,6 +850,32 @@ fn in_memory(frame: &frame::Video) -> Result<frame::Video> {
 
 type Around<'a> = (Option<&'a frame::Video>, Option<&'a frame::Video>);
 
+pub(crate) fn rgb_picture(
+    drawn: &mut Option<Single>,
+    frame: &frame::Video,
+    size: (u32, u32),
+    (kernel, form): (u32, Form),
+) -> Result<frame::Video> {
+    let look = Look::fitted(size, kernel, form);
+    let path = Path::new("hdr check");
+    shown_rgb(
+        drawn,
+        (frame, (None, None)),
+        0,
+        &look,
+        Reading::Frames,
+        path,
+    )
+}
+
+fn pixel_of((deep, _): Form) -> format::Pixel {
+    if deep {
+        format::Pixel::RGB48LE
+    } else {
+        format::Pixel::RGB24
+    }
+}
+
 fn shown_rgb(
     drawn: &mut Option<Single>,
     frames: (&frame::Video, Around<'_>),
@@ -830,17 +889,32 @@ fn shown_rgb(
         None => drawn.insert(Single::new(reading)?),
     };
     match look.placed.is_empty() {
-        true => single.held(frames, rotation, look.size, look.kernel, path),
+        true => single.held(frames, rotation, look, path),
         false => single.placed(frames, rotation, look, path),
     }
 }
 
-fn big_picture(out: &[u8], (w, h): (u32, u32), pts: Option<i64>) -> frame::Video {
-    let mut big = crate::buffers::unpacked(format::Pixel::RGB24, (w, h), 3, out);
+fn big_picture(
+    out: &[u8],
+    (w, h): (u32, u32),
+    pts: Option<i64>,
+    (deep, hdr): Form,
+) -> frame::Video {
+    use ffmpeg::util::color::{Primaries, TransferCharacteristic};
+    let (pixel, bytes) = match deep {
+        true => (format::Pixel::RGB48LE, 6),
+        false => (format::Pixel::RGB24, 3),
+    };
+    let mut big = crate::buffers::unpacked(pixel, (w, h), bytes, out);
     big.set_color_range(ffmpeg::util::color::Range::JPEG);
     big.set_color_space(ffmpeg::util::color::Space::RGB);
-    big.set_color_primaries(ffmpeg::util::color::Primaries::BT709);
-    big.set_color_transfer_characteristic(ffmpeg::util::color::TransferCharacteristic::BT709);
+    let (primaries, transfer) = match hdr {
+        None => (Primaries::BT709, TransferCharacteristic::BT709),
+        Some(Hdr::Pq) => (Primaries::BT2020, TransferCharacteristic::SMPTE2084),
+        Some(Hdr::Hlg) => (Primaries::BT2020, TransferCharacteristic::ARIB_STD_B67),
+    };
+    big.set_color_primaries(primaries);
+    big.set_color_transfer_characteristic(transfer);
     // SAFETY: a plain field of its own frame.
     unsafe { (*big.as_mut_ptr()).sample_aspect_ratio = ffmpeg::ffi::AVRational { num: 1, den: 1 } };
     big.set_pts(pts);
@@ -897,7 +971,8 @@ impl Source {
         if !super::normalize::enlarges((frame.width(), frame.height()), sar, 0, shown) {
             return Ok(None);
         }
-        if crate::color::Source::of(frame).hdr.is_some() && timeline.is_some() {
+        let form = upscale_form(upscaler, timeline);
+        if crate::color::Source::of(frame).hdr.is_some() && timeline.is_some() && form.1.is_none() {
             return Err(Error::Invalid(format!(
                 "{}: {} takes SDR pictures, and this one is HDR in an HDR timeline",
                 self.reader.path().display(),
@@ -934,6 +1009,7 @@ impl Source {
                 Some(i) => Key::Frame(i),
                 None => Key::Still(pts),
             },
+            form,
         };
         if let Some((_, p)) = self.scaled.iter().find(|(k, _)| *k == id) {
             return frame_ref(p).map(Some);
@@ -1184,7 +1260,7 @@ impl Source {
                 &mut self.drawn,
                 (f, around),
                 rotation,
-                &Look::fitted(run.size, 0),
+                &Look::fitted(run.size, 0, run.id.form),
                 reading,
                 self.reader.path(),
             )?),
@@ -1298,7 +1374,12 @@ fn fitted_size(fit: Fit, aim: (u32, u32)) -> (u32, u32) {
     (even(w), even(h))
 }
 
-fn placed_look(placed: &[Placed], fit: Fit, frame: (u32, u32), kernel: u32) -> Option<Look> {
+fn placed_look(
+    placed: &[Placed],
+    fit: Fit,
+    frame: (u32, u32),
+    (kernel, form): (u32, Form),
+) -> Option<Look> {
     let (x, y, w, h) = fit.placement(frame);
     let whole = (f64::from(frame.0), f64::from(frame.1));
     let placing = Placing::new(placed, whole, [x, y, w, h].map(f64::from));
@@ -1314,6 +1395,7 @@ fn placed_look(placed: &[Placed], fit: Fit, frame: (u32, u32), kernel: u32) -> O
         placed: placed.to_vec(),
         frame,
         origin: (x0, y0),
+        form,
     })
 }
 
@@ -1605,21 +1687,28 @@ impl Single {
         Ok(picture.with_woven(woven))
     }
 
-    pub(crate) fn held(
+    fn held(
         &mut self,
         frames: (&frame::Video, Around<'_>),
         rotation: u16,
-        (w, h): (u32, u32),
-        kernel: u32,
+        look: &Look,
         path: &Path,
     ) -> Result<frame::Video> {
+        let ((w, h), kernel, form) = (look.size, look.kernel, look.form);
         let picture = std::sync::Arc::new(self.woven(frames, rotation, path)?);
         let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
-        screen.draw(gpu, Some(&picture), &[], (&[], &[], &[kernel], None), w, h);
+        screen.draw(
+            gpu,
+            Some(&picture),
+            &[],
+            (&[], &[], &[kernel], form.1),
+            w,
+            h,
+        );
         screen.encoded(
             gpu,
-            format::Pixel::RGB24,
-            (None, None),
+            pixel_of(form),
+            (form.1, form.1),
             crate::screen::Sink::Held,
         )
     }
@@ -1644,14 +1733,15 @@ impl Single {
             gpu,
             Some(&picture),
             &[],
-            (&placed, &[], &[look.kernel], None),
+            (&placed, &[], &[look.kernel], look.form.1),
             w,
             h,
         );
+        let form = look.form;
         screen.encoded(
             gpu,
-            format::Pixel::RGB24,
-            (None, None),
+            pixel_of(form),
+            (form.1, form.1),
             crate::screen::Sink::Held,
         )
     }
@@ -2508,7 +2598,8 @@ impl VideoFrames {
             }
             _ => None,
         };
-        let hdr = self.timeline.is_some()
+        let hdr = *retime == Retime::Macos
+            && self.timeline.is_some()
             && src
                 .current
                 .as_ref()
@@ -2521,6 +2612,7 @@ impl VideoFrames {
         let scaled = self.scaled_pair(s, layer, reading)?;
         let kernel =
             crate::screen::kernel((!super_scale.is_off()).then_some(super_scale.sharpness));
+        let form = retime_form(*retime, self.timeline);
         let start = Instant::now();
         let src = &mut self.open[s];
         let rotation = src.reader.rotation();
@@ -2534,8 +2626,8 @@ impl VideoFrames {
             ),
         };
         let look = match placed.is_empty() {
-            true => Some(Look::fitted(fitted_size(fit, aim), kernel)),
-            false => placed_look(placed, fit, (w, h), kernel),
+            true => Some(Look::fitted(fitted_size(fit, aim), kernel, form)),
+            false => placed_look(placed, fit, (w, h), (kernel, form)),
         };
         let Some(look) = look else {
             return self.shown(i, s, layer, changed);
@@ -2594,7 +2686,7 @@ impl VideoFrames {
                 true => crate::interpolate::between_frames(&key, &a, &b, size, weight)?,
                 false => {
                     let made = crate::interpolate::between(*retime, &key, &a, &b, size, weight)?;
-                    made_picture(made, size, pb)?
+                    made_picture(made, size, pb, form_of(&a))?
                 }
             };
             crate::debug!(
@@ -2862,8 +2954,63 @@ pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {
 mod tests {
     use std::time::Duration;
 
-    use super::{fill_black, staying};
+    use vidcut_core::model::{Hdr, Retime, Upscaler};
+
+    use super::{PLAIN, big_picture, fill_black, retime_form, staying, upscale_form};
+    use crate::ffmpeg::util::color::{Primaries, TransferCharacteristic};
     use crate::ffmpeg::{format::Pixel, frame};
+
+    #[test]
+    fn a_16_bit_pq_picture_is_rgb48_in_bt_2020_pq() {
+        let f = big_picture(&[0; 24], (2, 2), None, (true, Some(Hdr::Pq)));
+        assert_eq!(
+            (
+                f.format(),
+                f.color_primaries(),
+                f.color_transfer_characteristic()
+            ),
+            (
+                Pixel::RGB48LE,
+                Primaries::BT2020,
+                TransferCharacteristic::SMPTE2084
+            )
+        );
+    }
+
+    #[test]
+    fn a_16_bit_hlg_picture_is_tagged_hlg() {
+        let f = big_picture(&[0; 24], (2, 2), None, (true, Some(Hdr::Hlg)));
+        assert_eq!(
+            f.color_transfer_characteristic(),
+            TransferCharacteristic::ARIB_STD_B67
+        );
+    }
+
+    #[test]
+    fn ai_fast_upscales_in_the_timeline_colors_at_16_bits() {
+        assert_eq!(
+            upscale_form(Upscaler::AiFast, Some(Hdr::Pq)),
+            (true, Some(Hdr::Pq))
+        );
+    }
+
+    #[test]
+    fn ai_best_upscales_8_bit_sdr() {
+        assert_eq!(upscale_form(Upscaler::AiBest, Some(Hdr::Pq)), PLAIN);
+    }
+
+    #[test]
+    fn the_retime_of_macos_takes_8_bit_sdr() {
+        assert_eq!(retime_form(Retime::Macos, Some(Hdr::Hlg)), PLAIN);
+    }
+
+    #[test]
+    fn frame_blend_retimes_in_the_timeline_colors_at_16_bits() {
+        assert_eq!(
+            retime_form(Retime::FrameBlend, Some(Hdr::Hlg)),
+            (true, Some(Hdr::Hlg))
+        );
+    }
 
     const fn secs(s: u64) -> Duration {
         Duration::from_secs(s)

@@ -50,6 +50,7 @@ pub(super) fn chan_norm(
 }
 
 pub(super) struct Unshuffle<'a> {
+    pub(super) deep: bool,
     pub(super) frames: &'a wgpu::Buffer,
     pub(super) out: &'a wgpu::Buffer,
     pub(super) wt: u32,
@@ -62,7 +63,8 @@ pub(super) struct Unshuffle<'a> {
 
 pub(super) fn unshuffle(gpu: &Gpu, pass: &mut wgpu::ComputePass, u: &Unshuffle) {
     let pipe = gpu.pipe("unshuffle", || include_str!("unshuffle.wgsl").into());
-    let p = gpu.uniform(&[u.wt, u.count, u.wm, u.slot, u.frame, u.plane, 0, 0]);
+    let deep = u32::from(u.deep);
+    let p = gpu.uniform(&[u.wt, u.count, u.wm, u.slot, u.frame, u.plane, deep, 0]);
     gpu.dispatch(
         pass,
         &pipe,
@@ -73,6 +75,7 @@ pub(super) fn unshuffle(gpu: &Gpu, pass: &mut wgpu::ComputePass, u: &Unshuffle) 
 }
 
 pub(super) struct DecInput<'a> {
+    pub(super) deep: bool,
     pub(super) frames: &'a wgpu::Buffer,
     pub(super) latents: &'a wgpu::Buffer,
     pub(super) out: &'a wgpu::Buffer,
@@ -88,7 +91,18 @@ pub(super) fn dec_input(gpu: &Gpu, pass: &mut wgpu::ComputePass, d: &DecInput) {
     let pipe = gpu.pipe("decinput", || include_str!("decinput.wgsl").into());
     let s = d.slots;
     let p = gpu.uniform(&[
-        d.w8, d.h8, d.wm, d.plane, d.f, 0, 0, 0, s[0], s[1], s[2], s[3],
+        d.w8,
+        d.h8,
+        d.wm,
+        d.plane,
+        d.f,
+        u32::from(d.deep),
+        0,
+        0,
+        s[0],
+        s[1],
+        s[2],
+        s[3],
     ]);
     gpu.dispatch(
         pass,
@@ -266,6 +280,7 @@ pub(super) fn resize(gpu: &Gpu, pass: &mut wgpu::ComputePass, r: &Resize, (x, y)
 }
 
 pub(super) struct Last<'a> {
+    pub(super) deep: bool,
     pub(super) src: &'a wgpu::Buffer,
     pub(super) weights: &'a wgpu::Buffer,
     pub(super) bias: &'a wgpu::Buffer,
@@ -280,7 +295,7 @@ pub(super) struct Last<'a> {
 
 pub(super) fn last(gpu: &Gpu, pass: &mut wgpu::ComputePass, l: &Last) {
     let pipe = gpu.pipe("last", || include_str!("last.wgsl").into());
-    let p = gpu.uniform(&[l.wm, l.hm, l.r0, l.rows, l.sy0, l.w, 0, 0]);
+    let p = gpu.uniform(&[l.wm, l.hm, l.r0, l.rows, l.sy0, l.w, u32::from(l.deep), 0]);
     gpu.set(pass, &pipe, p, &[l.src, l.weights, l.bias, l.out]);
     pass.dispatch_workgroups(l.w.div_ceil(16), l.rows.div_ceil(16), 1);
 }

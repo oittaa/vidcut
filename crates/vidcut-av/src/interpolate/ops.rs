@@ -790,7 +790,7 @@ fn value(p: u32, ch: u32) -> f32 {
     if (refine == 1u) {
         v += res[br + q * sr + ar + ch] * 2.0 - 1.0;
     }
-    return clamp(v, 0.0, 1.0) * 255.0;
+    return clamp(v, 0.0, 1.0);
 }
 
 @compute @workgroup_size(256)
@@ -801,12 +801,15 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<
         return;
     }
     let total = u(27u) * u(30u) * 3u;
+    let per = select(4u, 2u, u(31u) == 1u);
+    let bits = 32u / per;
+    let top_code = f32((1u << bits) - 1u);
     var out = 0u;
-    for (var j = 0u; j < 4u; j++) {
-        let byte = i * 4u + j;
-        if (byte < total) {
-            let v = u32(round(value(byte / 3u, byte % 3u)));
-            out |= v << (8u * j);
+    for (var j = 0u; j < per; j++) {
+        let at = i * per + j;
+        if (at < total) {
+            let v = u32(round(value(at / 3u, at % 3u) * top_code));
+            out |= v << (bits * j);
         }
     }
     dst[i] = out;
@@ -818,6 +821,9 @@ const LOAD: &str = r#"
 @group(0) @binding(2) var<storage, read_write> dst: array<f32>;
 
 fn byte(i: u32) -> f32 {
+    if (u(13u) == 1u) {
+        return f32((rgb[i / 2u] >> (16u * (i % 2u))) & 65535u) / 65535.0;
+    }
     return f32((rgb[i / 4u] >> (8u * (i % 4u))) & 255u) / 255.0;
 }
 
@@ -888,25 +894,28 @@ const STORE: &str = r#"
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_index) li: u32) {
     let ib = u(1u); let w = u(3u); let istr = u(4u); let iat = u(5u);
     let top = u(7u); let left = u(8u); let ow = u(9u); let oh = u(10u); let words = u(11u);
-    let two = u(12u); let h = u(2u);
+    let two = u(12u); let h = u(2u); let deep = u(13u);
     let i = gid(wg, nw) * 256u + li;
     if (i >= words) {
         return;
     }
     let total = ow * oh * 3u;
+    let per = select(4u, 2u, deep == 1u);
+    let bits = 32u / per;
+    let top_code = f32((1u << bits) - 1u);
     var out = 0u;
-    for (var j = 0u; j < 4u; j++) {
-        let byte = i * 4u + j;
-        if (byte < total) {
-            let p = byte / 3u;
+    for (var j = 0u; j < per; j++) {
+        let at = i * per + j;
+        if (at < total) {
+            let p = at / 3u;
             let y = p / ow + top;
             let x = p % ow + left;
-            var v = clamp(src[ib + (y * w + x) * istr + iat + byte % 3u], 0.0, 1.0);
+            var v = clamp(src[ib + (y * w + x) * istr + iat + at % 3u], 0.0, 1.0);
             if (two == 1u) {
-                let f = clamp(other[(((h - 1u - y) * w) + (w - 1u - x)) * istr + iat + byte % 3u], 0.0, 1.0);
+                let f = clamp(other[(((h - 1u - y) * w) + (w - 1u - x)) * istr + iat + at % 3u], 0.0, 1.0);
                 v = (v + f) / 2.0;
             }
-            out |= u32(round(v * 255.0)) << (8u * j);
+            out |= u32(round(v * top_code)) << (bits * j);
         }
     }
     dst[i] = out;
@@ -1149,6 +1158,7 @@ pub(super) struct Ops<'a, 'p> {
     pub(super) gpu: &'a Gpu,
     pub(super) k: &'a Kernels,
     pub(super) pass: &'a mut wgpu::ComputePass<'p>,
+    pub(super) deep: bool,
 }
 
 pub(super) enum Res<'v> {
@@ -1421,6 +1431,7 @@ impl Ops<'_, '_> {
             &[1],
             &dst.words(),
             &[sw, sh, pad.0, pad.1, u32::from(edge), u32::from(turned)],
+            &[u32::from(self.deep)],
         ]);
         let param = self.gpu.uniform(&p);
         let items = dst.h as u64 * dst.w as u64 * 3;
@@ -1451,11 +1462,12 @@ impl Ops<'_, '_> {
         (ow, oh): (u32, u32),
         out: &wgpu::Buffer,
     ) {
-        let n = (ow * oh * 3).div_ceil(4);
+        let n = (ow * oh * 3).div_ceil(if self.deep { 2 } else { 4 });
         let p = words(&[
             &[1],
             &src.words(),
             &[top, left, ow, oh, n, u32::from(turned.is_some())],
+            &[u32::from(self.deep)],
         ]);
         let param = self.gpu.uniform(&p);
         let other = turned.map_or(&src.buf, |t| &t.buf);
@@ -1499,7 +1511,7 @@ impl Ops<'_, '_> {
         (ow, oh): (u32, u32),
         out: &wgpu::Buffer,
     ) {
-        let n = (ow * oh * 3).div_ceil(4);
+        let n = (ow * oh * 3).div_ceil(if self.deep { 2 } else { 4 });
         let r = res.cloned().unwrap_or_else(|| mask.clone());
         let p = words(&[
             &[1],
@@ -1508,6 +1520,7 @@ impl Ops<'_, '_> {
             &mask.words(),
             &r.words(),
             &[top, left, ow, n, u32::from(res.is_some()), oh],
+            &[u32::from(self.deep)],
         ]);
         let param = self.gpu.uniform(&p);
         self.gpu.dispatch(

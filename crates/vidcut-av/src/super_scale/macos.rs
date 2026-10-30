@@ -110,7 +110,10 @@ impl Run {
 
 impl super::Run for Run {
     fn push(&mut self, index: i64, pts: Option<i64>, rgb: &Video) -> Result<Vec<super::Out>> {
-        let rgb = self.scaler.scale(index, &crate::screen::held::rgb(rgb)?)?;
+        let deep = crate::screen::held::deep(rgb);
+        let rgb = self
+            .scaler
+            .scale(index, (&crate::screen::held::rgb(rgb)?, deep))?;
         Ok(vec![super::Out {
             index,
             pts,
@@ -165,7 +168,7 @@ mod imp {
             Err(Error::Invalid(NEEDS.into()))
         }
 
-        pub(super) fn scale(&mut self, _index: i64, _rgb: &[u8]) -> Result<Vec<u8>> {
+        pub(super) fn scale(&mut self, _index: i64, _rgb: (&[u8], bool)) -> Result<Vec<u8>> {
             match self.0 {}
         }
 
@@ -415,10 +418,10 @@ mod imp {
             })
         }
 
-        pub(super) fn scale(&mut self, index: i64, rgb: &[u8]) -> Result<Vec<u8>> {
+        pub(super) fn scale(&mut self, index: i64, (rgb, deep): (&[u8], bool)) -> Result<Vec<u8>> {
             let clock = std::time::Instant::now();
             let source = buffer(&self.sources, WHAT)?;
-            write(&source, self.format, self.size, rgb)?;
+            write(&source, self.format, self.size, (rgb, deep))?;
             let wrote = clock.elapsed();
             let enlarged = self.enlarge(index, &source)?;
             let scaled = clock.elapsed();
@@ -427,9 +430,9 @@ mod imp {
                     let small = buffer(shrunk, WHAT)?;
                     self.transfer.run(&enlarged, &small, Matrix::Bt709, WHAT)?;
                     enlarged.remove_all_attachments();
-                    read(&small, self.format, self.made)?
+                    read(&small, self.format, self.made, deep)?
                 }
-                None => read(&enlarged, self.format, self.made)?,
+                None => read(&enlarged, self.format, self.made, deep)?,
             };
             told(index, wrote, scaled, clock);
             Ok(out)

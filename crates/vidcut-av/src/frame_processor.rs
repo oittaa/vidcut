@@ -428,14 +428,46 @@ fn code(v: f32) -> u8 {
     v.round().clamp(0.0, 255.0) as u8
 }
 
+fn to_eight(rgb: &[u8]) -> Vec<u8> {
+    rgb.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| code(f32::from(u16::from_le_bytes(*c)) / 257.0))
+        .collect()
+}
+
 pub(crate) fn write(
     buffer: &CVPixelBuffer,
     format: u32,
     (w, h): (u32, u32),
-    rgb: &[u8],
+    (rgb, deep): (&[u8], bool),
 ) -> Result<()> {
     let (w, h) = (w as usize, h as usize);
     let mut locked = Locked::new(buffer)?;
+    if deep && format == RGHA {
+        let one = f16::from_f32(1.0).to_bits().to_le_bytes();
+        for y in 0..h {
+            let row = locked.row(0, y, w * 8);
+            for (x, px) in row.as_chunks_mut::<8>().0.iter_mut().enumerate() {
+                let at = (y * w + x) * 6;
+                let [r, g, b] = [0, 2, 4].map(|i| {
+                    let v = u16::from_le_bytes([rgb[at + i], rgb[at + i + 1]]);
+                    f16::from_f32(f32::from(v) / 65535.0)
+                        .to_bits()
+                        .to_le_bytes()
+                });
+                *px = [r[0], r[1], g[0], g[1], b[0], b[1], one[0], one[1]];
+            }
+        }
+        return Ok(());
+    }
+    let eight;
+    let rgb = if deep {
+        eight = to_eight(rgb);
+        eight.as_slice()
+    } else {
+        rgb
+    };
     let pixel = |x: usize, y: usize| &rgb[(y * w + x) * 3..(y * w + x) * 3 + 3];
     if format == BGRA {
         for y in 0..h {
@@ -491,7 +523,45 @@ fn halves() -> &'static [u8] {
     })
 }
 
-pub(crate) fn read(buffer: &CVPixelBuffer, format: u32, (w, h): (u32, u32)) -> Result<Vec<u8>> {
+pub(crate) fn read(
+    buffer: &CVPixelBuffer,
+    format: u32,
+    (w, h): (u32, u32),
+    deep: bool,
+) -> Result<Vec<u8>> {
+    if !deep {
+        return read_eight(buffer, format, (w, h));
+    }
+    let (w, h) = (w as usize, h as usize);
+    if format != RGHA {
+        let eight = read_eight(buffer, format, (w as u32, h as u32))?;
+        return Ok(eight
+            .iter()
+            .flat_map(|v| (u16::from(*v) * 257).to_le_bytes())
+            .collect());
+    }
+    let mut locked = Locked::new(buffer)?;
+    let mut out = vec![0; w * h * 6];
+    for (y, line) in out.chunks_exact_mut(w * 6).enumerate() {
+        let row = locked.row(0, y, w * 8);
+        for (to, px) in line
+            .as_chunks_mut::<6>()
+            .0
+            .iter_mut()
+            .zip(row.as_chunks::<8>().0)
+        {
+            let c = |i: usize| {
+                let v = f16::from_bits(u16::from_le_bytes([px[i], px[i + 1]])).to_f32();
+                ((v.clamp(0.0, 1.0) * 65535.0).round() as u16).to_le_bytes()
+            };
+            let (r, g, b) = (c(0), c(2), c(4));
+            *to = [r[0], r[1], g[0], g[1], b[0], b[1]];
+        }
+    }
+    Ok(out)
+}
+
+fn read_eight(buffer: &CVPixelBuffer, format: u32, (w, h): (u32, u32)) -> Result<Vec<u8>> {
     let (w, h) = (w as usize, h as usize);
     let mut locked = Locked::new(buffer)?;
     if format == RGHA {

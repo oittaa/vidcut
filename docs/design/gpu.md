@@ -120,7 +120,7 @@ The draw:
   - The viewer's device imports that memory and draws from it (`shared::held_on`). Nothing comes down.
   - A held picture keeps the id of its `Gpu`. Only that `Gpu` draws from its buffer directly (`Held::on`, [gotchas](../gotchas.md#wgpu-and-egui)).
   - The stats panel shows a held picture in GPU memory (`Picture::held`). It tells whether the viewer drew it from GPU memory (`Screen::held_shared`).
-  - The player's cache counts these pictures in video memory. When the cache brings one down, it becomes RGB24 in memory.
+  - The player's cache counts these pictures in video memory. When the cache brings one down, it becomes RGB24 or RGB48 in memory.
   - This occurs on Linux and Windows, where Vulkan on both devices has the extension for external memory.
   - Why: each picture went down to memory and up again before the viewer could show it.
 
@@ -134,7 +134,7 @@ Frames that come down:
 - In the other cases, the player brings the pictures of the AI upscalers and the frame interpolation down (`held::in_memory`).
   - After a share fails, these pictures come down (`held::stop_sharing`). When a clip starts to use an AI model again, the player tries to share again (`held::share_again`).
   - Why: a failure can be for a short time only, for example when an AI model holds the video memory.
-  - They go to the viewer as RGB24, with no conversion on the CPU (`normalize::displayable`). An RGB24 still goes to the draw as it is too.
+  - They go to the viewer as RGB24 or RGB48, with no conversion on the CPU (`Screen::write_rgb`). An RGB24 still goes to the draw as it is too.
 - The cut test of a retime brings down a 96×54 luma picture of each frame, not the frame (`held::small_luma`, [export](export.md)).
 - The light meter brings SDR pictures down ([the light meter](#the-light-meter)).
 
@@ -159,7 +159,7 @@ Frames that come down:
 
 Super Scale (`SuperScale`) sets the upscaler of a picture that is enlarged.
 
-- `render::super_scale_of` gives each piece its upscaler: its own, or the project's (`MediaUpscaler`, `ProjectUpscaler`). Auto is the scaler of macOS on macOS, and AI Best elsewhere.
+- `render::super_scale_of` gives each piece its upscaler: its own, or the project's (`MediaUpscaler`, `ProjectUpscaler`). Auto is the scaler of macOS on macOS, and AI Fast elsewhere.
 - Classic enlarges in the shader of the viewer and the export, with the kernel of the picture's `Sharpness` (`screen::kernel`).
 - `layer_size` lets the picture of an AI upscaler grow past its source size.
 - The result of an AI upscaler is its own. It is not meant to match the CPU.
@@ -170,7 +170,9 @@ The AI upscalers share one path in the reader:
 - A picture has a key (`PictureId`). It comes from a run of the upscaler (`Session`, `super_scale::Run`), which starts at `super_scale::first_frame`.
 - A run takes frames in order. It reads them from the reader's queue, or with a second `VideoReader` (`Source::seek_ahead`).
 - The run gives each picture once, and keeps the last one for a change of size.
-- A picture of AI Fast or AI Best stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`).
+- A picture of AI Fast or AI Best stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`, `Layout::Rgb48`).
+- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best and the scaler of macOS take 8-bit SDR RGB.
+  - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast came nearer to the real frames with 16 bits, in the same time.
 - The reader drops a run for a frame that the run does not give (`RUN_JUMP`).
 - `super_scale::report` tells what the upscaler makes. The stats panel shows it (`SuperScaleStats`).
 
@@ -219,6 +221,7 @@ The scaler of macOS (`macos`):
 `interpolate` makes the frames of Retime Process ([export](export.md#which-source-frame), [deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
 
 - `interpolate::between` takes two RGB pictures on the GPU and a weight. It gives an RGB picture on the GPU.
+- The pictures are 16-bit RGB in the timeline color space (`retime_form`). The kernels read and write 16-bit values (`Ops`). The AI of macOS takes 8-bit SDR RGB.
 - It runs on the shared off-screen device (`compute::Gpu`), with kernels of its own (`interpolate::ops`).
   - Its kernels and memory go when the last `interpolate::User` goes.
 - The last pair stays on the GPU with its features. Why: the frames between one pair share them.
