@@ -2620,8 +2620,9 @@ pub enum Request {
     /// `jobs`, `mixer`, `preferences`, `history` (the undo history),
     /// `help` (the keyboard shortcuts), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
-    /// Media Pool), `clip_info` (the media selected in the pool), `titles`,
-    /// `inspector` or `keyframes` (tabs in the Media Pool's place), or the
+    /// Media Pool), `clip_info` (the media selected in the pool),
+    /// `transitions`, `titles`, `inspector` or `keyframes` (tabs in the Media
+    /// Pool's place), or the
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
     /// clip (the topmost clip at the playhead when none is selected), or
     /// `tools`, the viewer's row of Transform, Crop, Dynamic Zoom and their
@@ -3423,6 +3424,9 @@ pub enum GuiPanel {
     /// Clip Info: all that is known of the media selected in the pool, its
     /// file read again (`media.details`).
     ClipInfo,
+    /// The Transitions tab, in the Media Pool's place: the transitions to
+    /// drag onto an edit.
+    Transitions,
     /// The Titles tab, in the Media Pool's place: the kinds of title to
     /// drag onto the timeline.
     Titles,

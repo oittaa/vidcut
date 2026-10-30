@@ -258,6 +258,7 @@ impl Workspace {
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
             GuiPanel::Transcription => self.transcription.open = true,
+            GuiPanel::Transitions => self.left = LeftTab::Transitions,
             GuiPanel::Titles => self.left = LeftTab::Titles,
             GuiPanel::Inspector => self.left = LeftTab::Inspector,
             GuiPanel::Keyframes => self.left = LeftTab::Keyframes,
@@ -314,8 +315,12 @@ impl Workspace {
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
-            GuiPanel::Titles | GuiPanel::Inspector | GuiPanel::Keyframes => {
+            GuiPanel::Transitions
+            | GuiPanel::Titles
+            | GuiPanel::Inspector
+            | GuiPanel::Keyframes => {
                 let tab = match panel {
+                    GuiPanel::Transitions => LeftTab::Transitions,
                     GuiPanel::Titles => LeftTab::Titles,
                     GuiPanel::Keyframes => LeftTab::Keyframes,
                     _ => LeftTab::Inspector,
@@ -355,6 +360,7 @@ impl Workspace {
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
+            (GuiPanel::Transitions, self.left == LeftTab::Transitions),
             (GuiPanel::Titles, self.left == LeftTab::Titles),
             (GuiPanel::Inspector, self.left == LeftTab::Inspector),
             (GuiPanel::Keyframes, self.left == LeftTab::Keyframes),
@@ -434,6 +440,29 @@ impl Workspace {
             }),
             asked: counts.asked,
             passed_over: counts.passed_over,
+        }
+    }
+
+    pub(super) fn dissolve_target(&self) -> Value {
+        use super::timeline::Side;
+        match self.timeline.edit {
+            Some(e) => {
+                let align = match e.side {
+                    Side::Out => "end",
+                    Side::In => "start",
+                    Side::Both | Side::Audio => "center",
+                };
+                json!({
+                    "at": e.at,
+                    "track": e.track.id(),
+                    "align": align,
+                    "picture": e.side != Side::Audio,
+                })
+            }
+            None => json!({
+                "at": self.snap.timeline.position,
+                "clips": self.snap.selection.clips,
+            }),
         }
     }
 
@@ -1374,27 +1403,7 @@ impl Workspace {
             });
         }
         if pressed(Key::T) && m.command && !m.shift && !m.alt {
-            use super::timeline::Side;
-            let params = match self.timeline.edit {
-                Some(e) => {
-                    let align = match e.side {
-                        Side::Out => "end",
-                        Side::In => "start",
-                        Side::Both | Side::Audio => "center",
-                    };
-                    json!({
-                        "at": e.at,
-                        "track": e.track.id(),
-                        "align": align,
-                        "picture": e.side != Side::Audio,
-                    })
-                }
-                None => json!({
-                    "at": self.snap.timeline.position,
-                    "clips": self.snap.selection.clips,
-                }),
-            };
-            self.send("edit.dissolve", params);
+            self.send("edit.dissolve", self.dissolve_target());
         }
         if pressed(Key::T) && !m.command && !(m.alt && m.shift) {
             self.picture_tool(match (m.alt, m.shift) {
@@ -1832,6 +1841,10 @@ impl Workspace {
                     }
                     match self.left {
                         LeftTab::Pool => self.pool_panel(ui),
+                        LeftTab::Transitions => {
+                            self.pool_focus = false;
+                            self.transitions_panel(ui);
+                        }
                         LeftTab::Titles => {
                             self.pool_focus = false;
                             self.titles_panel(ui);

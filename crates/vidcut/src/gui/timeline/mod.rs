@@ -2092,7 +2092,10 @@ impl Workspace {
         }
         if matches!(
             d.drag.gesture,
-            Gesture::Media { .. } | Gesture::Title { .. } | Gesture::Subtitles { .. }
+            Gesture::Media { .. }
+                | Gesture::Title { .. }
+                | Gesture::Transition { .. }
+                | Gesture::Subtitles { .. }
         ) {
             d.upper = layout.upper.area.expand(8.0).contains(pos);
         }
@@ -2892,6 +2895,19 @@ impl Workspace {
         });
     }
 
+    pub(crate) fn start_transition_drag(
+        &mut self,
+        (kind, label): (vidcut_core::model::PictureTransition, &'static str),
+        press: Pos2,
+    ) {
+        self.timeline.snap_flipped = false;
+        self.timeline.drag = Some(ActiveDrag {
+            drag: Drag::new(Gesture::Transition { kind, label }, press),
+            upper: false,
+            preview: Preview::default(),
+        });
+    }
+
     pub(crate) fn media_drag_overlay(&self, ctx: &egui::Context) {
         if let Some(text) = self.bin_drag_label()
             && let Some(pos) = ctx.input(|i| i.pointer.latest_pos())
@@ -2925,6 +2941,14 @@ impl Workspace {
                 (0, cues.iter().map(|c| c.1).max().unwrap_or(0)),
             ),
             Gesture::Title { template, len } => (template.label.clone(), (0, *len)),
+            Gesture::Transition { label, .. } => (
+                (*label).to_string(),
+                (
+                    0,
+                    self.project()
+                        .map_or(0, |p| p.settings.fps.as_f64().round() as i64),
+                ),
+            ),
             _ => return,
         };
         let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) else {
