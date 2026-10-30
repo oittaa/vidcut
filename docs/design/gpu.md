@@ -82,8 +82,7 @@ In the viewer, exports, proxies and thumbnails:
 - A layer keeps the picture that its planes hold: from memory, from NVDEC, or brought down. A redraw of the same picture copies nothing.
 - A Direct3D 11 texture of the viewer keeps the picture that it holds (`D3d11Shared`). A redraw of the same picture does not fill it again.
 - A layer that brings its picture down brings down only its own frame (`alone_copied_down`).
-- `hw::Turner` turns VideoToolbox frames for the scalers of macOS (`vt::Turn`, `transpose_vt`).
-- Lanczos on Metal scales the input of the scaler and the frame interpolation of macOS to the size of their session (`lanczos::sized`). It also scales the output of the scaler to the size that it shows at.
+- Lanczos on Metal scales the output of the scaler of macOS to the size that it shows at (`lanczos::sized`).
   - Why Lanczos: the scaler of VideoToolbox keeps less detail.
 
 The draw:
@@ -171,7 +170,7 @@ The AI upscalers share one path in the reader:
 - A run takes frames in order. It reads them from the reader's queue, or with a second `VideoReader` (`Source::seek_ahead`).
 - The run gives each picture once, and keeps the last one for a change of size.
 - A picture of AI Fast or AI Best stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`, `Layout::Rgb48`).
-- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best and the scaler of macOS take 8-bit SDR RGB.
+- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best takes 8-bit SDR RGB. The scaler of macOS takes 8-bit SDR VideoToolbox frames.
   - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast came nearer to the real frames with 16 bits, in the same time.
 - The reader drops a run for a frame that the run does not give (`RUN_JUMP`).
 - `super_scale::report` tells what the upscaler makes. The stats panel shows it (`SuperScaleStats`).
@@ -210,10 +209,11 @@ AI Best (`flashvsr`):
 The scaler of macOS (`macos`):
 
 - It is a `VTFrameProcessor` session with a `VTSuperResolutionScalerConfiguration`, on macOS 26 and later.
-- It takes 8-bit SDR RGB, in the first of BGRA, NV12 and RGhA that it lists (`BYTES_FIRST`, [gotchas](../gotchas.md#operating-systems-and-libraries)).
+- Its own buffers are the first of BGRA, NV12 and RGhA that it lists (`BYTES_FIRST`, [gotchas](../gotchas.md#operating-systems-and-libraries)).
 - `macos::check` refuses HDR media in an HDR timeline, and pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
-- The draw puts each frame into a P416 VideoToolbox frame in SDR, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
+- The draw puts each frame into an NV12 VideoToolbox frame in SDR, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
+  - The frame is 8-bit because the scaler takes 8-bit SDR (`upscale_form`). Retime Process gets P416 frames.
   - The draw tone-maps an HDR frame and deinterlaces an interlaced frame.
 - It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
   - Why: a picture of 4 times the source fills the cache of the viewer.

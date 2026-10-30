@@ -328,12 +328,12 @@ impl Surfaces {
         Ok(Self { device, pool: None })
     }
 
-    pub(crate) fn fresh(&mut self, size: (u32, u32), what: &str) -> Result<Video> {
-        let key = (
-            ffi::AVPixelFormat::AV_PIX_FMT_P416LE,
-            ffi::AVColorRange::AVCOL_RANGE_MPEG,
-            size,
-        );
+    pub(crate) fn fresh(
+        &mut self,
+        (size, pixel): ((u32, u32), ffmpeg::format::Pixel),
+        what: &str,
+    ) -> Result<Video> {
+        let key = (pixel.into(), ffi::AVColorRange::AVCOL_RANGE_MPEG, size);
         if self.pool.as_ref().is_none_or(|p| p.like != key) {
             self.pool = None;
             self.pool = Some(Pool::new(self.device, key, what)?);

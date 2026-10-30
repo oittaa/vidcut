@@ -311,7 +311,7 @@ fn upscaled_pictures(u: Upscaler, small: &[frame::Video], frames: bool) -> Resul
         let mut outs = Vec::new();
         for (i, f) in small.iter().enumerate().take(last + 1).skip(first) {
             outs.extend(match frames {
-                true => run.push_frame(i as i64, f, 0)?,
+                true => run.push_frame(i as i64, f)?,
                 false => run.push(i as i64, Some(i as i64), f)?,
             });
         }

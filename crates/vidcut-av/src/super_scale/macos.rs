@@ -95,14 +95,12 @@ pub fn check<'a>(
 
 pub(crate) struct Run {
     scaler: imp::Scaler,
-    turner: Option<crate::hw::Turner>,
 }
 
 impl Run {
     pub(crate) fn open(size: (u32, u32), made: (u32, u32)) -> Result<Self> {
         Ok(Self {
             scaler: imp::Scaler::open(size, made)?,
-            turner: None,
         })
     }
 }
@@ -114,9 +112,8 @@ impl super::Run for Run {
         ))
     }
 
-    fn push_frame(&mut self, index: i64, f: &Video, rotation: u16) -> Result<Vec<super::Out>> {
-        let upright = crate::hw::Turner::turn(&mut self.turner, f, rotation)?;
-        let made = self.scaler.scale_frame(index, &upright)?;
+    fn push_frame(&mut self, index: i64, f: &Video) -> Result<Vec<super::Out>> {
+        let made = self.scaler.scale_frame(index, f)?;
         Ok(vec![super::Out {
             index,
             pts: f.pts(),
@@ -328,7 +325,6 @@ mod imp {
         sources: CFRetained<CVPixelBufferPool>,
         outputs: CFRetained<CVPixelBufferPool>,
         transfer: Transfer,
-        lanczos: Option<crate::lanczos::Lanczos>,
         shrink: Option<crate::lanczos::Lanczos>,
         frames: Frames,
         size: (u32, u32),
@@ -385,7 +381,6 @@ mod imp {
                 sources,
                 outputs,
                 transfer: Transfer::new(WHAT)?,
-                lanczos: None,
                 shrink: None,
                 frames: Frames::default(),
                 size,
@@ -398,8 +393,6 @@ mod imp {
         pub(super) fn scale_frame(&mut self, index: i64, f: &Video) -> Result<Video> {
             let clock = std::time::Instant::now();
             let source = buffer(&self.sources, WHAT)?;
-            let scaled = crate::lanczos::sized(&mut self.lanczos, f, self.size)?;
-            let f = scaled.as_ref().unwrap_or(f);
             let matrix = crate::color::colors_of(f).matrix;
             self.transfer.run(pixels(f, WHAT)?, &source, matrix, WHAT)?;
             source.remove_all_attachments();

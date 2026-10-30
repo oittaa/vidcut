@@ -25,8 +25,8 @@ pub(super) fn between_frames(
     imp::between_frames(key, a, b, size, t)
 }
 
-pub(super) fn blank(size: (u32, u32)) -> Result<frame::Video> {
-    imp::blank(size)
+pub(super) fn blank(size: (u32, u32), pixel: crate::ffmpeg::format::Pixel) -> Result<frame::Video> {
+    imp::blank(size, pixel)
 }
 
 pub(super) fn release() {
@@ -56,7 +56,10 @@ mod imp {
         Err(Error::Invalid(NEEDS.into()))
     }
 
-    pub(super) fn blank(_size: (u32, u32)) -> Result<crate::ffmpeg::frame::Video> {
+    pub(super) fn blank(
+        _size: (u32, u32),
+        _pixel: crate::ffmpeg::format::Pixel,
+    ) -> Result<crate::ffmpeg::frame::Video> {
         Err(Error::Invalid(NEEDS.into()))
     }
 
@@ -136,7 +139,6 @@ mod imp {
         sources: CFRetained<CVPixelBufferPool>,
         outputs: CFRetained<CVPixelBufferPool>,
         transfer: Transfer,
-        lanczos: Option<crate::lanczos::Lanczos>,
         size: (u32, u32),
         pair: Option<Pair>,
         frames: Frames,
@@ -204,7 +206,6 @@ mod imp {
                 sources,
                 outputs,
                 transfer: Transfer::new(WHAT)?,
-                lanczos: None,
                 size,
                 pair: None,
                 frames: Frames::default(),
@@ -213,8 +214,6 @@ mod imp {
 
         fn frame(&mut self, f: &Video, at: CMTime) -> Result<Retained<VTFrameProcessorFrame>> {
             let picture = buffer(&self.sources, WHAT)?;
-            let scaled = crate::lanczos::sized(&mut self.lanczos, f, self.size)?;
-            let f = scaled.as_ref().unwrap_or(f);
             let matrix = crate::color::colors_of(f).matrix;
             self.transfer
                 .run(pixels(f, WHAT)?, &picture, matrix, WHAT)?;
@@ -327,12 +326,12 @@ mod imp {
             .between_frames(key, a, b, t)
     }
 
-    pub(super) fn blank(size: (u32, u32)) -> Result<Video> {
+    pub(super) fn blank(size: (u32, u32), pixel: crate::ffmpeg::format::Pixel) -> Result<Video> {
         let mut slot = SURFACES.lock().unwrap_or_else(PoisonError::into_inner);
         if slot.is_none() {
             *slot = Some(Surfaces::new(WHAT)?);
         }
-        slot.as_mut().expect("surfaces").fresh(size, WHAT)
+        slot.as_mut().expect("surfaces").fresh((size, pixel), WHAT)
     }
 
     pub(super) fn release() {
