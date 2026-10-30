@@ -86,15 +86,41 @@ pub fn run(
                 .collect::<Result<Vec<_>>>()?,
         };
         let small = draw(&source, SMALL, (0, form))?;
-        let classic = draw(&small, FULL, (sharp, form))?
-            .iter()
-            .map(bytes)
-            .collect::<Result<Vec<_>>>()?;
         let inner: Vec<usize> = (2..count.saturating_sub(2)).collect();
-        let base = mean(&inner, |i| score(&classic[i], &truth[i], coding));
+        let base = match upscalers.is_empty() {
+            true => None,
+            false => {
+                let classic = draw(&small, FULL, (sharp, form))?
+                    .iter()
+                    .map(bytes)
+                    .collect::<Result<Vec<_>>>()?;
+                Some(mean(&inner, |i| score(&classic[i], &truth[i], coding)))
+            }
+        };
         for &u in upscalers {
             crate::super_scale::get_ready(dir, u, false)?;
-            let made = upscaled(u, &small)?;
+            let made = match u == Upscaler::Macos && form.0 {
+                true => {
+                    let small = source
+                        .iter()
+                        .map(|f| surface_picture(&mut framer, f, &clip.path, SMALL, form))
+                        .collect::<Result<Vec<_>>>()?;
+                    upscaled_pictures(u, &small, true)?
+                        .into_iter()
+                        .map(|p| match p {
+                            Picture::Frame(f) => bytes(&rgb_picture(
+                                &mut drawn,
+                                &f,
+                                &clip.path,
+                                FULL,
+                                (0, (true, coding)),
+                            )?),
+                            p => read(p, true),
+                        })
+                        .collect::<Result<Vec<_>>>()?
+                }
+                false => upscaled(u, &small)?,
+            };
             rows.push(Row {
                 clip: clip.name.clone(),
                 test: "Super Scale",
@@ -102,9 +128,12 @@ pub fn run(
                 model: crate::super_scale::name(u),
                 score: mean(&inner, |i| score(&made[i], &truth[i], coding)),
                 baseline: "Classic",
-                base,
+                base: base.expect("a Classic baseline"),
                 frames: inner.len(),
             });
+        }
+        if retimes.is_empty() {
+            continue;
         }
         let pairs: Vec<usize> = (0..count.saturating_sub(2)).step_by(2).collect();
         let frames = match form.0 && retimes.contains(&Retime::Macos) {
@@ -133,10 +162,10 @@ pub fn run(
                 .collect::<Result<Vec<_>>>()
         };
         let blend = made_by(Retime::FrameBlend)?;
-        let kept: Vec<usize> = (0..pairs.len())
-            .filter(|&k| score(&blend[k], &truth[pairs[k] + 1], coding).de < CUT)
-            .collect();
-        let base = mean(&kept, |k| score(&blend[k], &truth[pairs[k] + 1], coding));
+        let all: Vec<usize> = (0..pairs.len()).collect();
+        let blended = scores(&all, |k| score(&blend[k], &truth[pairs[k] + 1], coding));
+        let kept: Vec<usize> = all.into_iter().filter(|&k| blended[k].de < CUT).collect();
+        let base = average(&kept.iter().map(|&k| blended[k]).collect::<Vec<_>>());
         for &r in retimes {
             crate::interpolate::get_ready(dir, r, false)?;
             let made = made_by(r)?;
@@ -252,13 +281,13 @@ fn put(out: &mut [Option<Picture>], outs: Vec<Out>) {
 
 fn upscaled(u: Upscaler, small: &[frame::Video]) -> Result<Vec<Vec<u8>>> {
     let deep = small.first().is_some_and(crate::screen::held::deep);
-    upscaled_pictures(u, small)?
+    upscaled_pictures(u, small, false)?
         .into_iter()
         .map(|p| read(p, deep))
         .collect()
 }
 
-fn upscaled_pictures(u: Upscaler, small: &[frame::Video]) -> Result<Vec<Picture>> {
+fn upscaled_pictures(u: Upscaler, small: &[frame::Video], frames: bool) -> Result<Vec<Picture>> {
     let name = crate::super_scale::name(u);
     let made = crate::super_scale::made_size(u, SMALL, FULL);
     if made != FULL {
@@ -279,7 +308,10 @@ fn upscaled_pictures(u: Upscaler, small: &[frame::Video]) -> Result<Vec<Picture>
         let mut run = crate::super_scale::open(u, SMALL, made, first as i64, sink)?;
         let mut outs = Vec::new();
         for (i, f) in small.iter().enumerate().take(last + 1).skip(first) {
-            outs.extend(run.push(i as i64, Some(i as i64), f)?);
+            outs.extend(match frames {
+                true => run.push_frame(i as i64, f, 0)?,
+                false => run.push(i as i64, Some(i as i64), f)?,
+            });
         }
         outs.extend(run.finish()?);
         put(&mut out, outs);
@@ -350,7 +382,10 @@ pub fn speed(
         Model::Upscaler(_) => SMALL,
         Model::Retime(_) => FULL,
     };
-    let framed = model == Model::Retime(Retime::Macos) && form.0;
+    let framed = matches!(
+        model,
+        Model::Retime(Retime::Macos) | Model::Upscaler(Upscaler::Macos)
+    ) && form.0;
     let inputs = source
         .iter()
         .map(|f| match framed {
@@ -363,7 +398,7 @@ pub fn speed(
         match model {
             Model::Upscaler(u) => {
                 crate::super_scale::get_ready(dir, u, false)?;
-                Ok((upscaled_pictures(u, &inputs)?, inputs.len()))
+                Ok((upscaled_pictures(u, &inputs, framed)?, inputs.len()))
             }
             Model::Retime(r) => {
                 crate::interpolate::get_ready(dir, r, false)?;
@@ -410,9 +445,29 @@ pub fn speed(
     })
 }
 
-fn mean(at: &[usize], score: impl Fn(usize) -> Score) -> Score {
-    let n = at.len().max(1) as f64;
-    let sum = at.iter().map(|&i| score(i)).fold([0.0; 5], |t, s| {
+fn scores(at: &[usize], score: impl Fn(usize) -> Score + Sync) -> Vec<Score> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let per = at.len().div_ceil(threads).max(1);
+    let score = &score;
+    std::thread::scope(|s| {
+        let parts: Vec<_> = at
+            .chunks(per)
+            .map(|part| s.spawn(move || part.iter().map(|&i| score(i)).collect::<Vec<_>>()))
+            .collect();
+        parts
+            .into_iter()
+            .flat_map(|p| p.join().expect("a scoring thread"))
+            .collect()
+    })
+}
+
+fn mean(at: &[usize], score: impl Fn(usize) -> Score + Sync) -> Score {
+    average(&scores(at, score))
+}
+
+fn average(all: &[Score]) -> Score {
+    let n = all.len().max(1) as f64;
+    let sum = all.iter().fold([0.0; 5], |t, s| {
         [
             t[0] + s.de,
             t[1] + s.low,

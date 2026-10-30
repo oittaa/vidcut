@@ -165,7 +165,15 @@ fn main() {
         }
         return;
     }
-    let (upscalers, retimes) = (upscalers(), retimes());
+    let only = args.get(1).map(String::as_str);
+    let upscalers = match only {
+        Some("retime") => Vec::new(),
+        _ => upscalers(),
+    };
+    let retimes = match only {
+        Some("scale") => Vec::new(),
+        _ => retimes(),
+    };
     let dir = vidcut_core::dirs::models();
     println!("pipes: PQ or HLG and SDR at 16 bits, SDR8 at 8 bits; references drawn at 1920x1080");
     println!(

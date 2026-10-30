@@ -214,7 +214,8 @@ The scaler of macOS (`macos`):
 - `macos::check` refuses HDR media in an HDR timeline, and pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
 - An SDR VideoToolbox frame reaches it on the GPU (`Run::push_frame`). A turned frame turns first (`hw::Turner`).
-  - An HDR frame in an SDR timeline reaches it as tone-mapped RGB (`Run::push`).
+- The draw puts other frames into P416 VideoToolbox frames first, in SDR (`shown_frame`). They then reach it in the same way.
+  - These are HDR frames, which the draw tone-maps, interlaced frames and frames that the CPU decoded.
 - It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
   - Why: a picture of 4 times the source fills the cache of the viewer.
   - A picture of a layout that Lanczos cannot take comes out as P416 (`lanczos::takes`).

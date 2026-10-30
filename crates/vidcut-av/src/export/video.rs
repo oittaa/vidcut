@@ -72,6 +72,11 @@ pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
 
 type Rgb = (Option<i64>, Look, frame::Video);
 
+enum Fed {
+    Rgb(frame::Video),
+    Frame(frame::Video, u16),
+}
+
 pub type Form = (bool, Option<Hdr>);
 
 const PLAIN: Form = (false, None);
@@ -588,13 +593,14 @@ impl Source {
         if let Some((_, _, made)) = self.framed.iter().find(|(p, l, _)| *p == pts && l == look) {
             return frame_ref(made);
         }
-        let single = match &mut self.framer {
-            Some(single) => single,
-            None => self.framer.insert(Single::new(reading)?),
-        };
-        let out = crate::interpolate::blank(look.size)?;
         let around = (before.as_ref(), after.as_ref());
-        let made = single.surface((&f, around), rotation, (look, self.reader.path()), out)?;
+        let made = shown_frame(
+            &mut self.framer,
+            (&f, around),
+            (rotation, look),
+            reading,
+            self.reader.path(),
+        )?;
         self.framed.retain(|(p, l, _)| l == look && *p != pts);
         if self.framed.len() >= 2 {
             self.framed.remove(0);
@@ -925,13 +931,29 @@ pub(crate) fn surface_picture(
     size: (u32, u32),
     form: Form,
 ) -> Result<frame::Video> {
-    let single = match drawn {
-        Some(single) => single,
-        None => drawn.insert(Single::new(Reading::Frames)?),
-    };
     let look = Look::fitted(size, 0, form);
-    let out = crate::interpolate::blank(size)?;
-    single.surface((frame, (None, None)), 0, (&look, path), out)
+    shown_frame(
+        drawn,
+        (frame, (None, None)),
+        (0, &look),
+        Reading::Frames,
+        path,
+    )
+}
+
+fn shown_frame(
+    framer: &mut Option<Single>,
+    frames: (&frame::Video, Around<'_>),
+    (rotation, look): (u16, &Look),
+    reading: Reading,
+    path: &Path,
+) -> Result<frame::Video> {
+    let single = match framer {
+        Some(single) => single,
+        None => framer.insert(Single::new(reading)?),
+    };
+    let out = crate::interpolate::blank(look.size)?;
+    single.surface(frames, rotation, (look, path), out)
 }
 
 fn big_picture(
@@ -1282,21 +1304,33 @@ impl Source {
         }
         let clock = Instant::now();
         let woven = crate::decode::FrameProps::of(f).top_field_first.is_some();
-        let rgb = match run.run.takes(f, rotation) && !woven {
-            true => None,
-            false => Some(shown_rgb(
+        let look = Look::fitted(run.size, 0, run.id.form);
+        let path = self.reader.path();
+        let input = match (run.run.takes(f, rotation) && !woven, run.id.upscaler) {
+            (true, _) => Fed::Frame(frame_ref(f)?, rotation),
+            (false, Upscaler::Macos) => Fed::Frame(
+                shown_frame(
+                    &mut self.framer,
+                    (f, around),
+                    (rotation, &look),
+                    reading,
+                    path,
+                )?,
+                0,
+            ),
+            (false, _) => Fed::Rgb(shown_rgb(
                 &mut self.drawn,
                 (f, around),
                 rotation,
-                &Look::fitted(run.size, 0, run.id.form),
+                &look,
                 reading,
-                self.reader.path(),
+                path,
             )?),
         };
         let converted = clock.elapsed();
-        let outs = match rgb {
-            Some(rgb) => run.run.push(i, f.pts(), &rgb)?,
-            None => run.run.push_frame(i, f, rotation)?,
+        let outs = match input {
+            Fed::Rgb(rgb) => run.run.push(i, f.pts(), &rgb)?,
+            Fed::Frame(f, rotation) => run.run.push_frame(i, &f, rotation)?,
         };
         let pushed = clock.elapsed();
         run.next = i + 1;
@@ -1738,13 +1772,12 @@ impl Single {
         (look, path): (&Look, &Path),
         out: frame::Video,
     ) -> Result<frame::Video> {
+        let pts = frames.0.pts();
         let sink = crate::screen::Sink::Surface(out);
-        self.fitted(
-            frames,
-            rotation,
-            (look, path),
-            (format::Pixel::P416LE, sink),
-        )
+        let pixel = format::Pixel::P416LE;
+        let mut out = self.fitted(frames, rotation, (look, path), (pixel, sink))?;
+        out.set_pts(pts);
+        Ok(out)
     }
 
     fn fitted(
