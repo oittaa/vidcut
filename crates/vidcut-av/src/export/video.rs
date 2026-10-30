@@ -845,7 +845,8 @@ type Around<'a> = (Option<&'a frame::Video>, Option<&'a frame::Video>);
 
 pub(crate) fn rgb_picture(
     drawn: &mut Option<Single>,
-    (frame, path): (&frame::Video, &Path),
+    frame: &frame::Video,
+    path: &Path,
     size: (u32, u32),
     (kernel, form): (u32, Form),
 ) -> Result<frame::Video> {

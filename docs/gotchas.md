@@ -231,6 +231,11 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - On Windows, cpal hears the change, but keeps the stream on the old device.
   - cpal then reports `StreamInvalidated`, or `DeviceNotAvailable` when the old device is gone.
   - `player::output::follow` opens the stream again on the new default.
+- **macOS's frame processors list few pixel formats** (macOS 27.2, Apple M4).
+  - The frame rate conversion and the super-resolution scaler of `VTFrameProcessor` each list only RGhA, 64-bit RGBA in half floats.
+  - Other Macs can list other formats. `vidcut doctor` shows the list of this Mac (`macos_frame_processors`).
+  - The frame rate conversion takes RGhA first (`HALF_FIRST`). Why: an 8-bit format would cut 16-bit and HDR pictures to 8 bits.
+  - The scaler takes BGRA first (`BYTES_FIRST`). Its pictures are 8-bit SDR.
 - **zeno's mask is placed one mask too low** (0.3) when it renders with the origin at the bottom left before it has measured itself.
   - The top that it reports is the bottom edge of the mask.
   - swash measures first. `stroked` in `burn.rs` calls `inspect` before `render` to do the same.

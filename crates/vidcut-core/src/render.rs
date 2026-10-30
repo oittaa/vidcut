@@ -2226,16 +2226,24 @@ mod tests {
         assert_eq!(transitions::heard_at(&fades, &t.clips[1], 49), Some(0.5));
     }
 
-    #[test]
-    fn auto_gives_hdr_slow_motion_the_ai_of_this_computer() {
+    fn auto_for_hdr_slow_motion() -> Retime {
         let f = fixture();
         let p = f.editor.project();
         let mut m = p.media("m1").unwrap().clone();
         m.info.video.as_mut().unwrap().hdr = Some(crate::model::Hdr::Pq);
-        assert_eq!(
-            retime_at(ClipRetime::Project, 0.5, &m, &p.settings),
-            Retime::ai_here()
-        );
+        retime_at(ClipRetime::Project, 0.5, &m, &p.settings)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn auto_gives_hdr_slow_motion_ai_fast() {
+        assert_eq!(auto_for_hdr_slow_motion(), Retime::AiFast);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn auto_gives_hdr_slow_motion_the_ai_of_macos() {
+        assert_eq!(auto_for_hdr_slow_motion(), Retime::Macos);
     }
 
     #[test]

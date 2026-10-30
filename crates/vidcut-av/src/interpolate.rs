@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -501,17 +502,19 @@ pub(crate) fn between(
         dump(
             &format!("{name}-a"),
             size,
-            &held::eight(held::rgb(a)?, deep),
+            &held::eight(&held::rgb(a)?, deep),
         )?;
         dump(
             &format!("{name}-b"),
             size,
-            &held::eight(held::rgb(b)?, deep),
+            &held::eight(&held::rgb(b)?, deep),
         )?;
         let out = match &made {
-            Picture::Held(h) => held::eight(h.read(rgb_bytes(size, deep) as usize)?, deep),
-            Picture::Rgb(rgb) => held::eight(rgb.clone(), deep),
-            Picture::Frame(_) => Vec::new(),
+            Picture::Held(h) => {
+                Cow::Owned(held::eight(&h.read(rgb_bytes(size, deep) as usize)?, deep).into_owned())
+            }
+            Picture::Rgb(rgb) => held::eight(rgb, deep),
+            Picture::Frame(_) => Cow::Borrowed(&[][..]),
         };
         dump(
             &format!("{name}-out-{t:.4}-{}", r.title().replace(' ', "")),

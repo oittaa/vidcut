@@ -521,7 +521,6 @@ struct Paced {
     rate: f64,
     retime: ClipRetime,
     project: Retime,
-    hdr: bool,
     at: i64,
     ramped: bool,
 }
@@ -1212,12 +1211,6 @@ fn speed_section(
             acts.push(Act::Retime(ClipRetime::Project));
         }
         ui.end_row();
-        let chosen = retime.process().or(p.settings.retime.process());
-        if chosen.is_some_and(|r| !r.is_nearest()) && paced.iter().any(|c| c.hdr) {
-            ui.label("");
-            dialog::warn(ui, "Retime Process can't take HDR media in an HDR timeline");
-            ui.end_row();
-        }
     });
     acts.extend(picked);
 }
@@ -1332,9 +1325,6 @@ impl Workspace {
                             m,
                             &p.settings,
                         )
-                    }),
-                    hdr: p.media(&c.media).is_some_and(|m| {
-                        vidcut_av::super_scale::takes_hdr(m, self.timeline_colors()) == Some(true)
                     }),
                     at,
                     ramped: c.speed.as_ref().is_some_and(|s| s.sections.len() > 1),

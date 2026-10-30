@@ -151,7 +151,7 @@ fn main() {
         let out = std::path::Path::new(&args[2]);
         std::fs::create_dir_all(out).expect("a folder for the pictures");
         for clip in &clips()[..2] {
-            let made = pictures(clip, (30, 15), &upscalers(), &vidcut_core::dirs::models())
+            let made = pictures(clip, 30, 15, &upscalers(), &vidcut_core::dirs::models())
                 .expect("pictures");
             for (name, rgb) in made {
                 let file = format!(

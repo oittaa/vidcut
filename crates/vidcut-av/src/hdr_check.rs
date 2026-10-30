@@ -73,14 +73,17 @@ pub fn run(
         let mut draw = |frames: &[frame::Video], size, look: (u32, crate::export::video::Form)| {
             frames
                 .iter()
-                .map(|f| rgb_picture(&mut drawn, (f, &clip.path), size, look))
+                .map(|f| rgb_picture(&mut drawn, f, &clip.path, size, look))
                 .collect::<Result<Vec<_>>>()
         };
         let refs = draw(&source, FULL, (0, form))?;
-        let truth = draw(&source, FULL, (0, (true, coding)))?
-            .iter()
-            .map(bytes)
-            .collect::<Result<Vec<_>>>()?;
+        let truth = match form.0 {
+            true => refs.iter().map(bytes).collect::<Result<Vec<_>>>()?,
+            false => draw(&source, FULL, (0, (true, coding)))?
+                .iter()
+                .map(bytes)
+                .collect::<Result<Vec<_>>>()?,
+        };
         let small = draw(&source, SMALL, (0, form))?;
         let classic = draw(&small, FULL, (sharp, form))?
             .iter()
@@ -134,7 +137,8 @@ pub fn run(
 
 pub fn pictures(
     clip: &Clip,
-    (count, k): (usize, usize),
+    count: usize,
+    k: usize,
     upscalers: &[Upscaler],
     dir: &Path,
 ) -> Result<Vec<(String, Vec<u8>)>> {
@@ -143,20 +147,16 @@ pub fn pictures(
     let form = (true, Some(hdr.unwrap_or(Hdr::Pq)));
     let mut drawn = None;
     let path = clip.path.as_path();
-    let truth = bytes(&rgb_picture(
-        &mut drawn,
-        (&source[k], path),
-        FULL,
-        (0, form),
-    )?)?;
+    let truth = bytes(&rgb_picture(&mut drawn, &source[k], path, FULL, (0, form))?)?;
     let small = source
         .iter()
-        .map(|f| rgb_picture(&mut drawn, (f, path), SMALL, (0, form)))
+        .map(|f| rgb_picture(&mut drawn, f, path, SMALL, (0, form)))
         .collect::<Result<Vec<_>>>()?;
     let sharp = crate::screen::kernel(Some(Sharpness::Medium));
     let classic = bytes(&rgb_picture(
         &mut drawn,
-        (&small[k], path),
+        &small[k],
+        path,
         FULL,
         (sharp, form),
     )?)?;
@@ -327,7 +327,7 @@ pub fn speed(
     };
     let inputs = source
         .iter()
-        .map(|f| rgb_picture(&mut drawn, (f, &clip.path), size, (0, form)))
+        .map(|f| rgb_picture(&mut drawn, f, &clip.path, size, (0, form)))
         .collect::<Result<Vec<_>>>()?;
     let pairs: Vec<usize> = (0..count.saturating_sub(2)).step_by(2).collect();
     let once = || -> Result<(Vec<Picture>, usize)> {
