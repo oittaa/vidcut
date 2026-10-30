@@ -22,6 +22,8 @@ use objc2_video_toolbox::{
     kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
 };
 
+use vidcut_core::lru::Lru;
+
 use crate::color::Matrix;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, ffi, frame::Video};
@@ -300,7 +302,7 @@ impl Drop for Pool {
 
 pub(crate) struct Surfaces {
     device: *mut ffi::AVBufferRef,
-    pool: Option<Pool>,
+    pools: Lru<(i32, i32, (u32, u32)), Pool, 4>,
 }
 
 // SAFETY: one thread at a time uses the surfaces, behind the mutex of their process.
@@ -325,7 +327,10 @@ impl Surfaces {
                 source: ffmpeg::Error::from(ret),
             });
         }
-        Ok(Self { device, pool: None })
+        Ok(Self {
+            device,
+            pools: Lru::new(),
+        })
     }
 
     pub(crate) fn fresh(
@@ -333,18 +338,18 @@ impl Surfaces {
         (size, pixel): ((u32, u32), ffmpeg::format::Pixel),
         what: &str,
     ) -> Result<Video> {
-        let key = (pixel.into(), ffi::AVColorRange::AVCOL_RANGE_MPEG, size);
-        if self.pool.as_ref().is_none_or(|p| p.like != key) {
-            self.pool = None;
-            self.pool = Some(Pool::new(self.device, key, what)?);
+        let like: Like = (pixel.into(), ffi::AVColorRange::AVCOL_RANGE_MPEG, size);
+        let key = (like.0 as i32, like.1 as i32, size);
+        if !self.pools.contains(&key) {
+            self.pools.insert(key, Pool::new(self.device, like, what)?);
         }
-        self.pool.as_ref().expect("a pool").frame(what)
+        self.pools.get(&key).expect("a pool").frame(what)
     }
 }
 
 impl Drop for Surfaces {
     fn drop(&mut self) {
-        self.pool = None;
+        self.pools.clear();
         // SAFETY: the reference that `new` made.
         unsafe { ffi::av_buffer_unref(&mut self.device) };
     }

@@ -212,8 +212,9 @@ The scaler of macOS (`macos`):
 - Its own buffers are the first of BGRA, NV12 and RGhA that it lists (`BYTES_FIRST`, [gotchas](../gotchas.md#operating-systems-and-libraries)).
 - `macos::check` refuses HDR media in an HDR timeline, and pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
-- The draw puts each frame into an NV12 VideoToolbox frame in SDR, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
-  - The frame is 8-bit because the scaler takes 8-bit SDR (`upscale_form`). Retime Process gets P416 frames.
+- The draw puts each frame into a VideoToolbox frame in SDR, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
+  - The frame keeps the depth and the chroma of the source: NV12, P010, P210 or P416 (`surface_pixel`). Retime Process gets P416 frames.
+- The drawn frames come from a few VideoToolbox pools of vidcut's own, one for each layout and size (`Surfaces`).
   - The draw tone-maps an HDR frame and deinterlaces an interlaced frame.
 - It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
   - Why: a picture of 4 times the source fills the cache of the viewer.

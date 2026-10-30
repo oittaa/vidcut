@@ -936,14 +936,20 @@ fn shown_frame(
         Some(single) => single,
         None => drawn.insert(Single::new(reading)?),
     };
-    let out = crate::interpolate::blank(look.size, surface_pixel(look.form))?;
+    let out = crate::interpolate::blank(look.size, surface_pixel(look.form, frames.0))?;
     single.surface(frames, rotation, (look, path), out)
 }
 
-fn surface_pixel((deep, _): Form) -> format::Pixel {
-    match deep {
-        true => format::Pixel::P416LE,
-        false => format::Pixel::NV12,
+fn surface_pixel((deep, _): Form, source: &frame::Video) -> format::Pixel {
+    use format::Pixel as P;
+    if deep {
+        return P::P416LE;
+    }
+    match crate::hw::sw_format(source) {
+        P::NV12 | P::YUV420P | P::YUVJ420P => P::NV12,
+        P::P010LE | P::YUV420P10LE => P::P010LE,
+        P::P210LE | P::YUV422P | P::YUVJ422P | P::YUV422P10LE => P::P210LE,
+        _ => P::P416LE,
     }
 }
 
@@ -1739,8 +1745,8 @@ impl Single {
         out: frame::Video,
     ) -> Result<frame::Video> {
         let pts = frames.0.pts();
+        let pixel = crate::hw::sw_format(&out);
         let sink = crate::screen::Sink::Surface(out);
-        let pixel = surface_pixel(look.form);
         let mut out = self.draw_to(frames, rotation, (look, path), (pixel, sink))?;
         out.set_pts(pts);
         Ok(out)
@@ -2978,7 +2984,7 @@ mod tests {
 
     use vidcut_core::model::{Hdr, Upscaler};
 
-    use super::{PLAIN, fill_black, staying, upscale_form};
+    use super::{PLAIN, fill_black, staying, surface_pixel, upscale_form};
     use crate::ffmpeg::{format::Pixel, frame};
 
     #[test]
@@ -2987,6 +2993,24 @@ mod tests {
             upscale_form(Upscaler::AiFast, Some(Hdr::Pq)),
             (true, Some(Hdr::Pq))
         );
+    }
+
+    #[test]
+    fn an_8_bit_4_2_0_source_is_drawn_into_nv12_for_an_8_bit_model() {
+        let source = frame::Video::new(Pixel::YUV420P, 2, 2);
+        assert_eq!(surface_pixel(PLAIN, &source), Pixel::NV12);
+    }
+
+    #[test]
+    fn a_10_bit_4_2_2_source_is_drawn_into_p210_for_an_8_bit_model() {
+        let source = frame::Video::new(Pixel::YUV422P10LE, 2, 2);
+        assert_eq!(surface_pixel(PLAIN, &source), Pixel::P210LE);
+    }
+
+    #[test]
+    fn a_16_bit_model_gets_p416() {
+        let source = frame::Video::new(Pixel::YUV420P, 2, 2);
+        assert_eq!(surface_pixel((true, None), &source), Pixel::P416LE);
     }
 
     #[test]
