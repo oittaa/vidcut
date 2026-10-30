@@ -219,6 +219,9 @@ The scaler of macOS (`macos`):
   - Why: a picture of 4 times the source fills the cache of the viewer.
   - A picture of a layout that Lanczos cannot take comes out as P416 (`lanczos::takes`).
 - Its buffers lose the color labels of the transfers. Why: with labels, it makes less detail.
+- After an RGB picture, a color fix on the CPU gives the result the low frequencies of its source (`color_fix::fixed`).
+  - It is the fix of AI Best: the source is enlarged bilinearly, and the difference is blurred in 5 levels and added.
+  - A frame that reaches the scaler on the GPU does not get it.
 - AI Fast and AI Best are off on macOS (`super_scale::off_here`).
 
 ## Frame interpolation

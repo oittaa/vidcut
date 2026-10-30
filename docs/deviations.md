@@ -1798,6 +1798,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Then it makes the picture at the size that it shows at, as AI Best does.
     - It reads the frames of a clip in order. Each output frame uses the frame and the output before it.
     - It takes SDR pictures up to 1920×1080, the limit of macOS for video.
+    - After an RGB picture, the color fix of AI Best gives the result the colors and the light of the large areas of its source.
     - macOS downloads its models only when the user agrees, as for the weights of AI Fast and AI Best. vidcut does not ship them.
     - macOS does not give their size, so the question says that the size is unknown. On the owner's Mac, the weight file of the 4x model is 66 MB.
   - AI Best is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.

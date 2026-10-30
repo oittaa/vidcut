@@ -1,3 +1,5 @@
+#[cfg(any(target_os = "macos", test))]
+pub(crate) mod color_fix;
 pub mod flashvsr;
 pub mod macos;
 pub mod nanovsr;

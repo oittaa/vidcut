@@ -435,6 +435,7 @@ mod imp {
                 }
                 None => read(&enlarged, self.format, self.made, deep)?,
             };
+            let out = crate::super_scale::color_fix::fixed(&out, self.made, rgb, self.size, deep);
             told(index, wrote, scaled, clock);
             Ok(out)
         }
