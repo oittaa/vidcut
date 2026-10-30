@@ -321,7 +321,7 @@ mod tests {
             .iter()
             .map(|&(m, n)| {
                 if m == "black" {
-                    VideoPiece::Black { frames: n }
+                    VideoPiece::black(n)
                 } else {
                     piece(m, n)
                 }

@@ -193,8 +193,12 @@ pub enum VideoPiece {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         placed: Vec<Placed>,
     },
+    /// A frame of one color: black, or the color that a dip to color
+    /// goes through.
     Black {
         frames: i64,
+        #[serde(default, skip_serializing_if = "is_black")]
+        color: [u8; 3],
     },
     /// Pictures over each other: `under`, then each of `over` on top of it,
     /// at its level while a dissolve plays (decision D50), each as long as
@@ -377,6 +381,12 @@ pub struct Ramp {
 }
 
 pub const WHOLE: u32 = 1 << 16;
+
+pub const BLACK: [u8; 3] = [0, 0, 0];
+
+fn is_black(c: &[u8; 3]) -> bool {
+    *c == BLACK
+}
 
 impl Ramp {
     pub fn rising(&self, k: i64) -> (i64, i64) {
@@ -583,9 +593,15 @@ impl Fade {
 }
 
 impl VideoPiece {
+    pub fn black(frames: i64) -> Self {
+        Self::Black {
+            frames,
+            color: BLACK,
+        }
+    }
     pub fn frames(&self) -> i64 {
         match self {
-            Self::Source { frames, .. } | Self::Black { frames } => *frames,
+            Self::Source { frames, .. } | Self::Black { frames, .. } => *frames,
             Self::Mix { under, .. } | Self::Titled { under, .. } => under.frames(),
         }
     }
@@ -696,7 +712,10 @@ impl VideoPiece {
                     placed: placed.iter().map(|p| p.after(k)).collect(),
                 }
             }
-            Self::Black { .. } => Self::Black { frames },
+            Self::Black { color, .. } => Self::Black {
+                frames,
+                color: *color,
+            },
             Self::Mix { under, over } => Self::Mix {
                 under: Box::new(under.part(k, frames)),
                 over: over
@@ -717,7 +736,7 @@ impl VideoPiece {
 
     fn goes_on_as(&self, next: &VideoPiece) -> bool {
         match (self, next) {
-            (Self::Black { .. }, Self::Black { .. }) => true,
+            (Self::Black { color: a, .. }, Self::Black { color: b, .. }) => a == b,
             (
                 Self::Source {
                     media,
@@ -777,7 +796,7 @@ impl VideoPiece {
 
     fn lengthen(&mut self, more: i64) {
         match self {
-            Self::Source { frames, .. } | Self::Black { frames } => *frames += more,
+            Self::Source { frames, .. } | Self::Black { frames, .. } => *frames += more,
             Self::Mix { under, over } => {
                 under.lengthen(more);
                 for o in over {
@@ -1440,6 +1459,10 @@ impl Layer {
     }
 }
 
+fn middle((start, end): (i64, i64)) -> i64 {
+    start + (end - start) / 2
+}
+
 pub fn flatten(p: &Project, a: i64, b: i64) -> Result<RenderPlan> {
     flatten_lanes(p, a, b).map(|(plan, _)| plan)
 }
@@ -1503,6 +1526,9 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         }
         for d in played {
             cuts.extend([d.frames.0, d.frames.1].map(|f| f.clamp(a, b)));
+            if transitions::dip_of(d.transition).is_some() {
+                cuts.push(middle(d.frames).clamp(a, b));
+            }
         }
     }
     cuts.sort_unstable();
@@ -1550,6 +1576,28 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 })
             };
             match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {
+                Some(d) if let Some(color) = transitions::dip_of(d.transition) => {
+                    let mid = middle(d.frames);
+                    let (side, half) = match x < mid {
+                        true => (d.before, (x - d.frames.0, mid - d.frames.0, true)),
+                        false => (d.after, (x - mid, d.frames.1 - mid, false)),
+                    };
+                    let half = Some(Ramp {
+                        at: half.0,
+                        of: half.1,
+                        falling: half.2,
+                        wipe: None,
+                    });
+                    let picture = match side.filter(shows) {
+                        Some(c) => shown(c, half, !stack.is_empty())?,
+                        None => Layer::Picture(VideoPiece::black(y - x), half),
+                    };
+                    let backdrop = VideoPiece::Black {
+                        frames: y - x,
+                        color,
+                    };
+                    stack = vec![Layer::Picture(backdrop, None), picture];
+                }
                 Some(d) => {
                     let wipe = transitions::wipe_of(d.transition);
                     let ramp = |falling| Ramp {
@@ -1644,7 +1692,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 }
             }
         }
-        let mut piece = VideoPiece::Black { frames: y - x };
+        let mut piece = VideoPiece::black(y - x);
         for layer in stack {
             piece = match layer {
                 Layer::Picture(shown, None) => shown,
@@ -1919,7 +1967,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
             retime: Retime::Nearest,
             placed: Vec::new(),
         },
-        None => VideoPiece::Black { frames: 1 },
+        None => VideoPiece::black(1),
     })
 }
 
@@ -1963,7 +2011,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                 },
             );
         } else {
-            push_video(&mut video, VideoPiece::Black { frames });
+            push_video(&mut video, VideoPiece::black(frames));
         }
         let samples = sample(t + frames) - sample(t);
         if m.info.audio.is_empty() {
@@ -2287,7 +2335,7 @@ mod tests {
                     frames,
                     ..
                 } => format!("{media}@{source_frame}+{frames}"),
-                VideoPiece::Black { frames } => format!("black+{frames}"),
+                VideoPiece::Black { frames, .. } => format!("black+{frames}"),
                 VideoPiece::Mix { under, over } => {
                     let over: Vec<String> = over
                         .iter()
@@ -2370,6 +2418,41 @@ mod tests {
             .unwrap();
         assert_eq!(ramp.wipe, Some(WipeDirection::Left));
         assert!(!ramp.falling);
+    }
+
+    #[test]
+    fn black_and_red_frames_stay_two_pieces() {
+        let red = VideoPiece::Black {
+            frames: 5,
+            color: [255, 0, 0],
+        };
+        assert!(!VideoPiece::black(5).goes_on_as(&red));
+    }
+
+    #[test]
+    fn a_dip_to_red_fades_out_over_red_then_in() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m2", 10, 60);
+        let dip = json!({"type": "dip_to_color", "color": "#ff0000"});
+        req(
+            &mut f,
+            "edit.dissolve",
+            json!({"at": 50, "transition": dip}),
+        );
+        let plan = flatten(f.editor.project(), 0, 100).unwrap();
+        let halves: Vec<([u8; 3], bool)> = plan
+            .video
+            .iter()
+            .filter_map(|p| match p {
+                VideoPiece::Mix { under, over } => match (&**under, over.first()) {
+                    (VideoPiece::Black { color, .. }, Some(o)) => Some((*color, o.ramp?.falling)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(halves, [([255, 0, 0], true), ([255, 0, 0], false)]);
     }
 
     #[test]
@@ -2465,7 +2548,7 @@ mod tests {
                     frames,
                     ..
                 } => (format!("{media}@{source_frame}"), *frames),
-                VideoPiece::Black { frames } => ("black".into(), *frames),
+                VideoPiece::Black { frames, .. } => ("black".into(), *frames),
                 VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => ("mix".into(), v.frames()),
             })
             .collect();

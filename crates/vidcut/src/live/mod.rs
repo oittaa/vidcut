@@ -3589,9 +3589,7 @@ impl Live {
         self.hear_ducking(&mut plan, q);
         let mut plan = self.preview_plan(plan);
         if a.skips.is_none() {
-            plan.video = vec![render::VideoPiece::Black {
-                frames: plan.frames,
-            }];
+            plan.video = vec![render::VideoPiece::black(plan.frames)];
         }
         self.player.audition(plan, a.at, a.speed, a.skips).is_some()
     }

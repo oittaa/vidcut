@@ -14,7 +14,13 @@ type Card = (&'static str, PictureTransition);
 pub const GROUPS: [(&str, &[Card]); 2] = [
     (
         "Dissolve",
-        &[("Cross Dissolve", PictureTransition::Dissolve)],
+        &[
+            ("Cross Dissolve", PictureTransition::Dissolve),
+            (
+                "Dip To Color Dissolve",
+                PictureTransition::DipToColor { color: [0, 0, 0] },
+            ),
+        ],
     ),
     (
         "Wipe",
@@ -46,6 +52,21 @@ fn paint(painter: &Painter, rect: Rect, kind: PictureTransition) {
             }
             mesh.add_triangle(0, 1, 2);
             mesh.add_triangle(0, 2, 3);
+            painter.add(Shape::mesh(mesh));
+        }
+        PictureTransition::DipToColor { color } => {
+            let [r, g, b] = color;
+            let dip = egui::Color32::from_rgb(r, g, b);
+            let mid = rect.center().x;
+            let mut mesh = Mesh::default();
+            for (x, c) in [(rect.left(), from), (mid, dip), (rect.right(), to)] {
+                mesh.colored_vertex(pos2(x, rect.top()), c);
+                mesh.colored_vertex(pos2(x, rect.bottom()), c);
+            }
+            for i in [0, 2] {
+                mesh.add_triangle(i, i + 1, i + 3);
+                mesh.add_triangle(i, i + 3, i + 2);
+            }
             painter.add(Shape::mesh(mesh));
         }
         PictureTransition::Wipe { direction } => {

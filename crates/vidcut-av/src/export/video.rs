@@ -1490,6 +1490,7 @@ pub struct VideoFrames {
     reading: Vec<Option<usize>>,
     ahead: Ahead<Source, (Input, u64, i64)>,
     black: Option<frame::Video>,
+    colored: Option<([u8; 3], frame::Video)>,
     decoder: Option<crate::hw::GpuDecoder>,
     maker: Maker,
     gpu_made: i64,
@@ -1791,6 +1792,7 @@ impl VideoFrames {
             reading: Vec::new(),
             ahead: Ahead::new(),
             black: None,
+            colored: None,
             decoder: None,
             maker: Maker::new(
                 (width, height, format::Pixel::YUV420P),
@@ -2085,8 +2087,12 @@ impl VideoFrames {
                 } = layer
                 else {
                     if picture {
+                        let color = match layer {
+                            VideoPiece::Black { color, .. } => *color,
+                            _ => vidcut_core::render::BLACK,
+                        };
                         made.push(Layer {
-                            frame: Some(self.black_frame()?),
+                            frame: Some(self.solid_frame(color)?),
                             weight,
                             rotation: 0,
                             sampling: Sampling::Own,
@@ -2164,10 +2170,21 @@ impl VideoFrames {
         }
     }
 
-    fn black_frame(&mut self) -> Result<frame::Video> {
-        let mut out = frame_ref(self.black()?)?;
+    fn solid_frame(&mut self, color: [u8; 3]) -> Result<frame::Video> {
+        let mut out = match color == vidcut_core::render::BLACK {
+            true => frame_ref(self.black()?)?,
+            false => frame_ref(self.colored(color))?,
+        };
         self.black_metadata(&mut out)?;
         Ok(out)
+    }
+
+    fn colored(&mut self, color: [u8; 3]) -> &frame::Video {
+        if self.colored.as_ref().is_none_or(|(c, _)| *c != color) {
+            let (w, h, _) = self.maker.out();
+            self.colored = Some((color, filled(color, (w, h))));
+        }
+        &self.colored.as_ref().expect("just set").1
     }
 
     fn black_metadata(&self, out: &mut frame::Video) -> Result<()> {
@@ -2898,6 +2915,18 @@ fn dolby_vision(f: &frame::Video) -> Result<frame::Video> {
     };
     crate::hdr::copy_dynamic(f, &mut dv, only)?;
     Ok(dv)
+}
+
+fn filled(color: [u8; 3], (w, h): (u32, u32)) -> frame::Video {
+    let mut f = frame::Video::new(format::Pixel::RGB24, w, h);
+    let stride = f.stride(0);
+    let row = color.repeat(w as usize);
+    for line in f.data_mut(0).chunks_mut(stride) {
+        let n = row.len().min(line.len());
+        line[..n].copy_from_slice(&row[..n]);
+    }
+    crate::color::tag_frame(&mut f, None);
+    f
 }
 
 pub(crate) fn fill_black(f: &mut frame::Video) -> Result<()> {

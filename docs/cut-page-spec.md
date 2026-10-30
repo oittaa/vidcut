@@ -649,6 +649,11 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Each clip shows its media past its edge. Thus a dissolve is as long as the clips have frames there.
   - Pictures cross in a straight line. At a gap, they cross from or to black.
   - The level of a Cross Fade at its middle is +3, 0 or −3 dB.
+- **A Dip To Color Dissolve** (p. 1165):
+  - In the first half of the transition, the outgoing picture fades to its color. In the second half, the incoming picture fades in from it.
+  - Its color is black unless it is set. Resolve's Start Ratio and End Ratio come later.
+  - A request makes it: `{"type": "dip_to_color", "color": "#rrggbb"}`.
+  - An OTIO file holds it as a Dip To Color Dissolve, with the color in vidcut's own metadata ([todo](todo/effects-library.md)).
 - **A wipe:**
   - A wipe is another transition on an edit.
   - It uses the same length rules as a dissolve.
@@ -659,7 +664,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A request can make a wipe.
   - A request can change a dissolve into a wipe, and a wipe into a dissolve.
 - **The Transitions tab** (pp. 759–761):
-  - It has a card for Cross Dissolve under Dissolve, and for Edge Wipe under Wipe.
+  - It has cards for Cross Dissolve and Dip To Color Dissolve under Dissolve, and for Edge Wipe under Wipe.
   - The Edge Wipe of the card comes in from the bottom, as Resolve's Edge Wipe at 0 degrees (X89).
   - A drag of a card onto an edit of a video track adds that transition there, one second long.
     - Left of the edit, it ends on the edit. Right of the edit, it starts on it. On the edit, it is centered.
@@ -676,6 +681,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Duration is in frames, with the time beside it. A change keeps the alignment. The length is shortened to the media (X27).
   - Alignment is Start on Edit, Center on Edit or End on Edit.
   - An Edge Wipe also has Edge: Left, Right, Top or Bottom (X89).
+  - A Dip To Color Dissolve also has Color. A change goes to the project when the color picker closes.
   - Each change is a request: `edit.transition` for the type and the edge, `edit.dissolve` for the length and the alignment.
 - **Later:**
   - Smooth Cut
