@@ -196,7 +196,7 @@ pub fn frames_decoded() -> u64 {
     DECODED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Reading {
     Stream,
     Frames,

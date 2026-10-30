@@ -265,7 +265,6 @@ impl<N: Network> Slot<N> {
 
 pub(crate) enum Picture {
     Held(crate::screen::held::Held),
-    Rgb(Vec<u8>),
     Frame(crate::ffmpeg::frame::Video),
 }
 
@@ -285,17 +284,8 @@ pub(crate) trait Run: Send {
         rgb: &crate::ffmpeg::frame::Video,
     ) -> Result<Vec<Out>>;
 
-    fn takes(&self, _f: &crate::ffmpeg::frame::Video, _rotation: u16) -> bool {
-        false
-    }
-
-    fn push_frame(
-        &mut self,
-        index: i64,
-        f: &crate::ffmpeg::frame::Video,
-        rotation: u16,
-    ) -> Result<Vec<Out>> {
-        let _ = (index, f, rotation);
+    fn push_frame(&mut self, index: i64, f: &crate::ffmpeg::frame::Video) -> Result<Vec<Out>> {
+        let _ = (index, f);
         Err(Error::Invalid("this upscaler takes RGB pictures".into()))
     }
 

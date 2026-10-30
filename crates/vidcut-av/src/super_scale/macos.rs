@@ -3,7 +3,6 @@ use vidcut_core::render::VideoPiece;
 
 use crate::error::{Error, Result};
 use crate::ffmpeg::frame::Video;
-use crate::route::Place;
 
 pub const MOST: (u32, u32) = (1920, 1080);
 
@@ -96,38 +95,25 @@ pub fn check<'a>(
 
 pub(crate) struct Run {
     scaler: imp::Scaler,
-    turner: Option<crate::hw::Turner>,
 }
 
 impl Run {
     pub(crate) fn open(size: (u32, u32), made: (u32, u32)) -> Result<Self> {
         Ok(Self {
             scaler: imp::Scaler::open(size, made)?,
-            turner: None,
         })
     }
 }
 
 impl super::Run for Run {
-    fn push(&mut self, index: i64, pts: Option<i64>, rgb: &Video) -> Result<Vec<super::Out>> {
-        let deep = crate::screen::held::deep(rgb);
-        let rgb = self
-            .scaler
-            .scale(index, (&crate::screen::held::rgb(rgb)?, deep))?;
-        Ok(vec![super::Out {
-            index,
-            pts,
-            picture: super::Picture::Rgb(rgb),
-        }])
+    fn push(&mut self, _index: i64, _pts: Option<i64>, _rgb: &Video) -> Result<Vec<super::Out>> {
+        Err(Error::Invalid(
+            "the AI upscaler of macOS takes VideoToolbox frames".into(),
+        ))
     }
 
-    fn takes(&self, f: &Video, _rotation: u16) -> bool {
-        Place::of(f) == Place::VideoToolbox && crate::color::Source::of(f).hdr.is_none()
-    }
-
-    fn push_frame(&mut self, index: i64, f: &Video, rotation: u16) -> Result<Vec<super::Out>> {
-        let upright = crate::hw::Turner::turn(&mut self.turner, f, rotation)?;
-        let made = self.scaler.scale_frame(index, &upright)?;
+    fn push_frame(&mut self, index: i64, f: &Video) -> Result<Vec<super::Out>> {
+        let made = self.scaler.scale_frame(index, f)?;
         Ok(vec![super::Out {
             index,
             pts: f.pts(),
@@ -168,10 +154,6 @@ mod imp {
             Err(Error::Invalid(NEEDS.into()))
         }
 
-        pub(super) fn scale(&mut self, _index: i64, _rgb: (&[u8], bool)) -> Result<Vec<u8>> {
-            match self.0 {}
-        }
-
         pub(super) fn scale_frame(
             &mut self,
             _index: i64,
@@ -204,12 +186,10 @@ mod imp {
     use vidcut_core::model::Upscaler;
 
     use super::NEEDS;
-    use crate::color::Matrix;
     use crate::error::{Error, Result};
     use crate::ffmpeg::{ffi, format, frame::Video};
     use crate::frame_processor::{
         BYTES_FIRST, Frames, Transfer, buffer, format_in, fourcc, frame, numbers, pixels, pool,
-        read, write,
     };
 
     const MISSING: &str = "macOS's super-resolution models aren't on this Mac yet: pass \
@@ -344,13 +324,9 @@ mod imp {
         processor: Retained<VTFrameProcessor>,
         sources: CFRetained<CVPixelBufferPool>,
         outputs: CFRetained<CVPixelBufferPool>,
-        shrunk: Option<CFRetained<CVPixelBufferPool>>,
         transfer: Transfer,
-        lanczos: Option<crate::lanczos::Lanczos>,
         shrink: Option<crate::lanczos::Lanczos>,
         frames: Frames,
-        format: u32,
-        size: (u32, u32),
         enlarged: (u32, u32),
         made: (u32, u32),
         last: Option<(
@@ -380,9 +356,6 @@ mod imp {
             };
             let sources = pool(size, format, &from, WHAT)?;
             let outputs = pool(enlarged, format, &to, WHAT)?;
-            let shrunk = (made != enlarged)
-                .then(|| pool(made, format, &to, WHAT))
-                .transpose()?;
             // SAFETY: a new processor of the frame processor class.
             let processor = unsafe { VTFrameProcessor::new() };
             // SAFETY: a new processor and a live configuration.
@@ -406,44 +379,18 @@ mod imp {
                 processor,
                 sources,
                 outputs,
-                shrunk,
                 transfer: Transfer::new(WHAT)?,
-                lanczos: None,
                 shrink: None,
                 frames: Frames::default(),
-                format,
-                size,
                 enlarged,
                 made,
                 last: None,
             })
         }
 
-        pub(super) fn scale(&mut self, index: i64, (rgb, deep): (&[u8], bool)) -> Result<Vec<u8>> {
-            let clock = std::time::Instant::now();
-            let source = buffer(&self.sources, WHAT)?;
-            write(&source, self.format, self.size, (rgb, deep))?;
-            let wrote = clock.elapsed();
-            let enlarged = self.enlarge(index, &source)?;
-            let scaled = clock.elapsed();
-            let out = match &self.shrunk {
-                Some(shrunk) => {
-                    let small = buffer(shrunk, WHAT)?;
-                    self.transfer.run(&enlarged, &small, Matrix::Bt709, WHAT)?;
-                    enlarged.remove_all_attachments();
-                    read(&small, self.format, self.made, deep)?
-                }
-                None => read(&enlarged, self.format, self.made, deep)?,
-            };
-            told(index, wrote, scaled, clock);
-            Ok(out)
-        }
-
         pub(super) fn scale_frame(&mut self, index: i64, f: &Video) -> Result<Video> {
             let clock = std::time::Instant::now();
             let source = buffer(&self.sources, WHAT)?;
-            let scaled = crate::lanczos::sized(&mut self.lanczos, f, self.size)?;
-            let f = scaled.as_ref().unwrap_or(f);
             let matrix = crate::color::colors_of(f).matrix;
             self.transfer.run(pixels(f, WHAT)?, &source, matrix, WHAT)?;
             source.remove_all_attachments();

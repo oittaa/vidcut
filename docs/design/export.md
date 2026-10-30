@@ -160,14 +160,14 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
 - With an AI upscaler of Super Scale, the upscaler enlarges the two frames of the pair first (`scaled_pair`). The frame is then made from the two enlarged pictures.
   - Why: Super Scale works on the source, before the retime ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
   - The `Source` keeps the last two enlarged pictures (`Source::ai_picture`). Thus the later picture of one pair is the earlier picture of the next.
-- With the frame rate conversion of macOS and no placed picture, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
-  - Two SDR VideoToolbox frames go to it as they are. The draw puts other frames into P416 VideoToolbox frames first (`Source::frame_of`).
+- With the frame rate conversion of macOS, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
+  - The draw puts both frames into P416 VideoToolbox frames in the timeline color space first (`Source::frame_of`). They are sized and placed as the RGB pair is.
 - The pair is sized and placed before the frame is made. Why: Edit Sizing comes before Speed Effects ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
   - A clip with no placed picture: each frame becomes RGB on the GPU, upright, at the size that it fills in the frame (`fitted_size`).
   - A placed clip: the draw places each frame into RGB with its Transform, Crop and Dynamic Zoom (`Sampling::Colors`). The RGB covers only the bounds of the placed picture (`placed_look`).
   - Super Scale enlarges each frame with the kernel of its Sharpness, as the draw of an export does (`screen::kernel`).
   - `Source::rgb_from` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next, while the placing stays the same (`Look`).
-- `interpolate::between` makes the frame from the two RGB pictures.
+- With the other processes, `interpolate::between` makes the frame from the two RGB pictures.
 - The key of a pair names its placing (`Source::look_id`). Thus a new placing gets new features.
 - A made frame of a placed clip is already placed (`Sampling::Placed`). The draw takes only its edges, its opacity and its composite mode from `place::Placing`.
   - The draw uses the placing that the frame was made with. Thus during a drag in the viewer, a made frame moves only when it is made again.

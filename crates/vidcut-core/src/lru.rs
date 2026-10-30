@@ -119,6 +119,13 @@ impl<K: Hash + Eq + Clone, V, const N: usize> Lru<K, V, N> {
         self.link_newest(i);
     }
 
+    pub fn clear(&mut self) {
+        self.at.clear();
+        self.nodes.clear();
+        self.oldest = None;
+        self.newest = None;
+    }
+
     pub fn remove(&mut self, key: &K) -> Option<(K, V)> {
         let i = self.at.remove(key)?;
         self.unlink(i);
@@ -154,5 +161,13 @@ mod tests {
         lru.get(&1);
         lru.insert(3, ());
         assert_eq!(lru.iter().map(|(k, _)| *k).collect::<Vec<_>>(), [1, 3]);
+    }
+
+    #[test]
+    fn a_cleared_cache_finds_nothing() {
+        let mut lru: Lru<u32, (), 2> = Lru::new();
+        lru.insert(1, ());
+        lru.clear();
+        assert_eq!(lru.get(&1), None);
     }
 }

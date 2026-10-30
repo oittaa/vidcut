@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use vidcut_core::lru::Lru;
 use vidcut_core::model::{ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
 use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Placed, Ramp, VideoPiece, WHOLE, Wipe};
@@ -70,11 +71,11 @@ pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
     Ok(dst)
 }
 
-type Rgb = (Option<i64>, Look, frame::Video);
+type Drawn = Lru<Option<i64>, (Look, frame::Video), 2>;
 
 enum Fed {
     Rgb(frame::Video),
-    Frame(frame::Video, u16),
+    Frame(frame::Video),
 }
 
 pub type Form = (bool, Option<Hdr>);
@@ -131,10 +132,10 @@ struct Source {
     current: Option<(frame::Video, f64)>,
     prev: Option<(frame::Video, f64)>,
     prev2: Option<(frame::Video, f64)>,
-    lumas: Vec<(Option<i64>, Vec<u8>)>,
+    lumas: Lru<Option<i64>, Vec<u8>, 3>,
     retime: Retime,
     retimer: Option<crate::interpolate::User>,
-    rgb: Vec<Rgb>,
+    rgb: Drawn,
     dynamic: frame::Video,
     meter: Option<crate::light::Meter>,
     light: Option<crate::light::FrameLight>,
@@ -150,20 +151,18 @@ struct Source {
     upright: bool,
     sampling: Sampling,
     looks: (Option<Look>, u64),
-    scaled: Vec<(PictureId, frame::Video)>,
+    scaled: Lru<PictureId, frame::Video, 2>,
     gpu: Option<crate::hw::GpuDecoder>,
     ahead: Option<VideoReader>,
     run: Option<Session>,
     queued: VecDeque<frame::Video>,
-    turner: Option<crate::hw::Turner>,
     drawn: Option<Single>,
-    framer: Option<Single>,
-    framed: Vec<Rgb>,
+    framed: Drawn,
     keeper: Option<crate::hw::Keeper>,
     unkept: bool,
     before: Option<frame::Video>,
     woven: Option<Weave>,
-    made: Vec<(Option<i64>, frame::Video)>,
+    made: Lru<Option<i64>, frame::Video, 3>,
 }
 
 type Weave = (bool, Option<frame::Video>, Option<frame::Video>);
@@ -241,10 +240,10 @@ impl Source {
             current: None,
             prev: None,
             prev2: None,
-            lumas: Vec::new(),
+            lumas: Lru::new(),
             retime: Retime::Nearest,
             retimer: None,
-            rgb: Vec::new(),
+            rgb: Lru::new(),
             dynamic: frame::Video::empty(),
             meter: measure.then(crate::light::Meter::new),
             light: None,
@@ -260,20 +259,18 @@ impl Source {
             upright: false,
             sampling: Sampling::Own,
             looks: (None, 0),
-            scaled: Vec::new(),
+            scaled: Lru::new(),
             gpu: ahead_gpu,
             ahead: None,
             run: None,
             queued: VecDeque::new(),
-            turner: None,
             drawn: None,
-            framer: None,
-            framed: Vec::new(),
+            framed: Lru::new(),
             keeper: None,
             unkept: false,
             before: None,
             woven: None,
-            made: Vec::new(),
+            made: Lru::new(),
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -308,10 +305,10 @@ impl Source {
             current: None,
             prev: None,
             prev2: None,
-            lumas: Vec::new(),
+            lumas: Lru::new(),
             retime: Retime::Nearest,
             retimer: None,
-            rgb: Vec::new(),
+            rgb: Lru::new(),
             dynamic: frame::Video::empty(),
             meter: measure.then(crate::light::Meter::new),
             light: None,
@@ -327,20 +324,18 @@ impl Source {
             upright: false,
             sampling: Sampling::Own,
             looks: (None, 0),
-            scaled: Vec::new(),
+            scaled: Lru::new(),
             gpu: ahead_gpu,
             ahead: None,
             run: None,
             queued: VecDeque::new(),
-            turner: None,
             drawn: None,
-            framer: None,
-            framed: Vec::new(),
+            framed: Lru::new(),
             keeper: None,
             unkept: false,
             before: None,
             woven: None,
-            made: Vec::new(),
+            made: Lru::new(),
         })
     }
 
@@ -503,24 +498,21 @@ impl Source {
         if self.drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
             self.drawn = None;
             self.rgb.clear();
-        }
-        if self.framer.as_ref().is_some_and(|s| !s.on_offscreen()) {
-            self.framer = None;
             self.framed.clear();
         }
     }
 
     fn luma_of(&mut self, f: &frame::Video, size: (u32, u32), reading: Reading) -> Result<Vec<u8>> {
         let pts = f.pts();
-        if let Some((_, l)) = self.lumas.iter().find(|(p, _)| *p == pts) {
+        if let Some(l) = self.lumas.get(&pts) {
             return Ok(l.clone());
         }
         self.follow_offscreen();
         let held = self
             .rgb
-            .iter()
-            .find(|(p, l, _)| *p == pts && l.plain(size) && l.form.1.is_none())
-            .map(|(_, _, rgb)| frame_ref(rgb))
+            .peek(&pts)
+            .filter(|(l, _)| l.plain(size) && l.form.1.is_none())
+            .map(|(_, rgb)| frame_ref(rgb))
             .transpose()?;
         let held = match held {
             Some(rgb) => Some(rgb),
@@ -540,10 +532,7 @@ impl Source {
             (Some(rgb), Some(single)) => single.small_luma(&rgb)?,
             _ => crate::analysis::small_luma(&mut None, f)?,
         };
-        if self.lumas.len() >= 3 {
-            self.lumas.remove(0);
-        }
-        self.lumas.push((pts, l.clone()));
+        self.lumas.insert(pts, l.clone());
         Ok(l)
     }
 
@@ -588,25 +577,28 @@ impl Source {
         let rotation = self.reader.rotation();
         let [before, f, after] = self.neighbors(prev)?;
         let f = f.expect("a frame");
-        self.follow_offscreen();
-        let pts = f.pts();
-        if let Some((_, _, made)) = self.framed.iter().find(|(p, l, _)| *p == pts && l == look) {
-            return frame_ref(made);
-        }
         let around = (before.as_ref(), after.as_ref());
-        let made = shown_frame(
-            &mut self.framer,
-            (&f, around),
-            (rotation, look),
-            reading,
-            self.reader.path(),
-        )?;
-        self.framed.retain(|(p, l, _)| l == look && *p != pts);
-        if self.framed.len() >= 2 {
-            self.framed.remove(0);
-        }
-        self.framed.push((pts, look.clone(), frame_ref(&made)?));
-        Ok(made)
+        self.frame_from((&f, around), rotation, look, reading)
+    }
+
+    fn frame_from(
+        &mut self,
+        (f, around): (&frame::Video, Around<'_>),
+        rotation: u16,
+        look: &Look,
+        reading: Reading,
+    ) -> Result<frame::Video> {
+        self.follow_offscreen();
+        let path = self.reader.path();
+        drawn_once(&mut self.framed, (f.pts(), look), || {
+            shown_frame(
+                &mut self.drawn,
+                (f, around),
+                (rotation, look),
+                reading,
+                path,
+            )
+        })
     }
 
     fn rgb_from(
@@ -617,24 +609,10 @@ impl Source {
         reading: Reading,
     ) -> Result<frame::Video> {
         self.follow_offscreen();
-        let pts = f.pts();
-        if let Some((_, _, rgb)) = self.rgb.iter().find(|(p, l, _)| *p == pts && l == look) {
-            return frame_ref(rgb);
-        }
-        let rgb = shown_rgb(
-            &mut self.drawn,
-            (f, around),
-            rotation,
-            look,
-            reading,
-            self.reader.path(),
-        )?;
-        self.rgb.retain(|(p, l, _)| l == look && *p != pts);
-        if self.rgb.len() >= 2 {
-            self.rgb.remove(0);
-        }
-        self.rgb.push((pts, look.clone(), frame_ref(&rgb)?));
-        Ok(rgb)
+        let path = self.reader.path();
+        drawn_once(&mut self.rgb, (f.pts(), look), || {
+            shown_rgb(&mut self.drawn, (f, around), rotation, look, reading, path)
+        })
     }
 
     fn peek(&mut self) -> Result<Option<frame::Video>> {
@@ -652,14 +630,11 @@ impl Source {
         (layer, reading): (usize, Reading),
         f: &frame::Video,
     ) -> Result<frame::Video> {
-        if let Some((_, made)) = self.made.iter().find(|(pts, _)| *pts == f.pts()) {
+        if let Some(made) = self.made.get(&f.pts()) {
             return frame_ref(made);
         }
         let made = maker.make_layer(layer, &mut self.fitting, f, self.reader.path(), reading)?;
-        if self.made.len() >= 3 {
-            self.made.remove(0);
-        }
-        self.made.push((f.pts(), frame_ref(&made)?));
+        self.made.insert(f.pts(), frame_ref(&made)?);
         Ok(made)
     }
 
@@ -736,13 +711,13 @@ fn upright_fit(f: &frame::Video, rotation: u16, out: (u32, u32)) -> (u32, u32) {
 
 const PLACED_MOST: f64 = 16384.0;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Key {
     Frame(i64),
     Still(Option<i64>),
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 struct PictureId {
     input: Input,
     space: ColorSpace,
@@ -873,7 +848,6 @@ fn made_picture(
         crate::super_scale::Picture::Held(held) => {
             crate::screen::held::picture(held, made, pts, form)
         }
-        crate::super_scale::Picture::Rgb(rgb) => Ok(big_picture(&rgb, made, pts, form)),
         crate::super_scale::Picture::Frame(f) => Ok(f),
     }
 }
@@ -918,10 +892,20 @@ fn shown_rgb(
         Some(single) => single,
         None => drawn.insert(Single::new(reading)?),
     };
-    match look.placed.is_empty() {
-        true => single.held(frames, rotation, look, path),
-        false => single.placed(frames, rotation, look, path),
+    single.held(frames, rotation, look, path)
+}
+
+fn drawn_once(
+    kept: &mut Drawn,
+    (pts, look): (Option<i64>, &Look),
+    draw: impl FnOnce() -> Result<frame::Video>,
+) -> Result<frame::Video> {
+    if let Some((_, made)) = kept.get(&pts).filter(|(l, _)| l == look) {
+        return frame_ref(made);
     }
+    let made = draw()?;
+    kept.insert(pts, (look.clone(), frame_ref(&made)?));
+    Ok(made)
 }
 
 pub(crate) fn surface_picture(
@@ -942,33 +926,31 @@ pub(crate) fn surface_picture(
 }
 
 fn shown_frame(
-    framer: &mut Option<Single>,
+    drawn: &mut Option<Single>,
     frames: (&frame::Video, Around<'_>),
     (rotation, look): (u16, &Look),
     reading: Reading,
     path: &Path,
 ) -> Result<frame::Video> {
-    let single = match framer {
+    let single = match drawn {
         Some(single) => single,
-        None => framer.insert(Single::new(reading)?),
+        None => drawn.insert(Single::new(reading)?),
     };
-    let out = crate::interpolate::blank(look.size)?;
+    let out = crate::interpolate::blank(look.size, surface_pixel(look.form, frames.0))?;
     single.surface(frames, rotation, (look, path), out)
 }
 
-fn big_picture(
-    out: &[u8],
-    (w, h): (u32, u32),
-    pts: Option<i64>,
-    (deep, hdr): Form,
-) -> frame::Video {
-    let (pixel, bytes) = crate::screen::held::rgb_pixel(deep);
-    let mut big = crate::buffers::unpacked(pixel, (w, h), bytes, out);
-    crate::screen::held::tag(&mut big, hdr);
-    // SAFETY: a plain field of its own frame.
-    unsafe { (*big.as_mut_ptr()).sample_aspect_ratio = ffmpeg::ffi::AVRational { num: 1, den: 1 } };
-    big.set_pts(pts);
-    big
+fn surface_pixel((deep, _): Form, source: &frame::Video) -> format::Pixel {
+    use format::Pixel as P;
+    if deep {
+        return P::P416LE;
+    }
+    match crate::hw::sw_format(source) {
+        P::NV12 | P::YUV420P | P::YUVJ420P => P::NV12,
+        P::P010LE | P::YUV420P10LE => P::P010LE,
+        P::P210LE | P::YUV422P | P::YUVJ422P | P::YUV422P10LE => P::P210LE,
+        _ => P::P416LE,
+    }
 }
 
 impl Source {
@@ -1061,15 +1043,12 @@ impl Source {
             },
             form,
         };
-        if let Some((_, p)) = self.scaled.iter().find(|(k, _)| *k == id) {
+        if let Some(p) = self.scaled.get(&id) {
             return frame_ref(p).map(Some);
         }
         let p = self.ai_made(&id, size, reading)?;
         if !self.retime.is_nearest() {
-            if self.scaled.len() >= 2 {
-                self.scaled.remove(0);
-            }
-            self.scaled.push((id, frame_ref(&p)?));
+            self.scaled.insert(id, frame_ref(&p)?);
         }
         Ok(Some(p))
     }
@@ -1154,10 +1133,9 @@ impl Source {
                 continue;
             }
             let next = if run.own {
-                let rotation = self.reader.rotation();
-                let takes = |f: &frame::Video| run.run.takes(f, rotation);
+                let as_is = run.id.upscaler == Upscaler::Macos;
                 match self.reader.next_frame()? {
-                    Some(f) if takes(&f) => {
+                    Some(f) if as_is => {
                         self.queued.push_back(frame_ref(&f)?);
                         Some(f)
                     }
@@ -1303,22 +1281,17 @@ impl Source {
             return self.end_run();
         }
         let clock = Instant::now();
-        let woven = crate::decode::FrameProps::of(f).top_field_first.is_some();
         let look = Look::fitted(run.size, 0, run.id.form);
         let path = self.reader.path();
-        let input = match (run.run.takes(f, rotation) && !woven, run.id.upscaler) {
-            (true, _) => Fed::Frame(frame_ref(f)?, rotation),
-            (false, Upscaler::Macos) => Fed::Frame(
-                shown_frame(
-                    &mut self.framer,
-                    (f, around),
-                    (rotation, &look),
-                    reading,
-                    path,
-                )?,
-                0,
-            ),
-            (false, _) => Fed::Rgb(shown_rgb(
+        let input = match run.id.upscaler {
+            Upscaler::Macos => Fed::Frame(shown_frame(
+                &mut self.drawn,
+                (f, around),
+                (rotation, &look),
+                reading,
+                path,
+            )?),
+            _ => Fed::Rgb(shown_rgb(
                 &mut self.drawn,
                 (f, around),
                 rotation,
@@ -1330,7 +1303,7 @@ impl Source {
         let converted = clock.elapsed();
         let outs = match input {
             Fed::Rgb(rgb) => run.run.push(i, f.pts(), &rgb)?,
-            Fed::Frame(f, rotation) => run.run.push_frame(i, &f, rotation)?,
+            Fed::Frame(f) => run.run.push_frame(i, &f)?,
         };
         let pushed = clock.elapsed();
         run.next = i + 1;
@@ -1387,7 +1360,6 @@ impl Source {
 
     fn miss(&mut self, f: &frame::Video) -> Result<()> {
         let at = self.frame_index(f.pts());
-        let rotation = self.reader.rotation();
         let Some(run) = self.run.as_mut().filter(|r| r.own && !r.lost && !r.ended) else {
             return Ok(());
         };
@@ -1399,7 +1371,7 @@ impl Source {
             run.lost = true;
             return Ok(());
         }
-        let kept = match run.run.takes(f, rotation) {
+        let kept = match run.id.upscaler == Upscaler::Macos {
             true => frame_ref(f)?,
             false => self.kept(f)?,
         };
@@ -1757,7 +1729,7 @@ impl Single {
         path: &Path,
     ) -> Result<frame::Video> {
         let pixel = crate::screen::held::rgb_pixel(look.form.0).0;
-        self.fitted(
+        self.draw_to(
             frames,
             rotation,
             (look, path),
@@ -1773,65 +1745,44 @@ impl Single {
         out: frame::Video,
     ) -> Result<frame::Video> {
         let pts = frames.0.pts();
+        let pixel = crate::hw::sw_format(&out);
         let sink = crate::screen::Sink::Surface(out);
-        let pixel = format::Pixel::P416LE;
-        let mut out = self.fitted(frames, rotation, (look, path), (pixel, sink))?;
+        let mut out = self.draw_to(frames, rotation, (look, path), (pixel, sink))?;
         out.set_pts(pts);
         Ok(out)
     }
 
-    fn fitted(
+    fn draw_to(
         &mut self,
         frames: (&frame::Video, Around<'_>),
         rotation: u16,
         (look, path): (&Look, &Path),
         (pixel, sink): (format::Pixel, crate::screen::Sink<'_>),
     ) -> Result<frame::Video> {
-        let ((w, h), kernel, form) = (look.size, look.kernel, look.form);
-        let picture = std::sync::Arc::new(self.woven(frames, rotation, path)?);
+        let picture = self.woven(frames, rotation, path)?;
+        let placed = [look.placed.clone()];
+        let (picture, placed) = match look.placed.is_empty() {
+            true => (picture, &placed[..0]),
+            false => {
+                let sampling = Sampling::Colors {
+                    frame: look.frame,
+                    origin: look.origin,
+                };
+                (picture.with_sampling(sampling), &placed[..])
+            }
+        };
+        let picture = std::sync::Arc::new(picture);
         let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
+        let ((w, h), form) = (look.size, look.form);
         screen.draw(
             gpu,
             Some(&picture),
             &[],
-            (&[], &[], &[kernel], form.1),
+            (placed, &[], &[look.kernel], form.1),
             w,
             h,
         );
         screen.encoded(gpu, pixel, (form.1, form.1), sink)
-    }
-
-    fn placed(
-        &mut self,
-        frames: (&frame::Video, Around<'_>),
-        rotation: u16,
-        look: &Look,
-        path: &Path,
-    ) -> Result<frame::Video> {
-        let sampling = Sampling::Colors {
-            frame: look.frame,
-            origin: look.origin,
-        };
-        let picture = self.woven(frames, rotation, path)?.with_sampling(sampling);
-        let picture = std::sync::Arc::new(picture);
-        let placed = [look.placed.clone()];
-        let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
-        let (w, h) = look.size;
-        screen.draw(
-            gpu,
-            Some(&picture),
-            &[],
-            (&placed, &[], &[look.kernel], look.form.1),
-            w,
-            h,
-        );
-        let form = look.form;
-        screen.encoded(
-            gpu,
-            crate::screen::held::rgb_pixel(form.0).0,
-            (form.1, form.1),
-            crate::screen::Sink::Held,
-        )
     }
 }
 
@@ -2715,29 +2666,16 @@ impl VideoFrames {
             return self.shown(i, s, layer, changed);
         };
         let size = look.size;
-        let pair = match (&scaled, &src.prev, &src.current) {
-            _ if !look.placed.is_empty() => None,
-            (Some((a, b, _)), ..) if crate::interpolate::takes_frames(*retime, a, b) => {
-                Some((frame_ref(a)?, frame_ref(b)?))
-            }
-            (None, Some((a, _)), Some((b, _)))
-                if crate::interpolate::takes_frames(*retime, a, b) =>
-            {
-                let turner = &mut src.turner;
-                Some((
-                    crate::hw::Turner::turn(turner, a, rotation)?,
-                    crate::hw::Turner::turn(turner, b, rotation)?,
-                ))
-            }
-            _ => None,
-        };
-        let drawn = *retime == Retime::Macos && look.placed.is_empty() && scaled.is_none();
-        let pair = match pair {
-            None if drawn => Some((
+        let pair = match (*retime == Retime::Macos, &scaled) {
+            (false, _) => None,
+            (true, Some((a, b, _))) => Some((
+                src.frame_from((a, (None, None)), 0, &look, reading)?,
+                src.frame_from((b, (None, None)), 0, &look, reading)?,
+            )),
+            (true, None) => Some((
                 src.frame_of(true, &look, reading)?,
                 src.frame_of(false, &look, reading)?,
             )),
-            pair => pair,
         };
         let frames = pair.is_some();
         let (a, b) = match (pair, &scaled) {
@@ -3046,35 +2984,8 @@ mod tests {
 
     use vidcut_core::model::{Hdr, Upscaler};
 
-    use super::{PLAIN, big_picture, fill_black, staying, upscale_form};
-    use crate::ffmpeg::util::color::{Primaries, TransferCharacteristic};
+    use super::{PLAIN, fill_black, staying, surface_pixel, upscale_form};
     use crate::ffmpeg::{format::Pixel, frame};
-
-    #[test]
-    fn a_16_bit_pq_picture_is_rgb48_in_bt_2020_pq() {
-        let f = big_picture(&[0; 24], (2, 2), None, (true, Some(Hdr::Pq)));
-        assert_eq!(
-            (
-                f.format(),
-                f.color_primaries(),
-                f.color_transfer_characteristic()
-            ),
-            (
-                Pixel::RGB48LE,
-                Primaries::BT2020,
-                TransferCharacteristic::SMPTE2084
-            )
-        );
-    }
-
-    #[test]
-    fn a_16_bit_hlg_picture_is_tagged_hlg() {
-        let f = big_picture(&[0; 24], (2, 2), None, (true, Some(Hdr::Hlg)));
-        assert_eq!(
-            f.color_transfer_characteristic(),
-            TransferCharacteristic::ARIB_STD_B67
-        );
-    }
 
     #[test]
     fn ai_fast_upscales_in_the_timeline_colors_at_16_bits() {
@@ -3082,6 +2993,24 @@ mod tests {
             upscale_form(Upscaler::AiFast, Some(Hdr::Pq)),
             (true, Some(Hdr::Pq))
         );
+    }
+
+    #[test]
+    fn an_8_bit_4_2_0_source_is_drawn_into_nv12_for_an_8_bit_model() {
+        let source = frame::Video::new(Pixel::YUV420P, 2, 2);
+        assert_eq!(surface_pixel(PLAIN, &source), Pixel::NV12);
+    }
+
+    #[test]
+    fn a_10_bit_4_2_2_source_is_drawn_into_p210_for_an_8_bit_model() {
+        let source = frame::Video::new(Pixel::YUV422P10LE, 2, 2);
+        assert_eq!(surface_pixel(PLAIN, &source), Pixel::P210LE);
+    }
+
+    #[test]
+    fn a_16_bit_model_gets_p416() {
+        let source = frame::Video::new(Pixel::YUV420P, 2, 2);
+        assert_eq!(surface_pixel((true, None), &source), Pixel::P416LE);
     }
 
     #[test]

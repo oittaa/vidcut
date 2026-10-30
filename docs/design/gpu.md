@@ -82,8 +82,7 @@ In the viewer, exports, proxies and thumbnails:
 - A layer keeps the picture that its planes hold: from memory, from NVDEC, or brought down. A redraw of the same picture copies nothing.
 - A Direct3D 11 texture of the viewer keeps the picture that it holds (`D3d11Shared`). A redraw of the same picture does not fill it again.
 - A layer that brings its picture down brings down only its own frame (`alone_copied_down`).
-- `hw::Turner` turns VideoToolbox frames for the scalers of macOS (`vt::Turn`, `transpose_vt`).
-- Lanczos on Metal scales the input of the scaler and the frame interpolation of macOS to the size of their session (`lanczos::sized`). It also scales the output of the scaler to the size that it shows at.
+- Lanczos on Metal scales the output of the scaler of macOS to the size that it shows at (`lanczos::sized`).
   - Why Lanczos: the scaler of VideoToolbox keeps less detail.
 
 The draw:
@@ -171,7 +170,7 @@ The AI upscalers share one path in the reader:
 - A run takes frames in order. It reads them from the reader's queue, or with a second `VideoReader` (`Source::seek_ahead`).
 - The run gives each picture once, and keeps the last one for a change of size.
 - A picture of AI Fast or AI Best stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`, `Layout::Rgb48`).
-- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best and the scaler of macOS take 8-bit SDR RGB.
+- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best takes 8-bit SDR RGB. The scaler of macOS takes 8-bit SDR VideoToolbox frames.
   - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast came nearer to the real frames with 16 bits, in the same time.
 - The reader drops a run for a frame that the run does not give (`RUN_JUMP`).
 - `super_scale::report` tells what the upscaler makes. The stats panel shows it (`SuperScaleStats`).
@@ -210,12 +209,13 @@ AI Best (`flashvsr`):
 The scaler of macOS (`macos`):
 
 - It is a `VTFrameProcessor` session with a `VTSuperResolutionScalerConfiguration`, on macOS 26 and later.
-- It takes 8-bit SDR RGB, in the first of BGRA, NV12 and RGhA that it lists (`BYTES_FIRST`, [gotchas](../gotchas.md#operating-systems-and-libraries)).
+- Its own buffers are the first of BGRA, NV12 and RGhA that it lists (`BYTES_FIRST`, [gotchas](../gotchas.md#operating-systems-and-libraries)).
 - `macos::check` refuses HDR media in an HDR timeline, and pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
-- An SDR VideoToolbox frame reaches it on the GPU (`Run::push_frame`). A turned frame turns first (`hw::Turner`).
-- The draw puts other frames into P416 VideoToolbox frames first, in SDR (`shown_frame`). They then reach it in the same way.
-  - These are HDR frames, which the draw tone-maps, interlaced frames and frames that the CPU decoded.
+- The draw puts each frame into a VideoToolbox frame in SDR, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
+  - The frame keeps the depth and the chroma of the source: NV12, P010, P210 or P416 (`surface_pixel`). Retime Process gets P416 frames.
+- The drawn frames come from a few VideoToolbox pools of vidcut's own, one for each layout and size (`Surfaces`).
+  - The draw tone-maps an HDR frame and deinterlaces an interlaced frame.
 - It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
   - Why: a picture of 4 times the source fills the cache of the viewer.
   - A picture of a layout that Lanczos cannot take comes out as P416 (`lanczos::takes`).
@@ -239,15 +239,13 @@ On macOS (`interpolate::macos`):
 
 - The frame rate conversion of macOS makes the frame, in a `VTFrameProcessor` session.
 - Its buffers are RGhA when it lists RGhA (`HALF_FIRST`). Thus 16-bit and HDR pictures keep their depth ([gotchas](../gotchas.md#operating-systems-and-libraries)).
-- Two SDR VideoToolbox frames of a clip with no placed picture reach it on the GPU (`interpolate::takes_frames`). Turned frames turn first (`hw::Turner`).
-- Lanczos sizes them to the size that the picture fills in the frame, before the frame is made.
-- The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
-- The draw puts the other frames of a clip with no placed picture into 16-bit 4:4:4 VideoToolbox frames (P416), in the timeline color space (`Source::frame_of`). They then take the same path.
-  - The frames come from a VideoToolbox pool of vidcut's own (`interpolate::blank`, `Surfaces`). Thus frames that the CPU decoded take this path too.
+- The draw puts each frame of the pair into a VideoToolbox frame (`Source::frame_of`).
+  - The frame is 16-bit 4:4:4 (P416), in the timeline color space.
+  - It is sized and placed as the RGB pair of the other processes is ([export](export.md#which-source-frame)).
+  - They come from the VideoToolbox pools of vidcut's own (`interpolate::blank`, `Surfaces`). Thus frames that the CPU decoded take this path too.
   - Why: a Mac has unified memory. A copy of a picture through the CPU only costs time.
-- The frames of a placed clip go through 16-bit RGB in the timeline color space (`Form`).
-  - The session reads a held picture down from the GPU only for a new pair (`Input::Held`).
-  - The next frame between the same pair uses the pair that the session has (`SequentialReferencesUnchanged`).
+- The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
+- The next frame between the same pair uses the pair that the session has (`SequentialReferencesUnchanged`).
 
 `interpolate::report` tells what each process makes. The stats panel shows it (`RetimeStats`).
 

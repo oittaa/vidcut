@@ -141,10 +141,8 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 # macOS's own super-resolution scaler and frame rate conversion
 # (VideoToolbox's VTFrameProcessor) for the macOS processes of Super Scale
 # and Retime Process, with the CoreVideo pixel buffers and CoreMedia times
-# that they take. Zlib, Apache-2.0 or MIT; half for its 16-bit float
-# pictures is MIT or Apache-2.0.
+# that they take. Zlib, Apache-2.0 or MIT.
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
-half = { version = "2", default-features = false }
 block2 = { version = "0.6", default-features = false, features = ["std"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = [
     "std",

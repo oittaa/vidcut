@@ -45,7 +45,6 @@ objc2-video-toolbox.workspace = true
 objc2-metal.workspace = true
 objc2-metal-performance-shaders.workspace = true
 objc2-io-surface.workspace = true
-half.workspace = true
 
 [dev-dependencies]
 naga.workspace = true

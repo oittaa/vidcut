@@ -12,7 +12,6 @@ use crate::compute::Gpu;
 use crate::error::{Error, Result};
 use crate::ffmpeg::frame;
 use crate::models::{self, Fetch, Need};
-use crate::route::Place;
 use crate::screen::held;
 use crate::super_scale::Picture;
 
@@ -435,15 +434,8 @@ fn dump(name: &str, size: (u32, u32), rgb: &[u8]) -> Result<()> {
     )
 }
 
-pub(crate) fn takes_frames(r: Retime, a: &frame::Video, b: &frame::Video) -> bool {
-    let sdr_on_gpu = |f: &frame::Video| {
-        Place::of(f) == Place::VideoToolbox && crate::color::Source::of(f).hdr.is_none()
-    };
-    r == Retime::Macos && sdr_on_gpu(a) && sdr_on_gpu(b)
-}
-
-pub(crate) fn blank(size: (u32, u32)) -> Result<frame::Video> {
-    macos::blank(size)
+pub(crate) fn blank(size: (u32, u32), pixel: crate::ffmpeg::format::Pixel) -> Result<frame::Video> {
+    macos::blank(size, pixel)
 }
 
 pub(crate) fn between_frames(
@@ -484,21 +476,17 @@ pub(crate) fn between(
             name(r)
         )));
     }
-    let made = if r == Retime::Macos {
-        Picture::Rgb(macos::between(
-            key,
-            macos::Input::Held(a),
-            macos::Input::Held(b),
-            size,
-            t,
-        )?)
-    } else {
-        let pair = (held::held(a)?.buffer(), held::held(b)?.buffer());
-        Picture::Held(with_engine(|e| {
-            e.hold(r, key, pair, (size, deep))?;
-            e.frame(r, t as f32)
-        })?)
-    };
+    if r == Retime::Macos {
+        return Err(Error::Invalid(format!(
+            "{} takes VideoToolbox frames",
+            name(r)
+        )));
+    }
+    let pair = (held::held(a)?.buffer(), held::held(b)?.buffer());
+    let made = Picture::Held(with_engine(|e| {
+        e.hold(r, key, pair, (size, deep))?;
+        e.frame(r, t as f32)
+    })?);
     made_in(r, size, t, clock);
     if std::env::var_os("VIDCUT_INTERPOLATE_DUMP").is_some() {
         let n = DUMPED.fetch_add(1, Ordering::Relaxed);
@@ -517,7 +505,6 @@ pub(crate) fn between(
             Picture::Held(h) => {
                 Cow::Owned(held::eight(&h.read(rgb_bytes(size, deep) as usize)?, deep).into_owned())
             }
-            Picture::Rgb(rgb) => held::eight(rgb, deep),
             Picture::Frame(_) => Cow::Borrowed(&[][..]),
         };
         dump(

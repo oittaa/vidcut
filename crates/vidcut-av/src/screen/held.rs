@@ -485,8 +485,32 @@ impl Pipes {
 
 #[cfg(test)]
 mod tests {
-    use super::{eight, rgb_pixel, sixteen};
+    use vidcut_core::model::Hdr;
+
+    use super::{eight, rgb_pixel, sixteen, tag};
     use crate::ffmpeg::format::Pixel;
+    use crate::ffmpeg::frame;
+    use crate::ffmpeg::util::color::{Primaries, TransferCharacteristic};
+
+    #[test]
+    fn a_pq_picture_is_tagged_bt_2020_and_pq() {
+        let mut f = frame::Video::empty();
+        tag(&mut f, Some(Hdr::Pq));
+        assert_eq!(
+            (f.color_primaries(), f.color_transfer_characteristic()),
+            (Primaries::BT2020, TransferCharacteristic::SMPTE2084)
+        );
+    }
+
+    #[test]
+    fn an_hlg_picture_is_tagged_hlg() {
+        let mut f = frame::Video::empty();
+        tag(&mut f, Some(Hdr::Hlg));
+        assert_eq!(
+            f.color_transfer_characteristic(),
+            TransferCharacteristic::ARIB_STD_B67
+        );
+    }
 
     #[test]
     fn sixteen_bit_white_middle_and_black_become_255_128_and_0() {
