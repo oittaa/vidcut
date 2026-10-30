@@ -391,10 +391,11 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - Resolve writes each preset as a `UInt`, with its default and value only.
   - Resolve 21.1.2 reads an `Int` too, and plays it. But a click on that transition in the timeline closes Resolve.
   - The value is the place of the preset in the Preset menu of the Inspector, from 0.
-  - `push style` gives Push Left, Push Right, Push Up and Push Down.
+  - `push style` has four presets, from 0 to 3: Push Left, Push Right, Push Up and Push Down.
   - Push Left moves the pictures right: the incoming picture comes in from the left edge. Push Right moves them left.
   - Push Up moves them up, and Push Down moves them down. The incoming picture pushes the outgoing picture out.
-  - `slide style` gives Slide, Left-Right, Right-Left, Bottom-Up, Top-Down, Top-Left and Bottom-Right.
+  - `slide style` has six presets, from 0 to 5. The menu names each one "Slide, " and its edges:
+    - 0 Left-Right, 1 Right-Left, 2 Bottom-Up, 3 Top-Down, 4 Top-Left and 5 Bottom-Right.
   - Each one comes in from its first edge: left, right, bottom, top, the top-left corner or the bottom-right corner.
   - `transition direction` gives the Direction: 0 In, 1 Out.
   - With In, the incoming picture slides in over the outgoing picture. The outgoing picture stays still.
