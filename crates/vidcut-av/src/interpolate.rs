@@ -107,6 +107,10 @@ pub fn inspect(dir: &Path, r: Retime, download: bool) -> Result<()> {
     with_engine(|e| e.net(r).map(drop))
 }
 
+pub fn macos_formats() -> Result<Vec<String>> {
+    macos::formats()
+}
+
 pub fn unfit(m: &Media, r: Retime, timeline: Option<Hdr>) -> Option<&'static str> {
     if r.is_nearest() {
         return None;

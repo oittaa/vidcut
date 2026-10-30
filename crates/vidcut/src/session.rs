@@ -726,7 +726,7 @@ fn display_gpus() -> Vec<String> {
 }
 
 pub fn doctor() -> Value {
-    json!({
+    let mut doctor = json!({
         "vidcut": env!("CARGO_PKG_VERSION"),
         "system": crate::system::version(),
         "ffmpeg": vidcut_av::library_versions(),
@@ -740,5 +740,16 @@ pub fn doctor() -> Value {
         "display_gpus": display_gpus(),
         "state_dir": state_dir(),
         "test_data": vidcut_av::testdata::root(),
-    })
+    });
+    if cfg!(target_os = "macos") {
+        let formats = |list: vidcut_av::error::Result<Vec<String>>| match list {
+            Ok(list) => json!(list),
+            Err(e) => json!(e.to_string()),
+        };
+        doctor["macos_frame_processors"] = json!({
+            "frame_rate_conversion": formats(vidcut_av::interpolate::macos_formats()),
+            "super_resolution": formats(vidcut_av::super_scale::macos::formats()),
+        });
+    }
+    doctor
 }

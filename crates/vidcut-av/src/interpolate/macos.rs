@@ -17,6 +17,10 @@ pub(super) fn ready() -> Result<()> {
     imp::ready()
 }
 
+pub(super) fn formats() -> Result<Vec<String>> {
+    imp::formats()
+}
+
 pub(super) fn between(key: &Key, a: Input, b: Input, size: (u32, u32), t: f64) -> Result<Vec<u8>> {
     imp::between(key, a, b, size, t)
 }
@@ -41,6 +45,10 @@ mod imp {
     use crate::error::{Error, Result};
 
     pub(super) fn ready() -> Result<()> {
+        Err(Error::Invalid(NEEDS.into()))
+    }
+
+    pub(super) fn formats() -> Result<Vec<String>> {
         Err(Error::Invalid(NEEDS.into()))
     }
 
@@ -88,7 +96,8 @@ mod imp {
     use crate::error::{Error, Result};
     use crate::ffmpeg::frame::Video;
     use crate::frame_processor::{
-        Frames, Transfer, buffer, failed, format_in, fourcc, frame, pixels, pool, read, write,
+        Frames, Transfer, buffer, failed, format_in, fourcc, frame, numbers, pixels, pool, read,
+        write,
     };
 
     const WHAT: &str = "the frame rate conversion of macOS";
@@ -97,6 +106,27 @@ mod imp {
         AnyClass::get(c"VTFrameRateConversionConfiguration").is_some()
             // SAFETY: a class method of a class that exists.
             && unsafe { VTFrameRateConversionConfiguration::isSupported() }
+    }
+
+    pub(super) fn formats() -> Result<Vec<String>> {
+        if !available() {
+            return Err(Error::Invalid(NEEDS.into()));
+        }
+        // SAFETY: an initializer of plain values; it gives nil for what it can't take.
+        let config = unsafe {
+            VTFrameRateConversionConfiguration::initWithFrameWidth_frameHeight_usePrecomputedFlow_qualityPrioritization_revision(
+                VTFrameRateConversionConfiguration::alloc(),
+                1920,
+                1080,
+                false,
+                VTFrameRateConversionConfigurationQualityPrioritization::Quality,
+                VTFrameRateConversionConfiguration::defaultRevision(),
+            )
+        }
+        .ok_or_else(|| Error::Invalid(format!("{WHAT} can't take 1920x1080")))?;
+        // SAFETY: a property of a live configuration.
+        let list = unsafe { config.frameSupportedPixelFormats() };
+        Ok(numbers(&list).into_iter().map(fourcc).collect())
     }
 
     pub(super) fn ready() -> Result<()> {
