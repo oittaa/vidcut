@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -117,29 +116,20 @@ pub(crate) fn picture(
     Ok(f)
 }
 
+pub(crate) const RGB48: usize = 6;
+
 pub(crate) fn rgb_pixel(deep: bool) -> (ffmpeg::format::Pixel, usize) {
     match deep {
-        true => (ffmpeg::format::Pixel::RGB48LE, 6),
+        true => (ffmpeg::format::Pixel::RGB48LE, RGB48),
         false => (ffmpeg::format::Pixel::RGB24, 3),
     }
 }
 
-pub(crate) fn eight(rgb: &[u8], deep: bool) -> Cow<'_, [u8]> {
-    match deep {
-        true => Cow::Owned(
-            rgb.as_chunks::<2>()
-                .0
-                .iter()
-                .map(|c| ((u32::from(u16::from_le_bytes(*c)) + 128) / 257) as u8)
-                .collect(),
-        ),
-        false => Cow::Borrowed(rgb),
-    }
-}
-
-pub(crate) fn sixteen(rgb: &[u8]) -> Vec<u8> {
-    rgb.iter()
-        .flat_map(|v| (u16::from(*v) * 257).to_le_bytes())
+pub(crate) fn eight(rgb: &[u8]) -> Vec<u8> {
+    rgb.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| ((u32::from(u16::from_le_bytes(*c)) + 128) / 257) as u8)
         .collect()
 }
 
@@ -487,7 +477,7 @@ impl Pipes {
 mod tests {
     use vidcut_core::model::Hdr;
 
-    use super::{eight, rgb_pixel, sixteen, tag};
+    use super::{eight, rgb_pixel, tag};
     use crate::ffmpeg::format::Pixel;
     use crate::ffmpeg::frame;
     use crate::ffmpeg::util::color::{Primaries, TransferCharacteristic};
@@ -514,20 +504,7 @@ mod tests {
 
     #[test]
     fn sixteen_bit_white_middle_and_black_become_255_128_and_0() {
-        assert_eq!(
-            *eight(&[0xFF, 0xFF, 0x80, 0x80, 0x00, 0x00], true),
-            [255, 128, 0]
-        );
-    }
-
-    #[test]
-    fn an_8_bit_picture_stays_as_it_is() {
-        assert_eq!(*eight(&[1, 2, 3], false), [1, 2, 3]);
-    }
-
-    #[test]
-    fn eight_bit_levels_widen_to_16_bits_by_257() {
-        assert_eq!(sixteen(&[1, 255]), [1, 1, 255, 255]);
+        assert_eq!(eight(&[0xFF, 0xFF, 0x80, 0x80, 0x00, 0x00]), [255, 128, 0]);
     }
 
     #[test]

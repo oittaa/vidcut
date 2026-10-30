@@ -91,8 +91,8 @@ fn form_of(f: &frame::Video) -> Form {
 
 fn upscale_form(upscaler: Upscaler, timeline: Option<Hdr>) -> Form {
     match upscaler {
-        Upscaler::AiFast | Upscaler::Macos => (true, timeline),
-        _ => PLAIN,
+        Upscaler::AiBest => (true, None),
+        _ => (true, timeline),
     }
 }
 
@@ -2971,7 +2971,7 @@ mod tests {
 
     use vidcut_core::model::{Hdr, Upscaler};
 
-    use super::{PLAIN, fill_black, staying, upscale_form};
+    use super::{fill_black, staying, upscale_form};
     use crate::ffmpeg::{format::Pixel, frame};
 
     #[test]
@@ -2988,8 +2988,8 @@ mod tests {
     }
 
     #[test]
-    fn ai_best_upscales_8_bit_sdr() {
-        assert_eq!(upscale_form(Upscaler::AiBest, Some(Hdr::Pq)), PLAIN);
+    fn ai_best_upscales_sdr_at_16_bits() {
+        assert_eq!(upscale_form(Upscaler::AiBest, Some(Hdr::Pq)), (true, None));
     }
 
     const fn secs(s: u64) -> Duration {

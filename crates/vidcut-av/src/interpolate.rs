@@ -171,13 +171,12 @@ struct Held {
     key: (PathBuf, u64, i64, i64),
     retime: Retime,
     size: (u32, u32),
-    deep: bool,
     state: State,
     out: wgpu::Buffer,
 }
 
-fn rgb_bytes((w, h): (u32, u32), deep: bool) -> u64 {
-    u64::from(w) * u64::from(h) * held::rgb_pixel(deep).1 as u64
+fn rgb_bytes((w, h): (u32, u32)) -> u64 {
+    u64::from(w) * u64::from(h) * held::RGB48 as u64
 }
 
 struct Engine {
@@ -306,7 +305,7 @@ impl Engine {
         Ok(self.loaded(r).expect("loaded"))
     }
 
-    fn submit(&self, deep: bool, run: impl FnOnce(&mut Ops)) {
+    fn submit(&self, run: impl FnOnce(&mut Ops)) {
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_compute_pass(&Default::default());
@@ -314,7 +313,6 @@ impl Engine {
                 gpu: &self.gpu,
                 k: &self.kernels,
                 pass: &mut pass,
-                deep,
             };
             run(&mut o);
         }
@@ -327,9 +325,9 @@ impl Engine {
         r: Retime,
         key: &(PathBuf, u64, i64, i64),
         (ua, ub): (&wgpu::Buffer, &wgpu::Buffer),
-        (size, deep): ((u32, u32), bool),
+        size: (u32, u32),
     ) -> Result<()> {
-        let same = |h: &Held| h.retime == r && h.size == size && h.deep == deep;
+        let same = |h: &Held| h.retime == r && h.size == size;
         if self.held.as_ref().is_some_and(|h| h.key == *key && same(h)) {
             return Ok(());
         }
@@ -338,7 +336,7 @@ impl Engine {
             self.net(r)?;
         }
         let (w, h) = size;
-        let whole = rgb_bytes(size, deep);
+        let whole = rgb_bytes(size);
         if ua.size() < whole || ub.size() < whole {
             return Err(Error::Invalid(format!(
                 "{} got pictures smaller than {w}x{h}",
@@ -364,7 +362,7 @@ impl Engine {
                 (state, out)
             }
         };
-        self.submit(deep, |o| match (&state, self.loaded(r)) {
+        self.submit(|o| match (&state, self.loaded(r)) {
             (State::Blend(img, _), _) => {
                 o.load(ua, size, (0, 0), false, &img.frame(0));
                 o.load(ub, size, (0, 0), false, &img.frame(1));
@@ -384,7 +382,6 @@ impl Engine {
             key: key.clone(),
             retime: r,
             size,
-            deep,
             state,
             out,
         });
@@ -394,7 +391,7 @@ impl Engine {
     fn frame(&self, r: Retime, t: f32) -> Result<held::Held> {
         let held = self.held.as_ref().expect("held");
         let size = held.size;
-        self.submit(held.deep, |o| match (&held.state, self.loaded(r)) {
+        self.submit(|o| match (&held.state, self.loaded(r)) {
             (State::Blend(img, mixed), _) => {
                 o.combine(&img.frame(0), &img.frame(1), mixed, 1.0 - t, t);
                 o.store(mixed, (0, 0), size, &held.out);
@@ -408,7 +405,7 @@ impl Engine {
             }
             _ => {}
         });
-        let whole = rgb_bytes(size, held.deep).next_multiple_of(4);
+        let whole = rgb_bytes(size).next_multiple_of(4);
         let out = self.gpu.buffer(whole as usize);
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         enc.copy_buffer_to_buffer(&held.out, 0, &out, 0, whole);
@@ -469,12 +466,8 @@ pub(crate) fn between(
     t: f64,
 ) -> Result<Picture> {
     let clock = Instant::now();
-    let deep = held::deep(a);
-    if deep != held::deep(b) {
-        return Err(Error::Invalid(format!(
-            "{} got an 8-bit and a 16-bit picture",
-            name(r)
-        )));
+    if !held::deep(a) || !held::deep(b) {
+        return Err(Error::Invalid(format!("{} takes 16-bit pictures", name(r))));
     }
     if r == Retime::Macos {
         return Err(Error::Invalid(format!(
@@ -484,27 +477,17 @@ pub(crate) fn between(
     }
     let pair = (held::held(a)?.buffer(), held::held(b)?.buffer());
     let made = Picture::Held(with_engine(|e| {
-        e.hold(r, key, pair, (size, deep))?;
+        e.hold(r, key, pair, size)?;
         e.frame(r, t as f32)
     })?);
     made_in(r, size, t, clock);
     if std::env::var_os("VIDCUT_INTERPOLATE_DUMP").is_some() {
         let n = DUMPED.fetch_add(1, Ordering::Relaxed);
         let name = format!("{n:04}");
-        dump(
-            &format!("{name}-a"),
-            size,
-            &held::eight(&held::rgb(a)?, deep),
-        )?;
-        dump(
-            &format!("{name}-b"),
-            size,
-            &held::eight(&held::rgb(b)?, deep),
-        )?;
+        dump(&format!("{name}-a"), size, &held::eight(&held::rgb(a)?))?;
+        dump(&format!("{name}-b"), size, &held::eight(&held::rgb(b)?))?;
         let out = match &made {
-            Picture::Held(h) => {
-                Cow::Owned(held::eight(&h.read(rgb_bytes(size, deep) as usize)?, deep).into_owned())
-            }
+            Picture::Held(h) => Cow::Owned(held::eight(&h.read(rgb_bytes(size) as usize)?)),
             Picture::Frame(_) => Cow::Borrowed(&[][..]),
         };
         dump(

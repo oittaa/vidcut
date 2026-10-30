@@ -61,7 +61,7 @@ vidcut processes each picture in this order. The [spec](../cut-page-spec.md#13-o
 1. The reader decodes the frame, on the GPU or the CPU (`route::plan`, [gpu](gpu.md#routes)).
 2. The draw converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `color::shader_colors`). In an SDR timeline, it tone-maps HDR.
    - The AI stages get the picture in the timeline color space (`Single`).
-   - AI Fast of Super Scale and Retime Process get it as 16-bit RGB (`Form`). The scaler of macOS gets it as 16-bit P416 frames.
+   - Each AI stage gets it at 16 bits (`Form`): as RGB for the models of vidcut, and as P416 frames for the AI of macOS.
    - In an HDR timeline, AI Best gets SDR media only. The draw converts its result into the timeline color space (X98).
 3. The draw deinterlaces an interlaced frame from the converted frames before, at and after it (`fs_bwdif`, [gpu](gpu.md#deinterlacing-and-hdr)).
 4. An AI upscaler of Super Scale enlarges the frame (`Source::ai_picture`, [gpu](gpu.md#super-scale)).

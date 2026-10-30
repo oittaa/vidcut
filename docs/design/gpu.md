@@ -170,8 +170,9 @@ The AI upscalers share one path in the reader:
 - A run takes frames in order. It reads them from the reader's queue, or with a second `VideoReader` (`Source::seek_ahead`).
 - The run gives each picture once, and keeps the last one for a change of size.
 - A picture of AI Fast or AI Best stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`, `Layout::Rgb48`).
-- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best takes 8-bit SDR RGB. The scaler of macOS takes 16-bit 4:4:4 VideoToolbox frames (P416) in the timeline color space.
-  - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast came nearer to the real frames with 16 bits, in the same time.
+- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best takes and gives 16-bit SDR RGB. The scaler of macOS takes 16-bit 4:4:4 VideoToolbox frames (P416) in the timeline color space.
+  - The models of vidcut refuse 8-bit pictures. Retime Process takes 16 bits too.
+  - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast and AI Best came nearer to the real frames with 16 bits than with 8 bits.
 - The reader drops a run for a frame that the run does not give (`RUN_JUMP`).
 - `super_scale::report` tells what the upscaler makes. The stats panel shows it (`SuperScaleStats`).
 

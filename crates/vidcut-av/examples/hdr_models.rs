@@ -68,7 +68,7 @@ fn name(m: Model) -> &'static str {
     }
 }
 
-const FORMS: [(bool, Option<Hdr>); 3] = [(false, None), (true, None), (true, Some(Hdr::Pq))];
+const FORMS: [(bool, Option<Hdr>); 2] = [(true, None), (true, Some(Hdr::Pq))];
 
 fn upscalers() -> Vec<Upscaler> {
     models()
@@ -175,7 +175,7 @@ fn main() {
         _ => retimes(),
     };
     let dir = vidcut_core::dirs::models();
-    println!("pipes: PQ or HLG and SDR at 16 bits, SDR8 at 8 bits; references drawn at 1920x1080");
+    println!("pipes: PQ or HLG and SDR, at 16 bits; references drawn at 1920x1080");
     println!(
         "dE: mean dE ITP (BT.2124), lower is better; PSNR in dB on code values, higher is better"
     );

@@ -123,7 +123,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 **The AI models and HDR:** `cargo run --release -p vidcut-av --example hdr_models` (`hdr_check`).
 
-- It runs each AI model through three pipes: 16-bit RGB in PQ or HLG, 16-bit SDR and 8-bit SDR.
+- It runs each AI model through two pipes: 16-bit RGB in PQ or HLG, and 16-bit SDR.
 - Super Scale makes 1920×1080 from 480×270. It compares the result with the real frame, and with Classic.
 - Retime Process makes the frame half way between two frames. It compares it with the real frame between them, and with Frame Blend.
   - It leaves out pairs with a shot change.
