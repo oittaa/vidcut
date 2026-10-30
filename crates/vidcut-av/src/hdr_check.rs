@@ -61,7 +61,6 @@ pub fn run(
     let source = decoded(clip, count)?;
     let hdr = crate::color::Source::of(&source[0]).hdr;
     let mut drawn = None;
-    let mut framer = None;
     let mut rows = Vec::new();
     let forms = [
         (true, Some(hdr.unwrap_or(Hdr::Pq))),
@@ -99,27 +98,9 @@ pub fn run(
         };
         for &u in upscalers {
             crate::super_scale::get_ready(dir, u, false)?;
-            let made = match u == Upscaler::Macos && form.0 {
-                true => {
-                    let small = source
-                        .iter()
-                        .map(|f| surface_picture(&mut framer, f, &clip.path, SMALL, form))
-                        .collect::<Result<Vec<_>>>()?;
-                    upscaled_pictures(u, &small, true)?
-                        .into_iter()
-                        .map(|p| match p {
-                            Picture::Frame(f) => bytes(&rgb_picture(
-                                &mut drawn,
-                                &f,
-                                &clip.path,
-                                FULL,
-                                (0, (true, coding)),
-                            )?),
-                            p => read(p, true),
-                        })
-                        .collect::<Result<Vec<_>>>()?
-                }
-                false => upscaled(u, &small)?,
+            let made = match u {
+                Upscaler::Macos => by_macos(&mut drawn, &source, &clip.path, form)?,
+                _ => upscaled(u, &small)?,
             };
             rows.push(Row {
                 clip: clip.name.clone(),
@@ -139,7 +120,7 @@ pub fn run(
         let frames = match form.0 && retimes.contains(&Retime::Macos) {
             true => source
                 .iter()
-                .map(|f| surface_picture(&mut framer, f, &clip.path, FULL, form))
+                .map(|f| surface_picture(&mut drawn, f, &clip.path, FULL, form))
                 .collect::<Result<Vec<_>>>()?,
             false => Vec::new(),
         };
@@ -212,7 +193,10 @@ pub fn pictures(
     let mut out = vec![("truth".into(), truth), ("classic".into(), classic)];
     for &u in upscalers {
         crate::super_scale::get_ready(dir, u, false)?;
-        let mut made = upscaled(u, &small)?;
+        let mut made = match u {
+            Upscaler::Macos => by_macos(&mut drawn, &source, path, form)?,
+            _ => upscaled(u, &small)?,
+        };
         out.push((crate::super_scale::name(u).into(), made.swap_remove(k)));
     }
     Ok(out)
@@ -277,6 +261,25 @@ fn put(out: &mut [Option<Picture>], outs: Vec<Out>) {
             *slot = Some(o.picture);
         }
     }
+}
+
+fn by_macos(
+    drawn: &mut Option<crate::export::video::Single>,
+    source: &[frame::Video],
+    path: &Path,
+    form: crate::export::video::Form,
+) -> Result<Vec<Vec<u8>>> {
+    let small = source
+        .iter()
+        .map(|f| surface_picture(drawn, f, path, SMALL, form))
+        .collect::<Result<Vec<_>>>()?;
+    upscaled_pictures(Upscaler::Macos, &small, true)?
+        .into_iter()
+        .map(|p| match p {
+            Picture::Frame(f) => bytes(&rgb_picture(drawn, &f, path, FULL, (0, (true, form.1)))?),
+            p => read(p, true),
+        })
+        .collect()
 }
 
 fn upscaled(u: Upscaler, small: &[frame::Video]) -> Result<Vec<Vec<u8>>> {
@@ -377,19 +380,17 @@ pub fn speed(
     dir: &Path,
 ) -> Result<Speed> {
     let source = decoded(clip, count)?;
-    let (mut drawn, mut framer) = (None, None);
+    let mut drawn = None;
     let size = match model {
         Model::Upscaler(_) => SMALL,
         Model::Retime(_) => FULL,
     };
-    let framed = matches!(
-        model,
-        Model::Retime(Retime::Macos) | Model::Upscaler(Upscaler::Macos)
-    ) && form.0;
+    let framed = model == Model::Upscaler(Upscaler::Macos)
+        || (model == Model::Retime(Retime::Macos) && form.0);
     let inputs = source
         .iter()
         .map(|f| match framed {
-            true => surface_picture(&mut framer, f, &clip.path, size, form),
+            true => surface_picture(&mut drawn, f, &clip.path, size, form),
             false => rgb_picture(&mut drawn, f, &clip.path, size, (0, form)),
         })
         .collect::<Result<Vec<_>>>()?;

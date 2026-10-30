@@ -12,7 +12,6 @@ use crate::compute::Gpu;
 use crate::error::{Error, Result};
 use crate::ffmpeg::frame;
 use crate::models::{self, Fetch, Need};
-use crate::route::Place;
 use crate::screen::held;
 use crate::super_scale::Picture;
 
@@ -433,13 +432,6 @@ fn dump(name: &str, size: (u32, u32), rgb: &[u8]) -> Result<()> {
         &[size.1 as usize, size.0 as usize, 3],
         rgb,
     )
-}
-
-pub(crate) fn takes_frames(r: Retime, a: &frame::Video, b: &frame::Video) -> bool {
-    let sdr_on_gpu = |f: &frame::Video| {
-        Place::of(f) == Place::VideoToolbox && crate::color::Source::of(f).hdr.is_none()
-    };
-    r == Retime::Macos && sdr_on_gpu(a) && sdr_on_gpu(b)
 }
 
 pub(crate) fn blank(size: (u32, u32)) -> Result<frame::Video> {

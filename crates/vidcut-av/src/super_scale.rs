@@ -285,10 +285,6 @@ pub(crate) trait Run: Send {
         rgb: &crate::ffmpeg::frame::Video,
     ) -> Result<Vec<Out>>;
 
-    fn takes(&self, _f: &crate::ffmpeg::frame::Video, _rotation: u16) -> bool {
-        false
-    }
-
     fn push_frame(
         &mut self,
         index: i64,

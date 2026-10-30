@@ -74,7 +74,7 @@ type Rgb = (Option<i64>, Look, frame::Video);
 
 enum Fed {
     Rgb(frame::Video),
-    Frame(frame::Video, u16),
+    Frame(frame::Video),
 }
 
 pub type Form = (bool, Option<Hdr>);
@@ -155,9 +155,7 @@ struct Source {
     ahead: Option<VideoReader>,
     run: Option<Session>,
     queued: VecDeque<frame::Video>,
-    turner: Option<crate::hw::Turner>,
     drawn: Option<Single>,
-    framer: Option<Single>,
     framed: Vec<Rgb>,
     keeper: Option<crate::hw::Keeper>,
     unkept: bool,
@@ -265,9 +263,7 @@ impl Source {
             ahead: None,
             run: None,
             queued: VecDeque::new(),
-            turner: None,
             drawn: None,
-            framer: None,
             framed: Vec::new(),
             keeper: None,
             unkept: false,
@@ -332,9 +328,7 @@ impl Source {
             ahead: None,
             run: None,
             queued: VecDeque::new(),
-            turner: None,
             drawn: None,
-            framer: None,
             framed: Vec::new(),
             keeper: None,
             unkept: false,
@@ -503,9 +497,6 @@ impl Source {
         if self.drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
             self.drawn = None;
             self.rgb.clear();
-        }
-        if self.framer.as_ref().is_some_and(|s| !s.on_offscreen()) {
-            self.framer = None;
             self.framed.clear();
         }
     }
@@ -588,15 +579,25 @@ impl Source {
         let rotation = self.reader.rotation();
         let [before, f, after] = self.neighbors(prev)?;
         let f = f.expect("a frame");
+        let around = (before.as_ref(), after.as_ref());
+        self.frame_from((&f, around), rotation, look, reading)
+    }
+
+    fn frame_from(
+        &mut self,
+        (f, around): (&frame::Video, Around<'_>),
+        rotation: u16,
+        look: &Look,
+        reading: Reading,
+    ) -> Result<frame::Video> {
         self.follow_offscreen();
         let pts = f.pts();
         if let Some((_, _, made)) = self.framed.iter().find(|(p, l, _)| *p == pts && l == look) {
             return frame_ref(made);
         }
-        let around = (before.as_ref(), after.as_ref());
         let made = shown_frame(
-            &mut self.framer,
-            (&f, around),
+            &mut self.drawn,
+            (f, around),
             (rotation, look),
             reading,
             self.reader.path(),
@@ -942,15 +943,15 @@ pub(crate) fn surface_picture(
 }
 
 fn shown_frame(
-    framer: &mut Option<Single>,
+    drawn: &mut Option<Single>,
     frames: (&frame::Video, Around<'_>),
     (rotation, look): (u16, &Look),
     reading: Reading,
     path: &Path,
 ) -> Result<frame::Video> {
-    let single = match framer {
+    let single = match drawn {
         Some(single) => single,
-        None => framer.insert(Single::new(reading)?),
+        None => drawn.insert(Single::new(reading)?),
     };
     let out = crate::interpolate::blank(look.size)?;
     single.surface(frames, rotation, (look, path), out)
@@ -1154,10 +1155,9 @@ impl Source {
                 continue;
             }
             let next = if run.own {
-                let rotation = self.reader.rotation();
-                let takes = |f: &frame::Video| run.run.takes(f, rotation);
+                let as_is = run.id.upscaler == Upscaler::Macos;
                 match self.reader.next_frame()? {
-                    Some(f) if takes(&f) => {
+                    Some(f) if as_is => {
                         self.queued.push_back(frame_ref(&f)?);
                         Some(f)
                     }
@@ -1303,22 +1303,17 @@ impl Source {
             return self.end_run();
         }
         let clock = Instant::now();
-        let woven = crate::decode::FrameProps::of(f).top_field_first.is_some();
         let look = Look::fitted(run.size, 0, run.id.form);
         let path = self.reader.path();
-        let input = match (run.run.takes(f, rotation) && !woven, run.id.upscaler) {
-            (true, _) => Fed::Frame(frame_ref(f)?, rotation),
-            (false, Upscaler::Macos) => Fed::Frame(
-                shown_frame(
-                    &mut self.framer,
-                    (f, around),
-                    (rotation, &look),
-                    reading,
-                    path,
-                )?,
-                0,
-            ),
-            (false, _) => Fed::Rgb(shown_rgb(
+        let input = match run.id.upscaler {
+            Upscaler::Macos => Fed::Frame(shown_frame(
+                &mut self.drawn,
+                (f, around),
+                (rotation, &look),
+                reading,
+                path,
+            )?),
+            _ => Fed::Rgb(shown_rgb(
                 &mut self.drawn,
                 (f, around),
                 rotation,
@@ -1330,7 +1325,7 @@ impl Source {
         let converted = clock.elapsed();
         let outs = match input {
             Fed::Rgb(rgb) => run.run.push(i, f.pts(), &rgb)?,
-            Fed::Frame(f, rotation) => run.run.push_frame(i, &f, rotation)?,
+            Fed::Frame(f) => run.run.push_frame(i, &f, 0)?,
         };
         let pushed = clock.elapsed();
         run.next = i + 1;
@@ -1387,7 +1382,6 @@ impl Source {
 
     fn miss(&mut self, f: &frame::Video) -> Result<()> {
         let at = self.frame_index(f.pts());
-        let rotation = self.reader.rotation();
         let Some(run) = self.run.as_mut().filter(|r| r.own && !r.lost && !r.ended) else {
             return Ok(());
         };
@@ -1399,7 +1393,7 @@ impl Source {
             run.lost = true;
             return Ok(());
         }
-        let kept = match run.run.takes(f, rotation) {
+        let kept = match run.id.upscaler == Upscaler::Macos {
             true => frame_ref(f)?,
             false => self.kept(f)?,
         };
@@ -2715,29 +2709,16 @@ impl VideoFrames {
             return self.shown(i, s, layer, changed);
         };
         let size = look.size;
-        let pair = match (&scaled, &src.prev, &src.current) {
-            _ if !look.placed.is_empty() => None,
-            (Some((a, b, _)), ..) if crate::interpolate::takes_frames(*retime, a, b) => {
-                Some((frame_ref(a)?, frame_ref(b)?))
-            }
-            (None, Some((a, _)), Some((b, _)))
-                if crate::interpolate::takes_frames(*retime, a, b) =>
-            {
-                let turner = &mut src.turner;
-                Some((
-                    crate::hw::Turner::turn(turner, a, rotation)?,
-                    crate::hw::Turner::turn(turner, b, rotation)?,
-                ))
-            }
-            _ => None,
-        };
-        let drawn = *retime == Retime::Macos && look.placed.is_empty() && scaled.is_none();
-        let pair = match pair {
-            None if drawn => Some((
+        let pair = match (*retime == Retime::Macos && look.placed.is_empty(), &scaled) {
+            (false, _) => None,
+            (true, Some((a, b, _))) => Some((
+                src.frame_from((a, (None, None)), 0, &look, reading)?,
+                src.frame_from((b, (None, None)), 0, &look, reading)?,
+            )),
+            (true, None) => Some((
                 src.frame_of(true, &look, reading)?,
                 src.frame_of(false, &look, reading)?,
             )),
-            pair => pair,
         };
         let frames = pair.is_some();
         let (a, b) = match (pair, &scaled) {
