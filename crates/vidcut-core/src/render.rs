@@ -912,6 +912,16 @@ impl VideoPiece {
         }
     }
 
+    pub fn super_scales(&self) -> Vec<SuperScale> {
+        self.layers()
+            .into_iter()
+            .filter_map(|(l, _)| match l {
+                Self::Source { super_scale, .. } if !super_scale.is_off() => Some(*super_scale),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn crosses(&self) -> Vec<bool> {
         match self {
             Self::Mix { under, over } => under
