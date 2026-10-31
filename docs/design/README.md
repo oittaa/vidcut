@@ -107,8 +107,8 @@ A clip skips each step that it does not use. The steps run in this order:
 - `Source::ai_picture` enlarges the converted picture when Super Scale uses an AI upscaler ([gpu](gpu.md#super-scale)). An interlaced source is woven first.
 - `VideoFrames::retimed_frame` makes a frame from two pictures that are already converted, woven and enlarged ([export](export.md#which-source-frame)).
   - The draw sizes and places each picture of the pair first. That is Classic Super Scale, Transform, Crop and Dynamic Zoom.
-  - The made frame is already placed (`Sampling::Placed`). The later draw takes its edges, its effects, its opacity and its mode from `place::Placing`.
-  - The effects thus work on the made frame, after the speed change. The spec puts them before it (§13).
+  - The draw also applies the effects of the clip to each picture of the pair ([export](export.md#effects)). Thus the effects come before the speed change, as in the spec (§13).
+  - The made frame is already placed (`Sampling::Placed`). The later draw takes its edges, its opacity and its mode from `place::Placing`.
 - `VideoFrames::reversed_frame` chooses an earlier source frame that was made forward.
   - Without an AI upscaler, an interlaced frame is woven as that frame is placed.
   - With an AI upscaler, the weave and the enlargement come before the choice.

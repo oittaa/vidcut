@@ -1426,7 +1426,10 @@ fn placed_look(
     let (x, y, w, h) = fit.placement(frame);
     let whole = (f64::from(frame.0), f64::from(frame.1));
     let placing = Placing::new(placed, whole, [x, y, w, h].map(f64::from));
-    let [x0, y0, x1, y1] = placing.bounds(whole)?;
+    let [x0, y0, x1, y1] = match placing.effects.is_empty() {
+        true => placing.bounds(whole)?,
+        false => [0, 0, frame.0, frame.1],
+    };
     let (x0, y0) = (x0 / 2 * 2, y0 / 2 * 2);
     let (x1, y1) = (
         (x1.div_ceil(2) * 2).min(frame.0),

@@ -1,8 +1,10 @@
-use vidcut_core::place::Blurring;
+use vidcut_core::place::{Blurring, Placing, Soft};
 
 use super::{Gpu, MIXING, begin};
 
 const MOST: f64 = 128.0;
+
+const OPEN: f64 = 1e6;
 
 const REACH: f64 = 4.0;
 
@@ -168,6 +170,7 @@ pub(super) struct Blurred {
     size: (u32, u32),
     scratch: Option<[Texture; 2]>,
     layers: Vec<Option<Texture>>,
+    masks: Vec<Option<Texture>>,
 }
 
 impl Blurred {
@@ -176,12 +179,17 @@ impl Blurred {
             self.size = size;
             self.scratch = None;
             self.layers.clear();
+            self.masks.clear();
         }
         self.layers.resize_with(n, || None);
+        self.masks.resize_with(n, || None);
     }
 
     pub(super) fn drop_layer(&mut self, i: usize) {
-        if let Some(t) = self.layers.get_mut(i) {
+        for t in [self.layers.get_mut(i), self.masks.get_mut(i)]
+            .into_iter()
+            .flatten()
+        {
             *t = None;
         }
     }
@@ -195,92 +203,162 @@ impl Blurred {
         encoder: &mut wgpu::CommandEncoder,
     ) -> &wgpu::TextureView {
         let size = self.size;
+        self.masks[i] = None;
         let own = self.layers[i].get_or_insert_with(|| Texture::new(gpu, size));
-        {
-            let mut pass = begin(encoder, &own.view, Some(wgpu::Color::TRANSPARENT));
-            pass.set_pipeline(&gpu.adding);
-            pass.set_bind_group(0, drawn, &[]);
-            pass.draw(0..3, 0..1);
-        }
-        let pipes = &gpu.blur;
+        add(gpu, &own.view, drawn, encoder);
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        for blur in effects {
-            let mut ways: Vec<(Pass, bool)> = passes(blur.across)
-                .into_iter()
-                .map(|p| (p, false))
-                .chain(passes(blur.down).into_iter().map(|p| (p, true)))
-                .collect();
-            if ways.is_empty() {
-                let still = Pass {
-                    spread: [0.0; 4],
-                    step: 1,
-                    taps: 0,
-                };
-                ways.push((still, false));
-            }
-            let mut from = &own.view;
-            let mut k = 0;
-            for (j, (pass, down)) in ways.iter().enumerate() {
-                let to = &scratch[k];
-                let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("vidcut blur"),
-                    size: PARAMS as u64,
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                let last = j + 1 == ways.len();
-                gpu.queue
-                    .write_buffer(&params, 0, &bytes(pass, *down, blur, (j == 0, last)));
-                let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("vidcut blur"),
-                    layout: &pipes.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: params.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(from),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::TextureView(&own.view),
-                        },
-                    ],
-                });
-                let mut drawing = begin(encoder, &to.view, None);
-                drawing.set_pipeline(&pipes.pipeline);
-                drawing.set_bind_group(0, &bind, &[]);
-                drawing.draw(0..3, 0..1);
-                drop(drawing);
-                from = &to.view;
-                k = 1 - k;
-            }
-            let made = &scratch[1 - k];
-            encoder.copy_texture_to_texture(
-                made.texture.as_image_copy(),
-                own.texture.as_image_copy(),
-                wgpu::Extent3d {
-                    width: size.0,
-                    height: size.1,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
+        blur_into(gpu, own, scratch, effects, encoder);
         &own.view
+    }
+
+    pub(super) fn made(
+        &mut self,
+        gpu: &Gpu,
+        i: usize,
+        (drawn, placing): (&wgpu::BindGroup, &Placing),
+        effects: &[Blurring],
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> (&wgpu::TextureView, &wgpu::TextureView) {
+        let size = self.size;
+        let own = self.layers[i].get_or_insert_with(|| Texture::new(gpu, size));
+        add(gpu, &own.view, drawn, encoder);
+        let mask = self.masks[i].get_or_insert_with(|| Texture::new(gpu, size));
+        add(
+            gpu,
+            &mask.view,
+            &mask_bind(gpu, &own.view, placing),
+            encoder,
+        );
+        let scratch = self
+            .scratch
+            .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
+        blur_into(gpu, mask, scratch, effects, encoder);
+        (&own.view, &mask.view)
     }
 }
 
-pub(super) fn shown_bind(gpu: &Gpu, view: &wgpu::TextureView, placed: [f64; 4]) -> wgpu::BindGroup {
+fn add(
+    gpu: &Gpu,
+    to: &wgpu::TextureView,
+    drawn: &wgpu::BindGroup,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let mut pass = begin(encoder, to, Some(wgpu::Color::TRANSPARENT));
+    pass.set_pipeline(&gpu.adding);
+    pass.set_bind_group(0, drawn, &[]);
+    pass.draw(0..3, 0..1);
+}
+
+fn blur_into(
+    gpu: &Gpu,
+    own: &Texture,
+    scratch: &[Texture; 2],
+    effects: &[Blurring],
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let pipes = &gpu.blur;
+    for effect in effects {
+        let mut ways: Vec<(Pass, bool)> = passes(effect.across)
+            .into_iter()
+            .map(|p| (p, false))
+            .chain(passes(effect.down).into_iter().map(|p| (p, true)))
+            .collect();
+        if ways.is_empty() {
+            let still = Pass {
+                spread: [0.0; 4],
+                step: 1,
+                taps: 0,
+            };
+            ways.push((still, false));
+        }
+        let mut from = &own.view;
+        let mut k = 0;
+        for (j, (pass, down)) in ways.iter().enumerate() {
+            let to = &scratch[k];
+            let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("vidcut blur"),
+                size: PARAMS as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let last = j + 1 == ways.len();
+            gpu.queue
+                .write_buffer(&params, 0, &bytes(pass, *down, effect, (j == 0, last)));
+            let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("vidcut blur"),
+                layout: &pipes.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: params.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(from),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&own.view),
+                    },
+                ],
+            });
+            let mut drawing = begin(encoder, &to.view, None);
+            drawing.set_pipeline(&pipes.pipeline);
+            drawing.set_bind_group(0, &bind, &[]);
+            drawing.draw(0..3, 0..1);
+            drop(drawing);
+            from = &to.view;
+            k = 1 - k;
+        }
+        let made = &scratch[1 - k];
+        encoder.copy_texture_to_texture(
+            made.texture.as_image_copy(),
+            own.texture.as_image_copy(),
+            own.texture.size(),
+        );
+    }
+}
+
+pub(super) fn opened(placing: &Placing) -> Placing {
+    let mut out = placing.clone();
+    for l in &mut out.levels {
+        l.edge = [-OPEN, -OPEN, OPEN, OPEN];
+        l.soft = Soft::default();
+    }
+    out
+}
+
+fn mask_bind(gpu: &Gpu, view: &wgpu::TextureView, placing: &Placing) -> wgpu::BindGroup {
+    let inner = super::innermost(Some(placing));
+    let levels = super::level_floats(inner);
+    let mut floats = vec![0.0_f64; super::PARAMS / 4 - levels.len()];
+    floats[40..45].copy_from_slice(&[inner.len() as f64, 1.0, 0.0, 0.0, 4.0]);
+    floats.extend(levels);
+    picture_bind(gpu, &floats, (view, view))
+}
+
+pub(super) fn shown_bind(
+    gpu: &Gpu,
+    views: (&wgpu::TextureView, &wgpu::TextureView),
+    placed: [f64; 4],
+    made: [f64; 4],
+) -> wgpu::BindGroup {
     let mut floats = vec![0.0_f64; super::PARAMS / 4];
     floats[40..44].copy_from_slice(&placed);
-    floats[44] = 3.0;
+    floats[44..48].copy_from_slice(&made);
+    picture_bind(gpu, &floats, views)
+}
+
+fn picture_bind(
+    gpu: &Gpu,
+    floats: &[f64],
+    (color, alpha): (&wgpu::TextureView, &wgpu::TextureView),
+) -> wgpu::BindGroup {
     let bytes: Vec<u8> = floats
-        .into_iter()
-        .flat_map(|v| (v as f32).to_le_bytes())
+        .iter()
+        .flat_map(|v| (*v as f32).to_le_bytes())
         .collect();
     let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("vidcut blurred"),
@@ -289,7 +367,7 @@ pub(super) fn shown_bind(gpu: &Gpu, view: &wgpu::TextureView, placed: [f64; 4]) 
         mapped_at_creation: false,
     });
     gpu.queue.write_buffer(&params, 0, &bytes);
-    let texture = |binding| wgpu::BindGroupEntry {
+    let texture = |binding, view| wgpu::BindGroupEntry {
         binding,
         resource: wgpu::BindingResource::TextureView(view),
     };
@@ -301,15 +379,15 @@ pub(super) fn shown_bind(gpu: &Gpu, view: &wgpu::TextureView, placed: [f64; 4]) 
                 binding: 0,
                 resource: params.as_entire_binding(),
             },
-            texture(1),
-            texture(2),
-            texture(3),
+            texture(1, color),
+            texture(2, color),
+            texture(3, color),
             wgpu::BindGroupEntry {
                 binding: 4,
                 resource: wgpu::BindingResource::Sampler(&gpu.sampler),
             },
-            texture(7),
-            texture(8),
+            texture(7, color),
+            texture(8, alpha),
         ],
     })
 }
