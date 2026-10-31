@@ -266,8 +266,15 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
             (true, true) => super_scale.sharpness = Default::default(),
             (true, false) => *super_scale = Default::default(),
         }
-        if retime.is_nearest() {
-            placed.clear();
+        match retime.is_nearest() {
+            true => placed.clear(),
+            false => {
+                for p in placed.iter_mut() {
+                    p.picture.opacity = None;
+                    p.picture.opacity_keys.clear();
+                    p.picture.composite_mode = None;
+                }
+            }
         }
         *cache = ClipCache::Auto;
         *excluded = false;

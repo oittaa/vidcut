@@ -2686,7 +2686,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It holds a Retime Process other than Nearest.
       - It holds the frame at the size of the timeline. Why: a Retime Process makes each frame at the size that the clip shows.
       - For a placed clip, it holds the colors of the frame, with no edges and no alpha. The viewer makes them again from the placement. Thus the cache needs no alpha.
-      - A change of the Transform, the crop or an effect of a placed clip renders it again. A move, a split or a trim keeps it.
+      - A change of the Transform, the crop or an effect of a placed clip renders it again.
+      - A move, a split, a trim, or a change of the opacity or the composite mode keeps it.
     - A move, a split, a trim or an edit on another track keeps it.
     - It holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Super Scale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.

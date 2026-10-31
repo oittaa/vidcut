@@ -398,6 +398,7 @@ The names of frames:
   - With an AI upscaler, the size is that of the enlarged picture (`Setup::upscaled`, vidcut-av `ai_size`). It comes from the placement and the timeline size, as in an export. Thus a zoom that changes it renders the clip again.
   - With a Retime Process, the size is that of the `Look`. The name also holds the Retime Process, the `super_scale`, the placement and the exact source position (`VideoPiece::exact`).
     - Thus a change of the Transform or of an effect renders a placed clip again.
+    - `alone` takes the opacity and the composite mode out of the placement. Why: they change only the alpha and the mix, not the colors in the file.
 - An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
 - `Look::of` gives the size and the codec. With proxies on, they are those of proxies. With proxies off, the size is that of the timeline.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.
