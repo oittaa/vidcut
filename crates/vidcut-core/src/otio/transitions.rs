@@ -180,7 +180,7 @@ pub fn eased(ease: MotionEase, frames: i64) -> Vec<Keyframe> {
     ]
 }
 
-fn curve_otio(keys: &[Keyframe]) -> Value {
+fn keys_otio(keys: &[Keyframe]) -> Value {
     let point =
         |side: &str, h: &Handle| json!({side: [h.frames, h.value], "Variant Type": "POINTF"});
     let frames: serde_json::Map<String, Value> = keys
@@ -196,9 +196,13 @@ fn curve_otio(keys: &[Keyframe]) -> Value {
             (k.frame.to_string(), key)
         })
         .collect();
+    Value::Object(frames)
+}
+
+fn curve_otio(keys: &[Keyframe]) -> Value {
     json!({
         "Default Parameter Value": 0.0,
-        "Key Frames": frames,
+        "Key Frames": keys_otio(keys),
         "Parameter ID": CURVE,
         "Parameter Value": 0.0,
         "Variant Type": "Double",
@@ -235,6 +239,21 @@ fn curve_in(values: &[Value]) -> Vec<Keyframe> {
         .collect();
     keys.sort_by_key(|k| k.frame);
     keys
+}
+
+pub fn scale_curve(o: &mut Value, frame: impl Fn(i64) -> i64, ratio: f64) {
+    if moving_in(o).is_none() {
+        return;
+    }
+    let Some(p) = o
+        .pointer_mut(&format!("/metadata/{EDITOR}/Effects/Parameters"))
+        .and_then(Value::as_array_mut)
+        .and_then(|ps| ps.iter_mut().find(|p| p["Parameter ID"] == CURVE))
+    else {
+        return;
+    };
+    let keys = crate::keyframes::scaled(&curve_in(std::slice::from_ref(p)), frame, ratio);
+    p["Key Frames"] = keys_otio(&keys);
 }
 
 pub fn push_otio(preset: PushPreset, motion: &Motion, frames: i64) -> Value {

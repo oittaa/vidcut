@@ -191,6 +191,26 @@ pub fn retimed(keys: &[Keyframe], old: &Clip, new: &Clip) -> Vec<Keyframe> {
     out
 }
 
+pub fn scaled(keys: &[Keyframe], frame: impl Fn(i64) -> i64, ratio: f64) -> Vec<Keyframe> {
+    let handle = |h: Option<Handle>| {
+        h.map(|h| Handle {
+            frames: h.frames * ratio,
+            ..h
+        })
+    };
+    let mut out: Vec<Keyframe> = keys
+        .iter()
+        .map(|k| Keyframe {
+            frame: frame(k.frame),
+            value: k.value,
+            in_handle: handle(k.in_handle),
+            out_handle: handle(k.out_handle),
+        })
+        .collect();
+    out.dedup_by_key(|k| k.frame);
+    out
+}
+
 pub fn checked(value: f64) -> crate::error::Result<f64> {
     if GAIN.contains(&value) {
         Ok(value)
