@@ -230,6 +230,8 @@ The audio device:
   - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
   - The two sides of a Push or a Slide draw into two pictures of their own (`Moves`), each over transparent.
     - `fs_motion` then lays them over the canvas, premultiplied. `Moving::shift` gives where each side is, in pixels of the frame.
+    - The sides draw without their composite modes. When the outgoing clip has a mode, `fs_motion_mode` mixes the moved result with the copy of the canvas (`Below`, `mixed`).
+    - Why: thus the tracks below do not move, and the motion blur does not blur them, as in Resolve ([gotchas](../gotchas.md#resolves-otio-files)).
     - Each side moves by whole pixels. The band comes from the exact edges, on top.
     - A feather fades the upper side linearly across the band. In a corner, the smaller of the two fades applies.
     - The motion blur is a box along the move, with one tap for each pixel of its length, up to 512. Taps past the frame repeat its edge pixels.

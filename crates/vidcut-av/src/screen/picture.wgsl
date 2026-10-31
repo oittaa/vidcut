@@ -613,6 +613,7 @@ struct Motion {
     color: vec4<f32>,
     flags: vec4<u32>,
     gaps: vec4<u32>,
+    mode: vec4<u32>,
 };
 
 @group(0) @binding(11) var<uniform> motion: Motion;
@@ -717,7 +718,21 @@ fn tap(q: vec2<f32>) -> Tap {
 
 @fragment
 fn fs_motion(in: Out) -> @location(0) vec4<f32> {
-    let q = floor(in.position.xy);
+    return moved(floor(in.position.xy));
+}
+
+@fragment
+fn fs_motion_mode(in: Out) -> @location(0) vec4<f32> {
+    let top = moved(floor(in.position.xy));
+    let b = textureLoad(below, vec2<i32>(in.position.xy), 0).rgb;
+    if top.a <= 0.0 {
+        return vec4<f32>(b, 1.0);
+    }
+    let m = mixed(motion.mode.x, top.rgb / top.a, b);
+    return vec4<f32>(mix(b, m, top.a), 1.0);
+}
+
+fn moved(q: vec2<f32>) -> vec4<f32> {
     let here = tap(q);
     let len = motion.blur.z;
     if len < 0.5 {
