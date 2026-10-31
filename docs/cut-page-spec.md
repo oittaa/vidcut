@@ -676,6 +676,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A change of the length scales the curve, as in Resolve. A key at frame k goes to k × new / old, rounded down. The handles scale by new / old. The values stay.
     - If two keys come to one frame, vidcut keeps the first of them.
   - At a gap, the missing side shows the tracks below. Where it covers the other picture, that picture does not show.
+  - The pictures move and blur first. Then the composite mode of the outgoing clip mixes them with the tracks below. The tracks below do not move.
+    - The composite mode of the incoming clip has no effect during the transition.
   - Resolve's measured geometry, blur and ease are in [gotchas](gotchas.md#resolves-otio-files).
   - A request makes one: `{"type": "push", "preset": "up", "border": 0.02}`, or `{"type": "slide", "preset": "top_left", "out": true}`.
   - An OTIO file holds them as Resolve's Push and Slide, with their values.

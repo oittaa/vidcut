@@ -646,6 +646,12 @@ impl Moving {
         });
         let way = [sign[0], if sign[0] == 0.0 { -sign[1] } else { sign[1] }];
         let reach = way[0].hypot(way[1]).max(1.0);
+        let forward = |v: [f64; 2]| [0, 1].map(|a| sign[a] * (sign[a] * v[a]).max(0.0));
+        let (upper, lower) = match (push, out) {
+            (true, _) => (upper, forward(lower)),
+            (false, true) => (forward(upper), lower),
+            (false, false) => (upper, lower),
+        };
         Shift {
             upper_in: !out,
             upper: upper.map(f64::trunc),
