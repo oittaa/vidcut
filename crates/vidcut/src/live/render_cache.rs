@@ -167,6 +167,7 @@ impl Background {
             prefs: &self.prefs,
             project,
             slow: &slow,
+            upscaled: &vidcut_av::export::video::ai_size,
             look: &look,
         };
         let mut cache = self.lock();
@@ -277,6 +278,7 @@ impl Background {
             prefs: &self.prefs,
             project,
             slow: &slow,
+            upscaled: &vidcut_av::export::video::ai_size,
             look: &look,
         };
         let mut cache = self.lock();
@@ -354,6 +356,7 @@ impl Background {
             prefs: &self.prefs,
             project,
             slow: &slow,
+            upscaled: &vidcut_av::export::video::ai_size,
             look: &look,
         };
         let mut cache = self.lock();
@@ -373,6 +376,7 @@ impl Background {
             prefs: &self.prefs,
             project,
             slow: &slow,
+            upscaled: &vidcut_av::export::video::ai_size,
             look: &look,
         };
         let mut cache = self.lock();
@@ -476,6 +480,7 @@ impl Render {
             prefs: &self.prefs,
             project,
             slow: &slow,
+            upscaled: &vidcut_av::export::video::ai_size,
             look: &self.look,
         };
         let most = (self.base.fps.as_f64() * SECONDS_EACH as f64)
