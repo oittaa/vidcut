@@ -365,7 +365,7 @@ The names of frames:
   - In the piece, the fingerprint of each media takes the place of its path.
   - The piece has no clip ids and no times on the timeline. Thus a part that moves keeps its names.
   - The name also holds the `Look` (the size and the codec), the frame rate, the colors of the timeline and the version of vidcut.
-- An `Lru` keeps the names of each piece. Thus a plan that does not change is not hashed again.
+- An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
 - `Look::of` gives the size and the codec. With proxies on, they are those of proxies. With proxies off, the size is that of the timeline.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.
 
@@ -375,6 +375,7 @@ The files:
 - Each file is Matroska, with at most 2 s of frames in a row (`Cache::next`).
 - A `.keys` file next to it holds the names of its frames, 16 bytes each (`write_keys`). The disk cache does not count it (`Kind::keeps`).
 - `Index::scan` reads the `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a `.keys` file without its video.
+- The disk cache can remove a video at any time. `Cache::apply` removes from the index each file of the plan that is gone (`Index::remove`). Thus the background render makes its frames again.
 - `render_cache::segment` cuts the plan of a file. The draw of the export makes its frames (`encode_plan`), as for proxies.
 - `cache_encoders` gives the encoders, in order:
   - With proxies on: the encoders of the proxy codec.
@@ -393,12 +394,14 @@ The background render (`live::render_cache::Background`):
 
 - `Background::tick` reads a `Mark` at each turn of the live core: the revision, the playhead, the play and the jobs.
 - A changed `Mark`, a play, a job or a `Background::touch` is activity. Each activity stops the render at once (`AtomicBool`).
+  - A stopped job can end after the next job starts. Its end message carries its `AtomicBool`, and `Background::event` ignores it unless it names the running job.
   - The live core touches it for the previews of a change: titles, pictures, audition, skips and the history.
 - After `render_cache.after_secs` without activity, `vidcut-render-cache` starts (`Work::Job`).
   - It renders from the playhead forward, then from the start.
   - It writes one file at a time (vidcut-av `render_cache::write`), and adds it to the index (`Index::add`). The viewer then reloads the plan.
   - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
 - `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
+  - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
   - All removes each file of the folder. Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
 
 ## Code

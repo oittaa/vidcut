@@ -120,7 +120,6 @@ fn step(scale: &Scale, fps: f64, min_px: f64) -> f64 {
     7200.0
 }
 
-#[allow(clippy::too_many_arguments)]
 const CACHE_LINE: f32 = 3.0;
 const TO_CACHE: Color32 = Color32::from_rgb(225, 60, 60);
 const CACHED: Color32 = Color32::from_rgb(60, 130, 235);
@@ -164,6 +163,7 @@ pub fn cache_reasons(rect: Rect, scale: &Scale, line: &[Part], pos: Pos2) -> Opt
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn ruler(
     painter: &Painter,
     rect: Rect,
