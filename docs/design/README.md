@@ -104,9 +104,10 @@ A clip skips each step that it does not use. The steps run in this order:
   - The draw sizes and places each picture of the pair first. That is Classic Super Scale, Transform, Crop and Dynamic Zoom.
   - The made frame is already placed (`Sampling::Placed`). The later draw takes its edges, its opacity and its mode from `place::Placing`.
 - `VideoFrames::reversed_frame` chooses an earlier source frame that was made forward.
-  - Without Super Scale, an interlaced frame is woven as that frame is placed.
-  - With Super Scale, the weave and the enlargement come before the choice.
+  - Without an AI upscaler, an interlaced frame is woven as that frame is placed.
+  - With an AI upscaler, the weave and the enlargement come before the choice.
 - `Screen::draw` places the picture and mixes the layers (`place::Placing`, `screen::kernel`, [export](export.md#placed-pictures)).
+  - A transition's two sides, and each clip placed over another, are layers of the same draw.
   - Titles and burned subtitles are draws in that same pass (`fs_title`, [export](export.md#subtitles)).
 - The viewer shows the canvas. A wide canvas goes through `fs_screen` first ([playback](playback.md#the-viewer-thread)).
 - An export encodes that canvas (`Screen::encoded`) and skips `fs_screen` ([export](export.md#timeline-colors)).
