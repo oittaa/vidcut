@@ -299,7 +299,7 @@ impl Background {
     }
 
     pub(super) fn render_now(&mut self, project: &Project, from: i64) -> Value {
-        self.scanned();
+        self.stopped();
         if let Some(base) = self.base.clone()
             && project.settings.render_cache != Mode::Off
         {
@@ -360,14 +360,14 @@ impl Background {
         }
     }
 
-    fn scanned(&mut self) {
+    fn stopped(&mut self) {
         self.stop();
         self.done = false;
         self.indexed();
     }
 
     pub(super) fn delete_all(&mut self) -> usize {
-        self.scanned();
+        self.stopped();
         self.lock().index_mut().clear();
         let mut n = 0;
         if let Ok(listing) = std::fs::read_dir(Index::dir()) {
@@ -385,7 +385,7 @@ impl Background {
     }
 
     pub(super) fn delete_frames(&mut self, project: &Project, ranges: &[Span]) -> usize {
-        self.scanned();
+        self.stopped();
         let Some(base) = self.base.clone() else {
             return 0;
         };
@@ -405,7 +405,7 @@ impl Background {
     }
 
     pub(super) fn delete_unused(&mut self, project: &Project) -> usize {
-        self.scanned();
+        self.stopped();
         let Some(base) = self.base.clone() else {
             return 0;
         };
