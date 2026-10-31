@@ -41,7 +41,7 @@ flowchart TD
 - **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
   - The plan uses the sample rate and channels of the audio encoder (`resolve_audio`). Why: the sample math then agrees with the encoder.
-- **Models:** `session::export_media` first checks the models of Voice Isolation, Super Scale and Retime Process. A missing model needs `download`.
+- **Models:** `session::export_media` first checks the models of Voice Isolation, Super Scale, Retime Process and the Process of each Smooth Cut. A missing model needs `download`.
 
 GPU preferences:
 
@@ -190,6 +190,22 @@ Pictures:
 - `player::picture` makes one `Picture` of the layers, as the player does.
 - `VideoFrames::next_frame` draws that picture with the viewer's `Screen`, on the shared off-screen wgpu device (`screen::offscreen`).
 - Thus the export and the viewer have one draw path: `crates/vidcut-av/src/screen/picture.wgsl` ([playback](playback.md#the-viewer-thread)).
+
+## Smooth Cuts
+
+A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173), [deviation X99](../deviations.md#x99-smooth-cut-has-a-process-row-in-the-place-of-speed-warp)).
+
+- `render::flatten` puts the incoming side over the outgoing side. Its `Over` holds a `render::Smooth`: the `Retime` of the Process and the keys of the curve.
+- Each side takes Nearest. With Faster, each side stays on one source frame (`Pace::of` at the speed 0).
+- Two sides with no placed picture morph. Other sides play as a cross dissolve. Why: the models take whole RGB frames, with no alpha.
+- `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`).
+- `interpolate::between` makes the frame at `Smooth::at`. On macOS, `interpolate::between_frames` makes it from two VideoToolbox frames (`Source::frame_from`).
+- The made frame replaces the incoming layer, at full weight. Thus it covers the outgoing layer.
+- The key of the pair holds both files, both frames and both looks. The time of the outgoing frame orders the pairs. Why: the session of macOS takes times that go up.
+- The morph has no shot-change test. Why: a Smooth Cut always joins two shots.
+- A side played backward takes the usual path. The transition then plays as a cross dissolve.
+- The morph takes the decoded frames. AI Super Scale does not enlarge them.
+- The morph draws each side with no frames around it. Thus an interlaced side gives only the rows of its own field ([gpu](gpu.md#deinterlacing-and-hdr)).
 
 ## Timeline colors
 

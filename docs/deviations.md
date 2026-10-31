@@ -2053,3 +2053,36 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - On the Dolby Vision clip in HLG, its mean ΔE ITP was 4.2, and Classic's was 3.9. Its pictures had 1.03 times the light.
     - In SDR, the same clips gave 4.9 and 2.5.
   - SDR goes into an HDR timeline with no clipping. Thus the conversion after the stage keeps all of the picture.
+
+## X99. Smooth Cut has a Process row in the place of Speed Warp
+
+- **Resolve:**
+  - A Smooth Cut has a Speed Warp box in the Transition Inspector (p. 759). It is on by default.
+  - With the box on, Speed Warp, an AI model, makes the frames. With the box off, the older optical flow makes them.
+  - When the optical flow does not find the motion, the frames are a cross dissolve ([gotchas](gotchas.md#resolves-otio-files)).
+- **vidcut:**
+  - A Smooth Cut has a Process row in the place of the box. Its values are the processes of Retime Process ([X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+  - The values are AI Fast, AI Slow and Frame Blend. AI Fast is the default.
+  - On macOS, the values are AI and Frame Blend. AI is the default.
+  - A request sets it as `process`: `ai`, `ai_slow` or `frame_blend`. `ai` is the AI of the computer that plays or exports.
+  - An OTIO file holds AI Fast, AI and AI Slow as Speed Warp on, and Frame Blend as Speed Warp off.
+  - vidcut keeps AI Slow in its own metadata of the transition.
+- **Why:**
+  - vidcut has no optical flow. Its AI models make the frames in the place of Speed Warp and of the optical flow.
+  - AI Slow makes frames nearer to the real ones, in more time. The row lets the user choose it.
+  - Frame Blend makes the frames with no model and no download.
+
+## X100. A new Smooth Cut is 0.2 seconds long
+
+- **Resolve:**
+  - The Smooth Cut button puts a one-second Smooth Cut, the default length of all transitions (p. 759).
+  - It also puts a one-second Cross Fade 0 dB on the sound.
+  - The manual tells that 2- to 6-frame Smooth Cuts often work best (pp. 759, 1166).
+- **vidcut:**
+  - The Smooth Cut button and the Smooth Cut card put a 0.2-second Smooth Cut, to the nearest frame. At 30 fps, it is 6 frames.
+  - The Cross Fade 0 dB on the sound has the same length.
+  - `edit.dissolve` with a smooth cut and no `length` gives 0.2 seconds too.
+- **Why:**
+  - A one-second morph shows a long blend of two positions of the speaker.
+  - A one-second sound fade over a cut in speech plays the voice twice, with an echo.
+  - In a test on a cut pause of an interview, 6 frames at 30 fps looked and sounded good.

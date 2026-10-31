@@ -480,6 +480,23 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - The tracks below do not move, and the motion blur does not blur them.
   - The mode of the outgoing clip applies to the two moved pictures. The mode of the incoming clip has no effect during the transition.
   - Measured with a gray clip in Add mode over a picture that codes the position of each pixel, with and without motion blur.
+- **Resolve writes a Smooth Cut as a `Custom_Transition` with the effect `Morph Dissolve`.**
+  - Its name and `Transition Type` are `Smooth Cut`. The `Type` of the effect is 39.
+  - `smooth cut mode` (`UInt`) is the Mode: 0 Faster, 1 Better. Better is the default.
+  - `smooth cut ai` (`Bool`) is the Speed Warp box. It is on by default.
+  - `ease` and `transitionCustomCurvesKeyframes` are as for a Push. Resolve leaves out each value at its default.
+- **The Smooth Cut button of Resolve 21.1.2 puts a 24-frame Smooth Cut centered on the edit.**
+  - Its Mode is Better, Speed Warp is on and Ease is None.
+  - It also puts a 24-frame Cross Fade 0 dB on the linked sound. The Dissolve button puts a Cross Fade +3 dB.
+- **A Smooth Cut morphs the two pictures of its edit.**
+  - With Better, the two clips play on, as in a cross dissolve. Each frame morphs the frame of one clip into the frame of the other.
+  - With Faster, the outgoing picture stays on the first frame of the transition. The incoming picture stays on its last frame.
+  - At frame f of N frames, the morph is at min(1, p(f) + 0.5/N). p is the curve of the ease.
+  - This fits the renders with Ease None, In and In & Out within 0.0013. The morph is not at p(f + 0.5).
+  - Speed Warp off uses optical flow. It moved a bar of a 30-pixel jump to the exact place.
+  - When the optical flow does not find the move, the frame is a cross dissolve at the same point. A jump of 150 pixels gave this.
+  - Speed Warp on gave one sharp bar for the 30-pixel jump. It smeared the 150-pixel jump.
+  - Measured with renders of 24-frame Smooth Cuts between pictures with a bar at known places.
 
 ## transcribe.cpp and its models
 

@@ -2944,6 +2944,7 @@ fn mutate(
             sound,
             all,
             transition,
+            download,
         } => {
             let at = match at {
                 Some(t) => resolve(p, t, playhead)?,
@@ -2954,7 +2955,7 @@ fn mutate(
                 (None, None) => ops::Shape::Length(
                     match length {
                         Some(l) => frames(l)?,
-                        None => p.settings.fps.as_f64().round() as i64,
+                        None => ops::dissolve_length(p, transition),
                     },
                     *align,
                 ),
@@ -2989,19 +2990,27 @@ fn mutate(
                 let ids = resolve_clips(p, clips, playhead)?;
                 ops::dissolve_clips(p, &ids, shape, *picture, *sound, transition)?
             };
+            if *download && !dry_run {
+                ready_smooth(env, transition)?;
+            }
             json!({ "transitions": made })
         }
         Request::EditTransition {
             at,
             track,
             transition,
+            download,
         } => {
             let at = match at {
                 Some(t) => resolve(p, t, playhead)?,
                 None => playhead.unwrap_or(0),
             };
             let track = track.as_deref().unwrap_or(ops::MAIN);
-            json!({ "transition": ops::set_transition(p, track, at, transition)? })
+            let made = ops::set_transition(p, track, at, transition)?;
+            if *download && !dry_run {
+                ready_smooth(env, transition)?;
+            }
+            json!({ "transition": made })
         }
         Request::EditRemoveTransition {
             at,
@@ -6062,15 +6071,21 @@ pub fn project_from_otio(
 
 pub type Models = (Vec<crate::model::Retime>, Vec<crate::model::Upscaler>);
 
-fn models_used(p: &Project) -> Models {
+pub fn models_used(p: &Project) -> Models {
     let clips: Vec<String> = p
         .tracks
         .iter()
         .flat_map(|t| t.clips.iter().map(|c| c.id.clone()))
         .collect();
     let media = otio::used_media(p, None);
+    let mut retimes = ops::ai_retimes(p, &clips);
+    for r in ops::smooth_retimes(p) {
+        if !retimes.contains(&r) {
+            retimes.push(r);
+        }
+    }
     (
-        ops::ai_retimes(p, &clips),
+        retimes,
         ops::ai_upscalers(p, &media, &ops::SuperScaleSet::default()),
     )
 }
@@ -6104,6 +6119,15 @@ pub fn models_after(
 fn ready_retimes(env: &dyn Env, p: &Project, ids: &[String]) -> Result<()> {
     for r in ops::ai_retimes(p, ids) {
         env.interpolator(r, true)?;
+    }
+    Ok(())
+}
+
+fn ready_smooth(env: &dyn Env, kind: &crate::model::PictureTransition) -> Result<()> {
+    if let crate::model::PictureTransition::SmoothCut { process, .. } = kind
+        && process.retime().ai()
+    {
+        env.interpolator(process.retime(), true)?;
     }
     Ok(())
 }

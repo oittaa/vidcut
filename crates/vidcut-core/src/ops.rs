@@ -12,8 +12,9 @@ mod tracks;
 use std::collections::{BTreeMap, HashSet};
 
 pub use dissolve::{
-    Align, Made, Shape, cross_fade_joins, dissolve, dissolve_clips, planned as dissolve_sides,
-    room_at as dissolve_room, set_transition, split as dissolve_frames, to_cut,
+    Align, Made, Shape, cross_fade_joins, dissolve, dissolve_clips, length as dissolve_length,
+    planned as dissolve_sides, room_at as dissolve_room, set_transition, split as dissolve_frames,
+    to_cut,
 };
 use serde_json::json;
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
@@ -1857,6 +1858,21 @@ pub fn ai_retimes(p: &Project, ids: &[String]) -> Vec<crate::model::Retime> {
         };
         for (a, _) in c.runs(c.start, c.end()) {
             let r = crate::render::retime_of(c, a, m, &p.settings);
+            if r.ai() && !out.contains(&r) {
+                out.push(r);
+            }
+        }
+    }
+    out
+}
+
+pub fn smooth_retimes(p: &Project) -> Vec<crate::model::Retime> {
+    let mut out = Vec::new();
+    for t in p.tracks.iter().flat_map(|t| &t.transitions) {
+        if let Some(crate::model::PictureTransition::SmoothCut { process, .. }) =
+            crate::otio::transitions::kind_of(t)
+        {
+            let r = process.retime();
             if r.ai() && !out.contains(&r) {
                 out.push(r);
             }

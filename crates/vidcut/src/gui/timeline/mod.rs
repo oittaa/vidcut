@@ -2144,7 +2144,15 @@ impl Workspace {
         if released {
             if let Some(r) = request {
                 let method = r["method"].as_str().unwrap_or_default().to_string();
-                self.send_drag(&method, r["params"].clone());
+                let params = r["params"].clone();
+                match (
+                    method.as_str(),
+                    params["transition"]["type"] == "smooth_cut",
+                ) {
+                    ("edit.dissolve", true) => self.send_asking("edit.dissolve", params),
+                    ("edit.transition", true) => self.send_asking("edit.transition", params),
+                    _ => self.send_drag(&method, params),
+                }
                 if (d.preview.gains.is_some() || !d.preview.trims.is_empty())
                     && let Some(q) = d.preview.moved(p)
                 {
@@ -2948,12 +2956,12 @@ impl Workspace {
                 (0, cues.iter().map(|c| c.1).max().unwrap_or(0)),
             ),
             Gesture::Title { template, len } => (template.label.clone(), (0, *len)),
-            Gesture::Transition { label, .. } => (
+            Gesture::Transition { label, kind } => (
                 (*label).to_string(),
                 (
                     0,
                     self.project()
-                        .map_or(0, |p| p.settings.fps.as_f64().round() as i64),
+                        .map_or(0, |p| vidcut_core::ops::dissolve_length(p, kind)),
                 ),
             ),
             _ => return,

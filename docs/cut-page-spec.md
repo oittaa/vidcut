@@ -633,6 +633,10 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Where the sounds of the clips meet at that edit, a Cross Fade goes on the sound too (p. 1114).
   - Details: D50.
 - **Cut** (p. 759): the edit nearest the playhead becomes a cut again.
+- **Smooth Cut** (p. 759):
+  - The button puts a 0.2-second Smooth Cut centered on the edit nearest the playhead (deviation X100).
+  - Its Mode is Better, its Process is AI and its Ease is None.
+  - Where the sounds of the clips meet at that edit, a Cross Fade 0 dB of the same length goes on the sound too.
 - **A selected dissolve** (pp. 759, 761):
   - A click selects it.
   - Its right-click menu has Change Transition Duration, then Start on Edit, Center on Edit and End on Edit. The current one is greyed.
@@ -683,11 +687,26 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Resolve's measured geometry, blur and ease are in [gotchas](gotchas.md#resolves-otio-files).
   - A request makes one: `{"type": "push", "preset": "up", "border": 0.02}`, or `{"type": "slide", "preset": "top_left", "out": true}`.
   - An OTIO file holds them as Resolve's Push and Slide, with their values.
+- **A Smooth Cut** (pp. 759, 1166):
+  - It morphs the outgoing picture into the incoming picture. It hides a jump cut, for example in an interview.
+  - It uses the same length rules as a dissolve.
+  - With the Mode Better, both clips play on, as in a dissolve. Each frame morphs the frame of one clip into the frame of the other.
+  - With the Mode Faster, it morphs two still frames. They are the outgoing clip at the first frame of the transition and the incoming clip at its last frame.
+  - The Process makes the frames between the two pictures: AI Fast, AI Slow or Frame Blend (deviation X99). Frame Blend gives a Cross Dissolve.
+  - Ease and Transition Curve are as for a Push. Frame f of n frames shows the morph at curve(f) + 0.5 / n, at most 1.
+  - The morph takes the nearest source frame of each clip. A clip with a speed change shows no frames between its source frames.
+  - It morphs two pictures that each cover the frame alone, with the usual Inspector values. It plays as a Cross Dissolve in these cases:
+    - A side is a gap, a clip in a compound clip, or a clip over other tracks that does not fill the frame.
+    - A side has other Inspector values, or plays backward.
+  - Resolve's measured values are in [gotchas](gotchas.md#resolves-otio-files).
+  - A request makes one: `{"type": "smooth_cut", "mode": "faster", "process": "frame_blend"}`.
+  - An OTIO file holds it as Resolve's Smooth Cut, with its values.
 - **The Transitions tab** (pp. 759–761):
-  - It has cards for Cross Dissolve and Dip To Color Dissolve under Dissolve, for Edge Wipe under Wipe, and for Push and Slide under Motion.
+  - It has cards for Cross Dissolve, Dip To Color Dissolve and Smooth Cut under Dissolve.
+  - It has a card for Edge Wipe under Wipe, and cards for Push and Slide under Motion.
   - The Edge Wipe of the card comes in from the bottom, as Resolve's Edge Wipe at 0 degrees (X89).
-  - The Push of the card is Push Left. The Slide of the card is Left-Right, In.
-  - A drag of a card onto an edit of a video track adds that transition there, one second long.
+  - The Push of the card is Push Left. The Slide of the card is Left-Right, In. The Smooth Cut of the card is the Smooth Cut of the button.
+  - A drag of a card onto an edit of a video track adds that transition there, one second long. A Smooth Cut is 0.2 seconds long (X100).
     - Left of the edit, it ends on the edit. Right of the edit, it starts on it. On the edit, it is centered.
     - The length is shortened to the media (X27).
   - A drag of a card onto a transition changes its type. The length stays.
@@ -705,7 +724,9 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A Dip To Color Dissolve also has Color. A change goes to the project when the color picker closes.
   - A Push and a Slide also have Preset, Border, Feather, Color, Motion Blur and Ease. A Slide also has Direction: In or Out.
   - Border shows the band in pixels of the timeline width, as Resolve shows it. A change of Border or Motion Blur goes to the project when the drag ends.
-  - A Push and a Slide also have Transition Curve: the curve at the playhead, from 0 to 1. The row has the value, the previous-key and next-key arrows, a keyframe button and Reset.
+  - A Smooth Cut also has Mode, Process and Ease. Mode is Faster or Better. Process is AI Fast, AI Slow or Frame Blend (X99).
+  - A Process with an AI model that is not on the computer asks for its download first, as Retime Process does.
+  - A Push, a Slide and a Smooth Cut also have Transition Curve: the curve at the playhead, from 0 to 1. The row has the value, the previous-key and next-key arrows, a keyframe button and Reset.
     - The frame of a key counts from the first frame of the transition. A key can be outside the transition, as in Resolve.
     - A change of the value with keys puts a key at the playhead. With no keys, it changes the fixed value.
     - The keyframe button removes the key at the playhead. Else it adds a key with the value at the playhead.
@@ -715,7 +736,6 @@ Video Only and Audio Only limit what an edit takes (p. 694).
     - Reset with Custom gives the straight curve from 0 to 1, and the fixed value 0.
   - Each change is a request: `edit.transition` for the type and its values, `edit.dissolve` for the length and the alignment.
 - **Later:**
-  - Smooth Cut
   - Hover Scrub Preview of a transition, and favorites
   - the other values of each type, such as the Style of a dissolve and the border of a wipe
   - moving a transition to another edit

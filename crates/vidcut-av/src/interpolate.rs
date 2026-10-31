@@ -118,6 +118,7 @@ pub fn check<'a>(
     download: bool,
 ) -> Result<()> {
     let mut used: Vec<(Retime, String)> = Vec::new();
+    let mut smooth: Vec<Retime> = Vec::new();
     for plan in plans {
         for piece in &plan.video {
             for (layer, _) in piece.layers() {
@@ -128,7 +129,19 @@ pub fn check<'a>(
                     used.push((*retime, media.clone()));
                 }
             }
+            for s in piece.smooths().into_iter().flatten() {
+                if !smooth.contains(&s.retime) {
+                    smooth.push(s.retime);
+                }
+            }
         }
+    }
+    if let Some(r) = smooth.iter().find(|r| off_here(**r)) {
+        return Err(Error::Invalid(format!(
+            "{} doesn't run on this computer: set the Process of each Smooth Cut that uses it \
+             to another process",
+            name(*r)
+        )));
     }
     let mut off: Vec<String> = used
         .iter()
@@ -147,7 +160,12 @@ pub fn check<'a>(
             off.join(", ")
         )));
     }
-    let mut models: Vec<Retime> = used.iter().map(|(r, _)| *r).filter(Retime::ai).collect();
+    let mut models: Vec<Retime> = used
+        .iter()
+        .map(|(r, _)| *r)
+        .chain(smooth)
+        .filter(Retime::ai)
+        .collect();
     models.sort_by_key(|r| *r as u8);
     models.dedup();
     for r in models {

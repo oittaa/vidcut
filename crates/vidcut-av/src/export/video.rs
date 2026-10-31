@@ -1,11 +1,12 @@
 use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
 use vidcut_core::place::Placing;
-use vidcut_core::render::{Image, Moving, Placed, Ramp, VideoPiece, WHOLE, Wipe};
+use vidcut_core::render::{Image, Moving, Placed, Ramp, Smooth, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -1513,6 +1514,7 @@ pub struct VideoFrames {
     drawn: i64,
     encoder: Option<Handoff>,
     spent: (Duration, Duration),
+    smoother: Option<(Retime, crate::interpolate::User)>,
 }
 
 pub(crate) enum Handoff {
@@ -1818,6 +1820,7 @@ impl VideoFrames {
             drawn: 0,
             encoder: None,
             spent: Default::default(),
+            smoother: None,
         }
     }
 
@@ -2077,11 +2080,13 @@ impl VideoFrames {
             }
             let placed = crate::player::placed_of(&piece, k, &[]);
             let motions = piece.motions();
+            let smooths = piece.smooths();
             let mut made = Vec::with_capacity(layers.len());
             for (i, (layer, ramp)) in layers.into_iter().enumerate() {
                 let weight = ramp.map(|r| r.weight(k));
                 let wipe = mask_of(ramp, k);
                 let moving = motions[i].zip(ramp).map(|(m, r)| m.at(&r, k));
+                let smooth = smooths[i].zip(ramp).map(|(s, r)| (s, s.at(&r, k)));
                 let VideoPiece::Source {
                     image,
                     pace,
@@ -2158,6 +2163,20 @@ impl VideoFrames {
                     share: self.share_of(s, rotation, placed.get(i)),
                     woven,
                 });
+                if let Some((smooth, t)) = smooth
+                    && !backward
+                    && let Some(frame) = self.smooth_frame(i, smooth, t)?
+                {
+                    let last = made.last_mut().expect("just made");
+                    last.frame = Some(frame);
+                    last.weight = None;
+                    last.rotation = 0;
+                    last.sampling = Sampling::Own;
+                    last.wipe = None;
+                    last.moving = None;
+                    last.share = 1.0;
+                    last.woven = None;
+                }
             }
             return Ok(Some(picture.then_some(made)));
         }
@@ -2770,6 +2789,68 @@ impl VideoFrames {
             (clock.elapsed() - between).as_secs_f64() * 1e3
         );
         Ok(out)
+    }
+
+    fn smooth_frame(&mut self, i: usize, smooth: &Smooth, t: f64) -> Result<Option<frame::Video>> {
+        let reading_of = |j: usize| self.reading.get(j).copied().flatten();
+        let (Some(sa), Some(sb)) = (i.checked_sub(1).and_then(reading_of), reading_of(i)) else {
+            return Ok(None);
+        };
+        if self.open[sa].current.is_none() || self.open[sb].current.is_none() {
+            return Ok(None);
+        }
+        let retime = smooth.retime;
+        if self.smoother.as_ref().is_none_or(|(r, _)| *r != retime) {
+            self.smoother = crate::interpolate::User::of(retime).map(|u| (retime, u));
+        }
+        let (w, h, _) = self.maker.out();
+        let size = (w, h);
+        let look = Look::fitted(size, crate::screen::kernel(None), (true, self.timeline));
+        let frames = retime == Retime::Macos;
+        let made_reading = self.maker.reading();
+        let mut picture = |s: usize| -> Result<(frame::Video, Option<i64>, u64)> {
+            let src = &mut self.open[s];
+            let reading = src.pictures.reading(made_reading);
+            let rotation = src.reader.rotation();
+            let f = frame_ref(&src.current.as_ref().expect("a frame").0)?;
+            let made = match frames {
+                true => src.frame_from((&f, (None, None)), rotation, &look, reading)?,
+                false => src.rgb_from((&f, (None, None)), rotation, &look, reading)?,
+            };
+            Ok((made, f.pts(), src.look_id(&look)))
+        };
+        let (a, pa, la) = picture(sa)?;
+        let (b, pb, lb) = picture(sb)?;
+        let mut pair = std::hash::DefaultHasher::new();
+        (self.open[sb].reader.path(), pb, la, lb, size).hash(&mut pair);
+        let at = 2 * pa.unwrap_or(0);
+        let key = (
+            self.open[sa].reader.path().to_path_buf(),
+            pair.finish(),
+            at,
+            at + 1,
+        );
+        let clock = Instant::now();
+        let big = match frames {
+            true => crate::interpolate::between_frames(&key, &a, &b, size, t)?,
+            false => {
+                let made = crate::interpolate::between(retime, &key, &a, &b, size, t)?;
+                made_picture(made, size, pb, form_of(&a))?
+            }
+        };
+        crate::debug!(
+            "interpolate",
+            "smooth cut: {}: {w}x{h} at {t:.3} in {:.1} ms",
+            crate::interpolate::name(retime),
+            clock.elapsed().as_secs_f64() * 1e3
+        );
+        let src = &mut self.open[sb];
+        let reading = src.pictures.reading(made_reading);
+        let made = self
+            .maker
+            .make_layer(i, &mut src.fitting, &big, src.reader.path(), reading)?;
+        src.normalized = None;
+        self.finished_layer(sb, made).map(Some)
     }
 
     fn shown(

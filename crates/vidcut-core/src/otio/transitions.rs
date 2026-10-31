@@ -5,8 +5,9 @@ use serde_json::{Value, json};
 
 use super::{EDITOR, VIDCUT, gap, rt, schema};
 use crate::model::{
-    Clip, Handle, Keyframe, MAX_BORDER, Media, Motion, MotionEase, PictureTransition, Project,
-    PushPreset, SlidePreset, Track, Transition, WHITE, WipeDirection,
+    Clip, Course, Handle, Keyframe, MAX_BORDER, Media, Motion, MotionEase, PictureTransition,
+    Project, PushPreset, SlidePreset, SmoothMode, SmoothProcess, Track, Transition, WHITE,
+    WipeDirection,
 };
 use crate::render::Curve;
 
@@ -43,6 +44,10 @@ pub fn moving_of(t: &Transition) -> Option<PictureTransition> {
     (!t.sound).then(|| moving_in(&t.otio)).flatten()
 }
 
+pub fn smooth_of(t: &Transition) -> Option<PictureTransition> {
+    (!t.sound).then(|| smooth_in(&t.otio)).flatten()
+}
+
 pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
     if let Some(direction) = wipe_of(t) {
         return Some(PictureTransition::Wipe { direction });
@@ -50,17 +55,25 @@ pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
     if let Some(color) = dip_of(t) {
         return Some(PictureTransition::DipToColor { color });
     }
-    if let Some(kind) = moving_of(t) {
+    if let Some(kind) = moving_of(t).or_else(|| smooth_of(t)) {
         return Some(kind);
     }
     (!t.sound && dissolves(t)).then_some(PictureTransition::Dissolve)
 }
 
 pub fn mixes(t: &Transition) -> bool {
-    dissolves(t) || wipe_of(t).is_some() || dip_of(t).is_some() || moving_of(t).is_some()
+    dissolves(t)
+        || wipe_of(t).is_some()
+        || dip_of(t).is_some()
+        || moving_of(t).is_some()
+        || smooth_of(t).is_some()
 }
 
 fn custom(name: &str, kind: i64, parameters: Vec<Value>) -> Value {
+    custom_effect(name, name, kind, parameters)
+}
+
+fn custom_effect(name: &str, effect: &str, kind: i64, parameters: Vec<Value>) -> Value {
     json!({
         "OTIO_SCHEMA": "Transition.1",
         "name": name,
@@ -68,7 +81,7 @@ fn custom(name: &str, kind: i64, parameters: Vec<Value>) -> Value {
         "metadata": { EDITOR: {
             "Effects": {
                 "Display Type": 1,
-                "Effect Name": name,
+                "Effect Name": effect,
                 "Enabled": true,
                 "Name": name,
                 "Parameters": parameters,
@@ -99,6 +112,13 @@ fn value<'a>(values: &'a [Value], id: &str) -> Option<&'a Value> {
         .iter()
         .find(|p| p["Parameter ID"] == id)
         .map(|p| &p["Parameter Value"])
+}
+
+fn index(values: &[Value], id: &str, default: usize) -> Option<usize> {
+    match value(values, id) {
+        None => Some(default),
+        Some(v) => usize::try_from(v.as_u64()?).ok(),
+    }
 }
 
 fn uint(id: &str, value: usize) -> Value {
@@ -180,25 +200,25 @@ pub fn eased(ease: MotionEase, frames: i64) -> Vec<Keyframe> {
     ]
 }
 
-pub fn curve_of(m: &Motion, frames: i64) -> Vec<Keyframe> {
+pub fn curve_of(m: &Course, frames: i64) -> Vec<Keyframe> {
     match m.ease {
         MotionEase::Custom => m.curve.clone(),
         e => eased(e, frames),
     }
 }
 
-pub fn progress_at(m: &Motion, frames: i64, frame: i64) -> f64 {
+pub fn progress_at(m: &Course, frames: i64, frame: i64) -> f64 {
     crate::keyframes::value_at(&curve_of(m, frames), frame as f64).unwrap_or(m.progress)
 }
 
-fn customized(m: &mut Motion, frames: i64) {
+fn customized(m: &mut Course, frames: i64) {
     if m.ease != MotionEase::Custom {
         m.curve = eased(m.ease, frames);
         m.ease = MotionEase::Custom;
     }
 }
 
-pub fn put_progress(m: &mut Motion, frames: i64, frame: i64, value: f64) {
+pub fn put_progress(m: &mut Course, frames: i64, frame: i64, value: f64) {
     customized(m, frames);
     if m.curve.is_empty() {
         m.progress = value;
@@ -208,7 +228,7 @@ pub fn put_progress(m: &mut Motion, frames: i64, frame: i64, value: f64) {
     }
 }
 
-pub fn toggle_key(m: &mut Motion, frames: i64, frame: i64) {
+pub fn toggle_key(m: &mut Course, frames: i64, frame: i64) {
     customized(m, frames);
     if let Some(i) = m.curve.iter().position(|k| k.frame == frame) {
         m.curve.remove(i);
@@ -224,14 +244,14 @@ pub fn toggle_key(m: &mut Motion, frames: i64, frame: i64) {
     }
 }
 
-pub fn reset_curve(m: &mut Motion, frames: i64) {
+pub fn reset_curve(m: &mut Course, frames: i64) {
     if m.ease == MotionEase::Custom {
         m.curve = eased(MotionEase::None, frames);
     }
     m.progress = 0.0;
 }
 
-pub fn set_ease(m: &mut Motion, frames: i64, ease: MotionEase) {
+pub fn set_ease(m: &mut Course, frames: i64, ease: MotionEase) {
     m.curve = match ease {
         MotionEase::Custom => curve_of(m, frames),
         _ => Vec::new(),
@@ -301,7 +321,7 @@ fn curve_in(values: &[Value]) -> Vec<Keyframe> {
 }
 
 pub fn scale_curve(o: &mut Value, frame: impl Fn(i64) -> i64, ratio: f64) {
-    if moving_in(o).is_none() {
+    if curved_values(o).is_none() {
         return;
     }
     let Some(p) = o
@@ -355,14 +375,101 @@ fn moving_otio(
     if motion.motion_blur != 0.0 {
         parameters.push(double("motion blur", motion.motion_blur, 1.0));
     }
-    if !motion.ease.is_none() {
-        parameters.push(uint("ease", motion.ease as usize));
-    }
-    let keys = curve_of(motion, frames);
-    if !keys.is_empty() || motion.progress != 0.0 {
-        parameters.push(curve_otio(&keys, motion.progress));
-    }
+    parameters.extend(course_otio(&motion.course, frames));
     custom(name, type_of, parameters)
+}
+
+fn course_otio(course: &Course, frames: i64) -> Vec<Value> {
+    let mut parameters = Vec::new();
+    if !course.ease.is_none() {
+        parameters.push(uint("ease", course.ease as usize));
+    }
+    let keys = curve_of(course, frames);
+    if !keys.is_empty() || course.progress != 0.0 {
+        parameters.push(curve_otio(&keys, course.progress));
+    }
+    parameters
+}
+
+fn course_in(values: &[Value]) -> Option<Course> {
+    let ease = *MotionEase::ALL.get(index(values, "ease", 0)?)?;
+    Some(Course {
+        ease,
+        curve: match ease {
+            MotionEase::Custom => curve_in(values),
+            _ => Vec::new(),
+        },
+        progress: value(values, CURVE).and_then(Value::as_f64).unwrap_or(0.0),
+    })
+}
+
+const SMOOTH_CUT: &str = "Smooth Cut";
+
+const MORPH: &str = "Morph Dissolve";
+
+const MODE: &str = "smooth cut mode";
+
+const AI: &str = "smooth cut ai";
+
+const AI_SLOW: &str = "ai_slow";
+
+pub fn smooth_otio(
+    mode: SmoothMode,
+    process: SmoothProcess,
+    course: &Course,
+    frames: i64,
+) -> Value {
+    let mut parameters = Vec::new();
+    if !mode.is_better() {
+        parameters.push(json!({
+            "Default Parameter Value": SmoothMode::Better as usize,
+            "Parameter ID": MODE,
+            "Parameter Value": mode as usize,
+            "Variant Type": "UInt",
+        }));
+    }
+    if process == SmoothProcess::FrameBlend {
+        parameters.push(json!({
+            "Default Parameter Value": true,
+            "Parameter ID": AI,
+            "Parameter Value": false,
+            "Variant Type": "Bool",
+        }));
+    }
+    parameters.extend(course_otio(course, frames));
+    let mut o = custom_effect(SMOOTH_CUT, MORPH, 39, parameters);
+    if process == SmoothProcess::AiSlow {
+        o["metadata"][VIDCUT]["process"] = json!(AI_SLOW);
+    }
+    o
+}
+
+fn smooth_in(o: &Value) -> Option<PictureTransition> {
+    smooth_values(o).map(|(kind, _)| kind)
+}
+
+fn smooth_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
+    let values = values(o, SMOOTH_CUT, 39)?;
+    let mode = *SmoothMode::ALL.get(index(values, MODE, SmoothMode::Better as usize)?)?;
+    let ai = match value(values, AI) {
+        None => true,
+        Some(v) => v.as_bool()?,
+    };
+    let process = match ai {
+        false => SmoothProcess::FrameBlend,
+        true if o["metadata"][VIDCUT]["process"] == AI_SLOW => SmoothProcess::AiSlow,
+        true => SmoothProcess::Ai,
+    };
+    let kind = PictureTransition::SmoothCut {
+        mode,
+        process,
+        course: course_in(values)?,
+    };
+    Some((kind, values))
+}
+
+fn curved_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
+    moving_values(o).or_else(|| smooth_values(o))
 }
 
 fn moving_in(o: &Value) -> Option<PictureTransition> {
@@ -370,13 +477,8 @@ fn moving_in(o: &Value) -> Option<PictureTransition> {
 }
 
 fn moving_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
-    let index = |values: &[Value], id: &str| match value(values, id) {
-        None => Some(0),
-        Some(v) => usize::try_from(v.as_u64()?).ok(),
-    };
     let motion = |values: &[Value]| -> Option<Motion> {
         let number = |id: &str| value(values, id).and_then(Value::as_f64).unwrap_or(0.0);
-        let ease = *MotionEase::ALL.get(index(values, "ease")?)?;
         Some(Motion {
             border: number("border"),
             feather: value(values, "feather").and_then(Value::as_bool) == Some(true),
@@ -385,25 +487,20 @@ fn moving_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
                 .and_then(crate::subtitles::rgb)
                 .unwrap_or(WHITE),
             motion_blur: number("motion blur"),
-            ease,
-            curve: match ease {
-                MotionEase::Custom => curve_in(values),
-                _ => Vec::new(),
-            },
-            progress: number(CURVE),
+            course: course_in(values)?,
         })
     };
     if let Some(values) = values(o, PUSH, 50) {
         let kind = PictureTransition::Push {
-            preset: *PushPreset::ALL.get(index(values, "push style")?)?,
+            preset: *PushPreset::ALL.get(index(values, "push style", 0)?)?,
             motion: motion(values)?,
         };
         return Some((kind, values));
     }
     let values = values(o, SLIDE, 49)?;
     let kind = PictureTransition::Slide {
-        preset: *SlidePreset::ALL.get(index(values, "slide style")?)?,
-        out: match index(values, "transition direction")? {
+        preset: *SlidePreset::ALL.get(index(values, "slide style", 0)?)?,
+        out: match index(values, "transition direction", 0)? {
             0 => false,
             1 => true,
             _ => return None,
@@ -413,14 +510,14 @@ fn moving_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
     Some((kind, values))
 }
 
-pub fn moving_played(t: &Transition, frames: i64) -> Option<(PictureTransition, Vec<Keyframe>)> {
-    let (kind, values) = (!t.sound).then(|| moving_values(&t.otio)).flatten()?;
-    let motion = kind.motion()?;
-    let keys = match (motion.ease, curve_in(values)) {
+pub fn course_played(t: &Transition, frames: i64) -> Option<(PictureTransition, Vec<Keyframe>)> {
+    let (kind, values) = (!t.sound).then(|| curved_values(&t.otio)).flatten()?;
+    let course = kind.course()?;
+    let keys = match (course.ease, curve_in(values)) {
         (MotionEase::None, _) => eased(MotionEase::None, frames),
         (_, keys) if keys.is_empty() => vec![Keyframe {
             frame: 0,
-            value: motion.progress,
+            value: course.progress,
             in_handle: None,
             out_handle: None,
         }],
@@ -486,7 +583,11 @@ pub(super) fn plays_in(o: &Value, sound: bool) -> bool {
     if sound {
         cross_fade_in(o).is_some()
     } else {
-        dissolves_in(o) || wipe_in(o).is_some() || dip_in(o).is_some() || moving_in(o).is_some()
+        dissolves_in(o)
+            || wipe_in(o).is_some()
+            || dip_in(o).is_some()
+            || moving_in(o).is_some()
+            || smooth_in(o).is_some()
     }
 }
 

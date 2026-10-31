@@ -1794,6 +1794,10 @@ impl Workspace {
             if ui.button("Dissolve").clicked() {
                 self.send("edit.dissolve", json!({ "at": at }));
             }
+            if ui.button("Smooth Cut").clicked() {
+                let smooth = json!({ "type": "smooth_cut" });
+                self.send_asking("edit.dissolve", json!({ "at": at, "transition": smooth }));
+            }
             self.edit_only_toggles(ui);
         });
         let sources = self.edit_sources();

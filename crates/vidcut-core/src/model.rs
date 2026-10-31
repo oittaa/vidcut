@@ -1147,6 +1147,16 @@ pub enum PictureTransition {
     },
     /// One wipe, from `direction`.
     Wipe { direction: WipeDirection },
+    /// The outgoing picture morphs into the incoming picture, which hides a
+    /// jump cut.
+    SmoothCut {
+        #[serde(default, skip_serializing_if = "SmoothMode::is_better")]
+        mode: SmoothMode,
+        #[serde(default, skip_serializing_if = "SmoothProcess::is_ai")]
+        process: SmoothProcess,
+        #[serde(flatten)]
+        course: Course,
+    },
     /// The incoming picture pushes the outgoing picture out of the frame.
     Push {
         preset: PushPreset,
@@ -1228,18 +1238,8 @@ pub struct Motion {
     /// A blur along the move, from 0 to 1.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub motion_blur: f64,
-    /// How the move speeds up and slows down.
-    #[serde(default, skip_serializing_if = "MotionEase::is_none")]
-    pub ease: MotionEase,
-    /// With a `custom` ease, the keys of the move: from 0, the outgoing
-    /// picture, to 1, the incoming picture, at frames from the start of the
-    /// transition, in order and no two on one frame. Without keys, the
-    /// transition stays at `progress`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub curve: Vec<Keyframe>,
-    /// With a `custom` ease and no keys, the move at each frame, from 0 to 1.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub progress: f64,
+    #[serde(flatten)]
+    pub course: Course,
 }
 
 impl Motion {
@@ -1248,10 +1248,107 @@ impl Motion {
         feather: false,
         color: WHITE,
         motion_blur: 0.0,
+        course: Course::PLAIN,
+    };
+}
+
+/// How a Push, a Slide or a Smooth Cut goes from the outgoing picture to
+/// the incoming picture over its frames.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct Course {
+    /// How the transition speeds up and slows down.
+    #[serde(default, skip_serializing_if = "MotionEase::is_none")]
+    pub ease: MotionEase,
+    /// With a `custom` ease, the keys of the transition: from 0, the
+    /// outgoing picture, to 1, the incoming picture, at frames from the
+    /// start of the transition, in order and no two on one frame. Without
+    /// keys, the transition stays at `progress`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub curve: Vec<Keyframe>,
+    /// With a `custom` ease and no keys, the transition at each frame, from
+    /// 0 to 1.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub progress: f64,
+}
+
+impl Course {
+    pub const PLAIN: Course = Course {
         ease: MotionEase::None,
         curve: Vec::new(),
         progress: 0.0,
     };
+}
+
+/// Which frames a Smooth Cut morphs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SmoothMode {
+    /// The outgoing picture stops at the first frame of the transition, and
+    /// the incoming picture at its last frame. The morph goes from one still
+    /// to the other.
+    Faster,
+    /// Both clips play on, as in a cross dissolve, and each frame morphs the
+    /// outgoing frame into the incoming frame. Thus the motion of the
+    /// subject stays.
+    #[default]
+    Better,
+}
+
+impl SmoothMode {
+    pub const ALL: [SmoothMode; 2] = [Self::Faster, Self::Better];
+
+    pub fn is_better(&self) -> bool {
+        *self == Self::Better
+    }
+
+    pub fn title(&self) -> &'static str {
+        match self {
+            Self::Faster => "Faster",
+            Self::Better => "Better",
+        }
+    }
+}
+
+/// How a Smooth Cut makes each frame from the outgoing and the incoming
+/// picture (deviation X99).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SmoothProcess {
+    /// The AI of the computer that plays or exports: the frame rate
+    /// conversion of macOS on macOS, AI Fast (RIFE 4.25) elsewhere.
+    #[default]
+    Ai,
+    /// EMA-VFI on the GPU: slower, and nearer to the real frames. Off on
+    /// macOS.
+    AiSlow,
+    /// The two pictures, mixed by how far the transition is.
+    FrameBlend,
+}
+
+impl SmoothProcess {
+    pub fn is_ai(&self) -> bool {
+        *self == Self::Ai
+    }
+
+    pub fn here() -> &'static [SmoothProcess] {
+        if Retime::ai_here() == Retime::Macos {
+            &[Self::Ai, Self::FrameBlend]
+        } else {
+            &[Self::Ai, Self::AiSlow, Self::FrameBlend]
+        }
+    }
+
+    pub fn retime(self) -> Retime {
+        match self {
+            Self::Ai => Retime::ai_here(),
+            Self::AiSlow => Retime::AiSlow,
+            Self::FrameBlend => Retime::FrameBlend,
+        }
+    }
+
+    pub fn title(&self) -> &'static str {
+        self.retime().title()
+    }
 }
 
 impl Default for Motion {
@@ -1272,7 +1369,7 @@ fn is_white(c: &[u8; 3]) -> bool {
     *c == WHITE
 }
 
-/// How the move of a Push or a Slide goes over its frames.
+/// How a Push, a Slide or a Smooth Cut goes over its frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MotionEase {
@@ -1328,6 +1425,20 @@ impl PictureTransition {
         match self {
             Self::Push { motion, .. } | Self::Slide { motion, .. } => Some(motion),
             _ => None,
+        }
+    }
+
+    pub fn course(&self) -> Option<&Course> {
+        match self {
+            Self::SmoothCut { course, .. } => Some(course),
+            k => k.motion().map(|m| &m.course),
+        }
+    }
+
+    pub fn course_mut(&mut self) -> Option<&mut Course> {
+        match self {
+            Self::SmoothCut { course, .. } => Some(course),
+            k => k.motion_mut().map(|m| &mut m.course),
         }
     }
 }
