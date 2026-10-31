@@ -2,11 +2,13 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use vidcut_av::color::Matrix;
-use vidcut_av::player::{self as engine, Layout, Made, PlaysOn};
+use vidcut_av::player::{self as engine, Layout, Made, PlaysOn, Upscaled};
 use vidcut_av::{interpolate, super_scale};
 use vidcut_core::model::{Hdr, RenderCache, Retime, Sharpness, SuperScale, Upscaler, hex};
 use vidcut_core::render::BLACK;
 use vidcut_core::render_cache::{Part, Reason};
+
+use crate::when;
 
 pub type Group = (&'static str, Vec<(&'static str, String)>);
 
@@ -51,6 +53,7 @@ pub struct PictureStats {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MadeStats {
     pub layers: Vec<LayerMade>,
+    pub written: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -261,7 +264,8 @@ impl PlayerStats {
         let Some(frame) = self.picture.as_ref().map(|p| p.frame) else {
             return self;
         };
-        self.render_cache = cache_row(mode, line, frame);
+        let written = self.made.as_ref().and_then(|m| m.written);
+        self.render_cache = cache_row(mode, line, frame, written);
         let part = line.iter().find(|p| p.holds(frame));
         let shown = self.super_scale.as_ref().and_then(|s| s.scale);
         let made = part.and_then(|p| match shown {
@@ -313,13 +317,16 @@ impl PlayerStats {
     }
 }
 
-fn cache_row(mode: RenderCache, line: &[Part], frame: i64) -> Option<String> {
+fn cache_row(mode: RenderCache, line: &[Part], frame: i64, written: Option<u64>) -> Option<String> {
     if mode.is_off() {
         return None;
     }
     Some(match line.iter().find(|p| p.holds(frame)) {
         None => "Not needed".into(),
-        Some(p) if p.has(frame) => "Cached".into(),
+        Some(p) if p.has(frame) => match written {
+            Some(ms) => format!("Cached, written {}", when::ago(ms, when::now_ms())),
+            None => "Cached".into(),
+        },
         Some(p) => {
             format!("To render: {}", reason_names(&p.reasons).join(", "))
         }
@@ -379,9 +386,25 @@ impl MadeStats {
             .collect();
         origins.iter().any(Option::is_some).then(|| Self {
             layers: origins
-                .into_iter()
-                .map(|o| o.map_or_else(LayerMade::not_recorded, LayerMade::of))
+                .iter()
+                .flat_map(|o| match o.and_then(|o| o.cached.as_deref()) {
+                    Some(c) => c
+                        .layers
+                        .iter()
+                        .map(|l| {
+                            l.map_or_else(LayerMade::not_recorded, |(m, u)| {
+                                LayerMade::made(m, u, None)
+                            })
+                        })
+                        .collect(),
+                    None => vec![o.map_or_else(LayerMade::not_recorded, LayerMade::of)],
+                })
                 .collect(),
+            written: origins
+                .iter()
+                .flatten()
+                .find_map(|o| o.cached.as_ref())
+                .map(|c| c.written),
         })
     }
 
@@ -412,6 +435,11 @@ impl MadeStats {
 
 impl LayerMade {
     fn of(origin: &engine::Origin) -> Self {
+        let secs = origin.when.elapsed().as_secs_f64();
+        Self::made(origin.made, origin.upscaled, Some(secs))
+    }
+
+    fn made(how: Made, upscaled: Option<Upscaled>, secs_ago: Option<f64>) -> Self {
         let frame =
             |f: Option<i64>| f.map_or_else(|| "A source frame".into(), |f| format!("Frame {f}"));
         let made = |r: Retime, at: f64, took: Duration| {
@@ -421,7 +449,7 @@ impl LayerMade {
                 took.as_secs_f64() * 1e3
             )
         };
-        let (source, retime, smooth_cut) = match origin.made {
+        let (source, retime, smooth_cut) = match how {
             Made::Solid(BLACK) => ("Black".into(), None, None),
             Made::Solid(color) => (format!("Color {}", hex(color)), None, None),
             Made::Still => ("A still image".into(), None, None),
@@ -455,7 +483,7 @@ impl LayerMade {
                 Some(made(retime, at, took)),
             ),
         };
-        let upscaler = origin.upscaled.map(|u| {
+        let upscaler = upscaled.map(|u| {
             let name = super_scale::name(u.upscaler);
             match u.sizes {
                 Some([(w, h), (mw, mh)]) => format!("{name}, {w}×{h} → {mw}×{mh}"),
@@ -463,7 +491,7 @@ impl LayerMade {
             }
         });
         Self {
-            secs_ago: Some(origin.when.elapsed().as_secs_f64()),
+            secs_ago,
             source,
             retime,
             smooth_cut,

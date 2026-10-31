@@ -46,7 +46,8 @@ impl Kind {
         let ext = Path::new(name).extension().map(|e| e.to_string_lossy());
         match self {
             Kind::Analysis => ext.is_some_and(|e| e.starts_with("words")),
-            Kind::Render => ext.is_some_and(|e| e == crate::render_cache::KEYS),
+            Kind::Render => ext
+                .is_some_and(|e| e == crate::render_cache::KEYS || e == crate::render_cache::MADE),
             _ => false,
         }
     }

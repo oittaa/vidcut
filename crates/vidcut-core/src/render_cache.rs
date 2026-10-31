@@ -14,6 +14,7 @@ use crate::render::{Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
 pub type Key = [u8; 16];
 
 pub const KEYS: &str = "keys";
+pub const MADE: &str = "made";
 
 pub const FILE: &str = "mkv";
 
@@ -911,6 +912,7 @@ impl Index {
                 (true, Some(keys)) => index.add(&file, &keys),
                 _ => {
                     let _ = std::fs::remove_file(&path);
+                    let _ = std::fs::remove_file(path.with_extension(MADE));
                 }
             }
         }
@@ -966,6 +968,7 @@ impl Index {
         }
         let _ = std::fs::remove_file(file);
         let _ = std::fs::remove_file(file.with_extension(KEYS));
+        let _ = std::fs::remove_file(file.with_extension(MADE));
     }
 
     pub fn clear(&mut self) {

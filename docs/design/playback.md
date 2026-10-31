@@ -111,6 +111,11 @@ flowchart TD
 - The number of a source frame counts from 0 at the first frame of the file.
 - With an AI upscaler, the `Origin` tells the upscaler and the two sizes (`Upscaled`). When the frame needs no enlarging, it tells that the upscaler was not used.
 - The `Origin` also tells when the layer was made.
+- A picture from the render cache also carries the record of its frame in the cache file (`Cached`).
+  - The record tells how each layer of the frame was made when the cache was written (`Making`).
+  - It also holds the time of writing, as a date. Why: an `Instant` has no meaning in another process.
+  - The stats panel shows these layers in place of the cached layer. The other layers of the picture stay.
+  - The Render Cache row tells the time of writing.
 - The stats panel shows the `Origin` of each layer of the picture on the screen (`MadeStats`). It also shows how long ago each layer was made.
   - Each picture on the screen comes from the kept pictures. Thus the age of a layer tells whether the layer was made just now or kept from earlier.
   - The layers of a dissolve can have different ages.
@@ -410,7 +415,10 @@ The files:
 - The files are in the `render` folder of the disk cache (`Kind::Render`). They count in its limit ([the disk cache limit](analysis.md#the-disk-cache-limit)).
 - Each file is Matroska, with at most 2 s of frames in a row (`Cache::next`).
 - A `.keys` file next to it holds the names of its frames, 16 bytes each (`write_keys`). The disk cache does not count it (`Kind::keeps`).
-- `Index::scan` reads the `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a `.keys` file without its video.
+- A `.made` file next to it holds the record of each frame and the time of writing. The disk cache does not count it either.
+  - `render_cache::write` takes the record from the `Origin` of each layer that the draw made (`VideoFrames::next_made`).
+  - The reader of a file in the render folder reads it (`render_cache::kept`).
+- `Index::scan` reads the `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a `.keys` file and its `.made` file without their video.
 - The disk cache can remove a video at any time. `Cache::apply` removes from the index each file of the plan that is gone (`Index::remove`). Thus the background render makes its frames again.
 - `Cache::next` gives the next `Job` with its own plan. The draw of the export makes its frames (`encode_plan`), as for proxies.
   - At the timeline level, `render_cache::segment` cuts the plan of the timeline.
