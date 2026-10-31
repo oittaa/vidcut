@@ -169,10 +169,10 @@ The AI upscalers share one path in the reader:
 - A picture has a key (`PictureId`). It comes from a run of the upscaler (`Session`, `super_scale::Run`), which starts at `super_scale::first_frame`.
 - A run takes frames in order. It reads them from the reader's queue, or with a second `VideoReader` (`Source::seek_ahead`).
 - The run gives each picture once, and keeps the last one for a change of size.
-- A picture of AI Fast or AI Best stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`, `Layout::Rgb48`).
-- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Best takes and gives 16-bit SDR RGB. The scaler of macOS takes 16-bit 4:4:4 VideoToolbox frames (P416) in the timeline color space.
+- A picture of AI Fast or AI Slow stays on the GPU as RGB (`held::Held`). The export draws it there (`Layout::Rgb`, `Layout::Rgb48`).
+- AI Fast takes and gives 16-bit RGB in the timeline color space (`upscale_form`). AI Slow takes and gives 16-bit SDR RGB. The scaler of macOS takes 16-bit 4:4:4 VideoToolbox frames (P416) in the timeline color space.
   - The models of vidcut refuse 8-bit pictures. Retime Process takes 16 bits too.
-  - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast and AI Best came nearer to the real frames with 16 bits than with 8 bits.
+  - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast and AI Slow came nearer to the real frames with 16 bits than with 8 bits.
 - The reader drops a run for a frame that the run does not give (`RUN_JUMP`).
 - `super_scale::report` tells what the upscaler makes. The stats panel shows it (`SuperScaleStats`).
 
@@ -183,7 +183,7 @@ GPU memory:
   - Why: two AI upscalers do not hold memory at the same time.
 - An AI upscaler borrows the GPU memory of the viewer's kept pictures (`player::lend_on`, `player::room_on`, `store::Lent`).
   - Why: if they do not fit together, the driver moves GPU memory to main memory, and a picture can take minutes.
-- AI Best also borrows main memory for its caches (`player::lend_memory`, `store::LentMemory`).
+- AI Slow also borrows main memory for its caches (`player::lend_memory`, `store::LentMemory`).
 
 AI Fast (`nanovsr`):
 
@@ -194,7 +194,7 @@ AI Fast (`nanovsr`):
 - Its 3×3 convolutions use Winograd (`wino_shader`). Why: they do most of the work.
 - While the GPU makes a frame, the CPU reads the frame before it. Why: other GPU work fills the waits.
 
-AI Best (`flashvsr`):
+AI Slow (`flashvsr`):
 
 - FlashVSR+ Turbo on the shared off-screen device. A run is a `flashvsr::Stream` with no last frame.
 - `flashvsr::check` refuses media that it cannot take, and sizes that do not fit (`run::plan`).
@@ -211,8 +211,8 @@ The scaler of macOS (`macos`):
 
 - It is a `VTFrameProcessor` session with a `VTSuperResolutionScalerConfiguration`, on macOS 26 and later.
 - Its own buffers are RGhA (`HALF`, [gotchas](../gotchas.md#operating-systems-and-libraries)). Their IOSurfaces are also Metal textures.
-- After the scaler, the color fix of AI Best runs on these buffers on the GPU, with no copy (`fix::on_buffers`).
-  - The two upscalers use one shader for the fix. It reads packed buffers for AI Best and textures for the scaler (`fix::Pictures`).
+- After the scaler, the color fix of AI Slow runs on these buffers on the GPU, with no copy (`fix::on_buffers`).
+  - The two upscalers use one shader for the fix. It reads packed buffers for AI Slow and textures for the scaler (`fix::Pictures`).
 - `macos::check` refuses pictures over `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
 - The draw puts each frame into a VideoToolbox frame in the timeline color space, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
@@ -222,7 +222,7 @@ The scaler of macOS (`macos`):
 - It enlarges only by the factors of macOS. Then Lanczos makes the picture at the size that it shows at (`super_scale::made_size`).
   - Why: a picture of 4 times the source fills the cache of the viewer.
 - Its buffers lose the color labels of the transfers. Why: with labels, it makes less detail.
-- AI Fast and AI Best are off on macOS (`super_scale::off_here`).
+- AI Fast and AI Slow are off on macOS (`super_scale::off_here`).
 
 ## Frame interpolation
 
@@ -233,7 +233,7 @@ The scaler of macOS (`macos`):
 - It runs on the shared off-screen device (`compute::Gpu`), with kernels of its own (`interpolate::ops`).
   - Its kernels and memory go when the last `interpolate::User` goes.
 - The last pair stays on the GPU with its features. Why: the frames between one pair share them.
-- AI Fast is RIFE 4.25 (`rife`). AI Best is EMA-VFI (`ema`). Frame Blend mixes on the same device (`Ops::combine`).
+- AI Fast is RIFE 4.25 (`rife`). AI Slow is EMA-VFI (`ema`). Frame Blend mixes on the same device (`Ops::combine`).
 - EMA-VFI plans its work buffers in a pool (`ops::arena`), and refines in bands of rows (`ema::Pair`).
 - The weights come from the authors' PyTorch files (`weights::Torch`).
 

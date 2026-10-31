@@ -323,7 +323,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The panel has a group for each of these: decoding, the picture, Super Scale, the viewer, playback, the kept pictures and the sound.
   - The Super Scale group shows when the clip under the playhead has Super Scale on. It names the upscaler and the factor.
   - With an AI upscaler, the group also shows its GPU, the sizes it makes, what it is making now and its last finished work.
-    - Thus the user sees that AI Best is still making its first frame, which can take minutes at 4K.
+    - Thus the user sees that AI Slow is still making its first frame, which can take minutes at 4K.
   - `player stats` shows or hides the panel.
   - `player state` has the same facts as `stats`.
 - **Why:**
@@ -355,17 +355,22 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Users expect a desktop app to offer a few looks for long sessions.
   - Each theme keeps the layout of the Cut page and the meanings of its colors.
 
-## X23. A Keyboard Shortcuts window
+## X23. A Help window
 
 - **Resolve:**
   - The Cut page has none.
   - The Keyboard Customization window lists and changes keys, without explanations.
 - **vidcut:**
-  - F1, or Help in the top bar, lists every shortcut, with one action in each row.
+  - F1, or Help in the top bar, opens the Help window. It lists every shortcut, with one action in each row.
   - A ? beside a less obvious action explains it in a few plain words.
   - The user cannot change keys.
+  - Under the shortcuts, Help tells in a few words what each upscaler of Super Scale does ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
+  - It also tells what each Retime Process does ([X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+  - It lists only the choices that this computer has.
+  - It does not list Auto and Project Settings. Their lists already show what they give, as in Auto (AI Fast).
 - **Why:**
   - New users learn the keys and the ideas behind them in one place, in the app.
+  - The names AI Fast and AI Slow tell the speed only. The user also needs to know how the pictures are different.
 
 ## X24. Cross fades follow their curves exactly
 
@@ -1787,24 +1792,24 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It makes a clip of a higher resolution, which often stops playback in real time (p. 288). The usual sizing then fits that clip.
 - **vidcut:**
   - Super Scale is Off or On (`super_scale`). On enlarges a picture as much as it needs, up to 4 times its source. There is no Enhanced mode.
-  - Its Upscaler is Project Settings, the default, AI Best, AI Fast or Classic (`upscaler`).
+  - Its Upscaler is Project Settings, the default, AI Slow, AI Fast or Classic (`upscaler`).
   - Project Settings has the upscaler of the media that follow the project (`upscaler` of `project.set`).
-    - It is Auto, the default, AI Best, AI Fast or Classic.
+    - It is Auto, the default, AI Slow, AI Fast or Classic.
     - Auto is AI on macOS, and AI Fast elsewhere.
   - The lists name the upscaler that Auto and Project Settings give on this computer, as in Auto (AI Fast).
-  - On macOS, the upscalers are AI and Classic. AI Fast and AI Best are off there for now: exports and the viewer refuse them.
+  - On macOS, the upscalers are AI and Classic. AI Fast and AI Slow are off there for now: exports and the viewer refuse them.
   - On macOS, AI is the upscaler of Auto. It is the super-resolution scaler of macOS 26 and later (`VTFrameProcessor` of VideoToolbox), `macos` in requests.
     - It enlarges by a factor that macOS offers. It takes the smallest of these that reaches the shown size.
-    - Then it makes the picture at the size that it shows at, as AI Best does.
+    - Then it makes the picture at the size that it shows at, as AI Slow does.
     - It reads the frames of a clip in order. Each output frame uses the frame and the output before it.
     - It takes SDR and HDR pictures up to 1920×1080, the limit of macOS for video.
-    - After the scaler, the color fix of AI Best gives the picture the colors and the light of the large areas of its source.
+    - After the scaler, the color fix of AI Slow gives the picture the colors and the light of the large areas of its source.
       - In the test of `hdr_models` on the owner's Mac, its light is within 1.2% of the real frames in PQ, HLG and SDR.
       - Its mean ΔE ITP stays above that of Classic in each pipe. On the HDR10+ clip, it is 5.46 in PQ and 3.38 in SDR, against 1.85 and 1.53.
       - Thus HDR does not shift its light or colors. It takes HDR media in an HDR timeline.
-    - macOS downloads its models only when the user agrees, as for the weights of AI Fast and AI Best. vidcut does not ship them.
+    - macOS downloads its models only when the user agrees, as for the weights of AI Fast and AI Slow. vidcut does not ship them.
     - macOS does not give their size, so the question says that the size is unknown. On the owner's Mac, the weight file of the 4x model is 66 MB.
-  - AI Best is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.
+  - AI Slow is the one-step diffusion model FlashVSR+ Turbo. vidcut runs it with its own compute shaders on the GPU, through wgpu.
     - It is slow, and it adds more detail. It has no setting.
     - After the network, a color fix gives the picture the colors and the light of the large areas of its source. FlashVSR+ has this fix as an option, which is off by default.
     - It reads the frames of a clip in order, from the first frame that is asked for. Each output frame uses the frames before it and the 4 frames after it.
@@ -1818,10 +1823,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - AI Fast takes SDR and HDR pictures of any size. Its memory grows with the size of the source picture.
   - The AI upscalers:
     - Each picture goes into the timeline color space first, as in Resolve (§13, p. 3407). In an SDR timeline, an HDR picture is tone-mapped.
-    - In an HDR timeline, AI Best takes SDR media only. It refuses HDR media ([X98](#x98-in-an-hdr-timeline-ai-best-works-before-the-conversion)).
+    - In an HDR timeline, AI Slow takes SDR media only. It refuses HDR media ([X98](#x98-in-an-hdr-timeline-ai-slow-works-before-the-conversion)).
     - Before an export starts, vidcut refuses media that the upscaler cannot take. The error names each file and the reason.
     - It also refuses an AI upscaler without its weights, or without a GPU that can run the network.
-    - It refuses AI Best for a size that does not fit in the GPU's memory and main memory.
+    - It refuses AI Slow for a size that does not fit in the GPU's memory and main memory.
     - The Inspector and the pool show a warning under Upscaler for media that the AI upscaler cannot take.
     - The export's report names the files that an AI upscaler enlarged, and the upscaler.
   - Classic has a Sharpness of Low, Medium or High.
@@ -1830,25 +1835,25 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - With Classic, the viewer and the exports enlarge with the kernels of their shader. This is the same on each GPU.
     - Low is Catmull-Rom. Medium is Lanczos with 3 lobes, and High is Lanczos with 4 lobes.
   - The viewer shows Super Scale only with View > Show Super Scale, which is off by default.
-  - With an AI upscaler, the viewer runs the upscaler of the export on each picture that the export enlarges. Playback is then slower. With AI Best, a picture can take seconds.
+  - With an AI upscaler, the viewer runs the upscaler of the export on each picture that the export enlarges. Playback is then slower. With AI Slow, a picture can take seconds.
 - **Why:**
   - A video model adds detail that a classic upscaler cannot. In side-by-side tests, the owner ranked NanoVSR 5.4M above Real-ESRGAN's compact model.
   - Some users wait a long time for the best pictures, and others want good pictures fast. Thus there is a fast AI upscaler and a slow one.
   - On Windows and Linux, Auto takes AI Fast. It is fast, and it works in SDR and HDR timelines.
   - In the test of `hdr_models` ([tools](tools.md)), AI Fast came nearer to the real frames than Classic, in SDR and in HDR.
-  - The network of AI Best alone shifts the colors and the light of large areas. Thus a color fix follows it.
+  - The network of AI Slow alone shifts the colors and the light of large areas. Thus a color fix follows it.
     - In 8-bit SDR, the network alone came to a mean ΔE ITP of 11.6 to 17.4. Classic came to 1.9 to 3.9.
     - The ΔE of the means of 40×40 blocks was 60% to 87% of it. Thus most of the difference was in large areas, not in the detail.
     - On the Dolby Vision clip, its pictures had 1.21 times the light of the real frames.
     - In an export of 720p SDR video to 1080p, the network alone made each frame about 9 of 255 levels less red.
-  - With the color fix, AI Best's mean ΔE ITP in SDR is 2.5 to 8.5. The ΔE of its block means is 1.1 to 1.5, and Classic's is 0.3 to 1.2.
-    - On the Dolby Vision clip, AI Best comes nearer to the real frames than Classic. On the other two clips, it stays farther.
+  - With the color fix, AI Slow's mean ΔE ITP in SDR is 2.5 to 8.5. The ΔE of its block means is 1.1 to 1.5, and Classic's is 0.3 to 1.2.
+    - On the Dolby Vision clip, AI Slow comes nearer to the real frames than Classic. On the other two clips, it stays farther.
     - In the 720p export, the mean colors of each frame are those of its input picture. The fix added no time that the export measured.
     - The rest of its difference is in the detail that it makes.
   - vidcut makes a picture only as large as the output shows it. A factor would only limit placed pictures. Thus On is sufficient.
   - Auto lets a project move between macOS and other systems. Each computer uses its own AI.
   - On macOS, the scaler of macOS is the default because it is part of the system. vidcut needs no weights for it, and the owner chose it.
-  - AI Fast and AI Best are off on macOS because they are too slow there. On the owner's M4 MacBook Air, AI Fast took 345 s for 30 frames, 854×480 enlarged to 1920×1080.
+  - AI Fast and AI Slow are off on macOS because they are too slow there. On the owner's M4 MacBook Air, AI Fast took 345 s for 30 frames, 854×480 enlarged to 1920×1080.
   - FlashVSR+ Turbo is one step of a diffusion model, with Apache 2.0 code and weights. It streams over the frames, so a clip has no chunk edges.
   - The network has only 3×3 and 1×1 convolutions. Shaders of its own run it on the GPU of every maker through wgpu, with no new library.
   - The shaders keep the values between the layers as 16-bit floats, and add in 32-bit floats. This halves the memory traffic. It needs no GPU feature.
@@ -1908,18 +1913,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - Retime Process is a setting of a clip. The Speed section of the Inspector tab sets it, and `clip.set` sets it as `retime`.
   - The Change Clip Speed window (R) also sets it, for the selected clips with a picture.
-  - Its values are Project Settings, the default, Nearest, Frame Blend, AI Fast and AI Best.
+  - Its values are Project Settings, the default, Nearest, Frame Blend, AI Fast and AI Slow.
   - Project Settings has the Retime Process of the project. `project.set` sets it as `retime`.
-    - Its values are Auto, the default, Nearest, Frame Blend, AI Fast and AI Best.
+    - Its values are Auto, the default, Nearest, Frame Blend, AI Fast and AI Slow.
     - Auto gives slow motion the AI of the computer that plays or exports: AI on macOS, AI Fast elsewhere.
     - Auto gives Nearest to the rest: clips at 100% or faster, and frozen and backward clips.
   - The lists name the process that Auto and Project Settings give on this computer, as in Project Settings (AI Fast).
-  - On macOS, the processes are Nearest, Frame Blend and AI, `macos` in requests. AI Fast and AI Best are off on macOS.
+  - On macOS, the processes are Nearest, Frame Blend and AI, `macos` in requests. AI Fast and AI Slow are off on macOS.
     - AI is the frame rate conversion of macOS (`VTFrameProcessor` of VideoToolbox). macOS does not download a model for it.
-    - An export on another system refuses AI, and an export on macOS refuses AI Fast and AI Best.
+    - An export on another system refuses AI, and an export on macOS refuses AI Fast and AI Slow.
   - Nearest shows the source frame that the frame falls in (D48).
   - Frame Blend mixes the two source frames around the frame. Each frame has the weight of how near it is.
-  - AI Fast (RIFE 4.25) and AI Best (EMA-VFI) are AI models. Each makes the frame from the motion between the two source frames.
+  - AI Fast (RIFE 4.25) and AI Slow (EMA-VFI) are AI models. Each makes the frame from the motion between the two source frames.
     - vidcut runs them with compute shaders of its own on the GPU, through wgpu.
     - Their weights download at their first use: 25 MB and 264 MB. vidcut does not ship them.
     - The models make a frame at any point between the two source frames.
@@ -1935,8 +1940,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The models run on this computer and need no account. Their code and weights are under MIT (RIFE) and Apache 2.0 (EMA-VFI).
   - The models make any point between two frames, not only the middle. A speed of 40% needs points such as 0.4 and 0.8.
-  - AI Fast is fast and fits UHD frames. AI Best makes frames nearer to the real ones, in more time.
-  - In the test of `hdr_models` ([tools](tools.md)), AI Fast and AI Best came nearer to the real frames than Frame Blend, in SDR and in HDR.
+  - AI Fast is fast and fits UHD frames. AI Slow makes frames nearer to the real ones, in more time.
+  - In the test of `hdr_models` ([tools](tools.md)), AI Fast and AI Slow came nearer to the real frames than Frame Blend, in SDR and in HDR.
   - On the owner's Mac, AI on macOS also came nearer to the real frames than Frame Blend, in SDR and in HDR.
   - On macOS, the system's own process runs on the Mac's own hardware, as AI of Super Scale does.
   - A morph from one shot into the next looks wrong. Thus a shot change keeps the nearer source frame, as Nearest does.
@@ -2034,16 +2039,16 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Ease In and Ease Out then do what their names tell, as the Dynamic Zoom ease does. Ease In is slow at the start, Ease Out at the end.
   - A handle on one side of a speed keyframe alone gives a straight line. Thus one speed keyframe takes an ease on both sides or on none.
 
-## X98. In an HDR timeline, AI Best works before the conversion
+## X98. In an HDR timeline, AI Slow works before the conversion
 
 - **Resolve:** the input goes into the timeline color space before Super Scale and before Speed Effects (§13, p. 3407).
 - **vidcut:**
   - In an SDR timeline, vidcut keeps this order. The AI stages take the picture in the timeline color space. An HDR picture is tone-mapped first.
   - In an HDR timeline, AI Fast and AI of Super Scale, and Retime Process, keep this order too.
-  - In an HDR timeline, AI Best takes SDR media as SDR. The draw then converts its result into the timeline color space.
-  - AI Best refuses HDR media in an HDR timeline ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
+  - In an HDR timeline, AI Slow takes SDR media as SDR. The draw then converts its result into the timeline color space.
+  - AI Slow refuses HDR media in an HDR timeline ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
 - **Why:**
-  - In the test of `hdr_models` ([tools](tools.md)), AI Best in PQ and HLG came far from the real frames, also with its color fix.
+  - In the test of `hdr_models` ([tools](tools.md)), AI Slow in PQ and HLG came far from the real frames, also with its color fix.
     - On the HDR10+ clip in PQ, its mean ΔE ITP was 8.6, and Classic's was 1.8. Its pictures had 1.09 times the light of the real frames.
     - On the Dolby Vision clip in HLG, its mean ΔE ITP was 4.2, and Classic's was 3.9. Its pictures had 1.03 times the light.
     - In SDR, the same clips gave 4.9 and 2.5.

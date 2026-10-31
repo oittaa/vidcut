@@ -29,7 +29,7 @@ const UHD: (u32, u32) = (3840, 2160);
 fn model(r: Retime) -> Option<&'static catalog::Model> {
     match r {
         Retime::AiFast => Some(&catalog::RIFE),
-        Retime::AiBest => Some(&catalog::EMA_VFI),
+        Retime::AiSlow => Some(&catalog::EMA_VFI),
         Retime::Nearest | Retime::FrameBlend | Retime::Macos => None,
     }
 }
@@ -37,7 +37,7 @@ fn model(r: Retime) -> Option<&'static catalog::Model> {
 pub fn name(r: Retime) -> &'static str {
     match r {
         Retime::AiFast => "AI Fast (RIFE 4.25)",
-        Retime::AiBest => "AI Best (EMA-VFI)",
+        Retime::AiSlow => "AI Slow (EMA-VFI)",
         Retime::Macos => "AI (macOS frame rate conversion)",
         Retime::Nearest | Retime::FrameBlend => r.title(),
     }
@@ -45,7 +45,7 @@ pub fn name(r: Retime) -> &'static str {
 
 #[cfg(target_os = "macos")]
 pub fn off_here(r: Retime) -> bool {
-    matches!(r, Retime::AiFast | Retime::AiBest)
+    matches!(r, Retime::AiFast | Retime::AiSlow)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -139,9 +139,9 @@ pub fn check<'a>(
     off.dedup();
     if !off.is_empty() {
         #[cfg(target_os = "macos")]
-        let (which, instead) = ("AI Fast and AI Best are off on macOS for now", "AI");
+        let (which, instead) = ("AI Fast and AI Slow are off on macOS for now", "AI");
         #[cfg(not(target_os = "macos"))]
-        let (which, instead) = ("AI of macOS is on macOS only", "AI Fast or AI Best");
+        let (which, instead) = ("AI of macOS is on macOS only", "AI Fast or AI Slow");
         return Err(Error::Invalid(format!(
             "{which}: set the Retime Process of {} to {instead}",
             off.join(", ")

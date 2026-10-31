@@ -17,7 +17,7 @@ pub(super) const PROCESSES: [ClipRetime; 5] = [
     ClipRetime::Nearest,
     ClipRetime::FrameBlend,
     ClipRetime::AiFast,
-    ClipRetime::AiBest,
+    ClipRetime::AiSlow,
 ];
 
 #[cfg(target_os = "macos")]
@@ -34,7 +34,7 @@ pub(super) const PROJECT_PROCESSES: [ProjectRetime; 5] = [
     ProjectRetime::Nearest,
     ProjectRetime::FrameBlend,
     ProjectRetime::AiFast,
-    ProjectRetime::AiBest,
+    ProjectRetime::AiSlow,
 ];
 
 pub(super) fn clip_text(r: ClipRetime, project: Retime) -> String {
@@ -48,6 +48,23 @@ pub(super) fn project_text(r: ProjectRetime) -> String {
     match r {
         ProjectRetime::Auto => format!("Auto ({} for slow motion)", Retime::ai_here().title()),
         r => r.title().into(),
+    }
+}
+
+pub(super) fn choices() -> Vec<(&'static str, &'static str)> {
+    PROCESSES
+        .iter()
+        .filter_map(|c| c.process().map(|r| (r.title(), does(r))))
+        .collect()
+}
+
+fn does(r: Retime) -> &'static str {
+    match r {
+        Retime::Nearest => "Repeats or skips source frames. Makes no new frames.",
+        Retime::FrameBlend => "Mixes the two source frames around each frame.",
+        Retime::AiFast => "Makes new frames from the motion. Fast, also for UHD video.",
+        Retime::AiSlow => "Slower than AI Fast, with frames nearer to the real ones.",
+        Retime::Macos => "The frame rate conversion of macOS. Makes new frames from the motion.",
     }
 }
 

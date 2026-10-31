@@ -56,13 +56,13 @@ flowchart LR
 
 ## Picture order
 
-vidcut processes each picture in this order. The [spec](../cut-page-spec.md#13-order-of-operations-pp-287296-3407) gives the order of Resolve. [Deviation X98](../deviations.md#x98-in-an-hdr-timeline-ai-best-works-before-the-conversion) tells the one place where the two are different.
+vidcut processes each picture in this order. The [spec](../cut-page-spec.md#13-order-of-operations-pp-287296-3407) gives the order of Resolve. [Deviation X98](../deviations.md#x98-in-an-hdr-timeline-ai-slow-works-before-the-conversion) tells the one place where the two are different.
 
 1. The reader decodes the frame, on the GPU or the CPU (`route::plan`, [gpu](gpu.md#routes)).
 2. The draw converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `color::shader_colors`). In an SDR timeline, it tone-maps HDR.
    - The AI stages get the picture in the timeline color space (`Single`).
    - Each AI stage gets it at 16 bits (`Form`): as RGB for the models of vidcut, and as P416 frames for the AI of macOS.
-   - In an HDR timeline, AI Best gets SDR media only. The draw converts its result into the timeline color space (X98).
+   - In an HDR timeline, AI Slow gets SDR media only. The draw converts its result into the timeline color space (X98).
 3. The draw deinterlaces an interlaced frame from the converted frames before, at and after it (`fs_bwdif`, [gpu](gpu.md#deinterlacing-and-hdr)).
 4. An AI upscaler of Super Scale enlarges the frame (`Source::ai_picture`, [gpu](gpu.md#super-scale)).
 5. Retime Process makes a frame between two source frames (`VideoFrames::retimed_frame`, [export](export.md#which-source-frame)).
@@ -90,7 +90,7 @@ vidcut has none of the other stages of the spec:
 - **The core is pure.** vidcut-core reaches media only through the `Env` trait: `AvEnv` in the app, `FakeEnv` in tests. Thus edits, plans and decisions are tested without FFmpeg.
 - **One decode and mix stack.** The player and exports read the same `RenderPlan` through the same `VideoFrames` and `AudioMix`. Thus the viewer shows the frames that an export writes.
 - **The GPU first.** Decoding, scaling, mixing and encoding stay on the GPU wherever it gives correct results ([gpu](gpu.md)).
-- **AI features name roles.** Where vidcut picks the model, the app, the requests and the files name its role. The roles are AI Fast, AI Best, and AI for the own model of macOS.
+- **AI features name roles.** Where vidcut picks the model, the app, the requests and the files name its role. The roles are AI Fast, AI Slow, and AI for the own model of macOS.
   - Where the user picks the model, as for speech, they name the model.
   - In code, a feature is a module (`super_scale`, `interpolate`). Each model that vidcut runs with its own code is a module in it (`nanovsr`, `flashvsr`, `macos`, `rife`, `ema`).
   - Model names show in `vidcut models`, in Stats for Nerds and in the docs.

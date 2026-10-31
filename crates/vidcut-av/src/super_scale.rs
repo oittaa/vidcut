@@ -19,7 +19,7 @@ use crate::models::Need;
 pub fn needed(dir: &Path, upscaler: Upscaler) -> Vec<Need> {
     match upscaler {
         Upscaler::AiFast => nanovsr::needed(dir),
-        Upscaler::AiBest => flashvsr::needed(dir),
+        Upscaler::AiSlow => flashvsr::needed(dir),
         Upscaler::Macos => macos::needed(),
         Upscaler::Classic => Vec::new(),
     }
@@ -28,7 +28,7 @@ pub fn needed(dir: &Path, upscaler: Upscaler) -> Vec<Need> {
 pub fn get_ready(dir: &Path, upscaler: Upscaler, download: bool) -> Result<()> {
     match upscaler {
         Upscaler::AiFast => nanovsr::get_ready(dir, download),
-        Upscaler::AiBest => flashvsr::get_ready(dir, download),
+        Upscaler::AiSlow => flashvsr::get_ready(dir, download),
         Upscaler::Macos => macos::get_ready(download),
         Upscaler::Classic => Ok(()),
     }
@@ -36,7 +36,7 @@ pub fn get_ready(dir: &Path, upscaler: Upscaler, download: bool) -> Result<()> {
 
 #[cfg(target_os = "macos")]
 pub fn off_here(upscaler: Upscaler) -> bool {
-    matches!(upscaler, Upscaler::AiFast | Upscaler::AiBest)
+    matches!(upscaler, Upscaler::AiFast | Upscaler::AiSlow)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -49,7 +49,7 @@ pub fn unfit(m: &Media, upscaler: Upscaler, timeline: Option<Hdr>) -> Option<&'s
         return Some("pictures on macOS for now");
     }
     let model = match upscaler {
-        Upscaler::AiBest => &catalog::FLASHVSR,
+        Upscaler::AiSlow => &catalog::FLASHVSR,
         Upscaler::Macos => return macos::unfit(m),
         Upscaler::AiFast | Upscaler::Classic => return None,
     };
@@ -153,7 +153,7 @@ fn users() -> MutexGuard<'static, [usize; 2]> {
 fn slot(upscaler: Upscaler) -> Option<usize> {
     match upscaler {
         Upscaler::AiFast => Some(0),
-        Upscaler::AiBest => Some(1),
+        Upscaler::AiSlow => Some(1),
         Upscaler::Macos | Upscaler::Classic => None,
     }
 }
@@ -182,7 +182,7 @@ impl Drop for User {
         if last {
             match self.0 {
                 Upscaler::AiFast => nanovsr::release(),
-                Upscaler::AiBest => flashvsr::release(),
+                Upscaler::AiSlow => flashvsr::release(),
                 Upscaler::Macos | Upscaler::Classic => {}
             }
         }
@@ -296,14 +296,14 @@ pub(crate) trait Run: Send {
 pub(crate) fn first_frame(upscaler: Upscaler, want: i64) -> i64 {
     match upscaler {
         Upscaler::AiFast | Upscaler::Classic => want - want.rem_euclid(nanovsr::FRAMES as i64),
-        Upscaler::AiBest | Upscaler::Macos => want,
+        Upscaler::AiSlow | Upscaler::Macos => want,
     }
 }
 
 pub(crate) fn last_frame(upscaler: Upscaler, first: i64) -> Option<i64> {
     match upscaler {
         Upscaler::AiFast | Upscaler::Classic => Some(first + nanovsr::FRAMES as i64 - 1),
-        Upscaler::AiBest | Upscaler::Macos => None,
+        Upscaler::AiSlow | Upscaler::Macos => None,
     }
 }
 
@@ -325,7 +325,7 @@ pub(crate) fn made_size(upscaler: Upscaler, size: (u32, u32), shown: (u32, u32))
             let scale = nanovsr::SCALE;
             (size.0 * scale, size.1 * scale)
         }
-        Upscaler::AiBest => scaled(size, need(size, shown).min(f64::from(flashvsr::SCALE))),
+        Upscaler::AiSlow => scaled(size, need(size, shown).min(f64::from(flashvsr::SCALE))),
         Upscaler::Macos => scaled(
             size,
             need(size, shown).min(f64::from(macos::factor(size, shown))),
@@ -348,7 +348,7 @@ pub(crate) fn open(
     }
     match upscaler {
         Upscaler::AiFast | Upscaler::Classic => Ok(Box::new(nanovsr::Run::new(size, want, sink))),
-        Upscaler::AiBest => Ok(Box::new(flashvsr::Run::open(size, made)?)),
+        Upscaler::AiSlow => Ok(Box::new(flashvsr::Run::open(size, made)?)),
         Upscaler::Macos => Ok(Box::new(macos::Run::open(size, made)?)),
     }
 }
@@ -362,7 +362,7 @@ pub(crate) fn settle(upscaler: Upscaler) {
 pub fn name(upscaler: Upscaler) -> &'static str {
     match upscaler {
         Upscaler::AiFast => "AI Fast (NanoVSR 5.4M)",
-        Upscaler::AiBest => "AI Best (FlashVSR+ Turbo)",
+        Upscaler::AiSlow => "AI Slow (FlashVSR+ Turbo)",
         Upscaler::Macos => "AI (macOS super resolution)",
         Upscaler::Classic => "Classic",
     }
@@ -392,7 +392,7 @@ pub fn check<'a>(
     off.dedup();
     if !off.is_empty() {
         return Err(Error::Invalid(format!(
-            "AI Fast and AI Best are off on macOS for now: set the Upscaler of {} to AI or \
+            "AI Fast and AI Slow are off on macOS for now: set the Upscaler of {} to AI or \
              Classic",
             off.join(", ")
         )));

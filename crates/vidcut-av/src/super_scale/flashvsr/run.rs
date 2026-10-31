@@ -507,7 +507,7 @@ fn in_ram(host: u64, g: &Geometry) -> Result<()> {
     let ram = crate::player::system_memory().map_or(0, |b| b as u64);
     if host > ram / 2 {
         return Err(Error::Invalid(format!(
-            "the AI Best upscaler needs about {} GB of main memory at {}x{} for what does not fit on the GPU, and this computer has {} GB",
+            "the AI Slow upscaler needs about {} GB of main memory at {}x{} for what does not fit on the GPU, and this computer has {} GB",
             gigabytes(host),
             g.wm,
             g.hm,
@@ -539,7 +539,7 @@ pub(super) fn plan(gpu: &Gpu, g: &Geometry) -> Result<Plan> {
     let host_path = 2 * kv.iter().copied().max().unwrap_or(0);
     if fixed + host_path > room {
         return Err(Error::Invalid(format!(
-            "the AI Best upscaler needs about {} GB of GPU memory at {}x{}, and {} GB of this GPU is free",
+            "the AI Slow upscaler needs about {} GB of GPU memory at {}x{}, and {} GB of this GPU is free",
             gigabytes(fixed + host_path),
             g.wm,
             g.hm,
@@ -737,7 +737,7 @@ impl Stream {
         let g = self.g;
         if src.size() < u64::from(g.sw * g.sh) * crate::screen::held::RGB48 as u64 {
             return Err(Error::Invalid(format!(
-                "the AI Best upscaler got a picture of {} bytes for {}x{}",
+                "the AI Slow upscaler got a picture of {} bytes for {}x{}",
                 src.size(),
                 g.sw,
                 g.sh

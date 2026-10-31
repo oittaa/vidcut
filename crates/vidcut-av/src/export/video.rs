@@ -91,7 +91,7 @@ fn form_of(f: &frame::Video) -> Form {
 
 fn upscale_form(upscaler: Upscaler, timeline: Option<Hdr>) -> Form {
     match upscaler {
-        Upscaler::AiBest => (true, None),
+        Upscaler::AiSlow => (true, None),
         _ => (true, timeline),
     }
 }
@@ -3022,8 +3022,8 @@ mod tests {
     }
 
     #[test]
-    fn ai_best_upscales_sdr_at_16_bits() {
-        assert_eq!(upscale_form(Upscaler::AiBest, Some(Hdr::Pq)), (true, None));
+    fn ai_slow_upscales_sdr_at_16_bits() {
+        assert_eq!(upscale_form(Upscaler::AiSlow, Some(Hdr::Pq)), (true, None));
     }
 
     const fn secs(s: u64) -> Duration {

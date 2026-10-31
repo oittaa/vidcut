@@ -99,7 +99,7 @@ flowchart TD
 - `models.list` gives the catalog, and whether this computer has each file (`catalog::Model::json`).
 - `models.check` checks one model ([tools](../tools.md)):
   - It gets the files ready, and checks the SHA-256 of each (`models::verify`).
-  - It loads the model (`models::inspect`). FlashVSR+ loads onto the GPU, as AI Best does, and goes when nothing else uses it (`flashvsr::inspect`).
+  - It loads the model (`models::inspect`). FlashVSR+ loads onto the GPU, as AI Slow does, and goes when nothing else uses it (`flashvsr::inspect`).
   - `catalog::differences` compares what transcribe.cpp reports with the catalog. A difference is an error.
 - [model-catalog.md](../todo/model-catalog.md) has the open work.
 

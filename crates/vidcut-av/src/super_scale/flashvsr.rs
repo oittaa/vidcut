@@ -22,7 +22,7 @@ const GLOBAL: [usize; 5] = [0, 6, 12, 18, 24];
 
 pub const SCALE: u32 = catalog::FLASHVSR_SCALE;
 
-const WHAT: &str = "the AI Best upscaler";
+const WHAT: &str = "the AI Slow upscaler";
 const SHARED: u32 = 32 * 1024;
 
 pub fn needed(dir: &Path) -> Vec<Need> {
@@ -62,7 +62,7 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
 }
 
 pub fn unfit(m: &Media, timeline: Option<Hdr>) -> Option<&'static str> {
-    super::unfit(m, Upscaler::AiBest, timeline)
+    super::unfit(m, Upscaler::AiSlow, timeline)
 }
 
 pub fn enlarged(m: &Media, (ow, oh): (u32, u32)) -> Option<((u32, u32), (u32, u32))> {
@@ -114,7 +114,7 @@ pub fn check<'a>(
             else {
                 continue;
             };
-            if !super_scale.ai() || super_scale.upscaler != Upscaler::AiBest {
+            if !super_scale.ai() || super_scale.upscaler != Upscaler::AiSlow {
                 continue;
             }
             if !media.contains(&id.as_str()) {
@@ -139,7 +139,7 @@ pub fn check<'a>(
         .collect();
     if !refused.is_empty() {
         return Err(Error::Invalid(format!(
-            "the AI Best upscaler of Super Scale can't take {}: set their Upscaler to Classic, \
+            "the AI Slow upscaler of Super Scale can't take {}: set their Upscaler to Classic, \
              or their Super Scale to Off",
             refused.join(", ")
         )));
@@ -170,11 +170,11 @@ struct Engine {
 static ENGINE: super::Slot<Engine> = super::Slot::new();
 
 impl super::Network for Engine {
-    const UPSCALER: Upscaler = Upscaler::AiBest;
+    const UPSCALER: Upscaler = Upscaler::AiSlow;
 
     fn start() -> std::result::Result<Self, String> {
         let gpu = Gpu::start(WHAT, SHARED)?;
-        super::runs_on(Upscaler::AiBest, gpu.name.clone());
+        super::runs_on(Upscaler::AiSlow, gpu.name.clone());
         Ok(Engine {
             gpu,
             model: None,
@@ -264,7 +264,7 @@ impl super::Run for Run {
     ) -> Result<Vec<super::Out>> {
         if !crate::screen::held::deep(rgb) {
             return Err(Error::Invalid(
-                "the AI Best upscaler takes 16-bit pictures".into(),
+                "the AI Slow upscaler takes 16-bit pictures".into(),
             ));
         }
         let held = crate::screen::held::held(rgb)?;
@@ -283,7 +283,7 @@ impl Stream {
     pub fn open(source: (u32, u32), size: (u32, u32)) -> Result<Self> {
         if source.0 == 0 || source.1 == 0 || size.0 < source.0 || size.1 < source.1 {
             return Err(Error::Invalid(format!(
-                "the AI Best upscaler enlarges pictures: {}x{} to {}x{} is not larger",
+                "the AI Slow upscaler enlarges pictures: {}x{} to {}x{} is not larger",
                 source.0, source.1, size.0, size.1
             )));
         }
