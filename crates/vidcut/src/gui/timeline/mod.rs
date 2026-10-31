@@ -13,8 +13,11 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sense, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use vidcut_core::model::{ClipRetime, Ease, PictureTool, PictureTransition, Project, Track};
+use vidcut_core::model::{
+    ClipCache, ClipRetime, Ease, PictureTool, PictureTransition, Project, Track,
+};
 use vidcut_core::ops::{self, Edge, MAIN};
+use vidcut_core::render_cache::Part;
 use vidcut_core::request::ViewerMode;
 
 use crate::gui::workspace::{Workspace, dim};
@@ -783,6 +786,12 @@ impl Workspace {
             (None, Some(q)) => (&**q, &**q),
             (None, None) => (dragged.as_ref().unwrap_or(&*p), &*p),
         };
+        let cached = self.snap.render_cache.clone();
+        let cache_line: &[Part] = if std::ptr::eq(drawn, &*p) {
+            &cached
+        } else {
+            &[]
+        };
         let placed = match (&trimmed, &before, &dragged) {
             (Some((q, _)), _, _) => Arc::new(paint::placed(q)),
             (None, Some(q), _) => Arc::new(paint::placed(q)),
@@ -845,6 +854,7 @@ impl Workspace {
         {
             let painter = ui.painter_at(upper_rect);
             paint::ruler(&painter, upper_ruler, &upper_scale, drawn, smart, true);
+            paint::cache_line(&painter, upper_ruler, &upper_scale, cache_line);
             for row in &layout.upper.rows {
                 if let Some(s) = drawn.subtitle_track(&row.track) {
                     cues::paint_track(
@@ -940,6 +950,7 @@ impl Workspace {
                 smart,
                 false,
             );
+            paint::cache_line(&ruler_painter, lower_ruler, &lower_scale, cache_line);
             for row in &layout.lower.rows {
                 if let Some(s) = drawn.subtitle_track(&row.track) {
                     cues::paint_track(
@@ -1093,6 +1104,17 @@ impl Workspace {
                 }
                 if mark_grab(&p, ruler, scale, pos).is_some() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    continue;
+                }
+                if let Some(why) = paint::cache_reasons(ruler, scale, cache_line, pos) {
+                    egui::Tooltip::always_open(
+                        ui.ctx().clone(),
+                        ui.layer_id(),
+                        egui::Id::unique("render-cache-line"),
+                        egui::PopupAnchor::Pointer,
+                    )
+                    .gap(12.0)
+                    .show(|ui| ui.add(egui::Label::new(why).extend()));
                     continue;
                 }
                 if let Some(row) = rows.at(pos.y).filter(|r| geometry::is_subtitle(&r.track)) {
@@ -2771,6 +2793,37 @@ impl Workspace {
             self.send("edit.detect_scene_cuts", json!({ "clips": clips }));
             ui.close();
         }
+        self.render_cache_menu(ui, &clips);
+    }
+
+    fn render_cache_menu(&mut self, ui: &mut egui::Ui, clips: &[String]) {
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let pictured: Vec<&vidcut_core::model::Clip> = clips
+            .iter()
+            .filter_map(|id| p.clip(id))
+            .filter(|c| c.video && !c.media.is_empty())
+            .collect();
+        let Some(first) = pictured.first() else {
+            return;
+        };
+        let current = pictured
+            .iter()
+            .all(|c| c.render_cache == first.render_cache)
+            .then_some(first.render_cache);
+        let ids: Vec<&str> = pictured.iter().map(|c| c.id.as_str()).collect();
+        ui.separator();
+        ui.menu_button("Render Cache", |ui| {
+            for v in [ClipCache::Auto, ClipCache::On, ClipCache::Off] {
+                if ui.selectable_label(current == Some(v), v.title()).clicked() {
+                    if current != Some(v) {
+                        self.send("clip.set", json!({ "clips": ids, "render_cache": v }));
+                    }
+                    ui.close();
+                }
+            }
+        });
     }
 
     fn drag_tooltip(&self, ui: &egui::Ui, pv: &Preview) {

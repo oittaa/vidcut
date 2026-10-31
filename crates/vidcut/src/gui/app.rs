@@ -272,7 +272,18 @@ impl eframe::App for App {
         self.ws.picture = Picture { texture, has_frame };
         self.ws.levels = self.viewer.levels();
         let ctx = ui.ctx().clone();
-        self.ws.stats = self.ws.snap.stats.then(|| self.viewer.stats()).flatten();
+        let snap = &self.ws.snap;
+        let timeline = snap
+            .project()
+            .filter(|_| snap.viewer == vidcut_core::request::ViewerMode::Timeline);
+        self.ws.stats = snap
+            .stats
+            .then(|| self.viewer.stats())
+            .flatten()
+            .map(|s| match timeline {
+                Some(p) => s.with_cache(p.settings.render_cache, &snap.render_cache),
+                None => s,
+            });
         if self.ws.stats.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }

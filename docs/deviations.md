@@ -2141,3 +2141,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The kinds of User mode and the time depend on the computer, not on the project.
   - vidcut decodes H.264 and H.265 on the GPU. With the list of Resolve, Smart renders most clips of a camera or a phone. At 4K in ProRes 422 HQ, that is many GB for each minute.
   - AI Super Scale and the Retime Processes are slow to make on most computers.
+
+## X104. The render cache line is on both timelines, with its reasons
+
+- **Resolve:**
+  - Cache indicators along the bottom of the ruler of the Edit page timeline show the state of the cache (p. 203).
+  - Red means "to be cached", and blue means "has been cached".
+  - The manual does not name a render cache line on the Cut page. It does not show the reason of a red part.
+- **vidcut:**
+  - The line is on the ruler of both timelines of the Cut page, red and blue as in Resolve ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The pointer over the line shows why the mode renders the part, for example Transition or AI Super Scale.
+  - Stats for Nerds has a Render Cache row: Cached, To render with the reasons, or Not needed.
+- **Why:**
+  - vidcut has only the Cut page. Without the line, the user cannot see what the cache holds.
+  - The reasons tell the user which setting makes a part slow.

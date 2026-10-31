@@ -182,6 +182,7 @@ pub struct Snapshot {
     pub transcribed: Arc<HashSet<String>>,
     pub fillers: Arc<std::collections::BTreeMap<String, Vec<String>>>,
     pub lost_proxies: Arc<HashMap<String, PathBuf>>,
+    pub render_cache: Arc<Vec<vidcut_core::render_cache::Part>>,
     pub proxy_dir: Arc<Path>,
     pub waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     pub jobs: Arc<Vec<super::JobInfo>>,

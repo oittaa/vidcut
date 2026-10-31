@@ -9,6 +9,7 @@ use vidcut_av::waveform::Waveform;
 use vidcut_core::model::{Clip, Effects, Media, Project, Speed, Track, Transition};
 use vidcut_core::ops;
 use vidcut_core::otio::transitions;
+use vidcut_core::render_cache::Part;
 use vidcut_core::time::Rational;
 
 use super::geometry::{
@@ -120,6 +121,49 @@ fn step(scale: &Scale, fps: f64, min_px: f64) -> f64 {
 }
 
 #[allow(clippy::too_many_arguments)]
+const CACHE_LINE: f32 = 3.0;
+const TO_CACHE: Color32 = Color32::from_rgb(225, 60, 60);
+const CACHED: Color32 = Color32::from_rgb(60, 130, 235);
+
+pub fn cache_line(painter: &Painter, rect: Rect, scale: &Scale, line: &[Part]) {
+    let band = egui::Rangef::new(rect.bottom() - CACHE_LINE, rect.bottom());
+    let (a, b) = scale.visible(rect.left(), rect.right());
+    let fill = |from: i64, to: i64, color: Color32| {
+        let x0 = scale.xf(from).max(rect.left());
+        let x1 = scale.xf(to).min(rect.right());
+        if x1 > x0 {
+            painter.rect_filled(
+                Rect::from_x_y_ranges(x0..=x1, band),
+                CornerRadius::ZERO,
+                color,
+            );
+        }
+    };
+    for p in line
+        .iter()
+        .filter(|p| p.start < b && p.start + p.frames > a)
+    {
+        fill(p.start, p.start + p.frames, TO_CACHE);
+        for &(from, to) in &p.cached {
+            fill(from, to, CACHED);
+        }
+    }
+}
+
+pub fn cache_reasons(rect: Rect, scale: &Scale, line: &[Part], pos: Pos2) -> Option<String> {
+    let near = (rect.bottom() - 2.0 * CACHE_LINE..=rect.bottom() + 1.0).contains(&pos.y);
+    if !near || !rect.x_range().contains(pos.x) {
+        return None;
+    }
+    let frame = scale.under(pos.x);
+    let p = line.iter().find(|p| p.holds(frame))?;
+    let why: Vec<&str> = p.reasons.iter().map(|r| r.title()).collect();
+    Some(match p.has(frame) {
+        true => format!("Cached: {}", why.join(", ")),
+        false => why.join(", "),
+    })
+}
+
 pub fn ruler(
     painter: &Painter,
     rect: Rect,

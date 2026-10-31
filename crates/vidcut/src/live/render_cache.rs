@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use vidcut_core::model::{Project, RenderCache as Mode};
 use vidcut_core::preferences::{Preferences, Proxies, RenderCachePrefs};
 use vidcut_core::render::RenderPlan;
-use vidcut_core::render_cache::{Cache, Index, Key, Look, Setup, segment};
+use vidcut_core::render_cache::{Cache, Index, Key, Look, Part, Setup, segment};
 
 use super::Msg;
 use crate::threads::Work;
@@ -46,6 +46,7 @@ pub(super) struct Background {
     running: Option<Arc<AtomicBool>>,
     done: bool,
     error: Option<String>,
+    line: Arc<Vec<Part>>,
 }
 
 #[derive(PartialEq)]
@@ -86,6 +87,7 @@ impl Background {
             running: None,
             done: false,
             error: None,
+            line: Arc::default(),
         }
     }
 
@@ -118,18 +120,32 @@ impl Background {
         }
     }
 
-    pub(super) fn apply(&mut self, plan: &mut RenderPlan, project: &Project) {
+    pub(super) fn line(&self) -> Arc<Vec<Part>> {
+        self.line.clone()
+    }
+
+    fn show(&mut self, parts: Vec<Part>) -> bool {
+        let changed = *self.line != parts;
+        if changed {
+            self.line = Arc::new(parts);
+        }
+        changed
+    }
+
+    pub(super) fn apply(&mut self, plan: &mut RenderPlan, project: &Project) -> bool {
         if self.base.as_deref() != Some(plan) {
             self.base = Some(Arc::new(plan.clone()));
             self.done = false;
         }
         if project.settings.render_cache == Mode::Off {
             self.stop();
-            return;
+            return self.show(Vec::new());
         }
-        if self.index == Scan::None {
-            self.scan();
-            return;
+        if self.index != Scan::Done {
+            if self.index == Scan::None {
+                self.scan();
+            }
+            return self.show(Vec::new());
         }
         let look = self.look(project);
         let decodes = self.decodes.clone();
@@ -141,7 +157,11 @@ impl Background {
             slow: &slow,
             look: &look,
         };
-        self.lock().apply(plan, &setup, &Path::is_file);
+        let mut cache = self.lock();
+        let parts = cache.parts(plan, &setup);
+        cache.apply(plan, &setup, &Path::is_file);
+        drop(cache);
+        self.show(parts)
     }
 
     fn scan(&mut self) {
@@ -244,7 +264,8 @@ impl Background {
                     json!({
                         "start": p.start,
                         "frames": p.frames,
-                        "cached": p.cached,
+                        "cached": p.cached_frames(),
+                        "cached_ranges": p.cached,
                         "reasons": p.reasons.iter().map(|r| r.title()).collect::<Vec<_>>(),
                     })
                 })
