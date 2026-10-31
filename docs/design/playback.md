@@ -393,6 +393,7 @@ The background render (`live::render_cache::Background`):
   - It writes one file at a time (vidcut-av `render_cache::write`), and adds it to the index (`Index::add`). The viewer then reloads the plan.
   - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
 - `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
+  - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
   - All removes each file of the folder. Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
 
 ## Code

@@ -160,6 +160,9 @@ impl Background {
     pub(super) fn event(&mut self, e: Event) -> bool {
         match e {
             Event::Scanned(index) => {
+                if self.index == Scan::Done {
+                    return false;
+                }
                 *self.lock().index_mut() = index;
                 self.index = Scan::Done;
                 true
@@ -230,7 +233,8 @@ impl Background {
         }
     }
 
-    pub(super) fn status(&self, project: &Project) -> Value {
+    pub(super) fn status(&mut self, project: &Project) -> Value {
+        self.indexed();
         let mode = project.settings.render_cache;
         let look = self.look(project);
         let slow = |id: &str| slow_media(project, &self.proxies, &self.decodes, id);
@@ -272,13 +276,17 @@ impl Background {
         })
     }
 
-    fn scanned(&mut self) {
-        self.stop();
-        self.done = false;
+    fn indexed(&mut self) {
         if self.index != Scan::Done {
             *self.lock().index_mut() = Index::scan(&Index::dir());
             self.index = Scan::Done;
         }
+    }
+
+    fn scanned(&mut self) {
+        self.stop();
+        self.done = false;
+        self.indexed();
     }
 
     pub(super) fn delete_all(&mut self) -> usize {
