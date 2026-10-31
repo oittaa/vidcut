@@ -673,6 +673,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Feather fades one picture into the other across the band. The band then shows no color.
   - Motion Blur blurs along the move. A Push blurs the whole frame. A Slide blurs the moving picture only.
   - Ease is None, In, Out, In & Out or Custom. A Custom ease plays the keys of its curve. Without keys, the transition stays on the outgoing picture.
+  - At a gap, the missing side shows the tracks below. Where it covers the other picture, that picture does not show.
   - Resolve's measured geometry, blur and ease are in [gotchas](gotchas.md#resolves-otio-files).
   - A request makes one: `{"type": "push", "preset": "up", "border": 0.02}`, or `{"type": "slide", "preset": "top_left", "out": true}`.
   - An OTIO file holds them as Resolve's Push and Slide, with their values.
