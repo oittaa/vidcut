@@ -1,4 +1,5 @@
 mod dissolve;
+pub mod effect;
 pub mod filmstrip;
 mod follow;
 pub mod keyframes;

@@ -343,6 +343,7 @@ Writing:
   - a `Crop` of each side, and the softness of its edges (`crop_softness`)
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
   - its `composite_mode` (`CompositeMode`, `Picture::mode`) and its `opacity` (`Picture::opaque`)
+  - its `effects`, in their order: each an `Effect` with an `EffectKind`, such as a `GaussianBlur` ([export](export.md#effects))
 - Each value is left out at its usual value. A picture that `Picture::is_usual` accepts is only fitted into the frame.
 - Each value of `keyframes::PictureValue` can hold `Keyframe`s beside the plain value. `Picture::is_usual` is false while a value has keyframes.
   - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.
@@ -353,6 +354,10 @@ Writing:
   - `ops::picture::has_picture` tells which clips take a picture: not titles, generators or sound.
   - `ops::picture::clear` puts back one `PictureTool`, or all of them. `ops::picture::cleared` is the reset of one `PictureTool`, which the Inspector also uses.
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
+  - `ops::picture::effect_checked` checks an effect. It is part of `ops::picture::checked`.
+- `ops::effect` holds the edits of the effects: `effects.add`, `effects.set`, `effects.reset`, `effects.remove` and `effects.move`.
+  - A request names an effect by its place in the list of the clip, from 0.
+  - `picture.clear` of all the tools keeps the effects.
 - `place::Placing` turns the picture of a clip, with the pictures of the compound clips around it, into maps.
   - Each `place::Level` maps a pixel of the frame back to a picture, with the part shown, its soft edges and its opacity.
   - Each map zooms and turns the picture about its anchor point. `place::anchored` gives the pixel where the anchor point lands.

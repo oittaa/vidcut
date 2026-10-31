@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    CompositeMode, DuckDetect, DynamicZoom, Ease, Handle, PictureTool, PictureTransition, Place,
-    SubtitleStyle, TitleAlign, TitleKind, TitleStyle, TrackClip, ZoomBox,
+    Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EffectType, Handle, PictureTool,
+    PictureTransition, Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle, TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2100,6 +2100,71 @@ pub enum Request {
         #[serde(default)]
         tool: Option<PictureTool>,
     },
+    /// Add an effect at its usual values after the effects of clips:
+    /// footage, stills, image sequences and compound clips. The effects work
+    /// in their order, on the picture as its transform and its crop put it
+    /// in the frame, before its composite mode and its opacity. Returns each
+    /// clip with the place of its new effect, counted from 0.
+    #[serde(rename = "effects.add")]
+    EffectsAdd {
+        clips: OneOrMany<ClipRef>,
+        kind: EffectType,
+    },
+    /// Change values of one effect of a clip (`c3`, or `V2@15s`). `effect`
+    /// counts from 0, in the order of the clip's effects (`picture.get`).
+    /// Each value given replaces its own; a value the effect doesn't have is
+    /// an error.
+    #[serde(rename = "effects.set")]
+    EffectsSet {
+        clip: ClipRef,
+        effect: usize,
+        /// Off, the effect stays on the clip and does nothing.
+        #[serde(default)]
+        on: Option<bool>,
+        /// How much of the effect shows, from 0 (the picture as it comes
+        /// in) to 1 (all of the effect).
+        #[serde(default)]
+        blend: Option<f64>,
+        /// Off, the picture keeps its own shape, and the clear area around
+        /// it counts as black.
+        #[serde(default)]
+        use_alpha: Option<bool>,
+        /// A blur's strength, from 0 (none) to 1; with `split`, across.
+        #[serde(default)]
+        strength: Option<f64>,
+        /// A blur across and down at strengths of their own.
+        #[serde(default)]
+        split: Option<bool>,
+        /// With `split`, a blur's strength down, from 0 to 1.
+        #[serde(default)]
+        vertical_strength: Option<f64>,
+        /// A blur across on red, green, blue and alpha, `[r, g, b, a]`, each
+        /// a multiple of its spread from 0 to 2.
+        #[serde(default)]
+        horizontal_channels: Option<Vec<f64>>,
+        /// A blur down on red, green, blue and alpha, `[r, g, b, a]`, each
+        /// a multiple of its spread from 0 to 2.
+        #[serde(default)]
+        vertical_channels: Option<Vec<f64>>,
+        /// What a blur takes from beyond the frame's edges.
+        #[serde(default)]
+        border: Option<Border>,
+    },
+    /// Put one effect of a clip back at its usual values. It stays on or
+    /// off. `effect` counts from 0.
+    #[serde(rename = "effects.reset")]
+    EffectsReset { clip: ClipRef, effect: usize },
+    /// Take one effect off a clip. `effect` counts from 0.
+    #[serde(rename = "effects.remove")]
+    EffectsRemove { clip: ClipRef, effect: usize },
+    /// Move one effect of a clip to place `to` in its order. Both count
+    /// from 0.
+    #[serde(rename = "effects.move")]
+    EffectsMove {
+        clip: ClipRef,
+        effect: usize,
+        to: usize,
+    },
 
     /// Plan an export without encoding: settings, encoder, outputs, segments.
     #[serde(rename = "export.plan")]
@@ -3448,6 +3513,9 @@ pub enum GuiPanel {
     /// The Titles tab, in the Media Pool's place: the kinds of title to
     /// drag onto the timeline.
     Titles,
+    /// The Effects tab, in the Media Pool's place: the effects to drag
+    /// onto a clip.
+    Effects,
     /// The Inspector tab, in the Media Pool's place: the transform, crop
     /// and Dynamic Zoom of the selected clips, as numbers to type or drag.
     Inspector,

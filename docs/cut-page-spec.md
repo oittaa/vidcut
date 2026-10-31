@@ -51,6 +51,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - vidcut's Full Screen button is on the viewer (deviation X86).
   - A Transitions tab shows the transitions in the place of the Media Pool (p. 759, §8.11).
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
+  - An Effects tab shows the video effects in the place of the Media Pool (p. 765, §8.16).
   - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X70).
   - A Keyframes tab sits beside the Inspector ([X87](deviations.md#x87-the-keyframes-tab-has-an-ease-menu)).
   - The Timeline menu opens that tab.
@@ -1015,6 +1016,49 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Crop is in pixels of the picture as it is fitted in the timeline. Crop Left 100 on the 4:3 chart is a `cropLeft` of 100/1440 in the OTIO file.
   - Zoom is a factor (1.000). Rotation is in degrees.
 - **Later:** Foreground and the mask modes of Composite (pp. 769, 1202).
+
+### 8.16 Effects (pp. 765, 3526, 3536)
+
+- **Adding** (p. 765):
+  - The Effects tab has the video effects in groups.
+  - A drag of an effect onto a clip on the timeline adds the effect to that clip.
+  - On the Cut page, a double-click on an effect adds it to the selected clip.
+  - The Effects panel of the Inspector has the values of the effects.
+  - vidcut: the Effects tab has the Blur group with Gaussian Blur. The other effects come later ([todo](todo/effects-library.md)).
+  - vidcut: a double-click adds the effect to each selected clip with a picture. The right-click menu of an effect has Add to Selected Clips.
+- **Inspector** (vidcut, X70):
+  - The Inspector shows the effects of the first selected clip, after its Super Scale section. A change applies to that clip only.
+  - Each effect is a section with an on/off box, Move Up, Move Down, Reset and Delete.
+  - An effect that is off stays on the clip and does nothing.
+  - Reset puts back the usual values of the effect, and keeps it on or off.
+  - The effects of a clip work in their order, from the top.
+- **Blend** (p. 3526):
+  - Each effect has a Blend value under Global Blend, at the bottom of its values. It mixes the effect with the picture that comes in.
+  - Measured in Resolve Studio 21.1.2: Blend goes from 0 to 1 and is 1.000 by default.
+  - The output is (1 − Blend) × the picture that comes in + Blend × the effect. The picture on p. 3526 shows 0.000.
+  - Use Alpha is under Global Blend and is on by default.
+  - Measured: with Use Alpha off, the clip keeps its own shape. Inside it, the effect counts the clear area around the picture as black.
+- **Gaussian Blur** (p. 3536). Its values and their defaults, measured in Resolve Studio 21.1.2:
+  - Split Horizontal and Vertical is off. Off, Strength sets the blur. On, Horizontal Strength and Vertical Strength set it.
+  - Strength, Horizontal Strength and Vertical Strength go from 0 to 1. Each is 0.400.
+  - Horizontal Channel Adjustment and Vertical Channel Adjustment have Red, Green, Blue and Alpha. Each goes from 0 to 2 and is 1.000.
+  - The channel values also apply with Split Horizontal and Vertical off.
+  - Advanced Controls has Border Type: Black, Replicate, Reflect or Wrap-Around. Reflect is the default.
+  - The manual names a Blur Alpha box. Resolve Studio 21.1.2 does not show it.
+- **How the blur works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
+  - It is a Gaussian curve, sampled at each pixel, across the frame and then down it. A Strength of 0 gives the picture as it comes in.
+  - Its sigma is 0.05625 × Strength² × the timeline width in pixels.
+  - A channel value multiplies the sigma of that channel in that direction. A value of 0 gives no blur.
+  - The resolution of the source does not change the sigma.
+  - It works on the code values of the timeline, with no conversion to linear light.
+  - It comes after Transform and Crop. A Zoom of 2 doubles the sigma.
+  - Zoom X and Zoom Y multiply the sigma by √(Zoom X × Zoom Y), in both directions.
+  - Across and down are the directions of the frame. A rotated clip thus blurs across the frame, not across the clip.
+  - It also blurs the alpha. Over a lower track, the edge of a smaller picture fades into that track.
+  - Reflect and Wrap-Around match a blur of one pass. Black and Replicate do not ([X101](deviations.md#x101-black-and-replicate-borders-follow-their-plain-definitions)).
+  - A portrait timeline gives a sigma 3% smaller than the rule ([X102](deviations.md#x102-a-portrait-timeline-blurs-by-the-width-rule)).
+- **Compound clips:** vidcut: the effects of a compound clip work on each picture inside it ([todo](todo/compound-opacity.md)).
+- **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

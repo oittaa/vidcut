@@ -3,7 +3,8 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    Clip, CompositeMode, Crop, DynamicZoom, Picture, PictureTool, Project, TrackKind, ZoomBox,
+    Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectKind, GaussianBlur, Picture, PictureTool,
+    Project, TrackKind, ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -84,6 +85,11 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
     if let Some(why) = crate::keyframes::picture_problem(p) {
         return Err(Error::invalid(why));
     }
+    let effects = p
+        .effects
+        .iter()
+        .map(effect_checked)
+        .collect::<Result<Vec<_>>>()?;
     let out = Picture {
         position: p.position.filter(|at| *at != Picture::MIDDLE),
         zoom: p.zoom.filter(|z| *z != [1.0, 1.0]),
@@ -94,9 +100,53 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
         crop_softness: p.crop_softness.filter(|s| *s != 0.0),
         composite_mode: p.composite_mode.filter(|m| *m != CompositeMode::Normal),
         opacity: p.opacity.filter(|o| *o != 1.0),
+        effects,
         ..p.clone()
     };
     Ok((!out.is_usual()).then_some(out))
+}
+
+pub fn effect_checked(e: &Effect) -> Result<Effect> {
+    let share = |v: f64| v.is_finite() && (0.0..=1.0).contains(&v);
+    if !e.blend.is_none_or(share) {
+        return Err(Error::invalid("an effect's blend is from 0 to 1"));
+    }
+    let kind = match &e.kind {
+        EffectKind::GaussianBlur(b) => {
+            if ![b.strength, b.vertical_strength]
+                .into_iter()
+                .flatten()
+                .all(share)
+            {
+                return Err(Error::invalid("a Gaussian Blur's strength is from 0 to 1"));
+            }
+            let channel = |v: &f64| v.is_finite() && (0.0..=2.0).contains(v);
+            if ![b.horizontal_channels, b.vertical_channels]
+                .iter()
+                .flatten()
+                .all(|k| k.iter().all(channel))
+            {
+                return Err(Error::invalid(
+                    "a Gaussian Blur's channel values are from 0 to 2",
+                ));
+            }
+            let usual = |v: f64| v != GaussianBlur::STRENGTH;
+            let same = |k: &[f64; 4]| *k != GaussianBlur::SAME;
+            EffectKind::GaussianBlur(GaussianBlur {
+                strength: b.strength.filter(|v| usual(*v)),
+                vertical_strength: b.vertical_strength.filter(|v| usual(*v)),
+                horizontal_channels: b.horizontal_channels.filter(same),
+                vertical_channels: b.vertical_channels.filter(same),
+                border: b.border.filter(|v| *v != crate::model::Border::Reflect),
+                ..b.clone()
+            })
+        }
+    };
+    Ok(Effect {
+        kind,
+        blend: e.blend.filter(|v| *v != 1.0),
+        ..e.clone()
+    })
 }
 
 fn zoom_checked(z: &DynamicZoom) -> Result<()> {
@@ -119,7 +169,7 @@ pub fn has_picture(c: &Clip) -> bool {
     c.video && c.title.is_none() && c.generator.is_none()
 }
 
-fn takes(p: &Project, ti: usize, c: &Clip) -> Result<()> {
+pub(super) fn takes(p: &Project, ti: usize, c: &Clip) -> Result<()> {
     if c.title.is_some() {
         return Err(Error::invalid(format!(
             "{} is a title, placed by its own position, zoom and rotation (titles.set)",
@@ -310,7 +360,13 @@ pub fn clear(p: &mut Project, ids: &[String], tool: Option<PictureTool>) -> Resu
         let Some(old) = c.picture.take() else {
             continue;
         };
-        let kept = tool.map_or_else(Picture::default, |t| cleared(&old, t));
+        let kept = match tool {
+            Some(t) => cleared(&old, t),
+            None => Picture {
+                effects: old.effects,
+                ..Picture::default()
+            },
+        };
         c.picture = (!kept.is_usual()).then_some(kept);
     }
     Ok(())
@@ -331,6 +387,7 @@ pub fn cleared(old: &Picture, tool: PictureTool) -> Picture {
             composite_mode: old.composite_mode,
             opacity: old.opacity,
             opacity_keys: old.opacity_keys,
+            effects: old.effects,
             ..Picture::default()
         },
         PictureTool::Crop => {
@@ -375,7 +432,33 @@ pub fn shown(c: &Clip) -> Value {
         "dynamic_zoom": p.dynamic_zoom.as_ref().map(zoom_shown),
         "composite_mode": p.mode(),
         "opacity": p.opaque(),
+        "effects": p.effects.iter().map(effect_shown).collect::<Vec<_>>(),
     })
+}
+
+pub fn effect_shown(e: &Effect) -> Value {
+    let mut out = json!({
+        "kind": e.kind(),
+        "on": e.on,
+        "blend": e.mixed(),
+        "use_alpha": e.use_alpha,
+    });
+    match &e.kind {
+        EffectKind::GaussianBlur(b) => {
+            let more = json!({
+                "strength": b.across(),
+                "split": b.split,
+                "vertical_strength": b.vertical_strength.unwrap_or(GaussianBlur::STRENGTH),
+                "horizontal_channels": b.across_channels(),
+                "vertical_channels": b.down_channels(),
+                "border": b.edge(),
+            });
+            if let (Some(out), Some(more)) = (out.as_object_mut(), more.as_object()) {
+                out.extend(more.clone());
+            }
+        }
+    }
+    out
 }
 
 pub fn zoom_shown(z: &DynamicZoom) -> Value {

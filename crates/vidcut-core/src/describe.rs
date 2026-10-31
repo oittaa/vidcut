@@ -258,6 +258,16 @@ pub fn describe_at(
         "titles.add" => format!("Title {} at {}", quoted(&d.text("text")), d.time("at")),
         "titles.set" => d.title_set(),
         "picture.set" => d.picture_set(),
+        "effects.add" => format!("Add {} to {}", d.effect_name(), d.clips("clips")),
+        "effects.set" => format!("Change effect {} of {}", d.effect(), d.clips("clip")),
+        "effects.reset" => format!("Reset effect {} of {}", d.effect(), d.clips("clip")),
+        "effects.remove" => format!("Remove effect {} of {}", d.effect(), d.clips("clip")),
+        "effects.move" => format!(
+            "Move effect {} of {} to {}",
+            d.effect(),
+            d.clips("clip"),
+            d.params["to"].as_u64().unwrap_or(0) + 1
+        ),
         "picture.clear" => match d.params["tool"].as_str() {
             Some("crop") => format!("Reset the crop of {}", d.clips("clips")),
             Some("dynamic_zoom") => format!("Reset the Dynamic Zoom of {}", d.clips("clips")),
@@ -850,6 +860,15 @@ impl Words<'_> {
             Some(n) => format!("by {}", frames(n)),
             None => format!("to {}", self.time("to")),
         }
+    }
+
+    fn effect_name(&self) -> &'static str {
+        serde_json::from_value::<crate::model::EffectType>(self.params["kind"].clone())
+            .map_or("an effect", crate::model::EffectType::name)
+    }
+
+    fn effect(&self) -> u64 {
+        self.params["effect"].as_u64().unwrap_or(0) + 1
     }
 
     fn keyframes(&self) -> String {

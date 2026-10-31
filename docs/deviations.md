@@ -2086,3 +2086,26 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A one-second morph shows a long blend of two positions of the speaker.
   - A one-second sound fade over a cut in speech plays the voice twice, with an echo.
   - In a test on a cut pause of an interview, 6 frames at 30 fps looked and sounded good.
+
+## X101. Black and Replicate borders follow their plain definitions
+
+- **Resolve:**
+  - Border Type sets what a Gaussian Blur takes from beyond the edges of the frame (p. 3536).
+  - Measured in Resolve Studio 21.1.2, at Strength 1 on a 1920-pixel-wide timeline, next to a white edge:
+    - Black is darker in the last 8 pixels than a blur of one pass with black beyond the edge. The value at the edge is 0.06, not 0.27.
+    - Replicate takes about 60% of the edge color. The value at the edge is 0.64, not 0.75.
+  - No blur of one or more passes that was tried fits these values.
+  - Reflect and Wrap-Around match a blur of one pass.
+- **vidcut:**
+  - Black takes black and clear pixels from beyond the edges.
+  - Replicate takes the pixels of the edge, repeated.
+- **Why:** the measurements do not fit a known blur. The plain definitions give the result that the names tell.
+
+## X102. A portrait timeline blurs by the width rule
+
+- **Resolve:**
+  - The sigma of a Gaussian Blur is 0.05625 × Strength² × the timeline width in pixels ([spec §8.16](cut-page-spec.md#816-effects-pp-765-3526-3536)).
+  - Timelines of 1920×1080, 1920×1440 and 3840×2160 fit this rule within 0.1%.
+  - On a 1080×1920 timeline, Strength 0.4 gives a sigma of 9.46 pixels. The rule gives 9.72.
+- **vidcut:** all timelines use the rule. On a 1080×1920 timeline, the blur is thus 3% larger than Resolve's.
+- **Why:** the measurements do not explain the 3%. The rule fits each landscape timeline that was measured.

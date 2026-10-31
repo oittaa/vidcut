@@ -4,6 +4,7 @@ mod cells;
 mod clip_info;
 mod dialog;
 mod ducking;
+mod effect_browser;
 pub mod export;
 mod file_manager;
 mod fillers;

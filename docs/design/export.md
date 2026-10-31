@@ -396,6 +396,32 @@ Soft crop edges:
 - The crop softness and the width of the fitted picture give the length of the fade. A softness above 0 grows `edge` past the crop by the fade.
 - `place::Placing::bounds` and `place::Placing::share` use `edge`. The handles in the viewer use `shown`.
 
+## Effects
+
+The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)):
+
+- `place::Placing` holds the effects of the picture and of the compound clips around it, the inner ones first (`Placing.effects`).
+- Each `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas. It also holds the border, the blend and Use Alpha.
+  - The sigma is that of `GaussianBlur::spreads` at the width of the canvas.
+  - It is multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it, at the frame.
+  - An effect that is off, or at a blend of 0, is left out. So is a blur with no sigma and Use Alpha on.
+
+The draw:
+
+- `Screen::draw` draws a layer with effects into a picture of its own, with no opacity (`bared`).
+- `blur::Blurred` keeps that picture for each such layer. It also keeps two pictures for the passes.
+- `fs_blur` blurs across and then down, in passes (`blur::passes`).
+- The last pass of an effect mixes the blur with the picture that came in, by the blend. With Use Alpha off, it keeps the alpha of that picture.
+- Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
+- A made frame of a speed change gets the effects in the later draw (`Sampling::Placed`). The draw that makes it skips them (`Sampling::Colors`).
+
+The passes:
+
+- A large sigma needs many taps. A pass of at most 128 pixels of sigma keeps each draw short.
+- The first pass takes each pixel. A later pass takes each nth pixel.
+- The passes before it already blur the picture by more than n pixels. Thus the gaps do not show.
+- Above a sigma of 128 pixels, Black and Replicate borders thus differ a little from one pass.
+
 ## Proxies
 
 - `proxy.generate` uses the same machinery (spec D41).

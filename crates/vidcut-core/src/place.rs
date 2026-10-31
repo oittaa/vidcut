@@ -1,4 +1,4 @@
-use crate::model::{CompositeMode, Picture, VideoInfo};
+use crate::model::{Border, CompositeMode, Effect, EffectKind, Picture, VideoInfo};
 use crate::render::Placed;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -66,6 +66,37 @@ impl Soft {
 pub struct Placing {
     pub levels: Vec<Level>,
     pub mode: CompositeMode,
+    pub effects: Vec<Blurring>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Blurring {
+    pub across: [f64; 4],
+    pub down: [f64; 4],
+    pub border: Border,
+    pub blend: f64,
+    pub use_alpha: bool,
+}
+
+impl Blurring {
+    fn of(e: &Effect, width: f64) -> Option<Self> {
+        if !e.on || e.mixed() <= 0.0 {
+            return None;
+        }
+        match &e.kind {
+            EffectKind::GaussianBlur(b) => {
+                let (across, down) = b.spreads(width);
+                let still = across.iter().chain(&down).all(|s| *s <= 0.0);
+                (!(still && e.use_alpha)).then_some(Self {
+                    across,
+                    down,
+                    border: b.edge(),
+                    blend: e.mixed(),
+                    use_alpha: e.use_alpha,
+                })
+            }
+        }
+    }
 }
 
 pub fn flipped(p: &Picture, [x, y]: [f64; 2]) -> [f64; 2] {
@@ -219,7 +250,19 @@ impl Placing {
     pub fn new(placed: &[Placed], frame: (f64, f64), fitted: [f64; 4]) -> Self {
         let whole = [0.0, 0.0, frame.0, frame.1];
         let mut levels: Vec<Level> = Vec::with_capacity(placed.len());
+        let mut effects = Vec::new();
+        let mut zoom = 1.0;
         for (i, p) in placed.iter().enumerate().rev() {
+            let [zx, zy] = p.picture.scale_at(p.source as f64);
+            zoom *= (zx * zy).abs().sqrt();
+            let mut own: Vec<Blurring> = p
+                .picture
+                .effects
+                .iter()
+                .filter_map(|e| Blurring::of(e, frame.0 * zoom))
+                .collect();
+            own.append(&mut effects);
+            effects = own;
             let at = if i == 0 { fitted } else { whole };
             if i == 0 && !levels.is_empty() && at == whole && p.picture.is_usual() {
                 continue;
@@ -236,7 +279,11 @@ impl Placing {
             .map(|p| p.picture.mode())
             .find(|m| *m != CompositeMode::Normal)
             .unwrap_or_default();
-        Self { levels, mode }
+        Self {
+            levels,
+            mode,
+            effects,
+        }
     }
 
     pub fn whole(placed: &[Placed], frame: (f64, f64)) -> Self {

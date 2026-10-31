@@ -2101,6 +2101,7 @@ impl Workspace {
             Gesture::Media { .. }
                 | Gesture::Title { .. }
                 | Gesture::Transition { .. }
+                | Gesture::Effect { .. }
                 | Gesture::Subtitles { .. }
         ) {
             d.upper = layout.upper.area.expand(8.0).contains(pos);
@@ -2923,6 +2924,19 @@ impl Workspace {
         });
     }
 
+    pub(crate) fn start_effect_drag(
+        &mut self,
+        (kind, label): (vidcut_core::model::EffectType, &'static str),
+        press: Pos2,
+    ) {
+        self.timeline.snap_flipped = false;
+        self.timeline.drag = Some(ActiveDrag {
+            drag: Drag::new(Gesture::Effect { kind, label }, press),
+            upper: false,
+            preview: Preview::default(),
+        });
+    }
+
     pub(crate) fn media_drag_overlay(&self, ctx: &egui::Context) {
         if let Some(text) = self.bin_drag_label()
             && let Some(pos) = ctx.input(|i| i.pointer.latest_pos())
@@ -2947,23 +2961,24 @@ impl Workspace {
                 self.project()
                     .and_then(|p| p.media(media))
                     .map_or(media.clone(), |m| m.name.clone()),
-                *range,
+                Some(*range),
             ),
             Gesture::Subtitles { media, cues } => (
                 self.project()
                     .and_then(|p| p.media(media))
                     .map_or(media.clone(), |m| m.name.clone()),
-                (0, cues.iter().map(|c| c.1).max().unwrap_or(0)),
+                Some((0, cues.iter().map(|c| c.1).max().unwrap_or(0))),
             ),
-            Gesture::Title { template, len } => (template.label.clone(), (0, *len)),
+            Gesture::Title { template, len } => (template.label.clone(), Some((0, *len))),
             Gesture::Transition { label, kind } => (
                 (*label).to_string(),
-                (
+                Some((
                     0,
                     self.project()
                         .map_or(0, |p| vidcut_core::ops::dissolve_length(p, kind)),
-                ),
+                )),
             ),
+            Gesture::Effect { label, .. } => ((*label).to_string(), None),
             _ => return,
         };
         let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) else {
@@ -2973,11 +2988,11 @@ impl Workspace {
             egui::Order::Tooltip,
             egui::Id::unique("media-drag"),
         ));
-        let text = format!(
-            "{}  {}",
-            crate::gui::pool::elide(&name, 30),
-            self.src_tc(range.1 - range.0)
-        );
+        let name = crate::gui::pool::elide(&name, 30);
+        let text = match range {
+            Some((a, b)) => format!("{name}  {}", self.src_tc(b - a)),
+            None => name,
+        };
         let galley = painter.layout_no_wrap(text, FontId::proportional(12.0), Color32::WHITE);
         let at = pos + vec2(12.0, 10.0);
         painter.rect_filled(
@@ -2990,7 +3005,11 @@ impl Workspace {
             painter.text(
                 at + vec2(0.0, 20.0),
                 Align2::LEFT_TOP,
-                "drop on the timeline",
+                if range.is_some() {
+                    "drop on the timeline"
+                } else {
+                    "drop on a clip"
+                },
                 FontId::proportional(10.0),
                 theme::colors().text_dim,
             );

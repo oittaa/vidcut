@@ -2084,9 +2084,10 @@ impl Title {
     }
 }
 
-/// Where a clip's picture goes over the frame: footage, a still, an image
-/// sequence or a compound clip. A field left out is at its usual value; at
-/// all of them the picture is fitted into the frame. The tracks below show
+/// Where a clip's picture goes over the frame, and the effects on it:
+/// footage, a still, an image sequence or a compound clip. A field left out
+/// is at its usual value; at all of them the picture is fitted into the
+/// frame. The tracks below show
 /// wherever it doesn't cover the frame: in the bars around a picture of
 /// another shape, around it, where it is cropped and through its soft edges
 /// and its opacity.
@@ -2215,6 +2216,176 @@ pub struct Picture {
     /// Opacity keyframes, from 0 to 1 (decision D75).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub opacity_keys: Vec<Keyframe>,
+    /// The effects on the picture, in the order they work. Left out when it
+    /// has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<Effect>,
+}
+
+/// An effect on a clip's picture. It works on the picture as its transform
+/// and its crop put it in the frame, with the clear area around it, before
+/// its composite mode and its opacity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Effect {
+    /// Off, the effect stays on the clip and does nothing. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub on: bool,
+    #[serde(flatten)]
+    pub kind: EffectKind,
+    /// How much of the effect shows, from 0 (the picture as it comes in)
+    /// to 1 (all of the effect). Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend: Option<f64>,
+    /// On, the effect also works on the picture's transparency. Off, the
+    /// picture keeps its own shape, and the clear area around it counts as
+    /// black. Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub use_alpha: bool,
+}
+
+/// What an effect does, with its own values.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EffectKind {
+    /// A Gaussian blur across and down the frame.
+    GaussianBlur(GaussianBlur),
+}
+
+/// The effects there are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectType {
+    GaussianBlur,
+}
+
+/// A Gaussian blur. Its spread (the sigma of its curve) is 0.05625 × the
+/// strength² × the frame's width, times the zoom of the picture and of the
+/// compound clips around it. A channel value multiplies it for that channel
+/// and that way. It works on the code values, across and down the frame.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GaussianBlur {
+    /// How strong the blur is, from 0 (none) to 1; with `split`, across.
+    /// Usual: 0.4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strength: Option<f64>,
+    /// Across and down at strengths of their own: `strength` across and
+    /// `vertical_strength` down. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub split: bool,
+    /// With `split`, how strong the blur is down, from 0 to 1. Usual: 0.4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_strength: Option<f64>,
+    /// The blur across on red, green, blue and alpha, each a multiple of
+    /// its spread from 0 (none) to 2. Usual: `[1, 1, 1, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizontal_channels: Option<[f64; 4]>,
+    /// The blur down on red, green, blue and alpha, each a multiple of its
+    /// spread from 0 (none) to 2. Usual: `[1, 1, 1, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_channels: Option<[f64; 4]>,
+    /// What the blur takes from beyond the frame's edges. Usual: `reflect`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border: Option<Border>,
+}
+
+/// What a blur takes from beyond the frame's edges.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Border {
+    /// Nothing: black and clear.
+    Black,
+    /// The pixels of the edge, repeated.
+    Replicate,
+    /// The picture, mirrored about the pixels of the edge.
+    #[default]
+    Reflect,
+    /// The picture from the other side.
+    WrapAround,
+}
+
+impl Border {
+    pub const ALL: [Border; 4] = [
+        Border::Black,
+        Border::Replicate,
+        Border::Reflect,
+        Border::WrapAround,
+    ];
+
+    pub fn code(self) -> u32 {
+        Self::ALL.iter().position(|b| *b == self).unwrap_or(2) as u32
+    }
+}
+
+impl EffectType {
+    pub const ALL: [EffectType; 1] = [EffectType::GaussianBlur];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::GaussianBlur => "Gaussian Blur",
+        }
+    }
+
+    pub fn made(self) -> Effect {
+        let kind = match self {
+            Self::GaussianBlur => EffectKind::GaussianBlur(GaussianBlur::default()),
+        };
+        Effect {
+            on: true,
+            kind,
+            blend: None,
+            use_alpha: true,
+        }
+    }
+}
+
+impl Effect {
+    pub fn kind(&self) -> EffectType {
+        match self.kind {
+            EffectKind::GaussianBlur(_) => EffectType::GaussianBlur,
+        }
+    }
+
+    pub fn mixed(&self) -> f64 {
+        self.blend.unwrap_or(1.0)
+    }
+}
+
+impl GaussianBlur {
+    pub const STRENGTH: f64 = 0.4;
+    pub const SPREAD: f64 = 0.05625;
+    pub const SAME: [f64; 4] = [1.0; 4];
+
+    pub fn across(&self) -> f64 {
+        self.strength.unwrap_or(Self::STRENGTH)
+    }
+
+    pub fn down(&self) -> f64 {
+        if self.split {
+            self.vertical_strength.unwrap_or(Self::STRENGTH)
+        } else {
+            self.across()
+        }
+    }
+
+    pub fn across_channels(&self) -> [f64; 4] {
+        self.horizontal_channels.unwrap_or(Self::SAME)
+    }
+
+    pub fn down_channels(&self) -> [f64; 4] {
+        self.vertical_channels.unwrap_or(Self::SAME)
+    }
+
+    pub fn edge(&self) -> Border {
+        self.border.unwrap_or_default()
+    }
+
+    pub fn spreads(&self, width: f64) -> ([f64; 4], [f64; 4]) {
+        let of = |s: f64, k: [f64; 4]| k.map(|k| Self::SPREAD * s * s * width * k);
+        (
+            of(self.across(), self.across_channels()),
+            of(self.down(), self.down_channels()),
+        )
+    }
 }
 
 /// Dynamic Zoom: the part of the picture that fills its place goes from

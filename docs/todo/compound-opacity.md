@@ -10,4 +10,9 @@
   - At an opacity of 50% over white, the frame is 0.5 × the mix + 0.5.
   - At Multiply over 50% gray, the frame is 0.5 × the mix.
   - The soft edges of a compound clip are not measured.
+- vidcut blurs each picture inside a compound clip by the effects of the compound clip, in the frame (`Placing.effects`).
+  - The blur thus comes after the transform and the crop of the compound clip.
+  - A picture inside the compound clip is blurred by its own effects first.
+  - Resolve's order for the effects of a compound clip is not measured.
 - To do: mix the tracks of the compound clip first. Then fade the mix, or mix it by its composite mode, in the viewer and in the export.
+- To do: measure where Resolve applies the effects of a compound clip.

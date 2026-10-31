@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use eframe::egui::{Pos2, Rect};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    Clip, Handle, Keyframe, Marks, PictureTransition, Project, Track, TrackKind,
+    Clip, EffectType, Handle, Keyframe, Marks, PictureTransition, Project, Track, TrackKind,
 };
 use vidcut_core::ops::{Edge, MAIN};
 use vidcut_core::validate::GAIN;
@@ -105,6 +105,10 @@ pub enum Gesture {
     },
     Transition {
         kind: PictureTransition,
+        label: &'static str,
+    },
+    Effect {
+        kind: EffectType,
         label: &'static str,
     },
     CueMove {
@@ -376,6 +380,7 @@ impl Drag {
             Gesture::Subtitles { media, cues } => subtitles_preview(ctx, pos, media, cues),
             Gesture::Title { template, len } => title_preview(ctx, pos, template, *len),
             Gesture::Transition { kind, .. } => transition_preview(ctx, pos, kind),
+            Gesture::Effect { kind, .. } => effect_preview(ctx, pos, *kind),
             Gesture::Trim {
                 clip,
                 edge,
@@ -810,6 +815,32 @@ fn transition_preview(ctx: &Ctx, pos: Pos2, kind: &PictureTransition) -> Preview
         ),
         ghost: Some((at - before, at + after)),
         row: Some(id),
+        ..Preview::default()
+    }
+}
+
+fn effect_preview(ctx: &Ctx, pos: Pos2, kind: EffectType) -> Preview {
+    let Some(row) = ctx
+        .rows
+        .at(pos.y)
+        .filter(|r| r.track.starts_with('V') && ctx.rows.area.contains(pos))
+    else {
+        return Preview::default();
+    };
+    let Some(track) = ctx.project.track(&row.track).filter(|t| !t.locked) else {
+        return Preview::default();
+    };
+    let Some(c) = track
+        .clip_at(ctx.scale.under(pos.x))
+        .map(|i| &track.clips[i])
+        .filter(|c| vidcut_core::ops::picture::has_picture(c))
+    else {
+        return Preview::default();
+    };
+    Preview {
+        request: request("effects.add", json!({ "clips": [c.id], "kind": kind })),
+        ghost: Some((c.start, c.end())),
+        row: Some(row.track.clone()),
         ..Preview::default()
     }
 }
