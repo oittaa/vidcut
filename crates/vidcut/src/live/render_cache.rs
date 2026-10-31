@@ -277,8 +277,6 @@ impl Background {
         if let Some(base) = self.base.clone()
             && project.settings.render_cache != Mode::Off
         {
-            self.stop();
-            self.done = false;
             self.start(project, base, from);
         }
         self.status(project)
