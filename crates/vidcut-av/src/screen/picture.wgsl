@@ -248,12 +248,19 @@ fn faded(inner: vec4<f32>, reach: vec4<f32>, uv: vec2<f32>) -> f32 {
 }
 
 fn shown(px: vec2<f32>) -> vec4<f32> {
-    if p.made.x > 2.5 {
+    if p.made.x > 2.5 && p.made.x < 3.5 {
         let c = textureLoad(halved, vec2<i32>(px), 0);
         if c.a <= 0.0 {
             discard;
         }
         return vec4<f32>(c.rgb / c.a, c.a * p.placed.y);
+    }
+    if p.made.x > 4.5 {
+        let a = textureLoad(halved, vec2<i32>(px), 0).a;
+        if a <= 0.0 {
+            discard;
+        }
+        return vec4<f32>(textureLoad(luma, vec2<i32>(px), 0).rgb, a * p.placed.y);
     }
     let n = u32(p.placed.x);
     var cover = 1.0;
@@ -274,6 +281,9 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     }
     if cover <= 0.0 {
         discard;
+    }
+    if p.made.x > 3.5 {
+        return vec4<f32>(1.0, 1.0, 1.0, cover * p.placed.y);
     }
     if p.made.x > 1.5 {
         let q = (px / p.made.yz - p.part.xy) / p.part.zw;
@@ -518,7 +528,7 @@ fn fs_paired(in: Out) -> @location(0) vec4<f32> {
 fn fs(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
     if p.placed.x > 0.5 {
-        if p.made.x > 0.5 && p.made.x < 1.5 {
+        if (p.made.x > 0.5 && p.made.x < 1.5) || p.made.w > 0.5 {
             return vec4<f32>(shown(px + p.part.xy).rgb, 1.0);
         }
         return placed(px);
