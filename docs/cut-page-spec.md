@@ -2740,6 +2740,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - For a picture from the cache, the Super Scale group names the AI upscaler that made it, from the render cache.
   - The Retime Process group names the Retime Process in the same way.
   - `cache.status` gives the parts to render, their reasons and their cached frames, and the size on disk. `cache.delete` deletes.
+  - `cache.render` renders the cache now, for scripts.
+    - In a running GUI, it starts the background render at once, also with `render_cache.background` off. It answers at once, as `cache.status`.
+    - Without a GUI, the CLI renders all that the mode renders, and then answers. Ctrl-C stops it.
 
 ## 13. Order of operations (pp. 287–296, 3407)
 

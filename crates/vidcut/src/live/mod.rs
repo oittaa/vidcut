@@ -2743,6 +2743,13 @@ impl Live {
                 Some(open) => Step::Now(Ok(answer(self.render.status(open.project())))),
                 None => Step::Now(Err(no_project())),
             },
+            Request::CacheRender {} => match &self.project {
+                Some(open) => {
+                    let at = self.player.position(TIMELINE);
+                    Step::Now(Ok(answer(self.render.render_now(open.project(), at))))
+                }
+                None => Step::Now(Err(no_project())),
+            },
             Request::CacheDelete { what, clips } => Step::Now(self.cache_delete(what, clips)),
             Request::PlayerMute { mute } => {
                 let mute = mute.unwrap_or(!self.player.muted());
@@ -3731,17 +3738,8 @@ impl Live {
         self.proxied(self.shown_plan(plan))
     }
 
-    fn shown_plan(&self, mut plan: RenderPlan) -> RenderPlan {
-        if !self.show_super_scale {
-            for piece in &mut plan.video {
-                for layer in piece.layers_mut() {
-                    if let render::VideoPiece::Source { super_scale, .. } = layer {
-                        *super_scale = Default::default();
-                    }
-                }
-            }
-        }
-        plan
+    fn shown_plan(&self, plan: RenderPlan) -> RenderPlan {
+        shown(plan, self.show_super_scale)
     }
 
     fn proxied(&self, mut plan: RenderPlan) -> RenderPlan {
@@ -4499,6 +4497,24 @@ fn fetches(r: &Request) -> bool {
 
 fn no_project() -> Error {
     Error::usage("no project is open in this vidcut GUI (project.open opens one)")
+}
+
+fn shown(mut plan: RenderPlan, super_scale: bool) -> RenderPlan {
+    if !super_scale {
+        for piece in &mut plan.video {
+            for layer in piece.layers_mut() {
+                if let render::VideoPiece::Source { super_scale, .. } = layer {
+                    *super_scale = Default::default();
+                }
+            }
+        }
+    }
+    plan
+}
+
+pub(crate) fn render_cache(project: &Project, cancel: Arc<AtomicBool>) -> Result<Value> {
+    let super_scale = crate::preferences::load().is_ok_and(|p| p.viewer.super_scale);
+    render_cache::render_all(project, super_scale, cancel)
 }
 
 fn cancelled() -> Error {
