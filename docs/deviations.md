@@ -2130,6 +2130,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - One cache serves all projects. It is a part of the disk cache, under its limit. The least recently used files go first.
   - With proxies on, the cache has the size and the codec of proxies.
   - With proxies off, the timeline level has the size of the timeline. The clip level has the size of the media, or of the picture that AI Super Scale enlarges.
+    - A clip with a Retime Process has the size of the timeline at the clip level.
   - Preferences hold the background render, its time and the kinds of User mode. They are the settings of this computer.
   - Smart finds the media that are slow to decode by the decoder and by the proxy rules, not by a list of formats:
     - with GPU decoding on, media of a codec with long groups of pictures that the GPU does not decode

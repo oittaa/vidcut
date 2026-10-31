@@ -2683,10 +2683,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The cache has two levels, as in Resolve (pp. 203–204).
   - The clip level keeps the picture of one clip, before the tracks mix. It is the Render Cache Fusion Output of Resolve (p. 203).
     - It holds the clips set to On, media that are slow to decode, speed changes and AI Super Scale.
+    - It holds a Retime Process other than Nearest of a clip with no placed picture.
+      - Such a clip has no change in its Inspector or in a compound clip around it. No track below shows around it.
+      - It holds the frame at the size of the timeline, as the timeline shows it. Why: a Retime Process makes each frame at the size that the clip fills.
     - A move, a split, a trim or an edit on another track keeps it.
     - It holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Super Scale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
-    - A clip with a Retime Process other than Nearest stays at the timeline level. A still stays there too, and so does media with an alpha channel.
+    - A Retime Process of a placed clip stays at the timeline level. A still stays there too, and so does media with an alpha channel.
   - The timeline level keeps the frame after the tracks mix. It holds the other reasons.
     - Titles on top of all tracks stay out of it. Thus an edit of their text keeps the cache.
     - A part that moves keeps its cache when the tracks under it stay the same.
@@ -2709,6 +2712,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Stats for Nerds has a Render Cache row in How It Was Made (X104).
     - It tells for the frame on screen: Cached, To render with the reasons, or Not needed.
   - For a picture from the cache, the Super Scale group names the AI upscaler that made it, from the render cache.
+  - The Retime Process group names the Retime Process in the same way.
   - `cache.status` gives the parts to render, their reasons and their cached frames, and the size on disk. `cache.delete` deletes.
 
 ## 13. Order of operations (pp. 287–296, 3407)
