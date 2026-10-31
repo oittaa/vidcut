@@ -562,7 +562,9 @@ pub enum ClipCache {
     Auto,
     /// Rendered in the Smart mode and in the User mode.
     On,
-    /// Never rendered for itself.
+    /// Its slow media and AI Super Scale are not rendered. Speed changes,
+    /// Retime Processes, transitions, opacity and composite modes still
+    /// are.
     Off,
 }
 
@@ -1576,8 +1578,8 @@ pub struct Clip {
     /// Its own Clip Color (spec §3). Without one it shows its media's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Its Render Cache: `on` renders it in both modes, `off` in neither.
-    /// Left out at `auto`.
+    /// Its Render Cache: `on` renders it in both modes. `off` keeps its
+    /// slow media and AI Super Scale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
 }
