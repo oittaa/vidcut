@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
+use eframe::wgpu::rwh::HasWindowHandle;
 
 use super::theme;
 use super::video::{Viewer, ViewerHandle};
@@ -276,6 +277,7 @@ impl eframe::App for App {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
         self.window.watch(&ctx, frame);
+        self.ws.main_window = frame.window_handle().ok().map(|h| h.as_raw());
         self.ws.ui(ui);
         *self.port.two_up.lock().unwrap_or_else(|e| e.into_inner()) = self.ws.two_up_stats();
         self.publish();
@@ -288,6 +290,7 @@ impl eframe::App for App {
 
     fn on_exit(&mut self) {
         self.window.flush();
+        self.ws.flush_windows();
         crate::threads::end_within(EXIT_PATIENCE);
         crate::threads::ending("the session");
         self.gate.open();

@@ -14,11 +14,17 @@ use vidcut_core::request::ViewerMode;
 use super::export::Ask;
 use super::fillers::{FillerEditor, Lists, Scope};
 use super::theme;
+use super::window::{Separate, Tool};
 use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
 
 const PAUSE: f64 = 1.0;
 const FOUND: Color32 = Color32::from_rgba_premultiplied(110, 90, 20, 140);
+const WINDOW: Separate = Separate {
+    title: "Transcription",
+    file: "window-transcription.json",
+    size: [560.0, 620.0],
+};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Shown {
@@ -227,6 +233,7 @@ impl Searches {
 pub(super) struct TranscriptionUi {
     pub(super) open: bool,
     pub(super) over: bool,
+    pub(super) window: Tool,
     keys: Vec<Pressed>,
     asking: Option<(Asked, Ask)>,
     shown: Option<(Asked, Words)>,
@@ -752,6 +759,7 @@ impl Workspace {
             t.over = false;
             t.keys.clear();
             t.editing = None;
+            t.window.close();
         }
         self.transcription = t;
     }
@@ -787,8 +795,9 @@ impl Workspace {
     }
 
     fn transcription_frame(&mut self, ctx: &egui::Context, t: &mut TranscriptionUi) {
+        let owner = self.main_window;
         let Some(p) = self.project_shared() else {
-            super::dialog::tool_window(ctx, "Transcription", &mut t.open, [520.0, 300.0], |ui| {
+            super::dialog::separate_window(ctx, &mut t.window, owner, &WINDOW, &mut t.open, |ui| {
                 super::dialog::note(ui, "Open a project first")
             });
             return;
@@ -951,7 +960,16 @@ impl Workspace {
             Some(items) if !needle.is_empty() => t.searches.hits(t.version, &needle, items),
             _ => Arc::default(),
         };
-        super::dialog::tool_window(ctx, "Transcription", &mut open, [560.0, 620.0], |ui| {
+        let mut window = std::mem::take(&mut t.window);
+        super::dialog::separate_window(ctx, &mut window, owner, &WINDOW, &mut open, |ui| {
+            ui.spacing_mut().item_spacing.y = 8.0;
+            let separate = ui.ctx().viewport_id() != egui::ViewportId::ROOT;
+            if separate && !ui.ctx().egui_wants_keyboard_input() {
+                t.take_keys(ui.ctx());
+                if !t.keys.is_empty() {
+                    ui.ctx().request_repaint_of(egui::ViewportId::ROOT);
+                }
+            }
             ui.add(egui::Label::new(RichText::new(&title).strong()).truncate());
             super::dialog::form(ui, "transcription-form", |ui| {
                 super::dialog::row(ui, "Search", |ui| {
@@ -1474,8 +1492,10 @@ impl Workspace {
                 t.typing = None;
             }
             t.footer = (ui.cursor().top() - footer_top).ceil();
-            over = ui.ui_contains_pointer();
+            over = ui.ui_contains_pointer() && !separate;
+            self.filler_words_window(ctx, t, &p.settings.fillers, &preferred);
         });
+        t.window = window;
         if let (Some(to), Some(items)) = (go, &items)
             && !hits.is_empty()
         {
@@ -1502,7 +1522,6 @@ impl Workspace {
         }
         t.open = open;
         t.over = over;
-        self.filler_words_window(ctx, t, &p.settings.fillers, &preferred);
         if let Some(read) = &read {
             for act in acts {
                 let m = media.as_ref().map(|m| m.id.as_str());

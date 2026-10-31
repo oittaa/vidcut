@@ -255,6 +255,20 @@ The bar and the Jobs button:
 - The file is written only after the window changes and stays still, and when the GUI closes. Thus a reset that deletes the file stays done.
 - `gui.window` sets the size, position (not on Wayland), maximized, minimized and fullscreen state of a running GUI.
 
+**Separate windows.**
+
+- The Transcription and Jobs windows are system windows of their own (`dialog::separate_window`). Thus they can go to another screen.
+- They are immediate viewports of egui. Thus eframe draws them each time that it draws the main window.
+  - Why: they use the state of the `Workspace`, which a deferred viewport cannot borrow.
+- A window opens without the keyboard focus. With no kept place, it opens at the center of the main window.
+- On Windows, `Tool::watch` finds the window by its title among the windows of the UI thread. Why: egui does not give the handles of its viewports.
+- The main window then owns it. Thus it stays above the main window and has no taskbar button.
+- `window-transcription.json` and `window-jobs.json` keep the windows as `window.json` keeps the main window.
+  - Windows keeps the placement.
+  - macOS and Linux keep the size, the maximized state, and the position that egui reports. Wayland reports no position.
+- The keys that a separate window does not use go to the main window in the next frame (`dialog::take_forwarded_keys`). Thus the shortcuts work there too.
+  - Held keys do not go. Thus K with J or L works only in the main window.
+
 **View state.**
 
 - The view state is the selected edit points (`TimelineView::edit`, `TimelineView::edits`) and the selected dissolve (`TimelineView::transition`). It is also the target track, the zoom, the Timeline Options and the open windows.
@@ -399,7 +413,8 @@ The bar and the Jobs button:
 - It asks the core for `analyze.words` through an `Ask`. It asks again when the `rev` of the project or the `transcribed` set changes.
 - Each paragraph between pauses is one galley. On the timeline, each gap between clips is a pause too (`holes`). While playing, only the paragraphs whose current word changed are laid out again.
 - `Searches`, an `Lru`, keeps the matches of the last searches. A longer search filters the matches of a shorter search that it contains.
-- While the pointer is over the window, `TranscriptionUi::take_keys` takes its keys before the timeline's shortcuts.
+- While the window has the keyboard focus, `TranscriptionUi::take_keys` takes its keys before the timeline's shortcuts.
+- The Filler Words window opens in the Transcription window.
 - Its changes go as requests, for example `media.leave_out`, `edit.ripple_delete_words` and `media.words.set`. Its cuts on the timeline ask for `quiet` edges.
 - On the timeline, Cut, Copy and Paste send `edit.cut`, `edit.copy` and `edit.paste` with the range of the words. The core keeps the clips that come back as its clipboard.
 
