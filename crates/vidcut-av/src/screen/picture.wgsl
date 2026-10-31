@@ -248,6 +248,13 @@ fn faded(inner: vec4<f32>, reach: vec4<f32>, uv: vec2<f32>) -> f32 {
 }
 
 fn shown(px: vec2<f32>) -> vec4<f32> {
+    if p.made.x > 2.5 {
+        let c = textureLoad(halved, vec2<i32>(px), 0);
+        if c.a <= 0.0 {
+            discard;
+        }
+        return vec4<f32>(c.rgb / c.a, c.a * p.placed.y);
+    }
     let n = u32(p.placed.x);
     var cover = 1.0;
     var uv = vec2<f32>(0.0);
@@ -881,4 +888,84 @@ fn fs_encode(in: Out) -> @location(0) vec4<u32> {
 @fragment
 fn fs_encode_unorm(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(encoded_at(vec2<i32>(in.position.xy))) / f32(encoding.plane.w);
+}
+
+struct Blur {
+    spread: vec4<f32>,
+    way: vec4<i32>,
+    blend: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> blurring: Blur;
+@group(0) @binding(1) var blur_source: texture_2d<f32>;
+@group(0) @binding(2) var blur_start: texture_2d<f32>;
+
+fn blur_folded(i: i32, n: i32) -> i32 {
+    switch blurring.way.w {
+        case 1: {
+            return clamp(i, 0, n - 1);
+        }
+        case 2: {
+            if n == 1 {
+                return 0;
+            }
+            let period = 2 * (n - 1);
+            var m = i % period;
+            if m < 0 {
+                m += period;
+            }
+            return select(m, period - m, m >= n);
+        }
+        case 3: {
+            var m = i % n;
+            if m < 0 {
+                m += n;
+            }
+            return m;
+        }
+        default: {
+            return i;
+        }
+    }
+}
+
+fn blur_tap(px: vec2<i32>, k: i32, size: vec2<i32>) -> vec4<f32> {
+    let down = blurring.way.x == 1;
+    let n = select(size.x, size.y, down);
+    let i = select(px.x, px.y, down) + k;
+    if blurring.way.w == 0 && (i < 0 || i >= n) {
+        return vec4<f32>(0.0);
+    }
+    let at = blur_folded(i, n);
+    let c = textureLoad(blur_source, select(vec2<i32>(at, px.y), vec2<i32>(px.x, at), down), 0);
+    if blurring.blend.w > 0.5 && blurring.blend.y < 0.5 && c.a > 0.0 {
+        return vec4<f32>(c.rgb / c.a, c.a);
+    }
+    return c;
+}
+
+@fragment
+fn fs_blur(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let size = vec2<i32>(textureDimensions(blur_source));
+    let wide = blurring.spread > vec4<f32>(0.0);
+    let k = select(vec4<f32>(0.0), 0.5 / (blurring.spread * blurring.spread), wide);
+    let step = blurring.way.y;
+    var sum = blur_tap(px, 0, size);
+    var total = vec4<f32>(1.0);
+    for (var j = 1; j <= blurring.way.z; j++) {
+        let d = f32(j * step);
+        let w = select(vec4<f32>(0.0), exp(-d * d * k), wide);
+        sum += (blur_tap(px, j * step, size) + blur_tap(px, -j * step, size)) * w;
+        total += 2.0 * w;
+    }
+    var out = sum / total;
+    if blurring.blend.z > 0.5 {
+        let was = textureLoad(blur_start, px, 0);
+        if blurring.blend.y < 0.5 {
+            out = vec4<f32>(out.rgb * was.a, was.a);
+        }
+        out = mix(was, out, blurring.blend.x);
+    }
+    return out;
 }

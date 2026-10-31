@@ -29,6 +29,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 | "track"
                 | "bins"
                 | "picture"
+                | "effects"
                 | "speed"
         )
     ) && !matches!(
@@ -970,6 +971,40 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     end("start"),
                     end("end"),
                     z["ease"].as_str().unwrap_or_default()
+                );
+            }
+            for (i, e) in v["effects"].as_array().into_iter().flatten().enumerate() {
+                let n = |k: &str| e[k].as_f64().unwrap_or_default();
+                let list = |k: &str| {
+                    let all: Vec<String> = e[k]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|x| x.as_f64().unwrap_or_default().to_string())
+                        .collect();
+                    all.join(", ")
+                };
+                let strength = match e["split"] == true {
+                    true => format!(
+                        "strength {} across, {} down",
+                        n("strength"),
+                        n("vertical_strength")
+                    ),
+                    false => format!("strength {}", n("strength")),
+                };
+                println!(
+                    "  effect {i} {}{}  {strength}  channels across {}  down {}  border {}  blend {}{}",
+                    e["kind"].as_str().unwrap_or_default(),
+                    if e["on"] == true { "" } else { " (off)" },
+                    list("horizontal_channels"),
+                    list("vertical_channels"),
+                    e["border"].as_str().unwrap_or_default(),
+                    n("blend"),
+                    if e["use_alpha"] == true {
+                        ""
+                    } else {
+                        "  alpha not used"
+                    },
                 );
             }
         }

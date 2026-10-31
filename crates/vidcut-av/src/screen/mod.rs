@@ -9,11 +9,12 @@ use crate::hw::Kind;
 use crate::player::{Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
 use vidcut_core::model::{Hdr, WipeDirection};
-use vidcut_core::place::{Level, Placing, chain, lettered};
+use vidcut_core::place::{Blurring, Level, Placing, chain, lettered};
 use vidcut_core::render::{Moving, Placed, Shift, Wipe};
 
 #[cfg(any(target_os = "linux", windows))]
 mod acquire;
+mod blur;
 mod carried;
 mod gate;
 pub(crate) mod held;
@@ -69,6 +70,7 @@ pub struct Gpu {
     encoders: out::Encoders,
     held: held::Pipes,
     light: OnceLock<light::Pipes>,
+    blur: blur::Pipes,
 }
 
 struct Drawing {
@@ -665,6 +667,7 @@ impl Gpu {
             encoders: out::Encoders::new(device, &shader),
             held: held::Pipes::new(device),
             light: OnceLock::new(),
+            blur: blur::Pipes::new(device, &shader),
         }
     }
 
@@ -1008,6 +1011,7 @@ pub struct Screen {
     exported: bool,
     encoded: out::Encoded,
     spent: (std::time::Duration, std::time::Duration),
+    blurred: blur::Blurred,
 }
 
 struct Letters {
@@ -1502,6 +1506,8 @@ impl Screen {
         }
         let exported = self.exported;
         let clock = std::time::Instant::now();
+        self.blurred.sized(size, n);
+        let blurred = &mut self.blurred;
         let binds: Vec<(wgpu::BindGroup, Option<f64>, bool, u32)> = layers
             .iter()
             .zip(&mut self.slots)
@@ -1511,7 +1517,7 @@ impl Screen {
                     Sampling::Placed { placed, .. } => Some(&placed[..]),
                     _ => None,
                 };
-                let placing = made_with
+                let mut placing = made_with
                     .or(placed.get(i).map(Vec::as_slice))
                     .filter(|p| !p.is_empty())
                     .map(|p| {
@@ -1519,6 +1525,10 @@ impl Screen {
                         (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
                     });
                 let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
+                let (effects, factor) = placing
+                    .as_mut()
+                    .filter(|_| !colors_only)
+                    .map_or((Vec::new(), 1.0), |(p, l)| bared(p, l));
                 let mode = placing
                     .as_ref()
                     .filter(|_| !colors_only)
@@ -1530,6 +1540,14 @@ impl Screen {
                 };
                 let how = (placing.as_ref(), kernel, colors, paired[i]);
                 let bind = slot.prepare(gpu, picture, size, how, &mut encoder);
+                let bind = if effects.is_empty() {
+                    blurred.drop_layer(i);
+                    bind
+                } else {
+                    let view = blurred.layer(gpu, i, &bind, &effects, &mut encoder);
+                    let shown = [1.0, factor, f64::from(mode), f64::from(u8::from(paired[i]))];
+                    blur::shown_bind(gpu, view, shown)
+                };
                 (bind, level, placing.is_some(), mode)
             })
             .collect();
@@ -3277,6 +3295,20 @@ fn halvings(
     } else {
         most_halvings
     }
+}
+
+fn bared(placing: &mut Placing, level: &mut f64) -> (Vec<Blurring>, f64) {
+    let effects = std::mem::take(&mut placing.effects);
+    if effects.is_empty() {
+        return (effects, 1.0);
+    }
+    let opacity: f64 = innermost(Some(placing)).iter().map(|l| l.opacity).product();
+    let factor = *level * opacity;
+    for l in &mut placing.levels {
+        l.opacity = 1.0;
+    }
+    *level = 1.0;
+    (effects, factor)
 }
 
 fn innermost(placing: Option<&Placing>) -> &[Level] {

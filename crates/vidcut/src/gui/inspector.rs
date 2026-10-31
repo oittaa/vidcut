@@ -3,16 +3,16 @@ use std::time::Instant;
 
 use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
-    ARROW_COUNTER_CLOCKWISE, CARET_LEFT, CARET_RIGHT, DIAMOND, FLIP_HORIZONTAL, FLIP_VERTICAL,
-    LINK_SIMPLE, LINK_SIMPLE_BREAK,
+    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_UP, CARET_LEFT, CARET_RIGHT, DIAMOND,
+    FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, TRASH,
 };
 use serde_json::{Value, json};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, Keyframe, Picture, PictureTool, Project,
-    Retime, Speed, TrackKind, Upscaler, ZoomBox,
+    Border, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, Effect, EffectKind, GaussianBlur,
+    Keyframe, Picture, PictureTool, Project, Retime, Speed, TrackKind, Upscaler, ZoomBox,
 };
-use vidcut_core::ops::picture::{cleared, has_picture};
+use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::upright_fit;
 use vidcut_core::time::TimeSpec;
 use vidcut_core::validate::GAIN;
@@ -66,10 +66,112 @@ enum Field {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Key {
     Picture(Field),
+    Effect(usize, Knob),
     Volume,
     Speed,
     Rate,
     Length,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Knob {
+    Strength,
+    HorizontalStrength,
+    VerticalStrength,
+    Horizontal(usize),
+    Vertical(usize),
+    Blend,
+}
+
+const CHANNELS: [&str; 4] = ["Red", "Green", "Blue", "Alpha"];
+
+impl Knob {
+    fn label(self) -> &'static str {
+        match self {
+            Knob::Strength => "Strength",
+            Knob::HorizontalStrength => "Horizontal Strength",
+            Knob::VerticalStrength => "Vertical Strength",
+            Knob::Horizontal(c) | Knob::Vertical(c) => CHANNELS[c],
+            Knob::Blend => "Blend",
+        }
+    }
+
+    fn usual(self) -> f64 {
+        match self {
+            Knob::Strength | Knob::HorizontalStrength | Knob::VerticalStrength => {
+                GaussianBlur::STRENGTH
+            }
+            Knob::Horizontal(_) | Knob::Vertical(_) | Knob::Blend => 1.0,
+        }
+    }
+
+    fn range(self) -> RangeInclusive<f64> {
+        match self {
+            Knob::Horizontal(_) | Knob::Vertical(_) => 0.0..=2.0,
+            _ => 0.0..=1.0,
+        }
+    }
+
+    fn read(self, e: &Effect) -> f64 {
+        let EffectKind::GaussianBlur(g) = &e.kind;
+        match self {
+            Knob::Strength | Knob::HorizontalStrength => g.across(),
+            Knob::VerticalStrength => g.vertical_strength.unwrap_or(GaussianBlur::STRENGTH),
+            Knob::Horizontal(c) => g.across_channels()[c],
+            Knob::Vertical(c) => g.down_channels()[c],
+            Knob::Blend => e.mixed(),
+        }
+    }
+
+    fn put(self, e: &Effect, v: f64) -> Effect {
+        let r = self.range();
+        let v = v.clamp(*r.start(), *r.end());
+        let mut out = e.clone();
+        let EffectKind::GaussianBlur(g) = &mut out.kind;
+        match self {
+            Knob::Strength | Knob::HorizontalStrength => g.strength = Some(v),
+            Knob::VerticalStrength => g.vertical_strength = Some(v),
+            Knob::Horizontal(c) => {
+                let mut a = g.across_channels();
+                a[c] = v;
+                g.horizontal_channels = Some(a);
+            }
+            Knob::Vertical(c) => {
+                let mut a = g.down_channels();
+                a[c] = v;
+                g.vertical_channels = Some(a);
+            }
+            Knob::Blend => out.blend = Some(v),
+        }
+        effect_checked(&out).unwrap_or_else(|_| e.clone())
+    }
+
+    fn param(self, e: &Effect) -> (&'static str, Value) {
+        let EffectKind::GaussianBlur(g) = &e.kind;
+        match self {
+            Knob::Strength | Knob::HorizontalStrength => ("strength", json!(g.across())),
+            Knob::VerticalStrength => ("vertical_strength", json!(self.read(e))),
+            Knob::Horizontal(_) => ("horizontal_channels", json!(g.across_channels())),
+            Knob::Vertical(_) => ("vertical_channels", json!(g.down_channels())),
+            Knob::Blend => ("blend", json!(e.mixed())),
+        }
+    }
+}
+
+fn border_label(b: Border) -> &'static str {
+    match b {
+        Border::Black => "Black",
+        Border::Replicate => "Replicate",
+        Border::Reflect => "Reflect",
+        Border::WrapAround => "Wrap-Around",
+    }
+}
+
+fn knob_picture(c: &Chosen, (n, k): (usize, Knob), v: f64) -> Option<Picture> {
+    let e = c.shown.effects.get(n)?;
+    let mut p = c.shown.clone();
+    p.effects[n] = k.put(e, v);
+    Some(p)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -366,6 +468,7 @@ impl Key {
     fn label(self) -> &'static str {
         match self {
             Key::Picture(f) => f.label(),
+            Key::Effect(_, k) => k.label(),
             Key::Volume => "Volume",
             Key::Speed => "Speed",
             Key::Rate => "Frames per Second",
@@ -379,13 +482,15 @@ impl Key {
             Key::Volume => " dB",
             Key::Speed => "%",
             Key::Rate => " fps",
-            Key::Length => "",
+            Key::Effect(..) | Key::Length => "",
         }
     }
 
     fn speed(self) -> f64 {
         match self {
             Key::Picture(f) => f.speed(),
+            Key::Effect(_, Knob::Horizontal(_) | Knob::Vertical(_)) => 0.01,
+            Key::Effect(..) => 0.005,
             Key::Volume => 0.1,
             Key::Speed | Key::Length => 1.0,
             Key::Rate => 0.1,
@@ -396,6 +501,7 @@ impl Key {
         match self {
             Key::Picture(Field::Pitch | Field::Yaw) => (0, 3),
             Key::Picture(_) => (0, 2),
+            Key::Effect(..) => (3, 3),
             Key::Volume => (1, 1),
             Key::Speed => (0, 2),
             Key::Rate => (0, 3),
@@ -406,6 +512,7 @@ impl Key {
     fn usual(self) -> f64 {
         match self {
             Key::Picture(f) => f.usual(),
+            Key::Effect(_, k) => k.usual(),
             Key::Volume => 0.0,
             Key::Speed => 100.0,
             Key::Rate | Key::Length => 0.0,
@@ -600,6 +707,10 @@ enum Act {
     Toggle(Key),
     KeyEase(Key, Ease),
     ResetChannel(Field),
+    EffectSet(usize, Value),
+    EffectReset(usize),
+    EffectRemove(usize),
+    EffectMove(usize, usize),
 }
 
 fn param_name(key: Key) -> Option<&'static str> {
@@ -1047,6 +1158,158 @@ fn dynamic_zoom(
     });
 }
 
+fn rows(ui: &mut egui::Ui, salt: (usize, &str), rows: impl FnOnce(&mut egui::Ui)) {
+    egui::Grid::new(("inspector-effect-rows", salt))
+        .num_columns(3)
+        .min_col_width(84.0)
+        .spacing([8.0, 6.0])
+        .show(ui, rows);
+}
+
+fn fold(ui: &mut egui::Ui, (n, name): (usize, &str), body: impl FnOnce(&mut egui::Ui)) {
+    egui::CollapsingHeader::new(name)
+        .id_salt(("inspector-effect", n, name))
+        .default_open(false)
+        .show(ui, |ui| rows(ui, (n, name), body));
+}
+
+fn icon(ui: &mut egui::Ui, text: &str, name: &str, on: bool) -> bool {
+    ui.add_enabled(on, egui::Button::new(text).frame(false))
+        .on_hover_text(name)
+        .clicked()
+}
+
+fn knob(ui: &mut egui::Ui, i: &Inspector, (n, k): (usize, Knob), e: &Effect, acts: &mut Vec<Act>) {
+    let shown = k.read(e);
+    let values = (shown != k.usual(), shown, k.range());
+    entry(ui, (Key::Effect(n, k), None), i, values, None, acts);
+}
+
+fn check(ui: &mut egui::Ui, (n, name, now): (usize, &str, bool), put: &str, acts: &mut Vec<Act>) {
+    let set = |on: bool| {
+        let mut params = json!({});
+        params[put] = json!(on);
+        Act::EffectSet(n, params)
+    };
+    label(ui, name, !now);
+    let mut on = now;
+    if ui.checkbox(&mut on, "").clicked() {
+        acts.push(set(on));
+    }
+    if reset(ui, !now) {
+        acts.push(set(true));
+    }
+    ui.end_row();
+}
+
+fn effect_block(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, count): (usize, usize),
+    e: &Effect,
+    acts: &mut Vec<Act>,
+) {
+    let mut fresh = e.kind().made();
+    fresh.on = e.on;
+    let changed = *e != fresh;
+    let header = |ui: &mut egui::Ui| {
+        let mut act = None;
+        let mut on = e.on;
+        let r = ui.checkbox(&mut on, "");
+        r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, "On"));
+        if r.clicked() {
+            act = Some(Act::EffectSet(n, json!({ "on": on })));
+        }
+        ui.label(RichText::new(e.kind().name()).strong());
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if icon(ui, TRASH, "Delete", true) {
+                act = Some(Act::EffectRemove(n));
+            }
+            if ui
+                .add_enabled(changed, egui::Button::new("Reset"))
+                .clicked()
+            {
+                act = Some(Act::EffectReset(n));
+            }
+            if icon(ui, ARROW_DOWN, "Move Down", n + 1 < count) {
+                act = Some(Act::EffectMove(n, n + 1));
+            }
+            if icon(ui, ARROW_UP, "Move Up", n > 0) {
+                act = Some(Act::EffectMove(n, n - 1));
+            }
+        });
+        act
+    };
+    let EffectKind::GaussianBlur(g) = &e.kind;
+    let id = ui.make_persistent_id(("inspector-effect", n));
+    let (_, header, _) =
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
+            .show_header(ui, header)
+            .body(|ui| {
+                rows(ui, (n, "main"), |ui| {
+                    label(ui, "Split Horizontal and Vertical", g.split);
+                    let mut split = g.split;
+                    if ui.checkbox(&mut split, "").clicked() {
+                        acts.push(Act::EffectSet(n, json!({ "split": split })));
+                    }
+                    if reset(ui, g.split) {
+                        acts.push(Act::EffectSet(n, json!({ "split": false })));
+                    }
+                    ui.end_row();
+                    let strengths: &[Knob] = if g.split {
+                        &[Knob::HorizontalStrength, Knob::VerticalStrength]
+                    } else {
+                        &[Knob::Strength]
+                    };
+                    for &k in strengths {
+                        knob(ui, i, (n, k), e, acts);
+                    }
+                });
+                fold(ui, (n, "Horizontal Channel Adjustment"), |ui| {
+                    for c in 0..CHANNELS.len() {
+                        knob(ui, i, (n, Knob::Horizontal(c)), e, acts);
+                    }
+                });
+                fold(ui, (n, "Vertical Channel Adjustment"), |ui| {
+                    for c in 0..CHANNELS.len() {
+                        knob(ui, i, (n, Knob::Vertical(c)), e, acts);
+                    }
+                });
+                fold(ui, (n, "Advanced Controls"), |ui| {
+                    let now = g.edge();
+                    label(ui, "Border Type", now != Border::default());
+                    egui::ComboBox::from_id_salt(("inspector-border", n))
+                        .selected_text(border_label(now))
+                        .show_ui(ui, |ui| {
+                            for b in Border::ALL {
+                                if ui.selectable_label(b == now, border_label(b)).clicked()
+                                    && b != now
+                                {
+                                    acts.push(Act::EffectSet(n, json!({ "border": b })));
+                                }
+                            }
+                        });
+                    if reset(ui, now != Border::default()) {
+                        let b = Border::default();
+                        acts.push(Act::EffectSet(n, json!({ "border": b })));
+                    }
+                    ui.end_row();
+                });
+                fold(ui, (n, "Global Blend"), |ui| {
+                    knob(ui, i, (n, Knob::Blend), e, acts);
+                    check(ui, (n, "Use Alpha", e.use_alpha), "use_alpha", acts);
+                });
+            });
+    acts.extend(header.inner);
+}
+
+fn effects(ui: &mut egui::Ui, i: &Inspector, c: &Chosen, acts: &mut Vec<Act>) {
+    let count = c.shown.effects.len();
+    for (n, e) in c.shown.effects.iter().enumerate() {
+        effect_block(ui, i, (n, count), e, acts);
+    }
+}
+
 fn section_speed(c: &Paced, to: f64, ripple: bool) -> Option<(&'static str, Value)> {
     let (from, clips, at) = (c.shown.0, [&c.id], c.at);
     if to == 0.0 {
@@ -1451,8 +1714,44 @@ impl Workspace {
                     )
                 })
                 .collect(),
+            Some(Held {
+                field: Key::Effect(n, k),
+                value,
+                start,
+                ..
+            }) => start
+                .first()
+                .and_then(|c| Some((c.id.clone(), knob_picture(c, (*n, *k), *value)?)))
+                .into_iter()
+                .collect(),
             _ => self.inspector_landed(),
         }
+    }
+
+    fn send_knob(&mut self, chosen: &[Chosen], (n, k): (usize, Knob), value: f64) {
+        let Some(c) = chosen.first() else {
+            return;
+        };
+        let Some(to) = knob_picture(c, (n, k), value).filter(|p| *p != c.shown) else {
+            return;
+        };
+        let (name, v) = k.param(&to.effects[n]);
+        let mut params = json!({ "clip": c.id, "effect": n });
+        params[name] = v;
+        self.send("effects.set", params);
+        self.inspector.landing = Some(Landing {
+            since: Instant::now(),
+            pictures: vec![(c.id.clone(), c.stored.clone(), to)],
+        });
+    }
+
+    fn send_effect(&mut self, method: &str, chosen: &[Chosen], n: usize, mut params: Value) {
+        let Some(c) = chosen.first() else {
+            return;
+        };
+        params["clip"] = json!(c.id);
+        params["effect"] = json!(n);
+        self.send(method, params);
     }
 
     pub(super) fn settle_inspector(&mut self) {
@@ -1692,6 +1991,7 @@ impl Workspace {
                     Some(f.put_at(&c.shown, &c.shape, value, Some(c.frame)))
                 });
             }
+            Key::Effect(n, k) => self.send_knob(chosen, (n, k), value),
             Key::Volume => self.send_volume(sounds, value),
             Key::Speed => self.send_percent(paced, None, |_| value),
             Key::Rate => self.send_percent(paced, None, |c| value / c.rate * 100.0),
@@ -1999,6 +2299,12 @@ impl Workspace {
             Act::Toggle(key) => self.toggle_key(key, (chosen, sounds, paced)),
             Act::KeyEase(key, ease) => self.ease_key(key, ease, chosen, sounds),
             Act::ResetChannel(field) => self.reset_channel(field, chosen),
+            Act::EffectSet(n, params) => self.send_effect("effects.set", chosen, n, params),
+            Act::EffectReset(n) => self.send_effect("effects.reset", chosen, n, json!({})),
+            Act::EffectRemove(n) => self.send_effect("effects.remove", chosen, n, json!({})),
+            Act::EffectMove(n, to) => {
+                self.send_effect("effects.move", chosen, n, json!({ "to": to }));
+            }
             Act::Unkey => {
                 let keyed: Vec<&str> = sounds
                     .iter()
@@ -2071,6 +2377,7 @@ impl Workspace {
         let dropped = self.dropped();
         let gone = |k: Key| match k {
             Key::Picture(_) => chosen.is_empty(),
+            Key::Effect(n, _) => chosen.first().is_none_or(|c| c.shown.effects.len() <= n),
             Key::Volume => sounds.is_empty(),
             Key::Speed | Key::Rate | Key::Length => paced.is_empty(),
         };
@@ -2120,6 +2427,7 @@ impl Workspace {
                     dynamic_zoom(ui, i, &p, at, &chosen, boxes, &mut acts);
                     composite(ui, i, &p, at, &chosen, &mut acts);
                     self.super_scale_section(ui, &p, &chosen);
+                    effects(ui, &self.inspector, &chosen[0], &mut acts);
                 }
                 if !paced.is_empty() {
                     let state = (&self.inspector, &*p, dropped);

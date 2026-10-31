@@ -67,7 +67,9 @@ flowchart TD
   grow["The picture is enlarged<br>Source::ai_picture"]
   between["A frame between two pictures<br>VideoFrames::retimed_frame"]
   earlier["An earlier source frame<br>VideoFrames::reversed_frame"]
-  place["The picture is on the canvas<br>Screen::draw"]
+  place["The picture is placed<br>Screen::draw"]
+  fx["The effects work on it<br>fs_blur"]
+  mix["The layers are on the canvas<br>Screen::draw"]
   show["The viewer shows this frame"]
   mapped["Fitted to the display<br>fs_screen"]
   file["The file has this frame<br>Screen::encoded"]
@@ -88,10 +90,13 @@ flowchart TD
   earlier --> weave
   earlier --> place
   solid --> place
-  place --> show
-  place --> mapped
+  place --> fx
+  place --> mix
+  fx --> mix
+  mix --> show
+  mix --> mapped
   mapped --> show
-  place --> file
+  mix --> file
 ```
 
 A clip skips each step that it does not use. The steps run in this order:
@@ -102,13 +107,15 @@ A clip skips each step that it does not use. The steps run in this order:
 - `Source::ai_picture` enlarges the converted picture when Super Scale uses an AI upscaler ([gpu](gpu.md#super-scale)). An interlaced source is woven first.
 - `VideoFrames::retimed_frame` makes a frame from two pictures that are already converted, woven and enlarged ([export](export.md#which-source-frame)).
   - The draw sizes and places each picture of the pair first. That is Classic Super Scale, Transform, Crop and Dynamic Zoom.
-  - The made frame is already placed (`Sampling::Placed`). The later draw takes its edges, its opacity and its mode from `place::Placing`.
+  - The made frame is already placed (`Sampling::Placed`). The later draw takes its edges, its effects, its opacity and its mode from `place::Placing`.
+  - The effects thus work on the made frame, after the speed change. The spec puts them before it (§13).
 - `VideoFrames::reversed_frame` chooses an earlier source frame that was made forward.
   - Without an AI upscaler, an interlaced frame is woven as that frame is placed.
   - With an AI upscaler, the weave and the enlargement come before the choice.
 - `Screen::draw` places the picture and mixes the layers (`place::Placing`, `screen::kernel`, [export](export.md#placed-pictures)).
   - A transition's two sides, and each clip placed over another, are layers of the same draw.
   - Titles and burned subtitles are draws in that same pass (`fs_title`, [export](export.md#subtitles)).
+  - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, [export](export.md#effects)).
 - The viewer shows the canvas. A wide canvas goes through `fs_screen` first ([playback](playback.md#the-viewer-thread)).
 - An export encodes that canvas (`Screen::encoded`) and skips `fs_screen` ([export](export.md#timeline-colors)).
 
@@ -121,7 +128,7 @@ vidcut has none of the other stages of the spec:
 
 - Camera Raw, Lens Correction, the LUTs and Fusion;
 - Input Sizing, Image Stabilization and the grades;
-- Open FX and Resolve FX, Output Sizing and Data Burn-In.
+- Open FX, the Resolve FX other than Gaussian Blur, Output Sizing and Data Burn-In.
 
 ## Rules the code follows
 

@@ -70,6 +70,11 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("picture.get", &["clip"]),
     ("picture.set", &["clips"]),
     ("picture.clear", &["clips"]),
+    ("effects.add", &["clips", "kind"]),
+    ("effects.set", &["clip", "effect"]),
+    ("effects.reset", &["clip", "effect"]),
+    ("effects.remove", &["clip", "effect"]),
+    ("effects.move", &["clip", "effect", "to"]),
     ("edit.append", &["media"]),
     ("edit.smart_insert", &["media"]),
     ("edit.insert", &["media"]),
@@ -134,6 +139,10 @@ const GROUPS: &[(&str, &str)] = &[
     ("clip", "Clip properties"),
     ("decoders", "Hardware decoders that work here"),
     ("edit", "Edit the timeline"),
+    (
+        "effects",
+        "Effects on clips' pictures, in their order: Gaussian Blur",
+    ),
     ("encoders", "Hardware encoders that work here"),
     (
         "export",
@@ -349,6 +358,18 @@ const EXAMPLES: &[(&str, &str)] = &[
         "picture.clear",
         "vidcut picture clear c3\n  vidcut picture clear c3 --tool crop\n  \
          vidcut picture clear c3 --tool dynamic_zoom\n  vidcut picture clear c3 --tool composite",
+    ),
+    (
+        "effects.add",
+        "vidcut effects add c3 gaussian_blur\n  vidcut effects add V2@10s gaussian_blur",
+    ),
+    (
+        "effects.set",
+        "vidcut effects set c3 0 --strength 0.6\n  \
+         vidcut effects set c3 0 --split true --strength 0.2 --vertical-strength 0.7\n  \
+         vidcut effects set c3 0 --horizontal-channels 1,1,2,1 --border wrap_around\n  \
+         vidcut effects set V2@10s 1 --blend 0.5 --use-alpha false\n  \
+         vidcut effects set c3 0 --on false",
     ),
     (
         "export.start",

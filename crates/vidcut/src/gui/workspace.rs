@@ -262,6 +262,7 @@ impl Workspace {
             GuiPanel::Transcription => self.transcription.open = true,
             GuiPanel::Transitions => self.left = LeftTab::Transitions,
             GuiPanel::Titles => self.left = LeftTab::Titles,
+            GuiPanel::Effects => self.left = LeftTab::Effects,
             GuiPanel::Inspector => self.left = LeftTab::Inspector,
             GuiPanel::Keyframes => self.left = LeftTab::Keyframes,
             GuiPanel::Metadata => self.show_metadata_strip(true),
@@ -319,11 +320,13 @@ impl Workspace {
             GuiPanel::Transcription => self.transcription.open = false,
             GuiPanel::Transitions
             | GuiPanel::Titles
+            | GuiPanel::Effects
             | GuiPanel::Inspector
             | GuiPanel::Keyframes => {
                 let tab = match panel {
                     GuiPanel::Transitions => LeftTab::Transitions,
                     GuiPanel::Titles => LeftTab::Titles,
+                    GuiPanel::Effects => LeftTab::Effects,
                     GuiPanel::Keyframes => LeftTab::Keyframes,
                     _ => LeftTab::Inspector,
                 };
@@ -364,6 +367,7 @@ impl Workspace {
             (GuiPanel::Transcription, self.transcription.open),
             (GuiPanel::Transitions, self.left == LeftTab::Transitions),
             (GuiPanel::Titles, self.left == LeftTab::Titles),
+            (GuiPanel::Effects, self.left == LeftTab::Effects),
             (GuiPanel::Inspector, self.left == LeftTab::Inspector),
             (GuiPanel::Keyframes, self.left == LeftTab::Keyframes),
             (GuiPanel::Metadata, self.metadata_strip),
@@ -1857,6 +1861,10 @@ impl Workspace {
                         LeftTab::Titles => {
                             self.pool_focus = false;
                             self.titles_panel(ui);
+                        }
+                        LeftTab::Effects => {
+                            self.pool_focus = false;
+                            self.effects_panel(ui);
                         }
                         LeftTab::Inspector => {
                             self.pool_focus = false;
