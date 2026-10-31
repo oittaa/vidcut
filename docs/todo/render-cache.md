@@ -23,7 +23,6 @@ Each kept layer has a `player::Origin` ([playback](../design/playback.md#the-eng
 - **What it cost:** the `Origin` also holds the time that each layer took to decode and to enlarge.
   - It holds this time for a Retime Process and a Smooth Cut already.
   - The marks of dropped frames read these times.
-- **Why a part renders:** the reasons name the processes as Stats for Nerds does (`interpolate::name`, `super_scale::name`).
 
 ## Dropped frames
 
@@ -64,7 +63,7 @@ The owner accepted these. Each goes into [deviations.md](../deviations.md) with 
 
 ## Steps
 
-- **One record of each frame:** the kept `Id` and `Origin`, and the names of the processes.
+- **One record of each frame:** the kept `Id` and `Origin`.
 - **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
 - **Dropped frames:** the times of each layer in `Origin`, and the marks.
 

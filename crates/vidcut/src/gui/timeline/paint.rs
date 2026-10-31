@@ -156,7 +156,7 @@ pub fn cache_reasons(rect: Rect, scale: &Scale, line: &[Part], pos: Pos2) -> Opt
     }
     let frame = scale.under(pos.x);
     let p = line.iter().find(|p| p.holds(frame))?;
-    let why: Vec<&str> = p.reasons.iter().map(|r| r.title()).collect();
+    let why = crate::live::stats::reason_names(&p.reasons);
     Some(match p.has(frame) {
         true => format!("Cached: {}", why.join(", ")),
         false => why.join(", "),

@@ -2710,6 +2710,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Red: the mode renders this part. Blue: the part plays from the cache.
     - A part plays from the cache where its timeline level is cached. A part that needs only the clip level plays from the cache where each of its clips is cached.
     - The pointer over the line shows the reasons of the part.
+    - A Retime Process and AI Super Scale name their process, as Stats for Nerds does. Example: "Retime Process: Frame Blend".
     - During the preview of a drag, a trim or a step of the history, the line is not shown. Why: the line is of the timeline before the change.
   - Stats for Nerds has a Render Cache row in How It Was Made (X104).
     - It tells for the frame on screen: Cached, To render with the reasons, or Not needed.

@@ -292,7 +292,7 @@ impl Background {
                         "frames": p.frames,
                         "cached": p.cached_frames(),
                         "cached_ranges": p.cached,
-                        "reasons": p.reasons.iter().map(|r| r.title()).collect::<Vec<_>>(),
+                        "reasons": super::stats::reason_names(&p.reasons),
                     })
                 })
                 .collect(),
