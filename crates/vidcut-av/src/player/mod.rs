@@ -19,8 +19,8 @@ use vidcut_core::model::Title;
 use vidcut_core::render::RenderPlan;
 
 pub use frame::{
-    Fit, Layout, Made, Origin, Over, Picture, Sampling, Shown, TitleOver, TitlePicture, Upscaled,
-    Woven,
+    Cached, Fit, Layout, Made, Making, Origin, Over, Picture, Sampling, Shown, TitleOver,
+    TitlePicture, Upscaled, Woven,
 };
 pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,

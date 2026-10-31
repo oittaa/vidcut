@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vidcut_core::lru::Lru;
@@ -14,7 +15,7 @@ use super::make::{Fitting, Maker};
 use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, format, frame};
-use crate::player::{Fit, Made, Origin, Sampling, Upscaled};
+use crate::player::{Cached, Fit, Made, Origin, Sampling, Upscaled};
 
 pub(crate) fn target(fps: Rational, origin: f64, pos: i64) -> f64 {
     origin + fps.frames_to_secs(pos) - 0.5 * fps.frames_to_secs(1)
@@ -177,6 +178,7 @@ struct Source {
     made: Lru<Option<i64>, frame::Video, 3>,
     how: Made,
     upscaled: Option<Upscaled>,
+    kept: Option<Arc<[Arc<Cached>]>>,
 }
 
 type Weave = (bool, Option<frame::Video>, Option<frame::Video>);
@@ -289,6 +291,7 @@ impl Source {
             made: Lru::new(),
             how: Made::Source(None),
             upscaled: None,
+            kept: crate::render_cache::kept(input),
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -356,6 +359,7 @@ impl Source {
             made: Lru::new(),
             how: Made::Source(None),
             upscaled: None,
+            kept: crate::render_cache::kept(input),
         })
     }
 
@@ -981,6 +985,13 @@ impl Source {
         match self.pictures {
             Pictures::Still => Made::Still,
             _ => Made::Source(self.index_of(&self.current)),
+        }
+    }
+
+    fn cached(&self) -> Option<Arc<Cached>> {
+        match self.how {
+            Made::Source(Some(f)) => self.kept.as_ref()?.get(usize::try_from(f).ok()?).cloned(),
+            _ => None,
         }
     }
 
@@ -1992,6 +2003,10 @@ impl VideoFrames {
     }
 
     pub fn next_frame(&mut self) -> Result<Option<frame::Video>> {
+        Ok(self.next_made()?.map(|(f, _)| f))
+    }
+
+    pub(crate) fn next_made(&mut self) -> Result<Option<(frame::Video, Vec<Option<Origin>>)>> {
         if self.drawer.is_none() {
             let drawer = Drawer::new(self.encoder.take())?;
             let (out, reading) = (self.maker.out(), self.maker.reading());
@@ -2004,10 +2019,11 @@ impl VideoFrames {
         let Some(layers) = layers else {
             return Ok(None);
         };
+        let origins = layers.iter().map(|l| l.origin.clone()).collect();
         let clock = Instant::now();
         let out = self.drawn_frame(layers);
         self.spent.1 += clock.elapsed();
-        out
+        Ok(out?.map(|f| (f, origins)))
     }
 
     fn drawn_frame(&mut self, layers: Vec<Layer>) -> Result<Option<frame::Video>> {
@@ -2175,6 +2191,7 @@ impl VideoFrames {
                                 made: Made::Solid(color),
                                 upscaled: None,
                                 when: Instant::now(),
+                                cached: None,
                             }),
                         });
                     }
@@ -2240,6 +2257,7 @@ impl VideoFrames {
                         made: self.open[s].how,
                         upscaled: self.open[s].upscaled,
                         when: Instant::now(),
+                        cached: self.open[s].cached(),
                     }),
                 });
                 if let Some((smooth, t)) = smooth
@@ -2256,6 +2274,7 @@ impl VideoFrames {
                         },
                         upscaled: None,
                         when: Instant::now(),
+                        cached: None,
                     });
                     last.weight = None;
                     last.rotation = 0;

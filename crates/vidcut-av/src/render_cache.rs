@@ -1,12 +1,17 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use vidcut_core::render::RenderPlan;
-use vidcut_core::render_cache::{FILE, KEYS, Key, name_of, write_keys};
+use vidcut_core::render_cache::{FILE, Index, KEYS, Key, MADE, name_of, write_keys};
 
+use crate::decode::Input;
 use crate::error::{Error, Result};
 use crate::ffmpeg;
-use crate::proxy::{Failed, ProxyEncoder, encode_plan};
+use crate::player::{Cached, Making};
+use crate::proxy::{Failed, Origins, ProxyEncoder, encode_plan};
 
 const LONG_GOP: [&str; 8] = [
     "h264",
@@ -71,15 +76,19 @@ pub fn write(
     let mut errors = Vec::new();
     for (enc, high) in encoders {
         match encode_plan((plan, clip), (enc, *high), part.path(), decoder, cancel) {
-            Ok(frames) => {
+            Ok((frames, made)) => {
                 part.keep(&dest)
                     .map_err(|e| Error::Invalid(format!("replacing {}: {e}", dest.display())))?;
-                write_keys(&dest, keys).map_err(|e| {
-                    let _ = std::fs::remove_file(&dest);
-                    Error::Invalid(format!("writing the names of {}: {e}", dest.display()))
-                })?;
+                write_keys(&dest, keys)
+                    .and_then(|()| write_made(&dest, made))
+                    .map_err(|e| {
+                        let _ = std::fs::remove_file(&dest);
+                        let _ = std::fs::remove_file(dest.with_extension(KEYS));
+                        Error::Invalid(format!("writing the names of {}: {e}", dest.display()))
+                    })?;
                 if !vidcut_core::disk_cache::added(&dest) {
                     let _ = std::fs::remove_file(dest.with_extension(KEYS));
+                    let _ = std::fs::remove_file(dest.with_extension(MADE));
                     return Err(Error::Invalid(
                         "the disk cache has no room for the render cache".into(),
                     ));
@@ -99,4 +108,46 @@ pub fn write(
         }
     }
     Err(errors.remove(0))
+}
+
+#[derive(Serialize, Deserialize)]
+struct Record {
+    written: u64,
+    frames: Vec<Vec<Option<Making>>>,
+}
+
+fn write_made(file: &Path, made: Vec<Origins>) -> std::io::Result<()> {
+    let record = Record {
+        written: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64),
+        frames: made
+            .into_iter()
+            .map(|layers| {
+                layers
+                    .into_iter()
+                    .map(|o| o.map(|o| (o.made, o.upscaled)))
+                    .collect()
+            })
+            .collect(),
+    };
+    let bytes = serde_json::to_vec(&record).map_err(std::io::Error::other)?;
+    vidcut_core::temp::write(&file.with_extension(MADE), &bytes)
+}
+
+pub(crate) fn kept(input: &Input) -> Option<Arc<[Arc<Cached>]>> {
+    let Input::File(path) = input else {
+        return None;
+    };
+    if path.extension().is_none_or(|e| e != FILE) || path.parent() != Some(&Index::dir()) {
+        return None;
+    }
+    let bytes = std::fs::read(path.with_extension(MADE)).ok()?;
+    let Record { written, frames } = serde_json::from_slice(&bytes).ok()?;
+    Some(
+        frames
+            .into_iter()
+            .map(|layers| Arc::new(Cached { written, layers }))
+            .collect(),
+    )
 }

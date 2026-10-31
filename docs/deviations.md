@@ -2154,6 +2154,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The line is on the ruler of both timelines of the Cut page, red and blue as in Resolve ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The pointer over the line shows why the mode renders the part, for example Transition or AI Super Scale.
   - Stats for Nerds has a Render Cache row: Cached, To render with the reasons, or Not needed.
+  - For a picture from the cache, How It Was Made shows how each layer was made, and when the cache file was written.
 - **Why:**
   - vidcut has only the Cut page. Without the line, the user cannot see what the cache holds.
   - The reasons tell the user which setting makes a part slow.
