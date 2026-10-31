@@ -357,6 +357,7 @@ What it renders:
 - Slow media (`Reason::Media`) are of two kinds:
   - With GPU decoding on, media of a long-GOP codec that the GPU decoder does not take (vidcut-av `render_cache::slow`).
   - The render thread checks each file once. It keeps the answer by the path of the file, until the GPU preferences change.
+  - The answers come in a message that names its job. The live core drops the answers of a job that it stopped.
   - Media that the proxy rules pick (`Proxies::wants`), while the original plays.
 
 The names of frames:

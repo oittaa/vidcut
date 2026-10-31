@@ -18,7 +18,10 @@ const SECONDS_EACH: i64 = 2;
 
 pub(crate) enum Event {
     Scanned(Index),
-    Slow(HashMap<PathBuf, bool>),
+    Slow {
+        job: Arc<AtomicBool>,
+        decodes: HashMap<PathBuf, bool>,
+    },
     Written,
     Ended {
         job: Arc<AtomicBool>,
@@ -172,7 +175,10 @@ impl Background {
                 self.index = Scan::Done;
                 true
             }
-            Event::Slow(decodes) => {
+            Event::Slow { job, decodes } => {
+                if !self.running.as_ref().is_some_and(|r| Arc::ptr_eq(r, &job)) {
+                    return false;
+                }
                 let changed = *self.decodes != decodes;
                 self.decodes = Arc::new(decodes);
                 changed
@@ -425,8 +431,11 @@ impl Render {
                 found = true;
             }
         }
-        if found && !self.cancel.load(Ordering::Relaxed) {
-            self.send(Event::Slow(decodes.clone()));
+        if found {
+            self.send(Event::Slow {
+                job: self.cancel.clone(),
+                decodes: decodes.clone(),
+            });
         }
         let prefs = crate::preferences::load().unwrap_or_default();
         let proxies = self
