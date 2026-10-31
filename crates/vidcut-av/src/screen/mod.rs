@@ -1527,7 +1527,6 @@ impl Screen {
                 let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
                 let (effects, factor) = placing
                     .as_mut()
-                    .filter(|_| !colors_only)
                     .map_or((Vec::new(), 1.0), |(p, l)| bared(p, l));
                 let mode = placing
                     .as_ref()
@@ -1538,15 +1537,32 @@ impl Screen {
                     k if exported => k | WIDENS,
                     k => k,
                 };
-                let how = (placing.as_ref(), kernel, colors, paired[i]);
+                let made = made_with
+                    .filter(|_| !effects.is_empty())
+                    .and(placing.as_ref());
+                let open = made.map(|(p, l)| (blur::opened(p), *l));
+                let how = (
+                    open.as_ref().or(placing.as_ref()),
+                    kernel,
+                    colors,
+                    paired[i],
+                );
                 let bind = slot.prepare(gpu, picture, size, how, &mut encoder);
-                let bind = if effects.is_empty() {
-                    blurred.drop_layer(i);
-                    bind
-                } else {
-                    let view = blurred.layer(gpu, i, &bind, &effects, &mut encoder);
-                    let shown = [1.0, factor, f64::from(mode), f64::from(u8::from(paired[i]))];
-                    blur::shown_bind(gpu, view, shown)
+                let shown = [1.0, factor, f64::from(mode), f64::from(u8::from(paired[i]))];
+                let bind = match (effects.is_empty(), made) {
+                    (true, _) => {
+                        blurred.drop_layer(i);
+                        bind
+                    }
+                    (false, Some((p, _))) => {
+                        let views = blurred.made(gpu, i, (&bind, p), &effects, &mut encoder);
+                        blur::shown_bind(gpu, views, shown, [5.0, 0.0, 0.0, 0.0])
+                    }
+                    (false, None) => {
+                        let view = blurred.layer(gpu, i, &bind, &effects, &mut encoder);
+                        let only = f64::from(u8::from(colors_only));
+                        blur::shown_bind(gpu, (view, view), shown, [3.0, 0.0, 0.0, only])
+                    }
                 };
                 (bind, level, placing.is_some(), mode)
             })

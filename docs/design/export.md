@@ -413,7 +413,15 @@ The draw:
 - `fs_blur` blurs across and then down, in passes (`blur::passes`).
 - The last pass of an effect mixes the blur with the picture that came in, by the blend. With Use Alpha off, it keeps the alpha of that picture.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
-- A made frame of a speed change gets the effects in the later draw (`Sampling::Placed`). The draw that makes it skips them (`Sampling::Colors`).
+
+A made frame of a speed change ([which source frame](#which-source-frame)):
+
+- The effects work on each source picture before the frame between them is made, as in the spec (§13).
+- The draw that places a source picture also blurs it (`Sampling::Colors`). It covers the whole frame, because the blur spreads past the picture (`placed_look`).
+- The made frame holds colors only. The later draw thus takes its alpha from the placement at that frame (`Sampling::Placed`, `Blurred::made`):
+  - It draws the colors of the made frame with no edges (`blur::opened`).
+  - It draws the coverage of the picture, and blurs it by the same effects (`blur::mask_bind`).
+  - The layer takes its colors from the first and its alpha from the second.
 
 The passes:
 
