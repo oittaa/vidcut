@@ -114,7 +114,8 @@ flowchart TD
 - A picture from the render cache also carries the record of its frame in the cache file (`Cached`).
   - The record tells how each layer of the frame was made when the cache was written (`Making`).
   - It also holds the time of writing, as a date. Why: an `Instant` has no meaning in another process.
-  - The stats panel then shows these layers. The Render Cache row tells the time of writing.
+  - The stats panel shows these layers in place of the cached layer. The other layers of the picture stay.
+  - The Render Cache row tells the time of writing.
 - The stats panel shows the `Origin` of each layer of the picture on the screen (`MadeStats`). It also shows how long ago each layer was made.
   - Each picture on the screen comes from the kept pictures. Thus the age of a layer tells whether the layer was made just now or kept from earlier.
   - The layers of a dissolve can have different ages.

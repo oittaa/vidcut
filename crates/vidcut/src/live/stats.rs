@@ -381,29 +381,30 @@ impl PictureStats {
 
 impl MadeStats {
     fn of(picture: &engine::Picture) -> Option<Self> {
-        if let Some(c) = picture.origin().and_then(|o| o.cached.as_deref()) {
-            return Some(Self {
-                layers: c
-                    .layers
-                    .iter()
-                    .map(|l| {
-                        l.map_or_else(LayerMade::not_recorded, |(m, u)| {
-                            LayerMade::made(m, u, None)
-                        })
-                    })
-                    .collect(),
-                written: Some(c.written),
-            });
-        }
         let origins: Vec<_> = std::iter::once(picture.origin())
             .chain(picture.over().iter().map(|o| o.picture.origin()))
             .collect();
         origins.iter().any(Option::is_some).then(|| Self {
             layers: origins
-                .into_iter()
-                .map(|o| o.map_or_else(LayerMade::not_recorded, LayerMade::of))
+                .iter()
+                .flat_map(|o| match o.and_then(|o| o.cached.as_deref()) {
+                    Some(c) => c
+                        .layers
+                        .iter()
+                        .map(|l| {
+                            l.map_or_else(LayerMade::not_recorded, |(m, u)| {
+                                LayerMade::made(m, u, None)
+                            })
+                        })
+                        .collect(),
+                    None => vec![o.map_or_else(LayerMade::not_recorded, LayerMade::of)],
+                })
                 .collect(),
-            written: None,
+            written: origins
+                .iter()
+                .flatten()
+                .find_map(|o| o.cached.as_ref())
+                .map(|c| c.written),
         })
     }
 
