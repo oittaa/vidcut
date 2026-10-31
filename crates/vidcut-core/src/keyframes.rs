@@ -717,6 +717,9 @@ impl Picture {
                 }
             }
         }
+        if edited.effects != baseline.effects {
+            p.effects = edited.effects.clone();
+        }
         p
     }
 

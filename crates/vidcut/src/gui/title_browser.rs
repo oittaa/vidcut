@@ -156,6 +156,7 @@ pub enum LeftTab {
     Pool,
     Transitions,
     Titles,
+    Effects,
     Inspector,
     Keyframes,
 }
@@ -281,6 +282,7 @@ impl Workspace {
                 (LeftTab::Pool, "Media Pool"),
                 (LeftTab::Transitions, "Transitions"),
                 (LeftTab::Titles, "Titles"),
+                (LeftTab::Effects, "Effects"),
                 (LeftTab::Inspector, "Inspector"),
                 (LeftTab::Keyframes, "Keyframes"),
             ] {

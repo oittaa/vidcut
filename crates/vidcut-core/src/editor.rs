@@ -3843,6 +3843,58 @@ fn mutate(
             ops::picture::clear(p, &ids, *tool)?;
             Value::Null
         }
+        Request::EffectsAdd { clips, kind } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            ops::effect::add(p, &ids, *kind)?
+        }
+        Request::EffectsSet {
+            clip,
+            effect,
+            on,
+            blend,
+            use_alpha,
+            strength,
+            split,
+            vertical_strength,
+            horizontal_channels,
+            vertical_channels,
+            border,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let channels = |what: &str, raw: &Option<Vec<f64>>| {
+                raw.as_deref()
+                    .map(|k| ops::effect::channels(what, k))
+                    .transpose()
+            };
+            let change = ops::effect::EffectChange {
+                on: *on,
+                blend: *blend,
+                use_alpha: *use_alpha,
+                strength: *strength,
+                split: *split,
+                vertical_strength: *vertical_strength,
+                horizontal_channels: channels("horizontal_channels", horizontal_channels)?,
+                vertical_channels: channels("vertical_channels", vertical_channels)?,
+                border: *border,
+            };
+            ops::effect::set(p, &id, *effect, &change)?;
+            Value::Null
+        }
+        Request::EffectsReset { clip, effect } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::effect::reset(p, &id, *effect)?;
+            Value::Null
+        }
+        Request::EffectsRemove { clip, effect } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::effect::remove(p, &id, *effect)?;
+            Value::Null
+        }
+        Request::EffectsMove { clip, effect, to } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::effect::shift(p, &id, *effect, *to)?;
+            Value::Null
+        }
         Request::SubtitlesSet {
             cue,
             text,

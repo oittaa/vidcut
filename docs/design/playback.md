@@ -116,6 +116,9 @@ flowchart TD
   - A layer without an `Origin` shows "Not recorded". When no layer has an `Origin`, the panel does not show the group.
   - Until a frame is decoded, the panel shows the `Origin` of the picture that the viewer shows in its place.
 - Why: the reports of the GPU stages (`interpolate::report`, `super_scale::report`) tell only their last work. That work is usually ahead of the playhead. Thus they do not tell about a paused frame or a step back.
+- The panel keeps each group and each line for one second after a frame last had it (`HeldGroup`). A kept line shows no value.
+  - A group keeps its widest size for one second too.
+  - Why: frames that follow each other can have different lines. For example, at 50% speed with a Retime Process, every second frame is made between two source frames. Without this, the panel changes its size on each frame.
 
 **Dissolves and placed pictures**
 
