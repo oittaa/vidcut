@@ -454,7 +454,10 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - Measured with the Duration of the Inspector:
     - 24 to 6 frames put the keys 0, 12 and 24 at 0, 3 and 6. It put the `OutBez` 7.2 of an Ease In curve at 1.8.
     - Then 6 to 5 frames put the key 3 at 2. 5 to 7 kept it at 2, and 7 to 14 put it at 4.
-- **At a gap, the missing picture of a Push is transparent.** The tracks below show through it, and the other picture moves as usual.
+- **At a gap, the missing picture of a Push or a Slide shows the tracks below.**
+  - It still hides the other picture where it covers it. Thus a Slide In from a clip to a gap covers the clip as it slides in.
+  - The tracks below do not move. The other picture moves as usual.
+  - Measured at the middle frame of a Push, a Slide In and a Slide Out, into a gap and out of a gap.
 - **A Push on a clip with a composite mode moves its pictures before the mode applies.**
   - The tracks below do not move, and the motion blur does not blur them.
   - The mode of the outgoing clip applies to the two moved pictures. The mode of the incoming clip has no effect during the transition.
