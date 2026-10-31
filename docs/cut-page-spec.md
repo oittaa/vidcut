@@ -2676,6 +2676,17 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - a transition
     - an opacity below 100%, or keyframes of the opacity
     - a composite mode other than Normal
+    - a part where frames drop steadily during play (X103)
+  - Smart marks a part where frames drop steadily:
+    - The timeline plays forward, at normal speed.
+    - Frames drop in each second of a stretch of at least 5 s. In each of these seconds, a quarter of the frames or more come late or are skipped.
+    - The frames of the stretch took longer to make than their frame time, on average.
+      - Why: then the frames themselves are slow. A late draw on the screen does not mark a part.
+    - The first second after a start or a seek does not count.
+    - The time of a job, of the background render and of a hidden window does not count.
+    - The mark covers each part of the plan that holds the stretch. A moved part keeps its mark. An edit that changes the frames of a part makes a new part without a mark.
+    - The marks are on this computer, with the cache. Delete Render Cache > All removes them.
+    - Only Smart marks parts and uses the marks.
   - User renders the clips set to On and the checked effects. It also renders the kinds that Preferences turns on:
     - Transitions: off, unless set.
     - Composites: off, unless set. It includes opacity, as in Resolve.

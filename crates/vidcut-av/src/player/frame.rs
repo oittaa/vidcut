@@ -146,6 +146,7 @@ pub struct Origin {
     pub made: Made,
     pub upscaled: Option<Upscaled>,
     pub when: Instant,
+    pub took: Duration,
     pub cached: Option<Arc<Cached>>,
 }
 
@@ -214,6 +215,14 @@ impl Picture {
 
     pub fn origin(&self) -> Option<&Origin> {
         self.origin.as_ref()
+    }
+
+    pub fn took(&self) -> Duration {
+        std::iter::once(self.origin())
+            .chain(self.over.iter().map(|o| o.picture.origin()))
+            .flatten()
+            .map(|o| o.took)
+            .sum()
     }
 
     pub(crate) fn with_woven(mut self, woven: Woven) -> Self {

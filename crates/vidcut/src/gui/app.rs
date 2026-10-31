@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -28,6 +29,7 @@ pub struct Port {
     session: std::sync::OnceLock<live::Handle>,
     two_up: Mutex<live::stats::TwoUpStats>,
     gui: Mutex<Option<live::GuiState>>,
+    hidden: AtomicBool,
 }
 
 impl Port {
@@ -94,6 +96,10 @@ impl live::Renderer for Port {
         self.gui.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    fn shown(&self) -> bool {
+        !self.hidden.load(Ordering::Relaxed)
+    }
+
     fn trim_editor(&self, r: live::TrimEditor) {
         self.push(UiTask::TrimEditor(r));
     }
@@ -153,6 +159,7 @@ impl App {
             session: std::sync::OnceLock::new(),
             two_up: Mutex::default(),
             gui: Mutex::default(),
+            hidden: AtomicBool::new(false),
         });
         let socket = crate::ipc::registry::socket_path(std::process::id());
         let create = project.as_ref().is_some_and(|p| !p.exists());
@@ -214,6 +221,8 @@ impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let gate = self.gate.clone();
         let _open = gate.opened();
+        let hidden = ctx.input(|i| i.viewport().visible()) == Some(false);
+        self.port.hidden.store(hidden, Ordering::Relaxed);
         for task in self.port.take() {
             match task {
                 UiTask::CaptureWindow(done) => {
