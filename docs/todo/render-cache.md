@@ -1,6 +1,6 @@
 # Render cache
 
-**When:** next, one pull request for each step in [Steps](#steps).
+**When:** next, one pull request for each step in [Steps](#steps), in their order.
 
 The render cache renders the slow parts of the timeline in the background ([spec D98](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions), [playback](../design/playback.md#the-render-cache)). It keeps the frame after the tracks mix. This file tells what is still to do.
 
@@ -75,9 +75,9 @@ The owner accepted these. Each goes into [deviations.md](../deviations.md) with 
 
 ## Steps
 
-1. **Retime Processes at the clip level.**
-2. **One record of each frame:** the kept `Id` and `Origin`, and the names of the processes.
-3. **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
-4. **Dropped frames:** the times of each layer in `Origin`, and the marks.
+- **Retime Processes at the clip level.**
+- **One record of each frame:** the kept `Id` and `Origin`, and the names of the processes.
+- **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
+- **Dropped frames:** the times of each layer in `Origin`, and the marks.
 
 Each step adds its part to the spec, the design docs and the deviations. The last step deletes this file.
