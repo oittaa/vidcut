@@ -375,6 +375,7 @@ The files:
 - Each file is Matroska, with at most 2 s of frames in a row (`Cache::next`).
 - A `.keys` file next to it holds the names of its frames, 16 bytes each (`write_keys`). The disk cache does not count it (`Kind::keeps`).
 - `Index::scan` reads the `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a `.keys` file without its video.
+- The disk cache can remove a video at any time. `Cache::apply` removes from the index each file of the plan that is gone (`Index::remove`). Thus the background render makes its frames again.
 - `render_cache::segment` cuts the plan of a file. The draw of the export makes its frames (`encode_plan`), as for proxies.
 - `cache_encoders` gives the encoders, in order:
   - With proxies on: the encoders of the proxy codec.
