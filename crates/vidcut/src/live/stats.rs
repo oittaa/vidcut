@@ -6,7 +6,7 @@ use vidcut_av::player::{self as engine, Layout, Made, PlaysOn};
 use vidcut_av::{interpolate, super_scale};
 use vidcut_core::model::{Hdr, RenderCache, Retime, Sharpness, SuperScale, Upscaler, hex};
 use vidcut_core::render::BLACK;
-use vidcut_core::render_cache::Part;
+use vidcut_core::render_cache::{Part, Reason};
 
 pub type Group = (&'static str, Vec<(&'static str, String)>);
 
@@ -321,8 +321,7 @@ fn cache_row(mode: RenderCache, line: &[Part], frame: i64) -> Option<String> {
         None => "Not needed".into(),
         Some(p) if p.has(frame) => "Cached".into(),
         Some(p) => {
-            let why: Vec<&str> = p.reasons.iter().map(|r| r.title()).collect();
-            format!("To render: {}", why.join(", "))
+            format!("To render: {}", reason_names(&p.reasons).join(", "))
         }
     })
 }
@@ -525,6 +524,19 @@ impl RetimeStats {
         }
         rows
     }
+}
+
+pub fn reason_names(reasons: &[Reason]) -> Vec<String> {
+    reasons
+        .iter()
+        .map(|r| match r {
+            Reason::Retime(x) | Reason::AiRetime(x) => {
+                format!("Retime Process: {}", interpolate::name(*x))
+            }
+            Reason::SuperScale(u) => format!("Super Scale: {}", super_scale::name(*u)),
+            r => r.title().to_string(),
+        })
+        .collect()
 }
 
 fn named(s: SuperScale) -> String {

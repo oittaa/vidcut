@@ -469,7 +469,20 @@ impl SuperScale {
 }
 
 /// The upscaler of Super Scale.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Upscaler {
     /// The super-resolution scaler of macOS 26 and later, for pictures up
@@ -1653,7 +1666,20 @@ impl JsonSchema for Kept {
 
 /// Retime Process: how a clip makes a frame that falls between two of its
 /// source frames.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Default,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Retime {
     /// The source frame that the frame falls in.

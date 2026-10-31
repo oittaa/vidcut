@@ -352,6 +352,8 @@ flowchart LR
 What it renders:
 
 - `render_cache::reasons` gives the reasons of each video piece of the plan (`Reason`).
+  - `Reason::Retime` and `Reason::AiRetime` hold the `Retime`. `Reason::SuperScale` holds the `Upscaler`.
+  - `stats::reason_names` names them as Stats for Nerds does. The line, the Stats row and `cache.status` use these names.
 - `Setup::reasons` keeps the reasons of the mode. Smart keeps all. User keeps `Reason::On`, `Reason::Effect` and the kinds that `RenderCachePrefs` turns on.
 - A clip set to `ClipCache::Off` gives no `Reason::Media` and no `Reason::SuperScale`. Its other reasons stay (spec D98).
 - An `Effect` with `render_cache` on gives `Reason::Effect`, also in a `Placed` around a title. An effect that is off gives none.

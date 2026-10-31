@@ -24,9 +24,9 @@ pub enum Reason {
     Effect,
     Media,
     Speed,
-    Retime,
-    AiRetime,
-    SuperScale,
+    Retime(Retime),
+    AiRetime(Retime),
+    SuperScale(Upscaler),
     Transition,
     Opacity,
     Composite,
@@ -39,9 +39,9 @@ impl Reason {
             Self::Effect => "Render Cache Effect",
             Self::Media => "Slow Media",
             Self::Speed => "Speed Change",
-            Self::Retime => "Retime Process",
-            Self::AiRetime => "AI Retime Process",
-            Self::SuperScale => "AI Super Scale",
+            Self::Retime(_) => "Retime Process",
+            Self::AiRetime(_) => "AI Retime Process",
+            Self::SuperScale(_) => "AI Super Scale",
             Self::Transition => "Transition",
             Self::Opacity => "Opacity",
             Self::Composite => "Composite Mode",
@@ -51,7 +51,12 @@ impl Reason {
     fn clip(self) -> bool {
         matches!(
             self,
-            Self::On | Self::Media | Self::Speed | Self::Retime | Self::AiRetime | Self::SuperScale
+            Self::On
+                | Self::Media
+                | Self::Speed
+                | Self::Retime(_)
+                | Self::AiRetime(_)
+                | Self::SuperScale(_)
         )
     }
 
@@ -60,8 +65,8 @@ impl Reason {
             Self::On | Self::Effect => true,
             Self::Transition => prefs.transitions,
             Self::Opacity | Self::Composite => prefs.composites,
-            Self::AiRetime | Self::SuperScale => prefs.ai,
-            Self::Media | Self::Speed | Self::Retime => false,
+            Self::AiRetime(_) | Self::SuperScale(_) => prefs.ai,
+            Self::Media | Self::Speed | Self::Retime(_) => false,
         }
     }
 }
@@ -338,10 +343,13 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
             (mixed && !still && !pace.is_normal(), Reason::Speed),
             (
                 mixed && !still && !retime.is_nearest() && !retime.ai(),
-                Reason::Retime,
+                Reason::Retime(*retime),
             ),
-            (mixed && !still && retime.ai(), Reason::AiRetime),
-            (own && super_scale.ai(), Reason::SuperScale),
+            (mixed && !still && retime.ai(), Reason::AiRetime(*retime)),
+            (
+                own && super_scale.ai(),
+                Reason::SuperScale(super_scale.upscaler),
+            ),
             (mixed && moved, Reason::Transition),
             (
                 mixed
