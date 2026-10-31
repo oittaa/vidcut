@@ -2662,8 +2662,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A checked effect renders in Smart and in User mode, as in Resolve (p. 204). A checked effect that is off renders nothing.
     - Off on the clip does not stop its checked effects. Why: Resolve has two settings for them.
   - A video track can be out of the cache.
-    - The menu of the track header has Exclude Track from Caching (p. 204). `track.set` with `render_cache` also sets it.
-    - In User mode, the track gives none of its speed changes, Retime Processes, transitions, opacity and composite modes.
+    - The menu of the track header has Exclude Track from Caching (p. 205). `track.set` with `render_cache` also sets it.
+    - In User mode, the track gives none of its speed changes, Retime Processes, transitions, opacity and composite modes. Why: Resolve caches these in its sequence cache (p. 204). The setting is part of the User mode options of that cache (p. 205).
     - Its clips set to On, its checked effects and its AI Super Scale still render.
     - The manual gives this setting for User mode only. Thus it does nothing in Smart mode.
   - Smart renders each part of the timeline that has one of these:

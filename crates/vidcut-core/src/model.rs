@@ -537,8 +537,8 @@ pub enum RenderCache {
     Smart,
     /// The clips set to `on`, the effects with `render_cache`, and the
     /// kinds that the preferences turn on. A track with `render_cache` off
-    /// gives none of its speed changes, transitions, opacity and composite
-    /// modes.
+    /// gives none of its speed changes, Retime Processes, transitions,
+    /// opacity and composite modes.
     User,
 }
 
@@ -1105,8 +1105,8 @@ pub struct Track {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<Transition>,
     /// Off, the render cache's User mode renders none of its speed
-    /// changes, transitions, opacity and composite modes (video tracks
-    /// only). Usual: on.
+    /// changes, Retime Processes, transitions, opacity and composite modes
+    /// (video tracks only). Usual: on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub render_cache: bool,
 }

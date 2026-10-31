@@ -1205,7 +1205,8 @@ pub enum Request {
         #[serde(default)]
         video_enabled: Option<bool>,
         /// Off, the render cache's User mode renders none of the video
-        /// track's speed changes, transitions, opacity and composite modes.
+        /// track's speed changes, Retime Processes, transitions, opacity
+        /// and composite modes.
         #[serde(default)]
         render_cache: Option<bool>,
         /// Empty string clears the name.
