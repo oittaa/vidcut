@@ -56,26 +56,66 @@ flowchart LR
 
 ## Picture order
 
-vidcut processes each picture in this order. The [spec](../cut-page-spec.md#13-order-of-operations-pp-287296-3407) gives the order of Resolve. [Deviation X98](../deviations.md#x98-in-an-hdr-timeline-ai-slow-works-before-the-conversion) tells the one place where the two are different.
+One output frame takes one route. The [spec](../cut-page-spec.md#13-order-of-operations-pp-287296-3407) gives the order of the picture. [Deviation X98](../deviations.md#x98-in-an-hdr-timeline-ai-slow-works-before-the-conversion) is where vidcut differs.
 
-1. The reader decodes the frame, on the GPU or the CPU (`route::plan`, [gpu](gpu.md#routes)).
-2. The draw converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `color::shader_colors`). In an SDR timeline, it tone-maps HDR.
-   - The AI stages get the picture in the timeline color space (`Single`).
-   - Each AI stage gets it at 16 bits (`Form`): as RGB for the models of vidcut, and as P416 frames for the AI of macOS.
-   - In an HDR timeline, AI Slow gets SDR media only. The draw converts its result into the timeline color space (X98).
-3. The draw deinterlaces an interlaced frame from the converted frames before, at and after it (`fs_bwdif`, [gpu](gpu.md#deinterlacing-and-hdr)).
-4. An AI upscaler of Super Scale enlarges the frame (`Source::ai_picture`, [gpu](gpu.md#super-scale)).
-5. Retime Process makes a frame between two source frames (`VideoFrames::retimed_frame`, [export](export.md#which-source-frame)).
-   - The draw first sizes and places each frame of the pair: Classic Super Scale, Transform, Crop and Dynamic Zoom.
-   - The frame is made from the two placed pictures.
-6. The draw (`crates/vidcut-av/src/screen/picture.wgsl`) does the rest of the timeline, one layer after the other:
-   - It samples each converted picture where `place::Placing` puts it: Transform, Crop and Dynamic Zoom ([export](export.md#placed-pictures)).
-   - Classic Super Scale enlarges in the same sample (`screen::kernel`).
-   - A made frame of Retime Process is already placed (`Sampling::Placed`). The draw takes only its edges from `place::Placing`.
-   - It mixes the layer with the layers below, by its composite mode and opacity (`Placing::mode`).
-   - Titles and dissolves are layers and mixes of the same draw.
-7. The burned-in subtitles go over the frame (`VideoFrames::with_burn`, [export](export.md#subtitles)).
-8. `fs_encode` converts the timeline color space into the color space of the output (`Screen::encoded`).
+```mermaid
+flowchart TD
+  due["A frame is due"]
+  read["The clip is read<br>VideoFrames"]
+  solid["A solid color"]
+  weave["Fields are one picture<br>fs_bwdif"]
+  grow["The picture is enlarged<br>Source::ai_picture"]
+  between["A frame between two pictures<br>VideoFrames::retimed_frame"]
+  earlier["An earlier source frame<br>VideoFrames::reversed_frame"]
+  place["The picture is on the canvas<br>Screen::draw"]
+  show["The viewer shows this frame"]
+  mapped["Fitted to the display<br>fs_screen"]
+  file["The file has this frame<br>Screen::encoded"]
+  due --> read
+  due --> solid
+  read --> weave
+  read --> grow
+  read --> between
+  read --> earlier
+  read --> place
+  weave --> grow
+  weave --> between
+  weave --> place
+  grow --> between
+  grow --> earlier
+  grow --> place
+  between --> place
+  earlier --> weave
+  earlier --> place
+  solid --> place
+  place --> show
+  place --> mapped
+  mapped --> show
+  place --> file
+```
+
+A clip skips each step that it does not use. The steps run in this order:
+
+- `VideoFrames` reads the clip and keeps its fields (`VideoReader::keep_fields`). It decodes on the GPU or the CPU (`route::plan`). A solid color skips the file.
+- `fs_convert` puts the picture into the timeline color space, at the size of the picture (`color::shader_colors`). In an SDR timeline, it tone-maps HDR.
+- `fs_bwdif` weaves an interlaced frame after that conversion ([gpu](gpu.md#deinterlacing-and-hdr)). It uses the frames before it, at it and after it (`Woven`).
+- `Source::ai_picture` enlarges the converted picture when Super Scale uses an AI upscaler ([gpu](gpu.md#super-scale)). An interlaced source is woven first.
+- `VideoFrames::retimed_frame` makes a frame from two pictures that are already converted, woven and enlarged ([export](export.md#which-source-frame)).
+  - The draw sizes and places each picture of the pair first. That is Classic Super Scale, Transform, Crop and Dynamic Zoom.
+  - The made frame is already placed (`Sampling::Placed`). The later draw takes its edges, its opacity and its mode from `place::Placing`.
+- `VideoFrames::reversed_frame` chooses an earlier source frame that was made forward.
+  - Without an AI upscaler, an interlaced frame is woven as that frame is placed.
+  - With an AI upscaler, the weave and the enlargement come before the choice.
+- `Screen::draw` places the picture and mixes the layers (`place::Placing`, `screen::kernel`, [export](export.md#placed-pictures)).
+  - A transition's two sides, and each clip placed over another, are layers of the same draw.
+  - Titles and burned subtitles are draws in that same pass (`fs_title`, [export](export.md#subtitles)).
+- The viewer shows the canvas. A wide canvas goes through `fs_screen` first ([playback](playback.md#the-viewer-thread)).
+- An export encodes that canvas (`Screen::encoded`) and skips `fs_screen` ([export](export.md#timeline-colors)).
+
+The AI stages get the picture in the timeline color space (`Single`).
+
+- Each stage gets 16-bit pictures (`Form`). The models of vidcut get RGB. The AI of macOS gets P416.
+- In an HDR timeline, AI Slow gets SDR media only. The draw then converts its result into the timeline color space (X98).
 
 vidcut has none of the other stages of the spec:
 
@@ -88,7 +128,8 @@ vidcut has none of the other stages of the spec:
 - **One vocabulary.** Each capability is a variant of `Request`. The CLI, IPC and MCP can do each thing that the GUI can do.
 - **The file is the truth.** A command reads and writes the `.vidcut` file. A running GUI watches it and reloads. The revision of the project (`if_rev`) catches edits that cross.
 - **The core is pure.** vidcut-core reaches media only through the `Env` trait: `AvEnv` in the app, `FakeEnv` in tests. Thus edits, plans and decisions are tested without FFmpeg.
-- **One decode and mix stack.** The player and exports read the same `RenderPlan` through the same `VideoFrames` and `AudioMix`. Thus the viewer shows the frames that an export writes.
+- **One decode and mix stack.** The player and exports read a `RenderPlan` through the same `VideoFrames` and `AudioMix`, and draw with the same `Screen`.
+  - The viewer plan can leave Super Scale off and can read a proxy (`preview_plan`, `apply_proxies`). An export reads the timeline as stored.
 - **The GPU first.** Decoding, scaling, mixing and encoding stay on the GPU wherever it gives correct results ([gpu](gpu.md)).
 - **AI features name roles.** Where vidcut picks the model, the app, the requests and the files name its role. The roles are AI Fast, AI Slow, and AI for the own model of macOS.
   - Where the user picks the model, as for speech, they name the model.

@@ -676,7 +676,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A change to Custom keeps the curve of the ease before it. A change to another ease gives the curve of that ease.
   - A change of the length scales the curve, as in Resolve. A key at frame k goes to k × new / old, rounded down. The handles scale by new / old. The values stay.
   - An import from an OTIO file at another frame rate converts the curve to the project's rate. Each key goes to the nearest frame at that rate. The handles scale by the ratio of the rates.
-  - If the scale or the conversion puts two keys on one frame, vidcut keeps the first of them.
+  - If the scale or the conversion puts two keys on one frame, vidcut keeps the first of them. Resolve keeps the first key when it scales.
   - At a gap, the missing side shows the tracks below. Where it covers the other picture, that picture does not show.
   - The pictures move and blur first. Then the composite mode of the outgoing clip mixes them with the tracks below. The tracks below do not move.
     - The composite mode of the incoming clip has no effect during the transition.
