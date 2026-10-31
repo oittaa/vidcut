@@ -769,6 +769,8 @@ pub struct RenderCachePatch {
     pub composites: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codec: Option<CacheCodec>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -889,6 +891,7 @@ impl Preferences {
             r.transitions = x.transitions.unwrap_or(r.transitions);
             r.composites = x.composites.unwrap_or(r.composites);
             r.ai = x.ai.unwrap_or(r.ai);
+            r.codec = x.codec.unwrap_or(r.codec);
         }
         if let Some(fillers) = patch.transcripts.as_ref().and_then(|t| t.fillers.as_ref()) {
             set_fillers(&mut p.transcripts.fillers, fillers)?;
