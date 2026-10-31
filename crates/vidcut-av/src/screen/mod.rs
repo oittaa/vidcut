@@ -1127,9 +1127,9 @@ impl Moves {
     }
 }
 
-const MOVING: usize = 7 * 16;
+const MOVING: usize = 8 * 16;
 
-fn motion_bytes(m: &Moving, size: (u32, u32), colors: Option<Hdr>) -> Vec<u8> {
+fn motion_bytes(m: &Moving, gaps: [bool; 2], size: (u32, u32), colors: Option<Hdr>) -> Vec<u8> {
     let Shift {
         upper_in,
         upper,
@@ -1154,11 +1154,12 @@ fn motion_bytes(m: &Moving, size: (u32, u32), colors: Option<Hdr>) -> Vec<u8> {
         [r, g, b, transfer_of(colors)],
     ];
     let flags = [upper_in, feather, mixes_blur, still].map(u32::from);
+    let gaps = [gaps[0], gaps[1], false, false].map(u32::from);
     floats
         .iter()
         .flatten()
         .flat_map(|v| (*v as f32).to_le_bytes())
-        .chain(flags.iter().flat_map(|v| v.to_le_bytes()))
+        .chain(flags.iter().chain(&gaps).flat_map(|v| v.to_le_bytes()))
         .collect()
 }
 
@@ -1635,11 +1636,16 @@ impl Screen {
                 && let Some(m) = moving_of(i + 1)
             {
                 let moves = moves.next().expect("made for each move");
-                for (view, (bind, level, placed, blended)) in [&moves.outgoing, &moves.incoming]
-                    .into_iter()
-                    .zip(&binds[i..i + 2])
-                {
+                let gaps = [i, i + 1].map(|k| moving_of(k).is_some_and(|m| m.gap));
+                for (gap, (view, (bind, level, placed, blended))) in gaps.into_iter().zip(
+                    [&moves.outgoing, &moves.incoming]
+                        .into_iter()
+                        .zip(&binds[i..i + 2]),
+                ) {
                     let mut pass = begin(&mut encoder, view, Some(wgpu::Color::TRANSPARENT));
+                    if gap {
+                        continue;
+                    }
                     if *blended {
                         let below = self.below.as_ref().expect("made for a composite mode");
                         pass.set_pipeline(&gpu.adding_mode);
@@ -1654,7 +1660,7 @@ impl Screen {
                     pass.draw(0..3, 0..1);
                 }
                 gpu.queue
-                    .write_buffer(&moves.params, 0, &motion_bytes(&m, size, colors));
+                    .write_buffer(&moves.params, 0, &motion_bytes(&m, gaps, size, colors));
                 let mut pass = begin(&mut encoder, canvas, clear.take());
                 pass.set_pipeline(&gpu.moving);
                 pass.set_bind_group(0, &moves.bind, &[]);

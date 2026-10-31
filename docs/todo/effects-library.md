@@ -14,7 +14,6 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
    - The Inspector has no Transition Curve row yet. Thus a Custom ease set in the Inspector has no keys, and the transition stays on the outgoing picture, as in Resolve.
    - The row gets the controls of Resolve's row ([gotchas](../gotchas.md#resolves-otio-files)): a slider, a value from 0 to 1, a keyframe button and a reset button.
    - These cases of Push and Slide play differently from Resolve ([gotchas](../gotchas.md#resolves-otio-files)). Each fix is one pull request:
-     - A gap on one side. vidcut shows black there. Resolve shows the tracks below.
      - A change of the length. vidcut keeps the keys of a Custom curve at their frames. Resolve scales the curve to the new length.
      - A composite mode. vidcut mixes each side with the tracks below before the move. Thus those tracks move with the side. Resolve moves the pictures first, and then applies the mode of the outgoing clip.
 2. **Smooth Cut** (p. 759). It hides a jump cut with the frame interpolation of Retime Process.
