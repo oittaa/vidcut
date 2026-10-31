@@ -205,7 +205,9 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
             *cache = ClipCache::Auto;
             for p in placed {
                 p.clip.clear();
-                p.start = 0;
+                if p.ready {
+                    p.start = 0;
+                }
             }
         }
         VideoPiece::Black { .. } => {}
@@ -226,7 +228,9 @@ fn plain_title(t: &mut ShownTitle) {
     t.clip.clear();
     for p in &mut t.placed {
         p.clip.clear();
-        p.start = 0;
+        if p.ready {
+            p.start = 0;
+        }
     }
 }
 
@@ -286,12 +290,14 @@ impl Cache {
     pub fn keys(&mut self, piece: &VideoPiece, setup: &Setup, plan: &RenderPlan) -> Arc<[Key]> {
         let bare = bare(piece);
         let stem = setup.stem(plan);
-        let whole = serde_json::to_vec(bare).unwrap_or_default();
+        let name = |m: &str, p: &Path| setup.name(m, p);
+        let mut whole = bare.clone();
+        plain(&mut whole, &name);
+        let whole = serde_json::to_vec(&whole).unwrap_or_default();
         let memo = digest(&[stem.as_bytes(), &whole]);
         if let Some(keys) = self.keys.get(&memo) {
             return keys.clone();
         }
-        let name = |m: &str, p: &Path| setup.name(m, p);
         let keys: Arc<[Key]> = (0..bare.frames())
             .map(|k| {
                 let mut one = bare.part(k, 1);
@@ -412,6 +418,14 @@ impl Cache {
             }
         }
         plan.video = video;
+        let gone: Vec<Arc<Path>> = seen
+            .into_iter()
+            .filter(|(_, there)| !there)
+            .map(|(f, _)| f)
+            .collect();
+        for f in &gone {
+            self.index.remove(f);
+        }
     }
 }
 
