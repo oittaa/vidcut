@@ -486,9 +486,10 @@ The background render (`live::render_cache::Background`):
   - It uses the AI models that the viewer has loaded, with no second copy ([gpu](gpu.md#super-scale)).
   - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
 - `cache.render` in a GUI starts the render at once (`Background::render_now`). It does not wait for the time without activity.
+  - It first stops a render that runs. Thus only one render writes the cache.
 - Without a GUI, the CLI process renders the cache (`render_all`).
   - It makes the plan of the viewer, as the live core does (`flatten_lanes`, `shown`), and scans the index.
-  - It runs the same `Render` on its own thread, from the start, until the mode has nothing left to render.
+  - It runs the same `Render` on the thread of the request, from the start. It ends when the mode has nothing left to render.
 - `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
   - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
   - All removes each file of the folder. Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
