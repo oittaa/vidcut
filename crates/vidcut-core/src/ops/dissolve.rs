@@ -135,7 +135,7 @@ fn checked(kind: &PictureTransition) -> Result<()> {
     }
     if m.curve.windows(2).any(|w| w[0].frame >= w[1].frame) {
         return Err(Error::invalid(
-            "the keys of a curve go in order, one on each frame",
+            "the keys of a curve go in order, no two on one frame",
         ));
     }
     let finite = |h: &crate::model::Handle| h.frames.is_finite() && h.value.is_finite();
