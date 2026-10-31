@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use vidcut_av::color::Matrix;
 use vidcut_av::player::{self as engine, Layout, Made, PlaysOn};
 use vidcut_av::{interpolate, super_scale};
-use vidcut_core::model::{Hdr, Retime, Sharpness, SuperScale, Upscaler, hex};
+use vidcut_core::model::{Hdr, RenderCache, Retime, Sharpness, SuperScale, Upscaler, hex};
 use vidcut_core::render::BLACK;
+use vidcut_core::render_cache::Part;
 
 pub type Group = (&'static str, Vec<(&'static str, String)>);
 
@@ -14,6 +15,7 @@ pub struct PlayerStats {
     pub decoding: Option<DecodingStats>,
     pub picture: Option<PictureStats>,
     pub made: Option<MadeStats>,
+    pub render_cache: Option<String>,
     pub super_scale: Option<SuperScaleStats>,
     pub retime: Option<RetimeStats>,
     pub viewer: Option<ViewerStats>,
@@ -219,6 +221,7 @@ impl PlayerStats {
             decoding,
             picture,
             made,
+            render_cache: None,
             super_scale,
             retime,
             viewer,
@@ -252,6 +255,14 @@ impl PlayerStats {
         }
     }
 
+    pub fn with_cache(mut self, mode: RenderCache, line: &[Part]) -> Self {
+        self.render_cache = self
+            .picture
+            .as_ref()
+            .and_then(|p| cache_row(mode, line, p.frame));
+        self
+    }
+
     pub fn groups(&self) -> Vec<Group> {
         let mut groups = Vec::new();
         if let Some(d) = &self.decoding {
@@ -260,8 +271,12 @@ impl PlayerStats {
         if let Some(p) = &self.picture {
             groups.push(("Picture", p.rows()));
         }
-        if let Some(m) = &self.made {
-            groups.push(("How It Was Made", m.rows()));
+        let mut made = self.made.as_ref().map(MadeStats::rows).unwrap_or_default();
+        if let Some(c) = &self.render_cache {
+            made.push(("Render Cache", c.clone()));
+        }
+        if !made.is_empty() {
+            groups.push(("How It Was Made", made));
         }
         if let Some(s) = &self.super_scale {
             groups.push(("Super Scale", s.rows()));
@@ -277,6 +292,20 @@ impl PlayerStats {
         groups.push(("Sound", self.sound.rows()));
         groups
     }
+}
+
+fn cache_row(mode: RenderCache, line: &[Part], frame: i64) -> Option<String> {
+    if mode.is_off() {
+        return None;
+    }
+    Some(match line.iter().find(|p| p.holds(frame)) {
+        None => "Not needed".into(),
+        Some(p) if p.has(frame) => "Cached".into(),
+        Some(p) => {
+            let why: Vec<&str> = p.reasons.iter().map(|r| r.title()).collect();
+            format!("To render: {}", why.join(", "))
+        }
+    })
 }
 
 impl DecodingStats {

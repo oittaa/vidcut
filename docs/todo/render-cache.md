@@ -12,25 +12,14 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 - Resolve FX and OFX on a clip are cached only when the user picks them, in Smart and in User mode.
   - The menu of a clip has Render Cache OFX Filter, with each filter of the clip.
 - A track header has Exclude Track from Caching.
-- A line under the timeline ruler shows the state. Red is to be cached, and blue is cached.
 - The render cache format of a new project in Resolve Studio 21.1.2 is ProRes 422 HQ (`apch`).
 
-## The GUI
+## Effects and tracks
 
-- The menu of a clip has Render Cache: Auto, On and Off. `clip.set` with `render_cache` sets it now.
-- The menu of a clip also has Render Cache Effects, with each effect of the clip.
+- The menu of a clip has Render Cache Effects, with each effect of the clip.
   - A checked effect renders in Smart and in User mode, as in Resolve.
   - `effects.set` takes `render_cache`: true for a checked effect.
 - A track can be out of the cache (Exclude Track from Caching). `track.set` takes `render_cache`: false.
-
-## The line on the timeline
-
-- In Smart and User mode, a thin line runs under the ruler of both timelines.
-  - Red: the mode renders this part.
-  - Blue: the part is in the cache.
-- The line changes after each edit, and while the render runs. In Off mode, there is no line.
-- The pointer over a red part shows why the mode renders it, for example AI Super Scale or Transition.
-- `cache.status` gives the parts and their reasons now. The line reads the same parts.
 
 ## The clip level
 
@@ -59,7 +48,6 @@ Each kept layer has a `player::Origin` ([playback](../design/playback.md#the-eng
   - It holds this time for a Retime Process and a Smooth Cut already.
   - The marks of dropped frames read these times.
 - **Why a part renders:** the reasons name the processes as Stats for Nerds does (`interpolate::name`, `super_scale::name`).
-- Stats for Nerds gets a Render Cache row in How It Was Made: Cached, the reason that it will render, or Not Needed.
 
 ## Dropped frames
 
@@ -97,13 +85,12 @@ The owner accepted these. Each goes into [deviations.md](../deviations.md) with 
 
 - The background render first writes the frames that playback made.
 - Smart also renders the parts where frames drop steadily.
-- These are added: the line in both timelines, the reasons under the pointer, and the Render Cache row of Stats for Nerds.
 
 ## Steps
 
-1. **The GUI:** the line with its reasons, Render Cache in the menu of a clip, and the Stats for Nerds row with the `Origin`.
-2. **Effects and tracks:** Render Cache Effects, and Exclude Track from Caching.
-3. **The clip level.**
+1. **Effects and tracks:** Render Cache Effects, and Exclude Track from Caching.
+2. **The clip level.**
+3. **One record of each frame:** the kept `Id` and `Origin`, and the names of the processes.
 4. **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
 5. **Dropped frames:** the times of each layer in `Origin`, and the marks.
 

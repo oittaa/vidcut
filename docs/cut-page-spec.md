@@ -2648,11 +2648,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - `picture.set` takes `pitch` and `yaw`. `picture.clear` with `transform` puts both back to 0.
   - An import reads `transformationPitch` and `transformationYaw`. An export writes them back.
   - Each can have keyframes (D75). Their keys have the form of the keys of the rotation, in the units of the plain value.
-- **D98. Render cache** (deviation X103; the render cache pages, pp. 143–144 and 199–206, are outside the Cut page).
+- **D98. Render cache** (deviations X103, X104; the render cache pages, pp. 143–144 and 199–206, are outside the Cut page).
   - The render cache keeps on disk the frames that are slow to make. The viewer plays them from there. Exports do not use it.
   - The project has a mode (`render_cache`): Off, Smart or User. A new project has Off, as in Resolve.
     - Playback > Render Cache sets it. `project.set` with `render_cache` also sets it.
-  - Each clip has a Render Cache value (`clip.set` with `render_cache`): Auto, On or Off.
+  - Each clip has a Render Cache value: Auto, On or Off.
+    - The menu of a clip has Render Cache (p. 205). `clip.set` with `render_cache` also sets it.
     - Off keeps the clip out of both modes, as in Resolve.
   - Smart renders each part of the timeline that has one of these:
     - a clip set to On
@@ -2681,6 +2682,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - All empties the cache.
     - Unused keeps only the frames of the open timeline.
     - Selected Clips removes the files that hold frames of the selected clips.
+  - In Smart and User mode, a line along the bottom of the ruler of both timelines shows the state (p. 203, X104).
+    - Red: the mode renders this part. Blue: the part is in the cache.
+    - The pointer over the line shows the reasons of the part.
+    - During the preview of a drag, a trim or a step of the history, the line is not shown. Why: the line is of the timeline before the change.
+  - Stats for Nerds has a Render Cache row in How It Was Made (X104).
+    - It tells for the frame on screen: Cached, To render with the reasons, or Not needed.
   - `cache.status` gives the parts to render, their reasons and their cached frames, and the size on disk. `cache.delete` deletes.
 
 ## 13. Order of operations (pp. 287–296, 3407)

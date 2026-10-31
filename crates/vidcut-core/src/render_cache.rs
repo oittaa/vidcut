@@ -255,7 +255,21 @@ pub struct Part {
     pub start: i64,
     pub frames: i64,
     pub reasons: Vec<Reason>,
-    pub cached: i64,
+    pub cached: Vec<(i64, i64)>,
+}
+
+impl Part {
+    pub fn cached_frames(&self) -> i64 {
+        self.cached.iter().map(|(a, b)| b - a).sum()
+    }
+
+    pub fn holds(&self, frame: i64) -> bool {
+        (self.start..self.start + self.frames).contains(&frame)
+    }
+
+    pub fn has(&self, frame: i64) -> bool {
+        self.cached.iter().any(|&(a, b)| (a..b).contains(&frame))
+    }
 }
 
 #[derive(Default)]
@@ -304,7 +318,17 @@ impl Cache {
             let reasons = setup.reasons(piece);
             if !reasons.is_empty() {
                 let keys = self.keys(piece, setup, plan);
-                let cached = keys.iter().filter(|k| self.index.has(k)).count() as i64;
+                let mut cached: Vec<(i64, i64)> = Vec::new();
+                for (k, key) in keys.iter().enumerate() {
+                    if !self.index.has(key) {
+                        continue;
+                    }
+                    let at = t + k as i64;
+                    match cached.last_mut() {
+                        Some((_, end)) if *end == at => *end += 1,
+                        _ => cached.push((at, at + 1)),
+                    }
+                }
                 out.push(Part {
                     start: t,
                     frames,
