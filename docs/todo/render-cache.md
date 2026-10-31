@@ -13,9 +13,8 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 
 ## The clip level
 
-The clip level holds the clips set to On, slow media and speed changes ([spec D98](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It does not hold AI Super Scale and the Retime Processes yet.
+The clip level holds the clips set to On, slow media, speed changes and AI Super Scale ([spec D98](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It does not hold the Retime Processes yet.
 
-- AI Super Scale goes to the clip level, as the enlarged picture of the clip.
 - A Retime Process goes to the clip level.
   - A frame of a Retime Process is made at its placement, with the effects of the clip ([export](../design/export.md#effects)).
   - Thus a change of the Transform or of an effect of that clip renders it again.
@@ -76,10 +75,9 @@ The owner accepted these. Each goes into [deviations.md](../deviations.md) with 
 
 ## Steps
 
-1. **AI Super Scale at the clip level.**
-2. **Retime Processes at the clip level.**
-3. **One record of each frame:** the kept `Id` and `Origin`, and the names of the processes.
-4. **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
-5. **Dropped frames:** the times of each layer in `Origin`, and the marks.
+1. **Retime Processes at the clip level.**
+2. **One record of each frame:** the kept `Id` and `Origin`, and the names of the processes.
+3. **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
+4. **Dropped frames:** the times of each layer in `Origin`, and the marks.
 
 Each step adds its part to the spec, the design docs and the deviations. The last step deletes this file.

@@ -1449,21 +1449,38 @@ fn reach(super_scale: SuperScale) -> f64 {
     if super_scale.on { 4.0 } else { 1.0 }
 }
 
+pub fn ai_size(
+    size: (u32, u32),
+    out: (u32, u32),
+    placed: &[Placed],
+    super_scale: SuperScale,
+) -> (u32, u32) {
+    let aim = match placed.is_empty() {
+        true => out,
+        false => layer_size(out, (size.0, size.1, (1, 1)), 0, placed, super_scale),
+    };
+    let shown = vidcut_core::place::fit(size.0, size.1, (1, 1), aim.0, aim.1);
+    match super_scale.ai() && super::normalize::enlarges(size, (1, 1), 0, shown) {
+        true => crate::super_scale::made_size(super_scale.upscaler, size, shown),
+        false => size,
+    }
+}
+
 fn layer_size(
     out: (u32, u32),
-    f: &frame::Video,
+    (width, height, sar): (u32, u32, (i32, i32)),
     rotation: u16,
     placed: &[Placed],
     super_scale: SuperScale,
 ) -> (u32, u32) {
-    let (fw, fh) = upright_fit(f, rotation, out);
-    let sar = f.aspect_ratio();
-    let across = if sar.numerator() > 0 && sar.denominator() > 0 {
-        f64::from(sar.numerator()) / f64::from(sar.denominator())
+    let fit = |to| vidcut_core::place::upright_fit((width, height), sar, rotation, to);
+    let (fw, fh) = fit(out);
+    let across = if sar.0 > 0 && sar.1 > 0 {
+        f64::from(sar.0) / f64::from(sar.1)
     } else {
         1.0
     };
-    let (w, h) = (f64::from(f.width()) * across, f64::from(f.height()));
+    let (w, h) = (f64::from(width) * across, f64::from(height));
     let (dw, dh) = if rotation % 180 == 90 { (h, w) } else { (w, h) };
     let native = (dw / f64::from(fw.max(1))).max(dh / f64::from(fh.max(1)));
     let (ow, oh) = (f64::from(out.0), f64::from(out.1));
@@ -1475,7 +1492,7 @@ fn layer_size(
     let even = |v: f64| ((v * scale / 2.0).round() as u32 * 2).max(2);
     let mut size = (even(ow), even(oh));
     for _ in 0..3 {
-        let (fw, fh) = upright_fit(f, rotation, size);
+        let (fw, fh) = fit(size);
         let (x, y) = ((size.0 - fw.min(size.0)) / 2, (size.1 - fh.min(size.1)) / 2);
         if x % 4 == 0 && y % 4 == 0 {
             break;
@@ -3014,7 +3031,13 @@ impl VideoFrames {
         let src = &self.open[s];
         match (placed.is_empty(), &src.current) {
             (false, Some((frame, _))) => {
-                layer_size((w, h), frame, src.reader.rotation(), placed, super_scale)
+                let sar = frame.aspect_ratio();
+                let source = (
+                    frame.width(),
+                    frame.height(),
+                    (sar.numerator(), sar.denominator()),
+                );
+                layer_size((w, h), source, src.reader.rotation(), placed, super_scale)
             }
             _ => (w, h),
         }

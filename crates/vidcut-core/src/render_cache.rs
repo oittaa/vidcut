@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::disk_cache::Kind;
 use crate::lru::Lru;
-use crate::model::{ClipCache, CompositeMode, Project, RenderCache};
+use crate::model::{ClipCache, CompositeMode, Project, RenderCache, SuperScale, Upscaler};
 use crate::preferences::{ProxyCodec, RenderCachePrefs};
 use crate::render::{Placed, RenderPlan, ShownTitle, VideoPiece};
 
@@ -49,7 +49,10 @@ impl Reason {
     }
 
     fn clip(self) -> bool {
-        matches!(self, Self::On | Self::Media | Self::Speed)
+        matches!(
+            self,
+            Self::On | Self::Media | Self::Speed | Self::SuperScale
+        )
     }
 
     fn user(self, prefs: &RenderCachePrefs) -> bool {
@@ -96,8 +99,11 @@ pub struct Setup<'a> {
     pub prefs: &'a RenderCachePrefs,
     pub project: &'a Project,
     pub slow: &'a dyn Fn(&str) -> bool,
+    pub upscaled: &'a Upscaled,
     pub look: &'a Look,
 }
+
+pub type Upscaled = dyn Fn((u32, u32), (u32, u32), &[Placed], SuperScale) -> (u32, u32);
 
 impl Setup<'_> {
     fn kept(&self, r: &Reason) -> bool {
@@ -144,7 +150,13 @@ impl Setup<'_> {
     }
 
     fn sized(&self, layer: &VideoPiece) -> Option<(u32, u32)> {
-        let VideoPiece::Source { media, .. } = layer else {
+        let VideoPiece::Source {
+            media,
+            super_scale,
+            placed,
+            ..
+        } = layer
+        else {
             return None;
         };
         let (w, h) = self
@@ -154,9 +166,14 @@ impl Setup<'_> {
             .video
             .as_ref()?
             .display_size();
-        Some(match self.look.longest {
+        let size = match self.look.longest {
             Some(l) => crate::model::proxy_size(w, h, l),
             None => (w, h),
+        };
+        let out = (self.look.width, self.look.height);
+        Some(match super_scale.ai() {
+            true => (self.upscaled)(size, out, placed, *super_scale),
+            false => size,
         })
     }
 
@@ -203,7 +220,10 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
         ..
     } = &mut out
     {
-        *super_scale = Default::default();
+        match super_scale.ai() {
+            true => super_scale.sharpness = Default::default(),
+            false => *super_scale = Default::default(),
+        }
         placed.clear();
         *cache = ClipCache::Auto;
         *excluded = false;
@@ -722,6 +742,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32) {
         image,
         pace,
         color_space,
+        super_scale,
         ..
     } = layer
     {
@@ -732,6 +753,9 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32) {
         *image = None;
         *pace = Default::default();
         *color_space = Default::default();
+        if super_scale.ai() {
+            super_scale.upscaler = Upscaler::Classic;
+        }
     }
 }
 
