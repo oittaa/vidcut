@@ -205,6 +205,7 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - The morph has no shot-change test. Why: a Smooth Cut always joins two shots.
 - A side played backward takes the usual path. The transition then plays as a cross dissolve.
 - The morph takes the decoded frames. AI Super Scale does not enlarge them.
+- The morph draws each side with no frames around it. Thus an interlaced side gives only the rows of its own field ([gpu](gpu.md#deinterlacing-and-hdr)).
 
 ## Timeline colors
 

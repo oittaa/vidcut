@@ -16,6 +16,7 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
    - First effects: Gaussian Blur, Mosaic, Sharpen, Vignette, Film Grain and Glow.
 2. **Generators** (p. 766): Solid Color, Color Bars and Gradient.
 3. **Later:**
+   - Measure Smooth Cut in Resolve with a side that is a gap, a moved or resized side, and a side played backward. vidcut plays these as a Cross Dissolve now ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
    - Audio effects: equalizer, compressor and reverb.
    - Keyframes of effect values.
    - Hover Scrub Preview of transitions and effects (pp. 759, 765).
