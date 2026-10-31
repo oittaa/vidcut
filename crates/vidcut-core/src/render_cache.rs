@@ -530,8 +530,11 @@ impl Cache {
                 let (whole, clips) = self.levels(piece, setup, plan);
                 let mut cached: Vec<(i64, i64)> = Vec::new();
                 for k in 0..frames as usize {
-                    let mut all = whole.iter().chain(clips.iter().flatten());
-                    if !all.all(|keys| self.index.has(&keys[k])) {
+                    let played = match &whole {
+                        Some(keys) => self.index.has(&keys[k]),
+                        None => clips.iter().flatten().all(|keys| self.index.has(&keys[k])),
+                    };
+                    if !played {
                         continue;
                     }
                     let at = t + k as i64;

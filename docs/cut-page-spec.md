@@ -2702,7 +2702,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Unused keeps only the frames of the open timeline.
     - Selected Clips removes the files that hold frames at the times of the selected clips. At the clip level, it removes only the frames of their media. The media of a compound clip are the media of the clips in it.
   - In Smart and User mode, a line along the bottom of the ruler of both timelines shows the state (p. 203, X104).
-    - Red: the mode renders this part. Blue: the part is in the cache, at each level that it needs.
+    - Red: the mode renders this part. Blue: the part plays from the cache.
+    - A part plays from the cache where its timeline level is cached. A part that needs only the clip level plays from the cache where each of its clips is cached.
     - The pointer over the line shows the reasons of the part.
     - During the preview of a drag, a trim or a step of the history, the line is not shown. Why: the line is of the timeline before the change.
   - Stats for Nerds has a Render Cache row in How It Was Made (X104).
