@@ -366,15 +366,16 @@ What it renders:
 
 The two levels (spec D98):
 
-- `Setup::levels` puts each reason of a layer at a level. `Reason::On`, `Reason::Media`, `Reason::Speed` and `Reason::SuperScale` go to the clip level. The other reasons go to the timeline level.
+- `Setup::levels` puts each reason of a layer at a level. `Reason::On`, `Reason::Media`, `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime` and `Reason::SuperScale` go to the clip level. The other reasons go to the timeline level.
 - A layer takes the clip level only when all these are true. Otherwise all its reasons go to the timeline level.
-  - It is a video file with the Nearest retime.
-    - Why: each frame of the layer is then one source frame. A frame between two source frames needs the two source frames.
+  - It is a video file (`lone`). Its retime is Nearest, or its `placed` is empty.
+    - Why: the export makes a frame between two source frames at the placement of the clip ([export](export.md#which-source-frame)). It makes its alpha from the placement later. With no placement, the frame is the whole picture of the layer.
   - Its media has no alpha channel (`Setup::opaque`).
     - Why: the cache files have no alpha channel. The tracks below would not show through the clip.
   - Its clip is not set to `ClipCache::Off`.
 - `Cache::apply` puts the timeline level first. Where a frame of the timeline level is not there, it puts each found frame of the clip level in place of the layer (`from_file`).
   - The layer keeps its `placed` and its `retime`. The file takes the place of the media, as a proxy does. Thus the Transform and the effects work on it as on the media.
+  - A layer with a Retime Process takes the Nearest retime and no `super_scale`. Why: the file holds its frames as the timeline shows them.
   - With an AI upscaler, the file holds the enlarged picture. The layer then takes `Upscaler::Classic` with its Sharpness. Thus the draw uses the same kernel, and the AI upscaler does not run again.
   - `Index::run` follows the names of a file. Thus a run continues while the file holds the next name of the layer, also where a slow speed shows a frame twice.
   - A file of the clip level can hold one name many times, for example a freeze frame. `Index::add` keeps the first place of each name in the file. Thus a run starts at the start of the repeat.
@@ -393,6 +394,7 @@ The names of frames:
   - With an AI upscaler, the name holds the upscaler, but not the Sharpness. Why: the Sharpness changes only the draw after the cache.
   - The name also holds the size, the colors of the timeline, the codec and the version of vidcut. The size is that of the media, or of its proxy with proxies on (`Look::longest`).
   - With an AI upscaler, the size is that of the enlarged picture (`Setup::upscaled`, vidcut-av `ai_size`). It comes from the placement and the timeline size, as in an export. Thus a zoom that changes it renders the clip again.
+  - With a Retime Process, the size is that of the `Look`. The name also holds the Retime Process, the `super_scale` and the exact source position (`VideoPiece::exact`).
 - An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
 - `Look::of` gives the size and the codec. With proxies on, they are those of proxies. With proxies off, the size is that of the timeline.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.
@@ -407,6 +409,7 @@ The files:
 - `Cache::next` gives the next `Job` with its own plan. The draw of the export makes its frames (`encode_plan`), as for proxies.
   - At the timeline level, `render_cache::segment` cuts the plan of the timeline.
   - At the clip level, the plan holds the one layer, with no placement, at the size of the media (`clip_plan`). With an AI upscaler, the plan has the size of the enlarged picture, and the layer keeps its `super_scale`.
+  - With a Retime Process, the plan has the size of the `Look`. The layer keeps its `retime` and its `super_scale`.
   - At the same place, the clip level renders first. Then the render goes on from there at the timeline level.
 - `cache_encoders` gives the encoders, in order:
   - With proxies on: the encoders of the proxy codec.
@@ -424,8 +427,11 @@ The line and the Stats row:
 - `PlayerStats::with_cache` adds the Render Cache row for the frame on screen of the timeline. The GUI and `player.state` both call it.
   - For a picture from the cache, the Super Scale group names the AI upscaler that made it, from the render cache.
     - Each `Part` keeps the Super Scale of its layers for this (`VideoPiece::super_scales`). Why: the plan of a cached layer has `Upscaler::Classic`.
-    - A frame of the timeline level has no Super Scale in the plan. The group then takes the first AI upscaler of the part.
+    - A frame of the timeline level has no Super Scale in the plan. A layer with a Retime Process at the clip level has none either. The group then takes the first AI upscaler of the part.
     - A layer of the clip level has `Upscaler::Classic` in the plan, where the part has an AI upscaler. The group then takes that upscaler. This also holds while the timeline level of the frame is still to render.
+  - The Retime Process group names the Retime Process of a picture from the cache in the same way.
+    - Each `Part` keeps the Retime Processes of its layers and its Smooth Cuts (`VideoPiece::retimes`). The player's `retimes_at` uses the same function.
+    - A cached layer has the Nearest retime in the plan. Where the plan has no Retime Process, the group takes the first of the part.
 
 The background render (`live::render_cache::Background`):
 

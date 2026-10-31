@@ -275,6 +275,10 @@ impl PlayerStats {
         if let Some(s) = made.filter(|_| !mode.is_off()) {
             self.super_scale = Some(SuperScaleStats::cached(*s));
         }
+        let retime = part.and_then(|p| p.retimes.first());
+        if let Some(r) = retime.filter(|_| self.retime.is_none() && !mode.is_off()) {
+            self.retime = Some(RetimeStats::cached(*r));
+        }
         self
     }
 
@@ -480,6 +484,14 @@ impl LayerMade {
 }
 
 impl RetimeStats {
+    fn cached(retime: Retime) -> Self {
+        Self {
+            process: format!("{}, from the render cache", interpolate::name(retime)),
+            runs_on: None,
+            last: None,
+        }
+    }
+
     fn of(retime: Option<Retime>, report: &interpolate::Report) -> Option<Self> {
         let retime = retime?;
         let last = report

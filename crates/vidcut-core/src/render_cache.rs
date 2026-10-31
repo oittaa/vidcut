@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::disk_cache::Kind;
 use crate::lru::Lru;
-use crate::model::{ClipCache, CompositeMode, Project, RenderCache, SuperScale, Upscaler};
+use crate::model::{ClipCache, CompositeMode, Project, RenderCache, Retime, SuperScale, Upscaler};
 use crate::preferences::{ProxyCodec, RenderCachePrefs};
 use crate::render::{Placed, RenderPlan, ShownTitle, VideoPiece};
 
@@ -51,7 +51,7 @@ impl Reason {
     fn clip(self) -> bool {
         matches!(
             self,
-            Self::On | Self::Media | Self::Speed | Self::SuperScale
+            Self::On | Self::Media | Self::Speed | Self::Retime | Self::AiRetime | Self::SuperScale
         )
     }
 
@@ -164,6 +164,7 @@ impl Setup<'_> {
         let VideoPiece::Source {
             media,
             super_scale,
+            retime,
             placed,
             ..
         } = layer
@@ -177,11 +178,14 @@ impl Setup<'_> {
             .video
             .as_ref()?
             .display_size();
+        let out = (self.look.width, self.look.height);
+        if !retime.is_nearest() {
+            return Some(out);
+        }
         let size = match self.look.longest {
             Some(l) => crate::model::proxy_size(w, h, l),
             None => (w, h),
         };
-        let out = (self.look.width, self.look.height);
         Some(match super_scale.ai() {
             true => (self.upscaled)(size, out, placed, *super_scale),
             false => size,
@@ -218,22 +222,28 @@ impl Setup<'_> {
 }
 
 fn lone(layer: &VideoPiece) -> bool {
-    matches!(layer, VideoPiece::Source { image: None, retime, .. } if retime.is_nearest())
+    matches!(
+        layer,
+        VideoPiece::Source { image: None, retime, placed, .. }
+            if retime.is_nearest() || placed.is_empty()
+    )
 }
 
 fn alone(layer: &VideoPiece) -> VideoPiece {
     let mut out = layer.clone();
     if let VideoPiece::Source {
         super_scale,
+        retime,
         placed,
         cache,
         excluded,
         ..
     } = &mut out
     {
-        match super_scale.ai() {
-            true => super_scale.sharpness = Default::default(),
-            false => *super_scale = Default::default(),
+        match (retime.is_nearest(), super_scale.ai()) {
+            (false, _) => {}
+            (true, true) => super_scale.sharpness = Default::default(),
+            (true, false) => *super_scale = Default::default(),
         }
         placed.clear();
         *cache = ClipCache::Auto;
@@ -405,6 +415,7 @@ pub struct Part {
     pub reasons: Vec<Reason>,
     pub cached: Vec<(i64, i64)>,
     pub super_scales: Vec<SuperScale>,
+    pub retimes: Vec<Retime>,
 }
 
 impl Part {
@@ -476,6 +487,7 @@ impl Cache {
         if let Some(keys) = self.keys.get(&memo) {
             return Some(keys.clone());
         }
+        let retimed = matches!(&alone, VideoPiece::Source { retime, .. } if !retime.is_nearest());
         let keys: Arc<[Key]> = (0..alone.frames())
             .map(|k| {
                 let mut one = alone.part(k, 1);
@@ -484,7 +496,11 @@ impl Cache {
                 }
                 plain(&mut one, &name);
                 let json = serde_json::to_vec(&one).unwrap_or_default();
-                digest(&[stem.as_bytes(), &json])
+                let at = ((alone.exact(k) * 1e6).round() as i64).to_le_bytes();
+                match retimed {
+                    true => digest(&[stem.as_bytes(), &json, &at]),
+                    false => digest(&[stem.as_bytes(), &json]),
+                }
             })
             .collect();
         self.keys.insert(memo, keys.clone());
@@ -560,6 +576,7 @@ impl Cache {
                     reasons,
                     cached,
                     super_scales: piece.super_scales(),
+                    retimes: piece.retimes(),
                 });
             }
             t += frames;
@@ -759,6 +776,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32) {
         pace,
         color_space,
         super_scale,
+        retime,
         ..
     } = layer
     {
@@ -769,8 +787,13 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32) {
         *image = None;
         *pace = Default::default();
         *color_space = Default::default();
-        if super_scale.ai() {
-            super_scale.upscaler = Upscaler::Classic;
+        match retime.is_nearest() {
+            true if super_scale.ai() => super_scale.upscaler = Upscaler::Classic,
+            true => {}
+            false => {
+                *super_scale = Default::default();
+                *retime = Default::default();
+            }
         }
     }
 }

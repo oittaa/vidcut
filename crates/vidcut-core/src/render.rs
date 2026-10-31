@@ -922,6 +922,21 @@ impl VideoPiece {
             .collect()
     }
 
+    pub fn retimes(&self) -> Vec<Retime> {
+        self.layers()
+            .into_iter()
+            .filter_map(|(l, _)| match l {
+                Self::Source { image, retime, .. }
+                    if !matches!(image, Some(Image::Still)) && !retime.is_nearest() =>
+                {
+                    Some(*retime)
+                }
+                _ => None,
+            })
+            .chain(self.smooths().into_iter().flatten().map(|s| s.retime))
+            .collect()
+    }
+
     pub fn crosses(&self) -> Vec<bool> {
         match self {
             Self::Mix { under, over } => under

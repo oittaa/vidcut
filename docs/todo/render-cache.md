@@ -13,9 +13,9 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 
 ## The clip level
 
-The clip level holds the clips set to On, slow media, speed changes and AI Super Scale ([spec D98](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It does not hold the Retime Processes yet.
+The clip level holds the clips set to On, slow media, speed changes and AI Super Scale ([spec D98](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It holds the Retime Processes of a clip with no placed picture. It does not hold the Retime Processes of a placed clip yet.
 
-- A Retime Process goes to the clip level.
+- A Retime Process of a placed clip goes to the clip level.
   - A frame of a Retime Process is made at its placement, with the effects of the clip ([export](../design/export.md#effects)).
   - Thus a change of the Transform or of an effect of that clip renders it again.
   - The frame holds colors only. The draw makes its alpha again from the shape of the clip. Thus its codec needs no alpha.
@@ -75,7 +75,7 @@ The owner accepted these. Each goes into [deviations.md](../deviations.md) with 
 
 ## Steps
 
-- **Retime Processes at the clip level.**
+- **Retime Processes of placed clips:** all items of [The clip level](#the-clip-level).
 - **One record of each frame:** the kept `Id` and `Origin`, and the names of the processes.
 - **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
 - **Dropped frames:** the times of each layer in `Origin`, and the marks.
