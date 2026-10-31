@@ -410,16 +410,42 @@ The names of frames:
 - `Look::of` gives the size and the codec. With proxies on, they are those of proxies. With proxies off, the size is that of the timeline.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.
 
-The files:
+The format on disk:
 
-- The files are in the `render` folder of the disk cache (`Kind::Render`). They count in its limit ([the disk cache limit](analysis.md#the-disk-cache-limit)).
-- Each file is Matroska, with at most 2 s of frames in a row (`Cache::next`).
-- A `.keys` file next to it holds the names of its frames, 16 bytes each (`write_keys`). The disk cache does not count it (`Kind::keeps`).
-- A `.made` file next to it holds the record of each frame and the time of writing. The disk cache does not count it either.
-  - `render_cache::write` takes the record from the `Origin` of each layer that the draw made (`VideoFrames::next_made`).
+- The files are in the `render` folder of the disk cache (`Kind::Render`).
+- Each written run of frames gives three files with one name: `<name>.mkv`, `<name>.keys` and `<name>.made`.
+  - The name is the hex of a SHA-256 of the names of its frames, cut to 16 bytes (`name_of`).
+  - `render_cache::write` writes the video first, then the `.keys` file, then the `.made` file.
+  - Each file goes to a temporary file first, and then takes its name (`temp::write`). Thus a reader never finds a part of a file.
+  - A failed write leaves none of the three.
+- The `.mkv` file is Matroska with one video stream and no sound. Its `VIDCUT_ORIGIN` tag is "render cache".
+  - It holds at most 2 s of frames in a row (`Cache::next`). Each frame of the timeline has one picture, at the frame rate of the timeline.
+  - `cache_encoders` gives the codec. The size is that of the `Look`, or that of the clip level.
+- The `.keys` file holds the name of each frame of the video, in order (`write_keys`).
+  - Each name is 16 bytes: a SHA-256, cut to 16 bytes. The file has no header.
+  - One name can come more than once, for example in a freeze frame.
+- The `.made` file is JSON (`Record`). It holds the time of writing and the record of each frame.
+  - `written` is the time of writing, in milliseconds since 1970, UTC.
+  - `frames` has one list for each frame of the video, in order. The list has an item for each layer of the frame, from the bottom up.
+  - An item is a pair: how the layer was made (`Made`), and the AI upscaler (`Upscaled`) or null. A layer without an `Origin` gives null.
+  - `render_cache::write` takes these from the `Origin` of each layer that the draw made (`VideoFrames::next_made`).
   - The reader of a file in the render folder reads it (`render_cache::kept`).
+- Why the names and the records are in two files: `Index::scan` reads all `.keys` files at the start. The player reads a `.made` file only when its video plays. Thus the scan stays small.
+- The videos count in the limit of the disk cache ([the disk cache limit](analysis.md#the-disk-cache-limit)). The `.keys` and `.made` files do not count (`Kind::keeps`).
+
+An example of a `.made` file, with one frame of one layer:
+
+```json
+{"written":1793462400000,"frames":[[[{"Between":{"retime":"frame_blend","frames":[12,13],"at":0.5,"took":{"secs":0,"nanos":3000000}}},null]]]}
+```
+
+The index:
+
 - `Index::scan` reads the `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a `.keys` file and its `.made` file without their video.
 - The disk cache can remove a video at any time. `Cache::apply` removes from the index each file of the plan that is gone (`Index::remove`). Thus the background render makes its frames again.
+
+The jobs:
+
 - `Cache::next` gives the next `Job` with its own plan. The draw of the export makes its frames (`encode_plan`), as for proxies.
   - At the timeline level, `render_cache::segment` cuts the plan of the timeline.
   - At the clip level, the plan holds the one layer, with no placement, at the size of the media (`clip_plan`). With an AI upscaler, the plan has the size of the enlarged picture, and the layer keeps its `super_scale`.
