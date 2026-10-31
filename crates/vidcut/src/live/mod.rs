@@ -526,6 +526,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         transcribed: Arc::new(HashSet::new()),
         fillers: Arc::default(),
         lost_proxies: Arc::new(HashMap::new()),
+        render_cache: Arc::default(),
         proxy_dir: Arc::from(Path::new("")),
         waveforms: Arc::new(HashMap::new()),
         jobs: Arc::new(Vec::new()),
@@ -1445,6 +1446,7 @@ impl Live {
             transcribed: self.transcribed.clone(),
             fillers: self.fillers.clone(),
             lost_proxies: self.lost_proxies.clone(),
+            render_cache: self.render.line(),
             proxy_dir: self.proxy_dir.clone(),
             waveforms: self.waveforms.clone(),
             jobs: self.jobs.clone(),
@@ -3809,7 +3811,9 @@ impl Live {
         }
         self.hear_ducking(&mut plan, &p);
         let mut plan = self.shown_plan(plan);
-        self.render.apply(&mut plan, &p);
+        if self.render.apply(&mut plan, &p) {
+            self.dirty = true;
+        }
         let plan = self.proxied(plan);
         self.timeline_loaded_at = Some(Instant::now());
         self.player.load(TIMELINE, plan, lanes, at)
@@ -4291,7 +4295,14 @@ impl Live {
             "timecode_display": self.timecode_display,
             "timer1_origin": self.timer1_origin,
             "timecode": timecode,
-            "stats": self.player.stats(self.renderer.viewer_stats()),
+            "stats": self.player.stats(self.renderer.viewer_stats()).map(|s| {
+                match self.project.as_ref().filter(|_| self.viewer == ViewerMode::Timeline) {
+                    Some(open) => {
+                        s.with_cache(open.project().settings.render_cache, &self.render.line())
+                    }
+                    None => s,
+                }
+            }),
             "stats_shown": self.stats,
             "guides": self.guides,
             "two_up": self.renderer.two_up(),
