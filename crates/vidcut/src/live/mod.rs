@@ -1,3 +1,4 @@
+mod drops;
 mod jobs;
 mod missing;
 mod player;
@@ -145,6 +146,9 @@ pub trait Renderer: Send + Sync {
     fn capture_window(&self, done: Capture);
     fn window(&self, change: WindowChange);
     fn quit(&self);
+    fn shown(&self) -> bool {
+        true
+    }
     fn gui(&self, _changes: Vec<GuiChange>, _done: GuiDone) {}
     fn gui_state(&self) -> Option<GuiState> {
         None
@@ -613,6 +617,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
             tx.clone(),
             &crate::preferences::load().unwrap_or_default(),
         ),
+        drops: drops::Drops::default(),
         gates: HashMap::new(),
         job_replies: HashMap::new(),
         next_job: 1,
@@ -924,6 +929,7 @@ struct Live {
     duck_measuring: HashSet<Unmeasured>,
     duck_failed: HashSet<Unmeasured>,
     render: render_cache::Background,
+    drops: drops::Drops,
 }
 
 const SOURCE: PlayerId = PlayerId::Source;
@@ -1259,6 +1265,37 @@ impl Live {
         true
     }
 
+    fn watch_drops(&mut self, now: Instant) {
+        let settings = self.project.as_ref().map(|o| &o.project().settings);
+        let smart =
+            settings.is_some_and(|s| s.render_cache == vidcut_core::model::RenderCache::Smart);
+        let fps = settings.map_or(0.0, |s| s.fps.as_f64());
+        let timeline = PlayerId::of(self.viewer) == TIMELINE;
+        let counts = self
+            .player
+            .drop_counts(TIMELINE)
+            .filter(|_| smart && timeline);
+        let quiet =
+            self.job_cancels.is_empty() && !self.render.rendering() && self.renderer.shown();
+        let (speed, position, counts) = counts.unwrap_or_default();
+        let sample = drops::Sample {
+            counting: speed == 1.0 && quiet,
+            motion: self.player.motion,
+            position,
+            fps,
+            counts,
+        };
+        let Some(stretch) = self.drops.watch(now, &sample) else {
+            return;
+        };
+        let Some(open) = self.project.as_ref() else {
+            return;
+        };
+        if self.render.mark(open.project(), stretch) {
+            self.schedule_timeline();
+        }
+    }
+
     fn present_due(&mut self) {
         let Some(motion) = self.player.present_due(Instant::now()) else {
             return;
@@ -1329,6 +1366,7 @@ impl Live {
         if let Some(due) = self.render.tick(now, mark, project) {
             soonest(due);
         }
+        self.watch_drops(now);
         let mut i = 0;
         while i < self.waits.len() {
             if matches!(self.waits[i].until, Until::Settled { .. }) && self.settled() {

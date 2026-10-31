@@ -631,6 +631,20 @@ impl Player {
         self.contents[self.active.index()].error.as_ref()
     }
 
+    pub fn drop_counts(&self, id: PlayerId) -> Option<(f64, i64, super::drops::Counts)> {
+        if self.skips.is_some() || self.auditioning {
+            return None;
+        }
+        let s = self.engine_of(id)?.status();
+        let counts = super::drops::Counts {
+            late: s.late,
+            skipped: s.skipped,
+            frames: s.frames,
+            making: s.making,
+        };
+        Some((if s.playing { s.speed } else { 0.0 }, s.position, counts))
+    }
+
     pub fn misses(&self) -> (u64, u64) {
         self.engine.as_ref().map_or((0, 0), |e| {
             let s = e.status();

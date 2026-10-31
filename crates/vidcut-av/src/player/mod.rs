@@ -150,6 +150,8 @@ pub struct Status {
     pub range: (i64, i64),
     pub late: u64,
     pub skipped: u64,
+    pub frames: u64,
+    pub making: Duration,
     pub kept: (usize, usize),
     pub latency: Option<Duration>,
     pub decoder: Option<Decoder>,
@@ -242,6 +244,7 @@ struct Presenter {
     late: u64,
     late_at: Option<i64>,
     skipped: u64,
+    making: Duration,
 }
 
 impl Presenter {
@@ -1001,6 +1004,9 @@ impl Player {
         let mut p = lock(&self.shared.presenter);
         match picture {
             Some(picture) => {
+                if p.presented != Some(pos) {
+                    p.making += picture.took();
+                }
                 p.shows(clock.filter(|_| speed.abs() <= 1.0), pos);
                 if let Some(d) = picture.decoder() {
                     p.decoder = Some(d);
@@ -1173,6 +1179,8 @@ impl Player {
             range,
             late: p.late,
             skipped: p.skipped,
+            frames: p.frames,
+            making: p.making,
             kept: self.shared.store.usage(),
             latency: self.shared.heard.latency(),
             decoder: p.decoder,

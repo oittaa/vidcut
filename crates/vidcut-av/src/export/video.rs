@@ -2158,6 +2158,7 @@ impl VideoFrames {
             let smooths = piece.smooths();
             let mut made = Vec::with_capacity(layers.len());
             for (i, (layer, ramp)) in layers.into_iter().enumerate() {
+                let started = Instant::now();
                 let weight = ramp.map(|r| r.weight(k));
                 let wipe = mask_of(ramp, k);
                 let moving = motions[i].zip(ramp).map(|(m, r)| m.at(&r, k));
@@ -2191,6 +2192,7 @@ impl VideoFrames {
                                 made: Made::Solid(color),
                                 upscaled: None,
                                 when: Instant::now(),
+                                took: started.elapsed(),
                                 cached: None,
                             }),
                         });
@@ -2257,6 +2259,7 @@ impl VideoFrames {
                         made: self.open[s].how,
                         upscaled: self.open[s].upscaled,
                         when: Instant::now(),
+                        took: started.elapsed(),
                         cached: self.open[s].cached(),
                     }),
                 });
@@ -2274,6 +2277,7 @@ impl VideoFrames {
                         },
                         upscaled: None,
                         when: Instant::now(),
+                        took: started.elapsed(),
                         cached: None,
                     });
                     last.weight = None;
