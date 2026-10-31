@@ -261,7 +261,7 @@ The bar and the Jobs button:
 - They are immediate viewports of egui. Thus eframe draws them each time that it draws the main window.
   - Why: they use the state of the `Workspace`, which a deferred viewport cannot borrow.
 - A window opens without the keyboard focus. With no kept place, it opens at the center of the main window.
-- On Windows, `Tool::watch` finds the window by its title among the windows of the UI thread. Why: egui does not give the handles of its viewports.
+- On Windows, `Tool::watch` finds the window by its title among the windows of the UI thread ([gotchas](../gotchas.md#wgpu-and-egui)).
 - The main window then owns it. Thus it stays above the main window and has no taskbar button.
 - `window-transcription.json` and `window-jobs.json` keep the windows as `window.json` keeps the main window.
   - Windows keeps the placement.
