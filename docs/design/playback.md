@@ -110,8 +110,10 @@ flowchart TD
 - The number of a source frame counts from 0 at the first frame of the file.
 - With an AI upscaler, the `Origin` tells the upscaler and the two sizes (`Upscaled`). When the frame needs no enlarging, it tells that the upscaler was not used.
 - The `Origin` also tells when the layer was made.
-- The stats panel shows the `Origin` of each layer of the picture on the screen (`MadeStats`). It also shows how long ago the picture was made.
-  - Each picture on the screen comes from the kept pictures. Thus the age tells whether the picture was made just now or kept from earlier.
+- The stats panel shows the `Origin` of each layer of the picture on the screen (`MadeStats`). It also shows how long ago each layer was made.
+  - Each picture on the screen comes from the kept pictures. Thus the age of a layer tells whether the layer was made just now or kept from earlier.
+  - The layers of a dissolve can have different ages.
+  - A layer without an `Origin` shows "Not recorded". When no layer has an `Origin`, the panel does not show the group.
   - Until a frame is decoded, the panel shows the `Origin` of the picture that the viewer shows in its place.
 - Why: the reports of the GPU stages (`interpolate::report`, `super_scale::report`) tell only their last work. That work is usually ahead of the playhead. Thus they do not tell about a paused frame or a step back.
 

@@ -49,11 +49,11 @@ pub struct PictureStats {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MadeStats {
     pub layers: Vec<LayerMade>,
-    pub secs_ago: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LayerMade {
+    pub secs_ago: Option<f64>,
     pub source: String,
     pub retime: Option<String>,
     pub smooth_cut: Option<String>,
@@ -327,24 +327,26 @@ impl PictureStats {
 
 impl MadeStats {
     fn of(picture: &engine::Picture) -> Option<Self> {
-        let under = picture.origin()?;
-        let layers = std::iter::once(Some(under))
+        let origins: Vec<_> = std::iter::once(picture.origin())
             .chain(picture.over().iter().map(|o| o.picture.origin()))
-            .flatten()
-            .map(LayerMade::of)
             .collect();
-        Some(Self {
-            layers,
-            secs_ago: under.when.elapsed().as_secs_f64(),
+        origins.iter().any(Option::is_some).then(|| Self {
+            layers: origins
+                .into_iter()
+                .map(|o| o.map_or_else(LayerMade::not_recorded, LayerMade::of))
+                .collect(),
         })
     }
 
     fn rows(&self) -> Vec<(&'static str, String)> {
-        let mut rows = vec![("Made", format!("{:.1} s ago", self.secs_ago))];
+        let mut rows = Vec::new();
         let n = self.layers.len();
         for (i, layer) in self.layers.iter().enumerate() {
             if n > 1 {
                 rows.push(("Layer", format!("{} of {n}", i + 1)));
+            }
+            if let Some(secs) = layer.secs_ago {
+                rows.push(("Made", format!("{secs:.1} s ago")));
             }
             rows.push(("Source", layer.source.clone()));
             for (label, fact) in [
@@ -414,10 +416,21 @@ impl LayerMade {
             }
         });
         Self {
+            secs_ago: Some(origin.when.elapsed().as_secs_f64()),
             source,
             retime,
             smooth_cut,
             upscaler,
+        }
+    }
+
+    fn not_recorded() -> Self {
+        Self {
+            secs_ago: None,
+            source: "Not recorded".into(),
+            retime: None,
+            smooth_cut: None,
+            upscaler: None,
         }
     }
 }
