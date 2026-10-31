@@ -709,6 +709,9 @@ impl Words<'_> {
             audio(c, |a| json!(a.voice_isolation))
         });
         s.put("retime", "Retime Process", &retime, |c| json!(c.retime));
+        s.put("render_cache", "Render Cache", &word, |c| {
+            json!(c.render_cache)
+        });
         s.f.text()
     }
 
@@ -829,6 +832,9 @@ impl Words<'_> {
         });
         s.put("retime", "Retime Process", &retime, |x| json!(x.retime));
         s.put("upscaler", "Upscaler", &upscaler, |x| json!(x.upscaler));
+        s.put("render_cache", "Render Cache", &word, |x| {
+            json!(x.render_cache)
+        });
         let spec = |key: &str| serde_json::from_value::<TimeSpec>(p[key].clone()).ok();
         if !p["start_tc"].is_null() {
             let new = first.zip(spec("start_tc")).and_then(|(x, t)| {

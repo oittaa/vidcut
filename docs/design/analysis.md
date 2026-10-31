@@ -314,6 +314,7 @@ flowchart TD
 | transcripts (`media.transcribe`) | `analysis` (`AvEnv`) | origin, stream |
 | light, for HDR metadata | `analysis` (`light::cache_in`) | origin, input color space |
 | proxies | `proxies.folder` (`Proxies::folder_in`): `proxies` beside the project unless set (in the cache dir without a project); an absolute folder is shared by each project | content (`paths::proxy_origin`), size, codec, input color space |
+| render cache | `render` (`Kind::Render`), with a `.keys` file for each video | the piece of each frame, the size, the codec and the colors ([playback](playback.md#the-render-cache)) |
 | GPU encoders that work | `encoders.json` (`export::detected`) | FFmpeg, system and GPUs |
 | proxy codecs the GPU decoder plays | `plays.json` (`export::plays`) | the same, per GPU |
 | clips for decoder tests | `decoder-tests` | none |
@@ -328,10 +329,10 @@ flowchart TD
 
 `disk_cache` keeps what vidcut can make again under one limit:
 
-- the folders of `disk_cache::Kind`: `thumbs`, `waveforms`, `analysis`, `decoder-tests`
+- the folders of `disk_cache::Kind`: `thumbs`, `waveforms`, `analysis`, `decoder-tests`, `render`
 - the proxies (`.mkv` files) in `proxies.folder`, when it is in the cache dir (`Policy`)
 
-These stay, and do not count: transcripts (`words` files in `analysis`, `Kind::keeps`), `models`, `speech-replies`, `uploads`, `encoders.json` and `plays.json`.
+These stay, and do not count: transcripts (`words` files in `analysis`, `Kind::keeps`), the `.keys` files of the render cache, `models`, `speech-replies`, `uploads`, `encoders.json` and `plays.json`.
 
 A file with a `part` piece in its name is still being written, and does not count. Such a file that a killed job left goes at a later listing (`UNFINISHED_FOR`).
 

@@ -92,6 +92,89 @@ impl ProxyEncoder {
         }
     }
 
+    fn high_options(&self) -> Option<Vec<(&'static str, String)>> {
+        Some(match self.name.as_str() {
+            "prores_videotoolbox" => vec![("profile", "hq".into()), ("allow_sw", "0".into())],
+            "prores_ks" | "prores_ks_vulkan" => {
+                vec![("profile", "3".into()), ("vendor", "apl0".into())]
+            }
+            "av1_nvenc" | "hevc_nvenc" => vec![
+                ("preset", "p4".into()),
+                ("tune", "hq".into()),
+                ("rc", "vbr".into()),
+                ("cq", if self.codec == "av1" { "24" } else { "16" }.into()),
+                ("b", "0".into()),
+            ],
+            "hevc_amf" => vec![
+                ("rc", "cqp".into()),
+                ("qp_i", "16".into()),
+                ("qp_p", "16".into()),
+            ],
+            "hevc_vaapi" => vec![("rc_mode", "CQP".into()), ("qp", "16".into())],
+            "hevc_qsv" => vec![("global_quality", "16".into())],
+            "hevc_videotoolbox" => vec![
+                ("flags", "+qscale".into()),
+                ("global_quality", (85 * ffi::FF_QP2LAMBDA).to_string()),
+            ],
+            "av1_vaapi" => vec![("rc_mode", "CQP".into()), ("global_quality", "80".into())],
+            _ => return None,
+        })
+    }
+
+    pub fn high_label(&self) -> String {
+        let codec = match self.codec {
+            "av1" => "AV1",
+            "hevc" => "HEVC",
+            _ => "ProRes 422 HQ",
+        };
+        let label = self.label();
+        let what = label.split_once(", ").map_or("", |(_, w)| w);
+        format!("{codec}, {what}")
+    }
+
+    fn cache_encoder(&self, hdr: Option<Hdr>, high: bool) -> Option<VideoEncoder> {
+        let source = match (high, hdr) {
+            (true, _) => format::Pixel::YUV422P10LE,
+            (false, Some(_)) => format::Pixel::YUV420P10LE,
+            (false, None) => format::Pixel::YUV420P,
+        };
+        let pixel = self.pixel(source);
+        if hdr.is_some() && !deep(pixel) {
+            return None;
+        }
+        let picked = match high {
+            true => self.high_options()?,
+            false => self.options(deep(pixel)),
+        };
+        let mut options: Vec<(String, String)> = picked
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        let engine = !matches!(self.kind, EncoderChoice::Cpu | EncoderChoice::Vaapi);
+        if high && self.codec == "hevc" && engine {
+            let main = if deep(pixel) { "main10" } else { "main" };
+            options.push(("profile".into(), main.into()));
+        }
+        options.push(("g".into(), KEYFRAMES.to_string()));
+        options.push(("bf".into(), "0".into()));
+        match options.iter_mut().find(|(k, _)| k == "flags") {
+            Some((_, flags)) => *flags = format!("+cgop{flags}"),
+            None => options.push(("flags".into(), "+cgop".into())),
+        }
+        Some(VideoEncoder {
+            name: self.name.clone(),
+            kind: self.kind,
+            pixel,
+            device: self.device.clone(),
+            options,
+            hdr,
+            passes: Passes::One,
+            metadata: Default::default(),
+            dynamic: Default::default(),
+            chosen: Default::default(),
+        })
+    }
+
     fn options(&self, ten: bool) -> Vec<(&'static str, String)> {
         let keys = KEYFRAMES.to_string();
         let mut options = match self.name.as_str() {
@@ -223,6 +306,32 @@ pub fn encoders(
     }
     all.sort_by_key(|e| round(e, plays));
     all
+}
+
+pub fn cache_encoders(
+    proxies: Option<ProxyCodec>,
+    available: &Availability,
+    plays: &[(&str, crate::hw::Kind)],
+) -> Vec<(ProxyEncoder, bool)> {
+    if let Some(codec) = proxies {
+        return encoders(codec, available, plays)
+            .into_iter()
+            .map(|e| (e, false))
+            .collect();
+    }
+    let mut all: Vec<ProxyEncoder> = own(ProxyCodec::Prores, available);
+    for codec in [ProxyCodec::Hevc, ProxyCodec::Av1] {
+        all.extend(
+            own(codec, available)
+                .into_iter()
+                .filter(|e| e.kind != EncoderChoice::Cpu),
+        );
+    }
+    all.sort_by_key(|e| round(e, plays));
+    all.into_iter()
+        .filter(|e| e.high_options().is_some())
+        .map(|e| (e, true))
+        .collect()
 }
 
 fn round(e: &ProxyEncoder, plays: &[(&str, crate::hw::Kind)]) -> u8 {
@@ -474,9 +583,69 @@ impl Shown<'_> {
     }
 }
 
-enum Failed {
+pub(crate) enum Failed {
     Opening(Error),
     Encoding(Error),
+}
+
+pub(crate) fn encode_plan(
+    plan: &vidcut_core::render::RenderPlan,
+    (enc, high): (&ProxyEncoder, bool),
+    tmp: &Path,
+    decoder: Option<&crate::hw::GpuDecoder>,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> std::result::Result<u64, Failed> {
+    let Some(video) = enc.cache_encoder(plan.colors, high) else {
+        return Err(Failed::Opening(Error::Invalid(format!(
+            "{} cannot make this timeline's pictures",
+            enc.name
+        ))));
+    };
+    let (w, h) = (plan.width, plan.height);
+    let fps = plan.fps;
+    let num = |n: i64| i32::try_from(n).unwrap_or(i32::MAX);
+    let src_tb = ffmpeg::Rational(num(fps.den()), num(fps.num()));
+    let rate = Some(ffmpeg::Rational(num(fps.num()), num(fps.den())));
+    let shown = Shown {
+        dest: tmp,
+        total: plan.frames,
+        started: std::time::Instant::now(),
+    };
+    let (mut writer, handoff) = Writer::new(
+        (tmp, "render cache"),
+        &video,
+        (w, h),
+        (src_tb, rate),
+        decoder,
+        &shown,
+    )?;
+    let pixel = match handoff {
+        Some(Handoff::Cuda(..)) => crate::export::gpu_pixel(&video),
+        _ => video.pixel,
+    };
+    let drawing = || -> Result<()> {
+        let mut frames =
+            crate::export::video::VideoFrames::new(&plan.video, fps, w, h, pixel, video.hdr)
+                .encode_on(handoff)
+                .with_timeline(plan.colors)?;
+        if let Some(d) = decoder {
+            frames = frames.decode_on(d.clone());
+        }
+        for j in 0..plan.frames {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(Error::Invalid(crate::export::CANCELLED.into()));
+            }
+            let f = frames.next_frame()?.ok_or_else(|| {
+                Error::Invalid("the plan has fewer video frames than expected".into())
+            })?;
+            writer.push(f, Some(j))?;
+        }
+        Ok(())
+    };
+    if let Err(e) = drawing().and_then(|()| writer.last(tmp)) {
+        return Err(Failed::Encoding(writer.abandon(e)));
+    }
+    writer.finish().map_err(Failed::Encoding)
 }
 
 struct Writer<'a> {

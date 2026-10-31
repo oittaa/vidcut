@@ -45,6 +45,7 @@ flowchart TD
   - A Smooth Cut is the outgoing side, then the incoming side with a `render::Smooth` (`Over::smooth`). The `Smooth` holds the process and the keys of the morph ([export](export.md#smooth-cuts)).
 - The source viewer plays `render::tape`.
 - Where the project plays proxies (spec D41), `preview::apply_proxies` puts in the video of fresh proxies. Proxy frames keep the timestamps of their sources, so the player picks the same frames. The sound stays on the originals.
+- Before the proxies, `Cache::apply` puts in the frames of the render cache ([the render cache](#the-render-cache)).
 - After each edit or file reload, `Live::project_changed` reloads the source plan and schedules `Live::refresh_timeline_at`. Thus a burst of edits makes one plan.
 
 ## The session's player
@@ -333,10 +334,70 @@ Ripple Delete Silence:
 - During play, `Player::position` maps the position of the engine back past the stretches that the cuts take out (`ops::removed_time`, `unskipped`). Thus the playhead jumps what Remove closes up.
 - A stripe on another track under the picture of Track 1 leaves a gap there, as Remove does. The playhead runs through the gap.
 
+## The render cache
+
+The render cache keeps on disk the frames that are slow to make (spec D98). The viewer plays them from there. Exports do not read it.
+
+```mermaid
+flowchart LR
+  plan["RenderPlan of the timeline"] -- "Setup::reasons, Cache::keys" --> idx["Index<br>name of each frame"]
+  idx -- "Cache::apply" --> shown["plan of the viewer"]
+  subgraph job["vidcut-render-cache"]
+    next["Cache::next"] --> write["render_cache::write<br>encode_plan"]
+  end
+  plan --> next
+  write -- "Index::add" --> idx
+```
+
+What it renders:
+
+- `render_cache::reasons` gives the reasons of each video piece of the plan (`Reason`).
+- `Setup::reasons` keeps the reasons of the mode. Smart keeps all. User keeps `Reason::On` and the kinds that `RenderCachePrefs` turns on.
+- A clip set to `ClipCache::Off` gives no reason.
+- Slow media (`Reason::Media`) are of two kinds:
+  - With GPU decoding on, media of a long-GOP codec that the GPU decoder does not take (vidcut-av `render_cache::slow`). The render thread checks each media once.
+  - Media that the proxy rules pick (`Proxies::wants`), while the original plays.
+
+The names of frames:
+
+- The cache keeps the frame after the tracks mix. `render_cache::bare` takes off the titles on top of all tracks. Thus an edit of their text keeps the cache.
+- `Cache::keys` names each frame by a SHA-256 of its piece of one frame (`VideoPiece::part`).
+  - In the piece, the fingerprint of each media takes the place of its path.
+  - The piece has no clip ids and no times on the timeline. Thus a part that moves keeps its names.
+  - The name also holds the `Look` (the size and the codec), the frame rate, the colors of the timeline and the version of vidcut.
+- An `Lru` keeps the names of each piece. Thus a plan that does not change is not hashed again.
+- `Look::of` gives the size and the codec. With proxies on, they are those of proxies. With proxies off, the size is that of the timeline.
+- The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.
+
+The files:
+
+- The files are in the `render` folder of the disk cache (`Kind::Render`). They count in its limit ([the disk cache limit](analysis.md#the-disk-cache-limit)).
+- Each file is Matroska, with at most 2 s of frames in a row (`Cache::next`).
+- A `.keys` file next to it holds the names of its frames, 16 bytes each (`write_keys`). The disk cache does not count it (`Kind::keeps`).
+- `Index::scan` reads the `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a `.keys` file without its video.
+- `render_cache::segment` cuts the plan of a file. The draw of the export makes its frames (`encode_plan`), as for proxies.
+- `cache_encoders` gives the encoders, in order:
+  - With proxies on: the encoders of the proxy codec.
+  - With proxies off: ProRes 422 HQ on the GPU or the CPU, and HEVC and AV1 at a high quality on the GPU (`high_options`). The encoders that the GPU makes and plays come first (`round`).
+  - The quality values are starting values. A measurement sets them.
+
+The background render (`live::render_cache::Background`):
+
+- `Background::tick` reads a `Mark` at each turn of the live core: the revision, the playhead, the play and the jobs.
+- A changed `Mark`, a play, a job or a `Background::touch` is activity. Each activity stops the render at once (`AtomicBool`).
+  - The live core touches it for the previews of a change: titles, pictures, audition, skips and the history.
+- After `render_cache.after_secs` without activity, `vidcut-render-cache` starts (`Work::Job`).
+  - It renders from the playhead forward, then from the start.
+  - It writes one file at a time (vidcut-av `render_cache::write`), and adds it to the index (`Index::add`). The viewer then reloads the plan.
+  - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
+- `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
+  - All removes each file of the folder. Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
+
 ## Code
 
-- `crates/vidcut-core/src/render.rs`, `crates/vidcut-core/src/duck.rs`, `crates/vidcut-core/src/preview.rs`
-- `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/player.rs`
+- `crates/vidcut-core/src/render.rs`, `crates/vidcut-core/src/duck.rs`, `crates/vidcut-core/src/preview.rs`, `crates/vidcut-core/src/render_cache.rs`
+- `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/player.rs`, `crates/vidcut/src/live/render_cache.rs`
+- `crates/vidcut-av/src/render_cache.rs`, `crates/vidcut-av/src/proxy.rs`
 - `crates/vidcut-av/src/player/`, `crates/vidcut-av/src/stretch.rs`
 - `crates/vidcut-av/src/export/video.rs`, `crates/vidcut-av/src/export/audio.rs`
 - `crates/vidcut/src/gui/video.rs`, `crates/vidcut-av/src/screen/`, `crates/vidcut/src/gui/cells.rs`

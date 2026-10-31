@@ -436,6 +436,21 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         media: Option<OneOrMany<String>>,
     },
+    /// The render cache of the timeline in the running GUI (`project.set`
+    /// `render_cache`): the `mode`, each `part` that the mode renders with
+    /// its `reasons` and the frames of it in the cache, whether the
+    /// background render runs, and the `files` and `bytes` of the cache.
+    #[serde(rename = "cache.status")]
+    CacheStatus {},
+    /// Delete Render Cache in the running GUI: `all` empties the render
+    /// cache, `unused` keeps only the files with frames of this timeline,
+    /// and `clips` deletes the files with frames where `clips` show.
+    #[serde(rename = "cache.delete")]
+    CacheDelete {
+        what: CacheDelete,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clips: Option<OneOrMany<ClipRef>>,
+    },
     /// The Media Pool's bins.
     #[serde(rename = "bins.list")]
     BinsList {},
@@ -1222,8 +1237,8 @@ pub enum Request {
         #[serde(default)]
         look: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -60..24), name, Clip Color
-    /// and Voice Isolation.
+    /// Enable/disable video (D), mute, gain (dB, -60..24), name, Clip Color,
+    /// Voice Isolation, Retime Process and Render Cache.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -1262,6 +1277,10 @@ pub enum Request {
         /// Process of the project settings.
         #[serde(default)]
         retime: Option<crate::model::ClipRetime>,
+        /// Render Cache: `auto` follows the mode of the project, `on`
+        /// renders the clips in both modes, and `off` in neither.
+        #[serde(default)]
+        render_cache: Option<crate::model::ClipCache>,
         /// Download Voice Isolation's model, or the model of the Retime
         /// Process that the clips then use, if this computer doesn't have it
         /// yet, checked against its SHA-256. Without it, a missing Voice
@@ -3712,6 +3731,10 @@ pub struct ProjectSet {
     /// elsewhere), `macos`, `ai_slow`, `ai_fast` or `classic`.
     #[serde(default)]
     pub upscaler: Option<crate::model::ProjectUpscaler>,
+    /// The render cache: `off` (the default), `smart` or `user`. It makes
+    /// the parts that are slow to make in the background, for the viewer.
+    #[serde(default)]
+    pub render_cache: Option<crate::model::RenderCache>,
     /// Download the models of the Retime Process and the upscaler that the
     /// timeline then uses, if this computer doesn't have them yet.
     #[serde(default)]
@@ -3822,6 +3845,18 @@ fn given<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     d: D,
 ) -> Result<Option<T>, D::Error> {
     T::deserialize(d).map(Some)
+}
+
+/// What Delete Render Cache deletes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheDelete {
+    /// Every file of the render cache.
+    All,
+    /// The files without a frame of this timeline.
+    Unused,
+    /// The files with frames where the given clips show.
+    Clips,
 }
 
 /// One value or a list (`"c1"` or `["c1", "c2"]`).
@@ -4044,6 +4079,8 @@ impl Request {
                 | Self::JobsGet { .. }
                 | Self::JobsCancel { .. }
                 | Self::JobsWait { .. }
+                | Self::CacheStatus {}
+                | Self::CacheDelete { .. }
         )
     }
 

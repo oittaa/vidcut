@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
-use vidcut_core::model::{PictureTool, Project};
+use vidcut_core::model::{PictureTool, Project, RenderCache};
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{Rational, format_timecode};
 
@@ -988,8 +988,42 @@ impl Workspace {
                     ui.close();
                 }
             });
+            ui.menu_button("Playback", |ui| self.playback_menu(ui));
             ui.separator();
             self.bar_buttons(ui);
+        });
+    }
+
+    fn playback_menu(&mut self, ui: &mut egui::Ui) {
+        let Some(mode) = self.project().map(|p| p.settings.render_cache) else {
+            super::dialog::why(ui, "open a project first");
+            return;
+        };
+        ui.menu_button("Render Cache", |ui| {
+            for m in [RenderCache::Off, RenderCache::Smart, RenderCache::User] {
+                if ui.selectable_label(mode == m, m.title()).clicked() {
+                    if mode != m {
+                        self.send("project.set", json!({ "render_cache": m }));
+                    }
+                    ui.close();
+                }
+            }
+        });
+        ui.menu_button("Delete Render Cache", |ui| {
+            for (label, what) in [("All", "all"), ("Unused", "unused")] {
+                if ui.button(label).clicked() {
+                    self.send("cache.delete", json!({ "what": what }));
+                    ui.close();
+                }
+            }
+            let clips = self.snap.selection.clips.clone();
+            if ui
+                .add_enabled(!clips.is_empty(), egui::Button::new("Selected Clips"))
+                .clicked()
+            {
+                self.send("cache.delete", json!({ "what": "clips", "clips": clips }));
+                ui.close();
+            }
         });
     }
 

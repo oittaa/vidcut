@@ -37,6 +37,7 @@ pub mod pool;
 pub mod probe;
 pub mod progress;
 pub mod proxy;
+pub mod render_cache;
 pub mod route;
 pub mod screen;
 pub mod speech_api;

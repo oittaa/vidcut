@@ -19,9 +19,41 @@ pub struct Preferences {
     pub thumbnails: Thumbnails,
     pub cache: Cache,
     pub proxies: Proxies,
+    pub render_cache: RenderCachePrefs,
     pub transcripts: Transcripts,
     pub services: Services,
     pub viewer: ViewerPrefs,
+}
+
+/// How this computer makes the render cache of the project that is open
+/// (`project.set` `render_cache`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct RenderCachePrefs {
+    /// The running app renders the cache while nothing happens: no edit,
+    /// play, seek or drag.
+    pub background: bool,
+    /// How long nothing happens before the background render starts, in
+    /// seconds, from 1 to 3600.
+    pub after_secs: u32,
+    /// The User mode renders transitions.
+    pub transitions: bool,
+    /// The User mode renders opacity and composite modes.
+    pub composites: bool,
+    /// The User mode renders AI Super Scale and the AI Retime Processes.
+    pub ai: bool,
+}
+
+impl Default for RenderCachePrefs {
+    fn default() -> Self {
+        Self {
+            background: true,
+            after_secs: 5,
+            transitions: false,
+            composites: false,
+            ai: true,
+        }
+    }
 }
 
 /// Viewer framing and safe-area guides (decision D90). They draw only in the
@@ -552,6 +584,8 @@ pub struct PreferencesPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxies: Option<ProxiesPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_cache: Option<RenderCachePatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcripts: Option<TranscriptsPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub services: Option<ServicesPatch>,
@@ -632,6 +666,22 @@ pub struct ProxiesPatch {
     /// A folder in the project's folder, or an absolute path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenderCachePatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<bool>,
+    /// From 1 to 3600.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_secs: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transitions: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composites: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -745,6 +795,14 @@ impl Preferences {
                 p.folder = f.clone();
             }
         }
+        if let Some(x) = &patch.render_cache {
+            let r = &mut p.render_cache;
+            r.background = x.background.unwrap_or(r.background);
+            r.after_secs = x.after_secs.unwrap_or(r.after_secs);
+            r.transitions = x.transitions.unwrap_or(r.transitions);
+            r.composites = x.composites.unwrap_or(r.composites);
+            r.ai = x.ai.unwrap_or(r.ai);
+        }
         if let Some(fillers) = patch.transcripts.as_ref().and_then(|t| t.fillers.as_ref()) {
             set_fillers(&mut p.transcripts.fillers, fillers)?;
         }
@@ -783,6 +841,11 @@ impl Preferences {
         }
         if c.limit == CacheLimit::Gb && c.gb.is_none() {
             return Err(Error::usage("cache.limit is gb: set cache.gb too"));
+        }
+        if !(1..=3600).contains(&self.render_cache.after_secs) {
+            return Err(Error::usage(
+                "render_cache.after_secs must be from 1 to 3600",
+            ));
         }
         let x = &self.proxies;
         if x.larger_than.contains(&0) {

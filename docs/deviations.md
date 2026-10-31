@@ -2116,3 +2116,28 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - On a 1080×1920 timeline, Strength 0.4 gives a sigma of 9.46 pixels. The rule gives 9.72.
 - **vidcut:** all timelines use the rule. On a 1080×1920 timeline, the blur is thus 3% larger than Resolve's.
 - **Why:** the measurements do not explain the 3%. The rule fits each landscape timeline that was measured.
+
+## X103. One render cache, made in the background
+
+- **Resolve:**
+  - Resolve caches the parts to cache while they play. It also caches in the background, after a number of seconds without changes (pp. 199–206).
+  - Each project has its own cache folder. A preference deletes cache files after a number of days.
+  - The project settings hold the render cache format, the background render, its time and the kinds of User mode.
+  - Smart caches clips in formats that are slow to decode: H.264, H.265, DCP, JPEG 2000 and camera raw.
+  - Smart caches speed effects and Fusion effects. The manual does not name the upscaler or frame rate conversion for Smart.
+- **vidcut:**
+  - Playback does not write the cache. Only the background render writes it ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - One cache serves all projects. It is a part of the disk cache, under its limit. The least recently used files go first.
+  - With proxies on, the cache has the size and the codec of proxies. With proxies off, it has the size of the timeline.
+  - Preferences hold the background render, its time and the kinds of User mode. They are the settings of this computer.
+  - Smart finds the media that are slow to decode by the decoder and by the proxy rules, not by a list of formats:
+    - with GPU decoding on, media of a codec with long groups of pictures that the GPU does not decode
+    - media that the proxy rules pick (spec D41), while the original plays
+  - Smart also renders AI Super Scale, and each Retime Process other than Nearest.
+- **Why:**
+  - The writes of playback would take GPU time from the frames on the screen.
+  - A part that two projects share renders once.
+  - The size of proxies makes the cache small and fast to play.
+  - The kinds of User mode and the time depend on the computer, not on the project.
+  - vidcut decodes H.264 and H.265 on the GPU. With the list of Resolve, Smart renders most clips of a camera or a phone. At 4K in ProRes 422 HQ, that is many GB for each minute.
+  - AI Super Scale and the Retime Processes are slow to make on most computers.

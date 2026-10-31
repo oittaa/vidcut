@@ -2,6 +2,7 @@ mod jobs;
 mod missing;
 mod player;
 mod project;
+mod render_cache;
 pub mod snapshot;
 pub mod stats;
 mod workers;
@@ -299,6 +300,7 @@ pub(crate) enum Msg {
     PreviewPictures(Vec<(String, vidcut_core::model::Picture)>),
     Subtitles(Option<vidcut_av::player::SubtitleView>),
     FreeTitle(Option<FreeTitle>),
+    RenderCache(render_cache::Event),
     Shutdown,
 }
 
@@ -606,6 +608,10 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         jobs: Arc::new(Vec::new()),
         job_cancels: HashMap::new(),
         turns: jobs::Turns::default(),
+        render: render_cache::Background::new(
+            tx.clone(),
+            &crate::preferences::load().unwrap_or_default(),
+        ),
         gates: HashMap::new(),
         job_replies: HashMap::new(),
         next_job: 1,
@@ -916,6 +922,7 @@ struct Live {
     flash_seq: u64,
     duck_measuring: HashSet<Unmeasured>,
     duck_failed: HashSet<Unmeasured>,
+    render: render_cache::Background,
 }
 
 const SOURCE: PlayerId = PlayerId::Source;
@@ -1019,9 +1026,21 @@ impl Live {
                 project,
                 reply,
             } => self.request(envelope, origin, project, reply),
-            Msg::Audition(a) => changed = self.audition(a),
-            Msg::Skip(parts) => changed = self.set_skipping(parts),
+            Msg::Audition(a) => {
+                self.render.touch();
+                changed = self.audition(a);
+            }
+            Msg::Skip(parts) => {
+                self.render.touch();
+                changed = self.set_skipping(parts);
+            }
+            Msg::RenderCache(e) => {
+                if self.render.event(e) {
+                    self.schedule_timeline();
+                }
+            }
             Msg::PreviewTitle(title) => {
+                self.render.touch();
                 changed = false;
                 if self.timeline_due.take().is_some() {
                     self.refresh_timeline();
@@ -1029,6 +1048,7 @@ impl Live {
                 self.player.preview_title(title);
             }
             Msg::PreviewPictures(pictures) => {
+                self.render.touch();
                 changed = false;
                 if self.free_pictures != pictures {
                     self.player.preview_pictures(pictures.clone());
@@ -1042,6 +1062,7 @@ impl Live {
                 self.player.set_subtitles(view);
             }
             Msg::FreeTitle(title) => {
+                self.render.touch();
                 changed = false;
                 if self.free_title != title {
                     self.free_title = title;
@@ -1128,6 +1149,12 @@ impl Live {
                 }
                 self.follow_budget();
                 self.follow_theme();
+                if self
+                    .render
+                    .follow(&crate::preferences::load().unwrap_or_default())
+                {
+                    self.schedule_timeline();
+                }
                 if self.project.is_some() && self.proxy_folder() != *self.proxy_dir {
                     self.project_changed(None);
                 }
@@ -1136,7 +1163,10 @@ impl Live {
                 changed = false;
                 self.omarchy_due = Some(Instant::now() + OMARCHY_SETTLES);
             }
-            Msg::HistoryPreview(at) => changed = self.preview_step(at),
+            Msg::HistoryPreview(at) => {
+                self.render.touch();
+                changed = self.preview_step(at);
+            }
             Msg::Previewed { at, rev, result } => changed = self.previewed(at, rev, result),
             Msg::FileChanged => {
                 let refreshed = match self.project.as_mut().map(OpenProject::reload) {
@@ -1288,6 +1318,16 @@ impl Live {
         self.sync_tape_selection();
         self.sync_loop();
         self.follow_review();
+        let mark = render_cache::Mark {
+            rev: self.project.as_ref().map(|o| o.project().rev),
+            at: self.player.position(TIMELINE),
+            playing,
+            busy: !self.job_cancels.is_empty(),
+        };
+        let project = self.project.as_ref().map(OpenProject::project);
+        if let Some(due) = self.render.tick(now, mark, project) {
+            soonest(due);
+        }
         let mut i = 0;
         while i < self.waits.len() {
             if matches!(self.waits[i].until, Until::Settled { .. }) && self.settled() {
@@ -2659,6 +2699,11 @@ impl Live {
                 self.stats = show.unwrap_or(!self.stats);
                 Step::Now(Ok(self.state_response()))
             }
+            Request::CacheStatus {} => match &self.project {
+                Some(open) => Step::Now(Ok(answer(self.render.status(open.project())))),
+                None => Step::Now(Err(no_project())),
+            },
+            Request::CacheDelete { what, clips } => Step::Now(self.cache_delete(what, clips)),
             Request::PlayerMute { mute } => {
                 let mute = mute.unwrap_or(!self.player.muted());
                 self.player.set_muted(mute);
@@ -3642,7 +3687,11 @@ impl Live {
         });
     }
 
-    fn preview_plan(&self, mut plan: RenderPlan) -> RenderPlan {
+    fn preview_plan(&self, plan: RenderPlan) -> RenderPlan {
+        self.proxied(self.shown_plan(plan))
+    }
+
+    fn shown_plan(&self, mut plan: RenderPlan) -> RenderPlan {
         if !self.show_super_scale {
             for piece in &mut plan.video {
                 for layer in piece.layers_mut() {
@@ -3652,6 +3701,10 @@ impl Live {
                 }
             }
         }
+        plan
+    }
+
+    fn proxied(&self, mut plan: RenderPlan) -> RenderPlan {
         if let Some(open) = &self.project {
             vidcut_core::preview::apply_proxies(
                 &mut plan,
@@ -3661,6 +3714,38 @@ impl Live {
             );
         }
         plan
+    }
+
+    fn cache_delete(
+        &mut self,
+        what: vidcut_core::request::CacheDelete,
+        clips: Option<vidcut_core::request::OneOrMany<vidcut_core::request::ClipRef>>,
+    ) -> Result<Response> {
+        use vidcut_core::request::CacheDelete;
+        let p = self.project.as_ref().ok_or_else(no_project)?.project();
+        let playhead = Some(self.player.position(TIMELINE));
+        let deleted = match (what, clips) {
+            (CacheDelete::All, None) => self.render.delete_all(),
+            (CacheDelete::Unused, None) => self.render.delete_unused(p),
+            (CacheDelete::Clips, Some(refs)) => {
+                let mut ranges = Vec::new();
+                for r in refs.to_vec() {
+                    let id = vidcut_core::editor::resolve_clip(p, &r, playhead)?;
+                    if let Some(c) = p.clip(&id) {
+                        ranges.push((c.start, c.end()));
+                    }
+                }
+                self.render.delete_frames(p, &ranges)
+            }
+            (CacheDelete::Clips, None) => {
+                return Err(Error::usage("cache.delete clips needs the clips"));
+            }
+            (_, Some(_)) => {
+                return Err(Error::usage("clips go with cache.delete clips only"));
+            }
+        };
+        self.schedule_timeline();
+        Ok(answer(json!({ "deleted": deleted })))
     }
 
     fn schedule_timeline(&mut self) {
@@ -3723,7 +3808,9 @@ impl Live {
             }
         }
         self.hear_ducking(&mut plan, &p);
-        let plan = self.preview_plan(plan);
+        let mut plan = self.shown_plan(plan);
+        self.render.apply(&mut plan, &p);
+        let plan = self.proxied(plan);
         self.timeline_loaded_at = Some(Instant::now());
         self.player.load(TIMELINE, plan, lanes, at)
     }

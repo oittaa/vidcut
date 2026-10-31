@@ -289,6 +289,7 @@ mod tests {
             super_scale: Default::default(),
             retime: crate::model::Retime::Nearest,
             placed: Vec::new(),
+            cache: Default::default(),
         }
     }
 

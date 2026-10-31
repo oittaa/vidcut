@@ -474,6 +474,7 @@ mod tests {
                 start,
                 ready: true,
             }],
+            cache: Default::default(),
         }
     }
 

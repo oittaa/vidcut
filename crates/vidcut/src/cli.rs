@@ -30,6 +30,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("models.check", &["model"]),
     ("proxy.generate", &["media"]),
     ("proxy.remove", &["media"]),
+    ("cache.delete", &["what", "clips"]),
     ("bins.add", &["path"]),
     ("bins.remove", &["path"]),
     ("bins.rename", &["path", "to"]),
@@ -136,6 +137,10 @@ const GROUPS: &[(&str, &str)] = &[
         "Measure media or clips: silences, shots, black, loudness, the words said",
     ),
     ("bins", "Media Pool bins"),
+    (
+        "cache",
+        "The render cache of the running GUI: what it renders, and Delete",
+    ),
     ("clip", "Clip properties"),
     ("decoders", "Hardware decoders that work here"),
     ("edit", "Edit the timeline"),
