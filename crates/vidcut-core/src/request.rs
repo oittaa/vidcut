@@ -738,7 +738,8 @@ pub enum Request {
     /// The Dissolve button and Ctrl+T (decision D50): a Cross Dissolve on
     /// the edit of `track` (default V1) nearest `at` (default: the
     /// playhead), and a Cross Fade +3 dB where its clips' sounds meet
-    /// there. `length` (default 1 s) is shortened to the frames its clips'
+    /// there, or a Cross Fade 0 dB with a smooth cut (the Smooth Cut
+    /// button). `length` (default 1 s) is shortened to the frames its clips'
     /// media and the track leave. `align`: centered on the edit, starting
     /// on it or ending on it. `before` and `after` instead give each side
     /// of the edit, each shortened to its own media, as dragging a
@@ -774,15 +775,21 @@ pub enum Request {
         sound: bool,
         #[serde(default)]
         all: bool,
-        /// A cross dissolve, a dip to color, one wipe, a push or a slide.
+        /// A cross dissolve, a dip to color, one wipe, a smooth cut, a push
+        /// or a slide.
         /// Left out, a cross dissolve.
         #[serde(default, skip_serializing_if = "PictureTransition::is_dissolve")]
         transition: PictureTransition,
+        /// Download the model of the Process of a smooth cut, if this
+        /// computer doesn't have it yet, checked against its SHA-256.
+        /// Without it, an export asks for it.
+        #[serde(default)]
+        download: bool,
     },
     /// Sets the type of the picture transition on the edit of `track`
     /// (default V1) nearest `at` (default: the playhead). The length stays.
     /// Any type can become any other: a cross dissolve, a dip to color, a
-    /// wipe, a push or a slide.
+    /// wipe, a smooth cut, a push or a slide.
     #[serde(rename = "edit.transition")]
     EditTransition {
         #[serde(default)]
@@ -790,6 +797,11 @@ pub enum Request {
         #[serde(default)]
         track: Option<String>,
         transition: PictureTransition,
+        /// Download the model of the Process of a smooth cut, if this
+        /// computer doesn't have it yet, checked against its SHA-256.
+        /// Without it, an export asks for it.
+        #[serde(default)]
+        download: bool,
     },
     /// The Cut button (decision D50): the edit of `track` (default V1)
     /// nearest `at` (default: the playhead) becomes a cut again, its

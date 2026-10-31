@@ -2,8 +2,8 @@ use eframe::egui::{self, Key, RichText};
 use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, CARET_LEFT, CARET_RIGHT, DIAMOND};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    MAX_BORDER, MotionEase, PictureTransition, Project, PushPreset, SlidePreset, Transition,
-    WipeDirection,
+    MAX_BORDER, MotionEase, PictureTransition, Project, PushPreset, SlidePreset, SmoothMode,
+    SmoothProcess, Transition, WipeDirection,
 };
 use vidcut_core::ops;
 use vidcut_core::otio::transitions;
@@ -284,17 +284,17 @@ impl Workspace {
             .and_then(vidcut_core::otio::transitions::kind_of)
     }
 
-    fn set_transition(&self, track: TrackRef, at: i64, k: &PictureTransition) {
+    fn set_transition(&mut self, track: TrackRef, at: i64, k: &PictureTransition) {
         if self.transition_kind(track, at).as_ref() == Some(k) {
             return;
         }
-        self.send(
+        self.send_asking(
             "edit.transition",
             json!({ "at": at, "track": track.id(), "transition": k }),
         );
     }
 
-    fn recolor_transition(&self, track: TrackRef, at: i64, color: [u8; 3]) {
+    fn recolor_transition(&mut self, track: TrackRef, at: i64, color: [u8; 3]) {
         let Some(mut now) = self.transition_kind(track, at) else {
             return;
         };
@@ -325,7 +325,7 @@ impl Workspace {
         let kind = vidcut_core::otio::transitions::kind_of(&x);
         let mut values = match &self.timeline.transition_values {
             Some((track, at, k)) if (*track, *at) == (e.track, e.at) => Some(k.clone()),
-            _ => kind.clone().filter(|k| k.motion().is_some()),
+            _ => kind.clone().filter(|k| k.course().is_some()),
         };
         let (mut drafted_values, mut committed, mut seek) = (false, false, None);
         let length = x.before + x.after;
@@ -523,21 +523,42 @@ fn motion_rows(
 ) -> (bool, bool, Option<i64>) {
     use super::super::dialog;
     let (mut changed, mut done, mut seek) = (false, false, None);
-    dialog::row(ui, "Preset", |ui| match k {
-        PictureTransition::Push { preset, .. } => {
+    match k {
+        PictureTransition::Push { preset, .. } => dialog::row(ui, "Preset", |ui| {
             let pushes = PushPreset::ALL.map(|p| (p, push_label(p)));
             if let Some(p) = menu(ui, "transition-preset", *preset, &pushes) {
                 (*preset, done) = (p, true);
             }
-        }
-        PictureTransition::Slide { preset, .. } => {
+        }),
+        PictureTransition::Slide { preset, .. } => dialog::row(ui, "Preset", |ui| {
             let slides = SlidePreset::ALL.map(|p| (p, slide_label(p)));
             if let Some(p) = menu(ui, "transition-preset", *preset, &slides) {
                 (*preset, done) = (p, true);
             }
+        }),
+        PictureTransition::SmoothCut { mode, process, .. } => {
+            dialog::row(ui, "Mode", |ui| {
+                dialog::switch(ui, |ui| {
+                    for m in SmoothMode::ALL {
+                        if ui.selectable_label(*mode == m, m.title()).clicked() && *mode != m {
+                            (*mode, done) = (m, true);
+                        }
+                    }
+                });
+            });
+            dialog::row(ui, "Process", |ui| {
+                dialog::switch(ui, |ui| {
+                    for &p in SmoothProcess::here() {
+                        if ui.selectable_label(*process == p, p.title()).clicked() && *process != p
+                        {
+                            (*process, done) = (p, true);
+                        }
+                    }
+                });
+            });
         }
         _ => {}
-    });
+    }
     if let PictureTransition::Slide { out, .. } = k {
         dialog::row(ui, "Direction", |ui| {
             dialog::switch(ui, |ui| {
@@ -549,36 +570,38 @@ fn motion_rows(
             });
         });
     }
-    let Some(m) = k.motion_mut() else {
+    if let Some(m) = k.motion_mut() {
+        dialog::row(ui, "Border", |ui| {
+            let mut shown = m.border * width;
+            let r = ui.add(
+                egui::DragValue::new(&mut shown)
+                    .range(0.0..=MAX_BORDER * width)
+                    .max_decimals(1),
+            );
+            if r.changed() {
+                m.border = shown / width;
+                changed = true;
+            }
+            done |= r.drag_stopped() || r.lost_focus();
+        });
+        dialog::row(ui, "Feather", |ui| {
+            done |= ui.checkbox(&mut m.feather, "").changed();
+        });
+        dialog::row(ui, "Color", |ui| color(ui, m.color));
+        dialog::row(ui, "Motion Blur", |ui| {
+            let r = ui.add(
+                egui::DragValue::new(&mut m.motion_blur)
+                    .range(0.0..=1.0)
+                    .speed(0.01)
+                    .max_decimals(3),
+            );
+            changed |= r.changed();
+            done |= r.drag_stopped() || r.lost_focus();
+        });
+    }
+    let Some(m) = k.course_mut() else {
         return (changed, done, seek);
     };
-    dialog::row(ui, "Border", |ui| {
-        let mut shown = m.border * width;
-        let r = ui.add(
-            egui::DragValue::new(&mut shown)
-                .range(0.0..=MAX_BORDER * width)
-                .max_decimals(1),
-        );
-        if r.changed() {
-            m.border = shown / width;
-            changed = true;
-        }
-        done |= r.drag_stopped() || r.lost_focus();
-    });
-    dialog::row(ui, "Feather", |ui| {
-        done |= ui.checkbox(&mut m.feather, "").changed();
-    });
-    dialog::row(ui, "Color", |ui| color(ui, m.color));
-    dialog::row(ui, "Motion Blur", |ui| {
-        let r = ui.add(
-            egui::DragValue::new(&mut m.motion_blur)
-                .range(0.0..=1.0)
-                .speed(0.01)
-                .max_decimals(3),
-        );
-        changed |= r.changed();
-        done |= r.drag_stopped() || r.lost_focus();
-    });
     dialog::row(ui, "Ease", |ui| {
         let eases = MotionEase::ALL.map(|e| (e, ease_label(e)));
         if let Some(e) = menu(ui, "transition-ease", m.ease, &eases) {

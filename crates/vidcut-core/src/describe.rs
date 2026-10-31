@@ -438,6 +438,7 @@ fn asked(d: &Words) -> (&'static str, &'static str) {
         Some("wipe") => ("a wipe", "wipes"),
         Some("push") => ("a push", "pushes"),
         Some("slide") => ("a slide", "slides"),
+        Some("smooth_cut") => ("a smooth cut", "smooth cuts"),
         _ => ("a dissolve", "dissolves"),
     }
 }

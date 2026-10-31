@@ -2144,7 +2144,15 @@ impl Workspace {
         if released {
             if let Some(r) = request {
                 let method = r["method"].as_str().unwrap_or_default().to_string();
-                self.send_drag(&method, r["params"].clone());
+                let params = r["params"].clone();
+                match (
+                    method.as_str(),
+                    params["transition"]["type"] == "smooth_cut",
+                ) {
+                    ("edit.dissolve", true) => self.send_asking("edit.dissolve", params),
+                    ("edit.transition", true) => self.send_asking("edit.transition", params),
+                    _ => self.send_drag(&method, params),
+                }
                 if (d.preview.gains.is_some() || !d.preview.trims.is_empty())
                     && let Some(q) = d.preview.moved(p)
                 {

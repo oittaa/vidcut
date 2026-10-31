@@ -841,20 +841,9 @@ impl Workspace {
     }
 
     fn ai_models(&self) -> vidcut_core::editor::Models {
-        let Some(p) = self.project() else {
-            return Default::default();
-        };
-        let clips: Vec<String> = p
-            .tracks
-            .iter()
-            .flat_map(|t| t.clips.iter().map(|c| c.id.clone()))
-            .collect();
-        let media = vidcut_core::otio::used_media(p, None);
-        let set = vidcut_core::ops::SuperScaleSet::default();
-        (
-            vidcut_core::ops::ai_retimes(p, &clips),
-            vidcut_core::ops::ai_upscalers(p, &media, &set),
-        )
+        self.project()
+            .map(vidcut_core::editor::models_used)
+            .unwrap_or_default()
     }
 
     fn send_start(&self, ctx: &egui::Context, s: &mut Starting) {

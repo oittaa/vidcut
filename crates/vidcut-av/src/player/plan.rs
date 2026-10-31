@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use vidcut_core::model::WipeDirection;
+use vidcut_core::model::{Retime, WipeDirection};
 use vidcut_core::render::{Image, MovingKey, Placed, RenderPlan, ShownTitle, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -11,7 +11,14 @@ pub(crate) struct Id {
     over: Option<Arc<[Layer]>>,
 }
 
-type Layer = (Arc<str>, i64, u32, Option<WipeDirection>, Option<MovingKey>);
+type Layer = (
+    Arc<str>,
+    i64,
+    u32,
+    Option<WipeDirection>,
+    Option<MovingKey>,
+    Option<(u64, Retime)>,
+);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Fill {
@@ -149,14 +156,19 @@ impl Plan {
         let keys = &self.sources[i];
         let layers = piece.layers();
         let motions = piece.motions();
+        let smooths = piece.smooths();
         let over: Vec<Layer> = layers[1..]
             .iter()
             .zip(&motions[1..])
+            .zip(&smooths[1..])
             .zip(&keys[1..])
-            .map(|(((l, ramp), motion), key)| {
+            .map(|((((l, ramp), motion), smooth), key)| {
                 let (weight, wipe) = ramp.map_or((0, None), |r| (r.weight(k), r.wipe));
                 let moving = motion.zip(*ramp).map(|(m, r)| m.at(&r, k).key());
-                (key.clone(), pos(l), weight, wipe, moving)
+                let smoothed = smooth
+                    .zip(*ramp)
+                    .map(|(s, r)| (s.at(&r, k).to_bits(), s.retime));
+                (key.clone(), pos(l), weight, wipe, moving, smoothed)
             })
             .collect();
         Id {
@@ -226,16 +238,29 @@ impl Plan {
                 }
                 _ => None,
             })
+            .chain(piece.smooths().into_iter().flatten().map(|s| s.retime))
             .collect()
     }
 
     pub(crate) fn fill_at(&self, t: i64) -> Fill {
         let (i, _) = self.locate(t);
         self.plan.video.get(i).map_or(Fill::ALL, |piece| {
+            let made = Fill {
+                behind: false,
+                lead: false,
+                made: true,
+                ..Fill::ALL
+            };
             piece
                 .layers()
                 .into_iter()
                 .fold(Fill::ALL, |f, (l, _)| f.and(Fill::of(l)))
+                .and(
+                    match piece.smooths().into_iter().flatten().any(|s| s.retime.ai()) {
+                        true => made,
+                        false => Fill::ALL,
+                    },
+                )
         })
     }
 
@@ -466,6 +491,7 @@ mod tests {
                 }),
                 cross: false,
                 motion: None,
+                smooth: None,
             }],
         };
         super::Plan::new(RenderPlan {

@@ -56,6 +56,9 @@ fn wanted(shape: Shape, outgoing: bool, incoming: bool) -> Option<(i64, i64)> {
 }
 
 fn otio(sound: bool, frames: i64, kind: &PictureTransition) -> Value {
+    if sound && matches!(kind, PictureTransition::SmoothCut { .. }) {
+        return zero_db();
+    }
     if sound {
         return json!({
             "OTIO_SCHEMA": "Transition.1",
@@ -108,6 +111,11 @@ fn otio(sound: bool, frames: i64, kind: &PictureTransition) -> Value {
         PictureTransition::Dissolve => dissolve,
         PictureTransition::DipToColor { color } => transitions::dip_otio(*color),
         PictureTransition::Wipe { direction } => transitions::wipe_otio(*direction),
+        PictureTransition::SmoothCut {
+            mode,
+            process,
+            course,
+        } => transitions::smooth_otio(*mode, *process, course, frames),
         PictureTransition::Push { preset, motion } => {
             transitions::push_otio(*preset, motion, frames)
         }
@@ -120,17 +128,19 @@ fn otio(sound: bool, frames: i64, kind: &PictureTransition) -> Value {
 }
 
 fn checked(kind: &PictureTransition) -> Result<()> {
-    let Some(m) = kind.motion() else {
+    if let Some(m) = kind.motion() {
+        if !(0.0..=MAX_BORDER).contains(&m.border) {
+            return Err(Error::invalid(format!(
+                "a border is from 0 to {MAX_BORDER}"
+            )));
+        }
+        if !(0.0..=1.0).contains(&m.motion_blur) {
+            return Err(Error::invalid("a motion blur is from 0 to 1"));
+        }
+    }
+    let Some(m) = kind.course() else {
         return Ok(());
     };
-    if !(0.0..=MAX_BORDER).contains(&m.border) {
-        return Err(Error::invalid(format!(
-            "a border is from 0 to {MAX_BORDER}"
-        )));
-    }
-    if !(0.0..=1.0).contains(&m.motion_blur) {
-        return Err(Error::invalid("a motion blur is from 0 to 1"));
-    }
     if !(0.0..=1.0).contains(&m.progress) {
         return Err(Error::invalid("a progress is from 0 to 1"));
     }
@@ -342,7 +352,7 @@ fn resized(old: &Transition, kind: &PictureTransition, frames: i64) -> PictureTr
     if was > 0
         && was != frames
         && transitions::kind_of(old).as_ref() == Some(&kind)
-        && let Some(m) = kind.motion_mut()
+        && let Some(m) = kind.course_mut()
     {
         m.curve = crate::keyframes::scaled(
             &m.curve,

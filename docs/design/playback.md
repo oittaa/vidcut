@@ -39,9 +39,10 @@ flowchart TD
 - `render::flatten_lanes` makes the `RenderPlan` of the timeline: video pieces, audio lanes, and a `LaneTrack` for each lane.
   - A dissolve or a placed picture is a `VideoPiece::Mix`. A title is a `VideoPiece::Titled`.
   - A dip to color is two halves over a `VideoPiece::Black` of its color. The outgoing picture falls over the first half, the incoming one rises over the second.
-  - A Push or a Slide is two layers with the same `render::Move`: the outgoing side, then the incoming side marked `cross`. The `Move` holds the way, the values and the keys of the progress (`transitions::moving_played`).
+  - A Push or a Slide is two layers with the same `render::Move`: the outgoing side, then the incoming side marked `cross`. The `Move` holds the way, the values and the keys of the progress (`transitions::course_played`).
     - At a gap, the missing side is a black piece with `gap` set. It does not cover the tracks below, and the screen draws nothing for it.
     - `fs_motion` still hides the other side where the gap side covers it. Thus the tracks below show there.
+  - A Smooth Cut is the outgoing side, then the incoming side with a `render::Smooth` (`Over::smooth`). The `Smooth` holds the process and the keys of the morph ([export](export.md#smooth-cuts)).
 - The source viewer plays `render::tape`.
 - Where the project plays proxies (spec D41), `preview::apply_proxies` puts in the video of fresh proxies. Proxy frames keep the timestamps of their sources, so the player picks the same frames. The sound stays on the originals.
 - After each edit or file reload, `Live::project_changed` reloads the source plan and schedules `Live::refresh_timeline_at`. Thus a burst of edits makes one plan.
@@ -67,6 +68,7 @@ flowchart TD
 - A `looping` range (`Player::set_loop`, spec D51) keeps `Mode::Playing` going past its end. The audio thread reads on from the start, and queues the `Marker` of the jump. Thus the ring and the clock run on.
 - `player::plan::Plan` gives each frame an `Id`. The `Id` names what the picture shows (file, color reading, source position, layers over it), not where it shows. Thus kept pictures survive edits that move them.
   - Each layer over it adds its level, the edge of its wipe and the frame of its move (`Moving::key`). Why: a change of a wipe's edge or of a Border keeps the level, and the picture is a new one.
+  - The incoming layer of a Smooth Cut also adds the point and the process of its morph (`Smooth::at`). Why: a change of the Ease or the Process keeps the level.
 
 **Decoding**
 
@@ -79,7 +81,7 @@ flowchart TD
   4. when idle, the prepared frame and a window behind the playhead
 - Each piece of the plan tells which frames the player may decode before they are asked for (`player::plan::Fill`). Where layers overlap, each layer must allow it (`Plan::fill_at`).
 - A play that does not find the frame at the playhead decodes a frame ahead of the clock. The lead is the mean time of the recent seeks (`seek_cost`).
-- A piece with an AI upscaler or an AI Retime Process fills no frames behind the playhead (`Fill::of`). Why: an AI picture takes much GPU time. For an upscaler, a frame before the current run also starts a new run ([gpu](gpu.md)).
+- A piece with an AI upscaler, an AI Retime Process or an AI Smooth Cut fills no frames behind the playhead (`Fill::of`, `Plan::fill_at`). Why: an AI picture takes much GPU time. For an upscaler, a frame before the current run also starts a new run ([gpu](gpu.md)).
 - Such a piece gives no lead, and does not change `seek_cost`. Why: after an AI clip, a jump in another clip does not land far ahead of the clock.
 - While paused in such a piece, a seek keeps only the asked frame. The player then makes only the next frame ahead (`SLOW_AHEAD`). Why: each AI picture takes much GPU time.
 - The viewer's frame, play backward and steps back decode the frames that they need. The prepared frame is made with an AI upscaler too, so the next clip shows its first frame at once.
@@ -102,6 +104,7 @@ flowchart TD
 - The viewer blends the layers as it draws, in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), as an export does ([export](export.md#timeline-colors)). `Shown::colors` carries that space (`RenderPlan::colors`).
 - A wipe draws a part of each side (`shown_part`), in the timeline color space too.
 - A Push or a Slide gives each layer the frame of its move (`Move::at`, `Over::moving`). The viewer moves the two sides as it draws.
+- A Smooth Cut gives its incoming layer the morphed frame, at full weight (`VideoFrames::smooth_frame`). Thus it covers the outgoing layer.
 - Placed pictures ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) are layers of a `VideoPiece::Mix`. Their placement is not in the kept pictures.
   - `Player::present` hands the `Placed` pictures of each layer with the frame (`Shown`, `Plan::placed_at`). Thus a move or a zoom keeps the frames decoded.
   - For a Dynamic Zoom, `Plan::placed_at` moves the `Run` of each `Placed` picture to the frame.

@@ -1865,6 +1865,21 @@ pub fn ai_retimes(p: &Project, ids: &[String]) -> Vec<crate::model::Retime> {
     out
 }
 
+pub fn smooth_retimes(p: &Project) -> Vec<crate::model::Retime> {
+    let mut out = Vec::new();
+    for t in p.tracks.iter().flat_map(|t| &t.transitions) {
+        if let Some(crate::model::PictureTransition::SmoothCut { process, .. }) =
+            crate::otio::transitions::kind_of(t)
+        {
+            let r = process.retime();
+            if r.ai() && !out.contains(&r) {
+                out.push(r);
+            }
+        }
+    }
+    out
+}
+
 pub fn ai_upscalers(p: &Project, ids: &[String], set: &SuperScaleSet) -> Vec<Upscaler> {
     let mut out = Vec::new();
     for m in ids.iter().filter_map(|id| p.media(id)) {

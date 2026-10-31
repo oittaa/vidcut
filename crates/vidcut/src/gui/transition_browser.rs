@@ -3,7 +3,10 @@ use eframe::egui::{
     TextStyle, pos2, vec2,
 };
 use serde_json::{Value, json};
-use vidcut_core::model::{Motion, PictureTransition, PushPreset, SlidePreset, WipeDirection};
+use vidcut_core::model::{
+    Course, Motion, PictureTransition, PushPreset, SlidePreset, SmoothMode, SmoothProcess,
+    WipeDirection,
+};
 
 use super::theme;
 use super::timeline::Side;
@@ -19,6 +22,14 @@ pub const GROUPS: [(&str, &[Card]); 3] = [
             (
                 "Dip To Color Dissolve",
                 PictureTransition::DipToColor { color: [0, 0, 0] },
+            ),
+            (
+                "Smooth Cut",
+                PictureTransition::SmoothCut {
+                    mode: SmoothMode::Better,
+                    process: SmoothProcess::Ai,
+                    course: Course::PLAIN,
+                },
             ),
         ],
     ),
@@ -60,7 +71,7 @@ fn paint(painter: &Painter, rect: Rect, kind: &PictureTransition) {
     let colors = theme::colors();
     let (from, to) = (colors.track, colors.clip);
     match kind {
-        PictureTransition::Dissolve => {
+        PictureTransition::Dissolve | PictureTransition::SmoothCut { .. } => {
             let mut mesh = Mesh::default();
             for (pos, color) in [
                 (rect.left_top(), from),
@@ -73,6 +84,14 @@ fn paint(painter: &Painter, rect: Rect, kind: &PictureTransition) {
             mesh.add_triangle(0, 1, 2);
             mesh.add_triangle(0, 2, 3);
             painter.add(Shape::mesh(mesh));
+            if !kind.is_dissolve() {
+                let line = Stroke::new(2.0, colors.text);
+                let (c, r) = (rect.center(), rect.height() * 0.18);
+                let (a, b) = (pos2(c.x - 24.0, c.y), pos2(c.x + 24.0, c.y));
+                painter.circle_stroke(a, r, line);
+                painter.circle_stroke(b, r, line);
+                painter.line_segment([pos2(a.x + r, c.y), pos2(b.x - r, c.y)], line);
+            }
         }
         PictureTransition::DipToColor { color } => {
             let [r, g, b] = *color;
@@ -191,13 +210,13 @@ impl Workspace {
         }
         if let Some(kind) = added {
             let at = self.snap.timeline.position;
-            self.send(
+            self.send_asking(
                 "edit.dissolve",
                 json!({ "at": at, "transition": kind, "sound": false }),
             );
         }
         if let Some(params) = to_selected.and_then(|k| self.selected_transition_params(&k)) {
-            self.send("edit.dissolve", params);
+            self.send_asking("edit.dissolve", params);
         }
     }
 }

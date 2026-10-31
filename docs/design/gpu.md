@@ -226,7 +226,7 @@ The scaler of macOS (`macos`):
 
 ## Frame interpolation
 
-`interpolate` makes the frames of Retime Process ([export](export.md#which-source-frame), [deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
+`interpolate` makes the frames of Retime Process and of Smooth Cut ([export](export.md#which-source-frame), [deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
 
 - `interpolate::between` takes two RGB pictures on the GPU and a weight. It gives an RGB picture on the GPU.
 - The pictures are 16-bit RGB in the timeline color space (`Form`). The kernels read and write 16-bit values (`Ops`).

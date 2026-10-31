@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::model::{
     Clip, ClipRetime, ColorSpace, DuckDetect, Hdr, Keyframe, Media, MediaSuperScale, Picture,
-    PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset, SuperScale,
-    TimelineColors, Title, TrackKind, WipeDirection,
+    PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode,
+    SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -301,6 +301,37 @@ pub struct Over {
     /// together.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion: Option<Move>,
+    /// The incoming side of a Smooth Cut. Each frame is made from the
+    /// picture before it and this one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smooth: Option<Smooth>,
+}
+
+/// How a Smooth Cut makes each frame from its two pictures.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Smooth {
+    /// The process that makes a frame between the two pictures.
+    pub retime: Retime,
+    /// How far the frame is from the outgoing picture to the incoming one,
+    /// from 0 to 1, at frames from the start of the transition.
+    pub keys: Vec<Keyframe>,
+}
+
+impl Smooth {
+    fn of(d: &transitions::Playing) -> Option<(Self, SmoothMode)> {
+        let (kind, keys) = transitions::course_played(d.transition, d.frames.1 - d.frames.0)?;
+        let PictureTransition::SmoothCut { mode, process, .. } = kind else {
+            return None;
+        };
+        let retime = process.retime();
+        Some((Self { retime, keys }, mode))
+    }
+
+    pub fn at(&self, ramp: &Ramp, k: i64) -> f64 {
+        let f = (ramp.at + k) as f64;
+        let p = crate::keyframes::value_at(&self.keys, f).unwrap_or(0.0);
+        (p + 0.5 / ramp.of.max(1) as f64).min(1.0)
+    }
 }
 
 /// A clip's picture as it goes over the frame.
@@ -503,7 +534,7 @@ fn zero_f64(n: &f64) -> bool {
 
 impl Move {
     fn of(d: &transitions::Playing) -> Option<Self> {
-        let (kind, keys) = transitions::moving_played(d.transition, d.frames.1 - d.frames.0)?;
+        let (kind, keys) = transitions::course_played(d.transition, d.frames.1 - d.frames.0)?;
         let (way, motion) = match kind {
             PictureTransition::Push { preset, motion } => (Way::Push(preset), motion),
             PictureTransition::Slide {
@@ -859,6 +890,18 @@ impl VideoPiece {
         }
     }
 
+    pub fn smooths(&self) -> Vec<Option<&Smooth>> {
+        match self {
+            Self::Mix { under, over } => under
+                .smooths()
+                .into_iter()
+                .chain(over.iter().map(|o| o.smooth.as_ref()))
+                .collect(),
+            Self::Titled { under, .. } => under.smooths(),
+            _ => vec![None],
+        }
+    }
+
     pub fn crosses(&self) -> Vec<bool> {
         match self {
             Self::Mix { under, over } => under
@@ -954,6 +997,7 @@ impl VideoPiece {
                         ramp: o.ramp.map(|r| r.after(k)),
                         cross: o.cross,
                         motion: o.motion.clone(),
+                        smooth: o.smooth.clone(),
                     })
                     .collect(),
             },
@@ -1008,6 +1052,7 @@ impl VideoPiece {
                         a.ramp.map(|r| r.after(k)) == b.ramp
                             && a.cross == b.cross
                             && a.motion == b.motion
+                            && a.smooth == b.smooth
                             && a.piece.goes_on_as(&b.piece)
                     })
             }
@@ -1675,6 +1720,7 @@ enum Layer {
     Placed(VideoPiece, Option<Ramp>),
     Crossing(VideoPiece, Option<Ramp>),
     Moved(VideoPiece, Ramp, Move, bool),
+    Smoothed(VideoPiece, Ramp, Smooth),
     Title(Box<ShownTitle>),
 }
 
@@ -1808,6 +1854,39 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     _ => Layer::Picture(piece, ramp),
                 })
             };
+            let smoothed = |d: &transitions::Playing,
+                            below: bool|
+             -> Result<Option<(VideoPiece, VideoPiece, Smooth)>> {
+                let Some((smooth, mode)) = Smooth::of(d) else {
+                    return Ok(None);
+                };
+                let (Some(f), Some(g)) = (d.before.filter(shows), d.after.filter(shows)) else {
+                    return Ok(None);
+                };
+                let side = |c: &Clip, at: i64| -> Result<Option<VideoPiece>> {
+                    let Layer::Picture(mut piece, _) = shown(c, None, below)? else {
+                        return Ok(None);
+                    };
+                    if let VideoPiece::Source {
+                        source_frame,
+                        pace,
+                        retime,
+                        ..
+                    } = &mut piece
+                    {
+                        *retime = Retime::Nearest;
+                        if mode == SmoothMode::Faster {
+                            *source_frame = c.source_at(at);
+                            *pace = Pace::of(0.0, 0);
+                        }
+                    }
+                    Ok(Some(piece))
+                };
+                Ok(match (side(f, d.frames.0)?, side(g, d.frames.1 - 1)?) {
+                    (Some(f), Some(g)) => Some((f, g, smooth)),
+                    _ => None,
+                })
+            };
             match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {
                 Some(d) if let Some(color) = transitions::dip_of(d.transition) => {
                     let mid = middle(d.frames);
@@ -1857,6 +1936,15 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     let moved = |gap| Move { gap, ..m.clone() };
                     stack.push(Layer::Moved(f, ramp(true), moved(gap_f), false));
                     stack.push(Layer::Moved(g, ramp(false), moved(gap_g), true));
+                }
+                Some(d) if let Some((f, g, smooth)) = smoothed(d, !stack.is_empty())? => {
+                    let ramp = Ramp {
+                        at: x - d.frames.0,
+                        of: d.frames.1 - d.frames.0,
+                        falling: false,
+                        wipe: None,
+                    };
+                    stack = vec![Layer::Picture(f, None), Layer::Smoothed(g, ramp, smooth)];
                 }
                 Some(d) => {
                     let wipe = transitions::wipe_of(d.transition);
@@ -1961,18 +2049,28 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     ramp,
                     cross: false,
                     motion: None,
+                    smooth: None,
                 }),
                 Layer::Crossing(shown, ramp) => piece.with_over(Over {
                     piece: shown,
                     ramp,
                     cross: true,
                     motion: None,
+                    smooth: None,
                 }),
                 Layer::Moved(shown, ramp, m, cross) => piece.with_over(Over {
                     piece: shown,
                     ramp: Some(ramp),
                     cross,
                     motion: Some(m),
+                    smooth: None,
+                }),
+                Layer::Smoothed(shown, ramp, smooth) => piece.with_over(Over {
+                    piece: shown,
+                    ramp: Some(ramp),
+                    cross: false,
+                    motion: None,
+                    smooth: Some(smooth),
                 }),
                 Layer::Title(t) => piece.with_title(*t),
             };
