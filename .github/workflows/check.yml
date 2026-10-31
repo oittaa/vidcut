@@ -12,9 +12,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: check-${{ github.workflow }}-${{ github.ref }}
-  # A new push to a pull request replaces its run. Every master commit gets
-  # a run of its own.
+  # A new push to a pull request replaces its run. Each master commit has a
+  # group of its own: a group keeps one queued run, and a later merge would
+  # replace it.
+  group: check-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
