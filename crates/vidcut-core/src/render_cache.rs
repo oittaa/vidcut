@@ -149,20 +149,18 @@ pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool) -> Vec<Reason> {
             }
             continue;
         };
-        if *cache == ClipCache::Off {
-            continue;
-        }
+        let own = *cache != ClipCache::Off;
         let still = matches!(image, Some(crate::render::Image::Still));
         let found = [
             (*cache == ClipCache::On, Reason::On),
-            (image.is_none() && slow(media), Reason::Media),
+            (own && image.is_none() && slow(media), Reason::Media),
             (!still && !pace.is_normal(), Reason::Speed),
             (
                 !still && !retime.is_nearest() && !retime.ai(),
                 Reason::Retime,
             ),
             (!still && retime.ai(), Reason::AiRetime),
-            (super_scale.ai(), Reason::SuperScale),
+            (own && super_scale.ai(), Reason::SuperScale),
             (moved, Reason::Transition),
             (
                 placed

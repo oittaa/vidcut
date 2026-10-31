@@ -1277,8 +1277,9 @@ pub enum Request {
         /// Process of the project settings.
         #[serde(default)]
         retime: Option<crate::model::ClipRetime>,
-        /// Render Cache: `auto` follows the mode of the project, `on`
-        /// renders the clips in both modes, and `off` in neither.
+        /// Render Cache: `auto` follows the mode of the project, and `on`
+        /// renders the clips in both modes. `off` keeps their slow media and
+        /// AI Super Scale out of both.
         #[serde(default)]
         render_cache: Option<crate::model::ClipCache>,
         /// Download Voice Isolation's model, or the model of the Retime

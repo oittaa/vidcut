@@ -2654,7 +2654,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Playback > Render Cache sets it. `project.set` with `render_cache` also sets it.
   - Each clip has a Render Cache value: Auto, On or Off.
     - The menu of a clip has Render Cache (p. 205). `clip.set` with `render_cache` also sets it.
-    - Off keeps the clip out of both modes, as in Resolve.
+    - Off keeps the slow media and the AI Super Scale of the clip out of both modes.
+    - Off does not stop speed changes, Retime Processes, transitions, opacity and composite modes. Resolve caches these in its sequence cache, and no clip setting reaches it (p. 204).
   - Smart renders each part of the timeline that has one of these:
     - a clip set to On
     - media that are slow to decode (X103)
