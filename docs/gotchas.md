@@ -445,10 +445,23 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - This is 7.2 frames for a 24-frame Push with In and In & Out, and 3.6 frames for a 12-frame Push with Out.
   - The progress p(f) is the cubic Bezier curve through the keys and their handles, solved for the frame. Renders fit it within 0.0013.
   - The Inspector shows the curve at the playhead as Transition Curve. The row has a slider, a value from 0 to 1, a keyframe button and a reset button.
-  - With Custom, Resolve writes `ease` 4 and no curve. Such a transition shows the outgoing picture until its last frame.
+  - A change of Ease writes the curve of that ease. A change to Custom keeps the curve that the transition has.
+  - Thus a Push from a file without the curve has no keys after a change to Custom. It shows the outgoing picture until its last frame.
   - The keyframe button puts a key at the playhead. The frame of the key counts from the first frame of the transition.
-  - A key from the Inspector has no handles. Between two keys with no handles, the progress is a straight line.
+  - A key from the Inspector on a straight part of the curve has no handles. Between two keys with no handles, the progress is a straight line.
   - Measured with keys 0 at frame 0, 0.8 at 12 and 1 at 24. Frames 6, 12 and 18 moved 0.4, 0.8 and 0.9 of the frame.
+- **The Transition Curve row of Resolve 21.1.2 edits the curve at the playhead.**
+  - With keys, a change of the value puts a key at the playhead with that value. A key that is there gets the value.
+  - The playhead can be outside the transition. A change there put a key at frame −12 or 138 of a 24-frame Push.
+  - With no keys, a change sets the `Parameter Value` of the curve, and no key. The transition stays at that value: 0.5 held the Push at half the frame.
+  - The keyframe button adds a key with the value at the playhead, or removes the key at the playhead. With no keys, the key gets the `Parameter Value`.
+  - A new key on a curved part cuts the Bezier curve there, and the shape stays. The neighbors get shorter handles.
+    - On an Ease In curve of 24 frames, a key at frame 12 cut at u = 0.4138. The `OutBez` of frame 0 went from 7.2 to 2.98.
+    - The new key got the `InBez` (−4.397, −0.2008) and the `OutBez` (6.227, 0.2844). Then the typed 0.8 moved the key and its handles.
+  - A change of the curve with Ease In changes the Ease to Custom.
+  - Reset with Custom gives the straight curve from 0 at frame 0 to 1 at frame N. With In, it gives the In curve again.
+  - The arrows beside the keyframe button move the playhead to the previous or next key.
+  - Measured with exports after each change, on 24-frame Push and Slide transitions.
 - **A change of the length of a Push scales its curve.**
   - Each key at frame k goes to k × new / old, rounded down. The handles scale by new / old, and they are not rounded. The values stay.
   - Measured with the Duration of the Inspector:

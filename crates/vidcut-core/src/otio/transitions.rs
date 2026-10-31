@@ -180,6 +180,65 @@ pub fn eased(ease: MotionEase, frames: i64) -> Vec<Keyframe> {
     ]
 }
 
+pub fn curve_of(m: &Motion, frames: i64) -> Vec<Keyframe> {
+    match m.ease {
+        MotionEase::Custom => m.curve.clone(),
+        e => eased(e, frames),
+    }
+}
+
+pub fn progress_at(m: &Motion, frames: i64, frame: i64) -> f64 {
+    crate::keyframes::value_at(&curve_of(m, frames), frame as f64).unwrap_or(m.progress)
+}
+
+fn customized(m: &mut Motion, frames: i64) {
+    if m.ease != MotionEase::Custom {
+        m.curve = eased(m.ease, frames);
+        m.ease = MotionEase::Custom;
+    }
+}
+
+pub fn put_progress(m: &mut Motion, frames: i64, frame: i64, value: f64) {
+    customized(m, frames);
+    if m.curve.is_empty() {
+        m.progress = value;
+    } else {
+        let i = crate::keyframes::split(&mut m.curve, frame);
+        m.curve[i].value = value;
+    }
+}
+
+pub fn toggle_key(m: &mut Motion, frames: i64, frame: i64) {
+    customized(m, frames);
+    if let Some(i) = m.curve.iter().position(|k| k.frame == frame) {
+        m.curve.remove(i);
+    } else if m.curve.is_empty() {
+        m.curve.push(Keyframe {
+            frame,
+            value: m.progress,
+            in_handle: None,
+            out_handle: None,
+        });
+    } else {
+        crate::keyframes::split(&mut m.curve, frame);
+    }
+}
+
+pub fn reset_curve(m: &mut Motion, frames: i64) {
+    if m.ease == MotionEase::Custom {
+        m.curve = eased(MotionEase::None, frames);
+    }
+    m.progress = 0.0;
+}
+
+pub fn set_ease(m: &mut Motion, frames: i64, ease: MotionEase) {
+    m.curve = match ease {
+        MotionEase::Custom => curve_of(m, frames),
+        _ => Vec::new(),
+    };
+    m.ease = ease;
+}
+
 fn keys_otio(keys: &[Keyframe]) -> Value {
     let point =
         |side: &str, h: &Handle| json!({side: [h.frames, h.value], "Variant Type": "POINTF"});
@@ -199,12 +258,12 @@ fn keys_otio(keys: &[Keyframe]) -> Value {
     Value::Object(frames)
 }
 
-fn curve_otio(keys: &[Keyframe]) -> Value {
+fn curve_otio(keys: &[Keyframe], progress: f64) -> Value {
     json!({
         "Default Parameter Value": 0.0,
         "Key Frames": keys_otio(keys),
         "Parameter ID": CURVE,
-        "Parameter Value": 0.0,
+        "Parameter Value": progress,
         "Variant Type": "Double",
         "maxValue": 1.0,
         "minValue": 0.0,
@@ -299,12 +358,9 @@ fn moving_otio(
     if !motion.ease.is_none() {
         parameters.push(uint("ease", motion.ease as usize));
     }
-    let keys = match motion.ease {
-        MotionEase::Custom => motion.curve.clone(),
-        e => eased(e, frames),
-    };
-    if !keys.is_empty() {
-        parameters.push(curve_otio(&keys));
+    let keys = curve_of(motion, frames);
+    if !keys.is_empty() || motion.progress != 0.0 {
+        parameters.push(curve_otio(&keys, motion.progress));
     }
     custom(name, type_of, parameters)
 }
@@ -334,6 +390,7 @@ fn moving_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
                 MotionEase::Custom => curve_in(values),
                 _ => Vec::new(),
             },
+            progress: number(CURVE),
         })
     };
     if let Some(values) = values(o, PUSH, 50) {
@@ -358,9 +415,16 @@ fn moving_values(o: &Value) -> Option<(PictureTransition, &[Value])> {
 
 pub fn moving_played(t: &Transition, frames: i64) -> Option<(PictureTransition, Vec<Keyframe>)> {
     let (kind, values) = (!t.sound).then(|| moving_values(&t.otio)).flatten()?;
-    let keys = match kind.motion()?.ease {
-        MotionEase::None => eased(MotionEase::None, frames),
-        _ => curve_in(values),
+    let motion = kind.motion()?;
+    let keys = match (motion.ease, curve_in(values)) {
+        (MotionEase::None, _) => eased(MotionEase::None, frames),
+        (_, keys) if keys.is_empty() => vec![Keyframe {
+            frame: 0,
+            value: motion.progress,
+            in_handle: None,
+            out_handle: None,
+        }],
+        (_, keys) => keys,
     };
     Some((kind, keys))
 }
