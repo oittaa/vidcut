@@ -110,7 +110,9 @@ flowchart TD
   - a Smooth Cut, with its process, its position and the time that it took
 - The number of a source frame counts from 0 at the first frame of the file.
 - With an AI upscaler, the `Origin` tells the upscaler and the two sizes (`Upscaled`). When the frame needs no enlarging, it tells that the upscaler was not used.
-- The `Origin` also tells when the layer was made.
+- The `Origin` also tells when the layer was made, and how long the draw took to make it (`took`).
+  - `took` is the time from the start of the layer to its picture: the decode, the upscaler and the Retime Process or Smooth Cut.
+  - `Picture::took` adds the times of the layers of a picture.
 - A picture from the render cache also carries the record of its frame in the cache file (`Cached`).
   - The record tells how each layer of the frame was made when the cache was written (`Making`).
   - It also holds the time of writing, as a date. Why: an `Instant` has no meaning in another process.
@@ -370,6 +372,7 @@ What it renders:
   - The render thread checks each file once. It keeps the answer by the path of the file, until the GPU preferences change.
   - The answers come in a message that names its job. The live core drops the answers of a job that it stopped.
   - Media that the proxy rules pick (`Proxies::wants`), while the original plays.
+- `Reason::Drops` is for a marked part (`Cache::marked`). It is a reason of the timeline level, and only Smart keeps it.
 
 The two levels (spec D98):
 
@@ -485,15 +488,36 @@ The background render (`live::render_cache::Background`):
   - It writes one file at a time (vidcut-av `render_cache::write`), and adds it to the index (`Index::add`). The viewer then reloads the plan.
   - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
 - `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
+  - All also removes the marks (`Index::clear`).
   - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
   - All removes each file of the folder. Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
     - At the clip level, `Cache::names` gives only the frames of the media of each clip.
     - A compound clip gives the media of the clips in it (`otio::played_by`).
 
+The marks of dropped frames:
+
+- The engine counts the frames that it shows, and adds the `Picture::took` of each new one (`Status::frames`, `Status::making`). It also counts the late and the skipped frames.
+- At each turn, the live core gives these counts to `drops::Drops::watch`.
+  - It counts only in Smart mode, with the timeline playing forward at normal speed.
+  - It does not count during a job, a background render, a skip of the parts or an audition.
+  - It does not count while the window is hidden. The GUI tells it from the viewport state of egui (`Renderer::shown`).
+  - Each start of a count, or a change of `Player::motion`, waits for one second. A seek changes `motion`.
+- A second drops frames when its late and skipped frames are a quarter or more of the frames due in it.
+- A stretch of such seconds ends at the next second that does not drop frames, or when the count stops. `Background::mark` then marks it when both of these are true:
+  - It has 5 seconds or more.
+  - Its new frames took longer to make, on average, than their frame time. Why: a second can show no new frame at all.
+- `Cache::mark` marks each piece of the plan that holds a frame of the stretch. The mark is the name of the piece (`Setup::piece_name`).
+  - The name is a SHA-256 of the piece after the cleaning of `Cache::keys`, cut to 16 bytes. The `Look` is in it.
+  - Thus a moved piece keeps its mark. A piece with other frames, or another `Look`, has another name.
+- The index keeps the marks (`Index::mark`). It writes them to `drops.marks` in the render folder at once.
+  - The file holds the names, 16 bytes each, with no header, as a `.keys` file does.
+  - The file does not count in the limit of the disk cache (`Kind::keeps`).
+- The numbers are starting values. A measurement can change them.
+
 ## Code
 
 - `crates/vidcut-core/src/render.rs`, `crates/vidcut-core/src/duck.rs`, `crates/vidcut-core/src/preview.rs`, `crates/vidcut-core/src/render_cache.rs`
-- `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/player.rs`, `crates/vidcut/src/live/render_cache.rs`
+- `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/player.rs`, `crates/vidcut/src/live/render_cache.rs`, `crates/vidcut/src/live/drops.rs`
 - `crates/vidcut-av/src/render_cache.rs`, `crates/vidcut-av/src/proxy.rs`
 - `crates/vidcut-av/src/player/`, `crates/vidcut-av/src/stretch.rs`
 - `crates/vidcut-av/src/export/video.rs`, `crates/vidcut-av/src/export/audio.rs`
