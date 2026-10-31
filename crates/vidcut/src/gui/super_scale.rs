@@ -93,7 +93,9 @@ fn does(u: Upscaler) -> &'static str {
             "Slow. Invents more detail, and can look better on low-quality sources."
         }
         Upscaler::AiFast => "Fast. Adds detail to SDR and HDR pictures of any size.",
-        Upscaler::Classic => "Adds no detail. Runs on every computer, with no download.",
+        Upscaler::Classic => {
+            "Lanczos, or bicubic at Low Sharpness. Adds no detail. Runs everywhere."
+        }
     }
 }
 
