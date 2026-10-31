@@ -6,7 +6,7 @@ Some frames take longer to make than the viewer shows them. The viewer then cann
 
 - **Retime Process with an AI process:** a 1080p clip plays at 25% on an M4 with macOS 27. The viewer shows 48% of its frames in time. In place of the others, it shows the frame before.
 - **Super Scale with an AI upscaler:** on the same Mac, AI of Super Scale takes 474 ms for a frame of 540p shown at 1080p.
-- **Many layers:** dissolves, clips over each other with an opacity, and the effects of the [effects library](effects-library.md).
+- **Many layers and effects on a slow GPU:** dissolves, clips over each other with an opacity, and clip effects such as Gaussian Blur ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 
 The player keeps the frames that it made in memory, while its budget lasts. A longer part of the timeline does not fit.
 
@@ -24,6 +24,8 @@ The manual describes the render cache on pp. 143–144 and 199–206. The chapte
   - transitions, opacity, and composite modes other than Normal
 - User caches the clips set to On. It also caches the kinds that the project settings turn on: transitions, composites and Fusion effects.
 - Each clip has Render Cache Fusion Output: Auto, On or Off. Off keeps the clip out of Smart too.
+- Resolve FX and OFX on a clip are cached only when the user picks them, in Smart and in User mode.
+  - The menu of a clip has Render Cache OFX Filter, with each filter of the clip.
 - A track header has Exclude Track from Caching.
 - Resolve caches the parts to cache while they play.
 - It also caches in the background, after a number of seconds without changes.
@@ -50,6 +52,8 @@ A new project in Resolve Studio 21.1.2 on the owner's computer has these setting
   - Render Cache: Off, Smart and User
   - Delete Render Cache: All, Unused and Selected Clips
 - Each clip has Render Cache: Auto, On or Off. Off keeps the clip out of both modes.
+- The menu of a clip also has Render Cache Effects, with each effect of the clip.
+  - A checked effect renders in Smart and in User mode, as in Resolve.
 - A track can be out of the cache (Exclude Track from Caching).
 
 ## When it renders
@@ -69,7 +73,8 @@ A new project in Resolve Studio 21.1.2 on the owner's computer has these setting
 |---|---|
 | H.264, H.265, DCP, JPEG 2000, raw | the media that the proxy rules pick (`Proxies::wants`) and that play the original, and the media that decodes on the CPU (`GpuDecoder::why_not`) |
 | speed effects | each clip with a speed change, and each clip whose frames a Retime Process other than Nearest makes |
-| Fusion effects | AI Super Scale, and the slow effects of the effects library |
+| Fusion effects | AI Super Scale |
+| Resolve FX and OFX, only the picked ones | the same: only the effects checked in Render Cache Effects |
 | transitions, opacity, composite modes | the same: each transition, an opacity below 100%, a composite mode other than Normal |
 | none | parts where this computer drops frames steadily ([Dropped frames](#dropped-frames)) |
 
@@ -107,10 +112,13 @@ User mode renders these:
 1. **The clip level:** the picture of one clip, before the tracks mix.
    - It is for AI Super Scale, a Retime Process, a speed change and media that is slow to decode.
    - An edit on another track, a move, a split or a trim keeps the cache of the clip.
-   - A frame of a Retime Process is made at its placement ([playback](../design/playback.md#the-engine)). Thus a change of the Transform of that clip renders it again.
+   - A frame of a Retime Process is made at its placement, with the effects of the clip ([export](../design/export.md#effects)).
+   - Thus a change of the Transform or of an effect of that clip renders it again.
 2. **The timeline level:** the frame after the tracks mix.
-   - It is for transitions, opacity, composite modes, the slow effects and the parts with dropped frames.
+   - It is for transitions, opacity, composite modes, the checked effects and the parts with dropped frames.
    - Titles and subtitles on top of all tracks stay out of it. Thus an edit of their text keeps the cache.
+   - Why the effects are at this level: an effect works on the placed picture of a clip, which can be partly clear.
+   - A frame after the mix has no clear parts. Thus its codec needs no alpha.
 
 One line shows both levels. A frame is blue when each slow part of it is in the cache.
 
@@ -182,6 +190,7 @@ Smart also renders parts that this computer cannot play. One late frame does not
   - `project.set` with `render_cache`: the mode
   - `clip.set` with `render_cache`: auto, on or off
   - `track.set` with `render_cache`: false for an excluded track
+  - `effects.set` with `render_cache`: true for a checked effect
   - `cache.status` (new): the parts to render and the parts in the cache, with their reasons, and the size on disk
   - `cache.delete` (new): all, unused, or the given clips
   - `cache.render` (new): renders the cache without a GUI, for scripts
@@ -198,6 +207,7 @@ The owner accepted these. Each goes into [deviations.md](../deviations.md) with 
 - The settings of this computer are in Preferences, not in the project.
   - These are the background render and its time, the kinds of User mode, the codec and the folder.
 - Smart also renders the parts where frames drop steadily.
+- Smart also renders clips with AI Super Scale, and clips whose frames a Retime Process makes at another frame rate. The manual does not name these for Smart.
 - Smart finds the media that are slow to decode by the proxy rules and by the decoder, not by a list of formats.
 - These are added: the line in both timelines, the reasons under the pointer, and the Render Cache row of Stats for Nerds.
 
@@ -208,7 +218,7 @@ The owner accepted these. Each goes into [deviations.md](../deviations.md) with 
    - the background render, and Smart and User for the clip level
    - the mode, the requests and Preferences
 2. **The GUI:** the Playback menu, the line with its reasons, Render Cache in the menu of a clip, and the row of Stats for Nerds.
-3. **The timeline level:** transitions, opacity, composite modes, and Exclude Track from Caching.
+3. **The timeline level:** transitions, opacity, composite modes, Render Cache Effects, and Exclude Track from Caching.
 4. **Dropped frames:** the times of each layer in `Origin`, and the marks.
 
 Each step adds its part to the spec, the design docs and the deviations. The last step deletes this file.
