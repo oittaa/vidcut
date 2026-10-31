@@ -231,6 +231,7 @@ The audio device:
     - `fs_motion` then lays them over the canvas, premultiplied. `Moving::shift` gives where each side is, in pixels of the frame.
     - Each side moves by whole pixels. The band comes from the exact edges, on top.
     - A feather fades the upper side linearly across the band. In a corner, the smaller of the two fades applies.
+    - With a feather, the side that moves out never moves back. Its picture stays in place while the move is shorter than the band, and the fade keeps its place.
     - The motion blur is a box along the move, with one tap for each pixel of its length, up to 512. Taps past the frame repeat its edge pixels.
     - A Push blurs the whole result. A Slide mixes the blur in by the part of the box that the moving side covers.
     - Why: these rules give Resolve's renders within about 1 pixel ([gotchas](../gotchas.md#resolves-otio-files)).
