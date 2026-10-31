@@ -9,19 +9,14 @@ The Cut page has separate tabs for transitions, titles and effects (p. 636). vid
 
 Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
-1. **The Transition Curve of Push and Slide: what Resolve does in these cases is not measured.**
-   - A shorter length can put two keys of a curve on one frame. vidcut keeps the first.
-   - The keyframe button with an ease other than Custom. vidcut changes the ease to Custom first, as a change of the value does.
-   - The removal of the last key. vidcut keeps the fixed value as it was.
-   - Reset with Custom and a fixed value other than 0. vidcut sets the fixed value to 0.
-2. **Smooth Cut** (p. 759). It hides a jump cut with the frame interpolation of Retime Process.
-3. **Effects tab and clip effects** (p. 765).
+1. **Smooth Cut** (p. 759). It hides a jump cut with the frame interpolation of Retime Process.
+2. **Effects tab and clip effects** (p. 765).
    - A drag onto a clip adds the effect. A double-click adds it to the selected clip.
    - The Inspector gets an Effects panel with the values of each effect.
    - The effects come after Transform and Crop, and before compositing ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
    - First effects: Gaussian Blur, Mosaic, Sharpen, Vignette, Film Grain and Glow.
-4. **Generators** (p. 766): Solid Color, Color Bars and Gradient.
-5. **Later:**
+3. **Generators** (p. 766): Solid Color, Color Bars and Gradient.
+4. **Later:**
    - Audio effects: equalizer, compressor and reverb.
    - Keyframes of effect values.
    - Hover Scrub Preview of transitions and effects (pp. 759, 765).
