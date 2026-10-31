@@ -2955,7 +2955,7 @@ fn mutate(
                 (None, None) => ops::Shape::Length(
                     match length {
                         Some(l) => frames(l)?,
-                        None => p.settings.fps.as_f64().round() as i64,
+                        None => ops::dissolve_length(p, transition),
                     },
                     *align,
                 ),

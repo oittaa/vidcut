@@ -2071,3 +2071,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - vidcut has no optical flow. Its AI models make the frames in the place of Speed Warp and of the optical flow.
   - AI Slow makes frames nearer to the real ones, in more time. The row lets the user choose it.
   - Frame Blend makes the frames with no model and no download.
+
+## X100. A new Smooth Cut is 0.2 seconds long
+
+- **Resolve:**
+  - The Smooth Cut button puts a one-second Smooth Cut, the default length of all transitions (p. 759).
+  - It also puts a one-second Cross Fade 0 dB on the sound.
+  - The manual tells that 2- to 6-frame Smooth Cuts often work best (pp. 759, 1166).
+- **vidcut:**
+  - The Smooth Cut button and the Smooth Cut card put a 0.2-second Smooth Cut, to the nearest frame. At 30 fps, it is 6 frames.
+  - The Cross Fade 0 dB on the sound has the same length.
+  - `edit.dissolve` with a smooth cut and no `length` gives 0.2 seconds too.
+- **Why:**
+  - A one-second morph shows a long blend of two positions of the speaker.
+  - A one-second sound fade over a cut in speech plays the voice twice, with an echo.
+  - In a test on a cut pause of an interview, 6 frames at 30 fps looked and sounded good.
