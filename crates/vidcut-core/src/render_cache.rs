@@ -130,6 +130,7 @@ impl Setup<'_> {
             .map(|((layer, _), found)| {
                 let mut clip = false;
                 let own = lone(layer)
+                    && self.opaque(layer)
                     && !matches!(
                         layer,
                         VideoPiece::Source {
@@ -147,6 +148,16 @@ impl Setup<'_> {
             })
             .collect();
         (whole, clips)
+    }
+
+    fn opaque(&self, layer: &VideoPiece) -> bool {
+        let VideoPiece::Source { media, .. } = layer else {
+            return false;
+        };
+        self.project
+            .media(media)
+            .and_then(|m| m.info.video.as_ref())
+            .is_some_and(|v| !v.alpha)
     }
 
     fn sized(&self, layer: &VideoPiece) -> Option<(u32, u32)> {

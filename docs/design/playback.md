@@ -367,8 +367,12 @@ What it renders:
 The two levels (spec D98):
 
 - `Setup::levels` puts each reason of a layer at a level. `Reason::On`, `Reason::Media`, `Reason::Speed` and `Reason::SuperScale` go to the clip level. The other reasons go to the timeline level.
-- A layer takes the clip level only when it is a video file with the Nearest retime, and its clip is not set to `ClipCache::Off`. Otherwise all its reasons go to the timeline level.
-  - Why Nearest: each frame of the layer is then one source frame. A frame between two source frames needs the two source frames.
+- A layer takes the clip level only when all these are true. Otherwise all its reasons go to the timeline level.
+  - It is a video file with the Nearest retime.
+    - Why: each frame of the layer is then one source frame. A frame between two source frames needs the two source frames.
+  - Its media has no alpha channel (`Setup::opaque`).
+    - Why: the cache files have no alpha channel. The tracks below would not show through the clip.
+  - Its clip is not set to `ClipCache::Off`.
 - `Cache::apply` puts the timeline level first. Where a frame of the timeline level is not there, it puts each found frame of the clip level in place of the layer (`from_file`).
   - The layer keeps its `placed` and its `retime`. The file takes the place of the media, as a proxy does. Thus the Transform and the effects work on it as on the media.
   - With an AI upscaler, the file holds the enlarged picture. The layer then takes `Upscaler::Classic` with its Sharpness. Thus the draw uses the same kernel, and the AI upscaler does not run again.
