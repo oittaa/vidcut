@@ -480,13 +480,13 @@ impl Cache {
         piece: &VideoPiece,
         setup: &Setup,
         plan: &RenderPlan,
-        media: Option<&str>,
+        media: Option<&[String]>,
     ) -> Vec<Arc<[Key]>> {
         let mut out = vec![self.keys(piece, setup, plan)];
         for (layer, _) in piece.layers() {
             let mine = match (layer, media) {
                 (_, None) => true,
-                (VideoPiece::Source { media, .. }, Some(m)) => media == m,
+                (VideoPiece::Source { media, .. }, Some(m)) => m.contains(media),
                 _ => false,
             };
             if mine
@@ -814,7 +814,7 @@ impl Index {
 
     pub fn add(&mut self, file: &Path, keys: &[Key]) {
         let file: Arc<Path> = file.into();
-        for (i, k) in keys.iter().enumerate() {
+        for (i, k) in keys.iter().enumerate().rev() {
             self.frames.insert(*k, (file.clone(), i as u32));
         }
         self.files.insert(file, keys.into());

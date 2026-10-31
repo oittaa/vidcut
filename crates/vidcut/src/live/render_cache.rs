@@ -382,7 +382,7 @@ impl Background {
     }
 }
 
-pub(super) type Span = (i64, i64, Option<String>);
+pub(super) type Span = (i64, i64, Option<Vec<String>>);
 
 fn keys_in(cache: &mut Cache, base: &RenderPlan, setup: &Setup, spans: &[Span]) -> HashSet<Key> {
     let mut out = HashSet::new();

@@ -372,6 +372,7 @@ The two levels (spec D98):
 - `Cache::apply` puts the timeline level first. Where a frame of the timeline level is not there, it puts each found frame of the clip level in place of the layer (`from_file`).
   - The layer keeps its `placed`, its `super_scale` and its `retime`. The file takes the place of the media, as a proxy does. Thus the Transform, the effects and AI Super Scale work on it as on the media.
   - `Index::run` follows the names of a file. Thus a run continues while the file holds the next name of the layer, also where a slow speed shows a frame twice.
+  - A file of the clip level can hold one name many times, for example a freeze frame. `Index::add` keeps the first place of each name in the file. Thus a run starts at the start of the repeat.
 
 The names of frames:
 
@@ -425,7 +426,9 @@ The background render (`live::render_cache::Background`):
   - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
 - `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
   - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
-  - All removes each file of the folder. Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`). At the clip level, `Cache::names` gives only the frames of the media of each clip.
+  - All removes each file of the folder. Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
+    - At the clip level, `Cache::names` gives only the frames of the media of each clip.
+    - A compound clip gives the media of the clips in it (`otio::played_by`).
 
 ## Code
 

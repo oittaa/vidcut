@@ -2699,7 +2699,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Playback > Delete Render Cache has three choices:
     - All empties the cache.
     - Unused keeps only the frames of the open timeline.
-    - Selected Clips removes the files that hold frames at the times of the selected clips. At the clip level, it removes only the frames of their media.
+    - Selected Clips removes the files that hold frames at the times of the selected clips. At the clip level, it removes only the frames of their media. The media of a compound clip are the media of the clips in it.
   - In Smart and User mode, a line along the bottom of the ruler of both timelines shows the state (p. 203, X104).
     - Red: the mode renders this part. Blue: the part is in the cache, at each level that it needs.
     - The pointer over the line shows the reasons of the part.

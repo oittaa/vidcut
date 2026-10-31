@@ -3734,8 +3734,11 @@ impl Live {
                 for r in refs.to_vec() {
                     let id = vidcut_core::editor::resolve_clip(p, &r, playhead)?;
                     if let Some(c) = p.clip(&id) {
-                        let media = c.compound.is_none().then(|| c.media.clone());
-                        ranges.push((c.start, c.end(), media));
+                        let media = match &c.compound {
+                            Some(k) => vidcut_core::otio::played_by(k),
+                            None => vec![c.media.clone()],
+                        };
+                        ranges.push((c.start, c.end(), Some(media)));
                     }
                 }
                 self.render.delete_frames(p, &ranges)
