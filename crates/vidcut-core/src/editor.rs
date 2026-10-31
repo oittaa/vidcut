@@ -4898,13 +4898,13 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
     let pool: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
     let (from, to) = (t.fps, p.settings.fps);
     let conv = |f: i64| rescale(f, from, to);
+    let ratio = to.as_f64() / from.as_f64();
     let retime = |list: &mut Vec<Value>| {
         if from != to && !list.is_empty() {
             let mut e = Effects {
                 from: 0,
                 list: std::mem::take(list).into_iter().map(Kept::from).collect(),
             };
-            let ratio = to.as_f64() / from.as_f64();
             e.retime(|x| (x * ratio).round());
             e.scale_handles(ratio);
             *list = e.list.into_iter().map(Kept::into_value).collect();
@@ -4931,16 +4931,8 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
         retime(&mut c.effects);
         retime(&mut c.audio_effects);
         if from != to {
-            let ratio = to.as_f64() / from.as_f64();
-            for k in &mut c.gain_keys {
-                k.frame = conv(k.frame);
-                for h in [&mut k.in_handle, &mut k.out_handle].into_iter().flatten() {
-                    h.frames *= ratio;
-                }
-            }
-            c.gain_keys.dedup_by_key(|k| k.frame);
+            c.gain_keys = crate::keyframes::scaled(&c.gain_keys, conv, ratio);
             if let Some(picture) = c.picture.as_mut() {
-                let ratio = to.as_f64() / from.as_f64();
                 picture.scale_times(&conv, ratio);
             }
         }
@@ -4948,6 +4940,9 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
     }
     for x in &mut t.transitions {
         (x.before, x.after) = (conv(x.before), conv(x.after));
+        if from != to {
+            otio::transitions::scale_curve(&mut x.otio, conv, ratio);
+        }
     }
     for k in &mut t.markers {
         (k.at, k.duration) = (conv(k.at), conv(k.duration).max(1));

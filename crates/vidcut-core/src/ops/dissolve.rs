@@ -341,30 +341,13 @@ fn resized(old: &Transition, kind: &PictureTransition, frames: i64) -> PictureTr
         && transitions::kind_of(old).as_ref() == Some(&kind)
         && let Some(m) = kind.motion_mut()
     {
-        m.curve = scaled(&m.curve, was, frames);
+        m.curve = crate::keyframes::scaled(
+            &m.curve,
+            |k| (k * frames).div_euclid(was),
+            frames as f64 / was as f64,
+        );
     }
     kind
-}
-
-fn scaled(curve: &[Keyframe], was: i64, now: i64) -> Vec<Keyframe> {
-    let ratio = now as f64 / was as f64;
-    let handle = |h: Option<Handle>| {
-        h.map(|h| Handle {
-            frames: h.frames * ratio,
-            ..h
-        })
-    };
-    let mut keys: Vec<Keyframe> = curve
-        .iter()
-        .map(|k| Keyframe {
-            frame: (k.frame * now).div_euclid(was),
-            value: k.value,
-            in_handle: handle(k.in_handle),
-            out_handle: handle(k.out_handle),
-        })
-        .collect();
-    keys.dedup_by_key(|k| k.frame);
-    keys
 }
 
 #[allow(clippy::too_many_arguments)]
