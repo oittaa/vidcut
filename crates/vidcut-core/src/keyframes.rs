@@ -42,14 +42,68 @@ fn between_values(
         return av + (bv - av) * x / len;
     }
     let (out, into) = (a.out_handle.unwrap_or(FLAT), b.in_handle.unwrap_or(FLAT));
-    let x1 = out.frames.clamp(0.0, len);
-    let x2 = len + into.frames.clamp(-len, 0.0);
-    let u = solve(|u| cubic([0.0, x1, x2, len], u), x);
+    let xs = reach(a, b);
+    let u = solve(|u| cubic(xs, u), x);
     let (ov, iv) = match offset {
         ValueOffset::Handle => (out.value, into.value),
         ValueOffset::Zero => (0.0, 0.0),
     };
     cubic([av, av + ov, bv + iv, bv], u)
+}
+
+fn reach(a: &Keyframe, b: &Keyframe) -> [f64; 4] {
+    let len = (b.frame - a.frame) as f64;
+    let (out, into) = (a.out_handle.unwrap_or(FLAT), b.in_handle.unwrap_or(FLAT));
+    [
+        0.0,
+        out.frames.clamp(0.0, len),
+        len + into.frames.clamp(-len, 0.0),
+        len,
+    ]
+}
+
+pub fn split(keys: &mut Vec<Keyframe>, frame: i64) -> usize {
+    let i = keys.partition_point(|k| k.frame < frame);
+    if keys.get(i).is_some_and(|k| k.frame == frame) {
+        return i;
+    }
+    let mut key = Keyframe {
+        frame,
+        value: value_at(keys, frame as f64).unwrap_or(0.0),
+        in_handle: None,
+        out_handle: None,
+    };
+    if i > 0 && i < keys.len() && (keys[i - 1].out_handle.is_some() || keys[i].in_handle.is_some())
+    {
+        let (a, b) = (&keys[i - 1], &keys[i]);
+        let xs = reach(a, b);
+        let (ov, iv) = (
+            a.out_handle.unwrap_or(FLAT).value,
+            b.in_handle.unwrap_or(FLAT).value,
+        );
+        let ys = [a.value, a.value + ov, b.value + iv, b.value];
+        let u = solve(|u| cubic(xs, u), (frame - a.frame) as f64);
+        let lerp = |p: [f64; 2], q: [f64; 2]| [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u];
+        let p: [[f64; 2]; 4] = std::array::from_fn(|j| [xs[j], ys[j]]);
+        let (l0, l1, l2) = (lerp(p[0], p[1]), lerp(p[1], p[2]), lerp(p[2], p[3]));
+        let (m0, m1) = (lerp(l0, l1), lerp(l1, l2));
+        let mid = lerp(m0, m1);
+        let handle = |to: [f64; 2], from: [f64; 2]| Handle {
+            frames: to[0] - from[0],
+            value: to[1] - from[1],
+        };
+        key.value = mid[1];
+        key.in_handle = Some(handle(m0, mid));
+        key.out_handle = Some(handle(m1, mid));
+        if keys[i - 1].out_handle.is_some() {
+            keys[i - 1].out_handle = Some(handle(l0, p[0]));
+        }
+        if keys[i].in_handle.is_some() {
+            keys[i].in_handle = Some(handle(l2, p[3]));
+        }
+    }
+    keys.insert(i, key);
+    i
 }
 
 pub fn value_mapped(keys: &[Keyframe], frame: f64, value: impl Fn(usize) -> f64) -> Option<f64> {

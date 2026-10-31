@@ -1234,9 +1234,12 @@ pub struct Motion {
     /// With a `custom` ease, the keys of the move: from 0, the outgoing
     /// picture, to 1, the incoming picture, at frames from the start of the
     /// transition, in order and no two on one frame. Without keys, the
-    /// transition stays on the outgoing picture.
+    /// transition stays at `progress`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub curve: Vec<Keyframe>,
+    /// With a `custom` ease and no keys, the move at each frame, from 0 to 1.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub progress: f64,
 }
 
 impl Motion {
@@ -1247,6 +1250,7 @@ impl Motion {
         motion_blur: 0.0,
         ease: MotionEase::None,
         curve: Vec::new(),
+        progress: 0.0,
     };
 }
 

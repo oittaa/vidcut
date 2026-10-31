@@ -310,6 +310,8 @@ The bar and the Jobs button:
   - The core first loads a plan that it still owes. Why: the player does not show an older title.
 - The Titles tab (`title_browser::Browser`) draws its cards with `burn::title`. A dragged card (`Gesture::Title`) drops as `titles.add`.
 - The Inspector shows a selected transition with `Workspace::transition_form`. A change of length or alignment sends the type again (`fades::kind`), as `edit.dissolve` makes a new transition.
+  - The Transition Curve row edits the curve at the playhead with `transitions::put_progress`, `toggle_key` and `reset_curve`. The row sends the whole type with `edit.transition`.
+  - `keyframes::split` adds a key between two keys. On a curved part, it cuts the Bezier curve at the key, and the shape stays.
 - The Transitions tab (`transition_browser::GROUPS`) draws its cards. A dragged card (`Gesture::Transition`) drops as `edit.dissolve` on an edit, and as `edit.transition` on a transition.
 - A hovered card previews with `Handle::preview_free_title`: the core adds the title at the playhead to its copy of the project (`FreeTitle`).
 

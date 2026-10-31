@@ -131,6 +131,9 @@ fn checked(kind: &PictureTransition) -> Result<()> {
     if !(0.0..=1.0).contains(&m.motion_blur) {
         return Err(Error::invalid("a motion blur is from 0 to 1"));
     }
+    if !(0.0..=1.0).contains(&m.progress) {
+        return Err(Error::invalid("a progress is from 0 to 1"));
+    }
     if !m.curve.is_empty() && m.ease != MotionEase::Custom {
         return Err(Error::invalid("a curve goes with the custom ease only"));
     }

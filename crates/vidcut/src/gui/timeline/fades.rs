@@ -1,14 +1,17 @@
 use eframe::egui::{self, Key, RichText};
+use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, CARET_LEFT, CARET_RIGHT, DIAMOND};
 use serde_json::{Value, json};
 use vidcut_core::model::{
     MAX_BORDER, MotionEase, PictureTransition, Project, PushPreset, SlidePreset, Transition,
     WipeDirection,
 };
 use vidcut_core::ops;
+use vidcut_core::otio::transitions;
 use vidcut_core::time::{Rational, format_timecode, parse_media_timecode};
 
 use super::{EditSel, TrackRef, geometry};
 use crate::gui::workspace::Workspace;
+use crate::live::PlayerId;
 
 #[derive(Debug, Clone)]
 pub struct FadeDialog {
@@ -324,8 +327,10 @@ impl Workspace {
             Some((track, at, k)) if (*track, *at) == (e.track, e.at) => Some(k.clone()),
             _ => kind.clone().filter(|k| k.motion().is_some()),
         };
-        let (mut drafted_values, mut committed) = (false, false);
+        let (mut drafted_values, mut committed, mut seek) = (false, false, None);
         let length = x.before + x.after;
+        let start = e.at - x.before;
+        let playhead = self.snap.timeline.position - start;
         let mut frames = match self.timeline.transition_frames {
             Some((track, at, f)) if (track, at) == (e.track, e.at) => f,
             _ => length,
@@ -399,7 +404,8 @@ impl Workspace {
                         picked = Some(rgb);
                     }
                 };
-                (drafted_values, committed) = motion_rows(ui, k, width, color);
+                (drafted_values, committed, seek) =
+                    motion_rows(ui, k, (width, playhead, length), color);
             }
         });
         if let Some(k) = values.filter(|_| drafted_values || committed) {
@@ -407,6 +413,9 @@ impl Workspace {
         }
         if committed && let Some((track, at, k)) = self.timeline.transition_values.take() {
             self.set_transition(track, at, &k);
+        }
+        if let Some(f) = seek {
+            self.seek(PlayerId::Timeline, start + f, false);
         }
         if dragged {
             self.timeline.transition_frames = Some((e.track, e.at, frames));
@@ -509,11 +518,11 @@ impl Workspace {
 fn motion_rows(
     ui: &mut egui::Ui,
     k: &mut PictureTransition,
-    width: f64,
+    (width, at, frames): (f64, i64, i64),
     color: impl FnOnce(&mut egui::Ui, [u8; 3]),
-) -> (bool, bool) {
+) -> (bool, bool, Option<i64>) {
     use super::super::dialog;
-    let (mut changed, mut done) = (false, false);
+    let (mut changed, mut done, mut seek) = (false, false, None);
     dialog::row(ui, "Preset", |ui| match k {
         PictureTransition::Push { preset, .. } => {
             let pushes = PushPreset::ALL.map(|p| (p, push_label(p)));
@@ -541,7 +550,7 @@ fn motion_rows(
         });
     }
     let Some(m) = k.motion_mut() else {
-        return (changed, done);
+        return (changed, done, seek);
     };
     dialog::row(ui, "Border", |ui| {
         let mut shown = m.border * width;
@@ -573,12 +582,55 @@ fn motion_rows(
     dialog::row(ui, "Ease", |ui| {
         let eases = MotionEase::ALL.map(|e| (e, ease_label(e)));
         if let Some(e) = menu(ui, "transition-ease", m.ease, &eases) {
-            m.ease = e;
-            m.curve.clear();
+            transitions::set_ease(m, frames, e);
             done = true;
         }
     });
-    (changed, done)
+    dialog::row(ui, "Transition Curve", |ui| {
+        let mut v = transitions::progress_at(m, frames, at);
+        let r = ui.add(
+            egui::DragValue::new(&mut v)
+                .range(0.0..=1.0)
+                .speed(0.01)
+                .max_decimals(3),
+        );
+        if r.changed() {
+            transitions::put_progress(m, frames, at, v);
+            changed = true;
+        }
+        done |= r.drag_stopped() || r.lost_focus();
+        let keys: Vec<i64> = transitions::curve_of(m, frames)
+            .iter()
+            .map(|k| k.frame)
+            .collect();
+        let prev = keys.iter().rev().find(|f| **f < at).copied();
+        let next = keys.iter().find(|f| **f > at).copied();
+        let back = egui::Button::new(CARET_LEFT).frame(false);
+        if ui.add_enabled(prev.is_some(), back).clicked() {
+            seek = prev;
+        }
+        let diamond = egui::Button::selectable(keys.contains(&at), DIAMOND).frame(false);
+        if ui.add(diamond).clicked() {
+            transitions::toggle_key(m, frames, at);
+            done = true;
+        }
+        let forward = egui::Button::new(CARET_RIGHT).frame(false);
+        if ui.add_enabled(next.is_some(), forward).clicked() {
+            seek = next;
+        }
+        let custom = m.ease == MotionEase::Custom
+            && (m.curve != transitions::eased(MotionEase::None, frames) || m.progress != 0.0);
+        let reset = ui.add_visible(
+            custom,
+            egui::Button::new(ARROW_COUNTER_CLOCKWISE).frame(false),
+        );
+        reset.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, custom, "Reset"));
+        if reset.clicked() {
+            transitions::reset_curve(m, frames);
+            done = true;
+        }
+    });
+    (changed, done, seek)
 }
 
 #[cfg(test)]

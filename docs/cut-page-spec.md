@@ -672,7 +672,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Border puts a band of Color on the moving edge. Its width is a part of the shorter side of the frame.
   - Feather fades one picture into the other across the band. The band then shows no color.
   - Motion Blur blurs along the move. A Push blurs the whole frame. A Slide blurs the moving picture only.
-  - Ease is None, In, Out, In & Out or Custom. A Custom ease plays the keys of its curve. Without keys, the transition stays on the outgoing picture.
+  - Ease is None, In, Out, In & Out or Custom. A Custom ease plays the keys of its curve. Without keys, it stays at its fixed value, from 0 to 1.
+  - A change to Custom keeps the curve of the ease before it. A change to another ease gives the curve of that ease.
   - A change of the length scales the curve, as in Resolve. A key at frame k goes to k × new / old, rounded down. The handles scale by new / old. The values stay.
   - An import from an OTIO file at another frame rate converts the curve to the project's rate. Each key goes to the nearest frame at that rate. The handles scale by the ratio of the rates.
   - If the scale or the conversion puts two keys on one frame, vidcut keeps the first of them.
@@ -704,12 +705,19 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A Dip To Color Dissolve also has Color. A change goes to the project when the color picker closes.
   - A Push and a Slide also have Preset, Border, Feather, Color, Motion Blur and Ease. A Slide also has Direction: In or Out.
   - Border shows the band in pixels of the timeline width, as Resolve shows it. A change of Border or Motion Blur goes to the project when the drag ends.
+  - A Push and a Slide also have Transition Curve: the curve at the playhead, from 0 to 1. The row has the value, the previous-key and next-key arrows, a keyframe button and Reset.
+    - The frame of a key counts from the first frame of the transition. A key can be outside the transition, as in Resolve.
+    - A change of the value with keys puts a key at the playhead. With no keys, it changes the fixed value.
+    - The keyframe button removes the key at the playhead. Else it adds a key with the value at the playhead.
+    - A new key between two keys keeps the shape of the curve. On a curved part, the key and its neighbors get the handles that cut the curve there.
+    - A change of the curve with an ease other than Custom changes the ease to Custom first.
+    - The arrows move the playhead to the previous or next key.
+    - Reset with Custom gives the straight curve from 0 to 1, and the fixed value 0.
   - Each change is a request: `edit.transition` for the type and its values, `edit.dissolve` for the length and the alignment.
 - **Later:**
   - Smooth Cut
   - Hover Scrub Preview of a transition, and favorites
   - the other values of each type, such as the Style of a dissolve and the border of a wipe
-  - the Transition Curve of a Push or a Slide in the Inspector, for the keys of a Custom ease ([todo](todo/effects-library.md))
   - moving a transition to another edit
   - Change Transition Type, Set as Default Transition
   - cutting, copying and pasting transitions

@@ -9,11 +9,11 @@ The Cut page has separate tabs for transitions, titles and effects (p. 636). vid
 
 Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
-1. **The Transition Curve of Push and Slide** in the Inspector.
-   - A Custom ease plays the keys of its curve. A request and an OTIO file can give the keys.
-   - The Inspector has no Transition Curve row yet. Thus a Custom ease set in the Inspector has no keys, and the transition stays on the outgoing picture, as in Resolve.
-   - The row gets the controls of Resolve's row ([gotchas](../gotchas.md#resolves-otio-files)): a slider, a value from 0 to 1, a keyframe button and a reset button.
-   - To measure: a shorter length can put two keys of a curve on one frame. vidcut keeps the first. Which key Resolve keeps is not known.
+1. **The Transition Curve of Push and Slide: what Resolve does in these cases is not measured.**
+   - A shorter length can put two keys of a curve on one frame. vidcut keeps the first.
+   - The keyframe button with an ease other than Custom. vidcut changes the ease to Custom first, as a change of the value does.
+   - The removal of the last key. vidcut keeps the fixed value as it was.
+   - Reset with Custom and a fixed value other than 0. vidcut sets the fixed value to 0.
 2. **Smooth Cut** (p. 759). It hides a jump cut with the frame interpolation of Retime Process.
 3. **Effects tab and clip effects** (p. 765).
    - A drag onto a clip adds the effect. A double-click adds it to the selected clip.
