@@ -425,6 +425,16 @@ A made frame of a speed change ([which source frame](#which-source-frame)):
   - It draws the coverage of the picture, and blurs it by the same effects (`blur::mask_bind`).
   - The layer takes its colors from the first and its alpha from the second.
 
+The colors mode (`VideoFrames::colors_only`):
+
+- A job of the clip level of the render cache draws in this mode ([playback](playback.md#the-render-cache)).
+- A placed layer with a Retime Process gives the colors of each frame over the whole frame (`Look`).
+  - A frame between two source frames is a made frame.
+  - A frame on a source frame, or with no frame before it, takes the colors of that frame (`VideoFrames::colors_frame`).
+  - Why the whole frame: a file has one size, and the bounds of a picture change with its keyframes.
+- The draw then places no layer. Thus the file holds colors only, and the cache needs no alpha.
+- A layer of such a file has `made` (`render::Shape`). The draw places its frames with `Sampling::Placed`, over the whole frame, as it places a made frame.
+
 The passes:
 
 - A large sigma needs many taps. A pass of at most 128 pixels of sigma keeps each draw short.

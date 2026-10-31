@@ -9,7 +9,7 @@ use crate::disk_cache::Kind;
 use crate::lru::Lru;
 use crate::model::{ClipCache, CompositeMode, Project, RenderCache, Retime, SuperScale, Upscaler};
 use crate::preferences::{ProxyCodec, RenderCachePrefs};
-use crate::render::{Placed, RenderPlan, ShownTitle, VideoPiece};
+use crate::render::{Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
 
 pub type Key = [u8; 16];
 
@@ -192,6 +192,27 @@ impl Setup<'_> {
         })
     }
 
+    fn shape(&self, layer: &VideoPiece) -> Option<Shape> {
+        let VideoPiece::Source {
+            media,
+            retime,
+            placed,
+            ..
+        } = layer
+        else {
+            return None;
+        };
+        if retime.is_nearest() || placed.is_empty() {
+            return None;
+        }
+        let v = self.project.media(media)?.info.video.as_ref()?;
+        Some(Shape {
+            size: (v.width, v.height),
+            sar: (v.sar[0], v.sar[1]),
+            rotation: v.rotation,
+        })
+    }
+
     fn name(&self, media: &str, path: &Path) -> String {
         self.project
             .media(media)
@@ -224,8 +245,8 @@ impl Setup<'_> {
 fn lone(layer: &VideoPiece) -> bool {
     matches!(
         layer,
-        VideoPiece::Source { image: None, retime, placed, .. }
-            if retime.is_nearest() || placed.is_empty()
+        VideoPiece::Source { image: None, retime, placed, pace, .. }
+            if retime.is_nearest() || placed.is_empty() || pace.speed() > 0.0
     )
 }
 
@@ -245,7 +266,9 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
             (true, true) => super_scale.sharpness = Default::default(),
             (true, false) => *super_scale = Default::default(),
         }
-        placed.clear();
+        if retime.is_nearest() {
+            placed.clear();
+        }
         *cache = ClipCache::Auto;
         *excluded = false;
     }
@@ -711,7 +734,8 @@ impl Cache {
                 let mut part = piece.part(k as i64, m as i64);
                 for (layer, a) in part.layers_mut().into_iter().zip(&at) {
                     if let Some((f, i)) = a {
-                        from_file(layer, f, *i);
+                        let shape = setup.shape(layer);
+                        from_file(layer, f, *i, shape);
                     }
                 }
                 video.push(part);
@@ -755,6 +779,7 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
         placed: Vec::new(),
         cache: ClipCache::Auto,
         excluded: false,
+        made: None,
     };
     match part {
         VideoPiece::Titled { titles, .. } => VideoPiece::Titled {
@@ -765,7 +790,7 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
     }
 }
 
-fn from_file(layer: &mut VideoPiece, file: &Path, at: u32) {
+fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>) {
     crate::disk_cache::used(file);
     if let VideoPiece::Source {
         media,
@@ -777,6 +802,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32) {
         color_space,
         super_scale,
         retime,
+        made,
         ..
     } = layer
     {
@@ -793,6 +819,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32) {
             false => {
                 *super_scale = Default::default();
                 *retime = Default::default();
+                *made = shape;
             }
         }
     }

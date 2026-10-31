@@ -496,7 +496,7 @@ impl Render {
                 return Ok(true);
             };
             let written = vidcut_av::render_cache::write(
-                &job.plan,
+                (&job.plan, job.clip),
                 &job.keys,
                 &encoders,
                 gpu.as_ref(),

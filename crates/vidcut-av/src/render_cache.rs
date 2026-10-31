@@ -42,7 +42,7 @@ pub struct Written {
 }
 
 pub fn write(
-    plan: &RenderPlan,
+    (plan, clip): (&RenderPlan, bool),
     keys: &[Key],
     encoders: &[(ProxyEncoder, bool)],
     decoder: Option<&crate::hw::GpuDecoder>,
@@ -70,7 +70,7 @@ pub fn write(
     drop(file);
     let mut errors = Vec::new();
     for (enc, high) in encoders {
-        match encode_plan(plan, (enc, *high), part.path(), decoder, cancel) {
+        match encode_plan((plan, clip), (enc, *high), part.path(), decoder, cancel) {
             Ok(frames) => {
                 part.keep(&dest)
                     .map_err(|e| Error::Invalid(format!("replacing {}: {e}", dest.display())))?;

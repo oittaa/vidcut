@@ -55,6 +55,7 @@ fn main() {
         placed: Vec::new(),
         cache: Default::default(),
         excluded: false,
+        made: None,
     };
     let plan = RenderPlan {
         fps,

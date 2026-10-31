@@ -496,6 +496,7 @@ mod tests {
             placed: Vec::new(),
             cache: Default::default(),
             excluded: false,
+            made: None,
         }
     }
 

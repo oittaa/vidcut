@@ -368,14 +368,16 @@ The two levels (spec D98):
 
 - `Setup::levels` puts each reason of a layer at a level. `Reason::On`, `Reason::Media`, `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime` and `Reason::SuperScale` go to the clip level. The other reasons go to the timeline level.
 - A layer takes the clip level only when all these are true. Otherwise all its reasons go to the timeline level.
-  - It is a video file (`lone`). Its retime is Nearest, or its `placed` is empty.
-    - Why: the export makes a frame between two source frames at the placement of the clip ([export](export.md#which-source-frame)). It makes its alpha from the placement later. With no placement, the frame is the whole picture of the layer.
+  - It is a video file (`lone`). A layer with a Retime Process and a placement also plays forward.
+    - Why: the export makes the frames between two source frames only forward ([export](export.md#which-source-frame)). A placed layer at the clip level needs these made frames.
   - Its media has no alpha channel (`Setup::opaque`).
     - Why: the cache files have no alpha channel. The tracks below would not show through the clip.
   - Its clip is not set to `ClipCache::Off`.
 - `Cache::apply` puts the timeline level first. Where a frame of the timeline level is not there, it puts each found frame of the clip level in place of the layer (`from_file`).
   - The layer keeps its `placed` and its `retime`. The file takes the place of the media, as a proxy does. Thus the Transform and the effects work on it as on the media.
   - A layer with a Retime Process takes the Nearest retime and no `super_scale`. Why: the file holds its frames as the timeline shows them.
+  - A placed layer with a Retime Process also takes `made`: the `Shape` of its media (`Setup::shape`). The draw then places the colors of the file as a made frame (`Sampling::Placed`).
+    - The shape is that of the media. With AI Super Scale, the enlarged picture has the shape of the media, with its sides rounded to whole pixels.
   - With an AI upscaler, the file holds the enlarged picture. The layer then takes `Upscaler::Classic` with its Sharpness. Thus the draw uses the same kernel, and the AI upscaler does not run again.
   - `Index::run` follows the names of a file. Thus a run continues while the file holds the next name of the layer, also where a slow speed shows a frame twice.
   - A file of the clip level can hold one name many times, for example a freeze frame. `Index::add` keeps the first place of each name in the file. Thus a run starts at the start of the repeat.
@@ -390,11 +392,12 @@ The names of frames:
   - The player's key of a decoded frame (`source_key`) also leaves out the `render_cache` of effects. Thus a check in Render Cache Effects does not upscale again.
   - The name also holds the `Look` (the size and the codec), the frame rate, the colors of the timeline and the version of vidcut.
 - `Cache::clip_keys` names each frame of the clip level by a SHA-256 of its source frame alone (`alone`). It holds the media, the frame and the colors of the media.
-  - The name has no speed, no placement and no clip settings. Thus a frame that two clips show has one name.
+  - Without a Retime Process, the name has no speed, no placement and no clip settings. Thus a frame that two clips show has one name.
   - With an AI upscaler, the name holds the upscaler, but not the Sharpness. Why: the Sharpness changes only the draw after the cache.
   - The name also holds the size, the colors of the timeline, the codec and the version of vidcut. The size is that of the media, or of its proxy with proxies on (`Look::longest`).
   - With an AI upscaler, the size is that of the enlarged picture (`Setup::upscaled`, vidcut-av `ai_size`). It comes from the placement and the timeline size, as in an export. Thus a zoom that changes it renders the clip again.
-  - With a Retime Process, the size is that of the `Look`. The name also holds the Retime Process, the `super_scale` and the exact source position (`VideoPiece::exact`).
+  - With a Retime Process, the size is that of the `Look`. The name also holds the Retime Process, the `super_scale`, the placement and the exact source position (`VideoPiece::exact`).
+    - Thus a change of the Transform or of an effect renders a placed clip again.
 - An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
 - `Look::of` gives the size and the codec. With proxies on, they are those of proxies. With proxies off, the size is that of the timeline.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.
@@ -409,7 +412,8 @@ The files:
 - `Cache::next` gives the next `Job` with its own plan. The draw of the export makes its frames (`encode_plan`), as for proxies.
   - At the timeline level, `render_cache::segment` cuts the plan of the timeline.
   - At the clip level, the plan holds the one layer, with no placement, at the size of the media (`clip_plan`). With an AI upscaler, the plan has the size of the enlarged picture, and the layer keeps its `super_scale`.
-  - With a Retime Process, the plan has the size of the `Look`. The layer keeps its `retime` and its `super_scale`.
+  - With a Retime Process, the plan has the size of the `Look`. The layer keeps its `retime`, its `super_scale` and its `placed`.
+  - A job of the clip level draws in the colors mode of the export (`VideoFrames::colors_only`). Thus a placed layer gives its made frames, with no edges and no alpha ([export](export.md#effects)).
   - At the same place, the clip level renders first. Then the render goes on from there at the timeline level.
 - `cache_encoders` gives the encoders, in order:
   - With proxies on: the encoders of the proxy codec.

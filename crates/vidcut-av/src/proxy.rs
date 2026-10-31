@@ -589,7 +589,7 @@ pub(crate) enum Failed {
 }
 
 pub(crate) fn encode_plan(
-    plan: &vidcut_core::render::RenderPlan,
+    (plan, colors): (&vidcut_core::render::RenderPlan, bool),
     (enc, high): (&ProxyEncoder, bool),
     tmp: &Path,
     decoder: Option<&crate::hw::GpuDecoder>,
@@ -630,6 +630,9 @@ pub(crate) fn encode_plan(
                 .with_timeline(plan.colors)?;
         if let Some(d) = decoder {
             frames = frames.decode_on(d.clone());
+        }
+        if colors {
+            frames = frames.colors_only();
         }
         for j in 0..plan.frames {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
