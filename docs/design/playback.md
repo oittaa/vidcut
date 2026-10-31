@@ -178,7 +178,8 @@ flowchart TD
 - Each run that the audio thread queues carries a `Marker`: from this ring position, this timeline sample, at this speed, for this play request.
 - `Shared::clock_frame` chains `Heard::counter_at`, `Markers::sample_at` and the plan into the frame heard at this moment.
 - Until the sound of a play request is heard, the clock stands at its start. When the ring runs dry, the clock stops.
-- `Player::present` returns the kept picture of that frame. Until it is decoded, it returns the newest picture that a seek landed on, or the last picture shown, marked as not exact.
+- `Player::present` returns the kept picture of that frame. Until it is decoded, it returns the newest picture that a seek landed on, or the last picture shown.
+  - That result is not exact. Its placement, titles and subtitles are still those of this frame.
 - `Player::next_change` tells when the next frame is due.
 - Without a device, the silent `PacedOutput` pulls the ring in real time. Thus the clock runs.
 
