@@ -487,6 +487,11 @@ The background render (`live::render_cache::Background`):
   - It renders from the playhead forward, then from the start.
   - It writes one file at a time (vidcut-av `render_cache::write`), and adds it to the index (`Index::add`). The viewer then reloads the plan.
   - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
+- `cache.render` in a GUI starts the render at once (`Background::render_now`). It does not wait for the time without activity.
+  - It first stops a render that runs. Thus only one render writes the cache.
+- Without a GUI, the CLI process renders the cache (`render_all`).
+  - It makes the plan of the viewer, as the live core does (`flatten_lanes`, `shown`), and scans the index.
+  - It runs the same `Render` on the thread of the request, from the start. It ends when the mode has nothing left to render.
 - `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
   - All also removes the marks (`Index::clear`).
   - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
