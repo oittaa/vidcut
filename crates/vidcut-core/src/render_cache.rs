@@ -388,6 +388,14 @@ impl Cache {
             }
         }
         plan.video = video;
+        let gone: Vec<Arc<Path>> = seen
+            .into_iter()
+            .filter(|(_, there)| !there)
+            .map(|(f, _)| f)
+            .collect();
+        for f in &gone {
+            self.index.remove(f);
+        }
     }
 }
 
