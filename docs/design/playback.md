@@ -352,8 +352,12 @@ flowchart LR
 What it renders:
 
 - `render_cache::reasons` gives the reasons of each video piece of the plan (`Reason`).
-- `Setup::reasons` keeps the reasons of the mode. Smart keeps all. User keeps `Reason::On` and the kinds that `RenderCachePrefs` turns on.
+- `Setup::reasons` keeps the reasons of the mode. Smart keeps all. User keeps `Reason::On`, `Reason::Effect` and the kinds that `RenderCachePrefs` turns on.
 - A clip set to `ClipCache::Off` gives no `Reason::Media` and no `Reason::SuperScale`. Its other reasons stay (spec D98).
+- An `Effect` with `render_cache` on gives `Reason::Effect`, also in a `Placed` around a title. An effect that is off gives none.
+- Each `VideoPiece::Source` and `VideoPiece::Black` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
+  - In User mode, an excluded piece gives no `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime`, `Reason::Transition`, `Reason::Opacity` or `Reason::Composite`.
+  - Why the black pieces: the black side of a Push or a dip is a part of the transition of the track.
 - Slow media (`Reason::Media`) are of two kinds:
   - With GPU decoding on, media of a long-GOP codec that the GPU decoder does not take (vidcut-av `render_cache::slow`).
   - The render thread checks each file once. It keeps the answer by the path of the file, until the GPU preferences change.
@@ -366,6 +370,8 @@ The names of frames:
 - `Cache::keys` names each frame by a SHA-256 of its piece of one frame (`VideoPiece::part`).
   - In the piece, the fingerprint of each media takes the place of its path.
   - The piece has no clip ids and no times on the timeline. Thus a part that moves keeps its names.
+  - The piece has no `ClipCache`, no `excluded` and no `render_cache` of its effects. Thus a change of these settings keeps the names.
+  - The player's key of a decoded frame (`source_key`) also leaves out the `render_cache` of effects. Thus a check in Render Cache Effects does not upscale again.
   - The name also holds the `Look` (the size and the codec), the frame rate, the colors of the timeline and the version of vidcut.
 - An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
 - `Look::of` gives the size and the codec. With proxies on, they are those of proxies. With proxies off, the size is that of the timeline.

@@ -61,6 +61,7 @@ fn main() {
                 retime: vidcut_core::model::Retime::Nearest,
                 placed: Vec::new(),
                 cache: Default::default(),
+                excluded: false,
             };
             let t = Instant::now();
             reader

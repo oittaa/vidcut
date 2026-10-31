@@ -9,17 +9,8 @@ The render cache renders the slow parts of the timeline in the background ([spec
 The manual describes the render cache on pp. 143–144 and 199–206.
 
 - Smart caches speed effects at the level of the source. Thus a moved clip keeps its cache.
-- Resolve FX and OFX on a clip are cached only when the user picks them, in Smart and in User mode.
-  - The menu of a clip has Render Cache OFX Filter, with each filter of the clip.
-- A track header has Exclude Track from Caching.
+- Resolve caches the checked Resolve FX and OFX of a clip in its node cache, before the tracks mix.
 - The render cache format of a new project in Resolve Studio 21.1.2 is ProRes 422 HQ (`apch`).
-
-## Effects and tracks
-
-- The menu of a clip has Render Cache Effects, with each effect of the clip.
-  - A checked effect renders in Smart and in User mode, as in Resolve.
-  - `effects.set` takes `render_cache`: true for a checked effect.
-- A track can be out of the cache (Exclude Track from Caching). `track.set` takes `render_cache`: false.
 
 ## The clip level
 
@@ -88,10 +79,9 @@ The owner accepted these. Each goes into [deviations.md](../deviations.md) with 
 
 ## Steps
 
-1. **Effects and tracks:** Render Cache Effects, and Exclude Track from Caching.
-2. **The clip level.**
-3. **One record of each frame:** the kept `Id` and `Origin`, and the names of the processes.
-4. **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
-5. **Dropped frames:** the times of each layer in `Origin`, and the marks.
+1. **The clip level.**
+2. **One record of each frame:** the kept `Id` and `Origin`, and the names of the processes.
+3. **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
+4. **Dropped frames:** the times of each layer in `Origin`, and the marks.
 
 Each step adds its part to the spec, the design docs and the deviations. The last step deletes this file.

@@ -9,7 +9,7 @@ use crate::disk_cache::Kind;
 use crate::lru::Lru;
 use crate::model::{ClipCache, CompositeMode, Project, RenderCache};
 use crate::preferences::{ProxyCodec, RenderCachePrefs};
-use crate::render::{RenderPlan, ShownTitle, VideoPiece};
+use crate::render::{Placed, RenderPlan, ShownTitle, VideoPiece};
 
 pub type Key = [u8; 16];
 
@@ -21,6 +21,7 @@ pub const FILE: &str = "mkv";
 #[serde(rename_all = "snake_case")]
 pub enum Reason {
     On,
+    Effect,
     Media,
     Speed,
     Retime,
@@ -35,6 +36,7 @@ impl Reason {
     pub fn title(self) -> &'static str {
         match self {
             Self::On => "Render Cache On",
+            Self::Effect => "Render Cache Effect",
             Self::Media => "Slow Media",
             Self::Speed => "Speed Change",
             Self::Retime => "Retime Process",
@@ -48,7 +50,7 @@ impl Reason {
 
     fn user(self, prefs: &RenderCachePrefs) -> bool {
         match self {
-            Self::On => true,
+            Self::On | Self::Effect => true,
             Self::Transition => prefs.transitions,
             Self::Opacity | Self::Composite => prefs.composites,
             Self::AiRetime | Self::SuperScale => prefs.ai,
@@ -93,7 +95,7 @@ pub struct Setup<'a> {
 
 impl Setup<'_> {
     pub fn reasons(&self, piece: &VideoPiece) -> Vec<Reason> {
-        let mut out = reasons(piece, self.slow);
+        let mut out = reasons(piece, self.slow, self.mode == RenderCache::User);
         out.retain(|r| match self.mode {
             RenderCache::Off => false,
             RenderCache::Smart => true,
@@ -126,7 +128,13 @@ impl Setup<'_> {
     }
 }
 
-pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool) -> Vec<Reason> {
+fn checked(placed: &[Placed]) -> bool {
+    placed
+        .iter()
+        .any(|p| p.picture.effects.iter().any(|e| e.on && e.render_cache))
+}
+
+pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<Reason> {
     let mut out = Vec::new();
     let layers = piece.layers();
     let motions = piece.motions();
@@ -141,41 +149,50 @@ pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool) -> Vec<Reason> {
             retime,
             placed,
             cache,
+            excluded,
             ..
         } = layer
         else {
-            if moved {
+            let excluded = matches!(layer, VideoPiece::Black { excluded: true, .. });
+            if moved && !(user && excluded) {
                 out.push(Reason::Transition);
             }
             continue;
         };
         let own = *cache != ClipCache::Off;
+        let mixed = !(user && *excluded);
         let still = matches!(image, Some(crate::render::Image::Still));
         let found = [
             (*cache == ClipCache::On, Reason::On),
+            (checked(placed), Reason::Effect),
             (own && image.is_none() && slow(media), Reason::Media),
-            (!still && !pace.is_normal(), Reason::Speed),
+            (mixed && !still && !pace.is_normal(), Reason::Speed),
             (
-                !still && !retime.is_nearest() && !retime.ai(),
+                mixed && !still && !retime.is_nearest() && !retime.ai(),
                 Reason::Retime,
             ),
-            (!still && retime.ai(), Reason::AiRetime),
+            (mixed && !still && retime.ai(), Reason::AiRetime),
             (own && super_scale.ai(), Reason::SuperScale),
-            (moved, Reason::Transition),
+            (mixed && moved, Reason::Transition),
             (
-                placed
-                    .iter()
-                    .any(|p| p.picture.opaque() < 1.0 || !p.picture.opacity_keys.is_empty()),
+                mixed
+                    && placed
+                        .iter()
+                        .any(|p| p.picture.opaque() < 1.0 || !p.picture.opacity_keys.is_empty()),
                 Reason::Opacity,
             ),
             (
-                placed
-                    .iter()
-                    .any(|p| p.picture.mode() != CompositeMode::Normal),
+                mixed
+                    && placed
+                        .iter()
+                        .any(|p| p.picture.mode() != CompositeMode::Normal),
                 Reason::Composite,
             ),
         ];
         out.extend(found.into_iter().filter(|(on, _)| *on).map(|(_, r)| r));
+    }
+    if piece.titles().iter().any(|(_, t)| checked(&t.placed)) {
+        out.push(Reason::Effect);
     }
     out.sort_unstable();
     out.dedup();
@@ -196,19 +213,16 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
             path,
             placed,
             cache,
+            excluded,
             ..
         } => {
             *media = name(media, path);
             *path = PathBuf::new();
             *cache = ClipCache::Auto;
-            for p in placed {
-                p.clip.clear();
-                if p.ready {
-                    p.start = 0;
-                }
-            }
+            *excluded = false;
+            placed.iter_mut().for_each(plain_placed);
         }
-        VideoPiece::Black { .. } => {}
+        VideoPiece::Black { excluded, .. } => *excluded = false,
         VideoPiece::Mix { under, over } => {
             plain(under, name);
             for o in over {
@@ -224,12 +238,18 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
 
 fn plain_title(t: &mut ShownTitle) {
     t.clip.clear();
-    for p in &mut t.placed {
-        p.clip.clear();
-        if p.ready {
-            p.start = 0;
-        }
+    t.placed.iter_mut().for_each(plain_placed);
+}
+
+fn plain_placed(p: &mut Placed) {
+    p.clip.clear();
+    if p.ready {
+        p.start = 0;
     }
+    p.picture
+        .effects
+        .iter_mut()
+        .for_each(|e| e.render_cache = false);
 }
 
 fn digest(parts: &[&[u8]]) -> Key {
@@ -450,6 +470,7 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
         retime: Default::default(),
         placed: Vec::new(),
         cache: ClipCache::Auto,
+        excluded: false,
     };
     match part {
         VideoPiece::Titled { titles, .. } => VideoPiece::Titled {

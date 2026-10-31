@@ -195,6 +195,9 @@ pub enum VideoPiece {
         /// Its clip's Render Cache.
         #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
         cache: ClipCache,
+        /// Its track is out of the render cache's User mode.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        excluded: bool,
     },
     /// A frame of one color: black, or the color that a dip to color
     /// goes through.
@@ -202,6 +205,9 @@ pub enum VideoPiece {
         frames: i64,
         #[serde(default, skip_serializing_if = "is_black")]
         color: [u8; 3],
+        /// Its track is out of the render cache's User mode.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        excluded: bool,
     },
     /// Pictures over each other: `under`, then each of `over` on top of it,
     /// at its level while a dissolve plays (decision D50), each as long as
@@ -848,6 +854,7 @@ impl VideoPiece {
         Self::Black {
             frames,
             color: BLACK,
+            excluded: false,
         }
     }
     pub fn frames(&self) -> i64 {
@@ -971,6 +978,7 @@ impl VideoPiece {
                 retime,
                 placed,
                 cache,
+                excluded,
                 ..
             } => {
                 let still = matches!(image, Some(Image::Still));
@@ -987,11 +995,15 @@ impl VideoPiece {
                     retime: *retime,
                     placed: placed.iter().map(|p| p.after(k)).collect(),
                     cache: *cache,
+                    excluded: *excluded,
                 }
             }
-            Self::Black { color, .. } => Self::Black {
+            Self::Black {
+                color, excluded, ..
+            } => Self::Black {
                 frames,
                 color: *color,
+                excluded: *excluded,
             },
             Self::Mix { under, over } => Self::Mix {
                 under: Box::new(under.part(k, frames)),
@@ -1015,7 +1027,18 @@ impl VideoPiece {
 
     fn goes_on_as(&self, next: &VideoPiece) -> bool {
         match (self, next) {
-            (Self::Black { color: a, .. }, Self::Black { color: b, .. }) => a == b,
+            (
+                Self::Black {
+                    color: a,
+                    excluded: x,
+                    ..
+                },
+                Self::Black {
+                    color: b,
+                    excluded: y,
+                    ..
+                },
+            ) => a == b && x == y,
             (
                 Self::Source {
                     media,
@@ -1024,6 +1047,7 @@ impl VideoPiece {
                     pace,
                     retime,
                     placed,
+                    excluded,
                     ..
                 },
                 Self::Source {
@@ -1032,10 +1056,12 @@ impl VideoPiece {
                     pace: p2,
                     retime: r2,
                     placed: l2,
+                    excluded: e2,
                     ..
                 },
             ) => {
                 media == m2
+                    && excluded == e2
                     && retime == r2
                     && pace.is_normal()
                     && p2.is_normal()
@@ -1548,6 +1574,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     v.solo = t.solo;
                     v.volume_db = t.volume_db;
                     v.video_enabled &= t.video_enabled;
+                    v.render_cache &= t.render_cache;
                     v.transitions.clear();
                     let mut clips: Vec<(Clip, Nest)> = n
                         .clips
@@ -1841,6 +1868,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 retime: retime_of(c, x, m, s),
                 placed: placed_of(c, nest, over, x),
                 cache: c.render_cache,
+                excluded: false,
             })
         };
     let mut video = Vec::new();
@@ -1848,11 +1876,20 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         let (x, y) = (w[0], w[1]);
         let mut stack: Vec<Layer> = Vec::new();
         for ((t, played), within) in tracks.iter().zip(&dissolves).zip(&inside) {
+            let excluded = !t.render_cache;
+            let black = |color| VideoPiece::Black {
+                frames: y - x,
+                color,
+                excluded,
+            };
             let shows = |c: &&Clip| visible(t, c);
             let shown = |c: &Clip, ramp: Option<Ramp>, below: bool| -> Result<Layer> {
                 let nest =
                     within.and_then(|w| w.get(t.clips.iter().position(|x| std::ptr::eq(x, c))?));
-                let piece = picture(c, nest, below && !fills(c), x, y)?;
+                let mut piece = picture(c, nest, below && !fills(c), x, y)?;
+                if let VideoPiece::Source { excluded: e, .. } = &mut piece {
+                    *e = excluded;
+                }
                 Ok(match &piece {
                     VideoPiece::Source { placed, .. } if !placed.is_empty() => {
                         Layer::Placed(piece, ramp)
@@ -1908,13 +1945,9 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     });
                     let picture = match side.filter(shows) {
                         Some(c) => shown(c, half, !stack.is_empty())?,
-                        None => Layer::Picture(VideoPiece::black(y - x), half),
+                        None => Layer::Picture(black(BLACK), half),
                     };
-                    let backdrop = VideoPiece::Black {
-                        frames: y - x,
-                        color,
-                    };
-                    stack = vec![Layer::Picture(backdrop, None), picture];
+                    stack = vec![Layer::Picture(black(color), None), picture];
                 }
                 Some(d) if let Some(m) = Move::of(d) => {
                     let ramp = |falling| Ramp {
@@ -1931,7 +1964,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                                 Layer::Placed(p, _) => (p, false, false),
                                 _ => unreachable!("a clip shows as a picture"),
                             },
-                            None => (VideoPiece::black(y - x), false, true),
+                            None => (black(BLACK), false, true),
                         })
                     };
                     let ((f, whole_f, gap_f), (g, whole_g, gap_g)) =
@@ -2339,6 +2372,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
             retime: Retime::Nearest,
             placed: Vec::new(),
             cache: Default::default(),
+            excluded: false,
         },
         None => VideoPiece::black(1),
     })
@@ -2382,6 +2416,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     retime: Retime::Nearest,
                     placed: Vec::new(),
                     cache: Default::default(),
+                    excluded: false,
                 },
             );
         } else {
@@ -2799,6 +2834,7 @@ mod tests {
         let red = VideoPiece::Black {
             frames: 5,
             color: [255, 0, 0],
+            excluded: false,
         };
         assert!(!VideoPiece::black(5).goes_on_as(&red));
     }

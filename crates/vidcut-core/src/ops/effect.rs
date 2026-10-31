@@ -11,6 +11,7 @@ pub struct EffectChange {
     pub on: Option<bool>,
     pub blend: Option<f64>,
     pub use_alpha: Option<bool>,
+    pub render_cache: Option<bool>,
     pub strength: Option<f64>,
     pub split: Option<bool>,
     pub vertical_strength: Option<f64>,
@@ -72,6 +73,9 @@ pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result
     if let Some(v) = change.use_alpha {
         next.use_alpha = v;
     }
+    if let Some(v) = change.render_cache {
+        next.render_cache = v;
+    }
     match &mut next.kind {
         EffectKind::GaussianBlur(b) => {
             if let Some(v) = change.strength {
@@ -102,6 +106,7 @@ pub fn reset(p: &mut Project, id: &str, n: usize) -> Result<()> {
     let e = &mut effects_of(p, id, n)?[n];
     *e = Effect {
         on: e.on,
+        render_cache: e.render_cache,
         ..e.kind().made()
     };
     Ok(())

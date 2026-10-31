@@ -336,7 +336,14 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             let made = if super_scale.ai() || !retime.is_nearest() {
                 let placed: Vec<_> = placed
                     .iter()
-                    .map(|p| (&p.picture, p.run, p.source))
+                    .map(|p| {
+                        let mut picture = p.picture.clone();
+                        picture
+                            .effects
+                            .iter_mut()
+                            .for_each(|e| e.render_cache = false);
+                        (picture, p.run, p.source)
+                    })
                     .collect();
                 format!(
                     "|{super_scale:?}|{}x{}|{:?}|{placed:?}",
@@ -475,6 +482,7 @@ mod tests {
                 ready: true,
             }],
             cache: Default::default(),
+            excluded: false,
         }
     }
 
@@ -512,6 +520,7 @@ mod tests {
         let red = VideoPiece::Black {
             frames: 10,
             color: [255, 0, 0],
+            excluded: false,
         };
         assert_ne!(
             source_key(&VideoPiece::black(10), &plan()),

@@ -2656,8 +2656,18 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The menu of a clip has Render Cache (p. 205). `clip.set` with `render_cache` also sets it.
     - Off keeps the slow media and the AI Super Scale of the clip out of both modes.
     - Off does not stop speed changes, Retime Processes, transitions, opacity and composite modes. Resolve caches these in its sequence cache, and no clip setting reaches it (p. 204).
+  - Each effect of a clip has a Render Cache check. It is off, unless set.
+    - The menu of a clip has Render Cache Effects, with each effect of the clip in its order (p. 205). `effects.set` with `render_cache` also sets it.
+    - A checked effect renders in Smart and in User mode, as in Resolve (p. 204). A checked effect that is off renders nothing.
+    - Off on the clip does not stop its checked effects. Why: Resolve has two settings for them.
+  - A video track can be out of the cache.
+    - The menu of the track header has Exclude Track from Caching (p. 204). `track.set` with `render_cache` also sets it.
+    - In User mode, the track gives none of its speed changes, Retime Processes, transitions, opacity and composite modes.
+    - Its clips set to On, its checked effects and its AI Super Scale still render.
+    - The manual gives this setting for User mode only. Thus it does nothing in Smart mode.
   - Smart renders each part of the timeline that has one of these:
     - a clip set to On
+    - a checked effect
     - media that are slow to decode (X103)
     - a speed change
     - a Retime Process other than Nearest (X103)
@@ -2665,7 +2675,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - a transition
     - an opacity below 100%, or keyframes of the opacity
     - a composite mode other than Normal
-  - User renders the clips set to On. It also renders the kinds that Preferences turns on:
+  - User renders the clips set to On and the checked effects. It also renders the kinds that Preferences turns on:
     - Transitions: off, unless set.
     - Composites: off, unless set. It includes opacity, as in Resolve.
     - AI: on, unless set. It is AI Super Scale and the AI Retime Processes. It stands in for the Fusion effects of Resolve.
