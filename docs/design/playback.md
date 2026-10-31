@@ -365,7 +365,7 @@ The names of frames:
   - In the piece, the fingerprint of each media takes the place of its path.
   - The piece has no clip ids and no times on the timeline. Thus a part that moves keeps its names.
   - The name also holds the `Look` (the size and the codec), the frame rate, the colors of the timeline and the version of vidcut.
-- An `Lru` keeps the names of each piece. Thus a plan that does not change is not hashed again.
+- An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
 - `Look::of` gives the size and the codec. With proxies on, they are those of proxies. With proxies off, the size is that of the timeline.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.
 
