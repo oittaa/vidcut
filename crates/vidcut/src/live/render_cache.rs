@@ -130,6 +130,32 @@ impl Background {
         self.touched += 1;
     }
 
+    pub(super) fn rendering(&self) -> bool {
+        self.running.is_some()
+    }
+
+    pub(super) fn mark(&mut self, project: &Project, stretch: (i64, i64)) -> bool {
+        let Some(base) = self.base.clone() else {
+            return false;
+        };
+        self.indexed();
+        let look = self.look(project);
+        let slow = |id: &str| slow_media(project, &self.proxies, &self.decodes, id);
+        let setup = Setup {
+            mode: project.settings.render_cache,
+            prefs: &self.prefs,
+            project,
+            slow: &slow,
+            upscaled: &vidcut_av::export::video::ai_size,
+            look: &look,
+        };
+        let marked = self.lock().mark(&base, &setup, stretch);
+        if marked {
+            self.done = false;
+        }
+        marked
+    }
+
     fn stop(&mut self) {
         if let Some(cancel) = self.running.take() {
             cancel.store(true, Ordering::Relaxed);

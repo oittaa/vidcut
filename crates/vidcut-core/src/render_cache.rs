@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -15,6 +15,7 @@ pub type Key = [u8; 16];
 
 pub const KEYS: &str = "keys";
 pub const MADE: &str = "made";
+pub const MARKS: &str = "marks";
 
 pub const FILE: &str = "mkv";
 
@@ -31,6 +32,7 @@ pub enum Reason {
     Transition,
     Opacity,
     Composite,
+    Drops,
 }
 
 impl Reason {
@@ -46,6 +48,7 @@ impl Reason {
             Self::Transition => "Transition",
             Self::Opacity => "Opacity",
             Self::Composite => "Composite Mode",
+            Self::Drops => "Drops Frames",
         }
     }
 
@@ -67,7 +70,7 @@ impl Reason {
             Self::Transition => prefs.transitions,
             Self::Opacity | Self::Composite => prefs.composites,
             Self::AiRetime(_) | Self::SuperScale(_) => prefs.ai,
-            Self::Media | Self::Speed | Self::Retime(_) => false,
+            Self::Media | Self::Speed | Self::Retime(_) | Self::Drops => false,
         }
     }
 }
@@ -237,6 +240,13 @@ impl Setup<'_> {
             self.look.codec,
             env!("CARGO_PKG_VERSION")
         )
+    }
+
+    fn piece_name(&self, piece: &VideoPiece, plan: &RenderPlan) -> Key {
+        let mut whole = bare(piece).clone();
+        plain(&mut whole, &|m: &str, p: &Path| self.name(m, p));
+        let whole = serde_json::to_vec(&whole).unwrap_or_default();
+        digest(&[self.stem(plan).as_bytes(), &whole])
     }
 
     fn clip_stem(&self, plan: &RenderPlan, (w, h): (u32, u32)) -> String {
@@ -491,10 +501,7 @@ impl Cache {
         let bare = bare(piece);
         let stem = setup.stem(plan);
         let name = |m: &str, p: &Path| setup.name(m, p);
-        let mut whole = bare.clone();
-        plain(&mut whole, &name);
-        let whole = serde_json::to_vec(&whole).unwrap_or_default();
-        let memo = digest(&[stem.as_bytes(), &whole]);
+        let memo = setup.piece_name(piece, plan);
         if let Some(keys) = self.keys.get(&memo) {
             return keys.clone();
         }
@@ -547,8 +554,29 @@ impl Cache {
         Some(keys)
     }
 
+    fn marked(&self, piece: &VideoPiece, setup: &Setup, plan: &RenderPlan) -> bool {
+        if !self.index.has_marks() || !setup.kept(&Reason::Drops) {
+            return false;
+        }
+        self.index.marked(&setup.piece_name(piece, plan))
+    }
+
+    pub fn mark(&mut self, plan: &RenderPlan, setup: &Setup, (from, to): (i64, i64)) -> bool {
+        let mut marked = false;
+        let mut t = plan.range.0;
+        for piece in &plan.video {
+            let frames = piece.frames();
+            if t < to && t + frames > from {
+                marked |= self.index.mark(setup.piece_name(piece, plan));
+            }
+            t += frames;
+        }
+        marked
+    }
+
     fn levels(&mut self, piece: &VideoPiece, setup: &Setup, plan: &RenderPlan) -> Levels {
         let (mut whole, clips) = setup.levels(piece);
+        whole |= self.marked(piece, setup, plan);
         let clips: Vec<Option<Arc<[Key]>>> = piece
             .layers()
             .iter()
@@ -592,7 +620,10 @@ impl Cache {
         let mut t = plan.range.0;
         for piece in &plan.video {
             let frames = piece.frames();
-            let reasons = setup.reasons(piece);
+            let mut reasons = setup.reasons(piece);
+            if self.marked(piece, setup, plan) {
+                reasons.push(Reason::Drops);
+            }
             if !reasons.is_empty() {
                 let (whole, clips) = self.levels(piece, setup, plan);
                 let mut cached: Vec<(i64, i64)> = Vec::new();
@@ -891,6 +922,8 @@ pub fn segment(plan: &RenderPlan, look: &Look, start: i64, frames: i64) -> Rende
 pub struct Index {
     frames: HashMap<Key, (Arc<Path>, u32)>,
     files: HashMap<Arc<Path>, Arc<[Key]>>,
+    marks: HashSet<Key>,
+    dir: Option<PathBuf>,
 }
 
 impl Index {
@@ -899,7 +932,14 @@ impl Index {
     }
 
     pub fn scan(dir: &Path) -> Self {
-        let mut index = Self::default();
+        let mut index = Self {
+            marks: read_keys(&marks_file(dir))
+                .unwrap_or_default()
+                .into_iter()
+                .collect(),
+            dir: Some(dir.to_path_buf()),
+            ..Self::default()
+        };
         let Ok(listing) = std::fs::read_dir(dir) else {
             return index;
         };
@@ -977,6 +1017,30 @@ impl Index {
         for f in files {
             self.remove(&f);
         }
+        self.marks.clear();
+        if let Some(dir) = &self.dir {
+            let _ = std::fs::remove_file(marks_file(dir));
+        }
+    }
+
+    pub fn mark(&mut self, mark: Key) -> bool {
+        if !self.marks.insert(mark) {
+            return false;
+        }
+        if let Some(dir) = &self.dir {
+            let all: Vec<u8> = self.marks.iter().flatten().copied().collect();
+            let _ = std::fs::create_dir_all(dir)
+                .and_then(|()| crate::temp::write(&marks_file(dir), &all));
+        }
+        true
+    }
+
+    pub fn marked(&self, mark: &Key) -> bool {
+        self.marks.contains(mark)
+    }
+
+    pub fn has_marks(&self) -> bool {
+        !self.marks.is_empty()
     }
 
     pub fn keep_only(&mut self, keep: &std::collections::HashSet<Key>) -> usize {
@@ -1017,6 +1081,10 @@ impl Index {
 pub fn name_of(keys: &[Key]) -> String {
     let all: Vec<u8> = keys.iter().flatten().copied().collect();
     hex(&digest(&[&all]))
+}
+
+fn marks_file(dir: &Path) -> PathBuf {
+    dir.join("drops").with_extension(MARKS)
 }
 
 pub fn write_keys(file: &Path, keys: &[Key]) -> std::io::Result<()> {

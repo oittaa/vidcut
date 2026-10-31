@@ -2138,6 +2138,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - with GPU decoding on, media of a codec with long groups of pictures that the GPU does not decode
     - media that the proxy rules pick (spec D41), while the original plays
   - Smart also renders AI Super Scale, and each Retime Process other than Nearest.
+  - Smart also renders the parts where frames drop steadily during play ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - The writes of playback would take GPU time from the frames on the screen.
   - A part that two projects share renders once.
@@ -2146,6 +2147,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - HEVC and AV1 make small files, and the GPU plays them on many computers. An uncompressed file is many times larger than ProRes 422 HQ.
   - vidcut decodes H.264 and H.265 on the GPU. With the list of Resolve, Smart renders most clips of a camera or a phone. At 4K in ProRes 422 HQ, that is many GB for each minute.
   - AI Super Scale and the Retime Processes are slow to make on most computers.
+  - A part that this computer cannot play in time then plays from the cache. The list of slow formats does not find all of these parts.
 
 ## X104. The render cache line is on both timelines, with its reasons
 
