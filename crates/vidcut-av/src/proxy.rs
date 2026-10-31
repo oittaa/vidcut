@@ -3,7 +3,7 @@ use std::path::Path;
 
 use vidcut_core::export::EncoderChoice;
 use vidcut_core::model::{ColorSpace, Hdr};
-use vidcut_core::preferences::ProxyCodec;
+use vidcut_core::preferences::{CacheCodec, ProxyCodec};
 
 use crate::decode::{Input, VideoReader};
 use crate::error::{Context, Error, Result};
@@ -26,6 +26,7 @@ pub struct ProxyEncoder {
     pub device: Option<String>,
     pub ten_bit: bool,
     pub chroma_422: bool,
+    pub chroma_444: bool,
 }
 
 impl ProxyEncoder {
@@ -41,6 +42,7 @@ impl ProxyEncoder {
                 _ => false,
             },
             chroma_422: matches!(name, "prores_ks" | "dnxhd"),
+            chroma_444: matches!(name, "prores_ks" | "dnxhd"),
         }
     }
 
@@ -92,66 +94,108 @@ impl ProxyEncoder {
         }
     }
 
-    fn high_options(&self) -> Option<Vec<(&'static str, String)>> {
-        Some(match self.name.as_str() {
-            "prores_videotoolbox" => vec![("profile", "hq".into()), ("allow_sw", "0".into())],
-            "prores_ks" | "prores_ks_vulkan" => {
-                vec![("profile", "3".into()), ("vendor", "apl0".into())]
+    fn grade_pixel(&self, grade: CacheCodec) -> format::Pixel {
+        use CacheCodec::{Dnxhr444, DnxhrHq, DnxhrHqx, DnxhrLb, DnxhrSq, Prores4444, Prores4444Xq};
+        use format::Pixel::{P416LE, YUV422P, YUV422P10LE, YUV444P10LE};
+        match (grade, self.kind) {
+            (Prores4444 | Prores4444Xq, EncoderChoice::VideoToolbox) => P416LE,
+            (Prores4444 | Prores4444Xq | Dnxhr444, _) => YUV444P10LE,
+            (DnxhrLb | DnxhrSq | DnxhrHq, _) => YUV422P,
+            (DnxhrHqx, _) => YUV422P10LE,
+            _ => self.pixel(YUV422P10LE),
+        }
+    }
+
+    fn grade_options(&self, grade: CacheCodec) -> Option<Vec<(&'static str, String)>> {
+        use CacheCodec::*;
+        let prores = [
+            ProresProxy,
+            ProresLt,
+            Prores422,
+            ProresHq,
+            Prores4444,
+            Prores4444Xq,
+        ]
+        .iter()
+        .position(|&g| g == grade);
+        let dnxhr = [DnxhrLb, DnxhrSq, DnxhrHq, DnxhrHqx, Dnxhr444]
+            .iter()
+            .position(|&g| g == grade);
+        if matches!(grade, Prores4444 | Prores4444Xq | Dnxhr444) && !self.chroma_444 {
+            return None;
+        }
+        Some(match (self.name.as_str(), grade) {
+            ("prores_videotoolbox", _) => {
+                let named = ["proxy", "lt", "standard", "hq", "4444"].get(prores?)?;
+                vec![("profile", named.to_string()), ("allow_sw", "0".into())]
             }
-            "av1_nvenc" | "hevc_nvenc" => vec![
+            ("prores_ks" | "prores_ks_vulkan", _) => {
+                vec![("profile", prores?.to_string()), ("vendor", "apl0".into())]
+            }
+            ("dnxhd", _) => {
+                let named = ["lb", "sq", "hq", "hqx", "444"][dnxhr?];
+                vec![("profile", format!("dnxhr_{named}"))]
+            }
+            ("libx265", Hevc) | ("libsvtav1", Av1) => {
+                let crf = if grade == Av1 { "24" } else { "16" };
+                self.options(true)
+                    .into_iter()
+                    .map(|(k, v)| (k, if k == "crf" { crf.into() } else { v }))
+                    .collect()
+            }
+            ("av1_nvenc", Av1) | ("hevc_nvenc", Hevc) => vec![
                 ("preset", "p4".into()),
                 ("tune", "hq".into()),
                 ("rc", "vbr".into()),
                 ("cq", if self.codec == "av1" { "24" } else { "16" }.into()),
                 ("b", "0".into()),
             ],
-            "hevc_amf" => vec![
+            ("hevc_amf", Hevc) => vec![
                 ("rc", "cqp".into()),
                 ("qp_i", "16".into()),
                 ("qp_p", "16".into()),
             ],
-            "hevc_vaapi" => vec![("rc_mode", "CQP".into()), ("qp", "16".into())],
-            "hevc_qsv" => vec![("global_quality", "16".into())],
-            "hevc_videotoolbox" => vec![
+            ("hevc_vaapi", Hevc) => vec![("rc_mode", "CQP".into()), ("qp", "16".into())],
+            ("hevc_qsv", Hevc) => vec![("global_quality", "16".into())],
+            ("hevc_videotoolbox", Hevc) => vec![
                 ("flags", "+qscale".into()),
                 ("global_quality", (85 * ffi::FF_QP2LAMBDA).to_string()),
             ],
-            "av1_vaapi" => vec![("rc_mode", "CQP".into()), ("global_quality", "80".into())],
+            ("av1_vaapi", Av1) => {
+                vec![("rc_mode", "CQP".into()), ("global_quality", "80".into())]
+            }
             _ => return None,
         })
     }
 
-    pub fn high_label(&self) -> String {
-        let codec = match self.codec {
-            "av1" => "AV1",
-            "hevc" => "HEVC",
-            _ => "ProRes 422 HQ",
-        };
+    pub fn cache_label(&self, grade: Option<CacheCodec>) -> String {
         let label = self.label();
+        let Some(grade) = grade else {
+            return label;
+        };
         let what = label.split_once(", ").map_or("", |(_, w)| w);
-        format!("{codec}, {what}")
+        format!("{}, {what}", grade.name())
     }
 
-    fn cache_encoder(&self, hdr: Option<Hdr>, high: bool) -> Option<VideoEncoder> {
-        let source = match (high, hdr) {
-            (true, _) => format::Pixel::YUV422P10LE,
-            (false, Some(_)) => format::Pixel::YUV420P10LE,
-            (false, None) => format::Pixel::YUV420P,
+    fn cache_encoder(&self, hdr: Option<Hdr>, grade: Option<CacheCodec>) -> Option<VideoEncoder> {
+        let pixel = match (grade, hdr) {
+            (Some(g), _) => self.grade_pixel(g),
+            (None, Some(_)) => self.pixel(format::Pixel::YUV420P10LE),
+            (None, None) => self.pixel(format::Pixel::YUV420P),
         };
-        let pixel = self.pixel(source);
         if hdr.is_some() && !deep(pixel) {
             return None;
         }
-        let picked = match high {
-            true => self.high_options()?,
-            false => self.options(deep(pixel)),
+        let picked = match grade {
+            Some(g) => self.grade_options(g)?,
+            None => self.options(deep(pixel)),
         };
         let mut options: Vec<(String, String)> = picked
             .into_iter()
             .map(|(k, v)| (k.to_string(), v))
             .collect();
         let engine = !matches!(self.kind, EncoderChoice::Cpu | EncoderChoice::Vaapi);
-        if high && self.codec == "hevc" && engine {
+        if grade.is_some() && self.codec == "hevc" && engine {
             let main = if deep(pixel) { "main10" } else { "main" };
             options.push(("profile".into(), main.into()));
         }
@@ -309,29 +353,59 @@ pub fn encoders(
 }
 
 pub fn cache_encoders(
-    proxies: Option<ProxyCodec>,
+    (chosen, proxies): (CacheCodec, Option<ProxyCodec>),
     available: &Availability,
     plays: &[(&str, crate::hw::Kind)],
-) -> Vec<(ProxyEncoder, bool)> {
-    if let Some(codec) = proxies {
-        return encoders(codec, available, plays)
+) -> Vec<(ProxyEncoder, Option<CacheCodec>)> {
+    let mut all: Vec<(ProxyEncoder, CacheCodec)> = match (family(chosen), proxies) {
+        (Some((codec, name)), _) => own(codec, available)
             .into_iter()
-            .map(|e| (e, false))
-            .collect();
-    }
-    let mut all: Vec<ProxyEncoder> = own(ProxyCodec::Prores, available);
-    for codec in [ProxyCodec::Hevc, ProxyCodec::Av1] {
-        all.extend(
-            own(codec, available)
+            .filter(|e| e.codec == name)
+            .map(|e| (e, chosen))
+            .collect(),
+        (None, Some(codec)) => {
+            return encoders(codec, available, plays)
                 .into_iter()
-                .filter(|e| e.kind != EncoderChoice::Cpu),
-        );
-    }
-    all.sort_by_key(|e| round(e, plays));
+                .map(|e| (e, None))
+                .collect();
+        }
+        (None, None) => {
+            let mut all: Vec<(ProxyEncoder, CacheCodec)> = own(ProxyCodec::Prores, available)
+                .into_iter()
+                .map(|e| (e, CacheCodec::ProresHq))
+                .collect();
+            for (codec, grade) in [
+                (ProxyCodec::Hevc, CacheCodec::Hevc),
+                (ProxyCodec::Av1, CacheCodec::Av1),
+            ] {
+                all.extend(
+                    own(codec, available)
+                        .into_iter()
+                        .filter(|e| e.kind != EncoderChoice::Cpu)
+                        .map(|e| (e, grade)),
+                );
+            }
+            all
+        }
+    };
+    all.sort_by_key(|(e, _)| round(e, plays));
     all.into_iter()
-        .filter(|e| e.high_options().is_some())
-        .map(|e| (e, true))
+        .filter(|(e, grade)| e.grade_options(*grade).is_some())
+        .map(|(e, grade)| (e, Some(grade)))
         .collect()
+}
+
+fn family(codec: CacheCodec) -> Option<(ProxyCodec, &'static str)> {
+    use CacheCodec::*;
+    Some(match codec {
+        Auto => return None,
+        ProresProxy | ProresLt | Prores422 | ProresHq | Prores4444 | Prores4444Xq => {
+            (ProxyCodec::Prores, "prores")
+        }
+        DnxhrLb | DnxhrSq | DnxhrHq | DnxhrHqx | Dnxhr444 => (ProxyCodec::Dnxhr, "dnxhr"),
+        Hevc => (ProxyCodec::Hevc, "hevc"),
+        Av1 => (ProxyCodec::Av1, "av1"),
+    })
 }
 
 fn round(e: &ProxyEncoder, plays: &[(&str, crate::hw::Kind)]) -> u8 {
@@ -347,7 +421,7 @@ fn round(e: &ProxyEncoder, plays: &[(&str, crate::hw::Kind)]) -> u8 {
 
 fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
     use EncoderChoice::{Amf, Nvenc, Qsv, Vaapi, VideoToolbox, Vulkan};
-    use format::Pixel::{NV12, NV16, P010LE, P210LE, YUV420P, YUV422P10LE};
+    use format::Pixel::{NV12, NV16, P010LE, P210LE, P416LE, YUV420P, YUV422P10LE};
     let hardware: &[(&str, &'static str, EncoderChoice, format::Pixel)] = match codec {
         ProxyCodec::Av1 => &[
             ("av1_nvenc", "av1", Nvenc, YUV420P),
@@ -385,6 +459,7 @@ fn own(codec: ProxyCodec, available: &Availability) -> Vec<ProxyEncoder> {
                 ten_bit: pixel == YUV422P10LE || works(P010LE),
                 chroma_422: pixel == YUV422P10LE
                     || (codec == "prores" && works(NV16) && works(P210LE)),
+                chroma_444: kind == VideoToolbox && codec == "prores" && works(P416LE),
             });
         }
     }
@@ -592,12 +667,12 @@ pub(crate) type Origins = Vec<Option<crate::player::Origin>>;
 
 pub(crate) fn encode_plan(
     (plan, colors): (&vidcut_core::render::RenderPlan, bool),
-    (enc, high): (&ProxyEncoder, bool),
+    (enc, grade): (&ProxyEncoder, Option<CacheCodec>),
     tmp: &Path,
     decoder: Option<&crate::hw::GpuDecoder>,
     cancel: &std::sync::atomic::AtomicBool,
 ) -> std::result::Result<(u64, Vec<Origins>), Failed> {
-    let Some(video) = enc.cache_encoder(plan.colors, high) else {
+    let Some(video) = enc.cache_encoder(plan.colors, grade) else {
         return Err(Failed::Opening(Error::Invalid(format!(
             "{} cannot make this timeline's pictures",
             enc.name
@@ -1175,6 +1250,7 @@ mod tests {
             device: Some("0".into()),
             ten_bit: true,
             chroma_422: false,
+            chroma_444: false,
         }
     }
 
@@ -1220,6 +1296,7 @@ mod tests {
             device: Some("/dev/dri/renderD128".into()),
             ten_bit: true,
             chroma_422: false,
+            chroma_444: false,
         };
         assert_eq!(vaapi.pixel(format::Pixel::YUV420P10LE), format::Pixel::NV12);
     }
@@ -1240,6 +1317,7 @@ mod tests {
             device: None,
             ten_bit: true,
             chroma_422: false,
+            chroma_444: false,
         };
         assert_eq!(apple.pixel(format::Pixel::P010LE), format::Pixel::P010LE);
     }
@@ -1253,6 +1331,7 @@ mod tests {
             device: Some("0".into()),
             ten_bit: true,
             chroma_422: false,
+            chroma_444: false,
         };
         let source = first(format::Pixel::YUV420P10LE, None);
         let options = nvenc.video_encoder(Some(&source)).options;
@@ -1272,6 +1351,7 @@ mod tests {
             device: None,
             ten_bit: true,
             chroma_422,
+            chroma_444: false,
         }
     }
 
@@ -1341,6 +1421,7 @@ mod tests {
             device: Some("0".into()),
             ten_bit: false,
             chroma_422: false,
+            chroma_444: false,
         };
         let want = [
             ("preset", "p4"),
@@ -1365,6 +1446,7 @@ mod tests {
             device: None,
             ten_bit: false,
             chroma_422: false,
+            chroma_444: false,
         };
         let options = enc.video_encoder(None).options;
         let flags: Vec<&str> = options

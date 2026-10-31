@@ -524,6 +524,13 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     c["uses"].as_str().unwrap_or("nothing that works here")
                 );
             }
+            for c in r.result["cache_codecs"].as_array().into_iter().flatten() {
+                println!(
+                    "render_cache.codec={} makes the render cache with {}",
+                    c["codec"].as_str().unwrap_or_default(),
+                    c["uses"].as_str().unwrap_or("nothing that works here")
+                );
+            }
             let chosen = r.result["preferences"]["gpu"]["device"]
                 .as_str()
                 .unwrap_or_default();

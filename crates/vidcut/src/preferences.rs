@@ -335,7 +335,7 @@ fn folder_usage(dir: &std::path::Path) -> Value {
 }
 
 fn describe(p: &Preferences) -> Value {
-    use vidcut_core::preferences::ProxyCodec;
+    use vidcut_core::preferences::{CacheCodec, ProxyCodec};
     let decoding = p.gpu.acceleration && p.gpu.decoding;
     let played = crate::export::plays(decoding);
     let codecs: Vec<Value> = std::iter::once(ProxyCodec::Auto)
@@ -358,6 +358,21 @@ fn describe(p: &Preferences) -> Value {
             })
         })
         .collect();
+    let chosen: Vec<_> = CacheCodec::ALL.iter().map(|&c| (c, None)).collect();
+    let caches = crate::env::cache_encoders(&chosen, p.gpu.acceleration, decoding);
+    let cache_codecs: Vec<Value> = CacheCodec::ALL
+        .iter()
+        .zip(caches)
+        .map(|(c, encoders)| {
+            let first = encoders.first();
+            json!({
+                "codec": c,
+                "name": c.name(),
+                "encoder": first.map(|(e, _)| e.name.clone()),
+                "uses": first.map(|(e, grade)| e.cache_label(*grade)),
+            })
+        })
+        .collect();
     json!({
         "path": path(),
         "preferences": p,
@@ -365,6 +380,7 @@ fn describe(p: &Preferences) -> Value {
         "themes_folder": themes::dir(),
         "system_look": system_look(),
         "proxy_codecs": codecs,
+        "cache_codecs": cache_codecs,
         "services": crate::services::describe(),
         "cache": cache_usage(p),
         "gpus": vidcut_av::gpus::list(),

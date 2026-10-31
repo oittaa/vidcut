@@ -1241,6 +1241,57 @@ fn render_cache(
         });
         ui.end_row();
     });
+    let current = saved["codec"].as_str().unwrap_or("auto");
+    dialog::advanced(ui, "render-cache-advanced", current != "auto", |ui| {
+        grid(ui, "preferences-render-cache-advanced", |ui| {
+            cache_codec(ui, state, busy, patch);
+        });
+    });
+}
+
+fn cache_codec(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>) {
+    let current = state["preferences"]["render_cache"]["codec"]
+        .as_str()
+        .unwrap_or("auto");
+    let choices = state["cache_codecs"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let name = |c: &Value| c["name"].as_str().unwrap_or_default().to_string();
+    let selected = choices.iter().find(|c| c["codec"] == current);
+    label(ui, "Codec");
+    ui.add_enabled_ui(!busy, |ui| {
+        egui::ComboBox::from_id_salt("render-cache-codec")
+            .selected_text(selected.map_or(current.to_string(), name))
+            .show_ui(ui, |ui| {
+                for c in &choices {
+                    if ui
+                        .selectable_label(c["codec"] == current, name(c))
+                        .clicked()
+                    {
+                        *patch = Some(json!({ "render_cache": { "codec": c["codec"] } }));
+                    }
+                }
+            });
+    });
+    ui.end_row();
+    let line = match (current, selected.and_then(|c| c["uses"].as_str())) {
+        ("auto", _) => None,
+        (_, Some(uses)) => Some(dim(format!("Made by {}", by(uses)))),
+        (_, None) => Some(
+            RichText::new("Nothing here makes it: the cache stays empty")
+                .color(ui.visuals().warn_fg_color),
+        ),
+    };
+    if let Some(line) = line {
+        ui.label("");
+        ui.add(egui::Label::new(line).wrap());
+        ui.end_row();
+    }
+}
+
+fn by(uses: &str) -> &str {
+    uses.split_once(", ").map_or(uses, |(_, by)| by)
 }
 
 fn folder(

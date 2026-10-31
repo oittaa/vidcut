@@ -2701,6 +2701,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Each activity stops the render at once. The render continues later.
     - It renders from the playhead forward, then from the start of the timeline.
     - `render_cache.background` turns it off. Then the cache keeps what it has, and renders nothing new.
+  - The codec of the cache files is a preference of this computer (X103). Proxies and Render Cache > Advanced > Codec sets it. `render_cache.codec` also sets it.
+    - It is Automatic, unless set. With proxies on, Automatic takes the codec of proxies. With proxies off, it takes ProRes 422 HQ, HEVC or AV1 ([playback](design/playback.md#the-render-cache)).
+    - The other choices:
+      - ProRes 422 Proxy, LT, 422 and HQ, and ProRes 4444 and 4444 XQ
+      - DNxHR LB, SQ, HQ, HQX and 444
+      - HEVC and AV1
+    - A chosen codec goes to the encoder as it is. No other codec takes its place.
+    - When no encoder on this computer makes it, the cache stays empty. Preferences then says so under Codec, and `cache.status` gives the error.
+    - DNxHR LB, SQ and HQ have 8 bits. Thus an HDR timeline gets no cache with them.
+    - A change of the codec renders the cache again. The files of the other codec stay until the disk cache removes them.
   - Playback does not write the cache (X103).
   - Playback > Delete Render Cache has three choices:
     - All empties the cache.

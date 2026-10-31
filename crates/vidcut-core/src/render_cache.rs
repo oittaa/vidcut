@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use crate::disk_cache::Kind;
 use crate::lru::Lru;
 use crate::model::{ClipCache, CompositeMode, Project, RenderCache, Retime, SuperScale, Upscaler};
-use crate::preferences::{ProxyCodec, RenderCachePrefs};
+use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
 use crate::render::{Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
 
 pub type Key = [u8; 16];
@@ -81,15 +81,16 @@ pub struct Look {
 }
 
 impl Look {
-    pub fn of(project: &Project, proxies: (u32, ProxyCodec)) -> Self {
+    pub fn of(project: &Project, proxies: (u32, ProxyCodec), chosen: CacheCodec) -> Self {
         let s = &project.settings;
         let (width, height) = match s.use_proxies {
             true => crate::model::proxy_size(s.width, s.height, proxies.0),
             false => (s.width, s.height),
         };
-        let codec = match s.use_proxies {
-            true => format!("proxy {}", serde_json::json!(proxies.1)),
-            false => "auto".to_string(),
+        let codec = match (chosen, s.use_proxies) {
+            (CacheCodec::Auto, true) => format!("proxy {}", serde_json::json!(proxies.1)),
+            (CacheCodec::Auto, false) => "auto".to_string(),
+            (c, _) => serde_json::json!(c).to_string(),
         };
         Self {
             width,

@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use vidcut_core::preferences::CacheCodec;
 use vidcut_core::render::RenderPlan;
 use vidcut_core::render_cache::{FILE, Index, KEYS, Key, MADE, name_of, write_keys};
 
@@ -49,7 +50,7 @@ pub struct Written {
 pub fn write(
     (plan, clip): (&RenderPlan, bool),
     keys: &[Key],
-    encoders: &[(ProxyEncoder, bool)],
+    encoders: &[(ProxyEncoder, Option<CacheCodec>)],
     decoder: Option<&crate::hw::GpuDecoder>,
     dir: &Path,
     cancel: &AtomicBool,
@@ -74,8 +75,8 @@ pub fn write(
         .map_err(|e| Error::Invalid(format!("creating {}: {e}", dest.display())))?;
     drop(file);
     let mut errors = Vec::new();
-    for (enc, high) in encoders {
-        match encode_plan((plan, clip), (enc, *high), part.path(), decoder, cancel) {
+    for (enc, grade) in encoders {
+        match encode_plan((plan, clip), (enc, *grade), part.path(), decoder, cancel) {
             Ok((frames, made)) => {
                 part.keep(&dest)
                     .map_err(|e| Error::Invalid(format!("replacing {}: {e}", dest.display())))?;
@@ -93,14 +94,10 @@ pub fn write(
                         "the disk cache has no room for the render cache".into(),
                     ));
                 }
-                let encoder = match high {
-                    true => enc.high_label(),
-                    false => enc.label(),
-                };
                 return Ok(Written {
                     path: dest,
                     frames,
-                    encoder,
+                    encoder: enc.cache_label(*grade),
                 });
             }
             Err(Failed::Encoding(e)) => return Err(e),
