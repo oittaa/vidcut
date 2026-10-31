@@ -179,6 +179,7 @@ pub fn add(
             speed: None,
             retime: crate::model::ClipRetime::Project,
             color: None,
+            render_cache: crate::model::ClipCache::Auto,
         },
     );
     fix_audio(p, ti);

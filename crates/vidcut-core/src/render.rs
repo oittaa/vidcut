@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipRetime, ColorSpace, DuckDetect, Hdr, Keyframe, Media, MediaSuperScale, Picture,
-    PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode,
-    SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
+    Clip, ClipCache, ClipRetime, ColorSpace, DuckDetect, Hdr, Keyframe, Media, MediaSuperScale,
+    Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset,
+    SmoothMode, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -192,6 +192,9 @@ pub enum VideoPiece {
         /// covers the whole frame, its bars black.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         placed: Vec<Placed>,
+        /// Its clip's Render Cache.
+        #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
+        cache: ClipCache,
     },
     /// A frame of one color: black, or the color that a dip to color
     /// goes through.
@@ -967,6 +970,7 @@ impl VideoPiece {
                 super_scale,
                 retime,
                 placed,
+                cache,
                 ..
             } => {
                 let still = matches!(image, Some(Image::Still));
@@ -982,6 +986,7 @@ impl VideoPiece {
                     super_scale: *super_scale,
                     retime: *retime,
                     placed: placed.iter().map(|p| p.after(k)).collect(),
+                    cache: *cache,
                 }
             }
             Self::Black { color, .. } => Self::Black {
@@ -1835,6 +1840,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 super_scale: super_scale_of(m.super_scale, s),
                 retime: retime_of(c, x, m, s),
                 placed: placed_of(c, nest, over, x),
+                cache: c.render_cache,
             })
         };
     let mut video = Vec::new();
@@ -2332,6 +2338,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
             super_scale: super_scale_of(m.super_scale, &p.settings),
             retime: Retime::Nearest,
             placed: Vec::new(),
+            cache: Default::default(),
         },
         None => VideoPiece::black(1),
     })
@@ -2374,6 +2381,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     super_scale: super_scale_of(m.super_scale, &p.settings),
                     retime: Retime::Nearest,
                     placed: Vec::new(),
+                    cache: Default::default(),
                 },
             );
         } else {

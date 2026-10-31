@@ -12,14 +12,16 @@ pub enum Kind {
     Waveforms,
     Analysis,
     DecoderTests,
+    Render,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 4] = [
+    pub const ALL: [Kind; 5] = [
         Kind::Thumbs,
         Kind::Waveforms,
         Kind::Analysis,
         Kind::DecoderTests,
+        Kind::Render,
     ];
 
     pub fn folder(self) -> &'static str {
@@ -28,6 +30,7 @@ impl Kind {
             Kind::Waveforms => "waveforms",
             Kind::Analysis => "analysis",
             Kind::DecoderTests => "decoder-tests",
+            Kind::Render => "render",
         }
     }
 
@@ -40,10 +43,12 @@ impl Kind {
     }
 
     fn keeps(self, name: &str) -> bool {
-        self == Kind::Analysis
-            && Path::new(name)
-                .extension()
-                .is_some_and(|e| e.to_string_lossy().starts_with("words"))
+        let ext = Path::new(name).extension().map(|e| e.to_string_lossy());
+        match self {
+            Kind::Analysis => ext.is_some_and(|e| e.starts_with("words")),
+            Kind::Render => ext.is_some_and(|e| e == crate::render_cache::KEYS),
+            _ => false,
+        }
     }
 }
 

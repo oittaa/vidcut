@@ -19,7 +19,7 @@ classDiagram
     sample_rate, channels
     start_tc, drop_frame
     ripple_on, still_secs
-    auto_format, use_proxies
+    auto_format, use_proxies, render_cache
     fillers, timeline_colors
     retime, upscaler
   }
@@ -45,7 +45,7 @@ classDiagram
     id, name, color
     media
     start, duration, source_in
-    video, enabled, retime
+    video, enabled, retime, render_cache
   }
   class ClipAudio {
     stream
@@ -486,7 +486,7 @@ Which kept transitions play (`otio::transitions`):
 The file:
 
 - Preferences are not in the project. They are in `preferences.toml` in the config dir (`preferences::path`).
-- The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, transcripts, services and viewer ([the disk cache limit](analysis.md#the-disk-cache-limit)).
+- The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services and viewer ([the disk cache limit](analysis.md#the-disk-cache-limit)).
 - `ViewerPrefs.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
 - No key of a service is ever in the file.
 
@@ -499,7 +499,7 @@ Requests:
 - `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it, and replaces the file atomically.
 - `viewer.guides` changes the same `Guides` (`Guides::applied`). With no fields, it toggles the framing guides.
 - Code reads the file when it needs a value (`preferences::load`).
-- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words and the viewer guides.
+- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words, the viewer guides and the render cache.
 
 Reset:
 

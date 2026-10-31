@@ -21,6 +21,7 @@ pub(super) struct PreferencesUi {
     larger_h: String,
     mbps: String,
     size: String,
+    after_secs: String,
     folder: String,
     player_memory: String,
     video_memory: String,
@@ -235,6 +236,7 @@ impl Workspace {
                     ui_state.larger_h = n(&p["proxies"]["larger_than"][1]);
                     ui_state.mbps = n(&p["proxies"]["above_mbps"]);
                     ui_state.size = n(&p["proxies"]["size"]);
+                    ui_state.after_secs = n(&p["render_cache"]["after_secs"]);
                     ui_state.folder = proxy_folder(p).to_string();
                     ui_state.state = Some(r.result);
                     ui_state.error = None;
@@ -1078,8 +1080,8 @@ fn proxies(
     let proxies = &state["preferences"]["proxies"];
     page(
         ui,
-        "Proxies",
-        "Smaller copies the viewer plays; exports read the originals",
+        "Proxies and Render Cache",
+        "Copies the viewer plays for speed; exports read the originals",
         |ui| {
             grid(ui, "preferences-proxies", |ui| {
                 let size = label(ui, "Size");
@@ -1182,8 +1184,63 @@ fn proxies(
                 });
                 ui.end_row();
             });
+            ui.add_space(10.0);
+            ui.label(RichText::new("Render Cache").strong());
+            render_cache(ui, state, busy, ui_state, patch);
         },
     );
+}
+
+fn render_cache(
+    ui: &mut egui::Ui,
+    state: &Value,
+    busy: bool,
+    ui_state: &mut PreferencesUi,
+    patch: &mut Option<Value>,
+) {
+    let saved = &state["preferences"]["render_cache"];
+    grid(ui, "preferences-render-cache", |ui| {
+        let named = label(ui, "Background Render");
+        ui.horizontal(|ui| {
+            let mut on = saved["background"] == true;
+            if ui
+                .add_enabled(!busy, egui::Checkbox::new(&mut on, "After"))
+                .changed()
+            {
+                *patch = Some(json!({ "render_cache": { "background": on } }));
+            }
+            let field = NumberField {
+                label: named.id,
+                saved: saved["after_secs"].as_u64().unwrap_or(5),
+                range: 1..=3600,
+                unit: Unit::Plain,
+                enabled: !busy && on,
+                refusal: "The time is 1 to 3600 seconds",
+            };
+            if let Some(n) = field.show(ui, &mut ui_state.after_secs, &mut ui_state.error) {
+                *patch = Some(json!({ "render_cache": { "after_secs": n } }));
+            }
+            ui.label("seconds without activity");
+        });
+        ui.end_row();
+        label(ui, "User Mode");
+        ui.horizontal(|ui| {
+            for (key, text) in [
+                ("transitions", "Transitions"),
+                ("composites", "Composites"),
+                ("ai", "AI"),
+            ] {
+                let mut on = saved[key] == true;
+                if ui
+                    .add_enabled(!busy, egui::Checkbox::new(&mut on, text))
+                    .changed()
+                {
+                    *patch = Some(json!({ "render_cache": { key: on } }));
+                }
+            }
+        });
+        ui.end_row();
+    });
 }
 
 fn folder(

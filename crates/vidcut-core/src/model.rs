@@ -123,6 +123,9 @@ pub struct Settings {
     /// left out when `auto`.
     #[serde(default, skip_serializing_if = "ProjectUpscaler::is_auto")]
     pub upscaler: ProjectUpscaler,
+    /// What the render cache makes for the viewer; left out when `off`.
+    #[serde(default, skip_serializing_if = "RenderCache::is_off")]
+    pub render_cache: RenderCache,
 }
 
 impl Default for Settings {
@@ -143,6 +146,7 @@ impl Default for Settings {
             timeline_colors: TimelineColors::Auto,
             retime: ProjectRetime::Auto,
             upscaler: ProjectUpscaler::Auto,
+            render_cache: RenderCache::Off,
         }
     }
 }
@@ -515,6 +519,63 @@ impl MediaUpscaler {
             Self::AiSlow => Some(Upscaler::AiSlow),
             Self::AiFast => Some(Upscaler::AiFast),
             Self::Classic => Some(Upscaler::Classic),
+        }
+    }
+}
+
+/// What the render cache makes: the frames on disk that the viewer plays
+/// in place of the frames that are slow to make. Exports do not use it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderCache {
+    /// No render cache.
+    #[default]
+    Off,
+    /// The parts that are slow to make: the clips set to `on`, slow media,
+    /// speed changes, Retime Processes, AI Super Scale, transitions,
+    /// opacity and composite modes.
+    Smart,
+    /// The clips set to `on`, and the kinds that the preferences turn on.
+    User,
+}
+
+impl RenderCache {
+    pub fn is_off(&self) -> bool {
+        *self == Self::Off
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Smart => "Smart",
+            Self::User => "User",
+        }
+    }
+}
+
+/// A clip's Render Cache.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipCache {
+    /// As the mode of the project gives.
+    #[default]
+    Auto,
+    /// Rendered in the Smart mode and in the User mode.
+    On,
+    /// Never rendered for itself.
+    Off,
+}
+
+impl ClipCache {
+    pub fn is_auto(&self) -> bool {
+        *self == Self::Auto
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::On => "On",
+            Self::Off => "Off",
         }
     }
 }
@@ -1515,6 +1576,10 @@ pub struct Clip {
     /// Its own Clip Color (spec §3). Without one it shows its media's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Its Render Cache: `on` renders it in both modes, `off` in neither.
+    /// Left out at `auto`.
+    #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
+    pub render_cache: ClipCache,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -2648,6 +2648,40 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - `picture.set` takes `pitch` and `yaw`. `picture.clear` with `transform` puts both back to 0.
   - An import reads `transformationPitch` and `transformationYaw`. An export writes them back.
   - Each can have keyframes (D75). Their keys have the form of the keys of the rotation, in the units of the plain value.
+- **D98. Render cache** (deviation X103; the render cache pages, pp. 143–144 and 199–206, are outside the Cut page).
+  - The render cache keeps on disk the frames that are slow to make. The viewer plays them from there. Exports do not use it.
+  - The project has a mode (`render_cache`): Off, Smart or User. A new project has Off, as in Resolve.
+    - Playback > Render Cache sets it. `project.set` with `render_cache` also sets it.
+  - Each clip has a Render Cache value (`clip.set` with `render_cache`): Auto, On or Off.
+    - Off keeps the clip out of both modes, as in Resolve.
+  - Smart renders each part of the timeline that has one of these:
+    - a clip set to On
+    - media that are slow to decode (X103)
+    - a speed change
+    - a Retime Process other than Nearest (X103)
+    - AI Super Scale (X103)
+    - a transition
+    - an opacity below 100%, or keyframes of the opacity
+    - a composite mode other than Normal
+  - User renders the clips set to On. It also renders the kinds that Preferences turns on:
+    - Transitions: off, unless set.
+    - Composites: off, unless set. It includes opacity, as in Resolve.
+    - AI: on, unless set. It is AI Super Scale and the AI Retime Processes. It stands in for the Fusion effects of Resolve.
+  - The cache keeps the frame after the tracks mix.
+    - Titles on top of all tracks stay out of it. Thus an edit of their text keeps the cache.
+    - A part that moves keeps its cache when the tracks under it stay the same.
+    - An edit that changes the frames of a part renders it again.
+  - The background render starts after a time without activity: 5 s, unless set (`render_cache.after_secs`).
+    - Activity is an edit, a play, a seek, a scrub, the preview of a change, or a job.
+    - Each activity stops the render at once. The render continues later.
+    - It renders from the playhead forward, then from the start of the timeline.
+    - `render_cache.background` turns it off. Then the cache keeps what it has, and renders nothing new.
+  - Playback does not write the cache (X103).
+  - Playback > Delete Render Cache has three choices:
+    - All empties the cache.
+    - Unused keeps only the frames of the open timeline.
+    - Selected Clips removes the files that hold frames of the selected clips.
+  - `cache.status` gives the parts to render, their reasons and their cached frames, and the size on disk. `cache.delete` deletes.
 
 ## 13. Order of operations (pp. 287–296, 3407)
 

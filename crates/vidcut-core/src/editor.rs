@@ -3284,6 +3284,7 @@ fn mutate(
             color,
             voice_isolation,
             retime,
+            render_cache,
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -3306,6 +3307,7 @@ fn mutate(
                 color: or_none(color),
                 voice_isolation,
                 retime: *retime,
+                render_cache: *render_cache,
             };
             ops::set_clips(p, &ids, &props)?;
             if retime.is_some() && *download && !dry_run {
@@ -5152,6 +5154,7 @@ fn place_imported(
                 speed: c.speed.clone(),
                 retime: crate::model::ClipRetime::Project,
                 color: color(c),
+                render_cache: crate::model::ClipCache::Auto,
             });
             placed.insert(track_of(&c.track));
             continue;
@@ -5288,6 +5291,7 @@ fn place_imported(
             speed: c.speed.clone(),
             retime: crate::model::ClipRetime::Project,
             color: color(c),
+            render_cache: crate::model::ClipCache::Auto,
         });
         placed.insert(track_of(&c.track));
     }
@@ -6250,6 +6254,9 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
     }
     if let Some(upscaler) = set.upscaler {
         p.settings.upscaler = upscaler;
+    }
+    if let Some(mode) = set.render_cache {
+        p.settings.render_cache = mode;
     }
     if let Some(fillers) = &set.fillers {
         crate::preferences::set_fillers(&mut p.settings.fillers, fillers)?;

@@ -1,0 +1,461 @@
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
+
+use serde_json::{Value, json};
+use vidcut_core::model::{Project, RenderCache as Mode};
+use vidcut_core::preferences::{Preferences, Proxies, RenderCachePrefs};
+use vidcut_core::render::RenderPlan;
+use vidcut_core::render_cache::{Cache, Index, Key, Look, Setup, segment};
+
+use super::Msg;
+use crate::threads::Work;
+
+const SECONDS_EACH: i64 = 2;
+
+pub(crate) enum Event {
+    Scanned(Index),
+    Slow(HashMap<String, bool>),
+    Written,
+    Ended { done: bool, error: Option<String> },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct Mark {
+    pub(super) rev: Option<u64>,
+    pub(super) at: i64,
+    pub(super) playing: bool,
+    pub(super) busy: bool,
+}
+
+pub(super) struct Background {
+    tx: Sender<Msg>,
+    cache: Arc<Mutex<Cache>>,
+    prefs: RenderCachePrefs,
+    proxies: Proxies,
+    index: Scan,
+    decodes: Arc<HashMap<String, bool>>,
+    base: Option<Arc<RenderPlan>>,
+    mark: Option<Mark>,
+    touched: u64,
+    seen: u64,
+    quiet: Instant,
+    running: Option<Arc<AtomicBool>>,
+    done: bool,
+    error: Option<String>,
+}
+
+#[derive(PartialEq)]
+enum Scan {
+    None,
+    Running,
+    Done,
+}
+
+fn slow_media(
+    project: &Project,
+    proxies: &Proxies,
+    decodes: &HashMap<String, bool>,
+    id: &str,
+) -> bool {
+    if decodes.get(id).copied().unwrap_or(false) {
+        return true;
+    }
+    project.media(id).is_some_and(|m| {
+        proxies.wants(m) && !(project.settings.use_proxies && m.fresh_proxy().is_some())
+    })
+}
+
+impl Background {
+    pub(super) fn new(tx: Sender<Msg>, prefs: &Preferences) -> Self {
+        Self {
+            tx,
+            cache: Arc::default(),
+            prefs: prefs.render_cache,
+            proxies: prefs.proxies.clone(),
+            index: Scan::None,
+            decodes: Arc::default(),
+            base: None,
+            mark: None,
+            touched: 0,
+            seen: 0,
+            quiet: Instant::now(),
+            running: None,
+            done: false,
+            error: None,
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Cache> {
+        self.cache.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn look(&self, project: &Project) -> Look {
+        Look::of(project, (self.proxies.size, self.proxies.codec))
+    }
+
+    pub(super) fn follow(&mut self, prefs: &Preferences) -> bool {
+        let changed = self.prefs != prefs.render_cache || self.proxies != prefs.proxies;
+        if changed {
+            self.stop();
+            self.prefs = prefs.render_cache;
+            self.proxies = prefs.proxies.clone();
+            self.done = false;
+        }
+        changed
+    }
+
+    pub(super) fn touch(&mut self) {
+        self.touched += 1;
+    }
+
+    fn stop(&mut self) {
+        if let Some(cancel) = self.running.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+
+    pub(super) fn apply(&mut self, plan: &mut RenderPlan, project: &Project) {
+        if self.base.as_deref() != Some(plan) {
+            self.base = Some(Arc::new(plan.clone()));
+            self.done = false;
+        }
+        if project.settings.render_cache == Mode::Off {
+            self.stop();
+            return;
+        }
+        if self.index == Scan::None {
+            self.scan();
+            return;
+        }
+        let look = self.look(project);
+        let decodes = self.decodes.clone();
+        let slow = |id: &str| slow_media(project, &self.proxies, &decodes, id);
+        let setup = Setup {
+            mode: project.settings.render_cache,
+            prefs: &self.prefs,
+            project,
+            slow: &slow,
+            look: &look,
+        };
+        self.lock().apply(plan, &setup, &Path::is_file);
+    }
+
+    fn scan(&mut self) {
+        self.index = Scan::Running;
+        let tx = self.tx.clone();
+        let _ = crate::threads::spawn("vidcut-render-index", Work::Job, move || {
+            let index = Index::scan(&Index::dir());
+            let _ = tx.send(Msg::RenderCache(Event::Scanned(index)));
+        });
+    }
+
+    pub(super) fn event(&mut self, e: Event) -> bool {
+        match e {
+            Event::Scanned(index) => {
+                *self.lock().index_mut() = index;
+                self.index = Scan::Done;
+                true
+            }
+            Event::Slow(decodes) => {
+                let changed = *self.decodes != decodes;
+                self.decodes = Arc::new(decodes);
+                changed
+            }
+            Event::Written => {
+                self.error = None;
+                true
+            }
+            Event::Ended { done, error } => {
+                self.running = None;
+                self.done |= done || error.is_some();
+                self.error = error;
+                false
+            }
+        }
+    }
+
+    pub(super) fn tick(
+        &mut self,
+        now: Instant,
+        mark: Mark,
+        project: Option<&Project>,
+    ) -> Option<Instant> {
+        let active = mark.playing || mark.busy;
+        if self.mark.as_ref() != Some(&mark) || self.seen != self.touched || active {
+            self.mark = Some(mark.clone());
+            self.seen = self.touched;
+            self.quiet = now;
+            self.stop();
+        }
+        let project = project?;
+        let off = project.settings.render_cache == Mode::Off || !self.prefs.background;
+        if off || active || self.done || self.running.is_some() || self.index != Scan::Done {
+            return None;
+        }
+        let base = self.base.clone()?;
+        let due = self.quiet + Duration::from_secs(u64::from(self.prefs.after_secs));
+        if now < due {
+            return Some(due);
+        }
+        self.start(project, base, mark.at);
+        None
+    }
+
+    fn start(&mut self, project: &Project, base: Arc<RenderPlan>, from: i64) {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let work = Render {
+            cache: self.cache.clone(),
+            base,
+            project: Arc::new(project.clone()),
+            prefs: self.prefs,
+            proxies: self.proxies.clone(),
+            decodes: self.decodes.clone(),
+            look: self.look(project),
+            from,
+            cancel: cancel.clone(),
+            tx: self.tx.clone(),
+        };
+        if crate::threads::spawn("vidcut-render-cache", Work::Job, move || work.run()).is_ok() {
+            self.running = Some(cancel);
+        }
+    }
+
+    pub(super) fn status(&self, project: &Project) -> Value {
+        let mode = project.settings.render_cache;
+        let look = self.look(project);
+        let slow = |id: &str| slow_media(project, &self.proxies, &self.decodes, id);
+        let setup = Setup {
+            mode,
+            prefs: &self.prefs,
+            project,
+            slow: &slow,
+            look: &look,
+        };
+        let mut cache = self.lock();
+        let parts: Vec<Value> = match &self.base {
+            Some(base) => cache
+                .parts(base, &setup)
+                .into_iter()
+                .map(|p| {
+                    json!({
+                        "start": p.start,
+                        "frames": p.frames,
+                        "cached": p.cached,
+                        "reasons": p.reasons.iter().map(|r| r.title()).collect::<Vec<_>>(),
+                    })
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        let index = cache.index();
+        json!({
+            "mode": mode,
+            "background": self.prefs.background,
+            "after_secs": self.prefs.after_secs,
+            "rendering": self.running.is_some(),
+            "size": [look.width, look.height],
+            "parts": parts,
+            "files": index.files().count(),
+            "frames": index.frames(),
+            "bytes": index.bytes(),
+            "error": self.error,
+        })
+    }
+
+    fn scanned(&mut self) {
+        self.stop();
+        self.done = false;
+        if self.index != Scan::Done {
+            *self.lock().index_mut() = Index::scan(&Index::dir());
+            self.index = Scan::Done;
+        }
+    }
+
+    pub(super) fn delete_all(&mut self) -> usize {
+        self.scanned();
+        self.lock().index_mut().clear();
+        let mut n = 0;
+        if let Ok(listing) = std::fs::read_dir(Index::dir()) {
+            for e in listing.flatten() {
+                let path = e.path();
+                if path.is_file() && std::fs::remove_file(&path).is_ok() {
+                    n += usize::from(
+                        path.extension()
+                            .is_some_and(|x| x == vidcut_core::render_cache::FILE),
+                    );
+                }
+            }
+        }
+        n
+    }
+
+    pub(super) fn delete_frames(&mut self, project: &Project, ranges: &[(i64, i64)]) -> usize {
+        self.scanned();
+        let Some(base) = self.base.clone() else {
+            return 0;
+        };
+        let look = self.look(project);
+        let slow = |id: &str| slow_media(project, &self.proxies, &self.decodes, id);
+        let setup = Setup {
+            mode: Mode::Smart,
+            prefs: &self.prefs,
+            project,
+            slow: &slow,
+            look: &look,
+        };
+        let mut cache = self.lock();
+        let keys = keys_in(&mut cache, &base, &setup, ranges);
+        cache.index_mut().drop_with(&keys)
+    }
+
+    pub(super) fn delete_unused(&mut self, project: &Project) -> usize {
+        self.scanned();
+        let Some(base) = self.base.clone() else {
+            return 0;
+        };
+        let look = self.look(project);
+        let slow = |id: &str| slow_media(project, &self.proxies, &self.decodes, id);
+        let setup = Setup {
+            mode: Mode::Smart,
+            prefs: &self.prefs,
+            project,
+            slow: &slow,
+            look: &look,
+        };
+        let mut cache = self.lock();
+        let all = [(base.range.0, base.range.1)];
+        let keys = keys_in(&mut cache, &base, &setup, &all);
+        cache.index_mut().keep_only(&keys)
+    }
+}
+
+fn keys_in(
+    cache: &mut Cache,
+    base: &RenderPlan,
+    setup: &Setup,
+    ranges: &[(i64, i64)],
+) -> HashSet<Key> {
+    let mut out = HashSet::new();
+    let mut t = base.range.0;
+    for piece in &base.video {
+        let n = piece.frames();
+        if ranges.iter().any(|&(a, b)| a < t + n && b > t) {
+            let keys = cache.keys(piece, setup, base);
+            for (k, key) in keys.iter().enumerate() {
+                let at = t + k as i64;
+                if ranges.iter().any(|&(a, b)| (a..b).contains(&at)) {
+                    out.insert(*key);
+                }
+            }
+        }
+        t += n;
+    }
+    out
+}
+
+struct Render {
+    cache: Arc<Mutex<Cache>>,
+    base: Arc<RenderPlan>,
+    project: Arc<Project>,
+    prefs: RenderCachePrefs,
+    proxies: Proxies,
+    decodes: Arc<HashMap<String, bool>>,
+    look: Look,
+    from: i64,
+    cancel: Arc<AtomicBool>,
+    tx: Sender<Msg>,
+}
+
+impl Render {
+    fn send(&self, e: Event) {
+        let _ = self.tx.send(Msg::RenderCache(e));
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Cache> {
+        self.cache.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn run(self) {
+        let ended = self.render();
+        let (done, error) = match ended {
+            Ok(done) => (done, None),
+            Err(e) => (false, Some(e)),
+        };
+        self.send(Event::Ended { done, error });
+    }
+
+    fn render(&self) -> Result<bool, String> {
+        let gpu = crate::preferences::gpu_decoding().own_decoder();
+        let mut decodes = (*self.decodes).clone();
+        let mut found = false;
+        for m in &self.project.media {
+            let Some(v) = m.info.video.as_ref().filter(|v| !v.still) else {
+                continue;
+            };
+            if !decodes.contains_key(&m.id) {
+                let slow = vidcut_av::render_cache::slow(gpu.as_ref(), &m.path, &v.codec);
+                decodes.insert(m.id.clone(), slow);
+                found = true;
+            }
+        }
+        if found {
+            self.send(Event::Slow(decodes.clone()));
+        }
+        let prefs = crate::preferences::load().unwrap_or_default();
+        let proxies = self
+            .project
+            .settings
+            .use_proxies
+            .then_some(self.proxies.codec);
+        let encoders = crate::env::cache_encoders(
+            proxies,
+            prefs.gpu.acceleration,
+            prefs.gpu.acceleration && prefs.gpu.decoding,
+        );
+        let project = &*self.project;
+        let slow = |id: &str| slow_media(project, &self.proxies, &decodes, id);
+        let setup = Setup {
+            mode: project.settings.render_cache,
+            prefs: &self.prefs,
+            project,
+            slow: &slow,
+            look: &self.look,
+        };
+        let most = (self.base.fps.as_f64() * SECONDS_EACH as f64)
+            .round()
+            .max(1.0) as i64;
+        let mut from = self.from;
+        loop {
+            if self.cancel.load(Ordering::Relaxed) {
+                return Ok(false);
+            }
+            let next = self.lock().next(&self.base, &setup, from, most);
+            let Some((start, keys)) = next else {
+                return Ok(true);
+            };
+            let frames = keys.len() as i64;
+            let plan = segment(&self.base, &self.look, start, frames);
+            let written = vidcut_av::render_cache::write(
+                &plan,
+                &keys,
+                &encoders,
+                gpu.as_ref(),
+                &Index::dir(),
+                &self.cancel,
+            );
+            match written {
+                Ok(w) => {
+                    self.lock().index_mut().add(&w.path, &keys);
+                    self.send(Event::Written);
+                    from = start + frames;
+                }
+                Err(_) if self.cancel.load(Ordering::Relaxed) => return Ok(false),
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+    }
+}

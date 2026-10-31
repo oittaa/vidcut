@@ -22,6 +22,7 @@ pub mod place;
 pub mod preferences;
 pub mod preview;
 pub mod render;
+pub mod render_cache;
 pub mod request;
 pub mod retime;
 pub mod rich;
