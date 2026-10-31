@@ -865,8 +865,9 @@ pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
             .is_some()
             .then(|| l.decoder.map_or(Decoding::Cpu, Decoding::Gpu));
         let frame = l.frame.expect("frames as decoded, black too");
-        let picture =
-            Picture::new(frame, l.rotation, decoder, l.decoding).with_sampling(l.sampling);
+        let picture = Picture::new(frame, l.rotation, decoder, l.decoding)
+            .with_sampling(l.sampling)
+            .with_origin(l.origin);
         match l.woven {
             Some((top_first, before, after)) => {
                 let field = |f: Option<crate::ffmpeg::frame::Video>| {

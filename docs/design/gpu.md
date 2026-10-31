@@ -174,7 +174,8 @@ The AI upscalers share one path in the reader:
   - The models of vidcut refuse 8-bit pictures. Retime Process takes 16 bits too.
   - Why: 16 bits keep HDR pictures. In the test of `hdr_check`, AI Fast and AI Slow came nearer to the real frames with 16 bits than with 8 bits.
 - The reader drops a run for a frame that the run does not give (`RUN_JUMP`).
-- `super_scale::report` tells what the upscaler makes. The stats panel shows it (`SuperScaleStats`).
+- `super_scale::report` tells what the upscaler makes now and its last work. The stats panel shows it (`SuperScaleStats`).
+- Each kept picture tells its own upscaler and sizes (`Origin`, [playback](playback.md#the-engine)).
 
 GPU memory:
 
@@ -249,7 +250,9 @@ On macOS (`interpolate::macos`):
 - The made frame stays a VideoToolbox frame (`interpolate::between_frames`).
 - The next frame between the same pair uses the pair that the session has (`SequentialReferencesUnchanged`).
 
-`interpolate::report` tells what each process makes. The stats panel shows it (`RetimeStats`).
+`interpolate::report` tells the last frame that a process made. The stats panel shows it (`RetimeStats`).
+
+Each kept picture tells its own process, source frames and position (`Origin`, [playback](playback.md#the-engine)).
 
 ## Deinterlacing and HDR
 

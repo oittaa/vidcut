@@ -1,4 +1,7 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use vidcut_core::model::{Retime, Upscaler};
 
 use crate::color::{Colors, colors_of};
 use crate::decode::Decoding;
@@ -105,6 +108,43 @@ pub struct Picture {
     over: Vec<Over>,
     sampling: Sampling,
     woven: Option<Woven>,
+    origin: Option<Origin>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Made {
+    Solid([u8; 3]),
+    Still,
+    Source(Option<i64>),
+    Between {
+        retime: Retime,
+        frames: [Option<i64>; 2],
+        at: f64,
+        took: Duration,
+    },
+    Nearer {
+        retime: Retime,
+        frame: Option<i64>,
+        at: f64,
+    },
+    Smooth {
+        retime: Retime,
+        at: f64,
+        took: Duration,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Upscaled {
+    pub upscaler: Upscaler,
+    pub sizes: Option<[(u32, u32); 2]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Origin {
+    pub made: Made,
+    pub upscaled: Option<Upscaled>,
+    pub when: Instant,
 }
 
 #[derive(Clone)]
@@ -153,7 +193,17 @@ impl Picture {
             over: Vec::new(),
             sampling: Sampling::Own,
             woven: None,
+            origin: None,
         }
+    }
+
+    pub(crate) fn with_origin(mut self, origin: Option<Origin>) -> Self {
+        self.origin = origin;
+        self
+    }
+
+    pub fn origin(&self) -> Option<&Origin> {
+        self.origin.as_ref()
     }
 
     pub(crate) fn with_woven(mut self, woven: Woven) -> Self {
@@ -299,7 +349,8 @@ impl Picture {
         };
         Ok(
             Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
-                .with_sampling(self.sampling.clone()),
+                .with_sampling(self.sampling.clone())
+                .with_origin(self.origin),
         )
     }
 
