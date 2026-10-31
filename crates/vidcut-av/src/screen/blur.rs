@@ -118,7 +118,7 @@ fn passes(want: [f64; 4]) -> Vec<Pass> {
     }
 }
 
-fn bytes(pass: &Pass, down: bool, blur: &Blurring, last: bool) -> Vec<u8> {
+fn bytes(pass: &Pass, down: bool, blur: &Blurring, (first, last): (bool, bool)) -> Vec<u8> {
     let mut out = Vec::with_capacity(PARAMS);
     for v in pass.spread {
         out.extend_from_slice(&(v as f32).to_le_bytes());
@@ -128,8 +128,9 @@ fn bytes(pass: &Pass, down: bool, blur: &Blurring, last: bool) -> Vec<u8> {
         out.extend_from_slice(&v.to_le_bytes());
     }
     let use_alpha = if blur.use_alpha { 1.0 } else { 0.0 };
+    let first = if first { 1.0 } else { 0.0 };
     let last = if last { 1.0 } else { 0.0 };
-    for v in [blur.blend, use_alpha, last, 0.0] {
+    for v in [blur.blend, use_alpha, last, first] {
         out.extend_from_slice(&(v as f32).to_le_bytes());
     }
     out
@@ -284,7 +285,7 @@ fn blur_into(
             });
             let last = j + 1 == ways.len();
             gpu.queue
-                .write_buffer(&params, 0, &bytes(pass, *down, effect, last));
+                .write_buffer(&params, 0, &bytes(pass, *down, effect, (j == 0, last)));
             let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("vidcut blur"),
                 layout: &pipes.layout,

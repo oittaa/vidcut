@@ -947,7 +947,11 @@ fn blur_tap(px: vec2<i32>, k: i32, size: vec2<i32>) -> vec4<f32> {
         return vec4<f32>(0.0);
     }
     let at = blur_folded(i, n);
-    return textureLoad(blur_source, select(vec2<i32>(at, px.y), vec2<i32>(px.x, at), down), 0);
+    let c = textureLoad(blur_source, select(vec2<i32>(at, px.y), vec2<i32>(px.x, at), down), 0);
+    if blurring.blend.w > 0.5 && blurring.blend.y < 0.5 && c.a > 0.0 {
+        return vec4<f32>(c.rgb / c.a, c.a);
+    }
+    return c;
 }
 
 @fragment

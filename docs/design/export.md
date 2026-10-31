@@ -411,7 +411,9 @@ The draw:
 - `Screen::draw` draws a layer with effects into a picture of its own, with no opacity (`bared`).
 - `blur::Blurred` keeps that picture for each such layer. It also keeps two pictures for the passes.
 - `fs_blur` blurs across and then down, in passes (`blur::passes`).
-- The last pass of an effect mixes the blur with the picture that came in, by the blend. With Use Alpha off, it keeps the alpha of that picture.
+- The last pass of an effect mixes the blur with the picture that came in, by the blend.
+- With Use Alpha off, the first pass takes the colors without their alpha. Thus a clear part of the picture does not make it darker.
+  - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
 
 A made frame of a speed change ([which source frame](#which-source-frame)):
