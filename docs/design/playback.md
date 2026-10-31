@@ -383,7 +383,7 @@ The files:
 
 The line and the Stats row:
 
-- `Background::apply` also makes the parts of the line (`Cache::parts`). Each `Part` holds its reasons and its cached frames, in runs.
+- `Background::apply` also makes the parts of the line (`Cache::parts`), after `Cache::apply`. Each `Part` holds its reasons and its cached frames, in runs.
 - The parts change only when the plan is made again. The plan is made again after each edit, write, delete, scan and change of the preferences. Thus the line follows the render.
 - The `Snapshot` carries the parts (`render_cache`). The timeline draws them under both rulers (`paint::cache_line`). `paint::cache_reasons` gives the reasons under the pointer.
 - The timeline draws no line while it shows another project than the current one: a drag, a trim or a step of the history.

@@ -158,8 +158,11 @@ impl Background {
             look: &look,
         };
         let mut cache = self.lock();
-        let parts = cache.parts(plan, &setup);
         cache.apply(plan, &setup, &Path::is_file);
+        let parts = match &self.base {
+            Some(base) => cache.parts(base, &setup),
+            None => Vec::new(),
+        };
         drop(cache);
         self.show(parts)
     }
