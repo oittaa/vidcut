@@ -179,6 +179,9 @@ The AI upscalers share one path in the reader:
 
 GPU memory:
 
+- Each AI model has one engine for the whole process. Each upscaler has a static `super_scale::Slot`, and the Retime Processes have the `ENGINE` of `interpolate`.
+  - The viewer, the exports of the GUI and the background render of the render cache share these engines.
+  - Thus the render cache uses the model that the viewer has loaded. It does not load a second copy.
 - Each `Source` that uses an AI upscaler holds a `super_scale::User`.
 - When the last user goes, `super_scale::Slot::release` frees the GPU memory of that upscaler.
   - Why: two AI upscalers do not hold memory at the same time.

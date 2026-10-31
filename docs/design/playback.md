@@ -486,6 +486,7 @@ The background render (`live::render_cache::Background`):
 - After `render_cache.after_secs` without activity, `vidcut-render-cache` starts (`Work::Job`).
   - It renders from the playhead forward, then from the start.
   - It writes one file at a time (vidcut-av `render_cache::write`), and adds it to the index (`Index::add`). The viewer then reloads the plan.
+  - It uses the AI models that the viewer has loaded, with no second copy ([gpu](gpu.md#super-scale)).
   - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
 - `cache.render` in a GUI starts the render at once (`Background::render_now`). It does not wait for the time without activity.
   - It first stops a render that runs. Thus only one render writes the cache.

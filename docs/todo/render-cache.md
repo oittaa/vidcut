@@ -31,7 +31,6 @@ Each kept layer has a `player::Origin` ([playback](../design/playback.md#the-eng
 - The quality values of Auto with proxies off are starting values. A measurement sets them. Its plan goes to the owner first.
 - In an HDR timeline, the cache has 10 bits, in the PQ or HLG of the timeline. This needs a check.
 - The frames that playback made, and that the memory still keeps, go to the cache first. Thus they are not made again.
-- The background render uses the AI model that the viewer has loaded. It does not load a second copy.
 
 ## Differences from Resolve
 
