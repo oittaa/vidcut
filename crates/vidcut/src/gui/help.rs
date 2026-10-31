@@ -14,6 +14,8 @@ pub(super) struct HelpUi {
     explained: HashSet<&'static str>,
 }
 
+type Choices = (&'static str, Vec<(&'static str, &'static str)>);
+
 impl Workspace {
     pub(super) fn help_window(&mut self, ctx: &egui::Context) {
         let help = &mut self.help;
@@ -23,7 +25,7 @@ impl Workspace {
         }
         let mut open = true;
         let height = (ctx.content_rect().height() * 0.8).max(400.0);
-        egui::Window::new("Keyboard Shortcuts")
+        egui::Window::new("Help")
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
@@ -33,7 +35,7 @@ impl Workspace {
             .show(ctx, |ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut help.search)
-                        .hint_text("Find a key or an action")
+                        .hint_text("Find a key, an action or a setting")
                         .desired_width(f32::INFINITY),
                 );
                 ui.add_space(8.0);
@@ -49,6 +51,7 @@ impl Workspace {
                     })
                     .filter(|(_, rows)| !rows.is_empty())
                     .collect();
+                let found = choices(&query);
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -58,7 +61,19 @@ impl Workspace {
                                 right: 14,
                                 ..Default::default()
                             })
-                            .show(ui, |ui| shortcuts(ui, &groups, &query, &mut help.explained));
+                            .show(ui, |ui| {
+                                if groups.is_empty() && found.is_empty() {
+                                    ui.label(
+                                        RichText::new(
+                                            "Nothing matches. Try a key like J, or a word like trim.",
+                                        )
+                                        .color(theme::colors().text_dim),
+                                    );
+                                    return;
+                                }
+                                shortcuts(ui, &groups, &query, &mut help.explained);
+                                settings(ui, &found);
+                            });
                     });
             });
         help.open = open;
@@ -74,19 +89,38 @@ fn shortcuts(
     explained: &mut HashSet<&'static str>,
 ) {
     if groups.is_empty() {
-        ui.label(
-            RichText::new("Nothing matches. Try a key like J, or a word like trim.")
-                .color(theme::colors().text_dim),
-        );
         return;
     }
-    if ui.available_width() < 640.0 {
-        for (g, rows) in groups {
+    let (left, right) = groups.split_at(halves(groups));
+    two_columns(ui, |ui, side| {
+        for (g, rows) in [left, right][side] {
             group(ui, *g, rows, query, explained);
         }
+    });
+}
+
+fn settings(ui: &mut egui::Ui, found: &[Choices]) {
+    if found.is_empty() {
         return;
     }
-    let split = halves(groups);
+    let (left, right) = found.split_at(found.len().div_ceil(2));
+    two_columns(ui, |ui, side| {
+        for (title, rows) in [left, right][side] {
+            heading(ui, title);
+            for (i, (name, does)) in rows.iter().enumerate() {
+                choice(ui, name, does, i % 2 == 1);
+            }
+            ui.add_space(16.0);
+        }
+    });
+}
+
+fn two_columns(ui: &mut egui::Ui, mut side: impl FnMut(&mut egui::Ui, usize)) {
+    if ui.available_width() < 640.0 {
+        side(ui, 0);
+        side(ui, 1);
+        return;
+    }
     let middle = ui.available_rect_before_wrap().center().x;
     let top = ui.cursor().top();
     ui.columns(2, |columns| {
@@ -96,21 +130,13 @@ fn shortcuts(
                 right: GAP,
                 ..Default::default()
             })
-            .show(&mut left[0], |ui| {
-                for (g, rows) in &groups[..split] {
-                    group(ui, *g, rows, query, explained);
-                }
-            });
+            .show(&mut left[0], |ui| side(ui, 0));
         egui::Frame::new()
             .inner_margin(egui::Margin {
                 left: GAP,
                 ..Default::default()
             })
-            .show(&mut right[0], |ui| {
-                for (g, rows) in &groups[split..] {
-                    group(ui, *g, rows, query, explained);
-                }
-            });
+            .show(&mut right[0], |ui| side(ui, 1));
     });
     ui.painter().vline(
         middle,
@@ -141,6 +167,38 @@ fn matches(s: &Shortcut, query: &str) -> bool {
                 .is_some_and(|e| e.to_lowercase().contains(query)))
 }
 
+fn choices(query: &str) -> Vec<Choices> {
+    [
+        ("Super Scale Upscaler", super::super_scale::choices()),
+        ("Retime Process", super::retime_process::choices()),
+    ]
+    .into_iter()
+    .map(|(title, rows)| {
+        let rows = rows
+            .into_iter()
+            .filter(|&(name, does)| found_in(&[title, name, does], query))
+            .collect::<Vec<_>>();
+        (title, rows)
+    })
+    .filter(|(_, rows)| !rows.is_empty())
+    .collect()
+}
+
+fn found_in(texts: &[&str], query: &str) -> bool {
+    query.is_empty()
+        || query.chars().count() > 1 && texts.iter().any(|t| t.to_lowercase().contains(query))
+}
+
+fn heading(ui: &mut egui::Ui, title: &str) {
+    ui.label(
+        RichText::new(title.to_uppercase())
+            .small()
+            .strong()
+            .color(theme::colors().accent),
+    );
+    ui.add_space(4.0);
+}
+
 fn group(
     ui: &mut egui::Ui,
     g: Group,
@@ -148,13 +206,7 @@ fn group(
     query: &str,
     explained: &mut HashSet<&'static str>,
 ) {
-    ui.label(
-        RichText::new(g.title().to_uppercase())
-            .small()
-            .strong()
-            .color(theme::colors().accent),
-    );
-    ui.add_space(4.0);
+    heading(ui, g.title());
     for (i, s) in rows.iter().enumerate() {
         row(ui, s, query, explained, i % 2 == 1);
     }
@@ -174,8 +226,7 @@ fn row(
                 && s.explanation
                     .is_some_and(|e| e.to_lowercase().contains(query))));
     let mut toggle = false;
-    let behind = ui.painter().add(egui::Shape::Noop);
-    let shown = ui.vertical(|ui| {
+    striped(ui, stripe, |ui| {
         ui.horizontal(|ui| {
             if s.explanation.is_some() {
                 let r = mark(ui, open);
@@ -198,18 +249,35 @@ fn row(
             });
         });
         if open && let Some(e) = s.explanation {
-            ui.horizontal(|ui| {
-                ui.add_space(MARK + ui.spacing().item_spacing.x);
-                ui.add(
-                    egui::Label::new(RichText::new(super::keys(e)).color(theme::colors().text_dim))
-                        .wrap(),
-                );
-            });
+            indented(ui, dim(&super::keys(e)));
         }
     });
     if toggle && !explained.remove(s.action) {
         explained.insert(s.action);
     }
+}
+
+fn choice(ui: &mut egui::Ui, name: &str, does: &str, stripe: bool) {
+    striped(ui, stripe, |ui| {
+        indented(ui, egui::Label::new(name).wrap());
+        indented(ui, dim(does));
+    });
+}
+
+fn dim(text: &str) -> egui::Label {
+    egui::Label::new(RichText::new(text).color(theme::colors().text_dim)).wrap()
+}
+
+fn indented(ui: &mut egui::Ui, label: egui::Label) {
+    ui.horizontal(|ui| {
+        ui.add_space(MARK + ui.spacing().item_spacing.x);
+        ui.add(label);
+    });
+}
+
+fn striped(ui: &mut egui::Ui, stripe: bool, add: impl FnOnce(&mut egui::Ui)) {
+    let behind = ui.painter().add(egui::Shape::Noop);
+    let shown = ui.vertical(add);
     let rect = shown.response.rect.expand2(egui::vec2(6.0, 2.0));
     let c = theme::colors();
     let fill = match (ui.rect_contains_pointer(rect), stripe) {

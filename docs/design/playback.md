@@ -116,7 +116,7 @@ flowchart TD
   - With a Retime Process other than Nearest, a made frame comes from two enlarged and placed pictures ([export](export.md#which-source-frame)).
   - These two pictures always take the kernel of Super Scale, as an export does. `viewer.super_scale` does not change them.
   - A seek with AI Fast decodes the whole chunk first. The upscaler makes the asked frame first, and the rest of the chunk follows.
-  - A seek with AI Best starts a new stream at the asked frame. Its first picture comes after the first chunk of the stream.
+  - A seek with AI Slow starts a new stream at the asked frame. Its first picture comes after the first chunk of the stream.
   - While playing, the player skips the frames that it cannot make in time. A replay makes again the frames that it skipped.
   - The key of the kept frames holds the Super Scale, the placement and the timeline size (`source_key`). Why: they decide whether the picture is enlarged.
   - The placement in the key is its picture settings and its source position, not its clip or its timeline start. Thus a moved clip keeps its frames.

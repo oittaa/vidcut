@@ -161,7 +161,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
     - When NVENC takes the planes in GPU memory, the encoder's thread waits for the GPU. Otherwise, the export thread waits for it in the encoder's planes.
     - The line times only the last pass over the frames. It leaves out the first pass of a two-pass export and the HDR10+ light measurement.
   - The `[upscale]` lines give the time of each step of each AI Fast chunk.
-  - The `[flashvsr]` lines give the time of each step of each AI Best chunk: the input projection, the blocks and the decoder. They also give how many caches are in main memory, how many GB go there and back, and how long AI Best waits for them.
+  - The `[flashvsr]` lines give the time of each step of each AI Slow chunk: the input projection, the blocks and the decoder. They also give how many caches are in main memory, how many GB go there and back, and how long AI Slow waits for them.
   - On macOS, an `[ai]` line names the pixel formats that each processor of macOS takes, as four-character codes (`format_in`). A 10-bit or half-float format can carry HDR.
 - On macOS, `vidcut doctor` also lists these formats for a 1920×1080 frame rate conversion and a 960×540 super-resolution scale (`macos_frame_processors`).
 - A GUI that has not ended 10 s after its window closed (`EXIT_PATIENCE`) tells the stage and the wait state of each thread.
@@ -171,7 +171,7 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - `VIDCUT_HWDEC` selects the GPU decoder of the player: `nvdec[:CUDA index]`, `vaapi[:render node]`, `d3d11va[:adapter index]`, `videotoolbox` or `none`.
 - `WGPU_BACKEND` (`vulkan`, `metal`, `dx12`) and `WGPU_POWER_PREF` (`low`, `high`) select the backend and the adapter of wgpu.
 - `WGPU_VALIDATION=0` turns off the validation layers in debug builds.
-- `VIDCUT_FLASHVSR_DUMP=DIR` makes the AI Best upscaler write its stages as `.npy` files into `DIR`. A check against the official PyTorch code reads them.
+- `VIDCUT_FLASHVSR_DUMP=DIR` makes the AI Slow upscaler write its stages as `.npy` files into `DIR`. A check against the official PyTorch code reads them.
   - `inputNNN.npy`: each enlarged input frame, at the model size, 8-bit RGB.
   - `chunkK_noise.npy` and `chunkK_latents.npy`, for each chunk: the noise and the latents after the one step, `[16, 4, H/8, W/8]`.
   - `chunkK_x_in.npy` and `chunkK_x_blockN.npy` (N is 0, 6 and 29), for the first two chunks: the hidden state before block 0 and after block N, `[tokens, 1536]`. The tokens are in the order of the official code.

@@ -53,9 +53,9 @@ fn models() -> Vec<Model> {
     } else {
         vec![
             Model::Upscaler(Upscaler::AiFast),
-            Model::Upscaler(Upscaler::AiBest),
+            Model::Upscaler(Upscaler::AiSlow),
             Model::Retime(Retime::AiFast),
-            Model::Retime(Retime::AiBest),
+            Model::Retime(Retime::AiSlow),
             Model::Retime(Retime::FrameBlend),
         ]
     }

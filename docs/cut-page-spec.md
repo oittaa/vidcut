@@ -222,7 +222,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Classic has a Sharpness of Low, Medium or High, which selects the upscaler.
   - The first time that a change needs an AI upscaler, vidcut asks to download its weights.
   - AI takes the picture in the timeline color space (§13). In an SDR timeline, HDR media is tone-mapped first.
-  - In an HDR timeline, AI Best refuses HDR media, and the Inspector shows a warning (X98).
+  - In an HDR timeline, AI Slow refuses HDR media, and the Inspector shows a warning (X98).
   - A placed picture is made at most 4 times as large as its source, before it is placed.
   - A picture that fills the frame takes the better upscaler for all of its enlargement.
   - Super Scale works only where a picture is enlarged. A picture that is made smaller is scaled as before.
@@ -2581,7 +2581,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 The manual gives the order in which each picture is processed, on each page, as a chart (Ch. 144, p. 3407). vidcut keeps this order for the stages that it has.
 
 - A different order is a deviation, as for any other behavior.
-- [design](design/README.md#picture-order) gives the order of the code. [Deviation X98](deviations.md#x98-in-an-hdr-timeline-ai-best-works-before-the-conversion) tells where it is different.
+- [design](design/README.md#picture-order) gives the order of the code. [Deviation X98](deviations.md#x98-in-an-hdr-timeline-ai-slow-works-before-the-conversion) tells where it is different.
 
 Resolve converts each clip into full-range, uncompressed 32-bit float data when it reads it (p. 222). All stages then work on that data.
 

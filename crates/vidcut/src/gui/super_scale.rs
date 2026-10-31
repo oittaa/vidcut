@@ -6,7 +6,7 @@ use super::workspace::Workspace;
 
 const NAMES: [(Upscaler, &str); 4] = [
     (Upscaler::Macos, "AI"),
-    (Upscaler::AiBest, "AI Best"),
+    (Upscaler::AiSlow, "AI Slow"),
     (Upscaler::AiFast, "AI Fast"),
     (Upscaler::Classic, "Classic"),
 ];
@@ -21,7 +21,7 @@ pub(super) const UPSCALERS: &[(MediaUpscaler, &str)] = &[
 #[cfg(not(target_os = "macos"))]
 pub(super) const UPSCALERS: &[(MediaUpscaler, &str)] = &[
     (MediaUpscaler::Project, "Project Settings"),
-    (MediaUpscaler::AiBest, "AI Best"),
+    (MediaUpscaler::AiSlow, "AI Slow"),
     (MediaUpscaler::AiFast, "AI Fast"),
     (MediaUpscaler::Classic, "Classic"),
 ];
@@ -36,7 +36,7 @@ pub(super) const PROJECT_UPSCALERS: &[(ProjectUpscaler, &str)] = &[
 #[cfg(not(target_os = "macos"))]
 pub(super) const PROJECT_UPSCALERS: &[(ProjectUpscaler, &str)] = &[
     (ProjectUpscaler::Auto, "Auto"),
-    (ProjectUpscaler::AiBest, "AI Best"),
+    (ProjectUpscaler::AiSlow, "AI Slow"),
     (ProjectUpscaler::AiFast, "AI Fast"),
     (ProjectUpscaler::Classic, "Classic"),
 ];
@@ -76,6 +76,26 @@ pub(super) fn described(s: SuperScale) -> String {
     match s.upscaler {
         Upscaler::Classic => format!("Classic, Sharpness {}", label_of(&SHARPNESS, s.sharpness)),
         u => label_of(&NAMES, u).to_string(),
+    }
+}
+
+pub(super) fn choices() -> Vec<(&'static str, &'static str)> {
+    UPSCALERS
+        .iter()
+        .filter_map(|&(m, name)| m.upscaler().map(|u| (name, does(u))))
+        .collect()
+}
+
+fn does(u: Upscaler) -> &'static str {
+    match u {
+        Upscaler::Macos => "The scaler of macOS, for pictures up to 1920×1080.",
+        Upscaler::AiSlow => {
+            "Slow. Invents more detail, and can look better on low-quality sources."
+        }
+        Upscaler::AiFast => "Fast. Adds detail to SDR and HDR pictures of any size.",
+        Upscaler::Classic => {
+            "Lanczos, or bicubic at Low Sharpness. Adds no detail. Runs everywhere."
+        }
     }
 }
 

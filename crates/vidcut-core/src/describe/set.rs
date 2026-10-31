@@ -289,7 +289,7 @@ fn upscaler(v: &Value) -> String {
         Some("project") => "Project Settings".into(),
         Some("macos") => "AI".into(),
         Some("ai_fast") => "AI Fast".into(),
-        Some("ai_best") => "AI Best".into(),
+        Some("ai_slow") => "AI Slow".into(),
         _ => word(v),
     }
 }

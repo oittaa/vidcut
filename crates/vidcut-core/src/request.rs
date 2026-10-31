@@ -350,9 +350,9 @@ pub enum Request {
         sharpness: Option<crate::model::Sharpness>,
         /// The upscaler of Super Scale: `project` (the default: the upscaler
         /// of the project settings), `macos` (macOS 26 and later, called AI
-        /// there), `ai_best`, `ai_fast` or `classic`. `ai_best` and `ai_fast`
+        /// there), `ai_slow`, `ai_fast` or `classic`. `ai_slow` and `ai_fast`
         /// are off on macOS for now.
-        /// In an HDR timeline, an export refuses `ai_best` for HDR media. It
+        /// In an HDR timeline, an export refuses `ai_slow` for HDR media. It
         /// refuses `macos` for pictures over 1920x1080 or without macOS 26.
         #[serde(default)]
         upscaler: Option<crate::model::MediaUpscaler>,
@@ -2622,7 +2622,8 @@ pub enum Request {
     GuiQuit {},
     /// Open a window for the person at the GUI: `quick_export`, `export`,
     /// `jobs`, `mixer`, `preferences`, `history` (the undo history),
-    /// `help` (the keyboard shortcuts), `transcription` (the words of the
+    /// `help` (the keyboard shortcuts, and what each upscaler and Retime
+    /// Process does), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
     /// Media Pool), `clip_info` (the media selected in the pool),
     /// `transitions`, `titles`, `inspector` or `keyframes` (tabs in the Media
@@ -3619,14 +3620,14 @@ pub struct ProjectSet {
     #[serde(default)]
     pub timeline_colors: Option<crate::model::TimelineColors>,
     /// The Retime Process of the clips that follow the project: `auto`
-    /// (the default), `nearest`, `frame_blend`, `ai_fast`, `ai_best` or
+    /// (the default), `nearest`, `frame_blend`, `ai_fast`, `ai_slow` or
     /// `macos`. `auto` gives slow motion the AI of the computer that plays
     /// or exports, and Nearest to the rest.
     #[serde(default)]
     pub retime: Option<crate::model::ProjectRetime>,
     /// The upscaler of Super Scale for the media that follow the project:
     /// `auto` (the default: the scaler of macOS on macOS, `ai_fast`
-    /// elsewhere), `macos`, `ai_best`, `ai_fast` or `classic`.
+    /// elsewhere), `macos`, `ai_slow`, `ai_fast` or `classic`.
     #[serde(default)]
     pub upscaler: Option<crate::model::ProjectUpscaler>,
     /// Download the models of the Retime Process and the upscaler that the

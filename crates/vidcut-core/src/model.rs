@@ -479,7 +479,7 @@ pub enum Upscaler {
     /// slow, with more detail. It reads the frames of a clip in order from
     /// its first frame. Its weights (7.0 GB) download at their first use. An
     /// export refuses media that it cannot take. Off on macOS for now.
-    AiBest,
+    AiSlow,
     /// A neural network (NanoVSR 5.4M) on the GPU, for SDR and HDR pictures.
     /// It reads 15 frames at a time. Its weights (25 MB) download at their
     /// first use. The upscaler of Auto elsewhere. Off on macOS for now.
@@ -500,7 +500,7 @@ pub enum MediaUpscaler {
     /// The super-resolution scaler of macOS: on macOS only.
     Macos,
     /// FlashVSR+ Turbo on the GPU: off on macOS for now.
-    AiBest,
+    AiSlow,
     /// NanoVSR 5.4M on the GPU: off on macOS for now.
     AiFast,
     /// The classic upscalers.
@@ -512,7 +512,7 @@ impl MediaUpscaler {
         match self {
             Self::Project => None,
             Self::Macos => Some(Upscaler::Macos),
-            Self::AiBest => Some(Upscaler::AiBest),
+            Self::AiSlow => Some(Upscaler::AiSlow),
             Self::AiFast => Some(Upscaler::AiFast),
             Self::Classic => Some(Upscaler::Classic),
         }
@@ -530,7 +530,7 @@ pub enum ProjectUpscaler {
     /// The super-resolution scaler of macOS: on macOS only.
     Macos,
     /// FlashVSR+ Turbo on the GPU: off on macOS for now.
-    AiBest,
+    AiSlow,
     /// NanoVSR 5.4M on the GPU: off on macOS for now.
     AiFast,
     /// The classic upscalers.
@@ -546,7 +546,7 @@ impl ProjectUpscaler {
         match self {
             Self::Auto => Upscaler::default(),
             Self::Macos => Upscaler::Macos,
-            Self::AiBest => Upscaler::AiBest,
+            Self::AiSlow => Upscaler::AiSlow,
             Self::AiFast => Upscaler::AiFast,
             Self::Classic => Upscaler::Classic,
         }
@@ -1478,10 +1478,10 @@ pub enum Retime {
     /// A larger neural network (EMA-VFI) on the GPU, as AI Fast: slower, and
     /// nearer to the real frames. Its weights (264 MB) download at their
     /// first use.
-    AiBest,
+    AiSlow,
     /// The frame rate conversion of macOS (VideoToolbox) makes the frame
     /// from the motion between the two source frames. It is on macOS only,
-    /// where the app calls it AI, and where AI Fast and AI Best are off.
+    /// where the app calls it AI, and where AI Fast and AI Slow are off.
     Macos,
 }
 
@@ -1490,7 +1490,7 @@ impl Retime {
         Retime::Nearest,
         Retime::FrameBlend,
         Retime::AiFast,
-        Retime::AiBest,
+        Retime::AiSlow,
         Retime::Macos,
     ];
 
@@ -1499,7 +1499,7 @@ impl Retime {
     }
 
     pub fn ai(&self) -> bool {
-        matches!(self, Retime::AiFast | Retime::AiBest | Retime::Macos)
+        matches!(self, Retime::AiFast | Retime::AiSlow | Retime::Macos)
     }
 
     #[cfg(target_os = "macos")]
@@ -1517,7 +1517,7 @@ impl Retime {
             Retime::Nearest => "Nearest",
             Retime::FrameBlend => "Frame Blend",
             Retime::AiFast => "AI Fast",
-            Retime::AiBest => "AI Best",
+            Retime::AiSlow => "AI Slow",
             Retime::Macos => "AI",
         }
     }
@@ -1537,7 +1537,7 @@ pub enum ClipRetime {
     /// RIFE 4.25 on the GPU: off on macOS.
     AiFast,
     /// EMA-VFI on the GPU: off on macOS.
-    AiBest,
+    AiSlow,
     /// The frame rate conversion of macOS: on macOS only.
     Macos,
 }
@@ -1553,7 +1553,7 @@ impl ClipRetime {
             Self::Nearest => Some(Retime::Nearest),
             Self::FrameBlend => Some(Retime::FrameBlend),
             Self::AiFast => Some(Retime::AiFast),
-            Self::AiBest => Some(Retime::AiBest),
+            Self::AiSlow => Some(Retime::AiSlow),
             Self::Macos => Some(Retime::Macos),
         }
     }
@@ -1579,7 +1579,7 @@ pub enum ProjectRetime {
     /// RIFE 4.25 on the GPU: off on macOS.
     AiFast,
     /// EMA-VFI on the GPU: off on macOS.
-    AiBest,
+    AiSlow,
     /// The frame rate conversion of macOS: on macOS only.
     Macos,
 }
@@ -1595,7 +1595,7 @@ impl ProjectRetime {
             Self::Nearest => Some(Retime::Nearest),
             Self::FrameBlend => Some(Retime::FrameBlend),
             Self::AiFast => Some(Retime::AiFast),
-            Self::AiBest => Some(Retime::AiBest),
+            Self::AiSlow => Some(Retime::AiSlow),
             Self::Macos => Some(Retime::Macos),
         }
     }

@@ -536,7 +536,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     key(App, &["Ctrl", "I"], "Import media", None),
     key(App, &["Ctrl", "Shift", "N"], "New bin", None),
     key(App, &["Ctrl", ","], "Preferences", None),
-    key(App, &["F1"], "Keyboard shortcuts", None),
+    key(App, &["F1"], "Help", None),
     key(
         Play,
         &["C"],
