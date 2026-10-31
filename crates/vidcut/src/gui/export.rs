@@ -182,7 +182,14 @@ pub struct ExportUi {
     warnings: Option<(String, Vec<String>)>,
     confirm_quit: bool,
     pub quit_confirmed: bool,
+    pub(super) jobs_window: super::window::Tool,
 }
+
+const JOBS: super::window::Separate = super::window::Separate {
+    title: "Jobs",
+    file: "window-jobs.json",
+    size: [460.0, 560.0],
+};
 
 impl ExportUi {
     pub(super) fn windows(&self) -> (bool, bool) {
@@ -1293,6 +1300,7 @@ impl Workspace {
 
     fn jobs_window(&mut self, ctx: &egui::Context) {
         if !self.export.show_jobs {
+            self.export.jobs_window.close();
             return;
         }
         self.export.jobs_failed_unseen = false;
@@ -1300,48 +1308,46 @@ impl Workspace {
         let rate = self.project().map(|p| p.settings.fps.as_f64());
         let project = self.snap.project.as_ref().map(|p| p.path.clone());
         let mut open = true;
-        egui::Window::new("Jobs")
-            .default_width(460.0)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                if jobs.is_empty() {
-                    ui.label(dim("No jobs yet. Jobs from the CLI show here too."));
-                }
-                egui::ScrollArea::vertical()
-                    .max_height(520.0)
-                    .show(ui, |ui| {
-                        for j in jobs.iter().rev() {
-                            ui.group(|ui| {
-                                ui.set_min_width(ui.available_width());
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new(&j.title).strong());
-                                    match j.origin {
-                                        "ipc" => ui.label(dim("script")),
-                                        "session" => ui.label(dim("automatic")),
-                                        _ => ui.label(""),
-                                    };
-                                });
-                                job_chips(ui, j);
-                                for w in job_warnings(j) {
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(format!("⚠ {w}"))
-                                                .color(ui.visuals().warn_fg_color),
-                                        )
-                                        .wrap(),
-                                    );
-                                }
-                                for n in job_lines(j, "notes") {
-                                    ui.add(egui::Label::new(dim(n)).wrap());
-                                }
-                                job_view(ui, j, |method, params| self.send(method, params));
-                                egui::CollapsingHeader::new("Details")
-                                    .id_salt(("job-details", &j.id))
-                                    .show(ui, |ui| job_details(ui, j, rate, project.as_deref()));
-                            });
+        let owner = self.main_window;
+        let mut window = std::mem::take(&mut self.export.jobs_window);
+        super::dialog::separate_window(ctx, &mut window, owner, &JOBS, &mut open, |ui| {
+            if jobs.is_empty() {
+                ui.label(dim("No jobs yet. Jobs from the CLI show here too."));
+            }
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for j in jobs.iter().rev() {
+                    ui.group(|ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&j.title).strong());
+                            match j.origin {
+                                "ipc" => ui.label(dim("script")),
+                                "session" => ui.label(dim("automatic")),
+                                _ => ui.label(""),
+                            };
+                        });
+                        job_chips(ui, j);
+                        for w in job_warnings(j) {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("⚠ {w}"))
+                                        .color(ui.visuals().warn_fg_color),
+                                )
+                                .wrap(),
+                            );
                         }
+                        for n in job_lines(j, "notes") {
+                            ui.add(egui::Label::new(dim(n)).wrap());
+                        }
+                        job_view(ui, j, |method, params| self.send(method, params));
+                        egui::CollapsingHeader::new("Details")
+                            .id_salt(("job-details", &j.id))
+                            .show(ui, |ui| job_details(ui, j, rate, project.as_deref()));
                     });
+                }
             });
+        });
+        self.export.jobs_window = window;
         self.export.show_jobs = open;
     }
 

@@ -80,6 +80,7 @@ pub struct Workspace {
     pub stats: Option<live::stats::PlayerStats>,
     pub display: Option<String>,
     pub levels: Option<vidcut_av::player::Levels>,
+    pub main_window: Option<eframe::wgpu::rwh::RawWindowHandle>,
     pub(super) search: String,
     pub(super) bins: super::pool::BinsUi,
     pub(super) timecode: Option<TimecodeEntry>,
@@ -169,6 +170,7 @@ impl Workspace {
             want: [640, 360],
             display: None,
             levels: None,
+            main_window: None,
             search: String::new(),
             bins: Default::default(),
             timecode: None,
@@ -1162,6 +1164,7 @@ impl Workspace {
     }
 
     fn keys(&mut self, ctx: &egui::Context) {
+        super::dialog::take_forwarded_keys(ctx);
         self.key_focus(ctx);
         if vidcut_av::debug() {
             ctx.input(|i| {
@@ -1706,6 +1709,11 @@ impl Workspace {
         } else {
             self.delete_selected(lift);
         }
+    }
+
+    pub fn flush_windows(&mut self) {
+        self.transcription.window.flush();
+        self.export.jobs_window.flush();
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {

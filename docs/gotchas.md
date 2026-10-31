@@ -33,6 +33,9 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - Thus vidcut makes a new device after a loss only on an action of the user, and only a few times in a minute (`screen::retry_lost`).
 - **egui-wgpu shows an `Rgba8Unorm` native texture's values as they are**, with no sRGB conversion.
   - The target of the viewer (`TARGET` in `screen/mod.rs`) holds gamma-encoded BT.709 RGB.
+- **egui does not give the native handles of its viewports.** eframe gives only the handle of the main window (`Frame`).
+  - The owner and the placement of a separate window need its handle.
+  - Thus on Windows, `Tool::watch` finds a separate window by its title among the windows of the UI thread (`native::find`).
 
 ## FFmpeg: reading and decoding
 
