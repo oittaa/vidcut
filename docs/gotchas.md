@@ -251,7 +251,7 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 
 ## Resolve's OTIO files
 
-These facts come from measurements in Resolve Studio 21.1.1, through its scripting API. The measurements set values on clips, export and import OTIO files, and read back stills and a Deliver render.
+These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through its scripting API and its Inspector. The measurements set values on clips, export and import OTIO files, and read back stills and a Deliver render.
 
 - **Resolve draws a title read from a file at a pixel a point**, at any picture size.
   - Resolve's own titles have 1/1080 of the height of the picture for a point.
@@ -424,6 +424,9 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - In a Push, the two pictures overlap on the band. The band mixes them linearly, from one picture to the other.
   - In the corner of a diagonal Slide, the alpha is the smaller of the two edge ramps.
   - The first frame of the transition shows the outgoing picture with no move. From the second frame, the move above applies.
+  - The picture that moves out never moves back. In a Push and in a Slide Out, it moves the larger of 0 and m − b, rounded down.
+  - The band and its alpha ramp stay as above. Thus while m is smaller than b, no strip shows at the edge of the frame.
+  - Measured with Ease In on 24 frames at 960 × 540 and b = 27. On frames 1 to 4, the Push moved it 0, 0, 13 and 38 pixels. The Slide Out moved it 1 pixel further on frames 3 and 4.
 - **Resolve's motion blur of Push and Slide is a box blur along the axis of the move.**
   - At frame f, the box is `motion blur` × 2H × (p(f + 1) − p(f)) long, with H the height of the frame in pixels.
   - Thus with Ease None, the box is 2H/N long at the value 1. It does not depend on the width of the frame or the axis of the move.
@@ -441,8 +444,21 @@ These facts come from measurements in Resolve Studio 21.1.1, through its scripti
   - Ease In gives the first key a flat `OutBez` of 0.3 N frames. Ease Out gives the last key a flat `InBez` of −0.3 N. In & Out gives both.
   - This is 7.2 frames for a 24-frame Push with In and In & Out, and 3.6 frames for a 12-frame Push with Out.
   - The progress p(f) is the cubic Bezier curve through the keys and their handles, solved for the frame. Renders fit it within 0.0013.
-  - The Inspector shows the curve at the playhead as Transition Curve, with keyframe buttons.
+  - The Inspector shows the curve at the playhead as Transition Curve. The row has a slider, a value from 0 to 1, a keyframe button and a reset button.
   - With Custom, Resolve writes `ease` 4 and no curve. Such a transition shows the outgoing picture until its last frame.
+  - The keyframe button puts a key at the playhead. The frame of the key counts from the first frame of the transition.
+  - A key from the Inspector has no handles. Between two keys with no handles, the progress is a straight line.
+  - Measured with keys 0 at frame 0, 0.8 at 12 and 1 at 24. Frames 6, 12 and 18 moved 0.4, 0.8 and 0.9 of the frame.
+- **A change of the length of a Push scales its curve.**
+  - Each key at frame k goes to k × new / old, rounded down. The handles scale by new / old, and they are not rounded. The values stay.
+  - Measured with the Duration of the Inspector:
+    - 24 to 6 frames put the keys 0, 12 and 24 at 0, 3 and 6. It put the `OutBez` 7.2 of an Ease In curve at 1.8.
+    - Then 6 to 5 frames put the key 3 at 2. 5 to 7 kept it at 2, and 7 to 14 put it at 4.
+- **At a gap, the missing picture of a Push is transparent.** The tracks below show through it, and the other picture moves as usual.
+- **A Push on a clip with a composite mode moves its pictures before the mode applies.**
+  - The tracks below do not move, and the motion blur does not blur them.
+  - The mode of the outgoing clip applies to the two moved pictures. The mode of the incoming clip has no effect during the transition.
+  - Measured with a gray clip in Add mode over a picture that codes the position of each pixel, with and without motion blur.
 
 ## transcribe.cpp and its models
 
