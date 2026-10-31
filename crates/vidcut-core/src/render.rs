@@ -1044,6 +1044,7 @@ impl VideoPiece {
                     media,
                     source_frame,
                     frames,
+                    cache,
                     pace,
                     retime,
                     placed,
@@ -1053,6 +1054,7 @@ impl VideoPiece {
                 Self::Source {
                     media: m2,
                     source_frame: s2,
+                    cache: c2,
                     pace: p2,
                     retime: r2,
                     placed: l2,
@@ -1065,6 +1067,7 @@ impl VideoPiece {
                     && retime == r2
                     && pace.is_normal()
                     && p2.is_normal()
+                    && cache == c2
                     && *source_frame + *frames == *s2
                     && placed.len() == l2.len()
                     && placed.iter().zip(l2).all(|(a, b)| a.after(*frames) == *b)
