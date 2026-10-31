@@ -744,7 +744,9 @@ pub enum Request {
     /// of the edit, each shortened to its own media, as dragging a
     /// dissolve's edge does. `picture` or `sound` false leaves that one
     /// out. `all`: on every edit between two clips of the track (Add
-    /// Dissolve to All Edits). Transitions on those edits go.
+    /// Dissolve to All Edits). Transitions on those edits go. A transition
+    /// that is the same as the one it replaces but for its length keeps its
+    /// curve, with the frames of the keys scaled to the new length.
     #[serde(rename = "edit.dissolve")]
     EditDissolve {
         #[serde(default)]

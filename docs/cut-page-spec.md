@@ -673,6 +673,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Feather fades one picture into the other across the band. The band then shows no color.
   - Motion Blur blurs along the move. A Push blurs the whole frame. A Slide blurs the moving picture only.
   - Ease is None, In, Out, In & Out or Custom. A Custom ease plays the keys of its curve. Without keys, the transition stays on the outgoing picture.
+  - A change of the length scales the curve, as in Resolve. A key at frame k goes to k × new / old, rounded down. The handles scale by new / old. The values stay.
+    - If two keys come to one frame, vidcut keeps the first of them.
   - At a gap, the missing side shows the tracks below. Where it covers the other picture, that picture does not show.
   - The pictures move and blur first. Then the composite mode of the outgoing clip mixes them with the tracks below. The tracks below do not move.
     - The composite mode of the incoming clip has no effect during the transition.
