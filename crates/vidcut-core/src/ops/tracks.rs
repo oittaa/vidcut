@@ -106,6 +106,7 @@ pub struct TrackProps {
     pub voice_isolation: Option<Option<f64>>,
     pub duck: Option<Option<crate::model::Duck>>,
     pub video_enabled: Option<bool>,
+    pub render_cache: Option<bool>,
     pub name: Option<Option<String>>,
 }
 
@@ -121,7 +122,8 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     let t = p
         .track_mut(id)
         .ok_or_else(|| Error::not_found(format!("no track {id}")))?;
-    if props.video_enabled.is_some() && t.kind != TrackKind::Video {
+    if (props.video_enabled.is_some() || props.render_cache.is_some()) && t.kind != TrackKind::Video
+    {
         return Err(Error::invalid(format!("{id} is an audio track")));
     }
     if let Some(l) = props.locked {
@@ -144,6 +146,9 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     }
     if let Some(v) = props.video_enabled {
         t.video_enabled = v;
+    }
+    if let Some(v) = props.render_cache {
+        t.render_cache = v;
     }
     if let Some(n) = &props.name {
         t.name = n.clone();

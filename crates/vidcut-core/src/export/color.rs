@@ -290,6 +290,7 @@ mod tests {
             retime: crate::model::Retime::Nearest,
             placed: Vec::new(),
             cache: Default::default(),
+            excluded: false,
         }
     }
 

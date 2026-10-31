@@ -442,6 +442,7 @@ pub fn effect_shown(e: &Effect) -> Value {
         "on": e.on,
         "blend": e.mixed(),
         "use_alpha": e.use_alpha,
+        "render_cache": e.render_cache,
     });
     match &e.kind {
         EffectKind::GaussianBlur(b) => {

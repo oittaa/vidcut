@@ -1164,7 +1164,7 @@ pub enum Request {
         #[serde(default)]
         force: bool,
     },
-    /// Track header toggles (lock, mute, video on or off) and the mixer (solo,
+    /// Track header toggles (lock, mute, video on or off, render cache) and the mixer (solo,
     /// volume in dB, Voice Isolation, ducking). A subtitle track (`S1`) takes `locked`, `name`, `shown`,
     /// `language`, and `style` or a `look`.
     #[serde(rename = "track.set")]
@@ -1204,6 +1204,11 @@ pub enum Request {
         download: bool,
         #[serde(default)]
         video_enabled: Option<bool>,
+        /// Off, the render cache's User mode renders none of the video
+        /// track's speed changes, Retime Processes, transitions, opacity
+        /// and composite modes.
+        #[serde(default)]
+        render_cache: Option<bool>,
         /// Empty string clears the name.
         #[serde(default)]
         name: Option<String>,
@@ -2149,6 +2154,10 @@ pub enum Request {
         /// it counts as black.
         #[serde(default)]
         use_alpha: Option<bool>,
+        /// On, the render cache renders the frames of the effect, in its
+        /// Smart mode and in its User mode.
+        #[serde(default)]
+        render_cache: Option<bool>,
         /// A blur's strength, from 0 (none) to 1; with `split`, across.
         #[serde(default)]
         strength: Option<f64>,
@@ -2171,7 +2180,7 @@ pub enum Request {
         border: Option<Border>,
     },
     /// Put one effect of a clip back at its usual values. It stays on or
-    /// off. `effect` counts from 0.
+    /// off, and keeps its `render_cache`. `effect` counts from 0.
     #[serde(rename = "effects.reset")]
     EffectsReset { clip: ClipRef, effect: usize },
     /// Take one effect off a clip. `effect` counts from 0.

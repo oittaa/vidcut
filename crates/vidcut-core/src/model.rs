@@ -531,11 +531,14 @@ pub enum RenderCache {
     /// No render cache.
     #[default]
     Off,
-    /// The parts that are slow to make: the clips set to `on`, slow media,
-    /// speed changes, Retime Processes, AI Super Scale, transitions,
-    /// opacity and composite modes.
+    /// The parts that are slow to make: the clips set to `on`, the effects
+    /// with `render_cache`, slow media, speed changes, Retime Processes, AI
+    /// Super Scale, transitions, opacity and composite modes.
     Smart,
-    /// The clips set to `on`, and the kinds that the preferences turn on.
+    /// The clips set to `on`, the effects with `render_cache`, and the
+    /// kinds that the preferences turn on. A track with `render_cache` off
+    /// gives none of its speed changes, Retime Processes, transitions,
+    /// opacity and composite modes.
     User,
 }
 
@@ -1101,6 +1104,11 @@ pub struct Track {
     /// Transitions on its edit points, carried from another editor.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<Transition>,
+    /// Off, the render cache's User mode renders none of its speed
+    /// changes, Retime Processes, transitions, opacity and composite modes
+    /// (video tracks only). Usual: on.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub render_cache: bool,
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -2308,6 +2316,10 @@ pub struct Effect {
     /// black. Usual: on.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub use_alpha: bool,
+    /// On, the render cache renders the frames of the effect, in its Smart
+    /// mode and in its User mode. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub render_cache: bool,
 }
 
 /// What an effect does, with its own values.
@@ -2401,6 +2413,7 @@ impl EffectType {
             kind,
             blend: None,
             use_alpha: true,
+            render_cache: false,
         }
     }
 }
@@ -3726,6 +3739,7 @@ impl Track {
             video_enabled: true,
             name: None,
             transitions: Vec::new(),
+            render_cache: true,
         }
     }
 

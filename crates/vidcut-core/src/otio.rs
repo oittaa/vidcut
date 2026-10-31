@@ -955,6 +955,9 @@ pub fn export_drawn(
         if let Some(d) = &t.duck {
             meta["duck"] = json!(d);
         }
+        if !t.render_cache {
+            meta["render_cache"] = json!(false);
+        }
         let mut sound = json!({ "Locked": t.locked, "SoloOn": t.solo });
         if let Some(&n) = channels.first()
             && channels.iter().all(|&x| x == n)
@@ -1348,6 +1351,7 @@ pub struct ImportedTrack {
     pub voice_isolation: Option<f64>,
     pub duck: Option<crate::model::Duck>,
     pub video_enabled: bool,
+    pub render_cache: bool,
     pub name: Option<String>,
 }
 
@@ -1371,6 +1375,7 @@ impl ImportedTrack {
             voice_isolation: meta["voice_isolation"].as_f64(),
             duck: serde_json::from_value(meta["duck"].clone()).ok(),
             video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
+            render_cache: meta["render_cache"].as_bool().unwrap_or(true),
             name: match meta.get("name") {
                 Some(name) => name.as_str().map(String::from),
                 None => otio["name"]

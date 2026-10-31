@@ -40,6 +40,7 @@ classDiagram
     kind: Video or Audio
     locked, muted, solo, volume_db
     video_enabled, voice_isolation, duck
+    render_cache
   }
   class Clip {
     id, name, color

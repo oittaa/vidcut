@@ -164,6 +164,9 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 if t["video_enabled"] == false {
                     flags.push("video off".into());
                 }
+                if t["render_cache"] == false {
+                    flags.push("excluded from caching".into());
+                }
                 if let Some(v) = t["volume_db"].as_f64().filter(|v| *v != 0.0) {
                     flags.push(format!("{v:+} dB"));
                 }
@@ -993,7 +996,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     false => format!("strength {}", n("strength")),
                 };
                 println!(
-                    "  effect {i} {}{}  {strength}  channels across {}  down {}  border {}  blend {}{}",
+                    "  effect {i} {}{}  {strength}  channels across {}  down {}  border {}  blend {}{}{}",
                     e["kind"].as_str().unwrap_or_default(),
                     if e["on"] == true { "" } else { " (off)" },
                     list("horizontal_channels"),
@@ -1004,6 +1007,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
                         ""
                     } else {
                         "  alpha not used"
+                    },
+                    if e["render_cache"] == true {
+                        "  render cache"
+                    } else {
+                        ""
                     },
                 );
             }

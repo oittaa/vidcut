@@ -3573,6 +3573,7 @@ fn mutate(
             voice_isolation: None,
             duck: None,
             video_enabled: None,
+            render_cache: None,
             ..
         } if track.starts_with('S') => {
             let style = match (style, look) {
@@ -3619,6 +3620,7 @@ fn mutate(
             duck,
             download,
             video_enabled,
+            render_cache,
             name,
             ..
         } => {
@@ -3645,6 +3647,7 @@ fn mutate(
                 voice_isolation: voice_isolation.map(|v| (v > 0.0).then_some(v)),
                 duck,
                 video_enabled: *video_enabled,
+                render_cache: *render_cache,
                 name: name.as_ref().map(|n| (!n.is_empty()).then(|| n.clone())),
             };
             ops::set_track(p, track, &props)?;
@@ -3855,6 +3858,7 @@ fn mutate(
             on,
             blend,
             use_alpha,
+            render_cache,
             strength,
             split,
             vertical_strength,
@@ -3872,6 +3876,7 @@ fn mutate(
                 on: *on,
                 blend: *blend,
                 use_alpha: *use_alpha,
+                render_cache: *render_cache,
                 strength: *strength,
                 split: *split,
                 vertical_strength: *vertical_strength,
@@ -5997,6 +6002,7 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                     .and_then(|v| ops::checked_isolation(v).ok())
                     .filter(|v| *v > 0.0);
                 track.video_enabled = s.video_enabled;
+                track.render_cache = s.render_cache;
                 track.name = s.name.clone();
                 track.duck = s.duck.clone();
             }
@@ -6555,6 +6561,7 @@ pub fn query(
                     });
                     if t.kind == crate::model::TrackKind::Video {
                         v["video_enabled"] = json!(t.video_enabled);
+                        v["render_cache"] = json!(t.render_cache);
                     }
                     if let Some(n) = &t.name {
                         v["name"] = json!(n);

@@ -1776,6 +1776,20 @@ impl Workspace {
                         ui.close();
                     }
                 }
+                if t.kind == vidcut_core::model::TrackKind::Video {
+                    ui.separator();
+                    let mut excluded = !t.render_cache;
+                    if ui
+                        .checkbox(&mut excluded, "Exclude Track from Caching")
+                        .changed()
+                    {
+                        self.send(
+                            "track.set",
+                            json!({ "track": t.id, "render_cache": !excluded }),
+                        );
+                        ui.close();
+                    }
+                }
             });
             let enlarged = self.timeline.enlarged.as_deref() == Some(t.id.as_str());
             let glyph = if enlarged {
@@ -2794,6 +2808,7 @@ impl Workspace {
             ui.close();
         }
         self.render_cache_menu(ui, &clips);
+        self.cached_effects_menu(ui, c);
     }
 
     fn render_cache_menu(&mut self, ui: &mut egui::Ui, clips: &[String]) {
@@ -2820,6 +2835,25 @@ impl Workspace {
                     if current != Some(v) {
                         self.send("clip.set", json!({ "clips": ids, "render_cache": v }));
                     }
+                    ui.close();
+                }
+            }
+        });
+    }
+
+    fn cached_effects_menu(&mut self, ui: &mut egui::Ui, c: &vidcut_core::model::Clip) {
+        let effects = c.picture.as_ref().map_or(&[][..], |x| &x.effects);
+        if effects.is_empty() {
+            return;
+        }
+        ui.menu_button("Render Cache Effects", |ui| {
+            for (i, e) in effects.iter().enumerate() {
+                let mut on = e.render_cache;
+                if ui.checkbox(&mut on, e.kind().name()).changed() {
+                    self.send(
+                        "effects.set",
+                        json!({ "clip": c.id, "effect": i, "render_cache": on }),
+                    );
                     ui.close();
                 }
             }
