@@ -392,7 +392,7 @@ impl Workspace {
             }
         });
         if let Some(stats) = self.stats.as_ref().filter(|_| self.snap.stats) {
-            stats_panel(&painter, picture, stats);
+            stats_panel(&painter, id, picture, stats);
         }
         self.skim(ui, id, picture, player.frames);
 
@@ -1627,39 +1627,131 @@ fn paint_guides(painter: &egui::Painter, picture: Rect, guides: &vidcut_core::pr
     }
 }
 
-fn stats_panel(painter: &egui::Painter, picture: Rect, stats: &crate::live::stats::PlayerStats) {
-    let groups = stats.groups();
+const STEADY_SECS: f64 = 1.0;
+
+#[derive(Clone)]
+struct HeldGroup {
+    heading: &'static str,
+    seen: f64,
+    rows: Vec<(&'static str, f64)>,
+    width: f32,
+    widest: f64,
+}
+
+fn steady<K: PartialEq + Copy, T>(
+    kept: &[(K, f64)],
+    fresh: Vec<(K, T)>,
+    now: f64,
+) -> Vec<(K, f64, Option<T>, Option<usize>)> {
+    let keys: Vec<K> = fresh.iter().map(|(k, _)| *k).collect();
+    let mut values = fresh.into_iter().map(|(_, v)| v);
+    let (n, m) = (kept.len(), keys.len());
+    let mut common = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            common[i][j] = if kept[i].0 == keys[j] {
+                common[i + 1][j + 1] + 1
+            } else {
+                common[i + 1][j].max(common[i][j + 1])
+            };
+        }
+    }
+    let (mut i, mut j) = (0, 0);
+    let mut out = Vec::with_capacity(n + m);
+    while i < n || j < m {
+        if i < n && j < m && kept[i].0 == keys[j] {
+            out.push((keys[j], now, values.next(), Some(i)));
+            i += 1;
+            j += 1;
+        } else if j == m || (i < n && common[i + 1][j] >= common[i][j + 1]) {
+            out.push((kept[i].0, kept[i].1, None, Some(i)));
+            i += 1;
+        } else {
+            out.push((keys[j], now, values.next(), None));
+            j += 1;
+        }
+    }
+    out
+}
+
+fn stats_panel(
+    painter: &egui::Painter,
+    id: PlayerId,
+    picture: Rect,
+    stats: &crate::live::stats::PlayerStats,
+) {
+    let key = egui::Id::unique(("stats-panel", id));
+    let now = painter.ctx().input(|i| i.time);
+    let mut kept = painter
+        .ctx()
+        .data(|d| d.get_temp::<Vec<HeldGroup>>(key))
+        .unwrap_or_default();
+    kept.retain(|g| now - g.seen < STEADY_SECS);
+    let headings: Vec<_> = kept.iter().map(|g| (g.heading, g.seen)).collect();
+    let groups: Vec<_> = steady(&headings, stats.groups(), now)
+        .into_iter()
+        .map(|(heading, seen, rows, old)| {
+            let old = old.map(|i| &kept[i]);
+            let lines: Vec<_> = old
+                .map_or(&[][..], |g| &g.rows)
+                .iter()
+                .filter(|(_, s)| now - s < STEADY_SECS)
+                .copied()
+                .collect();
+            let rows = steady(&lines, rows.unwrap_or_default(), now);
+            let wide = old.map_or((0.0, now), |g| (g.width, g.widest));
+            (heading, seen, rows, wide)
+        })
+        .collect();
     let width = groups
         .iter()
-        .flat_map(|(_, rows)| rows.iter().map(|(label, _)| label.chars().count()))
+        .flat_map(|(_, _, rows, _)| rows.iter().map(|(label, ..)| label.chars().count()))
         .max()
         .unwrap_or(0);
     let font = FontId::monospace(11.0);
     let text = |color| egui::TextFormat::simple(font.clone(), color);
-    let galleys: Vec<_> = groups
+    let (galleys, held): (Vec<_>, Vec<_>) = groups
         .into_iter()
-        .map(|(heading, rows)| {
+        .map(|(heading, seen, rows, (wide, widest))| {
             let mut job = egui::text::LayoutJob::default();
             job.append(heading, 0.0, text(theme::colors().accent));
-            for (label, fact) in rows {
+            for (label, _, fact, _) in &rows {
                 job.append(
                     &format!("\n  {label:<width$}  "),
                     0.0,
                     text(theme::colors().text_dim),
                 );
-                job.append(&fact, 0.0, text(Color32::WHITE));
+                job.append(
+                    fact.as_deref().unwrap_or_default(),
+                    0.0,
+                    text(Color32::WHITE),
+                );
             }
             job.wrap.max_width = (picture.width() - 32.0).max(120.0);
-            painter.layout_job(job)
+            let galley = painter.layout_job(job);
+            let w = galley.size().x;
+            let (width, widest) = if w >= wide || now - widest >= STEADY_SECS {
+                (w, now)
+            } else {
+                (wide, widest)
+            };
+            let held = HeldGroup {
+                heading,
+                seen,
+                rows: rows.iter().map(|(label, s, ..)| (*label, *s)).collect(),
+                width,
+                widest,
+            };
+            (galley, held)
         })
-        .collect();
+        .unzip();
     let (top, bottom) = (picture.top() + 14.0, picture.bottom() - 14.0);
     let mut at = pos2(picture.left() + 16.0, top);
     let mut column = 0.0_f32;
     let mut area = Rect::NOTHING;
     let mut placed = Vec::new();
-    for galley in galleys {
-        let size = galley.size();
+    for (galley, g) in galleys.into_iter().zip(&held) {
+        let size = vec2(g.width, galley.size().y);
         if at.y > top && at.y + size.y > bottom {
             at = pos2(at.x + column + 24.0, top);
             column = 0.0;
@@ -1677,6 +1769,7 @@ fn stats_panel(painter: &egui::Painter, picture: Rect, stats: &crate::live::stat
     for (at, galley) in placed {
         painter.galley(at, galley, Color32::WHITE);
     }
+    painter.ctx().data_mut(|d| d.insert_temp(key, held));
 }
 
 pub(super) fn timecode_input(text: &str, dropped: i64) -> Option<String> {
