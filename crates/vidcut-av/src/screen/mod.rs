@@ -8,7 +8,7 @@ use crate::cuda::{CudaDevice, PlaneCopy};
 use crate::hw::Kind;
 use crate::player::{Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
-use vidcut_core::model::{CompositeMode, Hdr, WipeDirection};
+use vidcut_core::model::{Hdr, WipeDirection};
 use vidcut_core::place::{Level, Placing, chain, lettered};
 use vidcut_core::render::{Moving, Placed, Shift, Wipe};
 
@@ -46,6 +46,7 @@ pub struct Gpu {
     paired: wgpu::RenderPipeline,
     paired_wide: wgpu::RenderPipeline,
     moving: wgpu::RenderPipeline,
+    moving_mode: wgpu::RenderPipeline,
     moving_layout: wgpu::BindGroupLayout,
     screen: wgpu::RenderPipeline,
     screen_layout: wgpu::BindGroupLayout,
@@ -530,6 +531,12 @@ impl Gpu {
             }),
             MIXING,
         );
+        let moving_mode_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("vidcut move"),
+            bind_group_layouts: &[Some(&moving_layout), Some(&below_layout)],
+            immediate_size: 0,
+        });
+        let moving_mode = made(&moving_mode_layout, "fs_motion_mode", None, MIXING);
         let screen_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut screen"),
             entries: &[
@@ -623,6 +630,7 @@ impl Gpu {
             paired,
             paired_wide,
             moving,
+            moving_mode,
             moving_layout,
             screen,
             screen_layout,
@@ -1127,9 +1135,15 @@ impl Moves {
     }
 }
 
-const MOVING: usize = 7 * 16;
+const MOVING: usize = 9 * 16;
 
-fn motion_bytes(m: &Moving, size: (u32, u32), colors: Option<Hdr>) -> Vec<u8> {
+fn motion_bytes(
+    m: &Moving,
+    gaps: [bool; 2],
+    mode: u32,
+    size: (u32, u32),
+    colors: Option<Hdr>,
+) -> Vec<u8> {
     let Shift {
         upper_in,
         upper,
@@ -1154,11 +1168,19 @@ fn motion_bytes(m: &Moving, size: (u32, u32), colors: Option<Hdr>) -> Vec<u8> {
         [r, g, b, transfer_of(colors)],
     ];
     let flags = [upper_in, feather, mixes_blur, still].map(u32::from);
+    let gaps = [gaps[0], gaps[1], false, false].map(u32::from);
+    let mode = [mode, 0, 0, 0];
     floats
         .iter()
         .flatten()
         .flat_map(|v| (*v as f32).to_le_bytes())
-        .chain(flags.iter().flat_map(|v| v.to_le_bytes()))
+        .chain(
+            flags
+                .iter()
+                .chain(&gaps)
+                .chain(&mode)
+                .flat_map(|v| v.to_le_bytes()),
+        )
         .collect()
 }
 
@@ -1480,7 +1502,7 @@ impl Screen {
         }
         let exported = self.exported;
         let clock = std::time::Instant::now();
-        let binds: Vec<(wgpu::BindGroup, Option<f64>, bool, bool)> = layers
+        let binds: Vec<(wgpu::BindGroup, Option<f64>, bool, u32)> = layers
             .iter()
             .zip(&mut self.slots)
             .enumerate()
@@ -1497,10 +1519,10 @@ impl Screen {
                         (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
                     });
                 let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
-                let blended = !colors_only
-                    && placing
-                        .as_ref()
-                        .is_some_and(|(p, _)| p.mode != CompositeMode::Normal);
+                let mode = placing
+                    .as_ref()
+                    .filter(|_| !colors_only)
+                    .map_or(0, |(p, _)| p.mode.code());
                 let kernel = match kernels.get(i).copied().unwrap_or(0) {
                     0 if exported => RESIZE | WIDENS,
                     k if exported => k | WIDENS,
@@ -1508,7 +1530,7 @@ impl Screen {
                 };
                 let how = (placing.as_ref(), kernel, colors, paired[i]);
                 let bind = slot.prepare(gpu, picture, size, how, &mut encoder);
-                (bind, level, placing.is_some(), blended)
+                (bind, level, placing.is_some(), mode)
             })
             .collect();
         self.spent.0 += clock.elapsed();
@@ -1537,7 +1559,7 @@ impl Screen {
             self.moves.push(Moves::new(gpu, size));
         }
         let mut moves = self.moves.iter();
-        let blending = binds.iter().any(|b| b.3);
+        let blending = binds.iter().any(|b| b.3 != 0);
         let floats = self.exported || colors.is_some() || blending || n > 1;
         if !floats {
             self.wide = None;
@@ -1561,7 +1583,7 @@ impl Screen {
         let wide = self.wide.as_ref();
         let canvas = wide.map_or(&target.view, |w| &w.view);
         let canvas_texture = wide.map_or(&target.texture, |w| &w.texture);
-        let blends = |i: usize| binds.get(i).is_some_and(|b| b.3);
+        let blends = |i: usize| binds.get(i).is_some_and(|b| b.3 != 0);
         let (drawing, lettering, paired) = match wide {
             Some(_) => (&gpu.wide_drawing, &gpu.lettering_wide, &gpu.paired_wide),
             None => (&gpu.screen_drawing, &gpu.lettering, &gpu.paired),
@@ -1616,7 +1638,7 @@ impl Screen {
                     );
                 }
             }
-            if (blends(i) || (pair_at(i) && blends(i + 1))) && !holds(i) {
+            if (blends(i) || (mixes(i) && blends(i + 1))) && !holds(i) {
                 if clear.is_some() {
                     drop(begin(&mut encoder, canvas, clear.take()));
                 }
@@ -1635,16 +1657,17 @@ impl Screen {
                 && let Some(m) = moving_of(i + 1)
             {
                 let moves = moves.next().expect("made for each move");
-                for (view, (bind, level, placed, blended)) in [&moves.outgoing, &moves.incoming]
-                    .into_iter()
-                    .zip(&binds[i..i + 2])
-                {
+                let gaps = [i, i + 1].map(|k| moving_of(k).is_some_and(|m| m.gap));
+                for (gap, (view, (bind, level, placed, _))) in gaps.into_iter().zip(
+                    [&moves.outgoing, &moves.incoming]
+                        .into_iter()
+                        .zip(&binds[i..i + 2]),
+                ) {
                     let mut pass = begin(&mut encoder, view, Some(wgpu::Color::TRANSPARENT));
-                    if *blended {
-                        let below = self.below.as_ref().expect("made for a composite mode");
-                        pass.set_pipeline(&gpu.adding_mode);
-                        pass.set_bind_group(1, &below.bind, &[]);
-                    } else if *placed {
+                    if gap {
+                        continue;
+                    }
+                    if *placed {
                         pass.set_pipeline(&gpu.adding);
                     } else {
                         pass.set_pipeline(&gpu.adding_scaled);
@@ -1653,10 +1676,20 @@ impl Screen {
                     pass.set_bind_group(0, bind, &[]);
                     pass.draw(0..3, 0..1);
                 }
-                gpu.queue
-                    .write_buffer(&moves.params, 0, &motion_bytes(&m, size, colors));
+                let mode = binds[i].3;
+                gpu.queue.write_buffer(
+                    &moves.params,
+                    0,
+                    &motion_bytes(&m, gaps, mode, size, colors),
+                );
                 let mut pass = begin(&mut encoder, canvas, clear.take());
-                pass.set_pipeline(&gpu.moving);
+                if mode != 0 {
+                    let below = self.below.as_ref().expect("made for a composite mode");
+                    pass.set_pipeline(&gpu.moving_mode);
+                    pass.set_bind_group(1, &below.bind, &[]);
+                } else {
+                    pass.set_pipeline(&gpu.moving);
+                }
                 pass.set_bind_group(0, &moves.bind, &[]);
                 pass.draw(0..3, 0..1);
                 letter(&mut pass, lettering, &self.letters, titles, i + 1, n);
@@ -1669,8 +1702,8 @@ impl Screen {
                 {
                     let mut pass =
                         begin(&mut encoder, &mixing.view, Some(wgpu::Color::TRANSPARENT));
-                    for (bind, level, placed, blended) in &binds[i..i + 2] {
-                        if *blended {
+                    for (bind, level, placed, mode) in &binds[i..i + 2] {
+                        if *mode != 0 {
                             let below = self.below.as_ref().expect("made for a composite mode");
                             pass.set_pipeline(&gpu.adding_mode);
                             pass.set_bind_group(1, &below.bind, &[]);
@@ -1702,14 +1735,14 @@ impl Screen {
             let mut pass = begin(&mut encoder, canvas, clear.take());
             let first = i;
             while i < n && !pair_at(i) && (i == first || !starts(i)) {
-                let (bind, level, placed, blended) = &binds[i];
+                let (bind, level, placed, mode) = &binds[i];
                 let shown = part(i);
                 if shown.is_none_or(|p| p.2 > 0 && p.3 > 0) {
                     if let Some((x, y, w, h)) = shown {
                         pass.set_scissor_rect(x, y, w, h);
                     }
                     match level {
-                        _ if *blended => {
+                        _ if *mode != 0 => {
                             let below = self.below.as_ref().expect("made for a composite mode");
                             pass.set_pipeline(&drawing.mode);
                             pass.set_bind_group(1, &below.bind, &[]);
