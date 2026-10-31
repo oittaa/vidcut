@@ -673,6 +673,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Feather fades one picture into the other across the band. The band then shows no color.
   - Motion Blur blurs along the move. A Push blurs the whole frame. A Slide blurs the moving picture only.
   - Ease is None, In, Out, In & Out or Custom. A Custom ease plays the keys of its curve. Without keys, the transition stays on the outgoing picture.
+  - A change of the length scales the curve, as in Resolve. A key at frame k goes to k × new / old, rounded down. The handles scale by new / old. The values stay.
+    - If two keys come to one frame, vidcut keeps the first of them.
   - Resolve's measured geometry, blur and ease are in [gotchas](gotchas.md#resolves-otio-files).
   - A request makes one: `{"type": "push", "preset": "up", "border": 0.02}`, or `{"type": "slide", "preset": "top_left", "out": true}`.
   - An OTIO file holds them as Resolve's Push and Slide, with their values.

@@ -4,7 +4,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, MAX_BORDER, MotionEase, PictureTransition, Project, TrackKind, Transition,
+    Clip, Handle, Keyframe, MAX_BORDER, MotionEase, PictureTransition, Project, TrackKind,
+    Transition,
 };
 use crate::otio::transitions::{self, Cuts};
 
@@ -138,8 +139,8 @@ fn checked(kind: &PictureTransition) -> Result<()> {
             "the keys of a curve go in order, no two on one frame",
         ));
     }
-    let finite = |h: &crate::model::Handle| h.frames.is_finite() && h.value.is_finite();
-    let fits = |k: &crate::model::Keyframe| {
+    let finite = |h: &Handle| h.frames.is_finite() && h.value.is_finite();
+    let fits = |k: &Keyframe| {
         (0.0..=1.0).contains(&k.value) && k.in_handle.iter().chain(&k.out_handle).all(finite)
     };
     if !m.curve.iter().all(fits) {
@@ -293,6 +294,17 @@ fn put(
     kind: &PictureTransition,
 ) -> Option<Made> {
     let (from, to, before, after) = plan(p, ti, sound, e, shape)?;
+    let cuts = Cuts::of(p, &p.tracks[ti]);
+    let gone: Vec<bool> = p.tracks[ti]
+        .transitions
+        .iter()
+        .map(|x| x.sound == sound && cuts.place(p, x) == Some(e))
+        .collect();
+    let old = p.tracks[ti].transitions.iter().zip(&gone).find(|g| *g.1);
+    let kind = match old {
+        Some((x, _)) => resized(x, kind, before + after),
+        None => kind.clone(),
+    };
     let mut t = Transition {
         id: String::new(),
         sound,
@@ -300,17 +312,11 @@ fn put(
         to,
         before,
         after,
-        otio: otio(sound, before + after, kind).into(),
+        otio: otio(sound, before + after, &kind).into(),
     };
-    let cuts = Cuts::of(p, &p.tracks[ti]);
     if cuts.place(p, &t) != Some(e) {
         return None;
     }
-    let gone: Vec<bool> = p.tracks[ti]
-        .transitions
-        .iter()
-        .map(|x| x.sound == sound && cuts.place(p, x) == Some(e))
-        .collect();
     let mut gone = gone.into_iter();
     p.tracks[ti]
         .transitions
@@ -325,6 +331,40 @@ fn put(
         before,
         after,
     })
+}
+
+fn resized(old: &Transition, kind: &PictureTransition, frames: i64) -> PictureTransition {
+    let mut kind = kind.clone();
+    let was = old.before + old.after;
+    if was > 0
+        && was != frames
+        && transitions::kind_of(old).as_ref() == Some(&kind)
+        && let Some(m) = kind.motion_mut()
+    {
+        m.curve = scaled(&m.curve, was, frames);
+    }
+    kind
+}
+
+fn scaled(curve: &[Keyframe], was: i64, now: i64) -> Vec<Keyframe> {
+    let ratio = now as f64 / was as f64;
+    let handle = |h: Option<Handle>| {
+        h.map(|h| Handle {
+            frames: h.frames * ratio,
+            ..h
+        })
+    };
+    let mut keys: Vec<Keyframe> = curve
+        .iter()
+        .map(|k| Keyframe {
+            frame: (k.frame * now).div_euclid(was),
+            value: k.value,
+            in_handle: handle(k.in_handle),
+            out_handle: handle(k.out_handle),
+        })
+        .collect();
+    keys.dedup_by_key(|k| k.frame);
+    keys
 }
 
 #[allow(clippy::too_many_arguments)]
