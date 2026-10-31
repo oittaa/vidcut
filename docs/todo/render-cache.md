@@ -49,7 +49,6 @@ Smart also renders parts that this computer cannot play. One late frame does not
 - In an HDR timeline, the cache has 10 bits, in the PQ or HLG of the timeline. This needs a check.
 - The frames that playback made, and that the memory still keeps, go to the cache first. Thus they are not made again.
 - The background render uses the AI model that the viewer has loaded. It does not load a second copy.
-- `cache.render` (new): renders the cache without a GUI, for scripts.
 
 ## Differences from Resolve
 

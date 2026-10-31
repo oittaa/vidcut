@@ -442,6 +442,13 @@ pub enum Request {
     /// background render runs, and the `files` and `bytes` of the cache.
     #[serde(rename = "cache.status")]
     CacheStatus {},
+    /// Renders the render cache of the timeline now, as `cache.status`
+    /// answers. A running GUI starts its background render at once, also
+    /// with `render_cache.background` off, and answers while it renders.
+    /// Without a GUI, this process renders all that the mode renders, and
+    /// then answers.
+    #[serde(rename = "cache.render")]
+    CacheRender {},
     /// Delete Render Cache in the running GUI: `all` empties the render
     /// cache, `unused` keeps only the files with frames of this timeline,
     /// and `clips` deletes the files with frames where `clips` show.

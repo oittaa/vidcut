@@ -139,7 +139,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("bins", "Media Pool bins"),
     (
         "cache",
-        "The render cache of the running GUI: what it renders, and Delete",
+        "The render cache: what it renders, Render and Delete",
     ),
     ("clip", "Clip properties"),
     ("decoders", "Hardware decoders that work here"),

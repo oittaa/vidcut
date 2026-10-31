@@ -249,9 +249,8 @@ impl Background {
         None
     }
 
-    fn start(&mut self, project: &Project, base: Arc<RenderPlan>, from: i64) {
-        let cancel = Arc::new(AtomicBool::new(false));
-        let work = Render {
+    fn work(&self, project: &Project, base: Arc<RenderPlan>, from: i64) -> Render {
+        Render {
             cache: self.cache.clone(),
             base,
             project: Arc::new(project.clone()),
@@ -260,12 +259,27 @@ impl Background {
             decodes: self.decodes.clone(),
             look: self.look(project),
             from,
-            cancel: cancel.clone(),
-            tx: self.tx.clone(),
-        };
+            cancel: Arc::new(AtomicBool::new(false)),
+            tx: Some(self.tx.clone()),
+        }
+    }
+
+    fn start(&mut self, project: &Project, base: Arc<RenderPlan>, from: i64) {
+        let work = self.work(project, base, from);
+        let cancel = work.cancel.clone();
         if crate::threads::spawn("vidcut-render-cache", Work::Job, move || work.run()).is_ok() {
             self.running = Some(cancel);
         }
+    }
+
+    pub(super) fn render_now(&mut self, project: &Project, from: i64) -> Value {
+        self.scanned();
+        if let Some(base) = self.base.clone()
+            && project.settings.render_cache != Mode::Off
+        {
+            self.start(project, base, from);
+        }
+        self.status(project)
     }
 
     pub(super) fn status(&mut self, project: &Project) -> Value {
@@ -388,6 +402,32 @@ impl Background {
 
 pub(super) type Span = (i64, i64, Option<Vec<String>>);
 
+pub(crate) fn render_all(
+    project: &Project,
+    show_super_scale: bool,
+    cancel: Arc<AtomicBool>,
+) -> vidcut_core::Result<Value> {
+    let prefs = crate::preferences::load().unwrap_or_default();
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let mut background = Background::new(tx, &prefs);
+    background.indexed();
+    let end = project.end();
+    if end > 0 && project.settings.render_cache != Mode::Off {
+        let (plan, _) = vidcut_core::render::flatten_lanes(project, 0, end)?;
+        let base = Arc::new(super::shown(plan, show_super_scale));
+        background.base = Some(base.clone());
+        let mut work = background.work(project, base.clone(), base.range.0);
+        work.cancel = cancel;
+        work.tx = None;
+        match work.render() {
+            Ok(true) => {}
+            Ok(false) => return Err(super::cancelled()),
+            Err(e) => return Err(vidcut_core::Error::new(vidcut_core::ErrorCode::Media, e)),
+        }
+    }
+    Ok(background.status(project))
+}
+
 fn keys_in(cache: &mut Cache, base: &RenderPlan, setup: &Setup, spans: &[Span]) -> HashSet<Key> {
     let mut out = HashSet::new();
     let mut t = base.range.0;
@@ -417,12 +457,14 @@ struct Render {
     look: Look,
     from: i64,
     cancel: Arc<AtomicBool>,
-    tx: Sender<Msg>,
+    tx: Option<Sender<Msg>>,
 }
 
 impl Render {
     fn send(&self, e: Event) {
-        let _ = self.tx.send(Msg::RenderCache(e));
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(Msg::RenderCache(e));
+        }
     }
 
     fn lock(&self) -> MutexGuard<'_, Cache> {

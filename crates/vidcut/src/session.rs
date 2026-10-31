@@ -317,6 +317,15 @@ pub fn run_with(
             envelope.check_rev(editor.project().rev)?;
             render(editor.project(), store.path(), &envelope, hooks)?
         }
+        Request::CacheRender {} => {
+            let store = open(project)?;
+            let editor = store.load_project()?;
+            envelope.check_rev(editor.project().rev)?;
+            answer(crate::live::render_cache(
+                editor.project(),
+                hooks.cancel.clone(),
+            )?)
+        }
         Request::Probe { .. } => {
             let mut editor = vidcut_core::Editor::new(
                 vidcut_core::Project::new(Default::default()),
