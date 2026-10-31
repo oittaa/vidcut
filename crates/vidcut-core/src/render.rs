@@ -491,6 +491,10 @@ pub struct Move {
     /// The progress of the move, from 0 to 1, at frames from the start of
     /// the transition.
     pub keys: Vec<Keyframe>,
+    /// This side is a gap: it shows nothing, and the tracks below show
+    /// through it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub gap: bool,
 }
 
 fn zero_f64(n: &f64) -> bool {
@@ -519,6 +523,7 @@ impl Move {
             color: motion.color,
             blur: motion.motion_blur.clamp(0.0, 1.0),
             keys,
+            gap: false,
         })
     }
 
@@ -533,6 +538,7 @@ impl Move {
             feather: self.feather,
             color: self.color,
             blur: self.blur,
+            gap: self.gap,
         }
     }
 }
@@ -547,9 +553,10 @@ pub struct Moving {
     pub feather: bool,
     pub color: [u8; 3],
     pub blur: f64,
+    pub gap: bool,
 }
 
-pub type MovingKey = (Way, [u64; 4], bool, [u8; 3]);
+pub type MovingKey = (Way, [u64; 4], [bool; 2], [u8; 3]);
 
 /// Where the two pictures of a [`Moving`] are, in pixels of the frame.
 /// The upper picture carries the band on the edges that face the lower
@@ -593,7 +600,7 @@ fn slide_sign(preset: SlidePreset) -> [f64; 2] {
 impl Moving {
     pub fn key(&self) -> MovingKey {
         let bits = [self.progress, self.step, self.border, self.blur].map(f64::to_bits);
-        (self.way, bits, self.feather, self.color)
+        (self.way, bits, [self.feather, self.gap], self.color)
     }
 
     pub fn shift(&self, (w, h): (u32, u32)) -> Shift {
@@ -1826,22 +1833,24 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         wipe: None,
                     };
                     let below = !stack.is_empty();
-                    let side = |c: Option<&Clip>| -> Result<(VideoPiece, bool)> {
+                    let side = |c: Option<&Clip>| -> Result<(VideoPiece, bool, bool)> {
                         Ok(match c.filter(shows) {
                             Some(c) => match shown(c, None, below)? {
-                                Layer::Picture(p, _) => (p, true),
-                                Layer::Placed(p, _) => (p, false),
+                                Layer::Picture(p, _) => (p, true, false),
+                                Layer::Placed(p, _) => (p, false, false),
                                 _ => unreachable!("a clip shows as a picture"),
                             },
-                            None => (VideoPiece::black(y - x), true),
+                            None => (VideoPiece::black(y - x), false, true),
                         })
                     };
-                    let ((f, whole_f), (g, whole_g)) = (side(d.before)?, side(d.after)?);
+                    let ((f, whole_f, gap_f), (g, whole_g, gap_g)) =
+                        (side(d.before)?, side(d.after)?);
                     if whole_f && whole_g {
                         stack.clear();
                     }
-                    stack.push(Layer::Moved(f, ramp(true), m.clone(), false));
-                    stack.push(Layer::Moved(g, ramp(false), m, true));
+                    let moved = |gap| Move { gap, ..m.clone() };
+                    stack.push(Layer::Moved(f, ramp(true), moved(gap_f), false));
+                    stack.push(Layer::Moved(g, ramp(false), moved(gap_g), true));
                 }
                 Some(d) => {
                     let wipe = transitions::wipe_of(d.transition);
