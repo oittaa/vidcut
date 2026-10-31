@@ -207,19 +207,11 @@ impl Plan {
 
     pub(crate) fn super_scales_at(&self, t: i64) -> Vec<vidcut_core::model::SuperScale> {
         let (i, _) = self.locate(t);
-        let Some(piece) = self.plan.video.get(i) else {
-            return Vec::new();
-        };
-        piece
-            .layers()
-            .into_iter()
-            .filter_map(|(l, _)| match l {
-                VideoPiece::Source { super_scale, .. } if !super_scale.is_off() => {
-                    Some(*super_scale)
-                }
-                _ => None,
-            })
-            .collect()
+        self.plan
+            .video
+            .get(i)
+            .map(VideoPiece::super_scales)
+            .unwrap_or_default()
     }
 
     pub(crate) fn retimes_at(&self, t: i64) -> Vec<vidcut_core::model::Retime> {

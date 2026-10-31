@@ -69,6 +69,8 @@ pub struct SuperScaleStats {
     pub sizes: Option<String>,
     pub state: Option<String>,
     pub last: Option<String>,
+    #[serde(skip)]
+    pub scale: Option<SuperScale>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,10 +258,23 @@ impl PlayerStats {
     }
 
     pub fn with_cache(mut self, mode: RenderCache, line: &[Part]) -> Self {
-        self.render_cache = self
-            .picture
-            .as_ref()
-            .and_then(|p| cache_row(mode, line, p.frame));
+        let Some(frame) = self.picture.as_ref().map(|p| p.frame) else {
+            return self;
+        };
+        self.render_cache = cache_row(mode, line, frame);
+        let part = line.iter().find(|p| p.holds(frame));
+        let shown = self.super_scale.as_ref().and_then(|s| s.scale);
+        let made = part.and_then(|p| match shown {
+            None if p.has(frame) => p.super_scales.iter().find(|s| s.ai()),
+            None => None,
+            Some(s) => p
+                .super_scales
+                .first()
+                .filter(|b| b.ai() && s.upscaler == Upscaler::Classic),
+        });
+        if let Some(s) = made.filter(|_| !mode.is_off()) {
+            self.super_scale = Some(SuperScaleStats::cached(*s));
+        }
         self
     }
 
@@ -500,22 +515,37 @@ impl RetimeStats {
     }
 }
 
+fn named(s: SuperScale) -> String {
+    match s.upscaler {
+        Upscaler::Classic => format!(
+            "Classic, sharpness {}",
+            match s.sharpness {
+                Sharpness::Low => "low",
+                Sharpness::Medium => "medium",
+                Sharpness::High => "high",
+            }
+        ),
+        u => super_scale::name(u).to_string(),
+    }
+}
+
 impl SuperScaleStats {
+    fn cached(s: SuperScale) -> Self {
+        Self {
+            upscaler: Some(format!("{}, from the render cache", named(s))),
+            runs_on: None,
+            sizes: None,
+            state: None,
+            last: None,
+            scale: Some(s),
+        }
+    }
+
     fn of(s: Option<SuperScale>, report: &super_scale::Report) -> Option<Self> {
         if s.is_none() && report.making.is_none() {
             return None;
         }
-        let upscaler = s.map(|s| match s.upscaler {
-            Upscaler::Classic => format!(
-                "Classic, sharpness {}",
-                match s.sharpness {
-                    Sharpness::Low => "low",
-                    Sharpness::Medium => "medium",
-                    Sharpness::High => "high",
-                }
-            ),
-            u => super_scale::name(u).to_string(),
-        });
+        let upscaler = s.map(named);
         let mine = |w: &Option<super_scale::Work>| {
             w.clone()
                 .filter(|w| s.map(|s| s.upscaler) == Some(w.upscaler))
@@ -532,6 +562,7 @@ impl SuperScaleStats {
         let secs = |d: std::time::Duration| format!("{:.1} s", d.as_secs_f64());
         Some(Self {
             upscaler,
+            scale: s,
             runs_on: report
                 .devices
                 .iter()

@@ -393,6 +393,7 @@ pub struct Part {
     pub frames: i64,
     pub reasons: Vec<Reason>,
     pub cached: Vec<(i64, i64)>,
+    pub super_scales: Vec<SuperScale>,
 }
 
 impl Part {
@@ -547,6 +548,7 @@ impl Cache {
                     frames,
                     reasons,
                     cached,
+                    super_scales: piece.super_scales(),
                 });
             }
             t += frames;
