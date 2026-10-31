@@ -198,6 +198,11 @@ pub enum VideoPiece {
         /// Its track is out of the render cache's User mode.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         excluded: bool,
+        /// Its frames are made frames of a placed picture of this shape,
+        /// from the render cache: colors over the whole frame. `placed`
+        /// gives their edges and alpha.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        made: Option<Shape>,
     },
     /// A frame of one color: black, or the color that a dip to color
     /// goes through.
@@ -341,6 +346,17 @@ impl Smooth {
         let p = crate::keyframes::value_at(&self.keys, f).unwrap_or(0.0);
         (p + 0.5 / ramp.of.max(1) as f64).min(1.0)
     }
+}
+
+/// The size of a picture before it is placed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Shape {
+    /// Width and height, in pixels.
+    pub size: (u32, u32),
+    /// The shape of its pixels, width to height.
+    pub sar: (i32, i32),
+    /// Clockwise degrees that make it upright.
+    pub rotation: u16,
 }
 
 /// A clip's picture as it goes over the frame.
@@ -1004,6 +1020,7 @@ impl VideoPiece {
                 placed,
                 cache,
                 excluded,
+                made,
                 ..
             } => {
                 let still = matches!(image, Some(Image::Still));
@@ -1021,6 +1038,7 @@ impl VideoPiece {
                     placed: placed.iter().map(|p| p.after(k)).collect(),
                     cache: *cache,
                     excluded: *excluded,
+                    made: *made,
                 }
             }
             Self::Black {
@@ -1897,6 +1915,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 placed: placed_of(c, nest, over, x),
                 cache: c.render_cache,
                 excluded: false,
+                made: None,
             })
         };
     let mut video = Vec::new();
@@ -2401,6 +2420,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
             placed: Vec::new(),
             cache: Default::default(),
             excluded: false,
+            made: None,
         },
         None => VideoPiece::black(1),
     })
@@ -2445,6 +2465,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     placed: Vec::new(),
                     cache: Default::default(),
                     excluded: false,
+                    made: None,
                 },
             );
         } else {

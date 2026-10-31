@@ -119,6 +119,17 @@ impl Look {
         }
     }
 
+    fn whole(placed: &[Placed], frame: (u32, u32), kernel: u32, form: Form) -> Self {
+        Self {
+            size: frame,
+            kernel,
+            placed: placed.to_vec(),
+            frame,
+            origin: (0, 0),
+            form,
+        }
+    }
+
     fn plain(&self, size: (u32, u32)) -> bool {
         self.placed.is_empty() && self.size == size
     }
@@ -1555,6 +1566,7 @@ pub struct VideoFrames {
     encoder: Option<Handoff>,
     spent: (Duration, Duration),
     smoother: Option<(Retime, crate::interpolate::User)>,
+    colors: bool,
 }
 
 pub(crate) enum Handoff {
@@ -1861,6 +1873,7 @@ impl VideoFrames {
             encoder: None,
             spent: Default::default(),
             smoother: None,
+            colors: false,
         }
     }
 
@@ -1922,6 +1935,11 @@ impl VideoFrames {
 
     pub fn decode_on(mut self, gpu: crate::hw::GpuDecoder) -> Self {
         self.decoder = Some(gpu);
+        self
+    }
+
+    pub(crate) fn colors_only(mut self) -> Self {
+        self.colors = true;
         self
     }
 
@@ -2009,6 +2027,7 @@ impl VideoFrames {
         titles.extend(self.subtitles.shown_at(fps, (w, h), j).0);
         let placed = piece
             .as_ref()
+            .filter(|_| !self.colors)
             .map(|p| crate::player::placed_of(p, k, &[]))
             .unwrap_or_default();
         let crosses = piece.as_ref().map(VideoPiece::crosses).unwrap_or_default();
@@ -2131,6 +2150,7 @@ impl VideoFrames {
                     image,
                     pace,
                     retime,
+                    made: shape,
                     ..
                 } = layer
                 else {
@@ -2190,9 +2210,18 @@ impl VideoFrames {
                 } else {
                     self.source_frame(i, s, layer, k)?
                 };
-                let sampling = match backward {
-                    true => Sampling::Own,
-                    false => self.open[s].sampling.clone(),
+                let sampling = match (backward, shape) {
+                    (true, _) => Sampling::Own,
+                    (false, Some(shape)) => Sampling::Placed {
+                        fit: Fit {
+                            size: shape.size,
+                            sar: shape.sar,
+                            rotation: shape.rotation,
+                        },
+                        part: [0.0, 0.0, 1.0, 1.0],
+                        placed: placed.get(i).cloned().unwrap_or_default().into(),
+                    },
+                    (false, None) => self.open[s].sampling.clone(),
                 };
                 let woven = self.open[s].woven.as_ref().map(weave_ref).transpose()?;
                 made.push(Layer {
@@ -2732,8 +2761,12 @@ impl VideoFrames {
             }
             _ => None,
         };
+        let colors = self.colors && !placed.is_empty();
         let Some(weight) = weight.filter(|w| *w > 1e-6) else {
-            return self.shown(i, s, layer, changed);
+            return match colors {
+                true => self.colors_frame(i, s, layer, placed),
+                false => self.shown(i, s, layer, changed),
+            };
         };
         let (w, h, _) = self.maker.out();
         let reading = self.open[s].pictures.reading(self.maker.reading());
@@ -2759,9 +2792,10 @@ impl VideoFrames {
                 (w, h),
             ),
         };
-        let look = match placed.is_empty() {
-            true => Some(Look::fitted(fitted_size(fit, aim), kernel, form)),
-            false => placed_look(placed, fit, (w, h), (kernel, form)),
+        let look = match (colors, placed.is_empty()) {
+            (true, _) => Some(Look::whole(placed, (w, h), kernel, form)),
+            (false, true) => Some(Look::fitted(fitted_size(fit, aim), kernel, form)),
+            (false, false) => placed_look(placed, fit, (w, h), (kernel, form)),
         };
         let Some(look) = look else {
             return self.shown(i, s, layer, changed);
@@ -2853,7 +2887,7 @@ impl VideoFrames {
         src.upright = true;
         src.how = how;
         src.upscaled = upscaled;
-        src.sampling = match look.placed.is_empty() {
+        src.sampling = match look.placed.is_empty() || colors {
             true => Sampling::Own,
             false => {
                 let (fw, fh) = (f64::from(w), f64::from(h));
@@ -2879,6 +2913,55 @@ impl VideoFrames {
             (clock.elapsed() - between).as_secs_f64() * 1e3
         );
         Ok(out)
+    }
+
+    fn colors_frame(
+        &mut self,
+        i: usize,
+        s: usize,
+        layer: &VideoPiece,
+        placed: &[Placed],
+    ) -> Result<frame::Video> {
+        let super_scale = match layer {
+            VideoPiece::Source { super_scale, .. } => *super_scale,
+            _ => SuperScale::default(),
+        };
+        let (w, h, _) = self.maker.out();
+        let kernel =
+            crate::screen::kernel((!super_scale.is_off()).then_some(super_scale.sharpness));
+        let look = Look::whole(placed, (w, h), kernel, (true, self.timeline));
+        let aim = self.aim(s, placed, super_scale);
+        let timeline = self.timeline;
+        let src = &mut self.open[s];
+        let reading = src.pictures.reading(self.maker.reading());
+        let big = match super_scale.ai() {
+            true => src.ai_picture(false, aim, reading, (super_scale.upscaler, timeline))?,
+            false => None,
+        };
+        let rgb = match &big {
+            Some(b) => src.rgb_from((b, (None, None)), 0, &look, reading)?,
+            None => src.rgb_of(false, &look, reading)?,
+        };
+        let made = self
+            .maker
+            .make_layer(i, &mut src.fitting, &rgb, src.reader.path(), reading)?;
+        let current = src.current.as_ref().map(|(f, _)| (f.width(), f.height()));
+        src.normalized = None;
+        src.woven = None;
+        src.upright = true;
+        src.sampling = Sampling::Own;
+        src.how = src.shown_as_is();
+        src.upscaled = super_scale.ai().then(|| Upscaled {
+            upscaler: super_scale.upscaler,
+            sizes: big
+                .as_ref()
+                .zip(current)
+                .map(|(b, c)| [c, (b.width(), b.height())]),
+        });
+        if big.is_some() {
+            src.note_upscaled(super_scale.upscaler);
+        }
+        self.finished_layer(s, made)
     }
 
     fn smooth_frame(

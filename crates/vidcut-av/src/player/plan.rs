@@ -464,6 +464,7 @@ mod tests {
             }],
             cache: Default::default(),
             excluded: false,
+            made: None,
         }
     }
 
