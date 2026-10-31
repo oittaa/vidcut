@@ -1,8 +1,11 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use vidcut_av::color::Matrix;
-use vidcut_av::player::{self as engine, Layout, PlaysOn};
+use vidcut_av::player::{self as engine, Layout, Made, PlaysOn};
 use vidcut_av::{interpolate, super_scale};
-use vidcut_core::model::{Hdr, Retime, Sharpness, SuperScale, Upscaler};
+use vidcut_core::model::{Hdr, Retime, Sharpness, SuperScale, Upscaler, hex};
+use vidcut_core::render::BLACK;
 
 pub type Group = (&'static str, Vec<(&'static str, String)>);
 
@@ -10,6 +13,7 @@ pub type Group = (&'static str, Vec<(&'static str, String)>);
 pub struct PlayerStats {
     pub decoding: Option<DecodingStats>,
     pub picture: Option<PictureStats>,
+    pub made: Option<MadeStats>,
     pub super_scale: Option<SuperScaleStats>,
     pub retime: Option<RetimeStats>,
     pub viewer: Option<ViewerStats>,
@@ -40,6 +44,20 @@ pub struct PictureStats {
     pub range: String,
     pub hdr: Option<String>,
     pub memory: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MadeStats {
+    pub layers: Vec<LayerMade>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LayerMade {
+    pub secs_ago: Option<f64>,
+    pub source: String,
+    pub retime: Option<String>,
+    pub smooth_cut: Option<String>,
+    pub upscaler: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +203,10 @@ impl PlayerStats {
                 },
             }
         });
+        let made = s
+            .shown
+            .as_ref()
+            .and_then(|shown| MadeStats::of(&shown.picture));
         let device = match &s.plays_on {
             PlaysOn::Default => "System default".into(),
             PlaysOn::Chosen(id) => id.clone(),
@@ -196,6 +218,7 @@ impl PlayerStats {
         Self {
             decoding,
             picture,
+            made,
             super_scale,
             retime,
             viewer,
@@ -236,6 +259,9 @@ impl PlayerStats {
         }
         if let Some(p) = &self.picture {
             groups.push(("Picture", p.rows()));
+        }
+        if let Some(m) = &self.made {
+            groups.push(("How It Was Made", m.rows()));
         }
         if let Some(s) = &self.super_scale {
             groups.push(("Super Scale", s.rows()));
@@ -296,6 +322,116 @@ impl PictureStats {
         }
         rows.push(("Held in", self.memory.clone()));
         rows
+    }
+}
+
+impl MadeStats {
+    fn of(picture: &engine::Picture) -> Option<Self> {
+        let origins: Vec<_> = std::iter::once(picture.origin())
+            .chain(picture.over().iter().map(|o| o.picture.origin()))
+            .collect();
+        origins.iter().any(Option::is_some).then(|| Self {
+            layers: origins
+                .into_iter()
+                .map(|o| o.map_or_else(LayerMade::not_recorded, LayerMade::of))
+                .collect(),
+        })
+    }
+
+    fn rows(&self) -> Vec<(&'static str, String)> {
+        let mut rows = Vec::new();
+        let n = self.layers.len();
+        for (i, layer) in self.layers.iter().enumerate() {
+            if n > 1 {
+                rows.push(("Layer", format!("{} of {n}", i + 1)));
+            }
+            if let Some(secs) = layer.secs_ago {
+                rows.push(("Made", format!("{secs:.1} s ago")));
+            }
+            rows.push(("Source", layer.source.clone()));
+            for (label, fact) in [
+                ("Retime", &layer.retime),
+                ("Smooth Cut", &layer.smooth_cut),
+                ("Upscaler", &layer.upscaler),
+            ] {
+                if let Some(f) = fact {
+                    rows.push((label, f.clone()));
+                }
+            }
+        }
+        rows
+    }
+}
+
+impl LayerMade {
+    fn of(origin: &engine::Origin) -> Self {
+        let frame =
+            |f: Option<i64>| f.map_or_else(|| "A source frame".into(), |f| format!("Frame {f}"));
+        let made = |r: Retime, at: f64, took: Duration| {
+            format!(
+                "{} at {at:.2}, in {:.0} ms",
+                interpolate::name(r),
+                took.as_secs_f64() * 1e3
+            )
+        };
+        let (source, retime, smooth_cut) = match origin.made {
+            Made::Solid(BLACK) => ("Black".into(), None, None),
+            Made::Solid(color) => (format!("Color {}", hex(color)), None, None),
+            Made::Still => ("A still image".into(), None, None),
+            Made::Source(f) => (format!("{}, as it is", frame(f)), None, None),
+            Made::Between {
+                retime,
+                frames,
+                at,
+                took,
+            } => {
+                let frames = match frames {
+                    [Some(a), Some(b)] => format!("Frames {a} and {b}"),
+                    _ => "Two source frames".into(),
+                };
+                (frames, Some(made(retime, at, took)), None)
+            }
+            Made::Nearer {
+                retime,
+                frame: f,
+                at,
+            } => {
+                let nearer = format!(
+                    "{}, nearer frame at {at:.2}: a shot change",
+                    interpolate::name(retime)
+                );
+                (frame(f), Some(nearer), None)
+            }
+            Made::Smooth { retime, at, took } => (
+                "Both sides of the cut".into(),
+                None,
+                Some(made(retime, at, took)),
+            ),
+        };
+        let upscaler = origin.upscaled.map(|u| {
+            let name = super_scale::name(u.upscaler);
+            match u.sizes {
+                Some([(w, h), (mw, mh)]) => format!("{name}, {w}×{h} → {mw}×{mh}"),
+                None => format!("{name}, not used: the frame needs no enlarging"),
+            }
+        });
+        Self {
+            secs_ago: Some(origin.when.elapsed().as_secs_f64()),
+            source,
+            retime,
+            smooth_cut,
+            upscaler,
+        }
+    }
+
+    fn not_recorded() -> Self {
+        Self {
+            secs_ago: None,
+            source: "Not recorded".into(),
+            retime: None,
+            smooth_cut: None,
+            upscaler: None,
+        }
     }
 }
 

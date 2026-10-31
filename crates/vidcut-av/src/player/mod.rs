@@ -18,7 +18,10 @@ use std::time::{Duration, Instant};
 use vidcut_core::model::Title;
 use vidcut_core::render::RenderPlan;
 
-pub use frame::{Fit, Layout, Over, Picture, Sampling, Shown, TitleOver, TitlePicture, Woven};
+pub use frame::{
+    Fit, Layout, Made, Origin, Over, Picture, Sampling, Shown, TitleOver, TitlePicture, Upscaled,
+    Woven,
+};
 pub use output::{
     AudioOutput, AudioSource, CpalOutput, ManualOutput, OutputDevice, PacedOutput, PlaysOn,
     Recording, output_device, output_devices,
