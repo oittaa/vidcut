@@ -416,7 +416,10 @@ The line and the Stats row:
 - The `Snapshot` carries the parts (`render_cache`). The timeline draws them under both rulers (`paint::cache_line`). `paint::cache_reasons` gives the reasons under the pointer.
 - The timeline draws no line while it shows another project than the current one: a drag, a trim or a step of the history.
 - `PlayerStats::with_cache` adds the Render Cache row for the frame on screen of the timeline. The GUI and `player.state` both call it.
-  - For a cached frame with an AI upscaler, the Super Scale group names that upscaler, from the render cache. Each `Part` keeps the Super Scale of its layers for this (`VideoPiece::super_scales`). Why: the plan of a cached layer has `Upscaler::Classic`.
+  - For a picture from the cache, the Super Scale group names the AI upscaler that made it, from the render cache.
+    - Each `Part` keeps the Super Scale of its layers for this (`VideoPiece::super_scales`). Why: the plan of a cached layer has `Upscaler::Classic`.
+    - A frame of the timeline level has no Super Scale in the plan. The group then takes the first AI upscaler of the part.
+    - A layer of the clip level has `Upscaler::Classic` in the plan, where the part has an AI upscaler. The group then takes that upscaler. This also holds while the timeline level of the frame is still to render.
 
 The background render (`live::render_cache::Background`):
 

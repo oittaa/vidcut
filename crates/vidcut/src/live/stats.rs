@@ -69,6 +69,8 @@ pub struct SuperScaleStats {
     pub sizes: Option<String>,
     pub state: Option<String>,
     pub last: Option<String>,
+    #[serde(skip)]
+    pub scale: Option<SuperScale>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,10 +262,16 @@ impl PlayerStats {
             return self;
         };
         self.render_cache = cache_row(mode, line, frame);
-        let made = line
-            .iter()
-            .find(|p| p.has(frame))
-            .and_then(|p| p.super_scales.iter().find(|s| s.ai()));
+        let part = line.iter().find(|p| p.holds(frame));
+        let shown = self.super_scale.as_ref().and_then(|s| s.scale);
+        let made = part.and_then(|p| match shown {
+            None if p.has(frame) => p.super_scales.iter().find(|s| s.ai()),
+            None => None,
+            Some(s) => p
+                .super_scales
+                .first()
+                .filter(|b| b.ai() && s.upscaler == Upscaler::Classic),
+        });
         if let Some(s) = made.filter(|_| !mode.is_off()) {
             self.super_scale = Some(SuperScaleStats::cached(*s));
         }
@@ -529,6 +537,7 @@ impl SuperScaleStats {
             sizes: None,
             state: None,
             last: None,
+            scale: Some(s),
         }
     }
 
@@ -553,6 +562,7 @@ impl SuperScaleStats {
         let secs = |d: std::time::Duration| format!("{:.1} s", d.as_secs_f64());
         Some(Self {
             upscaler,
+            scale: s,
             runs_on: report
                 .devices
                 .iter()

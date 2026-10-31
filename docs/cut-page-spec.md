@@ -2706,8 +2706,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The pointer over the line shows the reasons of the part.
     - During the preview of a drag, a trim or a step of the history, the line is not shown. Why: the line is of the timeline before the change.
   - Stats for Nerds has a Render Cache row in How It Was Made (X104).
-  - For a cached frame, the Super Scale group names the AI upscaler that made it, from the render cache.
     - It tells for the frame on screen: Cached, To render with the reasons, or Not needed.
+  - For a picture from the cache, the Super Scale group names the AI upscaler that made it, from the render cache.
   - `cache.status` gives the parts to render, their reasons and their cached frames, and the size on disk. `cache.delete` deletes.
 
 ## 13. Order of operations (pp. 287–296, 3407)
