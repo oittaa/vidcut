@@ -455,11 +455,12 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - The playhead can be outside the transition. A change there put a key at frame −12 or 138 of a 24-frame Push.
   - With no keys, a change sets the `Parameter Value` of the curve, and no key. The transition stays at that value: 0.5 held the Push at half the frame.
   - The keyframe button adds a key with the value at the playhead, or removes the key at the playhead. With no keys, the key gets the `Parameter Value`.
+  - The removal of the last key keeps the `Parameter Value`. After a key of 0.7 went, the Push stayed at its 0.2.
   - A new key on a curved part cuts the Bezier curve there, and the shape stays. The neighbors get shorter handles.
     - On an Ease In curve of 24 frames, a key at frame 12 cut at u = 0.4138. The `OutBez` of frame 0 went from 7.2 to 2.98.
     - The new key got the `InBez` (−4.397, −0.2008) and the `OutBez` (6.227, 0.2844). Then the typed 0.8 moved the key and its handles.
-  - A change of the curve with Ease In changes the Ease to Custom.
-  - Reset with Custom gives the straight curve from 0 at frame 0 to 1 at frame N. With In, it gives the In curve again.
+  - A change of the curve with Ease In or None changes the Ease to Custom. The keyframe button does this too.
+  - Reset with Custom gives the straight curve from 0 at frame 0 to 1 at frame N, and the `Parameter Value` 0. With In, it gives the In curve again.
   - The arrows beside the keyframe button move the playhead to the previous or next key.
   - Measured with exports after each change, on 24-frame Push and Slide transitions.
 - **A change of the length of a Push scales its curve.**
@@ -467,6 +468,7 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - Measured with the Duration of the Inspector:
     - 24 to 6 frames put the keys 0, 12 and 24 at 0, 3 and 6. It put the `OutBez` 7.2 of an Ease In curve at 1.8.
     - Then 6 to 5 frames put the key 3 at 2. 5 to 7 kept it at 2, and 7 to 14 put it at 4.
+    - 24 to 12 frames put the keys 0.3 at 12 and 0.7 at 13 on frame 6. Resolve kept the first key, 0.3.
 - **At a gap, the missing picture of a Push or a Slide shows the tracks below.**
   - It still hides the other picture where it covers it. Thus a Slide In from a clip to a gap covers the clip as it slides in.
   - The tracks below do not move. The other picture moves as usual.
