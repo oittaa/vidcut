@@ -375,6 +375,7 @@ The files:
 - Each file is Matroska, with at most 2 s of frames in a row (`Cache::next`).
 - A `.keys` file next to it holds the names of its frames, 16 bytes each (`write_keys`). The disk cache does not count it (`Kind::keeps`).
 - `Index::scan` reads the `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a `.keys` file without its video.
+  - `cache.status` and `cache.delete` scan on the live thread when that scan has not ended. The later result of `vidcut-render-index` is then dropped.
 - `render_cache::segment` cuts the plan of a file. The draw of the export makes its frames (`encode_plan`), as for proxies.
 - `cache_encoders` gives the encoders, in order:
   - With proxies on: the encoders of the proxy codec.
