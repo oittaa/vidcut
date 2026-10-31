@@ -2565,7 +2565,8 @@ pub enum Request {
         mute: Option<bool>,
     },
     /// Stats for nerds: a panel over the viewer of what its player does
-    /// (the picture, its decoder, pictures kept, the sound, the renderer).
+    /// (the picture, how it was made, its decoder, pictures kept, the sound,
+    /// the renderer).
     /// Without `show`, toggles. `player.state` has the same as `stats`.
     #[serde(rename = "player.stats")]
     PlayerStats {

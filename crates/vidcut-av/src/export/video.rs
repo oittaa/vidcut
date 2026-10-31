@@ -14,7 +14,7 @@ use super::make::{Fitting, Maker};
 use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, format, frame};
-use crate::player::{Fit, Sampling};
+use crate::player::{Fit, Made, Origin, Sampling, Upscaled};
 
 pub(crate) fn target(fps: Rational, origin: f64, pos: i64) -> f64 {
     origin + fps.frames_to_secs(pos) - 0.5 * fps.frames_to_secs(1)
@@ -164,6 +164,8 @@ struct Source {
     before: Option<frame::Video>,
     woven: Option<Weave>,
     made: Lru<Option<i64>, frame::Video, 3>,
+    how: Made,
+    upscaled: Option<Upscaled>,
 }
 
 type Weave = (bool, Option<frame::Video>, Option<frame::Video>);
@@ -208,6 +210,8 @@ struct Reversed {
     frame: frame::Video,
     dolby_vision: frame::Video,
     woven: Option<Weave>,
+    how: Made,
+    upscaled: Option<Upscaled>,
 }
 
 impl Source {
@@ -272,6 +276,8 @@ impl Source {
             before: None,
             woven: None,
             made: Lru::new(),
+            how: Made::Source(None),
+            upscaled: None,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -337,6 +343,8 @@ impl Source {
             before: None,
             woven: None,
             made: Lru::new(),
+            how: Made::Source(None),
+            upscaled: None,
         })
     }
 
@@ -693,6 +701,7 @@ pub(crate) struct Layer {
     pub(crate) moving: Option<Moving>,
     pub(crate) share: f64,
     pub(crate) woven: Option<Weave>,
+    pub(crate) origin: Option<Origin>,
 }
 
 fn mask_of(ramp: Option<Ramp>, k: i64) -> Option<Wipe> {
@@ -951,6 +960,17 @@ impl Source {
         let first = self.reader.first_pts()?;
         let fps = f64::from(rate.numerator()) / f64::from(rate.denominator());
         Some((((pts? - first) as f64 * self.tick) * fps).round() as i64)
+    }
+
+    fn index_of(&self, f: &Option<(frame::Video, f64)>) -> Option<i64> {
+        self.frame_index(f.as_ref().and_then(|(f, _)| f.pts()))
+    }
+
+    fn shown_as_is(&self) -> Made {
+        match self.pictures {
+            Pictures::Still => Made::Still,
+            _ => Made::Source(self.index_of(&self.current)),
+        }
     }
 
     fn seek_ahead(&mut self, first: i64, reading: Reading) -> Result<()> {
@@ -2111,6 +2131,11 @@ impl VideoFrames {
                             moving,
                             share: 1.0,
                             woven: None,
+                            origin: Some(Origin {
+                                made: Made::Solid(color),
+                                upscaled: None,
+                                when: Instant::now(),
+                            }),
                         });
                     }
                     continue;
@@ -2162,13 +2187,27 @@ impl VideoFrames {
                     moving,
                     share: self.share_of(s, rotation, placed.get(i)),
                     woven,
+                    origin: Some(Origin {
+                        made: self.open[s].how,
+                        upscaled: self.open[s].upscaled,
+                        when: Instant::now(),
+                    }),
                 });
                 if let Some((smooth, t)) = smooth
                     && !backward
-                    && let Some(frame) = self.smooth_frame(i, smooth, t)?
+                    && let Some((frame, took)) = self.smooth_frame(i, smooth, t)?
                 {
                     let last = made.last_mut().expect("just made");
                     last.frame = Some(frame);
+                    last.origin = Some(Origin {
+                        made: Made::Smooth {
+                            retime: smooth.retime,
+                            at: t,
+                            took,
+                        },
+                        upscaled: None,
+                        when: Instant::now(),
+                    });
                     last.weight = None;
                     last.rotation = 0;
                     last.sampling = Sampling::Own;
@@ -2589,12 +2628,16 @@ impl VideoFrames {
                     let frame = self.frame_at(i, s, p, layer)?;
                     let dolby_vision = dolby_vision(&self.last_dolby_vision)?;
                     let woven = self.open[s].woven.as_ref().map(weave_ref).transpose()?;
-                    self.open[s].reversed.push(Reversed {
+                    let src = &mut self.open[s];
+                    let (how, upscaled) = (src.how, src.upscaled);
+                    src.reversed.push(Reversed {
                         input: input.clone(),
                         pos: p,
                         frame,
                         dolby_vision,
                         woven,
+                        how,
+                        upscaled,
                     });
                 } else {
                     self.pass_at(s, p)?;
@@ -2608,7 +2651,11 @@ impl VideoFrames {
             .expect("just made");
         self.last_dolby_vision = dolby_vision(&r.dolby_vision)?;
         let (frame, woven) = (frame_ref(&r.frame)?, r.woven.as_ref().map(weave_ref));
-        self.open[s].woven = woven.transpose()?;
+        let (how, upscaled) = (r.how, r.upscaled);
+        let src = &mut self.open[s];
+        src.woven = woven.transpose()?;
+        src.how = how;
+        src.upscaled = upscaled;
         Ok(frame)
     }
 
@@ -2678,6 +2725,12 @@ impl VideoFrames {
         let src = &mut self.open[s];
         let rotation = src.reader.rotation();
         let (cur, _) = src.current.as_ref().expect("a frame");
+        let upscaled = super_scale.ai().then(|| Upscaled {
+            upscaler: super_scale.upscaler,
+            sizes: scaled
+                .as_ref()
+                .map(|(_, b, _)| [(cur.width(), cur.height()), (b.width(), b.height())]),
+        });
         let (fit, measured, aim) = match &scaled {
             Some((_, b, aim)) => (Fit::of(b, 0), between_size(b, 0, *aim), *aim),
             None => (
@@ -2719,6 +2772,7 @@ impl VideoFrames {
         };
         let pts = |f: &Option<(frame::Video, f64)>| f.as_ref().and_then(|(f, _)| f.pts());
         let (pa, pb) = (pts(&src.prev), pts(&src.current));
+        let indexes = [src.index_of(&src.prev), src.index_of(&src.current)];
         let key = (
             src.reader.path().to_path_buf(),
             src.look_id(&look),
@@ -2727,7 +2781,7 @@ impl VideoFrames {
         );
         let clock = Instant::now();
         let converted = clock - start;
-        let big = if src.cut(measured, reading)? {
+        let (big, how) = if src.cut(measured, reading)? {
             crate::debug!(
                 "interpolate",
                 "{}: a cut between the frames at {weight:.3}",
@@ -2736,7 +2790,12 @@ impl VideoFrames {
             crate::interpolate::kept_at_cut(*retime, size, weight);
             let mut picture = frame_ref(if weight < 0.5 { &a } else { &b })?;
             picture.set_pts(pb);
-            picture
+            let nearer = Made::Nearer {
+                retime: *retime,
+                frame: indexes[usize::from(weight >= 0.5)],
+                at: weight,
+            };
+            (picture, nearer)
         } else {
             let made = match frames {
                 true => crate::interpolate::between_frames(&key, &a, &b, size, weight)?,
@@ -2745,15 +2804,24 @@ impl VideoFrames {
                     made_picture(made, size, pb, form_of(&a))?
                 }
             };
+            let took = clock.elapsed();
             crate::debug!(
                 "interpolate",
                 "{}: {}x{} at {weight:.3} in {:.1} ms",
                 crate::interpolate::name(*retime),
                 size.0,
                 size.1,
-                clock.elapsed().as_secs_f64() * 1e3
+                took.as_secs_f64() * 1e3
             );
-            made
+            (
+                made,
+                Made::Between {
+                    retime: *retime,
+                    frames: indexes,
+                    at: weight,
+                    took,
+                },
+            )
         };
         let between = clock.elapsed();
         let src = &mut self.open[s];
@@ -2763,6 +2831,8 @@ impl VideoFrames {
         src.normalized = None;
         src.woven = None;
         src.upright = true;
+        src.how = how;
+        src.upscaled = upscaled;
         src.sampling = match look.placed.is_empty() {
             true => Sampling::Own,
             false => {
@@ -2791,7 +2861,12 @@ impl VideoFrames {
         Ok(out)
     }
 
-    fn smooth_frame(&mut self, i: usize, smooth: &Smooth, t: f64) -> Result<Option<frame::Video>> {
+    fn smooth_frame(
+        &mut self,
+        i: usize,
+        smooth: &Smooth,
+        t: f64,
+    ) -> Result<Option<(frame::Video, Duration)>> {
         let reading_of = |j: usize| self.reading.get(j).copied().flatten();
         let (Some(sa), Some(sb)) = (i.checked_sub(1).and_then(reading_of), reading_of(i)) else {
             return Ok(None);
@@ -2838,11 +2913,12 @@ impl VideoFrames {
                 made_picture(made, size, pb, form_of(&a))?
             }
         };
+        let took = clock.elapsed();
         crate::debug!(
             "interpolate",
             "smooth cut: {}: {w}x{h} at {t:.3} in {:.1} ms",
             crate::interpolate::name(retime),
-            clock.elapsed().as_secs_f64() * 1e3
+            took.as_secs_f64() * 1e3
         );
         let src = &mut self.open[sb];
         let reading = src.pictures.reading(made_reading);
@@ -2850,7 +2926,7 @@ impl VideoFrames {
             .maker
             .make_layer(i, &mut src.fitting, &big, src.reader.path(), reading)?;
         src.normalized = None;
-        self.finished_layer(sb, made).map(Some)
+        Ok(Some((self.finished_layer(sb, made)?, took)))
     }
 
     fn shown(
@@ -2915,10 +2991,17 @@ impl VideoFrames {
             src.normalized = Some(made);
             src.upright = big.is_some();
             src.sampling = Sampling::Own;
+            src.upscaled = super_scale.ai().then(|| Upscaled {
+                upscaler: super_scale.upscaler,
+                sizes: big
+                    .as_ref()
+                    .map(|b| [(frame.width(), frame.height()), (b.width(), b.height())]),
+            });
             if big.is_some() {
                 src.note_upscaled(super_scale.upscaler);
             }
         }
+        src.how = src.shown_as_is();
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
         self.finished_layer(s, picture)
     }

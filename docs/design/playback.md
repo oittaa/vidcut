@@ -98,6 +98,25 @@ flowchart TD
 - An engine can show a picture that another engine decoded, by its `Id`.
 - Each engine plans its decoding with its part of the budget (`Config::part`). When the last engine ends, the cache empties.
 
+**How a picture was made**
+
+- Each layer of a kept picture carries an `Origin`. The decoding thread writes it when it makes the layer (`VideoFrames::next_layers`).
+- The `Origin` tells what made the layer (`Made`). It is one of these:
+  - a source frame as it is
+  - a black or colored frame, or a still image
+  - a Retime Process, with the two source frames, the position between them and the time that it took
+  - the nearer source frame, when a Retime Process finds a shot change between the two frames
+  - a Smooth Cut, with its process, its position and the time that it took
+- The number of a source frame counts from 0 at the first frame of the file.
+- With an AI upscaler, the `Origin` tells the upscaler and the two sizes (`Upscaled`). When the frame needs no enlarging, it tells that the upscaler was not used.
+- The `Origin` also tells when the layer was made.
+- The stats panel shows the `Origin` of each layer of the picture on the screen (`MadeStats`). It also shows how long ago each layer was made.
+  - Each picture on the screen comes from the kept pictures. Thus the age of a layer tells whether the layer was made just now or kept from earlier.
+  - The layers of a dissolve can have different ages.
+  - A layer without an `Origin` shows "Not recorded". When no layer has an `Origin`, the panel does not show the group.
+  - Until a frame is decoded, the panel shows the `Origin` of the picture that the viewer shows in its place.
+- Why: the reports of the GPU stages (`interpolate::report`, `super_scale::report`) tell only their last work. That work is usually ahead of the playhead. Thus they do not tell about a paused frame or a step back.
+
 **Dissolves and placed pictures**
 
 - The engine does not mix. A `VideoPiece::Mix` frame is one `Picture` with an `Over` (picture and weight) for each layer on top. Each layer is as decoded.

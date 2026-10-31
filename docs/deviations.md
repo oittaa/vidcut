@@ -320,7 +320,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - None. The viewer shows nothing about how it plays.
 - **vidcut:**
   - The right-click menu of the viewer opens a panel over the picture.
-  - The panel has a group for each of these: decoding, the picture, Super Scale, the viewer, playback, the kept pictures and the sound.
+  - The panel has a group for each of these:
+    - decoding, the picture and how it was made
+    - Super Scale and Retime Process
+    - the viewer, playback, the kept pictures and the sound
+  - The group "How It Was Made" tells about the picture on the screen, also when playback is paused.
+    - It shows the source frame, or the Retime Process with its position between two source frames.
+    - It shows the AI upscaler with its sizes, and the process of a Smooth Cut.
+    - It shows how long ago each layer was made.
   - The Super Scale group shows when the clip under the playhead has Super Scale on. It names the upscaler and the factor.
   - With an AI upscaler, the group also shows its GPU, the sizes it makes, what it is making now and its last finished work.
     - Thus the user sees that AI Slow is still making its first frame, which can take minutes at 4K.
