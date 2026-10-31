@@ -2656,6 +2656,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The menu of a clip has Render Cache (p. 205). `clip.set` with `render_cache` also sets it.
     - Off keeps the slow media and the AI Super Scale of the clip out of both modes.
     - Off does not stop speed changes, Retime Processes, transitions, opacity and composite modes. Resolve caches these in its sequence cache, and no clip setting reaches it (p. 204).
+    - With Off, a speed change of the clip renders only at the timeline level.
   - Each effect of a clip has a Render Cache check. It is off, unless set.
     - The menu of a clip has Render Cache Effects, with each effect of the clip in its order (p. 205). `effects.set` with `render_cache` also sets it.
     - A checked effect renders in Smart and in User mode, as in Resolve (p. 204). A checked effect that is off renders nothing.
@@ -2679,7 +2680,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Transitions: off, unless set.
     - Composites: off, unless set. It includes opacity, as in Resolve.
     - AI: on, unless set. It is AI Super Scale and the AI Retime Processes. It stands in for the Fusion effects of Resolve.
-  - The cache keeps the frame after the tracks mix.
+  - The cache has two levels, as in Resolve (pp. 203–204).
+  - The clip level keeps the picture of one clip, before the tracks mix. It is the Render Cache Fusion Output of Resolve (p. 203).
+    - It holds the clips set to On, media that are slow to decode, and speed changes.
+    - A move, a split, a trim or an edit on another track keeps it.
+    - It holds the picture at the size of the media, or of its proxy with proxies on. Effects, Transform and AI Super Scale come after it.
+    - A clip with a Retime Process other than Nearest stays at the timeline level. A still stays there too.
+  - The timeline level keeps the frame after the tracks mix. It holds the other reasons.
     - Titles on top of all tracks stay out of it. Thus an edit of their text keeps the cache.
     - A part that moves keeps its cache when the tracks under it stay the same.
     - An edit that changes the frames of a part renders it again.
@@ -2692,9 +2699,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Playback > Delete Render Cache has three choices:
     - All empties the cache.
     - Unused keeps only the frames of the open timeline.
-    - Selected Clips removes the files that hold frames of the selected clips.
+    - Selected Clips removes the files that hold frames at the times of the selected clips. At the clip level, it removes only the frames of their media. The media of a compound clip are the media of the clips in it.
   - In Smart and User mode, a line along the bottom of the ruler of both timelines shows the state (p. 203, X104).
-    - Red: the mode renders this part. Blue: the part is in the cache.
+    - Red: the mode renders this part. Blue: the part is in the cache, at each level that it needs.
     - The pointer over the line shows the reasons of the part.
     - During the preview of a drag, a trim or a step of the history, the line is not shown. Why: the line is of the timeline before the change.
   - Stats for Nerds has a Render Cache row in How It Was Made (X104).

@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use vidcut_core::model::{Project, RenderCache as Mode};
 use vidcut_core::preferences::{Gpu, Preferences, Proxies, RenderCachePrefs};
 use vidcut_core::render::RenderPlan;
-use vidcut_core::render_cache::{Cache, Index, Key, Look, Part, Setup, segment};
+use vidcut_core::render_cache::{Cache, Index, Key, Look, Part, Setup};
 
 use super::Msg;
 use crate::threads::Work;
@@ -342,7 +342,7 @@ impl Background {
         n
     }
 
-    pub(super) fn delete_frames(&mut self, project: &Project, ranges: &[(i64, i64)]) -> usize {
+    pub(super) fn delete_frames(&mut self, project: &Project, ranges: &[Span]) -> usize {
         self.scanned();
         let Some(base) = self.base.clone() else {
             return 0;
@@ -376,28 +376,25 @@ impl Background {
             look: &look,
         };
         let mut cache = self.lock();
-        let all = [(base.range.0, base.range.1)];
+        let all = [(base.range.0, base.range.1, None)];
         let keys = keys_in(&mut cache, &base, &setup, &all);
         cache.index_mut().keep_only(&keys)
     }
 }
 
-fn keys_in(
-    cache: &mut Cache,
-    base: &RenderPlan,
-    setup: &Setup,
-    ranges: &[(i64, i64)],
-) -> HashSet<Key> {
+pub(super) type Span = (i64, i64, Option<Vec<String>>);
+
+fn keys_in(cache: &mut Cache, base: &RenderPlan, setup: &Setup, spans: &[Span]) -> HashSet<Key> {
     let mut out = HashSet::new();
     let mut t = base.range.0;
     for piece in &base.video {
         let n = piece.frames();
-        if ranges.iter().any(|&(a, b)| a < t + n && b > t) {
-            let keys = cache.keys(piece, setup, base);
-            for (k, key) in keys.iter().enumerate() {
-                let at = t + k as i64;
-                if ranges.iter().any(|&(a, b)| (a..b).contains(&at)) {
-                    out.insert(*key);
+        for (a, b, media) in spans.iter().filter(|(a, b, _)| *a < t + n && *b > t) {
+            for keys in cache.names(piece, setup, base, media.as_deref()) {
+                for (k, key) in keys.iter().enumerate() {
+                    if (*a..*b).contains(&(t + k as i64)) {
+                        out.insert(*key);
+                    }
                 }
             }
         }
@@ -490,14 +487,12 @@ impl Render {
                 return Ok(false);
             }
             let next = self.lock().next(&self.base, &setup, from, most);
-            let Some((start, keys)) = next else {
+            let Some(job) = next else {
                 return Ok(true);
             };
-            let frames = keys.len() as i64;
-            let plan = segment(&self.base, &self.look, start, frames);
             let written = vidcut_av::render_cache::write(
-                &plan,
-                &keys,
+                &job.plan,
+                &job.keys,
                 &encoders,
                 gpu.as_ref(),
                 &Index::dir(),
@@ -505,9 +500,12 @@ impl Render {
             );
             match written {
                 Ok(w) => {
-                    self.lock().index_mut().add(&w.path, &keys);
+                    self.lock().index_mut().add(&w.path, &job.keys);
                     self.send(Event::Written);
-                    from = start + frames;
+                    from = match job.clip {
+                        true => job.start,
+                        false => job.start + job.keys.len() as i64,
+                    };
                 }
                 Err(_) if self.cancel.load(Ordering::Relaxed) => return Ok(false),
                 Err(e) => return Err(e.to_string()),

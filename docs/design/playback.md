@@ -364,6 +364,16 @@ What it renders:
   - The answers come in a message that names its job. The live core drops the answers of a job that it stopped.
   - Media that the proxy rules pick (`Proxies::wants`), while the original plays.
 
+The two levels (spec D98):
+
+- `Setup::levels` puts each reason of a layer at a level. `Reason::On`, `Reason::Media` and `Reason::Speed` go to the clip level. The other reasons go to the timeline level.
+- A layer takes the clip level only when it is a video file with the Nearest retime, and its clip is not set to `ClipCache::Off`. Otherwise all its reasons go to the timeline level.
+  - Why Nearest: each frame of the layer is then one source frame. A frame between two source frames needs the two source frames.
+- `Cache::apply` puts the timeline level first. Where a frame of the timeline level is not there, it puts each found frame of the clip level in place of the layer (`from_file`).
+  - The layer keeps its `placed`, its `super_scale` and its `retime`. The file takes the place of the media, as a proxy does. Thus the Transform, the effects and AI Super Scale work on it as on the media.
+  - `Index::run` follows the names of a file. Thus a run continues while the file holds the next name of the layer, also where a slow speed shows a frame twice.
+  - A file of the clip level can hold one name many times, for example a freeze frame. `Index::add` keeps the first place of each name in the file. Thus a run starts at the start of the repeat.
+
 The names of frames:
 
 - The cache keeps the frame after the tracks mix. `render_cache::bare` takes off the titles on top of all tracks. Thus an edit of their text keeps the cache.
@@ -373,6 +383,9 @@ The names of frames:
   - The piece has no `ClipCache`, no `excluded` and no `render_cache` of its effects. Thus a change of these settings keeps the names.
   - The player's key of a decoded frame (`source_key`) also leaves out the `render_cache` of effects. Thus a check in Render Cache Effects does not upscale again.
   - The name also holds the `Look` (the size and the codec), the frame rate, the colors of the timeline and the version of vidcut.
+- `Cache::clip_keys` names each frame of the clip level by a SHA-256 of its source frame alone (`alone`). It holds the media, the frame and the colors of the media.
+  - The name has no speed, no placement, no AI Super Scale and no clip settings. Thus a frame that two clips show has one name.
+  - The name also holds the size, the colors of the timeline, the codec and the version of vidcut. The size is that of the media, or of its proxy with proxies on (`Look::longest`).
 - An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
 - `Look::of` gives the size and the codec. With proxies on, they are those of proxies. With proxies off, the size is that of the timeline.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.
@@ -384,7 +397,10 @@ The files:
 - A `.keys` file next to it holds the names of its frames, 16 bytes each (`write_keys`). The disk cache does not count it (`Kind::keeps`).
 - `Index::scan` reads the `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a `.keys` file without its video.
 - The disk cache can remove a video at any time. `Cache::apply` removes from the index each file of the plan that is gone (`Index::remove`). Thus the background render makes its frames again.
-- `render_cache::segment` cuts the plan of a file. The draw of the export makes its frames (`encode_plan`), as for proxies.
+- `Cache::next` gives the next `Job` with its own plan. The draw of the export makes its frames (`encode_plan`), as for proxies.
+  - At the timeline level, `render_cache::segment` cuts the plan of the timeline.
+  - At the clip level, the plan holds the one layer, with no placement, at the size of the media (`clip_plan`).
+  - At the same place, the clip level renders first. Then the render goes on from there at the timeline level.
 - `cache_encoders` gives the encoders, in order:
   - With proxies on: the encoders of the proxy codec.
   - With proxies off: ProRes 422 HQ on the GPU or the CPU, and HEVC and AV1 at a high quality on the GPU (`high_options`). The encoders that the GPU makes and plays come first (`round`).
@@ -411,6 +427,8 @@ The background render (`live::render_cache::Background`):
 - `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
   - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
   - All removes each file of the folder. Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
+    - At the clip level, `Cache::names` gives only the frames of the media of each clip.
+    - A compound clip gives the media of the clips in it (`otio::played_by`).
 
 ## Code
 

@@ -8,23 +8,20 @@ The render cache renders the slow parts of the timeline in the background ([spec
 
 The manual describes the render cache on pp. 143–144 and 199–206.
 
-- Smart caches speed effects at the level of the source. Thus a moved clip keeps its cache.
 - Resolve caches the checked Resolve FX and OFX of a clip in its node cache, before the tracks mix.
 - The render cache format of a new project in Resolve Studio 21.1.2 is ProRes 422 HQ (`apch`).
 
 ## The clip level
 
-The cache keeps only the frame after the tracks mix. Thus an edit on another track at the same time renders the frame again.
+The clip level holds the clips set to On, slow media and speed changes ([spec D98](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It does not hold AI Super Scale and the Retime Processes yet.
 
-- The clip level keeps the picture of one clip, before the tracks mix.
-- It is for AI Super Scale, a Retime Process, a speed change and media that is slow to decode.
-- An edit on another track, a move, a split or a trim keeps the cache of the clip.
-- A frame of a Retime Process is made at its placement, with the effects of the clip ([export](../design/export.md#effects)).
+- AI Super Scale goes to the clip level, as the enlarged picture of the clip.
+- A Retime Process goes to the clip level.
+  - A frame of a Retime Process is made at its placement, with the effects of the clip ([export](../design/export.md#effects)).
   - Thus a change of the Transform or of an effect of that clip renders it again.
+  - The frame holds colors only. The draw makes its alpha again from the shape of the clip. Thus its codec needs no alpha.
 - The timeline level stays for transitions, opacity, composite modes, the checked effects and the parts with dropped frames.
   - Why the effects are at this level: an effect works on the placed picture of a clip, which can be partly clear.
-  - A frame after the mix has no clear parts. Thus its codec needs no alpha.
-- One line shows both levels. A frame is blue when each slow part of it is in the cache.
 
 ## One record of each frame
 
@@ -79,9 +76,10 @@ The owner accepted these. Each goes into [deviations.md](../deviations.md) with 
 
 ## Steps
 
-1. **The clip level.**
-2. **One record of each frame:** the kept `Id` and `Origin`, and the names of the processes.
-3. **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
-4. **Dropped frames:** the times of each layer in `Origin`, and the marks.
+1. **AI Super Scale at the clip level.**
+2. **Retime Processes at the clip level.**
+3. **One record of each frame:** the kept `Id` and `Origin`, and the names of the processes.
+4. **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
+5. **Dropped frames:** the times of each layer in `Origin`, and the marks.
 
 Each step adds its part to the spec, the design docs and the deviations. The last step deletes this file.

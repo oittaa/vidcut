@@ -48,6 +48,10 @@ impl Reason {
         }
     }
 
+    fn clip(self) -> bool {
+        matches!(self, Self::On | Self::Media | Self::Speed)
+    }
+
     fn user(self, prefs: &RenderCachePrefs) -> bool {
         match self {
             Self::On | Self::Effect => true,
@@ -64,6 +68,7 @@ pub struct Look {
     pub width: u32,
     pub height: u32,
     pub codec: String,
+    pub longest: Option<u32>,
 }
 
 impl Look {
@@ -81,6 +86,7 @@ impl Look {
             width,
             height,
             codec,
+            longest: s.use_proxies.then_some(proxies.0),
         }
     }
 }
@@ -94,18 +100,64 @@ pub struct Setup<'a> {
 }
 
 impl Setup<'_> {
-    pub fn reasons(&self, piece: &VideoPiece) -> Vec<Reason> {
-        let mut out = reasons(piece, self.slow, self.mode == RenderCache::User);
-        out.retain(|r| match self.mode {
+    fn kept(&self, r: &Reason) -> bool {
+        match self.mode {
             RenderCache::Off => false,
             RenderCache::Smart => true,
             RenderCache::User => r.user(self.prefs),
-        });
+        }
+    }
+
+    pub fn reasons(&self, piece: &VideoPiece) -> Vec<Reason> {
+        let mut out = reasons(piece, self.slow, self.mode == RenderCache::User);
+        out.retain(|r| self.kept(r));
         out
     }
 
-    pub fn wanted(&self, piece: &VideoPiece) -> bool {
-        !self.reasons(piece).is_empty()
+    fn levels(&self, piece: &VideoPiece) -> (bool, Vec<bool>) {
+        let user = self.mode == RenderCache::User;
+        let mut whole = titled(piece) && self.kept(&Reason::Effect);
+        let clips = piece
+            .layers()
+            .iter()
+            .zip(layered(piece, self.slow, user))
+            .map(|((layer, _), found)| {
+                let mut clip = false;
+                let own = lone(layer)
+                    && !matches!(
+                        layer,
+                        VideoPiece::Source {
+                            cache: ClipCache::Off,
+                            ..
+                        }
+                    );
+                for r in found.iter().filter(|r| self.kept(r)) {
+                    match r.clip() && own {
+                        true => clip = true,
+                        false => whole = true,
+                    }
+                }
+                clip
+            })
+            .collect();
+        (whole, clips)
+    }
+
+    fn sized(&self, layer: &VideoPiece) -> Option<(u32, u32)> {
+        let VideoPiece::Source { media, .. } = layer else {
+            return None;
+        };
+        let (w, h) = self
+            .project
+            .media(media)?
+            .info
+            .video
+            .as_ref()?
+            .display_size();
+        Some(match self.look.longest {
+            Some(l) => crate::model::proxy_size(w, h, l),
+            None => (w, h),
+        })
     }
 
     fn name(&self, media: &str, path: &Path) -> String {
@@ -126,6 +178,37 @@ impl Setup<'_> {
             env!("CARGO_PKG_VERSION")
         )
     }
+
+    fn clip_stem(&self, plan: &RenderPlan, (w, h): (u32, u32)) -> String {
+        format!(
+            "clip|{w}x{h}|{:?}|{}|{}",
+            plan.colors,
+            self.look.codec,
+            env!("CARGO_PKG_VERSION")
+        )
+    }
+}
+
+fn lone(layer: &VideoPiece) -> bool {
+    matches!(layer, VideoPiece::Source { image: None, retime, .. } if retime.is_nearest())
+}
+
+fn alone(layer: &VideoPiece) -> VideoPiece {
+    let mut out = layer.clone();
+    if let VideoPiece::Source {
+        super_scale,
+        placed,
+        cache,
+        excluded,
+        ..
+    } = &mut out
+    {
+        *super_scale = Default::default();
+        placed.clear();
+        *cache = ClipCache::Auto;
+        *excluded = false;
+    }
+    out
 }
 
 fn checked(placed: &[Placed]) -> bool {
@@ -134,7 +217,21 @@ fn checked(placed: &[Placed]) -> bool {
         .any(|p| p.picture.effects.iter().any(|e| e.on && e.render_cache))
 }
 
+fn titled(piece: &VideoPiece) -> bool {
+    piece.titles().iter().any(|(_, t)| checked(&t.placed))
+}
+
 pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<Reason> {
+    let mut out: Vec<Reason> = layered(piece, slow, user).into_iter().flatten().collect();
+    if titled(piece) {
+        out.push(Reason::Effect);
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<Vec<Reason>> {
     let mut out = Vec::new();
     let layers = piece.layers();
     let motions = piece.motions();
@@ -154,9 +251,10 @@ pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> V
         } = layer
         else {
             let excluded = matches!(layer, VideoPiece::Black { excluded: true, .. });
-            if moved && !(user && excluded) {
-                out.push(Reason::Transition);
-            }
+            out.push(match moved && !(user && excluded) {
+                true => vec![Reason::Transition],
+                false => Vec::new(),
+            });
             continue;
         };
         let own = *cache != ClipCache::Off;
@@ -189,13 +287,14 @@ pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> V
                 Reason::Composite,
             ),
         ];
-        out.extend(found.into_iter().filter(|(on, _)| *on).map(|(_, r)| r));
+        out.push(
+            found
+                .into_iter()
+                .filter(|(on, _)| *on)
+                .map(|(_, r)| r)
+                .collect(),
+        );
     }
-    if piece.titles().iter().any(|(_, t)| checked(&t.placed)) {
-        out.push(Reason::Effect);
-    }
-    out.sort_unstable();
-    out.dedup();
     out
 }
 
@@ -328,6 +427,78 @@ impl Cache {
         keys
     }
 
+    pub fn clip_keys(
+        &mut self,
+        layer: &VideoPiece,
+        setup: &Setup,
+        plan: &RenderPlan,
+    ) -> Option<Arc<[Key]>> {
+        let size = setup.sized(layer)?;
+        let stem = setup.clip_stem(plan, size);
+        let name = |m: &str, p: &Path| setup.name(m, p);
+        let alone = alone(layer);
+        let mut whole = alone.clone();
+        plain(&mut whole, &name);
+        let whole = serde_json::to_vec(&whole).unwrap_or_default();
+        let memo = digest(&[stem.as_bytes(), &whole]);
+        if let Some(keys) = self.keys.get(&memo) {
+            return Some(keys.clone());
+        }
+        let keys: Arc<[Key]> = (0..alone.frames())
+            .map(|k| {
+                let mut one = alone.part(k, 1);
+                if let VideoPiece::Source { pace, .. } = &mut one {
+                    *pace = Default::default();
+                }
+                plain(&mut one, &name);
+                let json = serde_json::to_vec(&one).unwrap_or_default();
+                digest(&[stem.as_bytes(), &json])
+            })
+            .collect();
+        self.keys.insert(memo, keys.clone());
+        Some(keys)
+    }
+
+    fn levels(&mut self, piece: &VideoPiece, setup: &Setup, plan: &RenderPlan) -> Levels {
+        let (mut whole, clips) = setup.levels(piece);
+        let clips: Vec<Option<Arc<[Key]>>> = piece
+            .layers()
+            .iter()
+            .zip(clips)
+            .map(|((layer, _), clip)| {
+                let keys = clip.then(|| self.clip_keys(layer, setup, plan)).flatten();
+                whole |= clip && keys.is_none();
+                keys
+            })
+            .collect();
+        let whole = whole.then(|| self.keys(piece, setup, plan));
+        (whole, clips)
+    }
+
+    pub fn names(
+        &mut self,
+        piece: &VideoPiece,
+        setup: &Setup,
+        plan: &RenderPlan,
+        media: Option<&[String]>,
+    ) -> Vec<Arc<[Key]>> {
+        let mut out = vec![self.keys(piece, setup, plan)];
+        for (layer, _) in piece.layers() {
+            let mine = match (layer, media) {
+                (_, None) => true,
+                (VideoPiece::Source { media, .. }, Some(m)) => m.contains(media),
+                _ => false,
+            };
+            if mine
+                && lone(layer)
+                && let Some(keys) = self.clip_keys(layer, setup, plan)
+            {
+                out.push(keys);
+            }
+        }
+        out
+    }
+
     pub fn parts(&mut self, plan: &RenderPlan, setup: &Setup) -> Vec<Part> {
         let mut out = Vec::new();
         let mut t = plan.range.0;
@@ -335,10 +506,11 @@ impl Cache {
             let frames = piece.frames();
             let reasons = setup.reasons(piece);
             if !reasons.is_empty() {
-                let keys = self.keys(piece, setup, plan);
+                let (whole, clips) = self.levels(piece, setup, plan);
                 let mut cached: Vec<(i64, i64)> = Vec::new();
-                for (k, key) in keys.iter().enumerate() {
-                    if !self.index.has(key) {
+                for k in 0..frames as usize {
+                    let mut all = whole.iter().chain(clips.iter().flatten());
+                    if !all.all(|keys| self.index.has(&keys[k])) {
                         continue;
                     }
                     let at = t + k as i64;
@@ -359,44 +531,76 @@ impl Cache {
         out
     }
 
-    pub fn next(
-        &mut self,
-        plan: &RenderPlan,
-        setup: &Setup,
-        from: i64,
-        most: i64,
-    ) -> Option<(i64, Vec<Key>)> {
-        let mut todo: Vec<(i64, Vec<(i64, Key)>)> = Vec::new();
+    pub fn next(&mut self, plan: &RenderPlan, setup: &Setup, from: i64, most: i64) -> Option<Job> {
+        let mut whole: Vec<(i64, Key)> = Vec::new();
+        let mut ahead: Option<(i64, usize, usize, usize)> = None;
+        let mut first: Option<(i64, usize, usize, usize)> = None;
         let mut t = plan.range.0;
-        for piece in &plan.video {
-            let frames = piece.frames();
-            if setup.wanted(piece) {
-                let keys = self.keys(piece, setup, plan);
-                let missing: Vec<(i64, Key)> = keys
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, k)| !self.index.has(k))
-                    .map(|(k, key)| (t + k as i64, *key))
-                    .collect();
-                if !missing.is_empty() {
-                    todo.push((t, missing));
+        for (p, piece) in plan.video.iter().enumerate() {
+            let (keys, clips) = self.levels(piece, setup, plan);
+            if let Some(keys) = keys {
+                whole.extend(
+                    keys.iter()
+                        .enumerate()
+                        .filter(|(_, key)| !self.index.has(key))
+                        .map(|(k, key)| (t + k as i64, *key)),
+                );
+            }
+            for (i, keys) in clips.iter().enumerate() {
+                let Some(keys) = keys else {
+                    continue;
+                };
+                let missing = |k: &usize| !self.index.has(&keys[*k]);
+                let at = |k: usize| (t + k as i64, p, i, k);
+                if let Some(k) = (0..keys.len()).find(missing).map(at) {
+                    first = first.filter(|f| f.0 <= k.0).or(Some(k));
+                }
+                let soon = |k: &usize| t + *k as i64 >= from && missing(k);
+                if let Some(k) = (0..keys.len()).find(soon).map(at) {
+                    ahead = ahead.filter(|a| a.0 <= k.0).or(Some(k));
                 }
             }
-            t += frames;
+            t += piece.frames();
         }
-        let all: Vec<(i64, Key)> = todo.into_iter().flat_map(|(_, m)| m).collect();
-        let first = all
-            .iter()
-            .position(|(t, _)| *t >= from)
-            .or((!all.is_empty()).then_some(0))?;
-        let start = all[first].0;
-        let run: Vec<Key> = all[first..]
+        let later = whole.iter().position(|(t, _)| *t >= from);
+        let clip = match (ahead, later) {
+            (Some(a), Some(w)) => (a.0 <= whole[w].0).then_some(a),
+            (Some(a), None) => Some(a),
+            (None, Some(_)) => None,
+            (None, None) => first.filter(|f| whole.first().is_none_or(|w| f.0 <= w.0)),
+        };
+        if let Some((start, p, i, k)) = clip {
+            let layer = plan.video[p].layers()[i].0.clone();
+            let keys = self.clip_keys(&layer, setup, plan)?;
+            let size = setup.sized(&layer)?;
+            let run: Vec<Key> = keys[k..]
+                .iter()
+                .take_while(|key| !self.index.has(key))
+                .take(most.max(1) as usize)
+                .copied()
+                .collect();
+            let alone = alone(&layer.part(k as i64, run.len() as i64));
+            return Some(Job {
+                start,
+                plan: clip_plan(plan, alone, size),
+                keys: run,
+                clip: true,
+            });
+        }
+        let first = later.or((!whole.is_empty()).then_some(0))?;
+        let start = whole[first].0;
+        let run: Vec<Key> = whole[first..]
             .iter()
             .enumerate()
             .take_while(|(i, (t, _))| *t == start + *i as i64 && (*i as i64) < most)
             .map(|(_, (_, key))| *key)
             .collect();
-        Some((start, run))
+        Some(Job {
+            start,
+            plan: segment(plan, setup.look, start, run.len() as i64),
+            keys: run,
+            clip: false,
+        })
     }
 
     pub fn apply(&mut self, plan: &mut RenderPlan, setup: &Setup, exists: &dyn Fn(&Path) -> bool) {
@@ -406,33 +610,59 @@ impl Cache {
         let pieces = std::mem::take(&mut plan.video);
         let mut video = Vec::with_capacity(pieces.len());
         let mut seen: HashMap<Arc<Path>, bool> = HashMap::new();
-        let mut there = |f: &Arc<Path>| *seen.entry(f.clone()).or_insert_with(|| exists(f));
         for piece in pieces {
-            if !setup.wanted(&piece) {
+            let (whole, clips) = self.levels(&piece, setup, plan);
+            if whole.is_none() && clips.iter().all(Option::is_none) {
                 video.push(piece);
                 continue;
             }
-            let keys = self.keys(&piece, setup, plan);
-            let found: Vec<Option<(Arc<Path>, u32)>> = keys
-                .iter()
-                .map(|k| self.index.find(k).filter(|(f, _)| there(f)))
-                .collect();
-            if found.iter().all(Option::is_none) {
-                video.push(piece);
-                continue;
-            }
+            let index = &self.index;
+            let mut found = |key: &Key| {
+                let (f, i) = index.find(key)?;
+                let there = *seen.entry(f.clone()).or_insert_with(|| exists(&f));
+                there.then_some((f, i))
+            };
+            let n = piece.frames() as usize;
             let mut k = 0;
-            while k < found.len() {
-                let mut n = 1;
-                while k + n < found.len() && follows(&found[k + n - 1], &found[k + n]) {
-                    n += 1;
+            while k < n {
+                if let Some(keys) = &whole
+                    && let Some((f, i)) = found(&keys[k])
+                {
+                    let m = index.run(&f, i, &keys[k..]);
+                    video.push(cached(&piece.part(k as i64, m as i64), &f, i, m as i64));
+                    k += m;
+                    continue;
                 }
-                let part = piece.part(k as i64, n as i64);
-                video.push(match &found[k] {
-                    Some((file, at)) => cached(&part, file, *at, n as i64),
-                    None => part,
-                });
-                k += n;
+                let at: Vec<Option<(Arc<Path>, u32)>> = clips
+                    .iter()
+                    .map(|keys| keys.as_ref().and_then(|keys| found(&keys[k])))
+                    .collect();
+                let mut m = 1;
+                while k + m < n {
+                    let j = k + m;
+                    if whole.as_ref().is_some_and(|keys| found(&keys[j]).is_some()) {
+                        break;
+                    }
+                    let goes_on = clips.iter().zip(&at).all(|(keys, a)| match (keys, a) {
+                        (Some(keys), Some((f, i))) => {
+                            index.run(f, *i + m as u32, &keys[j..=j]) == 1
+                        }
+                        (Some(keys), None) => found(&keys[j]).is_none(),
+                        (None, _) => true,
+                    });
+                    if !goes_on {
+                        break;
+                    }
+                    m += 1;
+                }
+                let mut part = piece.part(k as i64, m as i64);
+                for (layer, a) in part.layers_mut().into_iter().zip(&at) {
+                    if let Some((f, i)) = a {
+                        from_file(layer, f, *i);
+                    }
+                }
+                video.push(part);
+                k += m;
             }
         }
         plan.video = video;
@@ -447,12 +677,13 @@ impl Cache {
     }
 }
 
-fn follows(a: &Option<(Arc<Path>, u32)>, b: &Option<(Arc<Path>, u32)>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some((f, i)), Some((g, j))) => f == g && *j == i + 1,
-        _ => false,
-    }
+type Levels = (Option<Arc<[Key]>>, Vec<Option<Arc<[Key]>>>);
+
+pub struct Job {
+    pub start: i64,
+    pub keys: Vec<Key>,
+    pub plan: RenderPlan,
+    pub clip: bool,
 }
 
 fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
@@ -478,6 +709,47 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
             titles: titles.clone(),
         },
         _ => source,
+    }
+}
+
+fn from_file(layer: &mut VideoPiece, file: &Path, at: u32) {
+    crate::disk_cache::used(file);
+    if let VideoPiece::Source {
+        media,
+        path,
+        origin,
+        source_frame,
+        image,
+        pace,
+        color_space,
+        ..
+    } = layer
+    {
+        media.clear();
+        *path = file.to_path_buf();
+        *origin = 0.0;
+        *source_frame = i64::from(at);
+        *image = None;
+        *pace = Default::default();
+        *color_space = Default::default();
+    }
+}
+
+fn clip_plan(plan: &RenderPlan, layer: VideoPiece, (width, height): (u32, u32)) -> RenderPlan {
+    let frames = layer.frames();
+    RenderPlan {
+        fps: plan.fps,
+        width,
+        height,
+        sample_rate: plan.sample_rate,
+        channels: plan.channels,
+        frames,
+        video: vec![layer],
+        audio: Vec::new(),
+        ducking: Vec::new(),
+        range: (0, frames),
+        name: plan.name.clone(),
+        colors: plan.colors,
     }
 }
 
@@ -542,7 +814,7 @@ impl Index {
 
     pub fn add(&mut self, file: &Path, keys: &[Key]) {
         let file: Arc<Path> = file.into();
-        for (i, k) in keys.iter().enumerate() {
+        for (i, k) in keys.iter().enumerate().rev() {
             self.frames.insert(*k, (file.clone(), i as u32));
         }
         self.files.insert(file, keys.into());
@@ -550,6 +822,16 @@ impl Index {
 
     pub fn has(&self, key: &Key) -> bool {
         self.frames.contains_key(key)
+    }
+
+    pub fn run(&self, file: &Path, at: u32, keys: &[Key]) -> usize {
+        self.files.get(file).map_or(0, |held| {
+            held.iter()
+                .skip(at as usize)
+                .zip(keys)
+                .take_while(|(a, b)| a == b)
+                .count()
+        })
     }
 
     pub fn find(&self, key: &Key) -> Option<(Arc<Path>, u32)> {
