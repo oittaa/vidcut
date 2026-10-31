@@ -20,7 +20,11 @@ pub(crate) enum Event {
     Scanned(Index),
     Slow(HashMap<String, bool>),
     Written,
-    Ended { done: bool, error: Option<String> },
+    Ended {
+        job: Arc<AtomicBool>,
+        done: bool,
+        error: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,10 +173,12 @@ impl Background {
                 self.error = None;
                 true
             }
-            Event::Ended { done, error } => {
-                self.running = None;
-                self.done |= done || error.is_some();
-                self.error = error;
+            Event::Ended { job, done, error } => {
+                if self.running.as_ref().is_some_and(|r| Arc::ptr_eq(r, &job)) {
+                    self.running = None;
+                    self.done |= done || error.is_some();
+                    self.error = error;
+                }
                 false
             }
         }
@@ -385,7 +391,11 @@ impl Render {
             Ok(done) => (done, None),
             Err(e) => (false, Some(e)),
         };
-        self.send(Event::Ended { done, error });
+        self.send(Event::Ended {
+            job: self.cancel.clone(),
+            done,
+            error,
+        });
     }
 
     fn render(&self) -> Result<bool, String> {
