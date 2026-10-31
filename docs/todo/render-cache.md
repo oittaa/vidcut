@@ -13,31 +13,14 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 
 ## One record of each frame
 
-Each kept layer has a `player::Origin` ([playback](../design/playback.md#the-engine)). It tells what made the layer, the upscaler, and when. The render cache uses these records. It adds no second record of how a frame is made.
+Each kept layer has a `player::Origin` ([playback](../design/playback.md#the-engine)). It tells what made the layer, the upscaler, when, and how long it took. The render cache uses these records. It adds no second record of how a frame is made.
 
 - **The kept picture:** a cached part keeps the `Id` of the frames that it replaces.
   - Thus kept pictures, marks and Stats for Nerds name the same frame.
-- **What it cost:** the `Origin` also holds the time that each layer took to decode and to enlarge.
-  - It holds this time for a Retime Process and a Smooth Cut already.
-  - The marks of dropped frames read these times.
 
 ## Dropped frames
 
-Smart also renders parts that this computer cannot play. One late frame does not mark a part. A part gets a mark only when it drops frames steadily for a long time:
-
-- The play is forward, at normal speed.
-- Frames drop in each second of a stretch of at least 5 s.
-  - In each of these seconds, a quarter of the frames or more come late or are skipped (`late`, `skipped`).
-- The frames of the stretch took longer to make than their frame time, by the times in `Origin`.
-  - Why: then the frames themselves are slow. A late draw on the screen does not mark a part.
-- These times do not count:
-  - the first second after a start or a seek
-  - while vidcut runs a job or the background render
-  - while the window is hidden
-- The mark covers the part of the plan that holds the stretch (`VideoPiece`), by the names of its frames.
-  - Thus a moved part keeps its mark. An edit that changes the frames makes a new part without a mark.
-- The marks are in the index of the cache, on this computer. Delete Render Cache > All removes them too.
-- The numbers above are starting values. A measurement changes them, with a plan that the owner accepts first.
+- The numbers of the marks are starting values ([playback](../design/playback.md#the-render-cache)). A measurement changes them, with a plan that the owner accepts first.
 
 ## Codec, folder and writing
 
@@ -56,12 +39,11 @@ Smart also renders parts that this computer cannot play. One late frame does not
 The owner accepted these. Each goes into [deviations.md](../deviations.md) with the pull request that makes it.
 
 - The background render first writes the frames that playback made.
-- Smart also renders the parts where frames drop steadily.
 
 ## Steps
 
 - **One record of each frame:** the kept `Id`.
 - **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
-- **Dropped frames:** the times of each layer in `Origin`, and the marks.
+- **Dropped frames:** the measurement of the marks.
 
 Each step adds its part to the spec, the design docs and the deviations. The last step deletes this file.
