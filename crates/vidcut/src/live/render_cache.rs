@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use vidcut_core::model::{Project, RenderCache as Mode};
-use vidcut_core::preferences::{Preferences, Proxies, RenderCachePrefs};
+use vidcut_core::preferences::{Gpu, Preferences, Proxies, RenderCachePrefs};
 use vidcut_core::render::RenderPlan;
 use vidcut_core::render_cache::{Cache, Index, Key, Look, Part, Setup, segment};
 
@@ -18,7 +18,10 @@ const SECONDS_EACH: i64 = 2;
 
 pub(crate) enum Event {
     Scanned(Index),
-    Slow(HashMap<String, bool>),
+    Slow {
+        job: Arc<AtomicBool>,
+        decodes: HashMap<PathBuf, bool>,
+    },
     Written,
     Ended {
         job: Arc<AtomicBool>,
@@ -40,8 +43,9 @@ pub(super) struct Background {
     cache: Arc<Mutex<Cache>>,
     prefs: RenderCachePrefs,
     proxies: Proxies,
+    gpu: Gpu,
     index: Scan,
-    decodes: Arc<HashMap<String, bool>>,
+    decodes: Arc<HashMap<PathBuf, bool>>,
     base: Option<Arc<RenderPlan>>,
     mark: Option<Mark>,
     touched: u64,
@@ -63,14 +67,12 @@ enum Scan {
 fn slow_media(
     project: &Project,
     proxies: &Proxies,
-    decodes: &HashMap<String, bool>,
+    decodes: &HashMap<PathBuf, bool>,
     id: &str,
 ) -> bool {
-    if decodes.get(id).copied().unwrap_or(false) {
-        return true;
-    }
     project.media(id).is_some_and(|m| {
-        proxies.wants(m) && !(project.settings.use_proxies && m.fresh_proxy().is_some())
+        decodes.get(&m.path).copied().unwrap_or(false)
+            || (proxies.wants(m) && !(project.settings.use_proxies && m.fresh_proxy().is_some()))
     })
 }
 
@@ -81,6 +83,7 @@ impl Background {
             cache: Arc::default(),
             prefs: prefs.render_cache,
             proxies: prefs.proxies.clone(),
+            gpu: prefs.gpu.clone(),
             index: Scan::None,
             decodes: Arc::default(),
             base: None,
@@ -104,12 +107,17 @@ impl Background {
     }
 
     pub(super) fn follow(&mut self, prefs: &Preferences) -> bool {
-        let changed = self.prefs != prefs.render_cache || self.proxies != prefs.proxies;
+        let gpu = self.gpu != prefs.gpu;
+        let changed = gpu || self.prefs != prefs.render_cache || self.proxies != prefs.proxies;
         if changed {
             self.stop();
             self.prefs = prefs.render_cache;
             self.proxies = prefs.proxies.clone();
             self.done = false;
+        }
+        if gpu {
+            self.gpu = prefs.gpu.clone();
+            self.decodes = Arc::default();
         }
         changed
     }
@@ -190,7 +198,10 @@ impl Background {
                 self.index = Scan::Done;
                 true
             }
-            Event::Slow(decodes) => {
+            Event::Slow { job, decodes } => {
+                if !self.running.as_ref().is_some_and(|r| Arc::ptr_eq(r, &job)) {
+                    return false;
+                }
                 let changed = *self.decodes != decodes;
                 self.decodes = Arc::new(decodes);
                 changed
@@ -401,7 +412,7 @@ struct Render {
     project: Arc<Project>,
     prefs: RenderCachePrefs,
     proxies: Proxies,
-    decodes: Arc<HashMap<String, bool>>,
+    decodes: Arc<HashMap<PathBuf, bool>>,
     look: Look,
     from: i64,
     cancel: Arc<AtomicBool>,
@@ -438,14 +449,17 @@ impl Render {
             let Some(v) = m.info.video.as_ref().filter(|v| !v.still) else {
                 continue;
             };
-            if !decodes.contains_key(&m.id) {
+            if !decodes.contains_key(&m.path) {
                 let slow = vidcut_av::render_cache::slow(gpu.as_ref(), &m.path, &v.codec);
-                decodes.insert(m.id.clone(), slow);
+                decodes.insert(m.path.clone(), slow);
                 found = true;
             }
         }
         if found {
-            self.send(Event::Slow(decodes.clone()));
+            self.send(Event::Slow {
+                job: self.cancel.clone(),
+                decodes: decodes.clone(),
+            });
         }
         let prefs = crate::preferences::load().unwrap_or_default();
         let proxies = self
