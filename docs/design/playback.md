@@ -375,7 +375,6 @@ The files:
 - Each file is Matroska, with at most 2 s of frames in a row (`Cache::next`).
 - A `.keys` file next to it holds the names of its frames, 16 bytes each (`write_keys`). The disk cache does not count it (`Kind::keeps`).
 - `Index::scan` reads the `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a `.keys` file without its video.
-  - `cache.status` and `cache.delete` scan on the live thread when that scan has not ended. The later result of `vidcut-render-index` is then dropped.
 - `render_cache::segment` cuts the plan of a file. The draw of the export makes its frames (`encode_plan`), as for proxies.
 - `cache_encoders` gives the encoders, in order:
   - With proxies on: the encoders of the proxy codec.
@@ -392,6 +391,7 @@ The background render (`live::render_cache::Background`):
   - It writes one file at a time (vidcut-av `render_cache::write`), and adds it to the index (`Index::add`). The viewer then reloads the plan.
   - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
 - `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
+  - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
   - All removes each file of the folder. Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
 
 ## Code
