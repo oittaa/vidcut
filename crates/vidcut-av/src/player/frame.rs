@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
 use vidcut_core::model::{Retime, Upscaler};
 
 use crate::color::{Colors, colors_of};
@@ -111,7 +112,7 @@ pub struct Picture {
     origin: Option<Origin>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Made {
     Solid([u8; 3]),
     Still,
@@ -134,17 +135,26 @@ pub enum Made {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Upscaled {
     pub upscaler: Upscaler,
     pub sizes: Option<[(u32, u32); 2]>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Origin {
     pub made: Made,
     pub upscaled: Option<Upscaled>,
     pub when: Instant,
+    pub cached: Option<Arc<Cached>>,
+}
+
+pub type Making = (Made, Option<Upscaled>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cached {
+    pub written: u64,
+    pub layers: Vec<Option<Making>>,
 }
 
 #[derive(Clone)]
@@ -350,7 +360,7 @@ impl Picture {
         Ok(
             Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
                 .with_sampling(self.sampling.clone())
-                .with_origin(self.origin),
+                .with_origin(self.origin.clone()),
         )
     }
 

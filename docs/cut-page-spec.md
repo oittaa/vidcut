@@ -2714,6 +2714,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - During the preview of a drag, a trim or a step of the history, the line is not shown. Why: the line is of the timeline before the change.
   - Stats for Nerds has a Render Cache row in How It Was Made (X104).
     - It tells for the frame on screen: Cached, To render with the reasons, or Not needed.
+    - For a picture from the cache, How It Was Made shows how each layer was made when the cache was written.
+    - Cached then also tells when the cache file was written. Example: "Cached, written 2 min ago".
   - For a picture from the cache, the Super Scale group names the AI upscaler that made it, from the render cache.
   - The Retime Process group names the Retime Process in the same way.
   - `cache.status` gives the parts to render, their reasons and their cached frames, and the size on disk. `cache.delete` deletes.

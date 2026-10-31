@@ -588,13 +588,15 @@ pub(crate) enum Failed {
     Encoding(Error),
 }
 
+pub(crate) type Origins = Vec<Option<crate::player::Origin>>;
+
 pub(crate) fn encode_plan(
     (plan, colors): (&vidcut_core::render::RenderPlan, bool),
     (enc, high): (&ProxyEncoder, bool),
     tmp: &Path,
     decoder: Option<&crate::hw::GpuDecoder>,
     cancel: &std::sync::atomic::AtomicBool,
-) -> std::result::Result<u64, Failed> {
+) -> std::result::Result<(u64, Vec<Origins>), Failed> {
     let Some(video) = enc.cache_encoder(plan.colors, high) else {
         return Err(Failed::Opening(Error::Invalid(format!(
             "{} cannot make this timeline's pictures",
@@ -623,6 +625,7 @@ pub(crate) fn encode_plan(
         Some(Handoff::Cuda(..)) => crate::export::gpu_pixel(&video),
         _ => video.pixel,
     };
+    let mut made = Vec::with_capacity(plan.frames.max(0) as usize);
     let drawing = || -> Result<()> {
         let mut frames =
             crate::export::video::VideoFrames::new(&plan.video, fps, w, h, pixel, video.hdr)
@@ -638,9 +641,10 @@ pub(crate) fn encode_plan(
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err(Error::Invalid(crate::export::CANCELLED.into()));
             }
-            let f = frames.next_frame()?.ok_or_else(|| {
+            let (f, origins) = frames.next_made()?.ok_or_else(|| {
                 Error::Invalid("the plan has fewer video frames than expected".into())
             })?;
+            made.push(origins);
             writer.push(f, Some(j))?;
         }
         Ok(())
@@ -648,7 +652,8 @@ pub(crate) fn encode_plan(
     if let Err(e) = drawing().and_then(|()| writer.last(tmp)) {
         return Err(Failed::Encoding(writer.abandon(e)));
     }
-    writer.finish().map_err(Failed::Encoding)
+    let frames = writer.finish().map_err(Failed::Encoding)?;
+    Ok((frames, made))
 }
 
 struct Writer<'a> {
