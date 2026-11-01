@@ -712,11 +712,16 @@ pub(crate) fn encode_plan(
         if colors {
             frames = frames.colors_only();
         }
+        let kept = (!colors && plan.colors.is_none()).then(|| crate::player::Kept::of(plan));
         for j in 0..plan.frames {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err(Error::Invalid(crate::export::CANCELLED.into()));
             }
-            let (f, origins) = frames.next_made()?.ok_or_else(|| {
+            let next = match kept.as_ref().and_then(|k| k.at(plan.range.0 + j)) {
+                Some(picture) => frames.next_kept(&picture)?,
+                None => frames.next_made()?,
+            };
+            let (f, origins) = next.ok_or_else(|| {
                 Error::Invalid("the plan has fewer video frames than expected".into())
             })?;
             made.push(origins);

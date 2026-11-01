@@ -434,7 +434,7 @@ The format on disk:
   - `written` is the time of writing, in milliseconds since 1970, UTC.
   - `frames` has one list for each frame of the video, in order. The list has an item for each layer of the frame, from the bottom up.
   - An item is a pair: how the layer was made (`Made`), and the AI upscaler (`Upscaled`) or null. A layer without an `Origin` gives null.
-  - `render_cache::write` takes these from the `Origin` of each layer that the draw made (`VideoFrames::next_made`).
+  - `render_cache::write` takes these from the `Origin` of each layer that the draw made (`VideoFrames::next_made`), or of the kept picture (`VideoFrames::next_kept`).
   - The reader of an `.mkv` file that has a `.made` file reads it (`render_cache::kept`).
 - Why the names and the records are in two files: `Index::scan` reads all `.keys` files at the start. The player reads a `.made` file only when its video plays. Thus the scan stays small.
 - In the cache dir, the videos count in the limit of the disk cache ([the disk cache limit](analysis.md#the-disk-cache-limit)). The `.keys`, `.made` and `.marks` files do not count (`Kind::keeps`).
@@ -461,6 +461,15 @@ The jobs:
   - With a Retime Process, the plan has the size of the `Look`. The layer keeps its `retime`, its `super_scale` and its `placed`.
   - A job of the clip level draws in the colors mode of the export (`VideoFrames::colors_only`). Thus a placed layer gives its made frames, with no edges and no alpha ([export](export.md#effects)).
   - At the same place, the clip level renders first. Then the render goes on from there at the timeline level.
+- The background render starts at the frames that playback made before the playhead (`played_from`).
+  - It goes back from the playhead while the store keeps the picture of each frame. It finds the picture by its `Id` in the plan of the timeline.
+  - Why: the render writes these frames before the memory lets them go.
+- A job of the timeline level finds each frame that the store keeps by its `Id` in the plan of the job (`Kept`).
+  - The reader then only passes the frame, and the draw draws the kept picture (`VideoFrames::next_kept`). Thus the frame is not made again.
+  - The plan of the job is a part of the plan of the timeline before the proxies. Thus a frame has the `Id` that the viewer gave it, with proxies off.
+  - With proxies on, a frame from a proxy has another path in its `Id`. A made frame has the size of proxies in its `Id`. These frames find no kept picture.
+  - A job of the clip level finds no kept picture. Why: it draws the colors of one layer (`colors_only`). A kept picture holds the whole frame.
+  - In an HDR timeline, a job finds no kept picture. Why: the reader of the player makes its pictures without the colors of the timeline (`with_timeline`).
 - `cache_encoders` gives the encoders, in order. The encoders that the GPU makes and plays come first (`round`).
   - With a chosen codec: the encoders that make it, with the options of its grade (`grade_options`).
     - ProRes 422: Apple's hardware (VideoToolbox), the GPU through Vulkan, and the CPU.

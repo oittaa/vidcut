@@ -360,6 +360,28 @@ pub(crate) fn on_viewers_gpu(gpu: Option<&crate::gpus::Gpu>) -> bool {
         .is_some_and(|(gpu, viewer)| gpu.is_adapter(viewer))
 }
 
+pub(crate) struct Kept(plan::Plan);
+
+impl Kept {
+    pub(crate) fn of(plan: &RenderPlan) -> Self {
+        Self(plan::Plan::new(plan.clone()))
+    }
+
+    pub(crate) fn at(&self, t: i64) -> Option<Arc<Picture>> {
+        store::global().get(&self.0.id(t))
+    }
+}
+
+pub fn played_from(plan: &RenderPlan, at: i64) -> i64 {
+    let plan = plan::Plan::new(plan.clone());
+    let store = store::global();
+    let mut t = plan.clamp(at);
+    while t > plan.first() && store.contains(&plan.id(t - 1)) {
+        t -= 1;
+    }
+    t
+}
+
 static GPU_MEMORY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
 pub fn set_budget(budget: Budget) {
