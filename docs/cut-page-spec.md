@@ -2653,7 +2653,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - `picture.set` takes `pitch` and `yaw`. `picture.clear` with `transform` puts both back to 0.
   - An import reads `transformationPitch` and `transformationYaw`. An export writes them back.
   - Each can have keyframes (D75). Their keys have the form of the keys of the rotation, in the units of the plain value.
-- **D98. Render cache** (deviations X103, X104; the render cache pages, pp. 143–144 and 199–206, are outside the Cut page).
+- **D98. Render cache** (deviations X103, X104, X105; the render cache pages, pp. 143–144 and 199–206, are outside the Cut page).
   - The render cache keeps on disk the frames that are slow to make. The viewer plays them from there. Exports do not use it.
   - The project has a mode (`render_cache`): Off, Smart or User. A new project has Off, as in Resolve.
     - Playback > Render Cache sets it. `project.set` with `render_cache` also sets it.
@@ -2747,6 +2747,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - All empties the cache.
     - Unused keeps only the frames of the open timeline.
     - Selected Clips removes the files that hold frames at the times of the selected clips. At the clip level, it removes only the frames of their media. The media of a compound clip are the media of the clips in it.
+  - Playback > Manage Render Cache shows the render cache of each project that vidcut opened on this computer (p. 206, X105).
+    - It opens also when no project is open.
+    - Current Project shows the row of the open project.
+    - Location and Project Library select the rows to show. Location has All, Local and Network.
+    - The columns are Location, Project Library, Project Name and Render Cache. A click on a column title sorts the rows. A second click reverses the order.
+    - Render Cache shows the size of the cache, also when it is 0 kB. Its checkbox selects the row.
+    - Clear Selected Cache deletes the cache of each checked row that is shown. As in Resolve, there is no warning and no undo.
+    - When it deletes the cache of the open project, the render of that cache starts again.
+    - Close closes the window.
   - In Smart and User mode, a line along the bottom of the ruler of both timelines shows the state (p. 203, X104).
     - Red: the mode renders this part. Blue: the part plays from the cache.
     - A part plays from the cache where its timeline level is cached. A part that needs only the clip level plays from the cache where each of its clips is cached.
@@ -2760,6 +2769,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - For a picture from the cache, the Super Scale group names the AI upscaler that made it, from the render cache.
   - The Retime Process group names the Retime Process in the same way.
   - `cache.status` gives the parts to render, their reasons and their cached frames, and the size on disk. `cache.delete` deletes.
+  - `cache.list` gives the rows of Manage Render Cache. `cache.clear` deletes the cache of the given project files.
   - `cache.render` renders the cache now, for scripts.
     - In a running GUI, it starts the background render at once, also with `render_cache.background` off. It answers at once, as `cache.status`.
     - Without a GUI, the CLI renders all that the mode renders, and then answers. Ctrl-C stops it.

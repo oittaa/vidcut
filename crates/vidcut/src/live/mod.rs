@@ -2558,6 +2558,9 @@ impl Live {
                     Err(e) => Step::Now(Err(e)),
                 }
             }
+            Request::CacheClear { projects } => {
+                Step::Now(self.cache_clear(&projects.to_vec(), envelope.dry_run))
+            }
             r if r.is_projectless() => Step::Task(
                 Work::Interactive,
                 Box::new(move |_| crate::session::run(None, envelope)),
@@ -3439,6 +3442,7 @@ impl Live {
         if std::fs::create_dir_all(paths::state_dir()).is_ok() {
             let _ = vidcut_core::temp::write(&file, json!(recent).to_string().as_bytes());
         }
+        crate::render_caches::remember(path);
     }
 
     fn project_changed(&mut self, response: Option<&Response>) {
@@ -3789,6 +3793,20 @@ impl Live {
         };
         self.schedule_timeline();
         Ok(answer(json!({ "deleted": deleted })))
+    }
+
+    fn cache_clear(&mut self, projects: &[PathBuf], dry_run: bool) -> Result<Response> {
+        let open = self.project.is_some().then(|| self.render.folder());
+        let render = &mut self.render;
+        let cleared = crate::render_caches::clear(projects, dry_run, |dir| {
+            (open.as_deref() == Some(dir)).then(|| render.delete_all())
+        })?;
+        if open.is_some() && !dry_run {
+            self.schedule_timeline();
+        }
+        let mut r = answer(cleared);
+        r.dry_run = dry_run;
+        Ok(r)
     }
 
     fn schedule_timeline(&mut self) {

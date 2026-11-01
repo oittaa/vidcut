@@ -88,6 +88,65 @@ pub fn disk(path: &std::path::Path) -> Option<vidcut_core::disk_cache::Disk> {
     }
 }
 
+pub fn network(path: &std::path::Path) -> bool {
+    let Some(path) = path.ancestors().find(|p| p.exists()) else {
+        return false;
+    };
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        const CIFS: u32 = 0xFF53_4D42;
+        const SMB2: u32 = 0xFE53_4D42;
+        let Ok(name) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+            return false;
+        };
+        // SAFETY: an all-zero `statfs` is valid, and statfs writes only the one given.
+        let mut s: libc::statfs = unsafe { std::mem::zeroed() };
+        // SAFETY: `name` is a NUL-terminated path and `s` a live `statfs`.
+        if unsafe { libc::statfs(name.as_ptr(), &mut s) } != 0 {
+            return false;
+        }
+        let remote = [
+            libc::NFS_SUPER_MAGIC as u32,
+            libc::SMB_SUPER_MAGIC as u32,
+            CIFS,
+            SMB2,
+        ];
+        remote.contains(&(s.f_type as u32))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let Ok(name) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+            return false;
+        };
+        // SAFETY: an all-zero `statfs` is valid, and statfs writes only the one given.
+        let mut s: libc::statfs = unsafe { std::mem::zeroed() };
+        // SAFETY: `name` is a NUL-terminated path and `s` a live `statfs`.
+        if unsafe { libc::statfs(name.as_ptr(), &mut s) } != 0 {
+            return false;
+        }
+        (s.f_flags & libc::MNT_LOCAL as u32) == 0
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumePathNameW};
+        const DRIVE_REMOTE: u32 = 4;
+        let name: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+        let mut root = vec![0u16; name.len() + 1];
+        // SAFETY: `name` is a NUL-terminated path; `root` holds the count of u16s that is given.
+        let ok = unsafe { GetVolumePathNameW(name.as_ptr(), root.as_mut_ptr(), root.len() as u32) };
+        // SAFETY: on success, `root` holds a NUL-terminated path.
+        ok != 0 && unsafe { GetDriveTypeW(root.as_ptr()) } == DRIVE_REMOTE
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        let _ = path;
+        false
+    }
+}
+
 #[cfg(windows)]
 mod windows {
     use windows_sys::Win32::System::Registry::{

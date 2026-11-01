@@ -560,9 +560,28 @@ The background render (`live::render_cache::Background`):
   - `cache.status` gives the folder of the cache.
   - All also removes the marks (`Index::clear`).
   - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
-  - All removes each file of the folder. Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
+  - All removes each file of the folder (`render_caches::empty`). Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
     - At the clip level, `Cache::names` gives only the frames of the media of each clip.
     - A compound clip gives the media of the clips in it (`otio::played_by`).
+
+Manage Render Cache (`render_caches`):
+
+- `render_caches::remember` adds each project that the live core opens to `projects.json` in the state folder. `render_all` adds its project too.
+  - The file is a JSON list of canonical paths. `remember` does not look for the files of the list.
+  - Why: it runs on the live thread. A network drive that does not answer can stop a look for a file for seconds.
+  - `render_caches::list` leaves out a path whose file is gone. The file keeps the path. Thus a project on a drive that comes back shows again.
+- `cache.list` (`render_caches::list`) groups the projects by the folder of their render cache (`PlaybackFiles::render_cache_in`). Each group is one row.
+  - Why: the files in one folder have names from their content. Thus two projects can share a file, and the folder is the unit to clear.
+  - It counts the videos of the folder, and adds the size of each file in it.
+  - `system::network` tells if a network drive holds the project file.
+    - Windows: the drive type of the volume. Linux: the type of the file system. macOS: the local flag of the file system.
+- `cache.clear` (`render_caches::clear`) removes each file in the folder of each given project (`render_caches::empty`).
+  - In a GUI, the live core runs it on its thread (`Live::cache_clear`).
+  - For the folder of the open project (`Background::folder`), it calls `Background::delete_all`. That stops the render and clears the index first. The render then starts again.
+  - Why: the index of the open project must not name files that are gone.
+  - The CLI and MCP send it to the running GUI whose open project has its cache in one of the folders (`ipc::route`, `render_caches::sharing`).
+    - With no such GUI, the CLI process clears the folders. With two or more, `--instance` selects one. The other GUIs then find their files gone at the next plan.
+- The window is `CacheManager`. It sends `cache.list` when it opens and after each `cache.clear`.
 
 The marks of dropped frames:
 
@@ -587,6 +606,7 @@ The marks of dropped frames:
 
 - `crates/vidcut-core/src/render.rs`, `crates/vidcut-core/src/duck.rs`, `crates/vidcut-core/src/preview.rs`, `crates/vidcut-core/src/render_cache.rs`
 - `crates/vidcut/src/live/mod.rs`, `crates/vidcut/src/live/player.rs`, `crates/vidcut/src/live/render_cache.rs`, `crates/vidcut/src/live/drops.rs`
+- `crates/vidcut/src/render_caches.rs`, `crates/vidcut/src/gui/cache_manager.rs`
 - `crates/vidcut-av/src/render_cache.rs`, `crates/vidcut-av/src/proxy.rs`
 - `crates/vidcut-av/src/player/`, `crates/vidcut-av/src/stretch.rs`
 - `crates/vidcut-av/src/export/video.rs`, `crates/vidcut-av/src/export/audio.rs`

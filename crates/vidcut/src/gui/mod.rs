@@ -1,5 +1,6 @@
 mod app;
 mod bar;
+mod cache_manager;
 mod cells;
 mod clip_info;
 mod dialog;

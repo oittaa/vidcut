@@ -11,6 +11,7 @@ mod omarchy;
 pub mod output;
 pub mod paths;
 pub mod preferences;
+pub mod render_caches;
 pub mod reset;
 pub mod services;
 pub mod session;
