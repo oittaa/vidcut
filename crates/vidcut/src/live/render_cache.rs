@@ -215,6 +215,7 @@ impl Background {
         if self.base.as_deref() != Some(plan) {
             self.base = Some(Arc::new(plan.clone()));
             self.done = false;
+            self.stop();
         }
         if project.settings.render_cache == Mode::Off {
             self.stop();
@@ -643,5 +644,61 @@ fn full(dir: &Path) -> Result<(), String> {
             dir.display()
         )),
         _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, mpsc};
+
+    use vidcut_core::model::{Project, RenderCache as Mode, Settings};
+    use vidcut_core::preferences::Preferences;
+    use vidcut_core::render::{RenderPlan, VideoPiece};
+    use vidcut_core::time::Rational;
+
+    use super::{Background, Event, Scan};
+
+    fn plan(frames: i64) -> RenderPlan {
+        RenderPlan {
+            fps: Rational::new(25, 1).unwrap(),
+            width: 16,
+            height: 16,
+            sample_rate: 48_000,
+            channels: 2,
+            frames,
+            video: vec![VideoPiece::black(frames)],
+            audio: Vec::new(),
+            ducking: Vec::new(),
+            range: (0, frames),
+            name: "plan".into(),
+            colors: None,
+        }
+    }
+
+    #[test]
+    fn a_new_plan_ignores_the_render_of_the_old_one() {
+        let (tx, _rx) = mpsc::channel();
+        let mut bg = Background::new(tx, &Preferences::default());
+        bg.index = Scan::Done;
+        let project = Project::new(Settings {
+            render_cache: Mode::Smart,
+            auto_format: false,
+            ..Settings::default()
+        });
+        let mut first = plan(1);
+        bg.apply(&mut first, &project);
+        let job = Arc::new(AtomicBool::new(false));
+        bg.running = Some(job.clone());
+        let mut second = plan(2);
+        bg.apply(&mut second, &project);
+        assert!(job.load(Ordering::Relaxed));
+        assert!(bg.running.is_none());
+        bg.event(Event::Ended {
+            job,
+            done: true,
+            error: None,
+        });
+        assert!(!bg.done);
     }
 }
