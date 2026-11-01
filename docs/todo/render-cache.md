@@ -16,9 +16,6 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 - At the clip level, the render makes again the frames that playback made.
   - A job of the clip level draws the colors of one layer (`colors_only`). A kept picture holds the whole frame, as the viewer draws it.
   - The `Id` of a made picture holds the size and the placement of the timeline. The plan of a job of the clip level has other values.
-- In a piece that is cached in part, the render makes again the frames that playback made with AI Super Scale or a Retime Process.
-  - `Cache::apply` cuts the piece of the viewer. The cut moves the keyframe position of the placement in the `Id` (`Placed::after`).
-  - A fix: the `Id` holds the keyframe position of each frame, not that of its piece. This changes the `Id` of the player too.
 - In an HDR timeline, the render makes again the frames that playback made.
   - The reader of the player makes its pictures without the colors of the timeline (`with_timeline`). The render makes them with these colors.
 

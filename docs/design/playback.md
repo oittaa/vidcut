@@ -152,7 +152,10 @@ flowchart TD
   - A seek with AI Slow starts a new stream at the asked frame. Its first picture comes after the first chunk of the stream.
   - While playing, the player skips the frames that it cannot make in time. A replay makes again the frames that it skipped.
   - The key of the kept frames holds the Super Scale, the placement and the timeline size (`source_key`). Why: they decide whether the picture is enlarged.
-  - The placement in the key is its picture settings and its source position, not its clip or its timeline start. Thus a moved clip keeps its frames.
+  - The placement in the key is its picture settings, not its clip, its timeline start or its keyframe position. Thus a moved clip keeps its frames.
+  - The `Id` of each frame holds the keyframe position of the frame and the place of its Dynamic Zoom (`placed_now`). The keyframe position is in it only when the picture has keyframes.
+  - Why: the viewer draws a made frame at the placement of that frame. A still with no keyframes and no Dynamic Zoom thus keeps one `Id` for all its frames.
+  - A cut of the piece (`VideoPiece::part`) does not change these values. Thus a piece that plays in part from the cache keeps the `Id` of each frame.
 - With `viewer.super_scale` off, the live core plans the viewer without Super Scale (`preview_plan`).
 - With a Retime Process other than Nearest, `VideoFrames` makes the frames between the source frames for the viewer too ([export](export.md#which-source-frame)).
   - The key of such a frame holds the process, the Super Scale, the placement, the timeline size and the timeline colors (`source_key`). Why: the frame is made at its placement, and the viewer draws it with that placement and its opacity.
@@ -466,8 +469,7 @@ The jobs:
   - Why: the render writes these frames before the memory lets them go.
 - A job of the timeline level finds each frame that the store keeps (`Kept::at`). The reader then only passes the frame, and the draw draws the kept picture (`VideoFrames::next_kept`). Thus the frame is not made again.
   - `Kept` finds the picture by the `Id` of its frame in the plan of the timeline before the proxies. That is the plan that the viewer has, with proxies off.
-  - Why not the plan of the job: it cuts the pieces (`VideoPiece::part`). With AI Super Scale or a Retime Process, the `Id` holds the placement, and the cut moves its keyframe position (`Placed::after`).
-  - Where a part of a piece plays from the cache, `Cache::apply` cuts the piece of the viewer too. A made frame in the rest of that piece then has another `Id`, and the job makes it again.
+  - Where a part of a piece plays from the cache, `Cache::apply` cuts the piece of the viewer. The made frames in the rest of that piece keep their `Id`. Thus the job finds them.
   - The render reads the store without a change of its order (`Store::peek`). Thus the pictures of the viewer leave the memory in their own order.
 - A job takes no kept picture in these cases (`Kept::fits`). It makes each frame.
   - The job has another size than the timeline, as with proxies on. Why: a made picture has the size of its plan.
