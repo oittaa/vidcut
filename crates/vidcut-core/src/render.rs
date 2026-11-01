@@ -248,7 +248,7 @@ pub struct ShownTitle {
 
 /// Where a piece is in its clip, which a moving title and a Dynamic Zoom
 /// are placed by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct Run {
     /// Frames of the clip before the piece's first.
     pub at: i64,
@@ -409,13 +409,16 @@ impl Placed {
         }
     }
 
+    pub fn source_after(&self, k: i64) -> i64 {
+        self.source + if self.ready { k } else { k - self.start }
+    }
+
     pub fn after(&self, k: i64) -> Self {
-        let into = if self.ready { k } else { k - self.start };
         Self {
             clip: self.clip.clone(),
             picture: self.picture.clone(),
             run: self.run.map(|r| r.after(k)),
-            source: self.source + into,
+            source: self.source_after(k),
             start: self.start,
             ready: true,
         }

@@ -1,19 +1,23 @@
 use std::sync::Arc;
 
 use vidcut_core::model::{Retime, WipeDirection};
-use vidcut_core::render::{Image, MovingKey, Placed, RenderPlan, ShownTitle, VideoPiece};
+use vidcut_core::render::{Image, MovingKey, Placed, RenderPlan, Run, ShownTitle, VideoPiece};
 use vidcut_core::time::Rational;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Id {
     source: Arc<str>,
-    pos: i64,
+    pos: Pos,
     over: Option<Arc<[Layer]>>,
 }
 
+type Pos = (i64, Option<Keyed>);
+
+type Keyed = Arc<[(Option<i64>, Option<Run>)]>;
+
 type Layer = (
     Arc<str>,
-    i64,
+    Pos,
     u32,
     Option<WipeDirection>,
     Option<MovingKey>,
@@ -68,7 +72,7 @@ impl Id {
     pub(crate) fn at(source: &str, pos: i64) -> Self {
         Self {
             source: source.into(),
-            pos,
+            pos: (pos, None),
             over: None,
         }
     }
@@ -138,20 +142,23 @@ impl Plan {
         let Some(piece) = self.plan.video.get(i) else {
             return Id {
                 source: "".into(),
-                pos: 0,
+                pos: (0, None),
                 over: None,
             };
         };
-        let pos = |l: &VideoPiece| match l {
-            VideoPiece::Source { image, retime, .. }
-                if !matches!(image, Some(Image::Still)) && !retime.is_nearest() =>
-            {
-                (l.exact(k) * 1_000_000.0).round() as i64
-            }
-            VideoPiece::Source { image, .. } if !matches!(image, Some(Image::Still)) => {
-                l.position(k)
-            }
-            _ => 0,
+        let pos = |l: &VideoPiece| {
+            let at = match l {
+                VideoPiece::Source { image, retime, .. }
+                    if !matches!(image, Some(Image::Still)) && !retime.is_nearest() =>
+                {
+                    (l.exact(k) * 1_000_000.0).round() as i64
+                }
+                VideoPiece::Source { image, .. } if !matches!(image, Some(Image::Still)) => {
+                    l.position(k)
+                }
+                _ => 0,
+            };
+            (at, placed_now(l, k))
         };
         let keys = &self.sources[i];
         let layers = piece.layers();
@@ -323,7 +330,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
                             .effects
                             .iter_mut()
                             .for_each(|e| e.render_cache = false);
-                        (picture, p.run, p.source)
+                        picture
                     })
                     .collect();
                 format!(
@@ -357,6 +364,26 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
         VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => {
             format!("black|{}x{}", plan.width, plan.height).into()
         }
+    }
+}
+
+fn placed_now(piece: &VideoPiece, k: i64) -> Option<Keyed> {
+    match piece {
+        VideoPiece::Source {
+            image,
+            retime,
+            placed,
+            ..
+        } if !matches!(image, Some(Image::Still)) && !retime.is_nearest() => Some(
+            placed
+                .iter()
+                .map(|p| {
+                    let source = p.picture.is_keyed().then(|| p.source_after(k));
+                    (source, p.run.map(|r| r.after(k)))
+                })
+                .collect(),
+        ),
+        _ => None,
     }
 }
 
