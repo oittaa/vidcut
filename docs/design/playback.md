@@ -393,6 +393,7 @@ The two levels (spec D98):
   - The layer takes the Nearest retime. A layer with a Retime Process or a checked effect also takes no `super_scale`. Why: the file holds its frames as the timeline shows them.
   - A placed layer with a Retime Process or a checked effect also takes `made`: the `Shape` of its media (`Setup::shape`). The draw then places the colors of the file as a made frame (`Sampling::Placed`).
     - The shape is that of the media. With AI Super Scale, the enlarged picture has the shape of the media, with its sides rounded to whole pixels.
+    - A layer with a Retime Process checks all its effects. Why: the file holds them all, because the effects come before the frames between two source frames.
     - The player's key of such a frame holds the placement (`source_key`). Why: the draw takes the opacity and the composite mode from the placement of the kept picture. A change of these keeps the file.
   - With an AI upscaler and no Retime Process or checked effect, the file holds the enlarged picture. The layer then takes `Upscaler::Classic` with its Sharpness. Thus the draw uses the same kernel, and the AI upscaler does not run again.
   - `Index::run` follows the names of a file. Thus a run continues while the file holds the next name of the layer, also where a slow speed shows a frame twice.
@@ -418,6 +419,7 @@ The names of frames:
     - The `super_scale` holds the Sharpness. Why: the job draws the Sharpness into the file (`VideoFrames::colors_frame`).
     - With a Retime Process, it also holds the Retime Process and the exact source position (`VideoPiece::exact`).
     - Thus a change of the Transform or of an effect renders a placed clip again.
+    - Without a Retime Process, `alone` keeps the effects up to the last checked effect (`render_cache::baked`). Thus a change of a later effect keeps the names.
     - `alone` takes the opacity and the composite mode out of the placement. Why: they change only the alpha and the mix, not the colors in the file.
 - An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
 - `Look::of` gives the size and the codec. With proxies on, the size is that of proxies. With proxies off, the size is that of the timeline.

@@ -1517,17 +1517,26 @@ impl Screen {
                     Sampling::Placed { placed, .. } => Some(&placed[..]),
                     _ => None,
                 };
-                let mut placing = made_with
-                    .or(placed.get(i).map(Vec::as_slice))
-                    .filter(|p| !p.is_empty())
-                    .map(|p| {
-                        let (frame, fitted) = picture.placed_in(size);
-                        (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
-                    });
+                let full = placed.get(i).map(Vec::as_slice);
+                let mut placing = made_with.or(full).filter(|p| !p.is_empty()).map(|p| {
+                    let (frame, fitted) = picture.placed_in(size);
+                    (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
+                });
                 let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
                 let (effects, factor) = placing
                     .as_mut()
                     .map_or((Vec::new(), 1.0), |(p, l)| bared(p, l));
+                let live = match (made_with, full) {
+                    (Some(_), Some(full)) if placing.is_some() => {
+                        let (frame, fitted) = picture.placed_in(size);
+                        let all = Placing::new(full, frame, fitted).effects;
+                        all.get(effects.len()..)
+                            .map(<[_]>::to_vec)
+                            .unwrap_or_default()
+                    }
+                    _ => Vec::new(),
+                };
+                let blurs = !effects.is_empty() || !live.is_empty();
                 let mode = placing
                     .as_ref()
                     .filter(|_| !colors_only)
@@ -1537,9 +1546,7 @@ impl Screen {
                     k if exported => k | WIDENS,
                     k => k,
                 };
-                let made = made_with
-                    .filter(|_| !effects.is_empty())
-                    .and(placing.as_ref());
+                let made = made_with.filter(|_| blurs).and(placing.as_ref());
                 let open = made.map(|(p, l)| (blur::opened(p), *l));
                 let how = (
                     open.as_ref().or(placing.as_ref()),
@@ -1549,16 +1556,17 @@ impl Screen {
                 );
                 let bind = slot.prepare(gpu, picture, size, how, &mut encoder);
                 let shown = [1.0, factor, f64::from(mode), f64::from(u8::from(paired[i]))];
-                let bind = match (effects.is_empty(), made) {
-                    (true, _) => {
+                let bind = match (blurs, made) {
+                    (false, _) => {
                         blurred.drop_layer(i);
                         bind
                     }
-                    (false, Some((p, _))) => {
-                        let views = blurred.made(gpu, i, (&bind, p), &effects, &mut encoder);
-                        blur::shown_bind(gpu, views, shown, [5.0, 0.0, 0.0, 0.0])
+                    (true, Some((p, _))) => {
+                        let blurs = (&effects[..], &live[..]);
+                        let (a, b, how) = blurred.made(gpu, i, (&bind, p), blurs, &mut encoder);
+                        blur::shown_bind(gpu, (a, b), shown, [how, 0.0, 0.0, 0.0])
                     }
-                    (false, None) => {
+                    (true, None) => {
                         let view = blurred.layer(gpu, i, &bind, &effects, &mut encoder);
                         let only = f64::from(u8::from(colors_only));
                         blur::shown_bind(gpu, (view, view), shown, [3.0, 0.0, 0.0, only])
