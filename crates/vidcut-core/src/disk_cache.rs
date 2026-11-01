@@ -30,7 +30,7 @@ impl Kind {
             Kind::Waveforms => "waveforms",
             Kind::Analysis => "analysis",
             Kind::DecoderTests => "decoder-tests",
-            Kind::Render => "render",
+            Kind::Render => crate::preferences::RENDER_CACHE_FOLDER,
         }
     }
 
@@ -69,6 +69,7 @@ pub struct Disk {
 pub struct Policy {
     pub cache: Cache,
     pub proxies: PathBuf,
+    pub render: PathBuf,
 }
 
 pub const KEEP_FREE_PERCENT: u64 = 10;
@@ -101,15 +102,16 @@ impl Policy {
         Kind::ALL
             .iter()
             .any(|k| dir == plain(&k.dir()) && !k.keeps(&name))
-            || (self.proxies_dir().as_deref() == Some(dir) && name.ends_with(".mkv"))
+            || (in_cache(&self.proxies).as_deref() == Some(dir) && name.ends_with(".mkv"))
+            || (in_cache(&self.render).as_deref() == Some(dir) && !Kind::Render.keeps(&name))
     }
+}
 
-    fn proxies_dir(&self) -> Option<PathBuf> {
-        let dir = plain(&self.proxies);
-        (dir.starts_with(plain(&crate::dirs::cache()))
-            && !Kind::ALL.iter().any(|k| dir == plain(&k.dir())))
-        .then_some(dir)
-    }
+fn in_cache(dir: &Path) -> Option<PathBuf> {
+    let dir = plain(dir);
+    (dir.starts_with(plain(&crate::dirs::cache()))
+        && !Kind::ALL.iter().any(|k| dir == plain(&k.dir())))
+    .then_some(dir)
 }
 
 fn plain(path: &Path) -> PathBuf {
@@ -461,8 +463,16 @@ fn found(policy: &Policy) -> (Found, Vec<PathBuf>) {
         let counts = |name: &str| !kind.keeps(name);
         listed(&plain(&kind.dir()), &counts, &mut found, &mut left);
     }
-    if let Some(dir) = policy.proxies_dir() {
+    if let Some(dir) = in_cache(&policy.proxies) {
         listed(&dir, &|name| name.ends_with(".mkv"), &mut found, &mut left);
+    }
+    if let Some(dir) = in_cache(&policy.render) {
+        listed(
+            &dir,
+            &|name| !Kind::Render.keeps(name),
+            &mut found,
+            &mut left,
+        );
     }
     found.sort_by_key(|(_, _, used)| *used);
     (found, left)

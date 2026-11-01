@@ -313,8 +313,8 @@ flowchart TD
 | audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
 | transcripts (`media.transcribe`) | `analysis` (`AvEnv`) | origin, stream |
 | light, for HDR metadata | `analysis` (`light::cache_in`) | origin, input color space |
-| proxies | `proxies.folder` (`Proxies::folder_in`): `proxies` beside the project unless set (in the cache dir without a project); an absolute folder is shared by each project | content (`paths::proxy_origin`), size, codec, input color space |
-| render cache | `render` (`Kind::Render`), with a `.keys` file for each video | the piece of each frame, the size, the codec and the colors ([playback](playback.md#the-render-cache)) |
+| proxies | `proxies` in `playback_files.folder` (`PlaybackFiles::proxies_in`): in the project's folder unless set (in the cache dir without a project); an absolute folder is shared by each project | content (`paths::proxy_origin`), size, codec, input color space |
+| render cache | `render-cache` beside the proxies, unless `playback_files.render_cache` is set (`PlaybackFiles::render_cache_in`), with a `.keys` file for each video | the piece of each frame, the size, the codec and the colors ([playback](playback.md#the-render-cache)) |
 | GPU encoders that work | `encoders.json` (`export::detected`) | FFmpeg, system and GPUs |
 | proxy codecs the GPU decoder plays | `plays.json` (`export::plays`) | the same, per GPU |
 | clips for decoder tests | `decoder-tests` | none |
@@ -329,8 +329,8 @@ flowchart TD
 
 `disk_cache` keeps what vidcut can make again under one limit:
 
-- the folders of `disk_cache::Kind`: `thumbs`, `waveforms`, `analysis`, `decoder-tests`, `render`
-- the proxies (`.mkv` files) in `proxies.folder`, when it is in the cache dir (`Policy`)
+- the folders of `disk_cache::Kind`: `thumbs`, `waveforms`, `analysis`, `decoder-tests`, `render-cache`
+- the proxies (`.mkv` files) and the render cache in the folder of playback files, when it is in the cache dir (`Policy`)
 
 These stay, and do not count: transcripts (`words` files in `analysis`, `Kind::keeps`), the `.keys` files of the render cache, `models`, `speech-replies`, `uploads`, `encoders.json` and `plays.json`.
 

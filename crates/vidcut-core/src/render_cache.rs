@@ -5,7 +5,6 @@ use std::sync::Arc;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::disk_cache::Kind;
 use crate::lru::Lru;
 use crate::model::{ClipCache, CompositeMode, Project, RenderCache, Retime, SuperScale, Upscaler};
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
@@ -927,10 +926,6 @@ pub struct Index {
 }
 
 impl Index {
-    pub fn dir() -> PathBuf {
-        Kind::Render.dir()
-    }
-
     pub fn scan(dir: &Path) -> Self {
         let mut index = Self {
             marks: read_keys(&marks_file(dir))
@@ -1033,6 +1028,10 @@ impl Index {
                 .and_then(|()| crate::temp::write(&marks_file(dir), &all));
         }
         true
+    }
+
+    pub fn folder(&self) -> Option<&Path> {
+        self.dir.as_deref()
     }
 
     pub fn marked(&self, mark: &Key) -> bool {

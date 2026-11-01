@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use vidcut_core::preferences::CacheCodec;
 use vidcut_core::render::RenderPlan;
-use vidcut_core::render_cache::{FILE, Index, KEYS, Key, MADE, name_of, write_keys};
+use vidcut_core::render_cache::{FILE, KEYS, Key, MADE, name_of, write_keys};
 
 use crate::decode::Input;
 use crate::error::{Error, Result};
@@ -136,7 +136,7 @@ pub(crate) fn kept(input: &Input) -> Option<Arc<[Arc<Cached>]>> {
     let Input::File(path) = input else {
         return None;
     };
-    if path.extension().is_none_or(|e| e != FILE) || path.parent() != Some(&Index::dir()) {
+    if path.extension().is_none_or(|e| e != FILE) {
         return None;
     }
     let bytes = std::fs::read(path.with_extension(MADE)).ok()?;

@@ -409,7 +409,7 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut preferences set cache.limit=gb cache.gb=50   # a fixed size\n  \
          vidcut preferences set thumbnails.disk_cache=false   # also deletes those kept\n  \
          vidcut preferences set proxies.codec=auto\n  \
-         vidcut preferences set proxies.folder=\"$HOME/proxies\"   # one folder for every project",
+         vidcut preferences set playback_files.folder=\"$HOME/vidcut\"   # one folder for every project",
     ),
     (
         "player.seek",

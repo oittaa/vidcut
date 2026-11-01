@@ -1467,8 +1467,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The longest side of a proxy is 960 px, unless set.
   - `auto` selects a codec that the GPU plays ([export](design/export.md#proxies)).
   - A project names a proxy by its file. Each computer keeps the file in its own proxy folder.
-  - The proxy folder is `proxies` in the project's folder, or the folder that `proxies.folder` gives.
-  - A relative folder is in the project's folder. An absolute folder is shared by every project (deviation X26).
+  - The proxy folder is `proxies` in the folder of playback files (deviation X26).
+  - That folder is the project's folder, unless `playback_files.folder` sets another. A relative folder is in the project's folder. An absolute folder is shared by every project.
   - With `use_proxies` on, the preview plays fresh proxies, frame for frame as the originals. Thus heavy media play in real time.
   - Sound, exports and analyses use the originals.
 - **D42. Audio scrubbing** (§4.5; p. 876).
@@ -2721,7 +2721,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A chosen codec goes to the encoder as it is. No other codec takes its place.
     - When no encoder on this computer makes it, the cache stays empty. Preferences then says so under Codec, and `cache.status` gives the error.
     - DNxHR LB, SQ and HQ have 8 bits. Thus an HDR timeline gets no cache with them.
-    - A change of the codec renders the cache again. The files of the other codec stay until the disk cache removes them.
+    - A change of the codec renders the cache again. The files of the other codec stay until Delete Render Cache > Unused removes them.
+  - The cache files are in `render-cache` in the folder of playback files, beside the proxies (X26, X103).
+    - Proxies and Render Cache > Folder sets that folder for proxies and the render cache.
+    - Proxies and Render Cache > Advanced > Folder sets a folder for the render cache only (`playback_files.render_cache`).
+    - Outside the cache dir, the files do not count in the limit of the disk cache. Delete Render Cache removes them.
+    - Outside the cache dir, the render stops when the disk of the folder has less than 10% free. `cache.status` then gives the error. In the cache dir, the limit of the disk cache keeps that space free.
   - Playback does not write the cache (X103).
   - Playback > Delete Render Cache has three choices:
     - All empties the cache.

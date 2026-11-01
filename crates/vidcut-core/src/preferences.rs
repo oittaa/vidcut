@@ -20,6 +20,7 @@ pub struct Preferences {
     pub cache: Cache,
     pub proxies: Proxies,
     pub render_cache: RenderCachePrefs,
+    pub playback_files: PlaybackFiles,
     pub transcripts: Transcripts,
     pub services: Services,
     pub viewer: ViewerPrefs,
@@ -576,14 +577,42 @@ pub struct Proxies {
     pub size: u32,
     /// The codec proxies are made with.
     pub codec: ProxyCodec,
-    /// Where this computer keeps proxies: a folder in the project's folder
-    /// (`proxies`, the default), or an absolute path. Every project shares
-    /// an absolute one, so a file used in several projects gets one proxy;
-    /// with a project on a network drive, proxies can stay on a local one.
-    /// A project names its proxies by file, and each computer looks for
-    /// them in its own folder: after a change, move the files there or let
-    /// them be made again.
+}
+
+/// Where this computer keeps the files that it makes for a project to play:
+/// proxies and the render cache.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct PlaybackFiles {
+    /// A folder in the project's folder, or an absolute path. Empty, the
+    /// default, is the project's folder. Proxies go to `proxies` in it, and
+    /// the render cache to `render-cache`. Every project shares an absolute
+    /// one, so a file or a part used in several projects is made once; with
+    /// a project on a network drive, they can stay on a local disk. A
+    /// project names its proxies by file, and each computer looks for them
+    /// in its own folder: after a change, move the files there or let them
+    /// be made again. Outside the cache dir, these files do not count in
+    /// `cache`.
     pub folder: PathBuf,
+    /// The folder of the render cache: a folder in the project's folder, or
+    /// an absolute path. Empty, the default, is `render-cache` in `folder`.
+    pub render_cache: PathBuf,
+}
+
+pub const PROXIES_FOLDER: &str = "proxies";
+pub const RENDER_CACHE_FOLDER: &str = "render-cache";
+
+impl PlaybackFiles {
+    pub fn proxies_in(&self, project_dir: &Path) -> PathBuf {
+        project_dir.join(&self.folder).join(PROXIES_FOLDER)
+    }
+
+    pub fn render_cache_in(&self, project_dir: &Path) -> PathBuf {
+        match self.render_cache.as_os_str().is_empty() {
+            true => project_dir.join(&self.folder).join(RENDER_CACHE_FOLDER),
+            false => project_dir.join(&self.render_cache),
+        }
+    }
 }
 
 /// The codec proxies are made with (decision D41).
@@ -626,16 +655,11 @@ impl Default for Proxies {
             above_mbps: 150,
             size: PROXY_LONGEST,
             codec: ProxyCodec::Auto,
-            folder: PathBuf::from("proxies"),
         }
     }
 }
 
 impl Proxies {
-    pub fn folder_in(&self, project_dir: &Path) -> PathBuf {
-        project_dir.join(&self.folder)
-    }
-
     pub fn wants(&self, m: &Media) -> bool {
         let Some(v) = m.info.video.as_ref().filter(|v| !v.still) else {
             return false;
@@ -672,6 +696,8 @@ pub struct PreferencesPatch {
     pub proxies: Option<ProxiesPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_cache: Option<RenderCachePatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playback_files: Option<PlaybackFilesPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcripts: Option<TranscriptsPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -750,9 +776,19 @@ pub struct ProxiesPatch {
     pub size: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codec: Option<ProxyCodec>,
-    /// A folder in the project's folder, or an absolute path.
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlaybackFilesPatch {
+    /// A folder in the project's folder, or an absolute path. Empty is the
+    /// project's folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<PathBuf>,
+    /// A folder in the project's folder, or an absolute path. Empty is
+    /// `render-cache` in `folder`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_cache: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -880,8 +916,14 @@ impl Preferences {
             p.above_mbps = x.above_mbps.unwrap_or(p.above_mbps);
             p.size = x.size.unwrap_or(p.size);
             p.codec = x.codec.unwrap_or(p.codec);
-            if let Some(f) = &x.folder {
-                p.folder = f.clone();
+        }
+        if let Some(x) = &patch.playback_files {
+            let f = &mut p.playback_files;
+            if let Some(folder) = &x.folder {
+                f.folder = folder.clone();
+            }
+            if let Some(folder) = &x.render_cache {
+                f.render_cache = folder.clone();
             }
         }
         if let Some(x) = &patch.render_cache {
@@ -949,15 +991,16 @@ impl Preferences {
         if !(16..=7680).contains(&x.size) || !x.size.is_multiple_of(2) {
             return Err(Error::usage("proxies.size must be even, from 16 to 7680"));
         }
-        if x.folder.as_os_str().is_empty() {
-            return Err(Error::usage(
-                "proxies.folder names a folder: `proxies`, the default, is one in the project's folder",
-            ));
-        }
-        if x.folder.starts_with("~") {
-            return Err(Error::usage(
-                "proxies.folder: write the home folder out; `~` is not expanded",
-            ));
+        let f = &self.playback_files;
+        for (key, folder) in [
+            ("playback_files.folder", &f.folder),
+            ("playback_files.render_cache", &f.render_cache),
+        ] {
+            if folder.starts_with("~") {
+                return Err(Error::usage(format!(
+                    "{key}: write the home folder out; `~` is not expanded"
+                )));
+            }
         }
         Ok(())
     }
@@ -995,38 +1038,38 @@ mod tests {
 
     #[test]
     fn a_relative_proxy_folder_is_in_the_project_folder() {
-        let rules = Proxies::default();
+        let files = PlaybackFiles::default();
         assert_eq!(
-            rules.folder_in(Path::new("/films/talk")),
+            files.proxies_in(Path::new("/films/talk")),
             PathBuf::from("/films/talk/proxies")
         );
     }
 
     #[test]
     fn an_absolute_proxy_folder_is_shared() {
-        let rules = Proxies {
-            folder: PathBuf::from("/local/proxies"),
-            ..Proxies::default()
+        let files = PlaybackFiles {
+            folder: PathBuf::from("/local/vidcut"),
+            ..PlaybackFiles::default()
         };
         assert_eq!(
-            rules.folder_in(Path::new("/nas/talk")),
-            PathBuf::from("/local/proxies")
+            files.proxies_in(Path::new("/nas/talk")),
+            PathBuf::from("/local/vidcut/proxies")
         );
     }
 
     #[test]
     fn a_proxy_folder_with_a_tilde_is_refused() {
         let patch = PreferencesPatch {
-            proxies: Some(ProxiesPatch {
-                folder: Some(PathBuf::from("~/proxies")),
-                ..ProxiesPatch::default()
+            playback_files: Some(PlaybackFilesPatch {
+                folder: Some(PathBuf::from("~/vidcut")),
+                ..PlaybackFilesPatch::default()
             }),
             ..PreferencesPatch::default()
         };
         let e = Preferences::default().patched(&patch).unwrap_err();
         assert_eq!(
             e.message,
-            "proxies.folder: write the home folder out; `~` is not expanded"
+            "playback_files.folder: write the home folder out; `~` is not expanded"
         );
     }
 

@@ -42,10 +42,13 @@ pub fn run(saved: bool, keep_downloads: bool, dry_run: bool) -> Result<Value> {
         keep.push(crate::paths::models_dir());
         keep.push(vidcut_av::speech_api::replies_folder());
     }
-    if let Ok(p) = crate::preferences::load()
-        && p.proxies.folder.is_absolute()
-    {
-        keep.push(p.proxies.folder);
+    if let Ok(p) = crate::preferences::load() {
+        let f = p.playback_files;
+        keep.extend(
+            [f.folder, f.render_cache]
+                .into_iter()
+                .filter(|d| d.is_absolute()),
+        );
     }
     let (dirs, keep) = resolved(dirs, keep);
     let (removed, kept) = plan(&dirs, &keep)?;

@@ -416,7 +416,9 @@ The names of frames:
 
 The format on disk:
 
-- The files are in the `render` folder of the disk cache (`Kind::Render`).
+- The files are in the render cache folder of the project (`PlaybackFiles::render_cache_in`). It is `render-cache` beside the proxies, unless set.
+  - The live core takes the folder of the open project (`Background::open`). A change of the folder or of the project reads the index again.
+  - `cache.render` without a GUI takes the folder of its project.
 - Each written run of frames gives three files with one name: `<name>.mkv`, `<name>.keys` and `<name>.made`.
   - The name is the hex of a SHA-256 of the names of its frames, cut to 16 bytes (`name_of`).
   - `render_cache::write` writes the video first, then the `.keys` file, then the `.made` file.
@@ -433,9 +435,12 @@ The format on disk:
   - `frames` has one list for each frame of the video, in order. The list has an item for each layer of the frame, from the bottom up.
   - An item is a pair: how the layer was made (`Made`), and the AI upscaler (`Upscaled`) or null. A layer without an `Origin` gives null.
   - `render_cache::write` takes these from the `Origin` of each layer that the draw made (`VideoFrames::next_made`).
-  - The reader of a file in the render folder reads it (`render_cache::kept`).
+  - The reader of an `.mkv` file that has a `.made` file reads it (`render_cache::kept`).
 - Why the names and the records are in two files: `Index::scan` reads all `.keys` files at the start. The player reads a `.made` file only when its video plays. Thus the scan stays small.
-- The videos count in the limit of the disk cache ([the disk cache limit](analysis.md#the-disk-cache-limit)). The `.keys` and `.made` files do not count (`Kind::keeps`).
+- In the cache dir, the videos count in the limit of the disk cache ([the disk cache limit](analysis.md#the-disk-cache-limit)). The `.keys`, `.made` and `.marks` files do not count (`Kind::keeps`).
+- Outside the cache dir, no file counts. Delete Render Cache removes them.
+- Outside the cache dir, the render reads the free space of the disk before each run of frames (`system::disk`). With less than `KEEP_FREE_PERCENT` free, it stops with an error.
+  - Why: a render that nobody watches must not fill a disk. In the cache dir, the limit of the disk cache keeps that space free, and removes old files to make room.
 
 An example of a `.made` file, with one frame of one layer:
 
@@ -503,6 +508,7 @@ The background render (`live::render_cache::Background`):
   - It makes the plan of the viewer, as the live core does (`flatten_lanes`, `shown`), and scans the index.
   - It runs the same `Render` on the thread of the request, from the start. It ends when the mode has nothing left to render.
 - `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
+  - `cache.status` gives the folder of the cache.
   - All also removes the marks (`Index::clear`).
   - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
   - All removes each file of the folder. Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
@@ -524,7 +530,7 @@ The marks of dropped frames:
 - `Cache::mark` marks each piece of the plan that holds a frame of the stretch. The mark is the name of the piece (`Setup::piece_name`).
   - The name is a SHA-256 of the piece after the cleaning of `Cache::keys`, cut to 16 bytes. The `Look` is in it.
   - Thus a moved piece keeps its mark. A piece with other frames, or another `Look`, has another name.
-- The index keeps the marks (`Index::mark`). It writes them to `drops.marks` in the render folder at once.
+- The index keeps the marks (`Index::mark`). It writes them to `drops.marks` in the render cache folder at once.
   - The file holds the names, 16 bytes each, with no header, as a `.keys` file does.
   - The file does not count in the limit of the disk cache (`Kind::keeps`).
 - The numbers are starting values. A measurement can change them.
