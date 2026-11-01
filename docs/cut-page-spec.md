@@ -2726,7 +2726,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Proxies and Render Cache > Folder sets that folder for proxies and the render cache.
     - Proxies and Render Cache > Advanced > Folder sets a folder for the render cache only (`playback_files.render_cache`).
     - Outside the cache dir, the files do not count in the limit of the disk cache. Delete Render Cache removes them.
-    - The render stops when the disk of the folder has less than 10% free. `cache.status` then gives the error.
+    - Outside the cache dir, the render stops when the disk of the folder has less than 10% free. `cache.status` then gives the error. In the cache dir, the limit of the disk cache keeps that space free.
   - Playback does not write the cache (X103).
   - Playback > Delete Render Cache has three choices:
     - All empties the cache.

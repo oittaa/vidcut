@@ -2135,7 +2135,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Playback does not write the cache. Only the background render writes it ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The cache is in `render-cache` beside the proxies of the project, unless set ([X26](#x26-one-folder-for-proxies-and-the-render-cache-is-a-preference)).
   - Outside the cache dir, it does not count in the limit of the disk cache. No preference deletes old files. Delete Render Cache removes them.
-  - The background render stops when the disk has less than 10% free.
+  - Outside the cache dir, the background render stops when the disk has less than 10% free.
   - With proxies on, the cache has the size of proxies. With the codec on Automatic, it also has their codec.
   - With proxies off, the timeline level has the size of the timeline. The clip level has the size of the media, or of the picture that AI Super Scale enlarges.
     - A clip with a Retime Process has the size of the timeline at the clip level.

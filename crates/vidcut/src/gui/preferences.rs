@@ -1338,7 +1338,13 @@ fn folder(
     patch: &mut Option<Value>,
 ) {
     let saved = which.saved(&state["preferences"]);
+    let own = !Folder::RenderCache.saved(&state["preferences"]).is_empty();
     let (hint, title, every) = match which {
+        Folder::Files if own => (
+            "Project Folder",
+            "Folder",
+            "Every project's proxies are here",
+        ),
         Folder::Files => (
             "Project Folder",
             "Folder",

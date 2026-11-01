@@ -637,6 +637,9 @@ impl Render {
 
 fn full(dir: &Path) -> Result<(), String> {
     let keep = vidcut_core::disk_cache::KEEP_FREE_PERCENT;
+    if dir.starts_with(crate::paths::cache_dir()) {
+        return Ok(());
+    }
     match crate::system::disk(dir) {
         Some(d) if d.free < d.size / 100 * keep => Err(format!(
             "{}: the disk has less than {keep}% free; free some space, or set \

@@ -439,8 +439,8 @@ The format on disk:
 - Why the names and the records are in two files: `Index::scan` reads all `.keys` files at the start. The player reads a `.made` file only when its video plays. Thus the scan stays small.
 - In the cache dir, the videos count in the limit of the disk cache ([the disk cache limit](analysis.md#the-disk-cache-limit)). The `.keys`, `.made` and `.marks` files do not count (`Kind::keeps`).
 - Outside the cache dir, no file counts. Delete Render Cache removes them.
-- Before each run of frames, the render reads the free space of the disk (`system::disk`). With less than `KEEP_FREE_PERCENT` free, it stops with an error.
-  - Why: a render that nobody watches must not fill a disk.
+- Outside the cache dir, the render reads the free space of the disk before each run of frames (`system::disk`). With less than `KEEP_FREE_PERCENT` free, it stops with an error.
+  - Why: a render that nobody watches must not fill a disk. In the cache dir, the limit of the disk cache keeps that space free, and removes old files to make room.
 
 An example of a `.made` file, with one frame of one layer:
 
