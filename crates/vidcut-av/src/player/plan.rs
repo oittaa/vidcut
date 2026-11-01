@@ -319,10 +319,11 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             super_scale,
             retime,
             placed,
+            made: shape,
             ..
         } => {
-            let made = if !retime.is_nearest() {
-                let placed: Vec<_> = placed
+            let pictures = || -> Vec<_> {
+                placed
                     .iter()
                     .map(|p| {
                         let mut picture = p.picture.clone();
@@ -332,11 +333,16 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
                             .for_each(|e| e.render_cache = false);
                         picture
                     })
-                    .collect();
+                    .collect()
+            };
+            let made = if !retime.is_nearest() {
+                let placed = pictures();
                 format!(
                     "|{super_scale:?}|{}x{}|{:?}|{placed:?}|{retime:?}",
                     plan.width, plan.height, plan.colors
                 )
+            } else if shape.is_some() {
+                format!("|{:?}", pictures())
             } else if super_scale.ai() {
                 let detail =
                     (!placed.is_empty()).then(|| vidcut_core::place::detail(placed).to_bits());
