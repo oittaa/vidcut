@@ -541,6 +541,7 @@ impl Part {
 pub struct Cache {
     keys: Lru<Key, Arc<[Key]>, 4096>,
     index: Index,
+    blocked: HashSet<Key>,
 }
 
 impl Cache {
@@ -550,6 +551,18 @@ impl Cache {
 
     pub fn index_mut(&mut self) -> &mut Index {
         &mut self.index
+    }
+
+    pub fn block(&mut self, keys: &[Key]) {
+        self.blocked.extend(keys.iter().copied());
+    }
+
+    pub fn unblock(&mut self) {
+        self.blocked.clear();
+    }
+
+    fn open_key(&self, key: &Key) -> bool {
+        !self.index.has(key) && !self.blocked.contains(key)
     }
 
     pub fn keys(&mut self, piece: &VideoPiece, setup: &Setup, plan: &RenderPlan) -> Arc<[Key]> {
@@ -721,7 +734,7 @@ impl Cache {
                 whole.extend(
                     keys.iter()
                         .enumerate()
-                        .filter(|(_, key)| !self.index.has(key))
+                        .filter(|(_, key)| self.open_key(key))
                         .map(|(k, key)| (t + k as i64, *key)),
                 );
             }
@@ -729,7 +742,7 @@ impl Cache {
                 let Some(keys) = keys else {
                     continue;
                 };
-                let missing = |k: &usize| !self.index.has(&keys[*k]);
+                let missing = |k: &usize| self.open_key(&keys[*k]);
                 let at = |k: usize| (t + k as i64, p, i, k);
                 if let Some(k) = (0..keys.len()).find(missing).map(at) {
                     first = first.filter(|f| f.0 <= k.0).or(Some(k));
@@ -754,7 +767,7 @@ impl Cache {
             let size = setup.sized(&layer)?;
             let run: Vec<Key> = keys[k..]
                 .iter()
-                .take_while(|key| !self.index.has(key))
+                .take_while(|key| self.open_key(key))
                 .take(most.max(1) as usize)
                 .copied()
                 .collect();
@@ -1184,4 +1197,57 @@ fn read_keys(path: &Path) -> Option<Vec<Key>> {
         return None;
     }
     Some(bytes.as_chunks::<16>().0.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cache, Look, Setup};
+    use crate::model::{Project, RenderCache, Settings, SuperScale};
+    use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
+    use crate::render::{Placed, RenderPlan, Shape, VideoPiece};
+    use crate::time::Rational;
+
+    #[test]
+    fn a_blocked_frame_stays_out_of_the_cache_and_is_not_scheduled() {
+        let piece: VideoPiece = serde_json::from_str(
+            r#"{"kind":"source","media":"m1","path":"a.mov","origin":0.0,"source_frame":0,"frames":2,"cache":"on"}"#,
+        )
+        .unwrap();
+        let frames = piece.frames();
+        let plan = RenderPlan {
+            fps: Rational::new(25, 1).unwrap(),
+            width: 320,
+            height: 180,
+            sample_rate: 48_000,
+            channels: 2,
+            frames,
+            video: vec![piece],
+            audio: Vec::new(),
+            ducking: Vec::new(),
+            range: (0, frames),
+            name: "blocked".into(),
+            colors: None,
+        };
+        let project = Project::new(Settings::default());
+        let prefs = RenderCachePrefs::default();
+        let look = Look::of(&project, (1920, ProxyCodec::Auto), CacheCodec::Auto);
+        let slow = |_: &str| false;
+        let up = |_: Shape, _: (u32, u32), _: &[Placed], _: SuperScale| None;
+        let setup = Setup {
+            mode: RenderCache::Smart,
+            prefs: &prefs,
+            project: &project,
+            slow: &slow,
+            upscaled: &up,
+            look: &look,
+        };
+        let mut cache = Cache::default();
+        let job = cache.next(&plan, &setup, 0, 1).unwrap();
+        assert_eq!(job.keys.len(), 1);
+        let key = job.keys[0];
+        cache.block(&job.keys);
+        assert!(!cache.index().has(&key));
+        let again = cache.next(&plan, &setup, 0, 1).unwrap();
+        assert_ne!(again.keys[0], key);
+    }
 }
