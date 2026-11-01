@@ -18,6 +18,9 @@ The manual describes the render cache on pp. 143–144 and 199–206.
   - The `Id` of a made picture holds the size and the placement of the timeline. The plan of a job of the clip level has other values.
 - In an HDR timeline, the render makes again the frames that playback made.
   - The reader of the player makes its pictures without the colors of the timeline (`with_timeline`). The render makes them with these colors.
+- After a change of Sharpness, position or crop, the viewer makes again the frames of AI Super Scale.
+  - The key of these frames holds the whole `super_scale` and the whole picture (`source_key`).
+  - Of the picture settings, the size of the enlarged picture reads only the zoom and the Dynamic Zoom (`detail`). The draw reads the other values.
 
 ## Steps
 

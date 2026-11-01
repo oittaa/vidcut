@@ -152,15 +152,16 @@ flowchart TD
   - A seek with AI Slow starts a new stream at the asked frame. Its first picture comes after the first chunk of the stream.
   - While playing, the player skips the frames that it cannot make in time. A replay makes again the frames that it skipped.
   - The key of the kept frames holds the Super Scale, the placement and the timeline size (`source_key`). Why: they decide whether the picture is enlarged.
-  - The placement in the key is its picture settings, not its clip, its timeline start or its keyframe position. Thus a moved clip keeps its frames.
-  - The `Id` of each frame holds the keyframe position of the frame and the place of its Dynamic Zoom (`placed_now`). The keyframe position is in it only when the picture has keyframes.
-  - Why: the viewer draws a made frame at the placement of that frame. A still with no keyframes and no Dynamic Zoom thus keeps one `Id` for all its frames.
-  - A cut of the piece (`VideoPiece::part`) does not change these values. Thus a piece that plays in part from the cache keeps the `Id` of each frame.
+  - The placement in the key is its picture settings, not its clip, its timeline start or its keyframe position. Thus a moved clip keeps its frames. A cut of the piece (`VideoPiece::part`) keeps them too.
+  - The enlarged picture holds no placement (`Sampling::Own`). The draw places it at each frame.
 - With `viewer.super_scale` off, the live core plans the viewer without Super Scale (`preview_plan`).
 - With a Retime Process other than Nearest, `VideoFrames` makes the frames between the source frames for the viewer too ([export](export.md#which-source-frame)).
   - The key of such a frame holds the process, the Super Scale, the placement, the timeline size and the timeline colors (`source_key`). Why: the frame is made at its placement, and the viewer draws it with that placement and its opacity.
   - Why the timeline colors: an HDR picture goes to the AI stages only in an SDR timeline, tone-mapped.
   - The `Id` also holds the exact source position (`Plan::id`). Thus each made frame is a kept picture of its own.
+  - The `Id` also holds the keyframe position of the frame and the place of its Dynamic Zoom (`placed_now`). The keyframe position is in it only when the picture has keyframes.
+  - Why: the made frame keeps the placement of its frame (`Sampling::Placed`), and the draw uses that placement.
+  - A cut of the piece (`VideoPiece::part`) does not change these values. Thus a piece that plays in part from the cache keeps the `Id` of each frame.
   - A frame of an AI process aims ahead of the clock by the mean time of the recent made frames (`make_cost`). On the way, the player skips the frames between. Why: they would be late.
   - Ahead of the playhead, it makes only frames past the clock by the lead, and after the reader. Thus slow frames spread evenly, and the reader never seeks back.
   - A skipped frame moves the reader to its exact source time, as a made frame does (`exact_at`). Why: a step back between the two would seek.

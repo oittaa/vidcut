@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use vidcut_core::model::{Retime, SuperScale, WipeDirection};
+use vidcut_core::model::{Retime, WipeDirection};
 use vidcut_core::render::{Image, MovingKey, Placed, RenderPlan, Run, ShownTitle, VideoPiece};
 use vidcut_core::time::Rational;
 
@@ -321,7 +321,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             placed,
             ..
         } => {
-            let made = if made(super_scale, retime) {
+            let made = if super_scale.ai() || !retime.is_nearest() {
                 let placed: Vec<_> = placed
                     .iter()
                     .map(|p| {
@@ -367,18 +367,14 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
     }
 }
 
-fn made(super_scale: &SuperScale, retime: &Retime) -> bool {
-    super_scale.ai() || !retime.is_nearest()
-}
-
 fn placed_now(piece: &VideoPiece, k: i64) -> Option<Keyed> {
     match piece {
         VideoPiece::Source {
-            super_scale,
+            image,
             retime,
             placed,
             ..
-        } if made(super_scale, retime) => Some(
+        } if !matches!(image, Some(Image::Still)) && !retime.is_nearest() => Some(
             placed
                 .iter()
                 .map(|p| {
