@@ -360,17 +360,22 @@ pub(crate) fn on_viewers_gpu(gpu: Option<&crate::gpus::Gpu>) -> bool {
         .is_some_and(|(gpu, viewer)| gpu.is_adapter(viewer))
 }
 
-pub struct Kept(plan::Plan);
+pub struct Kept(plan::Plan, Option<plan::Plan>);
 
 impl Kept {
-    pub fn of(timeline: &RenderPlan) -> Self {
-        Self(plan::Plan::new(timeline.clone()))
+    pub fn of(timeline: &RenderPlan, shown: &RenderPlan) -> Self {
+        let shown = (shown != timeline).then(|| plan::Plan::new(shown.clone()));
+        Self(plan::Plan::new(timeline.clone()), shown)
+    }
+
+    fn ids(&self, t: i64) -> impl Iterator<Item = plan::Id> {
+        std::iter::once(self.0.id(t)).chain(self.1.as_ref().map(|p| p.id(t)))
     }
 
     pub fn played_from(&self, at: i64) -> i64 {
         let store = store::global();
         let mut t = self.0.clamp(at);
-        while t > self.0.first() && store.contains(&self.0.id(t - 1)) {
+        while t > self.0.first() && self.ids(t - 1).any(|id| store.contains(&id)) {
             t -= 1;
         }
         t
@@ -394,7 +399,7 @@ impl Kept {
         layer: Option<usize>,
         size: (u32, u32),
     ) -> Option<Arc<Picture>> {
-        let picture = store::global().peek(&self.0.id(t))?;
+        let picture = self.ids(t).find_map(|id| store::global().peek(&id))?;
         let Some(i) = layer else {
             return Some(picture);
         };

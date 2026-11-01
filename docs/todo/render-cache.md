@@ -17,5 +17,4 @@ The data comes from the manual, pp. 143–144 and 199–206.
 ## Frames that playback made
 
 - Use again the frames of a Retime Process that playback made, in the cache of the clip.
-- Use again the frames in which a layer plays from its cache file.
 - Use again the frames that playback made in an HDR timeline.
