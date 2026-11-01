@@ -2203,7 +2203,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - DNxHR 444 keeps no alpha channel. vidcut has no uncompressed codec ([X103](#x103-the-render-cache-is-made-in-the-background)).
   - With a checked effect, or with a Retime Process while the clip plays forward, such a clip stays at the timeline level with all codecs.
   - At the timeline level, the cache holds the frame after the tracks mix. The frame looks the same.
-  - A change on another track, or a move of the clip, renders such a frame again.
+  - The name of such a frame comes from all its layers, not from its time (`Cache::keys`). Thus its cache stays while its layers stay the same.
+  - A change on another track at the time of the frame renders it again. A move of the clip renders it again where other frames are under the clip.
 - **Why:**
   - The DNxHR encoder of FFmpeg has no pixel format with alpha.
   - With a checked effect or a Retime Process, the file of the clip level holds only the colors of the placed clip. An alpha channel there needs another kind of file.
