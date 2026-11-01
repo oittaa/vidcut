@@ -2744,7 +2744,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Outside the cache dir, the render stops when the disk of the folder has less than 10% free. `cache.status` then gives the error. In the cache dir, the limit of the disk cache keeps that space free.
   - Playback does not write the cache (X103).
   - Playback > Delete Render Cache has three choices:
-    - All empties the cache.
+    - All empties the cache. It removes the cache files and leaves any other file in the folder.
     - Unused keeps only the frames of the open timeline.
     - Selected Clips removes the files that hold frames at the times of the selected clips. At the clip level, it removes only the frames of their media. The media of a compound clip are the media of the clips in it.
   - Playback > Manage Render Cache shows the render cache of each project that vidcut opened on this computer (p. 206, X105).
