@@ -411,6 +411,8 @@ The names of frames:
   - With an AI upscaler, the name holds the upscaler, but not the Sharpness. Why: the Sharpness changes only the draw after the cache.
   - The name also holds the size, the colors of the timeline, the codec and the version of vidcut. The size is that of the media, or of its proxy with proxies on (`Look::longest`).
   - With an AI upscaler, the size is that of the enlarged picture (`Setup::upscaled`, vidcut-av `ai_size`). It comes from the placement and the timeline size, as in an export. Thus a zoom that changes it renders the clip again.
+    - `ai_size` takes the size, the pixel shape and the rotation of the media (`Shape`). With proxies on, it takes the size of the proxy.
+    - `ai_size` and the reader get the enlarged size from the same function (`enlarged`). Thus the job has the size of the enlarged pictures that playback keeps (`Kept::at`).
   - With a Retime Process, the size is that of the `Look`. The name also holds the Retime Process, the `super_scale`, the placement and the exact source position (`VideoPiece::exact`).
     - Thus a change of the Transform or of an effect renders a placed clip again.
     - `alone` takes the opacity and the composite mode out of the placement. Why: they change only the alpha and the mix, not the colors in the file.

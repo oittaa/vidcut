@@ -13,14 +13,18 @@ pub(crate) fn has_alpha(p: format::Pixel) -> bool {
     })
 }
 
-pub(crate) fn shown_size(
-    src: &frame::Video,
+pub(crate) fn shown_size(src: &frame::Video, rotation: u16, out: (u32, u32)) -> (u32, u32) {
+    let sar = src.aspect_ratio();
+    let sar = (sar.numerator(), sar.denominator());
+    shown_in((src.width(), src.height()), sar, rotation, out)
+}
+
+pub(crate) fn shown_in(
+    (w, h): (u32, u32),
+    sar: (i32, i32),
     rotation: u16,
     (out_w, out_h): (u32, u32),
 ) -> (u32, u32) {
-    let (w, h) = (src.width(), src.height());
-    let sar = src.aspect_ratio();
-    let sar = (sar.numerator(), sar.denominator());
     if rotation % 180 == 90 {
         let (sw, sh) = fit(h, w, (sar.1, sar.0), out_w, out_h);
         (sh, sw)

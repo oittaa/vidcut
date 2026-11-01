@@ -112,7 +112,7 @@ pub struct Setup<'a> {
     pub look: &'a Look,
 }
 
-pub type Upscaled = dyn Fn((u32, u32), (u32, u32), &[Placed], SuperScale) -> (u32, u32);
+pub type Upscaled = dyn Fn(Shape, (u32, u32), &[Placed], SuperScale) -> Option<(u32, u32)>;
 
 impl Setup<'_> {
     fn kept(&self, r: &Reason) -> bool {
@@ -180,25 +180,32 @@ impl Setup<'_> {
         else {
             return None;
         };
-        let (w, h) = self
-            .project
-            .media(media)?
-            .info
-            .video
-            .as_ref()?
-            .display_size();
+        let v = self.project.media(media)?.info.video.as_ref()?;
+        let (w, h) = v.display_size();
         let out = (self.look.width, self.look.height);
         if !retime.is_nearest() {
             return Some(out);
         }
-        let size = match self.look.longest {
-            Some(l) => crate::model::proxy_size(w, h, l),
-            None => (w, h),
+        let (size, shape) = match self.look.longest {
+            Some(l) => {
+                let size = crate::model::proxy_size(w, h, l);
+                let shape = Shape {
+                    size,
+                    sar: (1, 1),
+                    rotation: 0,
+                };
+                (size, shape)
+            }
+            None => {
+                let shape = Shape {
+                    size: (v.width, v.height),
+                    sar: (v.sar[0], v.sar[1]),
+                    rotation: v.rotation,
+                };
+                ((w, h), shape)
+            }
         };
-        Some(match super_scale.ai() {
-            true => (self.upscaled)(size, out, placed, *super_scale),
-            false => size,
-        })
+        Some((self.upscaled)(shape, out, placed, *super_scale).unwrap_or(size))
     }
 
     fn shape(&self, layer: &VideoPiece) -> Option<Shape> {
