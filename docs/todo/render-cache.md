@@ -19,9 +19,6 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 - The render makes again the frames that playback made for a piece in which a layer comes from the render cache.
   - Playback plays the plan after `Cache::apply`. There, `from_file` names the cached layer by its cache file.
   - `Kept` names the frames from the plan before `Cache::apply`. Thus no `Id` matches.
-- At the clip level, the render makes again the AI Super Scale frames of anamorphic or rotated media that playback made.
-  - `ai_size` gives the size of the job with square pixels and no rotation.
-  - The enlarged picture of the viewer can have a different size. Then `Kept::at` does not take it.
 - In an HDR timeline, the render makes again the frames that playback made.
   - The reader of the player makes its pictures without the colors of the timeline (`with_timeline`). The render makes them with these colors.
 
