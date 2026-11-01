@@ -393,6 +393,7 @@ The two levels (spec D98):
   - The layer takes the Nearest retime. A layer with a Retime Process or a checked effect also takes no `super_scale`. Why: the file holds its frames as the timeline shows them.
   - A placed layer with a Retime Process or a checked effect also takes `made`: the `Shape` of its media (`Setup::shape`). The draw then places the colors of the file as a made frame (`Sampling::Placed`).
     - The shape is that of the media. With AI Super Scale, the enlarged picture has the shape of the media, with its sides rounded to whole pixels.
+    - The player's key of such a frame holds the placement (`source_key`). Why: the draw takes the opacity and the composite mode from the placement of the kept picture. A change of these keeps the file.
   - With an AI upscaler and no Retime Process or checked effect, the file holds the enlarged picture. The layer then takes `Upscaler::Classic` with its Sharpness. Thus the draw uses the same kernel, and the AI upscaler does not run again.
   - `Index::run` follows the names of a file. Thus a run continues while the file holds the next name of the layer, also where a slow speed shows a frame twice.
   - A file of the clip level can hold one name many times, for example a freeze frame. `Index::add` keeps the first place of each name in the file. Thus a run starts at the start of the repeat.
