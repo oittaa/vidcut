@@ -1,30 +1,32 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
+use vidcut_core::preferences::PlaybackFiles;
 use vidcut_core::{Error, Result};
 
 fn known_file() -> PathBuf {
     crate::paths::state_dir().join("projects.json")
 }
 
-fn known() -> Vec<PathBuf> {
+fn stored() -> Vec<PathBuf> {
     std::fs::read_to_string(known_file())
         .ok()
         .and_then(|t| serde_json::from_str::<Vec<PathBuf>>(&t).ok())
         .unwrap_or_default()
-        .into_iter()
-        .filter(|p| p.is_file())
-        .collect()
+}
+
+fn known() -> Vec<PathBuf> {
+    stored().into_iter().filter(|p| p.is_file()).collect()
 }
 
 pub fn remember(project: &Path) {
-    let canonical = vidcut_core::dirs::canonical(project).unwrap_or(project.to_path_buf());
-    let mut all = known();
-    if all.contains(&canonical) {
+    let path = canonical(project);
+    let mut all = stored();
+    if all.contains(&path) {
         return;
     }
-    all.push(canonical);
+    all.push(path);
     let file = known_file();
     let written = std::fs::create_dir_all(crate::paths::state_dir())
         .and_then(|()| vidcut_core::temp::write(&file, json!(all).to_string().as_bytes()));
@@ -40,12 +42,28 @@ struct Folder {
     bytes: u64,
 }
 
+fn folder(files: &PlaybackFiles, project: &Path) -> PathBuf {
+    files.render_cache_in(project.parent().unwrap_or(Path::new("")))
+}
+
+fn canonical(project: &Path) -> PathBuf {
+    vidcut_core::dirs::canonical(project).unwrap_or(project.to_path_buf())
+}
+
+pub fn sharing(projects: &[PathBuf]) -> Result<impl Fn(&Path) -> bool> {
+    let files = crate::preferences::load()?.playback_files;
+    let wanted: BTreeSet<PathBuf> = projects
+        .iter()
+        .map(|p| folder(&files, &canonical(p)))
+        .collect();
+    Ok(move |project: &Path| wanted.contains(&folder(&files, project)))
+}
+
 fn folders(projects: &[PathBuf]) -> Result<Vec<Folder>> {
     let files = crate::preferences::load()?.playback_files;
     let mut by_dir: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
     for p in projects {
-        let dir = files.render_cache_in(p.parent().unwrap_or(Path::new("")));
-        by_dir.entry(dir).or_default().push(p.clone());
+        by_dir.entry(folder(&files, p)).or_default().push(p.clone());
     }
     Ok(by_dir
         .into_iter()
@@ -129,10 +147,7 @@ pub fn clear(
             p.display()
         )));
     }
-    let projects: Vec<PathBuf> = projects
-        .iter()
-        .map(|p| vidcut_core::dirs::canonical(p).unwrap_or(p.clone()))
-        .collect();
+    let projects: Vec<PathBuf> = projects.iter().map(|p| canonical(p)).collect();
     let cleared: Vec<Value> = folders(&projects)?
         .into_iter()
         .map(|f| {

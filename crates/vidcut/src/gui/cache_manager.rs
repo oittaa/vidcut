@@ -29,7 +29,7 @@ impl Column {
         match self {
             Column::Location => "Location",
             Column::Library => "Project Library",
-            Column::Project => "Project",
+            Column::Project => "Project Name",
             Column::Size => "Render Cache",
         }
     }
@@ -240,6 +240,11 @@ impl CacheManager {
 impl Workspace {
     pub(super) fn open_cache_manager(&mut self, ctx: &egui::Context) {
         self.cache_manager.open = true;
+        self.cache_manager.error = None;
+        self.ask_cache_list(ctx);
+    }
+
+    fn ask_cache_list(&mut self, ctx: &egui::Context) {
         self.cache_manager.asked = Some(Ask::send(&self.live, ctx, "cache.list", json!({})));
     }
 
@@ -252,7 +257,7 @@ impl Workspace {
             if let Err(e) = answer {
                 self.cache_manager.error = Some(e.message);
             }
-            self.open_cache_manager(ctx);
+            self.ask_cache_list(ctx);
         }
         let open_project = self.snap.project.as_ref().map(|p| p.path.clone());
         let m = &mut self.cache_manager;
@@ -270,7 +275,6 @@ impl Workspace {
                         m.rows.iter().map(|r| r.folder.clone()).collect();
                     m.checked.retain(|f| folders.contains(f));
                     m.current = open_project.map(|p| vidcut_core::dirs::canonical(&p).unwrap_or(p));
-                    m.error = None;
                 }
                 Err(e) => m.error = Some(e.message),
             }
@@ -307,6 +311,7 @@ impl Workspace {
                 .flat_map(|r| r.projects.iter().cloned())
                 .collect();
             m.checked.clear();
+            m.error = None;
             let params = json!({ "projects": projects });
             m.clearing = Some(Ask::send(&self.live, ctx, "cache.clear", params));
         }

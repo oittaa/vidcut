@@ -2751,7 +2751,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It opens also when no project is open.
     - Current Project shows the row of the open project.
     - Location and Project Library select the rows to show. Location has All, Local and Network.
-    - The columns are Location, Project Library, Project and Render Cache. A click on a column title sorts the rows. A second click reverses the order.
+    - The columns are Location, Project Library, Project Name and Render Cache. A click on a column title sorts the rows. A second click reverses the order.
     - Render Cache shows the size of the cache, also when it is 0 kB. Its checkbox selects the row.
     - Clear Selected Cache deletes the cache of each checked row that is shown. As in Resolve, there is no warning and no undo.
     - When it deletes the cache of the open project, the render of that cache starts again.

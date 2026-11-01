@@ -567,16 +567,20 @@ The background render (`live::render_cache::Background`):
 Manage Render Cache (`render_caches`):
 
 - `render_caches::remember` adds each project that the live core opens to `projects.json` in the state folder. `render_all` adds its project too.
-  - The file is a JSON list of canonical paths. A path whose file is gone drops out at the next `remember`.
+  - The file is a JSON list of canonical paths. `remember` does not look for the files of the list.
+  - Why: it runs on the live thread. A network drive that does not answer can stop a look for a file for seconds.
+  - `render_caches::list` leaves out a path whose file is gone. The file keeps the path. Thus a project on a drive that comes back shows again.
 - `cache.list` (`render_caches::list`) groups the projects by the folder of their render cache (`PlaybackFiles::render_cache_in`). Each group is one row.
   - Why: the files in one folder have names from their content. Thus two projects can share a file, and the folder is the unit to clear.
   - It counts the videos of the folder, and adds the size of each file in it.
   - `system::network` tells if a network drive holds the project file.
     - Windows: the drive type of the volume. Linux: the type of the file system. macOS: the local flag of the file system.
 - `cache.clear` (`render_caches::clear`) removes each file in the folder of each given project (`render_caches::empty`).
-  - It is a projectless request. In a GUI, the live core runs it on its thread (`Live::cache_clear`).
+  - In a GUI, the live core runs it on its thread (`Live::cache_clear`).
   - For the folder of the open project (`Background::folder`), it calls `Background::delete_all`. That stops the render and clears the index first. The render then starts again.
   - Why: the index of the open project must not name files that are gone.
+  - The CLI and MCP send it to the running GUI whose open project has its cache in one of the folders (`ipc::route`, `render_caches::sharing`).
+    - With no such GUI, the CLI process clears the folders. With two or more, `--instance` selects one. The other GUIs then find their files gone at the next plan.
 - The window is `CacheManager`. It sends `cache.list` when it opens and after each `cache.clear`.
 
 The marks of dropped frames:

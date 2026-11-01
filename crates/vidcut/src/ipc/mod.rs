@@ -60,6 +60,11 @@ pub fn run(
 }
 
 pub fn route(project: Option<&Path>, options: &RouteOptions, request: &Request) -> Result<Route> {
+    if let Request::CacheClear { projects } = request
+        && !options.headless
+    {
+        return clear_route(&projects.to_vec(), options);
+    }
     if request.is_projectless() {
         return Ok(Route::Headless);
     }
@@ -102,6 +107,29 @@ pub fn route(project: Option<&Path>, options: &RouteOptions, request: &Request) 
         [] => Ok(Route::Headless),
         many => Err(Error::usage(format!(
             "{} vidcut GUIs are running ({}); pick one with -p FILE or --instance PID",
+            many.len(),
+            many.iter()
+                .map(|i| i.pid.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+fn clear_route(projects: &[PathBuf], options: &RouteOptions) -> Result<Route> {
+    if let Some(which) = &options.instance {
+        return find_explicit(which).map(Route::Instance);
+    }
+    let shares = crate::render_caches::sharing(projects)?;
+    let users: Vec<Instance> = registry::list()
+        .into_iter()
+        .filter(|i| i.project.as_deref().is_some_and(&shares))
+        .collect();
+    match users.as_slice() {
+        [] => Ok(Route::Headless),
+        [one] => Ok(Route::Instance(one.clone())),
+        many => Err(Error::usage(format!(
+            "{} vidcut GUIs use these render caches ({}); pick one with --instance PID",
             many.len(),
             many.iter()
                 .map(|i| i.pid.to_string())

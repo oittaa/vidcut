@@ -1000,10 +1000,8 @@ impl Workspace {
     }
 
     fn playback_menu(&mut self, ui: &mut egui::Ui) {
-        match self.project().map(|p| p.settings.render_cache) {
-            Some(mode) => self.render_cache_menus(ui, mode),
-            None => super::dialog::why(ui, "open a project first"),
-        }
+        let mode = self.project().map(|p| p.settings.render_cache);
+        ui.add_enabled_ui(mode.is_some(), |ui| self.render_cache_menus(ui, mode));
         if ui.button("Manage Render Cache…").clicked() {
             let ctx = ui.ctx().clone();
             self.open_cache_manager(&ctx);
@@ -1011,11 +1009,11 @@ impl Workspace {
         }
     }
 
-    fn render_cache_menus(&mut self, ui: &mut egui::Ui, mode: RenderCache) {
+    fn render_cache_menus(&mut self, ui: &mut egui::Ui, mode: Option<RenderCache>) {
         ui.menu_button("Render Cache", |ui| {
             for m in [RenderCache::Off, RenderCache::Smart, RenderCache::User] {
-                if ui.selectable_label(mode == m, m.title()).clicked() {
-                    if mode != m {
+                if ui.selectable_label(mode == Some(m), m.title()).clicked() {
+                    if mode != Some(m) {
                         self.send("project.set", json!({ "render_cache": m }));
                     }
                     ui.close();

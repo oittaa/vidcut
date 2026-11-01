@@ -2165,7 +2165,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - Cache indicators along the bottom of the ruler show the state of the cache (p. 203).
   - Red means "to be cached", and blue means "has been cached".
-  - Resolve Studio 21.1.2 shows one line, on the Edit page and under both rulers of the Cut page. It does not show the reason of a red part.
+  - The caption of the picture on p. 203 names Source, Clip and Sequence Cache bars on the Edit page.
+  - In a test, Resolve Studio 21.1.2 showed one line, on the Edit page and under both rulers of the Cut page.
+  - Resolve does not show the reason of a red part.
 - **vidcut:**
   - The line is on the ruler of both timelines, red and blue as in Resolve ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The pointer over the line shows why the mode renders the part, for example Transition or AI Super Scale.
