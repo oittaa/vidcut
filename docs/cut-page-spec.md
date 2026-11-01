@@ -2699,15 +2699,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The cache has two levels, as in Resolve (pp. 203–204).
   - The clip level keeps the picture of one clip, before the tracks mix. It is the Render Cache Fusion Output of Resolve (p. 203).
     - It holds the clips set to On, media that are slow to decode, speed changes and AI Super Scale.
-    - It holds a Retime Process other than Nearest.
-      - It holds the frame at the size of the timeline. Why: a Retime Process makes each frame at the size that the clip shows.
+    - It holds a Retime Process other than Nearest, and the checked effects (p. 204).
+      - It holds the frame at the size of the timeline. Why: a Retime Process and an effect make each frame at the size that the clip shows.
+      - With a checked effect, it holds all the effects of the clip.
       - For a placed clip, it holds the colors of the frame, with no edges and no alpha. The viewer makes them again from the placement. Thus the cache needs no alpha.
       - A change of the Transform, the crop or an effect of a placed clip renders it again.
       - A move, a split, a trim, or a change of the opacity or the composite mode keeps it.
     - A move, a split, a trim or an edit on another track keeps it.
-    - It holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
+    - Without a Retime Process or a checked effect, it holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Super Scale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
-    - A placed clip with a Retime Process that plays backward stays at the timeline level. A still stays there too, and so does media with an alpha channel.
+    - A clip with a checked effect, or a placed clip with a Retime Process, stays at the timeline level when it plays backward. A still stays there too, and so does media with an alpha channel.
   - The timeline level keeps the frame after the tracks mix. It holds the other reasons.
     - Titles on top of all tracks stay out of it. Thus an edit of their text keeps the cache.
     - A part that moves keeps its cache when the tracks under it stay the same.
@@ -2718,7 +2719,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It renders from the playhead forward, then from the start of the timeline.
     - Where the memory keeps the frames that played before the playhead, it starts at the first of them (X103).
     - With proxies off and no HDR, it draws a frame that the memory keeps. It does not make it again.
-    - At the clip level, this is so for a clip without a Retime Process.
+    - At the clip level, this is so for a clip without a Retime Process or a checked effect.
     - `render_cache.background` turns it off. Then the cache keeps what it has, and renders nothing new.
   - The codec of the cache files is a preference of this computer (X103). Proxies and Render Cache > Advanced > Codec sets it. `render_cache.codec` also sets it.
     - It is Automatic, unless set. With proxies on, Automatic takes the codec of proxies. With proxies off, it takes ProRes 422 HQ, HEVC or AV1 ([playback](design/playback.md#the-render-cache)).
