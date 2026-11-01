@@ -148,6 +148,7 @@ impl Background {
             self.prefs = prefs.render_cache;
             self.proxies = prefs.proxies.clone();
             self.done = false;
+            self.lock().unblock();
         }
         if folder {
             let before = self.dir();
@@ -215,6 +216,7 @@ impl Background {
         if self.base.as_deref() != Some(plan) {
             self.base = Some(Arc::new(plan.clone()));
             self.done = false;
+            self.lock().unblock();
         }
         if project.settings.render_cache == Mode::Off {
             self.stop();
@@ -407,6 +409,7 @@ impl Background {
     fn stopped(&mut self) {
         self.stop();
         self.done = false;
+        self.lock().unblock();
         self.indexed();
     }
 
@@ -598,13 +601,17 @@ impl Render {
         self.lock().apply_clips(&mut shown, &setup, &Path::is_file);
         let kept = vidcut_av::player::Kept::of(&self.base, &shown);
         let mut from = kept.played_from(self.from);
+        let mut failed: Option<String> = None;
         loop {
             if self.cancel.load(Ordering::Relaxed) {
                 return Ok(false);
             }
             let next = self.lock().next(&self.base, &setup, from, most);
             let Some(job) = next else {
-                return Ok(true);
+                return match failed {
+                    Some(e) => Err(e),
+                    None => Ok(true),
+                };
             };
             full(&self.dir)?;
             let written = vidcut_av::render_cache::write(
@@ -625,7 +632,10 @@ impl Render {
                     };
                 }
                 Err(_) if self.cancel.load(Ordering::Relaxed) => return Ok(false),
-                Err(e) => return Err(e.to_string()),
+                Err(e) => {
+                    self.lock().block(&job.keys);
+                    failed = Some(e.to_string());
+                }
             }
         }
     }

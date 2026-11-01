@@ -553,6 +553,7 @@ The background render (`live::render_cache::Background`):
   - It writes one file at a time (vidcut-av `render_cache::write`), and adds it to the index (`Index::add`). The viewer then reloads the plan.
   - It uses the AI models that the viewer has loaded, with no second copy ([gpu](gpu.md#super-scale)).
   - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
+  - A frame that fails to write is left out for this plan (`Cache::block`). The render writes the other frames. The line stays red on that frame, because the index does not have it. A change of the plan tries the frame again.
 - `cache.render` in a GUI starts the render at once (`Background::render_now`). It does not wait for the time without activity.
   - It first stops a render that runs. Thus only one render writes the cache.
 - Without a GUI, the CLI process renders the cache (`render_all`).
