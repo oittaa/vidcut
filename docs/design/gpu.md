@@ -78,6 +78,9 @@ In the viewer, exports, proxies and thumbnails:
 - vidcut keeps facts of each VA-API device. `NO_COPY` and `WAYS` are kept by the address of the display. `SIZES` is kept by the device, the layout and the size.
 
 - ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
+- A Vulkan picture with an alpha channel has a fourth image. The draw takes it as the alpha plane (`Import::alpha`).
+  - The image holds 12-bit values in 16-bit samples. Thus the shader scales them (`ALPHA_OF_16`).
+  - A picture with alpha that comes without its fourth image comes down from the GPU.
 - A VideoToolbox frame that comes down is mapped, not copied (`hw::to_read`).
 - A layer keeps the picture that its planes hold: from memory, from NVDEC, or brought down. A redraw of the same picture copies nothing.
 - A Direct3D 11 texture of the viewer keeps the picture that it holds (`D3d11Shared`). A redraw of the same picture does not fill it again.
