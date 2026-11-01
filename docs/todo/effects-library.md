@@ -18,7 +18,8 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
    - Measure the Gaussian Blur with Dynamic Zoom. vidcut does not change the sigma by the Dynamic Zoom box.
    - Measure where Resolve applies the effects of a compound clip ([todo](compound-opacity.md)).
    - Measure the Gaussian Blur with Use Alpha off on a clip that is partly clear, for example with Crop Softness. vidcut blurs its colors without their alpha.
-   - Audio effects: equalizer, compressor and reverb.
+   - Audio effects: equalizer, compressor, reverb and broadband noise reduction.
+   - Voice Isolation separates a voice. Broadband noise reduction is the room and the hiss.
    - Keyframes of effect values.
    - Hover Scrub Preview of transitions and effects (pp. 759, 765).
    - Onscreen controls of effects in the viewer (p. 766).
