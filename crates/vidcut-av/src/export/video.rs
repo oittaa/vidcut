@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
 use vidcut_core::place::Placing;
-use vidcut_core::render::{Image, Moving, Placed, Ramp, Smooth, VideoPiece, WHOLE, Wipe};
+use vidcut_core::render::{Image, Moving, Placed, Ramp, Shape, Smooth, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -1043,11 +1043,14 @@ impl Source {
         }
         .expect("have a frame");
         let sar = frame.aspect_ratio();
-        let sar = (sar.numerator(), sar.denominator());
-        let shown = super::normalize::shown_size(frame, rotation, target);
-        if !super::normalize::enlarges((frame.width(), frame.height()), sar, 0, shown) {
+        let shape = Shape {
+            size: (frame.width(), frame.height()),
+            sar: (sar.numerator(), sar.denominator()),
+            rotation,
+        };
+        let Some((size, made)) = enlarged(shape, target, upscaler) else {
             return Ok(None);
-        }
+        };
         let form = upscale_form(upscaler, timeline);
         if crate::color::Source::of(frame).hdr.is_some() && timeline.is_some() && form.1.is_none() {
             return Err(Error::Invalid(format!(
@@ -1056,24 +1059,6 @@ impl Source {
                 crate::super_scale::name(upscaler)
             )));
         }
-        let across = if sar.0 > 0 && sar.1 > 0 {
-            f64::from(sar.0) / f64::from(sar.1)
-        } else {
-            1.0
-        };
-        let (dw, dh) = (f64::from(frame.width()) * across, f64::from(frame.height()));
-        let (dw, dh) = if rotation % 180 == 90 {
-            (dh, dw)
-        } else {
-            (dw, dh)
-        };
-        let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
-        let size = (even(dw), even(dh));
-        let up = if rotation % 180 == 90 {
-            (shown.1, shown.0)
-        } else {
-            shown
-        };
         let pts = frame.pts();
         let id = PictureId {
             input: self.reader.input().clone(),
@@ -1081,7 +1066,7 @@ impl Source {
             reading,
             rotation,
             upscaler,
-            made: crate::super_scale::made_size(upscaler, size, up),
+            made,
             key: match self.frame_index(pts) {
                 Some(i) => Key::Frame(i),
                 None => Key::Still(pts),
@@ -1486,20 +1471,52 @@ fn reach(super_scale: SuperScale) -> f64 {
 }
 
 pub fn ai_size(
-    size: (u32, u32),
+    shape: Shape,
     out: (u32, u32),
     placed: &[Placed],
     super_scale: SuperScale,
-) -> (u32, u32) {
+) -> Option<(u32, u32)> {
+    if !super_scale.ai() {
+        return None;
+    }
+    let (w, h) = shape.size;
     let aim = match placed.is_empty() {
         true => out,
-        false => layer_size(out, (size.0, size.1, (1, 1)), 0, placed, super_scale),
+        false => layer_size(out, (w, h, shape.sar), shape.rotation, placed, super_scale),
     };
-    let shown = vidcut_core::place::fit(size.0, size.1, (1, 1), aim.0, aim.1);
-    match super_scale.ai() && super::normalize::enlarges(size, (1, 1), 0, shown) {
-        true => crate::super_scale::made_size(super_scale.upscaler, size, shown),
-        false => size,
+    enlarged(shape, aim, super_scale.upscaler).map(|(_, made)| made)
+}
+
+fn enlarged(
+    shape: Shape,
+    target: (u32, u32),
+    upscaler: Upscaler,
+) -> Option<((u32, u32), (u32, u32))> {
+    let Shape {
+        size,
+        sar,
+        rotation,
+    } = shape;
+    let shown = super::normalize::shown_in(size, sar, rotation, target);
+    if !super::normalize::enlarges(size, sar, 0, shown) {
+        return None;
     }
+    let across = if sar.0 > 0 && sar.1 > 0 {
+        f64::from(sar.0) / f64::from(sar.1)
+    } else {
+        1.0
+    };
+    let (dw, dh) = (f64::from(size.0) * across, f64::from(size.1));
+    let ((dw, dh), up) = match rotation % 180 == 90 {
+        true => ((dh, dw), (shown.1, shown.0)),
+        false => ((dw, dh), shown),
+    };
+    let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
+    let display = (even(dw), even(dh));
+    Some((
+        display,
+        crate::super_scale::made_size(upscaler, display, up),
+    ))
 }
 
 fn layer_size(
