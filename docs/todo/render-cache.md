@@ -11,13 +11,8 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 - Resolve caches the checked Resolve FX and OFX of a clip in its node cache, before the tracks mix.
 - The render cache format of a new project in Resolve Studio 21.1.2 is ProRes 422 HQ (`apch`).
 
-## Dropped frames
-
-- The numbers of the marks are starting values ([playback](../design/playback.md#the-render-cache)). A measurement changes them, with a plan that the owner accepts first.
-
 ## Codec, folder and writing
 
-- The quality values of Auto with proxies off are starting values. A measurement sets them. Its plan goes to the owner first.
 - In an HDR timeline, the cache has 10 bits, in the PQ or HLG of the timeline. This needs a check.
 - At the clip level, the render makes again the frames that playback made.
   - A job of the clip level draws the colors of one layer (`colors_only`). A kept picture holds the whole frame, as the viewer draws it.
@@ -31,6 +26,5 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 ## Steps
 
 - **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
-- **Dropped frames:** the measurement of the marks.
 
 Each step adds its part to the spec, the design docs and the deviations. The last step deletes this file.
