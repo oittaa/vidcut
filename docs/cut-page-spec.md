@@ -2715,6 +2715,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - With another codec, it stays at the timeline level.
   - The timeline level keeps the frame after the tracks mix. It holds the other reasons.
     - Titles on top of all tracks stay out of it. Thus an edit of their text keeps the cache.
+    - A checked effect on a title does not make a cache part. The title is drawn on top of the picture.
     - A part that moves keeps its cache when the tracks under it stay the same.
     - An edit that changes the frames of a part renders it again.
   - The background render starts after a time without activity: 5 s, unless set (`render_cache.after_secs`).
