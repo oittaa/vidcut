@@ -38,6 +38,7 @@ vidcut has no grade ([deviation X19](../deviations.md#x19-hdr-metadata-comes-fro
 
 **Later than this:**
 
+- An input LUT and an output LUT ([luts.md](luts.md)).
 - A qualifier: a second grade on a range of hue, saturation or luma. It needs the scopes.
-- A look loaded from a file. OpenColorIO is one way to load a studio configuration, after the extra color spaces exist.
+- OpenColorIO, after the extra color spaces exist ([timeline-color-spaces-more.md](timeline-color-spaces-more.md)).
 - A node graph stays out. §13 is the order of the picture.

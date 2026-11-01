@@ -24,4 +24,4 @@ The viewer has no waveform, parade or vectorscope.
 - Show a waveform, a parade and a vectorscope of the viewer picture.
 - Use the timeline color space, PQ and HLG included.
 - The viewer turns each scope on, and a request does the same.
-- The scopes read the picture after the clip grade and after the timeline grade.
+- The scopes read the viewer picture, after the grades and after an output LUT ([luts.md](luts.md)).
