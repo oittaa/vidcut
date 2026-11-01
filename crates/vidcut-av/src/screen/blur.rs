@@ -218,9 +218,9 @@ impl Blurred {
         gpu: &Gpu,
         i: usize,
         (drawn, placing): (&wgpu::BindGroup, &Placing),
-        effects: &[Blurring],
+        (effects, live): (&[Blurring], &[Blurring]),
         encoder: &mut wgpu::CommandEncoder,
-    ) -> (&wgpu::TextureView, &wgpu::TextureView) {
+    ) -> (&wgpu::TextureView, &wgpu::TextureView, f64) {
         let size = self.size;
         let own = self.layers[i].get_or_insert_with(|| Texture::new(gpu, size));
         add(gpu, &own.view, drawn, encoder);
@@ -235,7 +235,23 @@ impl Blurred {
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
         blur_into(gpu, mask, scratch, effects, encoder);
-        (&own.view, &mask.view)
+        if live.is_empty() {
+            return (&own.view, &mask.view, 5.0);
+        }
+        let joined = shown_bind(
+            gpu,
+            (&own.view, &mask.view),
+            [1.0, 1.0, 0.0, 0.0],
+            [5.0, 0.0, 0.0, 0.0],
+        );
+        add(gpu, &scratch[0].view, &joined, encoder);
+        encoder.copy_texture_to_texture(
+            scratch[0].texture.as_image_copy(),
+            own.texture.as_image_copy(),
+            own.texture.size(),
+        );
+        blur_into(gpu, own, scratch, live, encoder);
+        (&own.view, &own.view, 3.0)
     }
 }
 

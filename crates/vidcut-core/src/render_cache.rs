@@ -295,6 +295,7 @@ fn lone(layer: &VideoPiece) -> bool {
 
 fn alone(layer: &VideoPiece) -> VideoPiece {
     let placing = placing(layer);
+    let retimed = retimed(layer);
     let mut out = layer.clone();
     if let VideoPiece::Source {
         super_scale,
@@ -317,12 +318,40 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
                     p.picture.opacity_keys.clear();
                     p.picture.composite_mode = None;
                 }
+                if !retimed {
+                    baked(placed);
+                }
             }
         }
         *cache = ClipCache::Auto;
         *excluded = false;
     }
     out
+}
+
+pub fn baked(placed: &mut [Placed]) {
+    let last = placed
+        .iter()
+        .enumerate()
+        .flat_map(|(i, p)| {
+            p.picture
+                .effects
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| e.on && e.render_cache)
+                .map(move |(j, _)| (i, j))
+        })
+        .last();
+    let Some((i, j)) = last else {
+        return;
+    };
+    for (k, p) in placed.iter_mut().enumerate() {
+        match k.cmp(&i) {
+            std::cmp::Ordering::Less => {}
+            std::cmp::Ordering::Equal => p.picture.effects.truncate(j + 1),
+            std::cmp::Ordering::Greater => p.picture.effects.clear(),
+        }
+    }
 }
 
 fn checked(placed: &[Placed]) -> bool {
@@ -890,6 +919,7 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
 fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>) {
     crate::disk_cache::used(file);
     let placing = placing(layer);
+    let retimed = retimed(layer);
     if let VideoPiece::Source {
         media,
         path,
@@ -900,6 +930,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         color_space,
         super_scale,
         retime,
+        placed,
         made,
         ..
     } = layer
@@ -918,6 +949,11 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
             true => {
                 *super_scale = Default::default();
                 *made = shape;
+                if retimed {
+                    for e in placed.iter_mut().flat_map(|p| &mut p.picture.effects) {
+                        e.render_cache = true;
+                    }
+                }
             }
         }
     }

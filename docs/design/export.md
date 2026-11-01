@@ -424,6 +424,9 @@ A made frame of a speed change ([which source frame](#which-source-frame)):
   - It draws the colors of the made frame with no edges (`blur::opened`).
   - It draws the coverage of the picture, and blurs it by the same effects (`blur::mask_bind`).
   - The layer takes its colors from the first and its alpha from the second.
+- A frame from a file of the render cache holds the effects up to the last checked effect ([playback](playback.md#the-render-cache)).
+  - `VideoFrames` gives it a placement with only these effects (`Sampling::Placed`, `render_cache::baked`). The coverage takes only these effects.
+  - The draw takes the later effects from the placement of the frame. It joins the colors and the coverage into one picture, then blurs it by these effects (`Blurred::made`).
 
 The colors mode (`VideoFrames::colors_only`):
 
