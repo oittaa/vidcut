@@ -2296,11 +2296,13 @@ impl VideoFrames {
                         src.reader.decoding().clone(),
                     )
                 };
+                let at = placed.get(i).map(Vec::as_slice).unwrap_or_default();
                 let frame = if backward {
                     self.reversed_frame(i, s, layer, k)?
                 } else if retimed {
-                    let placed = placed.get(i).map(Vec::as_slice).unwrap_or_default();
-                    self.retimed_frame(i, s, layer, k, placed)?
+                    self.retimed_frame(i, s, layer, k, at)?
+                } else if self.colors && !at.is_empty() {
+                    self.colors_source_frame(i, s, layer, k, at)?
                 } else {
                     self.source_frame(i, s, layer, k)?
                 };
@@ -2744,6 +2746,21 @@ impl VideoFrames {
     ) -> Result<frame::Video> {
         let first = self.open[s].source_frame;
         self.frame_at(i, s, first + Self::step(layer, k), layer)
+    }
+
+    fn colors_source_frame(
+        &mut self,
+        i: usize,
+        s: usize,
+        layer: &VideoPiece,
+        k: i64,
+        placed: &[Placed],
+    ) -> Result<frame::Video> {
+        let pos = self.open[s].source_frame + Self::step(layer, k);
+        let fps = self.fps;
+        let src = &mut self.open[s];
+        src.advance(target(fps, src.origin, pos))?;
+        self.colors_frame(i, s, layer, placed)
     }
 
     fn reversed_frame(

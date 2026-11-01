@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use crate::lru::Lru;
 use crate::model::{ClipCache, CompositeMode, Project, RenderCache, Retime, SuperScale, Upscaler};
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
-use crate::render::{Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
+use crate::render::{Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
 
 pub type Key = [u8; 16];
 
@@ -55,6 +55,7 @@ impl Reason {
         matches!(
             self,
             Self::On
+                | Self::Effect
                 | Self::Media
                 | Self::Speed
                 | Self::Retime(_)
@@ -138,8 +139,8 @@ impl Setup<'_> {
             .zip(layered(piece, self.slow, user))
             .map(|((layer, _), found)| {
                 let mut clip = false;
-                let own = lone(layer)
-                    && self.opaque(layer)
+                let single = lone(layer) && self.opaque(layer);
+                let own = single
                     && !matches!(
                         layer,
                         VideoPiece::Source {
@@ -148,7 +149,11 @@ impl Setup<'_> {
                         }
                     );
                 for r in found.iter().filter(|r| self.kept(r)) {
-                    match r.clip() && own {
+                    let here = match r {
+                        Reason::Effect => single,
+                        _ => own,
+                    };
+                    match r.clip() && here {
                         true => clip = true,
                         false => whole = true,
                     }
@@ -173,7 +178,6 @@ impl Setup<'_> {
         let VideoPiece::Source {
             media,
             super_scale,
-            retime,
             placed,
             ..
         } = layer
@@ -183,7 +187,7 @@ impl Setup<'_> {
         let v = self.project.media(media)?.info.video.as_ref()?;
         let (w, h) = v.display_size();
         let out = (self.look.width, self.look.height);
-        if !retime.is_nearest() {
+        if placing(layer) {
             return Some(out);
         }
         let (size, shape) = match self.look.longest {
@@ -209,16 +213,10 @@ impl Setup<'_> {
     }
 
     fn shape(&self, layer: &VideoPiece) -> Option<Shape> {
-        let VideoPiece::Source {
-            media,
-            retime,
-            placed,
-            ..
-        } = layer
-        else {
+        let VideoPiece::Source { media, placed, .. } = layer else {
             return None;
         };
-        if retime.is_nearest() || placed.is_empty() {
+        if !placing(layer) || placed.is_empty() {
             return None;
         }
         let v = self.project.media(media)?.info.video.as_ref()?;
@@ -265,33 +263,45 @@ impl Setup<'_> {
     }
 }
 
+fn retimed(layer: &VideoPiece) -> bool {
+    matches!(
+        layer,
+        VideoPiece::Source { image, retime, .. }
+            if !retime.is_nearest() && !matches!(image, Some(Image::Still))
+    )
+}
+
+fn placing(layer: &VideoPiece) -> bool {
+    retimed(layer) || matches!(layer, VideoPiece::Source { placed, .. } if checked(placed))
+}
+
 fn lone(layer: &VideoPiece) -> bool {
     matches!(
         layer,
-        VideoPiece::Source { image: None, retime, placed, pace, .. }
-            if retime.is_nearest() || placed.is_empty() || pace.speed() > 0.0
+        VideoPiece::Source { image: image @ (None | Some(Image::Still)), placed, pace, .. }
+            if !placing(layer) || placed.is_empty() || pace.speed() > 0.0 || image.is_some()
     )
 }
 
 fn alone(layer: &VideoPiece) -> VideoPiece {
+    let placing = placing(layer);
     let mut out = layer.clone();
     if let VideoPiece::Source {
         super_scale,
-        retime,
         placed,
         cache,
         excluded,
         ..
     } = &mut out
     {
-        match (retime.is_nearest(), super_scale.ai()) {
-            (false, _) => {}
-            (true, true) => super_scale.sharpness = Default::default(),
-            (true, false) => *super_scale = Default::default(),
+        match (placing, super_scale.ai()) {
+            (true, _) => {}
+            (false, true) => super_scale.sharpness = Default::default(),
+            (false, false) => *super_scale = Default::default(),
         }
-        match retime.is_nearest() {
-            true => placed.clear(),
-            false => {
+        match placing {
+            false => placed.clear(),
+            true => {
                 for p in placed.iter_mut() {
                     p.picture.opacity = None;
                     p.picture.opacity_keys.clear();
@@ -540,7 +550,7 @@ impl Cache {
         if let Some(keys) = self.keys.get(&memo) {
             return Some(keys.clone());
         }
-        let retimed = matches!(&alone, VideoPiece::Source { retime, .. } if !retime.is_nearest());
+        let retimed = retimed(&alone);
         let keys: Arc<[Key]> = (0..alone.frames())
             .map(|k| {
                 let mut one = alone.part(k, 1);
@@ -846,6 +856,7 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
 
 fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>) {
     crate::disk_cache::used(file);
+    let placing = placing(layer);
     if let VideoPiece::Source {
         media,
         path,
@@ -867,12 +878,12 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         *image = None;
         *pace = Default::default();
         *color_space = Default::default();
-        match retime.is_nearest() {
-            true if super_scale.ai() => super_scale.upscaler = Upscaler::Classic,
-            true => {}
-            false => {
+        *retime = Default::default();
+        match placing {
+            false if super_scale.ai() => super_scale.upscaler = Upscaler::Classic,
+            false => {}
+            true => {
                 *super_scale = Default::default();
-                *retime = Default::default();
                 *made = shape;
             }
         }
