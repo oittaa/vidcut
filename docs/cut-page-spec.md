@@ -2710,7 +2710,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A move, a split, a trim or an edit on another track keeps it.
     - Without a Retime Process or a checked effect, it holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Super Scale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
-    - Media with an alpha channel stays at the timeline level.
+    - Media with an alpha channel is at the clip level only with ProRes 4444 or 4444 XQ (p. 201). Its file then keeps the alpha channel.
+      - With a checked effect, or with a Retime Process while it plays forward, it stays at the timeline level. Why: its file holds only the colors of the placed clip.
+      - With another codec, it stays at the timeline level.
   - The timeline level keeps the frame after the tracks mix. It holds the other reasons.
     - Titles on top of all tracks stay out of it. Thus an edit of their text keeps the cache.
     - A part that moves keeps its cache when the tracks under it stay the same.
@@ -2733,6 +2735,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A chosen codec goes to the encoder as it is. No other codec takes its place.
     - When no encoder on this computer makes it, the cache stays empty. Preferences then says so under Codec, and `cache.status` gives the error.
     - DNxHR LB, SQ and HQ have 8 bits. Thus an HDR timeline gets no cache with them.
+    - DNxHR 444 files keep no alpha channel. The DNxHR encoder of FFmpeg has no pixel format with alpha.
     - A change of the codec renders the cache again. The files of the other codec stay until Delete Render Cache > Unused removes them.
   - The cache files are in `render-cache` in the folder of playback files, beside the proxies (X26, X103).
     - Proxies and Render Cache > Folder sets that folder for proxies and the render cache.

@@ -151,6 +151,7 @@ struct Layout {
     depth: u32,
     shift: u32,
     planes: Vec<Plane>,
+    alpha: bool,
 }
 
 fn layout_of(pixel: format::Pixel) -> Option<Layout> {
@@ -181,6 +182,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
             depth,
             shift: 0,
             planes,
+            alpha: false,
         }
     };
     let paired = |depth: u32, shift: u32, sub: (u32, u32)| {
@@ -196,6 +198,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
                 plane(LUMA, luma, texel, (0, 0)),
                 plane(PAIR, pair, texel * 2, sub),
             ],
+            alpha: false,
         }
     };
     Some(match pixel {
@@ -223,6 +226,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
             depth: 8,
             shift: 0,
             planes: vec![plane(RGBA, T::Rgba8Uint, 4, (0, 0))],
+            alpha: false,
         },
         P::RGB24 => Layout {
             depth: 8,
@@ -231,6 +235,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
                 packed: true,
                 ..plane(RGBA, T::Rgba8Uint, 4, (0, 0))
             }],
+            alpha: false,
         },
         P::RGB48LE => Layout {
             depth: 16,
@@ -239,6 +244,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
                 packed: true,
                 ..plane(RGBA, T::Rgba16Uint, 8, (0, 0))
             }],
+            alpha: false,
         },
         _ => return None,
     })
@@ -283,6 +289,11 @@ fn params(layout: &Layout, plane: &Plane, (from, to): (Option<Hdr>, Option<Hdr>)
         .flat_map(|v| (*v as f32).to_le_bytes())
         .chain(words.iter().flatten().flat_map(|v| v.to_le_bytes()))
         .chain(site.iter().flat_map(|v| (*v as f32).to_le_bytes()))
+        .chain(
+            [u32::from(layout.alpha), 0, 0, 0]
+                .iter()
+                .flat_map(|v| v.to_le_bytes()),
+        )
         .collect()
 }
 
@@ -321,7 +332,14 @@ struct Made {
     offset: u64,
 }
 
-type Key = (format::Pixel, (u32, u32), Option<Hdr>, Option<Hdr>, Target);
+type Key = (
+    format::Pixel,
+    (u32, u32),
+    Option<Hdr>,
+    Option<Hdr>,
+    Target,
+    bool,
+);
 
 const SLOTS: usize = 2;
 
@@ -415,6 +433,10 @@ impl Screen {
         }
     }
 
+    pub(crate) fn keep_alpha(&mut self, alpha: bool) {
+        self.alpha = alpha;
+    }
+
     pub(crate) fn spent(&self) -> (Duration, Duration) {
         self.spent
     }
@@ -431,8 +453,9 @@ impl Screen {
             .as_ref()
             .ok_or_else(|| Error::Invalid("nothing was drawn for the encoder".into()))?;
         let size = wide.size;
-        let layout = layout_of(pixel)
+        let mut layout = layout_of(pixel)
             .ok_or_else(|| Error::Invalid(format!("the GPU can't make frames in {pixel:?}")))?;
+        layout.alpha = self.alpha && layout.planes.iter().any(|p| p.kind == ALPHA);
         let target = sink.target();
         let deep = pixel == format::Pixel::RGB48LE;
         if target == Target::Held && pixel != format::Pixel::RGB24 && !deep {
@@ -440,7 +463,7 @@ impl Screen {
                 "the GPU holds RGB24 and RGB48 pictures, not {pixel:?}"
             )));
         }
-        let key = Some((pixel, size, colors.0, colors.1, target));
+        let key = Some((pixel, size, colors.0, colors.1, target, layout.alpha));
         if self.encoded.key != key {
             self.encoded.key = None;
             self.encoded.slots.clear();

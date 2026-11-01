@@ -279,6 +279,8 @@ const RESIZE: u32 = 4;
 
 const WIDENS: u32 = 8;
 
+const ALPHA: u32 = 16;
+
 const ALPHA_OF_16: u32 = 2;
 
 pub fn kernel(sharp: Option<vidcut_core::model::Sharpness>) -> u32 {
@@ -1011,6 +1013,7 @@ pub struct Screen {
     letters: Vec<Letters>,
     imports_before: u64,
     exported: bool,
+    alpha: bool,
     encoded: out::Encoded,
     spent: (std::time::Duration, std::time::Duration),
     blurred: blur::Blurred,
@@ -1508,6 +1511,7 @@ impl Screen {
             }
         }
         let exported = self.exported;
+        let alpha = self.alpha;
         let clock = std::time::Instant::now();
         self.blurred.sized(size, n);
         let blurred = &mut self.blurred;
@@ -1548,7 +1552,7 @@ impl Screen {
                     0 if exported => RESIZE | WIDENS,
                     k if exported => k | WIDENS,
                     k => k,
-                };
+                } | if alpha { ALPHA } else { 0 };
                 let made = made_with.filter(|_| blurs).and(placing.as_ref());
                 let open = made.map(|(p, l)| (blur::opened(p), *l));
                 let how = (
@@ -1633,7 +1637,10 @@ impl Screen {
             Some(_) => (&gpu.wide_drawing, &gpu.lettering_wide, &gpu.paired_wide),
             None => (&gpu.screen_drawing, &gpu.lettering, &gpu.paired),
         };
-        let mut clear = Some(wgpu::Color::BLACK);
+        let mut clear = Some(match alpha {
+            true => wgpu::Color::TRANSPARENT,
+            false => wgpu::Color::BLACK,
+        });
         if n == 0 {
             drop(begin(&mut encoder, &target.view, clear));
             drop(begin(&mut encoder, canvas, clear.take()));
