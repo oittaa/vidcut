@@ -507,7 +507,7 @@ Reset:
 - `reset` (`reset::plan`, `reset::run`) empties the config, cache and state dirs, except the paths that it keeps:
   - presets, themes and looks (unless `saved`)
   - the downloaded models and kept paid replies (with `keep_downloads`)
-  - a proxy folder set as an absolute path
+  - the folders of playback files set as absolute paths (`PlaybackFiles`)
   - the undo history of the project that its own GUI has open (`Store::history_path`)
 - It compares the paths after it resolves links (`dirs::canonical`). It does not follow a link to reach a kept path. When it removes a link, the folder that the link names stays.
 - It refuses while another GUI runs (the registry). Why: that GUI keeps view settings and folders in memory, and writes them back.

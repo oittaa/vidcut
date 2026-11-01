@@ -3401,6 +3401,7 @@ impl Live {
 
     fn open_project(&mut self, path: &Path, create: Option<project::New>) -> Result<()> {
         let open = OpenProject::open(path, create, self.tx.clone())?;
+        self.render.open(open.store.path());
         let proxies = AvEnv::for_project(open.store.path()).proxy_dir();
         for m in &open.project().media {
             if let Some(proxy) = &m.proxy {
@@ -4512,7 +4513,7 @@ fn shown(mut plan: RenderPlan, super_scale: bool) -> RenderPlan {
     plan
 }
 
-pub(crate) fn render_cache(project: &Project, cancel: Arc<AtomicBool>) -> Result<Value> {
+pub(crate) fn render_cache(project: (&Project, &Path), cancel: Arc<AtomicBool>) -> Result<Value> {
     let super_scale = crate::preferences::load().is_ok_and(|p| p.viewer.super_scale);
     render_cache::render_all(project, super_scale, cancel)
 }

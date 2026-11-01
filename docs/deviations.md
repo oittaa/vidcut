@@ -206,7 +206,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Reset vidcut… on the General page, and `vidcut reset`, restore the state of a fresh install.
   - They reset the preferences, the caches and the recent projects. They also reset the undo histories, except those of open projects.
   - They also reset the view settings, the size and place of the window, and the remembered folders.
-  - They reset presets and themes only when the user asks. They never reset a proxy folder that the user set.
+  - They reset presets and themes only when the user asks. They never reset a folder of playback files that the user set.
   - They do not remove the kept speech models and paid replies while Keep downloaded models and paid replies is on. This setting is on by default.
   - A confirmation comes first. Esc cancels it.
   - Reset vidcut refuses while another vidcut GUI runs, because that GUI would write its settings back.
@@ -413,16 +413,19 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Or it adds a menu item where the Cut page has only a button.
   - No addition changes how an edit works.
 
-## X26. The proxy folder is a preference
+## X26. One folder for proxies and the render cache is a preference
 
 - **Resolve:**
   - Proxies go to the "Proxy generation location" of the project (Project Settings, Working Folders, p. 145).
   - They go in subfolders by the folders of their sources (p. 208).
   - Preferences can put them in a "Proxy" subfolder beside each source instead, or ask for a folder each time (p. 98).
+  - Render cache files go to the "Cache files location" of the project (p. 145).
 - **vidcut:**
-  - One preference, `proxies.folder`, sets the folder.
-  - The default is `proxies` in the project's folder.
+  - One preference, `playback_files.folder`, sets the folder of playback files.
+  - Proxies go to `proxies` in it, and the render cache to `render-cache`.
+  - The default is the project's folder.
   - A relative folder is in the project's folder. All projects share an absolute folder.
+  - A second preference, `playback_files.render_cache`, sets a folder for the render cache only.
   - The name of a proxy comes from the content fingerprint, the size and the modification time of its source.
   - The project names the proxy by its file alone.
   - Thus projects that use the same file find and play one proxy. Each computer finds the proxy in its own folder.
@@ -432,6 +435,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - One setting serves the two reasons to move proxies.
   - The first reason is to keep proxies on a local disk while projects and media are on a network drive.
   - The second reason is to make one proxy for intros and outros that several projects use.
+  - The render cache has the same two reasons. Thus the same setting moves it.
+  - The render cache folder of its own keeps the two locations of Resolve. For example, the render cache can go on a faster disk.
 
 ## X27. A dissolve short of media is shortened
 
@@ -2117,7 +2122,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:** all timelines use the rule. On a 1080×1920 timeline, the blur is thus 3% larger than Resolve's.
 - **Why:** the measurements do not explain the 3%. The rule fits each landscape timeline that was measured.
 
-## X103. One render cache, made in the background
+## X103. The render cache is made in the background
 
 - **Resolve:**
   - Resolve caches the parts to cache while they play. It also caches in the background, after a number of seconds without changes (pp. 199–206).
@@ -2128,7 +2133,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Smart caches speed effects and Fusion effects. The manual does not name the upscaler or frame rate conversion for Smart.
 - **vidcut:**
   - Playback does not write the cache. Only the background render writes it ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-  - One cache serves all projects. It is a part of the disk cache, under its limit. The least recently used files go first.
+  - The cache is in `render-cache` beside the proxies of the project, unless set ([X26](#x26-one-folder-for-proxies-and-the-render-cache-is-a-preference)).
+  - Outside the cache dir, it does not count in the limit of the disk cache. No preference deletes old files. Delete Render Cache removes them.
+  - The background render stops when the disk has less than 10% free.
   - With proxies on, the cache has the size of proxies. With the codec on Automatic, it also has their codec.
   - With proxies off, the timeline level has the size of the timeline. The clip level has the size of the media, or of the picture that AI Super Scale enlarges.
     - A clip with a Retime Process has the size of the timeline at the clip level.
@@ -2141,7 +2148,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Smart also renders the parts where frames drop steadily during play ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - The writes of playback would take GPU time from the frames on the screen.
-  - A part that two projects share renders once.
+  - The cache of a project stays with the project, as its proxies do. Thus thumbnails and waveforms do not push it out.
+  - A background render can fill a disk without a sign. Thus it stops while the disk has little free space.
+  - With an absolute folder, a part that two projects share renders once.
   - The size of proxies makes the cache small and fast to play.
   - The codec, the kinds of User mode and the time depend on the computer, not on the project. Its encoders, its decoders and its disk set them.
   - HEVC and AV1 make small files, and the GPU plays them on many computers. An uncompressed file is many times larger than ProRes 422 HQ.

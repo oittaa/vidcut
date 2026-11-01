@@ -474,7 +474,10 @@ impl Env for AvEnv {
 
     fn proxy_dir(&self) -> PathBuf {
         let dir = self.project_dir.clone().unwrap_or_else(paths::cache_dir);
-        self.proxy_rules().folder_in(&dir)
+        crate::preferences::load()
+            .map(|p| p.playback_files)
+            .unwrap_or_default()
+            .proxies_in(&dir)
     }
 
     fn generate_proxy(
@@ -807,7 +810,7 @@ fn speech_options(asked: &Asked) -> Result<vidcut_av::transcribe::Options<'stati
 fn no_room(dir: &Path) -> Error {
     Error::media(format!(
         "{}: the disk cache has no room for this proxy: it stays under cache.limit and keeps \
-         {}% of the disk free; free some space, or set proxies.folder outside the cache dir",
+         {}% of the disk free; free some space, or set playback_files.folder outside the cache dir",
         dir.display(),
         disk_cache::KEEP_FREE_PERCENT
     ))

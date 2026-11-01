@@ -322,7 +322,7 @@ pub fn run_with(
             let editor = store.load_project()?;
             envelope.check_rev(editor.project().rev)?;
             answer(crate::live::render_cache(
-                editor.project(),
+                (editor.project(), store.path()),
                 hooks.cancel.clone(),
             )?)
         }

@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use eframe::egui::{self, RichText};
 use egui_phosphor::regular as icon;
 use serde_json::{Value, json};
-use vidcut_core::preferences::Proxies;
 
 use super::dialog;
 use super::export::{Ask, Picked, near_center};
@@ -22,14 +21,14 @@ pub(super) struct PreferencesUi {
     mbps: String,
     size: String,
     after_secs: String,
-    folder: String,
+    folders: [String; 2],
     player_memory: String,
     video_memory: String,
     audio_outputs: Option<Result<Vec<vidcut_av::player::OutputDevice>, String>>,
     listing:
         Option<std::sync::mpsc::Receiver<Result<Vec<vidcut_av::player::OutputDevice>, String>>>,
     importing: Option<Picked>,
-    choosing_folder: Option<Picked>,
+    choosing_folder: Option<(Folder, Picked)>,
     confirm_reset: bool,
     reset_saved: bool,
     reset_keep: bool,
@@ -39,6 +38,33 @@ pub(super) struct PreferencesUi {
     forgotten: Option<super::workspace::ViewState>,
     fillers: super::fillers::FillerEditor,
     page: Page,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Folder {
+    Files,
+    RenderCache,
+}
+
+impl Folder {
+    const ALL: [Self; 2] = [Self::Files, Self::RenderCache];
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Files => "folder",
+            Self::RenderCache => "render_cache",
+        }
+    }
+
+    fn saved(self, preferences: &Value) -> &str {
+        preferences["playback_files"][self.key()]
+            .as_str()
+            .unwrap_or_default()
+    }
+
+    fn patch(self, path: &Path) -> Value {
+        json!({ "playback_files": { self.key(): path } })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -237,13 +263,14 @@ impl Workspace {
                     ui_state.mbps = n(&p["proxies"]["above_mbps"]);
                     ui_state.size = n(&p["proxies"]["size"]);
                     ui_state.after_secs = n(&p["render_cache"]["after_secs"]);
-                    ui_state.folder = proxy_folder(p).to_string();
+                    ui_state.folders = Folder::ALL.map(|f| f.saved(p).to_string());
                     ui_state.state = Some(r.result);
                     ui_state.error = None;
                 }
                 Err(e) => {
                     if let Some(state) = &ui_state.state {
-                        ui_state.folder = proxy_folder(&state["preferences"]).to_string();
+                        let p = &state["preferences"];
+                        ui_state.folders = Folder::ALL.map(|f| f.saved(p).to_string());
                     }
                     ui_state.error = Some(e.message);
                 }
@@ -257,10 +284,14 @@ impl Workspace {
                 patch = Some(json!({ "appearance": { "theme": path } }));
             }
         }
-        if let Some(picked) = ui_state.choosing_folder.as_ref().and_then(Picked::take) {
+        if let Some((which, picked)) = ui_state
+            .choosing_folder
+            .as_ref()
+            .and_then(|(which, p)| p.take().map(|picked| (*which, picked)))
+        {
             ui_state.choosing_folder = None;
             if let Some(path) = picked {
-                patch = Some(json!({ "proxies": { "folder": path } }));
+                patch = Some(which.patch(&path));
             }
         }
         if let Some(listed) = ui_state.listing.as_ref().and_then(|r| r.try_recv().ok()) {
@@ -1058,12 +1089,6 @@ fn fillers(
     );
 }
 
-fn proxy_folder(preferences: &Value) -> &str {
-    preferences["proxies"]["folder"]
-        .as_str()
-        .unwrap_or_default()
-}
-
 struct Folders<'a> {
     dialogs: &'a std::sync::Arc<dyn super::export::Dialogs>,
     project: Option<&'a Path>,
@@ -1107,14 +1132,7 @@ fn proxies(
                 });
                 ui.end_row();
                 codec(ui, state, busy, patch);
-                folder(
-                    ui,
-                    proxy_folder(&state["preferences"]),
-                    busy,
-                    ui_state,
-                    folders,
-                    patch,
-                );
+                folder(ui, Folder::Files, state, busy, ui_state, folders, patch);
                 let mut auto = proxies["auto"] == true;
                 label(ui, "Automatic");
                 if ui
@@ -1186,7 +1204,7 @@ fn proxies(
             });
             ui.add_space(10.0);
             ui.label(RichText::new("Render Cache").strong());
-            render_cache(ui, state, busy, ui_state, patch);
+            render_cache(ui, state, busy, ui_state, folders, patch);
         },
     );
 }
@@ -1196,6 +1214,7 @@ fn render_cache(
     state: &Value,
     busy: bool,
     ui_state: &mut PreferencesUi,
+    folders: &Folders,
     patch: &mut Option<Value>,
 ) {
     let saved = &state["preferences"]["render_cache"];
@@ -1242,11 +1261,26 @@ fn render_cache(
         ui.end_row();
     });
     let current = saved["codec"].as_str().unwrap_or("auto");
-    dialog::advanced(ui, "render-cache-advanced", current != "auto", |ui| {
-        grid(ui, "preferences-render-cache-advanced", |ui| {
-            cache_codec(ui, state, busy, patch);
-        });
-    });
+    let own = !Folder::RenderCache.saved(&state["preferences"]).is_empty();
+    dialog::advanced(
+        ui,
+        "render-cache-advanced",
+        current != "auto" || own,
+        |ui| {
+            grid(ui, "preferences-render-cache-advanced", |ui| {
+                cache_codec(ui, state, busy, patch);
+                folder(
+                    ui,
+                    Folder::RenderCache,
+                    state,
+                    busy,
+                    ui_state,
+                    folders,
+                    patch,
+                );
+            });
+        },
+    );
 }
 
 fn cache_codec(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>) {
@@ -1296,23 +1330,40 @@ fn by(uses: &str) -> &str {
 
 fn folder(
     ui: &mut egui::Ui,
-    saved: &str,
+    which: Folder,
+    state: &Value,
     busy: bool,
     ui_state: &mut PreferencesUi,
     folders: &Folders,
     patch: &mut Option<Value>,
 ) {
+    let saved = which.saved(&state["preferences"]);
+    let (hint, title, every) = match which {
+        Folder::Files => (
+            "Project Folder",
+            "Folder",
+            "Every project's proxies and render cache are here",
+        ),
+        Folder::RenderCache => (
+            "Folder Above",
+            "Render Cache Folder",
+            "Every project's render cache is here",
+        ),
+    };
     let label = label(ui, "Folder");
+    let text = &mut ui_state.folders[which as usize];
     ui.horizontal(|ui| {
         let r = ui
             .add_enabled(
                 !busy,
-                egui::TextEdit::singleline(&mut ui_state.folder).desired_width(230.0),
+                egui::TextEdit::singleline(text)
+                    .hint_text(hint)
+                    .desired_width(230.0),
             )
             .labelled_by(label.id);
-        let typed = ui_state.folder.trim();
+        let typed = text.trim();
         if r.lost_focus() && !busy && typed != saved {
-            *patch = Some(json!({ "proxies": { "folder": typed } }));
+            *patch = Some(which.patch(Path::new(typed)));
         }
         let choose = ui.add_enabled(
             !busy && ui_state.choosing_folder.is_none(),
@@ -1329,20 +1380,20 @@ fn folder(
             } else {
                 folders.project.map(Path::to_path_buf).unwrap_or_default()
             };
-            ui_state.choosing_folder = Some(Picked::ask(ui.ctx(), move || {
-                dialogs.pick_folder("Proxy Folder", &start)
-            }));
+            let picked = Picked::ask(ui.ctx(), move || dialogs.pick_folder(title, &start));
+            ui_state.choosing_folder = Some((which, picked));
         }
-        let default = Proxies::default().folder;
-        if Path::new(saved) != default
-            && ui.add_enabled(!busy, egui::Button::new("Reset")).clicked()
-        {
-            *patch = Some(json!({ "proxies": { "folder": default } }));
+        if !saved.is_empty() && ui.add_enabled(!busy, egui::Button::new("Reset")).clicked() {
+            *patch = Some(which.patch(Path::new("")));
         }
     });
     ui.end_row();
+    if which == Folder::RenderCache && saved.is_empty() {
+        return;
+    }
     let shown = match folders.project {
-        _ if Path::new(saved).is_absolute() => "Every project's proxies are here".to_string(),
+        _ if Path::new(saved).is_absolute() => every.to_string(),
+        Some(dir) if saved.is_empty() => format!("This project's: {}", dir.display()),
         Some(dir) => format!("This project's: {}", dir.join(saved).display()),
         None => "In each project's folder".to_string(),
     };

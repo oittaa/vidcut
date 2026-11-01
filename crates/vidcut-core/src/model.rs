@@ -712,7 +712,7 @@ impl TimelineColors {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Proxy {
     /// The proxy file's name. Each computer looks for it in its own proxy
-    /// folder (preferences `proxies.folder`), so the project names no
+    /// folder (preferences `playback_files.folder`), so the project names no
     /// computer's folder.
     pub file: String,
     /// [`Media::size`] when the proxy was made.

@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use vidcut_core::model::{Project, RenderCache as Mode};
-use vidcut_core::preferences::{Gpu, Preferences, Proxies, RenderCachePrefs};
+use vidcut_core::preferences::{Gpu, PlaybackFiles, Preferences, Proxies, RenderCachePrefs};
 use vidcut_core::render::RenderPlan;
 use vidcut_core::render_cache::{Cache, Index, Key, Look, Part, Setup};
 
@@ -43,6 +43,8 @@ pub(super) struct Background {
     cache: Arc<Mutex<Cache>>,
     prefs: RenderCachePrefs,
     proxies: Proxies,
+    files: PlaybackFiles,
+    project_dir: Option<PathBuf>,
     gpu: Gpu,
     index: Scan,
     decodes: Arc<HashMap<PathBuf, bool>>,
@@ -83,6 +85,8 @@ impl Background {
             cache: Arc::default(),
             prefs: prefs.render_cache,
             proxies: prefs.proxies.clone(),
+            files: prefs.playback_files.clone(),
+            project_dir: None,
             gpu: prefs.gpu.clone(),
             index: Scan::None,
             decodes: Arc::default(),
@@ -110,14 +114,47 @@ impl Background {
         )
     }
 
+    fn dir(&self) -> PathBuf {
+        let base = self
+            .project_dir
+            .clone()
+            .unwrap_or_else(crate::paths::cache_dir);
+        self.files.render_cache_in(&base)
+    }
+
+    pub(super) fn open(&mut self, project_file: &Path) {
+        let dir = project_file.parent().map(Path::to_path_buf);
+        if self.project_dir != dir {
+            self.stop();
+            self.project_dir = dir;
+            self.moved();
+        }
+    }
+
+    fn moved(&mut self) {
+        self.index = Scan::None;
+        self.done = false;
+        self.error = None;
+        *self.lock().index_mut() = Index::default();
+    }
+
     pub(super) fn follow(&mut self, prefs: &Preferences) -> bool {
         let gpu = self.gpu != prefs.gpu;
-        let changed = gpu || self.prefs != prefs.render_cache || self.proxies != prefs.proxies;
+        let folder = self.files != prefs.playback_files;
+        let changed =
+            gpu || folder || self.prefs != prefs.render_cache || self.proxies != prefs.proxies;
         if changed {
             self.stop();
             self.prefs = prefs.render_cache;
             self.proxies = prefs.proxies.clone();
             self.done = false;
+        }
+        if folder {
+            let before = self.dir();
+            self.files = prefs.playback_files.clone();
+            if self.dir() != before {
+                self.moved();
+            }
         }
         if gpu {
             self.gpu = prefs.gpu.clone();
@@ -213,8 +250,9 @@ impl Background {
     fn scan(&mut self) {
         self.index = Scan::Running;
         let tx = self.tx.clone();
+        let dir = self.dir();
         let _ = crate::threads::spawn("vidcut-render-index", Work::Job, move || {
-            let index = Index::scan(&Index::dir());
+            let index = Index::scan(&dir);
             let _ = tx.send(Msg::RenderCache(Event::Scanned(index)));
         });
     }
@@ -222,7 +260,7 @@ impl Background {
     pub(super) fn event(&mut self, e: Event) -> bool {
         match e {
             Event::Scanned(index) => {
-                if self.index == Scan::Done {
+                if self.index == Scan::Done || index.folder() != Some(&self.dir()) {
                     return false;
                 }
                 *self.lock().index_mut() = index;
@@ -288,6 +326,7 @@ impl Background {
             proxies: self.proxies.clone(),
             decodes: self.decodes.clone(),
             look: self.look(project),
+            dir: self.dir(),
             from,
             cancel: Arc::new(AtomicBool::new(false)),
             tx: Some(self.tx.clone()),
@@ -349,6 +388,7 @@ impl Background {
             "after_secs": self.prefs.after_secs,
             "rendering": self.running.is_some(),
             "size": [look.width, look.height],
+            "folder": self.dir(),
             "parts": parts,
             "files": index.files().count(),
             "frames": index.frames(),
@@ -359,7 +399,7 @@ impl Background {
 
     fn indexed(&mut self) {
         if self.index != Scan::Done {
-            *self.lock().index_mut() = Index::scan(&Index::dir());
+            *self.lock().index_mut() = Index::scan(&self.dir());
             self.index = Scan::Done;
         }
     }
@@ -374,7 +414,7 @@ impl Background {
         self.stopped();
         self.lock().index_mut().clear();
         let mut n = 0;
-        if let Ok(listing) = std::fs::read_dir(Index::dir()) {
+        if let Ok(listing) = std::fs::read_dir(self.dir()) {
             for e in listing.flatten() {
                 let path = e.path();
                 if path.is_file() && std::fs::remove_file(&path).is_ok() {
@@ -433,13 +473,14 @@ impl Background {
 pub(super) type Span = (i64, i64, Option<Vec<String>>);
 
 pub(crate) fn render_all(
-    project: &Project,
+    (project, file): (&Project, &Path),
     show_super_scale: bool,
     cancel: Arc<AtomicBool>,
 ) -> vidcut_core::Result<Value> {
     let prefs = crate::preferences::load().unwrap_or_default();
     let (tx, _rx) = std::sync::mpsc::channel();
     let mut background = Background::new(tx, &prefs);
+    background.open(file);
     background.indexed();
     let end = project.end();
     if end > 0 && project.settings.render_cache != Mode::Off {
@@ -485,6 +526,7 @@ struct Render {
     proxies: Proxies,
     decodes: Arc<HashMap<PathBuf, bool>>,
     look: Look,
+    dir: PathBuf,
     from: i64,
     cancel: Arc<AtomicBool>,
     tx: Option<Sender<Msg>>,
@@ -568,12 +610,13 @@ impl Render {
             let Some(job) = next else {
                 return Ok(true);
             };
+            full(&self.dir)?;
             let written = vidcut_av::render_cache::write(
                 (&job.plan, job.clip),
                 &job.keys,
                 &encoders,
                 gpu.as_ref(),
-                &Index::dir(),
+                &self.dir,
                 &self.cancel,
             );
             match written {
@@ -589,5 +632,17 @@ impl Render {
                 Err(e) => return Err(e.to_string()),
             }
         }
+    }
+}
+
+fn full(dir: &Path) -> Result<(), String> {
+    let keep = vidcut_core::disk_cache::KEEP_FREE_PERCENT;
+    match crate::system::disk(dir) {
+        Some(d) if d.free < d.size / 100 * keep => Err(format!(
+            "{}: the disk has less than {keep}% free; free some space, or set \
+             playback_files.render_cache to another disk",
+            dir.display()
+        )),
+        _ => Ok(()),
     }
 }

@@ -103,7 +103,8 @@ pub fn cache_policy() -> Policy {
 fn policy_of(p: &Preferences) -> Policy {
     Policy {
         cache: p.cache.clone(),
-        proxies: p.proxies.folder_in(&paths::cache_dir()),
+        proxies: p.playback_files.proxies_in(&paths::cache_dir()),
+        render: p.playback_files.render_cache_in(&paths::cache_dir()),
     }
 }
 
