@@ -11,13 +11,6 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 - Resolve caches the checked Resolve FX and OFX of a clip in its node cache, before the tracks mix.
 - The render cache format of a new project in Resolve Studio 21.1.2 is ProRes 422 HQ (`apch`).
 
-## One record of each frame
-
-Each kept layer has a `player::Origin` ([playback](../design/playback.md#the-engine)). It tells what made the layer, the upscaler, when, and how long it took. The render cache uses these records. It adds no second record of how a frame is made.
-
-- **The kept picture:** a cached part keeps the `Id` of the frames that it replaces.
-  - Thus kept pictures, marks and Stats for Nerds name the same frame.
-
 ## Dropped frames
 
 - The numbers of the marks are starting values ([playback](../design/playback.md#the-render-cache)). A measurement changes them, with a plan that the owner accepts first.
@@ -28,6 +21,12 @@ Each kept layer has a `player::Origin` ([playback](../design/playback.md#the-eng
 - The quality values of Auto with proxies off are starting values. A measurement sets them. Its plan goes to the owner first.
 - In an HDR timeline, the cache has 10 bits, in the PQ or HLG of the timeline. This needs a check.
 - The frames that playback made, and that the memory still keeps, go to the cache first. Thus they are not made again.
+  - The render finds the kept picture of a frame by its `Id`. It draws the frame from that picture as from a decoded one.
+  - The `Id` names what the picture shows. A plain picture has no placement in it, and the draw places it.
+  - With AI Super Scale, the `Id` holds the placement, because the placement sets the enlarged size (`source_key`). The draw still places the picture.
+  - With a Retime Process other than Nearest, the picture is made at its placement, and its `Id` holds that placement.
+  - Thus a change of the placement gives these pictures a new `Id`.
+  - A cached frame keeps a name of its own.
 
 ## Differences from Resolve
 
@@ -37,7 +36,6 @@ The owner accepted these. Each goes into [deviations.md](../deviations.md) with 
 
 ## Steps
 
-- **One record of each frame:** the kept `Id`.
 - **Codec, folder and writing:** all items of [Codec, folder and writing](#codec-folder-and-writing).
 - **Dropped frames:** the measurement of the marks.
 
