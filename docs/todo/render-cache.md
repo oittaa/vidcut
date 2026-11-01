@@ -8,8 +8,8 @@ The data comes from the manual, pp. 143–144 and 199–206.
 
 - Apply the effects that are not checked in Render Cache Effects during playback, not in the cache of the clip (p. 202).
 - Keep a clip that plays backward in the cache of the clip.
-- Keep the alpha channel in the cache files of ProRes 4444, ProRes 4444 XQ and DNxHR 444 (p. 201). The DNxHR encoder of FFmpeg has no pixel format with alpha.
-- Then keep a clip with an alpha channel in the cache of the clip.
+- Keep the alpha channel in the cache files of DNxHR 444 (p. 201). The DNxHR encoder of FFmpeg has no pixel format with alpha.
+- Keep a clip with an alpha channel and a Retime Process or a checked effect in the cache of the clip. Its file holds only the colors of the placed clip.
 - Show a different bar on the ruler for each cache (p. 203).
 - Add the window Playback > Manage Render Cache (p. 206).
 - Find the cache that Resolve uses for speed changes and Retime Processes. Then use the same cache.

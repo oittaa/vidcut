@@ -177,11 +177,21 @@ impl ProxyEncoder {
         format!("{}, {what}", grade.name())
     }
 
-    fn cache_encoder(&self, hdr: Option<Hdr>, grade: Option<CacheCodec>) -> Option<VideoEncoder> {
+    fn cache_encoder(
+        &self,
+        hdr: Option<Hdr>,
+        grade: Option<CacheCodec>,
+        alpha: bool,
+    ) -> Option<VideoEncoder> {
         let pixel = match (grade, hdr) {
             (Some(g), _) => self.grade_pixel(g),
             (None, Some(_)) => self.pixel(format::Pixel::YUV420P10LE),
             (None, None) => self.pixel(format::Pixel::YUV420P),
+        };
+        let pixel = match (alpha, self.name.as_str(), pixel) {
+            (false, ..) => pixel,
+            (true, "prores_ks", format::Pixel::YUV444P10LE) => format::Pixel::YUVA444P10LE,
+            (true, ..) => return None,
         };
         if hdr.is_some() && !deep(pixel) {
             return None;
@@ -666,15 +676,19 @@ pub(crate) enum Failed {
 pub(crate) type Origins = Vec<Option<crate::player::Origin>>;
 
 pub(crate) fn encode_plan(
-    (plan, start, layer): (&vidcut_core::render::RenderPlan, i64, Option<usize>),
+    (plan, start, layer, alpha): (&vidcut_core::render::RenderPlan, i64, Option<usize>, bool),
     (enc, grade): (&ProxyEncoder, Option<CacheCodec>),
     tmp: &Path,
     (decoder, kept): (Option<&crate::hw::GpuDecoder>, Option<&crate::player::Kept>),
     cancel: &std::sync::atomic::AtomicBool,
 ) -> std::result::Result<(u64, Vec<Origins>), Failed> {
-    let Some(video) = enc.cache_encoder(plan.colors, grade) else {
+    let Some(video) = enc.cache_encoder(plan.colors, grade, alpha) else {
+        let what = match alpha {
+            true => "keep the alpha channel of this clip",
+            false => "make this timeline's pictures",
+        };
         return Err(Failed::Opening(Error::Invalid(format!(
-            "{} cannot make this timeline's pictures",
+            "{} cannot {what}",
             enc.name
         ))));
     };
@@ -711,6 +725,9 @@ pub(crate) fn encode_plan(
         }
         if layer.is_some() {
             frames = frames.colors_only();
+        }
+        if alpha {
+            frames = frames.keeping_alpha();
         }
         let kept = kept.filter(|k| k.fits(plan, layer));
         for j in 0..plan.frames {

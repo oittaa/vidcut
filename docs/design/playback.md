@@ -385,8 +385,9 @@ The two levels (spec D98):
 - A reason of a layer goes to the clip level only when all these are true. Otherwise it goes to the timeline level.
   - It is a video file or a still (`lone`). A placed video file with a Retime Process or a checked effect also plays forward.
     - Why: a placed layer at the clip level needs the colors of each frame (`Look::whole`). The export draws them only forward. It also makes the frames between two source frames only forward ([export](export.md#which-source-frame)).
-  - Its media has no alpha channel (`Setup::opaque`).
-    - Why: the cache files have no alpha channel. The tracks below would not show through the clip.
+  - Its media has no alpha channel (`Setup::opaque`). Or the codec is ProRes 4444 or 4444 XQ, and the layer has no Retime Process or checked effect (`Setup::keeps_alpha`).
+    - Why: only the files of these codecs keep the alpha channel. Without it, the tracks below would not show through the clip.
+    - A placed layer keeps no alpha in its file. Its file holds only the colors (`Look::whole`).
   - Its clip is not set to `ClipCache::Off`. This rule does not apply to `Reason::Effect` (spec D98).
 - A still has no Retime Process (`retimed`), as in the export. Thus a still keeps its placement in a job of the clip level only with a checked effect.
 - `Cache::apply` puts the timeline level first. Where a frame of the timeline level is not there, it puts each found frame of the clip level in place of the layer (`from_file`).
@@ -471,6 +472,11 @@ The jobs:
   - At the clip level, the plan holds the one layer (`clip_plan`). Without a Retime Process or a checked effect, it has no placement and the size of the media. With an AI upscaler, the plan has the size of the enlarged picture, and the layer keeps its `super_scale`.
   - With a Retime Process or a checked effect, the plan has the size of the `Look`. The layer keeps its `retime`, its `super_scale` and its `placed`.
   - A job of the clip level draws in the colors mode of the export (`VideoFrames::colors_only`). Thus a placed layer gives its made frames, with no edges and no alpha ([export](export.md#effects)).
+  - The job of a layer with an alpha channel keeps the alpha (`Job::alpha`, `VideoFrames::keeping_alpha`).
+    - Only the CPU encoder of ProRes 4444 and 4444 XQ takes it, in `YUVA444P10LE` (`cache_encoder`). Another encoder refuses the job. Then the next encoder takes it.
+    - Why not Apple's encoder: vidcut gives it P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
+    - The draw clears the frame to transparent and writes the alpha of the layer (`Screen::keep_alpha`).
+    - The encoder writes that alpha in the alpha plane. It writes the colors without the alpha in them, as the straight alpha of ProRes.
   - At the same place, the clip level renders first. Then the render goes on from there at the timeline level.
 - The background render starts at the frames that playback made before the playhead (`Kept::played_from`).
   - It goes back from the playhead while the store keeps the picture of each frame.

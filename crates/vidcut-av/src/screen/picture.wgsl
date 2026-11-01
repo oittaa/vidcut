@@ -533,14 +533,16 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
         }
         return placed(px);
     }
+    let keeps = (p.flags.w & 16u) != 0u;
     let rel = (px - p.place.xy) / p.place.zw;
     if any(rel < vec2<f32>(0.0)) || any(rel >= vec2<f32>(1.0)) {
-        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        return vec4<f32>(0.0, 0.0, 0.0, select(1.0, 0.0, keeps));
     }
     let cover = p.upright.xy / p.place.zw;
     let a = opacity(rel);
+    let solid = select(1.0, a, keeps);
     if resamples(cover) {
-        return vec4<f32>(sharp(rel, cover) * a, 1.0);
+        return vec4<f32>(sharp(rel, cover) * a, solid);
     }
     let taps = vec2<u32>(clamp(ceil(cover), vec2<f32>(1.0), vec2<f32>(8.0)));
     let step = vec2<f32>(1.0) / (p.place.zw * vec2<f32>(taps));
@@ -551,7 +553,7 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
             sum += pixel(first + vec2<f32>(f32(i), f32(j)) * step);
         }
     }
-    return vec4<f32>(sum / f32(taps.x * taps.y) * a, 1.0);
+    return vec4<f32>(sum / f32(taps.x * taps.y) * a, solid);
 }
 
 struct Lettering {
@@ -805,6 +807,7 @@ struct Encoding {
     how: vec4<u32>,
     plane: vec4<u32>,
     site: vec4<f32>,
+    alpha: vec4<u32>,
 };
 
 @group(0) @binding(10) var<uniform> encoding: Encoding;
@@ -828,10 +831,16 @@ fn encoded_rgb(code: vec3<f32>) -> vec3<f32> {
     return clamp(encode(c, wanted), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
-fn pixel_at(x: i32, y: i32) -> vec3<f32> {
+fn drawn_at(x: i32, y: i32) -> vec4<f32> {
     let size = vec2<i32>(textureDimensions(timeline));
     let at = clamp(vec2<i32>(x, y), vec2<i32>(0), size - vec2<i32>(1));
-    return encoded_rgb(textureLoad(timeline, at, 0).rgb);
+    return textureLoad(timeline, at, 0);
+}
+
+fn pixel_at(x: i32, y: i32) -> vec3<f32> {
+    let c = drawn_at(x, y);
+    let straight = encoding.alpha.x == 1u && c.a > 0.0;
+    return encoded_rgb(select(c.rgb, c.rgb / c.a, straight));
 }
 
 fn output_ycc(c: vec3<f32>) -> vec3<f32> {
@@ -882,7 +891,9 @@ fn encoded_at(px: vec2<i32>) -> vec4<u32> {
         let cr = code_of(c.y, 128.0, 224.0);
         out = select(vec4<u32>(cb, cr, 0u, 0u), vec4<u32>(cr, 0u, 0u, 0u), kind == 3u);
     } else if kind == 4u {
-        out.x = ((1u << encoding.how.z) - 1u) << encoding.how.w;
+        let top = (1u << encoding.how.z) - 1u;
+        let a = select(1.0, clamp(drawn_at(px.x, px.y).a, 0.0, 1.0), encoding.alpha.x == 1u);
+        out.x = u32(round(a * f32(top))) << encoding.how.w;
     } else {
         let top = (1u << encoding.how.z) - 1u;
         out = vec4<u32>(vec3<u32>(round(pixel_at(px.x, px.y) * f32(top))), top);

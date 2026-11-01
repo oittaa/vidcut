@@ -139,7 +139,7 @@ impl Setup<'_> {
             .zip(layered(piece, self.slow, user))
             .map(|((layer, _), found)| {
                 let mut clip = false;
-                let single = lone(layer) && self.opaque(layer);
+                let single = lone(layer) && (self.opaque(layer) || self.keeps_alpha(layer));
                 let own = single
                     && !matches!(
                         layer,
@@ -172,6 +172,14 @@ impl Setup<'_> {
             .media(media)
             .and_then(|m| m.info.video.as_ref())
             .is_some_and(|v| !v.alpha)
+    }
+
+    fn keeps_alpha(&self, layer: &VideoPiece) -> bool {
+        let alpha = matches!(
+            self.prefs.codec,
+            CacheCodec::Prores4444 | CacheCodec::Prores4444Xq
+        );
+        alpha && !placing(layer)
     }
 
     fn sized(&self, layer: &VideoPiece) -> Option<(u32, u32)> {
@@ -725,6 +733,7 @@ impl Cache {
                 plan: clip_plan(plan, alone, size),
                 keys: run,
                 layer: Some(i),
+                alpha: !setup.opaque(&layer),
             });
         }
         let first = later.or((!whole.is_empty()).then_some(0))?;
@@ -740,6 +749,7 @@ impl Cache {
             plan: segment(plan, setup.look, start, run.len() as i64),
             keys: run,
             layer: None,
+            alpha: false,
         })
     }
 
@@ -825,6 +835,7 @@ pub struct Job {
     pub keys: Vec<Key>,
     pub plan: RenderPlan,
     pub layer: Option<usize>,
+    pub alpha: bool,
 }
 
 fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {

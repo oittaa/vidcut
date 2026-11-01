@@ -1609,6 +1609,7 @@ pub struct VideoFrames {
     spent: (Duration, Duration),
     smoother: Option<(Retime, crate::interpolate::User)>,
     colors: bool,
+    alpha: bool,
 }
 
 pub(crate) enum Handoff {
@@ -1916,6 +1917,7 @@ impl VideoFrames {
             spent: Default::default(),
             smoother: None,
             colors: false,
+            alpha: false,
         }
     }
 
@@ -1985,6 +1987,11 @@ impl VideoFrames {
         self
     }
 
+    pub(crate) fn keeping_alpha(mut self) -> Self {
+        self.alpha = true;
+        self
+    }
+
     pub fn decoded_on(&self) -> Option<crate::hw::Kind> {
         self.last_decoder
     }
@@ -2039,7 +2046,8 @@ impl VideoFrames {
 
     fn start_drawing(&mut self) -> Result<()> {
         if self.drawer.is_none() {
-            let drawer = Drawer::new(self.encoder.take())?;
+            let mut drawer = Drawer::new(self.encoder.take())?;
+            drawer.screen.keep_alpha(self.alpha);
             let (out, reading) = (self.maker.out(), self.maker.reading());
             self.maker = Maker::new(out, drawer.keeps(), reading).holding().drawing();
             self.drawer = Some(drawer);

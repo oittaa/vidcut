@@ -613,7 +613,7 @@ impl Render {
             };
             full(&self.dir)?;
             let written = vidcut_av::render_cache::write(
-                (&job.plan, job.start, job.layer),
+                (&job.plan, job.start, job.layer, job.alpha),
                 &job.keys,
                 &encoders,
                 (gpu.as_ref(), Some(&kept)),
