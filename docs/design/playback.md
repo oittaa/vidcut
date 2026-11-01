@@ -562,7 +562,11 @@ The background render (`live::render_cache::Background`):
   - `cache.status` gives the folder of the cache.
   - All also removes the marks (`Index::clear`).
   - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
-  - All removes each file of the folder (`render_caches::empty`). Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
+  - All removes the frames of the open timeline and its drop marks (`Background::delete_open`).
+    - It keeps a file another opened project in that folder still names (`render_caches::preserved_keys`).
+    - With no such file, it removes each file in the folder (`render_caches::empty`).
+  - Unused keeps the open timeline and those other frames (`Index::keep_only`).
+  - Clips removes the files that hold frames of the clips (`Index::drop_with`).
     - At the clip level, `Cache::names` gives only the frames of the media of each clip.
     - A compound clip gives the media of the clips in it (`otio::played_by`).
 

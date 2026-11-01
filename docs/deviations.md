@@ -2188,10 +2188,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Project Library is the folder that holds the project file.
   - Projects whose render cache is in one folder share a row. Clear Selected Cache clears that folder for all of them.
     - By default, the projects in one folder share a render cache folder ([X103](#x103-the-render-cache-is-made-in-the-background)).
+  - Delete Render Cache > All and Unused keep a file that another project in that folder still names.
 - **Why:**
   - Without libraries, the projects that vidcut opened are the projects that it knows.
   - The folder of a project file is the nearest thing to a library.
-  - The files of a cache folder have names from their content. Thus two projects can share a file, and vidcut can clear only the full folder.
+  - The files of a cache folder have names from their content. Thus two projects can share a file.
+  - Clear Selected Cache clears the whole folder. All and Unused leave a file another project still names.
 
 ## X106. A clip with an alpha channel is cached with the tracks mixed
 

@@ -3765,11 +3765,25 @@ impl Live {
         clips: Option<vidcut_core::request::OneOrMany<vidcut_core::request::ClipRef>>,
     ) -> Result<Response> {
         use vidcut_core::request::CacheDelete;
-        let p = self.project.as_ref().ok_or_else(no_project)?.project();
+        let open = self.project.as_ref().ok_or_else(no_project)?;
+        let p = open.project();
+        let path = open.store.path();
         let playhead = Some(self.player.position(TIMELINE));
         let deleted = match (what, clips) {
-            (CacheDelete::All, None) => self.render.delete_all(),
-            (CacheDelete::Unused, None) => self.render.delete_unused(p),
+            (CacheDelete::All, None) => {
+                let keep = crate::render_caches::preserved_keys(
+                    path,
+                    &crate::render_caches::opened_projects(),
+                )?;
+                self.render.delete_open(p, &keep)
+            }
+            (CacheDelete::Unused, None) => {
+                let keep = crate::render_caches::preserved_keys(
+                    path,
+                    &crate::render_caches::opened_projects(),
+                )?;
+                self.render.delete_unused(p, &keep)
+            }
             (CacheDelete::Clips, Some(refs)) => {
                 let mut ranges = Vec::new();
                 for r in refs.to_vec() {

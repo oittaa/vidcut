@@ -420,6 +420,36 @@ impl Background {
         crate::render_caches::empty(&self.dir())
     }
 
+    pub(super) fn delete_open(&mut self, project: &Project, keep: &HashSet<Key>) -> usize {
+        self.stopped();
+        if keep.is_empty() {
+            self.lock().index_mut().clear();
+            return crate::render_caches::empty(&self.dir());
+        }
+        let marks = self.piece_marks(project);
+        let mut cache = self.lock();
+        cache.index_mut().forget(&marks);
+        cache.index_mut().keep_only(keep)
+    }
+
+    fn piece_marks(&mut self, project: &Project) -> HashSet<Key> {
+        let Some(base) = self.base.clone() else {
+            return HashSet::new();
+        };
+        let look = self.look(project);
+        let decodes = self.decodes.clone();
+        let slow = |id: &str| slow_media(project, &self.proxies, &decodes, id);
+        let setup = Setup {
+            mode: Mode::Smart,
+            prefs: &self.prefs,
+            project,
+            slow: &slow,
+            upscaled: &vidcut_av::export::video::ai_size,
+            look: &look,
+        };
+        self.lock().marks_of(&base, &setup)
+    }
+
     pub(super) fn delete_frames(&mut self, project: &Project, ranges: &[Span]) -> usize {
         self.stopped();
         let Some(base) = self.base.clone() else {
@@ -440,7 +470,7 @@ impl Background {
         cache.index_mut().drop_with(&keys)
     }
 
-    pub(super) fn delete_unused(&mut self, project: &Project) -> usize {
+    pub(super) fn delete_unused(&mut self, project: &Project, also: &HashSet<Key>) -> usize {
         self.stopped();
         let Some(base) = self.base.clone() else {
             return 0;
@@ -457,7 +487,8 @@ impl Background {
         };
         let mut cache = self.lock();
         let all = [(base.range.0, base.range.1, None)];
-        let keys = keys_in(&mut cache, &base, &setup, &all);
+        let mut keys = keys_in(&mut cache, &base, &setup, &all);
+        keys.extend(also.iter().copied());
         cache.index_mut().keep_only(&keys)
     }
 }
@@ -643,5 +674,42 @@ fn full(dir: &Path) -> Result<(), String> {
             dir.display()
         )),
         _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+    use std::sync::mpsc;
+
+    use vidcut_core::model::{Project, Settings};
+    use vidcut_core::preferences::Preferences;
+
+    use super::{Background, Scan};
+
+    #[test]
+    fn all_keeps_a_frame_another_project_names() {
+        let root = tempfile::tempdir().unwrap();
+        let mut prefs = Preferences::default();
+        prefs.playback_files.render_cache = root.path().to_path_buf();
+        let (tx, _rx) = mpsc::channel();
+        let mut bg = Background::new(tx, &prefs);
+        bg.open(std::path::Path::new("/projects/one.vidcut"));
+        bg.index = Scan::Done;
+        let keep_file = root.path().join("keep.mkv");
+        let drop_file = root.path().join("drop.mkv");
+        std::fs::write(&keep_file, b"keep").unwrap();
+        std::fs::write(&drop_file, b"drop").unwrap();
+        let keep_key = [1u8; 16];
+        let drop_key = [2u8; 16];
+        {
+            let mut cache = bg.lock();
+            cache.index_mut().add(&keep_file, &[keep_key]);
+            cache.index_mut().add(&drop_file, &[drop_key]);
+        }
+        let project = Project::new(Settings::default());
+        assert_eq!(bg.delete_open(&project, &HashSet::from([keep_key])), 1);
+        assert_eq!(std::fs::read(&keep_file).unwrap(), b"keep");
+        assert!(!drop_file.exists());
     }
 }

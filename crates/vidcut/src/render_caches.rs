@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -18,6 +18,36 @@ fn stored() -> Vec<PathBuf> {
 
 fn known() -> Vec<PathBuf> {
     stored().into_iter().filter(|p| p.is_file()).collect()
+}
+
+pub(crate) fn opened_projects() -> Vec<PathBuf> {
+    stored()
+}
+
+pub(crate) fn preserved_keys(
+    open: &Path,
+    projects: &[PathBuf],
+) -> Result<HashSet<vidcut_core::render_cache::Key>> {
+    let prefs = crate::preferences::load().unwrap_or_default();
+    let open = canonical(open);
+    let mine = folder(&prefs.playback_files, &open);
+    let upscaled = &vidcut_av::export::video::ai_size;
+    let mut keep = HashSet::new();
+    for path in projects {
+        let path = canonical(path);
+        if path == open || !path.is_file() || folder(&prefs.playback_files, &path) != mine {
+            continue;
+        }
+        let store = vidcut_core::store::Store::open(&path)?;
+        let editor = store.load_project()?;
+        keep.extend(vidcut_core::render_cache::named_frames(
+            editor.project(),
+            &prefs.render_cache,
+            &prefs.proxies,
+            upscaled,
+        )?);
+    }
+    Ok(keep)
 }
 
 pub fn remember(project: &Path) {
@@ -164,4 +194,32 @@ pub fn clear(
         })
         .collect();
     Ok(json!({ "cleared": cleared }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preserved_keys;
+    use vidcut_core::model::{Project, Settings};
+    use vidcut_core::store::Store;
+
+    #[test]
+    fn a_project_that_cannot_be_read_blocks_the_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let open = dir.path().join("open.vidcut");
+        let bad = dir.path().join("bad.vidcut");
+        Store::create(&open, &Project::new(Settings::default())).unwrap();
+        std::fs::write(&bad, b"nope").unwrap();
+        assert!(preserved_keys(&open, &[bad]).is_err());
+    }
+
+    #[test]
+    fn an_empty_neighbor_names_no_frames() {
+        let dir = tempfile::tempdir().unwrap();
+        let open = dir.path().join("open.vidcut");
+        let other = dir.path().join("other.vidcut");
+        let project = Project::new(Settings::default());
+        Store::create(&open, &project).unwrap();
+        Store::create(&other, &project).unwrap();
+        assert!(preserved_keys(&open, &[other]).unwrap().is_empty());
+    }
 }
