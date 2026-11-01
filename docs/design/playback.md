@@ -547,6 +547,7 @@ The background render (`live::render_cache::Background`):
 - `Background::tick` reads a `Mark` at each turn of the live core: the revision, the playhead, the play and the jobs.
 - A changed `Mark`, a play, a job or a `Background::touch` is activity. Each activity stops the render at once (`AtomicBool`).
   - A stopped job can end after the next job starts. Its end message carries its `AtomicBool`, and `Background::event` ignores it unless it names the running job.
+  - A change of the plan stops the render (`Background::apply`). A late end of that render does not mark the new plan done.
   - The live core touches it for the previews of a change: titles, pictures, audition, skips and the history.
 - After `render_cache.after_secs` without activity, `vidcut-render-cache` starts (`Work::Job`).
   - It renders from the playhead forward, then from the start.
