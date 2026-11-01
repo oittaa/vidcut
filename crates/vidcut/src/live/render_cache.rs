@@ -613,7 +613,7 @@ impl Render {
             };
             full(&self.dir)?;
             let written = vidcut_av::render_cache::write(
-                (&job.plan, job.clip),
+                (&job.plan, job.start, job.layer),
                 &job.keys,
                 &encoders,
                 (gpu.as_ref(), Some(&kept)),
@@ -624,9 +624,9 @@ impl Render {
                 Ok(w) => {
                     self.lock().index_mut().add(&w.path, &job.keys);
                     self.send(Event::Written);
-                    from = match job.clip {
-                        true => job.start,
-                        false => job.start + job.keys.len() as i64,
+                    from = match job.layer {
+                        Some(_) => job.start,
+                        None => job.start + job.keys.len() as i64,
                     };
                 }
                 Err(_) if self.cancel.load(Ordering::Relaxed) => return Ok(false),

@@ -2717,7 +2717,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Each activity stops the render at once. The render continues later.
     - It renders from the playhead forward, then from the start of the timeline.
     - Where the memory keeps the frames that played before the playhead, it starts at the first of them (X103).
-    - At the timeline level, with proxies off and no HDR, it draws a frame that the memory keeps. It does not make it again.
+    - With proxies off and no HDR, it draws a frame that the memory keeps. It does not make it again.
+    - At the clip level, this is so for a clip without a Retime Process.
     - `render_cache.background` turns it off. Then the cache keeps what it has, and renders nothing new.
   - The codec of the cache files is a preference of this computer (X103). Proxies and Render Cache > Advanced > Codec sets it. `render_cache.codec` also sets it.
     - It is Automatic, unless set. With proxies on, Automatic takes the codec of proxies. With proxies off, it takes ProRes 422 HQ, HEVC or AV1 ([playback](design/playback.md#the-render-cache)).

@@ -666,7 +666,7 @@ pub(crate) enum Failed {
 pub(crate) type Origins = Vec<Option<crate::player::Origin>>;
 
 pub(crate) fn encode_plan(
-    (plan, colors): (&vidcut_core::render::RenderPlan, bool),
+    (plan, start, layer): (&vidcut_core::render::RenderPlan, i64, Option<usize>),
     (enc, grade): (&ProxyEncoder, Option<CacheCodec>),
     tmp: &Path,
     (decoder, kept): (Option<&crate::hw::GpuDecoder>, Option<&crate::player::Kept>),
@@ -709,15 +709,15 @@ pub(crate) fn encode_plan(
         if let Some(d) = decoder {
             frames = frames.decode_on(d.clone());
         }
-        if colors {
+        if layer.is_some() {
             frames = frames.colors_only();
         }
-        let kept = kept.filter(|k| !colors && k.fits(plan));
+        let kept = kept.filter(|k| k.fits(plan, layer));
         for j in 0..plan.frames {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err(Error::Invalid(crate::export::CANCELLED.into()));
             }
-            let next = match kept.and_then(|k| k.at(plan.range.0 + j)) {
+            let next = match kept.and_then(|k| k.at(start + j, layer, (w, h))) {
                 Some(picture) => frames.next_kept(&picture)?,
                 None => frames.next_made()?,
             };
