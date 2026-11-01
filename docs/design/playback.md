@@ -393,7 +393,7 @@ The two levels (spec D98):
   - A layer with a Retime Process or a checked effect takes the Nearest retime and no `super_scale`. Why: the file holds its frames as the timeline shows them.
   - A placed layer with a Retime Process or a checked effect also takes `made`: the `Shape` of its media (`Setup::shape`). The draw then places the colors of the file as a made frame (`Sampling::Placed`).
     - The shape is that of the media. With AI Super Scale, the enlarged picture has the shape of the media, with its sides rounded to whole pixels.
-  - With an AI upscaler, the file holds the enlarged picture. The layer then takes `Upscaler::Classic` with its Sharpness. Thus the draw uses the same kernel, and the AI upscaler does not run again.
+  - With an AI upscaler and no Retime Process or checked effect, the file holds the enlarged picture. The layer then takes `Upscaler::Classic` with its Sharpness. Thus the draw uses the same kernel, and the AI upscaler does not run again.
   - `Index::run` follows the names of a file. Thus a run continues while the file holds the next name of the layer, also where a slow speed shows a frame twice.
   - A file of the clip level can hold one name many times, for example a freeze frame. `Index::add` keeps the first place of each name in the file. Thus a run starts at the start of the repeat.
 
@@ -408,12 +408,13 @@ The names of frames:
   - The name also holds the `Look` (the size and the codec), the frame rate, the colors of the timeline and the version of vidcut.
 - `Cache::clip_keys` names each frame of the clip level by a SHA-256 of its source frame alone (`alone`). It holds the media, the frame and the colors of the media.
   - Without a Retime Process or a checked effect, the name has no speed, no placement and no clip settings. Thus a frame that two clips show has one name.
-  - With an AI upscaler, the name holds the upscaler, but not the Sharpness. Why: the Sharpness changes only the draw after the cache.
+  - With an AI upscaler and no Retime Process or checked effect, the name holds the upscaler, but not the Sharpness. Why: the Sharpness changes only the draw after the cache.
   - The name also holds the size, the colors of the timeline, the codec and the version of vidcut. The size is that of the media, or of its proxy with proxies on (`Look::longest`).
-  - With an AI upscaler, the size is that of the enlarged picture (`Setup::upscaled`, vidcut-av `ai_size`). It comes from the placement and the timeline size, as in an export. Thus a zoom that changes it renders the clip again.
+  - With an AI upscaler and no Retime Process or checked effect, the size is that of the enlarged picture (`Setup::upscaled`, vidcut-av `ai_size`). It comes from the placement and the timeline size, as in an export. Thus a zoom that changes it renders the clip again.
     - `ai_size` takes the size, the pixel shape and the rotation of the media (`Shape`). With proxies on, it takes the size of the proxy.
     - `ai_size` and the reader get the enlarged size from the same function (`enlarged`). Thus the job has the size of the enlarged pictures that playback keeps (`Kept::at`).
   - With a Retime Process or a checked effect, the size is that of the `Look`. The name also holds the `super_scale` and the placement.
+    - The `super_scale` holds the Sharpness. Why: the job draws the Sharpness into the file (`VideoFrames::colors_frame`).
     - With a Retime Process, it also holds the Retime Process and the exact source position (`VideoPiece::exact`).
     - Thus a change of the Transform or of an effect renders a placed clip again.
     - `alone` takes the opacity and the composite mode out of the placement. Why: they change only the alpha and the mix, not the colors in the file.
@@ -465,7 +466,7 @@ The jobs:
 
 - `Cache::next` gives the next `Job` with its own plan. The draw of the export makes its frames (`encode_plan`), as for proxies.
   - At the timeline level, `render_cache::segment` cuts the plan of the timeline.
-  - At the clip level, the plan holds the one layer, with no placement, at the size of the media (`clip_plan`). With an AI upscaler, the plan has the size of the enlarged picture, and the layer keeps its `super_scale`.
+  - At the clip level, the plan holds the one layer (`clip_plan`). Without a Retime Process or a checked effect, it has no placement and the size of the media. With an AI upscaler, the plan has the size of the enlarged picture, and the layer keeps its `super_scale`.
   - With a Retime Process or a checked effect, the plan has the size of the `Look`. The layer keeps its `retime`, its `super_scale` and its `placed`.
   - A job of the clip level draws in the colors mode of the export (`VideoFrames::colors_only`). Thus a placed layer gives its made frames, with no edges and no alpha ([export](export.md#effects)).
   - At the same place, the clip level renders first. Then the render goes on from there at the timeline level.
@@ -518,7 +519,7 @@ The line and the Stats row:
   - For a picture from the cache, the Super Scale group names the AI upscaler that made it, from the render cache.
     - Each `Part` keeps the Super Scale of its layers for this (`VideoPiece::super_scales`). Why: the plan of a cached layer has `Upscaler::Classic`.
     - A frame of the timeline level has no Super Scale in the plan. A layer with a Retime Process or a checked effect at the clip level has none either. The group then takes the first AI upscaler of the part.
-    - A layer of the clip level has `Upscaler::Classic` in the plan, where the part has an AI upscaler. The group then takes that upscaler. This also holds while the timeline level of the frame is still to render.
+    - Any other layer of the clip level has `Upscaler::Classic` in the plan, where the part has an AI upscaler. The group then takes that upscaler. This also holds while the timeline level of the frame is still to render.
   - The Retime Process group names the Retime Process of a picture from the cache in the same way.
     - Each `Part` keeps the Retime Processes of its layers and its Smooth Cuts (`VideoPiece::retimes`). The player's `retimes_at` uses the same function.
     - A cached layer has the Nearest retime in the plan. Where the plan has no Retime Process, the group takes the first of the part.
