@@ -280,7 +280,7 @@ impl Picture {
     }
 
     pub fn alpha_plane(&self) -> bool {
-        self.frame.format() == format::Pixel::YUVA444P12LE
+        crate::hw::sw_format(&self.frame) == format::Pixel::YUVA444P12LE
     }
 
     pub(crate) fn in_video_memory(&self) -> Option<crate::hw::Kind> {
