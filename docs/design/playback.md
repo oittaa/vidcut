@@ -383,12 +383,11 @@ The two levels (spec D98):
 
 - `Setup::levels` puts each reason of a layer at a level. `Reason::On`, `Reason::Effect`, `Reason::Media`, `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime` and `Reason::SuperScale` go to the clip level. The other reasons go to the timeline level.
 - A reason of a layer goes to the clip level only when all these are true. Otherwise it goes to the timeline level.
-  - It is a video file or a still (`lone`). A placed video file with a Retime Process or a checked effect also plays forward.
-    - Why: a placed layer at the clip level needs the colors of each frame (`Look::whole`). The export draws them only forward. It also makes the frames between two source frames only forward ([export](export.md#which-source-frame)).
+  - It is a video file or a still (`lone`).
   - Its media has no alpha channel (`Setup::opaque`).
     - Why: the cache files have no alpha channel. The tracks below would not show through the clip.
   - Its clip is not set to `ClipCache::Off`. This rule does not apply to `Reason::Effect` (spec D98).
-- A still has no Retime Process (`retimed`), as in the export. Thus only a checked effect places a still at the clip level.
+- A Retime Process works only on a video file that plays forward (`retimed`), as in the export ([export](export.md#which-source-frame)). Thus only a checked effect places a still or a clip that plays backward at the clip level.
 - `Cache::apply` puts the timeline level first. Where a frame of the timeline level is not there, it puts each found frame of the clip level in place of the layer (`from_file`).
   - The layer keeps its `placed`. The file takes the place of the media, as a proxy does. Thus the Transform and the effects work on it as on the media.
   - The layer takes the Nearest retime. A layer with a Retime Process or a checked effect also takes no `super_scale`. Why: the file holds its frames as the timeline shows them.
