@@ -383,14 +383,13 @@ impl Kept {
 
     pub(crate) fn fits(&self, job: &RenderPlan, layer: Option<usize>) -> bool {
         let timeline = &self.0.plan;
-        let same = match layer {
+        match layer {
             Some(_) => job.video.iter().all(|p| match p {
                 VideoPiece::Source { placed, .. } => placed.is_empty(),
                 _ => true,
             }),
             None => (job.width, job.height) == (timeline.width, timeline.height),
-        };
-        timeline.colors.is_none() && same
+        }
     }
 
     pub(crate) fn at(
@@ -400,8 +399,12 @@ impl Kept {
         size: (u32, u32),
     ) -> Option<Arc<Picture>> {
         let picture = self.ids(t).find_map(|id| store::global().peek(&id))?;
+        let hdr = self.0.plan.colors.is_some();
         let Some(i) = layer else {
-            return Some(picture);
+            let mut all =
+                std::iter::once(&picture).chain(picture.over().iter().map(|o| &o.picture));
+            let plain = all.all(|p| decoded(p));
+            return (!hdr || plain).then_some(picture);
         };
         let one = match i {
             0 if picture.over().is_empty() => picture,
@@ -412,8 +415,15 @@ impl Kept {
             90 => (one.height(), one.width()),
             _ => (one.width(), one.height()),
         };
-        (matches!(one.sampling(), Sampling::Own) && upright == size).then_some(one)
+        let fits = matches!(one.sampling(), Sampling::Own) && upright == size;
+        (fits && (!hdr || decoded(&one))).then_some(one)
     }
+}
+
+fn decoded(picture: &Picture) -> bool {
+    picture.origin().is_some_and(|o| {
+        o.upscaled.is_none() && matches!(o.made, Made::Solid(_) | Made::Still | Made::Source(_))
+    })
 }
 
 static GPU_MEMORY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
