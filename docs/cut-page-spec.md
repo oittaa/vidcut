@@ -32,8 +32,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 **Later (later):**
 - other effects, other transitions, other titles, generators
 - keyframes other than Transform, Crop and the clip volume
-- color, Fusion, Smart Reframe, Close Up
-- Sync Bin, Multi Source, Source Overwrite, Live Overwrite
+- color, Fusion
+- Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
+- Sync Bin ([todo](todo/sync-bin.md)), Multi Source, Source Overwrite, Live Overwrite
+- making a compound clip from timeline clips ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
 - Mixer FX other than the Ducker, Paste Attributes, guides
