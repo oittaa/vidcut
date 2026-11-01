@@ -19,19 +19,14 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 
 - The quality values of Auto with proxies off are starting values. A measurement sets them. Its plan goes to the owner first.
 - In an HDR timeline, the cache has 10 bits, in the PQ or HLG of the timeline. This needs a check.
-- The frames that playback made, and that the memory still keeps, go to the cache first. Thus they are not made again.
-  - The render finds the kept picture of a frame by its `Id`. It draws the frame from that picture as from a decoded one.
-  - The `Id` names what the picture shows. A plain picture has no placement in it, and the draw places it.
-  - With AI Super Scale, the `Id` holds the placement, because the placement sets the enlarged size (`source_key`). The draw still places the picture.
-  - With a Retime Process other than Nearest, the picture is made at its placement, and its `Id` holds that placement.
-  - Thus a change of the placement gives these pictures a new `Id`.
-  - A cached frame keeps a name of its own.
-
-## Differences from Resolve
-
-The owner accepted these. Each goes into [deviations.md](../deviations.md) with the pull request that makes it.
-
-- The background render first writes the frames that playback made.
+- At the clip level, the render makes again the frames that playback made.
+  - A job of the clip level draws the colors of one layer (`colors_only`). A kept picture holds the whole frame, as the viewer draws it.
+  - The `Id` of a made picture holds the size and the placement of the timeline. The plan of a job of the clip level has other values.
+- In a piece that is cached in part, the render makes again the frames that playback made with AI Super Scale or a Retime Process.
+  - `Cache::apply` cuts the piece of the viewer. The cut moves the keyframe position of the placement in the `Id` (`Placed::after`).
+  - A fix: the `Id` holds the keyframe position of each frame, not that of its piece. This changes the `Id` of the player too.
+- In an HDR timeline, the render makes again the frames that playback made.
+  - The reader of the player makes its pictures without the colors of the timeline (`with_timeline`). The render makes them with these colors.
 
 ## Steps
 

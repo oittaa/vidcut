@@ -2133,6 +2133,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Smart caches speed effects and Fusion effects. The manual does not name the upscaler or frame rate conversion for Smart.
 - **vidcut:**
   - Playback does not write the cache. Only the background render writes it ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The background render first writes the frames that playback made, while the memory keeps them. Where it can, it draws them from the memory and does not make them again ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The cache is in `render-cache` beside the proxies of the project, unless set ([X26](#x26-one-folder-for-proxies-and-the-render-cache-is-a-preference)).
   - Outside the cache dir, it does not count in the limit of the disk cache. No preference deletes old files. Delete Render Cache removes them.
   - Outside the cache dir, the background render stops when the disk has less than 10% free.
@@ -2148,6 +2149,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Smart also renders the parts where frames drop steadily during play ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - **Why:**
   - The writes of playback would take GPU time from the frames on the screen.
+  - The frames that playback made are ready in the memory. The render writes them before the memory lets them go, and does not spend the time to make them again.
   - The cache of a project stays with the project, as its proxies do. Thus thumbnails and waveforms do not push it out.
   - A background render can fill a disk without a sign. Thus it stops while the disk has little free space.
   - With an absolute folder, a part that two projects share renders once.

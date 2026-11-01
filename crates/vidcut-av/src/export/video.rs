@@ -2006,13 +2006,42 @@ impl VideoFrames {
         Ok(self.next_made()?.map(|(f, _)| f))
     }
 
-    pub(crate) fn next_made(&mut self) -> Result<Option<(frame::Video, Vec<Option<Origin>>)>> {
+    fn start_drawing(&mut self) -> Result<()> {
         if self.drawer.is_none() {
             let drawer = Drawer::new(self.encoder.take())?;
             let (out, reading) = (self.maker.out(), self.maker.reading());
             self.maker = Maker::new(out, drawer.keeps(), reading).holding().drawing();
             self.drawer = Some(drawer);
         }
+        Ok(())
+    }
+
+    pub(crate) fn next_kept(
+        &mut self,
+        picture: &std::sync::Arc<crate::player::Picture>,
+    ) -> Result<Option<(frame::Video, Vec<Option<Origin>>)>> {
+        if self.dynamic.dolby_vision || self.dynamic.hdr10plus {
+            return self.next_made();
+        }
+        self.start_drawing()?;
+        let clock = Instant::now();
+        let passed = self.next(false)?;
+        self.spent.0 += clock.elapsed();
+        if passed.is_none() {
+            return Ok(None);
+        }
+        let origins = std::iter::once(picture)
+            .chain(picture.over().iter().map(|o| &o.picture))
+            .map(|p| p.origin().cloned())
+            .collect();
+        let clock = Instant::now();
+        let out = self.drawn(picture, None, None);
+        self.spent.1 += clock.elapsed();
+        Ok(out?.map(|f| (f, origins)))
+    }
+
+    pub(crate) fn next_made(&mut self) -> Result<Option<(frame::Video, Vec<Option<Origin>>)>> {
+        self.start_drawing()?;
         let clock = Instant::now();
         let layers = self.next_layers()?;
         self.spent.0 += clock.elapsed();
@@ -2027,6 +2056,23 @@ impl VideoFrames {
     }
 
     fn drawn_frame(&mut self, layers: Vec<Layer>) -> Result<Option<frame::Video>> {
+        let shown = heaviest(&layers);
+        let like = layers[shown].frame.as_ref().map(frame_ref).transpose()?;
+        let light = layers
+            .iter()
+            .filter_map(|l| l.frame.as_ref())
+            .filter_map(crate::hdr::Hdr10Plus::of_frame)
+            .reduce(|a, b| a.brightest(&b));
+        let picture = std::sync::Arc::new(crate::player::picture(layers));
+        self.drawn(&picture, like, light)
+    }
+
+    fn drawn(
+        &mut self,
+        picture: &std::sync::Arc<crate::player::Picture>,
+        like: Option<frame::Video>,
+        light: Option<crate::hdr::Hdr10Plus>,
+    ) -> Result<Option<frame::Video>> {
         let k = (self.k - 1).max(0);
         let piece = self.pieces.get(self.piece).cloned();
         let (w, h, _) = self.maker.out();
@@ -2054,17 +2100,9 @@ impl VideoFrames {
             .into_iter()
             .map(crate::screen::kernel)
             .collect();
-        let shown = heaviest(&layers);
-        let like = layers[shown].frame.as_ref().map(frame_ref).transpose()?;
-        let light = layers
-            .iter()
-            .filter_map(|l| l.frame.as_ref())
-            .filter_map(crate::hdr::Hdr10Plus::of_frame)
-            .reduce(|a, b| a.brightest(&b));
-        let picture = std::sync::Arc::new(crate::player::picture(layers));
         let drawer = self.drawer.as_mut().expect("made above");
         let mut out = drawer.frame(
-            &picture,
+            picture,
             &titles,
             (&placed, &crosses, &kernels, self.timeline),
             (w, h),
