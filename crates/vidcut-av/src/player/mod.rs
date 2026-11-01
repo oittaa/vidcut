@@ -415,7 +415,8 @@ impl Kept {
             90 => (one.height(), one.width()),
             _ => (one.width(), one.height()),
         };
-        let fits = matches!(one.sampling(), Sampling::Own) && upright == size;
+        let smooth = matches!(one.origin(), Some(o) if matches!(o.made, Made::Smooth { .. }));
+        let fits = matches!(one.sampling(), Sampling::Own) && upright == size && !smooth;
         (fits && (!hdr || decoded(&one))).then_some(one)
     }
 }
@@ -1386,9 +1387,16 @@ impl Drop for Player {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, ManualOutput, Player, Presenter};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use super::frame::Picture;
+    use super::plan::Plan;
+    use super::store;
+    use super::{Config, Kept, Made, ManualOutput, Origin, Player, Presenter, Sampling};
     use crate::ffmpeg::{format::Pixel, frame};
     use vidcut_core::editor::Copied;
+    use vidcut_core::model::Retime;
     use vidcut_core::render::{RenderPlan, VideoPiece};
     use vidcut_core::time::Rational;
 
@@ -1457,5 +1465,46 @@ mod tests {
         let mut p = Presenter::default();
         p.missed(false, 40);
         assert_eq!(p.late, 0);
+    }
+
+    fn one_frame() -> RenderPlan {
+        RenderPlan {
+            fps: Rational::new(25, 1).unwrap(),
+            width: 2,
+            height: 2,
+            sample_rate: 48_000,
+            channels: 2,
+            frames: 1,
+            video: vec![VideoPiece::black(1)],
+            audio: Vec::new(),
+            ducking: Vec::new(),
+            range: (0, 1),
+            name: "smooth".into(),
+            colors: None,
+        }
+    }
+
+    #[test]
+    fn a_smooth_cut_is_not_the_next_clip() {
+        let plan = one_frame();
+        let planned = Plan::new(plan.clone());
+        let picture = Picture::new(frame::Video::new(Pixel::YUV422P10LE, 2, 2), 0, None, None)
+            .with_origin(Some(Origin {
+                made: Made::Smooth {
+                    retime: Retime::FrameBlend,
+                    at: 0.25,
+                    took: Duration::ZERO,
+                },
+                upscaled: None,
+                when: Instant::now(),
+                took: Duration::ZERO,
+                cached: None,
+            }))
+            .with_sampling(Sampling::Own);
+        let size = (picture.width(), picture.height());
+        store::global().put(planned.id(0), Arc::new(picture));
+        let kept = Kept::of(&plan, &plan);
+        assert!(kept.at(0, Some(0), size).is_none());
+        assert!(kept.at(0, None, size).is_some());
     }
 }
