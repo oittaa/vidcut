@@ -321,7 +321,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             placed,
             ..
         } => {
-            let made = if super_scale.ai() || !retime.is_nearest() {
+            let made = if !retime.is_nearest() {
                 let placed: Vec<_> = placed
                     .iter()
                     .map(|p| {
@@ -334,16 +334,18 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
                     })
                     .collect();
                 format!(
-                    "|{super_scale:?}|{}x{}|{:?}|{placed:?}",
+                    "|{super_scale:?}|{}x{}|{:?}|{placed:?}|{retime:?}",
                     plan.width, plan.height, plan.colors
+                )
+            } else if super_scale.ai() {
+                let detail =
+                    (!placed.is_empty()).then(|| vidcut_core::place::detail(placed).to_bits());
+                format!(
+                    "|{:?}|{}x{}|{:?}|{detail:?}",
+                    super_scale.upscaler, plan.width, plan.height, plan.colors
                 )
             } else {
                 String::new()
-            };
-            let made = if retime.is_nearest() {
-                made
-            } else {
-                format!("{made}|{retime:?}")
             };
             format!(
                 "{}|{:x}|{image:?}|{}|{}{made}",
