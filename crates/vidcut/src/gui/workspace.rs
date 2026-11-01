@@ -136,6 +136,7 @@ pub struct Workspace {
     pub(super) ducking: super::ducking::DuckingUi,
     pub(super) transcription: super::transcription::TranscriptionUi,
     pub(super) clip_info: super::clip_info::ClipInfo,
+    pub(super) cache_manager: super::cache_manager::CacheManager,
     pub(super) metadata_strip: bool,
     pub(super) key_editor: super::keyframe_editor::Editor,
 }
@@ -227,6 +228,7 @@ impl Workspace {
             ducking: Default::default(),
             transcription: Default::default(),
             clip_info: Default::default(),
+            cache_manager: Default::default(),
             metadata_strip: super::pool::strip_kept(),
             key_editor: Default::default(),
         }
@@ -267,6 +269,7 @@ impl Workspace {
             GuiPanel::Keyframes => self.left = LeftTab::Keyframes,
             GuiPanel::Metadata => self.show_metadata_strip(true),
             GuiPanel::ClipInfo => self.open_clip_info(None),
+            GuiPanel::ManageRenderCache => self.open_cache_manager(ctx),
             GuiPanel::Transform => self.show_picture_tool(PictureTool::Transform),
             GuiPanel::Crop => self.show_picture_tool(PictureTool::Crop),
             GuiPanel::DynamicZoom => self.show_picture_tool(PictureTool::DynamicZoom),
@@ -336,6 +339,7 @@ impl Workspace {
             }
             GuiPanel::Metadata => self.show_metadata_strip(false),
             GuiPanel::ClipInfo => self.clip_info.open = false,
+            GuiPanel::ManageRenderCache => self.cache_manager.open = false,
             GuiPanel::Transform | GuiPanel::Crop | GuiPanel::DynamicZoom => {
                 let tool = match panel {
                     GuiPanel::Crop => PictureTool::Crop,
@@ -372,6 +376,7 @@ impl Workspace {
             (GuiPanel::Keyframes, self.left == LeftTab::Keyframes),
             (GuiPanel::Metadata, self.metadata_strip),
             (GuiPanel::ClipInfo, self.clip_info.open),
+            (GuiPanel::ManageRenderCache, self.cache_manager.open),
             (GuiPanel::Transform, tool == Some(PictureTool::Transform)),
             (GuiPanel::Crop, tool == Some(PictureTool::Crop)),
             (
@@ -995,10 +1000,18 @@ impl Workspace {
     }
 
     fn playback_menu(&mut self, ui: &mut egui::Ui) {
-        let Some(mode) = self.project().map(|p| p.settings.render_cache) else {
-            super::dialog::why(ui, "open a project first");
-            return;
-        };
+        match self.project().map(|p| p.settings.render_cache) {
+            Some(mode) => self.render_cache_menus(ui, mode),
+            None => super::dialog::why(ui, "open a project first"),
+        }
+        if ui.button("Manage Render Cache…").clicked() {
+            let ctx = ui.ctx().clone();
+            self.open_cache_manager(&ctx);
+            ui.close();
+        }
+    }
+
+    fn render_cache_menus(&mut self, ui: &mut egui::Ui, mode: RenderCache) {
         ui.menu_button("Render Cache", |ui| {
             for m in [RenderCache::Off, RenderCache::Smart, RenderCache::User] {
                 if ui.selectable_label(mode == m, m.title()).clicked() {
@@ -1822,6 +1835,7 @@ impl Workspace {
         self.ducking_windows(&ctx);
         self.transcription_window(&ctx);
         self.clip_info_window(&ctx);
+        self.cache_manager_window(&ctx);
         let panel = theme::colors().panel;
         egui::Panel::top("top").frame(theme::bar()).show(ui, |ui| {
             theme::decorated(ui, Deco::Bar, |ui| self.top_bar(ui))

@@ -458,6 +458,19 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clips: Option<OneOrMany<ClipRef>>,
     },
+    /// Manage Render Cache: each project that vidcut opened on this
+    /// computer, in `rows` by the folder of its render cache, with the
+    /// `files` and `bytes` in that folder. Projects whose render cache is in
+    /// one folder share a row. Each project has its `name`, its `library`
+    /// (the folder of the file) and its `location`: `local`, or `network`
+    /// when a network drive holds the file.
+    #[serde(rename = "cache.list")]
+    CacheList {},
+    /// Clear Selected Cache: delete each file in the render cache folder of
+    /// each given project file, also the files of other projects in that
+    /// folder. There is no undo.
+    #[serde(rename = "cache.clear")]
+    CacheClear { projects: OneOrMany<PathBuf> },
     /// The Media Pool's bins.
     #[serde(rename = "bins.list")]
     BinsList {},
@@ -3544,6 +3557,9 @@ pub enum GuiPanel {
     /// Clip Info: all that is known of the media selected in the pool, its
     /// file read again (`media.details`).
     ClipInfo,
+    /// Manage Render Cache: the render cache of each project that vidcut
+    /// opened on this computer (`cache.list`), to clear (`cache.clear`).
+    ManageRenderCache,
     /// The Transitions tab, in the Media Pool's place: the transitions to
     /// drag onto an edit.
     Transitions,
@@ -3907,6 +3923,15 @@ impl<T: Clone> OneOrMany<T> {
     }
 }
 
+impl<T> OneOrMany<T> {
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
+        match self {
+            Self::One(v) => std::slice::from_mut(v).iter_mut(),
+            Self::Many(v) => v.iter_mut(),
+        }
+    }
+}
+
 pub fn protocol_schema() -> &'static serde_json::Value {
     static SCHEMA: OnceLock<serde_json::Value> = OnceLock::new();
     SCHEMA.get_or_init(|| {
@@ -4127,6 +4152,8 @@ impl Request {
                 | Self::KeysList {}
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
+                | Self::CacheList {}
+                | Self::CacheClear { .. }
         )
     }
 
@@ -4191,6 +4218,8 @@ impl Request {
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }
                     | Self::EditCopy { .. }
+                    | Self::CacheList {}
+                    | Self::CacheClear { .. }
             )
     }
 
@@ -4204,6 +4233,7 @@ impl Request {
             | Self::Probe { path }
             | Self::SubtitlesExport { out: path, .. } => vec![path],
             Self::SubtitlesImport { path, .. } => path.iter_mut().collect(),
+            Self::CacheClear { projects } => projects.iter_mut().collect(),
             Self::SubtitlesTranscribe {
                 model_file,
                 vad_file,

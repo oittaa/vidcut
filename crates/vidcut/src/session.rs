@@ -269,6 +269,12 @@ pub fn run_with(
         Request::ModelsList {} => answer(models_list()),
         Request::ModelsCheck { model, download } => answer(models_check(model, *download)?),
         Request::PreferencesGet {} => answer(crate::preferences::get()?),
+        Request::CacheList {} => answer(crate::render_caches::list()?),
+        Request::CacheClear { projects } => answer(crate::render_caches::clear(
+            &projects.to_vec(),
+            envelope.dry_run,
+            |_| None,
+        )?),
         Request::KeysList {} => answer(shortcuts()),
         Request::ServicesSetKey { service, key } => answer(crate::services::set_key(
             *service,

@@ -410,22 +410,14 @@ impl Background {
         self.indexed();
     }
 
+    pub(super) fn folder(&self) -> PathBuf {
+        self.dir()
+    }
+
     pub(super) fn delete_all(&mut self) -> usize {
         self.stopped();
         self.lock().index_mut().clear();
-        let mut n = 0;
-        if let Ok(listing) = std::fs::read_dir(self.dir()) {
-            for e in listing.flatten() {
-                let path = e.path();
-                if path.is_file() && std::fs::remove_file(&path).is_ok() {
-                    n += usize::from(
-                        path.extension()
-                            .is_some_and(|x| x == vidcut_core::render_cache::FILE),
-                    );
-                }
-            }
-        }
-        n
+        crate::render_caches::empty(&self.dir())
     }
 
     pub(super) fn delete_frames(&mut self, project: &Project, ranges: &[Span]) -> usize {
@@ -480,6 +472,7 @@ pub(crate) fn render_all(
     let prefs = crate::preferences::load().unwrap_or_default();
     let (tx, _rx) = std::sync::mpsc::channel();
     let mut background = Background::new(tx, &prefs);
+    crate::render_caches::remember(file);
     background.open(file);
     background.indexed();
     let end = project.end();

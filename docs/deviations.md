@@ -2160,17 +2160,33 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - AI Super Scale and the Retime Processes are slow to make on most computers.
   - A part that this computer cannot play in time then plays from the cache. The list of slow formats does not find all of these parts.
 
-## X104. The render cache line is on both timelines, with its reasons
+## X104. The render cache line shows its reasons
 
 - **Resolve:**
-  - Cache indicators along the bottom of the ruler of the Edit page timeline show the state of the cache (p. 203).
+  - Cache indicators along the bottom of the ruler show the state of the cache (p. 203).
   - Red means "to be cached", and blue means "has been cached".
-  - The manual does not name a render cache line on the Cut page. It does not show the reason of a red part.
+  - Resolve Studio 21.1.2 shows one line, on the Edit page and under both rulers of the Cut page. It does not show the reason of a red part.
 - **vidcut:**
-  - The line is on the ruler of both timelines of the Cut page, red and blue as in Resolve ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - The line is on the ruler of both timelines, red and blue as in Resolve ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The pointer over the line shows why the mode renders the part, for example Transition or AI Super Scale.
   - Stats for Nerds has a Render Cache row: Cached, To render with the reasons, or Not needed.
   - For a picture from the cache, How It Was Made shows how each layer was made, and when the cache file was written.
+- **Why:** the reasons tell the user which setting makes a part slow.
+
+## X105. Manage Render Cache lists the projects that vidcut opened
+
+- **Resolve:**
+  - Playback > Manage Render Cache shows the render cache of the projects in the project libraries (p. 206).
+  - Location selects Local, Network, Cloud or All. Project Library selects one library, or All.
+  - Each project has its own row.
+- **vidcut:**
+  - vidcut has no project libraries. A project is a file.
+  - The window lists each project that vidcut opened on this computer. A project whose file is gone is not in the list.
+  - Location is Network when a network drive holds the project file. Else it is Local. There is no Cloud.
+  - Project Library is the folder that holds the project file.
+  - Projects whose render cache is in one folder share a row. Clear Selected Cache clears that folder for all of them.
+    - By default, the projects in one folder share a render cache folder ([X103](#x103-the-render-cache-is-made-in-the-background)).
 - **Why:**
-  - vidcut has only the Cut page. Without the line, the user cannot see what the cache holds.
-  - The reasons tell the user which setting makes a part slow.
+  - Without libraries, the projects that vidcut opened are the projects that it knows.
+  - The folder of a project file is the nearest thing to a library.
+  - The files of a cache folder have names from their content. Thus two projects can share a file, and vidcut can clear only the full folder.

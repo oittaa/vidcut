@@ -18,7 +18,7 @@ pub struct ClipInfo {
 
 type Section = (String, Vec<(String, String)>);
 
-fn bytes(n: u64) -> String {
+pub(super) fn bytes(n: u64) -> String {
     match n {
         b if b >= 1_000_000_000 => format!("{:.2} GB", b as f64 / 1e9),
         b if b >= 1_000_000 => format!("{:.1} MB", b as f64 / 1e6),

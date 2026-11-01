@@ -31,6 +31,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("proxy.generate", &["media"]),
     ("proxy.remove", &["media"]),
     ("cache.delete", &["what", "clips"]),
+    ("cache.clear", &["projects"]),
     ("bins.add", &["path"]),
     ("bins.remove", &["path"]),
     ("bins.rename", &["path", "to"]),
