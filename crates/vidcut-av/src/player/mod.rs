@@ -16,7 +16,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use vidcut_core::model::Title;
-use vidcut_core::render::RenderPlan;
+use vidcut_core::render::{RenderPlan, VideoPiece};
 
 pub use frame::{
     Cached, Fit, Layout, Made, Making, Origin, Over, Picture, Sampling, Shown, TitleOver,
@@ -378,8 +378,14 @@ impl Kept {
 
     pub(crate) fn fits(&self, job: &RenderPlan, layer: Option<usize>) -> bool {
         let timeline = &self.0.plan;
-        timeline.colors.is_none()
-            && (layer.is_some() || (job.width, job.height) == (timeline.width, timeline.height))
+        let same = match layer {
+            Some(_) => job.video.iter().all(|p| match p {
+                VideoPiece::Source { placed, .. } => placed.is_empty(),
+                _ => true,
+            }),
+            None => (job.width, job.height) == (timeline.width, timeline.height),
+        };
+        timeline.colors.is_none() && same
     }
 
     pub(crate) fn at(

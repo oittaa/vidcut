@@ -474,7 +474,7 @@ The jobs:
   - A job of the clip level takes the picture of its layer (`Job::layer`): the kept picture for the bottom layer, or its picture in `over`.
   - The bottom layer of a kept picture with layers over it gives a new picture of the same frame, without them (`Picture::alone`).
   - A job of the clip level takes a layer only when it holds no placement (`Sampling::Own`). Its upright size must be the size of the job.
-  - Thus it takes the decoded frames of a clip with slow media or a speed, and the enlarged pictures of AI Super Scale. A frame of a Retime Process holds its placement (`Sampling::Placed`), and the job makes it again.
+  - Thus it takes the decoded frames of a clip with slow media or a speed, and the enlarged pictures of AI Super Scale.
   - The reader decodes nothing for a kept frame (`Take::Skip`). Each source of the frame only marks that it skipped (`Source::skipped`).
   - The next frame that the job makes reads on from there (`Source::advance`). More than `DECODE_AHEAD` past the last decoded frame, the source seeks. Otherwise it decodes forward.
   - Why the limit: the same rule places a source at the start of a piece (`reads_on`).
@@ -486,6 +486,9 @@ The jobs:
   - The render reads the store without a change of its order (`Store::peek`). Thus the pictures of the viewer leave the memory in their own order.
 - A job takes no kept picture in these cases (`Kept::fits`). It makes each frame.
   - A job of the timeline level has another size than the timeline, as with proxies on. Why: a made picture has the size of its plan.
+  - The layer of a job of the clip level has a placement. Only a layer with a Retime Process keeps it in the job (`alone`).
+    - The job draws the colors of that layer over the whole frame (`Look::whole`).
+    - The viewer keeps the frames that fall on a source frame without the placement (`shown`). The other frames hold their placement (`Sampling::Placed`).
   - The timeline has HDR colors. Why: the reader of the player makes its pictures without the colors of the timeline (`with_timeline`).
 - `cache_encoders` gives the encoders, in order. The encoders that the GPU makes and plays come first (`round`).
   - With a chosen codec: the encoders that make it, with the options of its grade (`grade_options`).
