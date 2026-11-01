@@ -13,7 +13,6 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 
 ## Codec, folder and writing
 
-- In an HDR timeline, the cache has 10 bits, in the PQ or HLG of the timeline. This needs a check.
 - At the clip level, the render makes again the frames that playback made.
   - A job of the clip level draws the colors of one layer (`colors_only`). A kept picture holds the whole frame, as the viewer draws it.
   - The `Id` of a made picture holds the size and the placement of the timeline. The plan of a job of the clip level has other values.
