@@ -601,7 +601,9 @@ impl Render {
         let most = (self.base.fps.as_f64() * SECONDS_EACH as f64)
             .round()
             .max(1.0) as i64;
-        let kept = vidcut_av::player::Kept::of(&self.base);
+        let mut shown = (*self.base).clone();
+        self.lock().apply(&mut shown, &setup, &Path::is_file);
+        let kept = vidcut_av::player::Kept::of(&self.base, &shown);
         let mut from = kept.played_from(self.from);
         loop {
             if self.cancel.load(Ordering::Relaxed) {

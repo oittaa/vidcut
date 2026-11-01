@@ -483,7 +483,10 @@ The jobs:
   - A seek after a skip also ends the run of the AI upscaler. Why: the run takes the source frames in order (`miss`), and the skipped frames did not reach it.
   - The start of a piece still decodes from the keyframe to the first frame of the piece (`Source::open`, `open_next`).
   - The player keeps decoding the frames that it skips (`skip_frame`). Why: its decoder stays at the playhead for play.
-  - `Kept` finds the picture by the `Id` of its frame in the plan of the timeline before the proxies. That is the plan that the viewer has, with proxies off.
+  - `Kept` finds the picture by the `Id` of its frame in two plans of the timeline before the proxies. One plan has no cache, and the other has the cache (`Cache::apply`).
+    - Why: where the viewer plays a layer from its cache file, the frame has another `Id`. With proxies off, the viewer has the plan with the cache.
+    - The render applies the cache to its plan when it starts. Why: the viewer makes its plan again after each change of the cache. Thus both have the same cache.
+    - A job of the timeline level can thus take a frame that the viewer drew from a file of the clip level.
   - Where a part of a piece plays from the cache, `Cache::apply` cuts the piece of the viewer. The made frames in the rest of that piece keep their `Id`. Thus the job finds them.
   - The render reads the store without a change of its order (`Store::peek`). Thus the pictures of the viewer leave the memory in their own order.
 - A job takes no kept picture in these cases (`Kept::fits`). It makes each frame.
