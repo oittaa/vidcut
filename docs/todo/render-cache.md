@@ -21,8 +21,10 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 - The quality values of Auto with proxies off are starting values. A measurement sets them. Its plan goes to the owner first.
 - In an HDR timeline, the cache has 10 bits, in the PQ or HLG of the timeline. This needs a check.
 - The frames that playback made, and that the memory still keeps, go to the cache first. Thus they are not made again.
-  - The render finds the layers of a frame by the `Id` that playback gives them. An `Id` does not hold the place on the screen.
-  - Thus the render places and mixes these layers as it does all layers. A cached frame keeps a name of its own.
+  - The render finds the kept picture of a frame by its `Id`. It draws the frame from that picture as from a decoded one.
+  - The `Id` names what the picture shows. A plain picture has no placement in it, and the draw places it.
+  - With AI Super Scale or a Retime Process, the picture is made at its placement. Its `Id` holds that placement (`source_key`). Thus a change of the placement gives a new `Id`.
+  - A cached frame keeps a name of its own.
 
 ## Differences from Resolve
 
