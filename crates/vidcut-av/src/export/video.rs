@@ -2317,7 +2317,11 @@ impl VideoFrames {
                             rotation: shape.rotation,
                         },
                         part: [0.0, 0.0, 1.0, 1.0],
-                        placed: placed.get(i).cloned().unwrap_or_default().into(),
+                        placed: {
+                            let mut baked = placed.get(i).cloned().unwrap_or_default();
+                            vidcut_core::render_cache::baked(&mut baked);
+                            baked.into()
+                        },
                     },
                     (false, None) => self.open[s].sampling.clone(),
                 };

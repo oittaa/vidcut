@@ -6,7 +6,6 @@
 
 The data comes from the manual, pp. 143–144 and 199–206.
 
-- Apply the effects that are not checked in Render Cache Effects during playback, not in the cache of the clip (p. 202).
 - Keep the alpha channel in the cache files of ProRes 4444, ProRes 4444 XQ and DNxHR 444 (p. 201). The DNxHR encoder of FFmpeg has no pixel format with alpha.
 - Then keep a clip with an alpha channel in the cache of the clip.
 - Show a different bar on the ruler for each cache (p. 203).

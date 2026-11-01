@@ -2702,10 +2702,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It holds stills too.
     - It holds a Retime Process other than Nearest, and the checked effects (p. 204).
       - It holds the frame at the size of the timeline. Why: a Retime Process and an effect make each frame at the size that the clip shows.
-      - With a checked effect, it holds all the effects of the clip.
+      - With a checked effect, it holds the effects up to the last checked effect. The viewer applies the later effects, as in Resolve (p. 202).
+      - With a Retime Process, it holds all the effects. Why: the effects come before the frames between two source frames (§13).
       - For a placed clip, it holds the colors of the frame, with no edges and no alpha. The viewer makes them again from the placement. Thus the cache needs no alpha.
-      - A change of the Transform, the crop or an effect of a placed clip renders it again.
-      - A move, a split, a trim, or a change of the opacity or the composite mode keeps it.
+      - A change of the Transform, the crop or an effect that it holds renders it again.
+      - A move, a split, a trim, or a change of the opacity, the composite mode or an effect after the last checked effect keeps it.
     - A move, a split, a trim or an edit on another track keeps it.
     - Without a Retime Process or a checked effect, it holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Super Scale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
