@@ -268,6 +268,10 @@ impl Store {
         self.lock().pictures.contains(id)
     }
 
+    pub(crate) fn peek(&self, id: &Id) -> Option<Arc<Picture>> {
+        self.lock().pictures.peek(id).cloned()
+    }
+
     pub(crate) fn kept_run(&self, ids: impl IntoIterator<Item = Id>) -> usize {
         let inner = self.lock();
         ids.into_iter()

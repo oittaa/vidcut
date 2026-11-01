@@ -461,15 +461,18 @@ The jobs:
   - With a Retime Process, the plan has the size of the `Look`. The layer keeps its `retime`, its `super_scale` and its `placed`.
   - A job of the clip level draws in the colors mode of the export (`VideoFrames::colors_only`). Thus a placed layer gives its made frames, with no edges and no alpha ([export](export.md#effects)).
   - At the same place, the clip level renders first. Then the render goes on from there at the timeline level.
-- The background render starts at the frames that playback made before the playhead (`played_from`).
-  - It goes back from the playhead while the store keeps the picture of each frame. It finds the picture by its `Id` in the plan of the timeline.
+- The background render starts at the frames that playback made before the playhead (`Kept::played_from`).
+  - It goes back from the playhead while the store keeps the picture of each frame.
   - Why: the render writes these frames before the memory lets them go.
-- A job of the timeline level finds each frame that the store keeps by its `Id` in the plan of the job (`Kept`).
-  - The reader then only passes the frame, and the draw draws the kept picture (`VideoFrames::next_kept`). Thus the frame is not made again.
-  - The plan of the job is a part of the plan of the timeline before the proxies. Thus a frame has the `Id` that the viewer gave it, with proxies off.
-  - With proxies on, a frame from a proxy has another path in its `Id`. A made frame has the size of proxies in its `Id`. These frames find no kept picture.
-  - A job of the clip level finds no kept picture. Why: it draws the colors of one layer (`colors_only`). A kept picture holds the whole frame.
-  - In an HDR timeline, a job finds no kept picture. Why: the reader of the player makes its pictures without the colors of the timeline (`with_timeline`).
+- A job of the timeline level finds each frame that the store keeps (`Kept::at`). The reader then only passes the frame, and the draw draws the kept picture (`VideoFrames::next_kept`). Thus the frame is not made again.
+  - `Kept` finds the picture by the `Id` of its frame in the plan of the timeline before the proxies. That is the plan that the viewer has, with proxies off.
+  - Why not the plan of the job: it cuts the pieces (`VideoPiece::part`). With AI Super Scale or a Retime Process, the `Id` holds the placement, and the cut moves its keyframe position (`Placed::after`).
+  - Where a part of a piece plays from the cache, `Cache::apply` cuts the piece of the viewer too. A made frame in the rest of that piece then has another `Id`, and the job makes it again.
+  - The render reads the store without a change of its order (`Store::peek`). Thus the pictures of the viewer leave the memory in their own order.
+- A job takes no kept picture in these cases (`Kept::fits`). It makes each frame.
+  - The job has another size than the timeline, as with proxies on. Why: a made picture has the size of its plan.
+  - The timeline has HDR colors. Why: the reader of the player makes its pictures without the colors of the timeline (`with_timeline`).
+  - A job of the clip level. Why: it draws the colors of one layer (`colors_only`). A kept picture holds the whole frame.
 - `cache_encoders` gives the encoders, in order. The encoders that the GPU makes and plays come first (`round`).
   - With a chosen codec: the encoders that make it, with the options of its grade (`grade_options`).
     - ProRes 422: Apple's hardware (VideoToolbox), the GPU through Vulkan, and the CPU.

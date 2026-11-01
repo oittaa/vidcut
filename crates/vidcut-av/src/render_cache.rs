@@ -51,7 +51,7 @@ pub fn write(
     (plan, clip): (&RenderPlan, bool),
     keys: &[Key],
     encoders: &[(ProxyEncoder, Option<CacheCodec>)],
-    decoder: Option<&crate::hw::GpuDecoder>,
+    (decoder, kept): (Option<&crate::hw::GpuDecoder>, Option<&crate::player::Kept>),
     dir: &Path,
     cancel: &AtomicBool,
 ) -> Result<Written> {
@@ -76,7 +76,13 @@ pub fn write(
     drop(file);
     let mut errors = Vec::new();
     for (enc, grade) in encoders {
-        match encode_plan((plan, clip), (enc, *grade), part.path(), decoder, cancel) {
+        match encode_plan(
+            (plan, clip),
+            (enc, *grade),
+            part.path(),
+            (decoder, kept),
+            cancel,
+        ) {
             Ok((frames, made)) => {
                 part.keep(&dest)
                     .map_err(|e| Error::Invalid(format!("replacing {}: {e}", dest.display())))?;

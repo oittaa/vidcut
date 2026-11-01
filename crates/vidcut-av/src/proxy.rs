@@ -669,7 +669,7 @@ pub(crate) fn encode_plan(
     (plan, colors): (&vidcut_core::render::RenderPlan, bool),
     (enc, grade): (&ProxyEncoder, Option<CacheCodec>),
     tmp: &Path,
-    decoder: Option<&crate::hw::GpuDecoder>,
+    (decoder, kept): (Option<&crate::hw::GpuDecoder>, Option<&crate::player::Kept>),
     cancel: &std::sync::atomic::AtomicBool,
 ) -> std::result::Result<(u64, Vec<Origins>), Failed> {
     let Some(video) = enc.cache_encoder(plan.colors, grade) else {
@@ -712,12 +712,12 @@ pub(crate) fn encode_plan(
         if colors {
             frames = frames.colors_only();
         }
-        let kept = (!colors && plan.colors.is_none()).then(|| crate::player::Kept::of(plan));
+        let kept = kept.filter(|k| !colors && k.fits(plan));
         for j in 0..plan.frames {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err(Error::Invalid(crate::export::CANCELLED.into()));
             }
-            let next = match kept.as_ref().and_then(|k| k.at(plan.range.0 + j)) {
+            let next = match kept.and_then(|k| k.at(plan.range.0 + j)) {
                 Some(picture) => frames.next_kept(&picture)?,
                 None => frames.next_made()?,
             };
