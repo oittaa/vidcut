@@ -23,7 +23,9 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 - The frames that playback made, and that the memory still keeps, go to the cache first. Thus they are not made again.
   - The render finds the kept picture of a frame by its `Id`. It draws the frame from that picture as from a decoded one.
   - The `Id` names what the picture shows. A plain picture has no placement in it, and the draw places it.
-  - With AI Super Scale or a Retime Process, the picture is made at its placement. Its `Id` holds that placement (`source_key`). Thus a change of the placement gives a new `Id`.
+  - With AI Super Scale, the `Id` holds the placement, because the placement sets the enlarged size (`source_key`). The draw still places the picture.
+  - With a Retime Process other than Nearest, the picture is made at its placement, and its `Id` holds that placement.
+  - Thus a change of the placement gives these pictures a new `Id`.
   - A cached frame keeps a name of its own.
 
 ## Differences from Resolve
