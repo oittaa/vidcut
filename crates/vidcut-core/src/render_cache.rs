@@ -266,8 +266,8 @@ impl Setup<'_> {
 fn retimed(layer: &VideoPiece) -> bool {
     matches!(
         layer,
-        VideoPiece::Source { image, retime, .. }
-            if !retime.is_nearest() && !matches!(image, Some(Image::Still))
+        VideoPiece::Source { image, retime, pace, .. }
+            if !retime.is_nearest() && !matches!(image, Some(Image::Still)) && pace.speed() > 0.0
     )
 }
 
@@ -278,8 +278,10 @@ fn placing(layer: &VideoPiece) -> bool {
 fn lone(layer: &VideoPiece) -> bool {
     matches!(
         layer,
-        VideoPiece::Source { image: image @ (None | Some(Image::Still)), placed, pace, .. }
-            if !placing(layer) || placed.is_empty() || pace.speed() > 0.0 || image.is_some()
+        VideoPiece::Source {
+            image: None | Some(Image::Still),
+            ..
+        }
     )
 }
 
