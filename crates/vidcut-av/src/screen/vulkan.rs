@@ -6,6 +6,7 @@ use ash::vk;
 pub(super) struct Import {
     pub(super) images: Vec<vk::Image>,
     pub(super) views: [wgpu::TextureView; 3],
+    pub(super) alpha: Option<wgpu::TextureView>,
     pub(super) size: (u32, u32),
     pub(super) concurrent: bool,
     pub(super) _textures: Vec<wgpu::Texture>,

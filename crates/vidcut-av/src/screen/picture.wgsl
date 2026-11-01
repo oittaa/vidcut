@@ -83,6 +83,9 @@ fn opacity(u: vec2<f32>) -> f32 {
     if p.per.w == 1u {
         return textureSampleLevel(alpha_plane, bilinear, s, 0.0).r;
     }
+    if p.per.w == 2u {
+        return min(textureSampleLevel(alpha_plane, bilinear, s, 0.0).r * 65535.0 / 4095.0, 1.0);
+    }
     return 1.0;
 }
 

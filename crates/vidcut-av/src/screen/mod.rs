@@ -279,6 +279,8 @@ const RESIZE: u32 = 4;
 
 const WIDENS: u32 = 8;
 
+const ALPHA_OF_16: u32 = 2;
+
 pub fn kernel(sharp: Option<vidcut_core::model::Sharpness>) -> u32 {
     use vidcut_core::model::Sharpness;
     match sharp {
@@ -1344,6 +1346,7 @@ struct Slot {
     imported: Option<Arc<Picture>>,
     views: Option<(wgpu::TextureView, wgpu::TextureView, (u32, u32))>,
     v_view: Option<wgpu::TextureView>,
+    a_view: Option<wgpu::TextureView>,
     acquired: Option<wgpu::CommandBuffer>,
     #[cfg(any(target_os = "linux", windows))]
     kept: vulkan::Imports,
@@ -1902,7 +1905,12 @@ impl Slot {
             )
         });
         let halvings = halvings(picture, size, how);
-        let bytes = params_of(picture, size, gpu.wide, cover, how, halvings);
+        let alpha = match (&self.a_view, &self.views) {
+            (Some(_), _) => ALPHA_OF_16,
+            (None, None) => u32::from(picture.alpha_plane()),
+            (None, Some(_)) => 0,
+        };
+        let bytes = params_of(picture, size, gpu.wide, cover, how, (halvings, alpha));
         gpu.queue.write_buffer(params, 0, &bytes);
         let planes = self.planes.as_ref().expect("uploaded");
         let view = |t: &wgpu::Texture| t.create_view(&Default::default());
@@ -1912,7 +1920,7 @@ impl Slot {
             .map(|(y, u, _)| (y, u))
             .unwrap_or_else(|| (view(&planes.y), view(&planes.u)));
         let v = self.v_view.take().unwrap_or_else(|| view(&planes.v));
-        let a = view(&planes.a);
+        let a = self.a_view.take().unwrap_or_else(|| view(&planes.a));
         let bind = |halved: &wgpu::TextureView| {
             gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("vidcut picture"),
@@ -2384,6 +2392,9 @@ impl Slot {
         let (import, new) = self
             .kept
             .get_or_import(identity, || import_vulkan_frame(gpu, frame))?;
+        if picture.alpha_plane() && import.alpha.is_none() {
+            return Err("a picture with alpha came without its alpha plane".into());
+        }
         let left_in = crate::hw::vulkan::layout(frame).map_err(|e| e.to_string())?;
         // SAFETY: this device's images on FFmpeg's memory; wgpu left any it used shader-readable.
         let acquired = unsafe {
@@ -2403,6 +2414,7 @@ impl Slot {
         let [y, u, v] = &import.views;
         self.views = Some((y.clone(), u.clone(), import.size));
         self.v_view = Some(v.clone());
+        self.a_view = import.alpha.clone();
         self.acquired = Some(acquired);
         self.imported = Some(picture.clone());
         if new {
@@ -3216,6 +3228,7 @@ fn import_vulkan_frame(
     Ok(vulkan::Import {
         images,
         views: [view(y), view(u), view(v)],
+        alpha: textures.get(3).map(view),
         size: (y.width(), y.height()),
         concurrent,
         _textures: textures,
@@ -3516,7 +3529,7 @@ fn params_of(
     wide: bool,
     cover: (f64, f64),
     (placing, kernel, timeline, paired): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
-    halvings: u32,
+    (halvings, alpha): (u32, u32),
 ) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
     let (x, y, w, h) = picture.placement(size.0, size.1);
@@ -3566,7 +3579,6 @@ fn params_of(
     let uv = packing(layout);
     let (across, down) = per_chroma(layout);
     let mixes_in = transfer_of(timeline) as u32;
-    let alpha = u32::from(picture.alpha_plane());
     for v in [hdr, turns, uv, kernel, across, down, mixes_in, alpha] {
         out.extend_from_slice(&v.to_le_bytes());
     }
