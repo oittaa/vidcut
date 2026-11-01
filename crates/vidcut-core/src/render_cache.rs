@@ -1129,6 +1129,20 @@ impl Index {
         !self.marks.is_empty()
     }
 
+    pub fn holding(&self, gone: &std::collections::HashSet<Key>) -> usize {
+        self.files
+            .values()
+            .filter(|keys| keys.iter().any(|k| gone.contains(k)))
+            .count()
+    }
+
+    pub fn sparing(&self, keep: &std::collections::HashSet<Key>) -> usize {
+        self.files
+            .values()
+            .filter(|keys| keys.iter().all(|k| !keep.contains(k)))
+            .count()
+    }
+
     pub fn keep_only(&mut self, keep: &std::collections::HashSet<Key>) -> usize {
         let unused: Vec<Arc<Path>> = self
             .files

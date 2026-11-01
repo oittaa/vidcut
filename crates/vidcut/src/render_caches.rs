@@ -84,6 +84,10 @@ fn is_video(path: &Path) -> bool {
         .is_some_and(|x| x == vidcut_core::render_cache::FILE)
 }
 
+pub(crate) fn videos(dir: &Path) -> usize {
+    measure(dir).0
+}
+
 fn measure(dir: &Path) -> (usize, u64) {
     let (mut files, mut bytes) = (0, 0);
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {

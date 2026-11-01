@@ -2748,12 +2748,22 @@ impl Live {
             },
             Request::CacheRender {} => match &self.project {
                 Some(open) => {
-                    let at = self.player.position(TIMELINE);
-                    Step::Now(Ok(answer(self.render.render_now(open.project(), at))))
+                    let value = match envelope.dry_run {
+                        true => self.render.status(open.project()),
+                        false => {
+                            let at = self.player.position(TIMELINE);
+                            self.render.render_now(open.project(), at)
+                        }
+                    };
+                    let mut r = answer(value);
+                    r.dry_run = envelope.dry_run;
+                    Step::Now(Ok(r))
                 }
                 None => Step::Now(Err(no_project())),
             },
-            Request::CacheDelete { what, clips } => Step::Now(self.cache_delete(what, clips)),
+            Request::CacheDelete { what, clips } => {
+                Step::Now(self.cache_delete(what, clips, envelope.dry_run))
+            }
             Request::PlayerMute { mute } => {
                 let mute = mute.unwrap_or(!self.player.muted());
                 self.player.set_muted(mute);
@@ -3763,13 +3773,14 @@ impl Live {
         &mut self,
         what: vidcut_core::request::CacheDelete,
         clips: Option<vidcut_core::request::OneOrMany<vidcut_core::request::ClipRef>>,
+        dry_run: bool,
     ) -> Result<Response> {
         use vidcut_core::request::CacheDelete;
         let p = self.project.as_ref().ok_or_else(no_project)?.project();
         let playhead = Some(self.player.position(TIMELINE));
         let deleted = match (what, clips) {
-            (CacheDelete::All, None) => self.render.delete_all(),
-            (CacheDelete::Unused, None) => self.render.delete_unused(p),
+            (CacheDelete::All, None) => self.render.delete_all(dry_run),
+            (CacheDelete::Unused, None) => self.render.delete_unused(p, dry_run),
             (CacheDelete::Clips, Some(refs)) => {
                 let mut ranges = Vec::new();
                 for r in refs.to_vec() {
@@ -3782,7 +3793,7 @@ impl Live {
                         ranges.push((c.start, c.end(), Some(media)));
                     }
                 }
-                self.render.delete_frames(p, &ranges)
+                self.render.delete_frames(p, &ranges, dry_run)
             }
             (CacheDelete::Clips, None) => {
                 return Err(Error::usage("cache.delete clips needs the clips"));
@@ -3791,15 +3802,19 @@ impl Live {
                 return Err(Error::usage("clips go with cache.delete clips only"));
             }
         };
-        self.schedule_timeline();
-        Ok(answer(json!({ "deleted": deleted })))
+        if !dry_run {
+            self.schedule_timeline();
+        }
+        let mut r = answer(json!({ "deleted": deleted }));
+        r.dry_run = dry_run;
+        Ok(r)
     }
 
     fn cache_clear(&mut self, projects: &[PathBuf], dry_run: bool) -> Result<Response> {
         let open = self.project.is_some().then(|| self.render.folder());
         let render = &mut self.render;
         let cleared = crate::render_caches::clear(projects, dry_run, |dir| {
-            (open.as_deref() == Some(dir)).then(|| render.delete_all())
+            (open.as_deref() == Some(dir)).then(|| render.delete_all(false))
         })?;
         if open.is_some() && !dry_run {
             self.schedule_timeline();
@@ -4531,9 +4546,13 @@ fn shown(mut plan: RenderPlan, super_scale: bool) -> RenderPlan {
     plan
 }
 
-pub(crate) fn render_cache(project: (&Project, &Path), cancel: Arc<AtomicBool>) -> Result<Value> {
+pub(crate) fn render_cache(
+    project: (&Project, &Path),
+    cancel: Arc<AtomicBool>,
+    dry_run: bool,
+) -> Result<Value> {
     let super_scale = crate::preferences::load().is_ok_and(|p| p.viewer.super_scale);
-    render_cache::render_all(project, super_scale, cancel)
+    render_cache::render_all(project, super_scale, cancel, dry_run)
 }
 
 fn cancelled() -> Error {

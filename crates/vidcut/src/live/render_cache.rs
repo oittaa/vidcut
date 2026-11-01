@@ -414,14 +414,28 @@ impl Background {
         self.dir()
     }
 
-    pub(super) fn delete_all(&mut self) -> usize {
+    pub(super) fn delete_all(&mut self, dry_run: bool) -> usize {
+        let n = crate::render_caches::videos(&self.dir());
+        if dry_run {
+            return n;
+        }
         self.stopped();
         self.lock().index_mut().clear();
-        crate::render_caches::empty(&self.dir())
+        let _ = crate::render_caches::empty(&self.dir());
+        n
     }
 
-    pub(super) fn delete_frames(&mut self, project: &Project, ranges: &[Span]) -> usize {
-        self.stopped();
+    pub(super) fn delete_frames(
+        &mut self,
+        project: &Project,
+        ranges: &[Span],
+        dry_run: bool,
+    ) -> usize {
+        if dry_run {
+            self.indexed();
+        } else {
+            self.stopped();
+        }
         let Some(base) = self.base.clone() else {
             return 0;
         };
@@ -437,11 +451,18 @@ impl Background {
         };
         let mut cache = self.lock();
         let keys = keys_in(&mut cache, &base, &setup, ranges);
-        cache.index_mut().drop_with(&keys)
+        match dry_run {
+            true => cache.index().holding(&keys),
+            false => cache.index_mut().drop_with(&keys),
+        }
     }
 
-    pub(super) fn delete_unused(&mut self, project: &Project) -> usize {
-        self.stopped();
+    pub(super) fn delete_unused(&mut self, project: &Project, dry_run: bool) -> usize {
+        if dry_run {
+            self.indexed();
+        } else {
+            self.stopped();
+        }
         let Some(base) = self.base.clone() else {
             return 0;
         };
@@ -458,7 +479,10 @@ impl Background {
         let mut cache = self.lock();
         let all = [(base.range.0, base.range.1, None)];
         let keys = keys_in(&mut cache, &base, &setup, &all);
-        cache.index_mut().keep_only(&keys)
+        match dry_run {
+            true => cache.index().sparing(&keys),
+            false => cache.index_mut().keep_only(&keys),
+        }
     }
 }
 
@@ -468,15 +492,18 @@ pub(crate) fn render_all(
     (project, file): (&Project, &Path),
     show_super_scale: bool,
     cancel: Arc<AtomicBool>,
+    dry_run: bool,
 ) -> vidcut_core::Result<Value> {
     let prefs = crate::preferences::load().unwrap_or_default();
     let (tx, _rx) = std::sync::mpsc::channel();
     let mut background = Background::new(tx, &prefs);
-    crate::render_caches::remember(file);
+    if !dry_run {
+        crate::render_caches::remember(file);
+    }
     background.open(file);
     background.indexed();
     let end = project.end();
-    if end > 0 && project.settings.render_cache != Mode::Off {
+    if !dry_run && end > 0 && project.settings.render_cache != Mode::Off {
         let (plan, _) = vidcut_core::render::flatten_lanes(project, 0, end)?;
         let base = Arc::new(super::shown(plan, show_super_scale));
         background.base = Some(base.clone());
@@ -643,5 +670,28 @@ fn full(dir: &Path) -> Result<(), String> {
             dir.display()
         )),
         _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use vidcut_core::preferences::Preferences;
+
+    use super::Background;
+
+    #[test]
+    fn a_dry_run_does_not_delete_the_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let mut prefs = Preferences::default();
+        prefs.playback_files.render_cache = root.path().to_path_buf();
+        let (tx, _rx) = mpsc::channel();
+        let mut bg = Background::new(tx, &prefs);
+        bg.open(std::path::Path::new("/projects/p.vidcut"));
+        let file = root.path().join("0123456789abcdef0123456789abcdef.mkv");
+        std::fs::write(&file, b"frame").unwrap();
+        assert_eq!(bg.delete_all(true), 1);
+        assert_eq!(std::fs::read(&file).unwrap(), b"frame");
     }
 }
