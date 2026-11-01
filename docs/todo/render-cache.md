@@ -19,5 +19,5 @@ The data comes from the manual, pp. 143–144 and 199–206.
 ## Frames that playback made
 
 - Use again the frames of a Retime Process that playback made, in the cache of the clip.
-- In an HDR timeline, use again the AI pictures, the frames between two source frames and the Smooth Cuts that playback made.
+- In an HDR timeline, use again the AI pictures, the frames that a Retime Process made and the Smooth Cuts that playback made.
   - The reader of the player makes them without the colors of the timeline (`with_timeline`).
