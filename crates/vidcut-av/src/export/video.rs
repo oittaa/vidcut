@@ -179,6 +179,14 @@ struct Source {
     how: Made,
     upscaled: Option<Upscaled>,
     kept: Option<Arc<[Arc<Cached>]>>,
+    skipped: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Take {
+    Picture,
+    Pass,
+    Skip,
 }
 
 type Weave = (bool, Option<frame::Video>, Option<frame::Video>);
@@ -292,6 +300,7 @@ impl Source {
             how: Made::Source(None),
             upscaled: None,
             kept: crate::render_cache::kept(input),
+            skipped: false,
         };
         if pictures == Pictures::Still {
             source.advance(target)?;
@@ -360,6 +369,7 @@ impl Source {
             how: Made::Source(None),
             upscaled: None,
             kept: crate::render_cache::kept(input),
+            skipped: false,
         })
     }
 
@@ -379,6 +389,10 @@ impl Source {
     }
 
     fn advance(&mut self, target: f64) -> Result<bool> {
+        if std::mem::take(&mut self.skipped) && !self.reads_on(target) {
+            self.run = None;
+            self.seek(target)?;
+        }
         let behind = match &self.current {
             Some(_) => target < self.target - 1e-6,
             None => self
@@ -2025,7 +2039,7 @@ impl VideoFrames {
         }
         self.start_drawing()?;
         let clock = Instant::now();
-        let passed = self.next(false)?;
+        let passed = self.next(Take::Skip)?;
         self.spent.0 += clock.elapsed();
         if passed.is_none() {
             return Ok(None);
@@ -2129,7 +2143,7 @@ impl VideoFrames {
     }
 
     pub(crate) fn next_layers(&mut self) -> Result<Option<Vec<Layer>>> {
-        let Some(layers) = self.next(true)? else {
+        let Some(layers) = self.next(Take::Picture)? else {
             return Ok(None);
         };
         let layers = layers.expect("a picture was asked for");
@@ -2163,12 +2177,12 @@ impl VideoFrames {
     }
 
     pub fn skip_frame(&mut self) -> Result<bool> {
-        let skipped = self.next(false)?.is_some();
+        let skipped = self.next(Take::Pass)?.is_some();
         self.drawn += i64::from(skipped);
         Ok(skipped)
     }
 
-    fn next(&mut self, picture: bool) -> Result<Option<Option<Vec<Layer>>>> {
+    fn next(&mut self, take: Take) -> Result<Option<Option<Vec<Layer>>>> {
         loop {
             let Some(piece) = self.pieces.get(self.piece) else {
                 return Ok(None);
@@ -2209,7 +2223,7 @@ impl VideoFrames {
                     ..
                 } = layer
                 else {
-                    if picture {
+                    if take == Take::Picture {
                         let color = match layer {
                             VideoPiece::Black { color, .. } => *color,
                             _ => vidcut_core::render::BLACK,
@@ -2242,7 +2256,13 @@ impl VideoFrames {
                 let retimed = !retime.is_nearest() && !still && pace.speed() > 0.0;
                 let k = if still { 0 } else { k };
                 let s = self.reading[i].expect("a file's picture is read");
-                if !picture {
+                if take == Take::Skip {
+                    if !backward {
+                        self.open[s].skipped = true;
+                    }
+                    continue;
+                }
+                if take == Take::Pass {
                     if retimed {
                         let at = self.exact_at(s, layer, k);
                         self.pass_to(s, at)?;
@@ -2327,7 +2347,7 @@ impl VideoFrames {
                     last.woven = None;
                 }
             }
-            return Ok(Some(picture.then_some(made)));
+            return Ok(Some((take == Take::Picture).then_some(made)));
         }
     }
 
