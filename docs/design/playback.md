@@ -151,9 +151,10 @@ flowchart TD
   - A seek with AI Fast decodes the whole chunk first. The upscaler makes the asked frame first, and the rest of the chunk follows.
   - A seek with AI Slow starts a new stream at the asked frame. Its first picture comes after the first chunk of the stream.
   - While playing, the player skips the frames that it cannot make in time. A replay makes again the frames that it skipped.
-  - The key of the kept frames holds the Super Scale, the placement and the timeline size (`source_key`). Why: they decide whether the picture is enlarged.
-  - The placement in the key is its picture settings, not its clip, its timeline start or its keyframe position. Thus a moved clip keeps its frames. A cut of the piece (`VideoPiece::part`) keeps them too.
-  - The enlarged picture holds no placement (`Sampling::Own`). The draw places it at each frame.
+  - The key of the kept frames holds the upscaler, the timeline size and the timeline colors (`source_key`). Why: they decide the enlarged picture.
+  - Of the placement, the key holds only the value that sets the size of the enlarged picture: the largest zoom and the Dynamic Zoom (`detail`).
+  - Thus a change of Sharpness, position, crop or opacity keeps the frames. A moved clip and a cut of the piece (`VideoPiece::part`) keep them too.
+  - The enlarged picture holds no placement (`Sampling::Own`). The draw places it at each frame with the Sharpness of that frame (`Plan::scales_at`).
 - With `viewer.super_scale` off, the live core plans the viewer without Super Scale (`preview_plan`).
 - With a Retime Process other than Nearest, `VideoFrames` makes the frames between the source frames for the viewer too ([export](export.md#which-source-frame)).
   - The key of such a frame holds the process, the Super Scale, the placement, the timeline size and the timeline colors (`source_key`). Why: the frame is made at its placement, and the viewer draws it with that placement and its opacity.
