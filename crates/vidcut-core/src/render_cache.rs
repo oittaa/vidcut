@@ -274,8 +274,8 @@ impl Setup<'_> {
 fn retimed(layer: &VideoPiece) -> bool {
     matches!(
         layer,
-        VideoPiece::Source { image, retime, .. }
-            if !retime.is_nearest() && !matches!(image, Some(Image::Still))
+        VideoPiece::Source { image, retime, pace, .. }
+            if !retime.is_nearest() && !matches!(image, Some(Image::Still)) && pace.speed() > 0.0
     )
 }
 
@@ -286,8 +286,10 @@ fn placing(layer: &VideoPiece) -> bool {
 fn lone(layer: &VideoPiece) -> bool {
     matches!(
         layer,
-        VideoPiece::Source { image: image @ (None | Some(Image::Still)), placed, pace, .. }
-            if !placing(layer) || placed.is_empty() || pace.speed() > 0.0 || image.is_some()
+        VideoPiece::Source {
+            image: None | Some(Image::Still),
+            ..
+        }
     )
 }
 
@@ -754,6 +756,25 @@ impl Cache {
     }
 
     pub fn apply(&mut self, plan: &mut RenderPlan, setup: &Setup, exists: &dyn Fn(&Path) -> bool) {
+        self.applied(plan, setup, exists, true);
+    }
+
+    pub fn apply_clips(
+        &mut self,
+        plan: &mut RenderPlan,
+        setup: &Setup,
+        exists: &dyn Fn(&Path) -> bool,
+    ) {
+        self.applied(plan, setup, exists, false);
+    }
+
+    fn applied(
+        &mut self,
+        plan: &mut RenderPlan,
+        setup: &Setup,
+        exists: &dyn Fn(&Path) -> bool,
+        timeline: bool,
+    ) {
         if setup.mode == RenderCache::Off || self.index.is_empty() {
             return;
         }
@@ -762,6 +783,7 @@ impl Cache {
         let mut seen: HashMap<Arc<Path>, bool> = HashMap::new();
         for piece in pieces {
             let (whole, clips) = self.levels(&piece, setup, plan);
+            let whole = whole.filter(|_| timeline);
             if whole.is_none() && clips.iter().all(Option::is_none) {
                 video.push(piece);
                 continue;

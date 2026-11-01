@@ -383,13 +383,12 @@ The two levels (spec D98):
 
 - `Setup::levels` puts each reason of a layer at a level. `Reason::On`, `Reason::Effect`, `Reason::Media`, `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime` and `Reason::SuperScale` go to the clip level. The other reasons go to the timeline level.
 - A reason of a layer goes to the clip level only when all these are true. Otherwise it goes to the timeline level.
-  - It is a video file or a still (`lone`). A placed video file with a Retime Process or a checked effect also plays forward.
-    - Why: a placed layer at the clip level needs the colors of each frame (`Look::whole`). The export draws them only forward. It also makes the frames between two source frames only forward ([export](export.md#which-source-frame)).
-  - Its media has no alpha channel (`Setup::opaque`). Or the codec is ProRes 4444 or 4444 XQ, and the layer has no Retime Process or checked effect (`Setup::keeps_alpha`).
+  - It is a video file or a still (`lone`).
+  - Its media has no alpha channel (`Setup::opaque`). Or the codec is ProRes 4444 or 4444 XQ, and the layer keeps no placement in its job (`Setup::keeps_alpha`).
     - Why: only the files of these codecs keep the alpha channel. Without it, the tracks below would not show through the clip.
     - A placed layer keeps no alpha in its file. Its file holds only the colors (`Look::whole`).
   - Its clip is not set to `ClipCache::Off`. This rule does not apply to `Reason::Effect` (spec D98).
-- A still has no Retime Process (`retimed`), as in the export. Thus a still keeps its placement in a job of the clip level only with a checked effect.
+- A Retime Process works only on a video file that plays forward (`retimed`), as in the export ([export](export.md#which-source-frame)). Thus a still or a clip that plays backward keeps its placement in a job of the clip level only with a checked effect.
 - `Cache::apply` puts the timeline level first. Where a frame of the timeline level is not there, it puts each found frame of the clip level in place of the layer (`from_file`).
   - The layer keeps its `placed`. The file takes the place of the media, as a proxy does. Thus the Transform and the effects work on it as on the media.
   - The layer takes the Nearest retime. A layer with a Retime Process or a checked effect also takes no `super_scale`. Why: the file holds its frames as the timeline shows them.
@@ -493,7 +492,11 @@ The jobs:
   - A seek after a skip also ends the run of the AI upscaler. Why: the run takes the source frames in order (`miss`), and the skipped frames did not reach it.
   - The start of a piece still decodes from the keyframe to the first frame of the piece (`Source::open`, `open_next`).
   - The player keeps decoding the frames that it skips (`skip_frame`). Why: its decoder stays at the playhead for play.
-  - `Kept` finds the picture by the `Id` of its frame in the plan of the timeline before the proxies. That is the plan that the viewer has, with proxies off.
+  - `Kept` finds the picture by the `Id` of its frame in two plans of the timeline before the proxies. One plan has no cache, and the other has only the files of the clip level (`Cache::apply_clips`).
+    - Why: where the viewer plays a layer from its cache file, the frame has another `Id`. With proxies off, the viewer has the plan with the cache.
+    - The render applies the files of the clip level to its second plan when it starts. The viewer makes its plan again after each change of the cache.
+    - Thus the viewer and the second plan give the same `Id` to a frame with a layer from a file of the clip level. A job can take that frame.
+    - The second plan has no files of the timeline level. Why: such a frame holds the mixed tracks. A job of the clip level must not take it as the picture of one clip.
   - Where a part of a piece plays from the cache, `Cache::apply` cuts the piece of the viewer. The made frames in the rest of that piece keep their `Id`. Thus the job finds them.
   - The render reads the store without a change of its order (`Store::peek`). Thus the pictures of the viewer leave the memory in their own order.
 - A job takes no kept picture in these cases (`Kept::fits`). It makes each frame.

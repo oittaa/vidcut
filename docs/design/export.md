@@ -428,10 +428,12 @@ A made frame of a speed change ([which source frame](#which-source-frame)):
 The colors mode (`VideoFrames::colors_only`):
 
 - A job of the clip level of the render cache draws in this mode ([playback](playback.md#the-render-cache)).
-- A placed layer that plays forward gives the colors of each frame over the whole frame (`Look`).
+- A placed layer gives the colors of each frame over the whole frame (`Look`).
   - With a Retime Process, a frame between two source frames is a made frame.
   - A frame on a source frame, or with no frame before it, takes the colors of that frame (`VideoFrames::colors_frame`).
   - Why the whole frame: a file has one size, and the bounds of a picture change with its keyframes.
+  - A layer that plays backward gets the colors of each of its frames when its source frame decodes (`VideoFrames::reversed_frame`). Why: the placement can change from frame to frame.
+  - The memory budget of backward play then counts pictures at the size of the frame (`VideoFrames::reversed_frames`).
 - The draw then places no layer. Thus the file holds colors only, and the cache needs no alpha.
 - A layer of such a file has `made` (`render::Shape`). The draw places its frames with `Sampling::Placed`, over the whole frame, as it places a made frame.
 

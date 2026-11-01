@@ -2709,9 +2709,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A move, a split, a trim or an edit on another track keeps it.
     - Without a Retime Process or a checked effect, it holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Super Scale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
-    - A clip with a checked effect, or a placed clip with a Retime Process, stays at the timeline level when it plays backward.
     - Media with an alpha channel is at the clip level only with ProRes 4444 or 4444 XQ (p. 201). Its file then keeps the alpha channel.
-      - With a Retime Process or a checked effect, it stays at the timeline level. Why: its file holds only the colors of the placed clip.
+      - With a checked effect, or with a Retime Process while it plays forward, it stays at the timeline level. Why: its file holds only the colors of the placed clip.
       - With another codec, it stays at the timeline level.
   - The timeline level keeps the frame after the tracks mix. It holds the other reasons.
     - Titles on top of all tracks stay out of it. Thus an edit of their text keeps the cache.

@@ -228,6 +228,7 @@ fn staying(left: &[(Duration, bool)]) -> Vec<bool> {
 struct Reversed {
     input: Input,
     pos: i64,
+    at: Option<i64>,
     frame: frame::Video,
     dolby_vision: frame::Video,
     woven: Option<Weave>,
@@ -2305,11 +2306,12 @@ impl VideoFrames {
                     )
                 };
                 let at = placed.get(i).map(Vec::as_slice).unwrap_or_default();
+                let colors = self.colors && !at.is_empty();
                 let frame = if backward {
-                    self.reversed_frame(i, s, layer, k)?
+                    self.reversed_frame(i, s, (&piece, layer), k, colors)?
                 } else if retimed {
                     self.retimed_frame(i, s, layer, k, at)?
-                } else if self.colors && !at.is_empty() {
+                } else if colors {
                     self.colors_source_frame(i, s, layer, k, at)?
                 } else {
                     self.source_frame(i, s, layer, k)?
@@ -2775,29 +2777,50 @@ impl VideoFrames {
         &mut self,
         i: usize,
         s: usize,
-        layer: &VideoPiece,
+        (piece, layer): (&VideoPiece, &VideoPiece),
         k: i64,
+        colors: bool,
     ) -> Result<frame::Video> {
         let pos = layer.position(k);
+        let at = colors.then_some(k);
         let input = self.open[s].reader.input().clone();
-        let made = |r: &Reversed| r.pos == pos && r.input == input;
+        let made = |r: &Reversed| r.pos == pos && r.at == at && r.input == input;
         if !self.open[s].reversed.iter().any(made) {
             self.open[s].reversed.clear();
-            let most = self.reversed_frames(s);
-            let mut shown: Vec<i64> = Vec::new();
+            let most = self.reversed_frames(s, colors);
+            let mut shown: Vec<(i64, Option<i64>)> = Vec::new();
             for j in k..layer.frames() {
-                let p = layer.position(j);
-                if shown.last() != Some(&p) {
+                let one = (layer.position(j), colors.then_some(j));
+                if shown.last() != Some(&one) {
                     if shown.len() as i64 == most {
                         break;
                     }
-                    shown.push(p);
+                    shown.push(one);
                 }
             }
-            let low = *shown.last().expect("frame k");
+            let low = shown.last().expect("frame k").0;
             for p in low..=pos {
-                if shown.contains(&p) {
-                    let frame = self.frame_at(i, s, p, layer)?;
+                let mut here: Vec<Option<i64>> = shown
+                    .iter()
+                    .filter(|(q, _)| *q == p)
+                    .map(|(_, j)| *j)
+                    .collect();
+                here.dedup();
+                if here.is_empty() {
+                    self.pass_at(s, p)?;
+                }
+                for j in here {
+                    let frame = match j {
+                        Some(j) => {
+                            let fps = self.fps;
+                            let src = &mut self.open[s];
+                            src.advance(target(fps, src.origin, p))?;
+                            let placed = crate::player::placed_of(piece, j, &[]);
+                            let placed = placed.get(i).map(Vec::as_slice).unwrap_or_default();
+                            self.colors_frame(i, s, layer, placed)?
+                        }
+                        None => self.frame_at(i, s, p, layer)?,
+                    };
                     let dolby_vision = dolby_vision(&self.last_dolby_vision)?;
                     let woven = self.open[s].woven.as_ref().map(weave_ref).transpose()?;
                     let src = &mut self.open[s];
@@ -2805,14 +2828,13 @@ impl VideoFrames {
                     src.reversed.push(Reversed {
                         input: input.clone(),
                         pos: p,
+                        at: j,
                         frame,
                         dolby_vision,
                         woven,
                         how,
                         upscaled,
                     });
-                } else {
-                    self.pass_at(s, p)?;
                 }
             }
         }
@@ -2831,8 +2853,8 @@ impl VideoFrames {
         Ok(frame)
     }
 
-    fn reversed_frames(&self, s: usize) -> i64 {
-        let (w, h) = match self.open[s].current.as_ref() {
+    fn reversed_frames(&self, s: usize, colors: bool) -> i64 {
+        let (w, h) = match self.open[s].current.as_ref().filter(|_| !colors) {
             Some((f, _)) => (f.width(), f.height()),
             None => (self.maker.out().0, self.maker.out().1),
         };
