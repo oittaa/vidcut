@@ -8,8 +8,8 @@ The viewer has no waveform, parade or vectorscope.
 
 - Levels are hard to judge by eye, in SDR and in an HDR timeline.
 - vidcut has no grade ([deviation X19](../deviations.md#x19-hdr-metadata-comes-from-the-sources)).
-- The roadmap leaves the grade to the finishing tool.
-- A scope shows the picture of the current draw.
+- The grade is a separate item ([primary-grade.md](primary-grade.md)).
+- A grade set by eye is a guess. A scope shows the picture that grade changes.
 
 **In the code:**
 
@@ -24,4 +24,4 @@ The viewer has no waveform, parade or vectorscope.
 - Show a waveform, a parade and a vectorscope of the viewer picture.
 - Use the timeline color space, PQ and HLG included.
 - The viewer turns each scope on, and a request does the same.
-- Leave OpenColorIO, node graphs and qualifiers to the finishing tool.
+- The scopes read the picture after the clip grade and after the timeline grade.

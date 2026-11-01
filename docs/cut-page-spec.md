@@ -32,7 +32,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 **Later (later):**
 - other effects, other transitions, other titles, generators
 - keyframes other than Transform, Crop and the clip volume
-- color, Fusion
+- color ([todo](todo/primary-grade.md)), Fusion
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
 - Sync Bin ([todo](todo/sync-bin.md)), Multi Source, Source Overwrite, Live Overwrite
 - making a compound clip from timeline clips ([todo](todo/compound-clips.md))
