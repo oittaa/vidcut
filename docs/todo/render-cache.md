@@ -24,10 +24,7 @@ Each kept layer has a `player::Origin` ([playback](../design/playback.md#the-eng
 
 ## Codec, folder and writing
 
-- Advanced has Codec and Folder.
-  - The codec preference is Auto, or a codec of a list: the ProRes and DNxHR grades that Resolve offers, HEVC and AV1.
-  - A chosen codec goes to the encoder as it is. If this computer cannot make it, Preferences says so, and the cache stays empty. No other codec takes its place.
-  - The folder is for a faster disk, for example.
+- Advanced has Folder, for a faster disk, for example.
 - The quality values of Auto with proxies off are starting values. A measurement sets them. Its plan goes to the owner first.
 - In an HDR timeline, the cache has 10 bits, in the PQ or HLG of the timeline. This needs a check.
 - The frames that playback made, and that the memory still keeps, go to the cache first. Thus they are not made again.

@@ -42,6 +42,92 @@ pub struct RenderCachePrefs {
     pub composites: bool,
     /// The User mode renders AI Super Scale and the AI Retime Processes.
     pub ai: bool,
+    /// The codec of the cache files. A chosen codec goes to the encoder as
+    /// it is. When no encoder here makes it, the cache stays empty.
+    pub codec: CacheCodec,
+}
+
+/// The codec of the render cache files (decision D98).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheCodec {
+    /// With proxies on, the codec and the quality of proxies. With proxies
+    /// off, ProRes 422 HQ, or HEVC or AV1 at a high quality on the GPU: the
+    /// first that the GPU makes and plays.
+    #[default]
+    Auto,
+    /// ProRes 422 Proxy. On Apple's ProRes hardware (VideoToolbox) when
+    /// there is one, else on the GPU through Vulkan, else in software.
+    ProresProxy,
+    /// ProRes 422 LT, made as ProRes 422 Proxy is.
+    ProresLt,
+    /// ProRes 422, made as ProRes 422 Proxy is.
+    #[serde(rename = "prores_422")]
+    Prores422,
+    /// ProRes 422 HQ, made as ProRes 422 Proxy is.
+    ProresHq,
+    /// ProRes 4444, 10-bit 4:4:4. On Apple's ProRes hardware when it takes
+    /// 4:4:4, else in software.
+    #[serde(rename = "prores_4444")]
+    Prores4444,
+    /// ProRes 4444 XQ, 10-bit 4:4:4, in software.
+    #[serde(rename = "prores_4444_xq")]
+    Prores4444Xq,
+    /// DNxHR LB, 8-bit 4:2:2, in software. An HDR timeline gets no cache.
+    DnxhrLb,
+    /// DNxHR SQ, 8-bit 4:2:2, in software. An HDR timeline gets no cache.
+    DnxhrSq,
+    /// DNxHR HQ, 8-bit 4:2:2, in software. An HDR timeline gets no cache.
+    DnxhrHq,
+    /// DNxHR HQX, 10-bit 4:2:2, in software.
+    DnxhrHqx,
+    /// DNxHR 444, 10-bit 4:4:4, in software.
+    #[serde(rename = "dnxhr_444")]
+    Dnxhr444,
+    /// HEVC at a high quality: on a hardware encoder when there is one, else
+    /// with x265.
+    Hevc,
+    /// AV1 at a high quality: on a hardware encoder when there is one, else
+    /// with SVT-AV1.
+    Av1,
+}
+
+impl CacheCodec {
+    pub const ALL: [CacheCodec; 14] = [
+        Self::Auto,
+        Self::ProresProxy,
+        Self::ProresLt,
+        Self::Prores422,
+        Self::ProresHq,
+        Self::Prores4444,
+        Self::Prores4444Xq,
+        Self::DnxhrLb,
+        Self::DnxhrSq,
+        Self::DnxhrHq,
+        Self::DnxhrHqx,
+        Self::Dnxhr444,
+        Self::Hevc,
+        Self::Av1,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "Automatic",
+            Self::ProresProxy => "ProRes 422 Proxy",
+            Self::ProresLt => "ProRes 422 LT",
+            Self::Prores422 => "ProRes 422",
+            Self::ProresHq => "ProRes 422 HQ",
+            Self::Prores4444 => "ProRes 4444",
+            Self::Prores4444Xq => "ProRes 4444 XQ",
+            Self::DnxhrLb => "DNxHR LB",
+            Self::DnxhrSq => "DNxHR SQ",
+            Self::DnxhrHq => "DNxHR HQ",
+            Self::DnxhrHqx => "DNxHR HQX",
+            Self::Dnxhr444 => "DNxHR 444",
+            Self::Hevc => "HEVC",
+            Self::Av1 => "AV1",
+        }
+    }
 }
 
 impl Default for RenderCachePrefs {
@@ -52,6 +138,7 @@ impl Default for RenderCachePrefs {
             transitions: false,
             composites: false,
             ai: true,
+            codec: CacheCodec::Auto,
         }
     }
 }
@@ -682,6 +769,8 @@ pub struct RenderCachePatch {
     pub composites: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codec: Option<CacheCodec>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -802,6 +891,7 @@ impl Preferences {
             r.transitions = x.transitions.unwrap_or(r.transitions);
             r.composites = x.composites.unwrap_or(r.composites);
             r.ai = x.ai.unwrap_or(r.ai);
+            r.codec = x.codec.unwrap_or(r.codec);
         }
         if let Some(fillers) = patch.transcripts.as_ref().and_then(|t| t.fillers.as_ref()) {
             set_fillers(&mut p.transcripts.fillers, fillers)?;

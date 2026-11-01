@@ -2123,15 +2123,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Resolve caches the parts to cache while they play. It also caches in the background, after a number of seconds without changes (pp. 199–206).
   - Each project has its own cache folder. A preference deletes cache files after a number of days.
   - The project settings hold the render cache format, the background render, its time and the kinds of User mode.
+  - The Render Cache Format menu offers ProRes, DNxHR and uncompressed formats (p. 202).
   - Smart caches clips in formats that are slow to decode: H.264, H.265, DCP, JPEG 2000 and camera raw.
   - Smart caches speed effects and Fusion effects. The manual does not name the upscaler or frame rate conversion for Smart.
 - **vidcut:**
   - Playback does not write the cache. Only the background render writes it ([D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - One cache serves all projects. It is a part of the disk cache, under its limit. The least recently used files go first.
-  - With proxies on, the cache has the size and the codec of proxies.
+  - With proxies on, the cache has the size of proxies. With the codec on Automatic, it also has their codec.
   - With proxies off, the timeline level has the size of the timeline. The clip level has the size of the media, or of the picture that AI Super Scale enlarges.
     - A clip with a Retime Process has the size of the timeline at the clip level.
-  - Preferences hold the background render, its time and the kinds of User mode. They are the settings of this computer.
+  - Preferences hold the codec, the background render, its time and the kinds of User mode. They are the settings of this computer.
+  - The codecs are the ProRes and DNxHR grades, HEVC and AV1, and Automatic. There is no uncompressed format.
   - Smart finds the media that are slow to decode by the decoder and by the proxy rules, not by a list of formats:
     - with GPU decoding on, media of a codec with long groups of pictures that the GPU does not decode
     - media that the proxy rules pick (spec D41), while the original plays
@@ -2141,7 +2143,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The writes of playback would take GPU time from the frames on the screen.
   - A part that two projects share renders once.
   - The size of proxies makes the cache small and fast to play.
-  - The kinds of User mode and the time depend on the computer, not on the project.
+  - The codec, the kinds of User mode and the time depend on the computer, not on the project. Its encoders, its decoders and its disk set them.
+  - HEVC and AV1 make small files, and the GPU plays them on many computers. An uncompressed file is many times larger than ProRes 422 HQ.
   - vidcut decodes H.264 and H.265 on the GPU. With the list of Resolve, Smart renders most clips of a camera or a phone. At 4K in ProRes 422 HQ, that is many GB for each minute.
   - AI Super Scale and the Retime Processes are slow to make on most computers.
   - A part that this computer cannot play in time then plays from the cache. The list of slow formats does not find all of these parts.

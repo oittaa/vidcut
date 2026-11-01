@@ -410,7 +410,8 @@ The names of frames:
     - Thus a change of the Transform or of an effect renders a placed clip again.
     - `alone` takes the opacity and the composite mode out of the placement. Why: they change only the alpha and the mix, not the colors in the file.
 - An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
-- `Look::of` gives the size and the codec. With proxies on, they are those of proxies. With proxies off, the size is that of the timeline.
+- `Look::of` gives the size and the codec. With proxies on, the size is that of proxies. With proxies off, the size is that of the timeline.
+  - The codec is `render_cache.codec` (`CacheCodec`). With Automatic and proxies on, it is that of proxies.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.
 
 The format on disk:
@@ -455,10 +456,18 @@ The jobs:
   - With a Retime Process, the plan has the size of the `Look`. The layer keeps its `retime`, its `super_scale` and its `placed`.
   - A job of the clip level draws in the colors mode of the export (`VideoFrames::colors_only`). Thus a placed layer gives its made frames, with no edges and no alpha ([export](export.md#effects)).
   - At the same place, the clip level renders first. Then the render goes on from there at the timeline level.
-- `cache_encoders` gives the encoders, in order:
-  - With proxies on: the encoders of the proxy codec.
-  - With proxies off: ProRes 422 HQ on the GPU or the CPU, and HEVC and AV1 at a high quality on the GPU (`high_options`). The encoders that the GPU makes and plays come first (`round`).
+- `cache_encoders` gives the encoders, in order. The encoders that the GPU makes and plays come first (`round`).
+  - With a chosen codec: the encoders that make it, with the options of its grade (`grade_options`).
+    - ProRes 422: Apple's hardware (VideoToolbox), the GPU through Vulkan, and the CPU.
+    - ProRes 4444: Apple's hardware when it takes 4:4:4 (`chroma_444`), and the CPU.
+    - ProRes 4444 XQ: the CPU. Why: no check shows that Apple's encoder takes this grade. The exports do not use it either.
+    - Why Vulkan makes no ProRes 4444: the test of the encoders tries it with 4:2:2 only (`probes`).
+    - DNxHR: the CPU. HEVC and AV1: the GPU, and the CPU.
+    - No encoder of another codec takes its place. With no encoder, `render_cache::write` fails, and the background render stops with the error.
+  - With Automatic and proxies on: the encoders of the proxy codec.
+  - With Automatic and proxies off: ProRes 422 HQ on the GPU or the CPU, and HEVC and AV1 at a high quality on the GPU.
   - The quality values are starting values. A measurement sets them.
+- `preferences.get` gives the first encoder of each codec (`cache_codecs`). Preferences shows it under Codec.
 
 The line and the Stats row:
 

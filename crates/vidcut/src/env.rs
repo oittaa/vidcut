@@ -613,11 +613,19 @@ pub fn proxy_encoders(
     vidcut_av::proxy::encoders(codec, &available, &plays)
 }
 
+type CacheEncoders = Vec<(
+    vidcut_av::proxy::ProxyEncoder,
+    Option<vidcut_core::preferences::CacheCodec>,
+)>;
+
 pub fn cache_encoders(
-    proxies: Option<vidcut_core::preferences::ProxyCodec>,
+    codecs: &[(
+        vidcut_core::preferences::CacheCodec,
+        Option<vidcut_core::preferences::ProxyCodec>,
+    )],
     gpu: bool,
     decoding: bool,
-) -> Vec<(vidcut_av::proxy::ProxyEncoder, bool)> {
+) -> Vec<CacheEncoders> {
     let available = if gpu {
         crate::export::availability(false)
     } else {
@@ -631,7 +639,10 @@ pub fn cache_encoders(
             Some((codec.as_str(), vidcut_av::hw::Kind::with_label(decoder)?))
         })
         .collect();
-    vidcut_av::proxy::cache_encoders(proxies, &available, &plays)
+    codecs
+        .iter()
+        .map(|&c| vidcut_av::proxy::cache_encoders(c, &available, &plays))
+        .collect()
 }
 
 fn av_error(e: vidcut_av::error::Error) -> Error {

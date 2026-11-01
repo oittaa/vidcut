@@ -103,7 +103,11 @@ impl Background {
     }
 
     fn look(&self, project: &Project) -> Look {
-        Look::of(project, (self.proxies.size, self.proxies.codec))
+        Look::of(
+            project,
+            (self.proxies.size, self.proxies.codec),
+            self.prefs.codec,
+        )
     }
 
     pub(super) fn follow(&mut self, prefs: &Preferences) -> bool {
@@ -537,10 +541,11 @@ impl Render {
             .use_proxies
             .then_some(self.proxies.codec);
         let encoders = crate::env::cache_encoders(
-            proxies,
+            &[(self.prefs.codec, proxies)],
             prefs.gpu.acceleration,
             prefs.gpu.acceleration && prefs.gpu.decoding,
-        );
+        )
+        .concat();
         let project = &*self.project;
         let slow = |id: &str| slow_media(project, &self.proxies, &decodes, id);
         let setup = Setup {
