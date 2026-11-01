@@ -360,6 +360,17 @@ impl Picture {
         }))
     }
 
+    pub(crate) fn alone(&self) -> Result<Picture> {
+        let frame = crate::export::video::frame_ref(&self.frame)?;
+        let alone = Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
+            .with_sampling(self.sampling.clone())
+            .with_origin(self.origin.clone());
+        Ok(match &self.woven {
+            Some(w) => alone.with_woven(w.clone()),
+            None => alone,
+        })
+    }
+
     pub(crate) fn alone_copied_down(&self) -> Result<Picture> {
         let frame = match (self.gpu(), crate::screen::held::of(&self.frame)) {
             (Some(_), _) => crate::hw::download(&self.frame)?,

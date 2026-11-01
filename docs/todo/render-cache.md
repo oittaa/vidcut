@@ -13,9 +13,9 @@ The manual describes the render cache on pp. 143–144 and 199–206.
 
 ## Codec, folder and writing
 
-- At the clip level, the render makes again the frames that playback made.
-  - A job of the clip level draws the colors of one layer (`colors_only`). A kept picture holds the whole frame, as the viewer draws it.
-  - The `Id` of a made picture holds the size and the placement of the timeline. The plan of a job of the clip level has other values.
+- At the clip level, the render makes again the frames of a Retime Process that playback made.
+  - The viewer keeps such a frame for the part of the timeline frame where the clip shows, with its placement (`Sampling::Placed`).
+  - A job of the clip level makes the colors of the layer over the whole frame (`Look::whole`), with no edges and no alpha.
 - In an HDR timeline, the render makes again the frames that playback made.
   - The reader of the player makes its pictures without the colors of the timeline (`with_timeline`). The render makes them with these colors.
 

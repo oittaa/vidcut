@@ -48,7 +48,7 @@ pub struct Written {
 }
 
 pub fn write(
-    (plan, clip): (&RenderPlan, bool),
+    (plan, start, layer): (&RenderPlan, i64, Option<usize>),
     keys: &[Key],
     encoders: &[(ProxyEncoder, Option<CacheCodec>)],
     (decoder, kept): (Option<&crate::hw::GpuDecoder>, Option<&crate::player::Kept>),
@@ -77,7 +77,7 @@ pub fn write(
     let mut errors = Vec::new();
     for (enc, grade) in encoders {
         match encode_plan(
-            (plan, clip),
+            (plan, start, layer),
             (enc, *grade),
             part.path(),
             (decoder, kept),

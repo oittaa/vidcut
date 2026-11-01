@@ -376,13 +376,32 @@ impl Kept {
         t
     }
 
-    pub(crate) fn fits(&self, job: &RenderPlan) -> bool {
+    pub(crate) fn fits(&self, job: &RenderPlan, layer: Option<usize>) -> bool {
         let timeline = &self.0.plan;
-        timeline.colors.is_none() && (job.width, job.height) == (timeline.width, timeline.height)
+        timeline.colors.is_none()
+            && (layer.is_some() || (job.width, job.height) == (timeline.width, timeline.height))
     }
 
-    pub(crate) fn at(&self, t: i64) -> Option<Arc<Picture>> {
-        store::global().peek(&self.0.id(t))
+    pub(crate) fn at(
+        &self,
+        t: i64,
+        layer: Option<usize>,
+        size: (u32, u32),
+    ) -> Option<Arc<Picture>> {
+        let picture = store::global().peek(&self.0.id(t))?;
+        let Some(i) = layer else {
+            return Some(picture);
+        };
+        let one = match i {
+            0 if picture.over().is_empty() => picture,
+            0 => Arc::new(picture.alone().ok()?),
+            _ => picture.over().get(i - 1)?.picture.clone(),
+        };
+        let upright = match one.rotation() % 180 {
+            90 => (one.height(), one.width()),
+            _ => (one.width(), one.height()),
+        };
+        (matches!(one.sampling(), Sampling::Own) && upright == size).then_some(one)
     }
 }
 

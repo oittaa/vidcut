@@ -707,7 +707,7 @@ impl Cache {
                 start,
                 plan: clip_plan(plan, alone, size),
                 keys: run,
-                clip: true,
+                layer: Some(i),
             });
         }
         let first = later.or((!whole.is_empty()).then_some(0))?;
@@ -722,7 +722,7 @@ impl Cache {
             start,
             plan: segment(plan, setup.look, start, run.len() as i64),
             keys: run,
-            clip: false,
+            layer: None,
         })
     }
 
@@ -807,7 +807,7 @@ pub struct Job {
     pub start: i64,
     pub keys: Vec<Key>,
     pub plan: RenderPlan,
-    pub clip: bool,
+    pub layer: Option<usize>,
 }
 
 fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
