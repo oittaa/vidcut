@@ -483,7 +483,7 @@ The jobs:
     - No encoder of another codec takes its place. With no encoder, `render_cache::write` fails, and the background render stops with the error.
   - With Automatic and proxies on: the encoders of the proxy codec.
   - With Automatic and proxies off: ProRes 422 HQ on the GPU or the CPU, and HEVC and AV1 at a high quality on the GPU.
-  - The quality values are starting values. A measurement sets them.
+  - Why: ProRes 422 HQ is the render cache format of a new project in Resolve. HEVC and AV1 take the values of their own choices (`grade_options`).
 - `preferences.get` gives the first encoder of each codec (`cache_codecs`). Preferences shows it under Codec.
 
 The line and the Stats row:
@@ -545,7 +545,6 @@ The marks of dropped frames:
 - The index keeps the marks (`Index::mark`). It writes them to `drops.marks` in the render cache folder at once.
   - The file holds the names, 16 bytes each, with no header, as a `.keys` file does.
   - The file does not count in the limit of the disk cache (`Kind::keeps`).
-- The numbers are starting values. A measurement can change them.
 
 ## Code
 
