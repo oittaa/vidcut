@@ -55,6 +55,7 @@ impl Reason {
         matches!(
             self,
             Self::On
+                | Self::Effect
                 | Self::Media
                 | Self::Speed
                 | Self::Retime(_)
@@ -138,8 +139,8 @@ impl Setup<'_> {
             .zip(layered(piece, self.slow, user))
             .map(|((layer, _), found)| {
                 let mut clip = false;
-                let own = lone(layer)
-                    && self.opaque(layer)
+                let single = lone(layer) && self.opaque(layer);
+                let own = single
                     && !matches!(
                         layer,
                         VideoPiece::Source {
@@ -148,7 +149,11 @@ impl Setup<'_> {
                         }
                     );
                 for r in found.iter().filter(|r| self.kept(r)) {
-                    match r.clip() && own {
+                    let here = match r {
+                        Reason::Effect => single,
+                        _ => own,
+                    };
+                    match r.clip() && here {
                         true => clip = true,
                         false => whole = true,
                     }
@@ -183,7 +188,7 @@ impl Setup<'_> {
         let v = self.project.media(media)?.info.video.as_ref()?;
         let (w, h) = v.display_size();
         let out = (self.look.width, self.look.height);
-        if !retime.is_nearest() {
+        if placing(retime, placed) {
             return Some(out);
         }
         let (size, shape) = match self.look.longest {
@@ -218,7 +223,7 @@ impl Setup<'_> {
         else {
             return None;
         };
-        if retime.is_nearest() || placed.is_empty() {
+        if !placing(retime, placed) || placed.is_empty() {
             return None;
         }
         let v = self.project.media(media)?.info.video.as_ref()?;
@@ -265,11 +270,15 @@ impl Setup<'_> {
     }
 }
 
+fn placing(retime: &Retime, placed: &[Placed]) -> bool {
+    !retime.is_nearest() || checked(placed)
+}
+
 fn lone(layer: &VideoPiece) -> bool {
     matches!(
         layer,
         VideoPiece::Source { image: None, retime, placed, pace, .. }
-            if retime.is_nearest() || placed.is_empty() || pace.speed() > 0.0
+            if !placing(retime, placed) || placed.is_empty() || pace.speed() > 0.0
     )
 }
 
@@ -284,14 +293,15 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
         ..
     } = &mut out
     {
-        match (retime.is_nearest(), super_scale.ai()) {
-            (false, _) => {}
-            (true, true) => super_scale.sharpness = Default::default(),
-            (true, false) => *super_scale = Default::default(),
+        let placing = placing(retime, placed);
+        match (placing, super_scale.ai()) {
+            (true, _) => {}
+            (false, true) => super_scale.sharpness = Default::default(),
+            (false, false) => *super_scale = Default::default(),
         }
-        match retime.is_nearest() {
-            true => placed.clear(),
-            false => {
+        match placing {
+            false => placed.clear(),
+            true => {
                 for p in placed.iter_mut() {
                     p.picture.opacity = None;
                     p.picture.opacity_keys.clear();
@@ -856,6 +866,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         color_space,
         super_scale,
         retime,
+        placed,
         made,
         ..
     } = layer
@@ -867,10 +878,10 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         *image = None;
         *pace = Default::default();
         *color_space = Default::default();
-        match retime.is_nearest() {
-            true if super_scale.ai() => super_scale.upscaler = Upscaler::Classic,
-            true => {}
-            false => {
+        match placing(retime, placed) {
+            false if super_scale.ai() => super_scale.upscaler = Upscaler::Classic,
+            false => {}
+            true => {
                 *super_scale = Default::default();
                 *retime = Default::default();
                 *made = shape;
