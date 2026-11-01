@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::lru::Lru;
 use crate::model::{ClipCache, CompositeMode, Project, RenderCache, Retime, SuperScale, Upscaler};
-use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
+use crate::preferences::{CacheCodec, Proxies, ProxyCodec, RenderCachePrefs};
 use crate::render::{Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
 
 pub type Key = [u8; 16];
@@ -616,6 +616,13 @@ impl Cache {
         self.index.marked(&setup.piece_name(piece, plan))
     }
 
+    pub fn marks_of(&mut self, plan: &RenderPlan, setup: &Setup) -> HashSet<Key> {
+        plan.video
+            .iter()
+            .map(|piece| setup.piece_name(piece, plan))
+            .collect()
+    }
+
     pub fn mark(&mut self, plan: &RenderPlan, setup: &Setup, (from, to): (i64, i64)) -> bool {
         let mut marked = false;
         let mut t = plan.range.0;
@@ -1129,6 +1136,23 @@ impl Index {
         !self.marks.is_empty()
     }
 
+    pub fn forget(&mut self, gone: &std::collections::HashSet<Key>) {
+        let before = self.marks.len();
+        self.marks.retain(|mark| !gone.contains(mark));
+        if self.marks.len() == before {
+            return;
+        }
+        let Some(dir) = &self.dir else {
+            return;
+        };
+        if self.marks.is_empty() {
+            let _ = std::fs::remove_file(marks_file(dir));
+            return;
+        }
+        let all: Vec<u8> = self.marks.iter().flatten().copied().collect();
+        let _ = crate::temp::write(&marks_file(dir), &all);
+    }
+
     pub fn keep_only(&mut self, keep: &std::collections::HashSet<Key>) -> usize {
         let unused: Vec<Arc<Path>> = self
             .files
@@ -1164,6 +1188,37 @@ impl Index {
     }
 }
 
+pub fn named_frames(
+    project: &Project,
+    prefs: &RenderCachePrefs,
+    proxies: &Proxies,
+    upscaled: &Upscaled,
+) -> crate::error::Result<HashSet<Key>> {
+    let end = project.end();
+    if end <= 0 {
+        return Ok(HashSet::new());
+    }
+    let (plan, _) = crate::render::flatten_lanes(project, 0, end)?;
+    let look = Look::of(project, (proxies.size, proxies.codec), prefs.codec);
+    let slow = |_: &str| false;
+    let setup = Setup {
+        mode: project.settings.render_cache,
+        prefs,
+        project,
+        slow: &slow,
+        upscaled,
+        look: &look,
+    };
+    let mut cache = Cache::default();
+    let mut keys = HashSet::new();
+    for piece in &plan.video {
+        for set in cache.names(piece, &setup, &plan, None) {
+            keys.extend(set.iter().copied());
+        }
+    }
+    Ok(keys)
+}
+
 pub fn name_of(keys: &[Key]) -> String {
     let all: Vec<u8> = keys.iter().flatten().copied().collect();
     hex(&digest(&[&all]))
@@ -1184,4 +1239,30 @@ fn read_keys(path: &Path) -> Option<Vec<Key>> {
         return None;
     }
     Some(bytes.as_chunks::<16>().0.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::named_frames;
+    use crate::model::SuperScale;
+    use crate::preferences::{Proxies, RenderCachePrefs};
+    use crate::render::{Placed, Shape};
+    use crate::test_support::Fixture;
+
+    #[test]
+    fn two_timelines_name_different_frames() {
+        let mut first = Fixture::new(&[(1.0, false)]);
+        first.append("m1", 0, 10);
+        let mut second = Fixture::new(&[(1.0, false)]);
+        second.append("m1", 0, 20);
+        let prefs = RenderCachePrefs::default();
+        let proxies = Proxies::default();
+        let up = |_: Shape, _: (u32, u32), _: &[Placed], _: SuperScale| None;
+        let a = named_frames(first.editor.project(), &prefs, &proxies, &up).unwrap();
+        let b = named_frames(second.editor.project(), &prefs, &proxies, &up).unwrap();
+        let none = named_frames(Fixture::new(&[]).editor.project(), &prefs, &proxies, &up).unwrap();
+        assert!(!a.is_empty());
+        assert!(b.difference(&a).next().is_some());
+        assert!(none.is_empty());
+    }
 }
