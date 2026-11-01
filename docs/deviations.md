@@ -2192,3 +2192,19 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Without libraries, the projects that vidcut opened are the projects that it knows.
   - The folder of a project file is the nearest thing to a library.
   - The files of a cache folder have names from their content. Thus two projects can share a file, and vidcut can clear only the full folder.
+
+## X106. A clip with an alpha channel is cached with the tracks mixed
+
+- **Resolve:**
+  - Uncompressed 10-bit, Uncompressed 16-bit Float, ProRes 4444, ProRes 4444 XQ and DNxHR 444 keep the alpha channel of a cached clip (p. 201).
+  - Thus Resolve can cache a clip with an alpha channel at the clip level in these formats.
+- **vidcut:**
+  - Only ProRes 4444 and ProRes 4444 XQ keep the alpha channel. Media with an alpha channel is at the clip level only with these codecs ([spec D98](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - DNxHR 444 keeps no alpha channel. vidcut has no uncompressed codec ([X103](#x103-the-render-cache-is-made-in-the-background)).
+  - With a checked effect, or with a Retime Process while the clip plays forward, such a clip stays at the timeline level with all codecs.
+  - At the timeline level, the cache holds the frame after the tracks mix. The frame looks the same.
+  - A change on another track, or a move of the clip, renders such a frame again.
+- **Why:**
+  - The DNxHR encoder of FFmpeg has no pixel format with alpha.
+  - With a checked effect or a Retime Process, the file of the clip level holds only the colors of the placed clip. An alpha channel there needs another kind of file.
+  - The timeline level gives the same picture with one simple path. The cost is only more renders after edits.

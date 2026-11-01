@@ -2653,7 +2653,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - `picture.set` takes `pitch` and `yaw`. `picture.clear` with `transform` puts both back to 0.
   - An import reads `transformationPitch` and `transformationYaw`. An export writes them back.
   - Each can have keyframes (D75). Their keys have the form of the keys of the rotation, in the units of the plain value.
-- **D98. Render cache** (deviations X103, X104, X105; the render cache pages, pp. 143–144 and 199–206, are outside the Cut page).
+- **D98. Render cache** (deviations X103, X104, X105, X106; the render cache pages, pp. 143–144 and 199–206, are outside the Cut page).
   - The render cache keeps on disk the frames that are slow to make. The viewer plays them from there. Exports do not use it.
   - The project has a mode (`render_cache`): Off, Smart or User. A new project has Off, as in Resolve.
     - Playback > Render Cache sets it. `project.set` with `render_cache` also sets it.
@@ -2710,7 +2710,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A move, a split, a trim or an edit on another track keeps it.
     - Without a Retime Process or a checked effect, it holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Super Scale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
-    - Media with an alpha channel is at the clip level only with ProRes 4444 or 4444 XQ (p. 201). Its file then keeps the alpha channel.
+    - Media with an alpha channel is at the clip level only with ProRes 4444 or 4444 XQ (p. 201, X106). Its file then keeps the alpha channel.
       - With a checked effect, or with a Retime Process while it plays forward, it stays at the timeline level. Why: its file holds only the colors of the placed clip.
       - With another codec, it stays at the timeline level.
   - The timeline level keeps the frame after the tracks mix. It holds the other reasons.
