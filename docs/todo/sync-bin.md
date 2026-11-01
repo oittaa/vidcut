@@ -6,9 +6,8 @@ The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-
 
 **Why:**
 
-- Multicam cutting is a standing request among open-source editors.
-- Several cameras of one moment need a quick way to pick the angle.
-- The Cut page gathers those angles in a Sync Bin.
+- The Cut page gathers several angles of one moment in a Sync Bin.
+- vidcut has no command that aligns two pool items.
 
 **In the code:**
 

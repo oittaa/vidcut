@@ -9,7 +9,6 @@ vidcut applies no LUT. The spec has an input LUT, an output LUT and a display LU
 - A camera LUT makes a log picture look right. The primary knobs cannot replace that table.
 - An output LUT is a look for the whole timeline, shared as a file.
 - A `.cube` file is the table those looks use.
-- OpenColorIO loads a studio configuration. A LUT is the look itself.
 
 **In the code:**
 
@@ -25,7 +24,8 @@ vidcut applies no LUT. The spec has an input LUT, an output LUT and a display LU
 - Measure a `.cube` in Resolve: its 1D table, its 3D table, its domain and its interpolation.
 - An input LUT on a clip, just after `fs_convert`, in the viewer and in the export.
 - An output LUT on the timeline, after subtitles, in the viewer and in the export.
-- The viewer and the export use the same LUTs. A display-only LUT stays out.
+- This item's LUTs are in the viewer and in the export.
+- The display LUT is the viewer's own branch in §13, and it is separate work.
 - The project stores the path as it stores a media path.
 - The LUT runs in the timeline color space.
 - A conversion for the LUT is shown where the user sets it, and in the export report.

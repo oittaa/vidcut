@@ -17,8 +17,6 @@ The use cases decide what is built and tested.
 - Interchange with Resolve that is as easy as possible: moving an edit either way, or between computers, needs no fixing by hand.
 - Running well without a GPU on a modest CPU, tested with real meeting recordings (variable-frame-rate H.264).
 - Automatic cuts that are quick to tune: silence removal for speech, and scene cuts for footage.
-- A primary on a clip, so a quick edit can look right here ([todo](todo/primary-grade.md)).
-- A program grade still finishes in Resolve.
 
 ## What comes next
 

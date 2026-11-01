@@ -6,7 +6,7 @@ Smart Reframe and Close Up are later Cut page work ([spec §1](../cut-page-spec.
 
 **Why:**
 
-- A vertical export is a usual delivery, and placing the subject by hand is slow.
+- The manual's list of Cut page tools marks Smart Reframe as Studio.
 - The `tiktok` preset writes 1080×1920 (`builtin_presets`).
 - The viewer draws a 9:16 guide when that guide is on (`Framing::Social9_16`).
 - The user still sets the crop.

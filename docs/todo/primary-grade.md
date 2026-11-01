@@ -2,33 +2,32 @@
 
 **When:** not decided.
 
-vidcut has no grade ([deviation X19](../deviations.md#x19-hdr-metadata-comes-from-the-sources)). A clip cannot be made brighter, warmer or less green.
+The Cut page color control is Auto Color ([auto-color.md](auto-color.md)). These sliders are a deviation from that control, and they wait for a yes.
 
 **Why:**
 
-- A quick edit has to look right without a finishing tool.
-- A full grade of a program still finishes in Resolve ([roadmap](../roadmap.md)).
-- OpenColorIO loads a studio color configuration. It does not grade a clip.
-- A node graph is a second compositor. The picture already has one order ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
-- A qualifier selects a range of color. It needs this primary, and the scopes, first.
+- Auto Color is one button. It is the color item of the Cut page.
+- A quick edit that is delivered from vidcut has no manual correction.
+- A program grade still finishes in Resolve ([roadmap](../roadmap.md)).
+- Whether an OpenTimelineIO file keeps a grade is not measured.
+- A grade the file drops does not come back with the timeline.
 
 **In the code:**
 
-- `fs_convert` puts each picture into the timeline color space. The mix is 16-bit float.
-- `to_linear` and `encode` in `picture.wgsl` already convert SDR, PQ and HLG.
-- `color::shader_colors` supplies the matrices and the scales for that conversion.
+- vidcut has no grade ([deviation X19](../deviations.md#x19-hdr-metadata-comes-from-the-sources)).
+- The mix is `Wide`, format `Rgba16Float`, in the code values of the timeline ([decision D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `to_linear` and `encode` run inside `fs_convert`. They are not the stored mix.
 - An `Effect` runs on the placed picture, before composite mode and opacity (`fs_blur`).
-- The spec puts the clip grade after those effects and before the speed change (§13).
-- The spec puts the timeline grade after the tracks mix.
+- The spec puts a clip grade after those effects and before the speed change (§13).
+- The spec puts a timeline grade after the tracks mix.
 - Scopes are a separate item ([scopes.md](scopes.md)).
-- More color spaces are another ([timeline-color-spaces-more.md](timeline-color-spaces-more.md)).
 
-**To do:**
+**To do, if this deviation is accepted:**
 
-- Measure the primary controls Resolve writes, and whether an OpenTimelineIO file keeps them.
+- Measure the controls Resolve writes for a primary, and whether an OpenTimelineIO file keeps them.
+- Measure whether those controls work on the code values or in linear light.
 - A clip grade, and one timeline grade, with the same math.
-- The controls are exposure, contrast, temperature, tint and saturation.
-- The math runs in linear light, in the timeline color space, in the same draw.
+- The controls to measure are exposure, contrast, temperature, tint and saturation.
 - The clip grade runs after the clip's effects and before the mix.
 - The timeline grade runs on the mixed picture, before subtitles and the encode.
 - With the grade at its defaults, the picture and the HDR metadata stay as they are (X19).
@@ -36,9 +35,9 @@ vidcut has no grade ([deviation X19](../deviations.md#x19-hdr-metadata-comes-fro
 - The values take keyframes once effect keyframes exist ([effects-library.md](effects-library.md)).
 - The CLI, IPC and MCP perform the same action as the GUI.
 
-**Later than this:**
+**Not this item:**
 
 - An input LUT and an output LUT ([luts.md](luts.md)).
-- A qualifier: a second grade on a range of hue, saturation or luma. It needs the scopes.
-- OpenColorIO, after the extra color spaces exist ([timeline-color-spaces-more.md](timeline-color-spaces-more.md)).
-- A node graph stays out. §13 is the order of the picture.
+- A qualifier, after this primary and the scopes.
+- OpenColorIO, after the extra color spaces ([timeline-color-spaces-more.md](timeline-color-spaces-more.md)).
+- A node graph. §13 is the order of the picture.

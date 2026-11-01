@@ -6,8 +6,8 @@
 
 **Why:**
 
-- Editors who switch programs want their own keys.
-- The default for each action stays the Cut page key ([spec §11](../cut-page-spec.md#11-keyboard-shortcuts)).
+- `SHORTCUTS` is one table for every project.
+- A binding keeps the Cut page key until it is changed ([spec §11](../cut-page-spec.md#11-keyboard-shortcuts)).
 - A script calls a request.
 
 **To do:**

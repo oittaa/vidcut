@@ -6,8 +6,7 @@ vidcut has no matte of a person, and no matte of a subject the user points at.
 
 **Why:**
 
-- Cutting an object out by hand is a common reason to leave an open-source editor.
-- Commercial editors offer that matte as a usual command.
+- The Cut page has no matte of a person. Record a deviation if this item is built.
 - A composite mask mode takes its matte from the clip below ([composite-masks.md](composite-masks.md)).
 - A subject mask is a matte of the clip itself.
 

@@ -6,15 +6,16 @@ The viewer has no waveform, parade or vectorscope.
 
 **Why:**
 
-- Levels are hard to judge by eye, in SDR and in an HDR timeline.
+- The Cut page Tools have no scope. Record a deviation if this item is built.
 - vidcut has no grade ([deviation X19](../deviations.md#x19-hdr-metadata-comes-from-the-sources)).
 - The grade is a separate item ([primary-grade.md](primary-grade.md)).
-- A grade set by eye is a guess. A scope shows the picture that grade changes.
 
 **In the code:**
 
 - A timeline is SDR, HDR PQ or HDR HLG.
-- The draw stores the mix as 16-bit floats (`rgba16float` in `rgb.wgsl`).
+- The mix is `Wide`, format `Rgba16Float`, in `screen/mod.rs`.
+- Those values are the code values of the timeline ([decision D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `rgba16float` in `rgb.wgsl` is the texture `unpack16` writes when it unpacks stored RGB.
 - An export's bit depth follows the footage ([decision D44](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - An HDR export is 10-bit.
 - `light::Meter` measures HDR light for metadata.

@@ -6,10 +6,9 @@ vidcut plays a compound clip from another editor. `edit.decompose` opens one. No
 
 **Why:**
 
-- Users ask for nested timelines so a scene, a title card or a stack stays one clip.
-- Flat timelines are a standing complaint about open-source editors.
+- One clip can hold a scene, a title card or a stack.
 - An OpenTimelineIO file from Resolve keeps compound clips ([deviation X9](../deviations.md#x9-opentimelineio-interchange)).
-- vidcut already plays that shape, so a nest made here can leave and come back.
+- vidcut already plays that shape.
 
 **In the code:**
 
