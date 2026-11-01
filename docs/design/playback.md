@@ -506,8 +506,10 @@ The jobs:
   - The layer of a job of the clip level has a placement. Only a layer with a Retime Process or a checked effect keeps it in the job (`alone`).
     - The job draws the colors of that layer over the whole frame (`Look::whole`).
     - The viewer keeps the frames that fall on a source frame without the placement and the effects (`shown`). The other frames of a Retime Process hold their placement (`Sampling::Placed`).
+    - The job makes the other frames itself. Why: one path that makes them keeps the render simple.
 - In an HDR timeline, a job takes a kept picture only when the reader decoded each of its layers (`decoded`). It takes no AI picture, no frame that a Retime Process made and no Smooth Cut.
   - Why: the reader of the player makes these pictures without the colors of the timeline (`with_timeline`).
+  - The job makes these pictures itself. Why: one path that makes them keeps the render simple.
   - A decoded layer takes the colors of the timeline only in the draw (`fs_convert`). The viewer and the job draw it the same.
   - A clip with a Retime Process that plays backward or is frozen gives decoded frames. Thus a job takes them.
 - `cache_encoders` gives the encoders, in order. The encoders that the GPU makes and plays come first (`round`).
