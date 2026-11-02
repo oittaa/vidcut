@@ -316,6 +316,7 @@ Ducking in the preview:
 Faders:
 
 - A dragged mixer fader sends `mixer.preview`. `Player::preview_fader` makes the value a lane gain (`Player::set_lane_gain`). The user hears it at once, with no new plan.
+- At the bottom of the fader (`fader_silent`), the lane gain silences the lane.
 
 [Audio scrubbing](../cut-page-spec.md#45-other-viewer-features) (spec D42):
 

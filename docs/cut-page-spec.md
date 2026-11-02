@@ -1099,6 +1099,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
 - **Mixer** (pp. 649–650):
   - It has a channel strip for each track with sound: name, meter, fader in dB, mute and solo.
+  - D27 has the law and the ticks of the fader.
   - It has a meter for the mix.
   - Solo silences the tracks that are not soloed.
   - Mute and solo apply to the export too (p. 650).
@@ -1375,7 +1376,30 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The removal of a track with clips needs a confirmation.
   - An edit or a move can name the next track number. This makes that track.
   - Track 1 cannot be removed.
-  - Track volume is from −100 to +10 dB. Resolve's fader has the same top, and its bottom is minus infinity (measured in Resolve Studio 21.1.2).
+  - **The track fader** (measured in Resolve Studio 21.1.2: one drag on A1, 66 px of travel, read from the number above the fader):
+    - The top is +10 dB. The bottom is minus infinity.
+    - The table gives the place in px from the top, and the dB there.
+
+      | px | dB | px | dB | px | dB |
+      |---|---|---|---|---|---|
+      | 0 | +10 | 24 | −3.8 | 48 | −31 |
+      | 3 | +8.5 | 27 | −5.6 | 51 | −38 |
+      | 6 | +6.6 | 30 | −7.4 | 54 | −45 |
+      | 9 | +4.8 | 33 | −9.1 | 57 | −54 |
+      | 12 | +3.1 | 36 | −12 | 60 | −68 |
+      | 15 | +1.3 | 39 | −16 | 63 | −95 |
+      | 18 | −0.3 | 42 | −19 | 66 | −∞ |
+      | 21 | −2.1 | 45 | −24 | | |
+
+    - The ticks have no numbers. They are at these places in px from the top: 0, 17 (white, 0 dB), 35, 42.7, 47.7 and 51.7.
+    - Three or more ticks are close together from 57 to 63 px.
+    - By the table, the ticks at 35, 42.7, 47.7 and 51.7 px are about −10, −20, −30 and −40 dB. The lower ticks are not read.
+  - **The track fader in vidcut:**
+    - It uses straight lines between the rows of the table, from a place to dB and from dB to a place.
+    - The ticks are in the same share of the travel. The close ticks are at 57, 60 and 63 px.
+    - `volume_db` goes from −100 to +10 dB, because JSON has no infinity. −100 stands for the bottom.
+    - At −100, the number above the fader reads −∞, and the track is silent in playback and export.
+    - A track at −100 counts as not heard, as a muted track does. This applies to the meters, ducking sources and transcription.
 - **D28. Meters.**
   - There is a bar for each channel of the project's channel count (p. 649).
   - The bars show linear peaks from −60 dBFS. A peak stays for 1.5 s.

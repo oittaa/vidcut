@@ -1211,7 +1211,9 @@ pub enum Request {
         muted: Option<bool>,
         #[serde(default)]
         solo: Option<bool>,
-        /// The fader, in dB, from -100 to 10.
+        /// The fader, in dB, from -100 to 10. -100 stands for the fader's
+        /// bottom, minus infinity: the track is silent in playback and
+        /// export.
         #[serde(default)]
         volume_db: Option<f64>,
         /// Voice Isolation's Amount, from 0 to 100: that much of the voice

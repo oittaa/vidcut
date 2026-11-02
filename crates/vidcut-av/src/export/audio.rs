@@ -698,6 +698,7 @@ impl Lane {
                 origin,
                 source_sample,
                 gain_db,
+                silent,
                 speed,
                 fade: cross,
                 isolation,
@@ -792,7 +793,11 @@ impl Lane {
                     (None, Some(paced)) => paced.read(source, take, &mut self.scratch)?,
                     (None, None) => source.read(take, &mut self.scratch)?,
                 }
-                let gain = 10f32.powf(*gain_db as f32 / 20.0) * self.trim;
+                let gain = if *silent && self.trim == 1.0 {
+                    0.0
+                } else {
+                    10f32.powf(*gain_db as f32 / 20.0) * self.trim
+                };
                 let fade = self.declick.min(len / 2).max(1);
                 let before = self.piece.checked_sub(1).map(|i| &self.pieces[i]);
                 let after = self.pieces.get(self.piece + 1);
