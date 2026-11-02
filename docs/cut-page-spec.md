@@ -2262,6 +2262,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `keyframes.copy`, `keyframes.cut` and `keyframes.paste` take them in `param` too.
     - `timeline.get` names each picture value that has keyframes, as it names `volume`.
     - The Inspector shows the value at the playhead. Its Keyframe button adds or removes the keyframe there (X70).
+      - With the playhead outside the clip, the clip time is the playhead's frame minus the clip's first frame (measured in Resolve Studio 21.1.2).
+      - The Inspector then shows the curve at that time, and the button or a new number adds the keyframe there, outside the clip.
     - Previous and Next move the playhead to the keyframe before or after it, inside the clip.
     - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out.
     - The Reset of one value removes its keyframes and puts the usual value back.
@@ -2545,8 +2547,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - After the first keyframe of a value, Resolve's Inspector adds a keyframe at the playhead for each change of the value (p. 1251).
   - vidcut does the same. `clip.set` with `gain_db`, and the Inspector's Volume, set a keyframe at `at`, or at the playhead.
   - A keyframe that is already on that frame takes the new value.
-  - With several clips, each clip with keyframes whose sound is at the playhead gets a keyframe. Each clip without keyframes takes the plain value.
-  - A clip with keyframes and no sound at the playhead keeps its volume. If no clip takes the value, the request fails.
+  - With several clips, each clip with keyframes gets a keyframe at its own frame under `at`, also outside the clip (D75). Each clip without keyframes takes the plain value.
+  - Without `at` and a playhead, a clip with keyframes keeps its volume. If no clip takes the value, the request fails.
   - The Inspector shows the volume of the curve at the playhead. The Reset of Volume removes the keyframes and sets 0 dB.
   - A drag on the flat volume line of a selected clip also moves all the keyframes of the other selected clips by the same dB.
   - Reason: a change at one point keeps the rest of the curve, as in Resolve. A drag of several lines keeps the differences between the clips (X71).

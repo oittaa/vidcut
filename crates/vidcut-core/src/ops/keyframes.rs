@@ -45,9 +45,6 @@ pub fn check_keyed_gain(p: &Project, ids: &[String], at: Option<i64>) -> Result<
             "{} has volume keyframes: give `at` for the keyframe",
             clips[0].id
         ))),
-        Some(t) if !clips.iter().any(|c| c.sounds_at(t)) => Err(Error::invalid(format!(
-            "no clip with volume keyframes has sound at frame {t}"
-        ))),
         Some(_) => Ok(()),
     }
 }
@@ -91,18 +88,6 @@ pub fn add(
     value: Option<KeyValue>,
     ease: Option<Ease>,
 ) -> Result<Vec<(String, i64)>> {
-    added(p, ids, param, at, value, ease, false)
-}
-
-fn added(
-    p: &mut Project,
-    ids: &[String],
-    param: KeyParam,
-    at: i64,
-    value: Option<KeyValue>,
-    ease: Option<Ease>,
-    past_ends: bool,
-) -> Result<Vec<(String, i64)>> {
     if param == KeyParam::Speed {
         if value.is_some() || ease.is_some() {
             return Err(Error::usage(SPEED_ADD));
@@ -110,10 +95,10 @@ fn added(
         return super::speed::add_keyframe(p, ids, at);
     }
     if let Some(v) = picture_param(param) {
-        return add_picture(p, ids, v, at, value, ease, past_ends);
+        return add_picture(p, ids, v, at, value, ease);
     }
     let value = scalar(param, value)?;
-    add_volume(p, ids, at, value, ease, past_ends)
+    add_volume(p, ids, at, value, ease)
 }
 
 fn add_volume(
@@ -122,10 +107,9 @@ fn add_volume(
     at: i64,
     value: Option<f64>,
     ease: Option<Ease>,
-    past_ends: bool,
 ) -> Result<Vec<(String, i64)>> {
     let value = value.map(checked).transpose()?;
-    let takes = |c: &Clip| c.sounds_at(at) || past_ends && c.audio_range().is_some();
+    let takes = |c: &Clip| c.audio_range().is_some();
     let targets: Vec<String> = ids
         .iter()
         .filter(|id| p.clip(id).is_some_and(takes))
@@ -135,13 +119,8 @@ fn add_volume(
         for id in ids {
             locate(p, id)?;
         }
-        let at = if past_ends {
-            String::new()
-        } else {
-            format!(" at frame {at}")
-        };
         return Err(Error::invalid(format!(
-            "no clip of {} has sound{at}",
+            "no clip of {} has sound",
             ids.join(", ")
         )));
     }
@@ -608,7 +587,7 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
         let mut placed = Vec::new();
         for k in keys {
             let t = start + at - earliest + k.offset - first;
-            for (_, frame) in added(p, one, k.param, t, Some(k.value), None, true)? {
+            for (_, frame) in add(p, one, k.param, t, Some(k.value), None)? {
                 placed.push((*k, frame));
             }
         }
@@ -723,10 +702,6 @@ fn held_picture(c: &Clip) -> Option<Picture> {
         .or_else(|| c.picture.clone())
 }
 
-fn shows(c: &Clip, at: i64) -> bool {
-    holds(c) && c.start <= at && at < c.end()
-}
-
 fn owned_picture(p: &Project, id: &str, v: PictureValue) -> Result<(Picture, Clip)> {
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
@@ -779,7 +754,6 @@ fn add_picture(
     at: i64,
     value: Option<KeyValue>,
     ease: Option<Ease>,
-    past_ends: bool,
 ) -> Result<Vec<(String, i64)>> {
     if v == PictureValue::Anchor && ease.is_some_and(|e| !e.is_linear()) {
         return Err(Error::invalid(ANCHOR_LINEAR));
@@ -787,23 +761,17 @@ fn add_picture(
     let value = value
         .map(|n| numbers(v, n).and_then(|n| finite(v, n)))
         .transpose()?;
-    let takes = |c: &Clip| shows(c, at) || past_ends && holds(c);
     let targets: Vec<String> = ids
         .iter()
-        .filter(|id| p.clip(id).is_some_and(takes))
+        .filter(|id| p.clip(id).is_some_and(holds))
         .cloned()
         .collect();
     if targets.is_empty() {
         for id in ids {
             locate(p, id)?;
         }
-        let at = if past_ends {
-            String::new()
-        } else {
-            format!(" at frame {at}")
-        };
         return Err(Error::invalid(format!(
-            "no clip of {} shows a picture{at}",
+            "no clip of {} has a picture",
             ids.join(", ")
         )));
     }

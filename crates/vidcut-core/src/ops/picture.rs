@@ -295,9 +295,7 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
         takes(p, ti, c)?;
         let old = c.picture.clone().unwrap_or_default();
         let next = changed(&old, change);
-        let frame = at
-            .filter(|&t| c.start <= t && t < c.end())
-            .map(|t| c.content_at(t));
+        let frame = at.map(|t| c.content_at(t));
         let mut picture = old.clone();
         let mut wrote = false;
         for v in PictureValue::ALL {
@@ -345,7 +343,7 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
     }
     if !applied {
         return Err(if missed {
-            Error::invalid("no clip with keyframes on that value shows at the frame")
+            Error::invalid("a value with keyframes needs `at` or a playhead")
         } else {
             Error::usage(NEEDS)
         });
