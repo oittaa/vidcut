@@ -1802,6 +1802,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D56. Subtitle tracks and cues** (§8.12).
   - The manual does not say which track shows after a new track is added, or how long a new cue lasts.
   - Subtitle tracks are `S1`, `S2`, … from the video up.
+  - In Resolve Studio 21.1.2, a script added 380 subtitle tracks to one timeline, and none was refused.
+  - `track.add` takes a `count` of at least 1 subtitle track, with no top limit.
   - A new track is the shown track.
   - A new cue lasts 3 s from the playhead, measured in Resolve Studio 21.1.2. It does not stop at the next cue.
   - Add New and Add Subtitle overwrite what the new cue covers, measured in Resolve Studio 21.1.2:
