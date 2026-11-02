@@ -446,12 +446,13 @@ pub enum Request {
     /// answers. A running GUI starts its background render at once, also
     /// with `render_cache.background` off, and answers while it renders.
     /// Without a GUI, this process renders all that the mode renders, and
-    /// then answers.
+    /// then answers. A dry run renders nothing, and answers as `cache.status`.
     #[serde(rename = "cache.render")]
     CacheRender {},
     /// Delete Render Cache in the running GUI: `all` empties the render
     /// cache, `unused` keeps only the files with frames of this timeline,
-    /// and `clips` deletes the files with frames where `clips` show.
+    /// and `clips` deletes the files with frames where `clips` show. A dry
+    /// run deletes nothing, and `deleted` tells how many files would go.
     #[serde(rename = "cache.delete")]
     CacheDelete {
         what: CacheDelete,
