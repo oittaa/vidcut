@@ -1000,20 +1000,24 @@ fn put_pair(keys: &mut Vec<Keyframe>, y: &mut Vec<f64>, frame: i64, value: [f64;
 }
 
 pub fn picture_problem(p: &Picture) -> Option<String> {
-    for v in PictureValue::ALL {
+    PictureValue::ALL.into_iter().find_map(|v| {
         let (keys, y) = parts(p)[v as usize];
-        if let Some(why) = channel_problem(v, keys, y, p) {
-            return Some(why);
-        }
-    }
-    None
+        channel_problem(v, keys, y, true)
+    })
+}
+
+pub fn title_keys_problem(p: &Picture) -> Option<String> {
+    PictureValue::ALL.into_iter().find_map(|v| {
+        let (keys, y) = parts(p)[v as usize];
+        channel_problem(v, keys, y, v != PictureValue::Position)
+    })
 }
 
 fn channel_problem(
     v: PictureValue,
     keys: &[Keyframe],
     y: Option<&Vec<f64>>,
-    p: &Picture,
+    ranged: bool,
 ) -> Option<String> {
     if keys.is_empty() {
         return y.filter(|y| !y.is_empty()).map(|_| {
@@ -1048,7 +1052,12 @@ fn channel_problem(
             .find_map(|(h, before)| {
                 h.and_then(|h| checked_handle(h, before).err().map(|e| e.message))
             });
-        value_problem(v, value, p, k.frame).or(handle).map(|e| {
+        let range = if ranged {
+            value_problem(v, value).map(String::from)
+        } else {
+            None
+        };
+        range.or(handle).map(|e| {
             format!(
                 "{} keyframe at source frame {}: {}",
                 v.name().replace('_', " "),
@@ -1059,41 +1068,41 @@ fn channel_problem(
     })
 }
 
-fn value_problem(v: PictureValue, value: [f64; 2], p: &Picture, frame: i64) -> Option<String> {
-    let bad = match v {
-        PictureValue::Position => !value.iter().all(|n| n.is_finite() && n.abs() <= 100.0),
-        PictureValue::Zoom => !value
+pub fn value_problem(v: PictureValue, value: [f64; 2]) -> Option<&'static str> {
+    let reach = |n: &f64| (n - 0.5).abs() <= Picture::REACH;
+    let ok = match v {
+        PictureValue::Position | PictureValue::Anchor => value.iter().all(reach),
+        PictureValue::Zoom => value
             .iter()
-            .all(|n| n.is_finite() && (0.01..=100.0).contains(n)),
-        PictureValue::Rotation => !(value[0].is_finite() && value[0].abs() <= 3600.0),
-        PictureValue::Anchor => !value.iter().all(|n| n.is_finite() && n.abs() <= 100.0),
-        PictureValue::Pitch | PictureValue::Yaw => !(value[0].is_finite() && value[0].abs() <= 1.5),
+            .all(|n| (Picture::ZOOM.0..=Picture::ZOOM.1).contains(n)),
+        PictureValue::Rotation => value[0].abs() <= Picture::TURNS,
+        PictureValue::Pitch | PictureValue::Yaw => value[0].abs() <= Picture::LEAN,
+        PictureValue::CropSoftness => value[0].abs() <= Picture::SOFT,
+        PictureValue::CropLeft
+        | PictureValue::CropRight
+        | PictureValue::CropTop
+        | PictureValue::CropBottom
+        | PictureValue::Opacity => (0.0..=1.0).contains(&value[0]),
+    };
+    (!ok).then_some(match v {
+        PictureValue::Position => {
+            "a picture's position is two fractions of the frame, each from -3.5 to 4.5"
+        }
+        PictureValue::Zoom => "a picture's zoom is from 0 to 100",
+        PictureValue::Rotation => "a picture's rotation is degrees, from -100000 to 100000",
+        PictureValue::Anchor => {
+            "a picture's anchor is two fractions of the picture, each from -3.5 to 4.5"
+        }
+        PictureValue::Pitch => "a picture's pitch is from -1.5 to 1.5",
+        PictureValue::Yaw => "a picture's yaw is from -1.5 to 1.5",
+        PictureValue::CropSoftness => "a picture's crop softness is from -100 to 100",
+        PictureValue::Opacity => "a picture's opacity is from 0 to 1",
         PictureValue::CropLeft
         | PictureValue::CropRight
         | PictureValue::CropTop
         | PictureValue::CropBottom => {
-            let at = p.crop_at(frame as f64);
-            !(value[0].is_finite() && (0.0..1.0).contains(&value[0]))
-                || at.left + at.right >= 1.0
-                || at.top + at.bottom >= 1.0
+            "a picture's crop is a fraction of it on each side, from 0 to 1"
         }
-        PictureValue::CropSoftness => !(value[0].is_finite() && value[0].abs() <= 100.0),
-        PictureValue::Opacity => !(value[0].is_finite() && (0.0..=1.0).contains(&value[0])),
-    };
-    bad.then(|| match v {
-        PictureValue::Position => {
-            "a picture's position is two fractions of the frame, each from -100 to 100".into()
-        }
-        PictureValue::Zoom => "a picture's zoom is from 1/100 to 100".into(),
-        PictureValue::Rotation => "a picture's rotation is degrees, from -3600 to 3600".into(),
-        PictureValue::Anchor => {
-            "a picture's anchor is two fractions of the picture, each from -100 to 100".into()
-        }
-        PictureValue::Pitch => "a picture's pitch is from -1.5 to 1.5".into(),
-        PictureValue::Yaw => "a picture's yaw is from -1.5 to 1.5".into(),
-        PictureValue::CropSoftness => "a picture's crop softness is from -100 to 100".into(),
-        PictureValue::Opacity => "a picture's opacity is from 0 to 1".into(),
-        _ => "a picture's crop is a fraction of it on each side, from 0, leaving some of it".into(),
     })
 }
 

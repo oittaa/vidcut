@@ -1633,7 +1633,8 @@ pub enum Request {
         color: Option<String>,
         /// Its own style. A field left out keeps the track's. `{}` drops it.
         /// `align` is `left`, `center` or `right`. `position` is `[x, y]`,
-        /// fractions of the picture from the top left, each from 0 to 1.
+        /// fractions of the picture from the top left, from -4 to 4 across
+        /// and from -3 to 5 down.
         #[serde(default)]
         style: Option<SubtitleStyle>,
     },
@@ -1986,13 +1987,14 @@ pub enum Request {
         /// 1/10, `0` drawing none), `background` (a color and an `opacity`
         /// from 0 to 1, a box behind the whole text) and `shadow` (a
         /// `color`, an `opacity` from 0 to 1, an `offset` `[x, y]` right and
-        /// down as fractions of the picture, and a `blur` from 0 to 100). A
-        /// field left out keeps the usual look.
+        /// down as fractions of the picture, each from -4 to 4, and a `blur`
+        /// from 1 to 100). A field left out keeps the usual look.
         #[serde(default)]
         style: Option<TitleStyle>,
         /// Where it goes, `[x, y]` as fractions of the picture from its top
-        /// left: a `text` title's middle, a lower third's corner by its
-        /// `align`. Default: the kind's usual place.
+        /// left, from -4 to 4 across and from -3 to 5 down: a `text` title's
+        /// middle, a lower third's corner by its `align`. Default: the
+        /// kind's usual place.
         #[serde(default)]
         position: Option<[f64; 2]>,
         /// How much larger its text is drawn, from 1/4 to 4. Default: 1.
@@ -2035,8 +2037,8 @@ pub enum Request {
         align: Option<TitleAlign>,
         #[serde(default)]
         style: Option<TitleStyle>,
-        /// `[x, y]` as fractions of the picture, each from -100 to 100, or
-        /// `[]` for the kind's usual place.
+        /// `[x, y]` as fractions of the picture, from -4 to 4 across and
+        /// from -3 to 5 down, or `[]` for the kind's usual place.
         #[serde(default)]
         position: Option<Vec<f64>>,
         /// How much larger its text is drawn, from 1/4 to 4; 1 for the usual
@@ -2077,21 +2079,21 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         /// Where the middle of the whole picture goes before the zoom and
         /// the rotation, `[x, y]` as fractions of the frame from its top
-        /// left, each from -100 to 100, or `[]` for the middle.
+        /// left, each from -3.5 to 4.5, or `[]` for the middle.
         #[serde(default)]
         position: Option<Vec<f64>>,
-        /// How much larger it is drawn about its anchor, from 1/100 to 100:
-        /// one number for both ways, or `[x, y]` across and down. 1 for its
+        /// How much larger it is drawn about its anchor, from 0 to 100: one
+        /// number for both ways, or `[x, y]` across and down. 1 for its
         /// usual size.
         #[serde(default)]
         zoom: Option<OneOrMany<f64>>,
-        /// Degrees turned counterclockwise about its anchor, from -3600 to
-        /// 3600; 0 for none.
+        /// Degrees turned counterclockwise about its anchor, from -100000
+        /// to 100000; 0 for none.
         #[serde(default)]
         rotation: Option<f64>,
         /// The point of the picture that the zoom and the rotation work
         /// about, `[x, y]` as fractions of the picture from its top left, as
-        /// it shows after the flips, each from -100 to 100, or `[]` for the
+        /// it shows after the flips, each from -3.5 to 4.5, or `[]` for the
         /// middle.
         #[serde(default)]
         anchor: Option<Vec<f64>>,
@@ -2112,14 +2114,14 @@ pub enum Request {
         #[serde(default)]
         flip_vertical: Option<bool>,
         /// What is cut off its left side, as a fraction of its width, from
-        /// 0 up to what leaves some of it with `crop_right`.
+        /// 0 to 1. When it meets `crop_right`, the picture does not show.
         #[serde(default)]
         crop_left: Option<f64>,
         /// What is cut off its right side, as a fraction of its width.
         #[serde(default)]
         crop_right: Option<f64>,
-        /// What is cut off its top, as a fraction of its height, from 0 up
-        /// to what leaves some of it with `crop_bottom`.
+        /// What is cut off its top, as a fraction of its height, from 0 to
+        /// 1. When it meets `crop_bottom`, the picture does not show.
         #[serde(default)]
         crop_top: Option<f64>,
         /// What is cut off its bottom, as a fraction of its height.

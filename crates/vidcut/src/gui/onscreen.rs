@@ -308,8 +308,8 @@ impl Workspace {
                     y = y0;
                 }
                 next.now.position = Some([
-                    rounded(x.clamp(-100.0, 100.0), 4),
-                    rounded(y.clamp(-100.0, 100.0), 4),
+                    rounded(x.clamp(Title::ACROSS.0, Title::ACROSS.1), 4),
+                    rounded(y.clamp(Title::DOWN.0, Title::DOWN.1), 4),
                 ]);
                 next.guides = guides;
             }

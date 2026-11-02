@@ -5,8 +5,8 @@ use super::picture::{file_curve, read_keys};
 use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
-    Keyframe, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleAlign, TitleKind,
-    TitleShadow, TitleStyle,
+    Keyframe, Picture, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleAlign,
+    TitleKind, TitleShadow, TitleStyle,
 };
 use crate::rich::{self, Look, Span};
 
@@ -92,11 +92,11 @@ fn point_keys(
             let [x, y] = ours(v);
             let key = Keyframe {
                 frame: (at + origin as f64).round() as i64,
-                value: clamped(x),
+                value: across(x),
                 in_handle: None,
                 out_handle: None,
             };
-            rows.push((key, clamped(y)));
+            rows.push((key, down(y)));
         }
     }
     rows.sort_by_key(|(k, _)| k.frame);
@@ -827,10 +827,10 @@ fn shadow_of(all: &[&Value]) -> Option<TitleShadow> {
                 .as_f64()
                 .map(|o| (o / 100.0).clamp(0.0, 1.0)),
             offset: Some([
-                rounded(dx.clamp(-0.5, 0.5)),
-                rounded((-dy).clamp(-0.5, 0.5)),
+                rounded(dx.clamp(-Picture::REACH, Picture::REACH)),
+                rounded((-dy).clamp(-Picture::REACH, Picture::REACH)),
             ]),
-            blur: value(g, "shadow").as_f64().map(|b| b.clamp(0.0, 100.0)),
+            blur: value(g, "shadow").as_f64().map(|b| b.clamp(1.0, 100.0)),
         })
     })
 }
@@ -845,11 +845,11 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         Some(2) => TitleAlign::Right,
         _ => TitleAlign::Left,
     };
-    let across = point(value(text_group, "position")).map_or(0.51, |p| p[0]);
+    let middle = point(value(text_group, "position")).map_or(0.51, |p| p[0]);
     let x = match align {
-        TitleAlign::Left => across - 0.5,
-        TitleAlign::Middle => across,
-        TitleAlign::Right => across + 0.5,
+        TitleAlign::Left => middle - 0.5,
+        TitleAlign::Middle => middle,
+        TitleAlign::Right => middle + 0.5,
     };
     let font = look("font")
         .as_str()
@@ -879,7 +879,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
             background: backing_of(all),
             shadow: shadow_of(all),
         },
-        position: Some([clamped(x), 0.5]),
+        position: Some([across(x), 0.5]),
         position_keys: Vec::new(),
         position_y: Vec::new(),
         zoom: None,
@@ -897,8 +897,12 @@ fn point(v: &Value) -> Option<[f64; 2]> {
     Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?])
 }
 
-fn clamped(v: f64) -> f64 {
-    rounded(v).clamp(-100.0, 100.0)
+fn across(v: f64) -> f64 {
+    rounded(v).clamp(Title::ACROSS.0, Title::ACROSS.1)
+}
+
+fn down(v: f64) -> f64 {
+    rounded(v).clamp(Title::DOWN.0, Title::DOWN.1)
 }
 
 fn row(g: &Value) -> u64 {
@@ -948,7 +952,12 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
     });
     let keys = |id: &str| read_keys(parameter(main, id), origin).unwrap_or_default();
     t.zoom_keys = fitted(&keys("transformationZoomX"), 1.0, 0.25, 4.0);
-    t.rotation_keys = fitted(&keys("transformationRotationAngle"), 1.0, -3600.0, 3600.0);
+    t.rotation_keys = fitted(
+        &keys("transformationRotationAngle"),
+        1.0,
+        -Picture::TURNS,
+        Picture::TURNS,
+    );
 }
 
 pub fn read(item: &Value, reference: &Value, height: u32, origin: i64) -> Option<Title> {
@@ -971,7 +980,7 @@ pub fn read(item: &Value, reference: &Value, height: u32, origin: i64) -> Option
 pub fn with_keys_of(mut t: Title, read: &Title) -> Title {
     let dy = t.place()[1] - read.place()[1];
     t.position_keys.clone_from(&read.position_keys);
-    t.position_y = read.position_y.iter().map(|y| clamped(y + dy)).collect();
+    t.position_y = read.position_y.iter().map(|y| down(y + dy)).collect();
     t.zoom_keys.clone_from(&read.zoom_keys);
     t.rotation_keys.clone_from(&read.rotation_keys);
     t.opacity = read.opacity;
@@ -1032,7 +1041,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         .map(|z| rounded(z.clamp(0.25, 4.0)));
     let rotation = value(turned_by, "transformationRotationAngle")
         .as_f64()
-        .filter(|r| r.is_finite() && r.abs() <= 3600.0)
+        .filter(|r| r.abs() <= Picture::TURNS)
         .map(rounded);
     let size = style_from
         .points
@@ -1088,6 +1097,6 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     if let Some(row) = lowered {
         y += row as f64 / 2.0 * title.lower_line();
     }
-    title.position = Some([clamped(x), clamped(y)]);
+    title.position = Some([across(x), down(y)]);
     crate::ops::titles::checked(&title).ok()
 }

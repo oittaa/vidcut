@@ -64,15 +64,15 @@ fn a_track_style_is_stored_in_canonical_form() {
 }
 
 #[test]
-fn a_subtitle_position_outside_the_picture_is_refused() {
+fn a_subtitle_position_past_its_limit_is_refused() {
     let err = checked_style(&SubtitleStyle {
-        position: Some([1.5, 0.4]),
+        position: Some([4.5, 0.4]),
         ..SubtitleStyle::default()
     })
     .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "a subtitle position is two fractions of the picture, from 0 to 1"
+        "a subtitle position is two fractions of the picture, from -4 to 4 across and -3 to 5 down"
     );
 }
 

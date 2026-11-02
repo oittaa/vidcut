@@ -237,7 +237,7 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
   - `opacity` in the `Composite` clip effect, from 0 to 100
 - Between two keyframes, each value changes evenly.
 - A key time counts from the first frame that the clip shows.
-- A position has no minimum or maximum. A move of x from -0.5 to 1.5 plays.
+- A position goes from -4 to 4 on each axis, from the bottom left. A move of x from -0.5 to 1.5 plays.
 - A key of zoom, rotation or opacity takes `InBez` and `OutBez`.
 - A position key has no curve:
   - The curve button of the Position row is off. Drop Shadow Offset and Background Center are the same.

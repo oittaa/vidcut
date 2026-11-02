@@ -1,6 +1,8 @@
 use crate::model::{Border, CompositeMode, Effect, EffectKind, Picture, VideoInfo};
 use crate::render::Placed;
 
+const LEAST_ZOOM: f64 = 1e-9;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Level {
     pub back: [f64; 8],
@@ -114,7 +116,7 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4]) -> Level {
     let sampled = placed.picture.sampled(placed.source as f64);
     let p = &sampled;
     let [_, _, fw, fh] = fitted;
-    let [zx, zy] = p.scale();
+    let [zx, zy] = p.scale().map(|z| z.max(LEAST_ZOOM));
     let [ax, ay] = p.pivot();
     let (sin, cos) = p.turn().to_radians().sin_cos();
     let sx = if p.flip_horizontal { -1.0 } else { 1.0 };
@@ -129,6 +131,7 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4]) -> Level {
     let (c, d) = (k * sy * sin / (zy * fh), k * sy * cos / (zy * fh));
     let c0 = p.crop;
     let crop = [c0.left, c0.top, 1.0 - c0.right, 1.0 - c0.bottom];
+    let gone = p.scale().contains(&0.0) || crop[0] >= crop[2] || crop[1] >= crop[3];
     let (edge, soft) = Soft::of(crop, p.softness(), [fw, fh]);
     let affine = [
         a,
@@ -145,7 +148,7 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4]) -> Level {
         shown: crop,
         edge,
         soft,
-        opacity: p.opaque(),
+        opacity: if gone { 0.0 } else { p.opaque() },
     }
 }
 

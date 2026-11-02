@@ -10,77 +10,15 @@ use crate::request::DynamicZoomSet;
 
 use super::locate;
 
-const ZOOM: (f64, f64) = (0.01, 100.0);
-const REACH: f64 = 100.0;
-const TURNS: f64 = 3600.0;
-const LEAN: f64 = 1.5;
-const SOFT: f64 = 100.0;
-
 pub fn checked(p: &Picture) -> Result<Option<Picture>> {
-    if let Some(at) = p.position
-        && !at.iter().all(|v| v.is_finite() && v.abs() <= REACH)
-    {
-        return Err(Error::invalid(
-            "a picture's position is two fractions of the frame, each from -100 to 100",
-        ));
-    }
-    if let Some(z) = p.zoom
-        && !z
-            .iter()
-            .all(|v| v.is_finite() && (ZOOM.0..=ZOOM.1).contains(v))
-    {
-        return Err(Error::invalid("a picture's zoom is from 1/100 to 100"));
-    }
-    if let Some(r) = p.rotation
-        && !(r.is_finite() && r.abs() <= TURNS)
-    {
-        return Err(Error::invalid(
-            "a picture's rotation is degrees, from -3600 to 3600",
-        ));
-    }
-    if let Some(at) = p.anchor
-        && !at.iter().all(|v| v.is_finite() && v.abs() <= REACH)
-    {
-        return Err(Error::invalid(
-            "a picture's anchor is two fractions of the picture, each from -100 to 100",
-        ));
-    }
-    if let Some(v) = p.pitch
-        && !(v.is_finite() && v.abs() <= LEAN)
-    {
-        return Err(Error::invalid("a picture's pitch is from -1.5 to 1.5"));
-    }
-    if let Some(v) = p.yaw
-        && !(v.is_finite() && v.abs() <= LEAN)
-    {
-        return Err(Error::invalid("a picture's yaw is from -1.5 to 1.5"));
-    }
-    let c = p.crop;
-    if !c
-        .sides()
-        .iter()
-        .all(|v| v.is_finite() && (0.0..1.0).contains(v))
-        || c.left + c.right >= 1.0
-        || c.top + c.bottom >= 1.0
-    {
-        return Err(Error::invalid(
-            "a picture's crop is a fraction of it on each side, from 0, leaving some of it",
-        ));
-    }
-    if let Some(s) = p.crop_softness
-        && !(s.is_finite() && s.abs() <= SOFT)
-    {
-        return Err(Error::invalid(
-            "a picture's crop softness is from -100 to 100",
-        ));
+    for v in PictureValue::ALL {
+        if let Some(why) = crate::keyframes::value_problem(v, crate::keyframes::plain_channel(p, v))
+        {
+            return Err(Error::invalid(why));
+        }
     }
     if let Some(z) = &p.dynamic_zoom {
         zoom_checked(z)?;
-    }
-    if let Some(o) = p.opacity
-        && !(o.is_finite() && (0.0..=1.0).contains(&o))
-    {
-        return Err(Error::invalid("a picture's opacity is from 0 to 1"));
     }
     if let Some(why) = crate::keyframes::picture_problem(p) {
         return Err(Error::invalid(why));
@@ -151,12 +89,16 @@ pub fn effect_checked(e: &Effect) -> Result<Effect> {
 
 fn zoom_checked(z: &DynamicZoom) -> Result<()> {
     for b in [z.start, z.end] {
-        if !b.center.iter().all(|v| v.is_finite() && v.abs() <= REACH) {
+        if !b
+            .center
+            .iter()
+            .all(|v| v.is_finite() && v.abs() <= DynamicZoom::REACH)
+        {
             return Err(Error::invalid(
                 "a Dynamic Zoom box's middle is two fractions of the picture, each from -100 to 100",
             ));
         }
-        if !(b.size.is_finite() && (ZOOM.0..=ZOOM.1).contains(&b.size)) {
+        if !(DynamicZoom::SIZE.0..=DynamicZoom::SIZE.1).contains(&b.size) {
             return Err(Error::invalid(
                 "a Dynamic Zoom box's size is a fraction of the picture, from 1/100 to 100",
             ));

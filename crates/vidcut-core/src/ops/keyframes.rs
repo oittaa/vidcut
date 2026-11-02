@@ -683,40 +683,6 @@ fn numbers(v: PictureValue, value: KeyValue) -> Result<[f64; 2]> {
     }
 }
 
-fn finite(v: PictureValue, value: [f64; 2]) -> Result<[f64; 2]> {
-    let ok = match v {
-        PictureValue::Position => value.iter().all(|n| n.is_finite() && n.abs() <= 100.0),
-        PictureValue::Zoom => value
-            .iter()
-            .all(|n| n.is_finite() && (0.01..=100.0).contains(n)),
-        PictureValue::Rotation => value[0].is_finite() && value[0].abs() <= 3600.0,
-        PictureValue::Anchor => value.iter().all(|n| n.is_finite() && n.abs() <= 100.0),
-        PictureValue::Pitch | PictureValue::Yaw => value[0].is_finite() && value[0].abs() <= 1.5,
-        PictureValue::CropSoftness => value[0].is_finite() && value[0].abs() <= 100.0,
-        PictureValue::Opacity => value[0].is_finite() && (0.0..=1.0).contains(&value[0]),
-        _ => value[0].is_finite() && (0.0..1.0).contains(&value[0]),
-    };
-    if ok {
-        Ok(value)
-    } else {
-        Err(Error::invalid(match v {
-            PictureValue::Position => {
-                "a picture's position is two fractions of the frame, each from -100 to 100"
-            }
-            PictureValue::Zoom => "a picture's zoom is from 1/100 to 100",
-            PictureValue::Rotation => "a picture's rotation is degrees, from -3600 to 3600",
-            PictureValue::Anchor => {
-                "a picture's anchor is two fractions of the picture, each from -100 to 100"
-            }
-            PictureValue::Pitch => "a picture's pitch is from -1.5 to 1.5",
-            PictureValue::Yaw => "a picture's yaw is from -1.5 to 1.5",
-            PictureValue::CropSoftness => "a picture's crop softness is from -100 to 100",
-            PictureValue::Opacity => "a picture's opacity is from 0 to 1",
-            _ => "a picture's crop is a fraction of it on each side, from 0, leaving some of it",
-        }))
-    }
-}
-
 fn holds(c: &Clip) -> bool {
     super::picture::has_picture(c) || c.title.is_some()
 }
@@ -797,9 +763,7 @@ fn add_picture(
     if v == PictureValue::Anchor && ease.is_some_and(|e| !e.is_linear()) {
         return Err(Error::invalid(ANCHOR_LINEAR));
     }
-    let value = value
-        .map(|n| numbers(v, n).and_then(|n| finite(v, n)))
-        .transpose()?;
+    let value = value.map(|n| numbers(v, n)).transpose()?;
     let targets: Vec<String> = ids
         .iter()
         .filter(|id| p.cue(id).is_some() || p.clip(id).is_some_and(holds))
@@ -836,10 +800,7 @@ fn set_picture(
     pick: &Pick,
     change: &KeyChange,
 ) -> Result<()> {
-    let value = change
-        .value
-        .map(|n| numbers(v, n).and_then(|n| finite(v, n)))
-        .transpose()?;
+    let value = change.value.map(|n| numbers(v, n)).transpose()?;
     let by = change.by.map(|n| numbers(v, n)).transpose()?;
     if by
         .as_ref()
@@ -882,7 +843,6 @@ fn set_picture(
                 value.unwrap_or_else(|| picture.key_value(v, *frame).unwrap_or([0.0, 0.0]));
             if let Some(by) = by {
                 next = [next[0] + by[0], next[1] + by[1]];
-                next = finite(v, next)?;
             }
             if value.is_some() || by.is_some() {
                 picture.put_channel(v, *frame, next);

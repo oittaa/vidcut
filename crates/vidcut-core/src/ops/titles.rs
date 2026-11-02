@@ -1,8 +1,8 @@
 use crate::error::{Error, Result};
-use crate::keyframes::{PictureValue, picture_problem, plain_channel};
+use crate::keyframes::{PictureValue, plain_channel, title_keys_problem};
 use crate::looks::TitleLook;
 use crate::model::{
-    Clip, Keyframe, Project, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle, Track,
+    Clip, Keyframe, Picture, Project, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle, Track,
     TrackKind,
 };
 
@@ -12,19 +12,22 @@ use super::{clear_range, fix_audio, is_main, locate, place, tracks, unlocked};
 pub const DEFAULT_SECS: f64 = 5.0;
 
 const TEXT_MOST: usize = 2000;
-const REACH: f64 = 100.0;
 const ZOOM: (f64, f64) = (0.25, 4.0);
-const TURNS: f64 = 3600.0;
 
-const PLACE: &str = "a title's position is two fractions of the picture, each from -100 to 100";
+const PLACE: &str =
+    "a title's position is two fractions of the picture, from -4 to 4 across and -3 to 5 down";
 const ZOOMED: &str = "a title's zoom is from 1/4 to 4";
-const TURNED: &str = "a title's rotation is degrees, from -3600 to 3600";
+const TURNED: &str = "a title's rotation is degrees, from -100000 to 100000";
 const FADED: &str = "a title's opacity is from 0 to 1";
 const POSITION_LINEAR: &str =
     "a title's position keyframes are linear: they take no ease or handles";
 
-fn reaches(v: f64) -> bool {
-    v.is_finite() && v.abs() <= REACH
+fn across(v: f64) -> bool {
+    (Title::ACROSS.0..=Title::ACROSS.1).contains(&v)
+}
+
+fn down(v: f64) -> bool {
+    (Title::DOWN.0..=Title::DOWN.1).contains(&v)
 }
 
 fn zooms(z: f64) -> bool {
@@ -32,7 +35,7 @@ fn zooms(z: f64) -> bool {
 }
 
 fn turns(r: f64) -> bool {
-    r.is_finite() && r.abs() <= TURNS
+    r.abs() <= Picture::TURNS
 }
 
 fn fades(o: f64) -> bool {
@@ -48,7 +51,7 @@ fn all_in(keys: &[Keyframe], ok: fn(f64) -> bool, why: &str) -> Result<()> {
 }
 
 fn checked_keys(t: &Title) -> Result<()> {
-    if let Some(why) = picture_problem(&t.as_picture()) {
+    if let Some(why) = title_keys_problem(&t.as_picture()) {
         return Err(Error::invalid(why));
     }
     if t.kind == TitleKind::Scroll && (!t.zoom_keys.is_empty() || !t.rotation_keys.is_empty()) {
@@ -60,8 +63,8 @@ fn checked_keys(t: &Title) -> Result<()> {
     {
         return Err(Error::invalid(POSITION_LINEAR));
     }
-    all_in(&t.position_keys, reaches, PLACE)?;
-    if !t.position_y.iter().copied().all(reaches) {
+    all_in(&t.position_keys, across, PLACE)?;
+    if !t.position_y.iter().copied().all(down) {
         return Err(Error::invalid(PLACE));
     }
     all_in(&t.zoom_keys, zooms, ZOOMED)?;
@@ -98,7 +101,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         return Err(Error::invalid("a scroll has no zoom or rotation"));
     }
     if let Some(at) = t.position
-        && !at.iter().copied().all(reaches)
+        && !Title::places(at)
     {
         return Err(Error::invalid(PLACE));
     }
@@ -151,17 +154,17 @@ pub(crate) fn checked_shadow(s: &TitleShadow) -> Result<TitleShadow> {
         None => None,
     };
     let offset = match s.offset {
-        Some(at) if at.iter().all(|v| v.is_finite() && v.abs() <= 0.5) => Some(at),
+        Some(at) if at.iter().all(|v| v.abs() <= Picture::REACH) => Some(at),
         Some(_) => {
             return Err(Error::invalid(
-                "a shadow's offset is two fractions of the picture, each from -1/2 to 1/2",
+                "a shadow's offset is two fractions of the picture, each from -4 to 4",
             ));
         }
         None => None,
     };
     let blur = match s.blur {
-        Some(b) if b.is_finite() && (0.0..=100.0).contains(&b) => Some(b),
-        Some(_) => return Err(Error::invalid("a shadow's blur is from 0 to 100")),
+        Some(b) if (1.0..=100.0).contains(&b) => Some(b),
+        Some(_) => return Err(Error::invalid("a shadow's blur is from 1 to 100")),
         None => None,
     };
     Ok(TitleShadow {
