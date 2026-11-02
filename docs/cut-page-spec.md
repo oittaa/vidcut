@@ -1447,7 +1447,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The Smart Indicator, V, Smart Insert, the alignment of Place On Top, and Up/Down use the edits of Track 1, the main story.
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
-  - New Project takes any even picture size from 16 px, and any positive frame rate.
+  - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate.
+  - One side out of that range sets both sides to that limit. 99999 x 720 gives 32768 x 32768, and 16 x 720 gives 256 x 256.
+  - These sizes and this rule are measured in Resolve Studio 21.1.2, in its dialog and by script. `project.set` and `project.create` do the same.
+  - One side over the top and the other under the bottom is not measured. vidcut refuses it.
   - Without them, the first media with video sets both, with no prompt. A prompt would stop scripts and agents.
   - The size can change at any time.
   - The rate can change only while the timeline is empty, because positions are whole frames.
