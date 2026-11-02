@@ -1528,8 +1528,8 @@ impl Screen {
                 };
                 let full = placed.get(i).map(Vec::as_slice);
                 let mut placing = made_with.or(full).filter(|p| !p.is_empty()).map(|p| {
-                    let (frame, fitted) = picture.placed_in(size);
-                    (Placing::new(p, frame, fitted), level.unwrap_or(1.0))
+                    let (frame, fitted, pixels) = picture.placed_in(size);
+                    (Placing::new(p, frame, fitted, pixels), level.unwrap_or(1.0))
                 });
                 let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
                 let (effects, factor) = placing
@@ -1537,8 +1537,8 @@ impl Screen {
                     .map_or((Vec::new(), 1.0), |(p, l)| bared(p, l));
                 let live = match (made_with, full) {
                     (Some(_), Some(full)) if placing.is_some() => {
-                        let (frame, fitted) = picture.placed_in(size);
-                        let all = Placing::new(full, frame, fitted).effects;
+                        let (frame, fitted, pixels) = picture.placed_in(size);
+                        let all = Placing::new(full, frame, fitted, pixels).effects;
                         all.get(effects.len()..)
                             .map(<[_]>::to_vec)
                             .unwrap_or_default()

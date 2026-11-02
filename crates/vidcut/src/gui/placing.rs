@@ -352,6 +352,15 @@ fn content(p: &Project, c: &Clip, (w, h): (f64, f64)) -> [f64; 4] {
     }
 }
 
+fn pixels_of(p: &Project, c: &Clip, frame: (f64, f64)) -> (f64, f64) {
+    p.media(&c.media)
+        .and_then(|m| m.info.video.as_ref())
+        .filter(|v| v.width > 0 && v.height > 0)
+        .map_or(frame, |v| {
+            vidcut_core::place::upright_pixels((v.width, v.height), v.rotation)
+        })
+}
+
 fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Option<Shown> {
     let (w, h) = (f64::from(p.settings.width), f64::from(p.settings.height));
     let run = Run {
@@ -360,8 +369,9 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
         held: false,
     };
     let fit = content(p, c, (w, h));
+    let pixels = pixels_of(p, c, (w, h));
     let level_of = |x: Picture| {
-        Placing::new(&[Placed::at(c, x, run, at)], (w, h), fit)
+        Placing::new(&[Placed::at(c, x, run, at)], (w, h), fit, pixels)
             .levels
             .pop()
     };
@@ -369,7 +379,7 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
     let middle = placed[0]
         .zoomed()
         .map_or(Picture::MIDDLE, |b| flipped(&shown, b.center));
-    let level = Placing::new(&placed, (w, h), fit).levels.pop()?;
+    let level = Placing::new(&placed, (w, h), fit, pixels).levels.pop()?;
     let plain = level_of(Picture {
         dynamic_zoom: None,
         ..shown.clone()

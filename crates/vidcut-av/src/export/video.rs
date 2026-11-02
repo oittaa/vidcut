@@ -1450,7 +1450,7 @@ fn placed_look(
     (kernel, form): (u32, Form),
 ) -> Option<Look> {
     let whole = (f64::from(frame.0), f64::from(frame.1));
-    let placing = Placing::new(placed, whole, fit.placement(frame));
+    let placing = Placing::new(placed, whole, fit.placement(frame), fit.pixels());
     let [x0, y0, x1, y1] = match placing.effects.is_empty() {
         true => placing.bounds(whole)?,
         false => [0, 0, frame.0, frame.1],
@@ -2413,8 +2413,8 @@ impl VideoFrames {
             (Some((f, _)), Some(placed)) => {
                 let (w, h, _) = self.maker.out();
                 let size = (f64::from(w), f64::from(h));
-                let at = Fit::of(f, rotation).placement((w, h));
-                Placing::new(placed, size, at).share(size)
+                let fit = Fit::of(f, rotation);
+                Placing::new(placed, size, fit.placement((w, h)), fit.pixels()).share(size)
             }
             _ => 1.0,
         }
