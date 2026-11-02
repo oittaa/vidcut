@@ -35,6 +35,7 @@ enum Field {
     Zoom,
     ZoomX,
     ZoomY,
+    LinkedZoomY,
     X,
     Y,
     Rotation,
@@ -214,7 +215,7 @@ impl Field {
         match self {
             Field::Zoom => "Zoom",
             Field::ZoomX => "Zoom X",
-            Field::ZoomY => "Zoom Y",
+            Field::ZoomY | Field::LinkedZoomY => "Zoom Y",
             Field::X => "Position X",
             Field::Y => "Position Y",
             Field::Rotation => "Rotation",
@@ -258,6 +259,7 @@ impl Field {
             Field::Zoom
             | Field::ZoomX
             | Field::ZoomY
+            | Field::LinkedZoomY
             | Field::StartZoom
             | Field::EndZoom
             | Field::Opacity => "%",
@@ -271,6 +273,7 @@ impl Field {
             Field::Zoom
             | Field::ZoomX
             | Field::ZoomY
+            | Field::LinkedZoomY
             | Field::Rotation
             | Field::StartZoom
             | Field::EndZoom
@@ -283,7 +286,12 @@ impl Field {
 
     fn usual(self) -> f64 {
         match self {
-            Field::Zoom | Field::ZoomX | Field::ZoomY | Field::EndZoom | Field::Opacity => 100.0,
+            Field::Zoom
+            | Field::ZoomX
+            | Field::ZoomY
+            | Field::LinkedZoomY
+            | Field::EndZoom
+            | Field::Opacity => 100.0,
             Field::StartZoom => 100.0 / DynamicZoom::default().start.size,
             _ => 0.0,
         }
@@ -291,14 +299,20 @@ impl Field {
 
     fn axes(self) -> Vec<Field> {
         match self {
+            Field::Zoom | Field::ZoomX | Field::ZoomY | Field::LinkedZoomY => {
+                vec![Field::ZoomX, Field::ZoomY]
+            }
             Field::X | Field::Y => vec![Field::X, Field::Y],
+            Field::AnchorX | Field::AnchorY => vec![Field::AnchorX, Field::AnchorY],
             f => vec![f],
         }
     }
 
     fn channel(self) -> Option<PictureValue> {
         match self {
-            Field::Zoom | Field::ZoomX | Field::ZoomY => Some(PictureValue::Zoom),
+            Field::Zoom | Field::ZoomX | Field::ZoomY | Field::LinkedZoomY => {
+                Some(PictureValue::Zoom)
+            }
             Field::X | Field::Y => Some(PictureValue::Position),
             Field::Rotation => Some(PictureValue::Rotation),
             Field::AnchorX | Field::AnchorY => Some(PictureValue::Anchor),
@@ -324,7 +338,7 @@ impl Field {
         let b = self.zoom_box(&p.dynamic_zoom.unwrap_or_default());
         match self {
             Field::Zoom | Field::ZoomX => zx * 100.0,
-            Field::ZoomY => zy * 100.0,
+            Field::ZoomY | Field::LinkedZoomY => zy * 100.0,
             Field::X => (x - 0.5) * w,
             Field::Y => (0.5 - y) * h,
             Field::Rotation => p.turn(),
@@ -349,7 +363,7 @@ impl Field {
         let usual = self.zoom_box(&DynamicZoom::default());
         let b = p.dynamic_zoom.map_or(usual, |z| self.zoom_box(&z));
         match self {
-            Field::Zoom => zx == 1.0 && zy == 1.0,
+            Field::Zoom | Field::LinkedZoomY => zx == 1.0 && zy == 1.0,
             Field::ZoomX => zx == 1.0,
             Field::ZoomY => zy == 1.0,
             Field::X => x == 0.5,
@@ -377,7 +391,7 @@ impl Field {
             (Picture::REACH, Picture::TURNS, Picture::LEAN, Picture::SOFT);
         let (box_reach, box_size) = (DynamicZoom::REACH, DynamicZoom::SIZE);
         match self {
-            Field::Zoom | Field::ZoomX | Field::ZoomY => {
+            Field::Zoom | Field::ZoomX | Field::ZoomY | Field::LinkedZoomY => {
                 Picture::ZOOM.0 * 100.0..=Picture::ZOOM.1 * 100.0
             }
             Field::X => -reach * w..=reach * w,
@@ -426,7 +440,7 @@ impl Field {
         let box_at = |v: f64| v.clamp(-DynamicZoom::REACH, DynamicZoom::REACH);
         let mut out = p.clone();
         match self {
-            Field::Zoom => out.zoom = Some([zoom(v); 2]),
+            Field::Zoom | Field::LinkedZoomY => out.zoom = Some([zoom(v); 2]),
             Field::ZoomX => out.zoom = Some([zoom(v), zy]),
             Field::ZoomY => out.zoom = Some([zx, zoom(v)]),
             Field::X => out.position = Some([at(0.5 + v / w), y]),
@@ -485,8 +499,8 @@ impl Key {
 
     fn prefix(self) -> &'static str {
         match self {
-            Key::Picture(Field::X) => "X ",
-            Key::Picture(Field::Y) => "Y ",
+            Key::Picture(Field::Zoom | Field::ZoomX | Field::X | Field::AnchorX) => "X ",
+            Key::Picture(Field::LinkedZoomY | Field::ZoomY | Field::Y | Field::AnchorY) => "Y ",
             _ => "",
         }
     }
@@ -778,7 +792,7 @@ fn reset(ui: &mut egui::Ui, shown: bool) -> bool {
 
 fn number(
     ui: &mut egui::Ui,
-    (f, link): (Field, Option<bool>),
+    f: Field,
     i: &Inspector,
     p: &Project,
     at: i64,
@@ -797,7 +811,7 @@ fn number(
     let keys = key_mark(f, p, at, chosen);
     field(
         ui,
-        (Key::Picture(f), link),
+        Key::Picture(f),
         i,
         (set, shown, range),
         keyed_look(off),
@@ -814,8 +828,9 @@ fn key_mark(f: Field, p: &Project, at: i64, chosen: &[Chosen]) -> Option<KeyMark
     })
 }
 
-fn position_row(
+fn pair_row(
     ui: &mut egui::Ui,
+    (name, [a, b], link): (&str, [Field; 2], Option<bool>),
     i: &Inspector,
     p: &Project,
     at: i64,
@@ -823,32 +838,46 @@ fn position_row(
     acts: &mut Vec<Act>,
 ) {
     let first = &chosen[0];
-    let keyed = chosen
-        .iter()
-        .any(|c| c.stored.has_keys(PictureValue::Position));
+    let keyed = a
+        .channel()
+        .is_some_and(|v| chosen.iter().any(|c| c.stored.has_keys(v)));
     let look = keyed_look(chosen.len() > 1 && keyed);
     let moved = chosen
         .iter()
-        .any(|c| !Field::X.is_usual(&c.stored) || !Field::Y.is_usual(&c.stored));
+        .any(|c| !a.is_usual(&c.stored) || !b.is_usual(&c.stored));
     let set = !look.off && (keyed || moved);
-    label(ui, "Position", set);
+    label(ui, name, set);
     ui.horizontal(|ui| {
         if look.off {
             ui.disable();
         }
-        for f in [Field::X, Field::Y] {
+        let number_box = |ui: &mut egui::Ui, f: Field, acts: &mut Vec<Act>| {
             let shown = f.read(&first.shown, &first.shape, Some(first.frame));
             let range = f.range(&first.shape);
             drag(ui, Key::Picture(f), i, (shown, range), &look, acts);
+        };
+        number_box(ui, a, acts);
+        if let Some(lit) = link {
+            link_button(ui, lit, acts);
         }
-        if let Some(keys) = key_mark(Field::X, p, at, chosen) {
-            key_acts(ui, Key::Picture(Field::X), &keys, acts);
+        number_box(ui, b, acts);
+        if let Some(keys) = key_mark(a, p, at, chosen) {
+            key_acts(ui, Key::Picture(a), &keys, acts);
         }
     });
     if reset(ui, set || look.dead_reset) && !look.dead_reset {
-        acts.push(Act::ResetChannel(Field::X));
+        acts.push(Act::ResetChannel(a));
     }
     ui.end_row();
+}
+
+fn link_button(ui: &mut egui::Ui, lit: bool, acts: &mut Vec<Act>) {
+    let icon = if lit { LINK_SIMPLE } else { LINK_SIMPLE_BREAK };
+    let b = ui.add(egui::Button::selectable(lit, icon));
+    b.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, lit, "Link Zoom"));
+    if b.clicked() {
+        acts.push(Act::Link(!lit));
+    }
 }
 
 fn keyed_look(off: bool) -> Look<'static> {
@@ -999,7 +1028,7 @@ fn key_acts(ui: &mut egui::Ui, f: Key, keys: &KeyMark, acts: &mut Vec<Act>) {
 
 fn field(
     ui: &mut egui::Ui,
-    (f, link): (Key, Option<bool>),
+    f: Key,
     i: &Inspector,
     (set, shown, range): (bool, f64, RangeInclusive<f64>),
     look: Look<'_>,
@@ -1014,16 +1043,6 @@ fn field(
         drag(ui, f, i, (shown, range), &look, acts);
         if let Some(keys) = keys {
             key_acts(ui, f, &keys, acts);
-        }
-        if let Some(lit) = link {
-            let icon = if lit { LINK_SIMPLE } else { LINK_SIMPLE_BREAK };
-            let b = ui.add(egui::Button::selectable(lit, icon));
-            b.widget_info(|| {
-                egui::WidgetInfo::selected(egui::Role::Button, true, lit, "Link Zoom")
-            });
-            if b.clicked() {
-                acts.push(Act::Link(!lit));
-            }
         }
     });
     if reset(ui, set || look.dead_reset) && !look.dead_reset {
@@ -1095,19 +1114,25 @@ fn transform(
         set,
         acts,
         |ui, acts| {
-            let [zx, zy] = first.shown.scale();
-            if !i.unlinked && zx == zy {
-                number(ui, (Field::Zoom, Some(true)), i, p, at, chosen, acts);
+            let [zx, zy] = first.shown.sampled(first.frame as f64).scale();
+            let linked = !i.unlinked && zx == zy;
+            let zoom = if linked {
+                [Field::Zoom, Field::LinkedZoomY]
             } else {
-                number(ui, (Field::ZoomX, Some(false)), i, p, at, chosen, acts);
-                number(ui, (Field::ZoomY, None), i, p, at, chosen, acts);
+                [Field::ZoomX, Field::ZoomY]
+            };
+            let rows = [
+                ("Zoom", zoom, Some(linked)),
+                ("Position", [Field::X, Field::Y], None),
+            ];
+            for row in rows {
+                pair_row(ui, row, i, p, at, chosen, acts);
             }
-            position_row(ui, i, p, at, chosen, acts);
-            number(ui, (Field::Rotation, None), i, p, at, chosen, acts);
-            number(ui, (Field::AnchorX, None), i, p, at, chosen, acts);
-            number(ui, (Field::AnchorY, None), i, p, at, chosen, acts);
-            number(ui, (Field::Pitch, None), i, p, at, chosen, acts);
-            number(ui, (Field::Yaw, None), i, p, at, chosen, acts);
+            number(ui, Field::Rotation, i, p, at, chosen, acts);
+            let anchor = ("Anchor Point", [Field::AnchorX, Field::AnchorY], None);
+            pair_row(ui, anchor, i, p, at, chosen, acts);
+            number(ui, Field::Pitch, i, p, at, chosen, acts);
+            number(ui, Field::Yaw, i, p, at, chosen, acts);
             let flipped = chosen
                 .iter()
                 .any(|c| c.shown.flip_horizontal || c.shown.flip_vertical);
@@ -1151,7 +1176,7 @@ fn crop(
             Field::Bottom,
             Field::Softness,
         ] {
-            number(ui, (f, None), i, p, at, chosen, acts);
+            number(ui, f, i, p, at, chosen, acts);
         }
     });
 }
@@ -1187,7 +1212,7 @@ fn composite(
             acts.push(Act::Mode(CompositeMode::Normal));
         }
         ui.end_row();
-        number(ui, (Field::Opacity, None), i, p, at, chosen, acts);
+        number(ui, Field::Opacity, i, p, at, chosen, acts);
     });
 }
 
@@ -1234,7 +1259,7 @@ fn dynamic_zoom(
             Field::EndX,
             Field::EndY,
         ] {
-            number(ui, (f, None), i, p, at, chosen, acts);
+            number(ui, f, i, p, at, chosen, acts);
         }
         let eased = zooms.iter().any(|z| z.ease != Ease::Linear);
         label(ui, "Ease", eased);
@@ -1294,7 +1319,7 @@ fn knob(ui: &mut egui::Ui, i: &Inspector, (n, k): (usize, Knob), e: &Effect, act
     let values = (shown != k.usual(), shown, k.range());
     field(
         ui,
-        (Key::Effect(n, k), None),
+        Key::Effect(n, k),
         i,
         values,
         Look::default(),
@@ -1547,9 +1572,9 @@ fn speed_section(
             *SpeedDialog::PERCENT.end() / 100.0,
         );
         let percent = (sped, speed.abs() * 100.0, SpeedDialog::PERCENT);
-        field(ui, (Key::Speed, None), i, percent, moving, None, acts);
+        field(ui, Key::Speed, i, percent, moving, None, acts);
         let fps = (false, speed.abs() * rate, least * rate..=most * rate);
-        field(ui, (Key::Rate, None), i, fps, moving, None, acts);
+        field(ui, Key::Rate, i, fps, moving, None, acts);
         let span = length as f64 * speed.abs();
         let lengths = (span / most).ceil().max(1.0)..=(span / least).floor().max(1.0);
         let timed = Look {
@@ -1564,7 +1589,7 @@ fn speed_section(
         };
         field(
             ui,
-            (Key::Length, None),
+            Key::Length,
             i,
             (false, length as f64, lengths),
             timed,
@@ -2059,6 +2084,9 @@ impl Workspace {
         let Some(v) = field.channel() else {
             return;
         };
+        if v == PictureValue::Zoom {
+            self.inspector.unlinked = false;
+        }
         let keyed: Vec<&str> = chosen
             .iter()
             .filter(|c| c.stored.has_keys(v))
@@ -2246,7 +2274,7 @@ impl Workspace {
             });
             field(
                 ui,
-                (Key::Volume, None),
+                Key::Volume,
                 &self.inspector,
                 volume,
                 keyed_look(off),
