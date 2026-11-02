@@ -270,11 +270,11 @@ pub fn timeline_size(width: u32, height: u32) -> crate::error::Result<(u32, u32)
     let over = width > most || height > most;
     let under = width < least || height < least;
     match (over, under) {
-        (true, true) => Err(crate::error::Error::invalid(format!(
+        (true, true) if width < least => Err(crate::error::Error::invalid(format!(
             "{width} x {height}: one side is over {most} and the other under {least}"
         ))),
+        (_, true) => Ok((least, least)),
         (true, false) => Ok((most, most)),
-        (false, true) => Ok((least, least)),
         (false, false) => Ok((width, height)),
     }
 }

@@ -1449,8 +1449,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
   - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate.
   - One side out of that range sets both sides to that limit. 99999 x 720 gives 32768 x 32768, and 16 x 720 gives 256 x 256.
-  - These sizes and this rule are measured in Resolve Studio 21.1.2, in its dialog and by script. `project.set` and `project.create` do the same.
-  - One side over the top and the other under the bottom is not measured. vidcut refuses it.
+  - A width over the top with a height under the bottom gives the bottom limit. 99999 x 16 gives 256 x 256.
+  - These sizes and these rules are measured in Resolve Studio 21.1.2, in its dialog and by script. `project.set` and `project.create` do the same.
+  - A width under the bottom with a height over the top is not measured. vidcut refuses it.
   - Without them, the first media with video sets both, with no prompt. A prompt would stop scripts and agents.
   - The size can change at any time.
   - The rate can change only while the timeline is empty, because positions are whole frames.
