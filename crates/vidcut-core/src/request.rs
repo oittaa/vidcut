@@ -1199,7 +1199,7 @@ pub enum Request {
         solo: Option<bool>,
         #[serde(default)]
         volume_db: Option<f64>,
-        /// Voice Isolation's Amount, from 1 to 100: that much of the voice
+        /// Voice Isolation's Amount, from 0 to 100: that much of the voice
         /// the model hears in the sound of the track's clips
         /// that have none of their own, mixed with the rest of it; 0 turns
         /// it off. The model runs on this computer and is downloaded once,
@@ -1289,7 +1289,7 @@ pub enum Request {
         /// media's color.
         #[serde(default)]
         color: Option<String>,
-        /// Voice Isolation's Amount, from 1 to 100: that much of the voice
+        /// Voice Isolation's Amount, from 0 to 100: that much of the voice
         /// the model hears in the sound, mixed with the rest of it; 0 turns
         /// it off for the clip, also when its track has it on. A clip never
         /// given one follows its track's. The model runs on this computer

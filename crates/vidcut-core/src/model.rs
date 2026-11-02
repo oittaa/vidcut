@@ -2913,7 +2913,7 @@ pub struct ClipAudio {
     /// is `gain_db` and `gain_keys`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
-    /// Voice Isolation's Amount, from 1 to 100: that much of the voice the
+    /// Voice Isolation's Amount, from 0 to 100: that much of the voice the
     /// model hears in the sound, mixed with the rest of the sound. 0 keeps
     /// it off, also when the clip's track has it on. Left out, the clip
     /// follows its track's.

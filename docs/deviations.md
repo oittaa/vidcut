@@ -1324,13 +1324,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It runs in real time, but not on live input or on more than two channels.
   - Its Amount mixes the source with the isolated voice. At 50, they are about equal. At 70 to 80, it sounds natural (p. 774).
 - **vidcut:**
-  - The `voice_isolation` of a clip or a track is an Amount from 1 to 100.
+  - The `voice_isolation` of a clip or a track is an Amount from 0 to 100, as in Resolve Studio 21.1.2. 0 is off.
   - It runs `dpdfnet2_48khz_hr` of DPDFNet (Apache-2.0) on the CPU of this computer.
   - It runs live in playback, and the same in an export.
   - It works on any number of channels, each channel alone.
   - The Amount of a clip overrides the Amount of its track. A clip at 0 stays off on a track that has it on.
   - Voice Isolation in the right-click menu of a clip, or Alt + V, turns it on or off for the selected clips.
-  - On, it sets the Amount to 75, the middle of the 70 to 80 that the manual gives.
+  - On, it sets the Amount to 100, the value that Resolve Studio 21.1.2 shows when it is turned on.
   - The strip of the Mixer does it for a track.
   - An Amount field beside each one sets the Amount.
   - The model, 10 MB, is downloaded the first time, after a question (`download` in scripts).
