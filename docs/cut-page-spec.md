@@ -2724,12 +2724,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It renders from the playhead forward, then from the start of the timeline.
     - Where the memory keeps the frames that played before the playhead, it starts at the first of them (X103).
     - With proxies off, it draws a frame that the memory keeps. It does not make that frame again.
-    - In an HDR timeline, it draws only a frame that the reader decodes. It makes these frames again:
+    - In an HDR timeline, it makes these frames again:
       - an AI picture
       - a frame that a Retime Process makes
       - a frame of a Smooth Cut
     - At the clip level, it makes these frames again:
-      - a frame of a clip with a Retime Process
+      - a frame of a placed clip with a Retime Process
       - a frame of a clip with a checked effect
       - a frame of a Smooth Cut
     - A frame of a Smooth Cut comes from two clips. Thus it is not a frame of one clip.
