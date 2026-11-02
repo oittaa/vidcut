@@ -1040,7 +1040,7 @@ impl Index {
         };
         for e in listing.flatten() {
             let path = e.path();
-            if path.extension().is_none_or(|x| x != KEYS) {
+            if path.extension().is_none_or(|x| x != KEYS) || !is_named_cache(&path) {
                 continue;
             }
             let file = path.with_extension(FILE);
@@ -1199,9 +1199,50 @@ fn read_keys(path: &Path) -> Option<Vec<Key>> {
     Some(bytes.as_chunks::<16>().0.to_vec())
 }
 
+pub fn is_cache_file(path: &Path) -> bool {
+    part_target(path).is_some_and(|target| is_named_cache(Path::new(target)))
+        || is_named_cache(path)
+}
+
+pub fn is_cache_video(path: &Path) -> bool {
+    is_named_cache(path) && path.extension().is_some_and(|ext| ext == FILE)
+}
+
+fn is_named_cache(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    if name == format!("drops.{MARKS}") {
+        return true;
+    }
+    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    is_lower_hex(stem, 32)
+        && path
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|ext| ext == FILE || ext == KEYS || ext == MADE)
+}
+
+fn part_target(path: &Path) -> Option<&str> {
+    let name = path.file_name().and_then(|s| s.to_str())?;
+    let rest = name.strip_prefix('.')?;
+    let (front, _) = rest.rsplit_once(".part")?;
+    let (base, rand) = front.rsplit_once('.')?;
+    is_lower_hex(rand, 16).then_some(base)
+}
+
+fn is_lower_hex(text: &str, len: usize) -> bool {
+    text.len() == len
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Cache, Look, Reason, Setup, bare, reasons};
+    use super::{Cache, Index, Look, Reason, Setup, bare, is_cache_file, is_cache_video, reasons};
     use crate::model::{
         Effect, EffectKind, GaussianBlur, Picture, Project, RenderCache, Settings, SuperScale,
         Title,
@@ -1347,5 +1388,33 @@ mod tests {
         assert!(!cache.index().has(&key));
         let again = cache.next(&plan, &setup, 0, 1).unwrap();
         assert_ne!(again.keys[0], key);
+    }
+
+    #[test]
+    fn a_stopped_write_leaves_a_cache_part_file() {
+        let hex = "0123456789abcdef0123456789abcdef";
+        let video = format!("{hex}.mkv");
+        let part = format!(".{hex}.mkv.0123456789abcdef.part.mkv");
+        assert!(is_cache_video(std::path::Path::new(&video)));
+        assert!(is_cache_file(std::path::Path::new(&part)));
+        assert!(!is_cache_video(std::path::Path::new(&part)));
+        assert!(!is_cache_file(std::path::Path::new("clip.mkv")));
+        assert!(!is_cache_file(std::path::Path::new("notes.keys")));
+    }
+
+    #[test]
+    fn scan_leaves_a_keys_file_that_is_not_a_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("notes.keys"), b"keep").unwrap();
+        std::fs::write(dir.path().join("notes.made"), b"side").unwrap();
+        assert!(Index::scan(dir.path()).is_empty());
+        assert_eq!(
+            std::fs::read(dir.path().join("notes.keys")).unwrap(),
+            b"keep"
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("notes.made")).unwrap(),
+            b"side"
+        );
     }
 }

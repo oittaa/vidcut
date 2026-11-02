@@ -465,7 +465,7 @@ An example of a `.made` file, with one frame of one layer:
 
 The index:
 
-- `Index::scan` reads the `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a `.keys` file and its `.made` file without their video.
+- `Index::scan` reads the cache `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a cache `.keys` file and its `.made` file when their video is gone. Another `.keys` file stays.
 - The disk cache can remove a video at any time. `Cache::apply` removes from the index each file of the plan that is gone (`Index::remove`). Thus the background render makes its frames again.
 
 The jobs:
@@ -569,6 +569,7 @@ The background render (`live::render_cache::Background`):
   - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
   - All removes each cache file in the folder (`render_caches::empty`).
     - A cache file is `drops.marks`, or a video, keys file or made file whose name is 32 hex characters.
+    - A part file of one of those, left when a write stops, is a cache file too.
     - Another file stays.
   - Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
     - At the clip level, `Cache::names` gives only the frames of the media of each clip.
