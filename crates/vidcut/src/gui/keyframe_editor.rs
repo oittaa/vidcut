@@ -38,6 +38,7 @@ const HIT: f32 = 8.0;
 const TICK_GAP: f32 = 96.0;
 const FIELD_W: f32 = 72.0;
 const TRAY_ROWS: usize = 4;
+const SELECT_ONE: &str = "Select a clip or a subtitle.";
 const GROUPS: [Group; 5] = [
     Group::Transform,
     Group::Crop,
@@ -243,7 +244,11 @@ struct Deleting {
 }
 
 pub(super) fn takes_speed(c: &Clip) -> bool {
-    c.title.is_none() && c.compound.is_none() && !c.is_generator()
+    c.title.is_none() && c.compound.is_none() && !c.is_generator() && !is_cue(c)
+}
+
+fn is_cue(c: &Clip) -> bool {
+    c.id.starts_with('q')
 }
 
 fn speed_keys(c: &Clip) -> Vec<Keyframe> {
@@ -319,7 +324,7 @@ impl Target {
         match param {
             KeyParam::Volume => self.clip.sounds_at(self.play),
             KeyParam::Speed => self.clip.start < self.play && self.play < self.clip.end(),
-            _ => (self.clip.start..self.clip.end()).contains(&self.play),
+            _ => is_cue(&self.clip) || (self.clip.start..self.clip.end()).contains(&self.play),
         }
     }
 
@@ -916,6 +921,9 @@ fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
     if has_picture(clip) {
         let picture = clip.picture.clone().unwrap_or_default();
         for v in PictureValue::ALL {
+            if v == PictureValue::Anchor && is_cue(clip) {
+                continue;
+            }
             if !keyed_only || picture.has_keys(v) {
                 out.push(lane_from(&picture, v));
             }
@@ -1104,12 +1112,13 @@ fn playhead(painter: &egui::Painter, map: TimeMap, rect: Rect, at: i64) {
 
 impl Workspace {
     fn first_clip(&self, p: &Project) -> Option<Clip> {
-        self.snap
-            .selection
-            .clips
+        let selection = &self.snap.selection;
+        selection
+            .first
             .iter()
-            .find_map(|id| p.clip(id))
-            .cloned()
+            .chain(&selection.clips)
+            .chain(&selection.cues)
+            .find_map(|id| p.key_holder(id))
     }
 
     fn editor_clip(&mut self, p: &Project, tray: bool) -> Option<Clip> {
@@ -1166,7 +1175,7 @@ impl Workspace {
             return;
         };
         let Some(clip) = self.editor_clip(&p, true) else {
-            ui.label(dim("Select a clip."));
+            ui.label(dim(SELECT_ONE));
             return;
         };
         let lanes = lanes_of(&clip, true);
@@ -1208,11 +1217,11 @@ impl Workspace {
     pub(super) fn keyframe_panel(&mut self, ui: &mut egui::Ui) {
         self.key_editor.panel_area = Some(ui.max_rect());
         let Some(p) = self.project_shared() else {
-            ui.label(dim("Select a clip."));
+            ui.label(dim(SELECT_ONE));
             return;
         };
         let Some(clip) = self.editor_clip(&p, false) else {
-            ui.label(dim("Select a clip."));
+            ui.label(dim(SELECT_ONE));
             return;
         };
         let lanes = lanes_of(&clip, self.key_editor.keyed_only);
@@ -1355,12 +1364,12 @@ impl Workspace {
         let Some(p) = self.project_shared() else {
             return true;
         };
-        let clips: Vec<&String> = self
-            .snap
-            .selection
+        let selection = &self.snap.selection;
+        let clips: Vec<&String> = selection
             .clips
             .iter()
-            .filter(|id| p.clip(id).is_some())
+            .chain(&selection.cues)
+            .filter(|id| p.key_holder(id).is_some())
             .collect();
         self.send("keyframes.paste", json!({ "clips": clips }));
         true
@@ -1374,8 +1383,7 @@ impl Workspace {
             .key_editor
             .clip
             .as_deref()
-            .and_then(|id| p.clip(id))
-            .cloned()
+            .and_then(|id| p.key_holder(id))
         else {
             return;
         };
@@ -1511,7 +1519,9 @@ impl Workspace {
 
     fn key_target(&self) -> Result<Target, &'static str> {
         let p = self.project_shared().ok_or("Open a project first")?;
-        let clip = self.first_clip(&p).ok_or("Select a clip first")?;
+        let clip = self
+            .first_clip(&p)
+            .ok_or("Select a clip or a subtitle first")?;
         let e = &self.key_editor;
         let mine = e.clip.as_deref() == Some(clip.id.as_str());
         let mut shown = Vec::new();
@@ -2175,7 +2185,7 @@ impl Workspace {
         plot: Plot,
     ) {
         let play = plot.play;
-        let inside = |t: i64| clip.start <= t && t < clip.end();
+        let inside = |t: i64| is_cue(clip) || (clip.start <= t && t < clip.end());
         let times: Vec<i64> = lane
             .keys
             .iter()

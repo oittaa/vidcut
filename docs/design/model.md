@@ -268,6 +268,10 @@ Relinking:
 - A `Cue` spans whole frames, as a clip does. The cues of a track are sorted by start, and can overlap.
 - Its `text` is lines, with `<i>`, `<b>`, `<u>` and `<font color>` around words. `Place` tells where on the picture it goes.
 - `speaker` is the person who says it. `color` is its own color, over the color of the person (`Speakers::color_of`, [deviation X63](../deviations.md#x63-subtitles-keep-their-speaker-painted-in-the-persons-color)).
+- `picture` is a `Picture` for a picture as large as the frame.
+  - Its keyframes count frames from the start of the cue. Thus `Cue::as_clip` makes a `Clip` with `source_in` 0, and the keyframe code uses that clip for the time.
+  - `Project::key_holder` finds a clip or a cue by id for the `keyframes.*` requests.
+  - `Cue::move_keys` keeps keyframes on their timeline frames when the start of the cue changes. A timeline edit moves them with the frames of each part (`remap`).
 - `words` holds a `CueWord` for each word of the text, in order. The cue leaves `words` out when no word has a start frame or a style.
   - The `at` of a word is its start frame, from the start of the cue ([spec D70](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - Styles nest: the track style, then the `style` of a cue, then the `style` of a word. `SubtitleStyle::for_cue` merges each over the one under it. A field left out keeps the style under it.

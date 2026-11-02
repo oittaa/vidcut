@@ -8,7 +8,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - A clip has volume keyframes on its volume line ([spec §9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
   - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` holds the volume keyframes.
   - Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
-  - The Keyframes tab shows each value of the first selected clip that can have keyframes.
+  - The Keyframes tab shows each value of the item selected first that can have keyframes.
   - Each value has a track. Its curve shows when the user turns it on. A drag moves a keyframe, a group or a handle.
   - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. The anchor point is one keyframe for X and Y.
   - Rotation, Pitch and Yaw are values of their own. Each crop side, the crop softness and the opacity are values of their own.
@@ -16,7 +16,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** keyframes of speed ([speed-ramps.md](speed-ramps.md)) and [subtitles](#subtitles), and the other values of a [title](#titles).
+- **To do:** keyframes of speed ([speed-ramps.md](speed-ramps.md)), and the other values of a [title](#titles).
 
 ## What Resolve has
 
@@ -154,7 +154,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - Zoom X and Zoom Y as two keyframes when the zoom is not linked
     - Resolve then selects and steps Zoom X alone. vidcut's zoom is one keyframe for X and Y.
 
-**Later:** keyframes of speed and [subtitles](#subtitles).
+**Later:** keyframes of speed.
 
 ## Model
 
@@ -272,23 +272,42 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 
 ## Subtitles
 
-vidcut has no keyframes on subtitles.
+A subtitle has keyframes. [§8.12](../cut-page-spec.md#812-subtitles-pp-645646-702-12271248) tells how they work.
 
 **Measured in Resolve Studio 21.1.2:**
 
 - The Inspector of a subtitle has only Caption and Track tabs, with no Keyframe buttons.
 - The Keyframes panel of a selected subtitle lists these values, and adds keyframes on them:
-  - Transform: Zoom X and Y, Position X and Y, Rotation, Anchor Point, Pitch and Yaw
+  - Transform: Zoom X and Y, Position X and Y, Rotation, Pitch and Yaw. It has no Anchor Point.
   - Cropping: Left, Right, Top, Bottom and Softness
   - Composite Opacity
 - Each subtitle has its own keyframes.
-- An Opacity keyframe dims the subtitle.
-- Zoom scales the subtitle about the middle of the picture.
-- Position X is in pixels. A keyframe at 500 moved the subtitle about 503 pixels.
-- These effects are not measured: Rotation, Anchor Point, Pitch, Yaw and Cropping.
+- A subtitle acts as a picture as large as the frame, with the Transform and Cropping of a clip:
+  - An Opacity keyframe dims the subtitle.
+  - Zoom and Rotation act about the middle of the picture. A small positive Rotation moves bottom text to the right.
+  - Position X is in pixels. A keyframe at 500 moved the subtitle about 503 pixels.
+  - A positive Pitch enlarges bottom text and moves it down. A positive Yaw lowers the left end and raises the right end.
+  - Crop Left is in pixels of the frame width, up to 1920. At about 968, it cuts the text at the middle of the frame, and the rest stays in place.
+  - Softness fades the text at the cropped edge.
+- A head trim, a split and a keyframe's timeline frame:
+  - A head trim leaves each keyframe on its timeline frame.
+  - A split gives both parts each keyframe, on the same timeline frame.
+  - A move takes the keyframes along.
+- With the playhead outside the selected subtitle, the Keyframe button of a row adds a keyframe there.
+- The arrows of a row go to keyframes outside the subtitle. They went from 14 s to 15 s to 18 s and back to 15 s.
+- A ripple delete of Track 1 inside a subtitle gives two subtitles, with or without keyframes:
+  - A subtitle from 12 s to 20 s has keys at 13, 15 and 18 s. A cut from 14 s to 16 s gives 12–14 (keys 13, 15, 18) and 14–18 (keys 11, 13, 16).
+  - Then a cut from 13 s to 15 s gives 12–13 (keys 13, 15, 18) and 13–16 (keys 9, 11, 14).
+  - A subtitle from 27 s to 30 s with no keys, cut from 28 s to 29 s, gives 27–28 and 28–29.
+- Timeline > Join Clips joins two subtitles that share an edit point:
+  - Parts 2–6 s (key at 4 s) and 6–10 s (key at 8 s) become 2–10 s with the key at 4 s only.
+  - With different text, the result keeps the text of the first part.
+  - With a gap, the join gives an error: the clips "don't share an edit point".
+- The Keyframes panel shows the item selected first. A clip, then Ctrl+subtitle, shows the clip. A subtitle, then Ctrl+clip, shows the subtitle. A later subtitle, then Ctrl+an earlier one, shows the later one.
+- A typed In on a subtitle leaves each keyframe on its timeline frame.
+- A double-click in a row of the Keyframes panel adds no keyframe.
+- A burn-in render shows the keyframes, the crop and the softness.
 - An OTIO export leaves subtitle tracks out. Thus these keyframes reach no file.
-
-**To do:** give each `Cue` these values with keyframes, edit them in the Keyframes tab, and draw them in the viewer and the export.
 
 ## Scripting
 
@@ -305,4 +324,3 @@ Rule 3: each GUI action has a request.
 
 - **Compound clips:** what does `edit.decompose` do with the keyframes of a compound clip for a clip inside that is frozen or plays backward?
 - **Dynamic Zoom:** can its boxes have times other than the ends of the clip?
-- **Later work:** in which order do keyframes of speed (p. 737) and subtitles come?

@@ -184,6 +184,7 @@ flowchart TD
 - `Player::set_subtitles` takes the shown track (`SubtitleView`), each cue with its color set (`Speakers::color_of`).
 - `player::subtitles` draws what shows at a frame with `burn::draw`, at the times when titles draw. It keeps the drawings by what they show (`subtitles::shown`, an `Lru`).
 - `Player::present` hands the subtitles with the titles, above each layer. A subtitle that is not drawn yet shows the newest drawing.
+- A cue with a `picture` is drawn alone, because the shader places it apart from the other cues. Its `TitleOver` holds one `Placed`, and the shader does the transform as for a title in a compound clip. Thus a keyframe does not draw it again.
 
 ## The clock
 

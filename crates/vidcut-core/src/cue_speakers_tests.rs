@@ -16,6 +16,7 @@ fn req(method: &str, params: Value) -> Value {
 
 fn cue(speaker: Option<&str>, color: Option<&str>) -> Cue {
     Cue {
+        picture: None,
         id: "q1".into(),
         start: 0,
         duration: 25,

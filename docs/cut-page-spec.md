@@ -61,7 +61,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - A Keyframes tab sits beside the Inspector ([X87](deviations.md#x87-the-keyframes-tab-has-an-ease-menu)).
   - The Timeline menu opens that tab.
   - `gui.show keyframes` opens that tab.
-  - The tab shows the first selected clip.
+  - The tab shows the item selected first, a clip or a subtitle.
   - **Tracks** (pp. 1255–1256):
     - Each value that can have keyframes has a track, in a group for its section.
     - Volume is a track. Position is one track. Zoom is one track. The anchor point is one track.
@@ -133,7 +133,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - A keyframe that the Keyframe button or a double-click adds is selected. Thus the bar shows it at once.
   - **Keyframe tray** (p. 1259):
     - The Keyframes button of the lower timeline's toolbar shows a tray under the tracks of the lower timeline. The upper timeline does not change.
-    - The tray has a track for each value of the first selected clip that has keyframes. Its time is the time of the lower timeline.
+    - The tray has a track for each value of the item selected first that has keyframes. Its time is the time of the lower timeline.
     - Its tracks work as the tracks of the Keyframes tab, with Reset Keyframes and without the curve. They share the selection of the tab.
     - `gui.show keyframe_tray` opens the tray. `gui.close keyframe_tray` closes it.
     - Resolve's tray has more. vidcut does not have these parts yet ([todo](todo/keyframes.md)):
@@ -769,6 +769,16 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. The new range overwrites the other cues of the track.
   - Cues move, trim, split and delete like clips.
   - Details: D56, D57, D78, D79; deviations X43, X44.
+- **Keyframes** ([measured](todo/keyframes.md#subtitles)):
+  - A cue acts as a picture as large as the frame. It takes the Transform, Crop and Composite keyframes of a clip (§8.15, D75), without an anchor point, flips, Dynamic Zoom, composite mode or effects.
+  - The Inspector of a cue has no Keyframe buttons. The Keyframes tab and the keyframe tray show the item selected first, a cue or a clip.
+  - Each cue has its own keyframes. They count frames from its start, and can be before or after the cue.
+  - The Keyframe button of a row adds a keyframe at the playhead, also outside the cue. The arrows of a row go to keyframes outside the cue too.
+  - A head trim and a split keep each keyframe on its timeline frame. A split gives both parts every keyframe. A move takes the keyframes along.
+  - A ripple delete inside a cue gives two cues, with or without keyframes. Each cue moves all its keyframes by the same amount as its frames.
+  - A join needs a shared edit point: each cue starts where the cue before it ends. Otherwise the join is refused.
+  - A join keeps only the text, the words and the keyframes of the first cue.
+  - The viewer and a burn-in show the keyframes. A subtitle stream and a subtitle file hold no keyframes.
 - **Import** (pp. 1230–1231):
   - `.srt`, `.srtx`, `.vtt`, `.xml` and `.ttml` files come into the Media Pool as subtitle clips, with a badge.
   - Any media import, or Import Subtitle, brings them in.
@@ -1731,13 +1741,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Cues of one track can overlap, and show together.
   - On the timeline, cues that overlap share the height of their track, each in its own lane.
   - Split leaves its text in both parts.
-  - Join keeps the first cue, to the end of the last cue, with their texts as lines.
+  - Join needs a shared edit point (§8.12). It keeps the first cue, to the end of the last cue, with the text of the first cue only.
   - The viewer draws the cues of the shown track as a burn-in draws them (D61), in the style of the track, its font too.
   - While the Subtitle Track section is open for the shown track, the viewer draws the style of its fields, where they are valid.
 - **D57. Cues follow Track 1** (§6, §8.12; p. 1242).
   - The manual says only that subtitles linked to clips move with them.
   - A cue keeps the frames of Track 1 under it:
     - A ripple delete or trim takes out the part of a cue over the frames taken out.
+    - A ripple delete inside a cue leaves two cues. Both keep the text. The test: a cue from 27 s to 30 s, cut from 28 s to 29 s, gives 27–28 and 28–29.
     - It drops a cue that has no frames left.
     - An insert inside a cue splits it. Both parts keep the text.
     - Overwrite and lift leave cues where they are.
@@ -2071,7 +2082,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Edits of cues:
     - A move of the edge of a cue keeps each word on its frame, clamped into the cue.
     - A split leaves each part the words of its own frames. The words outside it go to its edge.
-    - A join puts the words of the cues one after another.
+    - A join keeps the words of the first cue only.
     - Re-time scales the words of a cue with its length.
     - A timeline edit maps each word through the frames that its cue follows (D57).
     - A word on a removed frame starts on the next frame that is kept.

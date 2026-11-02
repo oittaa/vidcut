@@ -422,6 +422,7 @@ pub fn add_cue(
             speaker: None,
             color: None,
             style: None,
+            picture: None,
         },
     );
     Ok(id)
@@ -582,6 +583,7 @@ pub fn set_cue(
         }
         None => {}
     }
+    c.move_keys(c.start - s);
     c.start = s;
     c.duration = e - s;
     if let Some(pl) = place {
@@ -678,6 +680,7 @@ pub fn split_cue(p: &mut Project, id: &str, at: i64) -> Result<String> {
     let mut right = c.clone();
     right.duration = right.end() - at;
     right.words = store_times(&clamped(&c.times(), at - c.start, right.duration), &c.words);
+    right.move_keys(c.start - at);
     right.start = at;
     let new_id = p.alloc_cue_id();
     right.id = new_id.clone();
@@ -713,41 +716,14 @@ pub fn join_cues(p: &mut Project, ids: &[String]) -> Result<String> {
         .map(|(_, ci)| p.subtitles[ti].cues[*ci].clone())
         .collect();
     cues.sort_by_key(|c| (c.start, c.end()));
+    if cues.windows(2).any(|w| w[0].end() != w[1].start) {
+        return Err(Error::invalid(
+            "the cues to join share no edit point: each must start where the one before it ends",
+        ));
+    }
     let end = cues.iter().map(Cue::end).max().expect("two cues");
-    let text = cues
-        .iter()
-        .map(|c| c.text.as_str())
-        .filter(|t| !t.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let timed = cues
-        .iter()
-        .all(|c| c.has_times() || subtitles::words(&c.text).is_empty());
-    let first = cues[0].start;
-    let (times, styles): (Vec<i64>, Vec<CueWord>) = if timed {
-        let times = cues
-            .iter()
-            .flat_map(|c| c.times().into_iter().map(move |w| w + c.start - first))
-            .collect();
-        let styles = cues.iter().flat_map(|c| c.words.clone()).collect();
-        (times, styles)
-    } else {
-        let styles = cues
-            .iter()
-            .flat_map(|c| {
-                let n = subtitles::words(&c.text).len();
-                (0..n).map(|i| CueWord {
-                    at: None,
-                    style: c.words.get(i).and_then(|w| w.style.clone()),
-                })
-            })
-            .collect();
-        (Vec::new(), styles)
-    };
     let mut joined = cues[0].clone();
     joined.duration = end - joined.start;
-    joined.text = subtitles::normalize(&text);
-    joined.words = store_times(&fitted(&joined.text, joined.duration, times), &styles);
     let ids: Vec<String> = cues.iter().map(|c| c.id.clone()).collect();
     take(p, &ids)?;
     let id = joined.id.clone();
@@ -909,6 +885,7 @@ pub fn import(
                 speaker,
                 color: None,
                 style: None,
+                picture: None,
             },
         );
         count += 1;
@@ -949,6 +926,19 @@ pub fn collect(p: &Project, ti: usize, range: (i64, i64), timecode: bool) -> Vec
         .collect()
 }
 
+fn runs_of(mut frames: Vec<i64>) -> Vec<(i64, i64)> {
+    frames.sort_unstable();
+    frames.dedup();
+    let mut runs: Vec<(i64, i64)> = Vec::new();
+    for f in frames {
+        match runs.last_mut() {
+            Some((_, end)) if *end == f => *end += 1,
+            _ => runs.push((f, f + 1)),
+        }
+    }
+    runs
+}
+
 pub fn remap(p: &mut Project, map: impl Fn(i64) -> Option<i64>) {
     let mut extra: Vec<(usize, Cue)> = Vec::new();
     for (ti, t) in p.subtitles.iter_mut().enumerate() {
@@ -958,22 +948,16 @@ pub fn remap(p: &mut Project, map: impl Fn(i64) -> Option<i64>) {
         let mut kept = Vec::with_capacity(t.cues.len());
         for c in std::mem::take(&mut t.cues) {
             let images: Vec<Option<i64>> = (c.start..=c.end()).map(&map).collect();
-            let mut frames: Vec<i64> = images
-                .windows(2)
-                .filter_map(|w| match (w[0], w[1]) {
-                    (Some(x), next) if next != Some(x) => Some(x),
-                    _ => None,
-                })
-                .collect();
-            frames.sort_unstable();
-            frames.dedup();
             let mut runs: Vec<(i64, i64)> = Vec::new();
-            for f in frames {
-                match runs.last_mut() {
-                    Some((_, end)) if *end == f => *end += 1,
-                    _ => runs.push((f, f + 1)),
+            let mut frames: Vec<i64> = Vec::new();
+            for w in images.windows(2) {
+                match (w[0], w[1]) {
+                    (None, _) => runs.extend(runs_of(std::mem::take(&mut frames))),
+                    (Some(x), next) if next != Some(x) => frames.push(x),
+                    _ => {}
                 }
             }
+            runs.extend(runs_of(frames));
             let landed: Vec<Option<i64>> = c
                 .times()
                 .iter()
@@ -994,6 +978,8 @@ pub fn remap(p: &mut Project, map: impl Fn(i64) -> Option<i64>) {
                     .map(|l| l.map_or(piece.duration - 1, |x| x - piece.start))
                     .collect();
                 piece.words = store_times(&clamped(&at, 0, piece.duration), &c.words);
+                let from = images.iter().position(|x| *x == Some(s)).unwrap_or(0) as i64;
+                piece.move_keys(s - piece.start - from);
                 if k == 0 {
                     kept.push(piece);
                 } else {

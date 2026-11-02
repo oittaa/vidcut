@@ -3514,6 +3514,13 @@ pub struct Cue {
     /// value is left out when the cue keeps the track's style.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<SubtitleStyle>,
+    /// How its picture goes over the frame: position, zoom, rotation, pitch,
+    /// yaw, crop and opacity, with their keyframes. The picture is as large
+    /// as the frame. Keyframes count frames from the cue's start, and can be
+    /// before or after the cue. The whole value is left out when nothing is
+    /// changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<Picture>,
 }
 
 /// Where a cue shows on the picture.
@@ -3546,6 +3553,35 @@ impl Cue {
             self.words.iter().map(|w| w.at.unwrap_or(0)).collect()
         } else {
             Vec::new()
+        }
+    }
+
+    pub fn as_clip(&self) -> Clip {
+        Clip {
+            id: self.id.clone(),
+            media: String::new(),
+            start: self.start,
+            duration: self.duration,
+            source_in: 0,
+            video: true,
+            audio: None,
+            enabled: true,
+            name: Some(crate::subtitles::plain(&self.text).replace('\n', " ")),
+            effects: None,
+            generator: None,
+            title: None,
+            picture: self.picture.clone(),
+            compound: None,
+            speed: None,
+            retime: ClipRetime::Project,
+            color: None,
+            render_cache: ClipCache::Auto,
+        }
+    }
+
+    pub fn move_keys(&mut self, by: i64) {
+        if let Some(picture) = self.picture.as_mut() {
+            picture.retarget(|f| f + by);
         }
     }
 }
@@ -3777,6 +3813,12 @@ impl Project {
 
     pub fn cue(&self, id: &str) -> Option<&Cue> {
         self.find_cue(id).map(|(t, c)| &self.subtitles[t].cues[c])
+    }
+
+    pub fn key_holder(&self, id: &str) -> Option<Clip> {
+        self.clip(id)
+            .cloned()
+            .or_else(|| self.cue(id).map(Cue::as_clip))
     }
 }
 

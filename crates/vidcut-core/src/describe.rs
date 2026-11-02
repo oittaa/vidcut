@@ -648,7 +648,10 @@ impl Words<'_> {
                     .media(&c.media)
                     .map_or_else(|| id.to_string(), |m| m.name.clone()),
             },
-            None => id.to_string(),
+            None => p.cue(id).map_or_else(
+                || id.to_string(),
+                |q| quoted(&crate::subtitles::plain(&q.text).replace('\n', " ")),
+            ),
         }
     }
 

@@ -127,6 +127,17 @@ pub struct Selection {
     pub clips: Vec<String>,
     pub cues: Vec<String>,
     pub media: Vec<String>,
+    pub first: Option<String>,
+}
+
+impl Selection {
+    pub fn keep_first(&mut self) {
+        let (clips, cues) = (&self.clips, &self.cues);
+        let held = |id: &String| clips.contains(id) || cues.contains(id);
+        if !self.first.as_ref().is_some_and(held) {
+            self.first = clips.first().or(cues.first()).cloned();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

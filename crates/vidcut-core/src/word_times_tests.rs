@@ -75,12 +75,12 @@ fn trimming_a_cues_start_shifts_its_words() {
 }
 
 #[test]
-fn a_ripple_delete_inside_a_cue_moves_the_cut_word_to_the_cut() {
+fn a_ripple_delete_inside_a_cue_moves_the_cut_word_to_the_second_part() {
     let mut f = Fixture::new(&[(10.0, true)]);
     f.append("m1", 0, 250);
     one_cue(&mut f);
     f.ok(req("edit.delete_range", json!({"range": "30f..50f"})));
-    assert_eq!(words_of(&f, "q1"), vec![0, 30, 60]);
+    assert_eq!(words_of(&f, "q2"), vec![0, 0, 30]);
 }
 
 #[test]
