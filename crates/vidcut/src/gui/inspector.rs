@@ -1582,7 +1582,8 @@ fn speed_section(
             *SpeedDialog::PERCENT.start() / 100.0,
             *SpeedDialog::PERCENT.end() / 100.0,
         );
-        let percent = (sped, speed.abs() * 100.0, SpeedDialog::PERCENT);
+        let typed_range = f64::NEG_INFINITY..=*SpeedDialog::PERCENT.end();
+        let percent = (sped, speed.abs() * 100.0, typed_range);
         field(ui, Key::Speed, i, percent, moving, None, acts);
         let fps = (false, speed.abs() * rate, least * rate..=most * rate);
         field(ui, Key::Rate, i, fps, moving, None, acts);
@@ -1838,6 +1839,15 @@ impl Workspace {
             }
             _ => self.send("apply", json!({ "commands": commands })),
         }
+    }
+
+    fn send_freeze(&mut self, paced: &[Paced], speed: f64) {
+        let clips: Vec<&String> = paced.iter().map(|c| &c.id).collect();
+        let at = self.snap.timeline.position;
+        self.send(
+            "speed.set",
+            json!({ "clips": clips, "at": at, "speed": speed }),
+        );
     }
 
     fn send_percent(
@@ -2159,6 +2169,9 @@ impl Workspace {
             }
             Key::Effect(n, k) => self.send_knob(chosen, (n, k), value),
             Key::Volume => self.send_volume(sounds, value),
+            Key::Speed if Speed::freezes(value / 100.0) && !paced.iter().any(|c| c.ramped) => {
+                self.send_freeze(paced, value / 100.0);
+            }
             Key::Speed => self.send_percent(paced, None, |_| value),
             Key::Rate => self.send_percent(paced, None, |c| value / c.rate * 100.0),
             Key::Length => {
@@ -2345,7 +2358,10 @@ impl Workspace {
             }
             Act::Drag(field, value) => {
                 if let Some(h) = self.inspector.held.as_mut().filter(|h| h.field == field) {
-                    h.value = value;
+                    h.value = match field {
+                        Key::Speed => value.max(*SpeedDialog::PERCENT.start()),
+                        _ => value,
+                    };
                 }
             }
             Act::Land(field) => {

@@ -1620,6 +1620,18 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - This is Retime Process at Nearest. The other processes make the frames between the source frames (deviation X93).
   - Sound keeps its pitch, and plays reversed when backward. A freeze is silent.
   - Edits count frames through the speed.
+  - **A speed under 0.01%, or 0.** These facts come from Resolve Studio 21.1.2, from `SetSpeed` in a script, on a clip with no speed keyframes. `speed.set` does the same:
+    - The speed gives a freeze frame. 0.009% and 0 give the same result.
+    - The clip keeps its length, and the next clip does not move. Ripple on or off gives the same result.
+    - With the playhead inside the clip, the clip splits at the playhead.
+      - The left part keeps its speed.
+      - The right part is a freeze frame of the source frame at the playhead, up to the clip's old end.
+      - The linked audio splits at the same frame and takes the same speeds.
+    - With the playhead on the clip's first frame, the whole clip is a freeze frame of its first source frame.
+    - With the playhead on the clip's last frame, the right part is a freeze frame of 1 frame.
+    - With the playhead after the clip, the whole clip is a freeze frame of its last source frame.
+    - A clip with speed keyframes and a playhead before the clip are not measured. In vidcut, `speed.set` refuses both.
+    - A value typed in the Inspector is not measured.
   - **Speed keyframes.** These facts come from Resolve Studio 21.1.2, from its renders and its OTIO files:
     - A speed keyframe cuts a clip into two sections. Each section has a speed of its own. The sound of the clip gets the same sections.
     - A new speed keyframe gives both sections the speed of the section that it cuts.
@@ -1672,6 +1684,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - vidcut applies this rule again after each edit that moves a speed keyframe.
       - Duration is off on a clip with speed keyframes.
       - Reset gives the whole clip 100%. Its speed keyframes go.
+      - Speed takes a typed value under 0.01%. On clips with no speed keyframes, it sends `speed.set` at the playhead.
+      - On a clip with speed keyframes, that value becomes 0.01%. A drag of Speed stops at 0.01%.
     - The diamond adds or removes a speed keyframe at the playhead. The arrows move the playhead to the previous or next speed keyframe.
     - The diamond is orange on a speed keyframe ([X107](deviations.md#x107-the-diamond-of-speed-change-is-orange)).
     - The list opens only on a section that plays forward. `speed.set` changes only such a section.
@@ -1690,6 +1704,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `keyframes.add` skips a clip that cannot take a speed keyframe at `at`. It fails only when no clip can.
     - `speed.reverse` turns a section at its speed keyframe ([X96](deviations.md#x96-reverse-keeps-the-speeds-of-the-other-sections)).
     - `speed.set` takes 0.01% to 100000% forward, in a section that plays forward.
+    - On a clip with no speed keyframes, `speed.set` also takes the speeds of `edit.change_speed`, and a speed under 0.01%.
     - `speed.ease` eases the speed keyframes of a section. `keyframes.set` gives one speed keyframe `linear` or `ease_in_out`.
     - `keyframes.list` gives `ease` `ease_in_out` for an eased speed keyframe.
     - `keyframes.remove` without `frames` and `at` removes all the speed keyframes of the clips.

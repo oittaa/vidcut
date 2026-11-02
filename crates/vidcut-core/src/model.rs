@@ -1869,6 +1869,10 @@ fn is_zero_frames(n: &i64) -> bool {
 impl Speed {
     pub const RANGE: std::ops::RangeInclusive<f64> = 0.0001..=1000.0;
 
+    pub fn freezes(speed: f64) -> bool {
+        (0.0..*Self::RANGE.start()).contains(&speed)
+    }
+
     pub fn percent(speed: f64) -> f64 {
         let percent = speed * 100.0;
         let places = if percent.abs() < 1.0 { 100.0 } else { 1.0 };

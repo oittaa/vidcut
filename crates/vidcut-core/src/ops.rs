@@ -1499,7 +1499,8 @@ pub fn change_speed(
 ) -> Result<()> {
     if !speed.is_finite() || (speed != 0.0 && !Speed::RANGE.contains(&speed.abs())) {
         return Err(Error::invalid(format!(
-            "speed {speed} isn't 0 (a freeze frame) or 0.01% to 100000% either way"
+            "speed {speed} isn't 0 (a freeze frame) or 0.01% to 100000% either way: \
+             speed.set also makes a freeze frame from a forward speed under 0.01%"
         )));
     }
     let ripple = ripple.unwrap_or(p.settings.ripple_on);

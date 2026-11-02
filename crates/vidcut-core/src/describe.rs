@@ -167,6 +167,7 @@ pub fn describe_at(
             d.clips("clips"),
             d.time("at"),
             match d.params["speed"].as_f64() {
+                Some(x) if crate::model::Speed::freezes(x) => "a freeze frame".to_string(),
                 Some(x) => format!("{}%", crate::model::Speed::percent(x)),
                 None => "?".to_string(),
             }

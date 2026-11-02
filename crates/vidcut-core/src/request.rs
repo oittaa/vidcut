@@ -1084,6 +1084,13 @@ pub enum Request {
     /// the clip's length changes and later clips follow; without, the clip
     /// keeps its length. A clip with no speed keyframes changes as with
     /// `edit.change_speed`.
+    /// On a clip with no speed keyframes, a speed under 0.0001 (0.01%) or 0
+    /// gives a freeze frame, with or without ripple: the clip splits at
+    /// `at`, the left part keeps its speed, and the right part holds the
+    /// source frame at `at`. With `at` on its first frame, the whole clip
+    /// holds that frame. With `at` after it, the whole clip holds its last
+    /// frame. The length stays, and later clips stay. With `at` before the
+    /// clip, or on a clip with speed keyframes, such a speed fails.
     #[serde(rename = "speed.set")]
     SpeedSet {
         clips: OneOrMany<ClipRef>,

@@ -1,5 +1,5 @@
 use super::keyframes::{Pick, picked_as};
-use super::{change_speed, check_source, retimed};
+use super::{change_speed, check_source, retimed, split_clip};
 use crate::error::{Error, Result};
 use crate::model::{Clip, Ease, Project, Section, Speed};
 use crate::render::source_frame;
@@ -192,6 +192,13 @@ pub fn remove_keyframes(p: &mut Project, ids: &[String], pick: &Pick) -> Result<
     Ok(())
 }
 
+fn freeze_from(p: &mut Project, c: &Clip, t: i64) -> Result<()> {
+    let part = split_clip(p, &c.id, &[t])?
+        .pop()
+        .unwrap_or_else(|| c.id.clone());
+    change_speed(p, &[part], 0.0, Some(false), Some(t.min(c.end() - 1)))
+}
+
 pub fn set(
     p: &mut Project,
     ids: &[String],
@@ -201,8 +208,14 @@ pub fn set(
 ) -> Result<()> {
     let ripple_on = ripple.unwrap_or(p.settings.ripple_on);
     for id in latest_first(p, ids) {
+        let c = clip_of(p, &id)?;
+        let plain = c.speed.as_ref().is_none_or(|s| s.sections.len() < 2);
+        if plain && Speed::freezes(speed) && t >= c.start {
+            freeze_from(p, &c, t)?;
+            continue;
+        }
         let c = under(p, &id, t)?;
-        if c.speed.as_ref().is_none_or(|s| s.sections.len() < 2) {
+        if plain {
             change_speed(p, std::slice::from_ref(&id), speed, ripple, Some(t))?;
             continue;
         }
