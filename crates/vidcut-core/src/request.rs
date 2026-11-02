@@ -2216,8 +2216,9 @@ pub enum Request {
         #[serde(default)]
         border: Option<Border>,
     },
-    /// Put one effect of a clip back at its usual values. It stays on or
-    /// off, and keeps its `render_cache`. `effect` counts from 0.
+    /// Put one effect of a clip back at its usual values. It stays on, and
+    /// keeps its `render_cache`. An effect that is off does not change.
+    /// `effect` counts from 0.
     #[serde(rename = "effects.reset")]
     EffectsReset { clip: ClipRef, effect: usize },
     /// Take one effect off a clip. `effect` counts from 0.
