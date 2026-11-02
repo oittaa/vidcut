@@ -5027,6 +5027,7 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
             if let Some(title) = c.title.as_mut().filter(|t| t.is_keyed()) {
                 let mut picture = title.as_picture();
                 picture.scale_times(&conv, ratio);
+                title.move_handles(conv);
                 title.take_picture(&picture);
             }
         }

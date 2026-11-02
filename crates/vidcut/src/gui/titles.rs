@@ -170,6 +170,7 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         position,
         position_keys: stored.position_keys.clone(),
         position_y: stored.position_y.clone(),
+        position_handles: stored.position_handles.clone(),
         zoom: if scroll {
             None
         } else {

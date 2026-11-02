@@ -235,14 +235,23 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
   - `position`, `transformationZoomX`, `transformationZoomY` and `transformationRotationAngle` in `Rich Text`
   - `position` in the `Text` group of a scroll
   - `opacity` in the `Composite` clip effect, from 0 to 100
-- Between two keyframes, each value changes evenly.
+- Between two keyframes with no handles, each value changes evenly.
 - A key time counts from the first frame that the clip shows.
 - A position goes from -4 to 4 on each axis, from the bottom left. A move of x from -0.5 to 1.5 plays.
 - A key of zoom, rotation or opacity takes `InBez` and `OutBez`.
-- A position key has no curve:
-  - The curve button of the Position row is off. Drop Shadow Offset and Background Center are the same.
-  - A click on the key opens no curve tools, and a right-click opens no menu.
-  - An export gives `{"30": {"Value": [0.5, 0.5], "Variant Type": "POINTF"}}`.
+- A position key also takes handles:
+  - A plain key exports as `{"30": {"Value": [0.5, 0.5], "Variant Type": "POINTF"}}`.
+  - A key with a handle adds `"OutBez": {"OutBez": [x, y], "Variant Type": "POINTF"}` or the same with `InBez`. The numbers are fractions of the picture.
+  - The import keeps these handles.
+- The path between two position keys is a cubic. P1 = P0 + `OutBez`, and P2 = P3 + `InBez`. A key with no handle gives a handle of zero.
+- The title moves at one speed along that path:
+  - The fraction of the time between the keys is the fraction of the length of the path.
+  - The length is in fractions of the picture, not pixels.
+  - Six sets of handles, with each frame rendered, fit this with a largest error of 0.00074 of the picture.
+- The right-click menu of the Inspector's Position key has Linear and one more item:
+  - The last key has Ease In. The first key has Ease Out. A lone key has only Linear.
+  - Ease In gives `InBez` `[0.0125, 0.025]` for keys at X 192 and Y 216 and 400, at 1920 x 1080. This one sample gives no formula.
+- The Keyframes panel of a title has only the rows of the clip. A key on the Position of the Title tab has no row.
 - The Inspector also has Keyframe buttons on these values of a title:
   - Drop Shadow: Offset, Blur and Opacity
   - Background: Outline Width, Width, Height, Corner Radius, Center and Opacity
@@ -253,6 +262,8 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - A Text title and a lower third take keyframes on position, zoom, rotation and opacity. A scroll takes them on position and opacity.
 - The Title section has the Keyframe button on Across, Zoom, Rotation and Title opacity. Across holds the keyframes of Across and Down.
 - The Keyframes tab shows these values of a selected title. Position has no curve button and no ease.
+- Play and export draw a title's position along the path of its handles (`Title::sampled`). A new key takes the point of the path at its frame.
+- `keyframes.set` with `linear` removes the handles of the chosen position keys. `keyframes.list` shows them as `in` and `out`.
 - `titles.set` and the viewer's handles put a new number on a keyframe at `at`, or at the playhead, when the value has keyframes.
 - With the playhead outside the clip, the Title section shows the curve at the playhead's clip time, as the other rows do. A new number and the Keyframe buttons add a keyframe there, outside the clip.
 - `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take a title in `clips`.
@@ -262,11 +273,14 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 
 - `otio::titles` writes the keyframes in the `Key Frames` of each parameter, on both `Rich Text` groups of a lower third.
 - It reads them from the group of the lower line.
-- Position keys convert as the plain position does. An import reads no handles on them.
+- Position keys convert as the plain position does. `InBez` and `OutBez` go to `position_handles` and come back, with Y turned over.
+- A scroll reads and writes no position handles, because nothing measures them.
 - The `vidcut` metadata holds the keyframes on source frames, as for a `Picture`.
 
 **To do:**
 
+- the Ease In and Ease Out items of the Position key, when a measurement gives what they write
+- what a new key on a bent path does to the handles beside it, when a measurement gives it. vidcut keeps them as they are.
 - keyframes of the shadow and the background
 - the Transform and Cropping of the clip on a title
 

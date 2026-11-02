@@ -1,12 +1,12 @@
 use serde_json::{Value, json};
 
-use super::effects::{effect, group, keyed, plain, ranged, rounded};
+use super::effects::{effect, group, handle_point, handle_value, keyed, plain, ranged, rounded};
 use super::picture::{file_curve, read_keys};
 use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
-    Keyframe, Picture, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleAlign,
-    TitleKind, TitleShadow, TitleStyle,
+    Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title,
+    TitleAlign, TitleKind, TitleShadow, TitleStyle,
 };
 use crate::rich::{self, Look, Span};
 
@@ -57,10 +57,17 @@ fn point_frames(t: &Title, origin: i64, file: impl Fn([f64; 2]) -> [f64; 2]) -> 
     let mut out = serde_json::Map::new();
     for (k, y) in t.position_keys.iter().zip(&t.position_y) {
         let [x, y] = file([k.value, *y]);
-        out.insert(
-            (k.frame - origin).to_string(),
-            json!({ "Value": [rounded(x), rounded(y)], "Variant Type": "POINTF" }),
-        );
+        let mut key = json!({ "Value": [rounded(x), rounded(y)], "Variant Type": "POINTF" });
+        if let Some(h) = t.position_handles.iter().find(|h| h.frame == k.frame) {
+            let [before, after] = ["InBez", "OutBez"];
+            if let Some([x, y]) = h.in_handle {
+                key[before] = handle_value(before, x, -y);
+            }
+            if let Some([x, y]) = h.out_handle {
+                key[after] = handle_value(after, x, -y);
+            }
+        }
+        out.insert((k.frame - origin).to_string(), key);
     }
     Some(Value::Object(out))
 }
@@ -102,6 +109,30 @@ fn point_keys(
     rows.sort_by_key(|(k, _)| k.frame);
     rows.dedup_by_key(|(k, _)| k.frame);
     rows.into_iter().unzip()
+}
+
+fn point_handles(p: &Value, origin: i64) -> Vec<PositionHandles> {
+    let handle = |k: &Value, name: &str| {
+        let h = handle_point(k, name)?;
+        Some([h.first()?.as_f64()?, -h.get(1)?.as_f64()?])
+    };
+    let keys = p.get("Key Frames").and_then(Value::as_object);
+    let mut out: Vec<PositionHandles> = keys
+        .into_iter()
+        .flatten()
+        .filter_map(|(t, k)| {
+            let (in_handle, out_handle) = (handle(k, "InBez"), handle(k, "OutBez"));
+            (in_handle.is_some() || out_handle.is_some()).then_some(())?;
+            Some(PositionHandles {
+                frame: (t.parse::<f64>().ok()? + origin as f64).round() as i64,
+                in_handle,
+                out_handle,
+            })
+        })
+        .collect();
+    out.sort_by_key(|h| h.frame);
+    out.dedup_by_key(|h| h.frame);
+    out
 }
 
 pub fn with_opacity(t: &Title, effects: Vec<Value>, origin: i64) -> Vec<Value> {
@@ -882,6 +913,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         position: Some([across(x), 0.5]),
         position_keys: Vec::new(),
         position_y: Vec::new(),
+        position_handles: Vec::new(),
         zoom: None,
         zoom_keys: Vec::new(),
         rotation: None,
@@ -950,6 +982,7 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
     (t.position_keys, t.position_y) = point_keys(parameter(main, "position"), origin, |[x, y]| {
         [x, 1.0 - y + lift]
     });
+    t.position_handles = point_handles(parameter(main, "position"), origin);
     let keys = |id: &str| read_keys(parameter(main, id), origin).unwrap_or_default();
     t.zoom_keys = fitted(&keys("transformationZoomX"), 1.0, 0.25, 4.0);
     t.rotation_keys = fitted(
@@ -981,6 +1014,7 @@ pub fn with_keys_of(mut t: Title, read: &Title) -> Title {
     let dy = t.place()[1] - read.place()[1];
     t.position_keys.clone_from(&read.position_keys);
     t.position_y = read.position_y.iter().map(|y| down(y + dy)).collect();
+    t.position_handles.clone_from(&read.position_handles);
     t.zoom_keys.clone_from(&read.zoom_keys);
     t.rotation_keys.clone_from(&read.rotation_keys);
     t.opacity = read.opacity;
@@ -1085,6 +1119,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         position: None,
         position_keys: Vec::new(),
         position_y: Vec::new(),
+        position_handles: Vec::new(),
         zoom,
         zoom_keys: Vec::new(),
         rotation,
