@@ -2420,11 +2420,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The preview plays a new source clip without its ducking until its measurement is done. The measurement runs as a job.
     - An export and `analyze.loudness` measure what is missing.
   - **Values:**
-    - Duck Amount: 0 to 60 dB.
-    - Lookahead: 0 to 1000 ms.
-    - Rise Time: 1 to 1000 ms.
-    - Hold: 0 to 5000 ms.
-    - Recovery Time: 1 to 1000 ms. 1000 is Resolve's maximum.
+    - Duck Amount: 0 to 18 dB (measured in Resolve Studio 21.1.2).
+    - Lookahead: 0 to 500 ms (measured).
+    - Rise Time: 0 to 1000 ms (measured).
+    - Hold: 0 to 1000 ms (measured).
+    - Recovery Time: 0 to 1000 ms (measured).
     - Threshold: −96 to 0 dBFS.
     - `track.set` refuses a value outside its range, and changes no value (X69).
     - The project file keeps only the values that are not the usual ones.

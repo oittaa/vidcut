@@ -3860,23 +3860,23 @@ pub struct DuckSet {
     /// The tracks whose sound dips it (`V1`, `A2`), never its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<String>>,
-    /// The Duck Amount: how far it dips, in dB, from 0 to 60.
+    /// The Duck Amount: how far it dips, in dB, from 0 to 18.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub amount_db: Option<f64>,
     /// How long before a source starts the full dip is reached, in ms,
-    /// from 0 to 1000.
+    /// from 0 to 500.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lookahead_ms: Option<f64>,
     /// The Rise Time: how long the gain takes to fall to the full dip, in
-    /// ms, from 1 to 1000.
+    /// ms, from 0 to 1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rise_ms: Option<f64>,
     /// How long the full dip stays after a source stops, in ms, from 0 to
-    /// 5000.
+    /// 1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hold_ms: Option<f64>,
     /// The Recovery Time: how long the gain takes to come back after the
-    /// hold, in ms, from 1 to 1000.
+    /// hold, in ms, from 0 to 1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery_ms: Option<f64>,
     /// What makes a source active: `speech`, or `level`, its sound at or
