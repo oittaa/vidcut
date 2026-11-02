@@ -1645,12 +1645,16 @@ pub struct ClipProps {
     pub render_cache: Option<crate::model::ClipCache>,
 }
 
+pub const ISOLATION: std::ops::RangeInclusive<f64> = 0.0..=100.0;
+
 pub fn checked_isolation(amount: f64) -> Result<f64> {
-    if amount == 0.0 || (1.0..=100.0).contains(&amount) {
+    if ISOLATION.contains(&amount) {
         Ok(amount)
     } else {
         Err(Error::invalid(format!(
-            "voice isolation {amount} is neither 0 (off) nor 1..100"
+            "voice isolation {amount} is outside {}..{}, where 0 is off",
+            ISOLATION.start(),
+            ISOLATION.end()
         )))
     }
 }
