@@ -237,6 +237,9 @@ pub struct ShownTitle {
     pub clip: String,
     pub title: Title,
     pub run: Run,
+    /// The source frame of its clip's first frame, which its keyframes are
+    /// counted from.
+    pub source_in: i64,
     /// How a dissolve at its clip's edge fades it in or out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fade: Option<Ramp>,
@@ -287,8 +290,20 @@ impl ShownTitle {
             clip: self.clip.clone(),
             title: self.title.clone(),
             run: self.run.after(k),
+            source_in: self.source_in,
             fade: self.fade.map(|r| r.after(k)),
             placed: self.placed.iter().map(|p| p.after(k)).collect(),
+        }
+    }
+
+    pub fn frame(&self) -> f64 {
+        (self.source_in + self.run.at) as f64
+    }
+
+    pub fn sampled(self) -> Self {
+        Self {
+            title: self.title.sampled(self.frame()),
+            ..self
         }
     }
 
@@ -2095,6 +2110,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         of: c.duration,
                         held: false,
                     },
+                    source_in: c.source_in,
                     fade,
                     placed: nest
                         .map_or_else(Vec::new, |n| n.outer.iter().map(|p| p.after(x)).collect()),

@@ -790,13 +790,65 @@ fn number(
     );
 }
 
-struct KeyMark {
+pub(super) struct KeyMark {
     on: bool,
     prev: bool,
     next: bool,
 }
 
-fn mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
+pub(super) enum KeyClick {
+    Step(i64),
+    Toggle,
+    Ease(Ease),
+}
+
+pub(super) fn key_diamond(on: bool) -> egui::Button<'static> {
+    let icon = RichText::new(DIAMOND);
+    let icon = if on { icon.color(theme::KEY_ON) } else { icon };
+    egui::Button::selectable(on, icon).frame(false)
+}
+
+pub(super) fn key_buttons(ui: &mut egui::Ui, keys: &KeyMark, linear: bool) -> Option<KeyClick> {
+    let mut click = None;
+    let prev = ui.add_enabled(keys.prev, egui::Button::new(CARET_LEFT).frame(false));
+    if prev.clicked() {
+        click = Some(KeyClick::Step(-1));
+    }
+    let diamond = ui.add(key_diamond(keys.on));
+    if diamond.clicked() {
+        click = Some(KeyClick::Toggle);
+    }
+    if keys.on && !linear {
+        diamond.context_menu(|ui| {
+            for e in Ease::ALL {
+                if ui.button(ease_label(e)).clicked() {
+                    click = Some(KeyClick::Ease(e));
+                }
+            }
+        });
+    }
+    let next = ui.add_enabled(keys.next, egui::Button::new(CARET_RIGHT).frame(false));
+    if next.clicked() {
+        click = Some(KeyClick::Step(1));
+    }
+    click
+}
+
+pub(super) fn next_key(
+    c: &Clip,
+    times: impl Iterator<Item = i64>,
+    at: i64,
+    dir: i64,
+) -> Option<i64> {
+    let times = times.filter(|t| c.start <= *t && *t < c.end());
+    if dir < 0 {
+        times.filter(|t| *t < at).max()
+    } else {
+        times.filter(|t| *t > at).min()
+    }
+}
+
+pub(super) fn mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
     let time = |k: &Keyframe| c.key_time(k.frame).round() as i64;
     let inside = |t: i64| c.start <= t && t < c.end();
     KeyMark {
@@ -810,12 +862,6 @@ fn mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
             inside(t) && t > at
         }),
     }
-}
-
-pub(super) fn key_diamond(on: bool) -> egui::Button<'static> {
-    let icon = RichText::new(DIAMOND);
-    let icon = if on { icon.color(theme::KEY_ON) } else { icon };
-    egui::Button::selectable(on, icon).frame(false)
 }
 
 fn entry(
@@ -887,27 +933,12 @@ fn field(
             acts.push(Act::Release(f));
         }
         if let Some(keys) = keys {
-            let prev = ui.add_enabled(keys.prev, egui::Button::new(CARET_LEFT).frame(false));
-            if prev.clicked() {
-                acts.push(Act::Step(f, -1));
-            }
-            let diamond = ui.add(key_diamond(keys.on));
-            if diamond.clicked() {
-                acts.push(Act::Toggle(f));
-            }
             let linear = matches!(f, Key::Picture(Field::AnchorX | Field::AnchorY));
-            if keys.on && !linear {
-                diamond.context_menu(|ui| {
-                    for e in Ease::ALL {
-                        if ui.button(ease_label(e)).clicked() {
-                            acts.push(Act::KeyEase(f, e));
-                        }
-                    }
-                });
-            }
-            let next = ui.add_enabled(keys.next, egui::Button::new(CARET_RIGHT).frame(false));
-            if next.clicked() {
-                acts.push(Act::Step(f, 1));
+            match key_buttons(ui, &keys, linear) {
+                Some(KeyClick::Step(dir)) => acts.push(Act::Step(f, dir)),
+                Some(KeyClick::Toggle) => acts.push(Act::Toggle(f)),
+                Some(KeyClick::Ease(e)) => acts.push(Act::KeyEase(f, e)),
+                None => {}
             }
         }
         if let Some(lit) = link {
@@ -1862,14 +1893,7 @@ impl Workspace {
         let Some(c) = key_clips(key, lists).first().and_then(|id| p.clip(id)) else {
             return;
         };
-        let inside = |t: &i64| c.start <= *t && *t < c.end();
-        let times = key_times(c, key).into_iter().filter(inside);
-        let target = if dir < 0 {
-            times.filter(|t| *t < at).max()
-        } else {
-            times.filter(|t| *t > at).min()
-        };
-        if let Some(t) = target {
+        if let Some(t) = next_key(c, key_times(c, key).into_iter(), at, dir) {
             self.seek(PlayerId::Timeline, t, false);
         }
     }

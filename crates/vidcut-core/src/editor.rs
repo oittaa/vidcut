@@ -3772,8 +3772,13 @@ fn mutate(
             rotation,
             opacity,
             look,
+            at,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
             let change = ops::titles::TitleChange {
                 text: text.clone(),
                 kind: *kind,
@@ -3788,7 +3793,7 @@ fn mutate(
                     .map(|l| crate::looks::title_look(env, l))
                     .transpose()?,
             };
-            ops::titles::set(p, &id, &change)?;
+            ops::titles::set(p, &id, &change, at)?;
             Value::Null
         }
         Request::PictureSet {
@@ -5003,6 +5008,11 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
             if let Some(picture) = c.picture.as_mut() {
                 picture.scale_times(&conv, ratio);
             }
+            if let Some(title) = c.title.as_mut().filter(|t| t.is_keyed()) {
+                let mut picture = title.as_picture();
+                picture.scale_times(&conv, ratio);
+                title.take_picture(&picture);
+            }
         }
         (c.start, c.duration) = (start, end - start);
     }
@@ -5125,10 +5135,8 @@ fn place_imported(
                 .title_from
                 .as_ref()
                 .and_then(|r| otio::titles::from_editor(r, p.settings.height))
-                .map(|mut t| {
-                    t.opacity = c.title.as_ref().and_then(|x| x.opacity);
-                    t
-                })
+                .zip(c.title.as_ref())
+                .map(|(t, read)| otio::titles::with_keys_of(t, read))
                 .or_else(|| c.title.clone());
             let shape = c
                 .compound
@@ -8006,6 +8014,9 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
     }
     if let Some(picture) = &c.picture {
         keyed.extend(picture.keyed_names());
+    }
+    if let Some(t) = &c.title {
+        keyed.extend(t.as_picture().keyed_names());
     }
     if !keyed.is_empty() {
         v["keyframes"] = json!(keyed);

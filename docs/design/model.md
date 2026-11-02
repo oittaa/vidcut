@@ -330,6 +330,11 @@ Writing:
   - its lines, with markup that `rich::spans` reads into `Span`s
   - a `TitleStyle`
   - an optional `position`: the point that its anchor goes to (`Title::place`, `Title::anchor`, [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
+  - `position_keys` with `position_y`, `zoom_keys`, `rotation_keys` and `opacity_keys`: `Keyframe`s on source frames, beside the plain values
+- `Title::takes_keys` tells which values take keyframes. A scroll has no zoom or rotation.
+- `Title::as_picture` gives a `Picture` with these values, and `Title::take_picture` takes them back. Thus `ops::keyframes` and the sampling use the code of `Picture`.
+- `Title::sampled` gives the title of one frame, without keyframes.
+- A title's zoom is one number. Its position keys take no handles, because a `POINTF` key has no curve.
 - `ops::titles` holds the edits. `ops::titles::checked` is the check that `titles.add`, `titles.set` and `validate::violations` share.
 - It checks the style through the checks of the subtitle style (`checked_font`, `checked_size`, `checked_color`, `checked_outline`, `checked_background`).
 

@@ -685,7 +685,9 @@ pub fn export_drawn(
             None => (
                 source,
                 match (&c.title, &c.generator) {
-                    (Some(t), _) => titles::reference(t, p.settings.height, &drawn(t)),
+                    (Some(t), _) => {
+                        titles::reference(t, p.settings.height, &drawn(t), source.round() as i64)
+                    }
                     (None, Some(g)) => (*g.reference).clone(),
                     (None, None) => Value::Null,
                 },
@@ -830,7 +832,7 @@ pub fn export_drawn(
                     }),
                 );
                 let effects = match &c.title {
-                    Some(t) => titles::with_opacity(t, effects),
+                    Some(t) => titles::with_opacity(t, effects, c.content_at(s)),
                     None => with_picture(c, &shape_of(p, c, m), effects, g, c.content_at(s)),
                 };
                 let mut it = match &c.compound {
@@ -1985,10 +1987,13 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if stack {
                     c.compound = Some(compound_of(item, fps));
                     c.picture = our_picture(item);
-                } else if let Some(mut t) = titles::read(item, reference, titles::UNKNOWN_HEIGHT) {
-                    let opacity = titles::take_opacity(&mut c.effects);
+                } else if let Some(mut t) =
+                    titles::read(item, reference, titles::UNKNOWN_HEIGHT, c.source_in)
+                {
+                    let (opacity, opacity_keys) = titles::take_opacity(&mut c.effects, c.source_in);
                     if item["metadata"][VIDCUT].get("title").is_none() {
                         t.opacity = opacity;
+                        t.opacity_keys = opacity_keys;
                     }
                     if c.name == reference["name"].as_str().unwrap_or_default()
                         || c.name == t.label()

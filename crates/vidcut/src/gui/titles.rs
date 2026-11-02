@@ -1,17 +1,21 @@
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
+use vidcut_core::keyframes::PictureValue;
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
-use vidcut_core::model::{Title, TitleAlign, TitleKind};
+use vidcut_core::model::{Clip, Title, TitleAlign, TitleKind};
 
 use super::export::Ask;
+use super::inspector::{KeyClick, key_buttons, mark, next_key};
 use super::looks::{Parts, Picker, TextFields, kept_plain, plain};
 use super::subtitles::{font_list, kept_number, percent, swatch};
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
+use crate::live::PlayerId;
 
 #[derive(Debug)]
 pub struct TitleDialog {
     clip: String,
+    at: i64,
     kind: TitleKind,
     align: TitleAlign,
     text: String,
@@ -46,6 +50,7 @@ impl TitleDialog {
     fn new(clip: &str, t: Option<&Title>) -> Self {
         let mut d = Self {
             clip: clip.to_string(),
+            at: 0,
             kind: TitleKind::Text,
             align: TitleAlign::Left,
             text: String::new(),
@@ -133,6 +138,14 @@ fn unstyled(text: &str, (a, b): (usize, usize)) -> String {
     format!("{}{middle}{}", &text[..a], &text[b..])
 }
 
+fn frame_in(c: &Clip, at: i64) -> i64 {
+    at.clamp(c.start, c.end() - 1)
+}
+
+fn sampled_at(c: &Clip, t: &Title, at: i64) -> Title {
+    t.sampled(c.content_at(frame_in(c, at)) as f64)
+}
+
 fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     let stored = d.base.as_ref().unwrap_or(stored);
     let style = d.fields.parts(&Parts::of_title(&stored.style))?.title();
@@ -159,22 +172,27 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         text: d.text.clone(),
         style,
         position,
+        position_keys: stored.position_keys.clone(),
+        position_y: stored.position_y.clone(),
         zoom: if scroll {
             None
         } else {
             kept_number(&d.zoom, stored.zoom, "zoom")?
         },
+        zoom_keys: stored.zoom_keys.clone(),
         rotation: if scroll {
             None
         } else {
             kept_plain(&d.rotation, stored.rotation, "rotation")?
         },
+        rotation_keys: stored.rotation_keys.clone(),
         opacity: kept_number(&d.title_opacity, stored.opacity, "title opacity")?,
+        opacity_keys: stored.opacity_keys.clone(),
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
 }
 
-fn changes(clip: &str, t: &Title, stored: &Title) -> Option<Value> {
+fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Option<Value> {
     let mut params = json!({ "clip": clip });
     if t.text != stored.text {
         params["text"] = json!(t.text);
@@ -200,17 +218,49 @@ fn changes(clip: &str, t: &Title, stored: &Title) -> Option<Value> {
     if t.opacity != stored.opacity {
         params["opacity"] = json!(t.opaque());
     }
-    params
-        .as_object()
-        .is_some_and(|o| o.len() > 1)
-        .then_some(params)
+    if params.as_object().is_none_or(|o| o.len() < 2) {
+        return None;
+    }
+    params["at"] = json!(at);
+    Some(params)
 }
 
 impl Workspace {
     fn title_changes(&self, d: &TitleDialog) -> Option<(String, Value, Title)> {
-        let stored = self.project()?.clip(&d.clip)?.title.as_ref()?;
-        let t = title_of(d, stored).ok()?;
-        Some((d.clip.clone(), changes(&d.clip, &t, stored)?, t))
+        let c = self.project()?.clip(&d.clip)?;
+        let stored = sampled_at(c, c.title.as_ref()?, d.at);
+        let t = title_of(d, &stored).ok()?;
+        Some((d.clip.clone(), changes(&d.clip, &t, &stored, d.at)?, t))
+    }
+
+    fn title_key(&mut self, c: &Clip, t: &Title, v: PictureValue, click: KeyClick, at: i64) {
+        let times = t
+            .keys_of(v)
+            .iter()
+            .map(|k| c.key_time(k.frame).round() as i64);
+        let mut body = json!({ "clips": [c.id], "param": v.name(), "at": at });
+        match click {
+            KeyClick::Step(dir) => {
+                if let Some(to) = next_key(c, times, at, dir) {
+                    self.seek(PlayerId::Timeline, to, false);
+                }
+            }
+            KeyClick::Toggle => {
+                let on = times.into_iter().any(|k| k == at);
+                self.send(
+                    if on {
+                        "keyframes.remove"
+                    } else {
+                        "keyframes.add"
+                    },
+                    body,
+                );
+            }
+            KeyClick::Ease(e) => {
+                body["ease"] = json!(e);
+                self.send("keyframes.set", body);
+            }
+        }
     }
 
     pub(crate) fn add_title(&mut self, ctx: &egui::Context) {
@@ -281,8 +331,14 @@ impl Workspace {
             let clip = &p.tracks[t].clips[c];
             Some((&p.tracks[t], clip, clip.title.as_ref()?))
         });
-        match found {
-            Some((_, _, t)) if !d.loaded || (!d.dirty && d.from.as_ref() != Some(t)) => {
+        let position = self.snap.timeline.position;
+        if !d.dirty {
+            d.at = found.map_or(position, |(_, clip, _)| frame_in(clip, position));
+        }
+        let frame = d.at;
+        let stored = found.map(|(_, clip, t)| sampled_at(clip, t, d.at));
+        match stored.as_ref() {
+            Some(t) if !d.loaded || (!d.dirty && d.from.as_ref() != Some(t)) => {
                 d.load(t);
                 d.from = Some(t.clone());
                 d.shown = None;
@@ -290,7 +346,6 @@ impl Workspace {
             None if d.loaded => return false,
             _ => {}
         }
-        let stored = found.map(|(_, _, t)| t.clone());
         let mut changed = false;
         ui.label(RichText::new("Title").strong());
         match found {
@@ -416,6 +471,7 @@ impl Workspace {
         );
         let across_hint = format!("{}%", percent(Some(usual[0])));
         let down_hint = format!("{}%", percent(Some(usual[1])));
+        let mut clicks = Vec::new();
         egui::Grid::new("title-style-fields").show(ui, |ui| {
             changed |= d.fields.rows(ui, "title", &d.families, &size_hint).0;
             let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
@@ -427,17 +483,33 @@ impl Workspace {
                 )
                 .changed()
             };
+            let mut keys = |ui: &mut egui::Ui, v: PictureValue| {
+                let Some((_, clip, t)) = found else {
+                    return;
+                };
+                let marks = mark(clip, t.keys_of(v), frame);
+                ui.horizontal(|ui| {
+                    let linear = v == PictureValue::Position;
+                    if let Some(click) = key_buttons(ui, &marks, linear) {
+                        clicks.push((v, click));
+                    }
+                });
+            };
             changed |= row(ui, "Across", &mut d.across, &across_hint);
+            keys(ui, PictureValue::Position);
             ui.end_row();
             if !scroll {
                 changed |= row(ui, "Down", &mut d.down, &down_hint);
                 ui.end_row();
                 changed |= row(ui, "Zoom", &mut d.zoom, "100%");
+                keys(ui, PictureValue::Zoom);
                 ui.end_row();
                 changed |= row(ui, "Rotation", &mut d.rotation, "0°");
+                keys(ui, PictureValue::Rotation);
                 ui.end_row();
             }
             changed |= row(ui, "Title opacity", &mut d.title_opacity, "100%");
+            keys(ui, PictureValue::Opacity);
             ui.end_row();
         });
         ui.label(dim(match d.kind {
@@ -455,7 +527,7 @@ impl Workspace {
         {
             match title_of(&d, s) {
                 Ok(t) => {
-                    if let Some(params) = changes(&d.clip, &t, s) {
+                    if let Some(params) = changes(&d.clip, &t, s, d.at) {
                         self.send("titles.set", params);
                         self.title_landing(&d.clip, &t);
                     }
@@ -468,6 +540,11 @@ impl Workspace {
         ui.separator();
         if changed && let Some(s) = &stored {
             d.shown = title_of(&d, s).ok().filter(|t| t != s);
+        }
+        if let Some((_, clip, t)) = found {
+            for (v, click) in clicks {
+                self.title_key(clip, t, v, click, frame);
+            }
         }
         self.timeline.title_dialog = Some(d);
         self.sync_title_preview();

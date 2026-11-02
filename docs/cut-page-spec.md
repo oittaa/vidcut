@@ -31,7 +31,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 
 **Later (later):**
 - other effects, other transitions, other titles, generators
-- keyframes other than Transform, Crop and the clip volume
+- keyframes other than Transform, Crop, the clip volume and the Position, Zoom, Rotation and Opacity of a title
 - color ([todo](todo/auto-color.md)), Fusion
 - LUTs ([todo](todo/luts.md))
 - Stabilization ([todo](todo/stabilization.md))
@@ -933,10 +933,16 @@ Video Only and Audio Only limit what an edit takes (p. 694).
     - A scroll has its own motion and line spacing (X55).
   - Details: D65. In OTIO files: D67.
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
+- **Keyframes** ([todo](todo/keyframes.md#titles)):
+  - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
+  - Its Position keyframes are linear. Their row has no curve.
+  - vidcut: the Across, Zoom, Rotation and Title opacity rows of the Title section have the Keyframe button.
+  - vidcut: the Across button holds the keyframes of Across and Down.
 - **Later** (X53):
   - Text+ and Fusion titles (p. 1178)
   - Transform, Cropping, Speed and the blend modes of Composite on titles (pp. 763, 1176)
-  - animation and keyframes
+  - animation
+  - keyframes of the shadow and the background
   - Safe area overlays in the viewer are in §4.5 (D90).
   - The measurement of Resolve's stroke step is open ([todo](todo/titles.md)).
 

@@ -16,7 +16,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** keyframes of speed ([speed-ramps.md](speed-ramps.md)) and titles.
+- **To do:** keyframes of speed ([speed-ramps.md](speed-ramps.md)) and [subtitles](#subtitles), and the other values of a [title](#titles).
 
 ## What Resolve has
 
@@ -152,7 +152,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - Zoom X and Zoom Y as two keyframes when the zoom is not linked
     - Resolve then selects and steps Zoom X alone. vidcut's zoom is one keyframe for X and Y.
 
-**Later:** keyframes of speed and titles ([§8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)).
+**Later:** keyframes of speed and [subtitles](#subtitles).
 
 ## Model
 
@@ -225,6 +225,69 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
   - Step
   - anchor point keys with Bezier handles, or on a picture that is not at its fitted size
 
+## Titles
+
+**Measured in Resolve Studio 21.1.2** (Text, a lower third and Scroll, with renders and OTIO exports):
+
+- These values take keyframes, play them and export them:
+  - `position`, `transformationZoomX`, `transformationZoomY` and `transformationRotationAngle` in `Rich Text`
+  - `position` in the `Text` group of a scroll
+  - `opacity` in the `Composite` clip effect, from 0 to 100
+- Between two keyframes, each value changes evenly.
+- A key time counts from the first frame that the clip shows.
+- A position has no minimum or maximum. A move of x from -0.5 to 1.5 plays.
+- A key of zoom, rotation or opacity takes `InBez` and `OutBez`.
+- A position key has no curve:
+  - The curve button of the Position row is off. Drop Shadow Offset and Background Center are the same.
+  - A click on the key opens no curve tools, and a right-click opens no menu.
+  - An export gives `{"30": {"Value": [0.5, 0.5], "Variant Type": "POINTF"}}`.
+- The Inspector also has Keyframe buttons on these values of a title:
+  - Drop Shadow: Offset, Blur and Opacity
+  - Background: Outline Width, Width, Height, Corner Radius, Center and Opacity
+  - the Transform and Cropping of the clip
+
+**In vidcut:**
+
+- A Text title and a lower third take keyframes on position, zoom, rotation and opacity. A scroll takes them on position and opacity.
+- The Title section has the Keyframe button on Across, Zoom, Rotation and Title opacity. Across holds the keyframes of Across and Down.
+- The Keyframes tab shows these values of a selected title. Position has no curve button and no ease.
+- `titles.set` and the viewer's handles put a new number on a keyframe at `at`, or at the playhead, when the value has keyframes.
+- With the playhead outside the clip, the Title section shows the clip's nearest frame. A new number and the Keyframe buttons act on that frame.
+- `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take a title in `clips`.
+- A switch to Scroll drops the zoom and rotation keyframes. A `look` in `titles.set` drops all keyframes.
+
+**In a file:**
+
+- `otio::titles` writes the keyframes in the `Key Frames` of each parameter, on both `Rich Text` groups of a lower third.
+- It reads them from the group of the lower line.
+- Position keys convert as the plain position does. An import reads no handles on them.
+- The `vidcut` metadata holds the keyframes on source frames, as for a `Picture`.
+
+**To do:**
+
+- keyframes of the shadow and the background
+- the Transform and Cropping of the clip on a title
+
+## Subtitles
+
+vidcut has no keyframes on subtitles.
+
+**Measured in Resolve Studio 21.1.2:**
+
+- The Inspector of a subtitle has only Caption and Track tabs, with no Keyframe buttons.
+- The Keyframes panel of a selected subtitle lists these values, and adds keyframes on them:
+  - Transform: Zoom X and Y, Position X and Y, Rotation, Anchor Point, Pitch and Yaw
+  - Cropping: Left, Right, Top, Bottom and Softness
+  - Composite Opacity
+- Each subtitle has its own keyframes.
+- An Opacity keyframe dims the subtitle.
+- Zoom scales the subtitle about the middle of the picture.
+- Position X is in pixels. A keyframe at 500 moved the subtitle about 503 pixels.
+- These effects are not measured: Rotation, Anchor Point, Pitch, Yaw and Cropping.
+- An OTIO export leaves subtitle tracks out. Thus these keyframes reach no file.
+
+**To do:** give each `Cue` these values with keyframes, edit them in the Keyframes tab, and draw them in the viewer and the export.
+
 ## Scripting
 
 Rule 3: each GUI action has a request.
@@ -240,4 +303,4 @@ Rule 3: each GUI action has a request.
 
 - **Compound clips:** what does `edit.decompose` do with the keyframes of a compound clip for a clip inside that is frozen or plays backward?
 - **Dynamic Zoom:** can its boxes have times other than the ends of the clip?
-- **Later work:** in which order do keyframes of speed (p. 737) and titles come?
+- **Later work:** in which order do keyframes of speed (p. 737) and subtitles come?

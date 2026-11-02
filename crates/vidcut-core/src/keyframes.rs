@@ -1,4 +1,4 @@
-use crate::model::{Clip, ClipAudio, Crop, Ease, Handle, Keyframe, Picture};
+use crate::model::{Clip, ClipAudio, Crop, Ease, Handle, Keyframe, Picture, Title, TitleKind};
 use crate::validate::GAIN;
 
 const FLAT: Handle = Handle {
@@ -832,6 +832,71 @@ impl Picture {
             write_plain(self, v, value);
         }
         first
+    }
+}
+
+impl Title {
+    pub fn takes_keys(&self, v: PictureValue) -> bool {
+        match v {
+            PictureValue::Position | PictureValue::Opacity => true,
+            PictureValue::Zoom | PictureValue::Rotation => self.kind != TitleKind::Scroll,
+            _ => false,
+        }
+    }
+
+    pub fn keys_of(&self, v: PictureValue) -> &[Keyframe] {
+        match v {
+            PictureValue::Position => &self.position_keys,
+            PictureValue::Zoom => &self.zoom_keys,
+            PictureValue::Rotation => &self.rotation_keys,
+            PictureValue::Opacity => &self.opacity_keys,
+            _ => &[],
+        }
+    }
+
+    pub fn is_keyed(&self) -> bool {
+        PictureValue::ALL
+            .into_iter()
+            .any(|v| !self.keys_of(v).is_empty())
+    }
+
+    pub fn as_picture(&self) -> Picture {
+        let zoom = self.scale();
+        Picture {
+            position: Some(self.place()),
+            position_keys: self.position_keys.clone(),
+            position_y: self.position_y.clone(),
+            zoom: Some([zoom, zoom]),
+            zoom_keys: self.zoom_keys.clone(),
+            zoom_y: self.zoom_keys.iter().map(|k| k.value).collect(),
+            rotation: self.rotation,
+            rotation_keys: self.rotation_keys.clone(),
+            opacity: self.opacity,
+            opacity_keys: self.opacity_keys.clone(),
+            ..Picture::default()
+        }
+    }
+
+    pub fn take_picture(&mut self, p: &Picture) {
+        let at = p.place();
+        self.position = (at != Self::usual_position(self.kind, self.align())).then_some(at);
+        self.position_keys.clone_from(&p.position_keys);
+        self.position_y.clone_from(&p.position_y);
+        self.zoom = Some(p.scale()[0]).filter(|z| *z != 1.0);
+        self.zoom_keys.clone_from(&p.zoom_keys);
+        self.rotation = p.rotation;
+        self.rotation_keys.clone_from(&p.rotation_keys);
+        self.opacity = p.opacity;
+        self.opacity_keys.clone_from(&p.opacity_keys);
+    }
+
+    pub fn sampled(&self, frame: f64) -> Title {
+        if !self.is_keyed() {
+            return self.clone();
+        }
+        let mut t = self.clone();
+        t.take_picture(&self.as_picture().sampled(frame));
+        t
     }
 }
 

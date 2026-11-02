@@ -101,12 +101,12 @@ impl TitleLook {
         Title {
             kind: self.kind,
             align: self.align,
-            text: text.to_string(),
             style: self.style.clone(),
             position: self.position,
             zoom: self.zoom,
             rotation: self.rotation,
             opacity: self.opacity,
+            ..Title::new(text)
         }
     }
 }

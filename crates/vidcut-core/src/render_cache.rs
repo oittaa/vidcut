@@ -1296,6 +1296,7 @@ mod tests {
                     of: 1,
                     held: false,
                 },
+                source_in: 0,
                 fade: None,
                 placed: vec![Placed {
                     clip: "c1".into(),

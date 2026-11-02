@@ -1,7 +1,9 @@
 use crate::error::{Error, Result};
+use crate::keyframes::{PictureValue, picture_problem, plain_channel};
 use crate::looks::TitleLook;
 use crate::model::{
-    Clip, Project, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle, Track, TrackKind,
+    Clip, Keyframe, Project, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle, Track,
+    TrackKind,
 };
 
 use super::subtitles::{checked_background, checked_color, checked_font, checked_outline};
@@ -10,6 +12,62 @@ use super::{clear_range, fix_audio, is_main, locate, place, tracks, unlocked};
 pub const DEFAULT_SECS: f64 = 5.0;
 
 const TEXT_MOST: usize = 2000;
+const REACH: f64 = 100.0;
+const ZOOM: (f64, f64) = (0.25, 4.0);
+const TURNS: f64 = 3600.0;
+
+const PLACE: &str = "a title's position is two fractions of the picture, each from -100 to 100";
+const ZOOMED: &str = "a title's zoom is from 1/4 to 4";
+const TURNED: &str = "a title's rotation is degrees, from -3600 to 3600";
+const FADED: &str = "a title's opacity is from 0 to 1";
+const POSITION_LINEAR: &str =
+    "a title's position keyframes are linear: they take no ease or handles";
+
+fn reaches(v: f64) -> bool {
+    v.is_finite() && v.abs() <= REACH
+}
+
+fn zooms(z: f64) -> bool {
+    z.is_finite() && (ZOOM.0..=ZOOM.1).contains(&z)
+}
+
+fn turns(r: f64) -> bool {
+    r.is_finite() && r.abs() <= TURNS
+}
+
+fn fades(o: f64) -> bool {
+    o.is_finite() && (0.0..=1.0).contains(&o)
+}
+
+fn all_in(keys: &[Keyframe], ok: fn(f64) -> bool, why: &str) -> Result<()> {
+    if keys.iter().all(|k| ok(k.value)) {
+        Ok(())
+    } else {
+        Err(Error::invalid(why))
+    }
+}
+
+fn checked_keys(t: &Title) -> Result<()> {
+    if let Some(why) = picture_problem(&t.as_picture()) {
+        return Err(Error::invalid(why));
+    }
+    if t.kind == TitleKind::Scroll && (!t.zoom_keys.is_empty() || !t.rotation_keys.is_empty()) {
+        return Err(Error::invalid("a scroll has no zoom or rotation"));
+    }
+    if t.position_keys
+        .iter()
+        .any(|k| k.in_handle.is_some() || k.out_handle.is_some())
+    {
+        return Err(Error::invalid(POSITION_LINEAR));
+    }
+    all_in(&t.position_keys, reaches, PLACE)?;
+    if !t.position_y.iter().copied().all(reaches) {
+        return Err(Error::invalid(PLACE));
+    }
+    all_in(&t.zoom_keys, zooms, ZOOMED)?;
+    all_in(&t.rotation_keys, turns, TURNED)?;
+    all_in(&t.opacity_keys, fades, FADED)
+}
 
 pub fn checked(t: &Title) -> Result<Title> {
     let text = t.text.replace("\r\n", "\n").replace('\r', "\n");
@@ -40,31 +98,26 @@ pub fn checked(t: &Title) -> Result<Title> {
         return Err(Error::invalid("a scroll has no zoom or rotation"));
     }
     if let Some(at) = t.position
-        && !at.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+        && !at.iter().copied().all(reaches)
     {
-        return Err(Error::invalid(
-            "a title's position is two fractions of the picture, from 0 to 1",
-        ));
+        return Err(Error::invalid(PLACE));
     }
     let zoom = match t.zoom {
-        Some(z) if z.is_finite() && (0.25..=4.0).contains(&z) => (z != 1.0).then_some(z),
-        Some(_) => return Err(Error::invalid("a title's zoom is from 1/4 to 4")),
+        Some(z) if zooms(z) => (z != 1.0).then_some(z),
+        Some(_) => return Err(Error::invalid(ZOOMED)),
         None => None,
     };
     let rotation = match t.rotation {
-        Some(r) if r.is_finite() && r.abs() <= 3600.0 => (r != 0.0).then_some(r),
-        Some(_) => {
-            return Err(Error::invalid(
-                "a title's rotation is degrees, from -3600 to 3600",
-            ));
-        }
+        Some(r) if turns(r) => (r != 0.0).then_some(r),
+        Some(_) => return Err(Error::invalid(TURNED)),
         None => None,
     };
     let opacity = match t.opacity {
-        Some(o) if o.is_finite() && (0.0..=1.0).contains(&o) => (o != 1.0).then_some(o),
-        Some(_) => return Err(Error::invalid("a title's opacity is from 0 to 1")),
+        Some(o) if fades(o) => (o != 1.0).then_some(o),
+        Some(_) => return Err(Error::invalid(FADED)),
         None => None,
     };
+    checked_keys(t)?;
     let s = &t.style;
     let style = TitleStyle {
         font: checked_font(s.font.as_deref(), "title")?,
@@ -80,9 +133,14 @@ pub fn checked(t: &Title) -> Result<Title> {
         text,
         style,
         position: t.position,
+        position_keys: t.position_keys.clone(),
+        position_y: t.position_y.clone(),
         zoom,
+        zoom_keys: t.zoom_keys.clone(),
         rotation,
+        rotation_keys: t.rotation_keys.clone(),
         opacity,
+        opacity_keys: t.opacity_keys.clone(),
     })
 }
 
@@ -208,6 +266,10 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
         if k == TitleKind::Text {
             t.align = None;
         }
+        if k == TitleKind::Scroll {
+            t.zoom_keys.clear();
+            t.rotation_keys.clear();
+        }
         t.kind = k;
     }
     if let Some(a) = change.align {
@@ -234,12 +296,44 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
     t
 }
 
-pub fn set(p: &mut Project, id: &str, change: &TitleChange) -> Result<()> {
+impl TitleChange {
+    fn names(&self, v: PictureValue) -> bool {
+        match v {
+            PictureValue::Position => self.position.is_some(),
+            PictureValue::Zoom => self.zoom.is_some(),
+            PictureValue::Rotation => self.rotation.is_some(),
+            PictureValue::Opacity => self.opacity.is_some(),
+            _ => false,
+        }
+    }
+}
+
+pub fn set(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) -> Result<()> {
     let (ti, ci) = locate(p, id)?;
-    let Some(old) = p.tracks[ti].clips[ci].title.as_ref() else {
+    let c = &p.tracks[ti].clips[ci];
+    let Some(old) = c.title.as_ref() else {
         return Err(Error::invalid(format!("{id} is not a title")));
     };
-    let t = checked(&changed(old, change))?;
+    let frame = at
+        .filter(|&t| c.start <= t && t < c.end())
+        .map(|t| c.content_at(t));
+    let mut next = changed(old, change);
+    if next.is_keyed() {
+        let mut picture = next.as_picture();
+        for v in PictureValue::ALL {
+            if change.names(v) && !next.keys_of(v).is_empty() {
+                let Some(f) = frame else {
+                    return Err(Error::invalid(
+                        "no clip with keyframes on that value shows at the frame",
+                    ));
+                };
+                let now = plain_channel(&picture, v);
+                picture.put_channel(v, f, now);
+            }
+        }
+        next.take_picture(&picture);
+    }
+    let t = checked(&next)?;
     p.tracks[ti].clips[ci].title = Some(t);
     Ok(())
 }

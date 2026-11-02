@@ -24,10 +24,10 @@ fn steady(t: &Title) -> Title {
     }
 }
 
-fn wanted<'a>(preview: &'a Preview, s: &'a ShownTitle) -> &'a Title {
+fn wanted(preview: &Preview, s: &ShownTitle) -> Title {
     match preview {
-        Some((clip, t)) if *clip == s.clip => t,
-        _ => &s.title,
+        Some((clip, t)) if *clip == s.clip => t.sampled(s.frame()),
+        _ => s.title.clone(),
     }
 }
 
@@ -73,7 +73,7 @@ impl Titles {
         let mut all = true;
         for (above, shown) in at {
             let to = wanted(&preview, shown);
-            let exact = (steady(to), size);
+            let exact = (steady(&to), size);
             let key = if kept.pictures.contains(&exact) {
                 exact
             } else {
@@ -124,7 +124,7 @@ impl Titles {
             let kept = lock(&self.kept);
             let mut keys: Vec<(String, Key)> = Vec::new();
             for (_, shown) in at {
-                let key = (steady(wanted(&preview, shown)), size);
+                let key = (steady(&wanted(&preview, shown)), size);
                 if !kept.pictures.contains(&key) && !keys.iter().any(|(_, k)| *k == key) {
                     keys.push((shown.clip.clone(), key));
                 }
