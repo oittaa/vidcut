@@ -770,7 +770,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A click on a cue in the list loads it into the Inspector to edit (p. 1236).
   - Add New, above the list, adds a cue at the playhead on the track of the list (p. 1233).
   - Prev and Next in the Inspector move to the cue before or after on the track (pp. 1231, 1233).
-  - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. The new range overwrites the other cues of the track.
+  - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. A value inside the cue next to it changes nothing (D79). Else the new range overwrites the other cues of the track.
   - Cues move, trim, split and delete like clips.
   - Details: D56, D57, D78, D79; deviations X43, X44.
 - **Keyframes** ([measured](todo/keyframes.md#subtitles)):
@@ -2520,9 +2520,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut counts the characters of the text that shows, as Resolve does. The style tags (`<i>`, `<b>`, `<u>` and `<font>`) do not count.
   - A line break counts as one character, as the space between two words on one line does.
   - Thus a text has the same CPS on one line and on two lines.
-- **D79. A cue across the part that the In or Out field covers** (§8.12; deviation X43).
+- **D79. The In and Out fields against other cues** (§8.12; deviation X43).
+  - Measured in Resolve Studio 21.1.2: an In typed inside the cue before, or an Out typed inside the cue after, changes nothing. Both cues stay.
+  - vidcut does the same. Its field shows the stored time at once, and Resolve's field shows it when the cue is selected again. The result is the same.
+  - `subtitles.set` does not refuse such a value. A script in Resolve is not measured.
   - A new In or Out overwrites only the part that it newly covers (X43).
-  - The measurements in Resolve do not show a subtitle that covers all of that part and more.
+  - Measured in Resolve Studio 21.1.2: a track has no overlaps, so a field cannot put a cue inside a longer cue.
   - In vidcut, only a cue that already overlaps the edited cue can do that (D56).
   - Such a cue stays as it is. Thus both cues show in that part, as they show together in the overlap.
   - Reason: a split would show its text twice. A trim would take frames outside the newly covered part.
