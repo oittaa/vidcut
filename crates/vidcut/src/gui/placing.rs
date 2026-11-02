@@ -17,7 +17,6 @@ const SNAP: f32 = 8.0;
 const LIFT: f32 = 26.0;
 const LINES: [f64; 3] = [1.0 / 3.0, 0.5, 2.0 / 3.0];
 const ZOOM: (f64, f64) = (0.01, 100.0);
-const REACH: f64 = 100.0;
 const START: Color32 = Color32::from_rgb(70, 200, 90);
 const END: Color32 = Color32::from_rgb(230, 70, 60);
 const LEFT_SHOWING: f32 = 4.0;
@@ -647,8 +646,10 @@ impl Workspace {
         w.last = Instant::now();
         if k != 1.0 {
             let [zx, zy] = w.start.scale();
-            w.zoom = (w.zoom * k).clamp(ZOOM.0 / zx.min(zy), ZOOM.1 / zx.max(zy));
-            w.now.zoom = Some([rounded(zx * w.zoom, 4), rounded(zy * w.zoom, 4)]);
+            if zx.min(zy) > 0.0 {
+                w.zoom = (w.zoom * k).clamp(ZOOM.0 / zx.min(zy), ZOOM.1 / zx.max(zy));
+                w.now.zoom = Some([rounded(zx * w.zoom, 4), rounded(zy * w.zoom, 4)]);
+            }
         }
         if turn != 0.0 {
             if shift {
@@ -854,13 +855,14 @@ impl Workspace {
                         guides.1 = Some(l);
                     }
                 }
-                next.now.position = Some([rounded(x, 4), rounded(y, 4)]);
+                let at = |v: f64| rounded(v.clamp(0.5 - Picture::REACH, 0.5 + Picture::REACH), 4);
+                next.now.position = Some([at(x), at(y)]);
                 next.guides = guides;
             }
             Hold::Corner => {
                 let (d0, d1) = (held.from.distance(pivot), to.distance(pivot));
-                if d0 > 1.0 {
-                    let [zx, zy] = p0.scale();
+                let [zx, zy] = p0.scale();
+                if d0 > 1.0 && zx.min(zy) > 0.0 {
                     let k = f64::from(d1 / d0);
                     let k = k.clamp(ZOOM.0 / zx.min(zy), ZOOM.1 / zx.max(zy));
                     next.now.zoom = Some([rounded(zx * k, 4), rounded(zy * k, 4)]);
@@ -919,7 +921,7 @@ impl Workspace {
                         dx = 0.0;
                     }
                 }
-                let at = |v: f64| rounded(v.clamp(-REACH, REACH), 4);
+                let at = |v: f64| rounded(v.clamp(-DynamicZoom::REACH, DynamicZoom::REACH), 4);
                 let center = [at(b.center[0] + dx), at(b.center[1] + dy)];
                 e.set(&mut z, ZoomBox { center, ..b });
                 next.now.dynamic_zoom = Some(z);
@@ -930,7 +932,8 @@ impl Workspace {
                 let middle = s.end_middle(e);
                 let (d0, d1) = (held.from.distance(middle), to.distance(middle));
                 if d0 > 1.0 {
-                    let size = (b.size * f64::from(d0 / d1.max(0.01))).clamp(ZOOM.0, ZOOM.1);
+                    let size = (b.size * f64::from(d0 / d1.max(0.01)))
+                        .clamp(DynamicZoom::SIZE.0, DynamicZoom::SIZE.1);
                     let keep = |c: f64| rounded(0.5 - (0.5 - c) / b.size * size, 4);
                     e.set(
                         &mut z,

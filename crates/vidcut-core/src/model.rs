@@ -1935,8 +1935,9 @@ pub struct Title {
     #[serde(default, skip_serializing_if = "TitleStyle::is_empty")]
     pub style: TitleStyle,
     /// Where it goes, as fractions of the picture's width and height from
-    /// its top left, each from -100 to 100: the middle of a `text` title's
-    /// block (usual: `[0.5, 0.5]`), a lower third's bottom left, middle or
+    /// its top left, from -4 to 4 across and from -3 to 5 down: the middle
+    /// of a `text` title's block (usual: `[0.5, 0.5]`), a lower third's
+    /// bottom left, middle or
     /// right corner by its `align` (usual: 10%, 50% or 90% across and 88%
     /// down, so that its lower line's top sits about a fifth up the picture:
     /// `[0.1, 0.88]`, `[0.5, 0.88]` and `[0.9, 0.88]`). A scroll's `x` is
@@ -2046,12 +2047,12 @@ pub struct TitleShadow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// `[x, y]`: how far it falls right and down, as fractions of the
-    /// picture's width and height, each from -1/2 to 1/2. Usual: `[0.003,
+    /// picture's width and height, each from -4 to 4. Usual: `[0.003,
     /// 0.005]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<[f64; 2]>,
-    /// How soft its edge is, from 0 (sharp) to 100, where the blur's radius
-    /// is about 3% of the picture height. Usual: 20.
+    /// How soft its edge is, from 1 to 100, where the blur's radius is
+    /// about 3% of the picture height. Usual: 20.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blur: Option<f64>,
 }
@@ -2090,6 +2091,12 @@ impl Title {
     pub const SAFE: f64 = 0.9;
     pub const LOWER_IN: f64 = 0.1;
     pub const LOWER_DOWN: f64 = 0.88;
+    pub const ACROSS: (f64, f64) = (-Picture::REACH, Picture::REACH);
+    pub const DOWN: (f64, f64) = (1.0 - Picture::REACH, 1.0 + Picture::REACH);
+
+    pub fn places([x, y]: [f64; 2]) -> bool {
+        (Self::ACROSS.0..=Self::ACROSS.1).contains(&x) && (Self::DOWN.0..=Self::DOWN.1).contains(&y)
+    }
 
     pub fn new(text: impl Into<String>) -> Self {
         Self {
@@ -2226,7 +2233,7 @@ impl Title {
 pub struct Picture {
     /// Where the middle of the whole picture goes before the zoom and the
     /// rotation, `[x, y]` as fractions of the frame from its top left, each
-    /// from -100 to 100. With an anchor away from the middle, the zoom and
+    /// from -3.5 to 4.5. With an anchor away from the middle, the zoom and
     /// the rotation then move the middle about the anchor. Usual: `[0.5,
     /// 0.5]`. With `position_keys`, the place at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2241,8 +2248,8 @@ pub struct Picture {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_y: Vec<f64>,
     /// How much larger it is drawn across and down, about its anchor, `[x,
-    /// y]`, each from 1/100 to 100. Usual: `[1, 1]`. With `zoom_keys`, the
-    /// zoom at a frame is that curve.
+    /// y]`, each from 0 to 100. At 0, it does not show. Usual: `[1, 1]`.
+    /// With `zoom_keys`, the zoom at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zoom: Option<[f64; 2]>,
     /// Zoom keyframes, one for X and Y (decision D75). `value` is X.
@@ -2254,9 +2261,9 @@ pub struct Picture {
     /// Y of each `zoom_keys` entry. Left out with those keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub zoom_y: Vec<f64>,
-    /// Degrees it is turned counterclockwise about its anchor, from -3600 to
-    /// 3600. Usual: 0. With `rotation_keys`, the angle at a frame is that
-    /// curve.
+    /// Degrees it is turned counterclockwise about its anchor, from -100000
+    /// to 100000. Usual: 0. With `rotation_keys`, the angle at a frame is
+    /// that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,
     /// Rotation keyframes, in degrees (decision D75). Left out when the
@@ -2265,7 +2272,7 @@ pub struct Picture {
     pub rotation_keys: Vec<Keyframe>,
     /// The point of the picture that the zoom and the rotation work about,
     /// `[x, y]` as fractions of the picture from its top left, as it shows
-    /// after the flips, each from -100 to 100. A Dynamic Zoom does not move
+    /// after the flips, each from -3.5 to 4.5. A Dynamic Zoom does not move
     /// it. Usual: `[0.5, 0.5]`, the middle. With `anchor_keys`, the anchor
     /// point at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2605,6 +2612,9 @@ impl Default for DynamicZoom {
 }
 
 impl DynamicZoom {
+    pub const REACH: f64 = 100.0;
+    pub const SIZE: (f64, f64) = (0.01, 100.0);
+
     pub fn at(&self, t: f64) -> ZoomBox {
         let e = self.ease.of(t);
         let (a, b) = (self.start, self.end);
@@ -2629,8 +2639,8 @@ impl DynamicZoom {
 }
 
 /// What is cut off each side of a picture, as fractions of its width
-/// (`left`, `right`) and height (`top`, `bottom`), each from 0 up to what
-/// leaves some of it. Usual: 0.
+/// (`left`, `right`) and height (`top`, `bottom`), each from 0 to 1. When
+/// two opposite sides meet, it does not show. Usual: 0.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Crop {
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -2775,6 +2785,11 @@ pub enum PictureTool {
 
 impl Picture {
     pub const MIDDLE: [f64; 2] = [0.5, 0.5];
+    pub const REACH: f64 = 4.0;
+    pub const ZOOM: (f64, f64) = (0.0, 100.0);
+    pub const TURNS: f64 = 100_000.0;
+    pub const LEAN: f64 = 1.5;
+    pub const SOFT: f64 = 100.0;
 
     pub fn is_usual(&self) -> bool {
         *self == Self::default()
@@ -3217,8 +3232,9 @@ pub struct SubtitleStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<SubtitleAlign>,
     /// Where the block's alignment point sits, `[x, y]` as fractions of
-    /// the picture from its top left, each from 0 to 1. Usual: the cue's
-    /// place. On a cue, left out keeps the track's position.
+    /// the picture from its top left, from -4 to 4 across and from -3 to 5
+    /// down. Usual: the cue's place. On a cue, left out keeps the track's
+    /// position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
 }

@@ -27,13 +27,6 @@ use super::viewer::timecode_input;
 use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
 
-const REACH: f64 = 100.0;
-const ZOOM: (f64, f64) = (0.01, 100.0);
-const BOX: (f64, f64) = (0.01, 100.0);
-const TURNS: f64 = 3600.0;
-const LEAN: f64 = 1.5;
-const SOFT: f64 = 100.0;
-const LEFT_SHOWING: f64 = 1.0;
 const SAME: f64 = 1e-9;
 const FIELD_WIDTH: f32 = 76.0;
 
@@ -371,31 +364,37 @@ impl Field {
         }
     }
 
-    fn range(self, p: &Picture, s: &Shape) -> RangeInclusive<f64> {
-        let ([w, h], [fw, fh], c) = (s.frame, s.fitted, p.crop);
-        let side = |other: f64, span: f64| 0.0..=((1.0 - other) * span - LEFT_SHOWING).max(0.0);
+    fn range(self, s: &Shape) -> RangeInclusive<f64> {
+        let ([w, h], [fw, fh]) = (s.frame, s.fitted);
+        let (reach, turns, lean, soft) =
+            (Picture::REACH, Picture::TURNS, Picture::LEAN, Picture::SOFT);
+        let (box_reach, box_size) = (DynamicZoom::REACH, DynamicZoom::SIZE);
         match self {
-            Field::Zoom | Field::ZoomX | Field::ZoomY => ZOOM.0 * 100.0..=ZOOM.1 * 100.0,
-            Field::X => (-REACH - 0.5) * w..=(REACH - 0.5) * w,
-            Field::Y => (0.5 - REACH) * h..=(0.5 + REACH) * h,
-            Field::Rotation => -TURNS..=TURNS,
-            Field::AnchorX => (-REACH - 0.5) * fw..=(REACH - 0.5) * fw,
-            Field::AnchorY => (0.5 - REACH) * fh..=(0.5 + REACH) * fh,
-            Field::Pitch | Field::Yaw => -LEAN..=LEAN,
-            Field::Left => side(c.right, fw),
-            Field::Right => side(c.left, fw),
-            Field::Top => side(c.bottom, fh),
-            Field::Bottom => side(c.top, fh),
-            Field::Softness => -SOFT..=SOFT,
+            Field::Zoom | Field::ZoomX | Field::ZoomY => {
+                Picture::ZOOM.0 * 100.0..=Picture::ZOOM.1 * 100.0
+            }
+            Field::X => -reach * w..=reach * w,
+            Field::Y => -reach * h..=reach * h,
+            Field::Rotation => -turns..=turns,
+            Field::AnchorX => -reach * fw..=reach * fw,
+            Field::AnchorY => -reach * fh..=reach * fh,
+            Field::Pitch | Field::Yaw => -lean..=lean,
+            Field::Left | Field::Right => 0.0..=fw,
+            Field::Top | Field::Bottom => 0.0..=fh,
+            Field::Softness => -soft..=soft,
             Field::Opacity => 0.0..=100.0,
-            Field::StartZoom | Field::EndZoom => 100.0 / BOX.1..=100.0 / BOX.0,
-            Field::StartX | Field::EndX => -REACH * fw / BOX.0..=REACH * fw / BOX.0,
-            Field::StartY | Field::EndY => -REACH * fh / BOX.0..=REACH * fh / BOX.0,
+            Field::StartZoom | Field::EndZoom => 100.0 / box_size.1..=100.0 / box_size.0,
+            Field::StartX | Field::EndX => {
+                -box_reach * fw / box_size.0..=box_reach * fw / box_size.0
+            }
+            Field::StartY | Field::EndY => {
+                -box_reach * fh / box_size.0..=box_reach * fh / box_size.0
+            }
         }
     }
 
     fn put_at(self, p: &Picture, s: &Shape, v: f64, frame: Option<i64>) -> Picture {
-        let r = self.range(p, s);
+        let r = self.range(s);
         let v = v.clamp(*r.start(), *r.end());
         if (self.read(p, s, frame) - v).abs() < SAME {
             return p.clone();
@@ -415,8 +414,9 @@ impl Field {
             .unwrap_or_else(|| p.pivot());
         let ([x, y], [zx, zy], [ax, ay]) = (place, scale, pivot);
         let ([w, h], [fw, fh]) = (s.frame, s.fitted);
-        let zoom = |v: f64| (v / 100.0).clamp(ZOOM.0, ZOOM.1);
-        let at = |v: f64| v.clamp(-REACH, REACH);
+        let zoom = |v: f64| (v / 100.0).clamp(Picture::ZOOM.0, Picture::ZOOM.1);
+        let at = |v: f64| v.clamp(0.5 - Picture::REACH, 0.5 + Picture::REACH);
+        let box_at = |v: f64| v.clamp(-DynamicZoom::REACH, DynamicZoom::REACH);
         let mut out = p.clone();
         match self {
             Field::Zoom => out.zoom = Some([zoom(v); 2]),
@@ -449,13 +449,13 @@ impl Field {
                 };
                 match self {
                     Field::StartZoom | Field::EndZoom => {
-                        let size = (100.0 / v).clamp(BOX.0, BOX.1);
-                        let keep = |c: f64| at(0.5 - (0.5 - c) / b.size * size);
+                        let size = (100.0 / v).clamp(DynamicZoom::SIZE.0, DynamicZoom::SIZE.1);
+                        let keep = |c: f64| box_at(0.5 - (0.5 - c) / b.size * size);
                         b.center = [keep(b.center[0]), keep(b.center[1])];
                         b.size = size;
                     }
-                    Field::StartX | Field::EndX => b.center[0] = at(0.5 - v / fw * b.size),
-                    _ => b.center[1] = at(0.5 + v / fh * b.size),
+                    Field::StartX | Field::EndX => b.center[0] = box_at(0.5 - v / fw * b.size),
+                    _ => b.center[1] = box_at(0.5 + v / fh * b.size),
                 }
                 out.dynamic_zoom = Some(z);
             }
@@ -777,7 +777,7 @@ fn number(
     let off = several && keyed;
     let set = !off && (keyed || chosen.iter().any(|c| !f.is_usual(&c.stored)));
     let shown = f.read(&first.shown, &first.shape, Some(first.frame));
-    let range = f.range(&first.shown, &first.shape);
+    let range = f.range(&first.shape);
     let keys = f.channel().filter(|_| !several).and_then(|v| {
         let c = p.clip(&first.id)?;
         let picture = c.picture.clone().unwrap_or_default();

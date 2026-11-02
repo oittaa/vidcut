@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::error::{Error, Result};
 use crate::model::{
     Cue, CueWord, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle,
-    SubtitleTrack, SubtitleWords,
+    SubtitleTrack, SubtitleWords, Title,
 };
 use crate::request::SubtitleTimeBase;
 use crate::subtitles::{self, Read, Timed};
@@ -206,11 +206,11 @@ fn checked_position(at: Option<[f64; 2]>) -> Result<Option<[f64; 2]>> {
     let Some(at) = at else {
         return Ok(None);
     };
-    if at.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)) {
+    if Title::places(at) {
         Ok(Some(at))
     } else {
         Err(Error::invalid(
-            "a subtitle position is two fractions of the picture, from 0 to 1",
+            "a subtitle position is two fractions of the picture, from -4 to 4 across and -3 to 5 down",
         ))
     }
 }

@@ -35,12 +35,12 @@ const CENTER: &str = "dynamicZoomCenter";
 const SIZE: &str = "dynamicZoomScale";
 
 const FIT: u8 = 2;
-const REACH: f64 = 4.0;
-const TURNS: f64 = 3600.0;
-const LEAN: f64 = 1.5;
+const REACH: f64 = Picture::REACH;
+const TURNS: f64 = Picture::TURNS;
+const LEAN: f64 = Picture::LEAN;
 const LATER: i64 = 1000;
-const SIZES: (f64, f64) = (0.01, 100.0);
-const SOFT: f64 = 100.0;
+const SIZES: (f64, f64) = DynamicZoom::SIZE;
+const SOFT: f64 = Picture::SOFT;
 const PERCENT: f64 = 100.0;
 const SAME: f64 = 1e-6;
 
@@ -824,7 +824,7 @@ pub(crate) fn effects(p: &Picture, shape: &Shape, g: i64, source: i64) -> Vec<Va
     let [zx, zy] = p.scale();
     let [ax, ay] = p.pivot();
     let [pan, tilt] = moved(p, shape).map(|v| v.clamp(-REACH, REACH));
-    let (zoom, reach) = ((0.0, 100.0), (-REACH, REACH));
+    let (zoom, reach) = (Picture::ZOOM, (-REACH, REACH));
     let (sx, sy) = (
         shape.frame[0] / shape.fitted[0],
         shape.frame[1] / shape.fitted[1],

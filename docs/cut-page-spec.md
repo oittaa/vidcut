@@ -2243,14 +2243,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - In an export, a title between layers cuts them ([todo](todo/composite-masks.md)).
   - **Units** (vidcut's, X65):
     - `position` is where the middle of the picture goes before the zoom and the turn: `[x, y]` in fractions of the frame from its top left.
-    - Each value of `position` is from −100 to 100. `[0.5, 0.5]` leaves the picture in place.
-    - `zoom` is how much larger the picture is drawn across and down, each from 1/100 to 100. One number sets both.
-    - `rotation` is in degrees, from −3600 to 3600.
-    - `anchor` is the point that the zoom and the turn work about, in fractions of the picture (D92).
+    - Each value of `position` is from −3.5 to 4.5: 4 frames either way from the middle. `[0.5, 0.5]` leaves the picture in place.
+    - `zoom` is how much larger the picture is drawn across and down, each from 0 to 100. One number sets both. A zoom of 0 shows nothing of the picture.
+    - `rotation` is in degrees, from −100000 to 100000.
+    - `anchor` is the point that the zoom and the turn work about, in fractions of the picture (D92). Each value is from −3.5 to 4.5.
     - `pitch` and `yaw` are each from −1.5 to 1.5. Usual: 0.
     - Positive pitch puts the top farther away. Positive yaw puts the left closer.
     - The flips mirror the picture left to right and top to bottom.
-    - The crop cuts each side by a fraction of the source picture, and leaves some of it.
+    - The crop cuts each side by a fraction of the source picture, from 0 to 1. The sides have no limit together. A crop of the whole picture shows nothing of it.
     - `crop_softness` is from −100 to 100, as Softness in Resolve. Usual: 0.
     - `composite_mode` is `normal` or the name of another mode in snake case, for example `color_dodge`. Usual: `normal`.
     - `opacity` is from 0 to 1. Usual: 1.
@@ -2645,7 +2645,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - `position` is the move. The anchor point stays where `position` puts it, whatever the zoom and the turn.
   - Thus the zoom and turn handles of the viewer keep the anchor point still. They do not change `position`.
   - The anchor point is a point of the picture as it shows after the flips.
-  - **Units:** `anchor` is `[x, y]` in fractions of the picture from its top left, each from −100 to 100.
+  - **Units:** `anchor` is `[x, y]` in fractions of the picture from its top left, each from −3.5 to 4.5.
   - `[0.5, 0.5]` is the middle. This is the usual value, and the project file leaves it out.
   - **Dynamic Zoom:** the anchor point is a point of the place of the picture, not of its content. A Dynamic Zoom does not move it.
   - Thus the picture zooms and turns about one point of the screen for the whole clip.

@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use vidcut_core::keyframes::{
     PictureValue, ease_of, eases, handle_point, value_mapped, value_paired,
 };
-use vidcut_core::model::{Clip, Ease, Handle, Keyframe, Picture, Project, Speed};
+use vidcut_core::model::{Clip, Ease, Handle, Keyframe, Picture, Project, Speed, Title};
 use vidcut_core::ops::picture::has_picture;
 use vidcut_core::request::KeyParam;
 use vidcut_core::validate::GAIN;
@@ -437,15 +437,14 @@ fn lane_name(param: KeyParam) -> &'static str {
 fn limits(param: KeyParam) -> (f64, f64) {
     match param {
         KeyParam::Volume => (*GAIN.start(), *GAIN.end()),
-        KeyParam::Position => (-100.0, 100.0),
-        KeyParam::Zoom => (0.01, 100.0),
-        KeyParam::Rotation => (-3600.0, 3600.0),
-        KeyParam::Anchor => (-100.0, 100.0),
-        KeyParam::Pitch | KeyParam::Yaw => (-1.5, 1.5),
+        KeyParam::Position | KeyParam::Anchor => (0.5 - Picture::REACH, 0.5 + Picture::REACH),
+        KeyParam::Zoom => Picture::ZOOM,
+        KeyParam::Rotation => (-Picture::TURNS, Picture::TURNS),
+        KeyParam::Pitch | KeyParam::Yaw => (-Picture::LEAN, Picture::LEAN),
         KeyParam::CropLeft | KeyParam::CropRight | KeyParam::CropTop | KeyParam::CropBottom => {
-            (0.0, 0.9999)
+            (0.0, 1.0)
         }
-        KeyParam::CropSoftness => (-100.0, 100.0),
+        KeyParam::CropSoftness => (-Picture::SOFT, Picture::SOFT),
         KeyParam::Opacity => (0.0, 1.0),
         KeyParam::Speed => (0.01, 100.0),
     }
@@ -555,11 +554,12 @@ fn linear(clip: &Clip, param: KeyParam) -> bool {
     param == KeyParam::Anchor || (param == KeyParam::Position && clip.title.is_some())
 }
 
-fn limits_of(clip: &Clip, param: KeyParam) -> (f64, f64) {
-    if param == KeyParam::Zoom && clip.title.is_some() {
-        (0.25, 4.0)
-    } else {
-        limits(param)
+fn limits_of(clip: &Clip, param: KeyParam, axis: Axis) -> (f64, f64) {
+    match param {
+        KeyParam::Zoom if clip.title.is_some() => (0.25, 4.0),
+        KeyParam::Position if clip.title.is_some() && axis == Axis::Y => Title::DOWN,
+        KeyParam::Position if clip.title.is_some() => Title::ACROSS,
+        _ => limits(param),
     }
 }
 
@@ -580,11 +580,6 @@ fn nudge_step(param: KeyParam, sign: f64, y: bool) -> f64 {
     };
     let down = matches!(param, KeyParam::Position | KeyParam::Anchor) && y;
     if down { -step * sign } else { step * sign }
-}
-
-fn place_value(param: KeyParam, v: f64) -> f64 {
-    let (lo, hi) = limits(param);
-    v.clamp(lo, hi)
 }
 
 fn choose(selected: &[Mark], hit: Mark, toggle: bool) -> Vec<Mark> {
@@ -749,27 +744,11 @@ fn d_value(span: f64, height: f32, dy: f32) -> f64 {
     }
 }
 
-fn side_hi(clip: &Clip, param: KeyParam, frame: i64) -> f64 {
-    let (_, hi) = limits_of(clip, param);
-    let Some(picture) = clip.picture.as_ref() else {
-        return hi;
-    };
-    let crop = picture.crop_at(frame as f64);
-    let other = match param {
-        KeyParam::CropLeft => crop.right,
-        KeyParam::CropRight => crop.left,
-        KeyParam::CropTop => crop.bottom,
-        KeyParam::CropBottom => crop.top,
-        _ => return hi,
-    };
-    (1.0 - other - 1e-4).clamp(0.0, hi)
-}
-
 fn clamped_delta(clip: &Clip, lane: &Lane, marks: &[Mark], axis: Axis, raw: f64) -> f64 {
     if axis == Axis::None {
         return 0.0;
     }
-    let (lo, _) = limits_of(clip, lane.param);
+    let (lo, hi) = limits_of(clip, lane.param, axis);
     let mut d = raw;
     for m in marks.iter().filter(|m| m.param == lane.param) {
         let Some(i) = lane.keys.iter().position(|k| k.frame == m.frame) else {
@@ -779,7 +758,6 @@ fn clamped_delta(clip: &Clip, lane: &Lane, marks: &[Mark], axis: Axis, raw: f64)
             Axis::Y => lane.extra.get(i).copied().unwrap_or(0.0),
             _ => lane.keys[i].value,
         };
-        let hi = side_hi(clip, lane.param, m.frame);
         d = d.clamp(lo - start, hi - start);
     }
     let d = quantize(lane.param, d);
@@ -792,7 +770,6 @@ fn clamped_delta(clip: &Clip, lane: &Lane, marks: &[Mark], axis: Axis, raw: f64)
             Axis::Y => lane.extra.get(i).copied().unwrap_or(0.0),
             _ => lane.keys[i].value,
         };
-        let hi = side_hi(clip, lane.param, m.frame);
         out = out.clamp(lo - start, hi - start);
     }
     if out.abs() < 1e-9 { 0.0 } else { out }
@@ -1038,8 +1015,8 @@ fn shown_lane(lane: &Lane, shift: Option<&Shift>) -> Vec<Shown> {
             continue;
         }
         match shift.axis {
-            Axis::X => row.key.value = place_value(lane.param, row.key.value + shift.dv),
-            Axis::Y => row.y = place_value(lane.param, row.y + shift.dv),
+            Axis::X => row.key.value += shift.dv,
+            Axis::Y => row.y += shift.dv,
             Axis::None => {}
         }
         if shift.dt != 0 {
