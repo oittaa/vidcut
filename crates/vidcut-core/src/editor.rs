@@ -6240,14 +6240,11 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
         p.settings.set_fps(fps);
         p.settings.auto_format = false;
     }
-    if let Some(w) = set.width {
-        crate::model::check_side("width", w)?;
-        p.settings.width = w;
-        p.settings.auto_format = false;
-    }
-    if let Some(h) = set.height {
-        crate::model::check_side("height", h)?;
-        p.settings.height = h;
+    if set.width.is_some() || set.height.is_some() {
+        (p.settings.width, p.settings.height) = crate::model::timeline_size(
+            set.width.unwrap_or(p.settings.width),
+            set.height.unwrap_or(p.settings.height),
+        );
         p.settings.auto_format = false;
     }
     if let Some(sr) = set.sample_rate {

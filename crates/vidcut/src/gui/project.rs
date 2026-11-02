@@ -21,7 +21,7 @@ const SIZES: [(&str, u32, u32); 7] = [
     ("Square", 1080, 1080),
 ];
 
-const MAX_SIDE: u32 = 16384;
+const SIDE_FIELD: (u32, u32) = (1, 99999);
 
 const START_HOURS: [i64; 3] = [0, 1, 10];
 
@@ -249,14 +249,13 @@ impl Format {
                     for (side, name) in [(&mut self.width, "Width"), (&mut self.height, "Height")] {
                         let r = ui.add(
                             egui::DragValue::new(side)
-                                .range(16..=MAX_SIDE)
-                                .speed(2.0)
+                                .range(SIDE_FIELD.0..=SIDE_FIELD.1)
+                                .speed(1.0)
                                 .suffix(" px"),
                         );
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::Role::SpinButton, true, name)
                         });
-                        *side += *side % 2;
                         if name == "Width" {
                             ui.label("×");
                         }
