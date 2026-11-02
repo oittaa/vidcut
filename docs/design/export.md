@@ -131,6 +131,8 @@ Notes:
   - the encoders that opened, and the loudness gain
   - each source file, with its `Decoding`
 - The report of a headless run keeps the failed encoders (`tried`) and the files (`sources`).
+- The error of a video encoder that does not open (`open_video`) names the encoder and the output size. Then it gives the reason from FFmpeg.
+  - The error does not say that the size is the cause. Why: the error code does not tell the cause, and the FFmpeg codec data holds no size limits.
 - [live](live.md#jobs) tells how a job collects the notes.
 
 ## Which source frame

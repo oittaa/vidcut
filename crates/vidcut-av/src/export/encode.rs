@@ -1159,7 +1159,7 @@ pub(crate) fn open_video(
         }
     }
     let opened = ctx.open_as_with(codec, dict);
-    let mut opened = opened.ctx(|| format!("opening {}", enc.name))?;
+    let mut opened = opened.ctx(|| format!("{} could not open at {width}×{height}", enc.name))?;
     unsafe {
         let raw = opened.as_mut_ptr();
         ffi::av_freep(&mut (*raw).stats_in as *mut *mut std::ffi::c_char as *mut _);

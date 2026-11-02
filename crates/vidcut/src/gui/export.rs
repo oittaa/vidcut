@@ -2092,11 +2092,7 @@ fn detail_rows(j: &JobInfo, rate: Option<f64>) -> Vec<(&'static str, String)> {
         rows.push(("Video", text));
     }
     for t in &d.tried {
-        let text = match &t.encoder {
-            Some(e) => format!("{e}: {}", t.error),
-            None => t.error.clone(),
-        };
-        rows.push(("Didn't open", text));
+        rows.push(("Didn't open", t.text()));
     }
     if let Some(a) = &d.audio {
         let mut text = format!("{} · {} Hz · {} ch", a.encoder, a.rate, a.channels);
