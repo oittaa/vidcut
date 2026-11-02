@@ -562,7 +562,10 @@ The background render (`live::render_cache::Background`):
   - `cache.status` gives the folder of the cache.
   - All also removes the marks (`Index::clear`).
   - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
-  - All removes each file of the folder (`render_caches::empty`). Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
+  - All removes each cache file in the folder (`render_caches::empty`).
+    - A cache file is `drops.marks`, or a video, keys file or made file whose name is 32 hex characters.
+    - Another file stays.
+  - Unused keeps the names of the open timeline (`Index::keep_only`). Clips removes the files that hold frames of the clips (`Index::drop_with`).
     - At the clip level, `Cache::names` gives only the frames of the media of each clip.
     - A compound clip gives the media of the clips in it (`otio::played_by`).
 
@@ -574,10 +577,10 @@ Manage Render Cache (`render_caches`):
   - `render_caches::list` leaves out a path whose file is gone. The file keeps the path. Thus a project on a drive that comes back shows again.
 - `cache.list` (`render_caches::list`) groups the projects by the folder of their render cache (`PlaybackFiles::render_cache_in`). Each group is one row.
   - Why: the files in one folder have names from their content. Thus two projects can share a file, and the folder is the unit to clear.
-  - It counts the videos of the folder, and adds the size of each file in it.
+  - It counts the cache videos in the folder, and adds the size of the cache files.
   - `system::network` tells if a network drive holds the project file.
     - Windows: the drive type of the volume. Linux: the type of the file system. macOS: the local flag of the file system.
-- `cache.clear` (`render_caches::clear`) removes each file in the folder of each given project (`render_caches::empty`).
+- `cache.clear` (`render_caches::clear`) removes each cache file in the folder of each given project (`render_caches::empty`).
   - In a GUI, the live core runs it on its thread (`Live::cache_clear`).
   - For the folder of the open project (`Background::folder`), it calls `Background::delete_all`. That stops the render and clears the index first. The render then starts again.
   - Why: the index of the open project must not name files that are gone.
