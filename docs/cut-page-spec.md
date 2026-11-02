@@ -1045,14 +1045,17 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The Effects tab has the video effects in groups.
   - A drag of an effect onto a clip on the timeline adds the effect to that clip.
   - On the Cut page, a double-click on an effect adds it to the selected clip.
+  - Measured in Resolve Studio 21.1.2: with several selected clips, only the first selected clip gets it.
   - The Effects panel of the Inspector has the values of the effects.
   - vidcut: the Effects tab has the Blur group with Gaussian Blur. The other effects come later ([todo](todo/effects-library.md)).
-  - vidcut: a double-click adds the effect to each selected clip with a picture. The right-click menu of an effect has Add to Selected Clips.
+  - vidcut: a double-click adds the effect to the first selected clip with a picture.
+  - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
 - **Inspector** (vidcut, X70):
   - The Inspector shows the effects of the first selected clip, after its Super Scale section. A change applies to that clip only.
   - Each effect is a section with an on/off box, Move Up, Move Down, Reset and Delete.
   - An effect that is off stays on the clip and does nothing.
-  - Reset puts back the usual values of the effect, and keeps it on or off.
+  - On an effect that is on, Reset puts back the usual values and leaves it on.
+  - On an effect that is off, Reset does nothing, as measured in Resolve Studio 21.1.2.
   - The effects of a clip work in their order, from the top.
 - **Blend** (p. 3526):
   - Each effect has a Blend value under Global Blend, at the bottom of its values. It mixes the effect with the picture that comes in.
