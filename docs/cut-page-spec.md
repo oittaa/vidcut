@@ -131,7 +131,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Keyframes and clips share one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
       - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
     - A right-click on a keyframe sets its ease (X87). The anchor point's keyframes take no ease (D92).
-    - A double-click on an empty part of a track adds a keyframe there ([X90](deviations.md#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
+    - A double-click on an empty part of a track adds a keyframe there ([X108](deviations.md#x108-a-double-click-on-a-row-of-the-keyframes-tab-adds-a-keyframe)).
     - The bar under the tracks shows the value, time and ease of the selected keyframe (X90).
     - A keyframe that the Keyframe button or a double-click adds is selected. Thus the bar shows it at once.
   - **Keyframe tray** (p. 1259):
