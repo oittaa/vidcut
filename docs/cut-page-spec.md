@@ -2299,6 +2299,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Previous and Next move the playhead to the keyframe before or after it, also outside the clip (measured in Resolve Studio 21.1.2).
     - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out.
     - The Reset of one value removes its keyframes and puts the usual value back.
+      - Position X and Y are on one row with one Reset. It removes all the position keyframes and sets X and Y to 0 (measured in Resolve Studio 21.1.2).
     - The Reset of Transform, Crop or Composite removes the keyframes of that section.
     - A clip with any keyframes shows a mark on its timeline bar.
     - Flips, the composite mode and Dynamic Zoom have no keyframes.

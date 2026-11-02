@@ -289,6 +289,13 @@ impl Field {
         }
     }
 
+    fn axes(self) -> Vec<Field> {
+        match self {
+            Field::X | Field::Y => vec![Field::X, Field::Y],
+            f => vec![f],
+        }
+    }
+
     fn channel(self) -> Option<PictureValue> {
         match self {
             Field::Zoom | Field::ZoomX | Field::ZoomY => Some(PictureValue::Zoom),
@@ -473,6 +480,14 @@ impl Key {
             Key::Speed => "Speed",
             Key::Rate => "Frames per Second",
             Key::Length => "Duration",
+        }
+    }
+
+    fn prefix(self) -> &'static str {
+        match self {
+            Key::Picture(Field::X) => "X ",
+            Key::Picture(Field::Y) => "Y ",
+            _ => "",
         }
     }
 
@@ -779,11 +794,7 @@ fn number(
     let set = !off && (keyed || chosen.iter().any(|c| !f.is_usual(&c.stored)));
     let shown = f.read(&first.shown, &first.shape, Some(first.frame));
     let range = f.range(&first.shape);
-    let keys = f.channel().filter(|_| !several).and_then(|v| {
-        let c = p.clip(&first.id)?;
-        let picture = c.picture.clone().unwrap_or_default();
-        Some(mark(c, picture.keys_of(v), at))
-    });
+    let keys = key_mark(f, p, at, chosen);
     field(
         ui,
         (Key::Picture(f), link),
@@ -793,6 +804,51 @@ fn number(
         keys,
         acts,
     );
+}
+
+fn key_mark(f: Field, p: &Project, at: i64, chosen: &[Chosen]) -> Option<KeyMark> {
+    f.channel().filter(|_| chosen.len() == 1).and_then(|v| {
+        let c = p.clip(&chosen[0].id)?;
+        let picture = c.picture.clone().unwrap_or_default();
+        Some(mark(c, picture.keys_of(v), at))
+    })
+}
+
+fn position_row(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    p: &Project,
+    at: i64,
+    chosen: &[Chosen],
+    acts: &mut Vec<Act>,
+) {
+    let first = &chosen[0];
+    let keyed = chosen
+        .iter()
+        .any(|c| c.stored.has_keys(PictureValue::Position));
+    let look = keyed_look(chosen.len() > 1 && keyed);
+    let moved = chosen
+        .iter()
+        .any(|c| !Field::X.is_usual(&c.stored) || !Field::Y.is_usual(&c.stored));
+    let set = !look.off && (keyed || moved);
+    label(ui, "Position", set);
+    ui.horizontal(|ui| {
+        if look.off {
+            ui.disable();
+        }
+        for f in [Field::X, Field::Y] {
+            let shown = f.read(&first.shown, &first.shape, Some(first.frame));
+            let range = f.range(&first.shape);
+            drag(ui, Key::Picture(f), i, (shown, range), &look, acts);
+        }
+        if let Some(keys) = key_mark(Field::X, p, at, chosen) {
+            key_acts(ui, Key::Picture(Field::X), &keys, acts);
+        }
+    });
+    if reset(ui, set || look.dead_reset) && !look.dead_reset {
+        acts.push(Act::ResetChannel(Field::X));
+    }
+    ui.end_row();
 }
 
 fn keyed_look(off: bool) -> Look<'static> {
@@ -877,6 +933,70 @@ fn speed_mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
     }
 }
 
+fn drag(
+    ui: &mut egui::Ui,
+    f: Key,
+    i: &Inspector,
+    (shown, range): (f64, RangeInclusive<f64>),
+    look: &Look<'_>,
+    acts: &mut Vec<Act>,
+) {
+    let held = i.held.as_ref().filter(|h| h.field == f);
+    let mut v = held.map_or(shown, |h| h.value);
+    let before = v;
+    let (fewest, most) = f.decimals();
+    let r = ui
+        .push_id(f, |ui| {
+            let mut drag = egui::DragValue::new(&mut v)
+                .update_while_editing(false)
+                .clamp_existing_to_range(false)
+                .range(range)
+                .speed(f.speed())
+                .min_decimals(fewest)
+                .max_decimals(most)
+                .prefix(f.prefix())
+                .suffix(f.suffix())
+                .custom_parser(typed)
+                .min_size(vec2(FIELD_WIDTH, ui.spacing().interact_size.y));
+            if let Some((p, dropped)) = look.timecode {
+                drag = drag
+                    .custom_formatter(|n, _| p.settings.length_timecode(n.round() as i64))
+                    .custom_parser(move |t| frames(p, t, dropped));
+            }
+            ui.add(drag)
+        })
+        .inner;
+    let r = match look.why {
+        Some(why) => r.on_disabled_hover_text(why),
+        None => r,
+    };
+    if r.drag_started() {
+        acts.push(Act::Hold(f, before));
+    }
+    if r.dragged() && r.changed() {
+        acts.push(Act::Drag(f, v));
+    }
+    if r.drag_stopped() || (held.is_some_and(|h| h.dragging) && !r.dragged()) {
+        acts.push(Act::Land(f));
+    } else if r.changed() && !r.dragged() {
+        acts.push(Act::Put(f, v));
+    } else if r.has_focus() {
+        acts.push(Act::Edit(f, v));
+    } else if held.is_some() && !r.dragged() {
+        acts.push(Act::Release(f));
+    }
+}
+
+fn key_acts(ui: &mut egui::Ui, f: Key, keys: &KeyMark, acts: &mut Vec<Act>) {
+    let linear = matches!(f, Key::Picture(Field::AnchorX | Field::AnchorY));
+    match key_buttons(ui, keys, linear) {
+        Some(KeyClick::Step(dir)) => acts.push(Act::Step(f, dir)),
+        Some(KeyClick::Toggle) => acts.push(Act::Toggle(f)),
+        Some(KeyClick::Ease(e)) => acts.push(Act::KeyEase(f, e)),
+        None => {}
+    }
+}
+
 fn field(
     ui: &mut egui::Ui,
     (f, link): (Key, Option<bool>),
@@ -887,61 +1007,13 @@ fn field(
     acts: &mut Vec<Act>,
 ) {
     label(ui, f.label(), set);
-    let held = i.held.as_ref().filter(|h| h.field == f);
-    let mut v = held.map_or(shown, |h| h.value);
-    let before = v;
-    let (fewest, most) = f.decimals();
     ui.horizontal(|ui| {
         if look.off {
             ui.disable();
         }
-        let r = ui
-            .push_id(f, |ui| {
-                let mut drag = egui::DragValue::new(&mut v)
-                    .update_while_editing(false)
-                    .clamp_existing_to_range(false)
-                    .range(range)
-                    .speed(f.speed())
-                    .min_decimals(fewest)
-                    .max_decimals(most)
-                    .suffix(f.suffix())
-                    .custom_parser(typed)
-                    .min_size(vec2(FIELD_WIDTH, ui.spacing().interact_size.y));
-                if let Some((p, dropped)) = look.timecode {
-                    drag = drag
-                        .custom_formatter(|n, _| p.settings.length_timecode(n.round() as i64))
-                        .custom_parser(move |t| frames(p, t, dropped));
-                }
-                ui.add(drag)
-            })
-            .inner;
-        let r = match look.why {
-            Some(why) => r.on_disabled_hover_text(why),
-            None => r,
-        };
-        if r.drag_started() {
-            acts.push(Act::Hold(f, before));
-        }
-        if r.dragged() && r.changed() {
-            acts.push(Act::Drag(f, v));
-        }
-        if r.drag_stopped() || (held.is_some_and(|h| h.dragging) && !r.dragged()) {
-            acts.push(Act::Land(f));
-        } else if r.changed() && !r.dragged() {
-            acts.push(Act::Put(f, v));
-        } else if r.has_focus() {
-            acts.push(Act::Edit(f, v));
-        } else if held.is_some() && !r.dragged() {
-            acts.push(Act::Release(f));
-        }
+        drag(ui, f, i, (shown, range), &look, acts);
         if let Some(keys) = keys {
-            let linear = matches!(f, Key::Picture(Field::AnchorX | Field::AnchorY));
-            match key_buttons(ui, &keys, linear) {
-                Some(KeyClick::Step(dir)) => acts.push(Act::Step(f, dir)),
-                Some(KeyClick::Toggle) => acts.push(Act::Toggle(f)),
-                Some(KeyClick::Ease(e)) => acts.push(Act::KeyEase(f, e)),
-                None => {}
-            }
+            key_acts(ui, f, &keys, acts);
         }
         if let Some(lit) = link {
             let icon = if lit { LINK_SIMPLE } else { LINK_SIMPLE_BREAK };
@@ -1030,8 +1102,7 @@ fn transform(
                 number(ui, (Field::ZoomX, Some(false)), i, p, at, chosen, acts);
                 number(ui, (Field::ZoomY, None), i, p, at, chosen, acts);
             }
-            number(ui, (Field::X, None), i, p, at, chosen, acts);
-            number(ui, (Field::Y, None), i, p, at, chosen, acts);
+            position_row(ui, i, p, at, chosen, acts);
             number(ui, (Field::Rotation, None), i, p, at, chosen, acts);
             number(ui, (Field::AnchorX, None), i, p, at, chosen, acts);
             number(ui, (Field::AnchorY, None), i, p, at, chosen, acts);
@@ -2002,7 +2073,9 @@ impl Workspace {
                 let mut base = plain.clone();
                 let now = c.stored.channel_at(v, c.frame as f64);
                 vidcut_core::keyframes::write_channel(&mut base, v, now);
-                let to = field.put_at(&base, &c.shape, field.usual(), Some(c.frame));
+                let to = field.axes().iter().fold(base, |b, f| {
+                    f.put_at(&b, &c.shape, f.usual(), Some(c.frame))
+                });
                 changed(&c.id, &plain, &to).map(|mut p| {
                     p["at"] = json!(at);
                     p
