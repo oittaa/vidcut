@@ -1191,6 +1191,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - AI Animated Subtitles are only in Resolve Studio. They are Fusion title templates in the Animated section of the Titles tab.
   - After the subtitles are made, the user drags a template onto the header of a subtitle track. The user sets it in the Inspector (p. 1240).
   - After a correction, Update Word Timings times the words of a cue again. Synchronize Word Timings does this for a track (p. 1241).
+  - Measured in Resolve Studio 21.1.2 with the Word Highlight template, on subtitles made from speech:
+    - The word times of a cue count from its start. A ripple delete, a razor cut and a trim do not change them.
+    - Thus each part of a cut cue starts again at the first word, and a trimmed cue keeps its times from the new start.
+    - The highlighted word is then not the word that is spoken, until the word timings are updated.
 - **vidcut:**
   - The animation is the `words` of a track style, with `bold`, `case` and `shadow`.
   - The user sets them in the Subtitle Track section of the Inspector or with `track.set` (D69).

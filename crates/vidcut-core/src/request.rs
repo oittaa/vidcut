@@ -1356,7 +1356,8 @@ pub enum Request {
     /// keyframes in order: the source `frame`, the timeline frame `at` and
     /// its timecode, the `value`, the `ease` (null when a handle was
     /// dragged), and the `in` and `out` handles. Previous and Next Keyframe
-    /// are this and `player.seek`.
+    /// are this and `player.seek`. `clips` also takes cues, as `keyframes.add`
+    /// tells. So do the `clips` and `clip` of the other keyframes requests.
     #[serde(rename = "keyframes.list")]
     KeyframesList {
         #[serde(default)]

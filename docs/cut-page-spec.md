@@ -2073,6 +2073,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The default of the request stays files.
 - **D70. Word times on cues** (§8.12; p. 1241).
   - In the manual, a button updates the word timings. It does not say what edits do to them.
+  - Measured in Resolve Studio 21.1.2: no edit changes the word times of a cue ([X58](deviations.md#x58-animated-subtitles-are-a-track-style-made-from-the-speech-in-one-step)).
   - A cue keeps the frame on which each word starts, counted from the start of the cue.
   - A word is what spaces and line breaks separate in its text, without the markup.
   - Create Subtitles from Audio keeps the word starts of the model.
