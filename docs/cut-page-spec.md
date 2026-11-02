@@ -2070,6 +2070,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The background box follows the place, zoom and rotation of the lower line. The upper line does not move it (measured in Resolve Studio 21.1.2).
     - Each line has its own shadow, which turns with the line (measured in Resolve Studio 21.1.2).
     - From the bottom, the order is the box, the lower line and the upper line. Each line is over its own shadow (measured in Resolve Studio 21.1.2).
+    - Opacity fades them as one picture. Text at half opacity over the box does not show the box (measured in Resolve Studio 21.1.2).
     - Opacity, text and style are the whole title's.
     - A switch to Text or Scroll drops the upper line's values.
   - Over the tracks below (§8.14):

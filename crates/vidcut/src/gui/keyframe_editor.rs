@@ -26,7 +26,7 @@ use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
 
-const LABEL: f32 = 172.0;
+const LABEL: f32 = 182.0;
 const RULER_H: f32 = 20.0;
 const GROUP_H: f32 = 22.0;
 const TRACK_H: f32 = 26.0;
