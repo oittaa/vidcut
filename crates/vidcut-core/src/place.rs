@@ -113,7 +113,11 @@ pub fn anchored(p: &Picture, (w, h): (f64, f64), [fx, fy, fw, fh]: [f64; 4]) -> 
     [fx + ax * fw + (px - 0.5) * w, fy + ay * fh + (py - 0.5) * h]
 }
 
-fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4]) -> Level {
+fn whole_pixels(part: f64, pixels: f64) -> f64 {
+    (part * pixels + 1e-6).floor() / pixels.max(1.0)
+}
+
+fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], (pw, ph): (f64, f64)) -> Level {
     let sampled = placed.picture.sampled(placed.source as f64);
     let p = &sampled;
     let [_, _, fw, fh] = fitted;
@@ -131,7 +135,12 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4]) -> Level {
     let (a, b) = (k * sx * cos / (zx * fw), -k * sx * sin / (zx * fw));
     let (c, d) = (k * sy * sin / (zy * fh), k * sy * cos / (zy * fh));
     let c0 = p.crop;
-    let crop = [c0.left, c0.top, 1.0 - c0.right, 1.0 - c0.bottom];
+    let crop = [
+        whole_pixels(c0.left, pw),
+        whole_pixels(c0.top, ph),
+        1.0 - whole_pixels(c0.right, pw),
+        1.0 - whole_pixels(c0.bottom, ph),
+    ];
     let gone = p.scale().contains(&0.0) || crop[0] >= crop[2] || crop[1] >= crop[3];
     let (edge, soft) = Soft::of(crop, p.softness(), [fw, fh]);
     let affine = [
@@ -266,7 +275,7 @@ impl Level {
 }
 
 impl Placing {
-    pub fn new(placed: &[Placed], frame: (f64, f64), fitted: [f64; 4]) -> Self {
+    pub fn new(placed: &[Placed], frame: (f64, f64), fitted: [f64; 4], pixels: (f64, f64)) -> Self {
         let whole = [0.0, 0.0, frame.0, frame.1];
         let mut levels: Vec<Level> = Vec::with_capacity(placed.len());
         let mut effects = Vec::new();
@@ -282,11 +291,15 @@ impl Placing {
                 .collect();
             own.append(&mut effects);
             effects = own;
-            let at = if i == 0 { fitted } else { whole };
+            let (at, size) = if i == 0 {
+                (fitted, pixels)
+            } else {
+                (whole, frame)
+            };
             if i == 0 && !levels.is_empty() && at == whole && p.picture.is_usual() {
                 continue;
             }
-            let own = level(p, frame, at);
+            let own = level(p, frame, at, size);
             let back = match levels.last() {
                 Some(outer) => then(&outer.back, &own.back, frame),
                 None => own.back,
@@ -313,7 +326,7 @@ impl Placing {
     }
 
     pub fn whole(placed: &[Placed], frame: (f64, f64)) -> Self {
-        Self::new(placed, frame, [0.0, 0.0, frame.0, frame.1])
+        Self::new(placed, frame, [0.0, 0.0, frame.0, frame.1], frame)
     }
 
     pub fn inner(&self, frame: (f64, f64)) -> [f64; 8] {
@@ -443,6 +456,11 @@ pub fn upright_fit(
     } else {
         fit(w, h, sar, out_w, out_h)
     }
+}
+
+pub fn upright_pixels((w, h): (u32, u32), rotation: u16) -> (f64, f64) {
+    let (w, h) = (f64::from(w), f64::from(h));
+    if rotation % 180 == 90 { (h, w) } else { (w, h) }
 }
 
 pub fn rounded_place(
