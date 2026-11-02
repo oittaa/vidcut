@@ -1568,9 +1568,9 @@ pub enum Request {
         range: Option<RangeSpec>,
     },
     /// Add a cue: `text` from `at` (default: the playhead) to `end`, or for
-    /// `duration`. Without either it lasts 3 s, or until the track's next cue
-    /// starts. On `track` (default: the shown subtitle track; S1 is made when
-    /// there is none). Returns its id.
+    /// `duration`. Without either it lasts 3 s. It changes no other cue, so
+    /// it can overlap them. On `track` (default: the shown subtitle track; S1
+    /// is made when there is none). Returns its id.
     #[serde(rename = "subtitles.add")]
     SubtitlesAdd {
         /// Its lines, separated by a line break. `<i>`, `<b>`, `<u>` and

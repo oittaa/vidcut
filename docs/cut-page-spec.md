@@ -1744,7 +1744,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The manual does not say which track shows after a new track is added, or how long a new cue lasts.
   - Subtitle tracks are `S1`, `S2`, … from the video up.
   - A new track is the shown track.
-  - A new cue lasts 3 s, or until the next cue of the track starts.
+  - A new cue lasts 3 s from the playhead, measured in Resolve Studio 21.1.2. It does not stop at the next cue.
+  - Add New and Add Subtitle overwrite what the new cue covers, measured in Resolve Studio 21.1.2:
+    - A cue that the new cue fully covers is removed.
+    - A cue that the new cue partly covers is trimmed to the new edge.
+    - A cue that covers all of the 3 s and more becomes two cues with the same text, before and after the new cue.
+  - These two cues keep their words and keyframes as a split does (D70, §8.12).
+  - The new cue has the text "Subtitle", selected in the text box, measured in Resolve Studio 21.1.2.
+  - `subtitles.add` alone does not overwrite. A script that wants the overwrite sends its own `apply`.
   - Cues of one track can overlap, and show together.
   - On the timeline, cues that overlap share the height of their track, each in its own lane.
   - Split leaves its text in both parts.
