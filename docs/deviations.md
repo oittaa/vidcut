@@ -1517,7 +1517,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The sections of other clips are the picture sections, the Speed section and the Audio section.
   - A double-click on the name of a subtitle track shows its Subtitle Track section (X51).
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
-  - With nothing of these selected, it shows one line.
+  - With nothing of these selected, it shows one line. It also shows that line with only several titles selected ([spec §8.14](cut-page-spec.md#814-titles-pp-762764-11761178)).
   - It has no Done and no Cancel. As in Resolve, a change goes in without a button, and Ctrl+Z undoes it.
   - A section shows the project while the user does not edit it, also after Ctrl+Z or a change from a script.
   - Audio clips, titles and subtitles have no picture.

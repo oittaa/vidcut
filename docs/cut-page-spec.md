@@ -936,6 +936,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
   - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer opens the Title section.
+  - With several titles selected, the Inspector shows nothing (measured in Resolve Studio 21.1.2).
+  - vidcut: the Title section does not show then (X70). The Keyframes tab still shows the item selected first (§2).
 - **Kinds** (p. 1178):
   - L, M and R Lower 3rd put two lines at the bottom left, middle or right of title safe.
   - Title safe is 90% of the picture by default (p. 1178).

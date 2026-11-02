@@ -2406,9 +2406,12 @@ impl Workspace {
             return;
         }
         let title = self.project_shared().and_then(|p| {
+            let is_title = |id: &String| p.clip(id).is_some_and(|c| c.title.is_some());
+            let several = now.0.len() > 1 && now.1.is_empty() && now.0.iter().all(is_title);
             now.0
                 .iter()
-                .find(|id| p.clip(id).is_some_and(|c| c.title.is_some()))
+                .find(|id| is_title(id))
+                .filter(|_| !several)
                 .cloned()
         });
         if let Some(id) = title {
