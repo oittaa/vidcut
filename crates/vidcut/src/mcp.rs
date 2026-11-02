@@ -289,7 +289,7 @@ impl State {
                     .split_once('x')
                     .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
                     .ok_or_else(|| Error::usage(format!("size {size:?}: expected WIDTHxHEIGHT")))?;
-                (settings.width, settings.height) = (w, h);
+                (settings.width, settings.height) = vidcut_core::model::timeline_size(w, h);
                 settings.auto_format = false;
             }
             Store::create(&path, &Project::new(settings))?;
