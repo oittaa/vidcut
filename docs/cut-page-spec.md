@@ -1738,6 +1738,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Subtitle tracks are `S1`, `S2`, … from the video up.
   - A new track is the shown track.
   - A new cue lasts 3 s, or until the next cue of the track starts.
+  - A cue from Add New lasts 3 s (measured in Resolve Studio 21.1.2). The stop at the next cue is not measured.
   - Cues of one track can overlap, and show together.
   - On the timeline, cues that overlap share the height of their track, each in its own lane.
   - Split leaves its text in both parts.
