@@ -874,6 +874,7 @@ pub fn title(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Sprite> {
     let size = (h * t.text_fraction() * zoom).max(1.0) as f32;
     let pixel = h / f64::from(timeline.max(1));
     let slack = (size * Title::PADDING as f32).ceil();
+    let text = t.sized_text();
     let look = Look {
         font: t.style.font.as_deref(),
         size,
@@ -893,7 +894,7 @@ pub fn title(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Sprite> {
             corner: 0.0,
         },
         shadow: t.style.shadow.as_ref().and_then(|s| shade(s, w, h)),
-        markup: Markup::Title(&t.text, (h * zoom) as f32),
+        markup: Markup::Title(&text, (h * zoom) as f32),
     };
     let Some(Laid {
         sprite: Some(sprite),

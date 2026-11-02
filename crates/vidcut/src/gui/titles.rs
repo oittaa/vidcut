@@ -2,7 +2,7 @@ use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
-use vidcut_core::model::{Clip, TextStroke, Title, TitleAlign, TitleKind};
+use vidcut_core::model::{Clip, Title, TitleAlign, TitleKind};
 
 use super::export::Ask;
 use super::inspector::{KeyClick, key_buttons, mark, next_key};
@@ -472,22 +472,13 @@ impl Workspace {
             "{}% of the picture",
             percent(Some(Title::usual_size(d.kind)))
         );
-        let outline_hint = format!(
-            "{} pixels",
-            plain(Some(Title::usual_size(d.kind) * TextStroke::USUAL))
-        );
         let across_hint = format!("{}%", percent(Some(usual[0])));
         let down_hint = format!("{}%", percent(Some(usual[1])));
         let mut clicks = Vec::new();
         egui::Grid::new("title-style-fields").show(ui, |ui| {
             changed |= d
                 .fields
-                .rows(
-                    ui,
-                    "title",
-                    &d.families,
-                    &Usual::title(&size_hint, &outline_hint),
-                )
+                .rows(ui, "title", &d.families, &Usual::title(&size_hint))
                 .0;
             let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
                 ui.label(label);

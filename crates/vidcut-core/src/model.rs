@@ -2042,20 +2042,22 @@ pub struct TitleStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
     /// Text height as a fraction of the picture height, above 0 and at most
-    /// 1/2. Usual: 96/1080 (about 0.089) for `text`, 0.06 for a lower third.
+    /// 1/2. Usual: 96/1080 for `text`, 108/1080 for `scroll`, and for a
+    /// `lower_third` 76/1080 on its lower line and 48/1080 on its upper line.
+    /// A size set here goes on both lines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Outline color and width. Usual: black, centered on the edge of the
-    /// letters, `0.1 * size * 1080` pixels of the timeline wide.
+    /// Outline color and width. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<SubtitleOutline>,
     /// A box behind the whole block of text. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<SubtitleBackground>,
-    /// A soft copy of the text behind it, over its background. Usual: none.
+    /// A soft copy of the text behind it, over its background. An offset of
+    /// 0 draws nothing. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<TitleShadow>,
 }
@@ -2070,8 +2072,8 @@ pub struct TitleShadow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// `[x, y]`: how far it falls right and down, as fractions of the
-    /// picture's width and height, each from -4 to 4. Usual: `[0.003,
-    /// 0.005]`.
+    /// picture's width and height, each from -4 to 4. Usual: `[0, 0]`, which
+    /// draws no shadow.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<[f64; 2]>,
     /// How soft its edge is, from 1 to 100, where the blur's radius is
@@ -2082,7 +2084,7 @@ pub struct TitleShadow {
 
 impl TitleShadow {
     pub const OPACITY: f64 = 0.75;
-    pub const OFFSET: [f64; 2] = [0.003, 0.005];
+    pub const OFFSET: [f64; 2] = [0.0, 0.0];
     pub const BLUR: f64 = 20.0;
     pub const BLUR_PER_PICTURE: f64 = 3300.0;
     pub const GAIN: f64 = 1.24;
@@ -2116,6 +2118,7 @@ impl Title {
     pub const SAFE: f64 = 0.9;
     pub const LOWER_IN: f64 = 0.1;
     pub const LOWER_DOWN: f64 = 0.88;
+    pub const UPPER_SIZE: f64 = 48.0 / 1080.0;
     pub const ACROSS: (f64, f64) = (-Picture::REACH, Picture::REACH);
     pub const DOWN: (f64, f64) = (1.0 - Picture::REACH, 1.0 + Picture::REACH);
 
@@ -2183,8 +2186,20 @@ impl Title {
 
     pub fn usual_size(kind: TitleKind) -> f64 {
         match kind {
-            TitleKind::Text | TitleKind::Scroll => 96.0 / 1080.0,
-            TitleKind::LowerThird => 0.06,
+            TitleKind::Text => 96.0 / 1080.0,
+            TitleKind::Scroll => 108.0 / 1080.0,
+            TitleKind::LowerThird => 76.0 / 1080.0,
+        }
+    }
+
+    pub fn sized_text(&self) -> std::borrow::Cow<'_, str> {
+        match (self.kind, self.style.size, self.text.split_once('\n')) {
+            (TitleKind::LowerThird, None, Some((upper, lower))) => format!(
+                "<font size=\"{}\">{upper}</font>\n{lower}",
+                Self::UPPER_SIZE
+            )
+            .into(),
+            _ => self.text.as_str().into(),
         }
     }
 
@@ -2201,11 +2216,7 @@ impl Title {
     }
 
     pub fn stroke(&self) -> Option<TextStroke> {
-        stroke_of(
-            self.style.outline.as_ref(),
-            self.text_fraction() * TextStroke::USUAL,
-            [0, 0, 0],
-        )
+        stroke_of(self.style.outline.as_ref(), 0.0, [0, 0, 0])
     }
 
     pub fn backing(&self) -> Option<([u8; 3], f64)> {
@@ -3338,7 +3349,7 @@ pub struct SubtitleOutline {
     pub color: Option<String>,
     /// Width in pixels of the timeline, from 0 to 16, whatever the text size
     /// and the timeline size. `0` draws none. Usual: 1 on a subtitle track,
-    /// `0.1 * size * 1080` on a title.
+    /// 0 on a title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// Half of the width always reaches past the letters. `true` draws it
@@ -3356,7 +3367,6 @@ pub struct TextStroke {
 
 impl TextStroke {
     pub const MOST: f64 = 16.0;
-    pub const USUAL: f64 = 0.1 * 1080.0;
 
     pub fn past_letter(&self) -> f64 {
         self.width / 2.0

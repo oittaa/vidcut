@@ -406,7 +406,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
     let color = hex(t.ink());
     let line = size * Title::LINE;
     let [x, y] = t.place();
-    let spanned = rich::lines(&t.text);
+    let spanned = rich::lines(&t.sized_text());
     let lines: Vec<&[Span]> = spanned.iter().map(Vec::as_slice).collect();
     let base = Base {
         family,
