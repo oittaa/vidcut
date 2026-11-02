@@ -1046,6 +1046,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - the zoom and the rotation
   - The viewer shows the title while the user edits it, drawn as an export draws it.
   - A change goes in as one `titles.set` when the user leaves the field. A button puts it in at once. Ctrl+Z undoes it.
+  - A number box that the user empties keeps its value, as Size and Position X do in Resolve Studio 21.1.2.
+  - A value at its usual number shows an empty box with that number as a hint. A number in the other box of a pair keeps this usual number.
   - In the viewer, a click on a title selects it, as in Resolve.
   - When the pointer is near a title, the viewer shows its outline, its corners and the handle above it. They work without a click.
   - Over them, the pointer becomes a move, resize or hand cursor.

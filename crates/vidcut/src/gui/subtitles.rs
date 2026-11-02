@@ -708,31 +708,45 @@ pub(super) fn kept_number(
     }
 }
 
+pub(super) fn filled(shown: &str, stored: Option<f64>) -> String {
+    if shown.trim().is_empty() {
+        percent(stored)
+    } else {
+        shown.to_string()
+    }
+}
+
 fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
     let stored = &d.base;
-    let parts = d.fields.parts(&Parts::of_subtitles(stored))?;
+    let was = Parts::of_subtitles(stored);
+    let parts = d.fields.refilled(&was).parts(&was)?;
     let words = match d.show {
-        Some(show) => Some(SubtitleWords {
-            show: Some(show),
-            color: field(&d.spoken),
-            pop: kept_number(&d.pop, stored.words.as_ref().and_then(|w| w.pop), "pop")?,
-        }),
+        Some(show) => {
+            let pop = stored.words.as_ref().and_then(|w| w.pop);
+            Some(SubtitleWords {
+                show: Some(show),
+                color: field(&d.spoken),
+                pop: kept_number(&filled(&d.pop, pop), pop, "pop")?,
+            })
+        }
         None => None,
     };
+    let across = filled(&d.across, stored.position.map(|p| p[0]));
+    let down = filled(&d.down, stored.position.map(|p| p[1]));
     let style = SubtitleStyle {
         font: parts.font,
         size: parts.size,
         color: parts.color,
         outline: parts.outline,
         background: parts.background,
-        margin: kept_number(&d.margin, stored.margin, "margin")?,
+        margin: kept_number(&filled(&d.margin, stored.margin), stored.margin, "margin")?,
         bold: d.bold.then_some(true),
         case: d.case,
         shadow: parts.shadow,
         words,
         speaker_color: d.paint,
         align: d.align,
-        position: position_of(&d.across, &d.down, stored.position)?,
+        position: position_of(&across, &down, stored.position)?,
     };
     vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)
 }
@@ -1745,7 +1759,7 @@ impl Workspace {
         if changed {
             d.preview = style_of(&d).ok();
         }
-        ui.label(dim("An empty field keeps the usual look."));
+        ui.label(dim("An empty number box keeps its value."));
         if !d.error.is_empty() {
             ui.colored_label(ui.visuals().error_fg_color, &d.error);
         }
@@ -1753,8 +1767,9 @@ impl Workspace {
         if d.dirty && (enter || self.inspector_commits()) {
             match self.track_params(&d) {
                 Ok(params) => {
-                    if let Some(params) = params {
-                        self.send("track.set", params);
+                    match params {
+                        Some(params) => self.send("track.set", params),
+                        None => d.from = None,
                     }
                     d.dirty = false;
                     d.error.clear();
