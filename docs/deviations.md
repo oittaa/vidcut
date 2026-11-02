@@ -1085,7 +1085,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Markup in its text styles words: `<b>`, `<i>`, `<u>` and `<font color face size>`.
   - The B, I, U, Color, Size, Font and Plain buttons of the Title section put this markup around the selected words.
   - A line of a lower third takes its own size in this way.
-  - The lines of a title share one zoom and one rotation.
   - vidcut does not have Text+ and Fusion titles.
   - The Position, Zoom, Rotation and Opacity of a title take keyframes ([todo](todo/keyframes.md#titles)). Its shadow and background do not.
   - A title clip has no Transform, Cropping, Speed or blend modes.

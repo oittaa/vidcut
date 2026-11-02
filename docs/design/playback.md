@@ -170,12 +170,12 @@ flowchart TD
 **Titles and subtitles**
 
 - Titles and subtitles are not in the kept pictures. Thus an edit of a title or a cue keeps the frames decoded.
-- `player::titles` draws each title of the plan at the size of the plan, with `burn::title`, on the decoding thread. Then it wakes the viewer.
+- `player::titles` draws each `TitleBlock` of each title of the plan at the size of the plan, with `burn::title_blocks`, on the decoding thread. Then it wakes the viewer.
   - It draws before it keeps a frame under the title, for the prepared frame, and for the frame at the playhead.
   - It keeps the drawings used last (an `Lru`).
   - Each drawing is where its kind puts it, without its own place, opacity or rotation. Thus a moved or turned title is not drawn again.
 - `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan.
-- `Player::present` hands each title of a frame as a `TitleOver`:
+- `Player::present` hands each block of a title of a frame as a `TitleOver`:
   - the picture, in premultiplied RGBA, and how many layers go under it
   - its move from how it was drawn: its place, zoom and rotation, or the `Run::top` of a scroll. The viewer's shader does the transform.
   - its level, from a fade or its opacity (`Lettering`)

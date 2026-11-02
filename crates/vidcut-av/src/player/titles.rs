@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{Picture, Title};
+use vidcut_core::model::{Picture, Title, TitleLine};
 use vidcut_core::render::ShownTitle;
 
 use super::frame::{TitleOver, TitlePicture};
@@ -20,6 +20,11 @@ fn steady(t: &Title) -> Title {
         position: None,
         rotation: None,
         opacity: None,
+        upper: t.upper.clone().map(|u| TitleLine {
+            position: None,
+            rotation: None,
+            ..u
+        }),
         ..t.clone()
     }
 }
@@ -33,7 +38,7 @@ fn wanted(preview: &Preview, s: &ShownTitle) -> Title {
 
 #[derive(Default)]
 struct Kept {
-    pictures: Lru<Key, Option<Arc<TitlePicture>>, KEPT>,
+    pictures: Lru<Key, Vec<Option<Arc<TitlePicture>>>, KEPT>,
     last: HashMap<String, Title>,
 }
 
@@ -84,11 +89,14 @@ impl Titles {
                     None => continue,
                 }
             };
-            let picture = kept.pictures.get(&key).cloned().flatten();
+            let pictures = kept.pictures.get(&key).cloned().unwrap_or_default();
             let (key, _) = key;
-            if let Some(p) = picture {
-                let [x0, y0] = key.pivot();
-                let [x, y] = to.pivot();
+            for ((picture, from), now) in pictures.iter().zip(key.blocks()).zip(to.blocks()) {
+                let Some(p) = picture.clone() else {
+                    continue;
+                };
+                let [x0, y0] = from.pivot;
+                let [x, y] = now.pivot;
                 let dy = if to.moves() {
                     shown.run.top(0, h, f64::from(p.height)).round() as i32 - p.top
                 } else {
@@ -102,8 +110,8 @@ impl Titles {
                     turn: [
                         (x * w) as f32,
                         (y * h) as f32,
-                        (to.scale() / key.scale()) as f32,
-                        (to.turn() - key.turn()).to_radians() as f32,
+                        (now.zoom / from.zoom) as f32,
+                        (now.turn - from.turn).to_radians() as f32,
                     ],
                     alpha: (to.opaque() * shown.fade.map_or(1.0, |r| r.level(0))) as f32,
                     placed: super::plan::previewed(&shown.placed, placing),
@@ -150,16 +158,20 @@ impl Titles {
     }
 }
 
-fn drawn(t: &Title, (width, height): (u32, u32), timeline: u32) -> Option<Arc<TitlePicture>> {
-    let sprite = crate::burn::title(t, width, height, timeline)
+fn drawn(t: &Title, (width, height): (u32, u32), timeline: u32) -> Vec<Option<Arc<TitlePicture>>> {
+    crate::burn::title_blocks(t, width, height, timeline)
         .into_iter()
-        .next()?;
-    Some(Arc::new(TitlePicture {
-        left: sprite.x,
-        top: sprite.y,
-        width: sprite.width,
-        height: sprite.height,
-        frame: (width, height),
-        rgba: sprite.premultiplied(),
-    }))
+        .map(|sprite| {
+            sprite.map(|sprite| {
+                Arc::new(TitlePicture {
+                    left: sprite.x,
+                    top: sprite.y,
+                    width: sprite.width,
+                    height: sprite.height,
+                    frame: (width, height),
+                    rgba: sprite.premultiplied(),
+                })
+            })
+        })
+        .collect()
 }

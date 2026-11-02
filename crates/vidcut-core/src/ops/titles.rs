@@ -2,8 +2,8 @@ use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, plain_channel, title_keys_problem};
 use crate::looks::TitleLook;
 use crate::model::{
-    Clip, Keyframe, Picture, PositionHandles, Project, Title, TitleAlign, TitleKind, TitleShadow,
-    TitleStyle, Track, TrackKind,
+    Clip, Keyframe, LowerThirdLine, Picture, PositionHandles, Project, Title, TitleAlign,
+    TitleKind, TitleShadow, TitleStyle, Track, TrackKind,
 };
 
 use super::subtitles::{checked_background, checked_color, checked_font, checked_outline};
@@ -140,6 +140,17 @@ pub fn checked(t: &Title) -> Result<Title> {
         None => None,
     };
     checked_keys(t)?;
+    let upper = match &t.upper {
+        Some(_) if t.kind != TitleKind::LowerThird => {
+            return Err(Error::invalid("only a lower third has lines apart"));
+        }
+        Some(_) => {
+            let mut high = t.upper_view();
+            high.upper = None;
+            Some(checked(&high)?.line())
+        }
+        None => None,
+    };
     let s = &t.style;
     let style = TitleStyle {
         font: checked_font(s.font.as_deref(), "title")?,
@@ -164,6 +175,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         rotation_keys: t.rotation_keys.clone(),
         opacity,
         opacity_keys: t.opacity_keys.clone(),
+        upper,
     })
 }
 
@@ -279,6 +291,7 @@ pub struct TitleChange {
     pub rotation: Option<f64>,
     pub opacity: Option<f64>,
     pub look: Option<TitleLook>,
+    pub line: Option<LowerThirdLine>,
 }
 
 pub fn changed(old: &Title, change: &TitleChange) -> Title {
@@ -290,6 +303,7 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
             zoom_keys: old.zoom_keys.clone(),
             rotation_keys: old.rotation_keys.clone(),
             opacity_keys: old.opacity_keys.clone(),
+            upper: old.upper.clone(),
             ..l.on(&old.text)
         },
         None => old.clone(),
@@ -299,6 +313,9 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
             t.align = None;
         }
         t.kind = k;
+    }
+    if t.kind != TitleKind::LowerThird {
+        t.upper = None;
     }
     if t.kind == TitleKind::Scroll {
         t.position_handles.clear();
@@ -339,9 +356,64 @@ impl TitleChange {
             _ => false,
         }
     }
+
+    fn only_a_line(&self) -> bool {
+        self.text.is_none()
+            && self.kind.is_none()
+            && self.align.is_none()
+            && self.style.is_none()
+            && self.opacity.is_none()
+            && self.look.is_none()
+    }
+}
+
+fn line_of<'a>(p: &'a mut Project, id: &str) -> Result<&'a mut Title> {
+    let not_one = || Error::invalid(format!("{id} is not a lower third"));
+    let (ti, ci) = p.find_clip(id).ok_or_else(not_one)?;
+    p.tracks[ti].clips[ci]
+        .title
+        .as_mut()
+        .filter(|t| t.kind == TitleKind::LowerThird)
+        .ok_or_else(not_one)
+}
+
+pub fn on_line<T>(
+    p: &mut Project,
+    ids: &[String],
+    line: Option<LowerThirdLine>,
+    work: impl FnOnce(&mut Project) -> Result<T>,
+) -> Result<T> {
+    let Some(line) = line else {
+        return work(p);
+    };
+    for id in ids {
+        line_of(p, id)?.part_lines();
+    }
+    let swap = |p: &mut Project| -> Result<()> {
+        if line == LowerThirdLine::Upper {
+            for id in ids {
+                line_of(p, id)?.swap_lines();
+            }
+        }
+        Ok(())
+    };
+    swap(p)?;
+    let out = work(p);
+    swap(p)?;
+    out
 }
 
 pub fn set(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) -> Result<()> {
+    if change.line.is_some() && !change.only_a_line() {
+        return Err(Error::invalid(
+            "`line` goes with position, zoom and rotation alone",
+        ));
+    }
+    let one = [id.to_string()];
+    on_line(p, &one, change.line, |p| set_values(p, id, change, at))
+}
+
+fn set_values(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) -> Result<()> {
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
     let Some(old) = c.title.as_ref() else {

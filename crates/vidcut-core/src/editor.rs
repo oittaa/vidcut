@@ -3382,6 +3382,7 @@ fn mutate(
         Request::KeyframesAdd {
             clips,
             param,
+            line,
             at,
             value,
             ease,
@@ -3392,7 +3393,9 @@ fn mutate(
                 None => playhead
                     .ok_or_else(|| Error::usage("keyframes.add needs `at` (no playhead)"))?,
             };
-            let added = ops::keyframes::add(p, &ids, *param, at, *value, *ease)?;
+            let added = ops::keyframes::on_line(p, &ids, *param, *line, |p| {
+                ops::keyframes::add(p, &ids, *param, at, *value, *ease)
+            })?;
             let added: Vec<Value> = added
                 .into_iter()
                 .map(|(clip, frame)| json!({ "clip": clip, "frame": frame }))
@@ -3402,6 +3405,7 @@ fn mutate(
         Request::KeyframesSet {
             clips,
             param,
+            line,
             frames,
             at,
             value,
@@ -3419,12 +3423,15 @@ fn mutate(
                 in_handle: *in_handle,
                 out_handle: *out_handle,
             };
-            ops::keyframes::set(p, &ids, *param, &pick, &change)?;
+            ops::keyframes::on_line(p, &ids, *param, *line, |p| {
+                ops::keyframes::set(p, &ids, *param, &pick, &change)
+            })?;
             Value::Null
         }
         Request::KeyframesMove {
             clips,
             param,
+            line,
             frames,
             at,
             by,
@@ -3433,30 +3440,38 @@ fn mutate(
             let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
-            ops::keyframes::shift(p, &ids, *param, &pick, *by, to)?;
+            ops::keyframes::on_line(p, &ids, *param, *line, |p| {
+                ops::keyframes::shift(p, &ids, *param, &pick, *by, to)
+            })?;
             Value::Null
         }
         Request::KeyframesRemove {
             clips,
             param,
+            line,
             frames,
             at,
         } => {
             let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
-            ops::keyframes::remove(p, &ids, *param, &pick)?;
+            ops::keyframes::on_line(p, &ids, *param, *line, |p| {
+                ops::keyframes::remove(p, &ids, *param, &pick)
+            })?;
             Value::Null
         }
         Request::KeyframesCut { clip, keys } => {
             let id = resolve_holder(p, clip, playhead)?;
             let picks = ops::keyframes::chosen(p, &id, keys.as_deref())?;
             let copied = ops::keyframes::copy(p, &id, &picks)?;
-            for (param, frames) in picks {
+            let one = std::slice::from_ref(&id);
+            for (param, line, frames) in picks {
                 let pick = ops::keyframes::Pick {
                     frames: Some(frames),
                     at: None,
                 };
-                ops::keyframes::remove(p, std::slice::from_ref(&id), param, &pick)?;
+                ops::keyframes::on_line(p, one, param, line, |p| {
+                    ops::keyframes::remove(p, one, param, &pick)
+                })?;
             }
             json!({ "clip": id, "keyframes": copied })
         }
@@ -3790,6 +3805,7 @@ fn mutate(
                     rotation: *rotation,
                     opacity: *opacity,
                     look: None,
+                    line: None,
                 },
             );
             let (id, track) = ops::titles::add(p, track.as_deref(), start, frames, &title)?;
@@ -3806,6 +3822,7 @@ fn mutate(
             rotation,
             opacity,
             look,
+            line,
             at,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
@@ -3826,6 +3843,7 @@ fn mutate(
                     .as_deref()
                     .map(|l| crate::looks::title_look(env, l))
                     .transpose()?,
+                line: *line,
             };
             ops::titles::set(p, &id, &change, at)?;
             Value::Null
@@ -5043,10 +5061,12 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
                 picture.scale_times(&conv, ratio);
             }
             if let Some(title) = c.title.as_mut().filter(|t| t.is_keyed()) {
-                let mut picture = title.as_picture();
-                picture.scale_times(&conv, ratio);
-                title.move_handles(conv);
-                title.take_picture(&picture);
+                title.each_line(|line| {
+                    let mut picture = line.as_picture();
+                    picture.scale_times(&conv, ratio);
+                    line.move_handles(conv);
+                    line.take_picture(&picture);
+                });
             }
         }
         (c.start, c.duration) = (start, end - start);
@@ -8115,6 +8135,11 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
     }
     if let Some(t) = &c.title {
         keyed.extend(t.as_picture().keyed_names());
+        for name in t.upper_view().as_picture().keyed_names() {
+            if !keyed.contains(&name) {
+                keyed.push(name);
+            }
+        }
     }
     if !keyed.is_empty() {
         v["keyframes"] = json!(keyed);

@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EffectType, Handle, PictureTool,
-    PictureTransition, Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle, TrackClip, ZoomBox,
+    Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EffectType, Handle, LowerThirdLine,
+    PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle,
+    TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -1418,6 +1419,10 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         param: KeyParam,
+        /// The line of a lower third that takes the position, zoom or
+        /// rotation. The two lines then go apart.
+        #[serde(default)]
+        line: Option<LowerThirdLine>,
         #[serde(default)]
         at: Option<TimeSpec>,
         /// The value at the keyframe. A number for volume (dB, from -100
@@ -1439,6 +1444,9 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         param: KeyParam,
+        /// The line of a lower third whose keyframes change.
+        #[serde(default)]
+        line: Option<LowerThirdLine>,
         #[serde(default)]
         frames: Option<OneOrMany<i64>>,
         #[serde(default)]
@@ -1487,6 +1495,9 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         param: KeyParam,
+        /// The line of a lower third whose keyframes move.
+        #[serde(default)]
+        line: Option<LowerThirdLine>,
         #[serde(default)]
         frames: Option<OneOrMany<i64>>,
         #[serde(default)]
@@ -1506,6 +1517,9 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         param: KeyParam,
+        /// The line of a lower third whose keyframes go.
+        #[serde(default)]
+        line: Option<LowerThirdLine>,
         #[serde(default)]
         frames: Option<OneOrMany<i64>>,
         #[serde(default)]
@@ -2098,6 +2112,12 @@ pub enum Request {
         /// A title look's name, built in or yours (`looks.list`).
         #[serde(default)]
         look: Option<String>,
+        /// The line of a lower third that takes `position`, `zoom` and
+        /// `rotation`. The two lines then go apart. Without it, the two
+        /// lines take them together until they go apart, then the lower
+        /// line alone.
+        #[serde(default)]
+        line: Option<LowerThirdLine>,
         /// The frame of a value with keyframes: the new number goes on a
         /// keyframe there. Usual: the playhead.
         #[serde(default)]
@@ -3351,6 +3371,9 @@ impl KeyParam {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct KeyPicks {
     pub param: KeyParam,
+    /// The line of a lower third whose keyframes these are.
+    #[serde(default)]
+    pub line: Option<LowerThirdLine>,
     /// The source frames of the keyframes. Without them, every keyframe of
     /// the value.
     #[serde(default)]
@@ -3362,6 +3385,10 @@ pub struct KeyPicks {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CopiedKey {
     pub param: KeyParam,
+    /// The line of a lower third that the keyframe came from. A paste on a
+    /// lower third puts it on that line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<LowerThirdLine>,
     /// Timeline frames after the first copied keyframe.
     pub offset: i64,
     /// A number, or x and y for position, zoom and the anchor point.

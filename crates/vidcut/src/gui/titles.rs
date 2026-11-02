@@ -204,6 +204,10 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         rotation_keys: stored.rotation_keys.clone(),
         opacity: kept(&d.title_opacity, stored.opacity, "title opacity")?,
         opacity_keys: stored.opacity_keys.clone(),
+        upper: stored
+            .upper
+            .clone()
+            .filter(|_| d.kind == TitleKind::LowerThird),
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
 }

@@ -2003,6 +2003,60 @@ pub struct Title {
     /// opacity has no keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub opacity_keys: Vec<Keyframe>,
+    /// A lower third's upper line, when it goes apart from the lower line.
+    /// `position`, `zoom` and `rotation` and their keyframes above are then
+    /// the lower line's alone. Left out when the two lines go together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upper: Option<TitleLine>,
+}
+
+/// One line of a lower third: `upper` or `lower`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LowerThirdLine {
+    Upper,
+    Lower,
+}
+
+/// The place, zoom and rotation of a lower third's upper line. The fields
+/// work as the title's fields with the same names. The same values on both
+/// lines draw them as one block. `zoom` and `rotation` work about the left,
+/// middle or right end of this line's bottom edge, by the title's `align`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TitleLine {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub position_keys: Vec<Keyframe>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub position_y: Vec<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub position_handles: Vec<PositionHandles>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zoom_keys: Vec<Keyframe>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rotation_keys: Vec<Keyframe>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TitlePart {
+    Whole,
+    Backing,
+    Upper,
+    Lower,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TitleBlock {
+    pub part: TitlePart,
+    pub pivot: [f64; 2],
+    pub bottom: f64,
+    pub zoom: f64,
+    pub turn: f64,
 }
 
 /// The handles of one position keyframe of a title, as fractions of the
@@ -2169,6 +2223,7 @@ impl Title {
             rotation_keys: Vec::new(),
             opacity: None,
             opacity_keys: Vec::new(),
+            upper: None,
         }
     }
 
@@ -2281,6 +2336,113 @@ impl Title {
             .last()
             .map_or(base, |line| crate::rich::largest(line, base));
         size * Self::LINE
+    }
+
+    pub fn line(&self) -> TitleLine {
+        TitleLine {
+            position: self.position,
+            position_keys: self.position_keys.clone(),
+            position_y: self.position_y.clone(),
+            position_handles: self.position_handles.clone(),
+            zoom: self.zoom,
+            zoom_keys: self.zoom_keys.clone(),
+            rotation: self.rotation,
+            rotation_keys: self.rotation_keys.clone(),
+        }
+    }
+
+    pub fn part_lines(&mut self) {
+        if self.upper.is_none() {
+            self.upper = Some(self.line());
+        }
+    }
+
+    pub fn swap_lines(&mut self) {
+        let Some(mut u) = self.upper.take() else {
+            return;
+        };
+        std::mem::swap(&mut self.position, &mut u.position);
+        std::mem::swap(&mut self.position_keys, &mut u.position_keys);
+        std::mem::swap(&mut self.position_y, &mut u.position_y);
+        std::mem::swap(&mut self.position_handles, &mut u.position_handles);
+        std::mem::swap(&mut self.zoom, &mut u.zoom);
+        std::mem::swap(&mut self.zoom_keys, &mut u.zoom_keys);
+        std::mem::swap(&mut self.rotation, &mut u.rotation);
+        std::mem::swap(&mut self.rotation_keys, &mut u.rotation_keys);
+        self.upper = Some(u);
+    }
+
+    pub fn upper_view(&self) -> Title {
+        let mut t = self.clone();
+        t.swap_lines();
+        t
+    }
+
+    pub fn each_line(&mut self, mut change: impl FnMut(&mut Title)) {
+        change(self);
+        if self.upper.is_some() {
+            self.swap_lines();
+            change(self);
+            self.swap_lines();
+        }
+    }
+
+    fn block(&self, part: TitlePart) -> TitleBlock {
+        let [_, y] = self.place();
+        let bottom = match self.kind {
+            TitleKind::Text => y,
+            TitleKind::LowerThird => y + self.lower_line() * (self.scale() - 1.0),
+            TitleKind::Scroll => 1.0,
+        };
+        TitleBlock {
+            part,
+            pivot: self.pivot(),
+            bottom,
+            zoom: self.scale(),
+            turn: self.turn(),
+        }
+    }
+
+    pub fn blocks(&self) -> Vec<TitleBlock> {
+        if self.upper.is_none() {
+            return vec![self.block(TitlePart::Whole)];
+        }
+        let high = self.upper_view();
+        let pivot = high.pivot();
+        let upper = TitleBlock {
+            part: TitlePart::Upper,
+            pivot,
+            bottom: pivot[1],
+            zoom: high.scale(),
+            turn: high.turn(),
+        };
+        let mut out = Vec::new();
+        if self.backing().is_some() {
+            out.push(self.block(TitlePart::Backing));
+        }
+        out.push(upper);
+        out.push(self.block(TitlePart::Lower));
+        out
+    }
+
+    pub fn block_text(&self, part: TitlePart) -> std::borrow::Cow<'_, str> {
+        let lines = crate::rich::lines(&self.text);
+        let none = crate::rich::Look::default();
+        match part {
+            TitlePart::Whole | TitlePart::Backing => self.sized_text(),
+            TitlePart::Lower => lines
+                .last()
+                .map_or(String::new(), |l| crate::rich::write(l, &none))
+                .into(),
+            TitlePart::Upper if lines.len() < 2 => "".into(),
+            TitlePart::Upper => {
+                let text = crate::rich::write(&lines[0], &none);
+                match self.style.size {
+                    Some(_) => text.into(),
+                    None => format!("<font size=\"{}\">{text}</font>", Self::UPPER_SIZE).into(),
+                }
+            }
+        }
     }
 
     pub fn label(&self) -> String {
@@ -4065,6 +4227,7 @@ impl Hash for Title {
             zoom,
             rotation,
             opacity,
+            upper,
             ..
         } = self;
         (kind, align, text, style).hash(h);
@@ -4074,6 +4237,16 @@ impl Hash for Title {
             floats_bits(*rotation),
             floats_bits(*opacity),
         )
+            .hash(h);
+        upper
+            .as_ref()
+            .map(|u| {
+                (
+                    pair_bits(u.position),
+                    floats_bits(u.zoom),
+                    floats_bits(u.rotation),
+                )
+            })
             .hash(h);
     }
 }

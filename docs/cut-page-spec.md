@@ -2059,7 +2059,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Zoom draws the text larger, and the outline and the background box grow with it. The zoom scales the outline, measured in Resolve Studio 21.1.2.
   - Rotation turns the whole title, box and shadow too, counterclockwise.
   - Zoom and rotation work about the middle of a Text title.
-  - For a lower third, they work about the point where its lines meet. Resolve turns each line of a lower third about that point (D67).
+  - For a lower third, they work about the point where its lines meet (D67).
+  - Each line of a lower third has its own `position`, `zoom`, `rotation` and keyframes (p. 1178):
+    - `line` in `titles.set` and in the `keyframes` requests names the line.
+    - The two lines go together until a request names a line. Each line then keeps its values and goes apart.
+    - A request that names no line then changes the lower line.
+    - The upper line stands on its point, and the lower line hangs from its point. Each line's zoom and rotation work about its point.
+    - Opacity, text and style are the whole title's.
+    - A switch to Text or Scroll drops the upper line's values.
   - Over the tracks below (§8.14):
     - A clip on a track above covers the title where its picture covers the frame (D75).
     - A clip that fades in or out above the title fades over it.
@@ -2101,8 +2108,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The group has the alignment of the lines.
     - Its `anchor` is on a 3×3 grid, counted from the bottom left: 0 bottom left, 4 middle, 8 top right.
     - Its `position` is in fractions of the picture, from its left and bottom.
-    - Its `transformationZoomX` and `Y` are the zoom of the title.
-    - Its `transformationRotationAngle` is the rotation of the title in degrees, counterclockwise.
+    - Its `transformationZoomX` and `Y` are the zoom of its title or line.
+    - Its `transformationRotationAngle` is the rotation of its title or line in degrees, counterclockwise.
     - The zoom and the rotation are about its anchor point.
     - Resolve zooms the text alone, and turns the background and shadow with it.
   - **Points:**
@@ -2113,6 +2120,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The upper line of a lower third stands on the point where its lines meet (anchor 0, 1 or 2).
     - Its lower line hangs from that point (6, 7 or 8).
     - That point is one line, 1.31 times the text height, above the corner of the title.
+    - Lines apart each have their own point.
     - Resolve's own lower thirds put their upper line first.
   - **Stroke:**
     - `strokeSize` is the width of the outline in pixels of the timeline, as a whole number. Thus 16 is the maximum of both.
@@ -2141,8 +2149,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - its other spans as markup, where they are different from that line
     - a background, from a `backgroundHeight` above 0
     - a drop shadow, from an offset other than 0
-    - the zoom (X) and the rotation of its lower line or Text group
-  - Keyframes, and a second zoom or rotation, are lost. The warnings of the import tell so.
+    - the place, the zoom (X), the rotation and the keyframes of its Text group, or of each line of a lower third
+  - The lines of a lower third go apart when the place, zoom, rotation or keyframes of their two groups are different.
+  - Resolve's own lower thirds are different: the upper line stands at 20% from the bottom, and the lower line hangs from 22%.
   - The lower line of a lower third is the group anchored by its top, else its second group.
   - The lines of a Text title are centered, whatever their alignment.
   - If a Text title is anchored at a point other than its middle, that point is taken as its middle.
