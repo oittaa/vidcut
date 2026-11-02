@@ -321,16 +321,19 @@ fn only(ids: Vec<String>) -> String {
     ids.into_iter().next().expect("one source makes one clip")
 }
 
+pub const VIDEO_TRACKS: u32 = 99;
+pub const AUDIO_TRACKS: u32 = 999;
+
 pub fn ensure_track(p: &mut Project, id: &str) -> Result<usize> {
-    let kind = match id.chars().next() {
-        Some('V') => TrackKind::Video,
-        Some('A') => TrackKind::Audio,
+    let (kind, most) = match id.chars().next() {
+        Some('V') => (TrackKind::Video, VIDEO_TRACKS),
+        Some('A') => (TrackKind::Audio, AUDIO_TRACKS),
         _ => return Err(Error::usage(format!("{id:?} is not a track (V1, A2…)"))),
     };
     let n: usize = id[1..]
         .parse()
         .ok()
-        .filter(|&n| (1..=99).contains(&n))
+        .filter(|&n| (1..=most as usize).contains(&n))
         .ok_or_else(|| Error::usage(format!("{id:?} is not a track (V1, A2…)")))?;
     Ok(tracks::nth(p, kind, n - 1))
 }
