@@ -1965,8 +1965,8 @@ pub struct Title {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_y: Vec<f64>,
     /// The handles of the `position_keys` that have any, in order of frame.
-    /// An OTIO import gives them. A scroll has none. Left out when no
-    /// keyframe has a handle.
+    /// `keyframes.set` with `ease` or an OTIO import gives them. A scroll has
+    /// none. Left out when no keyframe has a handle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_handles: Vec<PositionHandles>,
     /// How much larger its text is drawn, from 1/4 to 4, about the middle of

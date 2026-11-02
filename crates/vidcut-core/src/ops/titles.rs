@@ -19,8 +19,8 @@ const PLACE: &str =
 const ZOOMED: &str = "a title's zoom is from 1/4 to 4";
 const TURNED: &str = "a title's rotation is degrees, from -100000 to 100000";
 const FADED: &str = "a title's opacity is from 0 to 1";
-const POSITION_EASED: &str =
-    "a title's position keyframes take no ease or handles here: an OTIO import gives handles";
+const POSITION_HANDLED: &str =
+    "a title's position keyframes take `ease`, not `in` or `out`: their handles are points";
 const SCROLL_HANDLES: &str = "a scroll's position keyframes have no handles";
 const LOOSE_HANDLES: &str = "a title's position handles need finite numbers and their keyframe";
 
@@ -63,7 +63,10 @@ fn checked_keys(t: &Title) -> Result<()> {
         .iter()
         .any(|k| k.in_handle.is_some() || k.out_handle.is_some())
     {
-        return Err(Error::invalid(POSITION_EASED));
+        return Err(Error::invalid(match t.kind {
+            TitleKind::Scroll => SCROLL_HANDLES,
+            TitleKind::Text | TitleKind::LowerThird => POSITION_HANDLED,
+        }));
     }
     if t.kind == TitleKind::Scroll && !t.position_handles.is_empty() {
         return Err(Error::invalid(SCROLL_HANDLES));

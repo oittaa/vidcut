@@ -1,8 +1,8 @@
 use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
-use vidcut_core::keyframes::PictureValue;
+use vidcut_core::keyframes::{PictureValue, ease_of, eases};
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
-use vidcut_core::model::{Clip, Title, TitleAlign, TitleKind};
+use vidcut_core::model::{Clip, Ease, Title, TitleAlign, TitleKind};
 
 use super::export::Ask;
 use super::inspector::{KeyClick, key_buttons, mark, next_key};
@@ -140,6 +140,19 @@ fn unstyled(text: &str, (a, b): (usize, usize)) -> String {
 
 fn sampled_at(c: &Clip, t: &Title, at: i64) -> Title {
     t.sampled(c.content_at(at) as f64)
+}
+
+fn key_eases(c: &Clip, t: &Title, v: PictureValue, at: i64) -> (Vec<Ease>, Option<Ease>) {
+    let keys = t.keys_of(v);
+    let found = keys
+        .iter()
+        .position(|k| c.key_time(k.frame).round() as i64 == at);
+    let path = v == PictureValue::Position;
+    match found.filter(|_| !(path && t.moves())) {
+        Some(i) if path => (eases(keys, i), Some(t.position_ease(keys[i].frame))),
+        Some(i) => (eases(keys, i), ease_of(keys, i)),
+        None => (Vec::new(), None),
+    }
 }
 
 fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
@@ -491,9 +504,9 @@ impl Workspace {
                     return;
                 };
                 let marks = mark(clip, t.keys_of(v), frame);
+                let (eases, now) = key_eases(clip, t, v, frame);
                 ui.horizontal(|ui| {
-                    let linear = v == PictureValue::Position;
-                    if let Some(click) = key_buttons(ui, &marks, linear) {
+                    if let Some(click) = key_buttons(ui, &marks, &eases, now) {
                         clicks.push((v, click));
                     }
                 });

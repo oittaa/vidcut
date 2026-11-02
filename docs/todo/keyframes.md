@@ -248,9 +248,26 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
   - The fraction of the time between the keys is the fraction of the length of the path.
   - The length is in fractions of the picture, not pixels.
   - Six sets of handles, with each frame rendered, fit this with a largest error of 0.00074 of the picture.
-- The right-click menu of the Inspector's Position key has Linear and one more item:
-  - The last key has Ease In. The first key has Ease Out. A lone key has only Linear.
-  - Ease In gives `InBez` `[0.0125, 0.025]` for keys at X 192 and Y 216 and 400, at 1920 x 1080. This one sample gives no formula.
+- The right-click menu of the Inspector's Position key depends on the place of the key:
+  - The first key has Linear and Ease Out.
+  - The last key has Linear and Ease In.
+  - A middle key has Linear, Ease In, Ease Out and Ease In and Out.
+  - A lone key has only Linear.
+  - A check mark is on the current item. A new choice replaces the old one.
+- A Zoom key has the same menu. Three keys at 30, 60 and 90 show the first, middle and last items above, with the check mark.
+- A lone Rotation key has only Linear.
+- Rotation and Opacity keys take the same menu.
+- On Zoom, Rotation and Opacity, a handle is flat and a third of the gap. On a gap of 30 frames, Ease In writes `[-10, 0]`, and Ease Out writes `[10, 0]`. Zoom writes them on X and on Y.
+- The Position menu writes these values, in fractions of the picture, with Y from the bottom as in the file:
+  - `OutBez` of a key is (value of the next key - value of the previous key) / 8.
+  - `InBez` of a key is minus that value.
+  - A missing neighbor counts as (0, 0).
+  - The gap between the keys and the distance between them do not change the values.
+- Ease In sets only `InBez`. Ease Out sets only `OutBez`. Ease In and Out sets both.
+- Linear removes the handles of that key. The handles of its neighbors stay.
+- The menu reads the neighbors when the user chooses the item. A later change of a value does not change the stored handles.
+- A new key takes the point of the path at its frame. It has no handles, and its neighbors keep theirs.
+- A title that is copied and pasted keeps its keys and handles. In the measured paste, the paste took the range between the timeline's marks, and the keys moved by the same amount.
 - The Keyframes panel of a title has only the rows of the clip. A key on the Position of the Title tab has no row.
 - The Inspector also has Keyframe buttons on these values of a title:
   - Drop Shadow: Offset, Blur and Opacity
@@ -261,9 +278,17 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 
 - A Text title and a lower third take keyframes on position, zoom, rotation and opacity. A scroll takes them on position and opacity.
 - The Title section has the Keyframe button on Across, Zoom, Rotation and Title opacity. Across holds the keyframes of Across and Down.
-- The Keyframes tab shows these values of a selected title. Position has no curve button and no ease.
-- Play and export draw a title's position along the path of its handles (`Title::sampled`). A new key takes the point of the path at its frame.
-- `keyframes.set` with `linear` removes the handles of the chosen position keys. `keyframes.list` shows them as `in` and `out`.
+- The right-click menu of the Keyframe button of Across, Zoom, Rotation and Title opacity has the items of the measured menu (`key_buttons`, `eases`). It sends `keyframes.set`.
+- On Position, the check mark is on the item that the sides of the key's handles give (`Title::position_ease`).
+- On Zoom, Rotation and Title opacity, the check mark is on the item that `ease_of` gives. A key with other handles has no check mark.
+- A scroll's Position key has no menu, and `keyframes.set` gives it no handles. Nothing measures them.
+- The Keyframes tab shows these values of a selected title. In that tab, Position has no curve button and no ease.
+- Play and export draw a title's position along the path of its handles (`Title::sampled`). A new key takes the point of the path at its frame. It has no handles, and its neighbors keep theirs.
+- `keyframes.set` and `keyframes.add` with `ease` write the measured values on the chosen position keys (`Title::ease_position`). `keyframes.list` shows the handles as `in` and `out`, with Y from the top.
+- An ease that the place of the key does not offer follows the rule of the other values. The side with no neighbor gets no handle, and the old handles of the key go.
+- `keyframes.set` refuses `in` and `out` on a title's position keys. The handles of those keys are points in the picture, not frames and a value.
+- `edit.copy`, `edit.cut` and `edit.paste` carry the keys and the handles with the title.
+- `keyframes.copy` and `keyframes.cut` return the handles of a title's position key as `in_point` and `out_point`. `keyframes.paste` puts them on the position key of a title, as they are.
 - `titles.set` and the viewer's handles put a new number on a keyframe at `at`, or at the playhead, when the value has keyframes.
 - With the playhead outside the clip, the Title section shows the curve at the playhead's clip time, as the other rows do. A new number and the Keyframe buttons add a keyframe there, outside the clip.
 - `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take a title in `clips`.
@@ -279,8 +304,6 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 
 **To do:**
 
-- the Ease In and Ease Out items of the Position key, when a measurement gives what they write
-- what a new key on a bent path does to the handles beside it, when a measurement gives it. vidcut keeps them as they are.
 - keyframes of the shadow and the background
 - the Transform and Cropping of the clip on a title
 
