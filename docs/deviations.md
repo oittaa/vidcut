@@ -1523,9 +1523,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Audio clips, titles and subtitles have no picture.
   - With several clips selected, it shows the first one that can have a picture. Its header gives the number of these clips.
   - Its picture sections are Transform, Crop and Dynamic Zoom. Each picture section has a Reset of the whole section.
-  - **Transform:** Zoom, Position X and Y, Rotation, Anchor X and Y, Pitch, Yaw, Flip Horizontal and Flip Vertical.
-    - The link button beside Zoom shows Zoom X and Zoom Y. A picture with two different zooms shows them both.
-    - The link button turns the link on again, and makes Zoom Y equal to Zoom X.
+  - **Transform:** Zoom, Position, Rotation, Anchor Point, Pitch, Yaw, Flip Horizontal and Flip Vertical.
+    - Zoom, Position and Anchor Point have X and Y on one row, with one Keyframe button and one Reset, as in Resolve.
+    - That Reset removes the keyframes of the row and sets X and Y to their usual values, as measured in Resolve Studio 21.1.2.
+    - The link button is between Zoom X and Zoom Y. With the link on, a change of either box sets both.
+    - The link button turns the link on again, and makes Zoom Y equal to Zoom X. The Reset of Zoom also turns the link on.
+    - A picture with two different zooms shows the link off.
   - **Crop:** Left, Right, Top and Bottom.
   - **Dynamic Zoom:** Off or On, Start Zoom, Start X, Start Y, End Zoom, End X, End Y, the Ease, Show Boxes and Swap.
     - A value typed while Dynamic Zoom is off turns it on.
@@ -1549,7 +1552,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Volume is the gain of the clip, from −100 dB to +30 dB (D12). It shows one decimal and the unit.
     - On a clip with volume keyframes, Volume shows the volume at the playhead. A change sets a keyframe there ([D82](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - Volume has a Keyframe button between Previous and Next arrows. A right-click sets the ease (D75).
-    - The same button sits beside Zoom, Position X, Position Y, Rotation, Anchor X, Anchor Y, Pitch, Yaw and each crop side.
+    - The same button sits beside Zoom, Position, Rotation, Anchor Point, Pitch, Yaw and each crop side.
     - Position X and Y share one keyframe. Zoom X and Y share one keyframe. Anchor X and Y share one keyframe.
     - The button is lit on a keyframe. A click adds or removes the keyframe at the playhead.
     - Previous and Next move the playhead to the keyframe of that value, also outside the clip.
@@ -1736,7 +1739,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Anchor Point X and Y in the Inspector set the point that all transforms are centered on (p. 735).
   - The onscreen Transform controls set Zoom, Position, Rotation, Pitch, Yaw and Flip (p. 767). The anchor point is not one of them.
 - **vidcut:**
-  - Anchor X and Y in the Inspector set the anchor point ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)). `picture.set` sets it from a script.
+  - Anchor Point in the Inspector sets the anchor point ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)). `picture.set` sets it from a script.
   - While the Transform handles show, a small cross marks the anchor point in the viewer.
   - The cross has no drag. Thus, as in Resolve, the viewer does not set the anchor point.
 - **Why:**
@@ -1749,7 +1752,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The onscreen Transform controls set Zoom, Position, Rotation, Pitch, Yaw and Flip (p. 767).
   - The Inspector sets Pitch and Yaw too (p. 735).
 - **vidcut:**
-  - Pitch and Yaw are in the Inspector, after Anchor X and Y ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
+  - Pitch and Yaw are in the Inspector, after Anchor Point ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
   - `picture.set` sets them from a script.
   - The Transform handles in the viewer do not set Pitch or Yaw.
 - **Why:**
