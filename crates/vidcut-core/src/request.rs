@@ -1264,9 +1264,10 @@ pub enum Request {
         /// `outline` is a color, a `size` in pixels of the timeline from 0
         /// to 16 (`0` draws none), and `outside`, true to leave the letters
         /// whole. `background` is a color
-        /// and an `opacity` from 0 to 1. `margin` is the inset from the
-        /// left and right, and from the top or bottom, as a fraction of the
-        /// picture (from 0 up to but not including 1/2). `bold` takes the
+        /// and an `opacity` from 0 to 1 (`0` draws no box). `margin` is the
+        /// inset from the left and right, and from the top or bottom, as a
+        /// fraction of the picture (from 0 up to but not including 1/2).
+        /// `bold` takes the
         /// font's bold face; `case` draws every letter `upper` or `lower`.
         /// `shadow` is a title's drop shadow. `words` shows the words as
         /// they are spoken, by the cues' word times: `show` (`highlight`,

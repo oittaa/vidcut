@@ -184,7 +184,7 @@ fn an_imsc1_file_writes_the_track_style() {
          \x20   <styling>\n\
          \x20     <style xml:id=\"s\" tts:color=\"#ffcc00\" \
          tts:fontFamily=\"Arial,proportionalSansSerif\" tts:fontSize=\"400%\" \
-         tts:lineHeight=\"131%\" tts:textAlign=\"center\"/>\n\
+         tts:lineHeight=\"136.2%\" tts:textAlign=\"center\"/>\n\
          \x20   </styling>\n\
          \x20   <layout>\n\
          \x20     <region xml:id=\"bottom\" tts:origin=\"8% 28.2%\" tts:extent=\"84% 63.8%\" \
@@ -517,7 +517,7 @@ fn the_viewer_paints_one_word_and_leaves_the_other() {
         vec![
             ("one".into(), None, false, None),
             (" ".into(), None, false, None),
-            ("TWO".into(), Some("#ff0000".into()), true, Some(2000)),
+            ("TWO".into(), Some("#ff0000".into()), true, Some(2048)),
         ]
     );
 }

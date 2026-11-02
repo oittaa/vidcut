@@ -108,6 +108,7 @@ fn spans<'a>(
     faces: &'a [Option<String>],
     ink: Color,
     size: f32,
+    line: f32,
 ) -> Vec<(String, Attrs<'a>)> {
     pieces
         .iter()
@@ -123,7 +124,7 @@ fn spans<'a>(
                 .color(p.color.as_deref().and_then(rgb).map_or(ink, color));
             if let Some(scale) = p.size_scale {
                 let px = (size * scale as f32 / 1000.0).max(1.0);
-                a = a.metrics(Metrics::new(px, px * SubtitleStyle::LINE as f32));
+                a = a.metrics(Metrics::new(px, px * line));
             }
             if p.italic {
                 a = a.style(Style::Italic);
@@ -193,13 +194,14 @@ fn over(dst: [f32; 4], src: [f32; 4]) -> [f32; 4] {
 struct Look<'a> {
     font: Option<&'a str>,
     size: f32,
+    line: f32,
     wrap: f32,
     align: Align,
     ink: [u8; 3],
     stroke: Option<Edge>,
     backing: Option<([u8; 3], f64)>,
+    frame: Frame,
     shadow: Option<Shade>,
-    boxed: bool,
     markup: Markup<'a>,
 }
 
@@ -222,6 +224,13 @@ impl Edge {
     fn past(&self) -> f32 {
         self.width / 2.0
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Frame {
+    across: f32,
+    down: f32,
+    corner: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -279,14 +288,14 @@ struct Shade {
     sigma: f32,
 }
 
-fn shade(s: &TitleShadow, w: f64, h: f64) -> Shade {
+fn shade(s: &TitleShadow, w: f64, h: f64) -> Option<Shade> {
     let [dx, dy] = s.shift();
-    Shade {
+    (dx != 0.0 || dy != 0.0).then(|| Shade {
         ink: s.ink(),
         opacity: s.alpha() as f32,
         shift: ((dx * w).round() as i32, (dy * h).round() as i32),
         sigma: (s.softness() * h / TitleShadow::BLUR_PER_PICTURE) as f32,
-    }
+    })
 }
 
 fn radii(sigma: f32) -> [usize; 3] {
@@ -445,15 +454,25 @@ fn stroked(traces: &[Traced], width: f32, into: &mut [f32], w: usize, (left, top
     }
 }
 
+fn covered((x0, y0, x1, y1): (i32, i32, i32, i32), x: i32, y: i32, corner: f32) -> f32 {
+    let half = [(x1 - x0) as f32 / 2.0, (y1 - y0) as f32 / 2.0];
+    let from = [
+        x as f32 + 0.5 - (x0 + x1) as f32 / 2.0,
+        y as f32 + 0.5 - (y0 + y1) as f32 / 2.0,
+    ];
+    let r = corner.min(half[0]).min(half[1]);
+    let (qx, qy) = (from[0].abs() - half[0] + r, from[1].abs() - half[1] + r);
+    let past = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r;
+    (0.5 - past).clamp(0.0, 1.0)
+}
+
 fn lay_out(look: &Look) -> Option<Laid> {
     let size = look.size;
+    let line = look.line;
     let wrap = look.wrap;
     let mut held = fonts().lock().unwrap_or_else(|e| e.into_inner());
     let f = &mut *held;
-    let mut buffer = Buffer::new(
-        &mut f.system,
-        Metrics::new(size, size * SubtitleStyle::LINE as f32),
-    );
+    let mut buffer = Buffer::new(&mut f.system, Metrics::new(size, size * line));
     buffer.set_wrap(Wrap::WordOrGlyph);
     buffer.set_size(Some(wrap), None);
     let installed_family = look.font.and_then(|name| installed(f, name));
@@ -477,7 +496,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
         Markup::Title(..) => Vec::new(),
     };
     let spans = match look.markup {
-        Markup::Pieces(pieces) => spans(pieces, family, &word_faces, color(look.ink), size),
+        Markup::Pieces(pieces) => spans(pieces, family, &word_faces, color(look.ink), size, line),
         Markup::Title(_, per) => runs
             .iter()
             .zip(&faces)
@@ -496,7 +515,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
                     a = a.underline(UnderlineStyle::Single);
                 }
                 let px = r.look.size.map_or(size, |s| (s as f32 * per).max(1.0));
-                a = a.metrics(Metrics::new(px, px * SubtitleStyle::LINE as f32));
+                a = a.metrics(Metrics::new(px, px * line));
                 (r.text.clone(), a)
             })
             .collect(),
@@ -526,46 +545,35 @@ fn lay_out(look: &Look) -> Option<Laid> {
     let stroke = look.stroke;
     let backing = look.backing;
     let outline = stroke.map_or(0.0, |s| s.past());
-    let slack = (size * SubtitleStyle::PADDING as f32).ceil() as i32;
+    let frame = look.frame;
     let reach = look.shadow.map_or(0, |s| {
         s.shift.0.abs().max(s.shift.1.abs()) + (3.0 * s.sigma).ceil() as i32 + 1
     });
     let pad = if backing.is_some() {
-        (outline.ceil() as i32 + 2).max(slack)
+        (outline.ceil() as i32 + 2).max(frame.down.ceil() as i32)
     } else {
         outline.ceil() as i32 + 2
     } + reach;
-    let mut bands: Vec<(i32, i32, i32, i32)> = if backing.is_some() {
-        buffer
-            .layout_runs()
-            .filter_map(|run| {
-                let mut x0 = i32::MAX;
-                let mut x1 = i32::MIN;
-                for g in run.glyphs {
-                    x0 = x0.min(g.x.floor() as i32 - slack);
-                    x1 = x1.max((g.x + g.w).ceil() as i32 + slack);
-                }
-                (x1 > x0).then(|| {
-                    (
-                        x0,
-                        run.line_top.floor() as i32 - slack,
-                        x1,
-                        (run.line_top + run.line_height).ceil() as i32 + slack,
-                    )
+    let band = backing
+        .and_then(|_| {
+            buffer
+                .layout_runs()
+                .filter_map(|run| {
+                    let (x0, x1) = run.glyphs.iter().fold((f32::MAX, f32::MIN), |(a, b), g| {
+                        (a.min(g.x), b.max(g.x + g.w))
+                    });
+                    (x1 > x0).then_some((x0, run.line_top, x1, run.line_top + run.line_height))
                 })
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    if look.boxed
-        && let Some(all) = bands
-            .iter()
-            .copied()
-            .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
-    {
-        bands = vec![all];
-    }
+                .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
+        })
+        .map(|(x0, y0, x1, y1)| {
+            (
+                (x0 - frame.across).floor() as i32,
+                (y0 - frame.down).floor() as i32,
+                (x1 + frame.across).ceil() as i32,
+                (y1 + frame.down).ceil() as i32,
+            )
+        });
     let (mut gx0, mut gx1) = (i32::MAX, i32::MIN);
     for run in buffer.layout_runs() {
         for g in run.glyphs {
@@ -654,13 +662,10 @@ fn lay_out(look: &Look) -> Option<Laid> {
         .enumerate()
         .map(|(i, (p, &o))| {
             let (x, y) = ((i % w) as i32 + left, (i / w) as i32 - pad);
-            let bg = backing
-                .filter(|_| {
-                    bands
-                        .iter()
-                        .any(|&(x0, y0, x1, y1)| x >= x0 && x < x1 && y >= y0 && y < y1)
-                })
-                .map_or([0.0; 4], |(c, a)| unit(c, a as f32));
+            let bg = match (backing, band) {
+                (Some((c, a)), Some(band)) => unit(c, a as f32 * covered(band, x, y, frame.corner)),
+                _ => [0.0; 4],
+            };
             let text = if p[3] > 0.0 {
                 [p[0] / p[3], p[1] / p[3], p[2] / p[3], p[3]]
             } else {
@@ -723,13 +728,18 @@ fn block(
     let look = Look {
         font: style.font.as_deref(),
         size,
+        line: SubtitleStyle::LINE as f32,
         wrap: (style.wrap_width(w, h) as f32).max(size),
         align: text_align(style),
         ink: style.ink(),
         stroke: style.stroke().map(|s| Edge::of(s, pixel)),
         backing: style.backing(),
-        shadow: style.shadow.as_ref().map(|s| shade(s, w, h)),
-        boxed: false,
+        frame: Frame {
+            across: (style.text_fraction() * SubtitleStyle::BOX_ACROSS * pixel) as f32,
+            down: (SubtitleStyle::BOX_DOWN * pixel) as f32,
+            corner: (h * SubtitleStyle::BOX_CORNER) as f32,
+        },
+        shadow: style.shadow.as_ref().and_then(|s| shade(s, w, h)),
         markup: Markup::Pieces(pieces),
     };
     let line = Line {
@@ -863,9 +873,11 @@ pub fn title(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Sprite> {
     let zoom = t.scale();
     let size = (h * t.text_fraction() * zoom).max(1.0) as f32;
     let pixel = h / f64::from(timeline.max(1));
+    let slack = (size * Title::PADDING as f32).ceil();
     let look = Look {
         font: t.style.font.as_deref(),
         size,
+        line: Title::LINE as f32,
         wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
         align: match t.align() {
             TitleAlign::Left => Align::Left,
@@ -875,8 +887,12 @@ pub fn title(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Sprite> {
         ink: t.ink(),
         stroke: t.stroke().map(|s| Edge::of(s, pixel * zoom)),
         backing: t.backing(),
-        shadow: t.style.shadow.as_ref().map(|s| shade(s, w, h)),
-        boxed: true,
+        frame: Frame {
+            across: slack,
+            down: slack,
+            corner: 0.0,
+        },
+        shadow: t.style.shadow.as_ref().and_then(|s| shade(s, w, h)),
         markup: Markup::Title(&t.text, (h * zoom) as f32),
     };
     let Some(Laid {
@@ -1005,7 +1021,7 @@ impl Sprite {
 #[cfg(test)]
 mod tests {
     use super::{Drawing, draw};
-    use vidcut_core::model::{Place, SubtitleStyle};
+    use vidcut_core::model::{Place, SubtitleBackground, SubtitleStyle};
     use vidcut_core::subtitles::{Piece, Shown};
 
     fn drawn(piece: Piece) -> Drawing {
@@ -1019,7 +1035,13 @@ mod tests {
             &[(&shown, Place::Bottom)],
             1280,
             720,
-            &SubtitleStyle::default(),
+            &SubtitleStyle {
+                background: Some(SubtitleBackground {
+                    color: "#000000".into(),
+                    opacity: Some(0.0),
+                }),
+                ..SubtitleStyle::default()
+            },
         )
     }
 

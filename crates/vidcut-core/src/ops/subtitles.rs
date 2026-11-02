@@ -162,7 +162,7 @@ pub(crate) fn checked_background(
     let color = paint(&b.color, "a background color")?;
     let opacity = match b.opacity {
         None => None,
-        Some(o) if fraction(o, 0.0, 1.0, true) => (o < 1.0).then_some(o),
+        Some(o) if fraction(o, 0.0, 1.0, true) => Some(o),
         Some(_) => {
             return Err(Error::invalid("a background opacity is from 0 to 1"));
         }

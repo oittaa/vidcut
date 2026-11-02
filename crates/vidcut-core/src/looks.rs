@@ -194,10 +194,11 @@ fn spoken(size: f64, show: WordsShow, pop: Option<f64>, upper: bool) -> Subtitle
     SubtitleStyle {
         size: Some(size),
         outline: Some(SubtitleOutline {
-            color: None,
+            color: Some("#000000".into()),
             size: Some((0.16 * size * 1080.0).min(TextStroke::MOST)),
             outside: Some(true),
         }),
+        background: boxed("#000000", 0.0),
         margin: Some(0.15),
         bold: Some(true),
         case: upper.then_some(LetterCase::Upper),

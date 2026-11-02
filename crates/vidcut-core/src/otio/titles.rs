@@ -5,8 +5,8 @@ use super::picture::{file_curve, read_keys};
 use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
-    Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, SubtitleStyle,
-    TextStroke, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle,
+    Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, TextStroke, Title,
+    TitleAlign, TitleKind, TitleShadow, TitleStyle,
 };
 use crate::rich::{self, Look, Span};
 
@@ -404,7 +404,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
     let size = t.text_fraction();
     let points = size * f64::from(height);
     let color = hex(t.ink());
-    let line = size * SubtitleStyle::LINE;
+    let line = size * Title::LINE;
     let [x, y] = t.place();
     let spanned = rich::lines(&t.text);
     let lines: Vec<&[Span]> = spanned.iter().map(Vec::as_slice).collect();
@@ -532,10 +532,10 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
         Some((rgb, a)) => {
             let [left, top, w, h] = drawn.backing.unwrap_or_else(|| {
                 let rows = lines.len().max(1) as f64;
-                let h = rows * line + 2.0 * SubtitleStyle::PADDING * size;
+                let h = rows * line + 2.0 * Title::PADDING * size;
                 let top = match t.kind {
                     TitleKind::Text | TitleKind::Scroll => y - h / 2.0,
-                    TitleKind::LowerThird => y + SubtitleStyle::PADDING * size - h,
+                    TitleKind::LowerThird => y + Title::PADDING * size - h,
                 };
                 let middle = if t.kind == TitleKind::Text { x } else { 0.5 };
                 [middle - Title::SAFE / 2.0, top, Title::SAFE, h]
