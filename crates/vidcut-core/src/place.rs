@@ -2,6 +2,7 @@ use crate::model::{Border, CompositeMode, Effect, EffectKind, Picture, VideoInfo
 use crate::render::Placed;
 
 const LEAST_ZOOM: f64 = 1e-9;
+const LEAST_BAR: f64 = 0.2;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Level {
@@ -437,18 +438,49 @@ pub fn upright_fit(
     }
 }
 
-pub fn fills(v: &VideoInfo, frame: (u32, u32)) -> bool {
-    let sar = (v.sar[0], v.sar[1]);
-    !v.alpha && upright_fit((v.width, v.height), sar, v.rotation, frame) == frame
+pub fn rounded_place(
+    size: (u32, u32),
+    sar: (i32, i32),
+    rotation: u16,
+    (out_w, out_h): (u32, u32),
+) -> [f64; 4] {
+    let (w, h) = upright_fit(size, sar, rotation, (out_w, out_h));
+    [
+        f64::from((out_w - w.min(out_w)) / 2),
+        f64::from((out_h - h.min(out_h)) / 2),
+        f64::from(w),
+        f64::from(h),
+    ]
 }
 
-pub fn fitted((w, h): (u32, u32), (fw, fh): (u32, u32)) -> [f64; 4] {
-    [
-        f64::from((w - fw.min(w)) / 2),
-        f64::from((h - fh.min(h)) / 2),
-        f64::from(fw),
-        f64::from(fh),
-    ]
+pub fn fitted(
+    (w, h): (u32, u32),
+    sar: (i32, i32),
+    rotation: u16,
+    (out_w, out_h): (u32, u32),
+) -> [f64; 4] {
+    let square = sar.0 == sar.1 || sar.0 <= 0 || sar.1 <= 0;
+    if !square || rotation != 0 || w == 0 || h == 0 {
+        return rounded_place((w, h), sar, rotation, (out_w, out_h));
+    }
+    let (pw, ph) = (f64::from(w), f64::from(h));
+    let (fw, fh) = (f64::from(out_w), f64::from(out_h));
+    let (sw, sh) = if pw * fh >= ph * fw {
+        (fw, fw * ph / pw)
+    } else {
+        (fh * pw / ph, fh)
+    };
+    let (x, y) = ((fw - sw) / 2.0, (fh - sh) / 2.0);
+    if x < LEAST_BAR && y < LEAST_BAR {
+        return [0.0, 0.0, fw, fh];
+    }
+    [x, y, sw, sh]
+}
+
+pub fn fills(v: &VideoInfo, frame: (u32, u32)) -> bool {
+    let sar = (v.sar[0], v.sar[1]);
+    let [_, _, w, h] = fitted((v.width, v.height), sar, v.rotation, frame);
+    !v.alpha && w == f64::from(frame.0) && h == f64::from(frame.1)
 }
 
 pub fn detail(placed: &[Placed]) -> f64 {

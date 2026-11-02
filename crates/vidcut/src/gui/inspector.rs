@@ -13,7 +13,7 @@ use vidcut_core::model::{
     Keyframe, Picture, PictureTool, Project, Retime, Speed, TrackKind, Upscaler, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
-use vidcut_core::place::upright_fit;
+use vidcut_core::place::fitted;
 use vidcut_core::time::TimeSpec;
 use vidcut_core::validate::GAIN;
 
@@ -580,16 +580,19 @@ fn rate(p: &Project, c: &Clip) -> f64 {
 pub(super) fn shape(p: &Project, c: &Clip) -> Shape {
     let (w, h) = (p.settings.width.max(1), p.settings.height.max(1));
     let frame = [f64::from(w), f64::from(h)];
-    let fitted = p
+    let size = p
         .media(&c.media)
         .and_then(|m| m.info.video.as_ref())
         .filter(|v| v.width > 0 && v.height > 0)
         .map_or(frame, |v| {
             let sar = (v.sar[0], v.sar[1]);
-            let (fw, fh) = upright_fit((v.width, v.height), sar, v.rotation, (w, h));
-            [f64::from(fw.max(1)), f64::from(fh.max(1))]
+            let [_, _, fw, fh] = fitted((v.width, v.height), sar, v.rotation, (w, h));
+            [fw.max(1.0), fh.max(1.0)]
         });
-    Shape { frame, fitted }
+    Shape {
+        frame,
+        fitted: size,
+    }
 }
 
 fn name(p: &Project, c: &Clip) -> String {

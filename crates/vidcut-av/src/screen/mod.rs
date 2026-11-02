@@ -3299,7 +3299,7 @@ fn halvings(
     let origin = match picture.sampling() {
         Sampling::Placed { .. } => return 0,
         Sampling::Colors { origin, .. } => (f64::from(origin.0), f64::from(origin.1)),
-        Sampling::Own => (0.0, 0.0),
+        Sampling::Own | Sampling::Rounded => (0.0, 0.0),
     };
     let (sw, sh) = (f64::from(picture.width()), f64::from(picture.height()));
     let upright = if picture.rotation() % 180 == 90 {
@@ -3309,8 +3309,8 @@ fn halvings(
     };
     let most = match innermost(placing.map(|(p, _)| p)).last() {
         None => {
-            let (_, _, w, h) = picture.placement(size.0, size.1);
-            f64::max(upright.0 / f64::from(w), upright.1 / f64::from(h))
+            let [_, _, w, h] = picture.placement(size.0, size.1);
+            f64::max(upright.0 / w, upright.1 / h)
         }
         Some(l) => {
             let [a, b, e, c, d, f, g, h] = l.back;
@@ -3541,7 +3541,7 @@ fn params_of(
     (halvings, alpha): (u32, u32),
 ) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
-    let (x, y, w, h) = picture.placement(size.0, size.1);
+    let place = picture.placement(size.0, size.1);
     let turns = u32::from(picture.rotation() / 90) % 4;
     let (sw, sh) = (picture.width(), picture.height());
     let upright = if turns % 2 == 1 { (sh, sw) } else { (sw, sh) };
@@ -3572,7 +3572,7 @@ fn params_of(
         None => colors.gamut,
     };
     let floats: [[f64; 4]; 8] = [
-        [f64::from(x), f64::from(y), f64::from(w), f64::from(h)],
+        place,
         [f64::from(upright.0), f64::from(upright.1), cover.0, cover.1],
         range,
         [colors.kr, colors.kb, kg, colors.linear_scale],
@@ -3599,7 +3599,7 @@ fn params_of(
         f64::from(u8::from(paired)),
     ];
     let (made, part) = match picture.sampling() {
-        Sampling::Own => ([0.0; 4], [0.0; 4]),
+        Sampling::Own | Sampling::Rounded => ([0.0; 4], [0.0; 4]),
         Sampling::Colors { origin, .. } => (
             [1.0, 0.0, 0.0, 0.0],
             [f64::from(origin.0), f64::from(origin.1), 0.0, 0.0],

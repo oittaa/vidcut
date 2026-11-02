@@ -54,11 +54,11 @@ pub struct Shape {
 impl Shape {
     pub fn of(v: &VideoInfo, (w, h): (u32, u32)) -> Self {
         let sar = (v.sar[0], v.sar[1]);
-        let (fw, fh) = crate::place::upright_fit((v.width, v.height), sar, v.rotation, (w, h));
+        let [_, _, fw, fh] = crate::place::fitted((v.width, v.height), sar, v.rotation, (w, h));
         let (dw, dh) = v.display_size();
         Self {
             frame: [w.into(), h.into()],
-            fitted: [fw.into(), fh.into()],
+            fitted: [fw, fh],
             source: [dw.into(), dh.into()],
         }
     }

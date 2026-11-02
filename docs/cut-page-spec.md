@@ -2312,7 +2312,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A clip covers the tracks below it only where its picture covers the frame, at its usual values too.
     - The tracks below show in the bars around a picture of another shape, outside a placed picture, and where it is cropped.
     - Where there are no tracks below, these areas are black.
-    - A clip whose fitted picture fills the frame, to within half a pixel, covers them all.
+    - A clip whose fitted picture fills the frame covers them all ([§13](#the-fit-to-the-timeline)).
     - Its edges are smoothed over a pixel.
     - The two sides of a dissolve mix into each other first, and then go over the tracks below.
     - Thus the tracks below do not show through where both sides cover the frame (D50).
@@ -3002,3 +3002,22 @@ The default Resize Filter of a project is Sharper. These facts are measured in R
 - The weights of each axis are divided by their sum.
 - A read past the edge of the picture takes the edge pixel.
 - The filter works in the timeline gamma.
+
+### The fit to the timeline
+
+These facts are measured in Resolve Studio 21.1.2, in a default project that scales a picture to fit.
+
+- One factor scales the picture on both axes. It is the smaller of two values: frame width / picture width, and frame height / picture height.
+- The picture is centered. A bar at its side can be a part of a pixel.
+- A pixel that the picture covers in part reads that part of its value, over black.
+- The Zoom and the Position of a clip work on this fit. They do not start from a rounded size.
+- These pictures were measured in a timeline of 1280 x 720:
+  - 1000 x 562: the factor is 1.28 and the height is 719.36. Each bar is 0.32 of a pixel, and the top and bottom rows read 0.68 of their value.
+  - 999 x 800: the factor is 0.9 and the width is 899.1. Each bar is 190.45 pixels, and the edge columns read 0.55 of their value.
+  - 1700 x 956: the rule gives a bar of 0.094 of a pixel, but the top and bottom rows read their full value.
+- 1920 x 1080 in a timeline of 1921 x 1081 has the factor 1921 / 1920 and a bar of 0.21875 of a pixel. The edge rows read a part of their value.
+- The limit between no bar and a bar is between 0.094 and 0.21875 of a pixel. It was not measured.
+  - vidcut counts a bar under 0.2 of a pixel as no bar. The picture then fills the frame on each axis.
+  - A picture over a track below was not measured. In vidcut, the track below shows through a bar and through the uncovered part of an edge pixel.
+- A picture with pixels that are not square, or with a rotation in its file, was not measured.
+  - vidcut gives such a picture a fitted size that is rounded to even, and a place in whole pixels.
