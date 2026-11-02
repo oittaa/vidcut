@@ -1103,6 +1103,13 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - Solo silences the tracks that are not soloed.
   - Mute and solo apply to the export too (p. 650).
   - Track pan, and FX other than the Ducker: out.
+- **Voice Isolation** (p. 774; measured in Resolve Studio 21.1.2, on a clip):
+  - It has a switch and an Amount from 0 to 100.
+  - A fresh clip turned on gives Amount 100.
+  - Amount typed 0 stays on, with the value 0.
+  - A clip's stored Amount comes back when the switch goes on again.
+  - vidcut: `clip.set` and `track.set` take the switch (`voice_isolation_on`) and the Amount (`voice_isolation`) ([X64](deviations.md#x64-voice-isolation-is-free-on-a-clip-or-a-track)).
+  - vidcut: at Amount 0 the sound equals the source, and the model does not run.
 - **Ducking** (pp. 744, 778–779):
   - The Ducker Track FX lowers a target track, such as music, where one or more source tracks, such as dialogue, are active.
   - It changes the level only. It compresses nothing.

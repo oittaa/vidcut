@@ -1544,11 +1544,10 @@ impl Workspace {
                 .project()
                 .and_then(|p| clips.iter().find_map(|id| super::isolation::heard(p, id)));
             if let Some(current) = current {
-                let amount = match current {
-                    Some(_) => 0.0,
-                    None => super::isolation::FIRST_AMOUNT,
-                };
-                self.isolate(super::isolation::Isolate::Clips(clips), amount);
+                self.isolate(
+                    super::isolation::Isolate::Clips(clips),
+                    super::isolation::Change::Switch(current.is_none()),
+                );
             }
         }
         if pressed(Key::A) && m.command && self.pool_focus {

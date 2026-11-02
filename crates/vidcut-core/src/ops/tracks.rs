@@ -103,7 +103,8 @@ pub struct TrackProps {
     pub muted: Option<bool>,
     pub solo: Option<bool>,
     pub volume_db: Option<f64>,
-    pub voice_isolation: Option<Option<f64>>,
+    pub voice_isolation: Option<f64>,
+    pub voice_isolation_on: Option<bool>,
     pub duck: Option<Option<crate::model::Duck>>,
     pub video_enabled: Option<bool>,
     pub render_cache: Option<bool>,
@@ -138,9 +139,11 @@ pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     if let Some(v) = props.volume_db {
         t.volume_db = v;
     }
-    if let Some(v) = props.voice_isolation {
-        t.voice_isolation = v;
-    }
+    t.voice_isolation = super::changed_isolation(
+        t.voice_isolation,
+        props.voice_isolation_on,
+        props.voice_isolation,
+    );
     if let Some(d) = &props.duck {
         t.duck = d.clone();
     }

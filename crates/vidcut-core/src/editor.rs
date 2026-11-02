@@ -3301,6 +3301,7 @@ fn mutate(
             name,
             color,
             voice_isolation,
+            voice_isolation_on,
             retime,
             render_cache,
             download,
@@ -3313,7 +3314,7 @@ fn mutate(
             let or_none =
                 |v: &Option<String>| v.as_ref().map(|v| (!v.is_empty()).then(|| v.clone()));
             let voice_isolation = voice_isolation.map(ops::checked_isolation).transpose()?;
-            if voice_isolation.is_some_and(|v| v > 0.0) && !dry_run {
+            if ops::isolation_runs(*voice_isolation_on, voice_isolation) && !dry_run {
                 env.voice_isolation(*download)?;
             }
             let props = ClipProps {
@@ -3324,6 +3325,7 @@ fn mutate(
                 name: or_none(name),
                 color: or_none(color),
                 voice_isolation,
+                voice_isolation_on: *voice_isolation_on,
                 retime: *retime,
                 render_cache: *render_cache,
             };
@@ -3589,6 +3591,7 @@ fn mutate(
             solo: None,
             volume_db: None,
             voice_isolation: None,
+            voice_isolation_on: None,
             duck: None,
             video_enabled: None,
             render_cache: None,
@@ -3635,6 +3638,7 @@ fn mutate(
             solo,
             volume_db,
             voice_isolation,
+            voice_isolation_on,
             duck,
             download,
             video_enabled,
@@ -3643,7 +3647,7 @@ fn mutate(
             ..
         } => {
             let voice_isolation = voice_isolation.map(ops::checked_isolation).transpose()?;
-            if voice_isolation.is_some_and(|v| v > 0.0) && !dry_run {
+            if ops::isolation_runs(*voice_isolation_on, voice_isolation) && !dry_run {
                 env.voice_isolation(*download)?;
             }
             let duck = match duck {
@@ -3662,7 +3666,8 @@ fn mutate(
                 muted: *muted,
                 solo: *solo,
                 volume_db: *volume_db,
-                voice_isolation: voice_isolation.map(|v| (v > 0.0).then_some(v)),
+                voice_isolation,
+                voice_isolation_on: *voice_isolation_on,
                 duck,
                 video_enabled: *video_enabled,
                 render_cache: *render_cache,
@@ -5281,7 +5286,7 @@ fn place_imported(
                     effects: carry(&c.audio_effects, sound_from),
                     voice_isolation: c
                         .voice_isolation
-                        .and_then(|v| ops::checked_isolation(v).ok()),
+                        .filter(|v| ops::ISOLATION.contains(&v.amount)),
                 })
             });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {
@@ -6034,8 +6039,7 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                 );
                 track.voice_isolation = s
                     .voice_isolation
-                    .and_then(|v| ops::checked_isolation(v).ok())
-                    .filter(|v| *v > 0.0);
+                    .filter(|v| ops::ISOLATION.contains(&v.amount));
                 track.video_enabled = s.video_enabled;
                 track.render_cache = s.render_cache;
                 track.name = s.name.clone();

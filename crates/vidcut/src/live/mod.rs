@@ -1737,13 +1737,14 @@ impl Live {
             duck: Some(Some(set)),
             download,
             voice_isolation,
+            voice_isolation_on,
             ..
         } = &envelope.request
         else {
             return None;
         };
         let d = vidcut_core::duck::patched(p, track, set).ok()?;
-        let isolate = voice_isolation.is_some_and(|v| v > 0.0)
+        let isolate = vidcut_core::ops::isolation_runs(*voice_isolation_on, *voice_isolation)
             && *download
             && !vidcut_av::isolate::needed(&paths::models_dir()).is_empty();
         let detect = d.detect();
@@ -3136,15 +3137,17 @@ impl Live {
                 Step::Measure(Box::new(fetch), Box::new(envelope))
             }
             Request::ClipSet {
-                voice_isolation: Some(amount),
+                voice_isolation,
+                voice_isolation_on,
                 download: true,
                 ..
             }
             | Request::TrackSet {
-                voice_isolation: Some(amount),
+                voice_isolation,
+                voice_isolation_on,
                 download: true,
                 ..
-            } if amount > 0.0
+            } if vidcut_core::ops::isolation_runs(voice_isolation_on, voice_isolation)
                 && !envelope.dry_run
                 && !vidcut_av::isolate::needed(&paths::models_dir()).is_empty() =>
             {

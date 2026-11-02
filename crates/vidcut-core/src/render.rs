@@ -796,7 +796,8 @@ pub enum AudioPiece {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keyed: Option<Keyed>,
         /// Voice Isolation's Amount over it, up to 100: the clip's own,
-        /// else its track's; left out when the clip's own is 0.
+        /// else its track's; left out when that is off or at 0, where the
+        /// model does not run.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         isolation: Option<f64>,
     },
@@ -2260,7 +2261,10 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                             *joined =
                                 x > start.max(a) && c.pace().steady(x - 1 - c.start) == Some(1);
                             *f2 = fade(f, x, falling);
-                            *isolation = isolation.or(track.voice_isolation).filter(|a| *a > 0.0);
+                            *isolation = audio
+                                .voice_isolation
+                                .or(track.voice_isolation)
+                                .and_then(|v| v.heard());
                         }
                         push_audio(lane, piece);
                     }
@@ -2341,7 +2345,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         speed: c.pace().rate(x - c.start),
         joined: false,
         fade: None,
-        isolation: audio.voice_isolation,
+        isolation: None,
         keyed,
     }
 }

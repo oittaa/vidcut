@@ -1240,7 +1240,7 @@ pub struct ImportedClip {
     pub gain_db: f64,
     pub gain_keys: Vec<Keyframe>,
     pub muted: bool,
-    pub voice_isolation: Option<f64>,
+    pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub link: Option<i64>,
     pub effects: Vec<Value>,
     pub audio_effects: Vec<Value>,
@@ -1350,7 +1350,7 @@ pub struct ImportedTrack {
     pub muted: bool,
     pub solo: bool,
     pub volume_db: f64,
-    pub voice_isolation: Option<f64>,
+    pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub duck: Option<crate::model::Duck>,
     pub video_enabled: bool,
     pub render_cache: bool,
@@ -1374,7 +1374,7 @@ impl ImportedTrack {
                 .or(editor["SoloOn"].as_bool().filter(|_| audio))
                 .unwrap_or(false),
             volume_db: meta["volume_db"].as_f64().unwrap_or(0.0),
-            voice_isolation: meta["voice_isolation"].as_f64(),
+            voice_isolation: serde_json::from_value(meta["voice_isolation"].clone()).ok(),
             duck: serde_json::from_value(meta["duck"].clone()).ok(),
             video_enabled: meta["video_enabled"].as_bool().unwrap_or(audio || enabled),
             render_cache: meta["render_cache"].as_bool().unwrap_or(true),
@@ -2038,7 +2038,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         gain_db: meta["gain_db"].as_f64().unwrap_or(0.0),
                         gain_keys: our_keys(meta).unwrap_or_default(),
                         muted: meta["muted"].as_bool().unwrap_or(false),
-                        voice_isolation: meta["voice_isolation"].as_f64(),
+                        voice_isolation: serde_json::from_value(meta["voice_isolation"].clone())
+                            .ok(),
                         link: link_group(item),
                         effects,
                         audio_effects: Vec::new(),
@@ -2126,7 +2127,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let gain = meta["gain_db"].as_f64().or_else(|| effects::gain(item));
             let gain_keys = our_keys(meta).unwrap_or_else(|| effects::gain_keys(item));
             effects::drop_gain_keys(&mut effects);
-            let voice_isolation = meta["voice_isolation"].as_f64();
+            let voice_isolation = serde_json::from_value(meta["voice_isolation"].clone()).ok();
             let stream = meta["stream"]
                 .as_u64()
                 .map(|s| s as u32)
@@ -2450,11 +2451,11 @@ pub fn unheard_isolation(p: &Project, span: Option<(i64, i64)>) -> Option<String
             .filter(|c| {
                 c.audio
                     .as_ref()
-                    .is_some_and(|au| au.voice_isolation.is_some_and(|v| v > 0.0))
+                    .is_some_and(|au| au.voice_isolation.is_some_and(|v| v.heard().is_some()))
             })
             .filter(|c| exported(c, a, b))
             .collect();
-        match t.voice_isolation {
+        match t.voice_isolation.and_then(|v| v.heard()) {
             Some(_)
                 if t.clips
                     .iter()
