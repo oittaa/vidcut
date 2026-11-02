@@ -1098,7 +1098,7 @@ pub struct Track {
     /// While any track is soloed, only soloed tracks are heard (the mixer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
-    /// The mixer fader, in dB (decision D12's range, -60..24).
+    /// The mixer fader, in dB, from -100 to 10.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub volume_db: f64,
     /// Voice Isolation on the track's clips that have none of their own,
@@ -1864,6 +1864,14 @@ fn is_zero_frames(n: &i64) -> bool {
 }
 
 impl Speed {
+    pub const RANGE: std::ops::RangeInclusive<f64> = 0.0001..=1000.0;
+
+    pub fn percent(speed: f64) -> f64 {
+        let percent = speed * 100.0;
+        let places = if percent.abs() < 1.0 { 100.0 } else { 1.0 };
+        (percent * places).round() / places
+    }
+
     pub fn constant(speed: f64) -> Self {
         Self {
             sections: Arc::from([Section {
@@ -2877,7 +2885,7 @@ pub struct Keyframe {
     /// `skip` is. The keyframe stays on its content through trims, slips
     /// and splits.
     pub frame: i64,
-    /// The value there: the volume in dB, from -60 to 24.
+    /// The value there: the volume in dB, from -100 to 30.
     pub value: f64,
     /// The In handle, which shapes the change before the keyframe.
     #[serde(rename = "in", default, skip_serializing_if = "Option::is_none")]
@@ -2915,7 +2923,7 @@ pub struct ClipAudio {
     pub head: i64,
     /// Audio ends this many frames after the clip end (positive: an L cut).
     pub tail: i64,
-    /// The volume in dB, from -60 to 24, while the clip has no volume
+    /// The volume in dB, from -100 to 30, while the clip has no volume
     /// keyframes.
     pub gain_db: f64,
     /// The volume keyframes (decision D81), in the order of their frames,

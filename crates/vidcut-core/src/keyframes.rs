@@ -270,7 +270,7 @@ pub fn checked(value: f64) -> crate::error::Result<f64> {
         Ok(value)
     } else {
         Err(crate::error::Error::invalid(format!(
-            "gain {value} dB outside -60..24 dB"
+            "gain {value} dB outside -100..30 dB"
         )))
     }
 }

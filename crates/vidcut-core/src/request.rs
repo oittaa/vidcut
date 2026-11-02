@@ -1199,6 +1199,7 @@ pub enum Request {
         muted: Option<bool>,
         #[serde(default)]
         solo: Option<bool>,
+        /// The fader, in dB, from -100 to 10.
         #[serde(default)]
         volume_db: Option<f64>,
         /// Voice Isolation's Amount, from 0 to 100: that much of the voice
@@ -1265,7 +1266,7 @@ pub enum Request {
         #[serde(default)]
         look: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -60..24), name, Clip Color,
+    /// Enable/disable video (D), mute, gain (dB, -100..30), name, Clip Color,
     /// Voice Isolation, Retime Process and Render Cache.
     #[serde(rename = "clip.set")]
     ClipSet {
@@ -1323,7 +1324,7 @@ pub enum Request {
     /// volume keyframes, mute, Voice Isolation and transitions, and without
     /// its track's mixer. The volume of a clip with volume keyframes is its
     /// highest keyframe, and every keyframe moves by the same dB (decision
-    /// D83). The volume stops at -60 and +24 dB. One undo step; a dry run
+    /// D83). The volume stops at -100 and +30 dB. One undo step; a dry run
     /// gives the volumes and changes nothing. Returns the `target`, the
     /// `peak_limit` (null without one), and each clip's `level` (null when
     /// silent), its volume before (`from_db`) and after (`gain_db`), `held`
@@ -1384,8 +1385,8 @@ pub enum Request {
         param: KeyParam,
         #[serde(default)]
         at: Option<TimeSpec>,
-        /// The value at the keyframe. A number for volume (dB, from -60
-        /// to 24), rotation (degrees), pitch and yaw (from -1.5 to 1.5), a
+        /// The value at the keyframe. A number for volume (dB, from -100
+        /// to 30), rotation (degrees), pitch and yaw (from -1.5 to 1.5), a
         /// crop side (a fraction), crop softness (from -100 to 100) and
         /// opacity (from 0 to 1). For position, zoom and the anchor point,
         /// two numbers, x then y, or one number for both axes of zoom.
@@ -1412,7 +1413,7 @@ pub enum Request {
         #[serde(default)]
         value: Option<KeyValue>,
         /// Added to each value. A number, or two numbers for position,
-        /// zoom and the anchor point. Volume stops at -60 and +24 dB. A
+        /// zoom and the anchor point. Volume stops at -100 and +30 dB. A
         /// picture value stops at its own limits.
         #[serde(default)]
         by: Option<KeyValue>,
