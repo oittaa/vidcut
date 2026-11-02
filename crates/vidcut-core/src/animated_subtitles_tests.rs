@@ -131,6 +131,7 @@ fn an_imsc1_file_writes_capitals_and_bold() {
             frame_rate: Some(25.0),
             positions: true,
             style: &style,
+            timeline_height: 1080,
         },
     )
     .text;

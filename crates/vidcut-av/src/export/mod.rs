@@ -538,7 +538,7 @@ fn first_run(
     let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr)
         .with_timeline(plan.colors)?
         .with_dynamic(enc.dynamic)
-        .with_burn(burn.0, burn.1);
+        .with_burn(burn.0, burn.1, plan.height);
     if let Some(d) = decoder {
         frames = frames.decode_on(d.clone());
     }
@@ -1024,7 +1024,7 @@ fn encode(
                 .with_timeline(plan.colors)?
                 .with_dynamic(enc.dynamic)
                 .with_light(light)
-                .with_burn(burned.0, burned.1);
+                .with_burn(burned.0, burned.1, plan.height);
             if let Some(d) = decoder {
                 frames = frames.decode_on(d.clone());
             }

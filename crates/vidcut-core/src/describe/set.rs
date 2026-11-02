@@ -331,7 +331,7 @@ fn seconds(v: &Value) -> String {
         .map_or_else(|| raw(v), |n| format!("{}s", trim(n)))
 }
 
-const STYLE: [(&str, &str); 20] = [
+const STYLE: [(&str, &str); 21] = [
     ("font", "Font"),
     ("size", "Size"),
     ("color", "Color"),
@@ -339,6 +339,7 @@ const STYLE: [(&str, &str); 20] = [
     ("case", "Case"),
     ("outline.color", "Outline"),
     ("outline.size", "Outline Size"),
+    ("outline.outside", "Outside Only"),
     ("background.color", "Background"),
     ("background.opacity", "Opacity"),
     ("shadow", "Shadow"),
@@ -356,10 +357,9 @@ const STYLE: [(&str, &str); 20] = [
 
 fn style_show(key: &str) -> Show<'static> {
     match key {
-        "size" | "outline.size" | "background.opacity" | "shadow.opacity" | "margin"
-        | "words.pop" => &percent,
+        "size" | "background.opacity" | "shadow.opacity" | "margin" | "words.pop" => &percent,
         "shadow.offset" => &percents,
-        "shadow.blur" => &number,
+        "outline.size" | "shadow.blur" => &number,
         "case" | "words.show" | "speaker_color" => &word,
         _ => &raw,
     }

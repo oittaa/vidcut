@@ -792,7 +792,14 @@ fn layout(cues: &[Timed], style: &SubtitleStyle) -> ([Region; 3], Vec<String>) {
     (regions, warnings)
 }
 
-fn style_attrs(style: &SubtitleStyle) -> String {
+const OUTLINE_MOST: f64 = 0.1;
+
+fn outline_share(style: &SubtitleStyle, height: u32) -> Option<f64> {
+    let stroke = style.stroke()?;
+    Some(stroke.past_letter() / (style.text_fraction() * f64::from(height.max(1))))
+}
+
+fn style_attrs(style: &SubtitleStyle, height: u32) -> String {
     let font = match &style.font {
         Some(f) if f.contains(char::is_whitespace) => {
             format!("'{}',proportionalSansSerif", escape_xml(f))
@@ -811,11 +818,11 @@ fn style_attrs(style: &SubtitleStyle) -> String {
     if style.bold == Some(true) {
         attrs.push_str(" tts:fontWeight=\"bold\"");
     }
-    if let Some((rgb, size)) = style.stroke() {
+    if let (Some(stroke), Some(share)) = (style.stroke(), outline_share(style, height)) {
         attrs.push_str(&format!(
             " tts:textOutline=\"{} {}%\"",
-            hex(rgb),
-            plain_number(size * 100.0)
+            hex(stroke.ink),
+            plain_number(share.min(OUTLINE_MOST) * 100.0)
         ));
     }
     attrs
@@ -876,8 +883,16 @@ pub fn write(
     language: Option<&str>,
     frame_rate: Option<f64>,
     style: &SubtitleStyle,
+    height: u32,
 ) -> (String, Vec<String>) {
-    let (placed, warnings) = layout(cues, style);
+    let (placed, mut warnings) = layout(cues, style);
+    if outline_share(style, height).is_some_and(|share| share > OUTLINE_MOST) {
+        warnings.push(
+            "the outline is wider than the IMSC1 file holds, a tenth of the text height; \
+             the file has a tenth"
+                .to_string(),
+        );
+    }
     let inset = (style.inset() * GRID).round() as i64;
     let regions: String = [Place::Bottom, Place::Middle, Place::Top]
         .into_iter()
@@ -905,7 +920,7 @@ pub fn write(
          </head>\n  <body style=\"s\">\n    <div>\n",
         escape_xml(language.unwrap_or("")),
         rate_attr(frame_rate),
-        style_attrs(style),
+        style_attrs(style, height),
     );
     let track_background = background(style);
     for c in cues {

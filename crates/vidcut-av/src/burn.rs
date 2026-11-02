@@ -6,7 +6,8 @@ use cosmic_text::{
 };
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
-    Place, SubtitleAlign, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle,
+    Place, SubtitleAlign, SubtitleStyle, TextStroke, Title, TitleAlign, TitleKind, TitleShadow,
+    TitleStyle,
 };
 use vidcut_core::subtitles::{Piece, Shown, rgb};
 
@@ -195,11 +196,32 @@ struct Look<'a> {
     wrap: f32,
     align: Align,
     ink: [u8; 3],
-    stroke: Option<([u8; 3], f64)>,
+    stroke: Option<Edge>,
     backing: Option<([u8; 3], f64)>,
     shadow: Option<Shade>,
     boxed: bool,
     markup: Markup<'a>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Edge {
+    ink: [u8; 3],
+    width: f32,
+    outside: bool,
+}
+
+impl Edge {
+    fn of(s: TextStroke, pixel: f64) -> Self {
+        Self {
+            ink: s.ink,
+            width: (s.width * pixel) as f32,
+            outside: s.outside,
+        }
+    }
+
+    fn past(&self) -> f32 {
+        self.width / 2.0
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -220,6 +242,7 @@ struct Line {
     pieces: Vec<Piece>,
     place: Place,
     size: (u32, u32),
+    timeline: u32,
     style: SubtitleStyle,
 }
 
@@ -502,7 +525,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     });
     let stroke = look.stroke;
     let backing = look.backing;
-    let outline = stroke.map_or(0.0, |(_, s)| size * s as f32);
+    let outline = stroke.map_or(0.0, |s| s.past());
     let slack = (size * SubtitleStyle::PADDING as f32).ceil() as i32;
     let reach = look.shadow.map_or(0, |s| {
         s.shift.0.abs().max(s.shift.1.abs()) + (3.0 * s.sigma).ceil() as i32 + 1
@@ -595,13 +618,19 @@ fn lay_out(look: &Look) -> Option<Laid> {
     let traced = stroke.and_then(|_| traces(&buffer, f));
     drop(held);
     let alpha: Vec<f32> = canvas.iter().map(|p| p[3]).collect();
+    let on_top = traced.is_some() && stroke.is_some_and(|s| !s.outside);
     let (ring, edge) = match (stroke, traced) {
-        (Some((rgb, _)), Some(list)) => {
+        (Some(s), Some(list)) if s.outside => {
             let mut ring = alpha.clone();
-            stroked(&list, 2.0 * outline, &mut ring, w, (left, -pad));
-            (ring, rgb)
+            stroked(&list, s.width, &mut ring, w, (left, -pad));
+            (ring, s.ink)
         }
-        (Some((rgb, _)), None) => (dilate(&alpha, w, h, outline), rgb),
+        (Some(s), Some(list)) => {
+            let mut ring = vec![0.0; alpha.len()];
+            stroked(&list, s.width, &mut ring, w, (left, -pad));
+            (ring, s.ink)
+        }
+        (Some(s), None) => (dilate(&alpha, w, h, s.past()), s.ink),
         (None, _) => (vec![0.0; alpha.len()], [0, 0, 0]),
     };
     let shade: Vec<f32> = match look.shadow {
@@ -641,7 +670,11 @@ fn lay_out(look: &Look) -> Option<Laid> {
                 Some(sh) => over(bg, unit(sh.ink, shade[i])),
                 None => bg,
             };
-            over(over(behind, unit(edge, o)), text)
+            if on_top {
+                over(over(behind, text), unit(edge, o))
+            } else {
+                over(over(behind, unit(edge, o)), text)
+            }
         })
         .collect();
     let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
@@ -680,19 +713,20 @@ fn block(
     pieces: &[Piece],
     pop: f64,
     place: Place,
-    width: u32,
-    height: u32,
+    (width, height): (u32, u32),
+    timeline: u32,
     style: &SubtitleStyle,
 ) -> (Option<Sprite>, Option<Sprite>) {
     let (w, h) = (f64::from(width), f64::from(height));
     let size = (height as f32 * style.text_fraction() as f32).max(1.0);
+    let pixel = h / f64::from(timeline.max(1));
     let look = Look {
         font: style.font.as_deref(),
         size,
         wrap: (style.wrap_width(w, h) as f32).max(size),
         align: text_align(style),
         ink: style.ink(),
-        stroke: style.stroke(),
+        stroke: style.stroke().map(|s| Edge::of(s, pixel)),
         backing: style.backing(),
         shadow: style.shadow.as_ref().map(|s| shade(s, w, h)),
         boxed: false,
@@ -702,6 +736,7 @@ fn block(
         pieces: pieces.to_vec(),
         place,
         size: (width, height),
+        timeline,
         style: style.clone(),
     };
     let Some(laid) = laid_line(line, &look) else {
@@ -726,6 +761,10 @@ fn block(
         let big = Look {
             size: size * pop as f32,
             wrap: width as f32 * 4.0,
+            stroke: look.stroke.map(|s| Edge {
+                width: s.width * pop as f32,
+                ..s
+            }),
             backing: None,
             markup: Markup::Pieces(&word),
             ..look
@@ -767,7 +806,7 @@ pub struct Painted<'a> {
     pub style: &'a SubtitleStyle,
 }
 
-pub fn paint(cues: &[Painted<'_>], width: u32, height: u32) -> Drawing {
+pub fn paint(cues: &[Painted<'_>], width: u32, height: u32, timeline: u32) -> Drawing {
     let mut drawing = Drawing::default();
     for place in [Place::Top, Place::Middle, Place::Bottom] {
         let here: Vec<&Painted<'_>> = cues
@@ -794,7 +833,7 @@ pub fn paint(cues: &[Painted<'_>], width: u32, height: u32) -> Drawing {
             let pop = here[i..j].iter().map(|c| c.shown.pop).fold(1.0, f64::max);
             let (line, popped) = match pieces.is_empty() {
                 true => (None, None),
-                false => block(&pieces, pop, place, width, height, style),
+                false => block(&pieces, pop, place, (width, height), timeline, style),
             };
             drawing.lines.extend(line);
             drawing.pops.extend(popped);
@@ -813,16 +852,17 @@ pub fn draw(cues: &[(&Shown, Place)], width: u32, height: u32, style: &SubtitleS
             style,
         })
         .collect();
-    paint(&painted, width, height)
+    paint(&painted, width, height, height)
 }
 
-pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
+pub fn title(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Sprite> {
     if t.text.trim().is_empty() {
         return Vec::new();
     }
     let (w, h) = (f64::from(width), f64::from(height));
     let zoom = t.scale();
     let size = (h * t.text_fraction() * zoom).max(1.0) as f32;
+    let pixel = h / f64::from(timeline.max(1));
     let look = Look {
         font: t.style.font.as_deref(),
         size,
@@ -833,7 +873,7 @@ pub fn title(t: &Title, width: u32, height: u32) -> Vec<Sprite> {
             TitleAlign::Right => Align::Right,
         },
         ink: t.ink(),
-        stroke: t.stroke(),
+        stroke: t.stroke().map(|s| Edge::of(s, pixel * zoom)),
         backing: t.backing(),
         shadow: t.style.shadow.as_ref().map(|s| shade(s, w, h)),
         boxed: true,
@@ -939,7 +979,7 @@ pub fn backing_box(t: &Title, width: u32, height: u32) -> Option<[f64; 4]> {
         },
         ..t.clone()
     };
-    let s = title(&upright, width, height).into_iter().next()?;
+    let s = title(&upright, width, height, height).into_iter().next()?;
     let (w, h) = (f64::from(width), f64::from(height));
     Some([
         f64::from(s.x) / w,

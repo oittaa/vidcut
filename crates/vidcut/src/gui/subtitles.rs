@@ -1347,7 +1347,9 @@ impl Workspace {
             });
         });
         egui::Grid::new("cue-style-fields").show(ui, |ui| {
-            let _ = d.fields.rows(ui, "cue-style", &d.families, "the track");
+            let _ = d
+                .fields
+                .rows(ui, "cue-style", &d.families, "the track", "the track");
             ui.label("Margin");
             ui.add(
                 egui::TextEdit::singleline(&mut d.margin)
@@ -1660,10 +1662,18 @@ impl Workspace {
             d.load(&l.style);
             changed = true;
         }
+        let outline_hint = format!(
+            "{} pixels",
+            super::looks::plain(SubtitleStyle::default().stroke().map(|s| s.width))
+        );
         egui::Grid::new("subtitle-style-fields").show(ui, |ui| {
-            let (c, e) = d
-                .fields
-                .rows(ui, "subtitle", &d.families, "5.5% of the picture");
+            let (c, e) = d.fields.rows(
+                ui,
+                "subtitle",
+                &d.families,
+                "5.5% of the picture",
+                &outline_hint,
+            );
             changed |= c;
             enter |= e;
             let mut row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {

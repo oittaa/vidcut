@@ -19,6 +19,7 @@ fn style() -> SubtitleStyle {
         outline: Some(SubtitleOutline {
             color: Some("#000000".into()),
             size: Some(0.0),
+            outside: None,
         }),
         background: Some(SubtitleBackground {
             color: "#000000".into(),
@@ -52,6 +53,7 @@ fn a_track_style_is_stored_in_canonical_form() {
             outline: Some(SubtitleOutline {
                 color: Some("#000000".into()),
                 size: Some(0.0),
+                outside: None,
             }),
             background: Some(SubtitleBackground {
                 color: "#000000".into(),
@@ -90,18 +92,19 @@ fn a_subtitle_size_past_half_the_picture_is_refused() {
 }
 
 #[test]
-fn an_outline_thicker_than_a_tenth_is_refused() {
+fn an_outline_wider_than_sixteen_pixels_is_refused() {
     let err = checked_style(&SubtitleStyle {
         outline: Some(SubtitleOutline {
             color: None,
-            size: Some(0.2),
+            size: Some(17.0),
+            outside: None,
         }),
         ..SubtitleStyle::default()
     })
     .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "an outline's thickness is a fraction of the text height, from 0 to 1/10"
+        "an outline's width is in pixels of the timeline, from 0 to 16"
     );
 }
 
@@ -164,6 +167,7 @@ fn an_imsc1_file_writes_the_track_style() {
             frame_rate: Some(25.0),
             positions: true,
             style: &style,
+            timeline_height: 1080,
         },
     )
     .text;
@@ -243,6 +247,7 @@ fn a_styled_file_keeps_each_cues_place() {
             frame_rate: Some(25.0),
             positions: true,
             style: &style,
+            timeline_height: 1080,
         },
     )
     .text;
@@ -626,6 +631,7 @@ fn an_imsc1_file_writes_one_words_style() {
             frame_rate: None,
             positions: false,
             style: &SubtitleStyle::default(),
+            timeline_height: 1080,
         },
     )
     .text;
@@ -659,6 +665,7 @@ fn webvtt_writes_a_cues_alignment_and_position() {
             frame_rate: None,
             positions: true,
             style: &SubtitleStyle::default(),
+            timeline_height: 1080,
         },
     )
     .text;

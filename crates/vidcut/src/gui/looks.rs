@@ -327,6 +327,7 @@ pub(super) struct TextFields {
     color: String,
     outline: String,
     outline_size: String,
+    outside: bool,
     background: String,
     opacity: String,
     shadow: String,
@@ -372,7 +373,11 @@ impl TextFields {
                 .as_ref()
                 .and_then(|o| o.color.clone())
                 .unwrap_or_default(),
-            outline_size: percent(s.outline.as_ref().and_then(|o| o.size)),
+            outline_size: plain(s.outline.as_ref().and_then(|o| o.size)),
+            outside: s
+                .outline
+                .as_ref()
+                .is_none_or(|o| o.outside.unwrap_or(o.size.is_none())),
             background: s
                 .background
                 .as_ref()
@@ -421,6 +426,7 @@ impl TextFields {
         salt: &str,
         families: &[String],
         size_hint: &str,
+        outline_hint: &str,
     ) -> (bool, bool) {
         let mut enter = false;
         let mut changed = false;
@@ -449,7 +455,10 @@ impl TextFields {
         changed |= row(ui, "Outline", &mut self.outline, "#000000");
         changed |= swatch(ui, &mut self.outline, [0, 0, 0]);
         ui.end_row();
-        changed |= row(ui, "Outline size", &mut self.outline_size, "5% of the text");
+        changed |= row(ui, "Outline size", &mut self.outline_size, outline_hint);
+        ui.end_row();
+        ui.label("Outside Only");
+        changed |= ui.checkbox(&mut self.outside, "").changed();
         ui.end_row();
         changed |= row(ui, "Background", &mut self.background, "none");
         changed |= swatch(ui, &mut self.background, [0, 0, 0]);
@@ -530,21 +539,27 @@ impl TextFields {
             None => return Err("a background needs a color".into()),
         };
         let outline_color = field(&self.outline);
-        let outline_size = kept_number(
+        let outline_size = kept_plain(
             &self.outline_size,
             stored.outline.as_ref().and_then(|o| o.size),
             "outline size",
         )?;
+        let kept_outside = stored.outline.as_ref().and_then(|o| o.outside);
+        let outside = if kept_outside == Some(self.outside) {
+            kept_outside
+        } else {
+            (self.outside != outline_size.is_none()).then_some(self.outside)
+        };
         Ok(Parts {
             font: field(&self.font),
             size: kept_number(&self.size, stored.size, "size")?,
             color: field(&self.color),
-            outline: (outline_color.is_some() || outline_size.is_some()).then_some(
-                SubtitleOutline {
+            outline: (outline_color.is_some() || outline_size.is_some() || outside.is_some())
+                .then_some(SubtitleOutline {
                     color: outline_color,
                     size: outline_size,
-                },
-            ),
+                    outside,
+                }),
             background,
             shadow: self.shadow(stored.shadow.as_ref())?,
         })

@@ -135,6 +135,7 @@ pub struct Writing<'a> {
     pub frame_rate: Option<f64>,
     pub positions: bool,
     pub style: &'a SubtitleStyle,
+    pub timeline_height: u32,
 }
 
 pub struct Written {
@@ -146,7 +147,13 @@ pub fn write(cues: &[Timed], format: SubtitleFormat, how: &Writing) -> Written {
     let (text, warnings) = match format {
         SubtitleFormat::Srt => (srt::write(cues, how.positions, how.style), Vec::new()),
         SubtitleFormat::Vtt => (vtt::write(cues, how.style), Vec::new()),
-        SubtitleFormat::Ttml => ttml::write(cues, how.language, how.frame_rate, how.style),
+        SubtitleFormat::Ttml => ttml::write(
+            cues,
+            how.language,
+            how.frame_rate,
+            how.style,
+            how.timeline_height,
+        ),
     };
     Written { text, warnings }
 }
@@ -295,6 +302,7 @@ pub fn beside(
                 frame_rate: Some(p.settings.fps.as_f64()),
                 positions: !timeline,
                 style: &t.style,
+                timeline_height: p.settings.height,
             },
         );
         out.push(Beside {
