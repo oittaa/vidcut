@@ -794,7 +794,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - While the user types, the row of the open cue shows the typed text, as the cue on the timeline does.
   - The list has a fixed height and scrolls. It draws only the rows that show. Thus a track with thousands of cues stays fast.
   - Add New is at the left of the line above the list. It does what Add Subtitle in the right-click menu of the track does ([X44](#x44-add-subtitle-uses-the-shown-subtitle-track)).
-  - Thus the new cue opens in the section. Add New is off while a cue is being added.
+  - Thus the new cue opens in the section, with its text selected. Add New is off while a cue is being added.
   - The name of the track is at the right of the line with Add New.
   - Previous and Next are on the heading line of the Subtitle section.
   - Previous opens the cue before this cue on its track, by start time. Next opens the cue after it.
