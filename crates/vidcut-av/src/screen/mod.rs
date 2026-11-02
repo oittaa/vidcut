@@ -1014,6 +1014,8 @@ pub struct Screen {
     imports_before: u64,
     exported: bool,
     alpha: bool,
+    written: Option<(u32, u32)>,
+    whole: Option<Wide>,
     encoded: out::Encoded,
     spent: (std::time::Duration, std::time::Duration),
     blurred: blur::Blurred,

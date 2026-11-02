@@ -1112,6 +1112,9 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
             if let Some(t) = &o.subtitles.burn {
                 out["burned_in"] = json!({ "track": t.id, "cues": t.cues.len() });
             }
+            if let Some(r) = o.settings.video.as_ref().and_then(|v| v.rounded((o.plan.width, o.plan.height))) {
+                out["rounded"] = json!(r);
+            }
             out
         }).collect::<Vec<_>>(),
     })

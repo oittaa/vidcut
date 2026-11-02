@@ -1,6 +1,8 @@
-use vidcut_core::place::{Blurring, Placing, Soft};
+use vidcut_core::place::{Blurring, Level, Placing, Soft};
 
 use super::{Gpu, MIXING, begin};
+
+const KERNEL: usize = 35;
 
 const MOST: f64 = 128.0;
 
@@ -367,22 +369,50 @@ pub(super) fn shown_bind(
     picture_bind(gpu, &floats, views)
 }
 
+pub(super) fn whole_bind(
+    gpu: &Gpu,
+    view: &wgpu::TextureView,
+    (w, h): (u32, u32),
+    level: Level,
+    kernel: u32,
+) -> wgpu::BindGroup {
+    let levels = super::level_floats(&[level]);
+    let mut floats = vec![0.0_f64; super::PARAMS / 4 - levels.len()];
+    floats[4..6].copy_from_slice(&[f64::from(w), f64::from(h)]);
+    floats[40..42].copy_from_slice(&[1.0, 1.0]);
+    floats.extend(levels);
+    let mut bytes = float_bytes(&floats);
+    bytes[KERNEL * 4..(KERNEL + 1) * 4].copy_from_slice(&kernel.to_le_bytes());
+    bytes_bind(gpu, &bytes, (view, view))
+}
+
+fn float_bytes(floats: &[f64]) -> Vec<u8> {
+    floats
+        .iter()
+        .flat_map(|v| (*v as f32).to_le_bytes())
+        .collect()
+}
+
 fn picture_bind(
     gpu: &Gpu,
     floats: &[f64],
+    views: (&wgpu::TextureView, &wgpu::TextureView),
+) -> wgpu::BindGroup {
+    bytes_bind(gpu, &float_bytes(floats), views)
+}
+
+fn bytes_bind(
+    gpu: &Gpu,
+    bytes: &[u8],
     (color, alpha): (&wgpu::TextureView, &wgpu::TextureView),
 ) -> wgpu::BindGroup {
-    let bytes: Vec<u8> = floats
-        .iter()
-        .flat_map(|v| (*v as f32).to_le_bytes())
-        .collect();
     let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("vidcut blurred"),
         size: bytes.len() as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    gpu.queue.write_buffer(&params, 0, &bytes);
+    gpu.queue.write_buffer(&params, 0, bytes);
     let texture = |binding, view| wgpu::BindGroupEntry {
         binding,
         resource: wgpu::BindingResource::TextureView(view),

@@ -1190,6 +1190,13 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another bitrate or chosen rate.
   - A project at another rate, for example 96000 Hz, with AAC was not measured.
   - The TikTok preset has AAC at 256 kb/s. That number was not measured.
+  - H.264 and H.265 round an odd side of the timeline up to even.
+    - A timeline of 1281 x 721 gives a file of 1282 x 722. A timeline of 1281 x 720 gives a file of 1282 x 720.
+    - One factor scales the whole picture on both axes, and the picture stays centered. Thus part of a pixel can stay black at two edges.
+    - Resolve Studio 21.1.2 does this at 1281 x 721 with H.264 and H.265. Other odd sizes were not measured.
+    - The Export dialog and the report of the export show both sizes.
+  - ProRes, DNxHR, VP9 and AV1 on the CPU keep an odd side.
+  - AV1 on NVENC writes an even size by itself. The report shows that size after the export.
 
 ## 11. Keyboard shortcuts
 
@@ -1502,6 +1509,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
   - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate.
+  - An export in H.264 or H.265 rounds an odd side up (§10).
   - A side under 256 sets both sides to 256, whichever side it is. 16 x 720, 99999 x 16 and 16 x 99999 give 256 x 256.
   - Else a side over 32768 sets both sides to 32768. 99999 x 720 gives 32768 x 32768.
   - This rule is measured in the Project Settings dialog of Resolve Studio 21.1.2. `project.set` and `project.create` do the same.

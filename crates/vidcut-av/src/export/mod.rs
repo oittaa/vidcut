@@ -17,7 +17,7 @@ use serde::Serialize;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind};
 use vidcut_core::export::metadata::{self, Measured, MetadataChoice, PieceMeta};
 use vidcut_core::export::{
-    EncoderChoice, ExportSettings, HdrMetadata, HdrMode, VideoSettings, validate,
+    EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Rounded, VideoSettings, validate,
 };
 use vidcut_core::model::{Hdr, SubtitleStyle};
 use vidcut_core::render::{RenderPlan, VideoPiece};
@@ -70,6 +70,7 @@ pub enum Note {
     },
     Tried(Tried),
     Source(SourceNote),
+    Rounded(Rounded),
     Upscaled(UpscaleNote),
     Downloading {
         name: String,
@@ -211,6 +212,8 @@ pub struct Report {
     pub subtitle_streams: Vec<StreamNote>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub burned_in: Option<BurnNote>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rounded: Option<Rounded>,
 }
 
 pub fn probed_metadata<'a>(
@@ -537,7 +540,7 @@ fn first_run(
     plan: &RenderPlan,
     enc: &encode::VideoEncoder,
     mut encoder: encoder::Video,
-    (w, h): (u32, u32),
+    ((w, h), written): ((u32, u32), (u32, u32)),
     decoder: Option<&crate::hw::GpuDecoder>,
     burn: (Vec<subtitles::Cue>, SubtitleStyle),
     cancel: &AtomicBool,
@@ -545,6 +548,7 @@ fn first_run(
     progress: &mut dyn FnMut(Progress),
 ) -> Result<Option<String>> {
     let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr)
+        .written_at(written)
         .with_timeline(plan.colors)?
         .with_dynamic(enc.dynamic)
         .with_burn(burn.0, burn.1, plan.height);
@@ -905,13 +909,12 @@ fn encode(
         .ctx(|| format!("creating {}", output.display()))?;
     let global_header = octx.format().flags().contains(format::Flags::GLOBAL_HEADER);
 
+    let timeline = (plan.width, plan.height);
     let mut tried_encoders = Vec::new();
     let (mut video, mut video_out) = match &settings.video {
         Some(v) => {
-            let (w, h) = (
-                v.width.unwrap_or(plan.width),
-                v.height.unwrap_or(plan.height),
-            );
+            let drawn = v.drawn_size(timeline);
+            let (w, h) = v.written_size(timeline);
             let mut failed: Vec<(Option<String>, Error)> = Vec::new();
             let mut opened = None;
             let mut pass_files = None;
@@ -989,7 +992,7 @@ fn encode(
                         plan,
                         &enc,
                         encoder,
-                        (w, h),
+                        (drawn, (w, h)),
                         decoder,
                         burn(),
                         cancel,
@@ -1020,17 +1023,22 @@ fn encode(
                 passes: enc.passes.count(),
                 gpu_frames_in: handoff.is_some(),
             }));
+            if let Some(r) = v.rounded(timeline) {
+                crate::progress::note(Note::Rounded(r));
+            }
             let burned = burn();
             let pixel = match handoff {
                 Some(video::Handoff::Cuda(..)) => gpu_pixel(&enc),
                 _ => enc.pixel,
             };
-            let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, pixel, enc.hdr)
-                .encode_on(handoff)
-                .with_timeline(plan.colors)?
-                .with_dynamic(enc.dynamic)
-                .with_light(light)
-                .with_burn(burned.0, burned.1, plan.height);
+            let mut frames =
+                VideoFrames::new(&plan.video, plan.fps, drawn.0, drawn.1, pixel, enc.hdr)
+                    .encode_on(handoff)
+                    .written_at((w, h))
+                    .with_timeline(plan.colors)?
+                    .with_dynamic(enc.dynamic)
+                    .with_light(light)
+                    .with_burn(burned.0, burned.1, plan.height);
             if let Some(d) = decoder {
                 frames = frames.decode_on(d.clone());
             }
@@ -1288,6 +1296,12 @@ fn encode(
         s(spent.sound),
         s(spent.end)
     );
+    let rounded = settings.video.as_ref().and_then(|v| {
+        v.rounded(timeline).or_else(|| {
+            let encoder = video.as_ref().map(|m| m.name.as_str())?;
+            rounded_by_encoder(part, v.drawn_size(timeline), encoder)
+        })
+    });
     Ok(Report {
         output: output.to_path_buf(),
         frames: plan.frames,
@@ -1315,5 +1329,19 @@ fn encode(
         copies: Default::default(),
         subtitle_streams,
         burned_in,
+        rounded,
+    })
+}
+
+fn rounded_by_encoder(part: &Path, asked: (u32, u32), encoder: &str) -> Option<Rounded> {
+    if asked.0.is_multiple_of(2) && asked.1.is_multiple_of(2) {
+        return None;
+    }
+    let v = crate::probe::probe(part, None).ok()?.video?;
+    let written = (v.width, v.height);
+    (written != asked).then(|| {
+        let r = Rounded::by_encoder(asked, written, encoder);
+        crate::progress::note(Note::Rounded(r.clone()));
+        r
     })
 }
