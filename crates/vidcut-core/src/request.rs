@@ -467,9 +467,9 @@ pub enum Request {
     /// when a network drive holds the file.
     #[serde(rename = "cache.list")]
     CacheList {},
-    /// Clear Selected Cache: delete each file in the render cache folder of
-    /// each given project file, also the files of other projects in that
-    /// folder. There is no undo.
+    /// Clear Selected Cache: delete each cache file in the render cache
+    /// folder of each given project file, also the cache files of other
+    /// projects in that folder. Other files stay. There is no undo.
     #[serde(rename = "cache.clear")]
     CacheClear { projects: OneOrMany<PathBuf> },
     /// The Media Pool's bins.

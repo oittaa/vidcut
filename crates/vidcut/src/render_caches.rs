@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 use vidcut_core::preferences::PlaybackFiles;
-use vidcut_core::render_cache::{FILE, KEYS, MADE, MARKS};
+use vidcut_core::render_cache::{is_cache_file, is_cache_video};
 use vidcut_core::{Error, Result};
 
 fn known_file() -> PathBuf {
@@ -80,30 +80,6 @@ fn folders(projects: &[PathBuf]) -> Result<Vec<Folder>> {
         .collect())
 }
 
-fn is_video(path: &Path) -> bool {
-    path.extension().is_some_and(|x| x == FILE)
-}
-
-fn is_cache_file(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
-        return false;
-    };
-    if name == format!("drops.{MARKS}") {
-        return true;
-    }
-    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-        return false;
-    };
-    let hex = stem.len() == 32
-        && stem
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
-    hex && path
-        .extension()
-        .and_then(|s| s.to_str())
-        .is_some_and(|ext| ext == FILE || ext == KEYS || ext == MADE)
-}
-
 fn measure(dir: &Path) -> (usize, u64) {
     let (mut files, mut bytes) = (0, 0);
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
@@ -111,7 +87,7 @@ fn measure(dir: &Path) -> (usize, u64) {
         if let Some(m) = e.metadata().ok().filter(|m| m.is_file())
             && is_cache_file(&path)
         {
-            files += usize::from(is_video(&path));
+            files += usize::from(is_cache_video(&path));
             bytes += m.len();
         }
     }
@@ -127,7 +103,7 @@ pub fn empty(dir: &Path) -> usize {
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let path = e.path();
         if path.is_file() && is_cache_file(&path) && std::fs::remove_file(&path).is_ok() {
-            n += usize::from(is_video(&path));
+            n += usize::from(is_cache_video(&path));
         }
     }
     n
@@ -207,11 +183,16 @@ mod tests {
         std::fs::write(dir.path().join("drops.marks"), b"d").unwrap();
         let notes = dir.path().join("notes.txt");
         let proxy = dir.path().join("clip.mkv");
+        let part = dir
+            .path()
+            .join(format!(".{cache}.mkv.0123456789abcdef.part.mkv"));
         std::fs::write(&notes, b"keep").unwrap();
         std::fs::write(&proxy, b"media").unwrap();
+        std::fs::write(&part, b"p").unwrap();
         assert_eq!(empty(dir.path()), 1);
         assert_eq!(std::fs::read(&notes).unwrap(), b"keep");
         assert_eq!(std::fs::read(&proxy).unwrap(), b"media");
+        assert!(!part.exists());
         assert!(!video.exists());
         assert!(!dir.path().join(format!("{cache}.keys")).exists());
         assert!(!dir.path().join(format!("{cache}.made")).exists());
@@ -227,6 +208,12 @@ mod tests {
         std::fs::write(dir.path().join("drops.marks"), b"dd").unwrap();
         std::fs::write(dir.path().join("notes.txt"), b"keep").unwrap();
         std::fs::write(dir.path().join("clip.mkv"), b"media").unwrap();
-        assert_eq!(measure(dir.path()), (1, 4));
+        std::fs::write(
+            dir.path()
+                .join(format!(".{cache}.mkv.0123456789abcdef.part.mkv")),
+            b"p",
+        )
+        .unwrap();
+        assert_eq!(measure(dir.path()), (1, 5));
     }
 }
