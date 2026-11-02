@@ -151,9 +151,11 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     let position = match (across, down) {
         (Some(x), _) if scroll => Some([x, stored.position.map_or(0.5, |p| p[1])]),
         (None, _) if scroll => None,
-        (Some(x), Some(y)) => Some([x, y]),
         (None, None) => None,
-        _ => return Err("a position takes both numbers, or neither for the usual place".into()),
+        (x, y) => {
+            let usual = Title::usual_position(d.kind, d.align);
+            Some([x.unwrap_or(usual[0]), y.unwrap_or(usual[1])])
+        }
     };
     let align = match d.kind {
         TitleKind::Text => None,
