@@ -1194,7 +1194,7 @@ pub enum Request {
     TrackAdd {
         kind: NewTrack,
         /// How many at once: 0 to 99 video tracks, 0 to 999 audio tracks, or
-        /// 1 to 16 subtitle tracks.
+        /// at least 1 subtitle track.
         #[serde(default = "one")]
         count: u32,
     },

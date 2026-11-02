@@ -3677,13 +3677,19 @@ fn mutate(
             Value::Null
         }
         Request::TrackAdd { kind, count } => {
-            let (least, most) = match kind {
-                NewTrack::Video => (0, ops::VIDEO_TRACKS),
-                NewTrack::Audio => (0, ops::AUDIO_TRACKS),
-                NewTrack::Subtitle => (1, 16),
+            let most = match kind {
+                NewTrack::Video => Some(ops::VIDEO_TRACKS),
+                NewTrack::Audio => Some(ops::AUDIO_TRACKS),
+                NewTrack::Subtitle => None,
             };
-            if !(least..=most).contains(count) {
-                return Err(Error::usage(format!("count must be {least}..{most}")));
+            match most {
+                Some(most) if *count > most => {
+                    return Err(Error::usage(format!("count must be 0..{most}")));
+                }
+                None if *count == 0 => {
+                    return Err(Error::usage("count must be at least 1"));
+                }
+                _ => {}
             }
             let ids: Vec<String> = (0..*count)
                 .map(|_| match kind {
