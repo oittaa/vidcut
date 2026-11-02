@@ -128,8 +128,10 @@ fn resize_weight(x: f32, shrink: f32) -> f32 {
 }
 
 fn resized(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
-    let size = p.upright.xy;
-    let shrink = vec2<f32>(1.0) / max(spans, vec2<f32>(1.0));
+    let level = clamp(ceil(log2(max(spans.x, spans.y) / 8.0)), 0.0, p.shrunk.x);
+    let scale = exp2(level);
+    let size = p.upright.xy / scale;
+    let shrink = vec2<f32>(1.0) / max(spans / scale, vec2<f32>(1.0));
     let t = u * size - 0.5;
     let base = floor(t);
     let f = t - base;
@@ -153,7 +155,7 @@ fn resized(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
                 continue;
             }
             let q = (base + vec2<f32>(f32(i - 7), f32(j - 7)) + 0.5) / size;
-            sum += pixel(clamp(q, half, vec2<f32>(1.0) - half)) * across[i] * wy;
+            sum += sample_at(clamp(q, half, vec2<f32>(1.0) - half), level) * across[i] * wy;
         }
     }
     return sum / (total_across * total_down);

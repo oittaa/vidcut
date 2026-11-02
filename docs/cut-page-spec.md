@@ -3006,3 +3006,4 @@ The default Resize Filter of a project is Sharper. These facts are measured in R
 - The weights of each axis are divided by their sum.
 - A read past the edge of the picture takes the edge pixel.
 - The filter works in the timeline gamma.
+- This formula is measured down to a shrink of 18.6:1. Above a shrink of 8:1, vidcut is different ([X110](deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).

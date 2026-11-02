@@ -3293,9 +3293,10 @@ fn halvings(
     size: (u32, u32),
     (placing, kernel, ..): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
 ) -> u32 {
-    if kernel & WIDENS == 0 || kernel & 7 == 0 || kernel & 7 == RESIZE {
+    if kernel & WIDENS == 0 || kernel & 7 == 0 {
         return 0;
     }
+    let reach = if kernel & 7 == RESIZE { 8.0 } else { 4.0 };
     let origin = match picture.sampling() {
         Sampling::Placed { .. } => return 0,
         Sampling::Colors { origin, .. } => (f64::from(origin.0), f64::from(origin.1)),
@@ -3331,11 +3332,11 @@ fn halvings(
                 .fold(0.0, f64::max)
         }
     };
-    if most.is_nan() || most <= 4.0 {
+    if most.is_nan() || most <= reach {
         return 0;
     }
     let most_halvings = picture.width().max(picture.height()).max(1).ilog2();
-    let wanted = (most / 4.0).log2().ceil();
+    let wanted = (most / reach).log2().ceil();
     if wanted.is_finite() {
         (wanted as u32).min(most_halvings)
     } else {

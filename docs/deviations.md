@@ -2269,3 +2269,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - All the keyframes of a title show on rows over time, in one tab, as the keyframes of a clip do.
   - The user moves and deletes them in that tab.
   - The Title section of the Inspector shows only the keyframe at the playhead, with arrows to the others.
+
+## X110. A shrink above 8:1 reads each source pixel
+
+- **Resolve:**
+  - The scaling filter reads 16 source pixels across and 16 down at each scale ([spec §13](cut-page-spec.md#the-scaling-filter)).
+  - The formula is measured down to a shrink of 18.6:1.
+  - At a shrink of 24:1, one-pixel lines every 3 source pixels read 64, where their mean is 117.3 (measured in Resolve Studio 21.1.2).
+- **vidcut:**
+  - Up to a shrink of 8:1, vidcut uses the same filter.
+  - Above a shrink of 8:1, vidcut first halves the picture until the shrink that remains is 8:1 or less.
+- **Why:**
+  - Above 8:1, the filter gives some source pixels more weight than others. Thin lines then make bands.
+  - A 4K picture with one-pixel lines every 25 pixels has a mean of 70.4. At a shrink of 32:1, the filter alone reads 64 to 84. With the halving, it reads 69 to 71.
+  - Timeline thumbnails and storyboards often shrink this far.
