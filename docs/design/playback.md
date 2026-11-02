@@ -530,7 +530,11 @@ The jobs:
     - No encoder of another codec takes its place. With no encoder, `render_cache::write` fails, and the background render stops with the error.
   - With Automatic and proxies on: the encoders of the proxy codec.
   - With Automatic and proxies off: ProRes 422 HQ on the GPU or the CPU, and HEVC and AV1 at a high quality on the GPU.
-  - Why: ProRes 422 HQ is the render cache format of a new project in Resolve. HEVC and AV1 take the values of their own choices (`grade_options`).
+  - ProRes 422 HQ is vidcut's own first choice. No measurement of Resolve gives it as the format of a new project:
+    - A new project in Resolve Studio 21.1.2 shows Uncompressed 10-bit, while its script setting reads apch, which is ProRes 422 HQ.
+    - The one set of cache files that was read holds ap4x, which is ProRes 4444 XQ. They come from a clip with a retime.
+    - The format of a plain clip's cache in that state is not known.
+  - HEVC and AV1 take the values of their own choices (`grade_options`).
 - `preferences.get` gives the first encoder of each codec (`cache_codecs`). Preferences shows it under Codec.
 
 The line and the Stats row:
