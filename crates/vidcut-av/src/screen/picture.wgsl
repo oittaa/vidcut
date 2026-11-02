@@ -594,12 +594,15 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
         return placed(px);
     }
     let keeps = (p.flags.w & 16u) != 0u;
-    let rel = (px - p.place.xy) / p.place.zw;
-    if any(rel < vec2<f32>(0.0)) || any(rel >= vec2<f32>(1.0)) {
+    let sides = vec4<f32>(px - p.place.xy, p.place.xy + p.place.zw - px);
+    let e = clamp(sides + 0.5, vec4<f32>(0.0), vec4<f32>(1.0));
+    let edge = select(e.x * e.y * e.z * e.w, 1.0, p.shrunk.w > 0.5);
+    if edge <= 0.0 {
         return vec4<f32>(0.0, 0.0, 0.0, select(1.0, 0.0, keeps));
     }
+    let rel = (px - p.place.xy) / p.place.zw;
     let cover = p.upright.xy / p.place.zw;
-    let a = opacity(rel);
+    let a = opacity(clamp(rel, vec2<f32>(0.0), vec2<f32>(1.0))) * edge;
     let solid = select(1.0, a, keeps);
     if resamples(rel, cover) {
         return vec4<f32>(sharp(rel, cover) * a, solid);

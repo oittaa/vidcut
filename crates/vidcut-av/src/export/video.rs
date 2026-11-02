@@ -106,6 +106,7 @@ struct Look {
     frame: (u32, u32),
     origin: (u32, u32),
     form: Form,
+    rounded: bool,
 }
 
 impl Look {
@@ -117,6 +118,14 @@ impl Look {
             frame: size,
             origin: (0, 0),
             form,
+            rounded: false,
+        }
+    }
+
+    fn rounded(size: (u32, u32), kernel: u32, form: Form) -> Self {
+        Self {
+            rounded: true,
+            ..Self::fitted(size, kernel, form)
         }
     }
 
@@ -128,6 +137,7 @@ impl Look {
             frame,
             origin: (0, 0),
             form,
+            rounded: false,
         }
     }
 
@@ -560,7 +570,7 @@ impl Source {
                     &mut self.drawn,
                     (f, (None, None)),
                     self.reader.rotation(),
-                    &Look::fitted(size, 0, PLAIN),
+                    &Look::rounded(size, 0, PLAIN),
                     reading,
                     self.reader.path(),
                 )?)
@@ -744,12 +754,6 @@ fn mask_of(ramp: Option<Ramp>, k: i64) -> Option<Wipe> {
     })
 }
 
-fn upright_fit(f: &frame::Video, rotation: u16, out: (u32, u32)) -> (u32, u32) {
-    let sar = f.aspect_ratio();
-    let sar = (sar.numerator(), sar.denominator());
-    vidcut_core::place::upright_fit((f.width(), f.height()), sar, rotation, out)
-}
-
 const PLACED_MOST: f64 = 16384.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -910,7 +914,7 @@ pub(crate) fn rgb_picture(
     size: (u32, u32),
     (kernel, form): (u32, Form),
 ) -> Result<frame::Video> {
-    let look = Look::fitted(size, kernel, form);
+    let look = Look::rounded(size, kernel, form);
     shown_rgb(
         drawn,
         (frame, (None, None)),
@@ -956,7 +960,7 @@ pub(crate) fn surface_picture(
     size: (u32, u32),
     form: Form,
 ) -> Result<frame::Video> {
-    let look = Look::fitted(size, 0, form);
+    let look = Look::rounded(size, 0, form);
     shown_frame(
         drawn,
         (frame, (None, None)),
@@ -1312,7 +1316,7 @@ impl Source {
             return self.end_run();
         }
         let clock = Instant::now();
-        let look = Look::fitted(run.size, 0, run.id.form);
+        let look = Look::rounded(run.size, 0, run.id.form);
         let path = self.reader.path();
         let input = match run.id.upscaler {
             Upscaler::Macos => Fed::Frame(shown_frame(
@@ -1434,8 +1438,8 @@ fn between_size(f: &frame::Video, rotation: u16, aim: (u32, u32)) -> (u32, u32) 
 }
 
 fn fitted_size(fit: Fit, aim: (u32, u32)) -> (u32, u32) {
-    let (_, _, w, h) = fit.placement(aim);
-    let even = |v: u32| (v.div_ceil(2) * 2).max(2);
+    let [_, _, w, h] = fit.placement(aim);
+    let even = |v: f64| ((v.ceil() as u32).div_ceil(2) * 2).max(2);
     (even(w), even(h))
 }
 
@@ -1445,9 +1449,8 @@ fn placed_look(
     frame: (u32, u32),
     (kernel, form): (u32, Form),
 ) -> Option<Look> {
-    let (x, y, w, h) = fit.placement(frame);
     let whole = (f64::from(frame.0), f64::from(frame.1));
-    let placing = Placing::new(placed, whole, [x, y, w, h].map(f64::from));
+    let placing = Placing::new(placed, whole, fit.placement(frame));
     let [x0, y0, x1, y1] = match placing.effects.is_empty() {
         true => placing.bounds(whole)?,
         false => [0, 0, frame.0, frame.1],
@@ -1464,6 +1467,7 @@ fn placed_look(
         frame,
         origin: (x0, y0),
         form,
+        rounded: false,
     })
 }
 
@@ -1764,7 +1768,9 @@ impl Single {
         path: &Path,
     ) -> Result<frame::Video> {
         let made = self.maker.make(&mut self.fitting, frame, path)?;
-        let picture = std::sync::Arc::new(crate::player::Picture::new(made, rotation, None, None));
+        let picture = crate::player::Picture::new(made, rotation, None, None)
+            .with_sampling(Sampling::Rounded);
+        let picture = std::sync::Arc::new(picture);
         let layers = (&[][..], &[][..], &[][..], None);
         self.drawer
             .frame(&picture, &[], layers, size, (pixel, (None, None)))
@@ -1851,6 +1857,7 @@ impl Single {
         let picture = self.woven(frames, rotation, path)?;
         let placed = [look.placed.clone()];
         let (picture, placed) = match look.placed.is_empty() {
+            true if look.rounded => (picture.with_sampling(Sampling::Rounded), &placed[..0]),
             true => (picture, &placed[..0]),
             false => {
                 let sampling = Sampling::Colors {
@@ -2406,7 +2413,7 @@ impl VideoFrames {
             (Some((f, _)), Some(placed)) => {
                 let (w, h, _) = self.maker.out();
                 let size = (f64::from(w), f64::from(h));
-                let at = vidcut_core::place::fitted((w, h), upright_fit(f, rotation, (w, h)));
+                let at = Fit::of(f, rotation).placement((w, h));
                 Placing::new(placed, size, at).share(size)
             }
             _ => 1.0,
