@@ -415,6 +415,14 @@ pub fn non_speech(
     out
 }
 
+pub const SILENCE_THRESHOLD: f64 = -25.0;
+pub const SILENCE_LEVELS: std::ops::RangeInclusive<f64> = -100.0..=10.0;
+pub const SILENCE_MARGINS: std::ops::RangeInclusive<i64> = 0..=60;
+pub const SILENCE_MIN: i64 = 30;
+pub const SILENCE_MINS: std::ops::RangeInclusive<i64> = 2..=60;
+pub const SPEECH_MARGIN: f64 = 0.15;
+pub const SPEECH_MIN: f64 = 0.5;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SilenceSettings {
     pub threshold_db: f64,

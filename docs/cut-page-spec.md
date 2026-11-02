@@ -1372,8 +1372,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The check uses 10 ms steps.
   - Silence includes a clip past the end of its audio.
   - Silence also includes a click (under 0.05 s between 0.1 s of silence).
-  - Defaults: −40 dBFS, pre-head and post-tail 0.15 s, and minimum 0.5 s.
-  - The defaults are in seconds, so the frame rate does not change them.
+  - With Sound Level, the values are the ones that the window of Resolve Studio 21.1.2 showed, at 30 fps:
+    - Threshold: −100 to +10 dB, −25 by default.
+    - Pre head and post tail: 0 to 60 frames, 0 by default.
+    - Minimum: 2 to 60 frames, 30 by default.
+    - That window keeps the last values used. Thus it is not known whether −25 and 30 are factory values or kept values.
+    - `edit.ripple_delete_silence` refuses a value outside these ranges.
+  - With Speech, the pre head, the post tail and the minimum have their own defaults (deviation X47).
+  - `analyze.silence` starts from the same Threshold and minimum, and has no limits. It is vidcut's own.
   - Each silence of at least the minimum goes, less the post-tail and the pre-head.
   - At the ends of a clip, all of the silence goes.
   - The cuts are in whole frames.
