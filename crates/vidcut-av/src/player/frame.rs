@@ -77,10 +77,8 @@ impl Fit {
         }
     }
 
-    pub fn placement(&self, (width, height): (u32, u32)) -> (u32, u32, u32, u32) {
-        let (w, h) =
-            vidcut_core::place::upright_fit(self.size, self.sar, self.rotation, (width, height));
-        ((width - w) / 2, (height - h) / 2, w, h)
+    pub fn placement(&self, frame: (u32, u32)) -> [f64; 4] {
+        vidcut_core::place::fitted(self.size, self.sar, self.rotation, frame)
     }
 }
 
@@ -88,6 +86,7 @@ impl Fit {
 pub enum Sampling {
     #[default]
     Own,
+    Rounded,
     Colors {
         frame: (u32, u32),
         origin: (u32, u32),
@@ -308,21 +307,26 @@ impl Picture {
         self.rotation
     }
 
-    pub fn placement(&self, width: u32, height: u32) -> (u32, u32, u32, u32) {
-        Fit::of(&self.frame, self.rotation).placement((width, height))
+    pub fn placement(&self, width: u32, height: u32) -> [f64; 4] {
+        let fit = Fit::of(&self.frame, self.rotation);
+        match self.sampling {
+            Sampling::Rounded => {
+                vidcut_core::place::rounded_place(fit.size, fit.sar, fit.rotation, (width, height))
+            }
+            _ => fit.placement((width, height)),
+        }
     }
 
     pub fn placed_in(&self, size: (u32, u32)) -> ((f64, f64), [f64; 4]) {
         let own = Fit::of(&self.frame, self.rotation);
         let (frame, fit) = match &self.sampling {
-            Sampling::Own => (size, own),
+            Sampling::Own | Sampling::Rounded => (size, own),
             Sampling::Colors { frame, .. } => (*frame, own),
             Sampling::Placed { fit, .. } => (size, *fit),
         };
-        let (x, y, w, h) = fit.placement(frame);
         (
             (f64::from(frame.0), f64::from(frame.1)),
-            [x, y, w, h].map(f64::from),
+            fit.placement(frame),
         )
     }
 

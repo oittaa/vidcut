@@ -2316,7 +2316,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A clip covers the tracks below it only where its picture covers the frame, at its usual values too.
     - The tracks below show in the bars around a picture of another shape, outside a placed picture, and where it is cropped.
     - Where there are no tracks below, these areas are black.
-    - A clip whose fitted picture fills the frame, to within half a pixel, covers them all.
+    - A clip whose fitted picture leaves no bar covers them all ([§13](#the-limit-for-a-thin-bar)).
     - Its edges are smoothed over a pixel.
     - The two sides of a dissolve mix into each other first, and then go over the tracks below.
     - Thus the tracks below do not show through where both sides cover the frame (D50).
@@ -3007,3 +3007,44 @@ The default Resize Filter of a project is Sharper. These facts are measured in R
 - A read past the edge of the picture takes the edge pixel.
 - The filter works in the timeline gamma.
 - This formula is measured down to a shrink of 18.6:1. Above a shrink of 8:1, vidcut is different ([X110](deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).
+
+### The fit to the timeline
+
+These facts are measured in Resolve Studio 21.1.2, in a default project that scales a picture to fit.
+
+- One factor scales the picture on both axes. It is the smaller of two values: frame width / picture width, and frame height / picture height.
+- The picture is centered. A bar at its side can be a part of a pixel.
+- A pixel that the picture covers in part reads that part of its value, over the track below or over black.
+- The Zoom and the Position of a clip work on this fit. They do not start from a rounded size.
+- These pictures were measured in a timeline of 1280 x 720:
+  - 1000 x 562: the factor is 1.28 and the height is 719.36. Each bar is 0.32 of a pixel, and the top and bottom rows read 0.68 of their value.
+  - 999 x 800: the factor is 0.9 and the width is 899.1. Each bar is 190.45 pixels, and the edge columns read 0.55 of their value.
+- 1920 x 1080 in a timeline of 1921 x 1081 has the factor 1921 / 1920 and a bar of 0.21875 of a pixel. The edge rows read a part of their value.
+- A picture with pixels that are not square, or with a rotation in its file, was not measured.
+  - vidcut gives such a picture a fitted size that is rounded to even, and a place in whole pixels.
+
+### The limit for a thin bar
+
+These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 and 1920 x 1080.
+
+- For each corner of the frame, take its distance to the picture. The distance is 0 when the corner is inside the picture.
+- If all four distances are under 0.2 of a timeline pixel, no bar shows.
+  - Each edge pixel reads its full value, and the track below does not show.
+  - The picture keeps its exact scale and place. It does not stretch to the frame.
+- If a distance is 0.2 or more, each bar shows at its exact width. This includes a thinner bar at another side.
+- The limit is the same for the fit, the Zoom, the Position and the Rotation, alone or together.
+- These cases were measured in a timeline of 1280 x 720:
+  - 3840 x 2159: the fit leaves bars of 0.1667 of a pixel. No bar shows, and the scale on both axes is 1/3.
+  - The same picture with a Position of 0.1 down: the bars are 0.0667 and 0.2667, and both show.
+  - Position 0.198 across: no bar. Position 0.2 across: the edge column reads 0.8 of its value.
+  - Position 0.14 across and down: the distance is 0.198, and no bar shows.
+  - Position 0.15 across and down: the distance is 0.212, and the bars show.
+  - A Zoom that leaves bars of 0.17 and 0.0956: the distance is 0.195, and no bar shows.
+  - A Zoom that leaves bars of 0.18 and 0.10125: the distance is 0.2065, and the bars show.
+  - Rotation 0.016: no bar. Rotation 0.02: the bars show. The rule gives the change at 0.0179. That value was not measured.
+  - A part of the picture past the frame does not count. A left bar of 0.15 on an enlarged picture shows no bar.
+- These cases were not measured:
+  - Softness: vidcut does not use the limit on a picture with Softness.
+  - Pitch and Yaw: vidcut uses the same rule on the corners of the leaned picture.
+  - A compound clip: vidcut uses the rule on each level by itself.
+  - The rounding of an odd frame size for an encoder: vidcut does not use the limit there.

@@ -251,6 +251,12 @@ The audio device:
 - An export, a proxy and a thumbnail draw with the same `Screen`, always into `Wide` (`Screen::for_export`). They write the planes of the output from there ([export](export.md#timeline-colors)).
 - The drawing:
   - It fits the picture and turns it upright.
+    - `place::fitted` gives the place of the picture in the frame, in parts of a pixel ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)).
+    - `fs` covers a pixel at the edge of that place in part.
+    - Where `place::no_bars_at` is true, `fs` covers each edge pixel in full ([spec §13](../cut-page-spec.md#the-limit-for-a-thin-bar)).
+    - `Placing::new` opens the `edge` of a level where `place::no_bars` is true. The place of the picture does not change.
+    - The rule works at the size of the draw. The size of the viewer is in whole pixels of the screen, so its shape can differ a little from the timeline. Thus a picture that fills the timeline can leave a part of a pixel in the viewer.
+    - A thumbnail, a proxy and a picture for an AI upscaler draw into a size that is already rounded (`Sampling::Rounded`, `place::rounded_place`). Why: the picture must fill that size, with no bar.
   - It first converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `shader_colors`). In an SDR timeline, it tone-maps HDR.
     - Then it deinterlaces an interlaced picture (`fs_bwdif`, [gpu](gpu.md#deinterlacing-and-hdr)).
     - The converted picture is 16-bit floats. The scaling below reads it.
