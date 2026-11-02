@@ -472,15 +472,11 @@ pub const AAC_BITRATE: u64 = 320_000;
 pub const AAC_BITRATES: std::ops::RangeInclusive<u64> = 96_000..=320_000;
 pub const AAC_RATES: [u32; 2] = [44_100, 48_000];
 
-pub fn usual_rate(codec: AudioCodec) -> Option<u32> {
-    (codec == AudioCodec::Aac).then_some(48_000)
-}
-
 fn audio(codec: AudioCodec, kbps: Option<u64>) -> AudioSettings {
     AudioSettings {
         codec,
         bitrate: kbps.map(|k| k * 1000),
-        sample_rate: usual_rate(codec),
+        sample_rate: None,
         channels: None,
         loudness: None,
     }

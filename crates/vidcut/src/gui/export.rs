@@ -7,8 +7,7 @@ use serde_json::{Value, json};
 use vidcut_av::export::SpeechNote;
 use vidcut_core::export::{
     AAC_BITRATE, AAC_BITRATES, AAC_RATES, AudioCodec, AudioSettings, Container, EncoderChoice,
-    ExportSettings, HdrMetadata, HdrMode, VideoCodec, VideoSettings, apply_overrides, usual_rate,
-    validate,
+    ExportSettings, HdrMetadata, HdrMode, VideoCodec, VideoSettings, apply_overrides, validate,
 };
 use vidcut_core::request::{FindSpeech, ImportMode, SubtitleFormat, SubtitlesAs};
 use vidcut_core::{Envelope, Error, Response};
@@ -2897,7 +2896,7 @@ fn settings_form(
                     d.settings.audio = on.then(|| AudioSettings {
                         codec: audio_codecs(d.settings.container)[0],
                         bitrate: None,
-                        sample_rate: usual_rate(audio_codecs(d.settings.container)[0]),
+                        sample_rate: None,
                         channels: None,
                         loudness: None,
                     });
