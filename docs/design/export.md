@@ -366,6 +366,8 @@ Cancel:
 - `Screen::draw` lays the layers under a title, then the title, then the layers over it, and then the subtitles.
 - `burn::title_blocks` draws each `TitleBlock` of a title with the code of the burn-in (`lay_out`). `burn::title` merges the blocks into one `Sprite`.
   - A `TitlePart::Backing` block lays out the two lines at the lower line's values and draws only their box (`Look`, its `bare` field).
+    - The rows of the upper line (`Laid`, its `above` field) stand above the point of the lower line.
+    - The `drop` field of `Look` brings the top of the box down to where the upper line starts.
   - `lay_out` strokes the outlines of the glyphs with zeno. When a glyph has no outline, it grows the drawn letters instead (`dilate`).
   - A stroke goes over the letters. An `outside` stroke goes behind them, at the same width.
   - `Edge` holds its width in pixels of the picture. `burn::title` and `burn::paint` take the timeline height for this, because a width is in pixels of the timeline.

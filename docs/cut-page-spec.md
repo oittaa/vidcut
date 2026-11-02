@@ -2044,12 +2044,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Lines 1.31 times the text height apart, wrapped at the width of title safe, 90% of the picture width.
   - The lines of a Text title are centered. The middle of the block is at the middle of the picture.
   - The lines of a lower third align left, center or right.
-  - The bottom-left corner, bottom middle or bottom-right corner of its block is 10%, 50% or 90% across and 88% down.
-  - Thus the top of its lower line is about a fifth up the picture, where Resolve's own lower thirds put it (D67).
-  - `position` moves that point (X54).
+  - The lower line of a lower third hangs from a point that is 10%, 50% or 90% across and 78% down, by its alignment.
+  - The upper line stands on a point 80% down, at the same place across.
+  - These are the points of Resolve's own lower thirds (measured in Resolve Studio 21.1.2). The two lines overlap by 2% of the picture height.
+  - `position` moves the point of the lower line (X54). Lines that go together keep the 2% between their points.
   - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>` and `<font>` with a `color`, a `face` and a `size`.
   - A line takes the height of its largest size.
-  - The lines of a lower third meet one lower-line height above its corner.
+  - A larger size grows the upper line up from its point and the lower line down from its point (measured in Resolve Studio 21.1.2).
   - `size` is from 1/1080 to 4096/1080, also in markup. Size 1..4096 is the range of a title, measured in Resolve Studio 21.1.2.
   - Color, outline and background take the values and limits of the subtitle style (D61).
   - The background is one box behind the block. It reaches 0.15 of the text height past its lines.
@@ -2059,14 +2060,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Zoom draws the text larger, and the outline and the background box grow with it. The zoom scales the outline, measured in Resolve Studio 21.1.2.
   - Rotation turns the whole title, box and shadow too, counterclockwise.
   - Zoom and rotation work about the middle of a Text title.
-  - For a lower third, they work about the point where its lines meet (D67).
+  - For a lower third, they work on each line about its own point (D67).
   - Each line of a lower third has its own `position`, `zoom`, `rotation` and keyframes (p. 1178):
     - `line` in `titles.set` names the line.
     - In the `keyframes` requests, these values name the line: `upper_position`, `upper_zoom`, `upper_rotation`, `lower_position`, `lower_zoom` and `lower_rotation`.
     - The Title section has Across, Down, Zoom and Rotation under Upper Line and under Lower Line.
     - The two lines go together until a request names a line. Each line then keeps its values and goes apart.
     - A request that names no line then changes the lower line.
-    - The upper line stands on its point, and the lower line hangs from its point. Each line's zoom and rotation work about its point (measured in Resolve Studio 21.1.2).
+    - The `position` of a line is its own point. The Title section shows each line's point.
     - The background box follows the place, zoom and rotation of the lower line. The upper line does not move it (measured in Resolve Studio 21.1.2).
     - Each line has its own shadow, which turns with the line (measured in Resolve Studio 21.1.2).
     - From the bottom, the order is the box, the lower line and the upper line. Each line is over its own shadow (measured in Resolve Studio 21.1.2).
@@ -2123,10 +2124,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Resolve's own titles have 1/1080 of the picture height to a point ([gotchas](gotchas.md#resolves-otio-files)).
   - **Positions:**
     - The `position` of a Text title is its middle (anchor 4).
-    - The upper line of a lower third stands on the point where its lines meet (anchor 0, 1 or 2).
-    - Its lower line hangs from that point (6, 7 or 8).
-    - That point is one line, 1.31 times the text height, above the corner of the title.
-    - Lines apart each have their own point.
+    - The upper line of a lower third stands on its point (anchor 0, 1 or 2). By default, this is 20% up the picture.
+    - Its lower line hangs from its point (6, 7 or 8). By default, this is 22% up the picture.
+    - The file holds the points of `position`, with y counted from the bottom.
     - Resolve's own lower thirds put their upper line first.
   - **Stroke:**
     - `strokeSize` is the width of the outline in pixels of the timeline, as a whole number. Thus 16 is the maximum of both.

@@ -145,7 +145,8 @@ pub fn checked(t: &Title) -> Result<Title> {
             return Err(Error::invalid("only a lower third has lines apart"));
         }
         Some(_) => {
-            let mut high = t.upper_view();
+            let mut high = t.clone();
+            high.swap_lines();
             high.upper = None;
             Some(checked(&high)?.line())
         }
