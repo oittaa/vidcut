@@ -1540,7 +1540,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The same button sits beside Zoom, Position X, Position Y, Rotation, Anchor X, Anchor Y, Pitch, Yaw and each crop side.
     - Position X and Y share one keyframe. Zoom X and Y share one keyframe. Anchor X and Y share one keyframe.
     - The button is lit on a keyframe. A click adds or removes the keyframe at the playhead.
-    - Previous and Next move the playhead to the keyframe of that value inside the clip.
+    - Previous and Next move the playhead to the keyframe of that value, also outside the clip.
     - With several clips selected, no value has this button or the arrows, as in Resolve ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - A value with keyframes on one of these clips is then off and has no Reset.
     - Dynamic Zoom and the flips have no Keyframe button.

@@ -70,9 +70,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - A click on the name of a group opens or closes it. The ⋯ menu also has Expand All Parameters and Collapse All Parameters.
   - **Track controls** (p. 1257):
     - The curve button shows the curve of the value under its track.
-    - The Keyframe button adds a keyframe at the playhead. On a keyframe, it removes that keyframe, as the Inspector's button does.
+    - The Keyframe button adds a keyframe at the playhead, also outside the clip (measured in Resolve Studio 21.1.2). On a keyframe, it removes that keyframe, as the Inspector's button does.
     - The Keyframe button is orange on a keyframe (p. 1250), in the Inspector too.
-    - The arrows beside it go to the previous and the next keyframe in the clip.
+    - The arrows beside it go to the previous and the next keyframe of the value, also outside the clip (measured in Resolve Studio 21.1.2).
+    - On the Speed row, the button adds a keyframe only inside the clip, after its first frame. The arrows go only to keyframes inside the clip.
     - Reset Keyframes removes all keyframes of the track.
   - **Time** (p. 1258):
     - The time ruler shows timecode. A click or a drag on it moves the playhead.
@@ -111,7 +112,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - The tab and the tray share the selected rows. A new clip in the tab clears them.
     - Mark > Add Keyframe (Ctrl+[) adds a keyframe at the playhead on each selected row, at the value there. It sends `keyframes.add`.
       - A row with a keyframe at the playhead does not change.
-      - The Volume row takes a keyframe only where the clip has sound. A held key adds once.
+      - The Volume row takes a keyframe also outside the clip (measured in Resolve Studio 21.1.2). A held key adds once.
+      - The Speed row takes a keyframe only inside the clip, after its first frame.
       - The manual says that the context picks the value (pp. 1254–1255). In Resolve Studio 21.1.2, the selected row picks it.
       - The value changed last in the Inspector and the curve in view do not pick it.
     - Mark > Delete Keyframe (Alt+]) removes the selected keyframes. With none selected, it removes the keyframes of the selected rows at the playhead.
@@ -2282,7 +2284,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A value without keyframes takes a typed number on all these clips.
       - vidcut's Inspector has the same rules. The Reset does not show on a value that is off.
       - A request that names several clips still keys each clip at its own frame under `at`.
-    - Previous and Next move the playhead to the keyframe before or after it, inside the clip.
+    - Previous and Next move the playhead to the keyframe before or after it, also outside the clip (measured in Resolve Studio 21.1.2).
     - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out.
     - The Reset of one value removes its keyframes and puts the usual value back.
     - The Reset of Transform, Crop or Composite removes the keyframes of that section.
