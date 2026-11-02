@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EffectType, Handle, PictureTool,
-    PictureTransition, Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle, TrackClip, ZoomBox,
+    Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EffectType, Handle, LowerThirdLine,
+    PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle,
+    TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2098,6 +2099,12 @@ pub enum Request {
         /// A title look's name, built in or yours (`looks.list`).
         #[serde(default)]
         look: Option<String>,
+        /// The line of a lower third that takes `position`, `zoom` and
+        /// `rotation`. The two lines then go apart. Without it, the two
+        /// lines take them together until they go apart, then the lower
+        /// line alone. Not with `kind` or `look`.
+        #[serde(default)]
+        line: Option<LowerThirdLine>,
         /// The frame of a value with keyframes: the new number goes on a
         /// keyframe there. Usual: the playhead.
         #[serde(default)]
@@ -3292,10 +3299,13 @@ pub enum KeyParam {
     #[default]
     Volume,
     /// Position X and Y, one keyframe for both, as fractions of the frame.
+    /// On a lower third: both lines together, or the lower line when the
+    /// lines are apart.
     Position,
     /// Zoom X and Y, one keyframe for both. One number in `value` sets both.
+    /// On a lower third: as `position`.
     Zoom,
-    /// Rotation in degrees.
+    /// Rotation in degrees. On a lower third: as `position`.
     Rotation,
     /// The anchor point X and Y, one keyframe for both, as fractions of
     /// the picture.
@@ -3326,10 +3336,22 @@ pub enum KeyParam {
     /// `keyframes.add` skips a clip that cannot take one at `at`, and
     /// fails only when no clip can.
     Speed,
+    /// The position of the upper line of a lower third. The lines go apart.
+    UpperPosition,
+    /// The zoom of the upper line of a lower third. The lines go apart.
+    UpperZoom,
+    /// The rotation of the upper line of a lower third. The lines go apart.
+    UpperRotation,
+    /// The position of the lower line of a lower third. The lines go apart.
+    LowerPosition,
+    /// The zoom of the lower line of a lower third. The lines go apart.
+    LowerZoom,
+    /// The rotation of the lower line of a lower third. The lines go apart.
+    LowerRotation,
 }
 
 impl KeyParam {
-    pub const ALL: [KeyParam; 14] = [
+    pub const ALL: [KeyParam; 20] = [
         KeyParam::Volume,
         KeyParam::Position,
         KeyParam::Zoom,
@@ -3344,7 +3366,37 @@ impl KeyParam {
         KeyParam::CropSoftness,
         KeyParam::Opacity,
         KeyParam::Speed,
+        KeyParam::UpperPosition,
+        KeyParam::UpperZoom,
+        KeyParam::UpperRotation,
+        KeyParam::LowerPosition,
+        KeyParam::LowerZoom,
+        KeyParam::LowerRotation,
     ];
+
+    pub fn on_line(self) -> (KeyParam, Option<LowerThirdLine>) {
+        match self {
+            KeyParam::UpperPosition => (KeyParam::Position, Some(LowerThirdLine::Upper)),
+            KeyParam::UpperZoom => (KeyParam::Zoom, Some(LowerThirdLine::Upper)),
+            KeyParam::UpperRotation => (KeyParam::Rotation, Some(LowerThirdLine::Upper)),
+            KeyParam::LowerPosition => (KeyParam::Position, Some(LowerThirdLine::Lower)),
+            KeyParam::LowerZoom => (KeyParam::Zoom, Some(LowerThirdLine::Lower)),
+            KeyParam::LowerRotation => (KeyParam::Rotation, Some(LowerThirdLine::Lower)),
+            whole => (whole, None),
+        }
+    }
+
+    pub fn for_line(self, line: LowerThirdLine) -> KeyParam {
+        match (self, line) {
+            (KeyParam::Position, LowerThirdLine::Upper) => KeyParam::UpperPosition,
+            (KeyParam::Zoom, LowerThirdLine::Upper) => KeyParam::UpperZoom,
+            (KeyParam::Rotation, LowerThirdLine::Upper) => KeyParam::UpperRotation,
+            (KeyParam::Position, LowerThirdLine::Lower) => KeyParam::LowerPosition,
+            (KeyParam::Zoom, LowerThirdLine::Lower) => KeyParam::LowerZoom,
+            (KeyParam::Rotation, LowerThirdLine::Lower) => KeyParam::LowerRotation,
+            (whole, _) => whole,
+        }
+    }
 }
 
 /// The keyframes of one value to copy or cut.

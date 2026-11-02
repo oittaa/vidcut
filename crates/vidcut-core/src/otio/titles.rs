@@ -6,7 +6,7 @@ use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
     Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, TextStroke, Title,
-    TitleAlign, TitleKind, TitleShadow, TitleStyle, size_fits,
+    TitleAlign, TitleKind, TitleLine, TitleShadow, TitleStyle, size_fits,
 };
 use crate::rich::{self, Look, Span};
 
@@ -439,14 +439,15 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                 [only] => (none, *only),
                 [first, second, ..] => (*first, *second),
             };
+            let high = t.upper_view();
             (
                 vec![
                     rich_text(
-                        t,
+                        &high,
                         &[upper],
                         html(&[upper], align, 1, &base),
                         column,
-                        placed(t, [usual_x, 0.2], origin),
+                        placed(&high, [usual_x, 0.2], origin),
                         origin,
                     ),
                     rich_text(
@@ -923,6 +924,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         rotation_keys: Vec::new(),
         opacity: None,
         opacity_keys: Vec::new(),
+        upper: None,
     };
     crate::ops::titles::checked(&title).ok()
 }
@@ -986,7 +988,25 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
         [x, 1.0 - y + lift]
     });
     t.position_handles = point_handles(parameter(main, "position"), origin);
-    let keys = |id: &str| read_keys(parameter(main, id), origin).unwrap_or_default();
+    read_turn_keys(t, main, origin);
+    if t.kind == TitleKind::LowerThird
+        && t.text.contains('\n')
+        && let Some((Some(high), _)) = upper_lower(&texts)
+    {
+        let mut line = t.upper_view();
+        let lift = upper_lift(t, high);
+        (line.position_keys, line.position_y) =
+            point_keys(parameter(high, "position"), origin, |[x, y]| {
+                [x, 1.0 - y + lift]
+            });
+        line.position_handles = point_handles(parameter(high, "position"), origin);
+        read_turn_keys(&mut line, high, origin);
+        t.upper = Some(line.line()).filter(|u| *u != t.line());
+    }
+}
+
+fn read_turn_keys(t: &mut Title, g: &Value, origin: i64) {
+    let keys = |id: &str| read_keys(parameter(g, id), origin).unwrap_or_default();
     t.zoom_keys = fitted(&keys("transformationZoomX"), 1.0, 0.25, 4.0);
     t.rotation_keys = fitted(
         &keys("transformationRotationAngle"),
@@ -994,6 +1014,27 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
         -Picture::TURNS,
         Picture::TURNS,
     );
+}
+
+fn upper_lift(t: &Title, high: &Value) -> f64 {
+    let lines = rich::lines(&t.sized_text());
+    let base = t.text_fraction();
+    let size = lines.first().map_or(base, |l| rich::largest(l, base));
+    row(high) as f64 / 2.0 * size * Title::LINE + t.lower_line()
+}
+
+fn read_zoom(g: &Value) -> Option<f64> {
+    value(g, "transformationZoomX")
+        .as_f64()
+        .filter(|z| z.is_finite())
+        .map(|z| rounded(z.clamp(0.25, 4.0)))
+}
+
+fn read_rotation(g: &Value) -> Option<f64> {
+    value(g, "transformationRotationAngle")
+        .as_f64()
+        .filter(|r| r.abs() <= Picture::TURNS)
+        .map(rounded)
 }
 
 pub fn read(item: &Value, reference: &Value, height: u32, origin: i64) -> Option<Title> {
@@ -1014,15 +1055,25 @@ pub fn read(item: &Value, reference: &Value, height: u32, origin: i64) -> Option
 }
 
 pub fn with_keys_of(mut t: Title, read: &Title) -> Title {
+    take_keys(&mut t, read);
+    t.opacity = read.opacity;
+    t.opacity_keys.clone_from(&read.opacity_keys);
+    if read.upper.is_some() {
+        t.part_lines();
+        t.swap_lines();
+        take_keys(&mut t, &read.upper_view());
+        t.swap_lines();
+    }
+    t
+}
+
+fn take_keys(t: &mut Title, read: &Title) {
     let dy = t.place()[1] - read.place()[1];
     t.position_keys.clone_from(&read.position_keys);
     t.position_y = read.position_y.iter().map(|y| down(y + dy)).collect();
     t.position_handles.clone_from(&read.position_handles);
     t.zoom_keys.clone_from(&read.zoom_keys);
     t.rotation_keys.clone_from(&read.rotation_keys);
-    t.opacity = read.opacity;
-    t.opacity_keys.clone_from(&read.opacity_keys);
-    t
 }
 
 pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
@@ -1072,14 +1123,8 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             (lines, style_from, at, Some(row(lower)), lower)
         }
     };
-    let zoom = value(turned_by, "transformationZoomX")
-        .as_f64()
-        .filter(|z| z.is_finite())
-        .map(|z| rounded(z.clamp(0.25, 4.0)));
-    let rotation = value(turned_by, "transformationRotationAngle")
-        .as_f64()
-        .filter(|r| r.abs() <= Picture::TURNS)
-        .map(rounded);
+    let zoom = read_zoom(turned_by);
+    let rotation = read_rotation(turned_by);
     let size = style_from
         .points
         .map(|p| p / h)
@@ -1131,6 +1176,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         rotation_keys: Vec::new(),
         opacity: None,
         opacity_keys: Vec::new(),
+        upper: None,
     };
     let [x, from_bottom] = at;
     let mut y = 1.0 - from_bottom;
@@ -1138,5 +1184,21 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         y += row as f64 / 2.0 * title.lower_line();
     }
     title.position = Some([across(x), down(y)]);
+    if kind == TitleKind::LowerThird
+        && title.text.contains('\n')
+        && let Some((Some(high), _)) = upper_lower(&texts)
+    {
+        let [x, from_bottom] = point(value(high, "position")).unwrap_or([x, 0.2]);
+        let line = TitleLine {
+            position: Some([
+                across(x),
+                down(1.0 - from_bottom + upper_lift(&title, high)),
+            ]),
+            zoom: read_zoom(high),
+            rotation: read_rotation(high),
+            ..TitleLine::default()
+        };
+        title.upper = Some(line).filter(|u| *u != title.line());
+    }
     crate::ops::titles::checked(&title).ok()
 }

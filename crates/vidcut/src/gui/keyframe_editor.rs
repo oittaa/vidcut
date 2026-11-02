@@ -12,7 +12,9 @@ use serde_json::{Value, json};
 use vidcut_core::keyframes::{
     PictureValue, ease_of, eases, handle_point, value_mapped, value_paired,
 };
-use vidcut_core::model::{Clip, Ease, Handle, Keyframe, Picture, Project, Speed, Title};
+use vidcut_core::model::{
+    Clip, Ease, Handle, Keyframe, LowerThirdLine, Picture, Project, Speed, Title,
+};
 use vidcut_core::ops::picture::has_picture;
 use vidcut_core::request::KeyParam;
 use vidcut_core::validate::GAIN;
@@ -24,7 +26,7 @@ use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
 
-const LABEL: f32 = 172.0;
+const LABEL: f32 = 182.0;
 const RULER_H: f32 = 20.0;
 const GROUP_H: f32 = 22.0;
 const TRACK_H: f32 = 26.0;
@@ -389,8 +391,14 @@ impl Editor {
 fn group_of(param: KeyParam) -> Group {
     match param {
         KeyParam::Position
+        | KeyParam::UpperPosition
+        | KeyParam::LowerPosition
         | KeyParam::Zoom
+        | KeyParam::UpperZoom
+        | KeyParam::LowerZoom
         | KeyParam::Rotation
+        | KeyParam::UpperRotation
+        | KeyParam::LowerRotation
         | KeyParam::Anchor
         | KeyParam::Pitch
         | KeyParam::Yaw => Group::Transform,
@@ -421,6 +429,12 @@ fn lane_name(param: KeyParam) -> &'static str {
         KeyParam::Position => "Position",
         KeyParam::Zoom => "Zoom",
         KeyParam::Rotation => "Rotation",
+        KeyParam::UpperPosition => "Upper Position",
+        KeyParam::UpperZoom => "Upper Zoom",
+        KeyParam::UpperRotation => "Upper Rotation",
+        KeyParam::LowerPosition => "Lower Position",
+        KeyParam::LowerZoom => "Lower Zoom",
+        KeyParam::LowerRotation => "Lower Rotation",
         KeyParam::Anchor => "Anchor Point",
         KeyParam::Pitch => "Pitch",
         KeyParam::Yaw => "Yaw",
@@ -437,9 +451,14 @@ fn lane_name(param: KeyParam) -> &'static str {
 fn limits(param: KeyParam) -> (f64, f64) {
     match param {
         KeyParam::Volume => (*GAIN.start(), *GAIN.end()),
-        KeyParam::Position | KeyParam::Anchor => (0.5 - Picture::REACH, 0.5 + Picture::REACH),
-        KeyParam::Zoom => Picture::ZOOM,
-        KeyParam::Rotation => (-Picture::TURNS, Picture::TURNS),
+        KeyParam::Position
+        | KeyParam::UpperPosition
+        | KeyParam::LowerPosition
+        | KeyParam::Anchor => (0.5 - Picture::REACH, 0.5 + Picture::REACH),
+        KeyParam::Zoom | KeyParam::UpperZoom | KeyParam::LowerZoom => Picture::ZOOM,
+        KeyParam::Rotation | KeyParam::UpperRotation | KeyParam::LowerRotation => {
+            (-Picture::TURNS, Picture::TURNS)
+        }
         KeyParam::Pitch | KeyParam::Yaw => (-Picture::LEAN, Picture::LEAN),
         KeyParam::CropLeft | KeyParam::CropRight | KeyParam::CropTop | KeyParam::CropBottom => {
             (0.0, 1.0)
@@ -453,7 +472,10 @@ fn limits(param: KeyParam) -> (f64, f64) {
 fn quantize(param: KeyParam, d: f64) -> f64 {
     let places = match param {
         KeyParam::Volume => 1,
-        KeyParam::Rotation | KeyParam::CropSoftness => 2,
+        KeyParam::Rotation
+        | KeyParam::UpperRotation
+        | KeyParam::LowerRotation
+        | KeyParam::CropSoftness => 2,
         _ => 6,
     };
     let k = 10f64.powi(places);
@@ -463,8 +485,11 @@ fn quantize(param: KeyParam, d: f64) -> f64 {
 fn least_span(param: KeyParam) -> f64 {
     match param {
         KeyParam::Volume => 6.0,
-        KeyParam::Zoom => 0.1,
-        KeyParam::Rotation | KeyParam::CropSoftness => 10.0,
+        KeyParam::Zoom | KeyParam::UpperZoom | KeyParam::LowerZoom => 0.1,
+        KeyParam::Rotation
+        | KeyParam::UpperRotation
+        | KeyParam::LowerRotation
+        | KeyParam::CropSoftness => 10.0,
         KeyParam::Pitch | KeyParam::Yaw => 0.1,
         _ => 0.05,
     }
@@ -473,15 +498,23 @@ fn least_span(param: KeyParam) -> f64 {
 fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
     let ([w, h], [fw, fh]) = (f.frame, f.fitted);
     match param {
-        KeyParam::Position if y => (0.5 - v) * h,
-        KeyParam::Position => (v - 0.5) * w,
+        KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition if y => {
+            (0.5 - v) * h
+        }
+        KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition => (v - 0.5) * w,
         KeyParam::Anchor if y => (0.5 - v) * fh,
         KeyParam::Anchor => (v - 0.5) * fw,
-        KeyParam::Zoom | KeyParam::Opacity | KeyParam::Speed => v * 100.0,
+        KeyParam::Zoom
+        | KeyParam::UpperZoom
+        | KeyParam::LowerZoom
+        | KeyParam::Opacity
+        | KeyParam::Speed => v * 100.0,
         KeyParam::CropLeft | KeyParam::CropRight => v * fw,
         KeyParam::CropTop | KeyParam::CropBottom => v * fh,
         KeyParam::Volume
         | KeyParam::Rotation
+        | KeyParam::UpperRotation
+        | KeyParam::LowerRotation
         | KeyParam::Pitch
         | KeyParam::Yaw
         | KeyParam::CropSoftness => v,
@@ -491,15 +524,21 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
 fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
     let ([w, h], [fw, fh]) = (f.frame, f.fitted);
     match param {
-        KeyParam::Position if y => 0.5 - v / h,
-        KeyParam::Position => v / w + 0.5,
+        KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition if y => 0.5 - v / h,
+        KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition => v / w + 0.5,
         KeyParam::Anchor if y => 0.5 - v / fh,
         KeyParam::Anchor => v / fw + 0.5,
-        KeyParam::Zoom | KeyParam::Opacity | KeyParam::Speed => v / 100.0,
+        KeyParam::Zoom
+        | KeyParam::UpperZoom
+        | KeyParam::LowerZoom
+        | KeyParam::Opacity
+        | KeyParam::Speed => v / 100.0,
         KeyParam::CropLeft | KeyParam::CropRight => v / fw,
         KeyParam::CropTop | KeyParam::CropBottom => v / fh,
         KeyParam::Volume
         | KeyParam::Rotation
+        | KeyParam::UpperRotation
+        | KeyParam::LowerRotation
         | KeyParam::Pitch
         | KeyParam::Yaw
         | KeyParam::CropSoftness => v,
@@ -509,16 +548,28 @@ fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
 fn unit(param: KeyParam) -> &'static str {
     match param {
         KeyParam::Volume => " dB",
-        KeyParam::Zoom | KeyParam::Opacity | KeyParam::Speed => "%",
-        KeyParam::Rotation => "°",
+        KeyParam::Zoom
+        | KeyParam::UpperZoom
+        | KeyParam::LowerZoom
+        | KeyParam::Opacity
+        | KeyParam::Speed => "%",
+        KeyParam::Rotation | KeyParam::UpperRotation | KeyParam::LowerRotation => "°",
         _ => "",
     }
 }
 
 fn places(param: KeyParam) -> usize {
     match param {
-        KeyParam::Volume | KeyParam::Zoom | KeyParam::Opacity => 1,
-        KeyParam::Rotation | KeyParam::CropSoftness | KeyParam::Speed => 2,
+        KeyParam::Volume
+        | KeyParam::Zoom
+        | KeyParam::UpperZoom
+        | KeyParam::LowerZoom
+        | KeyParam::Opacity => 1,
+        KeyParam::Rotation
+        | KeyParam::UpperRotation
+        | KeyParam::LowerRotation
+        | KeyParam::CropSoftness
+        | KeyParam::Speed => 2,
         KeyParam::Pitch | KeyParam::Yaw => 3,
         _ => 0,
     }
@@ -546,30 +597,56 @@ fn tick_step(ppf: f32, fps: f64) -> i64 {
 fn paired(param: KeyParam) -> bool {
     matches!(
         param,
-        KeyParam::Position | KeyParam::Zoom | KeyParam::Anchor
+        KeyParam::Position
+            | KeyParam::UpperPosition
+            | KeyParam::LowerPosition
+            | KeyParam::Zoom
+            | KeyParam::UpperZoom
+            | KeyParam::LowerZoom
+            | KeyParam::Anchor
     )
 }
 
 fn linear(clip: &Clip, param: KeyParam) -> bool {
-    param == KeyParam::Anchor || (param == KeyParam::Position && clip.title.is_some())
+    param == KeyParam::Anchor
+        || (matches!(
+            param,
+            KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition
+        ) && clip.title.is_some())
 }
 
 fn limits_of(clip: &Clip, param: KeyParam, axis: Axis) -> (f64, f64) {
     match param {
-        KeyParam::Zoom if clip.title.is_some() => (0.25, 4.0),
-        KeyParam::Position if clip.title.is_some() && axis == Axis::Y => Title::DOWN,
-        KeyParam::Position if clip.title.is_some() => Title::ACROSS,
+        KeyParam::Zoom | KeyParam::UpperZoom | KeyParam::LowerZoom if clip.title.is_some() => {
+            (0.25, 4.0)
+        }
+        KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition
+            if clip.title.is_some() && axis == Axis::Y =>
+        {
+            Title::DOWN
+        }
+        KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition
+            if clip.title.is_some() =>
+        {
+            Title::ACROSS
+        }
         _ => limits(param),
     }
 }
 
 fn nudge_step(param: KeyParam, sign: f64, y: bool) -> f64 {
     let step = match param {
-        KeyParam::Zoom | KeyParam::Volume | KeyParam::CropSoftness => 0.2,
-        KeyParam::Rotation => 0.02,
+        KeyParam::Zoom
+        | KeyParam::UpperZoom
+        | KeyParam::LowerZoom
+        | KeyParam::Volume
+        | KeyParam::CropSoftness => 0.2,
+        KeyParam::Rotation | KeyParam::UpperRotation | KeyParam::LowerRotation => 0.02,
         KeyParam::Opacity => 0.002,
         KeyParam::Speed => 0.01,
         KeyParam::Position
+        | KeyParam::UpperPosition
+        | KeyParam::LowerPosition
         | KeyParam::Anchor
         | KeyParam::Pitch
         | KeyParam::Yaw
@@ -578,7 +655,10 @@ fn nudge_step(param: KeyParam, sign: f64, y: bool) -> f64 {
         | KeyParam::CropTop
         | KeyParam::CropBottom => 0.001,
     };
-    let down = matches!(param, KeyParam::Position | KeyParam::Anchor) && y;
+    let down = matches!(
+        param,
+        KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition | KeyParam::Anchor
+    ) && y;
     if down { -step * sign } else { step * sign }
 }
 
@@ -709,8 +789,16 @@ fn frames_of(marks: &[Mark], param: KeyParam) -> Vec<i64> {
 
 fn by_value(clip: &Clip, param: KeyParam, axis: Axis, d: f64) -> Value {
     match param {
-        KeyParam::Zoom if clip.title.is_some() => json!(d),
-        KeyParam::Position | KeyParam::Zoom | KeyParam::Anchor => match axis {
+        KeyParam::Zoom | KeyParam::UpperZoom | KeyParam::LowerZoom if clip.title.is_some() => {
+            json!(d)
+        }
+        KeyParam::Position
+        | KeyParam::UpperPosition
+        | KeyParam::LowerPosition
+        | KeyParam::Zoom
+        | KeyParam::UpperZoom
+        | KeyParam::LowerZoom
+        | KeyParam::Anchor => match axis {
             Axis::Y => json!([0.0, d]),
             _ => json!([d, 0.0]),
         },
@@ -907,14 +995,28 @@ fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
         }
     }
     if let Some(t) = &clip.title {
-        let picture = t.as_picture();
-        for v in PictureValue::ALL {
-            if t.takes_keys(v) && (!keyed_only || picture.has_keys(v)) {
-                let mut lane = lane_from(&picture, v);
-                if v == PictureValue::Zoom {
-                    lane.extra.clear();
+        let high = t.upper_view();
+        let lines = match &t.upper {
+            Some(_) => vec![
+                (&high, Some(LowerThirdLine::Upper)),
+                (t, Some(LowerThirdLine::Lower)),
+            ],
+            None => vec![(t, None)],
+        };
+        for (view, line) in lines {
+            let picture = view.as_picture();
+            for v in PictureValue::ALL {
+                let whole = v == PictureValue::Opacity && line == Some(LowerThirdLine::Upper);
+                if !whole && view.takes_keys(v) && (!keyed_only || picture.has_keys(v)) {
+                    let mut lane = lane_from(&picture, v);
+                    if v == PictureValue::Zoom {
+                        lane.extra.clear();
+                    }
+                    if let Some(line) = line {
+                        lane.param = lane.param.for_line(line);
+                    }
+                    out.push(lane);
                 }
-                out.push(lane);
             }
         }
     }
@@ -2384,7 +2486,13 @@ impl Workspace {
         let painter = ui.painter_at(rect);
         let colors = theme::colors();
         painter.rect_filled(rect, 2.0, colors.panel_dark);
-        if !matches!(lane.param, KeyParam::Position | KeyParam::Anchor) {
+        if !matches!(
+            lane.param,
+            KeyParam::Position
+                | KeyParam::UpperPosition
+                | KeyParam::LowerPosition
+                | KeyParam::Anchor
+        ) {
             let font = TextStyle::Small.resolve(ui.style());
             for (v, y, align) in [
                 (values.hi, rect.top() + 1.0, Align2::LEFT_TOP),
@@ -2628,7 +2736,12 @@ impl Workspace {
         let mut v = held.map_or(shown, |h| h.value);
         let speed = match param {
             KeyParam::Volume => 0.1,
-            KeyParam::Zoom | KeyParam::Rotation => 0.5,
+            KeyParam::Zoom
+            | KeyParam::UpperZoom
+            | KeyParam::LowerZoom
+            | KeyParam::Rotation
+            | KeyParam::UpperRotation
+            | KeyParam::LowerRotation => 0.5,
             KeyParam::Pitch | KeyParam::Yaw => 0.01,
             _ => 1.0,
         };

@@ -869,9 +869,13 @@ impl Title {
     }
 
     pub fn is_keyed(&self) -> bool {
-        PictureValue::ALL
-            .into_iter()
-            .any(|v| !self.keys_of(v).is_empty())
+        let upper = self.upper.as_ref().is_some_and(|u| {
+            !u.position_keys.is_empty() || !u.zoom_keys.is_empty() || !u.rotation_keys.is_empty()
+        });
+        upper
+            || PictureValue::ALL
+                .into_iter()
+                .any(|v| !self.keys_of(v).is_empty())
     }
 
     pub fn handles_at(&self, frame: i64) -> Option<&PositionHandles> {
@@ -1006,11 +1010,13 @@ impl Title {
             return self.clone();
         }
         let mut t = self.clone();
-        let mut picture = self.as_picture().sampled(frame);
-        if let Some(at) = self.on_path(frame) {
-            picture.position = Some(at);
-        }
-        t.take_picture(&picture);
+        t.each_line(|line| {
+            let mut picture = line.as_picture().sampled(frame);
+            if let Some(at) = line.on_path(frame) {
+                picture.position = Some(at);
+            }
+            line.take_picture(&picture);
+        });
         t
     }
 }

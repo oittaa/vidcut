@@ -5,7 +5,9 @@ use serde_json::{Value, json};
 use super::locate;
 use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, checked, checked_handle, ease_of, reshape};
-use crate::model::{Clip, ClipAudio, Ease, Handle, Keyframe, Picture, Project, Title};
+use crate::model::{
+    Clip, ClipAudio, Ease, Handle, Keyframe, LowerThirdLine, Picture, Project, Title, TitleKind,
+};
 use crate::request::{CopiedKey, KeyParam, KeyPicks, KeyValue};
 use crate::validate::GAIN;
 
@@ -432,7 +434,18 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                 );
             }
             if let Some(picture) = &held_picture(c) {
-                clips.extend(listed_values(p, c, &t.id, picture));
+                let rows = listed_values(p, c, &t.id, picture);
+                let apart = c.title.as_ref().is_some_and(|t| t.upper.is_some());
+                clips.extend(if apart {
+                    with_line(rows, "lower")
+                } else {
+                    rows
+                });
+            }
+            if let Some(title) = c.title.as_ref().filter(|t| t.upper.is_some()) {
+                let picture = title.upper_view().as_picture();
+                let rows = with_line(listed_values(p, c, &t.id, &picture), "upper");
+                clips.extend(rows.into_iter().filter(|r| r["param"] != "opacity"));
             }
         }
     }
@@ -451,6 +464,33 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
         }
     }
     Ok(json!({ "clips": clips }))
+}
+
+fn with_line(mut rows: Vec<Value>, line: &str) -> Vec<Value> {
+    for row in rows.iter_mut().filter(|r| r["param"] != "opacity") {
+        row["param"] = json!(format!("{line}_{}", row["param"].as_str().unwrap_or("")));
+    }
+    rows
+}
+
+pub fn on_line<T>(
+    p: &mut Project,
+    ids: &[String],
+    param: KeyParam,
+    work: impl FnOnce(&mut Project, KeyParam) -> Result<T>,
+) -> Result<T> {
+    let (value, line) = param.on_line();
+    super::titles::on_line(p, ids, line, |p| work(p, value))
+}
+
+fn of_line(c: &Clip, line: Option<LowerThirdLine>) -> Clip {
+    let mut c = c.clone();
+    if line == Some(LowerThirdLine::Upper)
+        && let Some(t) = c.title.as_mut()
+    {
+        t.swap_lines();
+    }
+    c
 }
 
 fn listed_values(p: &Project, c: &Clip, track: &str, picture: &Picture) -> Vec<Value> {
@@ -502,37 +542,49 @@ fn param_name(param: KeyParam) -> &'static str {
     }
 }
 
-pub fn chosen(
-    p: &Project,
-    id: &str,
-    picks: Option<&[KeyPicks]>,
-) -> Result<Vec<(KeyParam, Vec<i64>)>> {
-    let c = &holder(p, id)?;
+pub type ChosenKeys = (KeyParam, Vec<i64>);
+
+fn listed_params(c: &Clip) -> impl Iterator<Item = KeyParam> + use<> {
+    let apart = c.title.as_ref().is_some_and(|t| t.upper.is_some());
+    KeyParam::ALL.into_iter().filter(move |&param| {
+        if param.on_line().1.is_some() {
+            return apart;
+        }
+        !apart || param.for_line(LowerThirdLine::Lower) == param
+    })
+}
+
+pub fn chosen(p: &Project, id: &str, picks: Option<&[KeyPicks]>) -> Result<Vec<ChosenKeys>> {
+    let whole = &holder(p, id)?;
     let wanted: Vec<(KeyParam, Option<Vec<i64>>)> = match picks {
         Some(picks) => picks
             .iter()
             .map(|k| (k.param, k.frames.as_ref().map(|f| f.to_vec())))
             .collect(),
-        None => KeyParam::ALL
-            .into_iter()
-            .filter(|&param| !keys_of(c, param).is_empty())
+        None => listed_params(whole)
+            .filter(|&param| {
+                let (value, line) = param.on_line();
+                !keys_of(&of_line(whole, line), value).is_empty()
+            })
             .map(|param| (param, None))
             .collect(),
     };
-    let mut out: Vec<(KeyParam, Vec<i64>)> = Vec::new();
+    let mut out: Vec<ChosenKeys> = Vec::new();
     for (param, frames) in wanted {
         if param == KeyParam::Speed {
             return Err(Error::invalid("speed keyframes don't copy"));
         }
-        let keys = keys_of(c, param);
+        let (value, line) = param.on_line();
+        let c = &of_line(whole, line);
+        let keys = keys_of(c, value);
         if keys.is_empty() {
             return Err(Error::invalid(format!(
                 "{id} has no {} keyframes",
-                param_name(param).replace('_', " ")
+                param_name(value).replace('_', " ")
             )));
         }
         let pick = Pick { frames, at: None };
-        let mut taken: Vec<i64> = match picture_param(param) {
+        let mut taken: Vec<i64> = match picture_param(value) {
             Some(v) => picked_name(c, keys, &pick, v)?,
             None => picked(c, keys, &pick)?,
         }
@@ -554,18 +606,20 @@ pub fn chosen(
     Ok(out)
 }
 
-pub fn copy(p: &Project, id: &str, picks: &[(KeyParam, Vec<i64>)]) -> Result<Vec<CopiedKey>> {
-    let c = &holder(p, id)?;
-    let held = held_picture(c);
+pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey>> {
+    let whole = &holder(p, id)?;
     let mut rows = Vec::new();
     for (param, frames) in picks {
-        let keys = keys_of(c, *param);
+        let (plain, line) = param.on_line();
+        let c = &of_line(whole, line);
+        let held = held_picture(c);
+        let keys = keys_of(c, plain);
         for (i, k) in keys
             .iter()
             .enumerate()
             .filter(|(_, k)| frames.contains(&k.frame))
         {
-            let value = match (picture_param(*param), &held) {
+            let value = match (picture_param(plain), &held) {
                 (Some(v), Some(picture)) if v.pair() => {
                     KeyValue::Pair(picture.key_value(v, k.frame).unwrap_or([k.value, 0.0]))
                 }
@@ -575,7 +629,7 @@ pub fn copy(p: &Project, id: &str, picks: &[(KeyParam, Vec<i64>)]) -> Result<Vec
             let bent = c
                 .title
                 .as_ref()
-                .filter(|_| *param == KeyParam::Position)
+                .filter(|_| plain == KeyParam::Position)
                 .and_then(|t| t.handles_at(k.frame));
             rows.push((
                 at,
@@ -618,9 +672,14 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
     for (id, start) in ids.iter().zip(starts) {
         let one = std::slice::from_ref(id);
         let mut placed = Vec::new();
+        let thirds = title_mut(p, id).is_some_and(|t| t.kind == TitleKind::LowerThird);
         for k in keys {
             let t = start + at - earliest + k.offset - first;
-            for (_, frame) in add(p, one, k.param, t, Some(k.value), None)? {
+            let param = if thirds { k.param } else { k.param.on_line().0 };
+            let added = on_line(p, one, param, |p, param| {
+                add(p, one, param, t, Some(k.value), None)
+            })?;
+            for (_, frame) in added {
                 placed.push((*k, frame));
             }
         }
@@ -640,12 +699,16 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
                     ..KeyChange::default()
                 },
             };
-            set(p, one, k.param, &pick, &change)?;
-            if k.param == KeyParam::Position
-                && let Some(t) = title_mut(p, id).filter(|t| !t.moves())
-            {
-                t.put_handles(frame, k.in_point, k.out_point);
-            }
+            let param = if thirds { k.param } else { k.param.on_line().0 };
+            on_line(p, one, param, |p, param| {
+                set(p, one, param, &pick, &change)?;
+                if param == KeyParam::Position
+                    && let Some(t) = title_mut(p, id).filter(|t| !t.moves())
+                {
+                    t.put_handles(frame, k.in_point, k.out_point);
+                }
+                Ok(())
+            })?;
             out.push(json!({ "clip": id, "param": k.param, "value": k.value, "frame": frame }));
         }
     }
@@ -655,9 +718,13 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
 fn picture_param(param: KeyParam) -> Option<PictureValue> {
     match param {
         KeyParam::Volume => None,
-        KeyParam::Position => Some(PictureValue::Position),
-        KeyParam::Zoom => Some(PictureValue::Zoom),
-        KeyParam::Rotation => Some(PictureValue::Rotation),
+        KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition => {
+            Some(PictureValue::Position)
+        }
+        KeyParam::Zoom | KeyParam::UpperZoom | KeyParam::LowerZoom => Some(PictureValue::Zoom),
+        KeyParam::Rotation | KeyParam::UpperRotation | KeyParam::LowerRotation => {
+            Some(PictureValue::Rotation)
+        }
         KeyParam::Anchor => Some(PictureValue::Anchor),
         KeyParam::Pitch => Some(PictureValue::Pitch),
         KeyParam::Yaw => Some(PictureValue::Yaw),

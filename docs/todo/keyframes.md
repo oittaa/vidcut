@@ -277,7 +277,8 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 **In vidcut:**
 
 - A Text title and a lower third take keyframes on position, zoom, rotation and opacity. A scroll takes them on position and opacity.
-- The Title section has the Keyframe button on Across, Zoom, Rotation and Title opacity. Across holds the keyframes of Across and Down.
+- Each line of a lower third takes its own keyframes on position, zoom and rotation. `upper_position`, `lower_position` and the like in the `keyframes` requests name the line. Opacity is the whole title's.
+- The Title section has the Keyframe button on Across, Zoom, Rotation and Title opacity. Across holds the keyframes of Across and Down. A lower third has these buttons on each line, and one Title opacity.
 - The right-click menu of the Keyframe button of Across, Zoom, Rotation and Title opacity has the items of the measured menu (`key_buttons`, `eases`). It sends `keyframes.set`.
 - On Position, the check mark is on the item that the sides of the key's handles give (`Title::position_ease`).
 - On Zoom, Rotation and Title opacity, the check mark is on the item that `ease_of` gives. A key with other handles has no check mark.
@@ -298,8 +299,8 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 
 **In a file:**
 
-- `otio::titles` writes the keyframes in the `Key Frames` of each parameter, on both `Rich Text` groups of a lower third.
-- It reads them from the group of the lower line.
+- `otio::titles` writes the keyframes in the `Key Frames` of each parameter, on the `Rich Text` group of each line of a lower third.
+- It reads each line's keyframes from its own group.
 - Position keys convert as the plain position does. `InBez` and `OutBez` go to `position_handles` and come back, with Y turned over.
 - A scroll reads and writes no position handles, because nothing measures them.
 - The `vidcut` metadata holds the keyframes on source frames, as for a `Picture`.

@@ -1085,7 +1085,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Markup in its text styles words: `<b>`, `<i>`, `<u>` and `<font color face size>`.
   - The B, I, U, Color, Size, Font and Plain buttons of the Title section put this markup around the selected words.
   - A line of a lower third takes its own size in this way.
-  - The lines of a title share one zoom and one rotation.
   - vidcut does not have Text+ and Fusion titles.
   - The Position, Zoom, Rotation and Opacity of a title take keyframes ([todo](todo/keyframes.md#titles)). Its shadow and background do not.
   - A title clip has no Transform, Cropping, Speed or blend modes.
@@ -2264,6 +2263,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A keyframe on the Position of the Title tab has no row.
 - **vidcut:**
   - The Keyframes tab of a title has the rows Position, Zoom, Rotation and Opacity. A scroll has only Position and Opacity ([todo](todo/keyframes.md#titles)).
+  - A lower third with its lines apart has the rows Upper Position, Upper Zoom, Upper Rotation, Lower Position, Lower Zoom, Lower Rotation and Opacity.
   - A title has no rows for Transform and Cropping. A title has no such values ([spec §8.14](cut-page-spec.md#814-titles-pp-762764-11761178)).
 - **Why:**
   - All the keyframes of a title show on rows over time, in one tab, as the keyframes of a clip do.

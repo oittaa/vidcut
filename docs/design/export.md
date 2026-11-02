@@ -365,7 +365,8 @@ Cancel:
   - A clip that fades in or out above a title nests the other way: its `Mix` is over the titled picture.
   - `VideoPiece::titles` tells how many of the `VideoPiece::layers` each title goes over.
 - `Screen::draw` lays the layers under a title, then the title, then the layers over it, and then the subtitles.
-- `burn::title` lays out a title with the code of the burn-in (`lay_out`).
+- `burn::title_blocks` draws each `TitleBlock` of a title with the code of the burn-in (`lay_out`). `burn::title` merges the blocks into one `Sprite`.
+  - A `TitlePart::Backing` block lays out the two lines at the lower line's values and draws only their box (`Look`, its `bare` field).
   - `lay_out` strokes the outlines of the glyphs with zeno. When a glyph has no outline, it grows the drawn letters instead (`dilate`).
   - A stroke goes over the letters. An `outside` stroke goes behind them, at the same width.
   - `Edge` holds its width in pixels of the picture. `burn::title` and `burn::paint` take the timeline height for this, because a width is in pixels of the timeline.
