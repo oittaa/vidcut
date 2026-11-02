@@ -194,9 +194,7 @@ impl Settings {
             s.auto_format = false;
         }
         if let Some((w, h)) = size {
-            check_side("width", w)?;
-            check_side("height", h)?;
-            (s.width, s.height) = (w, h);
+            (s.width, s.height) = timeline_size(w, h);
             s.auto_format = false;
         }
         Ok(s)
@@ -265,13 +263,17 @@ impl Settings {
     }
 }
 
-pub fn check_side(name: &str, px: u32) -> crate::error::Result<()> {
-    if px < 16 || !px.is_multiple_of(2) {
-        return Err(crate::error::Error::invalid(format!(
-            "{name} must be even and at least 16"
-        )));
+pub const TIMELINE_SIDE: (u32, u32) = (256, 32768);
+
+pub fn timeline_size(width: u32, height: u32) -> (u32, u32) {
+    let (least, most) = TIMELINE_SIDE;
+    if width < least || height < least {
+        (least, least)
+    } else if width > most || height > most {
+        (most, most)
+    } else {
+        (width, height)
     }
-    Ok(())
 }
 
 pub const PROXY_LONGEST: u32 = 960;
@@ -1098,7 +1100,7 @@ pub struct Track {
     /// While any track is soloed, only soloed tracks are heard (the mixer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
-    /// The mixer fader, in dB (decision D12's range, -60..24).
+    /// The mixer fader, in dB, from -100 to 10.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub volume_db: f64,
     /// Voice Isolation on the track's clips that have none of their own,
@@ -1864,6 +1866,14 @@ fn is_zero_frames(n: &i64) -> bool {
 }
 
 impl Speed {
+    pub const RANGE: std::ops::RangeInclusive<f64> = 0.0001..=1000.0;
+
+    pub fn percent(speed: f64) -> f64 {
+        let percent = speed * 100.0;
+        let places = if percent.abs() < 1.0 { 100.0 } else { 1.0 };
+        (percent * places).round() / places
+    }
+
     pub fn constant(speed: f64) -> Self {
         Self {
             sections: Arc::from([Section {
@@ -1948,13 +1958,19 @@ pub struct Title {
     pub position: Option<[f64; 2]>,
     /// Position keyframes, one for X and Y, on the clip's source frames.
     /// `value` is X. `position_y` is Y, one number for each keyframe, in the
-    /// same order. They are linear: they take no handles. Left out when the
-    /// position has no keyframes.
+    /// same order. Their own `in_handle` and `out_handle` stay empty:
+    /// `position_handles` bends the path. Left out when the position has no
+    /// keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_keys: Vec<Keyframe>,
     /// Y of each `position_keys` entry. Left out with those keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_y: Vec<f64>,
+    /// The handles of the `position_keys` that have any, in order of frame.
+    /// `keyframes.set` with `ease` or an OTIO import gives them. A scroll has
+    /// none. Left out when no keyframe has a handle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub position_handles: Vec<PositionHandles>,
     /// How much larger its text is drawn, from 1/4 to 4, about the middle of
     /// a `text` title or the point where a lower third's lines meet; a
     /// scroll has none. Usual: 1. With `zoom_keys`, the zoom at a frame is
@@ -1982,6 +1998,23 @@ pub struct Title {
     /// opacity has no keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub opacity_keys: Vec<Keyframe>,
+}
+
+/// The handles of one position keyframe of a title, as fractions of the
+/// picture from that keyframe, `[x, y]`. Between two keyframes the title
+/// moves on a cubic path. Its inner points are the first keyframe plus its
+/// `out_handle` and the second keyframe plus its `in_handle`. The title moves
+/// at one speed along the path, with the length in fractions of the picture.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PositionHandles {
+    /// The source frame of the keyframe in `position_keys`.
+    pub frame: i64,
+    /// The handle toward the keyframe before it. Left out when it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_handle: Option<[f64; 2]>,
+    /// The handle toward the keyframe after it. Left out when it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_handle: Option<[f64; 2]>,
 }
 
 /// What kind of title: one block of text, a lower third, or a scroll.
@@ -2107,6 +2140,7 @@ impl Title {
             position: None,
             position_keys: Vec::new(),
             position_y: Vec::new(),
+            position_handles: Vec::new(),
             zoom: None,
             zoom_keys: Vec::new(),
             rotation: None,
@@ -2877,7 +2911,7 @@ pub struct Keyframe {
     /// `skip` is. The keyframe stays on its content through trims, slips
     /// and splits.
     pub frame: i64,
-    /// The value there: the volume in dB, from -60 to 24.
+    /// The value there: the volume in dB, from -100 to 30.
     pub value: f64,
     /// The In handle, which shapes the change before the keyframe.
     #[serde(rename = "in", default, skip_serializing_if = "Option::is_none")]
@@ -2915,7 +2949,7 @@ pub struct ClipAudio {
     pub head: i64,
     /// Audio ends this many frames after the clip end (positive: an L cut).
     pub tail: i64,
-    /// The volume in dB, from -60 to 24, while the clip has no volume
+    /// The volume in dB, from -100 to 30, while the clip has no volume
     /// keyframes.
     pub gain_db: f64,
     /// The volume keyframes (decision D81), in the order of their frames,

@@ -45,10 +45,14 @@ pub enum Request {
         /// Frame rate, like `25`, `29.97` or `30000/1001`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fps: Option<String>,
-        /// Frame width; give the height too.
+        /// Frame width, from 256 to 32768; give the height too. A side under
+        /// 256 sets both sides to 256. Else a side over 32768 sets both to
+        /// 32768.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         width: Option<u32>,
-        /// Frame height; give the width too.
+        /// Frame height, from 256 to 32768; give the width too. A side under
+        /// 256 sets both sides to 256. Else a side over 32768 sets both to
+        /// 32768.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -533,9 +537,10 @@ pub enum Request {
         /// Shorter speech doesn't count (`detect: speech`).
         #[serde(default = "min_speech")]
         min_speech: TimeSpec,
-        /// The shortest silence reported.
-        #[serde(default = "silence_min")]
-        min: TimeSpec,
+        /// The shortest silence reported. Default: 30 frames with
+        /// `detect: level`, 0.5 s with `detect: speech`.
+        #[serde(default)]
+        min: Option<TimeSpec>,
         /// `detect: speech` hears with transcribe.cpp's library and Silero VAD:
         /// download them if this computer doesn't have them yet, each checked
         /// against its SHA-256. Without it, a missing one is an error that
@@ -950,7 +955,8 @@ pub enum Request {
         /// What counts as silence.
         #[serde(default)]
         detect: Detect,
-        /// Sound below this level (dBFS) is silence (`detect: level`).
+        /// Sound below this level (dBFS) is silence (`detect: level`), from
+        /// -100 to 10.
         #[serde(default = "silence_threshold")]
         threshold_db: f64,
         /// Speech probability (0..1) from which a moment is speech
@@ -960,15 +966,21 @@ pub enum Request {
         /// Shorter speech doesn't count (`detect: speech`).
         #[serde(default = "min_speech")]
         min_speech: TimeSpec,
-        /// Silence kept before each audible part ("pre head").
-        #[serde(default = "silence_margin")]
-        pre_head: TimeSpec,
-        /// Silence kept after each audible part ("post tail").
-        #[serde(default = "silence_margin")]
-        post_tail: TimeSpec,
-        /// The shortest silence removed ("minimum to trip").
-        #[serde(default = "silence_min")]
-        min: TimeSpec,
+        /// Silence kept before each audible part ("pre head"). With
+        /// `detect: level`, from 0 to 60 frames, and none by default. With
+        /// `detect: speech`, 0.15 s by default.
+        #[serde(default)]
+        pre_head: Option<TimeSpec>,
+        /// Silence kept after each audible part ("post tail"). With
+        /// `detect: level`, from 0 to 60 frames, and none by default. With
+        /// `detect: speech`, 0.15 s by default.
+        #[serde(default)]
+        post_tail: Option<TimeSpec>,
+        /// The shortest silence removed ("minimum to trip"). With
+        /// `detect: level`, from 2 to 60 frames, and 30 by default. With
+        /// `detect: speech`, 0.5 s by default.
+        #[serde(default)]
+        min: Option<TimeSpec>,
         /// Cross Fade Audio: a 2-frame Cross Fade 0 dB on the sound where
         /// two parts that stay meet after the cut.
         #[serde(default)]
@@ -1199,6 +1211,7 @@ pub enum Request {
         muted: Option<bool>,
         #[serde(default)]
         solo: Option<bool>,
+        /// The fader, in dB, from -100 to 10.
         #[serde(default)]
         volume_db: Option<f64>,
         /// Voice Isolation's Amount, from 0 to 100: that much of the voice
@@ -1265,7 +1278,7 @@ pub enum Request {
         #[serde(default)]
         look: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -60..24), name, Clip Color,
+    /// Enable/disable video (D), mute, gain (dB, -100..30), name, Clip Color,
     /// Voice Isolation, Retime Process and Render Cache.
     #[serde(rename = "clip.set")]
     ClipSet {
@@ -1323,7 +1336,7 @@ pub enum Request {
     /// volume keyframes, mute, Voice Isolation and transitions, and without
     /// its track's mixer. The volume of a clip with volume keyframes is its
     /// highest keyframe, and every keyframe moves by the same dB (decision
-    /// D83). The volume stops at -60 and +24 dB. One undo step; a dry run
+    /// D83). The volume stops at -100 and +30 dB. One undo step; a dry run
     /// gives the volumes and changes nothing. Returns the `target`, the
     /// `peak_limit` (null without one), and each clip's `level` (null when
     /// silent), its volume before (`from_db`) and after (`gain_db`), `held`
@@ -1372,8 +1385,8 @@ pub enum Request {
     /// keyframe already on that frame takes the value and the ease. With
     /// its first keyframe, a clip's volume follows its keyframes. A title
     /// takes position, zoom, rotation and opacity, and a scroll takes
-    /// position and opacity. A title's zoom is one number, and its position
-    /// takes no ease or handles. `clips` also takes cues, as `q3` or
+    /// position and opacity. A title's zoom is one number. The handles of
+    /// its position keys bend its path. `clips` also takes cues, as `q3` or
     /// `S1@10s`. A cue takes every value of a picture except its anchor. Its
     /// frames count from its start. Returns the `clips` with the source
     /// `frame` of each new keyframe.
@@ -1384,8 +1397,8 @@ pub enum Request {
         param: KeyParam,
         #[serde(default)]
         at: Option<TimeSpec>,
-        /// The value at the keyframe. A number for volume (dB, from -60
-        /// to 24), rotation (degrees), pitch and yaw (from -1.5 to 1.5), a
+        /// The value at the keyframe. A number for volume (dB, from -100
+        /// to 30), rotation (degrees), pitch and yaw (from -1.5 to 1.5), a
         /// crop side (a fraction), crop softness (from -100 to 100) and
         /// opacity (from 0 to 1). For position, zoom and the anchor point,
         /// two numbers, x then y, or one number for both axes of zoom.
@@ -1412,12 +1425,15 @@ pub enum Request {
         #[serde(default)]
         value: Option<KeyValue>,
         /// Added to each value. A number, or two numbers for position,
-        /// zoom and the anchor point. Volume stops at -60 and +24 dB. A
+        /// zoom and the anchor point. Volume stops at -100 and +30 dB. A
         /// picture value stops at its own limits.
         #[serde(default)]
         by: Option<KeyValue>,
         /// Sets the handles: flat, a third of the way to the keyframe
-        /// before (In) and after (Out). `linear` takes them off.
+        /// before (In) and after (Out). `linear` takes them off. On a title's
+        /// position they are points: Out is an eighth of the way from the
+        /// keyframe before to the one after, In the opposite. An ease replaces
+        /// the old handles of that keyframe. A scroll's position takes none.
         #[serde(default)]
         ease: Option<Ease>,
         /// The In handle: `frames` (at most 0) and `value` (dB) from the
@@ -3332,6 +3348,14 @@ pub struct CopiedKey {
     /// The Out handle, when the keyframe has one.
     #[serde(rename = "out", default, skip_serializing_if = "Option::is_none")]
     pub out_handle: Option<Handle>,
+    /// On a title's position: the handle toward the keyframe before it, a
+    /// point in the picture. A paste on a title keeps it as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_point: Option<[f64; 2]>,
+    /// On a title's position: the handle toward the keyframe after it, a
+    /// point in the picture. A paste on a title keeps it as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_point: Option<[f64; 2]>,
 }
 
 /// A keyframe value: one number, or x and y for position, zoom and the
@@ -3670,7 +3694,7 @@ fn one() -> u32 {
 }
 
 fn silence_threshold() -> f64 {
-    -40.0
+    crate::analysis::SILENCE_THRESHOLD
 }
 
 fn speech_threshold() -> f64 {
@@ -3679,14 +3703,6 @@ fn speech_threshold() -> f64 {
 
 fn min_speech() -> TimeSpec {
     TimeSpec::Seconds(0.25)
-}
-
-fn silence_margin() -> TimeSpec {
-    TimeSpec::Seconds(0.15)
-}
-
-fn silence_min() -> TimeSpec {
-    TimeSpec::Seconds(0.5)
 }
 
 fn scene_threshold() -> f64 {
@@ -3748,8 +3764,12 @@ pub struct SourceParams {
 pub struct ProjectSet {
     #[serde(default)]
     pub fps: Option<Rational>,
+    /// Frame width, from 256 to 32768. A side under 256 sets both sides to
+    /// 256. Else a side over 32768 sets both to 32768.
     #[serde(default)]
     pub width: Option<u32>,
+    /// Frame height, from 256 to 32768. A side under 256 sets both sides to
+    /// 256. Else a side over 32768 sets both to 32768.
     #[serde(default)]
     pub height: Option<u32>,
     #[serde(default)]

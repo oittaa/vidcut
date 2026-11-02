@@ -949,7 +949,13 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
 - **Keyframes** ([todo](todo/keyframes.md#titles)):
   - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
-  - Its Position keyframes are linear. Their row has no curve.
+  - Its Position keyframes take handles. The title moves at one speed along the cubic path between two keys. The details are in the [todo](todo/keyframes.md#titles).
+  - A right-click on a key of Position, Zoom, Rotation or Opacity opens a menu of eases, by the place of the key:
+    - The first key has Linear and Ease Out. The last key has Linear and Ease In.
+    - A middle key has Linear, Ease In, Ease Out and Ease In and Out. A lone key has only Linear.
+    - A check mark is on the current item.
+    - On Position, the handles are an eighth of the difference between the two neighbors of the key. They stay when a value changes.
+    - On Zoom, Rotation and Opacity, a handle is flat and a third of the gap to the neighbor.
   - vidcut: the Across, Zoom, Rotation and Title opacity rows of the Title section have the Keyframe button.
   - vidcut: the Across button holds the keyframes of Across and Down.
 - **Later** (X53):
@@ -1172,6 +1178,11 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **In vidcut:**
   - The Quick Export row, the Export dialog and jobs are deviation X3.
   - The suggested file name is the name of the project.
+  - AAC takes 96 to 320 kb/s, and 320 by default.
+  - The sample rate of AAC is the project's by default. The other choices are 44100 Hz and 48000 Hz.
+  - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another bitrate or chosen rate.
+  - A project at another rate, for example 96000 Hz, with AAC was not measured.
+  - The TikTok preset has AAC at 256 kb/s. That number was not measured.
 
 ## 11. Keyboard shortcuts
 
@@ -1277,7 +1288,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - After 0.8 s of hover, a drop or move onto a clip changes from replace to overwrite.
   - The manual gives no value.
 - **D12. Clip gain range.**
-  - The range is −60 dB to +24 dB, plus mute.
+  - The range is −100 dB to +30 dB, plus mute (measured in Resolve Studio 21.1.2).
   - The manual gives no range.
   - The volume line of a clip shows this range on its own scale (D77).
 - **D13. Keys.**
@@ -1358,7 +1369,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The removal of a track with clips needs a confirmation.
   - An edit or a move can name the next track number. This makes that track.
   - Track 1 cannot be removed.
-  - Track volume is from −60 to +24 dB (D12).
+  - Track volume is from −100 to +10 dB. Resolve's fader has the same top, and its bottom is minus infinity (measured in Resolve Studio 21.1.2).
 - **D28. Meters.**
   - There is a bar for each channel of the project's channel count (p. 649).
   - The bars show linear peaks from −60 dBFS. A peak stays for 1.5 s.
@@ -1372,8 +1383,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The check uses 10 ms steps.
   - Silence includes a clip past the end of its audio.
   - Silence also includes a click (under 0.05 s between 0.1 s of silence).
-  - Defaults: −40 dBFS, pre-head and post-tail 0.15 s, and minimum 0.5 s.
-  - The defaults are in seconds, so the frame rate does not change them.
+  - With Sound Level, the values are the ones that the window of Resolve Studio 21.1.2 showed, at 30 fps:
+    - Threshold: −100 to +10 dB, −25 by default.
+    - Pre head and post tail: 0 to 60 frames, 0 by default.
+    - Minimum: 2 to 60 frames, 30 by default.
+    - That window keeps the last values used. Thus it is not known whether −25 and 30 are factory values or kept values.
+    - `edit.ripple_delete_silence` refuses a value outside these ranges.
+  - With Speech, the pre head, the post tail and the minimum have their own defaults (deviation X47).
+  - `analyze.silence` starts from the same Threshold and minimum, and has no limits. It is vidcut's own.
   - Each silence of at least the minimum goes, less the post-tail and the pre-head.
   - At the ends of a clip, all of the silence goes.
   - The cuts are in whole frames.
@@ -1454,7 +1471,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The Smart Indicator, V, Smart Insert, the alignment of Place On Top, and Up/Down use the edits of Track 1, the main story.
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
-  - New Project takes any even picture size from 16 px, and any positive frame rate.
+  - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate.
+  - A side under 256 sets both sides to 256, whichever side it is. 16 x 720, 99999 x 16 and 16 x 99999 give 256 x 256.
+  - Else a side over 32768 sets both sides to 32768. 99999 x 720 gives 32768 x 32768.
+  - This rule is measured in the Project Settings dialog of Resolve Studio 21.1.2. `project.set` and `project.create` do the same.
+  - A `project.set` of one side checks the pair as it stands then, as a script in Resolve Studio 21.1.2 does.
   - Without them, the first media with video sets both, with no prompt. A prompt would stop scripts and agents.
   - The size can change at any time.
   - The rate can change only while the timeline is empty, because positions are whole frames.
@@ -1552,7 +1573,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D48. Clips at another speed** (§1, §8.6; deviations X9, X95, X96, X97).
   - A clip's speed comes from Change Clip Speed, the Speed section of the Inspector, speed keyframes, or an OTIO file.
   - The speed applies wherever its pictures and sound go.
-  - Change Clip Speed takes 1% to 10000%, forward or backward.
+  - Change Clip Speed takes 0.01% to 100000%, forward or backward (measured in Resolve Studio 21.1.2).
   - It also takes 0, which freezes the frame under the playhead.
   - It gives the whole clip one speed. The speed keyframes of the clip go.
   - Without ripple, the clip keeps its length. With ripple, it keeps its source, and later clips follow.
@@ -1621,7 +1642,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A speed keyframe does not move or copy. Its value is the speed of the section after it.
       - Its ease menu has Linear and Ease In and Out ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)).
       - Ctrl+X leaves the selected speed keyframes in place, and they stay selected.
-      - A change of its value in the tab sends `speed.set`. The field takes 1% to 10000%.
+      - A change of its value in the tab sends `speed.set`. The field takes 0.01% to 100000%.
       - The field is off when the section is frozen or plays backward.
     - With the tab and the tray closed, Mark > Add Keyframe (Ctrl+[) adds a speed keyframe at the playhead to each selected clip under it.
     - Then Mark > Delete Keyframe (Alt+]) removes the speed keyframe at the playhead, or else the nearest one before it.
@@ -1630,7 +1651,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `speed.set`, `speed.freeze`, `speed.reverse` and `speed.ease` change the sections. All six act at a time, the playhead by default.
     - `keyframes.add` skips a clip that cannot take a speed keyframe at `at`. It fails only when no clip can.
     - `speed.reverse` turns a section at its speed keyframe ([X96](deviations.md#x96-reverse-keeps-the-speeds-of-the-other-sections)).
-    - `speed.set` takes 1% to 10000% forward, in a section that plays forward.
+    - `speed.set` takes 0.01% to 100000% forward, in a section that plays forward.
     - `speed.ease` eases the speed keyframes of a section. `keyframes.set` gives one speed keyframe `linear` or `ease_in_out`.
     - `keyframes.list` gives `ease` `ease_in_out` for an eased speed keyframe.
     - `keyframes.remove` without `frames` and `at` removes all the speed keyframes of the clips.
@@ -2462,12 +2483,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The line is in the sound part of the clip, 2 px in from its top and its bottom.
   - It shows only where the sound part is 20 px high or more.
   - **Scale:**
-    - −60 dB is at the bottom, and +24 dB is at the top.
-    - 0 dB is at 5/7 of the height, as on the fader of the Mixer.
-    - A gain g is a part x of its side of 0 dB, from 0 to 1. Above 0 dB, x = g / 24. Below 0 dB, x = −g / 60.
+    - −100 dB is at the bottom, and +30 dB is at the top.
+    - 0 dB is at 10/13 of the height.
+    - A gain g is a part x of its side of 0 dB, from 0 to 1. Above 0 dB, x = g / 30. Below 0 dB, x = −g / 100.
     - The line goes the part x × (2 − x) of the way from 0 dB to the end of its side.
-    - Thus near 0 dB, a change of 1 dB moves the line twice as far as on the fader of the Mixer.
-    - Near −60 dB and +24 dB, a change of 1 dB moves the line almost not at all.
+    - Thus near 0 dB, a change of 1 dB moves the line farthest.
+    - Near −100 dB and +30 dB, a change of 1 dB moves the line almost not at all.
     - The two sides have the same slope at 0 dB. Thus a drag across 0 dB keeps its speed.
   - **Drag:**
     - Within 4 px of the line, the pointer becomes an up-down arrow.
@@ -2541,7 +2562,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Relative: the highest level plus volume reaches the target. Every volume changes by that same number of dB.
     - The manual names the highest peak for Relative. vidcut uses the highest level for each mode.
     - A peak limit lowers the change to the limit less the true peak. In Relative, it uses the highest true peak plus volume.
-  - Each volume stops at −60 dB and +24 dB (D12). The result marks each clip that stopped (`held`).
+  - Each volume stops at −100 dB and +30 dB (D12). The result marks each clip that stopped (`held`).
   - The result also marks each clip that the peak limit stopped (`limited`).
   - Reason: the export already measures EBU R128 loudness and true peak. Thus the two features agree.
 - **D81. Volume keyframes** (§9; pp. 1109, 1112–1113, 1258; deviations X73, X74).
@@ -2560,7 +2581,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Between two keyframes, the volume follows the Bezier curve. A handle reaches no farther than the next keyframe.
     - With keyframes, the curve is the volume of the clip. `gain_db` is not heard.
     - A first keyframe does not change `gain_db`. When the last keyframes go, `gain_db` is heard again.
-    - A keyframe and the curve take −60 to +24 dB (D12).
+    - A keyframe and the curve take −100 to +30 dB (D12).
   - **Eases:**
     - Ease In sets a flat In handle a third of the way to the keyframe before. Ease Out sets a flat Out handle a third of the way to the next one.
     - Ease In and Out sets both. Linear removes both.
@@ -2596,7 +2617,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Resolve Studio 21.1.1 moved each of four volume keyframes of a clip by the same −3.4 dB. Thus the curve kept its shape.
   - vidcut measures the clip without its volume and without its keyframes, as for every clip (D80).
   - The volume of a clip with keyframes is the value of its highest keyframe. Normalize sets that volume as it sets the volume of other clips.
-  - Every keyframe of the clip then moves by the same dB. Each stops at −60 and +24 dB.
+  - Every keyframe of the clip then moves by the same dB. Each stops at −100 and +30 dB.
   - `from_db` and `gain_db` of the result give the highest keyframe before and after.
   - Reason: Normalize changes the volume of a clip. The curve keeps its shape, and its loudest part gets the volume that a flat clip would get.
 - **D84. The volume curve in the measurements** (§9; deviations X47, X69).

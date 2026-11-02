@@ -2,8 +2,8 @@ use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, plain_channel, title_keys_problem};
 use crate::looks::TitleLook;
 use crate::model::{
-    Clip, Keyframe, Picture, Project, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle, Track,
-    TrackKind,
+    Clip, Keyframe, Picture, PositionHandles, Project, Title, TitleAlign, TitleKind, TitleShadow,
+    TitleStyle, Track, TrackKind,
 };
 
 use super::subtitles::{checked_background, checked_color, checked_font, checked_outline};
@@ -19,8 +19,10 @@ const PLACE: &str =
 const ZOOMED: &str = "a title's zoom is from 1/4 to 4";
 const TURNED: &str = "a title's rotation is degrees, from -100000 to 100000";
 const FADED: &str = "a title's opacity is from 0 to 1";
-const POSITION_LINEAR: &str =
-    "a title's position keyframes are linear: they take no ease or handles";
+const POSITION_HANDLED: &str =
+    "a title's position keyframes take `ease`, not `in` or `out`: their handles are points";
+const SCROLL_HANDLES: &str = "a scroll's position keyframes have no handles";
+const LOOSE_HANDLES: &str = "a title's position handles need finite numbers and their keyframe";
 
 fn across(v: f64) -> bool {
     (Title::ACROSS.0..=Title::ACROSS.1).contains(&v)
@@ -61,7 +63,24 @@ fn checked_keys(t: &Title) -> Result<()> {
         .iter()
         .any(|k| k.in_handle.is_some() || k.out_handle.is_some())
     {
-        return Err(Error::invalid(POSITION_LINEAR));
+        return Err(Error::invalid(match t.kind {
+            TitleKind::Scroll => SCROLL_HANDLES,
+            TitleKind::Text | TitleKind::LowerThird => POSITION_HANDLED,
+        }));
+    }
+    if t.kind == TitleKind::Scroll && !t.position_handles.is_empty() {
+        return Err(Error::invalid(SCROLL_HANDLES));
+    }
+    let keyed = |h: &PositionHandles| t.position_keys.iter().any(|k| k.frame == h.frame);
+    let whole = |h: &PositionHandles| {
+        [h.in_handle, h.out_handle]
+            .into_iter()
+            .flatten()
+            .flatten()
+            .all(f64::is_finite)
+    };
+    if !t.position_handles.iter().all(|h| keyed(h) && whole(h)) {
+        return Err(Error::invalid(LOOSE_HANDLES));
     }
     all_in(&t.position_keys, across, PLACE)?;
     if !t.position_y.iter().copied().all(down) {
@@ -138,6 +157,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         position: t.position,
         position_keys: t.position_keys.clone(),
         position_y: t.position_y.clone(),
+        position_handles: t.position_handles.clone(),
         zoom,
         zoom_keys: t.zoom_keys.clone(),
         rotation,
@@ -270,6 +290,7 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
             t.align = None;
         }
         if k == TitleKind::Scroll {
+            t.position_handles.clear();
             t.zoom_keys.clear();
             t.rotation_keys.clear();
         }

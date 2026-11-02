@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
-    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_UP, CARET_LEFT, CARET_RIGHT, DIAMOND,
+    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_UP, CARET_LEFT, CARET_RIGHT, CHECK, DIAMOND,
     FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, TRASH,
 };
 use serde_json::{Value, json};
@@ -907,7 +907,12 @@ pub(super) fn key_diamond(on: bool) -> egui::Button<'static> {
     egui::Button::selectable(on, icon).frame(false)
 }
 
-pub(super) fn key_buttons(ui: &mut egui::Ui, keys: &KeyMark, linear: bool) -> Option<KeyClick> {
+pub(super) fn key_buttons(
+    ui: &mut egui::Ui,
+    keys: &KeyMark,
+    eases: &[Ease],
+    now: Option<Ease>,
+) -> Option<KeyClick> {
     let mut click = None;
     let prev = ui.add_enabled(keys.prev, egui::Button::new(CARET_LEFT).frame(false));
     if prev.clicked() {
@@ -917,10 +922,15 @@ pub(super) fn key_buttons(ui: &mut egui::Ui, keys: &KeyMark, linear: bool) -> Op
     if diamond.clicked() {
         click = Some(KeyClick::Toggle);
     }
-    if keys.on && !linear {
+    if keys.on && !eases.is_empty() {
         diamond.context_menu(|ui| {
-            for e in Ease::ALL {
-                if ui.button(ease_label(e)).clicked() {
+            for &e in eases {
+                let text = match now {
+                    Some(n) if n == e => format!("{CHECK}  {}", ease_label(e)),
+                    Some(_) => format!("     {}", ease_label(e)),
+                    None => ease_label(e).to_string(),
+                };
+                if ui.button(text).clicked() {
                     click = Some(KeyClick::Ease(e));
                 }
             }
@@ -1018,7 +1028,8 @@ fn drag(
 
 fn key_acts(ui: &mut egui::Ui, f: Key, keys: &KeyMark, acts: &mut Vec<Act>) {
     let linear = matches!(f, Key::Picture(Field::AnchorX | Field::AnchorY));
-    match key_buttons(ui, keys, linear) {
+    let eases: &[Ease] = if linear { &[] } else { &Ease::ALL };
+    match key_buttons(ui, keys, eases, None) {
         Some(KeyClick::Step(dir)) => acts.push(Act::Step(f, dir)),
         Some(KeyClick::Toggle) => acts.push(Act::Toggle(f)),
         Some(KeyClick::Ease(e)) => acts.push(Act::KeyEase(f, e)),
@@ -1920,8 +1931,14 @@ impl Workspace {
         let list: Vec<(String, Picture, Picture)> = chosen
             .iter()
             .filter_map(|c| {
-                let p = to(c).filter(|p| *p != c.shown)?;
-                Some((c.id.clone(), c.stored.clone(), p))
+                let frame = c.frame as f64;
+                let now = Chosen {
+                    stored: c.stored.sampled(frame),
+                    shown: c.shown.sampled(frame),
+                    ..c.clone()
+                };
+                let p = to(&now).filter(|p| *p != now.shown)?;
+                Some((now.id, now.stored, p))
             })
             .collect();
         let at = self.snap.timeline.position;

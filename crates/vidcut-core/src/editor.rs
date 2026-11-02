@@ -3130,12 +3130,14 @@ fn mutate(
             let parts = match given {
                 Some(given) => given_parts(p, given, &ids, playhead)?,
                 None => {
-                    let settings = SilenceSettings {
-                        threshold_db: *threshold_db,
-                        pre_head: length(p, pre_head)?.max(0),
-                        post_tail: length(p, post_tail)?.max(0),
-                        min: length(p, min)?.max(1),
-                    };
+                    let settings = silence_settings(
+                        p,
+                        *detect,
+                        *threshold_db,
+                        pre_head.as_ref(),
+                        post_tail.as_ref(),
+                        min.as_ref(),
+                    )?;
                     let speech = speech_settings(p, *detect, *speech_threshold, min_speech)?;
                     let mut parts = Vec::new();
                     for id in &ids {
@@ -5032,6 +5034,7 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
             if let Some(title) = c.title.as_mut().filter(|t| t.is_keyed()) {
                 let mut picture = title.as_picture();
                 picture.scale_times(&conv, ratio);
+                title.move_handles(conv);
                 title.take_picture(&picture);
             }
         }
@@ -5283,7 +5286,7 @@ fn place_imported(
             });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {
             warnings.push(format!(
-                "{label}: gain {:.1} dB set to the nearest of -60..24 dB",
+                "{label}: gain {:.1} dB set to the nearest of -100..30 dB",
                 c.gain_db
             ));
         }
@@ -6025,7 +6028,10 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                 track.locked = s.locked;
                 track.muted = s.muted;
                 track.solo = s.solo;
-                track.volume_db = s.volume_db.clamp(-60.0, 24.0);
+                track.volume_db = s.volume_db.clamp(
+                    *crate::validate::FADER.start(),
+                    *crate::validate::FADER.end(),
+                );
                 track.voice_isolation = s
                     .voice_isolation
                     .and_then(|v| ops::checked_isolation(v).ok())
@@ -6234,14 +6240,11 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
         p.settings.set_fps(fps);
         p.settings.auto_format = false;
     }
-    if let Some(w) = set.width {
-        crate::model::check_side("width", w)?;
-        p.settings.width = w;
-        p.settings.auto_format = false;
-    }
-    if let Some(h) = set.height {
-        crate::model::check_side("height", h)?;
-        p.settings.height = h;
+    if set.width.is_some() || set.height.is_some() {
+        (p.settings.width, p.settings.height) = crate::model::timeline_size(
+            set.width.unwrap_or(p.settings.width),
+            set.height.unwrap_or(p.settings.height),
+        );
         p.settings.auto_format = false;
     }
     if let Some(sr) = set.sample_rate {
@@ -7068,11 +7071,18 @@ pub fn query(
             min,
             download,
         } => {
+            let least = match (min, *detect) {
+                (Some(t), _) => length(p, t)?.max(1),
+                (None, Detect::Level) => analysis::SILENCE_MIN,
+                (None, Detect::Speech) => {
+                    length(p, &TimeSpec::Seconds(analysis::SPEECH_MIN))?.max(1)
+                }
+            };
             let settings = SilenceSettings {
                 threshold_db: *threshold_db,
                 pre_head: 0,
                 post_tail: 0,
-                min: length(p, min)?.max(1),
+                min: least,
             };
             let speech = speech_settings(p, *detect, *speech_threshold, min_speech)?;
             let mut out = Vec::new();
@@ -7362,6 +7372,62 @@ fn targets<'a>(
             .map(Target::Clip)
             .collect()),
     }
+}
+
+fn silence_settings(
+    p: &Project,
+    detect: Detect,
+    threshold_db: f64,
+    pre_head: Option<&TimeSpec>,
+    post_tail: Option<&TimeSpec>,
+    min: Option<&TimeSpec>,
+) -> Result<SilenceSettings> {
+    let frames = |t: Option<&TimeSpec>| t.map(|t| length(p, t)).transpose();
+    let (pre, post, least) = (frames(pre_head)?, frames(post_tail)?, frames(min)?);
+    if detect == Detect::Speech {
+        let margin = length(p, &TimeSpec::Seconds(analysis::SPEECH_MARGIN))?;
+        let usual = length(p, &TimeSpec::Seconds(analysis::SPEECH_MIN))?;
+        return Ok(SilenceSettings {
+            threshold_db,
+            pre_head: pre.unwrap_or(margin).max(0),
+            post_tail: post.unwrap_or(margin).max(0),
+            min: least.unwrap_or(usual).max(1),
+        });
+    }
+    let (levels, margins, mins) = (
+        analysis::SILENCE_LEVELS,
+        analysis::SILENCE_MARGINS,
+        analysis::SILENCE_MINS,
+    );
+    if !levels.contains(&threshold_db) {
+        return Err(Error::invalid(format!(
+            "threshold {threshold_db} dB is outside {}..{} dB",
+            levels.start(),
+            levels.end()
+        )));
+    }
+    for (name, v) in [("pre head", pre), ("post tail", post)] {
+        if let Some(v) = v.filter(|v| !margins.contains(v)) {
+            return Err(Error::invalid(format!(
+                "{name} {v} frames is outside {}..{} frames",
+                margins.start(),
+                margins.end()
+            )));
+        }
+    }
+    if let Some(v) = least.filter(|v| !mins.contains(v)) {
+        return Err(Error::invalid(format!(
+            "minimum {v} frames is outside {}..{} frames",
+            mins.start(),
+            mins.end()
+        )));
+    }
+    Ok(SilenceSettings {
+        threshold_db,
+        pre_head: pre.unwrap_or(0),
+        post_tail: post.unwrap_or(0),
+        min: least.unwrap_or(analysis::SILENCE_MIN),
+    })
 }
 
 fn speech_settings(

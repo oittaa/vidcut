@@ -1,10 +1,15 @@
-use crate::model::{Clip, ClipAudio, Crop, Ease, Handle, Keyframe, Picture, Title, TitleKind};
+use crate::model::{
+    Clip, ClipAudio, Crop, Ease, Handle, Keyframe, Picture, PositionHandles, Title, TitleKind,
+};
+use crate::otio::effects::rounded;
 use crate::validate::GAIN;
 
 const FLAT: Handle = Handle {
     frames: 0.0,
     value: 0.0,
 };
+const PATH_STEPS: usize = 256;
+const PATH_EASE: f64 = 0.125;
 
 pub fn value_at(keys: &[Keyframe], frame: f64) -> Option<f64> {
     let (first, last) = (keys.first()?, keys.last()?);
@@ -156,6 +161,26 @@ fn solve(x: impl Fn(f64) -> f64, at: f64) -> f64 {
     (lo + hi) / 2.0
 }
 
+fn along_path(path: [[f64; 2]; 4], share: f64) -> [f64; 2] {
+    let point = |u: f64| [cubic(path.map(|p| p[0]), u), cubic(path.map(|p| p[1]), u)];
+    let mut lengths = [0.0; PATH_STEPS + 1];
+    let mut last = path[0];
+    for i in 1..=PATH_STEPS {
+        let at = point(i as f64 / PATH_STEPS as f64);
+        lengths[i] = lengths[i - 1] + (at[0] - last[0]).hypot(at[1] - last[1]);
+        last = at;
+    }
+    let want = share * lengths[PATH_STEPS];
+    let i = lengths.partition_point(|l| *l < want).clamp(1, PATH_STEPS);
+    let step = lengths[i] - lengths[i - 1];
+    let part = if step > 0.0 {
+        (want - lengths[i - 1]) / step
+    } else {
+        0.0
+    };
+    point((i as f64 - 1.0 + part) / PATH_STEPS as f64)
+}
+
 pub fn handle_point(a: &Keyframe, b: &Keyframe, out: bool) -> Option<(f64, f64)> {
     let len = (b.frame - a.frame) as f64;
     if out {
@@ -179,13 +204,19 @@ fn sides(ease: Ease) -> (bool, bool) {
     }
 }
 
-fn handles(keys: &[Keyframe], i: usize, ease: Ease) -> (Option<Handle>, Option<Handle>) {
+fn reaches(count: usize, i: usize, ease: Ease) -> (bool, bool) {
     let (wants_in, wants_out) = sides(ease);
+    (wants_in && i > 0, wants_out && i + 1 < count)
+}
+
+fn handles(keys: &[Keyframe], i: usize, ease: Ease) -> (Option<Handle>, Option<Handle>) {
+    let (before, after) = reaches(keys.len(), i, ease);
     let gap = |j: usize| (keys[i].frame - keys[j].frame).abs() as f64 / 3.0;
     let flat = |frames: f64| Handle { frames, value: 0.0 };
-    let before = i.checked_sub(1).filter(|_| wants_in).map(|j| flat(-gap(j)));
-    let after = (i + 1 < keys.len() && wants_out).then(|| flat(gap(i + 1)));
-    (before, after)
+    (
+        before.then(|| flat(-gap(i - 1))),
+        after.then(|| flat(gap(i + 1))),
+    )
 }
 
 pub fn ease(keys: &mut [Keyframe], i: usize, ease: Ease) {
@@ -207,13 +238,9 @@ pub fn ease_of(keys: &[Keyframe], i: usize) -> Option<Ease> {
 }
 
 pub fn eases(keys: &[Keyframe], i: usize) -> Vec<Ease> {
-    let last = keys.len().saturating_sub(1);
     Ease::ALL
         .into_iter()
-        .filter(|e| {
-            let (wants_in, wants_out) = sides(*e);
-            !(wants_in && i == 0 || wants_out && i >= last)
-        })
+        .filter(|e| reaches(keys.len(), i, *e) == sides(*e))
         .collect()
 }
 
@@ -270,7 +297,7 @@ pub fn checked(value: f64) -> crate::error::Result<f64> {
         Ok(value)
     } else {
         Err(crate::error::Error::invalid(format!(
-            "gain {value} dB outside -60..24 dB"
+            "gain {value} dB outside -100..30 dB"
         )))
     }
 }
@@ -847,6 +874,101 @@ impl Title {
             .any(|v| !self.keys_of(v).is_empty())
     }
 
+    pub fn handles_at(&self, frame: i64) -> Option<&PositionHandles> {
+        self.position_handles.iter().find(|h| h.frame == frame)
+    }
+
+    pub fn place_at(&self, frame: f64) -> [f64; 2] {
+        self.on_path(frame)
+            .unwrap_or_else(|| self.as_picture().place_at(frame))
+    }
+
+    fn on_path(&self, frame: f64) -> Option<[f64; 2]> {
+        let (keys, y) = (&self.position_keys, &self.position_y);
+        if keys.len() != y.len() {
+            return None;
+        }
+        let i = keys.partition_point(|k| k.frame as f64 <= frame);
+        let (a, b) = (keys.get(i.checked_sub(1)?)?, keys.get(i)?);
+        let out = self.handles_at(a.frame).and_then(|h| h.out_handle);
+        let into = self.handles_at(b.frame).and_then(|h| h.in_handle);
+        out.or(into)?;
+        let (first, last) = ([a.value, y[i - 1]], [b.value, y[i]]);
+        let from = |at: [f64; 2], h: Option<[f64; 2]>| {
+            let [x, y] = h.unwrap_or([0.0, 0.0]);
+            [at[0] + x, at[1] + y]
+        };
+        let path = [first, from(first, out), from(last, into), last];
+        let len = (b.frame - a.frame) as f64;
+        Some(along_path(path, (frame - a.frame as f64) / len))
+    }
+
+    pub fn move_handles(&mut self, frame: impl Fn(i64) -> i64) {
+        for h in &mut self.position_handles {
+            h.frame = frame(h.frame);
+        }
+        self.position_handles.sort_by_key(|h| h.frame);
+        self.position_handles.dedup_by_key(|h| h.frame);
+    }
+
+    pub fn put_handles(
+        &mut self,
+        frame: i64,
+        in_handle: Option<[f64; 2]>,
+        out_handle: Option<[f64; 2]>,
+    ) {
+        self.position_handles.retain(|h| h.frame != frame);
+        if in_handle.is_some() || out_handle.is_some() {
+            self.position_handles.push(PositionHandles {
+                frame,
+                in_handle,
+                out_handle,
+            });
+            self.position_handles.sort_by_key(|h| h.frame);
+        }
+    }
+
+    pub fn in_file(&self, [x, y]: [f64; 2]) -> [f64; 2] {
+        let lift = match self.kind {
+            TitleKind::LowerThird => self.lower_line(),
+            TitleKind::Text | TitleKind::Scroll => 0.0,
+        };
+        [x, 1.0 - y + lift]
+    }
+
+    pub fn ease_position(&mut self, frame: i64, ease: Ease) {
+        let keys = &self.position_keys;
+        let Some(i) = keys.iter().position(|k| k.frame == frame) else {
+            return;
+        };
+        let (wants_in, wants_out) = reaches(keys.len(), i, ease);
+        let beside = |j: Option<usize>| {
+            j.and_then(|j| Some(self.in_file([keys.get(j)?.value, *self.position_y.get(j)?])))
+                .unwrap_or([0.0, 0.0])
+        };
+        let (before, after) = (beside(i.checked_sub(1)), beside(Some(i + 1)));
+        let x = rounded((after[0] - before[0]) * PATH_EASE);
+        let y = rounded((after[1] - before[1]) * PATH_EASE);
+        self.put_handles(
+            frame,
+            wants_in.then_some([0.0 - x, y]),
+            wants_out.then_some([x, 0.0 - y]),
+        );
+    }
+
+    pub fn position_ease(&self, frame: i64) -> Ease {
+        let h = self.handles_at(frame);
+        match (
+            h.is_some_and(|h| h.in_handle.is_some()),
+            h.is_some_and(|h| h.out_handle.is_some()),
+        ) {
+            (false, false) => Ease::Linear,
+            (true, false) => Ease::EaseIn,
+            (false, true) => Ease::EaseOut,
+            (true, true) => Ease::EaseInOut,
+        }
+    }
+
     pub fn as_picture(&self) -> Picture {
         let zoom = self.scale();
         Picture {
@@ -869,6 +991,8 @@ impl Title {
         self.position = (at != Self::usual_position(self.kind, self.align())).then_some(at);
         self.position_keys.clone_from(&p.position_keys);
         self.position_y.clone_from(&p.position_y);
+        let held = |h: &PositionHandles| p.position_keys.iter().any(|k| k.frame == h.frame);
+        self.position_handles.retain(held);
         self.zoom = Some(p.scale()[0]).filter(|z| *z != 1.0);
         self.zoom_keys.clone_from(&p.zoom_keys);
         self.rotation = p.rotation;
@@ -882,7 +1006,11 @@ impl Title {
             return self.clone();
         }
         let mut t = self.clone();
-        t.take_picture(&self.as_picture().sampled(frame));
+        let mut picture = self.as_picture().sampled(frame);
+        if let Some(at) = self.on_path(frame) {
+            picture.position = Some(at);
+        }
+        t.take_picture(&picture);
         t
     }
 }
