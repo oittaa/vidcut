@@ -1992,9 +1992,13 @@ impl Workspace {
         let sets: Vec<Value> = chosen
             .iter()
             .filter_map(|c| {
-                let base = c.stored.adopt(c.frame as f64);
+                let mut plain = c.stored.clone();
+                plain.clear_channel(v);
+                let mut base = plain.clone();
+                let now = c.stored.channel_at(v, c.frame as f64);
+                vidcut_core::keyframes::write_channel(&mut base, v, now);
                 let to = field.put_at(&base, &c.shape, field.usual(), Some(c.frame));
-                changed(&c.id, &base, &to).map(|mut p| {
+                changed(&c.id, &plain, &to).map(|mut p| {
                     p["at"] = json!(at);
                     p
                 })
