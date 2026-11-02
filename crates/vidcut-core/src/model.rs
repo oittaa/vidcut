@@ -2041,8 +2041,8 @@ pub struct TitleStyle {
     /// subtitles' font.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
-    /// Text height as a fraction of the picture height, above 0 and at most
-    /// 1/2. Usual: 96/1080 for `text`, 108/1080 for `scroll`, and for a
+    /// Text height as a fraction of the picture height, from 1/1080 to
+    /// 4096/1080. Usual: 96/1080 for `text`, 108/1080 for `scroll`, and for a
     /// `lower_third` 76/1080 on its lower line and 48/1080 on its upper line.
     /// A size set here goes on both lines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2112,7 +2112,12 @@ impl TitleStyle {
     }
 }
 
+pub fn size_fits(v: f64, most: u32) -> bool {
+    v.is_finite() && (1.0 / 1080.0..=f64::from(most) / 1080.0).contains(&v)
+}
+
 impl Title {
+    pub const MOST_SIZE: u32 = 4096;
     pub const LINE: f64 = 1.31;
     pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;
@@ -3228,8 +3233,8 @@ pub struct SubtitleStyle {
     /// Font family. The burn-in uses it when that font is installed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
-    /// Text height as a fraction of the picture height, above 0 and at most
-    /// 1/2. Usual: 58/1080 (about 0.054).
+    /// Text height as a fraction of the picture height, from 1/1080 to
+    /// 400/1080. Usual: 58/1080 (about 0.054).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
@@ -3385,6 +3390,7 @@ pub struct SubtitleBackground {
 }
 
 impl SubtitleStyle {
+    pub const MOST_SIZE: u32 = 400;
     pub const SIZE: f64 = 58.0 / 1080.0;
     pub const LINE: f64 = 1.362;
     pub const STROKE: f64 = 1.0;

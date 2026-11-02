@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::error::{Error, Result};
 use crate::model::{
     Cue, CueWord, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle,
-    SubtitleTrack, SubtitleWords, TextStroke, Title,
+    SubtitleTrack, SubtitleWords, TextStroke, Title, size_fits,
 };
 use crate::request::SubtitleTimeBase;
 use crate::subtitles::{self, Read, Timed};
@@ -108,12 +108,12 @@ pub(crate) fn checked_font(font: Option<&str>, what: &str) -> Result<Option<Stri
     }
 }
 
-pub(crate) fn checked_size(size: Option<f64>, what: &str) -> Result<Option<f64>> {
+pub(crate) fn checked_size(size: Option<f64>, what: &str, most: u32) -> Result<Option<f64>> {
     match size {
         None => Ok(None),
-        Some(s) if fraction(s, f64::MIN_POSITIVE, 0.5, true) => Ok(Some(s)),
+        Some(s) if size_fits(s, most) => Ok(Some(s)),
         Some(_) => Err(Error::invalid(format!(
-            "a {what} size is a fraction of the picture height, above 0 and at most 1/2"
+            "a {what} size is a fraction of the picture height, from 1/1080 to {most}/1080"
         ))),
     }
 }
@@ -172,7 +172,7 @@ pub(crate) fn checked_background(
 
 pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
     let font = checked_font(style.font.as_deref(), "subtitle")?;
-    let size = checked_size(style.size, "subtitle")?;
+    let size = checked_size(style.size, "subtitle", SubtitleStyle::MOST_SIZE)?;
     let color = checked_color(style.color.as_deref(), "subtitle")?;
     let outline = checked_outline(style.outline.as_ref())?;
     let background = checked_background(style.background.as_ref())?;

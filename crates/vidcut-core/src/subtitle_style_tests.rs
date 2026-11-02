@@ -79,7 +79,7 @@ fn a_subtitle_position_past_its_limit_is_refused() {
 }
 
 #[test]
-fn a_subtitle_size_past_half_the_picture_is_refused() {
+fn a_subtitle_size_past_its_limit_is_refused() {
     let err = checked_style(&SubtitleStyle {
         size: Some(0.6),
         ..SubtitleStyle::default()
@@ -87,7 +87,7 @@ fn a_subtitle_size_past_half_the_picture_is_refused() {
     .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "a subtitle size is a fraction of the picture height, above 0 and at most 1/2"
+        "a subtitle size is a fraction of the picture height, from 1/1080 to 400/1080"
     );
 }
 
@@ -116,7 +116,7 @@ fn a_project_file_refuses_a_style_track_set_would_refuse() {
     assert_eq!(
         crate::validate::violations(&p),
         vec![
-            "S1: a subtitle size is a fraction of the picture height, above 0 and at most 1/2"
+            "S1: a subtitle size is a fraction of the picture height, from 1/1080 to 400/1080"
                 .to_string()
         ]
     );

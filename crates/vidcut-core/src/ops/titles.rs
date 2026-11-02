@@ -140,7 +140,7 @@ pub fn checked(t: &Title) -> Result<Title> {
     let s = &t.style;
     let style = TitleStyle {
         font: checked_font(s.font.as_deref(), "title")?,
-        size: super::subtitles::checked_size(s.size, "title")?,
+        size: super::subtitles::checked_size(s.size, "title", Title::MOST_SIZE)?,
         color: checked_color(s.color.as_deref(), "title")?,
         outline: checked_outline(s.outline.as_ref())?,
         background: checked_background(s.background.as_ref())?,
