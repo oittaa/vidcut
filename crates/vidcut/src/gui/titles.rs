@@ -7,7 +7,7 @@ use vidcut_core::model::{Clip, Title, TitleAlign, TitleKind};
 use super::export::Ask;
 use super::inspector::{KeyClick, key_buttons, mark, next_key};
 use super::looks::{Parts, Picker, TextFields, kept_plain, plain};
-use super::subtitles::{font_list, kept_number, percent, swatch};
+use super::subtitles::{filled, font_list, kept_number, percent, swatch};
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
@@ -144,9 +144,13 @@ fn sampled_at(c: &Clip, t: &Title, at: i64) -> Title {
 
 fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     let stored = d.base.as_ref().unwrap_or(stored);
-    let style = d.fields.parts(&Parts::of_title(&stored.style))?.title();
-    let across = kept_number(&d.across, stored.position.map(|p| p[0]), "position")?;
-    let down = kept_number(&d.down, stored.position.map(|p| p[1]), "position")?;
+    let was = Parts::of_title(&stored.style);
+    let style = d.fields.refilled(&was).parts(&was)?.title();
+    let kept = |shown: &str, value: Option<f64>, what: &str| {
+        kept_number(&filled(shown, value), value, what)
+    };
+    let across = kept(&d.across, stored.position.map(|p| p[0]), "position")?;
+    let down = kept(&d.down, stored.position.map(|p| p[1]), "position")?;
     let scroll = d.kind == TitleKind::Scroll;
     let position = match (across, down) {
         (Some(x), _) if scroll => Some([x, stored.position.map_or(0.5, |p| p[1])]),
@@ -174,16 +178,18 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         zoom: if scroll {
             None
         } else {
-            kept_number(&d.zoom, stored.zoom, "zoom")?
+            kept(&d.zoom, stored.zoom, "zoom")?
         },
         zoom_keys: stored.zoom_keys.clone(),
         rotation: if scroll {
             None
+        } else if d.rotation.trim().is_empty() {
+            stored.rotation
         } else {
             kept_plain(&d.rotation, stored.rotation, "rotation")?
         },
         rotation_keys: stored.rotation_keys.clone(),
-        opacity: kept_number(&d.title_opacity, stored.opacity, "title opacity")?,
+        opacity: kept(&d.title_opacity, stored.opacity, "title opacity")?,
         opacity_keys: stored.opacity_keys.clone(),
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
@@ -524,9 +530,12 @@ impl Workspace {
         {
             match title_of(&d, s) {
                 Ok(t) => {
-                    if let Some(params) = changes(&d.clip, &t, s, d.at) {
-                        self.send("titles.set", params);
-                        self.title_landing(&d.clip, &t);
+                    match changes(&d.clip, &t, s, d.at) {
+                        Some(params) => {
+                            self.send("titles.set", params);
+                            self.title_landing(&d.clip, &t);
+                        }
+                        None => d.loaded = false,
                     }
                     d.dirty = false;
                     d.error.clear();

@@ -389,6 +389,32 @@ impl TextFields {
         }
     }
 
+    pub(super) fn refilled(&self, stored: &Parts) -> Self {
+        let was = Self::load(stored);
+        let kept = |shown: &str, was: &str| {
+            if shown.trim().is_empty() {
+                was.to_string()
+            } else {
+                shown.to_string()
+            }
+        };
+        let mut out = self.clone();
+        out.size = kept(&self.size, &was.size);
+        if !self.outline.trim().is_empty() || was.outline.is_empty() {
+            out.outline_size = kept(&self.outline_size, &was.outline_size);
+        }
+        if !self.background.trim().is_empty() {
+            out.opacity = kept(&self.opacity, &was.opacity);
+        }
+        if !self.shadow.trim().is_empty() {
+            out.shadow_opacity = kept(&self.shadow_opacity, &was.shadow_opacity);
+            out.shadow_across = kept(&self.shadow_across, &was.shadow_across);
+            out.shadow_down = kept(&self.shadow_down, &was.shadow_down);
+            out.shadow_blur = kept(&self.shadow_blur, &was.shadow_blur);
+        }
+        out
+    }
+
     pub(super) fn rows(
         &mut self,
         ui: &mut egui::Ui,
@@ -472,13 +498,11 @@ impl TextFields {
         let across = kept_number(&self.shadow_across, offset.map(|o| o[0]), "shadow offset")?;
         let down = kept_number(&self.shadow_down, offset.map(|o| o[1]), "shadow offset")?;
         let offset = match (across, down) {
-            (Some(x), Some(y)) => Some([x, y]),
             (None, None) => None,
-            _ => {
-                return Err(
-                    "a shadow's offset takes both numbers, or neither for the usual one".into(),
-                );
-            }
+            (x, y) => Some([
+                x.unwrap_or(TitleShadow::OFFSET[0]),
+                y.unwrap_or(TitleShadow::OFFSET[1]),
+            ]),
         };
         Ok(Some(TitleShadow {
             color,
