@@ -766,7 +766,11 @@ pub fn resolve_audio(a: &AudioSettings, rate: u32, channels: u16) -> Result<Audi
     use format::Sample;
     use format::sample::Type::{Packed, Planar};
     let (name, sample, default_kbps) = match a.codec {
-        AudioCodec::Aac => ("aac", Sample::F32(Planar), Some(256)),
+        AudioCodec::Aac => (
+            "aac",
+            Sample::F32(Planar),
+            Some(vidcut_core::export::AAC_BITRATE / 1000),
+        ),
         AudioCodec::Opus => match crate::parts::first(&crate::parts::OPUS) {
             Some("opus") => ("opus", Sample::F32(Planar), Some(160)),
             Some(_) => ("libopus", Sample::F32(Packed), Some(160)),
