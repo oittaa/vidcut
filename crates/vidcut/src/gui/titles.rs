@@ -237,7 +237,7 @@ impl Workspace {
         let mut body = json!({ "clips": [c.id], "param": v.name(), "at": at });
         match click {
             KeyClick::Step(dir) => {
-                if let Some(to) = next_key(c, times, at, dir) {
+                if let Some(to) = next_key(times, at, dir) {
                     self.seek(PlayerId::Timeline, to, false);
                 }
             }

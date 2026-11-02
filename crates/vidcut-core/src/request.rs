@@ -1367,7 +1367,8 @@ pub enum Request {
     },
     /// Add a keyframe at `at` (the playhead by default) to each of `clips`,
     /// on the source frame of that clip at `at`, also with `at` outside the
-    /// clip. Without a `value`, it takes the value the clip has there. A
+    /// clip. A speed keyframe goes only inside the clip, after its first
+    /// frame. Without a `value`, it takes the value the clip has there. A
     /// keyframe already on that frame takes the value and the ease. With
     /// its first keyframe, a clip's volume follows its keyframes. A title
     /// takes position, zoom, rotation and opacity, and a scroll takes
