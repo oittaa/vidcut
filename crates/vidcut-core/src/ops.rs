@@ -1667,7 +1667,7 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
     for id in ids {
         let (ti, ci) = locate(p, id)?;
         let c = &mut p.tracks[ti].clips[ci];
-        let at = props.at.filter(|&t| c.sounds_at(t)).map(|t| c.source_at(t));
+        let at = props.at.map(|t| c.source_at(t));
         if let Some(e) = props.enabled {
             c.enabled = e;
         }

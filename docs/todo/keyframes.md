@@ -34,6 +34,8 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
 
 - Most parameters of the Inspector can have keyframes, for example Zoom, Opacity and the crop (p. 1250).
 - Each such parameter has a Keyframe button between Previous and Next arrows. The button is orange on a keyframe (p. 1250).
+- With the playhead outside the selected clip, the Inspector shows the curve at the playhead's clip time (measured in Resolve Studio 21.1.2). The button and a typed value add a keyframe there, outside the clip.
+- With several clips selected, the Inspector has no Keyframe buttons (measured in Resolve Studio 21.1.2). A value with keyframes on one of these clips is off, and its Reset does nothing.
 - After the first keyframe of a parameter, each change at another frame adds a keyframe. The onscreen controls of the viewer also do this (p. 1251).
 - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out (p. 1251).
 - The reset button of a parameter removes its keyframes. The reset button of a group removes the keyframes of the group (p. 1251).
@@ -252,7 +254,7 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - The Title section has the Keyframe button on Across, Zoom, Rotation and Title opacity. Across holds the keyframes of Across and Down.
 - The Keyframes tab shows these values of a selected title. Position has no curve button and no ease.
 - `titles.set` and the viewer's handles put a new number on a keyframe at `at`, or at the playhead, when the value has keyframes.
-- With the playhead outside the clip, the Title section shows the clip's nearest frame. A new number and the Keyframe buttons act on that frame.
+- With the playhead outside the clip, the Title section shows the curve at the playhead's clip time, as the other rows do. A new number and the Keyframe buttons add a keyframe there, outside the clip.
 - `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take a title in `clips`.
 - A switch to Scroll drops the zoom and rotation keyframes. A `look` in `titles.set` drops all keyframes.
 

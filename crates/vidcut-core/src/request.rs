@@ -1273,8 +1273,7 @@ pub enum Request {
         #[serde(default)]
         muted: Option<bool>,
         /// The volume. A clip with volume keyframes gets it as a keyframe
-        /// at `at` (decision D82). Such a clip without sound there keeps
-        /// its volume.
+        /// at `at`, also outside the clip (decision D82).
         #[serde(default)]
         gain_db: Option<f64>,
         /// Where `gain_db` goes as a keyframe on clips with volume
@@ -1363,15 +1362,15 @@ pub enum Request {
         #[serde(default)]
         clips: Option<OneOrMany<ClipRef>>,
     },
-    /// Add a keyframe at `at` (the playhead by default) to each of `clips`
-    /// whose sound is there, on the source frame under `at`. Without a
-    /// `value`, it takes the value the clip has there. A keyframe already
-    /// on that frame takes the value and the ease. With its first
-    /// keyframe, a clip's volume follows its keyframes. A title takes
-    /// position, zoom, rotation and opacity, and a scroll takes position and
-    /// opacity. A title's zoom is one number, and its position takes no ease
-    /// or handles. Returns the `clips` with the source `frame` of each new
-    /// keyframe.
+    /// Add a keyframe at `at` (the playhead by default) to each of `clips`,
+    /// on the source frame of that clip at `at`, also with `at` outside the
+    /// clip. Without a `value`, it takes the value the clip has there. A
+    /// keyframe already on that frame takes the value and the ease. With
+    /// its first keyframe, a clip's volume follows its keyframes. A title
+    /// takes position, zoom, rotation and opacity, and a scroll takes
+    /// position and opacity. A title's zoom is one number, and its position
+    /// takes no ease or handles. Returns the `clips` with the source `frame`
+    /// of each new keyframe.
     #[serde(rename = "keyframes.add")]
     KeyframesAdd {
         clips: OneOrMany<ClipRef>,
@@ -2016,8 +2015,8 @@ pub enum Request {
     /// `text` drops the `align`. Switching to `scroll` drops the zoom and
     /// rotation keyframes. A `look` replaces all but the text, and the other
     /// fields given go on top. It also drops the title's keyframes. A value
-    /// with keyframes takes the new number on a keyframe at `at`. Moves and
-    /// trims are `edit.*`'s.
+    /// with keyframes takes the new number on a keyframe at `at`, also
+    /// outside the clip. Moves and trims are `edit.*`'s.
     #[serde(rename = "titles.set")]
     TitlesSet {
         clip: ClipRef,

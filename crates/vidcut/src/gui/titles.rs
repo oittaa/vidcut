@@ -138,12 +138,8 @@ fn unstyled(text: &str, (a, b): (usize, usize)) -> String {
     format!("{}{middle}{}", &text[..a], &text[b..])
 }
 
-fn frame_in(c: &Clip, at: i64) -> i64 {
-    at.clamp(c.start, c.end() - 1)
-}
-
 fn sampled_at(c: &Clip, t: &Title, at: i64) -> Title {
-    t.sampled(c.content_at(frame_in(c, at)) as f64)
+    t.sampled(c.content_at(at) as f64)
 }
 
 fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
@@ -333,7 +329,7 @@ impl Workspace {
         });
         let position = self.snap.timeline.position;
         if !d.dirty {
-            d.at = found.map_or(position, |(_, clip, _)| frame_in(clip, position));
+            d.at = position;
         }
         let frame = d.at;
         let stored = found.map(|(_, clip, t)| sampled_at(clip, t, d.at));

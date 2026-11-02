@@ -314,9 +314,7 @@ pub fn set(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) -> 
     let Some(old) = c.title.as_ref() else {
         return Err(Error::invalid(format!("{id} is not a title")));
     };
-    let frame = at
-        .filter(|&t| c.start <= t && t < c.end())
-        .map(|t| c.content_at(t));
+    let frame = at.map(|t| c.content_at(t));
     let mut next = changed(old, change);
     if next.is_keyed() {
         let mut picture = next.as_picture();
@@ -324,7 +322,7 @@ pub fn set(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) -> 
             if change.names(v) && !next.keys_of(v).is_empty() {
                 let Some(f) = frame else {
                     return Err(Error::invalid(
-                        "no clip with keyframes on that value shows at the frame",
+                        "a value with keyframes needs `at` or a playhead",
                     ));
                 };
                 let now = plain_channel(&picture, v);

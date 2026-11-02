@@ -1493,6 +1493,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Audio panel also has Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (pp. 743–744).
   - The manual names no Mute in the Audio panel (pp. 742–744).
   - Its Video panel also has Speed Change: Direction, Speed %, Frames Per Second, Duration, Ripple Sequence and Pitch Correction (pp. 736–737).
+  - With several clips selected, its header is Multiple Clips, and a value that differs between them shows a dash (measured in Resolve Studio 21.1.2).
 - **vidcut:**
   - An Inspector tab is beside the Media Pool and Titles tabs. It opens in the same place.
   - `gui.show inspector` shows it.
@@ -1536,6 +1537,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Position X and Y share one keyframe. Zoom X and Y share one keyframe. Anchor X and Y share one keyframe.
     - The button is lit on a keyframe. A click adds or removes the keyframe at the playhead.
     - Previous and Next move the playhead to the keyframe of that value inside the clip.
+    - With several clips selected, no value has this button or the arrows, as in Resolve ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+    - A value with keyframes on one of these clips is then off and has no Reset.
     - Dynamic Zoom and the flips have no Keyframe button.
     - The Reset of one of these values removes its keyframes. The Reset of Transform or Crop removes that section's keyframes.
     - The Reset of Volume sets 0 dB and removes the volume keyframes. The Audio section has no Reset of the whole section.
@@ -1564,7 +1567,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A typed value is one change. Each change is one undo step.
   - The fields show a change from a script, an agent, the viewer handles or the wheel at once.
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
-  - With several clips, the accent color and the Reset show when one of the clips has such a value.
+  - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has neither.
   - A picture value goes to all the selected clips that can have a picture. An Audio value goes to all the selected clips with sound.
   - A Speed value goes to all the selected clips that can change speed. Duration gives each clip the speed that fills it.
   - A value changes only that value on each clip. A Reset also acts on all of these clips.
