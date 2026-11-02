@@ -1141,24 +1141,24 @@ pub struct Duck {
     /// track is.
     #[serde(default)]
     pub sources: Vec<String>,
-    /// The Duck Amount: how far it dips, in dB, from 0 to 60. 2.7 unless
+    /// The Duck Amount: how far it dips, in dB, from 0 to 18. 2.7 unless
     /// set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub amount_db: Option<f64>,
     /// How long before a source starts the full dip is reached, in ms,
-    /// from 0 to 1000. 15 unless set.
+    /// from 0 to 500. 15 unless set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lookahead_ms: Option<f64>,
     /// The Rise Time: how long the gain takes to fall to the full dip, in
-    /// ms, from 1 to 1000. 10 unless set.
+    /// ms, from 0 to 1000. 10 unless set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rise_ms: Option<f64>,
     /// How long the full dip stays after a source stops, in ms, from 0 to
-    /// 5000. A pause shorter than this keeps the dip. 150 unless set.
+    /// 1000. A pause shorter than this keeps the dip. 150 unless set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hold_ms: Option<f64>,
     /// The Recovery Time: how long the gain takes to come back after the
-    /// hold, in ms, from 1 to 1000. 750 unless set.
+    /// hold, in ms, from 0 to 1000. 750 unless set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery_ms: Option<f64>,
     /// What makes a source active. `speech` unless set.
