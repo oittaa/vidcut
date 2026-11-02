@@ -94,6 +94,10 @@ fn measure(dir: &Path) -> (usize, u64) {
     (files, bytes)
 }
 
+pub(crate) fn videos(dir: &Path) -> usize {
+    measure(dir).0
+}
+
 pub fn empty(dir: &Path) -> usize {
     let mut n = 0;
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {

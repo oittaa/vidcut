@@ -330,6 +330,7 @@ pub fn run_with(
             answer(crate::live::render_cache(
                 (editor.project(), store.path()),
                 hooks.cancel.clone(),
+                envelope.dry_run,
             )?)
         }
         Request::Probe { .. } => {

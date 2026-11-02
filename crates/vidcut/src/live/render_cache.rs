@@ -80,6 +80,25 @@ fn slow_media(
     })
 }
 
+fn find_slow(
+    project: &Project,
+    gpu: Option<&vidcut_av::hw::GpuDecoder>,
+    decodes: &mut HashMap<PathBuf, bool>,
+) -> bool {
+    let mut found = false;
+    for m in &project.media {
+        let Some(v) = m.info.video.as_ref().filter(|v| !v.still) else {
+            continue;
+        };
+        if !decodes.contains_key(&m.path) {
+            let slow = vidcut_av::render_cache::slow(gpu, &m.path, &v.codec);
+            decodes.insert(m.path.clone(), slow);
+            found = true;
+        }
+    }
+    found
+}
+
 impl Background {
     pub(super) fn new(tx: Sender<Msg>, prefs: &Preferences) -> Self {
         Self {
@@ -359,11 +378,14 @@ impl Background {
         {
             self.start(project, base, from);
         }
-        self.status(project)
+        self.status(project, false)
     }
 
-    pub(super) fn status(&mut self, project: &Project) -> Value {
-        self.indexed();
+    pub(super) fn status(&mut self, project: &Project, dry_run: bool) -> Value {
+        match dry_run {
+            true => self.read_index(),
+            false => self.indexed(),
+        }
         let mode = project.settings.render_cache;
         let look = self.look(project);
         let slow = |id: &str| slow_media(project, &self.proxies, &self.decodes, id);
@@ -415,6 +437,12 @@ impl Background {
         }
     }
 
+    fn read_index(&mut self) {
+        if self.index != Scan::Done {
+            *self.lock().index_mut() = Index::read(&self.dir());
+        }
+    }
+
     fn stopped(&mut self) {
         self.stop();
         self.done = false;
@@ -427,14 +455,29 @@ impl Background {
         self.dir()
     }
 
-    pub(super) fn delete_all(&mut self) -> usize {
+    pub(super) fn delete_all(&mut self, dry_run: bool) -> usize {
+        let dir = self.dir();
+        if dry_run {
+            return crate::render_caches::videos(&dir);
+        }
         self.stopped();
+        let before = crate::render_caches::videos(&dir);
         self.lock().index_mut().clear();
-        crate::render_caches::empty(&self.dir())
+        crate::render_caches::empty(&dir);
+        before.saturating_sub(crate::render_caches::videos(&dir))
     }
 
-    pub(super) fn delete_frames(&mut self, project: &Project, ranges: &[Span]) -> usize {
-        self.stopped();
+    pub(super) fn delete_frames(
+        &mut self,
+        project: &Project,
+        ranges: &[Span],
+        dry_run: bool,
+    ) -> usize {
+        if dry_run {
+            self.read_index();
+        } else {
+            self.stopped();
+        }
         let Some(base) = self.base.clone() else {
             return 0;
         };
@@ -450,11 +493,18 @@ impl Background {
         };
         let mut cache = self.lock();
         let keys = keys_in(&mut cache, &base, &setup, ranges);
-        cache.index_mut().drop_with(&keys)
+        match dry_run {
+            true => cache.index().holding(&keys),
+            false => cache.index_mut().drop_with(&keys),
+        }
     }
 
-    pub(super) fn delete_unused(&mut self, project: &Project) -> usize {
-        self.stopped();
+    pub(super) fn delete_unused(&mut self, project: &Project, dry_run: bool) -> usize {
+        if dry_run {
+            self.read_index();
+        } else {
+            self.stopped();
+        }
         let Some(base) = self.base.clone() else {
             return 0;
         };
@@ -471,7 +521,10 @@ impl Background {
         let mut cache = self.lock();
         let all = [(base.range.0, base.range.1, None)];
         let keys = keys_in(&mut cache, &base, &setup, &all);
-        cache.index_mut().keep_only(&keys)
+        match dry_run {
+            true => cache.index().sparing(&keys),
+            false => cache.index_mut().keep_only(&keys),
+        }
     }
 }
 
@@ -481,28 +534,38 @@ pub(crate) fn render_all(
     (project, file): (&Project, &Path),
     show_super_scale: bool,
     cancel: Arc<AtomicBool>,
+    dry_run: bool,
 ) -> vidcut_core::Result<Value> {
     let prefs = crate::preferences::load().unwrap_or_default();
     let (tx, _rx) = std::sync::mpsc::channel();
     let mut background = Background::new(tx, &prefs);
-    crate::render_caches::remember(file);
     background.open(file);
-    background.indexed();
+    if !dry_run {
+        crate::render_caches::remember(file);
+        background.indexed();
+    }
     let end = project.end();
     if end > 0 && project.settings.render_cache != Mode::Off {
         let (plan, _) = vidcut_core::render::flatten_lanes(project, 0, end)?;
         let base = Arc::new(super::shown(plan, show_super_scale));
+        let start = base.range.0;
         background.base = Some(base.clone());
-        let mut work = background.work(project, base.clone(), base.range.0);
-        work.cancel = cancel;
-        work.tx = None;
-        match work.render() {
-            Ok(true) => {}
-            Ok(false) => return Err(super::cancelled()),
-            Err(e) => return Err(vidcut_core::Error::new(vidcut_core::ErrorCode::Media, e)),
+        let gpu = crate::preferences::gpu_decoding().own_decoder();
+        let mut decodes = HashMap::new();
+        find_slow(project, gpu.as_ref(), &mut decodes);
+        background.decodes = Arc::new(decodes);
+        if !dry_run {
+            let mut work = background.work(project, base, start);
+            work.cancel = cancel;
+            work.tx = None;
+            match work.render() {
+                Ok(true) => {}
+                Ok(false) => return Err(super::cancelled()),
+                Err(e) => return Err(vidcut_core::Error::new(vidcut_core::ErrorCode::Media, e)),
+            }
         }
     }
-    Ok(background.status(project))
+    Ok(background.status(project, dry_run))
 }
 
 fn keys_in(cache: &mut Cache, base: &RenderPlan, setup: &Setup, spans: &[Span]) -> HashSet<Key> {
@@ -565,18 +628,7 @@ impl Render {
     fn render(&self) -> Result<bool, String> {
         let gpu = crate::preferences::gpu_decoding().own_decoder();
         let mut decodes = (*self.decodes).clone();
-        let mut found = false;
-        for m in &self.project.media {
-            let Some(v) = m.info.video.as_ref().filter(|v| !v.still) else {
-                continue;
-            };
-            if !decodes.contains_key(&m.path) {
-                let slow = vidcut_av::render_cache::slow(gpu.as_ref(), &m.path, &v.codec);
-                decodes.insert(m.path.clone(), slow);
-                found = true;
-            }
-        }
-        if found {
+        if find_slow(&self.project, gpu.as_ref(), &mut decodes) {
             self.send(Event::Slow {
                 job: self.cancel.clone(),
                 decodes: decodes.clone(),
@@ -744,5 +796,19 @@ mod tests {
         });
         assert_eq!(bg.error.as_deref(), Some("the disk cache has no room"));
         assert!(!bg.done);
+    }
+
+    #[test]
+    fn a_dry_run_does_not_delete_the_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let mut prefs = Preferences::default();
+        prefs.playback_files.render_cache = root.path().to_path_buf();
+        let (tx, _rx) = mpsc::channel();
+        let mut bg = Background::new(tx, &prefs);
+        bg.open(std::path::Path::new("/projects/p.vidcut"));
+        let file = root.path().join("0123456789abcdef0123456789abcdef.mkv");
+        std::fs::write(&file, b"frame").unwrap();
+        assert_eq!(bg.delete_all(true), 1);
+        assert_eq!(std::fs::read(&file).unwrap(), b"frame");
     }
 }
