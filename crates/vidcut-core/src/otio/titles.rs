@@ -6,7 +6,7 @@ use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
     Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, TextStroke, Title,
-    TitleAlign, TitleKind, TitleShadow, TitleStyle,
+    TitleAlign, TitleKind, TitleShadow, TitleStyle, size_fits,
 };
 use crate::rich::{self, Look, Span};
 
@@ -709,7 +709,7 @@ fn markup(
                     .points
                     .filter(|p| Some(*p) != points)
                     .map(|p| rounded(p / height))
-                    .filter(|s| *s > 0.0 && *s <= 0.5),
+                    .filter(|s| size_fits(*s, Title::MOST_SIZE)),
             },
         })
         .collect();
@@ -890,7 +890,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
     let size = look("size")
         .as_f64()
         .map(|p| p / f64::from(height.max(1)))
-        .filter(|s| crate::ops::subtitles::checked_size(Some(*s), "title").is_ok());
+        .filter(|s| size_fits(*s, Title::MOST_SIZE));
     let color = look("color")
         .as_str()
         .map(str::to_string)
@@ -1081,7 +1081,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let size = style_from
         .points
         .map(|p| p / h)
-        .filter(|s| crate::ops::subtitles::checked_size(Some(*s), "title").is_ok());
+        .filter(|s| size_fits(*s, Title::MOST_SIZE));
     let font = style_from
         .family
         .filter(|f| crate::ops::subtitles::checked_font(Some(f), "title").is_ok());

@@ -92,7 +92,7 @@ fn a_bad_look_file_is_refused_with_its_reason() {
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("titles");
     std::fs::create_dir_all(&folder).unwrap();
-    std::fs::write(folder.join("Huge.toml"), "[style]\nsize = 0.9\n").unwrap();
+    std::fs::write(folder.join("Huge.toml"), "[style]\nsize = 9.0\n").unwrap();
     let listing = read(dir.path(), LookKind::Titles);
     assert_eq!(
         listing
@@ -102,7 +102,7 @@ fn a_bad_look_file_is_refused_with_its_reason() {
             .collect::<Vec<_>>(),
         vec![(
             "Huge",
-            "a title size is a fraction of the picture height, above 0 and at most 1/2"
+            "a title size is a fraction of the picture height, from 1/1080 to 4096/1080"
         )]
     );
 }

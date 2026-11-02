@@ -1,3 +1,4 @@
+use crate::model::{Title, size_fits};
 use crate::subtitles::color;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -65,7 +66,7 @@ fn size_of(raw: &str) -> Option<f64> {
         None => (t, 1.0),
     };
     let v = number.parse::<f64>().ok()? * scale;
-    (v.is_finite() && v > 0.0 && v <= 0.5).then_some(v)
+    size_fits(v, Title::MOST_SIZE).then_some(v)
 }
 
 fn tag(s: &str) -> Option<(bool, Option<Open>, usize)> {

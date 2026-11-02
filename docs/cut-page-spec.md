@@ -1886,7 +1886,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - HDR white is 203 cd/m², the graphics white of ITU-R BT.2408.
   - A track's style (`track.set`, the Subtitle Track section of the Inspector) replaces that look where it is set:
     - `font` is a family name. If it is not installed, the text is drawn in the usual font.
-    - `size` is the text height as a fraction of the picture height, above 0 and at most half.
+    - `size` is the text height as a fraction of the picture height, from 1/1080 to 400/1080.
+    - Size 1..400 is the range of a subtitle track, measured in Resolve Studio 21.1.2. One Size is one pixel of em at 1080p.
     - `color` is `#rrggbb`, `#rgb` or a name such as yellow. A color with an opacity is refused.
     - `outline` is a color and a width in pixels of the timeline, from 0 to 16. 0 draws no outline.
     - A `size` is Stroke Size, measured in Resolve Studio 21.1.2.
@@ -2013,7 +2014,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>` and `<font>` with a `color`, a `face` and a `size`.
   - A line takes the height of its largest size.
   - The lines of a lower third meet one lower-line height above its corner.
-  - Size, color, outline and background take the values and limits of the subtitle style (D61).
+  - `size` is from 1/1080 to 4096/1080, also in markup. Size 1..4096 is the range of a title, measured in Resolve Studio 21.1.2.
+  - Color, outline and background take the values and limits of the subtitle style (D61).
   - The background is one box behind the block. It reaches 0.15 of the text height past its lines.
   - A drop shadow is a blurred copy of the text and its outline. It is over the background and under the text, as in Resolve.
   - By default, the shadow is black, 75% opaque and blurred 20. These are Resolve's own values.

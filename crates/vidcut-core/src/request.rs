@@ -1266,7 +1266,7 @@ pub enum Request {
         /// A subtitle track's look, burned in and written to an IMSC1 file.
         /// Replaces the track's style; a field left out goes back to the
         /// usual look. `font` is a family name. `size` is the text height
-        /// as a fraction of the picture height (above 0, at most 1/2).
+        /// as a fraction of the picture height (from 1/1080 to 400/1080).
         /// Colors are `#rrggbb`, `#rgb` or a name such as `yellow`.
         /// `outline` is a color, a `size` in pixels of the timeline from 0
         /// to 16 (`0` draws none), and `outside`, true to leave the letters
@@ -2012,7 +2012,7 @@ pub enum Request {
         #[serde(default)]
         align: Option<TitleAlign>,
         /// Its look: `font` (a family name), `size` (the text height as a
-        /// fraction of the picture height, above 0, at most 1/2), `color`
+        /// fraction of the picture height, from 1/1080 to 4096/1080), `color`
         /// (`#rrggbb`, `#rgb` or a name such as `yellow`), `outline` (a
         /// color, a `size` in pixels of the timeline from 0 to 16, `0`
         /// drawing none, and `outside`, true to leave the letters whole),
