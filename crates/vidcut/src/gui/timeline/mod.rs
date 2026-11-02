@@ -2764,7 +2764,10 @@ impl Workspace {
             self.timeline.duration_dialog = Some(String::new());
             ui.close();
         }
-        if !c.is_generator() && ui.button(keys("Change Speed…  (R)")).clicked() {
+        if c.generator.is_some() {
+            ui.add_enabled(false, egui::Button::new(keys("Change Speed…  (R)")));
+            ui.add_enabled(false, egui::Button::new("Add Speed Keyframe"));
+        } else if !c.is_generator() && ui.button(keys("Change Speed…  (R)")).clicked() {
             self.open_speed_dialog();
             ui.close();
         }

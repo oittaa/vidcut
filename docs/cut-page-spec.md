@@ -708,6 +708,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The Process makes the frames between the two pictures: AI Fast, AI Slow or Frame Blend (deviation X99). Frame Blend gives a Cross Dissolve.
   - Ease and Transition Curve are as for a Push. Frame f of n frames shows the morph at curve(f) + 0.5 / n, at most 1.
   - The morph takes the nearest source frame of each clip. A clip with a speed change shows no frames between its source frames.
+  - A Solid Color side acts as a still side. Measured in Resolve Studio 21.1.2: two Solid Colors give the same picture as two stills of those colors.
   - It morphs two pictures that each cover the frame alone, with the usual Inspector values. It plays as a Cross Dissolve in these cases:
     - A side is a gap, a clip in a compound clip, or a clip over other tracks that does not fill the frame.
     - A side has other Inspector values, or plays backward.
@@ -1063,6 +1064,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - vidcut: the Effects tab has the Blur group with Gaussian Blur. The other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
   - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
+  - Measured in Resolve Studio 21.1.2: a generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API all leave it with none.
+  - vidcut: `effects.add` refuses a generator. A drag of a card onto a generator does nothing, and the double-click and Add to Selected Clips skip it.
 - **Inspector** (vidcut, X70):
   - The Inspector shows the effects of the first selected clip, after its Super Scale section. A change applies to that clip only.
   - Each effect is a section with an on/off box, Move Up, Move Down, Reset and Delete.
@@ -1115,16 +1118,30 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - The pointer on a card previews the generator (p. 766). vidcut does not have this preview yet ([todo](todo/effects-library.md)).
 - **Adding a generator:**
   - Drag a card onto the upper timeline or the lower timeline (p. 766).
-  - A drop puts the generator where the pointer is, on the video track under it, as `generators.add` with that track and frame does.
-  - A double-click on a card adds the generator at the playhead ([X110](deviations.md#x110-a-double-click-on-a-generator-adds-it-at-the-playhead)).
+  - vidcut: a drop puts the generator where the pointer is, on the video track under it, as `generators.add` with that track and frame does.
+  - Not measured: the track and the frame of a drop in Resolve.
+  - Measured: a double-click on a card loads the generator in the viewer as a source of 5 s. The timeline does not change. The Inspector shows nothing to inspect, so it has no Color row.
+  - Measured: a drag from the viewer onto a clip on V1 overwrites from the frame under the pointer. The clip then has its Color row.
+  - vidcut: a double-click on a card adds the generator at the playhead. The source viewer takes only media ([todo](todo/effects-library.md)).
   - `generators.add` without a track uses the track that D66 gives a title.
   - A new generator is 5 s long, and it adds no sound clip (measured).
 - **Inspector:**
   - Measured: the Generator tab of Solid Color has one row, Color. Color has no keyframes.
   - Measured: the Settings tab has Transform, Cropping, Dynamic Zoom, Composite, Speed Change and Stabilization.
   - vidcut: the Inspector shows a Generator section with the Color row, over the picture sections (X70).
-  - vidcut: the picture sections act as on any clip (§8.15). Renders of Position, Zoom, Crop and Opacity in Resolve Studio 21.1.2 agree.
-  - vidcut: a generator has no speed ([X111](deviations.md#x111-a-generator-has-no-speed)).
+- **Picture sections:**
+  - Measured in Resolve Studio 21.1.2: a Solid Color gives the same picture as a still of its color. The largest difference is 0.1 of 255. The renders have Rotation, Pitch, Yaw, Flip Vertical, Crop, Zoom, Overlay and Hue.
+  - Measured: vidcut's frames and renders of vidcut's OTIO file differ by at most 0.6 of 255. The cases are Rotation, Anchor, Flip Vertical, Zoom, Opacity and the 26 composite modes.
+  - Measured: Pitch and Yaw differ at the edge pixels, by at most 78.2 of 255. These pixels are 0.3% of the values. A still in Resolve gives the same picture.
+  - Measured: Flip Horizontal with Crop Left differs in one column. This is the rule of a crop, not of a generator.
+  - Not measured on a generator: Dynamic Zoom, Stabilization, keyframes in a render, Push, Slide, Wipe and Dip To Color.
+  - vidcut: the sections and these transitions act as on a still. On a Solid Color and on a still, the same requests give the same frames (0.0 of 255).
+- **Speed:**
+  - Measured: Speed Change on a generator has a dim dot and does not open. A still acts the same.
+  - Measured: the right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
+  - Measured: the scripting API refuses a speed. An import of a time warp on a Solid Color keeps the length and drops the warp.
+  - vidcut: the speed requests refuse a generator. The right-click menu has Change Speed and Add Speed Keyframe grey, and Change Duration on.
+  - vidcut: an import of a time warp on a Solid Color keeps the length and drops the warp.
 - **Solid Color:**
   - It has one value, Color. Black is the default (measured).
   - `generators.set` and the Color row change it.

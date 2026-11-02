@@ -111,6 +111,10 @@ pub fn has_picture(c: &Clip) -> bool {
     c.video && c.title.is_none() && (c.generator.is_none() || c.draws())
 }
 
+pub fn takes_effects(c: &Clip) -> bool {
+    has_picture(c) && c.generator.is_none()
+}
+
 pub(super) fn takes(p: &Project, ti: usize, c: &Clip) -> Result<()> {
     if c.title.is_some() {
         return Err(Error::invalid(format!(

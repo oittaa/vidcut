@@ -360,7 +360,7 @@ Writing:
 
 ## Generators
 
-- A clip with a `generator` makes its own picture ([spec §8.17](../cut-page-spec.md#817-generators-p-766)): no media, no audio, no speed, any length, on a video track.
+- A clip with a `generator` makes its own picture ([spec §8.17](../cut-page-spec.md#817-generators-p-766)): no media, no audio, no speed, no effects, any length, on a video track.
 - `Clip::is_generator` and `Clip::is_block` count it.
 - A `Generator` is one of two kinds:
   - `Generator::SolidColor` holds a `color`.
@@ -391,6 +391,7 @@ Writing:
 - `ops::picture` holds the edits:
   - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share.
   - `ops::picture::has_picture` tells which clips take a picture: not titles, sound or generators that do not draw.
+  - `ops::picture::takes_effects` tells which of them take effects: not generators ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
   - `ops::picture::clear` puts back one `PictureTool`, or all of them. `ops::picture::cleared` is the reset of one `PictureTool`, which the Inspector also uses.
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
   - `ops::picture::effect_checked` checks an effect. It is part of `ops::picture::checked`.

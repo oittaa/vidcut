@@ -1570,7 +1570,7 @@ pub struct Clip {
     /// Effects on its picture, carried from another editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
-    /// A generator (decision D99): a picture made with no file. It has no
+    /// A generator: a picture made with no file. It has no
     /// media (`media` is empty) and no audio, and any length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generator: Option<Generator>,
@@ -1927,7 +1927,7 @@ pub enum GeneratorKind {
     SolidColor,
 }
 
-/// What a generator makes (decision D99).
+/// What a generator makes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Generator {
@@ -2317,11 +2317,11 @@ impl Title {
 }
 
 /// Where a clip's picture goes over the frame, and the effects on it:
-/// footage, a still, an image sequence, a compound clip or a generator. A
-/// field left out is at its usual value; at all of them the picture is
-/// fitted into the frame. The tracks below show wherever it doesn't cover
-/// the frame: in the bars around a picture of another shape, around it,
-/// where it is cropped and through its soft edges and its opacity.
+/// footage, a still, an image sequence, a compound clip or a generator,
+/// which has no effects. A field left out is at its usual value; at all of
+/// them the picture is fitted into the frame. The tracks below show wherever
+/// it doesn't cover the frame: in the bars around a picture of another shape,
+/// around it, where it is cropped and through its soft edges and its opacity.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Picture {
     /// Where the middle of the whole picture goes before the zoom and the

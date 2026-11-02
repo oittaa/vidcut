@@ -838,7 +838,7 @@ fn effect_preview(ctx: &Ctx, pos: Pos2, kind: EffectType) -> Preview {
     let Some(c) = track
         .clip_at(ctx.scale.under(pos.x))
         .map(|i| &track.clips[i])
-        .filter(|c| vidcut_core::ops::picture::has_picture(c))
+        .filter(|c| vidcut_core::ops::picture::takes_effects(c))
     else {
         return Preview::default();
     };

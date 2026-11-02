@@ -214,7 +214,7 @@ pub enum VideoPiece {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         excluded: bool,
     },
-    /// A generator's picture (decision D99), made at the plan's size.
+    /// A generator's picture, made at the plan's size.
     Generated {
         frames: i64,
         picture: Generated,
@@ -2059,19 +2059,21 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     let Layer::Picture(mut piece, _) = shown(c, None, below)? else {
                         return Ok(None);
                     };
-                    let VideoPiece::Source {
-                        source_frame,
-                        pace,
-                        retime,
-                        ..
-                    } = &mut piece
-                    else {
-                        return Ok(None);
-                    };
-                    *retime = Retime::Nearest;
-                    if mode == SmoothMode::Faster {
-                        *source_frame = c.source_at(at);
-                        *pace = Pace::of(0.0, 0);
+                    match &mut piece {
+                        VideoPiece::Source {
+                            source_frame,
+                            pace,
+                            retime,
+                            ..
+                        } => {
+                            *retime = Retime::Nearest;
+                            if mode == SmoothMode::Faster {
+                                *source_frame = c.source_at(at);
+                                *pace = Pace::of(0.0, 0);
+                            }
+                        }
+                        VideoPiece::Generated { .. } => {}
+                        _ => return Ok(None),
                     }
                     Ok(Some(piece))
                 };

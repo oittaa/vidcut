@@ -55,7 +55,7 @@ impl Workspace {
             .iter()
             .filter(|id| {
                 p.find_clip(id).is_some_and(|(ti, ci)| {
-                    vidcut_core::ops::picture::has_picture(&p.tracks[ti].clips[ci])
+                    vidcut_core::ops::picture::takes_effects(&p.tracks[ti].clips[ci])
                 })
             })
             .cloned()

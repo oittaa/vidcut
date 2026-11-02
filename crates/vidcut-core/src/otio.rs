@@ -2009,6 +2009,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 } else {
                     if generators::read(reference).is_some() {
                         c.picture = our_picture(item);
+                        c.speed = None;
                         if c.name == reference["name"].as_str().unwrap_or_default() {
                             c.name.clear();
                         }

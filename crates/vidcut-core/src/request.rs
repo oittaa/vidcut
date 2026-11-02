@@ -2118,7 +2118,8 @@ pub enum Request {
     /// the playhead) for `duration` (default: 5 s). On `track` (default: the
     /// video track above the highest one with clips in those frames, made
     /// when there is none, or V1 when nothing is there), over what is there.
-    /// Returns its clip id. `picture.set` places it like any clip.
+    /// Returns its clip id. `picture.set` places it. It has no speed and takes
+    /// no effects.
     #[serde(rename = "generators.add")]
     GeneratorsAdd {
         /// `solid_color`: one color over the whole picture.
@@ -2250,9 +2251,10 @@ pub enum Request {
         tool: Option<PictureTool>,
     },
     /// Add an effect at its usual values after the effects of clips:
-    /// footage, stills, image sequences, compound clips and generators. The
-    /// effects work in their order, on the picture as its transform and its
-    /// crop put it in the frame, before its composite mode and its opacity.
+    /// footage, stills, image sequences and compound clips. A generator takes
+    /// no effects. The effects work in their order, on the picture as its
+    /// transform and its crop put it in the frame, before its composite mode
+    /// and its opacity.
     /// Returns each clip with the place of its new effect, counted from 0.
     #[serde(rename = "effects.add")]
     EffectsAdd {

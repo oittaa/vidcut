@@ -17,8 +17,10 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
    - Four Color Gradient.
    - The ramps and the SDR bars: 10 Step, 100mV Steps, Grey Scale, YCbCr Ramp, EBU Color Bar and SMPTE Color Bar.
    - The HDR bars and Window: the three BT.2111 Color Bars and Window.
+   - A double-click on a card loads the generator in the source viewer, as a source of 5 s. The source viewer and the edits from it take only media now ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
+   - Measure on a generator: Dynamic Zoom, Stabilization, keyframes in a render, Push, Slide, Wipe and Dip To Color. vidcut plays them as on a still.
 3. **Later:**
-   - Measure Smooth Cut in Resolve with a side that is a gap or a generator, a moved or resized side, and a side played backward. vidcut plays these as a Cross Dissolve now ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
+   - Measure Smooth Cut in Resolve with a side that is a gap, a moved or resized side, and a side played backward. vidcut plays these as a Cross Dissolve now ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
    - Measure the Gaussian Blur with Dynamic Zoom. vidcut does not change the sigma by the Dynamic Zoom box.
    - Measure where Resolve applies the effects of a compound clip ([todo](compound-opacity.md)).
    - Measure the Gaussian Blur with Use Alpha off on a clip that is partly clear, for example with Crop Softness. vidcut blurs its colors without their alpha.
