@@ -1247,8 +1247,8 @@ pub enum Request {
         /// as a fraction of the picture height (above 0, at most 1/2).
         /// Colors are `#rrggbb`, `#rgb` or a name such as `yellow`.
         /// `outline` is a color, a `size` in pixels of the timeline from 0
-        /// to 16 (`0` draws none), and `outside`, true to put all of it
-        /// outside the letters. `background` is a color
+        /// to 16 (`0` draws none), and `outside`, true to leave the letters
+        /// whole. `background` is a color
         /// and an `opacity` from 0 to 1. `margin` is the inset from the
         /// left and right, and from the top or bottom, as a fraction of the
         /// picture (from 0 up to but not including 1/2). `bold` takes the
@@ -1983,8 +1983,8 @@ pub enum Request {
         /// fraction of the picture height, above 0, at most 1/2), `color`
         /// (`#rrggbb`, `#rgb` or a name such as `yellow`), `outline` (a
         /// color, a `size` in pixels of the timeline from 0 to 16, `0`
-        /// drawing none, and `outside`, true to put all of it outside the
-        /// letters), `background` (a color and an `opacity`
+        /// drawing none, and `outside`, true to leave the letters whole),
+        /// `background` (a color and an `opacity`
         /// from 0 to 1, a box behind the whole text) and `shadow` (a
         /// `color`, an `opacity` from 0 to 1, an `offset` `[x, y]` right and
         /// down as fractions of the picture, each from -4 to 4, and a `blur`

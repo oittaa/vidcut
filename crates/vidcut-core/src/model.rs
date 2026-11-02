@@ -2048,7 +2048,7 @@ pub struct TitleStyle {
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Outline color and width. Usual: black, outside the letters, `0.05 *
+    /// Outline color and width. Usual: black, outside the letters, `0.1 *
     /// size * 1080` pixels of the timeline wide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<SubtitleOutline>,
@@ -3218,7 +3218,7 @@ pub struct SubtitleStyle {
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Outline color and width. Usual: black, outside the letters, `0.05 *
+    /// Outline color and width. Usual: black, outside the letters, `0.1 *
     /// size * 1080` pixels of the timeline wide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<SubtitleOutline>,
@@ -3331,9 +3331,9 @@ pub struct SubtitleOutline {
     /// and the timeline size. `0` draws none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
-    /// `true` puts all of its width outside the letters, behind them. Left
-    /// out, it is centered on their edges, over them. An outline with no
-    /// `size` is outside.
+    /// Half of the width always reaches past the letters. `true` draws it
+    /// behind them and leaves them whole. Left out, it goes over them. An
+    /// outline with no `size` is outside.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outside: Option<bool>,
 }
@@ -3347,14 +3347,10 @@ pub struct TextStroke {
 
 impl TextStroke {
     pub const MOST: f64 = 16.0;
-    pub const USUAL: f64 = 0.05 * 1080.0;
+    pub const USUAL: f64 = 0.1 * 1080.0;
 
     pub fn past_letter(&self) -> f64 {
-        if self.outside {
-            self.width
-        } else {
-            self.width / 2.0
-        }
+        self.width / 2.0
     }
 }
 

@@ -220,11 +220,7 @@ impl Edge {
     }
 
     fn past(&self) -> f32 {
-        if self.outside {
-            self.width
-        } else {
-            self.width / 2.0
-        }
+        self.width / 2.0
     }
 }
 
@@ -626,7 +622,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     let (ring, edge) = match (stroke, traced) {
         (Some(s), Some(list)) if s.outside => {
             let mut ring = alpha.clone();
-            stroked(&list, 2.0 * s.width, &mut ring, w, (left, -pad));
+            stroked(&list, s.width, &mut ring, w, (left, -pad));
             (ring, s.ink)
         }
         (Some(s), Some(list)) => {

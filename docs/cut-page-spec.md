@@ -1807,7 +1807,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut's look:
     - White text, 5.5% of the picture height.
     - Lines 1.31 times that height apart.
-    - A black outline outside the letters, 0.05 times the Size number wide, in pixels of the timeline.
+    - A black outline outside the letters, 0.1 times the Size number wide, in pixels of the timeline.
     - Centered, and wrapped at 90% of the width.
     - The middle of the block is at 80% of the height.
     - For a cue placed in the middle, the middle of the block is at 50%. For a cue at the top, it is at 20%.
@@ -1824,8 +1824,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A `size` is Stroke Size, measured in Resolve Studio 21.1.2.
     - It is centered on the edge of the letters, over them. Thus half of it eats into each letter.
     - It takes the same pixels at any text size and any timeline height.
-    - With `outside`, all of its width is outside the letters, behind them.
-    - How far Outside Only in Resolve reaches is not measured.
+    - With `outside`, the box Outside Only, it goes behind the letters. Its outer edge stays, and the letters stay whole.
+    - In both modes it reaches half its width past the letters, measured in Resolve Studio 21.1.2.
     - An export at another size scales the whole picture, thus the stroke too. A smaller export is measured in Resolve Studio 21.1.2.
     - `background` is a color and an opacity from 0 to 1.
     - The background is a box behind each line. The box reaches 0.15 of the text height past the line.
@@ -1930,7 +1930,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The manual does not give the look of a title, how its text sits, or how it plays over other tracks.
   - The usual look of a title:
     - The font of the burn-in (D61).
-    - White, with a black outline outside the letters, 0.05 times the Size number wide, in pixels of the timeline, and no background.
+    - White, with a black outline outside the letters, 0.1 times the Size number wide, in pixels of the timeline, and no background.
     - Text 96/1080 of the picture height for Text: the height of Resolve's 96-point Text title (D67).
     - Text 6% of the picture height for a lower third.
     - Lines 1.31 times the text height apart, wrapped at the width of title safe, 90% of the picture width.
@@ -1947,7 +1947,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A drop shadow is a blurred copy of the text and its outline. It is over the background and under the text, as in Resolve.
   - By default, the shadow is black, 75% opaque and blurred 20. These are Resolve's own values.
   - Its offset is 0.3% of the picture width right and 0.5% of its height down. Resolve's default offset of 0 draws no shadow.
-  - Zoom draws the text larger, and the outline and the background box grow with it. The outline at a zoom is not measured.
+  - Zoom draws the text larger, and the outline and the background box grow with it. The zoom scales the outline, measured in Resolve Studio 21.1.2.
   - Rotation turns the whole title, box and shadow too, counterclockwise.
   - Zoom and rotation work about the middle of a Text title.
   - For a lower third, they work about the point where its lines meet. Resolve turns each line of a lower third about that point (D67).
@@ -2068,10 +2068,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A cue without word times shows all its words at once.
   - The viewer and a burn-in draw it the same way. Subtitle files and streams get the text.
   - The looks of Create Subtitles from Audio (`look`) put the cues on a new track, with a style and the usual characters and lines:
-    - Pop: bold capitals, 7.5% of the picture height, an outline of 6.48 pixels outside the letters, a shadow and a margin of 15%.
+    - Pop: bold capitals, 7.5% of the picture height, an outline of 12.96 pixels outside the letters, a shadow and a margin of 15%.
     - In Pop, the spoken word is #ffd400 and pops at 1.25. Pop has 20 characters on one line.
-    - Highlight and Reveal: bold at 6.5%, with an outline of 5.62 pixels and the same shadow and margin. 32 characters on one line.
-    - Word: bold capitals at 10%, with an outline of 8.64 pixels, popping at 1.15. 20 characters.
+    - Highlight and Reveal: bold at 6.5%, with an outline of 11.23 pixels and the same shadow and margin. 32 characters on one line.
+    - Word: bold capitals at 10%, with an outline of 16 pixels, popping at 1.15. 20 characters.
     - Plain: the usual style, at 42.
   - Its dialog shows the looks as tiles. Each tile draws a sample in its look.
   - The looks are those of D71.
@@ -2112,7 +2112,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Built in for titles:
     - Plain: the usual title (D65)
     - Headline: white at 12% of the picture height, with no outline and a deep soft shadow
-    - Callout: yellow at 11%, with an outline of 11.88 pixels outside the letters and a shadow
+    - Callout: yellow at 11%, with an outline of 16 pixels outside the letters and a shadow
     - Caption: white at 5.5% on a 60% black box, its middle 82% down
     - News: a lower third at 5% on a blue bar
     - Soft: a lower third at 5.5%, with a soft shadow and no outline
