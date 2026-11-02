@@ -2066,7 +2066,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Title section has Across, Down, Zoom and Rotation under Upper Line and under Lower Line.
     - The two lines go together until a request names a line. Each line then keeps its values and goes apart.
     - A request that names no line then changes the lower line.
-    - The upper line stands on its point, and the lower line hangs from its point. Each line's zoom and rotation work about its point.
+    - The upper line stands on its point, and the lower line hangs from its point. Each line's zoom and rotation work about its point (measured in Resolve Studio 21.1.2).
+    - The background box follows the place, zoom and rotation of the lower line. The upper line does not move it (measured in Resolve Studio 21.1.2).
+    - Each line has its own shadow, which turns with the line (measured in Resolve Studio 21.1.2).
+    - From the bottom, the order is the box, the lower line and the upper line. Each line is over its own shadow (measured in Resolve Studio 21.1.2).
     - Opacity, text and style are the whole title's.
     - A switch to Text or Scroll drops the upper line's values.
   - Over the tracks below (§8.14):

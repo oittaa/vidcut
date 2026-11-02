@@ -349,7 +349,7 @@ Writing:
   - `Title::each_line` makes one change on each line.
 - `Title::blocks` tells what to draw. A `TitleBlock` has its `TitlePart`, its pivot, the bottom of its text, its zoom and its rotation:
   - Lines that go together are one `TitlePart::Whole`.
-  - Lines apart are a `TitlePart::Upper` and a `TitlePart::Lower`, with a `TitlePart::Backing` under them when the title has a background.
+  - Lines apart are a `TitlePart::Lower` under a `TitlePart::Upper`, with a `TitlePart::Backing` under them when the title has a background.
   - `Title::block_text` gives the text of a block.
 - A title's zoom is one number.
 - A handle of a title's position key is a point in the picture, not frames and a value. Thus it is not a `Handle` of the `Keyframe`:

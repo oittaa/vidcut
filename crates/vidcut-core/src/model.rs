@@ -2420,8 +2420,8 @@ impl Title {
         if self.backing().is_some() {
             out.push(self.block(TitlePart::Backing));
         }
-        out.push(upper);
         out.push(self.block(TitlePart::Lower));
+        out.push(upper);
         out
     }
 
