@@ -147,6 +147,7 @@ The schema describes the parameters, not the results. This list gives the result
     - `gpu_frames`: the frames made on the GPU.
     - `copies`: the GPU frames copied `down` and `up`.
     - `through_memory`: why the frames went to a GPU encoder through memory, when they did.
+    - `rounded`: the size of the timeline, the size of the file and a `message`, when the two sizes are different.
     - `color` and `metadata`: what was chosen, and `why`.
     - `tried`: the video encoders that did not open, and why.
     - `sources`: each file, and how it was decoded.
@@ -156,7 +157,8 @@ The schema describes the parameters, not the results. This list gives the result
   - `notes[]`: `code`, `message`.
 - `export plan`:
   - `settings`, `video_encoder` and `notes`.
-  - `outputs[]`, with `color` and `metadata`.
+  - `outputs[]`, with `color`, `metadata` and `rounded`.
+    - `rounded` tells the rule of the codec. A plan does not know what an encoder does by itself.
   - `auto`: what each automatic setting picks when only that setting is on auto.
     - It has a list for each of `encoder`, `passes`, `bit_depth`, `hdr` and `metadata`.
     - Each list has one entry for each different pick across the outputs.
@@ -183,7 +185,7 @@ The schema describes the parameters, not the results. This list gives the result
 - `titles list`: for each title, `clip`, `track`, `start`, `end` (frames), `start_tc`, `end_tc`, `enabled` and `title`.
 - `subtitles export`:
   - `path`, `track`, `format` and `cues` (how many).
-  - `warnings`: the cues of an IMSC1 file that have more lines than their region holds.
+  - `warnings`: the cues of an IMSC1 file that have more lines than their region holds, and an outline wider than the file holds.
 - `subtitles transcribe`:
   - `track`, `cues` (their ids), `from` and `to`.
   - `heard`: the tracks heard that have sound.

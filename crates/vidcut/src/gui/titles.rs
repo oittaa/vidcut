@@ -6,7 +6,7 @@ use vidcut_core::model::{Clip, Ease, Title, TitleAlign, TitleKind};
 
 use super::export::Ask;
 use super::inspector::{KeyClick, key_buttons, mark, next_key};
-use super::looks::{Parts, Picker, TextFields, kept_plain, plain};
+use super::looks::{Parts, Picker, TextFields, Usual, kept_plain, plain};
 use super::subtitles::{filled, font_list, kept_number, percent, swatch};
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
@@ -158,7 +158,7 @@ fn key_eases(c: &Clip, t: &Title, v: PictureValue, at: i64) -> (Vec<Ease>, Optio
 fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     let stored = d.base.as_ref().unwrap_or(stored);
     let was = Parts::of_title(&stored.style);
-    let style = d.fields.refilled(&was).parts(&was)?.title();
+    let style = d.fields.refilled(&was).parts(&was, None)?.title();
     let kept = |shown: &str, value: Option<f64>, what: &str| {
         kept_number(&filled(shown, value), value, what)
     };
@@ -489,7 +489,10 @@ impl Workspace {
         let down_hint = format!("{}%", percent(Some(usual[1])));
         let mut clicks = Vec::new();
         egui::Grid::new("title-style-fields").show(ui, |ui| {
-            changed |= d.fields.rows(ui, "title", &d.families, &size_hint).0;
+            changed |= d
+                .fields
+                .rows(ui, "title", &d.families, &Usual::title(&size_hint))
+                .0;
             let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
                 ui.label(label);
                 ui.add(

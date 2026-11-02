@@ -331,7 +331,7 @@ fn seconds(v: &Value) -> String {
         .map_or_else(|| raw(v), |n| format!("{}s", trim(n)))
 }
 
-const STYLE: [(&str, &str); 20] = [
+const STYLE: [(&str, &str); 21] = [
     ("font", "Font"),
     ("size", "Size"),
     ("color", "Color"),
@@ -339,6 +339,7 @@ const STYLE: [(&str, &str); 20] = [
     ("case", "Case"),
     ("outline.color", "Outline"),
     ("outline.size", "Outline Size"),
+    ("outline.outside", "Outside Only"),
     ("background.color", "Background"),
     ("background.opacity", "Opacity"),
     ("shadow", "Shadow"),
@@ -356,10 +357,9 @@ const STYLE: [(&str, &str); 20] = [
 
 fn style_show(key: &str) -> Show<'static> {
     match key {
-        "size" | "outline.size" | "background.opacity" | "shadow.opacity" | "margin"
-        | "words.pop" => &percent,
+        "size" | "background.opacity" | "shadow.opacity" | "margin" | "words.pop" => &percent,
         "shadow.offset" => &percents,
-        "shadow.blur" => &number,
+        "outline.size" | "shadow.blur" => &number,
         "case" | "words.show" | "speaker_color" => &word,
         _ => &raw,
     }
@@ -664,8 +664,11 @@ impl Words<'_> {
         s.put("muted", "Mute", &raw, |t| t["muted"].clone());
         s.put("solo", "Solo", &raw, |t| t["solo"].clone());
         s.put("volume_db", "Volume", &decibels, |t| t["volume_db"].clone());
-        s.put("voice_isolation", "Voice Isolation", &number, |t| {
-            t["voice_isolation"].clone()
+        s.put("voice_isolation", "Voice Isolation Amount", &number, |t| {
+            t["voice_isolation"]["amount"].clone()
+        });
+        s.put("voice_isolation_on", "Voice Isolation", &raw, |t| {
+            t["voice_isolation"]["on"].clone()
         });
         s.put("video_enabled", "Video", &raw, |t| {
             t["video_enabled"].clone()
@@ -705,8 +708,11 @@ impl Words<'_> {
             s.f.naming();
         }
         s.put("color", "Color", &raw, |c| json!(c.color));
-        s.put("voice_isolation", "Voice Isolation", &number, |c| {
-            audio(c, |a| json!(a.voice_isolation))
+        s.put("voice_isolation", "Voice Isolation Amount", &number, |c| {
+            audio(c, |a| json!(a.voice_isolation.map(|v| v.amount)))
+        });
+        s.put("voice_isolation_on", "Voice Isolation", &raw, |c| {
+            audio(c, |a| json!(a.voice_isolation.map(|v| v.on)))
         });
         s.put("retime", "Retime Process", &retime, |c| json!(c.retime));
         s.put("render_cache", "Render Cache", &word, |c| {

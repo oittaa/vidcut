@@ -753,9 +753,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - A new Out changes only the end. The start stays.
     - The new range overwrites the other subtitles of the track. The change and the overwrite are one undo step.
     - A subtitle that the new range fully covers is deleted. An In moved earlier past the whole subtitle before it deleted that subtitle.
-    - A subtitle that the new range partly covers is trimmed to the new edge.
-    - An Out moved 10 frames into the next subtitle moved the start of that subtitle to the new Out. Its end stayed.
     - An Out before the In does nothing, and the field shows the old value again.
+  - These facts come from Resolve Studio 21.1.2:
+    - An In later than the Out does nothing, and the field shows the old value again.
+    - An In inside the subtitle before, or an Out inside the subtitle after, changes nothing. Both subtitles stay.
+    - The field then keeps the typed text until the subtitle is selected again. The list shows the old time.
+    - A track has no overlaps. Thus a field cannot put a subtitle inside a longer subtitle.
 - **vidcut:**
   - The Subtitle section of the Inspector tab has the In, the Out, the text and the position of the cue.
   - These open it and show the Inspector tab:
@@ -774,12 +777,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A `+` or `-` before the value moves the edge by that much.
   - Enter, Tab or a click outside the field puts the change in. Esc puts the old value back.
   - In sends a new start only, and Out a new end only, as in Resolve.
-  - A value that does not parse, or an Out at or before the In, changes nothing. The field shows the value of the project again.
-  - The new range overwrites the other cues of the track, as in Resolve. Only the newly covered part counts:
+  - A value that does not parse, an In at or after the Out, or an Out at or before the In changes nothing. The field shows the value of the project again.
+  - An In inside the cue before, or an Out inside the cue after, changes nothing. Both cues stay, and the field shows the value of the project again (D79).
+  - Else the new range overwrites the other cues of the track. Only the newly covered part counts:
     - from the new In to the old In, when the In moves earlier
     - from the old Out to the new Out, when the Out moves later
   - A cue of the track that lies fully inside that part is removed.
-  - A cue that reaches into the part from one side loses its frames in the part. Thus its end moves to the new In, or its start to the new Out.
+  - A cue that already overlaps this cue and reaches into the part loses its frames in the part. Thus its end moves to the old Out, or its start to the old In.
   - A cue that covers all of the part and more stays as it is (D79).
   - An In moved later or an Out moved earlier changes no other cue.
   - The change and the overwrite go as one `apply`. Thus they are one undo step.
@@ -1325,19 +1329,25 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Voice Isolation is only in the Studio version. It is a plugin on a mono, stereo or dual-mono track.
   - It runs in real time, but not on live input or on more than two channels.
   - Its Amount mixes the source with the isolated voice. At 50, they are about equal. At 70 to 80, it sounds natural (p. 774).
+  - Measured in Resolve Studio 21.1.2, on a clip:
+    - It has a switch and an Amount from 0 to 100.
+    - A fresh clip turned on gives Amount 100.
+    - Amount typed 0 stays on, with the value 0.
+    - A clip's stored Amount comes back when the switch goes on again.
 - **vidcut:**
-  - The `voice_isolation` of a clip or a track is an Amount from 0 to 100, as in Resolve Studio 21.1.2. 0 is off.
+  - A clip or a track has the same switch (`voice_isolation_on`) and Amount (`voice_isolation`) as that measurement.
+  - An Amount given alone in a request also turns the switch on.
+  - At Amount 0 the sound equals the source, and the model does not run.
   - It runs `dpdfnet2_48khz_hr` of DPDFNet (Apache-2.0) on the CPU of this computer.
   - It runs live in playback, and the same in an export.
   - It works on any number of channels, each channel alone.
-  - The Amount of a clip overrides the Amount of its track. A clip at 0 stays off on a track that has it on.
-  - Voice Isolation in the right-click menu of a clip, or Alt + V, turns it on or off for the selected clips.
-  - On, it sets the Amount to 100, the value that Resolve Studio 21.1.2 shows when it is turned on.
+  - A clip left unset follows its track. A clip that is off stays off on a track that is on.
+  - Voice Isolation in the right-click menu of a clip, or Alt + V, turns the switch on or off for the selected clips.
   - The strip of the Mixer does it for a track.
   - An Amount field beside each one sets the Amount.
   - The model, 10 MB, is downloaded the first time, after a question (`download` in scripts).
   - vidcut checks the model against its SHA-256.
-  - An OTIO file keeps the Amounts in the metadata of vidcut. Its export tells that other editors do not hear them.
+  - An OTIO file keeps the switches and the Amounts in the metadata of vidcut. Its export tells that other editors do not hear them.
 - **Why:**
   - After the cut of its silences, a Meet recording needs noise removal more than anything else (use case 2).
   - A model that runs on one CPU thread at a tenth of real time needs no paid version.
@@ -1513,9 +1523,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Audio clips, titles and subtitles have no picture.
   - With several clips selected, it shows the first one that can have a picture. Its header gives the number of these clips.
   - Its picture sections are Transform, Crop and Dynamic Zoom. Each picture section has a Reset of the whole section.
-  - **Transform:** Zoom, Position X and Y, Rotation, Anchor X and Y, Pitch, Yaw, Flip Horizontal and Flip Vertical.
-    - The link button beside Zoom shows Zoom X and Zoom Y. A picture with two different zooms shows them both.
-    - The link button turns the link on again, and makes Zoom Y equal to Zoom X.
+  - **Transform:** Zoom, Position, Rotation, Anchor Point, Pitch, Yaw, Flip Horizontal and Flip Vertical.
+    - Zoom, Position and Anchor Point have X and Y on one row, with one Keyframe button and one Reset, as in Resolve.
+    - That Reset removes the keyframes of the row and sets X and Y to their usual values, as measured in Resolve Studio 21.1.2.
+    - The link button is between Zoom X and Zoom Y. With the link on, a change of either box sets both.
+    - The link button turns the link on again, and makes Zoom Y equal to Zoom X. The Reset of Zoom also turns the link on.
+    - A picture with two different zooms shows the link off.
   - **Crop:** Left, Right, Top and Bottom.
   - **Dynamic Zoom:** Off or On, Start Zoom, Start X, Start Y, End Zoom, End X, End Y, the Ease, Show Boxes and Swap.
     - A value typed while Dynamic Zoom is off turns it on.
@@ -1539,7 +1552,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Volume is the gain of the clip, from −100 dB to +30 dB (D12). It shows one decimal and the unit.
     - On a clip with volume keyframes, Volume shows the volume at the playhead. A change sets a keyframe there ([D82](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - Volume has a Keyframe button between Previous and Next arrows. A right-click sets the ease (D75).
-    - The same button sits beside Zoom, Position X, Position Y, Rotation, Anchor X, Anchor Y, Pitch, Yaw and each crop side.
+    - The same button sits beside Zoom, Position, Rotation, Anchor Point, Pitch, Yaw and each crop side.
     - Position X and Y share one keyframe. Zoom X and Y share one keyframe. Anchor X and Y share one keyframe.
     - The button is lit on a keyframe. A click adds or removes the keyframe at the playhead.
     - Previous and Next move the playhead to the keyframe of that value, also outside the clip.
@@ -1726,7 +1739,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Anchor Point X and Y in the Inspector set the point that all transforms are centered on (p. 735).
   - The onscreen Transform controls set Zoom, Position, Rotation, Pitch, Yaw and Flip (p. 767). The anchor point is not one of them.
 - **vidcut:**
-  - Anchor X and Y in the Inspector set the anchor point ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)). `picture.set` sets it from a script.
+  - Anchor Point in the Inspector sets the anchor point ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)). `picture.set` sets it from a script.
   - While the Transform handles show, a small cross marks the anchor point in the viewer.
   - The cross has no drag. Thus, as in Resolve, the viewer does not set the anchor point.
 - **Why:**
@@ -1739,7 +1752,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The onscreen Transform controls set Zoom, Position, Rotation, Pitch, Yaw and Flip (p. 767).
   - The Inspector sets Pitch and Yaw too (p. 735).
 - **vidcut:**
-  - Pitch and Yaw are in the Inspector, after Anchor X and Y ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
+  - Pitch and Yaw are in the Inspector, after Anchor Point ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
   - `picture.set` sets them from a script.
   - The Transform handles in the viewer do not set Pitch or Yaw.
 - **Why:**

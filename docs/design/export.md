@@ -131,6 +131,8 @@ Notes:
   - the encoders that opened, and the loudness gain
   - each source file, with its `Decoding`
 - The report of a headless run keeps the failed encoders (`tried`) and the files (`sources`).
+- The error of a video encoder that does not open (`open_video`) names the encoder and the output size. Then it gives the reason from FFmpeg.
+  - The error does not say that the size is the cause. Why: the error code does not tell the cause, and the FFmpeg codec data holds no size limits.
 - [live](live.md#jobs) tells how a job collects the notes.
 
 ## Which source frame
@@ -241,12 +243,30 @@ To the encoder:
 - When a hand-off to the encoder fails, the frames go through memory to the end of the export. The report tells why (`through_memory`).
 - Why: a frame stays in GPU memory from the decoder to the encoder where this is possible (AGENTS.md rule 9).
 
+The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
+
+- `VideoSettings::drawn_size` gives the size of the draw: `video.width` and `video.height`, or else the size of the timeline.
+- `VideoSettings::written_size` gives the size that the encoder gets. H.264 and HEVC round an odd side up. The other codecs keep the side.
+- `export::validate` refuses an odd `video.width` or `video.height`. Thus only a timeline can have an odd side.
+- With a rounded side, the draw of the timeline stays at the size of the timeline (`VideoFrames::written_at`, `Screen::write_at`).
+- `Screen::encoded` then draws that `Wide` as one picture into a second `Wide` at the written size (`scale_whole`). `fs_encode` reads the second `Wide`.
+  - Why: a draw at the written size can stretch each axis by its own factor. `place::fit` rounds the size of a layer to even, and 1281 x 721 fills 1282 x 722.
+  - `Level::centered` gives one factor for both axes and centers the picture. It takes the smaller factor, so that the whole picture fits.
+  - 1281 x 720 into 1282 x 720 has the factor 1. Thus the picture moves by half a pixel and has half a pixel of black at each side.
+  - The draw is the shader of the layers (`fs`), with the export's kernel for a change of size (`RESIZE`, `WIDENS`). Colors outside 0 to 1 stay between the two `Wide` pictures.
+- `VideoSettings::rounded` gives the `Rounded` that the export plan, the Export dialog and the report show.
+- An encoder can round a side by itself. av1_nvenc does this.
+  - `rounded_by_encoder` reads the finished file when a side is odd. A difference goes in the report.
+  - The plan and the Export dialog cannot show this. Why: only the file tells the size.
+
 ## Sound
 
 - `AudioMix` mixes the lanes sample-exact: clip gains, cross fades, de-click fades at cuts, and clips at other speeds, stretched with their pitch kept.
 - A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` holds only the fader of the track.
   - `AudioMix` multiplies each sample by `Keyed::gain` at the place of the sample on the keyframes' frames (`Keyed::at`).
   - Thus the player and the export play the same curve ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- A track at the bottom of its fader (`fader_silent`) keeps its lanes, and its pieces are `silent`. `AudioMix` gives such a piece no sound.
+  - Why: a fader preview ([playback](playback.md#sound)) can raise the lane with no new plan.
 - A clip with speed keyframes gives a sound piece for each section. A piece that plays on into the next section is `joined`.
   - `AudioMix` plays a run of joined pieces through one `Stretch`, with the speeds of all their sections (`Paced::mapped`).
   - A run plays in one direction, forward or backward. Where the clip turns, a new run starts.
@@ -268,6 +288,7 @@ Ducking ([spec D76](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)
 Voice Isolation:
 
 - A piece with Voice Isolation (the `isolation` of an `AudioPiece`) goes through an `Isolator` in its lane, after the speed stage.
+- `VoiceIsolation::heard` gives a piece its `isolation`. With the switch off or at Amount 0, a piece has none. Thus the model does not run.
 - The `Isolator` runs DPDFNet at 48 kHz on the CPU runtime of tract, with one model state for each channel. A mono file in a wider mix has one state.
 - At another mix rate, `Resampler::between` converts on each side of the model.
 - The model's output lags its input by two of its windows. The isolator reads that far ahead and drops as much. Thus the voice stays in sync.
@@ -345,6 +366,8 @@ Cancel:
 - `Screen::draw` lays the layers under a title, then the title, then the layers over it, and then the subtitles.
 - `burn::title` lays out a title with the code of the burn-in (`lay_out`).
   - `lay_out` strokes the outlines of the glyphs with zeno. When a glyph has no outline, it grows the drawn letters instead (`dilate`).
+  - A stroke goes over the letters. An `outside` stroke goes behind them, at the same width.
+  - `Edge` holds its width in pixels of the picture. `burn::title` and `burn::paint` take the timeline height for this, because a width is in pixels of the timeline.
   - A title has spans, each with its own face, size, weight, slant, underline and color.
   - Its kind aligns it, and title safe wraps it. It has one box behind the block, and its anchor places it.
 - Each title in the plan carries its clip, and where the piece is in that clip (`ShownTitle`, its `Run`). `Run::top` places a scrolling title on each frame.

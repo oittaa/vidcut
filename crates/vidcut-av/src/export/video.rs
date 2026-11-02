@@ -1604,6 +1604,7 @@ pub struct VideoFrames {
     timeline: Option<Hdr>,
     titles: crate::player::Titles,
     subtitles: crate::player::Subtitles,
+    timeline_height: u32,
     drawer: Option<Drawer>,
     drawn: i64,
     encoder: Option<Handoff>,
@@ -1611,6 +1612,7 @@ pub struct VideoFrames {
     smoother: Option<(Retime, crate::interpolate::User)>,
     colors: bool,
     alpha: bool,
+    written: Option<(u32, u32)>,
 }
 
 pub(crate) enum Handoff {
@@ -1912,6 +1914,7 @@ impl VideoFrames {
             timeline: None,
             titles: Default::default(),
             subtitles: Default::default(),
+            timeline_height: height,
             drawer: None,
             drawn: 0,
             encoder: None,
@@ -1919,11 +1922,18 @@ impl VideoFrames {
             smoother: None,
             colors: false,
             alpha: false,
+            written: None,
         }
     }
 
     pub(crate) fn encode_on(mut self, encoder: Option<Handoff>) -> Self {
         self.encoder = encoder;
+        self
+    }
+
+    pub(crate) fn written_at(mut self, size: (u32, u32)) -> Self {
+        let (w, h, _) = self.maker.out();
+        self.written = (size != (w, h)).then_some(size);
         self
     }
 
@@ -1936,8 +1946,14 @@ impl VideoFrames {
         Ok(self)
     }
 
-    pub fn with_burn(self, cues: Vec<super::subtitles::Cue>, style: SubtitleStyle) -> Self {
+    pub fn with_burn(
+        mut self,
+        cues: Vec<super::subtitles::Cue>,
+        style: SubtitleStyle,
+        timeline_height: u32,
+    ) -> Self {
         self.subtitles.burned(&cues, &style);
+        self.timeline_height = timeline_height;
         self
     }
 
@@ -2049,6 +2065,7 @@ impl VideoFrames {
         if self.drawer.is_none() {
             let mut drawer = Drawer::new(self.encoder.take())?;
             drawer.screen.keep_alpha(self.alpha);
+            drawer.screen.write_at(self.written);
             let (out, reading) = (self.maker.out(), self.maker.reading());
             self.maker = Maker::new(out, drawer.keeps(), reading).holding().drawing();
             self.drawer = Some(drawer);
@@ -2122,10 +2139,10 @@ impl VideoFrames {
             .as_ref()
             .map(|p| crate::player::titles_of(p, k))
             .unwrap_or_default();
-        self.titles.draw_at(&at, (w, h));
+        self.titles.draw_at(&at, (w, h), self.timeline_height);
         let (mut titles, _) = self.titles.shown_at(&at, (w, h), &[]);
         let fps = self.fps.as_f64();
-        self.subtitles.draw_at(fps, (w, h), j);
+        self.subtitles.draw_at(fps, (w, h), self.timeline_height, j);
         titles.extend(self.subtitles.shown_at(fps, (w, h), j).0);
         let placed = piece
             .as_ref()

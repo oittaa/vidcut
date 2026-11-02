@@ -1100,13 +1100,14 @@ pub struct Track {
     /// While any track is soloed, only soloed tracks are heard (the mixer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
-    /// The mixer fader, in dB, from -100 to 10.
+    /// The mixer fader, in dB, from -100 to 10. -100 stands for the fader's
+    /// bottom, minus infinity: the track is silent.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub volume_db: f64,
-    /// Voice Isolation on the track's clips that have none of their own,
-    /// as a clip's `voice_isolation`.
+    /// Voice Isolation on the track's clips that have none of their own.
+    /// Left out, it is off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub voice_isolation: Option<f64>,
+    pub voice_isolation: Option<VoiceIsolation>,
     /// Ducking: the track dips where its sources are active (decision
     /// D76).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2055,21 +2056,23 @@ pub struct TitleStyle {
     /// subtitles' font.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
-    /// Text height as a fraction of the picture height, above 0 and at most
-    /// 1/2. Usual: 96/1080 (about 0.089) for `text`, 0.06 for a lower third.
+    /// Text height as a fraction of the picture height, from 1/1080 to
+    /// 4096/1080. Usual: 96/1080 for `text`, 108/1080 for `scroll`, and for a
+    /// `lower_third` 76/1080 on its lower line and 48/1080 on its upper line.
+    /// A size set here goes on both lines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Outline color and thickness. Usual: black, a twentieth of the text
-    /// height.
+    /// Outline color and width. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<SubtitleOutline>,
     /// A box behind the whole block of text. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<SubtitleBackground>,
-    /// A soft copy of the text behind it, over its background. Usual: none.
+    /// A soft copy of the text behind it, over its background. An offset of
+    /// 0 draws nothing. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<TitleShadow>,
 }
@@ -2084,8 +2087,8 @@ pub struct TitleShadow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// `[x, y]`: how far it falls right and down, as fractions of the
-    /// picture's width and height, each from -4 to 4. Usual: `[0.003,
-    /// 0.005]`.
+    /// picture's width and height, each from -4 to 4. Usual: `[0, 0]`, which
+    /// draws no shadow.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<[f64; 2]>,
     /// How soft its edge is, from 1 to 100, where the blur's radius is
@@ -2096,7 +2099,7 @@ pub struct TitleShadow {
 
 impl TitleShadow {
     pub const OPACITY: f64 = 0.75;
-    pub const OFFSET: [f64; 2] = [0.003, 0.005];
+    pub const OFFSET: [f64; 2] = [0.0, 0.0];
     pub const BLUR: f64 = 20.0;
     pub const BLUR_PER_PICTURE: f64 = 3300.0;
     pub const GAIN: f64 = 1.24;
@@ -2124,10 +2127,18 @@ impl TitleStyle {
     }
 }
 
+pub fn size_fits(v: f64, most: u32) -> bool {
+    v.is_finite() && (1.0 / 1080.0..=f64::from(most) / 1080.0).contains(&v)
+}
+
 impl Title {
+    pub const MOST_SIZE: u32 = 4096;
+    pub const LINE: f64 = 1.31;
+    pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;
     pub const LOWER_IN: f64 = 0.1;
     pub const LOWER_DOWN: f64 = 0.88;
+    pub const UPPER_SIZE: f64 = 48.0 / 1080.0;
     pub const ACROSS: (f64, f64) = (-Picture::REACH, Picture::REACH);
     pub const DOWN: (f64, f64) = (1.0 - Picture::REACH, 1.0 + Picture::REACH);
 
@@ -2195,8 +2206,20 @@ impl Title {
 
     pub fn usual_size(kind: TitleKind) -> f64 {
         match kind {
-            TitleKind::Text | TitleKind::Scroll => 96.0 / 1080.0,
-            TitleKind::LowerThird => 0.06,
+            TitleKind::Text => 96.0 / 1080.0,
+            TitleKind::Scroll => 108.0 / 1080.0,
+            TitleKind::LowerThird => 76.0 / 1080.0,
+        }
+    }
+
+    pub fn sized_text(&self) -> std::borrow::Cow<'_, str> {
+        match (self.kind, self.style.size, self.text.split_once('\n')) {
+            (TitleKind::LowerThird, None, Some((upper, lower))) => format!(
+                "<font size=\"{}\">{upper}</font>\n{lower}",
+                Self::UPPER_SIZE
+            )
+            .into(),
+            _ => self.text.as_str().into(),
         }
     }
 
@@ -2212,8 +2235,8 @@ impl Title {
         paint(self.style.color.as_deref(), [255, 255, 255])
     }
 
-    pub fn stroke(&self) -> Option<([u8; 3], f64)> {
-        stroke_of(self.style.outline.as_ref())
+    pub fn stroke(&self) -> Option<TextStroke> {
+        stroke_of(self.style.outline.as_ref(), 0.0, [0, 0, 0])
     }
 
     pub fn backing(&self) -> Option<([u8; 3], f64)> {
@@ -2250,7 +2273,7 @@ impl Title {
         let size = lines
             .last()
             .map_or(base, |line| crate::rich::largest(line, base));
-        size * SubtitleStyle::LINE
+        size * Self::LINE
     }
 
     pub fn label(&self) -> String {
@@ -2966,12 +2989,27 @@ pub struct ClipAudio {
     /// is `gain_db` and `gain_keys`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
-    /// Voice Isolation's Amount, from 0 to 100: that much of the voice the
-    /// model hears in the sound, mixed with the rest of the sound. 0 keeps
-    /// it off, also when the clip's track has it on. Left out, the clip
-    /// follows its track's.
+    /// Voice Isolation of the clip. A clip that has it off stays off, also
+    /// when its track has it on. Left out, the clip follows its track's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub voice_isolation: Option<f64>,
+    pub voice_isolation: Option<VoiceIsolation>,
+}
+
+/// Voice Isolation: a switch and an Amount.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct VoiceIsolation {
+    /// The switch. Off keeps the Amount for the next time it goes on.
+    pub on: bool,
+    /// From 0 to 100: that much of the voice the model hears in the sound,
+    /// mixed with the rest of the sound. At 0 the sound equals the source,
+    /// and the model does not run.
+    pub amount: f64,
+}
+
+impl VoiceIsolation {
+    pub fn heard(self) -> Option<f64> {
+        (self.on && self.amount > 0.0).then_some(self.amount)
+    }
 }
 
 impl Clip {
@@ -3225,18 +3263,19 @@ pub struct SubtitleStyle {
     /// Font family. The burn-in uses it when that font is installed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
-    /// Text height as a fraction of the picture height, above 0 and at most
-    /// 1/2. Usual: 0.055.
+    /// Text height as a fraction of the picture height, from 1/1080 to
+    /// 400/1080. Usual: 58/1080 (about 0.054).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Outline color and thickness. Usual: black, a twentieth of the text
-    /// height.
+    /// Outline color and width. Usual: white, 1 pixel of the timeline wide,
+    /// centered on the edge of the letters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<SubtitleOutline>,
-    /// A box behind each line of text. Usual: none.
+    /// A box with round corners behind the whole block of text. Usual:
+    /// black, half opaque.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<SubtitleBackground>,
     /// Inset from the left and right, as a fraction of the picture width,
@@ -3252,7 +3291,8 @@ pub struct SubtitleStyle {
     /// (`lower`), whatever the text has. Usual: as the text has them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub case: Option<LetterCase>,
-    /// A soft copy of the text behind it. Usual: none.
+    /// A soft copy of the text behind it. An offset of 0 draws nothing.
+    /// Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<TitleShadow>,
     /// The words shown as they are spoken, by the cues' word times. A cue
@@ -3338,13 +3378,34 @@ pub enum WordsShow {
 /// An outline around a subtitle track's or a title's text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct SubtitleOutline {
-    /// `#rrggbb`, `#rgb` or a name. Usual: black.
+    /// `#rrggbb`, `#rgb` or a name. Usual: white on a subtitle track, black
+    /// on a title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Thickness as a fraction of the text height, from 0 to 1/10. Usual:
-    /// 0.05. `0` draws none.
+    /// Width in pixels of the timeline, from 0 to 16, whatever the text size
+    /// and the timeline size. `0` draws none. Usual: 1 on a subtitle track,
+    /// 0 on a title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
+    /// Half of the width always reaches past the letters. `true` draws it
+    /// behind them and leaves them whole. Left out, it goes over them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outside: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextStroke {
+    pub ink: [u8; 3],
+    pub width: f64,
+    pub outside: bool,
+}
+
+impl TextStroke {
+    pub const MOST: f64 = 16.0;
+
+    pub fn past_letter(&self) -> f64 {
+        self.width / 2.0
+    }
 }
 
 /// A box behind a subtitle track's or a title's text.
@@ -3352,14 +3413,21 @@ pub struct SubtitleOutline {
 pub struct SubtitleBackground {
     /// `#rrggbb`, `#rgb` or a name.
     pub color: String,
-    /// From 0 to 1. Usual: 1.
+    /// From 0 to 1. `0` draws no box on a subtitle track. Usual: 1/2 on a
+    /// subtitle track, 1 on a title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
 }
 
 impl SubtitleStyle {
-    pub const LINE: f64 = 1.31;
-    pub const PADDING: f64 = 0.15;
+    pub const MOST_SIZE: u32 = 400;
+    pub const SIZE: f64 = 58.0 / 1080.0;
+    pub const LINE: f64 = 1.362;
+    pub const STROKE: f64 = 1.0;
+    pub const BOX_ACROSS: f64 = 0.3 * 1080.0;
+    pub const BOX_DOWN: f64 = 5.0;
+    pub const BOX_CORNER: f64 = 0.010;
+    pub const BOX_OPACITY: f64 = 0.5;
 
     pub fn is_empty(&self) -> bool {
         self.font.is_none()
@@ -3415,19 +3483,23 @@ impl SubtitleStyle {
     }
 
     pub fn text_fraction(&self) -> f64 {
-        self.size.unwrap_or(0.055)
+        self.size.unwrap_or(Self::SIZE)
     }
 
     pub fn ink(&self) -> [u8; 3] {
         paint(self.color.as_deref(), [255, 255, 255])
     }
 
-    pub fn stroke(&self) -> Option<([u8; 3], f64)> {
-        stroke_of(self.outline.as_ref())
+    pub fn stroke(&self) -> Option<TextStroke> {
+        stroke_of(self.outline.as_ref(), Self::STROKE, [255, 255, 255])
     }
 
     pub fn backing(&self) -> Option<([u8; 3], f64)> {
-        backing_of(self.background.as_ref())
+        let (ink, opacity) = self.background.as_ref().map_or(([0, 0, 0], None), |b| {
+            (paint(Some(&b.color), [0, 0, 0]), b.opacity)
+        });
+        let opacity = opacity.unwrap_or(Self::BOX_OPACITY);
+        (opacity > 0.0).then_some((ink, opacity))
     }
 
     pub fn inset(&self) -> f64 {
@@ -3479,9 +3551,13 @@ fn paint(hex: Option<&str>, usual: [u8; 3]) -> [u8; 3] {
     hex.and_then(crate::subtitles::rgb).unwrap_or(usual)
 }
 
-fn stroke_of(o: Option<&SubtitleOutline>) -> Option<([u8; 3], f64)> {
-    let size = o.and_then(|o| o.size).unwrap_or(0.05);
-    (size > 0.0).then(|| (paint(o.and_then(|o| o.color.as_deref()), [0, 0, 0]), size))
+fn stroke_of(o: Option<&SubtitleOutline>, usual: f64, ink: [u8; 3]) -> Option<TextStroke> {
+    let width = o.and_then(|o| o.size).unwrap_or(usual);
+    (width > 0.0).then(|| TextStroke {
+        ink: paint(o.and_then(|o| o.color.as_deref()), ink),
+        width,
+        outside: o.and_then(|o| o.outside).unwrap_or(false),
+    })
 }
 
 fn backing_of(b: Option<&SubtitleBackground>) -> Option<([u8; 3], f64)> {
@@ -3899,8 +3975,12 @@ impl Track {
         self.kind == TrackKind::Audio || self.clips.iter().any(|c| c.audio.is_some())
     }
 
-    pub fn audible(&self, any_solo: bool) -> bool {
+    pub fn in_mix(&self, any_solo: bool) -> bool {
         !self.muted && (self.solo || !any_solo)
+    }
+
+    pub fn audible(&self, any_solo: bool) -> bool {
+        self.in_mix(any_solo) && !crate::validate::fader_silent(self.volume_db)
     }
 
     pub fn clip_covering(&self, t: i64) -> Option<usize> {
@@ -4040,8 +4120,12 @@ impl Eq for SubtitleStyle {}
 
 impl Hash for SubtitleOutline {
     fn hash<H: Hasher>(&self, h: &mut H) {
-        let SubtitleOutline { color, size } = self;
-        (color, floats_bits(*size)).hash(h);
+        let SubtitleOutline {
+            color,
+            size,
+            outside,
+        } = self;
+        (color, floats_bits(*size), outside).hash(h);
     }
 }
 

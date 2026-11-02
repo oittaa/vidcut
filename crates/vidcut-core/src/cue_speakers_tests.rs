@@ -145,6 +145,7 @@ fn webvtt_writes_the_speaker_as_a_voice() {
         frame_rate: None,
         positions: false,
         style: &SubtitleStyle::default(),
+        timeline_height: 1080,
     };
     assert_eq!(
         write(&cues, SubtitleFormat::Vtt, &how).text,

@@ -180,10 +180,11 @@ impl Subtitles {
     }
 
     pub(crate) fn draw(&self, plan: &Plan, t: i64) -> bool {
-        self.draw_at(plan.fps().as_f64(), plan.size(), t)
+        let size = plan.size();
+        self.draw_at(plan.fps().as_f64(), size, size.1, t)
     }
 
-    pub(crate) fn draw_at(&self, fps: f64, size: (u32, u32), t: i64) -> bool {
+    pub(crate) fn draw_at(&self, fps: f64, size: (u32, u32), timeline: u32, t: i64) -> bool {
         let timed = lock(&self.timed).clone();
         let mut painted = false;
         for (key, _) in drawn_at(&timed, fps, size, t) {
@@ -200,7 +201,7 @@ impl Subtitles {
                     style,
                 })
                 .collect();
-            let pictures: Vec<Arc<TitlePicture>> = crate::burn::paint(&cues, w, h)
+            let pictures: Vec<Arc<TitlePicture>> = crate::burn::paint(&cues, w, h, timeline)
                 .all()
                 .into_iter()
                 .map(|s| {

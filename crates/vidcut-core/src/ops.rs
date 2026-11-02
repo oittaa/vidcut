@@ -1642,21 +1642,46 @@ pub struct ClipProps {
     pub name: Option<Option<String>>,
     pub color: Option<Option<String>>,
     pub voice_isolation: Option<f64>,
+    pub voice_isolation_on: Option<bool>,
     pub retime: Option<crate::model::ClipRetime>,
     pub render_cache: Option<crate::model::ClipCache>,
 }
 
 pub const ISOLATION: std::ops::RangeInclusive<f64> = 0.0..=100.0;
 
+pub const FIRST_ISOLATION: f64 = 100.0;
+
 pub fn checked_isolation(amount: f64) -> Result<f64> {
     if ISOLATION.contains(&amount) {
         Ok(amount)
     } else {
         Err(Error::invalid(format!(
-            "voice isolation {amount} is outside {}..{}, where 0 is off",
+            "voice isolation {amount} is outside {}..{}",
             ISOLATION.start(),
             ISOLATION.end()
         )))
+    }
+}
+
+pub fn changed_isolation(
+    old: Option<crate::model::VoiceIsolation>,
+    on: Option<bool>,
+    amount: Option<f64>,
+) -> Option<crate::model::VoiceIsolation> {
+    if on.is_none() && amount.is_none() {
+        return old;
+    }
+    Some(crate::model::VoiceIsolation {
+        on: on.unwrap_or(true),
+        amount: amount.or(old.map(|v| v.amount)).unwrap_or(FIRST_ISOLATION),
+    })
+}
+
+pub fn isolation_runs(on: Option<bool>, amount: Option<f64>) -> bool {
+    match (on, amount) {
+        (Some(false), _) | (None, None) => false,
+        (_, Some(a)) => a > 0.0,
+        (Some(true), None) => true,
     }
 }
 
@@ -1695,7 +1720,11 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
             }
             c.render_cache = r;
         }
-        if props.muted.is_some() || props.gain_db.is_some() || props.voice_isolation.is_some() {
+        if props.muted.is_some()
+            || props.gain_db.is_some()
+            || props.voice_isolation.is_some()
+            || props.voice_isolation_on.is_some()
+        {
             let a = c
                 .audio
                 .as_mut()
@@ -1709,9 +1738,11 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
                 (Some(g), _) => a.gain_db = g,
                 (None, _) => {}
             }
-            if let Some(v) = props.voice_isolation {
-                a.voice_isolation = Some(v);
-            }
+            a.voice_isolation = changed_isolation(
+                a.voice_isolation,
+                props.voice_isolation_on,
+                props.voice_isolation,
+            );
         }
     }
     Ok(())

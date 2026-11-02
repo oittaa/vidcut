@@ -115,10 +115,16 @@ impl Titles {
     }
 
     pub(crate) fn draw(&self, plan: &Plan, t: i64) -> bool {
-        self.draw_at(&plan.titles_at(t), plan.size())
+        let size = plan.size();
+        self.draw_at(&plan.titles_at(t), size, size.1)
     }
 
-    pub(crate) fn draw_at(&self, at: &[(usize, ShownTitle)], size: (u32, u32)) -> bool {
+    pub(crate) fn draw_at(
+        &self,
+        at: &[(usize, ShownTitle)],
+        size: (u32, u32),
+        timeline: u32,
+    ) -> bool {
         let preview = lock(&self.preview).clone();
         let missing: Vec<(String, Key)> = {
             let kept = lock(&self.kept);
@@ -135,7 +141,7 @@ impl Titles {
             return false;
         }
         for (clip, key) in missing {
-            let picture = drawn(&key.0, size);
+            let picture = drawn(&key.0, size, timeline);
             let mut kept = lock(&self.kept);
             kept.last.insert(clip, key.0.clone());
             kept.pictures.insert(key, picture);
@@ -144,8 +150,10 @@ impl Titles {
     }
 }
 
-fn drawn(t: &Title, (width, height): (u32, u32)) -> Option<Arc<TitlePicture>> {
-    let sprite = crate::burn::title(t, width, height).into_iter().next()?;
+fn drawn(t: &Title, (width, height): (u32, u32), timeline: u32) -> Option<Arc<TitlePicture>> {
+    let sprite = crate::burn::title(t, width, height, timeline)
+        .into_iter()
+        .next()?;
     Some(Arc::new(TitlePicture {
         left: sprite.x,
         top: sprite.y,

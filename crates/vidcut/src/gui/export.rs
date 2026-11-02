@@ -2091,12 +2091,11 @@ fn detail_rows(j: &JobInfo, rate: Option<f64>) -> Vec<(&'static str, String)> {
         };
         rows.push(("Video", text));
     }
+    if let Some(r) = &d.rounded {
+        rows.push(("Size", r.message.clone()));
+    }
     for t in &d.tried {
-        let text = match &t.encoder {
-            Some(e) => format!("{e}: {}", t.error),
-            None => t.error.clone(),
-        };
-        rows.push(("Didn't open", text));
+        rows.push(("Didn't open", t.text()));
     }
     if let Some(a) = &d.audio {
         let mut text = format!("{} · {} Hz · {} ch", a.encoder, a.rate, a.channels);
@@ -2252,6 +2251,12 @@ fn plan_view(ui: &mut egui::Ui, d: &Dialog) -> Option<Vec<String>> {
                 }
             }
             let outputs = plan["outputs"].as_array().cloned().unwrap_or_default();
+            if let Some(line) = outputs
+                .iter()
+                .find_map(|o| o["rounded"]["message"].as_str())
+            {
+                ui.label(dim(line));
+            }
             if let Some(line) = color_line(&outputs) {
                 ui.label(line.0);
             }

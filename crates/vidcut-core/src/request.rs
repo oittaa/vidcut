@@ -1218,16 +1218,23 @@ pub enum Request {
         muted: Option<bool>,
         #[serde(default)]
         solo: Option<bool>,
-        /// The fader, in dB, from -100 to 10.
+        /// The fader, in dB, from -100 to 10. -100 stands for the fader's
+        /// bottom, minus infinity: the track is silent in playback and
+        /// export.
         #[serde(default)]
         volume_db: Option<f64>,
         /// Voice Isolation's Amount, from 0 to 100: that much of the voice
         /// the model hears in the sound of the track's clips
-        /// that have none of their own, mixed with the rest of it; 0 turns
-        /// it off. The model runs on this computer and is downloaded once,
-        /// when `download` allows it.
+        /// that have none of their own, mixed with the rest of it. At 0 the
+        /// sound equals the source, and the model does not run. Given alone,
+        /// it also turns the switch on. The model runs on this computer and
+        /// is downloaded once, when `download` allows it.
         #[serde(default)]
         voice_isolation: Option<f64>,
+        /// Voice Isolation's switch. Off keeps the Amount, and on brings it
+        /// back. The first time on, the Amount is 100.
+        #[serde(default)]
+        voice_isolation_on: Option<bool>,
         /// Ducking: the track dips by its Duck Amount where any of its
         /// sources is active, by speech or by sound level. Each field given
         /// replaces its own; null takes it off with its settings. `{}`
@@ -1266,13 +1273,15 @@ pub enum Request {
         /// A subtitle track's look, burned in and written to an IMSC1 file.
         /// Replaces the track's style; a field left out goes back to the
         /// usual look. `font` is a family name. `size` is the text height
-        /// as a fraction of the picture height (above 0, at most 1/2).
+        /// as a fraction of the picture height (from 1/1080 to 400/1080).
         /// Colors are `#rrggbb`, `#rgb` or a name such as `yellow`.
-        /// `outline` is a color and a `size` as a fraction of the text
-        /// height, from 0 to 1/10 (`0` draws none). `background` is a color
-        /// and an `opacity` from 0 to 1. `margin` is the inset from the
-        /// left and right, and from the top or bottom, as a fraction of the
-        /// picture (from 0 up to but not including 1/2). `bold` takes the
+        /// `outline` is a color, a `size` in pixels of the timeline from 0
+        /// to 16 (`0` draws none), and `outside`, true to leave the letters
+        /// whole. `background` is a color
+        /// and an `opacity` from 0 to 1 (`0` draws no box). `margin` is the
+        /// inset from the left and right, and from the top or bottom, as a
+        /// fraction of the picture (from 0 up to but not including 1/2).
+        /// `bold` takes the
         /// font's bold face; `case` draws every letter `upper` or `lower`.
         /// `shadow` is a title's drop shadow. `words` shows the words as
         /// they are spoken, by the cues' word times: `show` (`highlight`,
@@ -1312,12 +1321,18 @@ pub enum Request {
         #[serde(default)]
         color: Option<String>,
         /// Voice Isolation's Amount, from 0 to 100: that much of the voice
-        /// the model hears in the sound, mixed with the rest of it; 0 turns
-        /// it off for the clip, also when its track has it on. A clip never
-        /// given one follows its track's. The model runs on this computer
-        /// and is downloaded once, when `download` allows it.
+        /// the model hears in the sound, mixed with the rest of it. At 0 the
+        /// sound equals the source, and the model does not run. Given alone,
+        /// it also turns the switch on. A clip never given a switch or an
+        /// Amount follows its track's. The model runs on this computer and
+        /// is downloaded once, when `download` allows it.
         #[serde(default)]
         voice_isolation: Option<f64>,
+        /// Voice Isolation's switch. Off keeps the Amount, and the clip stays
+        /// off when its track has it on. On brings the Amount back. The first
+        /// time on, the Amount is 100.
+        #[serde(default)]
+        voice_isolation_on: Option<bool>,
         /// Retime Process: how the clips make a frame that falls between two
         /// of their source frames, at a speed change or where their media's
         /// frame rate isn't the timeline's. `project` follows the Retime
@@ -2004,10 +2019,11 @@ pub enum Request {
         #[serde(default)]
         align: Option<TitleAlign>,
         /// Its look: `font` (a family name), `size` (the text height as a
-        /// fraction of the picture height, above 0, at most 1/2), `color`
+        /// fraction of the picture height, from 1/1080 to 4096/1080), `color`
         /// (`#rrggbb`, `#rgb` or a name such as `yellow`), `outline` (a
-        /// color and a `size` as a fraction of the text height, from 0 to
-        /// 1/10, `0` drawing none), `background` (a color and an `opacity`
+        /// color, a `size` in pixels of the timeline from 0 to 16, `0`
+        /// drawing none, and `outside`, true to leave the letters whole),
+        /// `background` (a color and an `opacity`
         /// from 0 to 1, a box behind the whole text) and `shadow` (a
         /// `color`, an `opacity` from 0 to 1, an `offset` `[x, y]` right and
         /// down as fractions of the picture, each from -4 to 4, and a `blur`

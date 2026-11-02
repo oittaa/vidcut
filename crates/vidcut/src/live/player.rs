@@ -567,7 +567,12 @@ impl Player {
         let mut found = false;
         for (lane, t) in c.lanes.iter().enumerate() {
             if t.track == track {
-                c.faders.insert(lane, volume_db - t.volume_db);
+                let trim = if vidcut_core::validate::fader_silent(volume_db) {
+                    f64::NEG_INFINITY
+                } else {
+                    volume_db - t.volume_db
+                };
+                c.faders.insert(lane, trim);
                 found = true;
             }
         }

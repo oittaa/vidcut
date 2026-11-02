@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::editor::Env;
 use crate::error::{Error, Result};
 use crate::model::{
-    LetterCase, SubtitleBackground, SubtitleOutline, SubtitleStyle, SubtitleWords, Title,
-    TitleAlign, TitleKind, TitleShadow, TitleStyle, WordsShow,
+    LetterCase, SubtitleBackground, SubtitleOutline, SubtitleStyle, SubtitleWords, TextStroke,
+    Title, TitleAlign, TitleKind, TitleShadow, TitleStyle, WordsShow,
 };
 
 /// What a look styles: a subtitle track, or a title.
@@ -194,13 +194,15 @@ fn spoken(size: f64, show: WordsShow, pop: Option<f64>, upper: bool) -> Subtitle
     SubtitleStyle {
         size: Some(size),
         outline: Some(SubtitleOutline {
-            color: None,
-            size: Some(0.08),
+            color: Some("#000000".into()),
+            size: Some((0.16 * size * 1080.0).min(TextStroke::MOST)),
+            outside: Some(true),
         }),
+        background: boxed("#000000", 0.0),
         margin: Some(0.15),
         bold: Some(true),
         case: upper.then_some(LetterCase::Upper),
-        shadow: Some(TitleShadow::default()),
+        shadow: shade(0.75, [0.003, 0.005], 20.0),
         words: Some(SubtitleWords {
             show: Some(show),
             color: None,
@@ -222,6 +224,7 @@ fn bare() -> Option<SubtitleOutline> {
     Some(SubtitleOutline {
         color: None,
         size: Some(0.0),
+        outside: None,
     })
 }
 
@@ -290,7 +293,8 @@ pub fn built_in(kind: LookKind) -> Vec<Look> {
                         color: Some("#ffd400".into()),
                         outline: Some(SubtitleOutline {
                             color: None,
-                            size: Some(0.1),
+                            size: Some(TextStroke::MOST),
+                            outside: Some(true),
                         }),
                         shadow: shade(0.8, [0.004, 0.007], 15.0),
                         ..TitleStyle::default()

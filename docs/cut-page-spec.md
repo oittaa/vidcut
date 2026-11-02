@@ -770,7 +770,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A click on a cue in the list loads it into the Inspector to edit (p. 1236).
   - Add New, above the list, adds a cue at the playhead on the track of the list (p. 1233).
   - Prev and Next in the Inspector move to the cue before or after on the track (pp. 1231, 1233).
-  - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. The new range overwrites the other cues of the track.
+  - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. A value inside the cue next to it changes nothing (D79). Else the new range overwrites the other cues of the track.
   - Cues move, trim, split and delete like clips.
   - Details: D56, D57, D78, D79; deviations X43, X44.
 - **Keyframes** ([measured](todo/keyframes.md#subtitles)):
@@ -964,7 +964,6 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - animation
   - keyframes of the shadow and the background
   - Safe area overlays in the viewer are in §4.5 (D90).
-  - The measurement of Resolve's stroke step is open ([todo](todo/titles.md)).
 
 ### 8.15 Transform and Crop (pp. 766–768)
 
@@ -1100,10 +1099,18 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Meter:** green is safe, yellow is near the limit, and red can cause clipping.
 - **Mixer** (pp. 649–650):
   - It has a channel strip for each track with sound: name, meter, fader in dB, mute and solo.
+  - D27 has the law and the ticks of the fader.
   - It has a meter for the mix.
   - Solo silences the tracks that are not soloed.
   - Mute and solo apply to the export too (p. 650).
   - Track pan, and FX other than the Ducker: out.
+- **Voice Isolation** (p. 774; measured in Resolve Studio 21.1.2, on a clip):
+  - It has a switch and an Amount from 0 to 100.
+  - A fresh clip turned on gives Amount 100.
+  - Amount typed 0 stays on, with the value 0.
+  - A clip's stored Amount comes back when the switch goes on again.
+  - vidcut: `clip.set` and `track.set` take the switch (`voice_isolation_on`) and the Amount (`voice_isolation`) ([X64](deviations.md#x64-voice-isolation-is-free-on-a-clip-or-a-track)).
+  - vidcut: at Amount 0 the sound equals the source, and the model does not run.
 - **Ducking** (pp. 744, 778–779):
   - The Ducker Track FX lowers a target track, such as music, where one or more source tracks, such as dialogue, are active.
   - It changes the level only. It compresses nothing.
@@ -1183,6 +1190,13 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another bitrate or chosen rate.
   - A project at another rate, for example 96000 Hz, with AAC was not measured.
   - The TikTok preset has AAC at 256 kb/s. That number was not measured.
+  - H.264 and H.265 round an odd side of the timeline up to even.
+    - A timeline of 1281 x 721 gives a file of 1282 x 722. A timeline of 1281 x 720 gives a file of 1282 x 720.
+    - One factor scales the whole picture on both axes, and the picture stays centered. Thus part of a pixel can stay black at two edges.
+    - Resolve Studio 21.1.2 does this at 1281 x 721 with H.264 and H.265. Other odd sizes were not measured.
+    - The Export dialog and the report of the export show both sizes.
+  - ProRes, DNxHR, VP9 and AV1 on the CPU keep an odd side.
+  - AV1 on NVENC writes an even size by itself. The report shows that size after the export.
 
 ## 11. Keyboard shortcuts
 
@@ -1369,7 +1383,30 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The removal of a track with clips needs a confirmation.
   - An edit or a move can name the next track number. This makes that track.
   - Track 1 cannot be removed.
-  - Track volume is from −100 to +10 dB. Resolve's fader has the same top, and its bottom is minus infinity (measured in Resolve Studio 21.1.2).
+  - **The track fader** (measured in Resolve Studio 21.1.2: one drag on A1, 66 px of travel, read from the number above the fader):
+    - The top is +10 dB. The bottom is minus infinity.
+    - The table gives the place in px from the top, and the dB there.
+
+      | px | dB | px | dB | px | dB |
+      |---|---|---|---|---|---|
+      | 0 | +10 | 24 | −3.8 | 48 | −31 |
+      | 3 | +8.5 | 27 | −5.6 | 51 | −38 |
+      | 6 | +6.6 | 30 | −7.4 | 54 | −45 |
+      | 9 | +4.8 | 33 | −9.1 | 57 | −54 |
+      | 12 | +3.1 | 36 | −12 | 60 | −68 |
+      | 15 | +1.3 | 39 | −16 | 63 | −95 |
+      | 18 | −0.3 | 42 | −19 | 66 | −∞ |
+      | 21 | −2.1 | 45 | −24 | | |
+
+    - The ticks have no numbers. They are at these places in px from the top: 0, 17 (white, 0 dB), 35, 42.7, 47.7 and 51.7.
+    - Three or more ticks are close together from 57 to 63 px.
+    - By the table, the ticks at 35, 42.7, 47.7 and 51.7 px are about −10, −20, −30 and −40 dB. The lower ticks are not read.
+  - **The track fader in vidcut:**
+    - It uses straight lines between the rows of the table, from a place to dB and from dB to a place.
+    - The ticks are in the same share of the travel. The close ticks are at 57, 60 and 63 px.
+    - `volume_db` goes from −100 to +10 dB, because JSON has no infinity. −100 stands for the bottom.
+    - At −100, the number above the fader reads −∞, and the track is silent in playback and export.
+    - A track at −100 counts as not heard, as a muted track does. This applies to the meters, ducking sources and transcription.
 - **D28. Meters.**
   - There is a bar for each channel of the project's channel count (p. 649).
   - The bars show linear peaks from −60 dBFS. A peak stays for 1.5 s.
@@ -1472,6 +1509,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
   - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate.
+  - An export in H.264 or H.265 rounds an odd side up (§10).
   - A side under 256 sets both sides to 256, whichever side it is. 16 x 720, 99999 x 16 and 16 x 99999 give 256 x 256.
   - Else a side over 32768 sets both sides to 32768. 99999 x 720 gives 32768 x 32768.
   - This rule is measured in the Project Settings dialog of Resolve Studio 21.1.2. `project.set` and `project.create` do the same.
@@ -1851,30 +1889,38 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - `marks.set` and `media.marks.set` take the same values as `duration`.
 - **D61. Burned-in subtitles** (§8.12; p. 1247; deviations X45, X51).
   - The manual does not say how a track looks burned in before it has a style.
-  - Resolve's look, from a burn-in render of Resolve Studio 21.1.1 over black (made through its scripting API, 3840×2160):
-    - The tallest letters of a line are 4.2% of the picture height. Those of two lines are 11.3%.
-    - Both are centered at 80.1% of the height.
-    - Not checked: the outline or shadow of the text over a bright picture.
-  - vidcut's look:
-    - White text, 5.5% of the picture height.
-    - Lines 1.31 times that height apart.
-    - A black outline, a twentieth of the text height.
+  - The usual look is Resolve's default, measured in Resolve Studio 21.1.2:
+    - White Open Sans Regular at Size 58: 58/1080 of the picture height.
+    - Lines 1.362 times the text height apart. This scales with the picture height.
+    - A white stroke of Size 1, centered on the edge of the letters.
+    - A shadow with an offset of 0, which draws nothing.
+    - One black box, 50% opaque, behind the whole block, with no box for each line.
+    - The box is 5 pixels of the timeline taller than the lines, above and below, at any text size and timeline height.
+    - The box is 0.3 times the Size number wider than the widest line, each side. These are pixels of the timeline.
+    - The Corner Radius of the box is 0.010 of the picture height, about 10 pixels at 1080p. It does not grow with the text.
     - Centered, and wrapped at 90% of the width.
     - The middle of the block is at 80% of the height.
     - For a cue placed in the middle, the middle of the block is at 50%. For a cue at the top, it is at 20%.
-    - Measured at 1280×720 with Segoe UI: 4.2% and 11.3%, centered at 80.1%.
+  - The Corner Radius is not measured at other heights.
+  - An export at another size scales the whole picture, thus these pixels too. A smaller export is measured in Resolve Studio 21.1.2.
   - The font is Open Sans where it is installed, else the sans-serif font of the system.
   - For scripts that the font does not have, the system's fonts are used.
   - Cues that show together at one place are one block, in the order they start.
   - HDR white is 203 cd/m², the graphics white of ITU-R BT.2408.
   - A track's style (`track.set`, the Subtitle Track section of the Inspector) replaces that look where it is set:
     - `font` is a family name. If it is not installed, the text is drawn in the usual font.
-    - `size` is the text height as a fraction of the picture height, above 0 and at most half.
+    - `size` is the text height as a fraction of the picture height, from 1/1080 to 400/1080.
+    - Size 1..400 is the range of a subtitle track, measured in Resolve Studio 21.1.2. One Size is one pixel of em at 1080p.
     - `color` is `#rrggbb`, `#rgb` or a name such as yellow. A color with an opacity is refused.
-    - `outline` is a color and a thickness as a fraction of the text height, from 0 to a tenth.
-    - A tenth is the most that IMSC1 allows. 0 draws no outline.
-    - `background` is a color and an opacity from 0 to 1.
-    - The background is a box behind each line. The box reaches 0.15 of the text height past the line.
+    - `outline` is a color and a width in pixels of the timeline, from 0 to 16. 0 draws no outline.
+    - A `size` is Stroke Size, measured in Resolve Studio 21.1.2.
+    - It is centered on the edge of the letters, over them. Thus half of it eats into each letter.
+    - It takes the same pixels at any text size and any timeline height.
+    - With `outside`, the box Outside Only, it goes behind the letters. Its outer edge stays, and the letters stay whole.
+    - In both modes it reaches half its width past the letters, measured in Resolve Studio 21.1.2.
+    - An export at another size scales the whole picture, thus the stroke too. A smaller export is measured in Resolve Studio 21.1.2.
+    - `outline` left out is the white stroke. An `outline` with no color is white.
+    - `background` is a color and an opacity from 0 to 1. An opacity of 0 draws no box. A background with no opacity is 50% opaque.
     - `margin` is the inset of the block from the left and right, as that fraction of the width.
     - For a cue placed at the top or the bottom, `margin` is also the inset from that edge, as that fraction of the height.
     - `margin` is from 0 up to, but not including, half. A cue in the middle stays centered.
@@ -1884,8 +1930,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A margin moves a block to the edge:
     - Without a margin, the middle of a bottom block is at 80% of the height.
     - With a margin, its bottom edge is at the margin.
-    - Example: a margin of 5% puts the line of a one-line cue at 87.8–95% of the height.
-    - The line is 7.2% of the height (5.5% × 1.31). This is lower than the usual look.
+    - Example: a margin of 5% puts the line of a one-line cue at 87.7–95% of the height.
+    - The line is 7.3% of the height (5.37% × 1.362). This is lower than the usual look.
     - Likewise, with a margin, the top edge of a top block is at the margin. Without a margin, its middle is at 20%.
   - A project file with a style that `track.set` would refuse is refused.
   - The viewer draws the style as a burn-in does (D56).
@@ -1950,12 +1996,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Sizes are percentages, because IMSC1 allows `c` units in a text document only in `ebutts:linePadding`.
   - `ttp:cellResolution` makes the picture 100 rows of cells.
   - The text height is a percentage of one cell: 5.5% of the picture is `550%`.
-  - Lines are `131%` of it apart.
+  - Lines are `136.2%` of it apart.
   - `proportionalSansSerif` follows the font family.
   - A name with whitespace in it is in single quotes (`'Open Sans',proportionalSansSerif`).
   - Reason: TTML1 §8.3.5 takes a name bare or quoted, and IMSC1 §7.4 asks for no whitespace between the parts of the value.
   - A font name with a quote or a comma in it is refused.
-  - The background is a span around the text of each cue.
+  - The outline is the part of the stroke outside the letters, as a percentage of the text height. The file does not have the part over the letters.
+  - IMSC1 allows at most a tenth of the text height. A wider outline is written as a tenth.
+  - That outline is named in the notes of the export, and in the warnings of `subtitles.export`.
+  - The background is a span around the text of each cue. Thus each line has its own square box in the file, not one round box behind the block.
   - Each place has a region:
     - The region is as wide as the text wraps.
     - It is anchored where the block is: at the margin, or centered at 20%, 50% and 80%.
@@ -1973,9 +2022,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The manual does not give the look of a title, how its text sits, or how it plays over other tracks.
   - The usual look of a title:
     - The font of the burn-in (D61).
-    - White, with a black outline a twentieth of the text height, and no background.
+    - White, with no outline and no background (measured in Resolve Studio 21.1.2).
     - Text 96/1080 of the picture height for Text: the height of Resolve's 96-point Text title (D67).
-    - Text 6% of the picture height for a lower third.
+    - Text 108/1080 for Scroll (measured in Resolve Studio 21.1.2).
+    - For a lower third, 76/1080 on its lower line and 48/1080 on its upper line (measured in Resolve Studio 21.1.2).
+    - A `size` in the style goes on both lines of a lower third.
+    - Resolve's upper line also has a tracking of 11. A title in vidcut has no tracking.
     - Lines 1.31 times the text height apart, wrapped at the width of title safe, 90% of the picture width.
   - The lines of a Text title are centered. The middle of the block is at the middle of the picture.
   - The lines of a lower third align left, center or right.
@@ -1985,12 +2037,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>` and `<font>` with a `color`, a `face` and a `size`.
   - A line takes the height of its largest size.
   - The lines of a lower third meet one lower-line height above its corner.
-  - Size, color, outline and background take the values and limits of the subtitle style (D61).
+  - `size` is from 1/1080 to 4096/1080, also in markup. Size 1..4096 is the range of a title, measured in Resolve Studio 21.1.2.
+  - Color, outline and background take the values and limits of the subtitle style (D61).
   - The background is one box behind the block. It reaches 0.15 of the text height past its lines.
   - A drop shadow is a blurred copy of the text and its outline. It is over the background and under the text, as in Resolve.
   - By default, the shadow is black, 75% opaque and blurred 20. These are Resolve's own values.
-  - Its offset is 0.3% of the picture width right and 0.5% of its height down. Resolve's default offset of 0 draws no shadow.
-  - Zoom draws the text larger, and the background box grows with it.
+  - Its offset is 0, which draws no shadow (measured in Resolve Studio 21.1.2).
+  - Zoom draws the text larger, and the outline and the background box grow with it. The zoom scales the outline, measured in Resolve Studio 21.1.2.
   - Rotation turns the whole title, box and shadow too, counterclockwise.
   - Zoom and rotation work about the middle of a Text title.
   - For a lower third, they work about the point where its lines meet. Resolve turns each line of a lower third about that point (D67).
@@ -2049,10 +2102,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - That point is one line, 1.31 times the text height, above the corner of the title.
     - Resolve's own lower thirds put their upper line first.
   - **Stroke:**
-    - A `strokeSize` step is a 160th of the text height.
-    - Thus 16, Resolve's maximum, is a tenth, vidcut's maximum.
+    - `strokeSize` is the width of the outline in pixels of the timeline, as a whole number. Thus 16 is the maximum of both.
+    - `strokeOutsideOnly` holds `outside`.
     - An outline of 0 is `strokeSize` 0.
-    - Resolve draws no stroke on a title that it reads from a file. Thus the step is not measured.
   - **Background:**
     - It is the box that vidcut draws, with square corners.
     - `backgroundWidth` and `backgroundHeight` are in fractions of the picture.
@@ -2112,10 +2164,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A cue without word times shows all its words at once.
   - The viewer and a burn-in draw it the same way. Subtitle files and streams get the text.
   - The looks of Create Subtitles from Audio (`look`) put the cues on a new track, with a style and the usual characters and lines:
-    - Pop: bold capitals, 7.5% of the picture height, an outline 8% of the text height, a shadow and a margin of 15%.
+    - Pop: bold capitals, 7.5% of the picture height, no box, a shadow and a margin of 15%.
+    - Pop has a black outline of 12.96 pixels outside the letters.
     - In Pop, the spoken word is #ffd400 and pops at 1.25. Pop has 20 characters on one line.
-    - Highlight and Reveal: bold at 6.5%, with the same outline, shadow and margin. 32 characters on one line.
-    - Word: bold capitals at 10%, popping at 1.15. 20 characters.
+    - Highlight and Reveal: bold at 6.5%, with an outline of 11.23 pixels and the same shadow and margin. 32 characters on one line.
+    - Word: bold capitals at 10%, with an outline of 16 pixels, popping at 1.15. 20 characters.
     - Plain: the usual style, at 42.
   - Its dialog shows the looks as tiles. Each tile draws a sample in its look.
   - The looks are those of D71.
@@ -2156,7 +2209,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Built in for titles:
     - Plain: the usual title (D65)
     - Headline: white at 12% of the picture height, with no outline and a deep soft shadow
-    - Callout: yellow at 11%, with an outline a tenth of the text height and a shadow
+    - Callout: yellow at 11%, with an outline of 16 pixels outside the letters and a shadow
     - Caption: white at 5.5% on a 60% black box, its middle 82% down
     - News: a lower third at 5% on a blue bar
     - Soft: a lower third at 5.5%, with a soft shadow and no outline
@@ -2335,6 +2388,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Previous and Next move the playhead to the keyframe before or after it, also outside the clip (measured in Resolve Studio 21.1.2).
     - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out.
     - The Reset of one value removes its keyframes and puts the usual value back.
+      - Zoom, Position and Anchor Point each have X and Y on one row with one Reset (measured in Resolve Studio 21.1.2).
+      - That Reset removes all the keyframes of the row. X and Y go back to 0, or to 100% on Zoom. The Reset of Zoom also turns the link on.
     - The Reset of Transform, Crop or Composite removes the keyframes of that section.
     - A clip with any keyframes shows a mark on its timeline bar.
     - Flips, the composite mode and Dynamic Zoom have no keyframes.
@@ -2359,10 +2414,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A drag inside moves the picture. Its middle, as drawn, snaps to the middle and thirds of the frame, and a guide shows.
     - Shift keeps the drag on one axis, and Alt turns snapping off.
     - A corner zooms both ways in proportion, and a side zooms one way, about the anchor point. The pointer shows the zoom.
+    - A corner reaches Zoom 0 with the pointer on the anchor point. Past that point the zoom grows again, with no mirror (measured in Resolve Studio 21.1.2).
+    - The handles of a picture at Zoom 0 stay on the anchor point. A corner drag from there sets the zoom from the distance to the anchor point.
     - The handle above the box, or a drag just outside a corner, turns the picture about the anchor point.
     - A cross marks the anchor point. It has no drag (X82).
     - Shift turns it in steps of 15°. The pointer shows the angle.
     - The Crop handles move one side each. The uncropped picture shows dashed.
+    - A Crop handle crosses the picture until the crop of its side is 1, the whole picture. The handle stays (measured in Resolve Studio 21.1.2).
+    - When two Crop handles are on the same point, a drag takes the side with the larger crop.
     - While the Transform handles show, the wheel or a pinch over the picture zooms it as a corner does, 10% for each notch.
     - Alt+wheel turns it, 1° for each notch, counterclockwise for wheel up.
     - With Shift too, Alt+wheel turns it to the next multiple of 15°.
@@ -2523,9 +2582,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut counts the characters of the text that shows, as Resolve does. The style tags (`<i>`, `<b>`, `<u>` and `<font>`) do not count.
   - A line break counts as one character, as the space between two words on one line does.
   - Thus a text has the same CPS on one line and on two lines.
-- **D79. A cue across the part that the In or Out field covers** (§8.12; deviation X43).
+- **D79. The In and Out fields against other cues** (§8.12; deviation X43).
+  - Measured in Resolve Studio 21.1.2: an In typed inside the cue before, or an Out typed inside the cue after, changes nothing. Both cues stay.
+  - vidcut does the same. Its field shows the stored time at once, and Resolve's field shows it when the cue is selected again. The result is the same.
+  - `subtitles.set` does not refuse such a value. A script in Resolve is not measured.
   - A new In or Out overwrites only the part that it newly covers (X43).
-  - The measurements in Resolve do not show a subtitle that covers all of that part and more.
+  - Measured in Resolve Studio 21.1.2: a track has no overlaps, so a field cannot put a cue inside a longer cue.
   - In vidcut, only a cue that already overlaps the edited cue can do that (D56).
   - Such a cue stays as it is. Thus both cues show in that part, as they show together in the overlap.
   - Reason: a split would show its text twice. A trim would take frames outside the newly covered part.

@@ -19,6 +19,7 @@ fn style() -> SubtitleStyle {
         outline: Some(SubtitleOutline {
             color: Some("#000000".into()),
             size: Some(0.0),
+            outside: None,
         }),
         background: Some(SubtitleBackground {
             color: "#000000".into(),
@@ -52,6 +53,7 @@ fn a_track_style_is_stored_in_canonical_form() {
             outline: Some(SubtitleOutline {
                 color: Some("#000000".into()),
                 size: Some(0.0),
+                outside: None,
             }),
             background: Some(SubtitleBackground {
                 color: "#000000".into(),
@@ -77,7 +79,7 @@ fn a_subtitle_position_past_its_limit_is_refused() {
 }
 
 #[test]
-fn a_subtitle_size_past_half_the_picture_is_refused() {
+fn a_subtitle_size_past_its_limit_is_refused() {
     let err = checked_style(&SubtitleStyle {
         size: Some(0.6),
         ..SubtitleStyle::default()
@@ -85,23 +87,24 @@ fn a_subtitle_size_past_half_the_picture_is_refused() {
     .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "a subtitle size is a fraction of the picture height, above 0 and at most 1/2"
+        "a subtitle size is a fraction of the picture height, from 1/1080 to 400/1080"
     );
 }
 
 #[test]
-fn an_outline_thicker_than_a_tenth_is_refused() {
+fn an_outline_wider_than_sixteen_pixels_is_refused() {
     let err = checked_style(&SubtitleStyle {
         outline: Some(SubtitleOutline {
             color: None,
-            size: Some(0.2),
+            size: Some(17.0),
+            outside: None,
         }),
         ..SubtitleStyle::default()
     })
     .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "an outline's thickness is a fraction of the text height, from 0 to 1/10"
+        "an outline's width is in pixels of the timeline, from 0 to 16"
     );
 }
 
@@ -113,7 +116,7 @@ fn a_project_file_refuses_a_style_track_set_would_refuse() {
     assert_eq!(
         crate::validate::violations(&p),
         vec![
-            "S1: a subtitle size is a fraction of the picture height, above 0 and at most 1/2"
+            "S1: a subtitle size is a fraction of the picture height, from 1/1080 to 400/1080"
                 .to_string()
         ]
     );
@@ -164,6 +167,7 @@ fn an_imsc1_file_writes_the_track_style() {
             frame_rate: Some(25.0),
             positions: true,
             style: &style,
+            timeline_height: 1080,
         },
     )
     .text;
@@ -180,7 +184,7 @@ fn an_imsc1_file_writes_the_track_style() {
          \x20   <styling>\n\
          \x20     <style xml:id=\"s\" tts:color=\"#ffcc00\" \
          tts:fontFamily=\"Arial,proportionalSansSerif\" tts:fontSize=\"400%\" \
-         tts:lineHeight=\"131%\" tts:textAlign=\"center\"/>\n\
+         tts:lineHeight=\"136.2%\" tts:textAlign=\"center\"/>\n\
          \x20   </styling>\n\
          \x20   <layout>\n\
          \x20     <region xml:id=\"bottom\" tts:origin=\"8% 28.2%\" tts:extent=\"84% 63.8%\" \
@@ -243,6 +247,7 @@ fn a_styled_file_keeps_each_cues_place() {
             frame_rate: Some(25.0),
             positions: true,
             style: &style,
+            timeline_height: 1080,
         },
     )
     .text;
@@ -512,7 +517,7 @@ fn the_viewer_paints_one_word_and_leaves_the_other() {
         vec![
             ("one".into(), None, false, None),
             (" ".into(), None, false, None),
-            ("TWO".into(), Some("#ff0000".into()), true, Some(2000)),
+            ("TWO".into(), Some("#ff0000".into()), true, Some(2048)),
         ]
     );
 }
@@ -626,6 +631,7 @@ fn an_imsc1_file_writes_one_words_style() {
             frame_rate: None,
             positions: false,
             style: &SubtitleStyle::default(),
+            timeline_height: 1080,
         },
     )
     .text;
@@ -659,6 +665,7 @@ fn webvtt_writes_a_cues_alignment_and_position() {
             frame_rate: None,
             positions: true,
             style: &SubtitleStyle::default(),
+            timeline_height: 1080,
         },
     )
     .text;

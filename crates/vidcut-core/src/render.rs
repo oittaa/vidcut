@@ -778,6 +778,10 @@ pub enum AudioPiece {
         source_sample: i64,
         samples: i64,
         gain_db: f64,
+        /// Its track's fader is at the bottom: no sound, until a fader
+        /// preview moves the lane's gain.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        silent: bool,
         /// Source samples per sample heard (decision D48), the pitch kept;
         /// below 0 the source plays backward from `source_sample`.
         #[serde(default = "normal_speed", skip_serializing_if = "is_normal_speed")]
@@ -796,7 +800,8 @@ pub enum AudioPiece {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keyed: Option<Keyed>,
         /// Voice Isolation's Amount over it, up to 100: the clip's own,
-        /// else its track's; left out when the clip's own is 0.
+        /// else its track's; left out when that is off or at 0, where the
+        /// model does not run.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         isolation: Option<f64>,
     },
@@ -2187,7 +2192,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     let mut audio = Vec::new();
     let mut lanes = Vec::new();
     for track in &p.tracks {
-        if !track.audible(any_solo) || track.clips.iter().all(|c| c.audio.is_none()) {
+        if !track.in_mix(any_solo) || track.clips.iter().all(|c| c.audio.is_none()) {
             continue;
         }
         let fades = transitions::playing(p, track, true, |t| transitions::cross_fade(t).is_some());
@@ -2250,6 +2255,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         let mut piece = source_audio(p, c, m, x, sample(y) - sample(x));
                         if let AudioPiece::Source {
                             gain_db,
+                            silent,
                             joined,
                             fade: f2,
                             isolation,
@@ -2257,10 +2263,14 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         } = &mut piece
                         {
                             *gain_db += track.volume_db;
+                            *silent = crate::validate::fader_silent(track.volume_db);
                             *joined =
                                 x > start.max(a) && c.pace().steady(x - 1 - c.start) == Some(1);
                             *f2 = fade(f, x, falling);
-                            *isolation = isolation.or(track.voice_isolation).filter(|a| *a > 0.0);
+                            *isolation = audio
+                                .voice_isolation
+                                .or(track.voice_isolation)
+                                .and_then(|v| v.heard());
                         }
                         push_audio(lane, piece);
                     }
@@ -2338,10 +2348,11 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         source_sample,
         samples,
         gain_db: if keyed.is_some() { 0.0 } else { audio.gain_db },
+        silent: false,
         speed: c.pace().rate(x - c.start),
         joined: false,
         fade: None,
-        isolation: audio.voice_isolation,
+        isolation: None,
         keyed,
     }
 }
@@ -2506,6 +2517,7 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     source_sample: 0,
                     samples,
                     gain_db: 0.0,
+                    silent: false,
                     fade: None,
                     isolation: None,
                     keyed: None,

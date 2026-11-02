@@ -5,12 +5,11 @@ use super::picture::{file_curve, read_keys};
 use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
-    Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title,
-    TitleAlign, TitleKind, TitleShadow, TitleStyle,
+    Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, TextStroke, Title,
+    TitleAlign, TitleKind, TitleShadow, TitleStyle, size_fits,
 };
 use crate::rich::{self, Look, Span};
 
-pub const STROKE_PER_TEXT: f64 = 160.0;
 pub const UNKNOWN_HEIGHT: u32 = 1080;
 const USUAL_FAMILY: &str = "Open Sans";
 
@@ -405,9 +404,9 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
     let size = t.text_fraction();
     let points = size * f64::from(height);
     let color = hex(t.ink());
-    let line = size * SubtitleStyle::LINE;
+    let line = size * Title::LINE;
     let [x, y] = t.place();
-    let spanned = rich::lines(&t.text);
+    let spanned = rich::lines(&t.sized_text());
     let lines: Vec<&[Span]> = spanned.iter().map(Vec::as_slice).collect();
     let base = Base {
         family,
@@ -490,10 +489,11 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
             ),
         ],
     ));
-    let (stroke_color, stroke) = match t.stroke() {
-        Some((rgb, thickness)) => (
-            hex(rgb),
-            (thickness * STROKE_PER_TEXT).round().clamp(0.0, 16.0) as i64,
+    let (stroke_color, stroke, outside) = match t.stroke() {
+        Some(s) => (
+            hex(s.ink),
+            s.width.round().clamp(0.0, TextStroke::MOST) as i64,
+            s.outside,
         ),
         None => (
             t.style
@@ -502,6 +502,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                 .and_then(|o| o.color.clone())
                 .unwrap_or_else(|| "#000000".into()),
             0,
+            false,
         ),
     };
     let usual_stroke = if t.kind == TitleKind::Text { 1 } else { 0 };
@@ -521,7 +522,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                 0.0,
                 16.0,
             ),
-            plain("strokeOutsideOnly", json!(false), json!(false), "Bool"),
+            plain("strokeOutsideOnly", json!(outside), json!(false), "Bool"),
         ],
     );
     if t.kind != TitleKind::Scroll {
@@ -531,10 +532,10 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
         Some((rgb, a)) => {
             let [left, top, w, h] = drawn.backing.unwrap_or_else(|| {
                 let rows = lines.len().max(1) as f64;
-                let h = rows * line + 2.0 * SubtitleStyle::PADDING * size;
+                let h = rows * line + 2.0 * Title::PADDING * size;
                 let top = match t.kind {
                     TitleKind::Text | TitleKind::Scroll => y - h / 2.0,
-                    TitleKind::LowerThird => y + SubtitleStyle::PADDING * size - h,
+                    TitleKind::LowerThird => y + Title::PADDING * size - h,
                 };
                 let middle = if t.kind == TitleKind::Text { x } else { 0.5 };
                 [middle - Title::SAFE / 2.0, top, Title::SAFE, h]
@@ -708,7 +709,7 @@ fn markup(
                     .points
                     .filter(|p| Some(*p) != points)
                     .map(|p| rounded(p / height))
-                    .filter(|s| *s > 0.0 && *s <= 0.5),
+                    .filter(|s| size_fits(*s, Title::MOST_SIZE)),
             },
         })
         .collect();
@@ -889,7 +890,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
     let size = look("size")
         .as_f64()
         .map(|p| p / f64::from(height.max(1)))
-        .filter(|s| crate::ops::subtitles::checked_size(Some(*s), "title").is_ok());
+        .filter(|s| size_fits(*s, Title::MOST_SIZE));
     let color = look("color")
         .as_str()
         .map(str::to_string)
@@ -905,6 +906,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
             outline: Some(SubtitleOutline {
                 color: None,
                 size: Some(0.0),
+                outside: None,
             }),
             background: backing_of(all),
             shadow: shadow_of(all),
@@ -1079,7 +1081,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let size = style_from
         .points
         .map(|p| p / h)
-        .filter(|s| crate::ops::subtitles::checked_size(Some(*s), "title").is_ok());
+        .filter(|s| size_fits(*s, Title::MOST_SIZE));
     let font = style_from
         .family
         .filter(|f| crate::ops::subtitles::checked_font(Some(f), "title").is_ok());
@@ -1092,12 +1094,14 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         if steps > 0.0 {
             SubtitleOutline {
                 color: value(g, "strokeColor").as_str().map(str::to_string),
-                size: Some((steps / STROKE_PER_TEXT).min(0.1)),
+                size: Some(steps.min(TextStroke::MOST)),
+                outside: value(g, "strokeOutsideOnly").as_bool().filter(|o| *o),
             }
         } else {
             SubtitleOutline {
                 color: None,
                 size: Some(0.0),
+                outside: None,
             }
         }
     });

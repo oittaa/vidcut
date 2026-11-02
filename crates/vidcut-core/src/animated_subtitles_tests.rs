@@ -131,12 +131,13 @@ fn an_imsc1_file_writes_capitals_and_bold() {
             frame_rate: Some(25.0),
             positions: true,
             style: &style,
+            timeline_height: 1080,
         },
     )
     .text;
     let found = (
         text.contains("tts:fontWeight=\"bold\""),
-        text.contains(">HI <span tts:fontStyle=\"italic\">THERE</span></p>"),
+        text.contains(">HI <span tts:fontStyle=\"italic\">THERE</span></span></p>"),
     );
     assert_eq!(found, (true, true));
 }

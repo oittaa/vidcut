@@ -13,7 +13,7 @@ use vidcut_core::time::{Rational, TimeSpec};
 use super::dialog;
 use super::export::{Ask, Picked};
 use super::folders::Kind;
-use super::looks::{Parts, Picker, TextFields};
+use super::looks::{Parts, Picker, TextFields, Usual};
 use super::theme;
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
@@ -166,7 +166,7 @@ impl CueDialog {
     }
 
     fn cue_style(&self) -> Result<SubtitleStyle, String> {
-        let parts = self.fields.parts(&Parts::of_subtitles(&self.base))?;
+        let parts = self.fields.parts(&Parts::of_subtitles(&self.base), None)?;
         Ok(SubtitleStyle {
             font: parts.font,
             size: parts.size,
@@ -380,6 +380,12 @@ fn typed_frame(p: &Project, text: &str, base: i64, (playhead, dropped): (i64, i6
 
 fn command(method: &str, params: Value) -> Value {
     json!({ "method": method, "params": params })
+}
+
+fn enters_neighbor(cues: &[Cue], id: &str, was: (i64, i64), at: i64) -> bool {
+    cues.iter().any(|c| {
+        c.id != id && c.start < at && at < c.end() && (c.end() <= was.0 || c.start >= was.1)
+    })
 }
 
 fn overwrite(cues: &[Cue], id: &str, was: (i64, i64), now: (i64, i64)) -> Vec<Value> {
@@ -719,7 +725,7 @@ pub(super) fn filled(shown: &str, stored: Option<f64>) -> String {
 fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
     let stored = &d.base;
     let was = Parts::of_subtitles(stored);
-    let parts = d.fields.refilled(&was).parts(&was)?;
+    let parts = d.fields.refilled(&was).parts(&was, Some("#000000"))?;
     let words = match d.show {
         Some(show) => {
             let pop = stored.words.as_ref().and_then(|w| w.pop);
@@ -1347,7 +1353,7 @@ impl Workspace {
             });
         });
         egui::Grid::new("cue-style-fields").show(ui, |ui| {
-            let _ = d.fields.rows(ui, "cue-style", &d.families, "the track");
+            let _ = d.fields.rows(ui, "cue-style", &d.families, &Usual::cue());
             ui.label("Margin");
             ui.add(
                 egui::TextEdit::singleline(&mut d.margin)
@@ -1515,13 +1521,14 @@ impl Workspace {
             Edge::In => (at, was.1),
             Edge::Out => (was.0, at),
         };
-        if now == was || now.0 < 0 || now.1 <= now.0 {
+        let cues = &p.subtitles[t].cues;
+        if now == was || now.0 < 0 || now.1 <= now.0 || enters_neighbor(cues, &d.cue, was, at) {
             return;
         }
         let params = json!({ "cue": d.cue, key: at });
         let label = vidcut_core::describe::describe("subtitles.set", &params, Some(p));
         let mut commands = vec![command("subtitles.set", params)];
-        commands.extend(overwrite(&p.subtitles[t].cues, &d.cue, was, now));
+        commands.extend(overwrite(cues, &d.cue, was, now));
         let batch = json!({ "commands": commands, "label": label });
         d.pending
             .sent
@@ -1660,10 +1667,11 @@ impl Workspace {
             d.load(&l.style);
             changed = true;
         }
+        let size_hint = format!("{}% of the picture", percent(Some(SubtitleStyle::SIZE)));
+        let outline_hint = format!("{} pixel", super::looks::plain(Some(SubtitleStyle::STROKE)));
         egui::Grid::new("subtitle-style-fields").show(ui, |ui| {
-            let (c, e) = d
-                .fields
-                .rows(ui, "subtitle", &d.families, "5.5% of the picture");
+            let usual = Usual::subtitles(&size_hint, &outline_hint);
+            let (c, e) = d.fields.rows(ui, "subtitle", &d.families, &usual);
             changed |= c;
             enter |= e;
             let mut row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {

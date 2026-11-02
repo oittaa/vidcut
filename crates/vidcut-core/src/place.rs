@@ -247,6 +247,21 @@ impl Level {
     pub fn forward(&self, uv: [f64; 2]) -> [f64; 2] {
         ahead(&self.back, uv)
     }
+
+    pub fn centered(from: (u32, u32), to: (u32, u32)) -> Self {
+        let (fw, fh) = (f64::from(from.0), f64::from(from.1));
+        let (tw, th) = (f64::from(to.0), f64::from(to.1));
+        let by = (tw / fw).min(th / fh);
+        let (w, h) = (fw * by, fh * by);
+        let (x, y) = ((tw - w) / 2.0, (th - h) / 2.0);
+        Self {
+            back: [1.0 / w, 0.0, -x / w, 0.0, 1.0 / h, -y / h, 0.0, 0.0],
+            shown: [0.0, 0.0, 1.0, 1.0],
+            edge: [0.0, 0.0, 1.0, 1.0],
+            soft: Soft::default(),
+            opacity: 1.0,
+        }
+    }
 }
 
 impl Placing {

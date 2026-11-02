@@ -278,7 +278,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("media.set", "vidcut media set m1 m2 --color teal"),
     (
         "clip.set",
-        "vidcut clip set c4 --color pink\n  vidcut clip set c4 --color \"\"\n  vidcut clip set c4 --voice-isolation 75 --download\n  vidcut clip set c4 --voice-isolation 0",
+        "vidcut clip set c4 --color pink\n  vidcut clip set c4 --color \"\"\n  vidcut clip set c4 --voice-isolation 75 --download\n  vidcut clip set c4 --voice-isolation-on false",
     ),
     (
         "keyframes.add",
