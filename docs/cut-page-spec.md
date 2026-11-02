@@ -1927,6 +1927,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `bold` uses the bold face of the font.
     - `case` draws every letter `upper` or `lower`.
     - `shadow` is the drop shadow of a title (D65), behind the text and its outline.
+    - `off` in `background` or `shadow` draws none and keeps the values.
+  - The Subtitle Track section has these rules for empty boxes and for switches:
+    - A color has no empty state, measured in Resolve Studio 21.1.2. An outline, background or shadow color box that the user empties keeps its color.
+    - Size 0 draws no stroke, and the color stays, measured in Resolve Studio 21.1.2.
+    - Show Background and Show Shadow are the switches of Background and Drop Shadow, measured in Resolve Studio 21.1.2.
+    - The Drop Shadow switch off greys the values and keeps them, measured in Resolve Studio 21.1.2. On again gives the same values.
+    - Show Background does the same. Its greying is not measured.
+    - The two shadow offset boxes are separate, measured in Resolve Studio 21.1.2. One typed box is accepted, and the other keeps its value.
+    - One typed Across or Down box is accepted. The other box takes the position of the track, else the place of the block.
   - A margin moves a block to the edge:
     - Without a margin, the middle of a bottom block is at 80% of the height.
     - With a margin, its bottom edge is at the margin.

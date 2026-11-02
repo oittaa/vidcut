@@ -37,6 +37,7 @@ pub struct CueDialog {
     word: Option<usize>,
     kept: Option<SubtitleStyle>,
     base: SubtitleStyle,
+    track: SubtitleStyle,
     families: Vec<String>,
     error: String,
     loaded: bool,
@@ -167,7 +168,7 @@ impl CueDialog {
 
     fn cue_style(&self) -> Result<SubtitleStyle, String> {
         let parts = self.fields.parts(&Parts::of_subtitles(&self.base), None)?;
-        Ok(SubtitleStyle {
+        let mut style = SubtitleStyle {
             font: parts.font,
             size: parts.size,
             color: parts.color,
@@ -180,8 +181,14 @@ impl CueDialog {
             words: self.base.words.clone(),
             speaker_color: self.base.speaker_color,
             align: self.align,
-            position: position_of(&self.across, &self.down, self.base.position)?,
-        })
+            position: None,
+        };
+        let look = self.track.for_cue(Some(&style));
+        let usual = look
+            .position
+            .unwrap_or_else(|| look.usual_position(self.place));
+        style.position = position_of(&self.across, &self.down, self.base.position, usual)?;
+        Ok(style)
     }
 
     fn typing(&self) -> Typing {
@@ -210,14 +217,14 @@ fn position_of(
     across: &str,
     down: &str,
     stored: Option<[f64; 2]>,
+    usual: [f64; 2],
 ) -> Result<Option<[f64; 2]>, String> {
     let x = kept_number(across, stored.map(|p| p[0]), "across")?;
     let y = kept_number(down, stored.map(|p| p[1]), "down")?;
-    match (x, y) {
-        (None, None) => Ok(None),
-        (Some(x), Some(y)) => Ok(Some([x, y])),
-        _ => Err("Across and Down go together".into()),
-    }
+    Ok(match (x, y) {
+        (None, None) => None,
+        (x, y) => Some([x.unwrap_or(usual[0]), y.unwrap_or(usual[1])]),
+    })
 }
 
 fn raw_of(style: Option<&SubtitleStyle>) -> LookRaw {
@@ -725,7 +732,11 @@ pub(super) fn filled(shown: &str, stored: Option<f64>) -> String {
 fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
     let stored = &d.base;
     let was = Parts::of_subtitles(stored);
-    let parts = d.fields.refilled(&was).parts(&was, Some("#000000"))?;
+    let parts = d
+        .fields
+        .colors_kept(&was)
+        .refilled(&was)
+        .parts(&was, Some("#000000"))?;
     let words = match d.show {
         Some(show) => {
             let pop = stored.words.as_ref().and_then(|w| w.pop);
@@ -739,7 +750,7 @@ fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
     };
     let across = filled(&d.across, stored.position.map(|p| p[0]));
     let down = filled(&d.down, stored.position.map(|p| p[1]));
-    let style = SubtitleStyle {
+    let mut style = SubtitleStyle {
         font: parts.font,
         size: parts.size,
         color: parts.color,
@@ -752,8 +763,10 @@ fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
         words,
         speaker_color: d.paint,
         align: d.align,
-        position: position_of(&across, &down, stored.position)?,
+        position: None,
     };
+    let usual = style.usual_position(Place::Bottom);
+    style.position = position_of(&across, &down, stored.position, usual)?;
     vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)
 }
 
@@ -960,6 +973,7 @@ impl Workspace {
             word: None,
             kept: None,
             base: SubtitleStyle::default(),
+            track: SubtitleStyle::default(),
             families: Vec::new(),
             error: String::new(),
             loaded: false,
@@ -970,9 +984,10 @@ impl Workspace {
             times: Times::default(),
         };
         if let Some(p) = self.project()
-            && let Some(c) = p.cue(id)
+            && let Some((t, c)) = p.find_cue(id)
         {
-            d.load(&p.speakers, c);
+            d.track = p.subtitles[t].style.clone();
+            d.load(&p.speakers, &p.subtitles[t].cues[c]);
         }
         if let Some(l) = landing {
             d.resume(l);
@@ -1133,6 +1148,11 @@ impl Workspace {
         }
         let at = p.find_cue(&d.cue);
         let found = at.map(|(t, c)| (&p.subtitles[t], &p.subtitles[t].cues[c]));
+        if let Some((track, _)) = found
+            && d.track != track.style
+        {
+            d.track = track.style.clone();
+        }
         let shown =
             found.is_some_and(|(_, cue)| settled(&d.cue, &p.speakers, cue, d.word) == d.state());
         match found {

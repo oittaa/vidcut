@@ -167,7 +167,11 @@ pub(crate) fn checked_background(
             return Err(Error::invalid("a background opacity is from 0 to 1"));
         }
     };
-    Ok(Some(SubtitleBackground { color, opacity }))
+    Ok(Some(SubtitleBackground {
+        color,
+        opacity,
+        off: b.off.filter(|&o| o),
+    }))
 }
 
 pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {

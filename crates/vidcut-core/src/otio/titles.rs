@@ -462,7 +462,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
             )
         }
     };
-    let (shade, shift, blur, dim) = match &t.style.shadow {
+    let (shade, shift, blur, dim) = match t.style.shadow.as_ref().filter(|s| !s.is_off()) {
         Some(s) => {
             let [dx, dy] = s.shift();
             (
@@ -842,6 +842,7 @@ fn backing_of(all: &[&Value]) -> Option<SubtitleBackground> {
             opacity: value(g, "backgroundOpacity")
                 .as_f64()
                 .map(|o| (o / 100.0).clamp(0.0, 1.0)),
+            off: None,
         })
     })
 }
@@ -862,6 +863,7 @@ fn shadow_of(all: &[&Value]) -> Option<TitleShadow> {
                 rounded((-dy).clamp(-Picture::REACH, Picture::REACH)),
             ]),
             blur: value(g, "shadow").as_f64().map(|b| b.clamp(1.0, 100.0)),
+            off: None,
         })
     })
 }
