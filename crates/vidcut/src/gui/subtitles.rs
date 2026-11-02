@@ -382,6 +382,12 @@ fn command(method: &str, params: Value) -> Value {
     json!({ "method": method, "params": params })
 }
 
+fn enters_neighbor(cues: &[Cue], id: &str, was: (i64, i64), at: i64) -> bool {
+    cues.iter().any(|c| {
+        c.id != id && c.start < at && at < c.end() && (c.end() <= was.0 || c.start >= was.1)
+    })
+}
+
 fn overwrite(cues: &[Cue], id: &str, was: (i64, i64), now: (i64, i64)) -> Vec<Value> {
     let (from, to) = if now.0 < was.0 {
         (now.0, was.0)
@@ -1517,13 +1523,14 @@ impl Workspace {
             Edge::In => (at, was.1),
             Edge::Out => (was.0, at),
         };
-        if now == was || now.0 < 0 || now.1 <= now.0 {
+        let cues = &p.subtitles[t].cues;
+        if now == was || now.0 < 0 || now.1 <= now.0 || enters_neighbor(cues, &d.cue, was, at) {
             return;
         }
         let params = json!({ "cue": d.cue, key: at });
         let label = vidcut_core::describe::describe("subtitles.set", &params, Some(p));
         let mut commands = vec![command("subtitles.set", params)];
-        commands.extend(overwrite(&p.subtitles[t].cues, &d.cue, was, now));
+        commands.extend(overwrite(cues, &d.cue, was, now));
         let batch = json!({ "commands": commands, "label": label });
         d.pending
             .sent
