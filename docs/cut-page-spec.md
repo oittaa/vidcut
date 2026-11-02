@@ -2727,7 +2727,6 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - In an HDR timeline, this is so only for a frame that the reader decoded. It is not so for an AI picture, a frame that a Retime Process made or a Smooth Cut.
     - At the clip level, this is so for a clip without a Retime Process or a checked effect.
     - A Smooth Cut is not a frame of the next clip. The background render does not take it for that clip. The viewer does not either.
-    - A frame already written stays until Delete Render Cache > All.
     - `render_cache.background` turns it off. Then the cache keeps what it has, and renders nothing new.
   - The codec of the cache files is a preference of this computer (X103). Proxies and Render Cache > Advanced > Codec sets it. `render_cache.codec` also sets it.
     - It is Automatic, unless set. With proxies on, Automatic takes the codec of proxies. With proxies off, it takes ProRes 422 HQ, HEVC or AV1 ([playback](design/playback.md#the-render-cache)).
