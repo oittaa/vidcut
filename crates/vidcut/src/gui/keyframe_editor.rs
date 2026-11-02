@@ -6,7 +6,7 @@ use eframe::egui::{
 };
 use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROWS_OUT_LINE_HORIZONTAL, CARET_DOWN, CARET_LEFT, CARET_RIGHT,
-    DIAMOND, DOTS_THREE, MAGNIFYING_GLASS_PLUS, WAVE_SINE,
+    DOTS_THREE, MAGNIFYING_GLASS_PLUS, WAVE_SINE,
 };
 use serde_json::{Value, json};
 use vidcut_core::keyframes::{
@@ -17,7 +17,7 @@ use vidcut_core::ops::picture::has_picture;
 use vidcut_core::request::KeyParam;
 use vidcut_core::validate::GAIN;
 
-use super::inspector::{Shape as Frame, shape};
+use super::inspector::{Shape as Frame, key_diamond, shape};
 use super::placing::ease_label;
 use super::theme;
 use super::title_browser::LeftTab;
@@ -2209,10 +2209,7 @@ impl Workspace {
                     act = Some(RowAct::Step(1));
                 }
                 if ui
-                    .add_enabled(
-                        keyable || on_key,
-                        egui::Button::selectable(on_key, DIAMOND).frame(false),
-                    )
+                    .add_enabled(keyable || on_key, key_diamond(on_key))
                     .clicked()
                 {
                     act = Some(RowAct::Toggle);

@@ -71,6 +71,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - **Track controls** (p. 1257):
     - The curve button shows the curve of the value under its track.
     - The Keyframe button adds a keyframe at the playhead. On a keyframe, it removes that keyframe, as the Inspector's button does.
+    - The Keyframe button is orange on a keyframe (p. 1250), in the Inspector too.
     - The arrows beside it go to the previous and the next keyframe in the clip.
     - Reset Keyframes removes all keyframes of the track.
   - **Time** (p. 1258):
@@ -1590,6 +1591,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Duration is off on a clip with speed keyframes.
       - Reset gives the whole clip 100%. Its speed keyframes go.
     - The diamond adds or removes a speed keyframe at the playhead. The arrows move the playhead to the previous or next speed keyframe.
+    - The diamond is orange on a speed keyframe ([X107](deviations.md#x107-the-diamond-of-speed-change-is-orange)).
     - The list opens only on a section that plays forward. `speed.set` changes only such a section.
     - Add Speed Keyframe in the right-click menu adds a speed keyframe at the playhead.
     - The Speed row of the Keyframes tab and the keyframe tray shows the speed keyframes ([X94](deviations.md#x94-speed-keyframes-and-the-mark-menus-keyframe-items)).

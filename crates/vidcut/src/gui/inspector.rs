@@ -812,6 +812,12 @@ fn mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
     }
 }
 
+pub(super) fn key_diamond(on: bool) -> egui::Button<'static> {
+    let icon = RichText::new(DIAMOND);
+    let icon = if on { icon.color(theme::KEY_ON) } else { icon };
+    egui::Button::selectable(on, icon).frame(false)
+}
+
 fn entry(
     ui: &mut egui::Ui,
     key: (Key, Option<bool>),
@@ -885,7 +891,7 @@ fn field(
             if prev.clicked() {
                 acts.push(Act::Step(f, -1));
             }
-            let diamond = ui.add(egui::Button::selectable(keys.on, DIAMOND).frame(false));
+            let diamond = ui.add(key_diamond(keys.on));
             if diamond.clicked() {
                 acts.push(Act::Toggle(f));
             }
@@ -1330,7 +1336,7 @@ fn speed_keys(ui: &mut egui::Ui, (keys, inside): (KeyMark, bool)) -> Option<Act>
     if prev.clicked() {
         act = Some(Act::Step(Key::Speed, -1));
     }
-    let diamond = egui::Button::selectable(keys.on, DIAMOND).frame(false);
+    let diamond = key_diamond(keys.on);
     if ui.add_enabled(inside || keys.on, diamond).clicked() {
         act = Some(Act::Toggle(Key::Speed));
     }
