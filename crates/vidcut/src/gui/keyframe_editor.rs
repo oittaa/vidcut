@@ -322,9 +322,9 @@ struct Target {
 impl Target {
     fn takes(&self, param: KeyParam) -> bool {
         match param {
-            KeyParam::Volume => self.clip.sounds_at(self.play),
+            KeyParam::Volume => self.clip.audio.is_some(),
             KeyParam::Speed => self.clip.start < self.play && self.play < self.clip.end(),
-            _ => is_cue(&self.clip) || (self.clip.start..self.clip.end()).contains(&self.play),
+            _ => true,
         }
     }
 
@@ -1089,13 +1089,8 @@ fn playhead(painter: &egui::Painter, map: TimeMap, rect: Rect, at: i64) {
 
 impl Workspace {
     fn first_clip(&self, p: &Project) -> Option<Clip> {
-        let selection = &self.snap.selection;
-        selection
-            .first
-            .iter()
-            .chain(&selection.clips)
-            .chain(&selection.cues)
-            .find_map(|id| p.key_holder(id))
+        let order = &self.snap.selection.order;
+        order.iter().find_map(|id| p.key_holder(id))
     }
 
     fn editor_clip(&mut self, p: &Project, tray: bool) -> Option<Clip> {
@@ -1657,11 +1652,7 @@ impl Workspace {
         }
         match cmd {
             KeyCmd::Add if !t.rows.iter().any(|&r| t.takes(r)) => {
-                Some(if t.rows.iter().all(|&r| r == KeyParam::Volume) {
-                    "Move the playhead over the clip's sound"
-                } else {
-                    "Move the playhead over the clip"
-                })
+                Some("Move the playhead over the clip")
             }
             KeyCmd::Add if !t.rows.iter().any(|&r| t.takes(r) && !t.keyed_here(r)) => {
                 Some("Already keyed here. Move the playhead to add one.")
@@ -2162,16 +2153,17 @@ impl Workspace {
         plot: Plot,
     ) {
         let play = plot.play;
-        let inside = |t: i64| is_cue(clip) || (clip.start <= t && t < clip.end());
+        let speed = lane.param == KeyParam::Speed;
+        let reached = |t: i64| !speed || (clip.start <= t && t < clip.end());
         let times: Vec<i64> = lane
             .keys
             .iter()
             .map(|k| clip.key_time(k.frame).round() as i64)
             .collect();
         let on_key = times.contains(&play);
-        let keyable = inside(play) && (lane.param != KeyParam::Speed || play > clip.start);
-        let prev = times.iter().any(|&t| inside(t) && t < play);
-        let next = times.iter().any(|&t| inside(t) && t > play);
+        let keyable = !speed || (clip.start < play && play < clip.end());
+        let prev = times.iter().any(|&t| reached(t) && t < play);
+        let next = times.iter().any(|&t| reached(t) && t > play);
         let curve = self.key_editor.curves.contains(&lane.param);
         let keyed = !lane.keys.is_empty();
         let picked = self.key_editor.rows.contains(&lane.param);
@@ -2247,13 +2239,13 @@ impl Workspace {
                     times
                         .iter()
                         .copied()
-                        .filter(|&t| inside(t) && t < play)
+                        .filter(|&t| reached(t) && t < play)
                         .max()
                 } else {
                     times
                         .iter()
                         .copied()
-                        .filter(|&t| inside(t) && t > play)
+                        .filter(|&t| reached(t) && t > play)
                         .min()
                 };
                 if let Some(t) = to {

@@ -829,16 +829,7 @@ impl Picture {
         }
     }
 
-    pub fn drop_chosen(
-        &mut self,
-        v: PictureValue,
-        chosen: &std::collections::HashSet<i64>,
-    ) -> Option<[f64; 2]> {
-        let first = self
-            .keys_of(v)
-            .iter()
-            .find(|k| chosen.contains(&k.frame))
-            .and_then(|k| self.key_value(v, k.frame));
+    pub fn drop_chosen(&mut self, v: PictureValue, chosen: &std::collections::HashSet<i64>) {
         let y_was = parts(self)[v as usize].1.cloned().unwrap_or_default();
         let (keys, y) = parts_mut(self, v);
         let rows: Vec<(Keyframe, f64)> = keys
@@ -851,10 +842,6 @@ impl Picture {
         if let Some(y) = y {
             *y = rows.into_iter().map(|(_, n)| n).collect();
         }
-        if let (false, Some(value)) = (self.has_keys(v), first) {
-            write_plain(self, v, value);
-        }
-        first
     }
 }
 

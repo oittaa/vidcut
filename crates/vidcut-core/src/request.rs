@@ -1174,6 +1174,8 @@ pub enum Request {
     #[serde(rename = "track.add")]
     TrackAdd {
         kind: NewTrack,
+        /// How many at once: 0 to 99 video tracks, 0 to 999 audio tracks, or
+        /// 1 to 16 subtitle tracks.
         #[serde(default = "one")]
         count: u32,
     },
@@ -1199,7 +1201,7 @@ pub enum Request {
         solo: Option<bool>,
         #[serde(default)]
         volume_db: Option<f64>,
-        /// Voice Isolation's Amount, from 1 to 100: that much of the voice
+        /// Voice Isolation's Amount, from 0 to 100: that much of the voice
         /// the model hears in the sound of the track's clips
         /// that have none of their own, mixed with the rest of it; 0 turns
         /// it off. The model runs on this computer and is downloaded once,
@@ -1289,7 +1291,7 @@ pub enum Request {
         /// media's color.
         #[serde(default)]
         color: Option<String>,
-        /// Voice Isolation's Amount, from 1 to 100: that much of the voice
+        /// Voice Isolation's Amount, from 0 to 100: that much of the voice
         /// the model hears in the sound, mixed with the rest of it; 0 turns
         /// it off for the clip, also when its track has it on. A clip never
         /// given one follows its track's. The model runs on this computer
@@ -1333,12 +1335,12 @@ pub enum Request {
         /// What is measured and brought to `target`. Default: `youtube`.
         #[serde(default)]
         mode: NormalizeMode,
-        /// The level to reach: LUFS with a loudness mode (-60 to -5), dBFS
-        /// with `sample_peak` and dBTP with `true_peak` (-60 to 0). Default:
+        /// The level to reach: LUFS with a loudness mode (-30 to 0), dBFS
+        /// with `sample_peak` and dBTP with `true_peak` (-20 to 0). Default:
         /// the mode's. A mode with a fixed target takes only that value.
         #[serde(default)]
         target: Option<f64>,
-        /// The highest true peak allowed, in dBTP (-60 to 0), for a mode
+        /// The highest true peak allowed, in dBTP (-20 to 0), for a mode
         /// that has a peak limit. The volume stops where the peaks reach it,
         /// even below `target`. Default: the mode's. A fixed limit takes only
         /// that value.
@@ -1365,7 +1367,8 @@ pub enum Request {
     },
     /// Add a keyframe at `at` (the playhead by default) to each of `clips`,
     /// on the source frame of that clip at `at`, also with `at` outside the
-    /// clip. Without a `value`, it takes the value the clip has there. A
+    /// clip. A speed keyframe goes only inside the clip, after its first
+    /// frame. Without a `value`, it takes the value the clip has there. A
     /// keyframe already on that frame takes the value and the ease. With
     /// its first keyframe, a clip's volume follows its keyframes. A title
     /// takes position, zoom, rotation and opacity, and a scroll takes
@@ -1457,9 +1460,9 @@ pub enum Request {
         to: Option<TimeSpec>,
     },
     /// Remove the keyframes of `clips`: those on the source `frames`, those
-    /// at the timeline frames `at`, or, with neither, all of them. When a
-    /// clip's last keyframes go, the value of the first of them stays as
-    /// its volume.
+    /// at the timeline frames `at`, or, with neither, all of them. When the
+    /// last keyframes of a value go, the value it had before the first
+    /// keyframe returns.
     #[serde(rename = "keyframes.remove")]
     KeyframesRemove {
         clips: OneOrMany<ClipRef>,
@@ -1566,9 +1569,9 @@ pub enum Request {
         range: Option<RangeSpec>,
     },
     /// Add a cue: `text` from `at` (default: the playhead) to `end`, or for
-    /// `duration`. Without either it lasts 3 s, or until the track's next cue
-    /// starts. On `track` (default: the shown subtitle track; S1 is made when
-    /// there is none). Returns its id.
+    /// `duration`. Without either it lasts 3 s. It changes no other cue, so
+    /// it can overlap them. On `track` (default: the shown subtitle track; S1
+    /// is made when there is none). Returns its id.
     #[serde(rename = "subtitles.add")]
     SubtitlesAdd {
         /// Its lines, separated by a line break. `<i>`, `<b>`, `<u>` and
@@ -2216,8 +2219,9 @@ pub enum Request {
         #[serde(default)]
         border: Option<Border>,
     },
-    /// Put one effect of a clip back at its usual values. It stays on or
-    /// off, and keeps its `render_cache`. `effect` counts from 0.
+    /// Put one effect of a clip back at its usual values. It stays on, and
+    /// keeps its `render_cache`. An effect that is off does not change.
+    /// `effect` counts from 0.
     #[serde(rename = "effects.reset")]
     EffectsReset { clip: ClipRef, effect: usize },
     /// Take one effect off a clip. `effect` counts from 0.
@@ -2694,6 +2698,7 @@ pub enum Request {
     /// `edits` lists every selected edit, left to right. `edit` is the one
     /// clicked last, which the Trim Editor shows. `first` is the clip or cue
     /// selected first, which the Keyframes tab and the keyframe tray show.
+    /// When it leaves the selection, the next one selected takes its place.
     #[serde(rename = "selection.get")]
     SelectionGet {},
     /// Select timeline clips, subtitle cues, pool media or an edit point
@@ -3364,9 +3369,9 @@ impl KeyValue {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NormalizeMode {
-    /// The highest sample, in dBFS. Target -1.
+    /// The highest sample, in dBFS. Target -9.
     SamplePeak,
-    /// The highest true peak, between the samples too, in dBTP. Target -1.
+    /// The highest true peak, between the samples too, in dBTP. Target -2.
     TruePeak,
     /// Loudness, target -23 LUFS, no peak limit.
     #[serde(rename = "bs1770_1")]

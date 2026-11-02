@@ -67,6 +67,7 @@ impl Workspace {
         let selected = self.pictured_selection();
         let mut grabbed = None;
         let mut added = None;
+        let mut doubled = None;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -95,7 +96,7 @@ impl Workspace {
                                     grabbed = Some(((*kind, *label), press));
                                 }
                                 if resp.double_clicked() {
-                                    added = Some(*kind);
+                                    doubled = Some(*kind);
                                 }
                                 resp.context_menu(|ui| {
                                     let item = egui::Button::new("Add to Selected Clips");
@@ -112,6 +113,11 @@ impl Workspace {
             });
         if let Some((card, press)) = grabbed {
             self.start_effect_drag(card, press);
+        }
+        if let Some(kind) = doubled
+            && let Some(first) = selected.first()
+        {
+            self.send("effects.add", json!({ "clips": [first], "kind": kind }));
         }
         if let Some(kind) = added.filter(|_| !selected.is_empty()) {
             self.send("effects.add", json!({ "clips": selected, "kind": kind }));

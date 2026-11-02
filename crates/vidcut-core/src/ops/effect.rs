@@ -104,11 +104,12 @@ pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result
 
 pub fn reset(p: &mut Project, id: &str, n: usize) -> Result<()> {
     let e = &mut effects_of(p, id, n)?[n];
-    *e = Effect {
-        on: e.on,
-        render_cache: e.render_cache,
-        ..e.kind().made()
-    };
+    if e.on {
+        *e = Effect {
+            render_cache: e.render_cache,
+            ..e.kind().made()
+        };
+    }
     Ok(())
 }
 

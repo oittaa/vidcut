@@ -695,14 +695,17 @@ pub fn apply_overrides(settings: &mut ExportSettings, sets: &[String]) -> Result
 }
 
 pub fn validate(s: &ExportSettings) -> Result<()> {
+    use crate::ops::normalize::LOUDNESS;
     use AudioCodec as A;
     use Container as C;
     use VideoCodec as V;
     if let Some(l) = s.audio.as_ref().and_then(|a| a.loudness)
-        && !(-60.0..=-5.0).contains(&l)
+        && !LOUDNESS.contains(&l)
     {
         return Err(Error::usage(format!(
-            "audio.loudness {l} LUFS is outside -60..-5"
+            "audio.loudness {l} LUFS is outside {}..{}",
+            LOUDNESS.start(),
+            LOUDNESS.end()
         )));
     }
     if s.video.is_none() && s.audio.is_none() {
