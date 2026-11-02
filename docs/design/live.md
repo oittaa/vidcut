@@ -359,6 +359,9 @@ The bar and the Jobs button:
   - On, Move Up, Move Down, Reset and Delete send `effects.set`, `effects.move`, `effects.reset` and `effects.remove`.
 - `speed_section` sends what the Change Clip Speed window sends (`SpeedDialog::params`). `Workspace::audio_section` sends `clip.set`.
   - On a clip with speed keyframes, it shows the section under the playhead (`Paced`). `section_speed` sends `speed.set`, `speed.freeze` or `speed.reverse` there.
+  - A Speed value under `Speed::RANGE` on clips with no speed keyframes goes to `Workspace::send_freeze`, which sends `speed.set` at the playhead.
+  - The range of the Speed field has no bottom, so that a typed value comes through. `SpeedDialog::set_percent` limits the other values.
+  - `Act::Drag` stops a drag at the start of `SpeedDialog::PERCENT`.
   - The Ease row shows `ops::speed::section_eases` and sends `speed.ease` for each clip (`Workspace::ease_sections`).
   - `speed_keys` draws the diamond and the arrows of the header. They act as the keyframe buttons of the picture and volume fields.
 - With several clips, `number`, `speed_section` and `Workspace::audio_section` draw no keyframe buttons. `keyed_look` turns off a value with keyframes on one of the clips.
