@@ -2991,3 +2991,19 @@ The display LUT of the Color page is on a branch after Data Burn-In. The output 
 - Output Sizing does not go back to the source. It enlarges the picture that the earlier stages give (p. 296).
 
 The chart does not show titles, generators or transitions.
+
+### The scaling filter
+
+The default Resize Filter of a project is Sharper. These facts are measured in Resolve Studio 21.1.2.
+
+- An export uses this filter for a zoom, a fit to the timeline, a rotation and a move by a fraction of a pixel.
+- It also uses this filter when it rounds an odd frame size for an encoder.
+- For each output pixel, the filter reads 16 source pixels across and 16 down. A rotated picture reads along its own axes.
+- `d` is the distance from the output pixel to a source pixel, in source pixels.
+- `s` is the output size divided by the source size. `s` is 1 when the picture enlarges.
+- At each half pixel of `d`, the weight is `s × sinc(s × d) × (0.5 + 0.5 × cos(π × d / 8))`. From `d` = 8, the weight is 0.
+- Between two half pixels, the weight is on a straight line.
+- The weights of each axis are divided by their sum.
+- A read past the edge of the picture takes the edge pixel.
+- The filter works in the timeline gamma.
+- This formula is measured down to a shrink of 18.6:1. Above a shrink of 8:1, vidcut is different ([X110](deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).

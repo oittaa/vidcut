@@ -257,11 +257,15 @@ The audio device:
     - Why: the spec converts the input before the sizing ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)). A conversion that is not linear gives other edges after a scale.
   - It reads the chroma of each frame at the site that the frame's chroma location gives (`chroma_site`). An H.264 or HEVC 4:2:0 frame with no chroma location is sited left, the default of these formats (`color::default_site`). Another frame with no chroma location is read as centered.
   - The viewer enlarges with one bilinear sample, and shrinks with a box of bilinear samples.
-  - An export, a proxy and a thumbnail scale with a bicubic kernel (`sharp`). The kernel widens when the picture shrinks.
-  - The kernel widens up to 4 times. Above a shrink of 4:1, the draw first halves the converted picture into smaller levels (`halvings`, `fs_halve`).
-  - The kernel then reads the level where the shrink is 4:1 or less. The larger shrink of the two axes selects the level.
-  - Why: each pixel has the same work at any shrink. A kernel that widens without a limit puts all the work of a small picture on few GPU threads.
-  - Why: the viewer must be fast, and an export must keep the detail of the picture.
+  - An export, a proxy and a thumbnail scale with the filter of the spec (`resized`, [spec §13](../cut-page-spec.md#the-scaling-filter)).
+    - Each pixel reads the same number of samples at any scale.
+    - A pixel with no scale and a whole-pixel place reads one sample (`resamples`).
+    - Above a shrink of 8:1, the filter reads the level of `halvings` where the shrink is 8:1 or less ([X110](../deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).
+  - In an export, the kernels of Super Scale widen when the picture shrinks (`sharp`).
+    - They widen up to 4 times. Above a shrink of 4:1, the draw first halves the converted picture into smaller levels (`halvings`, `fs_halve`).
+    - The kernel then reads the level where the shrink is 4:1 or less. The larger shrink of the two axes selects the level.
+    - Why: each pixel has the same work at any shrink. A kernel that widens without a limit puts all the work of a small picture on few GPU threads.
+  - Why: the viewer must be fast, and an export must have the same picture as the spec.
   - The layers of a dissolve are more draws in the pass.
   - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
   - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).

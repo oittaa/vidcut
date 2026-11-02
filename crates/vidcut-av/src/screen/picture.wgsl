@@ -91,8 +91,8 @@ fn opacity(u: vec2<f32>) -> f32 {
 
 fn weight(x: f32, kind: u32) -> f32 {
     let a = abs(x);
-    if kind == 1u || kind == 4u {
-        let k = select(-0.5, -0.6, kind == 4u);
+    if kind == 1u {
+        let k = -0.5;
         if a < 1.0 {
             return ((k + 2.0) * a - (k + 3.0)) * a * a + 1.0;
         }
@@ -112,12 +112,66 @@ fn weight(x: f32, kind: u32) -> f32 {
     return lobes * sin(t) * sin(t / lobes) / (t * t);
 }
 
-fn resamples(spans: vec2<f32>) -> bool {
-    if (p.flags.w & 7u) == 0u {
+fn tapered(d: f32, shrink: f32) -> f32 {
+    if d >= 8.0 {
+        return 0.0;
+    }
+    let t = 3.14159265 * d;
+    let low = select(sin(shrink * t) / (shrink * t), 1.0, d < 1e-5);
+    return shrink * low * (0.5 + 0.5 * cos(t / 8.0));
+}
+
+fn resize_weight(x: f32, shrink: f32) -> f32 {
+    let a = abs(x) * 2.0;
+    let k = floor(a);
+    return mix(tapered(k * 0.5, shrink), tapered((k + 1.0) * 0.5, shrink), a - k);
+}
+
+fn resized(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
+    let level = clamp(ceil(log2(max(spans.x, spans.y) / 8.0)), 0.0, p.shrunk.x);
+    let scale = exp2(level);
+    let size = p.upright.xy / scale;
+    let shrink = vec2<f32>(1.0) / max(spans / scale, vec2<f32>(1.0));
+    let t = u * size - 0.5;
+    let base = floor(t);
+    let f = t - base;
+    let half = vec2<f32>(0.5) / size;
+    var across: array<f32, 16>;
+    var total_across = 0.0;
+    for (var i = 0; i < 16; i++) {
+        across[i] = resize_weight(f32(i - 7) - f.x, shrink.x);
+        total_across += across[i];
+    }
+    var sum = vec3<f32>(0.0);
+    var total_down = 0.0;
+    for (var j = 0; j < 16; j++) {
+        let wy = resize_weight(f32(j - 7) - f.y, shrink.y);
+        total_down += wy;
+        if abs(wy) < 1e-6 {
+            continue;
+        }
+        for (var i = 0; i < 16; i++) {
+            if abs(across[i]) < 1e-6 {
+                continue;
+            }
+            let q = (base + vec2<f32>(f32(i - 7), f32(j - 7)) + 0.5) / size;
+            sum += sample_at(clamp(q, half, vec2<f32>(1.0) - half), level) * across[i] * wy;
+        }
+    }
+    return sum / (total_across * total_down);
+}
+
+fn resamples(u: vec2<f32>, spans: vec2<f32>) -> bool {
+    let kind = p.flags.w & 7u;
+    if kind == 0u {
         return false;
     }
     if (p.flags.w & 8u) != 0u {
-        return any(abs(spans - vec2<f32>(1.0)) > vec2<f32>(1e-4));
+        if any(abs(spans - vec2<f32>(1.0)) > vec2<f32>(1e-4)) {
+            return true;
+        }
+        let t = u * p.upright.xy - 0.5;
+        return kind == 4u && any(abs(t - round(t)) > vec2<f32>(1e-3));
     }
     return max(spans.x, spans.y) < 1.0;
 }
@@ -131,10 +185,13 @@ fn sample_at(q: vec2<f32>, level: f32) -> vec3<f32> {
 
 fn sharp(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
     let kind = p.flags.w & 7u;
+    if kind == 4u {
+        return resized(u, spans);
+    }
     let level = clamp(ceil(log2(max(spans.x, spans.y) / 4.0)), 0.0, p.shrunk.x);
     let scale = exp2(level);
     let size = p.upright.xy / scale;
-    let lobes = select(select(4.0, 3.0, kind == 2u), 2.0, kind == 1u || kind == 4u);
+    let lobes = select(select(4.0, 3.0, kind == 2u), 2.0, kind == 1u);
     let wide = clamp(spans / scale, vec2<f32>(1.0), vec2<f32>(4.0));
     let reach = vec2<i32>(ceil(lobes * wide));
     let t = u * size - 0.5;
@@ -295,7 +352,7 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     let size = p.upright.xy;
     let spans = vec2<f32>(length(across * size), length(down * size));
     let a = cover * p.placed.y * opacity(uv);
-    if resamples(spans) {
+    if resamples(uv, spans) {
         return vec4<f32>(sharp(uv, spans), a);
     }
     let taps = vec2<u32>(clamp(ceil(spans), vec2<f32>(1.0), vec2<f32>(8.0)));
@@ -544,7 +601,7 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     let cover = p.upright.xy / p.place.zw;
     let a = opacity(rel);
     let solid = select(1.0, a, keeps);
-    if resamples(cover) {
+    if resamples(rel, cover) {
         return vec4<f32>(sharp(rel, cover) * a, solid);
     }
     let taps = vec2<u32>(clamp(ceil(cover), vec2<f32>(1.0), vec2<f32>(8.0)));
