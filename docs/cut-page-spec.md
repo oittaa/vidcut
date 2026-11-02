@@ -1741,7 +1741,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Add New and Add Subtitle overwrite what the new cue covers, measured in Resolve Studio 21.1.2:
     - A cue that the new cue fully covers is removed.
     - A cue that the new cue partly covers is trimmed to the new edge.
-    - A cue that covers all of the 3 s and more is not measured. It stays as it is, as in D79.
+    - A cue that covers all of the 3 s and more becomes two cues with the same text, before and after the new cue.
+  - These two cues keep their words and keyframes as a split does (D70, §8.12).
   - The new cue has the text "Subtitle", selected in the text box, measured in Resolve Studio 21.1.2.
   - `subtitles.add` alone does not overwrite. A script that wants the overwrite sends its own `apply`.
   - Cues of one track can overlap, and show together.

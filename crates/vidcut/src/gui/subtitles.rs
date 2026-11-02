@@ -425,7 +425,15 @@ pub(super) fn new_cue(p: &Project, track: Option<&str>, at: i64) -> Value {
     };
     if let Some(ti) = on {
         let end = at + subtitle_ops::default_length(p);
-        commands.extend(overwrite(&p.subtitles[ti].cues, "", (at, at), (at, end)));
+        let cues = &p.subtitles[ti].cues;
+        commands.extend(overwrite(cues, "", (at, at), (at, end)));
+        for c in cues.iter().filter(|c| c.start < at && c.end() > end) {
+            commands.push(command(
+                "subtitles.split",
+                json!({ "cue": c.id, "at": end }),
+            ));
+            commands.push(command("subtitles.set", json!({ "cue": c.id, "end": at })));
+        }
     }
     json!({ "commands": commands, "label": label })
 }
