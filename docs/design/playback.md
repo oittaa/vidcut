@@ -368,7 +368,9 @@ What it renders:
   - `stats::reason_names` names them as Stats for Nerds does. The line, the Stats row and `cache.status` use these names.
 - `Setup::reasons` keeps the reasons of the mode. Smart keeps all. User keeps `Reason::On`, `Reason::Effect` and the kinds that `RenderCachePrefs` turns on.
 - A clip set to `ClipCache::Off` gives no `Reason::Media` and no `Reason::SuperScale`. Its other reasons stay (spec D98).
-- An `Effect` with `render_cache` on gives `Reason::Effect`, also in a `Placed` around a title. An effect that is off gives none.
+- An `Effect` with `render_cache` on gives `Reason::Effect`. An effect that is off gives none.
+  - A `Placed` around a title under another track gives it. The cache file holds that title.
+  - A `Placed` around a title on top of all tracks gives none. The cache file does not hold that title.
 - Each `VideoPiece::Source` and `VideoPiece::Black` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
   - In User mode, an excluded piece gives no `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime`, `Reason::Transition`, `Reason::Opacity` or `Reason::Composite`.
   - Why the black pieces: the black side of a Push or a dip is a part of the transition of the track.

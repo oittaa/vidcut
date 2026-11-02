@@ -361,7 +361,7 @@ fn checked(placed: &[Placed]) -> bool {
 }
 
 fn titled(piece: &VideoPiece) -> bool {
-    piece.titles().iter().any(|(_, t)| checked(&t.placed))
+    bare(piece).titles().iter().any(|(_, t)| checked(&t.placed))
 }
 
 pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<Reason> {
@@ -1201,11 +1201,109 @@ fn read_keys(path: &Path) -> Option<Vec<Key>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cache, Look, Setup};
-    use crate::model::{Project, RenderCache, Settings, SuperScale};
+    use super::{Cache, Look, Reason, Setup, bare, reasons};
+    use crate::model::{
+        Effect, EffectKind, GaussianBlur, Picture, Project, RenderCache, Settings, SuperScale,
+        Title,
+    };
     use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
-    use crate::render::{Placed, RenderPlan, Shape, VideoPiece};
+    use crate::render::{Placed, RenderPlan, Run, Shape, ShownTitle, VideoPiece};
     use crate::time::Rational;
+
+    fn effect() -> Effect {
+        Effect {
+            on: true,
+            kind: EffectKind::GaussianBlur(GaussianBlur::default()),
+            blend: None,
+            use_alpha: true,
+            render_cache: true,
+        }
+    }
+
+    fn titled() -> VideoPiece {
+        let mut picture = Picture::default();
+        picture.effects.push(effect());
+        VideoPiece::Titled {
+            under: Box::new(VideoPiece::black(1)),
+            titles: vec![ShownTitle {
+                clip: "c1".into(),
+                title: Title::new("Hello"),
+                run: Run {
+                    at: 0,
+                    of: 1,
+                    held: false,
+                },
+                fade: None,
+                placed: vec![Placed {
+                    clip: "c1".into(),
+                    picture,
+                    run: None,
+                    source: 0,
+                    start: 0,
+                    ready: false,
+                }],
+            }],
+        }
+    }
+
+    fn plan_of(piece: VideoPiece) -> RenderPlan {
+        let frames = piece.frames();
+        RenderPlan {
+            fps: Rational::new(25, 1).unwrap(),
+            width: 320,
+            height: 180,
+            sample_rate: 48_000,
+            channels: 2,
+            frames,
+            video: vec![piece],
+            audio: Vec::new(),
+            ducking: Vec::new(),
+            range: (0, frames),
+            name: "title".into(),
+            colors: None,
+        }
+    }
+
+    #[test]
+    fn a_checked_effect_on_a_title_schedules_no_cache() {
+        let piece = titled();
+        assert!(reasons(&piece, &|_| false, false).is_empty());
+        let project = Project::new(Settings::default());
+        let prefs = RenderCachePrefs::default();
+        let look = Look::of(&project, (1920, ProxyCodec::Auto), CacheCodec::Auto);
+        let slow = |_: &str| false;
+        let up = |_: Shape, _: (u32, u32), _: &[Placed], _: SuperScale| None;
+        let setup = Setup {
+            mode: RenderCache::Smart,
+            prefs: &prefs,
+            project: &project,
+            slow: &slow,
+            upscaled: &up,
+            look: &look,
+        };
+        let plan = plan_of(piece);
+        assert!(Cache::default().next(&plan, &setup, 0, 8).is_none());
+    }
+
+    #[test]
+    fn a_title_without_a_checked_effect_stays_out_of_the_cache() {
+        let mut piece = titled();
+        let VideoPiece::Titled { titles, .. } = &mut piece else {
+            panic!("title");
+        };
+        titles[0].placed[0].picture.effects[0].render_cache = false;
+        assert!(reasons(&piece, &|_| false, false).is_empty());
+        assert!(matches!(bare(&piece), VideoPiece::Black { .. }));
+    }
+
+    #[test]
+    fn a_checked_effect_on_a_clip_is_a_cache_reason() {
+        let piece: VideoPiece = serde_json::from_str(
+            r#"{"kind":"source","media":"m1","path":"a.mov","origin":0.0,"source_frame":0,"frames":1,"placed":[{"clip":"c1","picture":{"effects":[{"kind":"gaussian_blur","render_cache":true}]}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(reasons(&piece, &|_| false, false), vec![Reason::Effect]);
+    }
 
     #[test]
     fn a_blocked_frame_stays_out_of_the_cache_and_is_not_scheduled() {
