@@ -19,7 +19,6 @@ const LINES: [f64; 3] = [1.0 / 3.0, 0.5, 2.0 / 3.0];
 const ZOOM: (f64, f64) = (0.01, 100.0);
 const START: Color32 = Color32::from_rgb(70, 200, 90);
 const END: Color32 = Color32::from_rgb(230, 70, 60);
-const LEFT_SHOWING: f32 = 4.0;
 const TURN_BAND: f32 = 12.0;
 const STEP: f64 = 15.0;
 const NOTCH_ZOOM: f64 = 1.1;
@@ -129,6 +128,7 @@ struct Shown {
     anchor: [f64; 2],
     origin: Pos2,
     scale: Vec2,
+    whole: f64,
     plain: Level,
     ends: [Level; 2],
 }
@@ -241,6 +241,16 @@ impl Shown {
         (a - b).normalized()
     }
 
+    fn cropped(&self, side: Side) -> f64 {
+        let k = &self.picture.crop;
+        match side {
+            Side::Left => k.left,
+            Side::Right => k.right,
+            Side::Top => k.top,
+            Side::Bottom => k.bottom,
+        }
+    }
+
     fn inside(&self, p: Pos2, margin: f32) -> bool {
         let at = self.frame_at(p);
         let [u, v] = apply(&self.level.back, at);
@@ -255,10 +265,10 @@ impl Shown {
         let near = |q: Pos2| q.distance(p) <= GRAB * 1.6;
         match tool {
             PictureTool::Transform => {
-                if near(self.turn_at()) {
-                    Some(Hold::Turn)
-                } else if self.corners().into_iter().any(near) {
+                if self.corners().into_iter().any(near) {
                     Some(Hold::Corner)
+                } else if near(self.turn_at()) {
+                    Some(Hold::Turn)
                 } else if let Some(s) = Side::ALL.into_iter().find(|s| near(self.side(*s))) {
                     Some(Hold::Stretch(s))
                 } else if self.inside(p, GRAB) {
@@ -273,7 +283,9 @@ impl Shown {
             }
             PictureTool::Crop => Side::ALL
                 .into_iter()
-                .find(|s| near(self.side(*s)))
+                .rev()
+                .filter(|s| near(self.side(*s)))
+                .max_by(|a, b| self.cropped(*a).total_cmp(&self.cropped(*b)))
                 .map(Hold::Crop),
             PictureTool::DynamicZoom => {
                 let z = self.zoom();
@@ -363,6 +375,8 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
         ..shown.clone()
     })?;
     let z = shown.dynamic_zoom.unwrap_or_default();
+    let scale = vec2(picture.width() / w as f32, picture.height() / h as f32);
+    let whole = (fit[2] * f64::from(scale.x)).hypot(fit[3] * f64::from(scale.y)) / 2.0;
     let fixed = |b: ZoomBox| Picture {
         dynamic_zoom: Some(DynamicZoom {
             start: b,
@@ -379,7 +393,8 @@ fn shape_of(p: &Project, c: &Clip, shown: Picture, picture: Rect, at: i64) -> Op
         level,
         middle,
         origin: picture.min,
-        scale: vec2(picture.width() / w as f32, picture.height() / h as f32),
+        scale,
+        whole,
         plain,
         ends,
     })
@@ -861,12 +876,23 @@ impl Workspace {
             }
             Hold::Corner => {
                 let (d0, d1) = (held.from.distance(pivot), to.distance(pivot));
+                let d1 = f64::from(if d1 < 1.0 { 0.0 } else { d1 });
                 let [zx, zy] = p0.scale();
-                if d0 > 1.0 && zx.min(zy) > 0.0 {
-                    let k = f64::from(d1 / d0);
-                    let k = k.clamp(ZOOM.0 / zx.min(zy), ZOOM.1 / zx.max(zy));
-                    next.now.zoom = Some([rounded(zx * k, 4), rounded(zy * k, 4)]);
-                }
+                let most = zx.max(zy);
+                let size = if most * s.whole <= f64::from(GRAB * 3.2) {
+                    d1 / s.whole
+                } else if d0 > 1.0 {
+                    most * d1 / f64::from(d0)
+                } else {
+                    most
+                };
+                let size = size.min(ZOOM.1);
+                let [rx, ry] = if most > 0.0 {
+                    [zx / most, zy / most]
+                } else {
+                    [1.0, 1.0]
+                };
+                next.now.zoom = Some([rounded(rx * size, 4), rounded(ry * size, 4)]);
             }
             Hold::Stretch(side) => {
                 let axis = s.axis(side);
@@ -893,18 +919,13 @@ impl Workspace {
             Hold::Crop(side) => {
                 let at = s.frame_at(to);
                 let [u, v] = apply(&s.level.back, at);
-                let [du, dv] = slopes(&s.level.back, at);
-                let least = |d: f64| f64::from(LEFT_SHOWING / s.scale.x) * d;
-                let (lu, lv) = (least(du), least(dv));
                 let k = &mut next.now.crop;
-                let side_of = |v: f64, other: f64, least: f64| {
-                    rounded(v.clamp(0.0, (1.0 - other - least).max(0.0)), 4)
-                };
+                let side_of = |v: f64| rounded(v.clamp(0.0, 1.0), 4);
                 match side {
-                    Side::Left => k.left = side_of(u, k.right, lu),
-                    Side::Right => k.right = side_of(1.0 - u, k.left, lu),
-                    Side::Top => k.top = side_of(v, k.bottom, lv),
-                    Side::Bottom => k.bottom = side_of(1.0 - v, k.top, lv),
+                    Side::Left => k.left = side_of(u),
+                    Side::Right => k.right = side_of(1.0 - u),
+                    Side::Top => k.top = side_of(v),
+                    Side::Bottom => k.bottom = side_of(1.0 - v),
                 }
             }
             Hold::ZoomMove(e) => {
