@@ -1212,11 +1212,16 @@ pub enum Request {
         volume_db: Option<f64>,
         /// Voice Isolation's Amount, from 0 to 100: that much of the voice
         /// the model hears in the sound of the track's clips
-        /// that have none of their own, mixed with the rest of it; 0 turns
-        /// it off. The model runs on this computer and is downloaded once,
-        /// when `download` allows it.
+        /// that have none of their own, mixed with the rest of it. At 0 the
+        /// sound equals the source, and the model does not run. Given alone,
+        /// it also turns the switch on. The model runs on this computer and
+        /// is downloaded once, when `download` allows it.
         #[serde(default)]
         voice_isolation: Option<f64>,
+        /// Voice Isolation's switch. Off keeps the Amount, and on brings it
+        /// back. The first time on, the Amount is 100.
+        #[serde(default)]
+        voice_isolation_on: Option<bool>,
         /// Ducking: the track dips by its Duck Amount where any of its
         /// sources is active, by speech or by sound level. Each field given
         /// replaces its own; null takes it off with its settings. `{}`
@@ -1301,12 +1306,18 @@ pub enum Request {
         #[serde(default)]
         color: Option<String>,
         /// Voice Isolation's Amount, from 0 to 100: that much of the voice
-        /// the model hears in the sound, mixed with the rest of it; 0 turns
-        /// it off for the clip, also when its track has it on. A clip never
-        /// given one follows its track's. The model runs on this computer
-        /// and is downloaded once, when `download` allows it.
+        /// the model hears in the sound, mixed with the rest of it. At 0 the
+        /// sound equals the source, and the model does not run. Given alone,
+        /// it also turns the switch on. A clip never given a switch or an
+        /// Amount follows its track's. The model runs on this computer and
+        /// is downloaded once, when `download` allows it.
         #[serde(default)]
         voice_isolation: Option<f64>,
+        /// Voice Isolation's switch. Off keeps the Amount, and the clip stays
+        /// off when its track has it on. On brings the Amount back. The first
+        /// time on, the Amount is 100.
+        #[serde(default)]
+        voice_isolation_on: Option<bool>,
         /// Retime Process: how the clips make a frame that falls between two
         /// of their source frames, at a speed change or where their media's
         /// frame rate isn't the timeline's. `project` follows the Retime

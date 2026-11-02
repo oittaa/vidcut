@@ -268,6 +268,7 @@ Ducking ([spec D76](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)
 Voice Isolation:
 
 - A piece with Voice Isolation (the `isolation` of an `AudioPiece`) goes through an `Isolator` in its lane, after the speed stage.
+- `VoiceIsolation::heard` gives a piece its `isolation`. With the switch off or at Amount 0, a piece has none. Thus the model does not run.
 - The `Isolator` runs DPDFNet at 48 kHz on the CPU runtime of tract, with one model state for each channel. A mono file in a wider mix has one state.
 - At another mix rate, `Resampler::between` converts on each side of the model.
 - The model's output lags its input by two of its windows. The isolator reads that far ahead and drops as much. Thus the voice stays in sync.

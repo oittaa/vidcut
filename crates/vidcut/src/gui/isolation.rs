@@ -4,12 +4,25 @@ use vidcut_core::Project;
 
 use super::workspace::Workspace;
 
-pub(super) const FIRST_AMOUNT: f64 = 100.0;
-
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Isolate {
     Clips(Vec<String>),
     Track(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Change {
+    Switch(bool),
+    Amount(f64),
+}
+
+impl Change {
+    fn fields(self) -> (Option<bool>, Option<f64>) {
+        match self {
+            Self::Switch(on) => (Some(on), None),
+            Self::Amount(amount) => (None, Some(amount)),
+        }
+    }
 }
 
 pub(super) fn heard(p: &Project, clip: &str) -> Option<Option<f64>> {
@@ -22,18 +35,19 @@ pub(super) fn heard(p: &Project, clip: &str) -> Option<Option<f64>> {
         audio
             .voice_isolation
             .or(t.voice_isolation)
-            .filter(|a| *a > 0.0),
+            .filter(|v| v.on)
+            .map(|v| v.amount),
     )
 }
 
 #[derive(Default)]
 pub(super) struct IsolationUi {
-    asking: Option<(Isolate, f64)>,
+    asking: Option<(Isolate, Change)>,
     dragging: Option<(Isolate, f64)>,
 }
 
 impl Workspace {
-    pub(super) fn isolate(&mut self, on: Isolate, amount: f64) {
+    pub(super) fn isolate(&mut self, on: Isolate, change: Change) {
         let on = match on {
             Isolate::Clips(clips) => {
                 let heard: Vec<String> = self
@@ -53,22 +67,36 @@ impl Workspace {
             track => track,
         };
         let dir = crate::paths::models_dir();
-        if amount > 0.0 && !vidcut_av::isolate::needed(&dir).is_empty() {
-            self.isolation.asking = Some((on, amount));
+        let (switch, amount) = change.fields();
+        if vidcut_core::ops::isolation_runs(switch, amount)
+            && !vidcut_av::isolate::needed(&dir).is_empty()
+        {
+            self.isolation.asking = Some((on, change));
             return;
         }
-        self.send_isolation(&on, amount, false);
+        self.send_isolation(&on, change, false);
     }
 
-    fn send_isolation(&self, on: &Isolate, amount: f64, download: bool) {
+    fn send_isolation(&self, on: &Isolate, change: Change, download: bool) {
+        let (switch, amount) = change.fields();
         match on {
             Isolate::Clips(clips) => self.send(
                 "clip.set",
-                json!({ "clips": clips, "voice_isolation": amount, "download": download }),
+                json!({
+                    "clips": clips,
+                    "voice_isolation_on": switch,
+                    "voice_isolation": amount,
+                    "download": download,
+                }),
             ),
             Isolate::Track(track) => self.send(
                 "track.set",
-                json!({ "track": track, "voice_isolation": amount, "download": download }),
+                json!({
+                    "track": track,
+                    "voice_isolation_on": switch,
+                    "voice_isolation": amount,
+                    "download": download,
+                }),
             ),
         }
     }
@@ -83,13 +111,13 @@ impl Workspace {
         let mut checked = amount.is_some();
         let toggled = ui.checkbox(&mut checked, label).clicked();
         if toggled {
-            self.isolate(on.clone(), if checked { FIRST_AMOUNT } else { 0.0 });
+            self.isolate(on.clone(), Change::Switch(checked));
         }
         if let Some(stored) = amount {
             if !vidcut_av::isolate::needed(&crate::paths::models_dir()).is_empty() {
                 let size = vidcut_av::models::size(vidcut_av::isolate::DPDFNET.bytes);
                 if ui.button(format!("Download Model ({size})")).clicked() {
-                    self.isolate(on, stored);
+                    self.isolate(on, Change::Switch(true));
                 }
                 return toggled;
             }
@@ -112,26 +140,26 @@ impl Workspace {
                 && let Some((o, v)) = self.isolation.dragging.take()
                 && v != stored
             {
-                self.isolate(o, v);
+                self.isolate(o, Change::Amount(v));
             }
         }
         toggled
     }
 
     pub(super) fn isolation_prompt(&mut self, ctx: &egui::Context) {
-        let Some((on, amount)) = self.isolation.asking.clone() else {
+        let Some((on, change)) = self.isolation.asking.clone() else {
             return;
         };
         let needs = vidcut_av::isolate::needed(&crate::paths::models_dir());
         if needs.is_empty() {
             self.isolation.asking = None;
-            self.send_isolation(&on, amount, false);
+            self.send_isolation(&on, change, false);
             return;
         }
         match super::speech::ask_download(ctx, "voice-isolation-download", &needs, "Download") {
             Some(true) => {
                 self.isolation.asking = None;
-                self.send_isolation(&on, amount, true);
+                self.send_isolation(&on, change, true);
             }
             Some(false) => self.isolation.asking = None,
             None => {}

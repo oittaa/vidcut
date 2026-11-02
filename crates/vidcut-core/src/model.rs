@@ -1101,10 +1101,10 @@ pub struct Track {
     /// The mixer fader, in dB, from -100 to 10.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub volume_db: f64,
-    /// Voice Isolation on the track's clips that have none of their own,
-    /// as a clip's `voice_isolation`.
+    /// Voice Isolation on the track's clips that have none of their own.
+    /// Left out, it is off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub voice_isolation: Option<f64>,
+    pub voice_isolation: Option<VoiceIsolation>,
     /// Ducking: the track dips where its sources are active (decision
     /// D76).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2960,12 +2960,27 @@ pub struct ClipAudio {
     /// is `gain_db` and `gain_keys`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
-    /// Voice Isolation's Amount, from 0 to 100: that much of the voice the
-    /// model hears in the sound, mixed with the rest of the sound. 0 keeps
-    /// it off, also when the clip's track has it on. Left out, the clip
-    /// follows its track's.
+    /// Voice Isolation of the clip. A clip that has it off stays off, also
+    /// when its track has it on. Left out, the clip follows its track's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub voice_isolation: Option<f64>,
+    pub voice_isolation: Option<VoiceIsolation>,
+}
+
+/// Voice Isolation: a switch and an Amount.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct VoiceIsolation {
+    /// The switch. Off keeps the Amount for the next time it goes on.
+    pub on: bool,
+    /// From 0 to 100: that much of the voice the model hears in the sound,
+    /// mixed with the rest of the sound. At 0 the sound equals the source,
+    /// and the model does not run.
+    pub amount: f64,
+}
+
+impl VoiceIsolation {
+    pub fn heard(self) -> Option<f64> {
+        (self.on && self.amount > 0.0).then_some(self.amount)
+    }
 }
 
 impl Clip {

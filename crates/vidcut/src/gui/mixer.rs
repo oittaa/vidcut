@@ -472,7 +472,8 @@ impl Workspace {
                 }
             });
             let on = super::isolation::Isolate::Track(t.id.clone());
-            self.isolation_controls(ui, on, t.voice_isolation, "Voice Isolation");
+            let amount = t.voice_isolation.filter(|v| v.on).map(|v| v.amount);
+            self.isolation_controls(ui, on, amount, "Voice Isolation");
             self.ducking_controls(ui, p, t);
         });
     }

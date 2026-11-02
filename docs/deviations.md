@@ -1325,19 +1325,25 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Voice Isolation is only in the Studio version. It is a plugin on a mono, stereo or dual-mono track.
   - It runs in real time, but not on live input or on more than two channels.
   - Its Amount mixes the source with the isolated voice. At 50, they are about equal. At 70 to 80, it sounds natural (p. 774).
+  - Measured in Resolve Studio 21.1.2, on a clip:
+    - It has a switch and an Amount from 0 to 100.
+    - A fresh clip turned on gives Amount 100.
+    - Amount typed 0 stays on, with the value 0.
+    - A clip's stored Amount comes back when the switch goes on again.
 - **vidcut:**
-  - The `voice_isolation` of a clip or a track is an Amount from 0 to 100, as in Resolve Studio 21.1.2. 0 is off.
+  - A clip or a track has the same switch (`voice_isolation_on`) and Amount (`voice_isolation`) as that measurement.
+  - An Amount given alone in a request also turns the switch on.
+  - At Amount 0 the sound equals the source, and the model does not run.
   - It runs `dpdfnet2_48khz_hr` of DPDFNet (Apache-2.0) on the CPU of this computer.
   - It runs live in playback, and the same in an export.
   - It works on any number of channels, each channel alone.
-  - The Amount of a clip overrides the Amount of its track. A clip at 0 stays off on a track that has it on.
-  - Voice Isolation in the right-click menu of a clip, or Alt + V, turns it on or off for the selected clips.
-  - On, it sets the Amount to 100, the value that Resolve Studio 21.1.2 shows when it is turned on.
+  - A clip left unset follows its track. A clip that is off stays off on a track that is on.
+  - Voice Isolation in the right-click menu of a clip, or Alt + V, turns the switch on or off for the selected clips.
   - The strip of the Mixer does it for a track.
   - An Amount field beside each one sets the Amount.
   - The model, 10 MB, is downloaded the first time, after a question (`download` in scripts).
   - vidcut checks the model against its SHA-256.
-  - An OTIO file keeps the Amounts in the metadata of vidcut. Its export tells that other editors do not hear them.
+  - An OTIO file keeps the switches and the Amounts in the metadata of vidcut. Its export tells that other editors do not hear them.
 - **Why:**
   - After the cut of its silences, a Meet recording needs noise removal more than anything else (use case 2).
   - A model that runs on one CPU thread at a tenth of real time needs no paid version.
