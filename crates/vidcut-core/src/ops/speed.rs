@@ -206,9 +206,9 @@ pub fn set(
             change_speed(p, std::slice::from_ref(&id), speed, ripple, Some(t))?;
             continue;
         }
-        if !speed.is_finite() || !(0.01..=100.0).contains(&speed) {
+        if !speed.is_finite() || !Speed::RANGE.contains(&speed) {
             return Err(Error::invalid(format!(
-                "speed {speed} isn't 1% to 10000% forward: a section between speed \
+                "speed {speed} isn't 0.01% to 100000% forward: a section between speed \
                  keyframes plays forward, and speed.freeze makes a freeze frame"
             )));
         }
@@ -252,7 +252,7 @@ pub fn set(
             c.duration
         };
         let n = with(&c, map, skip);
-        let how = format!("at {}%", (speed * 100.0).round());
+        let how = format!("at {}%", Speed::percent(speed));
         retimed(p, &c, n, want, ripple_on, &how)?;
     }
     Ok(())

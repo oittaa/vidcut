@@ -643,6 +643,7 @@ struct Look<'a> {
     off: bool,
     why: Option<&'static str>,
     timecode: Option<(&'a Project, i64)>,
+    dead_reset: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -798,6 +799,7 @@ fn keyed_look(off: bool) -> Look<'static> {
     Look {
         off,
         why: off.then_some("Select one clip to change its keyframes"),
+        dead_reset: off,
         ..Look::default()
     }
 }
@@ -846,13 +848,7 @@ pub(super) fn key_buttons(ui: &mut egui::Ui, keys: &KeyMark, linear: bool) -> Op
     click
 }
 
-pub(super) fn next_key(
-    c: &Clip,
-    times: impl Iterator<Item = i64>,
-    at: i64,
-    dir: i64,
-) -> Option<i64> {
-    let times = times.filter(|t| c.start <= *t && *t < c.end());
+pub(super) fn next_key(times: impl Iterator<Item = i64>, at: i64, dir: i64) -> Option<i64> {
     if dir < 0 {
         times.filter(|t| *t < at).max()
     } else {
@@ -862,17 +858,22 @@ pub(super) fn next_key(
 
 pub(super) fn mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
     let time = |k: &Keyframe| c.key_time(k.frame).round() as i64;
-    let inside = |t: i64| c.start <= t && t < c.end();
     KeyMark {
         on: keys.iter().any(|k| time(k) == at),
-        prev: keys.iter().any(|k| {
-            let t = time(k);
-            inside(t) && t < at
-        }),
-        next: keys.iter().any(|k| {
-            let t = time(k);
-            inside(t) && t > at
-        }),
+        prev: keys.iter().any(|k| time(k) < at),
+        next: keys.iter().any(|k| time(k) > at),
+    }
+}
+
+fn speed_mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
+    let inside: Vec<Keyframe> = keys
+        .iter()
+        .copied()
+        .filter(|k| (c.start..c.end()).contains(&(c.key_time(k.frame).round() as i64)))
+        .collect();
+    KeyMark {
+        on: mark(c, keys, at).on,
+        ..mark(c, &inside, at)
     }
 }
 
@@ -953,7 +954,7 @@ fn field(
             }
         }
     });
-    if reset(ui, set) {
+    if reset(ui, set || look.dead_reset) && !look.dead_reset {
         acts.push(match f {
             Key::Volume => Act::Unkey,
             Key::Picture(field) if field.channel().is_some() => Act::ResetChannel(field),
@@ -1410,7 +1411,7 @@ fn speed_section(
         .filter(|c| count == 1 && c.compound.is_none())
         .map(|c| {
             let keys = c.speed.as_ref().map(Speed::keyframes).unwrap_or_default();
-            (mark(c, &keys, at), c.start < at && at < c.end())
+            (speed_mark(c, &keys, at), c.start < at && at < c.end())
         });
     let header = |ui: &mut egui::Ui| {
         let mut act = keys.and_then(|k| speed_keys(ui, k));
@@ -1488,6 +1489,7 @@ fn speed_section(
                 (!frozen && !ripple).then_some("Needs Ripple Timeline")
             },
             timecode: Some((p, dropped)),
+            dead_reset: false,
         };
         field(
             ui,
@@ -1902,7 +1904,10 @@ impl Workspace {
         let Some(c) = key_clips(key, lists).first().and_then(|id| p.clip(id)) else {
             return;
         };
-        if let Some(t) = next_key(c, key_times(c, key).into_iter(), at, dir) {
+        let times = key_times(c, key)
+            .into_iter()
+            .filter(|t| key != Key::Speed || (c.start..c.end()).contains(t));
+        if let Some(t) = next_key(times, at, dir) {
             self.seek(PlayerId::Timeline, t, false);
         }
     }
@@ -1992,9 +1997,13 @@ impl Workspace {
         let sets: Vec<Value> = chosen
             .iter()
             .filter_map(|c| {
-                let base = c.stored.adopt(c.frame as f64);
+                let mut plain = c.stored.clone();
+                plain.clear_channel(v);
+                let mut base = plain.clone();
+                let now = c.stored.channel_at(v, c.frame as f64);
+                vidcut_core::keyframes::write_channel(&mut base, v, now);
                 let to = field.put_at(&base, &c.shape, field.usual(), Some(c.frame));
-                changed(&c.id, &base, &to).map(|mut p| {
+                changed(&c.id, &plain, &to).map(|mut p| {
                     p["at"] = json!(at);
                     p
                 })

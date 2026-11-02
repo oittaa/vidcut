@@ -314,7 +314,9 @@ The bar and the Jobs button:
   - Why: a refused change goes away, and the field does not jump back while a change is on its way.
   - A section that closes while it waits leaves a `Landing`, which it takes back when it opens again on the cue.
 - The selected cues are part of the session's `Selection`, as clips are.
-  - Its `first` is the clip or cue selected first, because the two lists hold no order between them. `Selection::keep_first` keeps it while it stays selected.
+  - Its `order` holds the clips and the cues in the order of selection, because the two lists hold no order between them.
+  - `Selection::keep_order` removes each item that left the selection and adds each new item at the end. Items that come in one request count clips first.
+  - Its `first` is the first item of `order`.
 
 **Titles** ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab-or-add-title-and-are-edited-in-the-inspector)).
 

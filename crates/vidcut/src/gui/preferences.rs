@@ -1231,10 +1231,10 @@ fn render_cache(
             let field = NumberField {
                 label: named.id,
                 saved: saved["after_secs"].as_u64().unwrap_or(5),
-                range: 1..=3600,
+                range: 1..=30,
                 unit: Unit::Plain,
                 enabled: !busy && on,
-                refusal: "The time is 1 to 3600 seconds",
+                refusal: "The time is 1 to 30 seconds",
             };
             if let Some(n) = field.show(ui, &mut ui_state.after_secs, &mut ui_state.error) {
                 *patch = Some(json!({ "render_cache": { "after_secs": n } }));

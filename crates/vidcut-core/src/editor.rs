@@ -3670,8 +3670,13 @@ fn mutate(
             Value::Null
         }
         Request::TrackAdd { kind, count } => {
-            if !(1..=16).contains(count) {
-                return Err(Error::usage("count must be 1..16"));
+            let (least, most) = match kind {
+                NewTrack::Video => (0, ops::VIDEO_TRACKS),
+                NewTrack::Audio => (0, ops::AUDIO_TRACKS),
+                NewTrack::Subtitle => (1, 16),
+            };
+            if !(least..=most).contains(count) {
+                return Err(Error::usage(format!("count must be {least}..{most}")));
             }
             let ids: Vec<String> = (0..*count)
                 .map(|_| match kind {
@@ -5279,7 +5284,7 @@ fn place_imported(
             });
         if audio.is_some() && !GAIN.contains(&c.gain_db) {
             warnings.push(format!(
-                "{label}: gain {:.1} dB set to the nearest of -60..24 dB",
+                "{label}: gain {:.1} dB set to the nearest of -100..30 dB",
                 c.gain_db
             ));
         }
@@ -6021,7 +6026,10 @@ fn add_tracks(p: &mut Project, t: &otio::Imported, settings: bool) -> Result<()>
                 track.locked = s.locked;
                 track.muted = s.muted;
                 track.solo = s.solo;
-                track.volume_db = s.volume_db.clamp(-60.0, 24.0);
+                track.volume_db = s.volume_db.clamp(
+                    *crate::validate::FADER.start(),
+                    *crate::validate::FADER.end(),
+                );
                 track.voice_isolation = s
                     .voice_isolation
                     .and_then(|v| ops::checked_isolation(v).ok())

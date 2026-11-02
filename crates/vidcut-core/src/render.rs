@@ -795,7 +795,7 @@ pub enum AudioPiece {
         /// track's fader only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keyed: Option<Keyed>,
-        /// Voice Isolation's Amount over it, from 1 to 100: the clip's own,
+        /// Voice Isolation's Amount over it, up to 100: the clip's own,
         /// else its track's; left out when the clip's own is 0.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         isolation: Option<f64>,
