@@ -1385,9 +1385,8 @@ pub enum Request {
     /// keyframe already on that frame takes the value and the ease. With
     /// its first keyframe, a clip's volume follows its keyframes. A title
     /// takes position, zoom, rotation and opacity, and a scroll takes
-    /// position and opacity. A title's zoom is one number. Its position
-    /// takes no ease here: an OTIO import gives the handles that bend its
-    /// path. `clips` also takes cues, as `q3` or
+    /// position and opacity. A title's zoom is one number. The handles of
+    /// its position keys bend its path. `clips` also takes cues, as `q3` or
     /// `S1@10s`. A cue takes every value of a picture except its anchor. Its
     /// frames count from its start. Returns the `clips` with the source
     /// `frame` of each new keyframe.
@@ -1431,7 +1430,10 @@ pub enum Request {
         #[serde(default)]
         by: Option<KeyValue>,
         /// Sets the handles: flat, a third of the way to the keyframe
-        /// before (In) and after (Out). `linear` takes them off.
+        /// before (In) and after (Out). `linear` takes them off. On a title's
+        /// position they are points: Out is an eighth of the way from the
+        /// keyframe before to the one after, In the opposite. An ease replaces
+        /// the old handles of that keyframe. A scroll's position takes none.
         #[serde(default)]
         ease: Option<Ease>,
         /// The In handle: `frames` (at most 0) and `value` (dB) from the
@@ -3346,6 +3348,14 @@ pub struct CopiedKey {
     /// The Out handle, when the keyframe has one.
     #[serde(rename = "out", default, skip_serializing_if = "Option::is_none")]
     pub out_handle: Option<Handle>,
+    /// On a title's position: the handle toward the keyframe before it, a
+    /// point in the picture. A paste on a title keeps it as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_point: Option<[f64; 2]>,
+    /// On a title's position: the handle toward the keyframe after it, a
+    /// point in the picture. A paste on a title keeps it as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_point: Option<[f64; 2]>,
 }
 
 /// A keyframe value: one number, or x and y for position, zoom and the

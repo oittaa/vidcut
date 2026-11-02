@@ -950,6 +950,12 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Keyframes** ([todo](todo/keyframes.md#titles)):
   - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
   - Its Position keyframes take handles. The title moves at one speed along the cubic path between two keys. The details are in the [todo](todo/keyframes.md#titles).
+  - A right-click on a key of Position, Zoom, Rotation or Opacity opens a menu of eases, by the place of the key:
+    - The first key has Linear and Ease Out. The last key has Linear and Ease In.
+    - A middle key has Linear, Ease In, Ease Out and Ease In and Out. A lone key has only Linear.
+    - A check mark is on the current item.
+    - On Position, the handles are an eighth of the difference between the two neighbors of the key. They stay when a value changes.
+    - On Zoom, Rotation and Opacity, a handle is flat and a third of the gap to the neighbor.
   - vidcut: the Across, Zoom, Rotation and Title opacity rows of the Title section have the Keyframe button.
   - vidcut: the Across button holds the keyframes of Across and Down.
 - **Later** (X53):
