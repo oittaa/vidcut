@@ -7,6 +7,7 @@ use vidcut_core::model::{
     Cue, LetterCase, Place, Project, SpeakerPaint, Speakers, SubtitleAlign, SubtitleStyle,
     SubtitleTrack, SubtitleWords, WordsShow,
 };
+use vidcut_core::ops::subtitles as subtitle_ops;
 use vidcut_core::time::{Rational, TimeSpec};
 
 use super::dialog;
@@ -40,6 +41,7 @@ pub struct CueDialog {
     error: String,
     loaded: bool,
     focus: bool,
+    select: bool,
     dirty: bool,
     pending: Pending,
     times: Times,
@@ -380,6 +382,12 @@ fn command(method: &str, params: Value) -> Value {
     json!({ "method": method, "params": params })
 }
 
+fn enters_neighbor(cues: &[Cue], id: &str, was: (i64, i64), at: i64) -> bool {
+    cues.iter().any(|c| {
+        c.id != id && c.start < at && at < c.end() && (c.end() <= was.0 || c.start >= was.1)
+    })
+}
+
 fn overwrite(cues: &[Cue], id: &str, was: (i64, i64), now: (i64, i64)) -> Vec<Value> {
     let (from, to) = if now.0 < was.0 {
         (now.0, was.0)
@@ -410,6 +418,33 @@ fn overwrite(cues: &[Cue], id: &str, was: (i64, i64), now: (i64, i64)) -> Vec<Va
     commands
 }
 
+pub(super) fn new_cue(p: &Project, track: Option<&str>, at: i64) -> Value {
+    let mut params = json!({ "text": NEW_TEXT, "at": at });
+    if let Some(t) = track {
+        params["track"] = json!(t);
+    }
+    let label = vidcut_core::describe::describe("subtitles.add", &params, Some(p));
+    let mut commands = vec![command("subtitles.add", params)];
+    let on = match track {
+        Some(t) => p.subtitle_index(t),
+        None => subtitle_ops::usual_track(p),
+    };
+    if let Some(ti) = on {
+        let end = at + subtitle_ops::default_length(p);
+        let cues = &p.subtitles[ti].cues;
+        commands.extend(overwrite(cues, "", (at, at), (at, end)));
+        for c in cues.iter().filter(|c| c.start < at && c.end() > end) {
+            commands.push(command(
+                "subtitles.split",
+                json!({ "cue": c.id, "at": end }),
+            ));
+            commands.push(command("subtitles.set", json!({ "cue": c.id, "end": at })));
+        }
+    }
+    json!({ "commands": commands, "label": label })
+}
+
+const NEW_TEXT: &str = "Subtitle";
 const LIST_ROWS: f32 = 5.0;
 const PAD: f32 = 6.0;
 const GAP: f32 = 10.0;
@@ -929,6 +964,7 @@ impl Workspace {
             error: String::new(),
             loaded: false,
             focus,
+            select: false,
             dirty: false,
             pending: Pending::default(),
             times: Times::default(),
@@ -1068,9 +1104,12 @@ impl Workspace {
             self.timeline.adding = None;
             match result {
                 Ok(r) => {
-                    if let Some(id) = r.result["cue"].as_str() {
+                    if let Some(id) = r.result["results"][0]["cue"].as_str() {
                         let id = id.to_string();
                         self.open_cue(&id);
+                        if let Some(d) = &mut self.timeline.cue_dialog {
+                            d.select = true;
+                        }
                     }
                 }
                 Err(e) => self.say(format!("Add Subtitle: {}", e.message)),
@@ -1128,15 +1167,25 @@ impl Workspace {
             }
         }
         let before = d.state();
-        let r = ui.add(
-            egui::TextEdit::multiline(&mut d.text)
-                .desired_rows(3)
-                .desired_width(f32::INFINITY)
-                .hint_text("Its text; Enter starts a new line"),
-        );
+        let out = egui::TextEdit::multiline(&mut d.text)
+            .desired_rows(3)
+            .desired_width(f32::INFINITY)
+            .hint_text("Its text; Enter starts a new line")
+            .show(ui);
+        let r = &out.response;
         if d.focus {
             r.request_focus();
             d.focus = false;
+        }
+        if d.select && d.loaded {
+            let mut state = out.state;
+            let all = egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(d.text.chars().count()),
+            );
+            state.cursor.set_char_range(Some(all));
+            state.store(ui.ctx(), r.id);
+            d.select = false;
         }
         dialog::note(
             ui,
@@ -1472,13 +1521,14 @@ impl Workspace {
             Edge::In => (at, was.1),
             Edge::Out => (was.0, at),
         };
-        if now == was || now.0 < 0 || now.1 <= now.0 {
+        let cues = &p.subtitles[t].cues;
+        if now == was || now.0 < 0 || now.1 <= now.0 || enters_neighbor(cues, &d.cue, was, at) {
             return;
         }
         let params = json!({ "cue": d.cue, key: at });
         let label = vidcut_core::describe::describe("subtitles.set", &params, Some(p));
         let mut commands = vec![command("subtitles.set", params)];
-        commands.extend(overwrite(&p.subtitles[t].cues, &d.cue, was, now));
+        commands.extend(overwrite(cues, &d.cue, was, now));
         let batch = json!({ "commands": commands, "label": label });
         d.pending
             .sent

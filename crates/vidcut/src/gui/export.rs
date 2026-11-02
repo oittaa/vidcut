@@ -6,8 +6,8 @@ use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_av::export::SpeechNote;
 use vidcut_core::export::{
-    AudioCodec, AudioSettings, Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode,
-    VideoCodec, VideoSettings, apply_overrides, validate,
+    AAC_BITRATE, AAC_BITRATES, AAC_RATES, AudioCodec, AudioSettings, Container, EncoderChoice,
+    ExportSettings, HdrMetadata, HdrMode, VideoCodec, VideoSettings, apply_overrides, validate,
 };
 use vidcut_core::request::{FindSpeech, ImportMode, SubtitleFormat, SubtitlesAs};
 use vidcut_core::{Envelope, Error, Response};
@@ -364,6 +364,13 @@ fn lossy(a: AudioCodec) -> bool {
     matches!(a, AudioCodec::Aac | AudioCodec::Opus | AudioCodec::Mp3)
 }
 
+fn usual_bitrate(a: AudioCodec) -> u64 {
+    match a {
+        AudioCodec::Aac => AAC_BITRATE,
+        _ => 256_000,
+    }
+}
+
 fn fit_codecs(s: &mut ExportSettings) {
     if s.container.audio_only() {
         s.video = None;
@@ -379,7 +386,7 @@ fn fit_codecs(s: &mut ExportSettings) {
         let ok = audio_codecs(s.container);
         if !ok.contains(&a.codec) {
             a.codec = ok[0];
-            a.bitrate = lossy(a.codec).then_some(a.bitrate.unwrap_or(256_000));
+            a.bitrate = lossy(a.codec).then_some(a.bitrate.unwrap_or(usual_bitrate(a.codec)));
         }
     }
 }
@@ -2902,18 +2909,20 @@ fn settings_form(
                             for c in audio_codecs(d.settings.container) {
                                 let why = why_audio(can, *c);
                                 if choice(ui, &mut a.codec, *c, name(c), why).changed() {
-                                    a.bitrate = lossy(a.codec).then_some(256_000);
+                                    a.bitrate = lossy(a.codec).then_some(usual_bitrate(a.codec));
                                 }
                             }
                         });
                     if lossy(a.codec) {
-                        let mut kbps = a.bitrate.unwrap_or(256_000) / 1000;
+                        let mut kbps = a.bitrate.unwrap_or(usual_bitrate(a.codec)) / 1000;
+                        let range = match a.codec {
+                            AudioCodec::Aac => {
+                                AAC_BITRATES.start() / 1000..=AAC_BITRATES.end() / 1000
+                            }
+                            _ => 32..=512,
+                        };
                         if ui
-                            .add(
-                                egui::DragValue::new(&mut kbps)
-                                    .range(32..=512)
-                                    .suffix(" kb/s"),
-                            )
+                            .add(egui::DragValue::new(&mut kbps).range(range).suffix(" kb/s"))
                             .changed()
                         {
                             a.bitrate = Some(kbps * 1000);
@@ -2930,7 +2939,11 @@ fn settings_form(
                                 None,
                                 format!("project ({} Hz)", audio.0),
                             );
-                            for r in [44_100, 48_000, 96_000] {
+                            let rates: &[u32] = match a.codec {
+                                AudioCodec::Aac => &AAC_RATES,
+                                _ => &[44_100, 48_000, 96_000],
+                            };
+                            for &r in rates {
                                 ui.selectable_value(&mut a.sample_rate, Some(r), format!("{r} Hz"));
                             }
                         });
@@ -2965,7 +2978,7 @@ fn settings_form(
                     if let Some(target) = &mut a.loudness {
                         ui.add(
                             egui::DragValue::new(target)
-                                .range(-60.0..=-5.0)
+                                .range(vidcut_core::ops::normalize::LOUDNESS)
                                 .speed(0.1)
                                 .suffix(" LUFS"),
                         );

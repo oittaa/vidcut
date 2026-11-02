@@ -14,7 +14,7 @@ use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sen
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    ClipCache, ClipRetime, Ease, PictureTool, PictureTransition, Project, Track,
+    ClipCache, ClipRetime, Ease, PictureTool, PictureTransition, Project, Speed, Track,
 };
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::render_cache::Part;
@@ -388,7 +388,8 @@ pub struct SpeedDialog {
 }
 
 impl SpeedDialog {
-    pub const PERCENT: std::ops::RangeInclusive<f64> = 1.0..=10000.0;
+    pub const PERCENT: std::ops::RangeInclusive<f64> =
+        *Speed::RANGE.start() * 100.0..=*Speed::RANGE.end() * 100.0;
 
     pub fn of(speed: f64, ripple: bool) -> Self {
         SpeedDialog {

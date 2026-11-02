@@ -314,7 +314,9 @@ The bar and the Jobs button:
   - Why: a refused change goes away, and the field does not jump back while a change is on its way.
   - A section that closes while it waits leaves a `Landing`, which it takes back when it opens again on the cue.
 - The selected cues are part of the session's `Selection`, as clips are.
-  - Its `first` is the clip or cue selected first, because the two lists hold no order between them. `Selection::keep_first` keeps it while it stays selected.
+  - Its `order` holds the clips and the cues in the order of selection, because the two lists hold no order between them.
+  - `Selection::keep_order` removes each item that left the selection and adds each new item at the end. Items that come in one request count clips first.
+  - Its `first` is the first item of `order`.
 
 **Titles** ([deviation X52](../deviations.md#x52-titles-come-from-a-titles-tab-or-add-title-and-are-edited-in-the-inspector)).
 
@@ -347,7 +349,7 @@ The bar and the Jobs button:
 
 - It is a tab of the left panel (`LeftTab`). It draws the open Title, Subtitle and Subtitle Track sections (`Workspace::title_form`, `Workspace::cue_form`, `Workspace::track_form`).
 - `Workspace::follow_selection` shows the section of the selected title or subtitle. A section that closes puts its changes in first.
-- The In and Out fields of a cue (`Workspace::cue_times`) send one `apply`. It sets the cue, and sets or removes the cues that it overwrites.
+- The In and Out fields of a cue (`Workspace::cue_times`) send one `apply`. It sets the cue, and sets or removes the cues that it overwrites. A value inside the cue next to it sends nothing (`enters_neighbor`).
 - The picture fields convert between the picture and their own unit (`Field::read`, `Field::put`). The fitted size comes from `place::upright_fit`, as in an export.
   - A picture from the handles, the wheel or the Inspector goes first (`Workspace::picture_wanted`). Thus the fields follow a drag in the viewer.
   - Each change is one undo step: one `picture.set`, or an `apply` of one `picture.set` for each clip. Reset sends `picture.clear`.

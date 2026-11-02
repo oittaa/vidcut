@@ -753,9 +753,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - A new Out changes only the end. The start stays.
     - The new range overwrites the other subtitles of the track. The change and the overwrite are one undo step.
     - A subtitle that the new range fully covers is deleted. An In moved earlier past the whole subtitle before it deleted that subtitle.
-    - A subtitle that the new range partly covers is trimmed to the new edge.
-    - An Out moved 10 frames into the next subtitle moved the start of that subtitle to the new Out. Its end stayed.
     - An Out before the In does nothing, and the field shows the old value again.
+  - These facts come from Resolve Studio 21.1.2:
+    - An In later than the Out does nothing, and the field shows the old value again.
+    - An In inside the subtitle before, or an Out inside the subtitle after, changes nothing. Both subtitles stay.
+    - The field then keeps the typed text until the subtitle is selected again. The list shows the old time.
+    - A track has no overlaps. Thus a field cannot put a subtitle inside a longer subtitle.
 - **vidcut:**
   - The Subtitle section of the Inspector tab has the In, the Out, the text and the position of the cue.
   - These open it and show the Inspector tab:
@@ -774,12 +777,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A `+` or `-` before the value moves the edge by that much.
   - Enter, Tab or a click outside the field puts the change in. Esc puts the old value back.
   - In sends a new start only, and Out a new end only, as in Resolve.
-  - A value that does not parse, or an Out at or before the In, changes nothing. The field shows the value of the project again.
-  - The new range overwrites the other cues of the track, as in Resolve. Only the newly covered part counts:
+  - A value that does not parse, an In at or after the Out, or an Out at or before the In changes nothing. The field shows the value of the project again.
+  - An In inside the cue before, or an Out inside the cue after, changes nothing. Both cues stay, and the field shows the value of the project again (D79).
+  - Else the new range overwrites the other cues of the track. Only the newly covered part counts:
     - from the new In to the old In, when the In moves earlier
     - from the old Out to the new Out, when the Out moves later
   - A cue of the track that lies fully inside that part is removed.
-  - A cue that reaches into the part from one side loses its frames in the part. Thus its end moves to the new In, or its start to the new Out.
+  - A cue that already overlaps this cue and reaches into the part loses its frames in the part. Thus its end moves to the old Out, or its start to the old In.
   - A cue that covers all of the part and more stays as it is (D79).
   - An In moved later or an Out moved earlier changes no other cue.
   - The change and the overwrite go as one `apply`. Thus they are one undo step.
@@ -794,7 +798,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - While the user types, the row of the open cue shows the typed text, as the cue on the timeline does.
   - The list has a fixed height and scrolls. It draws only the rows that show. Thus a track with thousands of cues stays fast.
   - Add New is at the left of the line above the list. It does what Add Subtitle in the right-click menu of the track does ([X44](#x44-add-subtitle-uses-the-shown-subtitle-track)).
-  - Thus the new cue opens in the section. Add New is off while a cue is being added.
+  - Thus the new cue opens in the section, with its text selected. Add New is off while a cue is being added.
   - The name of the track is at the right of the line with Add New.
   - Previous and Next are on the heading line of the Subtitle section.
   - Previous opens the cue before this cue on its track, by start time. Next opens the cue after it.
@@ -1326,13 +1330,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It runs in real time, but not on live input or on more than two channels.
   - Its Amount mixes the source with the isolated voice. At 50, they are about equal. At 70 to 80, it sounds natural (p. 774).
 - **vidcut:**
-  - The `voice_isolation` of a clip or a track is an Amount from 1 to 100.
+  - The `voice_isolation` of a clip or a track is an Amount from 0 to 100, as in Resolve Studio 21.1.2. 0 is off.
   - It runs `dpdfnet2_48khz_hr` of DPDFNet (Apache-2.0) on the CPU of this computer.
   - It runs live in playback, and the same in an export.
   - It works on any number of channels, each channel alone.
   - The Amount of a clip overrides the Amount of its track. A clip at 0 stays off on a track that has it on.
   - Voice Isolation in the right-click menu of a clip, or Alt + V, turns it on or off for the selected clips.
-  - On, it sets the Amount to 75, the middle of the 70 to 80 that the manual gives.
+  - On, it sets the Amount to 100, the value that Resolve Studio 21.1.2 shows when it is turned on.
   - The strip of the Mixer does it for a track.
   - An Amount field beside each one sets the Amount.
   - The model, 10 MB, is downloaded the first time, after a question (`download` in scripts).
@@ -1536,15 +1540,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - **Audio:** Volume, Mute and Voice Isolation of the selected clips with sound. These are the video clips with sound and the audio clips.
     - The Audio section is below the picture sections. For an audio clip, it is the only section.
     - With several clips with sound, it shows the first one. Its header gives the number of these clips.
-    - Volume is the gain of the clip, from −60 dB to +24 dB (D12). It shows one decimal and the unit.
+    - Volume is the gain of the clip, from −100 dB to +30 dB (D12). It shows one decimal and the unit.
     - On a clip with volume keyframes, Volume shows the volume at the playhead. A change sets a keyframe there ([D82](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - Volume has a Keyframe button between Previous and Next arrows. A right-click sets the ease (D75).
     - The same button sits beside Zoom, Position X, Position Y, Rotation, Anchor X, Anchor Y, Pitch, Yaw and each crop side.
     - Position X and Y share one keyframe. Zoom X and Y share one keyframe. Anchor X and Y share one keyframe.
     - The button is lit on a keyframe. A click adds or removes the keyframe at the playhead.
-    - Previous and Next move the playhead to the keyframe of that value inside the clip.
+    - Previous and Next move the playhead to the keyframe of that value, also outside the clip.
     - With several clips selected, no value has this button or the arrows, as in Resolve ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-    - A value with keyframes on one of these clips is then off and has no Reset.
+    - A value with keyframes on one of these clips is then off. Its Reset shows and does nothing.
     - Dynamic Zoom and the flips have no Keyframe button.
     - The Reset of one of these values removes its keyframes. The Reset of Transform or Crop removes that section's keyframes.
     - The Reset of Volume sets 0 dB and removes the volume keyframes. The Audio section has no Reset of the whole section.
@@ -1573,7 +1577,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A typed value is one change. Each change is one undo step.
   - The fields show a change from a script, an agent, the viewer handles or the wheel at once.
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
-  - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has neither.
+  - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has no accent color, and its Reset does nothing.
   - A picture value goes to all the selected clips that can have a picture. An Audio value goes to all the selected clips with sound.
   - A Speed value goes to all the selected clips that can change speed. Duration gives each clip the speed that fills it.
   - A value changes only that value on each clip. A Reset also acts on all of these clips.
@@ -1609,7 +1613,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - On release, one `clip.set` goes in. It is one undo step.
   - A drag on a clip that is not selected changes only that clip. It does not select the clip.
   - A drag on a selected clip changes all the selected clips with sound by the same number of dB:
-    - Thus they keep the differences between their gains. Each gain stops at −60 dB and at +24 dB.
+    - Thus they keep the differences between their gains. Each gain stops at −100 dB and at +30 dB.
     - A selected clip with volume keyframes moves all its keyframes by that number of dB ([D82](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - On release, one `apply` holds a `clip.set` or a `keyframes.set` for each clip that changes. It is one undo step.
   - A line on a locked track does not take a drag. A selected clip on a locked track does not change.

@@ -60,10 +60,10 @@ fn point_frames(t: &Title, origin: i64, file: impl Fn([f64; 2]) -> [f64; 2]) -> 
         if let Some(h) = t.position_handles.iter().find(|h| h.frame == k.frame) {
             let [before, after] = ["InBez", "OutBez"];
             if let Some([x, y]) = h.in_handle {
-                key[before] = handle_value(before, x, -y);
+                key[before] = handle_value(before, x, 0.0 - y);
             }
             if let Some([x, y]) = h.out_handle {
-                key[after] = handle_value(after, x, -y);
+                key[after] = handle_value(after, x, 0.0 - y);
             }
         }
         out.insert((k.frame - origin).to_string(), key);
@@ -321,16 +321,16 @@ fn plain_lines(lines: &[&[Span]]) -> String {
         .join("\n")
 }
 
-fn placed(t: &Title, lift: f64, usual: [f64; 2], origin: i64) -> Value {
-    let [x, y] = t.place();
+fn placed(t: &Title, usual: [f64; 2], origin: i64) -> Value {
+    let [x, y] = t.in_file(t.place());
     with_frames(
         keyed(
             "position",
-            json!([rounded(x), rounded(1.0 - y + lift)]),
+            json!([rounded(x), rounded(y)]),
             json!(usual),
             "POINTF",
         ),
-        point_frames(t, origin, |[x, y]| [x, 1.0 - y + lift]),
+        point_frames(t, origin, |at| t.in_file(at)),
     )
 }
 
@@ -422,10 +422,10 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                 &lines,
                 html(&lines, Some("center"), 0, &base),
                 4,
-                placed(t, 0.0, [0.5, 0.5], origin),
+                placed(t, [0.5, 0.5], origin),
                 origin,
             )],
-            Some([x, 1.0 - y]),
+            Some(t.in_file([x, y])),
         ),
         TitleKind::LowerThird => {
             let (align, column, usual_x) = match t.align() {
@@ -439,7 +439,6 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                 [only] => (none, *only),
                 [first, second, ..] => (*first, *second),
             };
-            let meet = 1.0 - y + t.lower_line();
             (
                 vec![
                     rich_text(
@@ -447,7 +446,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                         &[upper],
                         html(&[upper], align, 1, &base),
                         column,
-                        placed(t, t.lower_line(), [usual_x, 0.2], origin),
+                        placed(t, [usual_x, 0.2], origin),
                         origin,
                     ),
                     rich_text(
@@ -455,11 +454,11 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                         &[lower],
                         html(&[lower], align, 0, &base),
                         6 + column,
-                        placed(t, t.lower_line(), [usual_x, 0.22], origin),
+                        placed(t, [usual_x, 0.22], origin),
                         origin,
                     ),
                 ],
-                Some([x, meet]),
+                Some(t.in_file([x, y])),
             )
         }
     };

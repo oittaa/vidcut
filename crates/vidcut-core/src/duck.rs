@@ -16,11 +16,11 @@ pub const HOLD_MS: f64 = 150.0;
 pub const RECOVERY_MS: f64 = 750.0;
 pub const THRESHOLD_DB: f64 = -42.0;
 
-pub const AMOUNT: RangeInclusive<f64> = 0.0..=60.0;
-pub const LOOKAHEAD: RangeInclusive<f64> = 0.0..=1000.0;
-pub const RISE: RangeInclusive<f64> = 1.0..=1000.0;
-pub const HOLD: RangeInclusive<f64> = 0.0..=5000.0;
-pub const RECOVERY: RangeInclusive<f64> = 1.0..=1000.0;
+pub const AMOUNT: RangeInclusive<f64> = 0.0..=18.0;
+pub const LOOKAHEAD: RangeInclusive<f64> = 0.0..=500.0;
+pub const RISE: RangeInclusive<f64> = 0.0..=1000.0;
+pub const HOLD: RangeInclusive<f64> = 0.0..=1000.0;
+pub const RECOVERY: RangeInclusive<f64> = 0.0..=1000.0;
 pub const THRESHOLD: RangeInclusive<f64> = -96.0..=0.0;
 
 impl Duck {

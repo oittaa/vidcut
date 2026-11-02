@@ -62,6 +62,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The Timeline menu opens that tab.
   - `gui.show keyframes` opens that tab.
   - The tab shows the item selected first, a clip or a subtitle.
+  - When that item leaves the selection, the tab shows the next item selected, not the earliest on the timeline. Clips and subtitles share this order. Resolve Studio 21.1.2 shows this with three titles.
   - **Tracks** (pp. 1255–1256):
     - Each value that can have keyframes has a track, in a group for its section.
     - Volume is a track. Position is one track. Zoom is one track. The anchor point is one track.
@@ -70,9 +71,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - A click on the name of a group opens or closes it. The ⋯ menu also has Expand All Parameters and Collapse All Parameters.
   - **Track controls** (p. 1257):
     - The curve button shows the curve of the value under its track.
-    - The Keyframe button adds a keyframe at the playhead. On a keyframe, it removes that keyframe, as the Inspector's button does.
+    - The Keyframe button adds a keyframe at the playhead, also outside the clip (measured in Resolve Studio 21.1.2). On a keyframe, it removes that keyframe, as the Inspector's button does.
     - The Keyframe button is orange on a keyframe (p. 1250), in the Inspector too.
-    - The arrows beside it go to the previous and the next keyframe in the clip.
+    - The arrows beside it go to the previous and the next keyframe of the value, also outside the clip (measured in Resolve Studio 21.1.2).
+    - On the Speed row, the button adds a keyframe only inside the clip, after its first frame. The arrows go only to keyframes inside the clip.
     - Reset Keyframes removes all keyframes of the track.
   - **Time** (p. 1258):
     - The time ruler shows timecode. A click or a drag on it moves the playhead.
@@ -111,7 +113,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - The tab and the tray share the selected rows. A new clip in the tab clears them.
     - Mark > Add Keyframe (Ctrl+[) adds a keyframe at the playhead on each selected row, at the value there. It sends `keyframes.add`.
       - A row with a keyframe at the playhead does not change.
-      - The Volume row takes a keyframe only where the clip has sound. A held key adds once.
+      - The Volume row takes a keyframe also outside the clip (measured in Resolve Studio 21.1.2). A held key adds once.
+      - The Speed row takes a keyframe only inside the clip, after its first frame.
       - The manual says that the context picks the value (pp. 1254–1255). In Resolve Studio 21.1.2, the selected row picks it.
       - The value changed last in the Inspector and the curve in view do not pick it.
     - Mark > Delete Keyframe (Alt+]) removes the selected keyframes. With none selected, it removes the keyframes of the selected rows at the playhead.
@@ -157,6 +160,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Minimize Subtitle Track, Boring Detector.
   - **Timeline Actions:**
     - Add Video/Audio/Subtitle Track, Split Clips, Join Match Edit Clips, Add Marker.
+    - The Add Tracks window of Resolve Studio 21.1.2 takes 0 to 99 video tracks and 0 to 999 audio tracks. `track.add` takes the same.
     - Detect Scene Cuts, Add Dissolve to All Edits, Clear Transition from All Edits.
     - vidcut also has Add Subtitle (deviation X44), Create Subtitles from Audio (X46), Re-time Subtitles to Speech (X49) and Ripple Delete Silence.
   - **Edit Actions:** Trim Start to Playhead, Trim End to Playhead.
@@ -766,7 +770,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A click on a cue in the list loads it into the Inspector to edit (p. 1236).
   - Add New, above the list, adds a cue at the playhead on the track of the list (p. 1233).
   - Prev and Next in the Inspector move to the cue before or after on the track (pp. 1231, 1233).
-  - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. The new range overwrites the other cues of the track.
+  - The In and Out fields of the Inspector (pp. 1231, 1233) move one edge of the cue. A value inside the cue next to it changes nothing (D79). Else the new range overwrites the other cues of the track.
   - Cues move, trim, split and delete like clips.
   - Details: D56, D57, D78, D79; deviations X43, X44.
 - **Keyframes** ([measured](todo/keyframes.md#subtitles)):
@@ -946,6 +950,12 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Keyframes** ([todo](todo/keyframes.md#titles)):
   - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
   - Its Position keyframes take handles. The title moves at one speed along the cubic path between two keys. The details are in the [todo](todo/keyframes.md#titles).
+  - A right-click on a key of Position, Zoom, Rotation or Opacity opens a menu of eases, by the place of the key:
+    - The first key has Linear and Ease Out. The last key has Linear and Ease In.
+    - A middle key has Linear, Ease In, Ease Out and Ease In and Out. A lone key has only Linear.
+    - A check mark is on the current item.
+    - On Position, the handles are an eighth of the difference between the two neighbors of the key. They stay when a value changes.
+    - On Zoom, Rotation and Opacity, a handle is flat and a third of the gap to the neighbor.
   - vidcut: the Across, Zoom, Rotation and Title opacity rows of the Title section have the Keyframe button.
   - vidcut: the Across button holds the keyframes of Across and Down.
 - **Later** (X53):
@@ -1044,14 +1054,17 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The Effects tab has the video effects in groups.
   - A drag of an effect onto a clip on the timeline adds the effect to that clip.
   - On the Cut page, a double-click on an effect adds it to the selected clip.
+  - Measured in Resolve Studio 21.1.2: with several selected clips, only the first selected clip gets it.
   - The Effects panel of the Inspector has the values of the effects.
   - vidcut: the Effects tab has the Blur group with Gaussian Blur. The other effects come later ([todo](todo/effects-library.md)).
-  - vidcut: a double-click adds the effect to each selected clip with a picture. The right-click menu of an effect has Add to Selected Clips.
+  - vidcut: a double-click adds the effect to the first selected clip with a picture.
+  - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
 - **Inspector** (vidcut, X70):
   - The Inspector shows the effects of the first selected clip, after its Super Scale section. A change applies to that clip only.
   - Each effect is a section with an on/off box, Move Up, Move Down, Reset and Delete.
   - An effect that is off stays on the clip and does nothing.
-  - Reset puts back the usual values of the effect, and keeps it on or off.
+  - On an effect that is on, Reset puts back the usual values and leaves it on.
+  - On an effect that is off, Reset does nothing, as measured in Resolve Studio 21.1.2.
   - The effects of a clip work in their order, from the top.
 - **Blend** (p. 3526):
   - Each effect has a Blend value under Global Blend, at the bottom of its values. It mixes the effect with the picture that comes in.
@@ -1164,6 +1177,11 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **In vidcut:**
   - The Quick Export row, the Export dialog and jobs are deviation X3.
   - The suggested file name is the name of the project.
+  - AAC takes 96 to 320 kb/s, and 320 by default.
+  - The sample rate of AAC is the project's by default. The other choices are 44100 Hz and 48000 Hz.
+  - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another bitrate or chosen rate.
+  - A project at another rate, for example 96000 Hz, with AAC was not measured.
+  - The TikTok preset has AAC at 256 kb/s. That number was not measured.
 
 ## 11. Keyboard shortcuts
 
@@ -1269,7 +1287,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - After 0.8 s of hover, a drop or move onto a clip changes from replace to overwrite.
   - The manual gives no value.
 - **D12. Clip gain range.**
-  - The range is −60 dB to +24 dB, plus mute.
+  - The range is −100 dB to +30 dB, plus mute (measured in Resolve Studio 21.1.2).
   - The manual gives no range.
   - The volume line of a clip shows this range on its own scale (D77).
 - **D13. Keys.**
@@ -1350,7 +1368,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The removal of a track with clips needs a confirmation.
   - An edit or a move can name the next track number. This makes that track.
   - Track 1 cannot be removed.
-  - Track volume is from −60 to +24 dB (D12).
+  - Track volume is from −100 to +10 dB. Resolve's fader has the same top, and its bottom is minus infinity (measured in Resolve Studio 21.1.2).
 - **D28. Meters.**
   - There is a bar for each channel of the project's channel count (p. 649).
   - The bars show linear peaks from −60 dBFS. A peak stays for 1.5 s.
@@ -1364,8 +1382,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The check uses 10 ms steps.
   - Silence includes a clip past the end of its audio.
   - Silence also includes a click (under 0.05 s between 0.1 s of silence).
-  - Defaults: −40 dBFS, pre-head and post-tail 0.15 s, and minimum 0.5 s.
-  - The defaults are in seconds, so the frame rate does not change them.
+  - With Sound Level, the values are the ones that the window of Resolve Studio 21.1.2 showed, at 30 fps:
+    - Threshold: −100 to +10 dB, −25 by default.
+    - Pre head and post tail: 0 to 60 frames, 0 by default.
+    - Minimum: 2 to 60 frames, 30 by default.
+    - That window keeps the last values used. Thus it is not known whether −25 and 30 are factory values or kept values.
+    - `edit.ripple_delete_silence` refuses a value outside these ranges.
+  - With Speech, the pre head, the post tail and the minimum have their own defaults (deviation X47).
+  - `analyze.silence` starts from the same Threshold and minimum, and has no limits. It is vidcut's own.
   - Each silence of at least the minimum goes, less the post-tail and the pre-head.
   - At the ends of a clip, all of the silence goes.
   - The cuts are in whole frames.
@@ -1446,7 +1470,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The Smart Indicator, V, Smart Insert, the alignment of Place On Top, and Up/Down use the edits of Track 1, the main story.
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
-  - New Project takes any even picture size from 16 px, and any positive frame rate.
+  - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate.
+  - A side under 256 sets both sides to 256, whichever side it is. 16 x 720, 99999 x 16 and 16 x 99999 give 256 x 256.
+  - Else a side over 32768 sets both sides to 32768. 99999 x 720 gives 32768 x 32768.
+  - This rule is measured in the Project Settings dialog of Resolve Studio 21.1.2. `project.set` and `project.create` do the same.
+  - A `project.set` of one side checks the pair as it stands then, as a script in Resolve Studio 21.1.2 does.
   - Without them, the first media with video sets both, with no prompt. A prompt would stop scripts and agents.
   - The size can change at any time.
   - The rate can change only while the timeline is empty, because positions are whole frames.
@@ -1544,7 +1572,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D48. Clips at another speed** (§1, §8.6; deviations X9, X95, X96, X97).
   - A clip's speed comes from Change Clip Speed, the Speed section of the Inspector, speed keyframes, or an OTIO file.
   - The speed applies wherever its pictures and sound go.
-  - Change Clip Speed takes 1% to 10000%, forward or backward.
+  - Change Clip Speed takes 0.01% to 100000%, forward or backward (measured in Resolve Studio 21.1.2).
   - It also takes 0, which freezes the frame under the playhead.
   - It gives the whole clip one speed. The speed keyframes of the clip go.
   - Without ripple, the clip keeps its length. With ripple, it keeps its source, and later clips follow.
@@ -1613,7 +1641,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A speed keyframe does not move or copy. Its value is the speed of the section after it.
       - Its ease menu has Linear and Ease In and Out ([X97](deviations.md#x97-ease-in-and-ease-out-ease-their-own-side-of-a-section)).
       - Ctrl+X leaves the selected speed keyframes in place, and they stay selected.
-      - A change of its value in the tab sends `speed.set`. The field takes 1% to 10000%.
+      - A change of its value in the tab sends `speed.set`. The field takes 0.01% to 100000%.
       - The field is off when the section is frozen or plays backward.
     - With the tab and the tray closed, Mark > Add Keyframe (Ctrl+[) adds a speed keyframe at the playhead to each selected clip under it.
     - Then Mark > Delete Keyframe (Alt+]) removes the speed keyframe at the playhead, or else the nearest one before it.
@@ -1622,7 +1650,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `speed.set`, `speed.freeze`, `speed.reverse` and `speed.ease` change the sections. All six act at a time, the playhead by default.
     - `keyframes.add` skips a clip that cannot take a speed keyframe at `at`. It fails only when no clip can.
     - `speed.reverse` turns a section at its speed keyframe ([X96](deviations.md#x96-reverse-keeps-the-speeds-of-the-other-sections)).
-    - `speed.set` takes 1% to 10000% forward, in a section that plays forward.
+    - `speed.set` takes 0.01% to 100000% forward, in a section that plays forward.
     - `speed.ease` eases the speed keyframes of a section. `keyframes.set` gives one speed keyframe `linear` or `ease_in_out`.
     - `keyframes.list` gives `ease` `ease_in_out` for an eased speed keyframe.
     - `keyframes.remove` without `frames` and `at` removes all the speed keyframes of the clips.
@@ -1736,7 +1764,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The manual does not say which track shows after a new track is added, or how long a new cue lasts.
   - Subtitle tracks are `S1`, `S2`, … from the video up.
   - A new track is the shown track.
-  - A new cue lasts 3 s, or until the next cue of the track starts.
+  - A new cue lasts 3 s from the playhead, measured in Resolve Studio 21.1.2. It does not stop at the next cue.
+  - Add New and Add Subtitle overwrite what the new cue covers, measured in Resolve Studio 21.1.2:
+    - A cue that the new cue fully covers is removed.
+    - A cue that the new cue partly covers is trimmed to the new edge.
+    - A cue that covers all of the 3 s and more becomes two cues with the same text, before and after the new cue.
+  - These two cues keep their words and keyframes as a split does (D70, §8.12).
+  - The new cue has the text "Subtitle", selected in the text box, measured in Resolve Studio 21.1.2.
+  - `subtitles.add` alone does not overwrite. A script that wants the overwrite sends its own `apply`.
   - Cues of one track can overlap, and show together.
   - On the timeline, cues that overlap share the height of their track, each in its own lane.
   - Split leaves its text in both parts.
@@ -2279,7 +2314,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Position Y, zoom Y and anchor Y keep the handle frames and use a value offset of 0.
     - Before the first keyframe the value is the first. After the last it is the last.
     - With keyframes, that curve is the value. The plain value is not played.
-    - When the last keyframes of a value go, the first of them stays as the plain value.
+    - A first keyframe does not change the plain value. When the last keyframes of a value go, the plain value returns.
     - The viewer and the export sample the curve at the source frame of each frame.
     - A change of a keyed value at `at` sets a keyframe there, as volume does (D82).
     - `picture.set` takes `at`. With no `at`, it uses the playhead.
@@ -2294,9 +2329,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - No value has a Keyframe button or arrows.
       - A value with keyframes on one of these clips is off. It takes no typed number, and its Reset does nothing.
       - A value without keyframes takes a typed number on all these clips.
-      - vidcut's Inspector has the same rules. The Reset does not show on a value that is off.
+      - vidcut's Inspector has the same rules. The Reset shows on a value that is off.
       - A request that names several clips still keys each clip at its own frame under `at`.
-    - Previous and Next move the playhead to the keyframe before or after it, inside the clip.
+    - Previous and Next move the playhead to the keyframe before or after it, also outside the clip (measured in Resolve Studio 21.1.2).
     - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out.
     - The Reset of one value removes its keyframes and puts the usual value back.
     - The Reset of Transform, Crop or Composite removes the keyframes of that section.
@@ -2434,11 +2469,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The preview plays a new source clip without its ducking until its measurement is done. The measurement runs as a job.
     - An export and `analyze.loudness` measure what is missing.
   - **Values:**
-    - Duck Amount: 0 to 60 dB.
-    - Lookahead: 0 to 1000 ms.
-    - Rise Time: 1 to 1000 ms.
-    - Hold: 0 to 5000 ms.
-    - Recovery Time: 1 to 1000 ms. 1000 is Resolve's maximum.
+    - Duck Amount: 0 to 18 dB (measured in Resolve Studio 21.1.2).
+    - Lookahead: 0 to 500 ms (measured).
+    - Rise Time: 0 to 1000 ms (measured).
+    - Hold: 0 to 1000 ms (measured).
+    - Recovery Time: 0 to 1000 ms (measured).
     - Threshold: −96 to 0 dBFS.
     - `track.set` refuses a value outside its range, and changes no value (X69).
     - The project file keeps only the values that are not the usual ones.
@@ -2460,12 +2495,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The line is in the sound part of the clip, 2 px in from its top and its bottom.
   - It shows only where the sound part is 20 px high or more.
   - **Scale:**
-    - −60 dB is at the bottom, and +24 dB is at the top.
-    - 0 dB is at 5/7 of the height, as on the fader of the Mixer.
-    - A gain g is a part x of its side of 0 dB, from 0 to 1. Above 0 dB, x = g / 24. Below 0 dB, x = −g / 60.
+    - −100 dB is at the bottom, and +30 dB is at the top.
+    - 0 dB is at 10/13 of the height.
+    - A gain g is a part x of its side of 0 dB, from 0 to 1. Above 0 dB, x = g / 30. Below 0 dB, x = −g / 100.
     - The line goes the part x × (2 − x) of the way from 0 dB to the end of its side.
-    - Thus near 0 dB, a change of 1 dB moves the line twice as far as on the fader of the Mixer.
-    - Near −60 dB and +24 dB, a change of 1 dB moves the line almost not at all.
+    - Thus near 0 dB, a change of 1 dB moves the line farthest.
+    - Near −100 dB and +30 dB, a change of 1 dB moves the line almost not at all.
     - The two sides have the same slope at 0 dB. Thus a drag across 0 dB keeps its speed.
   - **Drag:**
     - Within 4 px of the line, the pointer becomes an up-down arrow.
@@ -2487,9 +2522,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut counts the characters of the text that shows, as Resolve does. The style tags (`<i>`, `<b>`, `<u>` and `<font>`) do not count.
   - A line break counts as one character, as the space between two words on one line does.
   - Thus a text has the same CPS on one line and on two lines.
-- **D79. A cue across the part that the In or Out field covers** (§8.12; deviation X43).
+- **D79. The In and Out fields against other cues** (§8.12; deviation X43).
+  - Measured in Resolve Studio 21.1.2: an In typed inside the cue before, or an Out typed inside the cue after, changes nothing. Both cues stay.
+  - vidcut does the same. Its field shows the stored time at once, and Resolve's field shows it when the cue is selected again. The result is the same.
+  - `subtitles.set` does not refuse such a value. A script in Resolve is not measured.
   - A new In or Out overwrites only the part that it newly covers (X43).
-  - The measurements in Resolve do not show a subtitle that covers all of that part and more.
+  - Measured in Resolve Studio 21.1.2: a track has no overlaps, so a field cannot put a cue inside a longer cue.
   - In vidcut, only a cue that already overlaps the edited cue can do that (D56).
   - Such a cue stays as it is. Thus both cues show in that part, as they show together in the overlap.
   - Reason: a split would show its text twice. A trim would take frames outside the newly covered part.
@@ -2506,7 +2544,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 
     | Mode | Loudness (LUFS) | Peak limit (dBTP) |
     |---|---|---|
-    | Sample Peak, True Peak | the target is a peak, −1 by default | none |
+    | Sample Peak | the target is a peak, −9 by default | none |
+    | True Peak | the target is a peak, −2 by default | none |
     | ITU-R BS.1770-1 | −23, can change | none |
     | ITU-R BS.1770-4 | −23, can change | −2, can change |
     | ATSC A/85, OP-59, AGCOM 219/09/CSP | −24 | −2 |
@@ -2520,9 +2559,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Defaults:**
     - The mode is YouTube: −14 LUFS with a −1 dBTP peak limit.
     - It is the value for YouTube that the export's loudness setting names. The limit keeps loud peaks under full scale.
-    - Sample Peak and True Peak start at −1 dB. Resolve's window showed −9.0 and −2.0, which it can have kept from earlier use.
+    - Sample Peak starts at −9 dBFS, and True Peak at −2 dBTP.
+    - These two come from the Deliver page of Resolve Studio 21.1.2, in a project that never used it.
     - Set Level is Independent.
-  - **Range:** −60 to −5 LUFS, as the export's loudness setting takes. A peak target and a peak limit are from −60 to 0 dB.
+  - **Range** (measured in Resolve Studio 21.1.2):
+    - A loudness target is from −30 to 0 LUFS. The export's loudness setting takes the same range.
+    - A peak target and a peak limit are from −20 to 0 dB.
   - **Measured part:** the sound that the clip plays, with its J or L cut and at its speed.
     - The clip is measured alone, without its volume, mute and Voice Isolation, and without transitions.
     - Its track's volume, mute, solo, Voice Isolation and ducking do not apply.
@@ -2535,7 +2577,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Relative: the highest level plus volume reaches the target. Every volume changes by that same number of dB.
     - The manual names the highest peak for Relative. vidcut uses the highest level for each mode.
     - A peak limit lowers the change to the limit less the true peak. In Relative, it uses the highest true peak plus volume.
-  - Each volume stops at −60 dB and +24 dB (D12). The result marks each clip that stopped (`held`).
+  - Each volume stops at −100 dB and +30 dB (D12). The result marks each clip that stopped (`held`).
   - The result also marks each clip that the peak limit stopped (`limited`).
   - Reason: the export already measures EBU R128 loudness and true peak. Thus the two features agree.
 - **D81. Volume keyframes** (§9; pp. 1109, 1112–1113, 1258; deviations X73, X74).
@@ -2553,8 +2595,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Before the first keyframe, the volume is the value of the first. After the last keyframe, it is the value of the last.
     - Between two keyframes, the volume follows the Bezier curve. A handle reaches no farther than the next keyframe.
     - With keyframes, the curve is the volume of the clip. `gain_db` is not heard.
-    - When the last keyframes go, the value of the first of them becomes `gain_db`.
-    - A keyframe and the curve take −60 to +24 dB (D12).
+    - A first keyframe does not change `gain_db`. When the last keyframes go, `gain_db` is heard again.
+    - A keyframe and the curve take −100 to +30 dB (D12).
   - **Eases:**
     - Ease In sets a flat In handle a third of the way to the keyframe before. Ease Out sets a flat Out handle a third of the way to the next one.
     - Ease In and Out sets both. Linear removes both.
@@ -2590,7 +2632,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Resolve Studio 21.1.1 moved each of four volume keyframes of a clip by the same −3.4 dB. Thus the curve kept its shape.
   - vidcut measures the clip without its volume and without its keyframes, as for every clip (D80).
   - The volume of a clip with keyframes is the value of its highest keyframe. Normalize sets that volume as it sets the volume of other clips.
-  - Every keyframe of the clip then moves by the same dB. Each stops at −60 and +24 dB.
+  - Every keyframe of the clip then moves by the same dB. Each stops at −100 and +30 dB.
   - `from_db` and `gain_db` of the result give the highest keyframe before and after.
   - Reason: Normalize changes the volume of a clip. The curve keeps its shape, and its loudest part gets the volume that a flat clip would get.
 - **D84. The volume curve in the measurements** (§9; deviations X47, X69).
@@ -2761,7 +2803,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A checked effect on a compound clip around such a title does not make a cache part.
     - A part that moves keeps its cache when the tracks under it stay the same.
     - An edit that changes the frames of a part renders it again.
-  - The background render starts after a time without activity: 5 s, unless set (`render_cache.after_secs`).
+  - The background render starts after a time without activity: 5 s, unless set (`render_cache.after_secs`). The time goes from 1 to 30 s (measured in Resolve Studio 21.1.2).
     - Activity is an edit, a play, a seek, a scrub, the preview of a change, or a job.
     - Each activity stops the render at once. The render continues later.
     - It renders from the playhead forward, then from the start of the timeline.

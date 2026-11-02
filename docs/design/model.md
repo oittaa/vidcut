@@ -344,6 +344,9 @@ Writing:
   - `Title::place_at` gives the point on the path. It uses the same `cubic` as the other curves, at one speed along the length.
   - `Title::as_picture` leaves the handles out. `Title::take_picture` keeps the handles of the keys that stay.
   - `Title::move_handles` follows a key that moves, or a new frame rate.
+  - `Title::ease_position` computes the handles of an ease from the two neighbors. It reads their values as the file holds them (`Title::in_file`), and it stores the result with Y from the top.
+  - `Title::put_handles` replaces the handles of one key. The other keys keep theirs.
+  - `Title::position_ease` gives the current ease of a key, from the sides that have a handle.
 - `ops::titles` holds the edits. `ops::titles::checked` is the check that `titles.add`, `titles.set` and `validate::violations` share.
 - It checks the style through the checks of the subtitle style (`checked_font`, `checked_size`, `checked_color`, `checked_outline`, `checked_background`).
 

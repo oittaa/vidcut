@@ -45,10 +45,14 @@ pub enum Request {
         /// Frame rate, like `25`, `29.97` or `30000/1001`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fps: Option<String>,
-        /// Frame width; give the height too.
+        /// Frame width, from 256 to 32768; give the height too. A side under
+        /// 256 sets both sides to 256. Else a side over 32768 sets both to
+        /// 32768.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         width: Option<u32>,
-        /// Frame height; give the width too.
+        /// Frame height, from 256 to 32768; give the width too. A side under
+        /// 256 sets both sides to 256. Else a side over 32768 sets both to
+        /// 32768.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -533,9 +537,10 @@ pub enum Request {
         /// Shorter speech doesn't count (`detect: speech`).
         #[serde(default = "min_speech")]
         min_speech: TimeSpec,
-        /// The shortest silence reported.
-        #[serde(default = "silence_min")]
-        min: TimeSpec,
+        /// The shortest silence reported. Default: 30 frames with
+        /// `detect: level`, 0.5 s with `detect: speech`.
+        #[serde(default)]
+        min: Option<TimeSpec>,
         /// `detect: speech` hears with transcribe.cpp's library and Silero VAD:
         /// download them if this computer doesn't have them yet, each checked
         /// against its SHA-256. Without it, a missing one is an error that
@@ -950,7 +955,8 @@ pub enum Request {
         /// What counts as silence.
         #[serde(default)]
         detect: Detect,
-        /// Sound below this level (dBFS) is silence (`detect: level`).
+        /// Sound below this level (dBFS) is silence (`detect: level`), from
+        /// -100 to 10.
         #[serde(default = "silence_threshold")]
         threshold_db: f64,
         /// Speech probability (0..1) from which a moment is speech
@@ -960,15 +966,21 @@ pub enum Request {
         /// Shorter speech doesn't count (`detect: speech`).
         #[serde(default = "min_speech")]
         min_speech: TimeSpec,
-        /// Silence kept before each audible part ("pre head").
-        #[serde(default = "silence_margin")]
-        pre_head: TimeSpec,
-        /// Silence kept after each audible part ("post tail").
-        #[serde(default = "silence_margin")]
-        post_tail: TimeSpec,
-        /// The shortest silence removed ("minimum to trip").
-        #[serde(default = "silence_min")]
-        min: TimeSpec,
+        /// Silence kept before each audible part ("pre head"). With
+        /// `detect: level`, from 0 to 60 frames, and none by default. With
+        /// `detect: speech`, 0.15 s by default.
+        #[serde(default)]
+        pre_head: Option<TimeSpec>,
+        /// Silence kept after each audible part ("post tail"). With
+        /// `detect: level`, from 0 to 60 frames, and none by default. With
+        /// `detect: speech`, 0.15 s by default.
+        #[serde(default)]
+        post_tail: Option<TimeSpec>,
+        /// The shortest silence removed ("minimum to trip"). With
+        /// `detect: level`, from 2 to 60 frames, and 30 by default. With
+        /// `detect: speech`, 0.5 s by default.
+        #[serde(default)]
+        min: Option<TimeSpec>,
         /// Cross Fade Audio: a 2-frame Cross Fade 0 dB on the sound where
         /// two parts that stay meet after the cut.
         #[serde(default)]
@@ -1174,6 +1186,8 @@ pub enum Request {
     #[serde(rename = "track.add")]
     TrackAdd {
         kind: NewTrack,
+        /// How many at once: 0 to 99 video tracks, 0 to 999 audio tracks, or
+        /// 1 to 16 subtitle tracks.
         #[serde(default = "one")]
         count: u32,
     },
@@ -1197,9 +1211,10 @@ pub enum Request {
         muted: Option<bool>,
         #[serde(default)]
         solo: Option<bool>,
+        /// The fader, in dB, from -100 to 10.
         #[serde(default)]
         volume_db: Option<f64>,
-        /// Voice Isolation's Amount, from 1 to 100: that much of the voice
+        /// Voice Isolation's Amount, from 0 to 100: that much of the voice
         /// the model hears in the sound of the track's clips
         /// that have none of their own, mixed with the rest of it; 0 turns
         /// it off. The model runs on this computer and is downloaded once,
@@ -1265,7 +1280,7 @@ pub enum Request {
         #[serde(default)]
         look: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -60..24), name, Clip Color,
+    /// Enable/disable video (D), mute, gain (dB, -100..30), name, Clip Color,
     /// Voice Isolation, Retime Process and Render Cache.
     #[serde(rename = "clip.set")]
     ClipSet {
@@ -1291,7 +1306,7 @@ pub enum Request {
         /// media's color.
         #[serde(default)]
         color: Option<String>,
-        /// Voice Isolation's Amount, from 1 to 100: that much of the voice
+        /// Voice Isolation's Amount, from 0 to 100: that much of the voice
         /// the model hears in the sound, mixed with the rest of it; 0 turns
         /// it off for the clip, also when its track has it on. A clip never
         /// given one follows its track's. The model runs on this computer
@@ -1323,7 +1338,7 @@ pub enum Request {
     /// volume keyframes, mute, Voice Isolation and transitions, and without
     /// its track's mixer. The volume of a clip with volume keyframes is its
     /// highest keyframe, and every keyframe moves by the same dB (decision
-    /// D83). The volume stops at -60 and +24 dB. One undo step; a dry run
+    /// D83). The volume stops at -100 and +30 dB. One undo step; a dry run
     /// gives the volumes and changes nothing. Returns the `target`, the
     /// `peak_limit` (null without one), and each clip's `level` (null when
     /// silent), its volume before (`from_db`) and after (`gain_db`), `held`
@@ -1335,12 +1350,12 @@ pub enum Request {
         /// What is measured and brought to `target`. Default: `youtube`.
         #[serde(default)]
         mode: NormalizeMode,
-        /// The level to reach: LUFS with a loudness mode (-60 to -5), dBFS
-        /// with `sample_peak` and dBTP with `true_peak` (-60 to 0). Default:
+        /// The level to reach: LUFS with a loudness mode (-30 to 0), dBFS
+        /// with `sample_peak` and dBTP with `true_peak` (-20 to 0). Default:
         /// the mode's. A mode with a fixed target takes only that value.
         #[serde(default)]
         target: Option<f64>,
-        /// The highest true peak allowed, in dBTP (-60 to 0), for a mode
+        /// The highest true peak allowed, in dBTP (-20 to 0), for a mode
         /// that has a peak limit. The volume stops where the peaks reach it,
         /// even below `target`. Default: the mode's. A fixed limit takes only
         /// that value.
@@ -1367,13 +1382,13 @@ pub enum Request {
     },
     /// Add a keyframe at `at` (the playhead by default) to each of `clips`,
     /// on the source frame of that clip at `at`, also with `at` outside the
-    /// clip. Without a `value`, it takes the value the clip has there. A
+    /// clip. A speed keyframe goes only inside the clip, after its first
+    /// frame. Without a `value`, it takes the value the clip has there. A
     /// keyframe already on that frame takes the value and the ease. With
     /// its first keyframe, a clip's volume follows its keyframes. A title
     /// takes position, zoom, rotation and opacity, and a scroll takes
-    /// position and opacity. A title's zoom is one number. Its position
-    /// takes no ease here: an OTIO import gives the handles that bend its
-    /// path. `clips` also takes cues, as `q3` or
+    /// position and opacity. A title's zoom is one number. The handles of
+    /// its position keys bend its path. `clips` also takes cues, as `q3` or
     /// `S1@10s`. A cue takes every value of a picture except its anchor. Its
     /// frames count from its start. Returns the `clips` with the source
     /// `frame` of each new keyframe.
@@ -1384,8 +1399,8 @@ pub enum Request {
         param: KeyParam,
         #[serde(default)]
         at: Option<TimeSpec>,
-        /// The value at the keyframe. A number for volume (dB, from -60
-        /// to 24), rotation (degrees), pitch and yaw (from -1.5 to 1.5), a
+        /// The value at the keyframe. A number for volume (dB, from -100
+        /// to 30), rotation (degrees), pitch and yaw (from -1.5 to 1.5), a
         /// crop side (a fraction), crop softness (from -100 to 100) and
         /// opacity (from 0 to 1). For position, zoom and the anchor point,
         /// two numbers, x then y, or one number for both axes of zoom.
@@ -1412,12 +1427,15 @@ pub enum Request {
         #[serde(default)]
         value: Option<KeyValue>,
         /// Added to each value. A number, or two numbers for position,
-        /// zoom and the anchor point. Volume stops at -60 and +24 dB. A
+        /// zoom and the anchor point. Volume stops at -100 and +30 dB. A
         /// picture value stops at its own limits.
         #[serde(default)]
         by: Option<KeyValue>,
         /// Sets the handles: flat, a third of the way to the keyframe
-        /// before (In) and after (Out). `linear` takes them off.
+        /// before (In) and after (Out). `linear` takes them off. On a title's
+        /// position they are points: Out is an eighth of the way from the
+        /// keyframe before to the one after, In the opposite. An ease replaces
+        /// the old handles of that keyframe. A scroll's position takes none.
         #[serde(default)]
         ease: Option<Ease>,
         /// The In handle: `frames` (at most 0) and `value` (dB) from the
@@ -1459,9 +1477,9 @@ pub enum Request {
         to: Option<TimeSpec>,
     },
     /// Remove the keyframes of `clips`: those on the source `frames`, those
-    /// at the timeline frames `at`, or, with neither, all of them. When a
-    /// clip's last keyframes go, the value of the first of them stays as
-    /// its volume.
+    /// at the timeline frames `at`, or, with neither, all of them. When the
+    /// last keyframes of a value go, the value it had before the first
+    /// keyframe returns.
     #[serde(rename = "keyframes.remove")]
     KeyframesRemove {
         clips: OneOrMany<ClipRef>,
@@ -1568,9 +1586,9 @@ pub enum Request {
         range: Option<RangeSpec>,
     },
     /// Add a cue: `text` from `at` (default: the playhead) to `end`, or for
-    /// `duration`. Without either it lasts 3 s, or until the track's next cue
-    /// starts. On `track` (default: the shown subtitle track; S1 is made when
-    /// there is none). Returns its id.
+    /// `duration`. Without either it lasts 3 s. It changes no other cue, so
+    /// it can overlap them. On `track` (default: the shown subtitle track; S1
+    /// is made when there is none). Returns its id.
     #[serde(rename = "subtitles.add")]
     SubtitlesAdd {
         /// Its lines, separated by a line break. `<i>`, `<b>`, `<u>` and
@@ -2219,8 +2237,9 @@ pub enum Request {
         #[serde(default)]
         border: Option<Border>,
     },
-    /// Put one effect of a clip back at its usual values. It stays on or
-    /// off, and keeps its `render_cache`. `effect` counts from 0.
+    /// Put one effect of a clip back at its usual values. It stays on, and
+    /// keeps its `render_cache`. An effect that is off does not change.
+    /// `effect` counts from 0.
     #[serde(rename = "effects.reset")]
     EffectsReset { clip: ClipRef, effect: usize },
     /// Take one effect off a clip. `effect` counts from 0.
@@ -2697,6 +2716,7 @@ pub enum Request {
     /// `edits` lists every selected edit, left to right. `edit` is the one
     /// clicked last, which the Trim Editor shows. `first` is the clip or cue
     /// selected first, which the Keyframes tab and the keyframe tray show.
+    /// When it leaves the selection, the next one selected takes its place.
     #[serde(rename = "selection.get")]
     SelectionGet {},
     /// Select timeline clips, subtitle cues, pool media or an edit point
@@ -3331,6 +3351,14 @@ pub struct CopiedKey {
     /// The Out handle, when the keyframe has one.
     #[serde(rename = "out", default, skip_serializing_if = "Option::is_none")]
     pub out_handle: Option<Handle>,
+    /// On a title's position: the handle toward the keyframe before it, a
+    /// point in the picture. A paste on a title keeps it as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_point: Option<[f64; 2]>,
+    /// On a title's position: the handle toward the keyframe after it, a
+    /// point in the picture. A paste on a title keeps it as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_point: Option<[f64; 2]>,
 }
 
 /// A keyframe value: one number, or x and y for position, zoom and the
@@ -3367,9 +3395,9 @@ impl KeyValue {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NormalizeMode {
-    /// The highest sample, in dBFS. Target -1.
+    /// The highest sample, in dBFS. Target -9.
     SamplePeak,
-    /// The highest true peak, between the samples too, in dBTP. Target -1.
+    /// The highest true peak, between the samples too, in dBTP. Target -2.
     TruePeak,
     /// Loudness, target -23 LUFS, no peak limit.
     #[serde(rename = "bs1770_1")]
@@ -3669,7 +3697,7 @@ fn one() -> u32 {
 }
 
 fn silence_threshold() -> f64 {
-    -40.0
+    crate::analysis::SILENCE_THRESHOLD
 }
 
 fn speech_threshold() -> f64 {
@@ -3678,14 +3706,6 @@ fn speech_threshold() -> f64 {
 
 fn min_speech() -> TimeSpec {
     TimeSpec::Seconds(0.25)
-}
-
-fn silence_margin() -> TimeSpec {
-    TimeSpec::Seconds(0.15)
-}
-
-fn silence_min() -> TimeSpec {
-    TimeSpec::Seconds(0.5)
 }
 
 fn scene_threshold() -> f64 {
@@ -3747,8 +3767,12 @@ pub struct SourceParams {
 pub struct ProjectSet {
     #[serde(default)]
     pub fps: Option<Rational>,
+    /// Frame width, from 256 to 32768. A side under 256 sets both sides to
+    /// 256. Else a side over 32768 sets both to 32768.
     #[serde(default)]
     pub width: Option<u32>,
+    /// Frame height, from 256 to 32768. A side under 256 sets both sides to
+    /// 256. Else a side over 32768 sets both to 32768.
     #[serde(default)]
     pub height: Option<u32>,
     #[serde(default)]
@@ -3866,23 +3890,23 @@ pub struct DuckSet {
     /// The tracks whose sound dips it (`V1`, `A2`), never its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<String>>,
-    /// The Duck Amount: how far it dips, in dB, from 0 to 60.
+    /// The Duck Amount: how far it dips, in dB, from 0 to 18.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub amount_db: Option<f64>,
     /// How long before a source starts the full dip is reached, in ms,
-    /// from 0 to 1000.
+    /// from 0 to 500.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lookahead_ms: Option<f64>,
     /// The Rise Time: how long the gain takes to fall to the full dip, in
-    /// ms, from 1 to 1000.
+    /// ms, from 0 to 1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rise_ms: Option<f64>,
     /// How long the full dip stays after a source stops, in ms, from 0 to
-    /// 5000.
+    /// 1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hold_ms: Option<f64>,
     /// The Recovery Time: how long the gain takes to come back after the
-    /// hold, in ms, from 1 to 1000.
+    /// hold, in ms, from 0 to 1000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery_ms: Option<f64>,
     /// What makes a source active: `speech`, or `level`, its sound at or

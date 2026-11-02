@@ -5,8 +5,8 @@ use crate::error::{Error, Result};
 use crate::request::NormalizeMode;
 use crate::validate::GAIN;
 
-pub const LOUDNESS: RangeInclusive<f64> = -60.0..=-5.0;
-pub const PEAKS: RangeInclusive<f64> = -60.0..=0.0;
+pub const LOUDNESS: RangeInclusive<f64> = -30.0..=0.0;
+pub const PEAKS: RangeInclusive<f64> = -20.0..=0.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rule {
@@ -19,7 +19,8 @@ pub struct Rule {
 pub fn rule(mode: NormalizeMode) -> Rule {
     use NormalizeMode as M;
     let (target, free_target, limit, free_limit) = match mode {
-        M::SamplePeak | M::TruePeak => (-1.0, true, None, false),
+        M::SamplePeak => (-9.0, true, None, false),
+        M::TruePeak => (-2.0, true, None, false),
         M::Bs1770v1 => (-23.0, true, None, false),
         M::Bs1770v4 => (-23.0, true, Some(-2.0), true),
         M::AtscA85 | M::Op59 | M::Agcom => (-24.0, false, Some(-2.0), false),

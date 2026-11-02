@@ -1391,7 +1391,7 @@ fn clip_line(c: &Value) -> String {
     };
     let speed = match c["speed"].as_f64() {
         Some(0.0) => ", freeze".to_string(),
-        Some(x) => format!(", {}%", (x * 100.0).round()),
+        Some(x) => format!(", {}%", vidcut_core::model::Speed::percent(x)),
         None => String::new(),
     };
     format!(

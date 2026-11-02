@@ -1,6 +1,7 @@
 use crate::model::{
     Clip, ClipAudio, Crop, Ease, Handle, Keyframe, Picture, PositionHandles, Title, TitleKind,
 };
+use crate::otio::effects::rounded;
 use crate::validate::GAIN;
 
 const FLAT: Handle = Handle {
@@ -8,6 +9,7 @@ const FLAT: Handle = Handle {
     value: 0.0,
 };
 const PATH_STEPS: usize = 256;
+const PATH_EASE: f64 = 0.125;
 
 pub fn value_at(keys: &[Keyframe], frame: f64) -> Option<f64> {
     let (first, last) = (keys.first()?, keys.last()?);
@@ -202,13 +204,19 @@ fn sides(ease: Ease) -> (bool, bool) {
     }
 }
 
-fn handles(keys: &[Keyframe], i: usize, ease: Ease) -> (Option<Handle>, Option<Handle>) {
+fn reaches(count: usize, i: usize, ease: Ease) -> (bool, bool) {
     let (wants_in, wants_out) = sides(ease);
+    (wants_in && i > 0, wants_out && i + 1 < count)
+}
+
+fn handles(keys: &[Keyframe], i: usize, ease: Ease) -> (Option<Handle>, Option<Handle>) {
+    let (before, after) = reaches(keys.len(), i, ease);
     let gap = |j: usize| (keys[i].frame - keys[j].frame).abs() as f64 / 3.0;
     let flat = |frames: f64| Handle { frames, value: 0.0 };
-    let before = i.checked_sub(1).filter(|_| wants_in).map(|j| flat(-gap(j)));
-    let after = (i + 1 < keys.len() && wants_out).then(|| flat(gap(i + 1)));
-    (before, after)
+    (
+        before.then(|| flat(-gap(i - 1))),
+        after.then(|| flat(gap(i + 1))),
+    )
 }
 
 pub fn ease(keys: &mut [Keyframe], i: usize, ease: Ease) {
@@ -230,13 +238,9 @@ pub fn ease_of(keys: &[Keyframe], i: usize) -> Option<Ease> {
 }
 
 pub fn eases(keys: &[Keyframe], i: usize) -> Vec<Ease> {
-    let last = keys.len().saturating_sub(1);
     Ease::ALL
         .into_iter()
-        .filter(|e| {
-            let (wants_in, wants_out) = sides(*e);
-            !(wants_in && i == 0 || wants_out && i >= last)
-        })
+        .filter(|e| reaches(keys.len(), i, *e) == sides(*e))
         .collect()
 }
 
@@ -293,7 +297,7 @@ pub fn checked(value: f64) -> crate::error::Result<f64> {
         Ok(value)
     } else {
         Err(crate::error::Error::invalid(format!(
-            "gain {value} dB outside -60..24 dB"
+            "gain {value} dB outside -100..30 dB"
         )))
     }
 }
@@ -829,16 +833,7 @@ impl Picture {
         }
     }
 
-    pub fn drop_chosen(
-        &mut self,
-        v: PictureValue,
-        chosen: &std::collections::HashSet<i64>,
-    ) -> Option<[f64; 2]> {
-        let first = self
-            .keys_of(v)
-            .iter()
-            .find(|k| chosen.contains(&k.frame))
-            .and_then(|k| self.key_value(v, k.frame));
+    pub fn drop_chosen(&mut self, v: PictureValue, chosen: &std::collections::HashSet<i64>) {
         let y_was = parts(self)[v as usize].1.cloned().unwrap_or_default();
         let (keys, y) = parts_mut(self, v);
         let rows: Vec<(Keyframe, f64)> = keys
@@ -851,10 +846,6 @@ impl Picture {
         if let Some(y) = y {
             *y = rows.into_iter().map(|(_, n)| n).collect();
         }
-        if let (false, Some(value)) = (self.has_keys(v), first) {
-            write_plain(self, v, value);
-        }
-        first
     }
 }
 
@@ -920,8 +911,62 @@ impl Title {
         self.position_handles.dedup_by_key(|h| h.frame);
     }
 
-    pub fn clear_handles(&mut self, chosen: &std::collections::HashSet<i64>) {
-        self.position_handles.retain(|h| !chosen.contains(&h.frame));
+    pub fn put_handles(
+        &mut self,
+        frame: i64,
+        in_handle: Option<[f64; 2]>,
+        out_handle: Option<[f64; 2]>,
+    ) {
+        self.position_handles.retain(|h| h.frame != frame);
+        if in_handle.is_some() || out_handle.is_some() {
+            self.position_handles.push(PositionHandles {
+                frame,
+                in_handle,
+                out_handle,
+            });
+            self.position_handles.sort_by_key(|h| h.frame);
+        }
+    }
+
+    pub fn in_file(&self, [x, y]: [f64; 2]) -> [f64; 2] {
+        let lift = match self.kind {
+            TitleKind::LowerThird => self.lower_line(),
+            TitleKind::Text | TitleKind::Scroll => 0.0,
+        };
+        [x, 1.0 - y + lift]
+    }
+
+    pub fn ease_position(&mut self, frame: i64, ease: Ease) {
+        let keys = &self.position_keys;
+        let Some(i) = keys.iter().position(|k| k.frame == frame) else {
+            return;
+        };
+        let (wants_in, wants_out) = reaches(keys.len(), i, ease);
+        let beside = |j: Option<usize>| {
+            j.and_then(|j| Some(self.in_file([keys.get(j)?.value, *self.position_y.get(j)?])))
+                .unwrap_or([0.0, 0.0])
+        };
+        let (before, after) = (beside(i.checked_sub(1)), beside(Some(i + 1)));
+        let x = rounded((after[0] - before[0]) * PATH_EASE);
+        let y = rounded((after[1] - before[1]) * PATH_EASE);
+        self.put_handles(
+            frame,
+            wants_in.then_some([0.0 - x, y]),
+            wants_out.then_some([x, 0.0 - y]),
+        );
+    }
+
+    pub fn position_ease(&self, frame: i64) -> Ease {
+        let h = self.handles_at(frame);
+        match (
+            h.is_some_and(|h| h.in_handle.is_some()),
+            h.is_some_and(|h| h.out_handle.is_some()),
+        ) {
+            (false, false) => Ease::Linear,
+            (true, false) => Ease::EaseIn,
+            (false, true) => Ease::EaseOut,
+            (true, true) => Ease::EaseInOut,
+        }
     }
 
     pub fn as_picture(&self) -> Picture {

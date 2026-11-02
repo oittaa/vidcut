@@ -15,6 +15,7 @@ use super::{header_button, icon, paint};
 use crate::gui::export::Ask;
 use crate::gui::keys;
 use crate::gui::pool::elide;
+use crate::gui::subtitles::new_cue;
 use crate::gui::theme;
 use crate::gui::workspace::Workspace;
 
@@ -611,11 +612,11 @@ impl Workspace {
     }
 
     pub(crate) fn add_subtitle(&mut self, ctx: &egui::Context, track: Option<&str>) {
-        let mut params = json!({ "text": "", "at": self.snap.timeline.position });
-        if let Some(t) = track {
-            params["track"] = json!(t);
-        }
-        self.timeline.adding = Some(Ask::send(&self.live, ctx, "subtitles.add", params));
+        let at = self.snap.timeline.position;
+        let Some(batch) = self.project().map(|p| new_cue(p, track, at)) else {
+            return;
+        };
+        self.timeline.adding = Some(Ask::send(&self.live, ctx, "apply", batch));
     }
 
     pub(crate) fn split_at_playhead(&self) {
