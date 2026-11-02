@@ -2344,10 +2344,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A drag inside moves the picture. Its middle, as drawn, snaps to the middle and thirds of the frame, and a guide shows.
     - Shift keeps the drag on one axis, and Alt turns snapping off.
     - A corner zooms both ways in proportion, and a side zooms one way, about the anchor point. The pointer shows the zoom.
+    - A corner reaches Zoom 0 with the pointer on the anchor point. Past that point the zoom grows again, with no mirror (measured in Resolve Studio 21.1.2).
+    - The handles of a picture at Zoom 0 stay on the anchor point. A corner drag from there sets the zoom from the distance to the anchor point.
     - The handle above the box, or a drag just outside a corner, turns the picture about the anchor point.
     - A cross marks the anchor point. It has no drag (X82).
     - Shift turns it in steps of 15°. The pointer shows the angle.
     - The Crop handles move one side each. The uncropped picture shows dashed.
+    - A Crop handle crosses the picture until the crop of its side is 1, the whole picture. The handle stays (measured in Resolve Studio 21.1.2).
+    - When two Crop handles are on the same point, a drag takes the side with the larger crop.
     - While the Transform handles show, the wheel or a pinch over the picture zooms it as a corner does, 10% for each notch.
     - Alt+wheel turns it, 1° for each notch, counterclockwise for wheel up.
     - With Shift too, Alt+wheel turns it to the next multiple of 15°.
