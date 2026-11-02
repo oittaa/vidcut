@@ -234,6 +234,7 @@ fn shade(opacity: f64, offset: [f64; 2], blur: f64) -> Option<TitleShadow> {
         opacity: Some(opacity),
         offset: Some(offset),
         blur: Some(blur),
+        off: None,
     })
 }
 
@@ -241,6 +242,7 @@ fn boxed(color: &str, opacity: f64) -> Option<SubtitleBackground> {
     Some(SubtitleBackground {
         color: color.into(),
         opacity: Some(opacity),
+        off: None,
     })
 }
 

@@ -1276,7 +1276,8 @@ pub enum Request {
         /// fraction of the picture (from 0 up to but not including 1/2).
         /// `bold` takes the
         /// font's bold face; `case` draws every letter `upper` or `lower`.
-        /// `shadow` is a title's drop shadow. `words` shows the words as
+        /// `shadow` is a title's drop shadow. In `background` or `shadow`,
+        /// `off` true draws none and keeps the values. `words` shows the words as
         /// they are spoken, by the cues' word times: `show` (`highlight`,
         /// `reveal` or `word`), the spoken word's `color`, and its `pop`,
         /// how large it starts, from 1 to 2.
@@ -2020,7 +2021,8 @@ pub enum Request {
         /// from 0 to 1, a box behind the whole text) and `shadow` (a
         /// `color`, an `opacity` from 0 to 1, an `offset` `[x, y]` right and
         /// down as fractions of the picture, each from -4 to 4, and a `blur`
-        /// from 1 to 100). A field left out keeps the usual look.
+        /// from 1 to 100). In `background` or `shadow`, `off` true draws none
+        /// and keeps the values. A field left out keeps the usual look.
         #[serde(default)]
         style: Option<TitleStyle>,
         /// Where it goes, `[x, y]` as fractions of the picture from its top

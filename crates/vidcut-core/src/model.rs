@@ -2091,6 +2091,9 @@ pub struct TitleShadow {
     /// about 3% of the picture height. Usual: 20.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blur: Option<f64>,
+    /// `true` draws no shadow and keeps these values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off: Option<bool>,
 }
 
 impl TitleShadow {
@@ -2099,6 +2102,10 @@ impl TitleShadow {
     pub const BLUR: f64 = 20.0;
     pub const BLUR_PER_PICTURE: f64 = 3300.0;
     pub const GAIN: f64 = 1.24;
+
+    pub fn is_off(&self) -> bool {
+        self.off == Some(true)
+    }
 
     pub fn ink(&self) -> [u8; 3] {
         paint(self.color.as_deref(), [0, 0, 0])
@@ -3413,6 +3420,15 @@ pub struct SubtitleBackground {
     /// subtitle track, 1 on a title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
+    /// `true` draws no box and keeps these values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off: Option<bool>,
+}
+
+impl SubtitleBackground {
+    pub fn is_off(&self) -> bool {
+        self.off == Some(true)
+    }
 }
 
 impl SubtitleStyle {
@@ -3491,6 +3507,13 @@ impl SubtitleStyle {
     }
 
     pub fn backing(&self) -> Option<([u8; 3], f64)> {
+        if self
+            .background
+            .as_ref()
+            .is_some_and(SubtitleBackground::is_off)
+        {
+            return None;
+        }
         let (ink, opacity) = self.background.as_ref().map_or(([0, 0, 0], None), |b| {
             (paint(Some(&b.color), [0, 0, 0]), b.opacity)
         });
@@ -3514,6 +3537,15 @@ impl SubtitleStyle {
             (None, Place::Top) => (0.2, 0.5),
             (None, Place::Bottom) => (0.8, 0.5),
         }
+    }
+
+    pub fn usual_position(&self, place: Place) -> [f64; 2] {
+        let across = match self.line_align() {
+            SubtitleAlign::Left => self.inset(),
+            SubtitleAlign::Center => 0.5,
+            SubtitleAlign::Right => 1.0 - self.inset(),
+        };
+        [across, self.anchor(place).0]
     }
 
     pub fn block_top(&self, place: Place, picture_height: f64, lines: f64) -> f64 {
@@ -3557,7 +3589,7 @@ fn stroke_of(o: Option<&SubtitleOutline>, usual: f64, ink: [u8; 3]) -> Option<Te
 }
 
 fn backing_of(b: Option<&SubtitleBackground>) -> Option<([u8; 3], f64)> {
-    let b = b?;
+    let b = b.filter(|b| !b.is_off())?;
     Some((paint(Some(&b.color), [0, 0, 0]), b.opacity.unwrap_or(1.0)))
 }
 
@@ -4067,12 +4099,14 @@ impl Hash for TitleShadow {
             opacity,
             offset,
             blur,
+            off,
         } = self;
         (
             color,
             floats_bits(*opacity),
             pair_bits(*offset),
             floats_bits(*blur),
+            off,
         )
             .hash(h);
     }
@@ -4129,8 +4163,12 @@ impl Eq for SubtitleOutline {}
 
 impl Hash for SubtitleBackground {
     fn hash<H: Hasher>(&self, h: &mut H) {
-        let SubtitleBackground { color, opacity } = self;
-        (color, floats_bits(*opacity)).hash(h);
+        let SubtitleBackground {
+            color,
+            opacity,
+            off,
+        } = self;
+        (color, floats_bits(*opacity), off).hash(h);
     }
 }
 

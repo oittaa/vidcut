@@ -290,7 +290,7 @@ struct Shade {
 
 fn shade(s: &TitleShadow, w: f64, h: f64) -> Option<Shade> {
     let [dx, dy] = s.shift();
-    (dx != 0.0 || dy != 0.0).then(|| Shade {
+    (!s.is_off() && (dx != 0.0 || dy != 0.0)).then(|| Shade {
         ink: s.ink(),
         opacity: s.alpha() as f32,
         shift: ((dx * w).round() as i32, (dy * h).round() as i32),
@@ -1040,6 +1040,7 @@ mod tests {
                 background: Some(SubtitleBackground {
                     color: "#000000".into(),
                     opacity: Some(0.0),
+                    off: None,
                 }),
                 ..SubtitleStyle::default()
             },

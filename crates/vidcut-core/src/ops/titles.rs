@@ -192,6 +192,7 @@ pub(crate) fn checked_shadow(s: &TitleShadow) -> Result<TitleShadow> {
         opacity,
         offset,
         blur,
+        off: s.off.filter(|&o| o),
     })
 }
 
