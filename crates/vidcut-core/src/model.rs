@@ -2048,8 +2048,8 @@ pub struct TitleStyle {
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Outline color and thickness. Usual: black, a twentieth of the text
-    /// height.
+    /// Outline color and width. Usual: black, outside the letters, `0.05 *
+    /// size * 1080` pixels of the timeline wide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<SubtitleOutline>,
     /// A box behind the whole block of text. Usual: none.
@@ -2198,8 +2198,8 @@ impl Title {
         paint(self.style.color.as_deref(), [255, 255, 255])
     }
 
-    pub fn stroke(&self) -> Option<([u8; 3], f64)> {
-        stroke_of(self.style.outline.as_ref())
+    pub fn stroke(&self) -> Option<TextStroke> {
+        stroke_of(self.style.outline.as_ref(), self.text_fraction())
     }
 
     pub fn backing(&self) -> Option<([u8; 3], f64)> {
@@ -3218,8 +3218,8 @@ pub struct SubtitleStyle {
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Outline color and thickness. Usual: black, a twentieth of the text
-    /// height.
+    /// Outline color and width. Usual: black, outside the letters, `0.05 *
+    /// size * 1080` pixels of the timeline wide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<SubtitleOutline>,
     /// A box behind each line of text. Usual: none.
@@ -3327,10 +3327,35 @@ pub struct SubtitleOutline {
     /// `#rrggbb`, `#rgb` or a name. Usual: black.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Thickness as a fraction of the text height, from 0 to 1/10. Usual:
-    /// 0.05. `0` draws none.
+    /// Width in pixels of the timeline, from 0 to 16, whatever the text size
+    /// and the timeline size. `0` draws none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
+    /// `true` puts all of its width outside the letters, behind them. Left
+    /// out, it is centered on their edges, over them. An outline with no
+    /// `size` is outside.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outside: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextStroke {
+    pub ink: [u8; 3],
+    pub width: f64,
+    pub outside: bool,
+}
+
+impl TextStroke {
+    pub const MOST: f64 = 16.0;
+    pub const USUAL: f64 = 0.05 * 1080.0;
+
+    pub fn past_letter(&self) -> f64 {
+        if self.outside {
+            self.width
+        } else {
+            self.width / 2.0
+        }
+    }
 }
 
 /// A box behind a subtitle track's or a title's text.
@@ -3408,8 +3433,8 @@ impl SubtitleStyle {
         paint(self.color.as_deref(), [255, 255, 255])
     }
 
-    pub fn stroke(&self) -> Option<([u8; 3], f64)> {
-        stroke_of(self.outline.as_ref())
+    pub fn stroke(&self) -> Option<TextStroke> {
+        stroke_of(self.outline.as_ref(), self.text_fraction())
     }
 
     pub fn backing(&self) -> Option<([u8; 3], f64)> {
@@ -3465,9 +3490,14 @@ fn paint(hex: Option<&str>, usual: [u8; 3]) -> [u8; 3] {
     hex.and_then(crate::subtitles::rgb).unwrap_or(usual)
 }
 
-fn stroke_of(o: Option<&SubtitleOutline>) -> Option<([u8; 3], f64)> {
-    let size = o.and_then(|o| o.size).unwrap_or(0.05);
-    (size > 0.0).then(|| (paint(o.and_then(|o| o.color.as_deref()), [0, 0, 0]), size))
+fn stroke_of(o: Option<&SubtitleOutline>, text: f64) -> Option<TextStroke> {
+    let size = o.and_then(|o| o.size);
+    let width = size.unwrap_or(text * TextStroke::USUAL);
+    (width > 0.0).then(|| TextStroke {
+        ink: paint(o.and_then(|o| o.color.as_deref()), [0, 0, 0]),
+        width,
+        outside: o.and_then(|o| o.outside).unwrap_or(size.is_none()),
+    })
 }
 
 fn backing_of(b: Option<&SubtitleBackground>) -> Option<([u8; 3], f64)> {
@@ -4026,8 +4056,12 @@ impl Eq for SubtitleStyle {}
 
 impl Hash for SubtitleOutline {
     fn hash<H: Hasher>(&self, h: &mut H) {
-        let SubtitleOutline { color, size } = self;
-        (color, floats_bits(*size)).hash(h);
+        let SubtitleOutline {
+            color,
+            size,
+            outside,
+        } = self;
+        (color, floats_bits(*size), outside).hash(h);
     }
 }
 

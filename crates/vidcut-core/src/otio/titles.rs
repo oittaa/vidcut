@@ -5,12 +5,11 @@ use super::picture::{file_curve, read_keys};
 use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
-    Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title,
-    TitleAlign, TitleKind, TitleShadow, TitleStyle,
+    Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, SubtitleStyle,
+    TextStroke, Title, TitleAlign, TitleKind, TitleShadow, TitleStyle,
 };
 use crate::rich::{self, Look, Span};
 
-pub const STROKE_PER_TEXT: f64 = 160.0;
 pub const UNKNOWN_HEIGHT: u32 = 1080;
 const USUAL_FAMILY: &str = "Open Sans";
 
@@ -491,10 +490,11 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
             ),
         ],
     ));
-    let (stroke_color, stroke) = match t.stroke() {
-        Some((rgb, thickness)) => (
-            hex(rgb),
-            (thickness * STROKE_PER_TEXT).round().clamp(0.0, 16.0) as i64,
+    let (stroke_color, stroke, outside) = match t.stroke() {
+        Some(s) => (
+            hex(s.ink),
+            s.width.round().clamp(0.0, TextStroke::MOST) as i64,
+            s.outside,
         ),
         None => (
             t.style
@@ -503,6 +503,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                 .and_then(|o| o.color.clone())
                 .unwrap_or_else(|| "#000000".into()),
             0,
+            false,
         ),
     };
     let usual_stroke = if t.kind == TitleKind::Text { 1 } else { 0 };
@@ -522,7 +523,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                 0.0,
                 16.0,
             ),
-            plain("strokeOutsideOnly", json!(false), json!(false), "Bool"),
+            plain("strokeOutsideOnly", json!(outside), json!(false), "Bool"),
         ],
     );
     if t.kind != TitleKind::Scroll {
@@ -906,6 +907,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
             outline: Some(SubtitleOutline {
                 color: None,
                 size: Some(0.0),
+                outside: None,
             }),
             background: backing_of(all),
             shadow: shadow_of(all),
@@ -1093,12 +1095,14 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         if steps > 0.0 {
             SubtitleOutline {
                 color: value(g, "strokeColor").as_str().map(str::to_string),
-                size: Some((steps / STROKE_PER_TEXT).min(0.1)),
+                size: Some(steps.min(TextStroke::MOST)),
+                outside: value(g, "strokeOutsideOnly").as_bool().filter(|o| *o),
             }
         } else {
             SubtitleOutline {
                 color: None,
                 size: Some(0.0),
+                outside: None,
             }
         }
     });

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::error::{Error, Result};
 use crate::model::{
     Cue, CueWord, Place, Project, SubtitleBackground, SubtitleOutline, SubtitleStyle,
-    SubtitleTrack, SubtitleWords, Title,
+    SubtitleTrack, SubtitleWords, TextStroke, Title,
 };
 use crate::request::SubtitleTimeBase;
 use crate::subtitles::{self, Read, Timed};
@@ -136,14 +136,21 @@ pub(crate) fn checked_outline(
     };
     let size = match o.size {
         None => None,
-        Some(s) if s.is_finite() && (0.0..=0.10).contains(&s) => Some(s),
+        Some(s) if s.is_finite() && (0.0..=TextStroke::MOST).contains(&s) => Some(s),
         Some(_) => {
             return Err(Error::invalid(
-                "an outline's thickness is a fraction of the text height, from 0 to 1/10",
+                "an outline's width is in pixels of the timeline, from 0 to 16",
             ));
         }
     };
-    Ok((color.is_some() || size.is_some()).then_some(SubtitleOutline { color, size }))
+    let outside = o.outside;
+    Ok(
+        (color.is_some() || size.is_some() || outside.is_some()).then_some(SubtitleOutline {
+            color,
+            size,
+            outside,
+        }),
+    )
 }
 
 pub(crate) fn checked_background(

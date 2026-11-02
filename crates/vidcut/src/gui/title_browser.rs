@@ -197,7 +197,7 @@ impl Browser {
         let moves = template.title.moves();
         let stale = self.cards.get(&key).is_none_or(|c| c.size != size);
         if stale {
-            let sprite = vidcut_av::burn::title(&template.title, size.0, size.1)
+            let sprite = vidcut_av::burn::title(&template.title, size.0, size.1, 1080)
                 .into_iter()
                 .next();
             let dy = if moves {
@@ -254,7 +254,9 @@ impl Thumbs {
             let id = match self.kept.get(&key) {
                 Some(texture) => texture.id(),
                 None => {
-                    let sprite = vidcut_av::burn::title(t, w, h).into_iter().next();
+                    let sprite = vidcut_av::burn::title(t, w, h, p.settings.height)
+                        .into_iter()
+                        .next();
                     let dy = if t.moves() {
                         scrolled(sprite.as_ref(), h, 0.5)
                     } else {

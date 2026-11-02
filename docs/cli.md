@@ -183,7 +183,7 @@ The schema describes the parameters, not the results. This list gives the result
 - `titles list`: for each title, `clip`, `track`, `start`, `end` (frames), `start_tc`, `end_tc`, `enabled` and `title`.
 - `subtitles export`:
   - `path`, `track`, `format` and `cues` (how many).
-  - `warnings`: the cues of an IMSC1 file that have more lines than their region holds.
+  - `warnings`: the cues of an IMSC1 file that have more lines than their region holds, and an outline wider than the file holds.
 - `subtitles transcribe`:
   - `track`, `cues` (their ids), `from` and `to`.
   - `heard`: the tracks heard that have sound.

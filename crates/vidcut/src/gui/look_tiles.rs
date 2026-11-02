@@ -3,24 +3,35 @@ use std::collections::HashMap;
 use eframe::egui::{self, RichText, Sense, Stroke, StrokeKind, TextureHandle, TextureOptions};
 use vidcut_av::burn::Sprite;
 use vidcut_core::looks::{Look, Styled};
-use vidcut_core::model::{Place, SubtitleStyle};
+use vidcut_core::model::{Place, SubtitleOutline, SubtitleStyle};
 
 use super::title_browser::picture;
 use super::{dialog, theme};
 
 const SAMPLE: &str = "say it";
 const SAMPLE_WORDS: [i64; 2] = [0, 10];
+const SAMPLE_SIZE: f64 = 0.34;
 const GAP: f32 = 8.0;
 const TILE: egui::Vec2 = egui::vec2((dialog::WIDTH - 4.0 * GAP) / 5.0, 44.0);
 
 fn sample(style: &SubtitleStyle, (w, h): (u32, u32)) -> Vec<Sprite> {
+    let grown = SAMPLE_SIZE / style.text_fraction();
     let style = SubtitleStyle {
-        size: Some(0.34),
+        size: Some(SAMPLE_SIZE),
         margin: Some(0.03),
+        outline: style.outline.as_ref().map(|o| SubtitleOutline {
+            size: o.size.map(|s| s * grown),
+            ..o.clone()
+        }),
         ..style.clone()
     };
     let shown = vidcut_core::subtitles::shown(SAMPLE, &SAMPLE_WORDS, &[], &style, 0, 30.0, None);
-    vidcut_av::burn::draw(&[(&shown, Place::Middle)], w, h, &style).all()
+    let cue = vidcut_av::burn::Painted {
+        shown: &shown,
+        place: Place::Middle,
+        style: &style,
+    };
+    vidcut_av::burn::paint(&[cue], w, h, 1080).all()
 }
 
 #[derive(Default)]

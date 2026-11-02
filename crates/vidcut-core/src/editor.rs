@@ -6993,6 +6993,7 @@ pub fn query(
                     frame_rate: Some(p.settings.fps.as_f64()),
                     positions: true,
                     style: &t.style,
+                    timeline_height: p.settings.height,
                 },
             );
             if !dry_run {

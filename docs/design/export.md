@@ -345,6 +345,8 @@ Cancel:
 - `Screen::draw` lays the layers under a title, then the title, then the layers over it, and then the subtitles.
 - `burn::title` lays out a title with the code of the burn-in (`lay_out`).
   - `lay_out` strokes the outlines of the glyphs with zeno. When a glyph has no outline, it grows the drawn letters instead (`dilate`).
+  - A stroke goes over the letters. An `outside` stroke goes behind them, at twice its width.
+  - `Edge` holds its width in pixels of the picture. `burn::title` and `burn::paint` take the timeline height for this, because a width is in pixels of the timeline.
   - A title has spans, each with its own face, size, weight, slant, underline and color.
   - Its kind aligns it, and title safe wraps it. It has one box behind the block, and its anchor places it.
 - Each title in the plan carries its clip, and where the piece is in that clip (`ShownTitle`, its `Run`). `Run::top` places a scrolling title on each frame.

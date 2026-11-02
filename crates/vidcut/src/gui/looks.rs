@@ -372,7 +372,7 @@ impl TextFields {
                 .as_ref()
                 .and_then(|o| o.color.clone())
                 .unwrap_or_default(),
-            outline_size: percent(s.outline.as_ref().and_then(|o| o.size)),
+            outline_size: plain(s.outline.as_ref().and_then(|o| o.size)),
             background: s
                 .background
                 .as_ref()
@@ -421,6 +421,7 @@ impl TextFields {
         salt: &str,
         families: &[String],
         size_hint: &str,
+        outline_hint: &str,
     ) -> (bool, bool) {
         let mut enter = false;
         let mut changed = false;
@@ -449,7 +450,7 @@ impl TextFields {
         changed |= row(ui, "Outline", &mut self.outline, "#000000");
         changed |= swatch(ui, &mut self.outline, [0, 0, 0]);
         ui.end_row();
-        changed |= row(ui, "Outline size", &mut self.outline_size, "5% of the text");
+        changed |= row(ui, "Outline size", &mut self.outline_size, outline_hint);
         ui.end_row();
         changed |= row(ui, "Background", &mut self.background, "none");
         changed |= swatch(ui, &mut self.background, [0, 0, 0]);
@@ -530,7 +531,7 @@ impl TextFields {
             None => return Err("a background needs a color".into()),
         };
         let outline_color = field(&self.outline);
-        let outline_size = kept_number(
+        let outline_size = kept_plain(
             &self.outline_size,
             stored.outline.as_ref().and_then(|o| o.size),
             "outline size",
@@ -543,6 +544,7 @@ impl TextFields {
                 SubtitleOutline {
                     color: outline_color,
                     size: outline_size,
+                    outside: stored.outline.as_ref().and_then(|o| o.outside),
                 },
             ),
             background,

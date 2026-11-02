@@ -195,7 +195,8 @@ fn spoken(size: f64, show: WordsShow, pop: Option<f64>, upper: bool) -> Subtitle
         size: Some(size),
         outline: Some(SubtitleOutline {
             color: None,
-            size: Some(0.08),
+            size: Some(0.08 * size * 1080.0),
+            outside: Some(true),
         }),
         margin: Some(0.15),
         bold: Some(true),
@@ -222,6 +223,7 @@ fn bare() -> Option<SubtitleOutline> {
     Some(SubtitleOutline {
         color: None,
         size: Some(0.0),
+        outside: None,
     })
 }
 
@@ -290,7 +292,8 @@ pub fn built_in(kind: LookKind) -> Vec<Look> {
                         color: Some("#ffd400".into()),
                         outline: Some(SubtitleOutline {
                             color: None,
-                            size: Some(0.1),
+                            size: Some(0.1 * 0.11 * 1080.0),
+                            outside: Some(true),
                         }),
                         shadow: shade(0.8, [0.004, 0.007], 15.0),
                         ..TitleStyle::default()

@@ -136,7 +136,7 @@ impl Grab {
             },
             ..t.clone()
         };
-        let s = vidcut_av::burn::title(&upright, size.0, size.1)
+        let s = vidcut_av::burn::title(&upright, size.0, size.1, size.1)
             .into_iter()
             .next()?;
         let b = [s.x as f32, s.y as f32, s.width as f32, s.height as f32];
