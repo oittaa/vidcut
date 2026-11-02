@@ -753,9 +753,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - A new Out changes only the end. The start stays.
     - The new range overwrites the other subtitles of the track. The change and the overwrite are one undo step.
     - A subtitle that the new range fully covers is deleted. An In moved earlier past the whole subtitle before it deleted that subtitle.
-    - A subtitle that the new range partly covers is trimmed to the new edge.
-    - An Out moved 10 frames into the next subtitle moved the start of that subtitle to the new Out. Its end stayed.
     - An Out before the In does nothing, and the field shows the old value again.
+  - These facts come from Resolve Studio 21.1.2:
+    - An In later than the Out does nothing, and the field shows the old value again.
+    - An In inside the subtitle before, or an Out inside the subtitle after, changes nothing. Both subtitles stay.
+    - The field then keeps the typed text until the subtitle is selected again. The list shows the old time.
+    - A track has no overlaps. Thus a field cannot put a subtitle inside a longer subtitle.
 - **vidcut:**
   - The Subtitle section of the Inspector tab has the In, the Out, the text and the position of the cue.
   - These open it and show the Inspector tab:
@@ -774,12 +777,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A `+` or `-` before the value moves the edge by that much.
   - Enter, Tab or a click outside the field puts the change in. Esc puts the old value back.
   - In sends a new start only, and Out a new end only, as in Resolve.
-  - A value that does not parse, or an Out at or before the In, changes nothing. The field shows the value of the project again.
-  - The new range overwrites the other cues of the track, as in Resolve. Only the newly covered part counts:
+  - A value that does not parse, an In at or after the Out, or an Out at or before the In changes nothing. The field shows the value of the project again.
+  - An In inside the cue before, or an Out inside the cue after, changes nothing. Both cues stay, and the field shows the value of the project again (D79).
+  - Else the new range overwrites the other cues of the track. Only the newly covered part counts:
     - from the new In to the old In, when the In moves earlier
     - from the old Out to the new Out, when the Out moves later
   - A cue of the track that lies fully inside that part is removed.
-  - A cue that reaches into the part from one side loses its frames in the part. Thus its end moves to the new In, or its start to the new Out.
+  - A cue that already overlaps this cue and reaches into the part loses its frames in the part. Thus its end moves to the old Out, or its start to the old In.
   - A cue that covers all of the part and more stays as it is (D79).
   - An In moved later or an Out moved earlier changes no other cue.
   - The change and the overwrite go as one `apply`. Thus they are one undo step.
