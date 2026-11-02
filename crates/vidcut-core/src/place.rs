@@ -293,6 +293,13 @@ impl Placing {
             };
             levels.push(Level { back, ..own });
         }
+        for l in &mut levels {
+            let [u0, v0, u1, v1] = l.edge;
+            let quad = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(|c| ahead(&l.back, c));
+            if l.soft == Soft::default() && no_bars(quad, frame) {
+                l.edge = [-1.0, -1.0, 2.0, 2.0];
+            }
+        }
         let mode = placed
             .iter()
             .map(|p| p.picture.mode())
@@ -470,17 +477,40 @@ pub fn fitted(
     } else {
         (fh * pw / ph, fh)
     };
-    let (x, y) = ((fw - sw) / 2.0, (fh - sh) / 2.0);
-    if x < LEAST_BAR && y < LEAST_BAR {
-        return [0.0, 0.0, fw, fh];
+    [(fw - sw) / 2.0, (fh - sh) / 2.0, sw, sh]
+}
+
+fn uncovered(quad: &[[f64; 2]; 4], [x, y]: [f64; 2]) -> f64 {
+    let (mut left, mut right, mut near) = (false, false, f64::INFINITY);
+    for i in 0..4 {
+        let [ax, ay] = quad[i];
+        let [bx, by] = quad[(i + 1) % 4];
+        let (dx, dy) = (bx - ax, by - ay);
+        let (px, py) = (x - ax, y - ay);
+        let side = dx * py - dy * px;
+        left |= side > 0.0;
+        right |= side < 0.0;
+        let t = ((px * dx + py * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+        near = near.min((px - t * dx).hypot(py - t * dy));
     }
-    [x, y, sw, sh]
+    if left && right { near } else { 0.0 }
+}
+
+pub fn no_bars(quad: [[f64; 2]; 4], (w, h): (f64, f64)) -> bool {
+    quad.iter().flatten().all(|v| v.is_finite())
+        && [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]]
+            .iter()
+            .all(|c| uncovered(&quad, *c) < LEAST_BAR - 1e-9)
+}
+
+pub fn no_bars_at([x, y, w, h]: [f64; 4], frame: (f64, f64)) -> bool {
+    no_bars([[x, y], [x + w, y], [x + w, y + h], [x, y + h]], frame)
 }
 
 pub fn fills(v: &VideoInfo, frame: (u32, u32)) -> bool {
     let sar = (v.sar[0], v.sar[1]);
-    let [_, _, w, h] = fitted((v.width, v.height), sar, v.rotation, frame);
-    !v.alpha && w == f64::from(frame.0) && h == f64::from(frame.1)
+    let place = fitted((v.width, v.height), sar, v.rotation, frame);
+    !v.alpha && no_bars_at(place, (f64::from(frame.0), f64::from(frame.1)))
 }
 
 pub fn detail(placed: &[Placed]) -> f64 {

@@ -390,7 +390,7 @@ The plan:
 - A placed clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) is a source piece with `placed` pictures (`render::Placed`). They are the picture of its clip, then the pictures of the compound clips around it.
 - `render::flatten_lanes` lays it over the tracks below, as an `Over` of a `VideoPiece::Mix` without a ramp. In a dissolve with a placed side, the incoming side is marked `cross`.
 - A clip at its usual values goes over the same way where its fitted picture leaves bars and something is below it. A bar can be a part of a pixel ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)).
-- Where its fitted picture fills the frame, it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.
+- Where its fitted picture leaves no bar ([spec §13](../cut-page-spec.md#the-limit-for-a-thin-bar)), it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.
 - A picture with an alpha channel (`VideoInfo::alpha`) never fills the frame. It goes over the layers below by its straight alpha ([todo](../todo/clip-alpha.md)).
 - With nothing below it, it is drawn with black bars. Why: this costs less.
 

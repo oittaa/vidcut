@@ -253,6 +253,8 @@ The audio device:
   - It fits the picture and turns it upright.
     - `place::fitted` gives the place of the picture in the frame, in parts of a pixel ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)).
     - `fs` covers a pixel at the edge of that place in part.
+    - Where `place::no_bars_at` is true, `fs` covers each edge pixel in full ([spec §13](../cut-page-spec.md#the-limit-for-a-thin-bar)).
+    - `Placing::new` opens the `edge` of a level where `place::no_bars` is true. The place of the picture does not change.
     - The rule works at the size of the draw. The size of the viewer is in whole pixels of the screen, so its shape can differ a little from the timeline. Thus a picture that fills the timeline can leave a part of a pixel in the viewer.
     - A thumbnail, a proxy and a picture for an AI upscaler draw into a size that is already rounded (`Sampling::Rounded`, `place::rounded_place`). Why: the picture must fill that size, with no bar.
   - It first converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `shader_colors`). In an SDR timeline, it tone-maps HDR.
@@ -264,6 +266,7 @@ The audio device:
   - An export, a proxy and a thumbnail scale with the filter of the spec (`resized`, [spec §13](../cut-page-spec.md#the-scaling-filter)).
     - Each pixel reads the same number of samples at any scale.
     - A pixel with no scale and a whole-pixel place reads one sample (`resamples`).
+    - Above a shrink of 8:1, the filter reads the level of `halvings` where the shrink is 8:1 or less ([X110](../deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).
   - In an export, the kernels of Super Scale widen when the picture shrinks (`sharp`).
     - They widen up to 4 times. Above a shrink of 4:1, the draw first halves the converted picture into smaller levels (`halvings`, `fs_halve`).
     - The kernel then reads the level where the shrink is 4:1 or less. The larger shrink of the two axes selects the level.

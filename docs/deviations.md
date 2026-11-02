@@ -908,7 +908,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Its Threshold is the speech probability (0.5).
   - Shortest Speech leaves out shorter speech (0.25 s, the default of Silero).
   - Pre Head and Post Tail keep 0.15 s around each spoken part.
-  - Non-speech shorter than Minimum to Trip (0.5 s) stays.
+  - Non-speech shorter than Minimum (0.5 s) stays.
   - The red stripes, Remove and the one undo step are the same as with Sound level.
   - The requests are `detect`, `speech_threshold` and `min_speech` on `edit.ripple_delete_silence` and `analyze.silence`.
 - **Why:**
@@ -1517,7 +1517,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The sections of other clips are the picture sections, the Speed section and the Audio section.
   - A double-click on the name of a subtitle track shows its Subtitle Track section (X51).
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
-  - With nothing of these selected, it shows one line.
+  - With nothing of these selected, it shows one line. It also shows that line with only several titles selected ([spec §8.14](cut-page-spec.md#814-titles-pp-762764-11761178)).
   - It has no Done and no Cancel. As in Resolve, a change goes in without a button, and Ctrl+Z undoes it.
   - A section shows the project while the user does not edit it, also after Ctrl+Z or a change from a script.
   - Audio clips, titles and subtitles have no picture.
@@ -1795,11 +1795,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 ## X90. The Keyframes tab edits a keyframe in place
 
 - **Resolve:**
-  - The Keyframe Editor adds a keyframe with the Keyframe button or Ctrl+[, at the playhead (p. 1257).
-  - Its track controls have no value field (p. 1257). The Curve Editor is a separate view (p. 1255).
+  - The track controls of the Keyframe Editor have no value field (p. 1257). The Curve Editor is a separate view (p. 1255).
   - Full Extend Zoom shows the whole clip. Detail Zoom zooms in around the playhead. A zoom slider sets the zoom (p. 1258).
 - **vidcut:**
-  - A double-click on an empty part of a track adds a keyframe there. The playhead moves to it.
   - A bar under the tracks shows the selected keyframe:
     - the name of the value and the time
     - the value, in the units of the Inspector
@@ -1814,7 +1812,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A scroll bar under the tracks shows and moves the range.
 - **Why:**
   - The user sees and sets the exact value of a keyframe without a change to the Inspector.
-  - A double-click adds a keyframe where the user points, without a move of the playhead first.
   - The curve stays in line with the keyframes that it joins.
   - "Fit Clip" tells what the button does.
   - The mouse wheel zooms at the point of interest, which a slider cannot do.
@@ -2244,3 +2241,45 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Keyframe button of the other values is orange on a keyframe (p. 1250).
 - **vidcut:** Each Keyframe button is orange on a keyframe. This includes the diamond of the Speed section.
 - **Why:** The same button has the same color in each place.
+
+## X108. A double-click on a row of the Keyframes tab adds a keyframe
+
+- **Resolve:**
+  - The Keyframe Editor adds a keyframe with the Keyframe button or Ctrl+[, at the playhead (p. 1257).
+  - A double-click on a row of the Keyframes panel adds nothing, inside or outside the clip (measured in Resolve Studio 21.1.2).
+  - The Add Keyframes tool of the Curve Editor adds a keyframe with a click on a curve.
+  - That click can be inside the clip or before its start (measured in Resolve Studio 21.1.2).
+- **vidcut:**
+  - A double-click on an empty part of a row or its curve adds a keyframe at the frame under the pointer, inside the clip.
+  - A double-click outside the clip adds nothing.
+  - The playhead moves to the new keyframe, and the keyframe is selected ([X90](#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
+  - The rows of the keyframe tray do the same.
+- **Why:**
+  - The user adds a keyframe at the frame under the pointer, and does not first move the playhead to that frame.
+
+## X109. The Keyframes tab shows the values of a title
+
+- **Resolve:**
+  - The Keyframes panel of a title has only the rows of the clip: Transform, Cropping and Composite (measured in Resolve Studio 21.1.2).
+  - A keyframe on the Position of the Title tab has no row.
+- **vidcut:**
+  - The Keyframes tab of a title has the rows Position, Zoom, Rotation and Opacity. A scroll has only Position and Opacity ([todo](todo/keyframes.md#titles)).
+  - A title has no rows for Transform and Cropping. A title has no such values ([spec §8.14](cut-page-spec.md#814-titles-pp-762764-11761178)).
+- **Why:**
+  - All the keyframes of a title show on rows over time, in one tab, as the keyframes of a clip do.
+  - The user moves and deletes them in that tab.
+  - The Title section of the Inspector shows only the keyframe at the playhead, with arrows to the others.
+
+## X110. A shrink above 8:1 reads each source pixel
+
+- **Resolve:**
+  - The scaling filter reads 16 source pixels across and 16 down at each scale ([spec §13](cut-page-spec.md#the-scaling-filter)).
+  - The formula is measured down to a shrink of 18.6:1.
+  - At a shrink of 24:1, one-pixel lines every 3 source pixels read 64, where their mean is 117.3 (measured in Resolve Studio 21.1.2).
+- **vidcut:**
+  - Up to a shrink of 8:1, vidcut uses the same filter.
+  - Above a shrink of 8:1, vidcut first halves the picture until the shrink that remains is 8:1 or less.
+- **Why:**
+  - Above 8:1, the filter gives some source pixels more weight than others. Thin lines then make bands.
+  - A 4K picture with one-pixel lines every 25 pixels has a mean of 70.4. At a shrink of 32:1, the filter alone reads 64 to 84. With the halving, it reads 69 to 71.
+  - Timeline thumbnails and storyboards often shrink this far.
