@@ -1800,18 +1800,20 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - `marks.set` and `media.marks.set` take the same values as `duration`.
 - **D61. Burned-in subtitles** (§8.12; p. 1247; deviations X45, X51).
   - The manual does not say how a track looks burned in before it has a style.
-  - Resolve's look, from a burn-in render of Resolve Studio 21.1.1 over black (made through its scripting API, 3840×2160):
-    - The tallest letters of a line are 4.2% of the picture height. Those of two lines are 11.3%.
-    - Both are centered at 80.1% of the height.
-    - Not checked: the outline or shadow of the text over a bright picture.
-  - vidcut's look:
-    - White text, 5.5% of the picture height.
-    - Lines 1.31 times that height apart.
-    - A black outline outside the letters, 0.1 times the Size number wide, in pixels of the timeline.
+  - The usual look is Resolve's default, measured in Resolve Studio 21.1.2:
+    - White Open Sans Regular at Size 58: 58/1080 of the picture height.
+    - Lines 1.362 times the text height apart. This scales with the picture height.
+    - A white stroke of Size 1, centered on the edge of the letters.
+    - A shadow with an offset of 0, which draws nothing.
+    - One black box, 50% opaque, behind the whole block, with no box for each line.
+    - The box is 5 pixels of the timeline taller than the lines, above and below, at any text size and timeline height.
+    - The box is 0.3 times the Size number wider than the widest line, each side. These are pixels of the timeline.
+    - The Corner Radius of the box is 0.010 of the picture height, about 10 pixels at 1080p. It does not grow with the text.
     - Centered, and wrapped at 90% of the width.
     - The middle of the block is at 80% of the height.
     - For a cue placed in the middle, the middle of the block is at 50%. For a cue at the top, it is at 20%.
-    - Measured at 1280×720 with Segoe UI: 4.2% and 11.3%, centered at 80.1%.
+  - The Corner Radius is not measured at other heights.
+  - An export at another size scales the whole picture, thus these pixels too. A smaller export is measured in Resolve Studio 21.1.2.
   - The font is Open Sans where it is installed, else the sans-serif font of the system.
   - For scripts that the font does not have, the system's fonts are used.
   - Cues that show together at one place are one block, in the order they start.
@@ -1827,8 +1829,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - With `outside`, the box Outside Only, it goes behind the letters. Its outer edge stays, and the letters stay whole.
     - In both modes it reaches half its width past the letters, measured in Resolve Studio 21.1.2.
     - An export at another size scales the whole picture, thus the stroke too. A smaller export is measured in Resolve Studio 21.1.2.
-    - `background` is a color and an opacity from 0 to 1.
-    - The background is a box behind each line. The box reaches 0.15 of the text height past the line.
+    - `outline` left out is the white stroke. An `outline` with no color is white.
+    - `background` is a color and an opacity from 0 to 1. An opacity of 0 draws no box. A background with no opacity is 50% opaque.
     - `margin` is the inset of the block from the left and right, as that fraction of the width.
     - For a cue placed at the top or the bottom, `margin` is also the inset from that edge, as that fraction of the height.
     - `margin` is from 0 up to, but not including, half. A cue in the middle stays centered.
@@ -1838,8 +1840,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A margin moves a block to the edge:
     - Without a margin, the middle of a bottom block is at 80% of the height.
     - With a margin, its bottom edge is at the margin.
-    - Example: a margin of 5% puts the line of a one-line cue at 87.8–95% of the height.
-    - The line is 7.2% of the height (5.5% × 1.31). This is lower than the usual look.
+    - Example: a margin of 5% puts the line of a one-line cue at 87.7–95% of the height.
+    - The line is 7.3% of the height (5.37% × 1.362). This is lower than the usual look.
     - Likewise, with a margin, the top edge of a top block is at the margin. Without a margin, its middle is at 20%.
   - A project file with a style that `track.set` would refuse is refused.
   - The viewer draws the style as a burn-in does (D56).
@@ -1904,7 +1906,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Sizes are percentages, because IMSC1 allows `c` units in a text document only in `ebutts:linePadding`.
   - `ttp:cellResolution` makes the picture 100 rows of cells.
   - The text height is a percentage of one cell: 5.5% of the picture is `550%`.
-  - Lines are `131%` of it apart.
+  - Lines are `136.2%` of it apart.
   - `proportionalSansSerif` follows the font family.
   - A name with whitespace in it is in single quotes (`'Open Sans',proportionalSansSerif`).
   - Reason: TTML1 §8.3.5 takes a name bare or quoted, and IMSC1 §7.4 asks for no whitespace between the parts of the value.
@@ -1912,7 +1914,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The outline is the part of the stroke outside the letters, as a percentage of the text height. The file does not have the part over the letters.
   - IMSC1 allows at most a tenth of the text height. A wider outline is written as a tenth.
   - That outline is named in the notes of the export, and in the warnings of `subtitles.export`.
-  - The background is a span around the text of each cue.
+  - The background is a span around the text of each cue. Thus each line has its own square box in the file, not one round box behind the block.
   - Each place has a region:
     - The region is as wide as the text wraps.
     - It is anchored where the block is: at the margin, or centered at 20%, 50% and 80%.
@@ -1930,7 +1932,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The manual does not give the look of a title, how its text sits, or how it plays over other tracks.
   - The usual look of a title:
     - The font of the burn-in (D61).
-    - White, with a black outline outside the letters, 0.1 times the Size number wide, in pixels of the timeline, and no background.
+    - White, with no background.
+    - A black outline centered on the edge of the letters, 0.1 times the Size number wide, in pixels of the timeline.
     - Text 96/1080 of the picture height for Text: the height of Resolve's 96-point Text title (D67).
     - Text 6% of the picture height for a lower third.
     - Lines 1.31 times the text height apart, wrapped at the width of title safe, 90% of the picture width.
@@ -2068,7 +2071,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A cue without word times shows all its words at once.
   - The viewer and a burn-in draw it the same way. Subtitle files and streams get the text.
   - The looks of Create Subtitles from Audio (`look`) put the cues on a new track, with a style and the usual characters and lines:
-    - Pop: bold capitals, 7.5% of the picture height, an outline of 12.96 pixels outside the letters, a shadow and a margin of 15%.
+    - Pop: bold capitals, 7.5% of the picture height, no box, a shadow and a margin of 15%.
+    - Pop has a black outline of 12.96 pixels outside the letters.
     - In Pop, the spoken word is #ffd400 and pops at 1.25. Pop has 20 characters on one line.
     - Highlight and Reveal: bold at 6.5%, with an outline of 11.23 pixels and the same shadow and margin. 32 characters on one line.
     - Word: bold capitals at 10%, with an outline of 16 pixels, popping at 1.15. 20 characters.

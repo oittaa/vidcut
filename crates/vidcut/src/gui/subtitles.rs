@@ -12,7 +12,7 @@ use vidcut_core::time::{Rational, TimeSpec};
 use super::dialog;
 use super::export::{Ask, Picked};
 use super::folders::Kind;
-use super::looks::{Parts, Picker, TextFields};
+use super::looks::{Parts, Picker, TextFields, Usual};
 use super::theme;
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
@@ -164,7 +164,7 @@ impl CueDialog {
     }
 
     fn cue_style(&self) -> Result<SubtitleStyle, String> {
-        let parts = self.fields.parts(&Parts::of_subtitles(&self.base))?;
+        let parts = self.fields.parts(&Parts::of_subtitles(&self.base), None)?;
         Ok(SubtitleStyle {
             font: parts.font,
             size: parts.size,
@@ -690,7 +690,7 @@ pub(super) fn filled(shown: &str, stored: Option<f64>) -> String {
 fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
     let stored = &d.base;
     let was = Parts::of_subtitles(stored);
-    let parts = d.fields.refilled(&was).parts(&was)?;
+    let parts = d.fields.refilled(&was).parts(&was, Some("#000000"))?;
     let words = match d.show {
         Some(show) => {
             let pop = stored.words.as_ref().and_then(|w| w.pop);
@@ -1304,9 +1304,7 @@ impl Workspace {
             });
         });
         egui::Grid::new("cue-style-fields").show(ui, |ui| {
-            let _ = d
-                .fields
-                .rows(ui, "cue-style", &d.families, "the track", "the track");
+            let _ = d.fields.rows(ui, "cue-style", &d.families, &Usual::cue());
             ui.label("Margin");
             ui.add(
                 egui::TextEdit::singleline(&mut d.margin)
@@ -1619,18 +1617,11 @@ impl Workspace {
             d.load(&l.style);
             changed = true;
         }
-        let outline_hint = format!(
-            "{} pixels",
-            super::looks::plain(SubtitleStyle::default().stroke().map(|s| s.width))
-        );
+        let size_hint = format!("{}% of the picture", percent(Some(SubtitleStyle::SIZE)));
+        let outline_hint = format!("{} pixel", super::looks::plain(Some(SubtitleStyle::STROKE)));
         egui::Grid::new("subtitle-style-fields").show(ui, |ui| {
-            let (c, e) = d.fields.rows(
-                ui,
-                "subtitle",
-                &d.families,
-                "5.5% of the picture",
-                &outline_hint,
-            );
+            let usual = Usual::subtitles(&size_hint, &outline_hint);
+            let (c, e) = d.fields.rows(ui, "subtitle", &d.families, &usual);
             changed |= c;
             enter |= e;
             let mut row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {

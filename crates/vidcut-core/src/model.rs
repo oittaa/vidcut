@@ -2048,8 +2048,8 @@ pub struct TitleStyle {
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Outline color and width. Usual: black, outside the letters, `0.1 *
-    /// size * 1080` pixels of the timeline wide.
+    /// Outline color and width. Usual: black, centered on the edge of the
+    /// letters, `0.1 * size * 1080` pixels of the timeline wide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<SubtitleOutline>,
     /// A box behind the whole block of text. Usual: none.
@@ -2111,6 +2111,8 @@ impl TitleStyle {
 }
 
 impl Title {
+    pub const LINE: f64 = 1.31;
+    pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;
     pub const LOWER_IN: f64 = 0.1;
     pub const LOWER_DOWN: f64 = 0.88;
@@ -2199,7 +2201,11 @@ impl Title {
     }
 
     pub fn stroke(&self) -> Option<TextStroke> {
-        stroke_of(self.style.outline.as_ref(), self.text_fraction())
+        stroke_of(
+            self.style.outline.as_ref(),
+            self.text_fraction() * TextStroke::USUAL,
+            [0, 0, 0],
+        )
     }
 
     pub fn backing(&self) -> Option<([u8; 3], f64)> {
@@ -2236,7 +2242,7 @@ impl Title {
         let size = lines
             .last()
             .map_or(base, |line| crate::rich::largest(line, base));
-        size * SubtitleStyle::LINE
+        size * Self::LINE
     }
 
     pub fn label(&self) -> String {
@@ -3212,17 +3218,18 @@ pub struct SubtitleStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
     /// Text height as a fraction of the picture height, above 0 and at most
-    /// 1/2. Usual: 0.055.
+    /// 1/2. Usual: 58/1080 (about 0.054).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
-    /// Outline color and width. Usual: black, outside the letters, `0.1 *
-    /// size * 1080` pixels of the timeline wide.
+    /// Outline color and width. Usual: white, 1 pixel of the timeline wide,
+    /// centered on the edge of the letters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<SubtitleOutline>,
-    /// A box behind each line of text. Usual: none.
+    /// A box with round corners behind the whole block of text. Usual:
+    /// black, half opaque.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<SubtitleBackground>,
     /// Inset from the left and right, as a fraction of the picture width,
@@ -3238,7 +3245,8 @@ pub struct SubtitleStyle {
     /// (`lower`), whatever the text has. Usual: as the text has them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub case: Option<LetterCase>,
-    /// A soft copy of the text behind it. Usual: none.
+    /// A soft copy of the text behind it. An offset of 0 draws nothing.
+    /// Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<TitleShadow>,
     /// The words shown as they are spoken, by the cues' word times. A cue
@@ -3324,16 +3332,17 @@ pub enum WordsShow {
 /// An outline around a subtitle track's or a title's text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 pub struct SubtitleOutline {
-    /// `#rrggbb`, `#rgb` or a name. Usual: black.
+    /// `#rrggbb`, `#rgb` or a name. Usual: white on a subtitle track, black
+    /// on a title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     /// Width in pixels of the timeline, from 0 to 16, whatever the text size
-    /// and the timeline size. `0` draws none.
+    /// and the timeline size. `0` draws none. Usual: 1 on a subtitle track,
+    /// `0.1 * size * 1080` on a title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
     /// Half of the width always reaches past the letters. `true` draws it
-    /// behind them and leaves them whole. Left out, it goes over them. An
-    /// outline with no `size` is outside.
+    /// behind them and leaves them whole. Left out, it goes over them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outside: Option<bool>,
 }
@@ -3359,14 +3368,20 @@ impl TextStroke {
 pub struct SubtitleBackground {
     /// `#rrggbb`, `#rgb` or a name.
     pub color: String,
-    /// From 0 to 1. Usual: 1.
+    /// From 0 to 1. `0` draws no box on a subtitle track. Usual: 1/2 on a
+    /// subtitle track, 1 on a title.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
 }
 
 impl SubtitleStyle {
-    pub const LINE: f64 = 1.31;
-    pub const PADDING: f64 = 0.15;
+    pub const SIZE: f64 = 58.0 / 1080.0;
+    pub const LINE: f64 = 1.362;
+    pub const STROKE: f64 = 1.0;
+    pub const BOX_ACROSS: f64 = 0.3 * 1080.0;
+    pub const BOX_DOWN: f64 = 5.0;
+    pub const BOX_CORNER: f64 = 0.010;
+    pub const BOX_OPACITY: f64 = 0.5;
 
     pub fn is_empty(&self) -> bool {
         self.font.is_none()
@@ -3422,7 +3437,7 @@ impl SubtitleStyle {
     }
 
     pub fn text_fraction(&self) -> f64 {
-        self.size.unwrap_or(0.055)
+        self.size.unwrap_or(Self::SIZE)
     }
 
     pub fn ink(&self) -> [u8; 3] {
@@ -3430,11 +3445,15 @@ impl SubtitleStyle {
     }
 
     pub fn stroke(&self) -> Option<TextStroke> {
-        stroke_of(self.outline.as_ref(), self.text_fraction())
+        stroke_of(self.outline.as_ref(), Self::STROKE, [255, 255, 255])
     }
 
     pub fn backing(&self) -> Option<([u8; 3], f64)> {
-        backing_of(self.background.as_ref())
+        let (ink, opacity) = self.background.as_ref().map_or(([0, 0, 0], None), |b| {
+            (paint(Some(&b.color), [0, 0, 0]), b.opacity)
+        });
+        let opacity = opacity.unwrap_or(Self::BOX_OPACITY);
+        (opacity > 0.0).then_some((ink, opacity))
     }
 
     pub fn inset(&self) -> f64 {
@@ -3486,13 +3505,12 @@ fn paint(hex: Option<&str>, usual: [u8; 3]) -> [u8; 3] {
     hex.and_then(crate::subtitles::rgb).unwrap_or(usual)
 }
 
-fn stroke_of(o: Option<&SubtitleOutline>, text: f64) -> Option<TextStroke> {
-    let size = o.and_then(|o| o.size);
-    let width = size.unwrap_or(text * TextStroke::USUAL);
+fn stroke_of(o: Option<&SubtitleOutline>, usual: f64, ink: [u8; 3]) -> Option<TextStroke> {
+    let width = o.and_then(|o| o.size).unwrap_or(usual);
     (width > 0.0).then(|| TextStroke {
-        ink: paint(o.and_then(|o| o.color.as_deref()), [0, 0, 0]),
+        ink: paint(o.and_then(|o| o.color.as_deref()), ink),
         width,
-        outside: o.and_then(|o| o.outside).unwrap_or(size.is_none()),
+        outside: o.and_then(|o| o.outside).unwrap_or(false),
     })
 }
 

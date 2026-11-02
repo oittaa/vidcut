@@ -275,6 +275,50 @@ impl Workspace {
 
 pub(super) const SHADOW_INK: &str = "#000000";
 
+pub(super) struct Usual<'a> {
+    size: &'a str,
+    outline: &'a str,
+    ink: [u8; 3],
+    outline_size: &'a str,
+    background: &'a str,
+    opacity: &'a str,
+}
+
+impl<'a> Usual<'a> {
+    pub(super) fn subtitles(size: &'a str, outline_size: &'a str) -> Self {
+        Self {
+            size,
+            outline: "#ffffff",
+            ink: [255, 255, 255],
+            outline_size,
+            background: "#000000",
+            opacity: "50%",
+        }
+    }
+
+    pub(super) fn cue() -> Self {
+        Self {
+            size: "the track",
+            outline: "the track",
+            ink: [255, 255, 255],
+            outline_size: "the track",
+            background: "the track",
+            opacity: "the track",
+        }
+    }
+
+    pub(super) fn title(size: &'a str, outline_size: &'a str) -> Self {
+        Self {
+            size,
+            outline: "#000000",
+            ink: [0, 0, 0],
+            outline_size,
+            background: "none",
+            opacity: "100%",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct Parts {
     pub font: Option<String>,
@@ -374,10 +418,7 @@ impl TextFields {
                 .and_then(|o| o.color.clone())
                 .unwrap_or_default(),
             outline_size: plain(s.outline.as_ref().and_then(|o| o.size)),
-            outside: s
-                .outline
-                .as_ref()
-                .is_none_or(|o| o.outside.unwrap_or(o.size.is_none())),
+            outside: s.outline.as_ref().is_some_and(|o| o.outside == Some(true)),
             background: s
                 .background
                 .as_ref()
@@ -425,8 +466,7 @@ impl TextFields {
         ui: &mut egui::Ui,
         salt: &str,
         families: &[String],
-        size_hint: &str,
-        outline_hint: &str,
+        usual: &Usual,
     ) -> (bool, bool) {
         let mut enter = false;
         let mut changed = false;
@@ -447,23 +487,28 @@ impl TextFields {
         changed |= row(ui, "Font", &mut self.font, "Open Sans");
         changed |= font_list(ui, &format!("{salt}-font"), &mut self.font, families);
         ui.end_row();
-        changed |= row(ui, "Size", &mut self.size, size_hint);
+        changed |= row(ui, "Size", &mut self.size, usual.size);
         ui.end_row();
         changed |= row(ui, "Color", &mut self.color, "#ffffff");
         changed |= swatch(ui, &mut self.color, [255, 255, 255]);
         ui.end_row();
-        changed |= row(ui, "Outline", &mut self.outline, "#000000");
-        changed |= swatch(ui, &mut self.outline, [0, 0, 0]);
+        changed |= row(ui, "Outline", &mut self.outline, usual.outline);
+        changed |= swatch(ui, &mut self.outline, usual.ink);
         ui.end_row();
-        changed |= row(ui, "Outline size", &mut self.outline_size, outline_hint);
+        changed |= row(
+            ui,
+            "Outline size",
+            &mut self.outline_size,
+            usual.outline_size,
+        );
         ui.end_row();
         ui.label("Outside Only");
         changed |= ui.checkbox(&mut self.outside, "").changed();
         ui.end_row();
-        changed |= row(ui, "Background", &mut self.background, "none");
+        changed |= row(ui, "Background", &mut self.background, usual.background);
         changed |= swatch(ui, &mut self.background, [0, 0, 0]);
         ui.end_row();
-        changed |= row(ui, "Opacity", &mut self.opacity, "100%");
+        changed |= row(ui, "Opacity", &mut self.opacity, usual.opacity);
         ui.end_row();
         changed |= row(ui, "Shadow", &mut self.shadow, "none");
         changed |= swatch(ui, &mut self.shadow, [0, 0, 0]);
@@ -525,8 +570,14 @@ impl TextFields {
         }))
     }
 
-    pub(super) fn parts(&self, stored: &Parts) -> Result<Parts, String> {
-        let background = match field(&self.background) {
+    pub(super) fn parts(&self, stored: &Parts, usual_box: Option<&str>) -> Result<Parts, String> {
+        let color = match (field(&self.background), usual_box) {
+            (Some(color), _) => Some(color),
+            (None, _) if self.opacity.trim().is_empty() => None,
+            (None, Some(usual)) => Some(usual.to_string()),
+            (None, None) => return Err("a background needs a color".into()),
+        };
+        let background = match color {
             Some(color) => Some(SubtitleBackground {
                 color,
                 opacity: kept_number(
@@ -535,8 +586,7 @@ impl TextFields {
                     "opacity",
                 )?,
             }),
-            None if self.opacity.trim().is_empty() => None,
-            None => return Err("a background needs a color".into()),
+            None => None,
         };
         let outline_color = field(&self.outline);
         let outline_size = kept_plain(
@@ -548,7 +598,7 @@ impl TextFields {
         let outside = if kept_outside == Some(self.outside) {
             kept_outside
         } else {
-            (self.outside != outline_size.is_none()).then_some(self.outside)
+            self.outside.then_some(true)
         };
         Ok(Parts {
             font: field(&self.font),

@@ -137,7 +137,7 @@ fn an_imsc1_file_writes_capitals_and_bold() {
     .text;
     let found = (
         text.contains("tts:fontWeight=\"bold\""),
-        text.contains(">HI <span tts:fontStyle=\"italic\">THERE</span></p>"),
+        text.contains(">HI <span tts:fontStyle=\"italic\">THERE</span></span></p>"),
     );
     assert_eq!(found, (true, true));
 }
