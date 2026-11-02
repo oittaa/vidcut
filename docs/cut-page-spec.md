@@ -2280,7 +2280,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - No value has a Keyframe button or arrows.
       - A value with keyframes on one of these clips is off. It takes no typed number, and its Reset does nothing.
       - A value without keyframes takes a typed number on all these clips.
-      - vidcut's Inspector has the same rules. The Reset does not show on a value that is off.
+      - vidcut's Inspector has the same rules. The Reset shows on a value that is off.
       - A request that names several clips still keys each clip at its own frame under `at`.
     - Previous and Next move the playhead to the keyframe before or after it, inside the clip.
     - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out.
