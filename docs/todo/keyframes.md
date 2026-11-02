@@ -292,7 +292,9 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - `titles.set` and the viewer's handles put a new number on a keyframe at `at`, or at the playhead, when the value has keyframes.
 - With the playhead outside the clip, the Title section shows the curve at the playhead's clip time, as the other rows do. A new number and the Keyframe buttons add a keyframe there, outside the clip.
 - `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take a title in `clips`.
-- A switch to Scroll drops the zoom and rotation keyframes. A `look` in `titles.set` drops all keyframes.
+- A switch to Scroll drops the zoom and rotation keyframes and the position handles.
+- A `look` in `titles.set` keeps the keyframes and the position handles. A look that makes a scroll drops what a switch to Scroll drops.
+- A `look` in `titles.set` adds no keyframe. Its number for a value with keyframes shows when the last of them goes.
 
 **In a file:**
 
