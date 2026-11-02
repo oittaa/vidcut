@@ -447,7 +447,7 @@ fn limits(param: KeyParam) -> (f64, f64) {
         }
         KeyParam::CropSoftness => (-100.0, 100.0),
         KeyParam::Opacity => (0.0, 1.0),
-        KeyParam::Speed => (0.01, 100.0),
+        KeyParam::Speed => (*Speed::RANGE.start(), *Speed::RANGE.end()),
     }
 }
 
@@ -518,8 +518,8 @@ fn unit(param: KeyParam) -> &'static str {
 
 fn places(param: KeyParam) -> usize {
     match param {
-        KeyParam::Volume | KeyParam::Zoom | KeyParam::Opacity | KeyParam::Speed => 1,
-        KeyParam::Rotation | KeyParam::CropSoftness => 2,
+        KeyParam::Volume | KeyParam::Zoom | KeyParam::Opacity => 1,
+        KeyParam::Rotation | KeyParam::CropSoftness | KeyParam::Speed => 2,
         KeyParam::Pitch | KeyParam::Yaw => 3,
         _ => 0,
     }

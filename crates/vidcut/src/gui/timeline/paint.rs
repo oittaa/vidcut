@@ -708,7 +708,7 @@ fn speed_marks(
         } else {
             theme::colors().text_dim
         };
-        let text = format!("{}%", (l.speed * 100.0).round());
+        let text = format!("{}%", Speed::percent(l.speed));
         for dx in [0.0, 1.0] {
             painter.text(
                 l.rect.center() + vec2(dx, 0.0),

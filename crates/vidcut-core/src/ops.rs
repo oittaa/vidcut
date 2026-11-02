@@ -1494,9 +1494,9 @@ pub fn change_speed(
     ripple: Option<bool>,
     at: Option<i64>,
 ) -> Result<()> {
-    if !speed.is_finite() || (speed != 0.0 && !(0.01..=100.0).contains(&speed.abs())) {
+    if !speed.is_finite() || (speed != 0.0 && !Speed::RANGE.contains(&speed.abs())) {
         return Err(Error::invalid(format!(
-            "speed {speed} isn't 0 (a freeze frame) or 1% to 10000% either way"
+            "speed {speed} isn't 0 (a freeze frame) or 0.01% to 100000% either way"
         )));
     }
     let ripple = ripple.unwrap_or(p.settings.ripple_on);
@@ -1554,7 +1554,7 @@ pub fn change_speed(
         } else {
             c.duration
         };
-        let at_speed = format!("at {}%", (speed * 100.0).round());
+        let at_speed = format!("at {}%", Speed::percent(speed));
         retimed(p, &c, n, want, ripple, &at_speed)?;
     }
     Ok(())
@@ -1653,10 +1653,8 @@ pub fn checked_isolation(amount: f64) -> Result<f64> {
 }
 
 pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<()> {
-    if let Some(g) = props.gain_db
-        && !(-60.0..=24.0).contains(&g)
-    {
-        return Err(Error::invalid(format!("gain {g} dB outside -60..24 dB")));
+    if let Some(g) = props.gain_db {
+        crate::keyframes::checked(g)?;
     }
     if let Some(Some(c)) = &props.color {
         check_clip_color(c)?;
@@ -2355,7 +2353,7 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
             }
             if c.audio.as_ref().is_some_and(|a| {
                 a.stream as usize >= media.info.audio.len()
-                    || !(-60.0..=24.0).contains(&a.gain_db)
+                    || !crate::validate::GAIN.contains(&a.gain_db)
                     || crate::keyframes::problem(&a.gain_keys).is_some()
             }) {
                 return Err(Error::invalid(format!(

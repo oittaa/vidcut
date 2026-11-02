@@ -112,9 +112,9 @@ pub struct TrackProps {
 
 pub fn set_track(p: &mut Project, id: &str, props: &TrackProps) -> Result<()> {
     if let Some(v) = props.volume_db
-        && !(-60.0..=24.0).contains(&v)
+        && !crate::validate::FADER.contains(&v)
     {
-        return Err(Error::invalid(format!("volume {v} dB outside -60..24 dB")));
+        return Err(Error::invalid(format!("volume {v} dB outside -100..10 dB")));
     }
     if let Some(Some(d)) = &props.duck {
         crate::duck::checked(p, id, d)?;

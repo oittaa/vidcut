@@ -1534,7 +1534,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - **Audio:** Volume, Mute and Voice Isolation of the selected clips with sound. These are the video clips with sound and the audio clips.
     - The Audio section is below the picture sections. For an audio clip, it is the only section.
     - With several clips with sound, it shows the first one. Its header gives the number of these clips.
-    - Volume is the gain of the clip, from −60 dB to +24 dB (D12). It shows one decimal and the unit.
+    - Volume is the gain of the clip, from −100 dB to +30 dB (D12). It shows one decimal and the unit.
     - On a clip with volume keyframes, Volume shows the volume at the playhead. A change sets a keyframe there ([D82](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - Volume has a Keyframe button between Previous and Next arrows. A right-click sets the ease (D75).
     - The same button sits beside Zoom, Position X, Position Y, Rotation, Anchor X, Anchor Y, Pitch, Yaw and each crop side.
@@ -1607,7 +1607,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - On release, one `clip.set` goes in. It is one undo step.
   - A drag on a clip that is not selected changes only that clip. It does not select the clip.
   - A drag on a selected clip changes all the selected clips with sound by the same number of dB:
-    - Thus they keep the differences between their gains. Each gain stops at −60 dB and at +24 dB.
+    - Thus they keep the differences between their gains. Each gain stops at −100 dB and at +30 dB.
     - A selected clip with volume keyframes moves all its keyframes by that number of dB ([D82](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - On release, one `apply` holds a `clip.set` or a `keyframes.set` for each clip that changes. It is one undo step.
   - A line on a locked track does not take a drag. A selected clip on a locked track does not change.
