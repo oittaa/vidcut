@@ -368,7 +368,7 @@ What it renders:
   - `stats::reason_names` names them as Stats for Nerds does. The line, the Stats row and `cache.status` use these names.
 - `Setup::reasons` keeps the reasons of the mode. Smart keeps all. User keeps `Reason::On`, `Reason::Effect` and the kinds that `RenderCachePrefs` turns on.
 - A clip set to `ClipCache::Off` gives no `Reason::Media` and no `Reason::SuperScale`. Its other reasons stay (spec D98).
-- An `Effect` with `render_cache` on gives `Reason::Effect` on a clip. An effect on a title does not. An effect that is off gives none.
+- An `Effect` with `render_cache` on gives `Reason::Effect` on a clip and on a title. The title is then in the cache file. An effect that is off gives none.
 - Each `VideoPiece::Source` and `VideoPiece::Black` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
   - In User mode, an excluded piece gives no `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime`, `Reason::Transition`, `Reason::Opacity` or `Reason::Composite`.
   - Why the black pieces: the black side of a Push or a dip is a part of the transition of the track.
@@ -402,7 +402,7 @@ The two levels (spec D98):
 
 The names of frames:
 
-- The cache keeps the frame after the tracks mix. `render_cache::bare` takes off the titles on top of all tracks. Thus an edit of their text keeps the cache.
+- The cache keeps the frame after the tracks mix. `render_cache::bare` takes off the titles on top of all tracks when none of them has a checked effect. A checked effect keeps those titles in the file. An edit of that title's text renders the frames again.
 - `Cache::keys` names each frame by a SHA-256 of its piece of one frame (`VideoPiece::part`).
   - In the piece, the fingerprint of each media takes the place of its path.
   - The piece has no clip ids and no times on the timeline. Thus a part that moves keeps its names.

@@ -132,7 +132,7 @@ impl Setup<'_> {
 
     fn levels(&self, piece: &VideoPiece) -> (bool, Vec<bool>) {
         let user = self.mode == RenderCache::User;
-        let mut whole = false;
+        let mut whole = titled(piece) && self.kept(&Reason::Effect);
         let clips = piece
             .layers()
             .iter()
@@ -360,8 +360,26 @@ fn checked(placed: &[Placed]) -> bool {
         .any(|p| p.picture.effects.iter().any(|e| e.on && e.render_cache))
 }
 
+fn checked_effect(effects: &[crate::model::Effect]) -> bool {
+    effects.iter().any(|e| e.on && e.render_cache)
+}
+
+fn checked_title(title: &ShownTitle) -> bool {
+    checked(&title.placed) || checked_effect(&title.effects)
+}
+
+fn titled(piece: &VideoPiece) -> bool {
+    bare(piece)
+        .titles()
+        .iter()
+        .any(|(_, title)| checked_title(title))
+}
+
 pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<Reason> {
     let mut out: Vec<Reason> = layered(piece, slow, user).into_iter().flatten().collect();
+    if titled(piece) {
+        out.push(Reason::Effect);
+    }
     out.sort_unstable();
     out.dedup();
     out
@@ -439,7 +457,7 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
 
 pub fn bare(piece: &VideoPiece) -> &VideoPiece {
     match piece {
-        VideoPiece::Titled { under, .. } => under,
+        VideoPiece::Titled { under, titles, .. } if !titles.iter().any(checked_title) => under,
         other => other,
     }
 }
@@ -477,6 +495,7 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
 fn plain_title(t: &mut ShownTitle) {
     t.clip.clear();
     t.placed.iter_mut().for_each(plain_placed);
+    t.effects.iter_mut().for_each(|e| e.render_cache = false);
 }
 
 fn plain_placed(p: &mut Placed) {
@@ -901,10 +920,12 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
         made: None,
     };
     match part {
-        VideoPiece::Titled { titles, .. } => VideoPiece::Titled {
-            under: Box::new(source),
-            titles: titles.clone(),
-        },
+        VideoPiece::Titled { titles, .. } if !titles.iter().any(checked_title) => {
+            VideoPiece::Titled {
+                under: Box::new(source),
+                titles: titles.clone(),
+            }
+        }
         _ => source,
     }
 }
@@ -1181,7 +1202,7 @@ fn read_keys(path: &Path) -> Option<Vec<Key>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cache, Look, Reason, Setup, reasons};
+    use super::{Cache, Look, Reason, Setup, bare, cached, reasons};
     use crate::model::{
         Effect, EffectKind, GaussianBlur, Picture, Project, RenderCache, Settings, SuperScale,
         Title,
@@ -1222,6 +1243,7 @@ mod tests {
                     start: 0,
                     ready: false,
                 }],
+                effects: Vec::new(),
             }],
         }
     }
@@ -1245,9 +1267,12 @@ mod tests {
     }
 
     #[test]
-    fn a_checked_effect_on_a_title_schedules_no_cache() {
+    fn a_checked_effect_on_a_title_keeps_the_title_in_the_cache() {
         let piece = titled();
-        assert!(reasons(&piece, &|_| false, false).is_empty());
+        assert_eq!(reasons(&piece, &|_| false, false), vec![Reason::Effect]);
+        assert!(matches!(bare(&piece), VideoPiece::Titled { .. }));
+        let kept = cached(&piece, std::path::Path::new("cache.mkv"), 0, 1);
+        assert!(matches!(kept, VideoPiece::Source { .. }));
         let project = Project::new(Settings::default());
         let prefs = RenderCachePrefs::default();
         let look = Look::of(&project, (1920, ProxyCodec::Auto), CacheCodec::Auto);
@@ -1262,7 +1287,18 @@ mod tests {
             look: &look,
         };
         let plan = plan_of(piece);
-        assert!(Cache::default().next(&plan, &setup, 0, 8).is_none());
+        assert!(Cache::default().next(&plan, &setup, 0, 8).is_some());
+    }
+
+    #[test]
+    fn a_title_without_a_checked_effect_stays_out_of_the_cache() {
+        let mut piece = titled();
+        let VideoPiece::Titled { titles, .. } = &mut piece else {
+            panic!("title");
+        };
+        titles[0].placed[0].picture.effects[0].render_cache = false;
+        assert!(reasons(&piece, &|_| false, false).is_empty());
+        assert!(matches!(bare(&piece), VideoPiece::Black { .. }));
     }
 
     #[test]

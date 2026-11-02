@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipCache, ClipRetime, ColorSpace, DuckDetect, Hdr, Keyframe, Media, MediaSuperScale,
-    Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset,
-    SmoothMode, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
+    Clip, ClipCache, ClipRetime, ColorSpace, DuckDetect, Effect, Hdr, Keyframe, Media,
+    MediaSuperScale, Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings,
+    SlidePreset, SmoothMode, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -244,6 +244,9 @@ pub struct ShownTitle {
     /// plays inside, outward. Empty, it is drawn over the frame as it is.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub placed: Vec<Placed>,
+    /// Effects on the title clip's picture. Empty when it has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<Effect>,
 }
 
 /// Where a piece is in its clip, which a moving title and a Dynamic Zoom
@@ -289,6 +292,7 @@ impl ShownTitle {
             run: self.run.after(k),
             fade: self.fade.map(|r| r.after(k)),
             placed: self.placed.iter().map(|p| p.after(k)).collect(),
+            effects: self.effects.clone(),
         }
     }
 
@@ -2098,6 +2102,11 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     fade,
                     placed: nest
                         .map_or_else(Vec::new, |n| n.outer.iter().map(|p| p.after(x)).collect()),
+                    effects: c
+                        .picture
+                        .as_ref()
+                        .map(|p| p.effects.clone())
+                        .unwrap_or_default(),
                 })
             };
             match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {
