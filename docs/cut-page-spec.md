@@ -2061,7 +2061,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Zoom and rotation work about the middle of a Text title.
   - For a lower third, they work about the point where its lines meet (D67).
   - Each line of a lower third has its own `position`, `zoom`, `rotation` and keyframes (p. 1178):
-    - `line` in `titles.set` and in the `keyframes` requests names the line.
+    - `line` in `titles.set` names the line.
+    - In the `keyframes` requests, these values name the line: `upper_position`, `upper_zoom`, `upper_rotation`, `lower_position`, `lower_zoom` and `lower_rotation`.
+    - The Title section has Across, Down, Zoom and Rotation under Upper Line and under Lower Line.
     - The two lines go together until a request names a line. Each line then keeps its values and goes apart.
     - A request that names no line then changes the lower line.
     - The upper line stands on its point, and the lower line hangs from its point. Each line's zoom and rotation work about its point.

@@ -3382,7 +3382,6 @@ fn mutate(
         Request::KeyframesAdd {
             clips,
             param,
-            line,
             at,
             value,
             ease,
@@ -3393,8 +3392,8 @@ fn mutate(
                 None => playhead
                     .ok_or_else(|| Error::usage("keyframes.add needs `at` (no playhead)"))?,
             };
-            let added = ops::keyframes::on_line(p, &ids, *param, *line, |p| {
-                ops::keyframes::add(p, &ids, *param, at, *value, *ease)
+            let added = ops::keyframes::on_line(p, &ids, *param, |p, param| {
+                ops::keyframes::add(p, &ids, param, at, *value, *ease)
             })?;
             let added: Vec<Value> = added
                 .into_iter()
@@ -3405,7 +3404,6 @@ fn mutate(
         Request::KeyframesSet {
             clips,
             param,
-            line,
             frames,
             at,
             value,
@@ -3423,15 +3421,14 @@ fn mutate(
                 in_handle: *in_handle,
                 out_handle: *out_handle,
             };
-            ops::keyframes::on_line(p, &ids, *param, *line, |p| {
-                ops::keyframes::set(p, &ids, *param, &pick, &change)
+            ops::keyframes::on_line(p, &ids, *param, |p, param| {
+                ops::keyframes::set(p, &ids, param, &pick, &change)
             })?;
             Value::Null
         }
         Request::KeyframesMove {
             clips,
             param,
-            line,
             frames,
             at,
             by,
@@ -3440,22 +3437,21 @@ fn mutate(
             let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
-            ops::keyframes::on_line(p, &ids, *param, *line, |p| {
-                ops::keyframes::shift(p, &ids, *param, &pick, *by, to)
+            ops::keyframes::on_line(p, &ids, *param, |p, param| {
+                ops::keyframes::shift(p, &ids, param, &pick, *by, to)
             })?;
             Value::Null
         }
         Request::KeyframesRemove {
             clips,
             param,
-            line,
             frames,
             at,
         } => {
             let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
-            ops::keyframes::on_line(p, &ids, *param, *line, |p| {
-                ops::keyframes::remove(p, &ids, *param, &pick)
+            ops::keyframes::on_line(p, &ids, *param, |p, param| {
+                ops::keyframes::remove(p, &ids, param, &pick)
             })?;
             Value::Null
         }
@@ -3464,12 +3460,12 @@ fn mutate(
             let picks = ops::keyframes::chosen(p, &id, keys.as_deref())?;
             let copied = ops::keyframes::copy(p, &id, &picks)?;
             let one = std::slice::from_ref(&id);
-            for (param, line, frames) in picks {
+            for (param, frames) in picks {
                 let pick = ops::keyframes::Pick {
                     frames: Some(frames),
                     at: None,
                 };
-                ops::keyframes::on_line(p, one, param, line, |p| {
+                ops::keyframes::on_line(p, one, param, |p, param| {
                     ops::keyframes::remove(p, one, param, &pick)
                 })?;
             }

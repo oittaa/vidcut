@@ -1419,10 +1419,6 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         param: KeyParam,
-        /// The line of a lower third that takes the position, zoom or
-        /// rotation. The two lines then go apart.
-        #[serde(default)]
-        line: Option<LowerThirdLine>,
         #[serde(default)]
         at: Option<TimeSpec>,
         /// The value at the keyframe. A number for volume (dB, from -100
@@ -1444,9 +1440,6 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         param: KeyParam,
-        /// The line of a lower third whose keyframes change.
-        #[serde(default)]
-        line: Option<LowerThirdLine>,
         #[serde(default)]
         frames: Option<OneOrMany<i64>>,
         #[serde(default)]
@@ -1495,9 +1488,6 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         param: KeyParam,
-        /// The line of a lower third whose keyframes move.
-        #[serde(default)]
-        line: Option<LowerThirdLine>,
         #[serde(default)]
         frames: Option<OneOrMany<i64>>,
         #[serde(default)]
@@ -1517,9 +1507,6 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         param: KeyParam,
-        /// The line of a lower third whose keyframes go.
-        #[serde(default)]
-        line: Option<LowerThirdLine>,
         #[serde(default)]
         frames: Option<OneOrMany<i64>>,
         #[serde(default)]
@@ -2115,7 +2102,7 @@ pub enum Request {
         /// The line of a lower third that takes `position`, `zoom` and
         /// `rotation`. The two lines then go apart. Without it, the two
         /// lines take them together until they go apart, then the lower
-        /// line alone.
+        /// line alone. Not with `kind` or `look`.
         #[serde(default)]
         line: Option<LowerThirdLine>,
         /// The frame of a value with keyframes: the new number goes on a
@@ -3312,10 +3299,13 @@ pub enum KeyParam {
     #[default]
     Volume,
     /// Position X and Y, one keyframe for both, as fractions of the frame.
+    /// On a lower third: both lines together, or the lower line when the
+    /// lines are apart.
     Position,
     /// Zoom X and Y, one keyframe for both. One number in `value` sets both.
+    /// On a lower third: as `position`.
     Zoom,
-    /// Rotation in degrees.
+    /// Rotation in degrees. On a lower third: as `position`.
     Rotation,
     /// The anchor point X and Y, one keyframe for both, as fractions of
     /// the picture.
@@ -3346,10 +3336,22 @@ pub enum KeyParam {
     /// `keyframes.add` skips a clip that cannot take one at `at`, and
     /// fails only when no clip can.
     Speed,
+    /// The position of the upper line of a lower third. The lines go apart.
+    UpperPosition,
+    /// The zoom of the upper line of a lower third. The lines go apart.
+    UpperZoom,
+    /// The rotation of the upper line of a lower third. The lines go apart.
+    UpperRotation,
+    /// The position of the lower line of a lower third. The lines go apart.
+    LowerPosition,
+    /// The zoom of the lower line of a lower third. The lines go apart.
+    LowerZoom,
+    /// The rotation of the lower line of a lower third. The lines go apart.
+    LowerRotation,
 }
 
 impl KeyParam {
-    pub const ALL: [KeyParam; 14] = [
+    pub const ALL: [KeyParam; 20] = [
         KeyParam::Volume,
         KeyParam::Position,
         KeyParam::Zoom,
@@ -3364,16 +3366,43 @@ impl KeyParam {
         KeyParam::CropSoftness,
         KeyParam::Opacity,
         KeyParam::Speed,
+        KeyParam::UpperPosition,
+        KeyParam::UpperZoom,
+        KeyParam::UpperRotation,
+        KeyParam::LowerPosition,
+        KeyParam::LowerZoom,
+        KeyParam::LowerRotation,
     ];
+
+    pub fn on_line(self) -> (KeyParam, Option<LowerThirdLine>) {
+        match self {
+            KeyParam::UpperPosition => (KeyParam::Position, Some(LowerThirdLine::Upper)),
+            KeyParam::UpperZoom => (KeyParam::Zoom, Some(LowerThirdLine::Upper)),
+            KeyParam::UpperRotation => (KeyParam::Rotation, Some(LowerThirdLine::Upper)),
+            KeyParam::LowerPosition => (KeyParam::Position, Some(LowerThirdLine::Lower)),
+            KeyParam::LowerZoom => (KeyParam::Zoom, Some(LowerThirdLine::Lower)),
+            KeyParam::LowerRotation => (KeyParam::Rotation, Some(LowerThirdLine::Lower)),
+            whole => (whole, None),
+        }
+    }
+
+    pub fn for_line(self, line: LowerThirdLine) -> KeyParam {
+        match (self, line) {
+            (KeyParam::Position, LowerThirdLine::Upper) => KeyParam::UpperPosition,
+            (KeyParam::Zoom, LowerThirdLine::Upper) => KeyParam::UpperZoom,
+            (KeyParam::Rotation, LowerThirdLine::Upper) => KeyParam::UpperRotation,
+            (KeyParam::Position, LowerThirdLine::Lower) => KeyParam::LowerPosition,
+            (KeyParam::Zoom, LowerThirdLine::Lower) => KeyParam::LowerZoom,
+            (KeyParam::Rotation, LowerThirdLine::Lower) => KeyParam::LowerRotation,
+            (whole, _) => whole,
+        }
+    }
 }
 
 /// The keyframes of one value to copy or cut.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct KeyPicks {
     pub param: KeyParam,
-    /// The line of a lower third whose keyframes these are.
-    #[serde(default)]
-    pub line: Option<LowerThirdLine>,
     /// The source frames of the keyframes. Without them, every keyframe of
     /// the value.
     #[serde(default)]
@@ -3385,10 +3414,6 @@ pub struct KeyPicks {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CopiedKey {
     pub param: KeyParam,
-    /// The line of a lower third that the keyframe came from. A paste on a
-    /// lower third puts it on that line.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub line: Option<LowerThirdLine>,
     /// Timeline frames after the first copied keyframe.
     pub offset: i64,
     /// A number, or x and y for position, zoom and the anchor point.

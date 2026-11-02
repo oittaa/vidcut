@@ -356,15 +356,6 @@ impl TitleChange {
             _ => false,
         }
     }
-
-    fn only_a_line(&self) -> bool {
-        self.text.is_none()
-            && self.kind.is_none()
-            && self.align.is_none()
-            && self.style.is_none()
-            && self.opacity.is_none()
-            && self.look.is_none()
-    }
 }
 
 fn line_of<'a>(p: &'a mut Project, id: &str) -> Result<&'a mut Title> {
@@ -404,10 +395,8 @@ pub fn on_line<T>(
 }
 
 pub fn set(p: &mut Project, id: &str, change: &TitleChange, at: Option<i64>) -> Result<()> {
-    if change.line.is_some() && !change.only_a_line() {
-        return Err(Error::invalid(
-            "`line` goes with position, zoom and rotation alone",
-        ));
+    if change.line.is_some() && (change.kind.is_some() || change.look.is_some()) {
+        return Err(Error::invalid("`line` does not go with `kind` or `look`"));
     }
     let one = [id.to_string()];
     on_line(p, &one, change.line, |p| set_values(p, id, change, at))
