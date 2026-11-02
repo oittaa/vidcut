@@ -2265,7 +2265,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Position Y, zoom Y and anchor Y keep the handle frames and use a value offset of 0.
     - Before the first keyframe the value is the first. After the last it is the last.
     - With keyframes, that curve is the value. The plain value is not played.
-    - When the last keyframes of a value go, the first of them stays as the plain value.
+    - A first keyframe does not change the plain value. When the last keyframes of a value go, the plain value returns.
     - The viewer and the export sample the curve at the source frame of each frame.
     - A change of a keyed value at `at` sets a keyframe there, as volume does (D82).
     - `picture.set` takes `at`. With no `at`, it uses the playhead.
@@ -2539,7 +2539,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Before the first keyframe, the volume is the value of the first. After the last keyframe, it is the value of the last.
     - Between two keyframes, the volume follows the Bezier curve. A handle reaches no farther than the next keyframe.
     - With keyframes, the curve is the volume of the clip. `gain_db` is not heard.
-    - When the last keyframes go, the value of the first of them becomes `gain_db`.
+    - A first keyframe does not change `gain_db`. When the last keyframes go, `gain_db` is heard again.
     - A keyframe and the curve take −60 to +24 dB (D12).
   - **Eases:**
     - Ease In sets a flat In handle a third of the way to the keyframe before. Ease Out sets a flat Out handle a third of the way to the next one.

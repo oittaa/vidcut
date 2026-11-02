@@ -366,17 +366,9 @@ fn remove_volume(p: &mut Project, ids: &[String], pick: &Pick) -> Result<()> {
     for id in ids {
         let (a, c) = keyed_audio(p, id)?;
         let chosen = picked(&c, &a.gain_keys, pick)?;
-        let first = a
-            .gain_keys
-            .iter()
-            .find(|k| chosen.contains(&k.frame))
-            .map(|k| k.value);
         reshape(&mut a.gain_keys, |marked| {
             marked.retain(|(k, _)| !chosen.contains(&k.frame));
         });
-        if let (false, Some(v)) = (a.is_keyed(), first) {
-            a.gain_db = v;
-        }
     }
     Ok(())
 }

@@ -1456,9 +1456,9 @@ pub enum Request {
         to: Option<TimeSpec>,
     },
     /// Remove the keyframes of `clips`: those on the source `frames`, those
-    /// at the timeline frames `at`, or, with neither, all of them. When a
-    /// clip's last keyframes go, the value of the first of them stays as
-    /// its volume.
+    /// at the timeline frames `at`, or, with neither, all of them. When the
+    /// last keyframes of a value go, the value it had before the first
+    /// keyframe returns.
     #[serde(rename = "keyframes.remove")]
     KeyframesRemove {
         clips: OneOrMany<ClipRef>,
