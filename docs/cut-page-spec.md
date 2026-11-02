@@ -2212,7 +2212,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - If you name such a look, you get that reason.
   - The application of a look is one change that you can undo:
     - `track.set` with `look` sets the style of a track (Apply Look on a subtitle track header).
-    - `titles.add` and `titles.set` with `look` set all of a title except its text. The fields given go on top.
+    - `titles.add` and `titles.set` with `look` set all of a title except its text and its keyframes ([todo](todo/keyframes.md#titles)). The fields given go on top.
     - `subtitles.transcribe` takes any subtitle look.
   - In the Subtitle Track and Title sections of the Inspector:
     - The Look list fills the fields. It shows the look that they match, or Custom.

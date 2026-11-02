@@ -2054,10 +2054,13 @@ pub enum Request {
     /// each field given replaces its own. A `style` replaces the whole
     /// style, a field left out going back to the usual look. Switching to
     /// `text` drops the `align`. Switching to `scroll` drops the zoom and
-    /// rotation keyframes. A `look` replaces all but the text, and the other
-    /// fields given go on top. It also drops the title's keyframes. A value
-    /// with keyframes takes the new number on a keyframe at `at`, also
-    /// outside the clip. Moves and trims are `edit.*`'s.
+    /// rotation keyframes and the position handles. A `look` replaces all but
+    /// the text and the keyframes, and the other fields given go on top. A
+    /// look that makes a scroll drops what that switch drops. A look adds no
+    /// keyframe: its number for a value with keyframes shows when the last of
+    /// them goes. A value given with keyframes takes the new number on a
+    /// keyframe at `at`, also outside the clip. Moves and trims are
+    /// `edit.*`'s.
     #[serde(rename = "titles.set")]
     TitlesSet {
         clip: ClipRef,
