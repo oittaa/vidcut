@@ -1085,6 +1085,13 @@ pub enum Request {
     /// the clip's length changes and later clips follow; without, the clip
     /// keeps its length. A clip with no speed keyframes changes as with
     /// `edit.change_speed`.
+    /// On a clip with no speed keyframes, a speed under 0.0001 (0.01%) or 0
+    /// gives a freeze frame, with or without ripple: the clip splits at
+    /// `at`, the left part keeps its speed, and the right part holds the
+    /// source frame at `at`. With `at` on its first frame, the whole clip
+    /// holds that frame. With `at` after it, the whole clip holds its last
+    /// frame. The length stays, and later clips stay. With `at` before the
+    /// clip, or on a clip with speed keyframes, such a speed fails.
     #[serde(rename = "speed.set")]
     SpeedSet {
         clips: OneOrMany<ClipRef>,
@@ -1188,7 +1195,7 @@ pub enum Request {
     TrackAdd {
         kind: NewTrack,
         /// How many at once: 0 to 99 video tracks, 0 to 999 audio tracks, or
-        /// 1 to 16 subtitle tracks.
+        /// at least 1 subtitle track.
         #[serde(default = "one")]
         count: u32,
     },
@@ -1277,7 +1284,8 @@ pub enum Request {
         /// fraction of the picture (from 0 up to but not including 1/2).
         /// `bold` takes the
         /// font's bold face; `case` draws every letter `upper` or `lower`.
-        /// `shadow` is a title's drop shadow. `words` shows the words as
+        /// `shadow` is a title's drop shadow. In `background` or `shadow`,
+        /// `off` true draws none and keeps the values. `words` shows the words as
         /// they are spoken, by the cues' word times: `show` (`highlight`,
         /// `reveal` or `word`), the spoken word's `color`, and its `pop`,
         /// how large it starts, from 1 to 2.
@@ -2021,7 +2029,8 @@ pub enum Request {
         /// from 0 to 1, a box behind the whole text) and `shadow` (a
         /// `color`, an `opacity` from 0 to 1, an `offset` `[x, y]` right and
         /// down as fractions of the picture, each from -4 to 4, and a `blur`
-        /// from 1 to 100). A field left out keeps the usual look.
+        /// from 1 to 100). In `background` or `shadow`, `off` true draws none
+        /// and keeps the values. A field left out keeps the usual look.
         #[serde(default)]
         style: Option<TitleStyle>,
         /// Where it goes, `[x, y]` as fractions of the picture from its top
@@ -2055,10 +2064,13 @@ pub enum Request {
     /// each field given replaces its own. A `style` replaces the whole
     /// style, a field left out going back to the usual look. Switching to
     /// `text` drops the `align`. Switching to `scroll` drops the zoom and
-    /// rotation keyframes. A `look` replaces all but the text, and the other
-    /// fields given go on top. It also drops the title's keyframes. A value
-    /// with keyframes takes the new number on a keyframe at `at`, also
-    /// outside the clip. Moves and trims are `edit.*`'s.
+    /// rotation keyframes and the position handles. A `look` replaces all but
+    /// the text and the keyframes, and the other fields given go on top. A
+    /// look that makes a scroll drops what that switch drops. A look adds no
+    /// keyframe: its number for a value with keyframes shows when the last of
+    /// them goes. A value given with keyframes takes the new number on a
+    /// keyframe at `at`, also outside the clip. Moves and trims are
+    /// `edit.*`'s.
     #[serde(rename = "titles.set")]
     TitlesSet {
         clip: ClipRef,

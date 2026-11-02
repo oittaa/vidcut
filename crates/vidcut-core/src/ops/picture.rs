@@ -243,8 +243,9 @@ pub fn set(p: &mut Project, ids: &[String], change: &PictureChange, at: Option<i
         for v in PictureValue::ALL {
             let was = crate::keyframes::plain_channel(&old, v);
             let now = crate::keyframes::plain_channel(&next, v);
-            if was == now {
-                wrote |= !old.has_keys(v) && change.names(v);
+            let named = change.names(v);
+            if was == now && !(named && old.has_keys(v)) {
+                wrote |= named;
                 continue;
             }
             if old.has_keys(v) {

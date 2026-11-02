@@ -282,6 +282,8 @@ pub(super) struct Usual<'a> {
     outline_size: &'a str,
     background: &'a str,
     opacity: &'a str,
+    shadow: &'a str,
+    switches: bool,
 }
 
 impl<'a> Usual<'a> {
@@ -293,6 +295,8 @@ impl<'a> Usual<'a> {
             outline_size,
             background: "#000000",
             opacity: "50%",
+            shadow: SHADOW_INK,
+            switches: true,
         }
     }
 
@@ -304,6 +308,8 @@ impl<'a> Usual<'a> {
             outline_size: "the track",
             background: "the track",
             opacity: "the track",
+            shadow: "none",
+            switches: false,
         }
     }
 
@@ -315,6 +321,8 @@ impl<'a> Usual<'a> {
             outline_size: "none",
             background: "none",
             opacity: "100%",
+            shadow: "none",
+            switches: false,
         }
     }
 }
@@ -372,13 +380,24 @@ pub(super) struct TextFields {
     outline: String,
     outline_size: String,
     outside: bool,
+    box_off: bool,
     background: String,
     opacity: String,
+    shadow_off: bool,
     shadow: String,
     shadow_opacity: String,
     shadow_across: String,
     shadow_down: String,
     shadow_blur: String,
+}
+
+fn switched(ui: &mut egui::Ui, label: &str, off: &mut bool) -> bool {
+    ui.label(label);
+    let mut on = !*off;
+    let changed = ui.checkbox(&mut on, "").changed();
+    *off = !on;
+    ui.end_row();
+    changed
 }
 
 pub(super) fn plain(v: Option<f64>) -> String {
@@ -419,12 +438,17 @@ impl TextFields {
                 .unwrap_or_default(),
             outline_size: plain(s.outline.as_ref().and_then(|o| o.size)),
             outside: s.outline.as_ref().is_some_and(|o| o.outside == Some(true)),
+            box_off: s
+                .background
+                .as_ref()
+                .is_some_and(SubtitleBackground::is_off),
             background: s
                 .background
                 .as_ref()
                 .map(|b| b.color.clone())
                 .unwrap_or_default(),
             opacity: percent(s.background.as_ref().and_then(|b| b.opacity)),
+            shadow_off: shade.is_some_and(TitleShadow::is_off),
             shadow: shade.map_or_else(String::new, |h| {
                 h.color.clone().unwrap_or_else(|| SHADOW_INK.to_string())
             }),
@@ -433,6 +457,21 @@ impl TextFields {
             shadow_down: percent(shade.and_then(|h| h.offset).map(|o| o[1])),
             shadow_blur: plain(shade.and_then(|h| h.blur)),
         }
+    }
+
+    pub(super) fn colors_kept(&self, stored: &Parts) -> Self {
+        let was = Self::load(stored);
+        let mut out = self.clone();
+        for (shown, kept) in [
+            (&mut out.outline, was.outline),
+            (&mut out.background, was.background),
+            (&mut out.shadow, was.shadow),
+        ] {
+            if shown.trim().is_empty() {
+                *shown = kept;
+            }
+        }
+        out
     }
 
     pub(super) fn refilled(&self, stored: &Parts) -> Self {
@@ -470,9 +509,10 @@ impl TextFields {
     ) -> (bool, bool) {
         let mut enter = false;
         let mut changed = false;
-        let mut row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
-            ui.label(label);
-            let r = ui.add(
+        let mut row = |ui: &mut egui::Ui, on: bool, label: &str, text: &mut String, hint: &str| {
+            ui.add_enabled(on, egui::Label::new(label));
+            let r = ui.add_enabled(
+                on,
                 egui::TextEdit::singleline(text)
                     .hint_text(hint)
                     .min_size(egui::vec2(240.0, 0.0)),
@@ -484,19 +524,20 @@ impl TextFields {
         let shadow_across = format!("{}%", percent(Some(TitleShadow::OFFSET[0])));
         let shadow_down = format!("{}%", percent(Some(TitleShadow::OFFSET[1])));
         let shadow_blur = plain(Some(TitleShadow::BLUR));
-        changed |= row(ui, "Font", &mut self.font, "Open Sans");
+        changed |= row(ui, true, "Font", &mut self.font, "Open Sans");
         changed |= font_list(ui, &format!("{salt}-font"), &mut self.font, families);
         ui.end_row();
-        changed |= row(ui, "Size", &mut self.size, usual.size);
+        changed |= row(ui, true, "Size", &mut self.size, usual.size);
         ui.end_row();
-        changed |= row(ui, "Color", &mut self.color, "#ffffff");
+        changed |= row(ui, true, "Color", &mut self.color, "#ffffff");
         changed |= swatch(ui, &mut self.color, [255, 255, 255]);
         ui.end_row();
-        changed |= row(ui, "Outline", &mut self.outline, usual.outline);
+        changed |= row(ui, true, "Outline", &mut self.outline, usual.outline);
         changed |= swatch(ui, &mut self.outline, usual.ink);
         ui.end_row();
         changed |= row(
             ui,
+            true,
             "Outline size",
             &mut self.outline_size,
             usual.outline_size,
@@ -505,48 +546,71 @@ impl TextFields {
         ui.label("Outside Only");
         changed |= ui.checkbox(&mut self.outside, "").changed();
         ui.end_row();
-        changed |= row(ui, "Background", &mut self.background, usual.background);
-        changed |= swatch(ui, &mut self.background, [0, 0, 0]);
+        if usual.switches {
+            changed |= switched(ui, "Show Background", &mut self.box_off);
+        }
+        let on = !usual.switches || !self.box_off;
+        changed |= row(ui, on, "Background", &mut self.background, usual.background);
+        changed |= ui
+            .add_enabled_ui(on, |ui| swatch(ui, &mut self.background, [0, 0, 0]))
+            .inner;
         ui.end_row();
-        changed |= row(ui, "Opacity", &mut self.opacity, usual.opacity);
+        changed |= row(ui, on, "Opacity", &mut self.opacity, usual.opacity);
         ui.end_row();
-        changed |= row(ui, "Shadow", &mut self.shadow, "none");
-        changed |= swatch(ui, &mut self.shadow, [0, 0, 0]);
+        if usual.switches {
+            changed |= switched(ui, "Show Shadow", &mut self.shadow_off);
+        }
+        let on = !usual.switches || !self.shadow_off;
+        changed |= row(ui, on, "Shadow", &mut self.shadow, usual.shadow);
+        changed |= ui
+            .add_enabled_ui(on, |ui| swatch(ui, &mut self.shadow, [0, 0, 0]))
+            .inner;
         ui.end_row();
         changed |= row(
             ui,
+            on,
             "Shadow opacity",
             &mut self.shadow_opacity,
             &shadow_opacity,
         );
         ui.end_row();
-        changed |= row(ui, "Shadow across", &mut self.shadow_across, &shadow_across);
+        changed |= row(
+            ui,
+            on,
+            "Shadow across",
+            &mut self.shadow_across,
+            &shadow_across,
+        );
         ui.end_row();
-        changed |= row(ui, "Shadow down", &mut self.shadow_down, &shadow_down);
+        changed |= row(ui, on, "Shadow down", &mut self.shadow_down, &shadow_down);
         ui.end_row();
-        changed |= row(ui, "Shadow blur", &mut self.shadow_blur, &shadow_blur);
+        changed |= row(ui, on, "Shadow blur", &mut self.shadow_blur, &shadow_blur);
         ui.end_row();
         (changed, enter)
     }
 
-    fn shadow(&self, stored: Option<&TitleShadow>) -> Result<Option<TitleShadow>, String> {
-        let rest = [
+    fn shadow(
+        &self,
+        stored: Option<&TitleShadow>,
+        black_is_usual: bool,
+    ) -> Result<Option<TitleShadow>, String> {
+        let bare = [
             &self.shadow_opacity,
             &self.shadow_across,
             &self.shadow_down,
             &self.shadow_blur,
-        ];
-        let Some(color) = field(&self.shadow) else {
-            return if rest.iter().all(|f| f.trim().is_empty()) {
-                Ok(None)
-            } else {
-                Err("a shadow needs a color".into())
-            };
-        };
-        let color = match stored {
-            Some(h) if h.color.is_none() && color.eq_ignore_ascii_case(SHADOW_INK) => None,
-            None if color.eq_ignore_ascii_case(SHADOW_INK) => None,
-            _ => Some(color),
+        ]
+        .iter()
+        .all(|f| f.trim().is_empty());
+        let color = match field(&self.shadow) {
+            Some(color) => match stored {
+                Some(h) if h.color.is_none() && color.eq_ignore_ascii_case(SHADOW_INK) => None,
+                None if color.eq_ignore_ascii_case(SHADOW_INK) => None,
+                _ => Some(color),
+            },
+            None if black_is_usual && (self.shadow_off || !bare) => None,
+            None if bare => return Ok(None),
+            None => return Err("a shadow needs a color".into()),
         };
         let offset = stored.and_then(|h| h.offset);
         let across = kept_number(&self.shadow_across, offset.map(|o| o[0]), "shadow offset")?;
@@ -567,15 +631,18 @@ impl TextFields {
             )?,
             offset,
             blur: kept_plain(&self.shadow_blur, stored.and_then(|h| h.blur), "blur")?,
+            off: self.shadow_off.then_some(true),
         }))
     }
 
     pub(super) fn parts(&self, stored: &Parts, usual_box: Option<&str>) -> Result<Parts, String> {
         let color = match (field(&self.background), usual_box) {
             (Some(color), _) => Some(color),
+            (None, Some(usual)) if self.box_off || !self.opacity.trim().is_empty() => {
+                Some(usual.to_string())
+            }
             (None, _) if self.opacity.trim().is_empty() => None,
-            (None, Some(usual)) => Some(usual.to_string()),
-            (None, None) => return Err("a background needs a color".into()),
+            (None, _) => return Err("a background needs a color".into()),
         };
         let background = match color {
             Some(color) => Some(SubtitleBackground {
@@ -585,6 +652,7 @@ impl TextFields {
                     stored.background.as_ref().and_then(|b| b.opacity),
                     "opacity",
                 )?,
+                off: self.box_off.then_some(true),
             }),
             None => None,
         };
@@ -611,7 +679,7 @@ impl TextFields {
                     outside,
                 }),
             background,
-            shadow: self.shadow(stored.shadow.as_ref())?,
+            shadow: self.shadow(stored.shadow.as_ref(), usual_box.is_some())?,
         })
     }
 }

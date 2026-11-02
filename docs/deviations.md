@@ -909,7 +909,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Its Threshold is the speech probability (0.5).
   - Shortest Speech leaves out shorter speech (0.25 s, the default of Silero).
   - Pre Head and Post Tail keep 0.15 s around each spoken part.
-  - Non-speech shorter than Minimum to Trip (0.5 s) stays.
+  - Non-speech shorter than Minimum (0.5 s) stays.
   - The red stripes, Remove and the one undo step are the same as with Sound level.
   - The requests are `detect`, `speech_threshold` and `min_speech` on `edit.ripple_delete_silence` and `analyze.silence`.
 - **Why:**
@@ -1518,15 +1518,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The sections of other clips are the picture sections, the Speed section and the Audio section.
   - A double-click on the name of a subtitle track shows its Subtitle Track section (X51).
   - Of the Title, Subtitle and Subtitle Track sections, one shows at a time (X43, X52). Another selection puts its changes in first. A field that is not valid then loses its change.
-  - With nothing of these selected, it shows one line.
+  - With nothing of these selected, it shows one line. It also shows that line with only several titles selected ([spec §8.14](cut-page-spec.md#814-titles-pp-762764-11761178)).
   - It has no Done and no Cancel. As in Resolve, a change goes in without a button, and Ctrl+Z undoes it.
   - A section shows the project while the user does not edit it, also after Ctrl+Z or a change from a script.
   - Audio clips, titles and subtitles have no picture.
   - With several clips selected, it shows the first one that can have a picture. Its header gives the number of these clips.
   - Its picture sections are Transform, Crop and Dynamic Zoom. Each picture section has a Reset of the whole section.
-  - **Transform:** Zoom, Position X and Y, Rotation, Anchor X and Y, Pitch, Yaw, Flip Horizontal and Flip Vertical.
-    - The link button beside Zoom shows Zoom X and Zoom Y. A picture with two different zooms shows them both.
-    - The link button turns the link on again, and makes Zoom Y equal to Zoom X.
+  - **Transform:** Zoom, Position, Rotation, Anchor Point, Pitch, Yaw, Flip Horizontal and Flip Vertical.
+    - Zoom, Position and Anchor Point have X and Y on one row, with one Keyframe button and one Reset, as in Resolve.
+    - That Reset removes the keyframes of the row and sets X and Y to their usual values, as measured in Resolve Studio 21.1.2.
+    - The link button is between Zoom X and Zoom Y. With the link on, a change of either box sets both.
+    - The link button turns the link on again, and makes Zoom Y equal to Zoom X. The Reset of Zoom also turns the link on.
+    - A picture with two different zooms shows the link off.
   - **Crop:** Left, Right, Top and Bottom.
   - **Dynamic Zoom:** Off or On, Start Zoom, Start X, Start Y, End Zoom, End X, End Y, the Ease, Show Boxes and Swap.
     - A value typed while Dynamic Zoom is off turns it on.
@@ -1550,7 +1553,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Volume is the gain of the clip, from −100 dB to +30 dB (D12). It shows one decimal and the unit.
     - On a clip with volume keyframes, Volume shows the volume at the playhead. A change sets a keyframe there ([D82](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - Volume has a Keyframe button between Previous and Next arrows. A right-click sets the ease (D75).
-    - The same button sits beside Zoom, Position X, Position Y, Rotation, Anchor X, Anchor Y, Pitch, Yaw and each crop side.
+    - The same button sits beside Zoom, Position, Rotation, Anchor Point, Pitch, Yaw and each crop side.
     - Position X and Y share one keyframe. Zoom X and Y share one keyframe. Anchor X and Y share one keyframe.
     - The button is lit on a keyframe. A click adds or removes the keyframe at the playhead.
     - Previous and Next move the playhead to the keyframe of that value, also outside the clip.
@@ -1737,7 +1740,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Anchor Point X and Y in the Inspector set the point that all transforms are centered on (p. 735).
   - The onscreen Transform controls set Zoom, Position, Rotation, Pitch, Yaw and Flip (p. 767). The anchor point is not one of them.
 - **vidcut:**
-  - Anchor X and Y in the Inspector set the anchor point ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)). `picture.set` sets it from a script.
+  - Anchor Point in the Inspector sets the anchor point ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)). `picture.set` sets it from a script.
   - While the Transform handles show, a small cross marks the anchor point in the viewer.
   - The cross has no drag. Thus, as in Resolve, the viewer does not set the anchor point.
 - **Why:**
@@ -1750,7 +1753,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The onscreen Transform controls set Zoom, Position, Rotation, Pitch, Yaw and Flip (p. 767).
   - The Inspector sets Pitch and Yaw too (p. 735).
 - **vidcut:**
-  - Pitch and Yaw are in the Inspector, after Anchor X and Y ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
+  - Pitch and Yaw are in the Inspector, after Anchor Point ([X70](#x70-the-inspector-is-a-tab-beside-the-media-pool-in-frame-pixels)).
   - `picture.set` sets them from a script.
   - The Transform handles in the viewer do not set Pitch or Yaw.
 - **Why:**
@@ -1793,11 +1796,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 ## X90. The Keyframes tab edits a keyframe in place
 
 - **Resolve:**
-  - The Keyframe Editor adds a keyframe with the Keyframe button or Ctrl+[, at the playhead (p. 1257).
-  - Its track controls have no value field (p. 1257). The Curve Editor is a separate view (p. 1255).
+  - The track controls of the Keyframe Editor have no value field (p. 1257). The Curve Editor is a separate view (p. 1255).
   - Full Extend Zoom shows the whole clip. Detail Zoom zooms in around the playhead. A zoom slider sets the zoom (p. 1258).
 - **vidcut:**
-  - A double-click on an empty part of a track adds a keyframe there. The playhead moves to it.
   - A bar under the tracks shows the selected keyframe:
     - the name of the value and the time
     - the value, in the units of the Inspector
@@ -1812,7 +1813,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A scroll bar under the tracks shows and moves the range.
 - **Why:**
   - The user sees and sets the exact value of a keyframe without a change to the Inspector.
-  - A double-click adds a keyframe where the user points, without a move of the playhead first.
   - The curve stays in line with the keyframes that it joins.
   - "Fit Clip" tells what the button does.
   - The mouse wheel zooms at the point of interest, which a slider cannot do.
@@ -2243,13 +2243,41 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:** Each Keyframe button is orange on a keyframe. This includes the diamond of the Speed section.
 - **Why:** The same button has the same color in each place.
 
-## X108. A double-click on a generator adds it at the playhead
+## X108. A double-click on a row of the Keyframes tab adds a keyframe
+
+- **Resolve:**
+  - The Keyframe Editor adds a keyframe with the Keyframe button or Ctrl+[, at the playhead (p. 1257).
+  - A double-click on a row of the Keyframes panel adds nothing, inside or outside the clip (measured in Resolve Studio 21.1.2).
+  - The Add Keyframes tool of the Curve Editor adds a keyframe with a click on a curve.
+  - That click can be inside the clip or before its start (measured in Resolve Studio 21.1.2).
+- **vidcut:**
+  - A double-click on an empty part of a row or its curve adds a keyframe at the frame under the pointer, inside the clip.
+  - A double-click outside the clip adds nothing.
+  - The playhead moves to the new keyframe, and the keyframe is selected ([X90](#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
+  - The rows of the keyframe tray do the same.
+- **Why:**
+  - The user adds a keyframe at the frame under the pointer, and does not first move the playhead to that frame.
+
+## X109. The Keyframes tab shows the values of a title
+
+- **Resolve:**
+  - The Keyframes panel of a title has only the rows of the clip: Transform, Cropping and Composite (measured in Resolve Studio 21.1.2).
+  - A keyframe on the Position of the Title tab has no row.
+- **vidcut:**
+  - The Keyframes tab of a title has the rows Position, Zoom, Rotation and Opacity. A scroll has only Position and Opacity ([todo](todo/keyframes.md#titles)).
+  - A title has no rows for Transform and Cropping. A title has no such values ([spec §8.14](cut-page-spec.md#814-titles-pp-762764-11761178)).
+- **Why:**
+  - All the keyframes of a title show on rows over time, in one tab, as the keyframes of a clip do.
+  - The user moves and deletes them in that tab.
+  - The Title section of the Inspector shows only the keyframe at the playhead, with arrows to the others.
+
+## X110. A double-click on a generator adds it at the playhead
 
 - **Resolve:** A double-click on a card of the Generators tab loads the generator in the viewer as a source of 5 s. It adds no clip (measured in Resolve Studio 21.1.2, with Window).
 - **vidcut:** A double-click on a card adds the generator at the playhead.
 - **Why:** The same gesture does the same thing in the Titles tab and on the Generators page.
 
-## X109. A generator has no speed
+## X111. A generator has no speed
 
 - **Resolve:** The Settings tab of a generator has Speed Change (measured in Resolve Studio 21.1.2).
 - **vidcut:** A generator has no Speed section, and the speed requests refuse it. A title has no speed in the same way.

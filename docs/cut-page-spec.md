@@ -133,7 +133,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Keyframes and clips share one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
       - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
     - A right-click on a keyframe sets its ease (X87). The anchor point's keyframes take no ease (D92).
-    - A double-click on an empty part of a track adds a keyframe there ([X90](deviations.md#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
+    - A double-click on an empty part of a track adds a keyframe there ([X108](deviations.md#x108-a-double-click-on-a-row-of-the-keyframes-tab-adds-a-keyframe)).
     - The bar under the tracks shows the value, time and ease of the selected keyframe (X90).
     - A keyframe that the Keyframe button or a double-click adds is selected. Thus the bar shows it at once.
   - **Keyframe tray** (p. 1259):
@@ -938,6 +938,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
   - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer opens the Title section.
+  - With several titles selected, the Inspector shows nothing (measured in Resolve Studio 21.1.2).
+  - vidcut: the Title section does not show then (X70). The Keyframes tab still shows the item selected first (§2).
 - **Kinds** (p. 1178):
   - L, M and R Lower 3rd put two lines at the bottom left, middle or right of title safe.
   - Title safe is 90% of the picture by default (p. 1178).
@@ -1114,7 +1116,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
 - **Adding a generator:**
   - Drag a card onto the upper timeline or the lower timeline (p. 766).
   - A drop puts the generator where the pointer is, on the video track under it, as `generators.add` with that track and frame does.
-  - A double-click on a card adds the generator at the playhead ([X108](deviations.md#x108-a-double-click-on-a-generator-adds-it-at-the-playhead)).
+  - A double-click on a card adds the generator at the playhead ([X110](deviations.md#x110-a-double-click-on-a-generator-adds-it-at-the-playhead)).
   - `generators.add` without a track uses the track that D66 gives a title.
   - A new generator is 5 s long, and it adds no sound clip (measured).
 - **Inspector:**
@@ -1122,7 +1124,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: the Settings tab has Transform, Cropping, Dynamic Zoom, Composite, Speed Change and Stabilization.
   - vidcut: the Inspector shows a Generator section with the Color row, over the picture sections (X70).
   - vidcut: the picture sections act as on any clip (§8.15). Renders of Position, Zoom, Crop and Opacity in Resolve Studio 21.1.2 agree.
-  - vidcut: a generator has no speed ([X109](deviations.md#x109-a-generator-has-no-speed)).
+  - vidcut: a generator has no speed ([X111](deviations.md#x111-a-generator-has-no-speed)).
 - **Solid Color:**
   - It has one value, Color. Black is the default (measured).
   - `generators.set` and the Color row change it.
@@ -1246,6 +1248,13 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another bitrate or chosen rate.
   - A project at another rate, for example 96000 Hz, with AAC was not measured.
   - The TikTok preset has AAC at 256 kb/s. That number was not measured.
+  - H.264 and H.265 round an odd side of the timeline up to even.
+    - A timeline of 1281 x 721 gives a file of 1282 x 722. A timeline of 1281 x 720 gives a file of 1282 x 720.
+    - One factor scales the whole picture on both axes, and the picture stays centered. Thus part of a pixel can stay black at two edges.
+    - Resolve Studio 21.1.2 does this at 1281 x 721 with H.264 and H.265. Other odd sizes were not measured.
+    - The Export dialog and the report of the export show both sizes.
+  - ProRes, DNxHR, VP9 and AV1 on the CPU keep an odd side.
+  - AV1 on NVENC writes an even size by itself. The report shows that size after the export.
 
 ## 11. Keyboard shortcuts
 
@@ -1558,6 +1567,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
   - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate.
+  - An export in H.264 or H.265 rounds an odd side up (§10).
   - A side under 256 sets both sides to 256, whichever side it is. 16 x 720, 99999 x 16 and 16 x 99999 give 256 x 256.
   - Else a side over 32768 sets both sides to 32768. 99999 x 720 gives 32768 x 32768.
   - This rule is measured in the Project Settings dialog of Resolve Studio 21.1.2. `project.set` and `project.create` do the same.
@@ -1668,6 +1678,18 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - This is Retime Process at Nearest. The other processes make the frames between the source frames (deviation X93).
   - Sound keeps its pitch, and plays reversed when backward. A freeze is silent.
   - Edits count frames through the speed.
+  - **A speed under 0.01%, or 0.** These facts come from Resolve Studio 21.1.2, from `SetSpeed` in a script, on a clip with no speed keyframes. `speed.set` does the same:
+    - The speed gives a freeze frame. 0.009% and 0 give the same result.
+    - The clip keeps its length, and the next clip does not move. Ripple on or off gives the same result.
+    - With the playhead inside the clip, the clip splits at the playhead.
+      - The left part keeps its speed.
+      - The right part is a freeze frame of the source frame at the playhead, up to the clip's old end.
+      - The linked audio splits at the same frame and takes the same speeds.
+    - With the playhead on the clip's first frame, the whole clip is a freeze frame of its first source frame.
+    - With the playhead on the clip's last frame, the right part is a freeze frame of 1 frame.
+    - With the playhead after the clip, the whole clip is a freeze frame of its last source frame.
+    - A clip with speed keyframes and a playhead before the clip are not measured. In vidcut, `speed.set` refuses both.
+    - A value typed in the Inspector is not measured.
   - **Speed keyframes.** These facts come from Resolve Studio 21.1.2, from its renders and its OTIO files:
     - A speed keyframe cuts a clip into two sections. Each section has a speed of its own. The sound of the clip gets the same sections.
     - A new speed keyframe gives both sections the speed of the section that it cuts.
@@ -1720,6 +1742,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - vidcut applies this rule again after each edit that moves a speed keyframe.
       - Duration is off on a clip with speed keyframes.
       - Reset gives the whole clip 100%. Its speed keyframes go.
+      - Speed takes a typed value under 0.01%. On clips with no speed keyframes, it sends `speed.set` at the playhead.
+      - On a clip with speed keyframes, that value becomes 0.01%. A drag of Speed stops at 0.01%.
     - The diamond adds or removes a speed keyframe at the playhead. The arrows move the playhead to the previous or next speed keyframe.
     - The diamond is orange on a speed keyframe ([X107](deviations.md#x107-the-diamond-of-speed-change-is-orange)).
     - The list opens only on a section that plays forward. `speed.set` changes only such a section.
@@ -1738,6 +1762,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `keyframes.add` skips a clip that cannot take a speed keyframe at `at`. It fails only when no clip can.
     - `speed.reverse` turns a section at its speed keyframe ([X96](deviations.md#x96-reverse-keeps-the-speeds-of-the-other-sections)).
     - `speed.set` takes 0.01% to 100000% forward, in a section that plays forward.
+    - On a clip with no speed keyframes, `speed.set` also takes the speeds of `edit.change_speed`, and a speed under 0.01%.
     - `speed.ease` eases the speed keyframes of a section. `keyframes.set` gives one speed keyframe `linear` or `ease_in_out`.
     - `keyframes.list` gives `ease` `ease_in_out` for an eased speed keyframe.
     - `keyframes.remove` without `frames` and `at` removes all the speed keyframes of the clips.
@@ -1850,6 +1875,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D56. Subtitle tracks and cues** (§8.12).
   - The manual does not say which track shows after a new track is added, or how long a new cue lasts.
   - Subtitle tracks are `S1`, `S2`, … from the video up.
+  - In Resolve Studio 21.1.2, a script added 380 subtitle tracks to one timeline, and none was refused.
+  - `track.add` takes a `count` of at least 1 subtitle track, with no top limit.
   - A new track is the shown track.
   - A new cue lasts 3 s from the playhead, measured in Resolve Studio 21.1.2. It does not stop at the next cue.
   - Add New and Add Subtitle overwrite what the new cue covers, measured in Resolve Studio 21.1.2:
@@ -1960,6 +1987,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `bold` uses the bold face of the font.
     - `case` draws every letter `upper` or `lower`.
     - `shadow` is the drop shadow of a title (D65), behind the text and its outline.
+    - `off` in `background` or `shadow` draws none and keeps the values.
+  - The Subtitle Track section has these rules for empty boxes and for switches:
+    - A color has no empty state, measured in Resolve Studio 21.1.2. An outline, background or shadow color box that the user empties keeps its color.
+    - Size 0 draws no stroke, and the color stays, measured in Resolve Studio 21.1.2.
+    - Show Background and Show Shadow are the switches of Background and Drop Shadow, measured in Resolve Studio 21.1.2.
+    - The Drop Shadow switch off greys the values and keeps them, measured in Resolve Studio 21.1.2. On again gives the same values.
+    - Show Background does the same. Its greying is not measured.
+    - The two shadow offset boxes are separate, measured in Resolve Studio 21.1.2. One typed box is accepted, and the other keeps its value.
+    - One typed Across or Down box is accepted. The other box takes the position of the track, else the place of the block.
   - A margin moves a block to the edge:
     - Without a margin, the middle of a bottom block is at 80% of the height.
     - With a margin, its bottom edge is at the margin.
@@ -2260,7 +2296,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - If you name such a look, you get that reason.
   - The application of a look is one change that you can undo:
     - `track.set` with `look` sets the style of a track (Apply Look on a subtitle track header).
-    - `titles.add` and `titles.set` with `look` set all of a title except its text. The fields given go on top.
+    - `titles.add` and `titles.set` with `look` set all of a title except its text and its keyframes ([todo](todo/keyframes.md#titles)). The fields given go on top.
     - `subtitles.transcribe` takes any subtitle look.
   - In the Subtitle Track and Title sections of the Inspector:
     - The Look list fills the fields. It shows the look that they match, or Custom.
@@ -2421,6 +2457,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Previous and Next move the playhead to the keyframe before or after it, also outside the clip (measured in Resolve Studio 21.1.2).
     - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out.
     - The Reset of one value removes its keyframes and puts the usual value back.
+      - Zoom, Position and Anchor Point each have X and Y on one row with one Reset (measured in Resolve Studio 21.1.2).
+      - That Reset removes all the keyframes of the row. X and Y go back to 0, or to 100% on Zoom. The Reset of Zoom also turns the link on.
     - The Reset of Transform, Crop or Composite removes the keyframes of that section.
     - A clip with any keyframes shows a mark on its timeline bar.
     - Flips, the composite mode and Dynamic Zoom have no keyframes.

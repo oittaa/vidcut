@@ -287,6 +287,8 @@ pub struct VideoSettings {
     #[serde(default)]
     pub bit_depth: Option<u8>,
     /// Output frame size; the picture is fit inside and padded. Default: the project's.
+    /// H.264 and HEVC round an odd side of the project's size up, and scale
+    /// the whole picture to fit.
     #[serde(default)]
     pub width: Option<u32>,
     #[serde(default)]
@@ -357,6 +359,57 @@ impl VideoSettings {
             max_cll: None,
         }
     }
+
+    pub fn drawn_size(&self, timeline: (u32, u32)) -> (u32, u32) {
+        (
+            self.width.unwrap_or(timeline.0),
+            self.height.unwrap_or(timeline.1),
+        )
+    }
+
+    pub fn written_size(&self, timeline: (u32, u32)) -> (u32, u32) {
+        let (w, h) = self.drawn_size(timeline);
+        match self.codec {
+            VideoCodec::H264 | VideoCodec::Hevc => (w.next_multiple_of(2), h.next_multiple_of(2)),
+            _ => (w, h),
+        }
+    }
+
+    pub fn rounded(&self, timeline: (u32, u32)) -> Option<Rounded> {
+        let (drawn, written) = (self.drawn_size(timeline), self.written_size(timeline));
+        (drawn != written).then(|| Rounded::for_codec(drawn, written, self.codec))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Rounded {
+    pub timeline: (u32, u32),
+    pub written: (u32, u32),
+    pub message: String,
+}
+
+impl Rounded {
+    fn for_codec(timeline: (u32, u32), written: (u32, u32), codec: VideoCodec) -> Self {
+        let (a, b) = (size_words(timeline), size_words(written));
+        Self {
+            timeline,
+            written,
+            message: format!("{a} rounded up to {b} for {}", codec.title()),
+        }
+    }
+
+    pub fn by_encoder(timeline: (u32, u32), written: (u32, u32), encoder: &str) -> Self {
+        let (a, b) = (size_words(timeline), size_words(written));
+        Self {
+            timeline,
+            written,
+            message: format!("{a} written as {b} by {encoder}"),
+        }
+    }
+}
+
+fn size_words((w, h): (u32, u32)) -> String {
+    format!("{w}×{h}")
 }
 
 pub const MAX_LOOKAHEAD: u32 = 32;

@@ -153,6 +153,8 @@ Speeds ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
 - A trim or a split moves only `skip` and `source_in` (`Clip::walk`). Thus all the speed keyframes stay.
 - The keyframes of a clip with a speed are on its retimed source (`Clip::content_at`). Thus they stay on their frames of the clip.
 - `ops::speed` adds and removes speed keyframes, and holds `speed.set`, `speed.freeze`, `speed.reverse` and `speed.ease`. `ops::change_speed` gives a clip one speed.
+- `freeze_from` makes the freeze frame of a speed under `Speed::RANGE`. `ops::split_clip` cuts the clip, and `ops::change_speed` freezes the right part.
+  - Why two clips: the spec gives two clips, one after the other. `speed.freeze` gives one clip with a freeze section.
 
 Stills ([D38](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
 

@@ -8,6 +8,7 @@ use vidcut_av::export::{
 };
 use vidcut_core::Error;
 use vidcut_core::editor::Copied;
+use vidcut_core::export::Rounded;
 use vidcut_core::export::color::ColorChoice;
 use vidcut_core::export::metadata::MetadataChoice;
 
@@ -70,6 +71,8 @@ pub struct JobDetails {
     pub tried: Vec<Tried>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<SourceNote>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rounded: Option<Rounded>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub upscaled: Vec<UpscaleNote>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,6 +103,7 @@ impl JobDetails {
                 Some(o) => *o = s,
                 None => self.sources.push(s),
             },
+            Note::Rounded(r) => self.rounded = Some(r),
             Note::Upscaled(u) => match self.upscaled.iter_mut().find(|o| o.path == u.path) {
                 Some(o) => *o = u,
                 None => self.upscaled.push(u),

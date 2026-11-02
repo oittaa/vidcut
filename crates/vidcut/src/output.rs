@@ -279,6 +279,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 if let Some(why) = o["through_memory"].as_str() {
                     println!("  the frames went to the encoder through memory: {why}");
                 }
+                print_rounded(o);
                 print_copies(&o["copies"]);
                 print_color(&o["color"]);
                 print_metadata(&o["metadata"]);
@@ -344,6 +345,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     o["video_pieces"],
                     o["audio_lanes"]
                 );
+                print_rounded(o);
                 print_color(&o["color"]);
                 print_metadata(&o["metadata"]);
             }
@@ -1609,6 +1611,12 @@ fn print_copies(c: &Value) {
         (true, false) => println!("  frames copied down from the GPU: {down}"),
         (false, true) => println!("  frames copied up to the GPU: {up}"),
         (false, false) => {}
+    }
+}
+
+fn print_rounded(output: &Value) {
+    if let Some(message) = output["rounded"]["message"].as_str() {
+        println!("  {message}");
     }
 }
 

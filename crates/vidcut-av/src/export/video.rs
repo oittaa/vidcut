@@ -1616,6 +1616,7 @@ pub struct VideoFrames {
     smoother: Option<(Retime, crate::interpolate::User)>,
     colors: bool,
     alpha: bool,
+    written: Option<(u32, u32)>,
 }
 
 pub(crate) enum Handoff {
@@ -1927,11 +1928,18 @@ impl VideoFrames {
             smoother: None,
             colors: false,
             alpha: false,
+            written: None,
         }
     }
 
     pub(crate) fn encode_on(mut self, encoder: Option<Handoff>) -> Self {
         self.encoder = encoder;
+        self
+    }
+
+    pub(crate) fn written_at(mut self, size: (u32, u32)) -> Self {
+        let (w, h, _) = self.maker.out();
+        self.written = (size != (w, h)).then_some(size);
         self
     }
 
@@ -2069,6 +2077,7 @@ impl VideoFrames {
         if self.drawer.is_none() {
             let mut drawer = Drawer::new(self.encoder.take())?;
             drawer.screen.keep_alpha(self.alpha);
+            drawer.screen.write_at(self.written);
             let (out, reading) = (self.maker.out(), self.maker.reading());
             self.maker = Maker::new(out, drawer.keeps(), reading).holding().drawing();
             self.drawer = Some(drawer);

@@ -331,7 +331,7 @@ fn seconds(v: &Value) -> String {
         .map_or_else(|| raw(v), |n| format!("{}s", trim(n)))
 }
 
-const STYLE: [(&str, &str); 21] = [
+const STYLE: [(&str, &str); 23] = [
     ("font", "Font"),
     ("size", "Size"),
     ("color", "Color"),
@@ -342,11 +342,13 @@ const STYLE: [(&str, &str); 21] = [
     ("outline.outside", "Outside Only"),
     ("background.color", "Background"),
     ("background.opacity", "Opacity"),
+    ("background.off", "Background Off"),
     ("shadow", "Shadow"),
     ("shadow.color", "Shadow Color"),
     ("shadow.opacity", "Shadow Opacity"),
     ("shadow.offset", "Shadow Offset"),
     ("shadow.blur", "Shadow Blur"),
+    ("shadow.off", "Shadow Off"),
     ("margin", "Margin"),
     ("words", "Words"),
     ("words.show", "Show Words"),

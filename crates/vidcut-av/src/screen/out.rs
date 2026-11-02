@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use vidcut_core::model::Hdr;
 
 use super::shared::Shared;
-use super::{Gpu, Screen, begin, transfer_of};
+use super::{Gpu, Screen, Wide, begin, transfer_of};
 use crate::cuda::{CudaDevice, CudaFrames, PlaneCopy};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{format, frame};
@@ -437,6 +437,10 @@ impl Screen {
         self.alpha = alpha;
     }
 
+    pub(crate) fn write_at(&mut self, size: Option<(u32, u32)>) {
+        self.written = size;
+    }
+
     pub(crate) fn spent(&self) -> (Duration, Duration) {
         self.spent
     }
@@ -448,10 +452,28 @@ impl Screen {
         colors: (Option<Hdr>, Option<Hdr>),
         sink: Sink<'_>,
     ) -> Result<frame::Video> {
-        let wide = self
+        let drawn = self
             .wide
             .as_ref()
             .ok_or_else(|| Error::Invalid("nothing was drawn for the encoder".into()))?;
+        if let Some(size) = self.written {
+            let most = gpu.device.limits().max_texture_dimension_2d;
+            if size.0 > most || size.1 > most {
+                return Err(Error::Invalid(format!(
+                    "the GPU can't draw {}×{}",
+                    size.0, size.1
+                )));
+            }
+            if self
+                .whole
+                .as_ref()
+                .is_none_or(|w| w.size != size || w.hdr != drawn.hdr)
+            {
+                self.whole = Some(Wide::new(gpu, size, drawn.hdr));
+            }
+        }
+        let whole = self.written.and(self.whole.as_ref());
+        let wide = whole.unwrap_or(drawn);
         let size = wide.size;
         let mut layout = layout_of(pixel)
             .ok_or_else(|| Error::Invalid(format!("the GPU can't make frames in {pixel:?}")))?;
@@ -514,6 +536,9 @@ impl Screen {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("vidcut encoding"),
             });
+        if let Some(to) = whole {
+            scale_whole(gpu, drawn, to, &mut encoder);
+        }
         for (i, (plane, m)) in layout.planes.iter().zip(&self.encoded.made).enumerate() {
             let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("vidcut encoding"),
@@ -681,6 +706,21 @@ impl Screen {
         crate::copies::down(&out);
         Ok(out)
     }
+}
+
+fn scale_whole(gpu: &Gpu, from: &Wide, to: &Wide, encoder: &mut wgpu::CommandEncoder) {
+    let level = vidcut_core::place::Level::centered(from.size, to.size);
+    let bind = super::blur::whole_bind(
+        gpu,
+        &from.view,
+        from.size,
+        level,
+        super::RESIZE | super::WIDENS,
+    );
+    let mut pass = begin(encoder, &to.view, Some(wgpu::Color::BLACK));
+    pass.set_pipeline(&gpu.wide_drawing.placed);
+    pass.set_bind_group(0, &bind, &[]);
+    pass.draw(0..3, 0..1);
 }
 
 fn wait(device: &wgpu::Device, submission: wgpu::SubmissionIndex) -> Result<()> {
