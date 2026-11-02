@@ -2753,7 +2753,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A checked effect on a compound clip around such a title does not make a cache part.
     - A part that moves keeps its cache when the tracks under it stay the same.
     - An edit that changes the frames of a part renders it again.
-  - The background render starts after a time without activity: 5 s, unless set (`render_cache.after_secs`).
+  - The background render starts after a time without activity: 5 s, unless set (`render_cache.after_secs`). The time goes from 1 to 30 s (measured in Resolve Studio 21.1.2).
     - Activity is an edit, a play, a seek, a scrub, the preview of a change, or a job.
     - Each activity stops the render at once. The render continues later.
     - It renders from the playhead forward, then from the start of the timeline.

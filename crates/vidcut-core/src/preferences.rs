@@ -35,7 +35,7 @@ pub struct RenderCachePrefs {
     /// play, seek or drag.
     pub background: bool,
     /// How long nothing happens before the background render starts, in
-    /// seconds, from 1 to 3600.
+    /// seconds, from 1 to 30.
     pub after_secs: u32,
     /// The User mode renders transitions.
     pub transitions: bool,
@@ -796,7 +796,7 @@ pub struct PlaybackFilesPatch {
 pub struct RenderCachePatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<bool>,
-    /// From 1 to 3600.
+    /// From 1 to 30.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_secs: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -974,10 +974,8 @@ impl Preferences {
         if c.limit == CacheLimit::Gb && c.gb.is_none() {
             return Err(Error::usage("cache.limit is gb: set cache.gb too"));
         }
-        if !(1..=3600).contains(&self.render_cache.after_secs) {
-            return Err(Error::usage(
-                "render_cache.after_secs must be from 1 to 3600",
-            ));
+        if !(1..=30).contains(&self.render_cache.after_secs) {
+            return Err(Error::usage("render_cache.after_secs must be from 1 to 30"));
         }
         let x = &self.proxies;
         if x.larger_than.contains(&0) {
