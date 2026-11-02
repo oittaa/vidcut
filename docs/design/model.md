@@ -335,10 +335,15 @@ Writing:
   - a `TitleStyle`
   - an optional `position`: the point that its anchor goes to (`Title::place`, `Title::anchor`, [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
   - `position_keys` with `position_y`, `zoom_keys`, `rotation_keys` and `opacity_keys`: `Keyframe`s on source frames, beside the plain values
+  - `position_handles`: the `PositionHandles` of the position keys that have any, each with the frame of its key
 - `Title::takes_keys` tells which values take keyframes. A scroll has no zoom or rotation.
 - `Title::as_picture` gives a `Picture` with these values, and `Title::take_picture` takes them back. Thus `ops::keyframes` and the sampling use the code of `Picture`.
 - `Title::sampled` gives the title of one frame, without keyframes.
-- A title's zoom is one number. Its position keys take no handles, because a `POINTF` key has no curve.
+- A title's zoom is one number.
+- A handle of a title's position key is a point in the picture, not frames and a value. Thus it is not a `Handle` of the `Keyframe`:
+  - `Title::place_at` gives the point on the path. It uses the same `cubic` as the other curves, at one speed along the length.
+  - `Title::as_picture` leaves the handles out. `Title::take_picture` keeps the handles of the keys that stay.
+  - `Title::move_handles` follows a key that moves, or a new frame rate.
 - `ops::titles` holds the edits. `ops::titles::checked` is the check that `titles.add`, `titles.set` and `validate::violations` share.
 - It checks the style through the checks of the subtitle style (`checked_font`, `checked_size`, `checked_color`, `checked_outline`, `checked_background`).
 

@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use super::locate;
 use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, checked, checked_handle, ease_of, reshape};
-use crate::model::{Clip, ClipAudio, Ease, Handle, Keyframe, Picture, Project};
+use crate::model::{Clip, ClipAudio, Ease, Handle, Keyframe, Picture, Project, Title};
 use crate::request::{CopiedKey, KeyParam, KeyPicks, KeyValue};
 use crate::validate::GAIN;
 
@@ -727,6 +727,11 @@ fn owned_picture(p: &Project, id: &str, v: PictureValue) -> Result<(Picture, Cli
     ))
 }
 
+fn title_mut<'a>(p: &'a mut Project, id: &str) -> Option<&'a mut Title> {
+    let (ti, ci) = p.find_clip(id)?;
+    p.tracks[ti].clips[ci].title.as_mut()
+}
+
 fn save(p: &mut Project, id: &str, picture: &Picture) -> Result<()> {
     if let Some((ti, ci)) = p.find_cue(id) {
         super::subtitles::unlocked(p, ti)?;
@@ -782,7 +787,10 @@ fn add_picture(
     for id in &targets {
         let (mut picture, c) = owned_picture(p, id, v)?;
         let frame = c.content_at(at);
-        let n = value.unwrap_or_else(|| picture.channel_at(v, frame as f64));
+        let n = value.unwrap_or_else(|| match (v, &c.title) {
+            (PictureValue::Position, Some(t)) => t.place_at(frame as f64),
+            _ => picture.channel_at(v, frame as f64),
+        });
         picture.put_channel(v, frame, n);
         if let Some(e) = ease {
             picture.mark_ease(v, frame, e);
@@ -857,6 +865,12 @@ fn set_picture(
                 picture.set_handle(v, *frame, false, h);
             }
         }
+        if v == PictureValue::Position
+            && change.ease.is_some_and(|e| e.is_linear())
+            && let Some(t) = title_mut(p, id)
+        {
+            t.clear_handles(&chosen);
+        }
         save(p, id, &picture)?;
     }
     Ok(())
@@ -909,6 +923,11 @@ fn shift_picture(
             }
         }
         picture.move_chosen(v, &chosen, moved);
+        if v == PictureValue::Position
+            && let Some(t) = title_mut(p, id)
+        {
+            t.move_handles(|f| if chosen.contains(&f) { moved(f) } else { f });
+        }
         save(p, id, &picture)?;
     }
     Ok(())
@@ -954,6 +973,12 @@ fn listed(p: &Project, c: &Clip, picture: &Picture, v: PictureValue) -> Vec<Valu
             }
             if let Some(h) = k.out_handle {
                 row["out"] = json!(h);
+            }
+            let path = c.title.as_ref().filter(|_| v == PictureValue::Position);
+            if let Some(h) = path.and_then(|t| t.handles_at(k.frame)) {
+                row["ease"] = Value::Null;
+                row["in"] = json!(h.in_handle);
+                row["out"] = json!(h.out_handle);
             }
             row
         })

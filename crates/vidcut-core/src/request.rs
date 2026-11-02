@@ -1373,8 +1373,9 @@ pub enum Request {
     /// keyframe already on that frame takes the value and the ease. With
     /// its first keyframe, a clip's volume follows its keyframes. A title
     /// takes position, zoom, rotation and opacity, and a scroll takes
-    /// position and opacity. A title's zoom is one number, and its position
-    /// takes no ease or handles. `clips` also takes cues, as `q3` or
+    /// position and opacity. A title's zoom is one number. Its position
+    /// takes no ease here: an OTIO import gives the handles that bend its
+    /// path. `clips` also takes cues, as `q3` or
     /// `S1@10s`. A cue takes every value of a picture except its anchor. Its
     /// frames count from its start. Returns the `clips` with the source
     /// `frame` of each new keyframe.

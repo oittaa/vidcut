@@ -1,10 +1,13 @@
-use crate::model::{Clip, ClipAudio, Crop, Ease, Handle, Keyframe, Picture, Title, TitleKind};
+use crate::model::{
+    Clip, ClipAudio, Crop, Ease, Handle, Keyframe, Picture, PositionHandles, Title, TitleKind,
+};
 use crate::validate::GAIN;
 
 const FLAT: Handle = Handle {
     frames: 0.0,
     value: 0.0,
 };
+const PATH_STEPS: usize = 256;
 
 pub fn value_at(keys: &[Keyframe], frame: f64) -> Option<f64> {
     let (first, last) = (keys.first()?, keys.last()?);
@@ -154,6 +157,26 @@ fn solve(x: impl Fn(f64) -> f64, at: f64) -> f64 {
         }
     }
     (lo + hi) / 2.0
+}
+
+fn along_path(path: [[f64; 2]; 4], share: f64) -> [f64; 2] {
+    let point = |u: f64| [cubic(path.map(|p| p[0]), u), cubic(path.map(|p| p[1]), u)];
+    let mut lengths = [0.0; PATH_STEPS + 1];
+    let mut last = path[0];
+    for i in 1..=PATH_STEPS {
+        let at = point(i as f64 / PATH_STEPS as f64);
+        lengths[i] = lengths[i - 1] + (at[0] - last[0]).hypot(at[1] - last[1]);
+        last = at;
+    }
+    let want = share * lengths[PATH_STEPS];
+    let i = lengths.partition_point(|l| *l < want).clamp(1, PATH_STEPS);
+    let step = lengths[i] - lengths[i - 1];
+    let part = if step > 0.0 {
+        (want - lengths[i - 1]) / step
+    } else {
+        0.0
+    };
+    point((i as f64 - 1.0 + part) / PATH_STEPS as f64)
 }
 
 pub fn handle_point(a: &Keyframe, b: &Keyframe, out: bool) -> Option<(f64, f64)> {
@@ -847,6 +870,47 @@ impl Title {
             .any(|v| !self.keys_of(v).is_empty())
     }
 
+    pub fn handles_at(&self, frame: i64) -> Option<&PositionHandles> {
+        self.position_handles.iter().find(|h| h.frame == frame)
+    }
+
+    pub fn place_at(&self, frame: f64) -> [f64; 2] {
+        self.on_path(frame)
+            .unwrap_or_else(|| self.as_picture().place_at(frame))
+    }
+
+    fn on_path(&self, frame: f64) -> Option<[f64; 2]> {
+        let (keys, y) = (&self.position_keys, &self.position_y);
+        if keys.len() != y.len() {
+            return None;
+        }
+        let i = keys.partition_point(|k| k.frame as f64 <= frame);
+        let (a, b) = (keys.get(i.checked_sub(1)?)?, keys.get(i)?);
+        let out = self.handles_at(a.frame).and_then(|h| h.out_handle);
+        let into = self.handles_at(b.frame).and_then(|h| h.in_handle);
+        out.or(into)?;
+        let (first, last) = ([a.value, y[i - 1]], [b.value, y[i]]);
+        let from = |at: [f64; 2], h: Option<[f64; 2]>| {
+            let [x, y] = h.unwrap_or([0.0, 0.0]);
+            [at[0] + x, at[1] + y]
+        };
+        let path = [first, from(first, out), from(last, into), last];
+        let len = (b.frame - a.frame) as f64;
+        Some(along_path(path, (frame - a.frame as f64) / len))
+    }
+
+    pub fn move_handles(&mut self, frame: impl Fn(i64) -> i64) {
+        for h in &mut self.position_handles {
+            h.frame = frame(h.frame);
+        }
+        self.position_handles.sort_by_key(|h| h.frame);
+        self.position_handles.dedup_by_key(|h| h.frame);
+    }
+
+    pub fn clear_handles(&mut self, chosen: &std::collections::HashSet<i64>) {
+        self.position_handles.retain(|h| !chosen.contains(&h.frame));
+    }
+
     pub fn as_picture(&self) -> Picture {
         let zoom = self.scale();
         Picture {
@@ -869,6 +933,8 @@ impl Title {
         self.position = (at != Self::usual_position(self.kind, self.align())).then_some(at);
         self.position_keys.clone_from(&p.position_keys);
         self.position_y.clone_from(&p.position_y);
+        let held = |h: &PositionHandles| p.position_keys.iter().any(|k| k.frame == h.frame);
+        self.position_handles.retain(held);
         self.zoom = Some(p.scale()[0]).filter(|z| *z != 1.0);
         self.zoom_keys.clone_from(&p.zoom_keys);
         self.rotation = p.rotation;
@@ -882,7 +948,11 @@ impl Title {
             return self.clone();
         }
         let mut t = self.clone();
-        t.take_picture(&self.as_picture().sampled(frame));
+        let mut picture = self.as_picture().sampled(frame);
+        if let Some(at) = self.on_path(frame) {
+            picture.position = Some(at);
+        }
+        t.take_picture(&picture);
         t
     }
 }

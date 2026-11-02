@@ -949,7 +949,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **How they play:** a title shows over the tracks below it, or over black where there are none. Details: D65.
 - **Keyframes** ([todo](todo/keyframes.md#titles)):
   - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
-  - Its Position keyframes are linear. Their row has no curve.
+  - Its Position keyframes take handles. The title moves at one speed along the cubic path between two keys. The details are in the [todo](todo/keyframes.md#titles).
   - vidcut: the Across, Zoom, Rotation and Title opacity rows of the Title section have the Keyframe button.
   - vidcut: the Across button holds the keyframes of Across and Down.
 - **Later** (X53):

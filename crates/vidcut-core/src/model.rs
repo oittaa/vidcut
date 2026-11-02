@@ -1956,13 +1956,19 @@ pub struct Title {
     pub position: Option<[f64; 2]>,
     /// Position keyframes, one for X and Y, on the clip's source frames.
     /// `value` is X. `position_y` is Y, one number for each keyframe, in the
-    /// same order. They are linear: they take no handles. Left out when the
-    /// position has no keyframes.
+    /// same order. Their own `in_handle` and `out_handle` stay empty:
+    /// `position_handles` bends the path. Left out when the position has no
+    /// keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_keys: Vec<Keyframe>,
     /// Y of each `position_keys` entry. Left out with those keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_y: Vec<f64>,
+    /// The handles of the `position_keys` that have any, in order of frame.
+    /// An OTIO import gives them. A scroll has none. Left out when no
+    /// keyframe has a handle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub position_handles: Vec<PositionHandles>,
     /// How much larger its text is drawn, from 1/4 to 4, about the middle of
     /// a `text` title or the point where a lower third's lines meet; a
     /// scroll has none. Usual: 1. With `zoom_keys`, the zoom at a frame is
@@ -1990,6 +1996,23 @@ pub struct Title {
     /// opacity has no keyframes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub opacity_keys: Vec<Keyframe>,
+}
+
+/// The handles of one position keyframe of a title, as fractions of the
+/// picture from that keyframe, `[x, y]`. Between two keyframes the title
+/// moves on a cubic path. Its inner points are the first keyframe plus its
+/// `out_handle` and the second keyframe plus its `in_handle`. The title moves
+/// at one speed along the path, with the length in fractions of the picture.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PositionHandles {
+    /// The source frame of the keyframe in `position_keys`.
+    pub frame: i64,
+    /// The handle toward the keyframe before it. Left out when it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_handle: Option<[f64; 2]>,
+    /// The handle toward the keyframe after it. Left out when it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_handle: Option<[f64; 2]>,
 }
 
 /// What kind of title: one block of text, a lower third, or a scroll.
@@ -2115,6 +2138,7 @@ impl Title {
             position: None,
             position_keys: Vec::new(),
             position_y: Vec::new(),
+            position_handles: Vec::new(),
             zoom: None,
             zoom_keys: Vec::new(),
             rotation: None,
