@@ -252,6 +252,7 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - The Title section has the Keyframe button on Across, Zoom, Rotation and Title opacity. Across holds the keyframes of Across and Down.
 - The Keyframes tab shows these values of a selected title. Position has no curve button and no ease.
 - `titles.set` and the viewer's handles put a new number on a keyframe at `at`, or at the playhead, when the value has keyframes.
+- With the playhead outside the clip, the Title section shows the clip's nearest frame. A new number goes on a keyframe at that frame.
 - `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take a title in `clips`.
 - A switch to Scroll drops the zoom and rotation keyframes. A `look` in `titles.set` drops all keyframes.
 

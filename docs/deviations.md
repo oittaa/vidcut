@@ -1102,6 +1102,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The user moves the text of a title with a drag in the viewer. It snaps to the center and the thirds of the frame (pp. 763–764, 1176).
   - The Position in the Inspector also moves it (p. 764).
   - A lower third is at a corner or at the middle of the bottom of title safe (p. 1178).
+  - A position has no minimum or maximum (measured in Resolve Studio 21.1.2).
 - **vidcut:**
   - The `position` of a title is `[x, y]`, in fractions of the width and the height of the picture, from its top left.
   - Each number goes from -100 to 100. Thus a title can start and end outside the picture.
@@ -1111,6 +1112,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - Fractions mean the same at any picture size, and a script sets them exactly.
   - A lower third hung from its corner stays inside title safe, whatever the length of its text.
+  - The limit of each number is the limit of a clip's Position.
 
 ## X55. A scroll rises over the whole clip, its lines spaced as other titles'
 
