@@ -1542,7 +1542,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The button is lit on a keyframe. A click adds or removes the keyframe at the playhead.
     - Previous and Next move the playhead to the keyframe of that value, also outside the clip.
     - With several clips selected, no value has this button or the arrows, as in Resolve ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
-    - A value with keyframes on one of these clips is then off and has no Reset.
+    - A value with keyframes on one of these clips is then off. Its Reset shows and does nothing.
     - Dynamic Zoom and the flips have no Keyframe button.
     - The Reset of one of these values removes its keyframes. The Reset of Transform or Crop removes that section's keyframes.
     - The Reset of Volume sets 0 dB and removes the volume keyframes. The Audio section has no Reset of the whole section.
@@ -1571,7 +1571,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A typed value is one change. Each change is one undo step.
   - The fields show a change from a script, an agent, the viewer handles or the wheel at once.
   - The label of a value that is not at its default is in the accent color. Such a value has its own Reset button.
-  - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has neither.
+  - With several clips, the accent color and the Reset show when one of the clips has such a value. A value that is off has no accent color, and its Reset does nothing.
   - A picture value goes to all the selected clips that can have a picture. An Audio value goes to all the selected clips with sound.
   - A Speed value goes to all the selected clips that can change speed. Duration gives each clip the speed that fills it.
   - A value changes only that value on each clip. A Reset also acts on all of these clips.

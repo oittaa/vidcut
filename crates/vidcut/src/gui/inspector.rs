@@ -643,6 +643,7 @@ struct Look<'a> {
     off: bool,
     why: Option<&'static str>,
     timecode: Option<(&'a Project, i64)>,
+    dead_reset: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -798,6 +799,7 @@ fn keyed_look(off: bool) -> Look<'static> {
     Look {
         off,
         why: off.then_some("Select one clip to change its keyframes"),
+        dead_reset: off,
         ..Look::default()
     }
 }
@@ -952,7 +954,7 @@ fn field(
             }
         }
     });
-    if reset(ui, set) {
+    if reset(ui, set || look.dead_reset) && !look.dead_reset {
         acts.push(match f {
             Key::Volume => Act::Unkey,
             Key::Picture(field) if field.channel().is_some() => Act::ResetChannel(field),
@@ -1487,6 +1489,7 @@ fn speed_section(
                 (!frozen && !ripple).then_some("Needs Ripple Timeline")
             },
             timecode: Some((p, dropped)),
+            dead_reset: false,
         };
         field(
             ui,
