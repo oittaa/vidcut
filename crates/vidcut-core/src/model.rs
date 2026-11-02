@@ -194,9 +194,7 @@ impl Settings {
             s.auto_format = false;
         }
         if let Some((w, h)) = size {
-            check_side("width", w)?;
-            check_side("height", h)?;
-            (s.width, s.height) = (w, h);
+            (s.width, s.height) = timeline_size(w, h);
             s.auto_format = false;
         }
         Ok(s)
@@ -265,13 +263,17 @@ impl Settings {
     }
 }
 
-pub fn check_side(name: &str, px: u32) -> crate::error::Result<()> {
-    if px < 16 || !px.is_multiple_of(2) {
-        return Err(crate::error::Error::invalid(format!(
-            "{name} must be even and at least 16"
-        )));
+pub const TIMELINE_SIDE: (u32, u32) = (256, 32768);
+
+pub fn timeline_size(width: u32, height: u32) -> (u32, u32) {
+    let (least, most) = TIMELINE_SIDE;
+    if width < least || height < least {
+        (least, least)
+    } else if width > most || height > most {
+        (most, most)
+    } else {
+        (width, height)
     }
-    Ok(())
 }
 
 pub const PROXY_LONGEST: u32 = 960;
@@ -1965,8 +1967,8 @@ pub struct Title {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_y: Vec<f64>,
     /// The handles of the `position_keys` that have any, in order of frame.
-    /// An OTIO import gives them. A scroll has none. Left out when no
-    /// keyframe has a handle.
+    /// `keyframes.set` with `ease` or an OTIO import gives them. A scroll has
+    /// none. Left out when no keyframe has a handle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_handles: Vec<PositionHandles>,
     /// How much larger its text is drawn, from 1/4 to 4, about the middle of

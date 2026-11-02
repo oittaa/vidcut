@@ -950,6 +950,12 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **Keyframes** ([todo](todo/keyframes.md#titles)):
   - The Position, Zoom, Rotation and Composite Opacity of a title take keyframes.
   - Its Position keyframes take handles. The title moves at one speed along the cubic path between two keys. The details are in the [todo](todo/keyframes.md#titles).
+  - A right-click on a key of Position, Zoom, Rotation or Opacity opens a menu of eases, by the place of the key:
+    - The first key has Linear and Ease Out. The last key has Linear and Ease In.
+    - A middle key has Linear, Ease In, Ease Out and Ease In and Out. A lone key has only Linear.
+    - A check mark is on the current item.
+    - On Position, the handles are an eighth of the difference between the two neighbors of the key. They stay when a value changes.
+    - On Zoom, Rotation and Opacity, a handle is flat and a third of the gap to the neighbor.
   - vidcut: the Across, Zoom, Rotation and Title opacity rows of the Title section have the Keyframe button.
   - vidcut: the Across button holds the keyframes of Across and Down.
 - **Later** (X53):
@@ -1171,6 +1177,11 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **In vidcut:**
   - The Quick Export row, the Export dialog and jobs are deviation X3.
   - The suggested file name is the name of the project.
+  - AAC takes 96 to 320 kb/s, and 320 by default.
+  - The sample rate of AAC is the project's by default. The other choices are 44100 Hz and 48000 Hz.
+  - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another bitrate or chosen rate.
+  - A project at another rate, for example 96000 Hz, with AAC was not measured.
+  - The TikTok preset has AAC at 256 kb/s. That number was not measured.
 
 ## 11. Keyboard shortcuts
 
@@ -1371,8 +1382,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The check uses 10 ms steps.
   - Silence includes a clip past the end of its audio.
   - Silence also includes a click (under 0.05 s between 0.1 s of silence).
-  - Defaults: −40 dBFS, pre-head and post-tail 0.15 s, and minimum 0.5 s.
-  - The defaults are in seconds, so the frame rate does not change them.
+  - With Sound Level, the values are the ones that the window of Resolve Studio 21.1.2 showed, at 30 fps:
+    - Threshold: −100 to +10 dB, −25 by default.
+    - Pre head and post tail: 0 to 60 frames, 0 by default.
+    - Minimum: 2 to 60 frames, 30 by default.
+    - That window keeps the last values used. Thus it is not known whether −25 and 30 are factory values or kept values.
+    - `edit.ripple_delete_silence` refuses a value outside these ranges.
+  - With Speech, the pre head, the post tail and the minimum have their own defaults (deviation X47).
+  - `analyze.silence` starts from the same Threshold and minimum, and has no limits. It is vidcut's own.
   - Each silence of at least the minimum goes, less the post-tail and the pre-head.
   - At the ends of a clip, all of the silence goes.
   - The cuts are in whole frames.
@@ -1453,7 +1470,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The Smart Indicator, V, Smart Insert, the alignment of Place On Top, and Up/Down use the edits of Track 1, the main story.
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
-  - New Project takes any even picture size from 16 px, and any positive frame rate.
+  - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate.
+  - A side under 256 sets both sides to 256, whichever side it is. 16 x 720, 99999 x 16 and 16 x 99999 give 256 x 256.
+  - Else a side over 32768 sets both sides to 32768. 99999 x 720 gives 32768 x 32768.
+  - This rule is measured in the Project Settings dialog of Resolve Studio 21.1.2. `project.set` and `project.create` do the same.
+  - A `project.set` of one side checks the pair as it stands then, as a script in Resolve Studio 21.1.2 does.
   - Without them, the first media with video sets both, with no prompt. A prompt would stop scripts and agents.
   - The size can change at any time.
   - The rate can change only while the timeline is empty, because positions are whole frames.

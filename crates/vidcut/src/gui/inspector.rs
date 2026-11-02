@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
-    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_UP, CARET_LEFT, CARET_RIGHT, DIAMOND,
+    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_UP, CARET_LEFT, CARET_RIGHT, CHECK, DIAMOND,
     FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, TRASH,
 };
 use serde_json::{Value, json};
@@ -822,7 +822,12 @@ pub(super) fn key_diamond(on: bool) -> egui::Button<'static> {
     egui::Button::selectable(on, icon).frame(false)
 }
 
-pub(super) fn key_buttons(ui: &mut egui::Ui, keys: &KeyMark, linear: bool) -> Option<KeyClick> {
+pub(super) fn key_buttons(
+    ui: &mut egui::Ui,
+    keys: &KeyMark,
+    eases: &[Ease],
+    now: Option<Ease>,
+) -> Option<KeyClick> {
     let mut click = None;
     let prev = ui.add_enabled(keys.prev, egui::Button::new(CARET_LEFT).frame(false));
     if prev.clicked() {
@@ -832,10 +837,15 @@ pub(super) fn key_buttons(ui: &mut egui::Ui, keys: &KeyMark, linear: bool) -> Op
     if diamond.clicked() {
         click = Some(KeyClick::Toggle);
     }
-    if keys.on && !linear {
+    if keys.on && !eases.is_empty() {
         diamond.context_menu(|ui| {
-            for e in Ease::ALL {
-                if ui.button(ease_label(e)).clicked() {
+            for &e in eases {
+                let text = match now {
+                    Some(n) if n == e => format!("{CHECK}  {}", ease_label(e)),
+                    Some(_) => format!("     {}", ease_label(e)),
+                    None => ease_label(e).to_string(),
+                };
+                if ui.button(text).clicked() {
                     click = Some(KeyClick::Ease(e));
                 }
             }
@@ -936,7 +946,8 @@ fn field(
         }
         if let Some(keys) = keys {
             let linear = matches!(f, Key::Picture(Field::AnchorX | Field::AnchorY));
-            match key_buttons(ui, &keys, linear) {
+            let eases: &[Ease] = if linear { &[] } else { &Ease::ALL };
+            match key_buttons(ui, &keys, eases, None) {
                 Some(KeyClick::Step(dir)) => acts.push(Act::Step(f, dir)),
                 Some(KeyClick::Toggle) => acts.push(Act::Toggle(f)),
                 Some(KeyClick::Ease(e)) => acts.push(Act::KeyEase(f, e)),
