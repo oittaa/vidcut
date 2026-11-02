@@ -35,6 +35,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
 - Most parameters of the Inspector can have keyframes, for example Zoom, Opacity and the crop (p. 1250).
 - Each such parameter has a Keyframe button between Previous and Next arrows. The button is orange on a keyframe (p. 1250).
 - With the playhead outside the selected clip, the Inspector shows the curve at the playhead's clip time (measured in Resolve Studio 21.1.2). The button and a typed value add a keyframe there, outside the clip.
+- With several clips selected, the Inspector has no Keyframe buttons (measured in Resolve Studio 21.1.2). A value with keyframes on one of these clips is off, and its Reset does nothing.
 - After the first keyframe of a parameter, each change at another frame adds a keyframe. The onscreen controls of the viewer also do this (p. 1251).
 - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out (p. 1251).
 - The reset button of a parameter removes its keyframes. The reset button of a group removes the keyframes of the group (p. 1251).

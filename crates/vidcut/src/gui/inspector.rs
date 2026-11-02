@@ -770,24 +770,36 @@ fn number(
     acts: &mut Vec<Act>,
 ) {
     let first = &chosen[0];
-    let set = chosen
-        .iter()
-        .any(|c| !f.is_usual(&c.stored) || f.channel().is_some_and(|v| c.stored.has_keys(v)));
+    let several = chosen.len() > 1;
+    let keyed = f
+        .channel()
+        .is_some_and(|v| chosen.iter().any(|c| c.stored.has_keys(v)));
+    let off = several && keyed;
+    let set = !off && (keyed || chosen.iter().any(|c| !f.is_usual(&c.stored)));
     let shown = f.read(&first.shown, &first.shape, Some(first.frame));
     let range = f.range(&first.shown, &first.shape);
-    let keys = f.channel().and_then(|v| {
+    let keys = f.channel().filter(|_| !several).and_then(|v| {
         let c = p.clip(&first.id)?;
         let picture = c.picture.clone().unwrap_or_default();
         Some(mark(c, picture.keys_of(v), at))
     });
-    entry(
+    field(
         ui,
         (Key::Picture(f), link),
         i,
         (set, shown, range),
+        keyed_look(off),
         keys,
         acts,
     );
+}
+
+fn keyed_look(off: bool) -> Look<'static> {
+    Look {
+        off,
+        why: off.then_some("Select one clip to change its keyframes"),
+        ..Look::default()
+    }
 }
 
 pub(super) struct KeyMark {
@@ -862,17 +874,6 @@ pub(super) fn mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
             inside(t) && t > at
         }),
     }
-}
-
-fn entry(
-    ui: &mut egui::Ui,
-    key: (Key, Option<bool>),
-    i: &Inspector,
-    values: (bool, f64, RangeInclusive<f64>),
-    keys: Option<KeyMark>,
-    acts: &mut Vec<Act>,
-) {
-    field(ui, key, i, values, Look::default(), keys, acts);
 }
 
 fn field(
@@ -1219,7 +1220,15 @@ fn icon(ui: &mut egui::Ui, text: &str, name: &str, on: bool) -> bool {
 fn knob(ui: &mut egui::Ui, i: &Inspector, (n, k): (usize, Knob), e: &Effect, acts: &mut Vec<Act>) {
     let shown = k.read(e);
     let values = (shown != k.usual(), shown, k.range());
-    entry(ui, (Key::Effect(n, k), None), i, values, None, acts);
+    field(
+        ui,
+        (Key::Effect(n, k), None),
+        i,
+        values,
+        Look::default(),
+        None,
+        acts,
+    );
 }
 
 fn check(ui: &mut egui::Ui, (n, name, now): (usize, &str, bool), put: &str, acts: &mut Vec<Act>) {
@@ -1398,7 +1407,7 @@ fn speed_section(
     let back = paced.iter().any(|c| c.ramped && c.shown.0 < 0.0);
     let keys = p
         .clip(&paced[0].id)
-        .filter(|c| c.compound.is_none())
+        .filter(|c| count == 1 && c.compound.is_none())
         .map(|c| {
             let keys = c.speed.as_ref().map(Speed::keyframes).unwrap_or_default();
             (mark(c, &keys, at), c.start < at && at < c.end())
@@ -2142,16 +2151,26 @@ impl Workspace {
         };
         let normalize = group(ui, "Audio", header, |ui| {
             let first = &sounds[0];
-            let set = sounds
-                .iter()
-                .any(|s| s.keyed || s.gain != Key::Volume.usual());
+            let off = count > 1 && sounds.iter().any(|s| s.keyed);
+            let set = !off
+                && sounds
+                    .iter()
+                    .any(|s| s.keyed || s.gain != Key::Volume.usual());
             let volume = (set, first.gain, *GAIN.start()..=*GAIN.end());
-            let keys = p.clip(&first.id).and_then(|c| {
+            let keys = p.clip(&first.id).filter(|_| count == 1).and_then(|c| {
                 c.audio
                     .as_ref()
                     .map(|a| mark(c, &a.gain_keys, self.snap.timeline.position))
             });
-            entry(ui, (Key::Volume, None), &self.inspector, volume, keys, acts);
+            field(
+                ui,
+                (Key::Volume, None),
+                &self.inspector,
+                volume,
+                keyed_look(off),
+                keys,
+                acts,
+            );
             label(ui, "Mute", sounds.iter().any(|s| s.muted));
             let mut on = first.muted;
             if ui.checkbox(&mut on, "").clicked() {

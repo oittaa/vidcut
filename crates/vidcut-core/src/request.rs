@@ -1273,8 +1273,7 @@ pub enum Request {
         #[serde(default)]
         muted: Option<bool>,
         /// The volume. A clip with volume keyframes gets it as a keyframe
-        /// at `at` (decision D82). Such a clip without sound there keeps
-        /// its volume.
+        /// at `at`, also outside the clip (decision D82).
         #[serde(default)]
         gain_db: Option<f64>,
         /// Where `gain_db` goes as a keyframe on clips with volume
