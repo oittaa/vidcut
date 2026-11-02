@@ -3293,7 +3293,7 @@ fn halvings(
     size: (u32, u32),
     (placing, kernel, ..): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
 ) -> u32 {
-    if kernel & WIDENS == 0 || kernel & 7 == 0 {
+    if kernel & WIDENS == 0 || kernel & 7 == 0 || kernel & 7 == RESIZE {
         return 0;
     }
     let origin = match picture.sampling() {
