@@ -194,7 +194,7 @@ impl Settings {
             s.auto_format = false;
         }
         if let Some((w, h)) = size {
-            (s.width, s.height) = timeline_size(w, h)?;
+            (s.width, s.height) = timeline_size(w, h);
             s.auto_format = false;
         }
         Ok(s)
@@ -265,17 +265,14 @@ impl Settings {
 
 pub const TIMELINE_SIDE: (u32, u32) = (256, 32768);
 
-pub fn timeline_size(width: u32, height: u32) -> crate::error::Result<(u32, u32)> {
+pub fn timeline_size(width: u32, height: u32) -> (u32, u32) {
     let (least, most) = TIMELINE_SIDE;
-    let over = width > most || height > most;
-    let under = width < least || height < least;
-    match (over, under) {
-        (true, true) if width < least => Err(crate::error::Error::invalid(format!(
-            "{width} x {height}: one side is over {most} and the other under {least}"
-        ))),
-        (_, true) => Ok((least, least)),
-        (true, false) => Ok((most, most)),
-        (false, false) => Ok((width, height)),
+    if width < least || height < least {
+        (least, least)
+    } else if width > most || height > most {
+        (most, most)
+    } else {
+        (width, height)
     }
 }
 

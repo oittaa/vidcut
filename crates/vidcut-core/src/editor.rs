@@ -6238,7 +6238,7 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
         (p.settings.width, p.settings.height) = crate::model::timeline_size(
             set.width.unwrap_or(p.settings.width),
             set.height.unwrap_or(p.settings.height),
-        )?;
+        );
         p.settings.auto_format = false;
     }
     if let Some(sr) = set.sample_rate {

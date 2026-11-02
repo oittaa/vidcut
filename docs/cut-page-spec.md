@@ -1449,10 +1449,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
   - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate.
-  - One side out of that range sets both sides to that limit. 99999 x 720 gives 32768 x 32768, and 16 x 720 gives 256 x 256.
-  - A width over the top with a height under the bottom gives the bottom limit. 99999 x 16 gives 256 x 256.
-  - These sizes and these rules are measured in Resolve Studio 21.1.2, in its dialog and by script. `project.set` and `project.create` do the same.
-  - A width under the bottom with a height over the top is not measured. vidcut refuses it.
+  - A side under 256 sets both sides to 256, whichever side it is. 16 x 720, 99999 x 16 and 16 x 99999 give 256 x 256.
+  - Else a side over 32768 sets both sides to 32768. 99999 x 720 gives 32768 x 32768.
+  - This rule is measured in the Project Settings dialog of Resolve Studio 21.1.2. `project.set` and `project.create` do the same.
+  - A `project.set` of one side checks the pair as it stands then, as a script in Resolve Studio 21.1.2 does.
   - Without them, the first media with video sets both, with no prompt. A prompt would stop scripts and agents.
   - The size can change at any time.
   - The rate can change only while the timeline is empty, because positions are whole frames.

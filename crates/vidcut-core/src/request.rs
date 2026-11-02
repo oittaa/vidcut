@@ -45,12 +45,14 @@ pub enum Request {
         /// Frame rate, like `25`, `29.97` or `30000/1001`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fps: Option<String>,
-        /// Frame width, from 256 to 32768; give the height too. A side out
-        /// of that range sets both sides to that limit.
+        /// Frame width, from 256 to 32768; give the height too. A side under
+        /// 256 sets both sides to 256. Else a side over 32768 sets both to
+        /// 32768.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         width: Option<u32>,
-        /// Frame height, from 256 to 32768; give the width too. A side out
-        /// of that range sets both sides to that limit.
+        /// Frame height, from 256 to 32768; give the width too. A side under
+        /// 256 sets both sides to 256. Else a side over 32768 sets both to
+        /// 32768.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3745,12 +3747,12 @@ pub struct SourceParams {
 pub struct ProjectSet {
     #[serde(default)]
     pub fps: Option<Rational>,
-    /// Frame width, from 256 to 32768. A side out of that range sets both
-    /// sides to that limit.
+    /// Frame width, from 256 to 32768. A side under 256 sets both sides to
+    /// 256. Else a side over 32768 sets both to 32768.
     #[serde(default)]
     pub width: Option<u32>,
-    /// Frame height, from 256 to 32768. A side out of that range sets both
-    /// sides to that limit.
+    /// Frame height, from 256 to 32768. A side under 256 sets both sides to
+    /// 256. Else a side over 32768 sets both to 32768.
     #[serde(default)]
     pub height: Option<u32>,
     #[serde(default)]
