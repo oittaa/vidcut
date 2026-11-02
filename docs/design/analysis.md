@@ -39,7 +39,7 @@ flowchart TD
 - `VoiceActivity` keeps the speech probability of each frame of the VAD.
 - `analysis::non_speech` finds the speech in the frames that the clip covers, by the rule of Silero that transcribe.cpp ports:
   - Speech starts at a frame at or above the threshold.
-  - Speech ends at a frame well below the threshold, when no frame reaches the threshold again within Minimum to Trip.
+  - Speech ends at a frame well below the threshold, when no frame reaches the threshold again within Minimum.
   - Speech no longer than Shortest Speech does not count.
 - What is between the speech is cut, less Pre Head and Post Tail, as for silence (`analysis::silent_parts`).
 - Ducking by speech uses the same probabilities. `analysis::speech_frames` gives the speech of a source clip in timeline frames, by the defaults of Silero (`retime::SPEECH`, `retime::SHORTEST_SPEECH`, `retime::SHORTEST_PAUSE`).

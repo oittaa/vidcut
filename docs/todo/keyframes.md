@@ -117,7 +117,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 
 - The ease menu is on each keyframe: on the Keyframe button and in the Keyframe Editor.
 - A bar shows the value, time and ease of the selected keyframe ([X90](../deviations.md#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
-- A double-click on a track adds a keyframe there (X90).
+- A double-click on a track adds a keyframe there ([X108](../deviations.md#x108-a-double-click-on-a-row-of-the-keyframes-tab-adds-a-keyframe)).
 
 ## Scope
 
@@ -282,7 +282,7 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - On Position, the check mark is on the item that the sides of the key's handles give (`Title::position_ease`).
 - On Zoom, Rotation and Title opacity, the check mark is on the item that `ease_of` gives. A key with other handles has no check mark.
 - A scroll's Position key has no menu, and `keyframes.set` gives it no handles. Nothing measures them.
-- The Keyframes tab shows these values of a selected title. In that tab, Position has no curve button and no ease.
+- The Keyframes tab shows these values of a selected title ([X109](../deviations.md#x109-the-keyframes-tab-shows-the-values-of-a-title)). In that tab, Position has no curve button and no ease.
 - Play and export draw a title's position along the path of its handles (`Title::sampled`). A new key takes the point of the path at its frame. It has no handles, and its neighbors keep theirs.
 - `keyframes.set` and `keyframes.add` with `ease` write the measured values on the chosen position keys (`Title::ease_position`). `keyframes.list` shows the handles as `in` and `out`, with Y from the top.
 - An ease that the place of the key does not offer follows the rule of the other values. The side with no neighbor gets no handle, and the old handles of the key go.
@@ -292,7 +292,9 @@ The picture uses the `Keyframe` of the volume ([D81](../cut-page-spec.md#12-deci
 - `titles.set` and the viewer's handles put a new number on a keyframe at `at`, or at the playhead, when the value has keyframes.
 - With the playhead outside the clip, the Title section shows the curve at the playhead's clip time, as the other rows do. A new number and the Keyframe buttons add a keyframe there, outside the clip.
 - `keyframes.add`, `keyframes.set`, `keyframes.move` and `keyframes.remove` take a title in `clips`.
-- A switch to Scroll drops the zoom and rotation keyframes. A `look` in `titles.set` drops all keyframes.
+- A switch to Scroll drops the zoom and rotation keyframes and the position handles.
+- A `look` in `titles.set` keeps the keyframes and the position handles. A look that makes a scroll drops what a switch to Scroll drops.
+- A `look` in `titles.set` adds no keyframe. Its number for a value with keyframes shows when the last of them goes.
 
 **In a file:**
 

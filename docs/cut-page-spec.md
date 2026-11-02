@@ -131,7 +131,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Keyframes and clips share one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
       - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
     - A right-click on a keyframe sets its ease (X87). The anchor point's keyframes take no ease (D92).
-    - A double-click on an empty part of a track adds a keyframe there ([X90](deviations.md#x90-the-keyframes-tab-edits-a-keyframe-in-place)).
+    - A double-click on an empty part of a track adds a keyframe there ([X108](deviations.md#x108-a-double-click-on-a-row-of-the-keyframes-tab-adds-a-keyframe)).
     - The bar under the tracks shows the value, time and ease of the selected keyframe (X90).
     - A keyframe that the Keyframe button or a double-click adds is selected. Thus the bar shows it at once.
   - **Keyframe tray** (p. 1259):
@@ -936,6 +936,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A drag snaps to the centre and the thirds of the frame.
   - Shift keeps the drag on one axis, and Option turns snapping off (pp. 763–764).
   - vidcut: the Title section of the Inspector and the controls of the viewer (X52). A double-click on a title in the viewer opens the Title section.
+  - With several titles selected, the Inspector shows nothing (measured in Resolve Studio 21.1.2).
+  - vidcut: the Title section does not show then (X70). The Keyframes tab still shows the item selected first (§2).
 - **Kinds** (p. 1178):
   - L, M and R Lower 3rd put two lines at the bottom left, middle or right of title safe.
   - Title safe is 90% of the picture by default (p. 1178).
@@ -1817,6 +1819,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D56. Subtitle tracks and cues** (§8.12).
   - The manual does not say which track shows after a new track is added, or how long a new cue lasts.
   - Subtitle tracks are `S1`, `S2`, … from the video up.
+  - In Resolve Studio 21.1.2, a script added 380 subtitle tracks to one timeline, and none was refused.
+  - `track.add` takes a `count` of at least 1 subtitle track, with no top limit.
   - A new track is the shown track.
   - A new cue lasts 3 s from the playhead, measured in Resolve Studio 21.1.2. It does not stop at the next cue.
   - Add New and Add Subtitle overwrite what the new cue covers, measured in Resolve Studio 21.1.2:
@@ -2236,7 +2240,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - If you name such a look, you get that reason.
   - The application of a look is one change that you can undo:
     - `track.set` with `look` sets the style of a track (Apply Look on a subtitle track header).
-    - `titles.add` and `titles.set` with `look` set all of a title except its text. The fields given go on top.
+    - `titles.add` and `titles.set` with `look` set all of a title except its text and its keyframes ([todo](todo/keyframes.md#titles)). The fields given go on top.
     - `subtitles.transcribe` takes any subtitle look.
   - In the Subtitle Track and Title sections of the Inspector:
     - The Look list fills the fields. It shows the look that they match, or Custom.

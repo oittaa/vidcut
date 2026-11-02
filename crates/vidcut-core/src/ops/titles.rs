@@ -283,19 +283,27 @@ pub struct TitleChange {
 
 pub fn changed(old: &Title, change: &TitleChange) -> Title {
     let mut t = match &change.look {
-        Some(l) => l.on(&old.text),
+        Some(l) => Title {
+            position_keys: old.position_keys.clone(),
+            position_y: old.position_y.clone(),
+            position_handles: old.position_handles.clone(),
+            zoom_keys: old.zoom_keys.clone(),
+            rotation_keys: old.rotation_keys.clone(),
+            opacity_keys: old.opacity_keys.clone(),
+            ..l.on(&old.text)
+        },
         None => old.clone(),
     };
     if let Some(k) = change.kind {
         if k == TitleKind::Text {
             t.align = None;
         }
-        if k == TitleKind::Scroll {
-            t.position_handles.clear();
-            t.zoom_keys.clear();
-            t.rotation_keys.clear();
-        }
         t.kind = k;
+    }
+    if t.kind == TitleKind::Scroll {
+        t.position_handles.clear();
+        t.zoom_keys.clear();
+        t.rotation_keys.clear();
     }
     if let Some(a) = change.align {
         t.align = Some(a);
