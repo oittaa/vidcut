@@ -1112,13 +1112,8 @@ fn playhead(painter: &egui::Painter, map: TimeMap, rect: Rect, at: i64) {
 
 impl Workspace {
     fn first_clip(&self, p: &Project) -> Option<Clip> {
-        let selection = &self.snap.selection;
-        selection
-            .first
-            .iter()
-            .chain(&selection.clips)
-            .chain(&selection.cues)
-            .find_map(|id| p.key_holder(id))
+        let order = &self.snap.selection.order;
+        order.iter().find_map(|id| p.key_holder(id))
     }
 
     fn editor_clip(&mut self, p: &Project, tray: bool) -> Option<Clip> {

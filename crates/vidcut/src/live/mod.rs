@@ -3507,7 +3507,7 @@ impl Live {
         self.selection.media.retain(|m| media.contains(m));
         self.selection.clips.retain(|c| p.clip(c).is_some());
         self.selection.cues.retain(|c| p.cue(c).is_some());
-        self.selection.keep_first();
+        self.selection.keep_order();
         if self
             .source_media
             .as_ref()
@@ -4208,7 +4208,7 @@ impl Live {
         if let Some(m) = media {
             self.selection.media = m.to_vec();
         }
-        self.selection.keep_first();
+        self.selection.keep_order();
         Ok(())
     }
 

@@ -128,15 +128,18 @@ pub struct Selection {
     pub cues: Vec<String>,
     pub media: Vec<String>,
     pub first: Option<String>,
+    #[serde(skip)]
+    pub order: Vec<String>,
 }
 
 impl Selection {
-    pub fn keep_first(&mut self) {
-        let (clips, cues) = (&self.clips, &self.cues);
-        let held = |id: &String| clips.contains(id) || cues.contains(id);
-        if !self.first.as_ref().is_some_and(held) {
-            self.first = clips.first().or(cues.first()).cloned();
-        }
+    pub fn keep_order(&mut self) {
+        let mut fresh: HashSet<&String> = self.clips.iter().chain(&self.cues).collect();
+        self.order.retain(|id| fresh.remove(id));
+        let added = self.clips.iter().chain(&self.cues);
+        self.order
+            .extend(added.filter(|id| fresh.remove(*id)).cloned());
+        self.first = self.order.first().cloned();
     }
 }
 
