@@ -753,7 +753,7 @@ impl Workspace {
                     }
                     ui.label(dim(format!("kept after each {kept} part")));
                 });
-                dialog::row(ui, "Shortest Cut", |ui| match speech {
+                dialog::row(ui, "Minimum", |ui| match speech {
                     true => seconds(ui, &mut d.min, 1.0 / fps, 60.0),
                     false => frames(ui, &mut d.min_frames, analysis::SILENCE_MINS),
                 });

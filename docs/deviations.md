@@ -908,7 +908,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Its Threshold is the speech probability (0.5).
   - Shortest Speech leaves out shorter speech (0.25 s, the default of Silero).
   - Pre Head and Post Tail keep 0.15 s around each spoken part.
-  - Non-speech shorter than Minimum to Trip (0.5 s) stays.
+  - Non-speech shorter than Minimum (0.5 s) stays.
   - The red stripes, Remove and the one undo step are the same as with Sound level.
   - The requests are `detect`, `speech_threshold` and `min_speech` on `edit.ripple_delete_silence` and `analyze.silence`.
 - **Why:**
