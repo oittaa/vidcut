@@ -1356,7 +1356,8 @@ pub enum Request {
     /// keyframes in order: the source `frame`, the timeline frame `at` and
     /// its timecode, the `value`, the `ease` (null when a handle was
     /// dragged), and the `in` and `out` handles. Previous and Next Keyframe
-    /// are this and `player.seek`.
+    /// are this and `player.seek`. `clips` also takes cues, as `keyframes.add`
+    /// tells. So do the `clips` and `clip` of the other keyframes requests.
     #[serde(rename = "keyframes.list")]
     KeyframesList {
         #[serde(default)]
@@ -1369,8 +1370,10 @@ pub enum Request {
     /// its first keyframe, a clip's volume follows its keyframes. A title
     /// takes position, zoom, rotation and opacity, and a scroll takes
     /// position and opacity. A title's zoom is one number, and its position
-    /// takes no ease or handles. Returns the `clips` with the source `frame`
-    /// of each new keyframe.
+    /// takes no ease or handles. `clips` also takes cues, as `q3` or
+    /// `S1@10s`. A cue takes every value of a picture except its anchor. Its
+    /// frames count from its start. Returns the `clips` with the source
+    /// `frame` of each new keyframe.
     #[serde(rename = "keyframes.add")]
     KeyframesAdd {
         clips: OneOrMany<ClipRef>,
@@ -1672,7 +1675,8 @@ pub enum Request {
         at: Option<TimeSpec>,
     },
     /// Join cues of one track into the first: from its start to the last
-    /// one's end, their texts on separate lines.
+    /// one's end. Each cue must start where the one before it ends. The
+    /// result keeps only the first cue's text, words and keyframes.
     #[serde(rename = "subtitles.join")]
     SubtitlesJoin { cues: OneOrMany<String> },
     /// Put a subtitle file's cues on a subtitle track: SRT, WebVTT, or TTML
@@ -2685,7 +2689,8 @@ pub enum Request {
     },
     /// The timeline clips, subtitle cues, pool media and edit points selected.
     /// `edits` lists every selected edit, left to right. `edit` is the one
-    /// clicked last, which the Trim Editor shows.
+    /// clicked last, which the Trim Editor shows. `first` is the clip or cue
+    /// selected first, which the Keyframes tab and the keyframe tray show.
     #[serde(rename = "selection.get")]
     SelectionGet {},
     /// Select timeline clips, subtitle cues, pool media or an edit point

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use serde::Serialize;
-use vidcut_core::model::{Place, SubtitleStyle};
+use vidcut_core::model::{Picture, Place, SubtitleStyle};
 use vidcut_core::subtitles::{Tag, Token, three_letter, tokens, vtt_settings};
 use vidcut_core::time::Rational;
 
@@ -18,6 +18,7 @@ pub struct Cue {
     pub word_styles: Vec<Option<SubtitleStyle>>,
     pub color: Option<String>,
     pub style: Option<SubtitleStyle>,
+    pub picture: Option<Picture>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -260,6 +261,7 @@ pub(crate) fn segments(cues: &[Cue], by_place: bool) -> Vec<Cue> {
                     word_styles,
                     color: None,
                     style,
+                    picture: None,
                 }),
             }
         }

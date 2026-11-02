@@ -88,6 +88,7 @@ pub fn add(
     value: Option<KeyValue>,
     ease: Option<Ease>,
 ) -> Result<Vec<(String, i64)>> {
+    picture_only(p, ids, param)?;
     if param == KeyParam::Speed {
         if value.is_some() || ease.is_some() {
             return Err(Error::usage(SPEED_ADD));
@@ -215,6 +216,7 @@ pub fn set(
     pick: &Pick,
     change: &KeyChange,
 ) -> Result<()> {
+    picture_only(p, ids, param)?;
     if param == KeyParam::Speed {
         let shaped = change.value.is_some()
             || change.by.is_some()
@@ -292,6 +294,7 @@ pub fn shift(
     by: Option<i64>,
     to: Option<i64>,
 ) -> Result<()> {
+    picture_only(p, ids, param)?;
     if param == KeyParam::Speed {
         return Err(Error::invalid("speed keyframes don't move"));
     }
@@ -349,6 +352,7 @@ fn shift_volume(
 }
 
 pub fn remove(p: &mut Project, ids: &[String], param: KeyParam, pick: &Pick) -> Result<()> {
+    picture_only(p, ids, param)?;
     if param == KeyParam::Speed {
         return super::speed::remove_keyframes(p, ids, pick);
     }
@@ -436,25 +440,58 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                 );
             }
             if let Some(picture) = &held_picture(c) {
-                for v in PictureValue::ALL {
-                    if picture.has_keys(v) {
-                        clips.push(json!({
-                            "clip": c.id,
-                            "track": t.id,
-                            "param": v.name(),
-                            "keyframes": listed(p, c, picture, v),
-                        }));
-                    }
-                }
+                clips.extend(listed_values(p, c, &t.id, picture));
+            }
+        }
+    }
+    for t in &p.subtitles {
+        for q in &t.cues {
+            if ids.is_none_or(|ids| ids.contains(&q.id))
+                && let Some(picture) = &q.picture
+            {
+                clips.extend(listed_values(p, &q.as_clip(), &t.id, picture));
             }
         }
     }
     if let Some(ids) = ids {
         for id in ids {
-            locate(p, id)?;
+            holder(p, id)?;
         }
     }
     Ok(json!({ "clips": clips }))
+}
+
+fn listed_values(p: &Project, c: &Clip, track: &str, picture: &Picture) -> Vec<Value> {
+    PictureValue::ALL
+        .into_iter()
+        .filter(|v| picture.has_keys(*v))
+        .map(|v| {
+            json!({
+                "clip": c.id,
+                "track": track,
+                "param": v.name(),
+                "keyframes": listed(p, c, picture, v),
+            })
+        })
+        .collect()
+}
+
+fn holder(p: &Project, id: &str) -> Result<Clip> {
+    p.key_holder(id)
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))
+}
+
+fn picture_only(p: &Project, ids: &[String], param: KeyParam) -> Result<()> {
+    match (
+        picture_param(param),
+        ids.iter().find(|id| p.cue(id).is_some()),
+    ) {
+        (None, Some(id)) => Err(Error::invalid(format!(
+            "{id} is a subtitle, which has no {} keyframes",
+            param_name(param)
+        ))),
+        _ => Ok(()),
+    }
 }
 
 fn keys_of(c: &Clip, param: KeyParam) -> &[Keyframe] {
@@ -478,8 +515,7 @@ pub fn chosen(
     id: &str,
     picks: Option<&[KeyPicks]>,
 ) -> Result<Vec<(KeyParam, Vec<i64>)>> {
-    let (ti, ci) = locate(p, id)?;
-    let c = &p.tracks[ti].clips[ci];
+    let c = &holder(p, id)?;
     let wanted: Vec<(KeyParam, Option<Vec<i64>>)> = match picks {
         Some(picks) => picks
             .iter()
@@ -527,8 +563,7 @@ pub fn chosen(
 }
 
 pub fn copy(p: &Project, id: &str, picks: &[(KeyParam, Vec<i64>)]) -> Result<Vec<CopiedKey>> {
-    let (ti, ci) = locate(p, id)?;
-    let c = &p.tracks[ti].clips[ci];
+    let c = &holder(p, id)?;
     let held = held_picture(c);
     let mut rows = Vec::new();
     for (param, frames) in picks {
@@ -575,8 +610,7 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
     };
     let mut starts = Vec::new();
     for id in ids {
-        let (ti, ci) = locate(p, id)?;
-        starts.push(p.tracks[ti].clips[ci].start);
+        starts.push(holder(p, id)?.start);
     }
     let Some(earliest) = starts.iter().copied().min() else {
         return Err(Error::usage("keyframes.paste needs clips"));
@@ -703,6 +737,14 @@ fn held_picture(c: &Clip) -> Option<Picture> {
 }
 
 fn owned_picture(p: &Project, id: &str, v: PictureValue) -> Result<(Picture, Clip)> {
+    if let Some(q) = p.cue(id) {
+        if v == PictureValue::Anchor {
+            return Err(Error::invalid(format!(
+                "{id} is a subtitle, which has no anchor keyframes"
+            )));
+        }
+        return Ok((q.picture.clone().unwrap_or_default(), q.as_clip()));
+    }
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
     if let Some(t) = &c.title {
@@ -728,6 +770,11 @@ fn owned_picture(p: &Project, id: &str, v: PictureValue) -> Result<(Picture, Cli
 }
 
 fn save(p: &mut Project, id: &str, picture: &Picture) -> Result<()> {
+    if let Some((ti, ci)) = p.find_cue(id) {
+        super::subtitles::unlocked(p, ti)?;
+        p.subtitles[ti].cues[ci].picture = super::picture::checked(picture)?;
+        return Ok(());
+    }
     let (ti, ci) = locate(p, id)?;
     let c = &mut p.tracks[ti].clips[ci];
     let Some(mut t) = c.title.clone() else {
@@ -763,7 +810,7 @@ fn add_picture(
         .transpose()?;
     let targets: Vec<String> = ids
         .iter()
-        .filter(|id| p.clip(id).is_some_and(holds))
+        .filter(|id| p.cue(id).is_some() || p.clip(id).is_some_and(holds))
         .cloned()
         .collect();
     if targets.is_empty() {

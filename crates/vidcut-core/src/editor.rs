@@ -2258,6 +2258,22 @@ fn resolve_clips(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result
     refs.iter().map(|r| resolve_clip(p, r, playhead)).collect()
 }
 
+fn resolve_holder(p: &Project, r: &ClipRef, playhead: Option<i64>) -> Result<String> {
+    let on_subtitles = r
+        .split_once('@')
+        .is_some_and(|(track, _)| p.subtitle_track(track).is_some());
+    if on_subtitles || p.cue(r).is_some() {
+        return resolve_cue(p, r, playhead);
+    }
+    resolve_clip(p, r, playhead)
+}
+
+fn resolve_holders(p: &Project, refs: &[ClipRef], playhead: Option<i64>) -> Result<Vec<String>> {
+    refs.iter()
+        .map(|r| resolve_holder(p, r, playhead))
+        .collect()
+}
+
 fn key_pick(
     p: &Project,
     frames: &Option<OneOrMany<i64>>,
@@ -3366,7 +3382,7 @@ fn mutate(
             value,
             ease,
         } => {
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
             let at = match at {
                 Some(t) => resolve(p, t, playhead)?,
                 None => playhead
@@ -3390,7 +3406,7 @@ fn mutate(
             in_handle,
             out_handle,
         } => {
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let change = ops::keyframes::KeyChange {
                 value: *value,
@@ -3410,7 +3426,7 @@ fn mutate(
             by,
             to,
         } => {
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
             let to = to.as_ref().map(|t| resolve(p, t, playhead)).transpose()?;
             ops::keyframes::shift(p, &ids, *param, &pick, *by, to)?;
@@ -3422,13 +3438,13 @@ fn mutate(
             frames,
             at,
         } => {
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
             let pick = key_pick(p, frames, at, playhead)?;
             ops::keyframes::remove(p, &ids, *param, &pick)?;
             Value::Null
         }
         Request::KeyframesCut { clip, keys } => {
-            let id = resolve_clip(p, clip, playhead)?;
+            let id = resolve_holder(p, clip, playhead)?;
             let picks = ops::keyframes::chosen(p, &id, keys.as_deref())?;
             let copied = ops::keyframes::copy(p, &id, &picks)?;
             for (param, frames) in picks {
@@ -3448,7 +3464,7 @@ fn mutate(
             let keys = keyframes.as_ref().ok_or_else(|| {
                 Error::usage("keyframes.paste needs `keyframes` (the GUI pastes its clipboard)")
             })?;
-            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let ids = resolve_holders(p, &clips.to_vec(), playhead)?;
             let at = match at {
                 Some(t) => resolve(p, t, playhead)?,
                 None => need(playhead, "at")?,
@@ -6537,12 +6553,12 @@ pub fn query(
         Request::KeyframesList { clips } => {
             let ids = clips
                 .as_ref()
-                .map(|c| resolve_clips(p, &c.to_vec(), playhead))
+                .map(|c| resolve_holders(p, &c.to_vec(), playhead))
                 .transpose()?;
             ops::keyframes::list(p, ids.as_deref())?
         }
         Request::KeyframesCopy { clip, keys } => {
-            let id = resolve_clip(p, clip, playhead)?;
+            let id = resolve_holder(p, clip, playhead)?;
             let picks = ops::keyframes::chosen(p, &id, keys.as_deref())?;
             json!({ "clip": id, "keyframes": ops::keyframes::copy(p, &id, &picks)? })
         }
