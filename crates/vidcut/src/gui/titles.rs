@@ -335,6 +335,7 @@ impl Workspace {
         if !d.dirty {
             d.at = found.map_or(position, |(_, clip, _)| frame_in(clip, position));
         }
+        let frame = d.at;
         let stored = found.map(|(_, clip, t)| sampled_at(clip, t, d.at));
         match stored.as_ref() {
             Some(t) if !d.loaded || (!d.dirty && d.from.as_ref() != Some(t)) => {
@@ -486,7 +487,7 @@ impl Workspace {
                 let Some((_, clip, t)) = found else {
                     return;
                 };
-                let marks = mark(clip, t.keys_of(v), position);
+                let marks = mark(clip, t.keys_of(v), frame);
                 ui.horizontal(|ui| {
                     let linear = v == PictureValue::Position;
                     if let Some(click) = key_buttons(ui, &marks, linear) {
@@ -542,7 +543,7 @@ impl Workspace {
         }
         if let Some((_, clip, t)) = found {
             for (v, click) in clicks {
-                self.title_key(clip, t, v, click, position);
+                self.title_key(clip, t, v, click, frame);
             }
         }
         self.timeline.title_dialog = Some(d);
