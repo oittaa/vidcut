@@ -504,17 +504,20 @@ pub(crate) fn render_all(
     background.open(file);
     background.indexed();
     let end = project.end();
-    if !dry_run && end > 0 && project.settings.render_cache != Mode::Off {
+    if end > 0 && project.settings.render_cache != Mode::Off {
         let (plan, _) = vidcut_core::render::flatten_lanes(project, 0, end)?;
         let base = Arc::new(super::shown(plan, show_super_scale));
+        let start = base.range.0;
         background.base = Some(base.clone());
-        let mut work = background.work(project, base.clone(), base.range.0);
-        work.cancel = cancel;
-        work.tx = None;
-        match work.render() {
-            Ok(true) => {}
-            Ok(false) => return Err(super::cancelled()),
-            Err(e) => return Err(vidcut_core::Error::new(vidcut_core::ErrorCode::Media, e)),
+        if !dry_run {
+            let mut work = background.work(project, base, start);
+            work.cancel = cancel;
+            work.tx = None;
+            match work.render() {
+                Ok(true) => {}
+                Ok(false) => return Err(super::cancelled()),
+                Err(e) => return Err(vidcut_core::Error::new(vidcut_core::ErrorCode::Media, e)),
+            }
         }
     }
     Ok(background.status(project))
