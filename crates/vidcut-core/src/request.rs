@@ -1366,8 +1366,11 @@ pub enum Request {
     /// whose sound is there, on the source frame under `at`. Without a
     /// `value`, it takes the value the clip has there. A keyframe already
     /// on that frame takes the value and the ease. With its first
-    /// keyframe, a clip's volume follows its keyframes. Returns the
-    /// `clips` with the source `frame` of each new keyframe.
+    /// keyframe, a clip's volume follows its keyframes. A title takes
+    /// position, zoom, rotation and opacity, and a scroll takes position and
+    /// opacity. A title's zoom is one number, and its position takes no ease
+    /// or handles. Returns the `clips` with the source `frame` of each new
+    /// keyframe.
     #[serde(rename = "keyframes.add")]
     KeyframesAdd {
         clips: OneOrMany<ClipRef>,
@@ -2009,8 +2012,11 @@ pub enum Request {
     /// Change a title clip (`c3`, or `V2@15s` for the clip on V2 at 15 s):
     /// each field given replaces its own. A `style` replaces the whole
     /// style, a field left out going back to the usual look. Switching to
-    /// `text` drops the `align`. A `look` replaces all but the text, and the
-    /// other fields given go on top. Moves and trims are `edit.*`'s.
+    /// `text` drops the `align`. Switching to `scroll` drops the zoom and
+    /// rotation keyframes. A `look` replaces all but the text, and the other
+    /// fields given go on top. It also drops the title's keyframes. A value
+    /// with keyframes takes the new number on a keyframe at `at`. Moves and
+    /// trims are `edit.*`'s.
     #[serde(rename = "titles.set")]
     TitlesSet {
         clip: ClipRef,
@@ -2022,8 +2028,8 @@ pub enum Request {
         align: Option<TitleAlign>,
         #[serde(default)]
         style: Option<TitleStyle>,
-        /// `[x, y]` as fractions of the picture, or `[]` for the kind's
-        /// usual place.
+        /// `[x, y]` as fractions of the picture, each from -100 to 100, or
+        /// `[]` for the kind's usual place.
         #[serde(default)]
         position: Option<Vec<f64>>,
         /// How much larger its text is drawn, from 1/4 to 4; 1 for the usual
@@ -2039,6 +2045,10 @@ pub enum Request {
         /// A title look's name, built in or yours (`looks.list`).
         #[serde(default)]
         look: Option<String>,
+        /// The frame of a value with keyframes: the new number goes on a
+        /// keyframe there. Usual: the playhead.
+        #[serde(default)]
+        at: Option<TimeSpec>,
     },
 
     /// Where a clip's picture goes over the frame (`c3`, or `V2@15s`): the

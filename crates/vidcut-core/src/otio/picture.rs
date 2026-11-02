@@ -552,7 +552,7 @@ fn moved_at([x, y]: [f64; 2], shape: &Shape) -> [f64; 2] {
     [rounded((x - 0.5) * w / fw), rounded(-(y - 0.5) * h / fh)]
 }
 
-fn read_keys(p: &Value, origin: i64) -> Option<Vec<Keyframe>> {
+pub(super) fn read_keys(p: &Value, origin: i64) -> Option<Vec<Keyframe>> {
     let Some(keys) = p.get("Key Frames").and_then(Value::as_object) else {
         return Some(Vec::new());
     };
@@ -698,7 +698,7 @@ fn position_of(pan: f64, tilt: f64, anchor: [f64; 2], scale: u8, shape: &Shape) 
     [rounded(0.5 + d[0] / w), rounded(0.5 + d[1] / h)]
 }
 
-fn file_curve(
+pub(super) fn file_curve(
     keys: &[Keyframe],
     y: Option<&[f64]>,
     source: i64,

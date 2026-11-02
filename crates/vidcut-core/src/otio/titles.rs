@@ -1,11 +1,12 @@
 use serde_json::{Value, json};
 
 use super::effects::{effect, group, keyed, plain, ranged, rounded};
+use super::picture::{file_curve, read_keys};
 use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
-    SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleAlign, TitleKind, TitleShadow,
-    TitleStyle,
+    Keyframe, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleAlign, TitleKind,
+    TitleShadow, TitleStyle,
 };
 use crate::rich::{self, Look, Span};
 
@@ -29,30 +30,100 @@ pub fn name(t: &Title) -> &'static str {
     kind_of(t).1
 }
 
-fn composite_opacity(e: &Value) -> Option<f64> {
-    (super::effects::name(e) == "Composite").then(|| {
-        e["metadata"][EDITOR]["Parameters"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|p| p["Parameter ID"] == "opacity")
-            .and_then(|p| p["Parameter Value"].as_f64())
-            .unwrap_or(100.0)
-    })
+fn parameter<'a>(group: &'a Value, id: &str) -> &'a Value {
+    group["Parameters"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|p| p["Parameter ID"] == id)
+        .unwrap_or(&Value::Null)
 }
 
-pub fn with_opacity(t: &Title, effects: Vec<Value>) -> Vec<Value> {
+fn composite(e: &Value) -> Option<&Value> {
+    (super::effects::name(e) == "Composite").then(|| parameter(&e["metadata"][EDITOR], "opacity"))
+}
+
+fn with_frames(mut p: Value, frames: Option<Value>) -> Value {
+    if let Some(frames) = frames {
+        p["Key Frames"] = frames;
+    }
+    p
+}
+
+fn point_frames(t: &Title, origin: i64, file: impl Fn([f64; 2]) -> [f64; 2]) -> Option<Value> {
+    if t.position_keys.is_empty() {
+        return None;
+    }
+    let mut out = serde_json::Map::new();
+    for (k, y) in t.position_keys.iter().zip(&t.position_y) {
+        let [x, y] = file([k.value, *y]);
+        out.insert(
+            (k.frame - origin).to_string(),
+            json!({ "Value": [rounded(x), rounded(y)], "Variant Type": "POINTF" }),
+        );
+    }
+    Some(Value::Object(out))
+}
+
+fn fitted(keys: &[Keyframe], by: f64, low: f64, high: f64) -> Vec<Keyframe> {
+    let scaled = |h: crate::model::Handle| crate::model::Handle {
+        frames: h.frames,
+        value: rounded(h.value * by),
+    };
+    keys.iter()
+        .map(|k| Keyframe {
+            value: rounded((k.value * by).clamp(low, high)),
+            in_handle: k.in_handle.map(scaled),
+            out_handle: k.out_handle.map(scaled),
+            frame: k.frame,
+        })
+        .collect()
+}
+
+fn point_keys(
+    p: &Value,
+    origin: i64,
+    ours: impl Fn([f64; 2]) -> [f64; 2],
+) -> (Vec<Keyframe>, Vec<f64>) {
+    let keys = p.get("Key Frames").and_then(Value::as_object);
+    let mut rows: Vec<(Keyframe, f64)> = Vec::new();
+    for (t, k) in keys.into_iter().flatten() {
+        if let (Ok(at), Some(v)) = (t.parse::<f64>(), point(&k["Value"])) {
+            let [x, y] = ours(v);
+            let key = Keyframe {
+                frame: (at + origin as f64).round() as i64,
+                value: clamped(x),
+                in_handle: None,
+                out_handle: None,
+            };
+            rows.push((key, clamped(y)));
+        }
+    }
+    rows.sort_by_key(|(k, _)| k.frame);
+    rows.dedup_by_key(|(k, _)| k.frame);
+    rows.into_iter().unzip()
+}
+
+pub fn with_opacity(t: &Title, effects: Vec<Value>, origin: i64) -> Vec<Value> {
     let mut out: Vec<Value> = effects
         .into_iter()
-        .filter(|e| composite_opacity(e).is_none())
+        .filter(|e| composite(e).is_none())
         .collect();
-    if let Some(o) = t.opacity {
+    if t.opacity.is_some() || !t.opacity_keys.is_empty() {
         out.push(effect(group(
             "Composite",
             1,
             1,
             vec![ranged(
-                keyed("opacity", json!(rounded(o * 100.0)), json!(100.0), "Double"),
+                with_frames(
+                    keyed(
+                        "opacity",
+                        json!(rounded(t.opaque() * 100.0)),
+                        json!(100.0),
+                        "Double",
+                    ),
+                    file_curve(&t.opacity_keys, None, origin, |o| rounded(o * 100.0), 100.0),
+                ),
                 0.0,
                 100.0,
             )],
@@ -61,12 +132,18 @@ pub fn with_opacity(t: &Title, effects: Vec<Value>) -> Vec<Value> {
     out
 }
 
-pub fn take_opacity(effects: &mut Vec<Value>) -> Option<f64> {
-    let found = effects.iter().find_map(composite_opacity);
-    effects.retain(|e| composite_opacity(e).is_none());
-    found
-        .map(|o| rounded((o / 100.0).clamp(0.0, 1.0)))
-        .filter(|o| *o < 1.0)
+pub fn take_opacity(effects: &mut Vec<Value>, origin: i64) -> (Option<f64>, Vec<Keyframe>) {
+    let found = effects.iter().find_map(composite).cloned();
+    effects.retain(|e| composite(e).is_none());
+    let Some(p) = found else {
+        return (None, Vec::new());
+    };
+    let plain = p["Parameter Value"].as_f64().unwrap_or(100.0);
+    let keys = read_keys(&p, origin).unwrap_or_default();
+    (
+        Some(rounded((plain / 100.0).clamp(0.0, 1.0))).filter(|o| *o < 1.0),
+        fitted(&keys, 0.01, 0.0, 1.0),
+    )
 }
 
 fn kind_named(kind: &str) -> Option<(TitleKind, Option<TitleAlign>)> {
@@ -80,12 +157,12 @@ fn kind_named(kind: &str) -> Option<(TitleKind, Option<TitleAlign>)> {
     }
 }
 
-fn scrolling(t: &Title, family: &str, points: f64, color: &str) -> Vec<Value> {
+fn scrolling(t: &Title, family: &str, points: f64, color: &str, origin: i64) -> Vec<Value> {
     let [x, _] = t.place();
-    let (across, alignment) = match t.align() {
-        TitleAlign::Left => (x + 0.5, 0),
-        TitleAlign::Middle => (x, 1),
-        TitleAlign::Right => (x - 0.5, 2),
+    let (shift, alignment) = match t.align() {
+        TitleAlign::Left => (0.5, 0),
+        TitleAlign::Middle => (0.0, 1),
+        TitleAlign::Right => (-0.5, 2),
     };
     vec![
         group(
@@ -99,11 +176,14 @@ fn scrolling(t: &Title, family: &str, points: f64, color: &str) -> Vec<Value> {
                     json!("Scroll Title"),
                     "String",
                 ),
-                keyed(
-                    "position",
-                    json!([rounded(across), 0.5]),
-                    json!([0.51, 0.5]),
-                    "POINTF",
+                with_frames(
+                    keyed(
+                        "position",
+                        json!([rounded(x + shift), 0.5]),
+                        json!([0.51, 0.5]),
+                        "POINTF",
+                    ),
+                    point_frames(t, origin, |[x, _]| [x + shift, 0.5]),
                 ),
             ],
         ),
@@ -211,16 +291,38 @@ fn plain_lines(lines: &[&[Span]]) -> String {
         .join("\n")
 }
 
+fn placed(t: &Title, lift: f64, usual: [f64; 2], origin: i64) -> Value {
+    let [x, y] = t.place();
+    with_frames(
+        keyed(
+            "position",
+            json!([rounded(x), rounded(1.0 - y + lift)]),
+            json!(usual),
+            "POINTF",
+        ),
+        point_frames(t, origin, |[x, y]| [x, 1.0 - y + lift]),
+    )
+}
+
 fn rich_text(
     t: &Title,
     lines: &[&[Span]],
     blob: String,
     anchor: u32,
-    at: [f64; 2],
-    usual: [f64; 2],
+    position: Value,
+    origin: i64,
 ) -> Value {
     let scale = rounded(t.scale());
-    let zoom = |id: &str| ranged(keyed(id, json!(scale), json!(1.0), "Double"), 0.25, 4.0);
+    let zoom = |id: &str| {
+        ranged(
+            with_frames(
+                keyed(id, json!(scale), json!(1.0), "Double"),
+                file_curve(&t.zoom_keys, None, origin, rounded, 1.0),
+            ),
+            0.25,
+            4.0,
+        )
+    };
     group(
         "Rich Text",
         24,
@@ -234,16 +336,19 @@ fn rich_text(
             ),
             json!({ "Parameter ID": "title blob", "Title HTML": blob }),
             plain("anchor", json!(anchor), json!(anchor), "UInt"),
-            keyed("position", json!(at), json!(usual), "POINTF"),
+            position,
             zoom("transformationZoomX"),
             zoom("transformationZoomY"),
             plain("transformationZoomLink", json!(true), json!(true), "Bool"),
             ranged(
-                keyed(
-                    "transformationRotationAngle",
-                    json!(rounded(t.turn())),
-                    json!(0.0),
-                    "Double",
+                with_frames(
+                    keyed(
+                        "transformationRotationAngle",
+                        json!(rounded(t.turn())),
+                        json!(0.0),
+                        "Double",
+                    ),
+                    file_curve(&t.rotation_keys, None, origin, rounded, 1.0),
                 ),
                 -100000.0,
                 100000.0,
@@ -258,7 +363,7 @@ pub struct Drawn {
     pub backing: Option<[f64; 4]>,
 }
 
-pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
+pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
     let (kind, name) = kind_of(t);
     let family = t
         .style
@@ -280,15 +385,15 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
         color: &color,
     };
     let (mut groups, hold) = match t.kind {
-        TitleKind::Scroll => (scrolling(t, family, points, &color), None),
+        TitleKind::Scroll => (scrolling(t, family, points, &color, origin), None),
         TitleKind::Text => (
             vec![rich_text(
                 t,
                 &lines,
                 html(&lines, Some("center"), 0, &base),
                 4,
-                [rounded(x), rounded(1.0 - y)],
-                [0.5, 0.5],
+                placed(t, 0.0, [0.5, 0.5], origin),
+                origin,
             )],
             Some([x, 1.0 - y]),
         ),
@@ -312,16 +417,16 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn) -> Value {
                         &[upper],
                         html(&[upper], align, 1, &base),
                         column,
-                        [rounded(x), rounded(meet)],
-                        [usual_x, 0.2],
+                        placed(t, t.lower_line(), [usual_x, 0.2], origin),
+                        origin,
                     ),
                     rich_text(
                         t,
                         &[lower],
                         html(&[lower], align, 0, &base),
                         6 + column,
-                        [rounded(x), rounded(meet)],
-                        [usual_x, 0.22],
+                        placed(t, t.lower_line(), [usual_x, 0.22], origin),
+                        origin,
                     ),
                 ],
                 Some([x, meet]),
@@ -502,18 +607,12 @@ fn named<'a>(groups: &[&'a Value], name: &str) -> Vec<&'a Value> {
 }
 
 fn value<'a>(group: &'a Value, id: &str) -> &'a Value {
-    group["Parameters"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|p| p["Parameter ID"] == id)
-        .map_or(&Value::Null, |p| {
-            if p["Parameter ID"] == "title blob" {
-                &p["Title HTML"]
-            } else {
-                &p["Parameter Value"]
-            }
-        })
+    let p = parameter(group, id);
+    if p["Parameter ID"] == "title blob" {
+        &p["Title HTML"]
+    } else {
+        &p["Parameter Value"]
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -781,9 +880,14 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
             shadow: shadow_of(all),
         },
         position: Some([clamped(x), 0.5]),
+        position_keys: Vec::new(),
+        position_y: Vec::new(),
         zoom: None,
+        zoom_keys: Vec::new(),
         rotation: None,
+        rotation_keys: Vec::new(),
         opacity: None,
+        opacity_keys: Vec::new(),
     };
     crate::ops::titles::checked(&title).ok()
 }
@@ -794,17 +898,85 @@ fn point(v: &Value) -> Option<[f64; 2]> {
 }
 
 fn clamped(v: f64) -> f64 {
-    rounded(v).clamp(0.0, 1.0)
+    rounded(v).clamp(-100.0, 100.0)
 }
 
-pub fn read(item: &Value, reference: &Value, height: u32) -> Option<Title> {
+fn row(g: &Value) -> u64 {
+    (value(g, "anchor").as_u64().unwrap_or(4) / 3).min(2)
+}
+
+fn upper_lower<'a>(texts: &[&'a Value]) -> Option<(Option<&'a Value>, &'a Value)> {
+    let first = *texts.first()?;
+    Some(match texts.get(1).copied() {
+        Some(s) if row(first) == 2 && row(s) != 2 => (Some(s), first),
+        Some(s) => (Some(first), s),
+        None => (None, first),
+    })
+}
+
+fn read_scroll_keys(t: &mut Title, all: &[&Value], origin: i64) {
+    let Some(text) = named(all, "Text").first().copied() else {
+        return;
+    };
+    let shift = match t.align() {
+        TitleAlign::Left => 0.5,
+        TitleAlign::Middle => 0.0,
+        TitleAlign::Right => -0.5,
+    };
+    (t.position_keys, t.position_y) = point_keys(parameter(text, "position"), origin, |[x, _]| {
+        [x - shift, 0.5]
+    });
+}
+
+fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
+    let texts = named(all, "Rich Text");
+    let Some((_, lower)) = upper_lower(&texts) else {
+        return;
+    };
+    let main = if t.kind == TitleKind::Text {
+        texts[0]
+    } else {
+        lower
+    };
+    let lift = if t.kind == TitleKind::Text {
+        0.0
+    } else {
+        row(main) as f64 / 2.0 * t.lower_line()
+    };
+    (t.position_keys, t.position_y) = point_keys(parameter(main, "position"), origin, |[x, y]| {
+        [x, 1.0 - y + lift]
+    });
+    let keys = |id: &str| read_keys(parameter(main, id), origin).unwrap_or_default();
+    t.zoom_keys = fitted(&keys("transformationZoomX"), 1.0, 0.25, 4.0);
+    t.rotation_keys = fitted(&keys("transformationRotationAngle"), 1.0, -3600.0, 3600.0);
+}
+
+pub fn read(item: &Value, reference: &Value, height: u32, origin: i64) -> Option<Title> {
     if let Some(raw) = item["metadata"][VIDCUT].get("title")
         && let Ok(t) = serde_json::from_value::<Title>(raw.clone())
         && let Ok(t) = crate::ops::titles::checked(&t)
     {
         return Some(t);
     }
-    from_editor(reference, height)
+    let mut t = from_editor(reference, height)?;
+    let all = groups(reference);
+    if t.kind == TitleKind::Scroll {
+        read_scroll_keys(&mut t, &all, origin);
+    } else {
+        read_rich_keys(&mut t, &all, origin);
+    }
+    crate::ops::titles::checked(&t).ok()
+}
+
+pub fn with_keys_of(mut t: Title, read: &Title) -> Title {
+    let dy = t.place()[1] - read.place()[1];
+    t.position_keys.clone_from(&read.position_keys);
+    t.position_y = read.position_y.iter().map(|y| clamped(y + dy)).collect();
+    t.zoom_keys.clone_from(&read.zoom_keys);
+    t.rotation_keys.clone_from(&read.rotation_keys);
+    t.opacity = read.opacity;
+    t.opacity_keys.clone_from(&read.opacity_keys);
+    t
 }
 
 pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
@@ -816,7 +988,6 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let texts = named(&all, "Rich Text");
     let first = *texts.first()?;
     let read_of = |g: &Value| read_html(value(g, "title blob").as_str().unwrap_or(""));
-    let row = |g: &Value| (value(g, "anchor").as_u64().unwrap_or(4) / 3).min(2);
     let h = f64::from(height.max(1));
     let marked = |r: &Read, base: &Read| -> Vec<String> {
         r.lines
@@ -840,11 +1011,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             (marked(&r, &r), r, at, None, first)
         }
         TitleKind::LowerThird => {
-            let (upper, lower) = match texts.get(1).copied() {
-                Some(s) if row(first) == 2 && row(s) != 2 => (Some(s), first),
-                Some(s) => (Some(first), s),
-                None => (None, first),
-            };
+            let (upper, lower) = upper_lower(&texts)?;
             let low = read_of(lower);
             let high = upper.map(read_of).unwrap_or_default();
             let style_from = if high.points.is_some() { high } else { low };
@@ -907,9 +1074,14 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             shadow,
         },
         position: None,
+        position_keys: Vec::new(),
+        position_y: Vec::new(),
         zoom,
+        zoom_keys: Vec::new(),
         rotation,
+        rotation_keys: Vec::new(),
         opacity: None,
+        opacity_keys: Vec::new(),
     };
     let [x, from_bottom] = at;
     let mut y = 1.0 - from_bottom;

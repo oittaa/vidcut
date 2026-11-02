@@ -456,7 +456,7 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                     json!({ "clip": c.id, "track": t.id, "param": "speed", "keyframes": keys }),
                 );
             }
-            if let Some(picture) = &c.picture {
+            if let Some(picture) = &held_picture(c) {
                 for v in PictureValue::ALL {
                     if picture.has_keys(v) {
                         clips.push(json!({
@@ -479,10 +479,11 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
 }
 
 fn keys_of(c: &Clip, param: KeyParam) -> &[Keyframe] {
-    match (param, picture_param(param)) {
-        (KeyParam::Speed, _) => &[],
-        (_, Some(v)) => c.picture.as_ref().map_or(&[], |p| p.keys_of(v)),
-        (_, None) => c.audio.as_ref().map_or(&[], |a| a.gain_keys.as_slice()),
+    match (param, picture_param(param), &c.title) {
+        (KeyParam::Speed, _, _) => &[],
+        (_, Some(v), Some(t)) => t.keys_of(v),
+        (_, Some(v), None) => c.picture.as_ref().map_or(&[], |p| p.keys_of(v)),
+        (_, None, _) => c.audio.as_ref().map_or(&[], |a| a.gain_keys.as_slice()),
     }
 }
 
@@ -549,6 +550,7 @@ pub fn chosen(
 pub fn copy(p: &Project, id: &str, picks: &[(KeyParam, Vec<i64>)]) -> Result<Vec<CopiedKey>> {
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
+    let held = held_picture(c);
     let mut rows = Vec::new();
     for (param, frames) in picks {
         let keys = keys_of(c, *param);
@@ -557,7 +559,7 @@ pub fn copy(p: &Project, id: &str, picks: &[(KeyParam, Vec<i64>)]) -> Result<Vec
             .enumerate()
             .filter(|(_, k)| frames.contains(&k.frame))
         {
-            let value = match (picture_param(*param), &c.picture) {
+            let value = match (picture_param(*param), &held) {
                 (Some(v), Some(picture)) if v.pair() => {
                     KeyValue::Pair(picture.key_value(v, k.frame).unwrap_or([k.value, 0.0]))
                 }
@@ -710,13 +712,34 @@ fn finite(v: PictureValue, value: [f64; 2]) -> Result<[f64; 2]> {
     }
 }
 
-fn shows(c: &Clip, at: i64) -> bool {
-    super::picture::has_picture(c) && c.start <= at && at < c.end()
+fn holds(c: &Clip) -> bool {
+    super::picture::has_picture(c) || c.title.is_some()
 }
 
-fn owned_picture(p: &Project, id: &str) -> Result<(Picture, Clip)> {
+fn held_picture(c: &Clip) -> Option<Picture> {
+    c.title
+        .as_ref()
+        .map(crate::model::Title::as_picture)
+        .or_else(|| c.picture.clone())
+}
+
+fn shows(c: &Clip, at: i64) -> bool {
+    holds(c) && c.start <= at && at < c.end()
+}
+
+fn owned_picture(p: &Project, id: &str, v: PictureValue) -> Result<(Picture, Clip)> {
     let (ti, ci) = locate(p, id)?;
     let c = &p.tracks[ti].clips[ci];
+    if let Some(t) = &c.title {
+        if !t.takes_keys(v) {
+            return Err(Error::invalid(format!(
+                "{id} is a {}, which has no {} keyframes",
+                if t.moves() { "scroll" } else { "title" },
+                v.name().replace('_', " ")
+            )));
+        }
+        return Ok((t.as_picture(), c.clone()));
+    }
     if !super::picture::has_picture(c) {
         return Err(Error::invalid(format!("{id} has no picture")));
     }
@@ -730,9 +753,22 @@ fn owned_picture(p: &Project, id: &str) -> Result<(Picture, Clip)> {
 }
 
 fn save(p: &mut Project, id: &str, picture: &Picture) -> Result<()> {
-    let stored = super::picture::checked(picture)?;
     let (ti, ci) = locate(p, id)?;
-    p.tracks[ti].clips[ci].picture = stored;
+    let c = &mut p.tracks[ti].clips[ci];
+    let Some(mut t) = c.title.clone() else {
+        c.picture = super::picture::checked(picture)?;
+        return Ok(());
+    };
+    if picture
+        .zoom_keys
+        .iter()
+        .zip(&picture.zoom_y)
+        .any(|(k, y)| k.value != *y)
+    {
+        return Err(Error::invalid("a title's zoom is one number"));
+    }
+    t.take_picture(picture);
+    c.title = Some(super::titles::checked(&t)?);
     Ok(())
 }
 
@@ -751,7 +787,7 @@ fn add_picture(
     let value = value
         .map(|n| numbers(v, n).and_then(|n| finite(v, n)))
         .transpose()?;
-    let takes = |c: &Clip| shows(c, at) || past_ends && super::picture::has_picture(c);
+    let takes = |c: &Clip| shows(c, at) || past_ends && holds(c);
     let targets: Vec<String> = ids
         .iter()
         .filter(|id| p.clip(id).is_some_and(takes))
@@ -773,7 +809,7 @@ fn add_picture(
     }
     let mut added = Vec::new();
     for id in &targets {
-        let (mut picture, c) = owned_picture(p, id)?;
+        let (mut picture, c) = owned_picture(p, id, v)?;
         let frame = c.content_at(at);
         let n = value.unwrap_or_else(|| picture.channel_at(v, frame as f64));
         picture.put_channel(v, frame, n);
@@ -826,7 +862,7 @@ fn set_picture(
         .map(|h| h.map(|h| checked_handle(h, false)).transpose())
         .transpose()?;
     for id in ids {
-        let (mut picture, c) = owned_picture(p, id)?;
+        let (mut picture, c) = owned_picture(p, id, v)?;
         if !picture.has_keys(v) {
             return Err(Error::invalid(format!(
                 "{id} has no {} keyframes",
@@ -871,7 +907,7 @@ fn shift_picture(
         return Err(Error::usage("give `by` or `to`"));
     }
     for id in ids {
-        let (mut picture, c) = owned_picture(p, id)?;
+        let (mut picture, c) = owned_picture(p, id, v)?;
         if !picture.has_keys(v) {
             return Err(Error::invalid(format!(
                 "{id} has no {} keyframes",
@@ -913,7 +949,7 @@ fn shift_picture(
 
 fn remove_picture(p: &mut Project, ids: &[String], v: PictureValue, pick: &Pick) -> Result<()> {
     for id in ids {
-        let (mut picture, c) = owned_picture(p, id)?;
+        let (mut picture, c) = owned_picture(p, id, v)?;
         if !picture.has_keys(v) {
             return Err(Error::invalid(format!(
                 "{id} has no {} keyframes",

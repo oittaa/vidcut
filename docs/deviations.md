@@ -1080,14 +1080,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The B, I, U, Color, Size, Font and Plain buttons of the Title section put this markup around the selected words.
   - A line of a lower third takes its own size in this way.
   - The lines of a title share one zoom and one rotation.
-  - vidcut does not have Text+ and Fusion titles. A title has no keyframes.
+  - vidcut does not have Text+ and Fusion titles.
+  - The Position, Zoom, Rotation and Opacity of a title take keyframes ([todo](todo/keyframes.md#titles)). Its shadow and background do not.
   - A title clip has no Transform, Cropping, Speed or blend modes.
 - **Why:**
   - Most cuts need a block of text, a lower third and credits.
   - Text+ and Fusion titles are Fusion compositions, and vidcut does not have Fusion (spec §1).
   - Resolve writes Text+ to an OTIO file as a `MissingReference` with nothing of the title in it.
   - Thus neither Text+ nor Fusion titles could come from Resolve or go to Resolve.
-  - Keyframes other than those of the clip volume, and blend modes, are out (spec §1).
+  - Blend modes are out (spec §1).
 
   - Other clips have Transform, Crop and Dynamic Zoom ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). A title does not.
   - The place, zoom, rotation and opacity of a title do what Transform and the opacity of Composite would do.
@@ -1103,6 +1104,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A lower third is at a corner or at the middle of the bottom of title safe (p. 1178).
 - **vidcut:**
   - The `position` of a title is `[x, y]`, in fractions of the width and the height of the picture, from its top left.
+  - Each number goes from -100 to 100. Thus a title can start and end outside the picture.
   - The Title section of the Inspector shows it as percents.
   - It is where the middle of a Text title goes, or the bottom corner or middle of a lower third (D65).
   - Without a position, the title takes the usual place of its kind.

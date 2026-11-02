@@ -414,7 +414,7 @@ pub(crate) fn titles_of(piece: &VideoPiece, k: i64) -> Vec<(usize, ShownTitle)> 
     piece
         .titles()
         .into_iter()
-        .map(|(n, s)| (n, s.after(k)))
+        .map(|(n, s)| (n, s.after(k).sampled()))
         .collect()
 }
 

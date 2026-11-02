@@ -1935,27 +1935,52 @@ pub struct Title {
     #[serde(default, skip_serializing_if = "TitleStyle::is_empty")]
     pub style: TitleStyle,
     /// Where it goes, as fractions of the picture's width and height from
-    /// its top left: the middle of a `text` title's block (usual: `[0.5,
-    /// 0.5]`), a lower third's bottom left, middle or right corner by its
-    /// `align` (usual: 10%, 50% or 90% across and 88% down, so that its
-    /// lower line's top sits about a fifth up the picture: `[0.1, 0.88]`,
-    /// `[0.5, 0.88]` and `[0.9, 0.88]`). A scroll's `x` is where its lines'
-    /// left edge, middle or right edge goes by its `align` (usual: 5%, 50%
-    /// or 95% across); its `y` is not used.
+    /// its top left, each from -100 to 100: the middle of a `text` title's
+    /// block (usual: `[0.5, 0.5]`), a lower third's bottom left, middle or
+    /// right corner by its `align` (usual: 10%, 50% or 90% across and 88%
+    /// down, so that its lower line's top sits about a fifth up the picture:
+    /// `[0.1, 0.88]`, `[0.5, 0.88]` and `[0.9, 0.88]`). A scroll's `x` is
+    /// where its lines' left edge, middle or right edge goes by its `align`
+    /// (usual: 5%, 50% or 95% across); its `y` is not used. With
+    /// `position_keys`, the place at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
+    /// Position keyframes, one for X and Y, on the clip's source frames.
+    /// `value` is X. `position_y` is Y, one number for each keyframe, in the
+    /// same order. They are linear: they take no handles. Left out when the
+    /// position has no keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub position_keys: Vec<Keyframe>,
+    /// Y of each `position_keys` entry. Left out with those keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub position_y: Vec<f64>,
     /// How much larger its text is drawn, from 1/4 to 4, about the middle of
     /// a `text` title or the point where a lower third's lines meet; a
-    /// scroll has none. Usual: 1.
+    /// scroll has none. Usual: 1. With `zoom_keys`, the zoom at a frame is
+    /// that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zoom: Option<f64>,
+    /// Zoom keyframes, on the clip's source frames. Left out when the zoom
+    /// has no keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zoom_keys: Vec<Keyframe>,
     /// Degrees it is turned counterclockwise, with its background and
-    /// shadow, about the same point as `zoom`. Usual: 0.
+    /// shadow, about the same point as `zoom`. Usual: 0. With
+    /// `rotation_keys`, the angle at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,
-    /// How opaque the whole title is, from 0 to 1. Usual: 1.
+    /// Rotation keyframes, on the clip's source frames. Left out when the
+    /// rotation has no keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rotation_keys: Vec<Keyframe>,
+    /// How opaque the whole title is, from 0 to 1. Usual: 1. With
+    /// `opacity_keys`, the opacity at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
+    /// Opacity keyframes, on the clip's source frames. Left out when the
+    /// opacity has no keyframes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub opacity_keys: Vec<Keyframe>,
 }
 
 /// What kind of title: one block of text, a lower third, or a scroll.
@@ -2073,9 +2098,14 @@ impl Title {
             text: text.into(),
             style: TitleStyle::default(),
             position: None,
+            position_keys: Vec::new(),
+            position_y: Vec::new(),
             zoom: None,
+            zoom_keys: Vec::new(),
             rotation: None,
+            rotation_keys: Vec::new(),
             opacity: None,
+            opacity_keys: Vec::new(),
         }
     }
 
@@ -3827,6 +3857,7 @@ impl Hash for Title {
             zoom,
             rotation,
             opacity,
+            ..
         } = self;
         (kind, align, text, style).hash(h);
         pair_bits(*position).hash(h);

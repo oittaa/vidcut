@@ -348,8 +348,10 @@ Cancel:
   - A title has spans, each with its own face, size, weight, slant, underline and color.
   - Its kind aligns it, and title safe wraps it. It has one box behind the block, and its anchor places it.
 - Each title in the plan carries its clip, and where the piece is in that clip (`ShownTitle`, its `Run`). `Run::top` places a scrolling title on each frame.
+- `titles_of` gives a title with keyframes the values of its frame (`ShownTitle::sampled`). Thus the viewer and the export get plain values.
 - A title in a dissolve at the edge of its clip fades by the `Ramp` of the dissolve (`fade`), on both sides of the edge. `ShownTitle::alpha` gives its level, with its opacity.
 - The player's `Titles` draws a title once for the size of the output, and keeps it while it shows. The shader moves and fades it.
+  - Each new zoom of a title with zoom keyframes draws it again. The viewer scales the last drawing until the new one is ready.
 - Titles draw in each export and in `frame.render`, whatever the subtitle settings are.
 
 Titles in a placed compound clip:

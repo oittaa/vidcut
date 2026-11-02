@@ -105,7 +105,10 @@ fn showing(p: &Project, at: i64) -> Vec<(String, Title, i64, i64)> {
             t.clips
                 .iter()
                 .filter(|c| c.enabled && c.start <= at && at < c.end())
-                .filter_map(|c| Some((c.id.clone(), c.title.clone()?, c.start, c.duration)))
+                .filter_map(|c| {
+                    let t = c.title.as_ref()?.sampled(c.content_at(at) as f64);
+                    Some((c.id.clone(), t, c.start, c.duration))
+                })
         })
         .collect()
 }
@@ -304,8 +307,10 @@ impl Workspace {
                 if t0.kind == TitleKind::Scroll {
                     y = y0;
                 }
-                next.now.position =
-                    Some([rounded(x.clamp(0.0, 1.0), 4), rounded(y.clamp(0.0, 1.0), 4)]);
+                next.now.position = Some([
+                    rounded(x.clamp(-100.0, 100.0), 4),
+                    rounded(y.clamp(-100.0, 100.0), 4),
+                ]);
                 next.guides = guides;
             }
             Hold::Zoom => {
@@ -382,7 +387,10 @@ impl Workspace {
         }
         if resp.drag_stopped()
             && let Some(held) = self.timeline.title_grab.held.take()
-            && let Some(params) = changed(&held)
+            && let Some(params) = changed(
+                &held,
+                self.snap.player(crate::live::PlayerId::Timeline).position,
+            )
         {
             self.send("titles.set", params);
             self.title_landing(&held.clip, &held.now);
@@ -474,7 +482,7 @@ impl Workspace {
     }
 }
 
-fn changed(held: &Held) -> Option<Value> {
+fn changed(held: &Held, at: i64) -> Option<Value> {
     let (a, b) = (&held.title, &held.now);
     let mut params = json!({ "clip": held.clip });
     if a.position != b.position {
@@ -486,8 +494,9 @@ fn changed(held: &Held) -> Option<Value> {
     if a.rotation != b.rotation {
         params["rotation"] = json!(b.turn());
     }
-    params
-        .as_object()
-        .is_some_and(|o| o.len() > 1)
-        .then_some(params)
+    if params.as_object().is_none_or(|o| o.len() < 2) {
+        return None;
+    }
+    params["at"] = json!(at);
+    Some(params)
 }

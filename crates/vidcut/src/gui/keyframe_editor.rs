@@ -546,6 +546,18 @@ fn paired(param: KeyParam) -> bool {
     )
 }
 
+fn linear(clip: &Clip, param: KeyParam) -> bool {
+    param == KeyParam::Anchor || (param == KeyParam::Position && clip.title.is_some())
+}
+
+fn limits_of(clip: &Clip, param: KeyParam) -> (f64, f64) {
+    if param == KeyParam::Zoom && clip.title.is_some() {
+        (0.25, 4.0)
+    } else {
+        limits(param)
+    }
+}
+
 fn nudge_step(param: KeyParam, sign: f64, y: bool) -> f64 {
     let step = match param {
         KeyParam::Zoom | KeyParam::Volume | KeyParam::CropSoftness => 0.2,
@@ -695,8 +707,9 @@ fn frames_of(marks: &[Mark], param: KeyParam) -> Vec<i64> {
         .collect()
 }
 
-fn by_value(param: KeyParam, axis: Axis, d: f64) -> Value {
+fn by_value(clip: &Clip, param: KeyParam, axis: Axis, d: f64) -> Value {
     match param {
+        KeyParam::Zoom if clip.title.is_some() => json!(d),
         KeyParam::Position | KeyParam::Zoom | KeyParam::Anchor => match axis {
             Axis::Y => json!([0.0, d]),
             _ => json!([d, 0.0]),
@@ -732,7 +745,7 @@ fn d_value(span: f64, height: f32, dy: f32) -> f64 {
 }
 
 fn side_hi(clip: &Clip, param: KeyParam, frame: i64) -> f64 {
-    let (_, hi) = limits(param);
+    let (_, hi) = limits_of(clip, param);
     let Some(picture) = clip.picture.as_ref() else {
         return hi;
     };
@@ -751,7 +764,7 @@ fn clamped_delta(clip: &Clip, lane: &Lane, marks: &[Mark], axis: Axis, raw: f64)
     if axis == Axis::None {
         return 0.0;
     }
-    let (lo, _) = limits(lane.param);
+    let (lo, _) = limits_of(clip, lane.param);
     let mut d = raw;
     for m in marks.iter().filter(|m| m.param == lane.param) {
         let Some(i) = lane.keys.iter().position(|k| k.frame == m.frame) else {
@@ -905,6 +918,18 @@ fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
         for v in PictureValue::ALL {
             if !keyed_only || picture.has_keys(v) {
                 out.push(lane_from(&picture, v));
+            }
+        }
+    }
+    if let Some(t) = &clip.title {
+        let picture = t.as_picture();
+        for v in PictureValue::ALL {
+            if t.takes_keys(v) && (!keyed_only || picture.has_keys(v)) {
+                let mut lane = lane_from(&picture, v);
+                if v == PictureValue::Zoom {
+                    lane.extra.clear();
+                }
+                out.push(lane);
             }
         }
     }
@@ -1394,7 +1419,7 @@ impl Workspace {
                 let axis = if y { Axis::Y } else { Axis::X };
                 clamped_delta(&clip, lane, &marks, axis, nudge_step(param, sign, y))
             };
-            let by = if paired(param) {
+            let by = if paired(param) && lane.extra.len() == lane.keys.len() {
                 let (x, y) = (d(false), d(true));
                 if x == 0.0 && y == 0.0 {
                     continue;
@@ -2024,7 +2049,7 @@ impl Workspace {
                         &clip.id,
                         param,
                         &frames,
-                        by_value(param, shift.axis, shift.dv),
+                        by_value(clip, param, shift.axis, shift.dv),
                     ),
                 ));
             }
@@ -2180,7 +2205,7 @@ impl Workspace {
             if !plot.tray {
                 let c = ui
                     .add_enabled(
-                        keyed && lane.param != KeyParam::Anchor && !fixed(lane.param),
+                        keyed && !linear(clip, lane.param) && !fixed(lane.param),
                         egui::Button::selectable(curve && keyed, WAVE_SINE).frame(false),
                     )
                     .on_hover_text("Curve");
@@ -2569,7 +2594,7 @@ impl Workspace {
                     });
                 }
             }
-            if mark.param == KeyParam::Anchor {
+            if linear(clip, mark.param) {
                 return;
             }
             let (current, options) = key_eases(clip, lane, i);
@@ -2845,7 +2870,7 @@ impl Workspace {
         if !open {
             return;
         }
-        if lane.param == KeyParam::Anchor {
+        if linear(clip, lane.param) {
             self.key_editor.menu = None;
             return;
         }
