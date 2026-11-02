@@ -2965,7 +2965,7 @@ fn settings_form(
                     if let Some(target) = &mut a.loudness {
                         ui.add(
                             egui::DragValue::new(target)
-                                .range(-60.0..=-5.0)
+                                .range(vidcut_core::ops::normalize::LOUDNESS)
                                 .speed(0.1)
                                 .suffix(" LUFS"),
                         );

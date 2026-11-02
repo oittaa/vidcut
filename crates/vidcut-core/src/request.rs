@@ -1335,12 +1335,12 @@ pub enum Request {
         /// What is measured and brought to `target`. Default: `youtube`.
         #[serde(default)]
         mode: NormalizeMode,
-        /// The level to reach: LUFS with a loudness mode (-60 to -5), dBFS
-        /// with `sample_peak` and dBTP with `true_peak` (-60 to 0). Default:
+        /// The level to reach: LUFS with a loudness mode (-30 to 0), dBFS
+        /// with `sample_peak` and dBTP with `true_peak` (-20 to 0). Default:
         /// the mode's. A mode with a fixed target takes only that value.
         #[serde(default)]
         target: Option<f64>,
-        /// The highest true peak allowed, in dBTP (-60 to 0), for a mode
+        /// The highest true peak allowed, in dBTP (-20 to 0), for a mode
         /// that has a peak limit. The volume stops where the peaks reach it,
         /// even below `target`. Default: the mode's. A fixed limit takes only
         /// that value.
@@ -3365,9 +3365,9 @@ impl KeyValue {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NormalizeMode {
-    /// The highest sample, in dBFS. Target -1.
+    /// The highest sample, in dBFS. Target -9.
     SamplePeak,
-    /// The highest true peak, between the samples too, in dBTP. Target -1.
+    /// The highest true peak, between the samples too, in dBTP. Target -2.
     TruePeak,
     /// Loudness, target -23 LUFS, no peak limit.
     #[serde(rename = "bs1770_1")]
