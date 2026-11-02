@@ -1967,10 +1967,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The manual does not give the look of a title, how its text sits, or how it plays over other tracks.
   - The usual look of a title:
     - The font of the burn-in (D61).
-    - White, with no background.
-    - A black outline centered on the edge of the letters, 0.1 times the Size number wide, in pixels of the timeline.
+    - White, with no outline and no background (measured in Resolve Studio 21.1.2).
     - Text 96/1080 of the picture height for Text: the height of Resolve's 96-point Text title (D67).
-    - Text 6% of the picture height for a lower third.
+    - Text 108/1080 for Scroll (measured in Resolve Studio 21.1.2).
+    - For a lower third, 76/1080 on its lower line and 48/1080 on its upper line (measured in Resolve Studio 21.1.2).
+    - A `size` in the style goes on both lines of a lower third.
+    - Resolve's upper line also has a tracking of 11. A title in vidcut has no tracking.
     - Lines 1.31 times the text height apart, wrapped at the width of title safe, 90% of the picture width.
   - The lines of a Text title are centered. The middle of the block is at the middle of the picture.
   - The lines of a lower third align left, center or right.
@@ -1984,7 +1986,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The background is one box behind the block. It reaches 0.15 of the text height past its lines.
   - A drop shadow is a blurred copy of the text and its outline. It is over the background and under the text, as in Resolve.
   - By default, the shadow is black, 75% opaque and blurred 20. These are Resolve's own values.
-  - Its offset is 0.3% of the picture width right and 0.5% of its height down. Resolve's default offset of 0 draws no shadow.
+  - Its offset is 0, which draws no shadow (measured in Resolve Studio 21.1.2).
   - Zoom draws the text larger, and the outline and the background box grow with it. The zoom scales the outline, measured in Resolve Studio 21.1.2.
   - Rotation turns the whole title, box and shadow too, counterclockwise.
   - Zoom and rotation work about the middle of a Text title.

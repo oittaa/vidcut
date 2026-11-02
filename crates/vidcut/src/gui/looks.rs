@@ -307,12 +307,12 @@ impl<'a> Usual<'a> {
         }
     }
 
-    pub(super) fn title(size: &'a str, outline_size: &'a str) -> Self {
+    pub(super) fn title(size: &'a str) -> Self {
         Self {
             size,
             outline: "#000000",
             ink: [0, 0, 0],
-            outline_size,
+            outline_size: "none",
             background: "none",
             opacity: "100%",
         }

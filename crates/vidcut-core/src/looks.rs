@@ -202,7 +202,7 @@ fn spoken(size: f64, show: WordsShow, pop: Option<f64>, upper: bool) -> Subtitle
         margin: Some(0.15),
         bold: Some(true),
         case: upper.then_some(LetterCase::Upper),
-        shadow: Some(TitleShadow::default()),
+        shadow: shade(0.75, [0.003, 0.005], 20.0),
         words: Some(SubtitleWords {
             show: Some(show),
             color: None,
