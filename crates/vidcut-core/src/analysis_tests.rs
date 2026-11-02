@@ -34,12 +34,12 @@ fn ripple_delete_silence_honors_the_threshold_and_minimum() {
     assert_eq!(f.v1().len(), 1);
     let r = f.ok(req(
         "edit.ripple_delete_silence",
-        json!({"clips": "c1", "min": "3s", "pre_head": 0, "post_tail": 0}),
+        json!({"clips": "c1", "min": "60f", "pre_head": 0, "post_tail": 0}),
     ));
     let removed = r.result["removed"].as_array().unwrap();
-    assert_eq!(removed.len(), 1, "{removed:?}");
+    assert_eq!(removed.len(), 2, "{removed:?}");
     assert_eq!(
-        (&removed[0]["start"], &removed[0]["end"]),
+        (&removed[1]["start"], &removed[1]["end"]),
         (&json!(175), &json!(250))
     );
 }

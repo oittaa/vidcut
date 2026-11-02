@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use crate::model::{Project, TrackKind};
 
-pub const GAIN: std::ops::RangeInclusive<f64> = -60.0..=24.0;
+pub const GAIN: std::ops::RangeInclusive<f64> = -100.0..=30.0;
+pub const FADER: std::ops::RangeInclusive<f64> = -100.0..=10.0;
 
 pub fn violations(p: &Project) -> Vec<String> {
     let mut v = Vec::new();
@@ -28,9 +29,9 @@ pub fn violations(p: &Project) -> Vec<String> {
         if i > 0 && t.kind == TrackKind::Video && p.tracks[i - 1].kind == TrackKind::Audio {
             v.push(format!("video track {} after audio tracks", t.id));
         }
-        if !GAIN.contains(&t.volume_db) {
+        if !FADER.contains(&t.volume_db) {
             v.push(format!(
-                "track {} volume {} dB outside -60..24 dB",
+                "track {} volume {} dB outside -100..10 dB",
                 t.id, t.volume_db
             ));
         }
@@ -110,7 +111,7 @@ pub fn violations(p: &Project) -> Vec<String> {
                     if let Some(a) = &c.audio {
                         if !GAIN.contains(&a.gain_db) {
                             v.push(format!(
-                                "{}: gain {} dB outside -60..24 dB",
+                                "{}: gain {} dB outside -100..30 dB",
                                 c.id, a.gain_db
                             ));
                         }
@@ -261,7 +262,7 @@ mod tests {
         p.tracks[0].clips[0].audio.as_mut().unwrap().gain_db = 1000.0;
         p.tracks[0].volume_db = f64::NAN;
         let v = violations(&p).join("; ");
-        assert!(v.contains("gain 1000 dB outside -60..24 dB"), "{v}");
+        assert!(v.contains("gain 1000 dB outside -100..30 dB"), "{v}");
         assert!(v.contains("track V1 volume NaN dB"), "{v}");
     }
 }

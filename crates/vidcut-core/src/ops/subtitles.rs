@@ -290,13 +290,18 @@ pub fn target(p: &mut Project, track: Option<&str>) -> Result<usize> {
             p.subtitles.len() + 1
         )));
     }
-    if let Some(i) = p.subtitles.iter().position(|t| t.shown) {
+    if let Some(i) = usual_track(p) {
         return Ok(i);
     }
-    if p.subtitles.is_empty() {
-        add_track(p, None);
-    }
+    add_track(p, None);
     Ok(0)
+}
+
+pub fn usual_track(p: &Project) -> Option<usize> {
+    p.subtitles
+        .iter()
+        .position(|t| t.shown)
+        .or((!p.subtitles.is_empty()).then_some(0))
 }
 
 pub fn shown(p: &Project) -> Result<usize> {
@@ -319,15 +324,8 @@ pub fn cue_at(t: &SubtitleTrack, frame: i64) -> Option<usize> {
         .rposition(|c| c.start <= frame && frame < c.end())
 }
 
-fn default_length(p: &Project, ti: usize, start: i64) -> i64 {
-    let full = (DEFAULT_SECS * p.settings.fps.as_f64()).round() as i64;
-    let next = p.subtitles[ti]
-        .cues
-        .iter()
-        .map(|c| c.start)
-        .filter(|&s| s > start)
-        .min();
-    next.map_or(full, |n| full.min(n - start)).max(1)
+pub fn default_length(p: &Project) -> i64 {
+    p.settings.fps.secs_to_frames(DEFAULT_SECS).max(1)
 }
 
 pub fn checked_words(text: &str, duration: i64, words: &[i64]) -> Result<()> {
@@ -409,7 +407,7 @@ pub fn add_cue(
     let duration = match (end, duration) {
         (Some(e), _) => e - start,
         (None, Some(d)) => d,
-        (None, None) => default_length(p, ti, start),
+        (None, None) => default_length(p),
     };
     if duration < 1 {
         return Err(Error::invalid("a cue lasts at least one frame"));

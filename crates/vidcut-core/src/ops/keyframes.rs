@@ -366,17 +366,9 @@ fn remove_volume(p: &mut Project, ids: &[String], pick: &Pick) -> Result<()> {
     for id in ids {
         let (a, c) = keyed_audio(p, id)?;
         let chosen = picked(&c, &a.gain_keys, pick)?;
-        let first = a
-            .gain_keys
-            .iter()
-            .find(|k| chosen.contains(&k.frame))
-            .map(|k| k.value);
         reshape(&mut a.gain_keys, |marked| {
             marked.retain(|(k, _)| !chosen.contains(&k.frame));
         });
-        if let (false, Some(v)) = (a.is_keyed(), first) {
-            a.gain_db = v;
-        }
     }
     Ok(())
 }
@@ -580,15 +572,22 @@ pub fn copy(p: &Project, id: &str, picks: &[(KeyParam, Vec<i64>)]) -> Result<Vec
                 _ => KeyValue::Scalar(k.value),
             };
             let at = c.key_time(k.frame).round() as i64;
+            let bent = c
+                .title
+                .as_ref()
+                .filter(|_| *param == KeyParam::Position)
+                .and_then(|t| t.handles_at(k.frame));
             rows.push((
                 at,
                 CopiedKey {
                     param: *param,
                     offset: 0,
                     value,
-                    ease: ease_of(keys, i),
+                    ease: ease_of(keys, i).filter(|_| bent.is_none()),
                     in_handle: k.in_handle,
                     out_handle: k.out_handle,
+                    in_point: bent.and_then(|h| h.in_handle),
+                    out_point: bent.and_then(|h| h.out_handle),
                 },
             ));
         }
@@ -642,6 +641,11 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
                 },
             };
             set(p, one, k.param, &pick, &change)?;
+            if k.param == KeyParam::Position
+                && let Some(t) = title_mut(p, id).filter(|t| !t.moves())
+            {
+                t.put_handles(frame, k.in_point, k.out_point);
+            }
             out.push(json!({ "clip": id, "param": k.param, "value": k.value, "frame": frame }));
         }
     }
@@ -740,6 +744,18 @@ fn title_mut<'a>(p: &'a mut Project, id: &str) -> Option<&'a mut Title> {
     p.tracks[ti].clips[ci].title.as_mut()
 }
 
+fn bends(c: &Clip, v: PictureValue) -> bool {
+    v == PictureValue::Position && c.title.as_ref().is_some_and(|t| !t.moves())
+}
+
+fn ease_path(p: &mut Project, id: &str, frames: impl IntoIterator<Item = i64>, ease: Ease) {
+    if let Some(t) = title_mut(p, id) {
+        for frame in frames {
+            t.ease_position(frame, ease);
+        }
+    }
+}
+
 fn save(p: &mut Project, id: &str, picture: &Picture) -> Result<()> {
     if let Some((ti, ci)) = p.find_cue(id) {
         super::subtitles::unlocked(p, ti)?;
@@ -800,10 +816,14 @@ fn add_picture(
             _ => picture.channel_at(v, frame as f64),
         });
         picture.put_channel(v, frame, n);
-        if let Some(e) = ease {
+        let path = bends(&c, v);
+        if let Some(e) = ease.filter(|_| !path) {
             picture.mark_ease(v, frame, e);
         }
         save(p, id, &picture)?;
+        if let Some(e) = ease.filter(|_| path) {
+            ease_path(p, id, [frame], e);
+        }
         added.push((id.clone(), frame));
     }
     Ok(added)
@@ -854,6 +874,7 @@ fn set_picture(
             )));
         }
         let chosen = picked_name(&c, picture.keys_of(v), pick, v)?;
+        let path = bends(&c, v);
         for frame in &chosen {
             let mut next =
                 value.unwrap_or_else(|| picture.key_value(v, *frame).unwrap_or([0.0, 0.0]));
@@ -863,7 +884,7 @@ fn set_picture(
             if value.is_some() || by.is_some() {
                 picture.put_channel(v, *frame, next);
             }
-            if let Some(e) = change.ease {
+            if let Some(e) = change.ease.filter(|_| !path) {
                 picture.mark_ease(v, *frame, e);
             }
             if let Some(h) = in_handle {
@@ -873,13 +894,10 @@ fn set_picture(
                 picture.set_handle(v, *frame, false, h);
             }
         }
-        if v == PictureValue::Position
-            && change.ease.is_some_and(|e| e.is_linear())
-            && let Some(t) = title_mut(p, id)
-        {
-            t.clear_handles(&chosen);
-        }
         save(p, id, &picture)?;
+        if let Some(e) = change.ease.filter(|_| path) {
+            ease_path(p, id, chosen, e);
+        }
     }
     Ok(())
 }
@@ -983,8 +1001,10 @@ fn listed(p: &Project, c: &Clip, picture: &Picture, v: PictureValue) -> Vec<Valu
                 row["out"] = json!(h);
             }
             let path = c.title.as_ref().filter(|_| v == PictureValue::Position);
-            if let Some(h) = path.and_then(|t| t.handles_at(k.frame)) {
-                row["ease"] = Value::Null;
+            if let Some(t) = path
+                && let Some(h) = t.handles_at(k.frame)
+            {
+                row["ease"] = json!(t.position_ease(k.frame));
                 row["in"] = json!(h.in_handle);
                 row["out"] = json!(h.out_handle);
             }

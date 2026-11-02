@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use eframe::egui::{self, Align, Layout, RichText, vec2};
 use egui_phosphor::regular::{
-    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_UP, CARET_LEFT, CARET_RIGHT, DIAMOND,
+    ARROW_COUNTER_CLOCKWISE, ARROW_DOWN, ARROW_UP, CARET_LEFT, CARET_RIGHT, CHECK, DIAMOND,
     FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, TRASH,
 };
 use serde_json::{Value, json};
@@ -643,6 +643,7 @@ struct Look<'a> {
     off: bool,
     why: Option<&'static str>,
     timecode: Option<(&'a Project, i64)>,
+    dead_reset: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -798,6 +799,7 @@ fn keyed_look(off: bool) -> Look<'static> {
     Look {
         off,
         why: off.then_some("Select one clip to change its keyframes"),
+        dead_reset: off,
         ..Look::default()
     }
 }
@@ -820,7 +822,12 @@ pub(super) fn key_diamond(on: bool) -> egui::Button<'static> {
     egui::Button::selectable(on, icon).frame(false)
 }
 
-pub(super) fn key_buttons(ui: &mut egui::Ui, keys: &KeyMark, linear: bool) -> Option<KeyClick> {
+pub(super) fn key_buttons(
+    ui: &mut egui::Ui,
+    keys: &KeyMark,
+    eases: &[Ease],
+    now: Option<Ease>,
+) -> Option<KeyClick> {
     let mut click = None;
     let prev = ui.add_enabled(keys.prev, egui::Button::new(CARET_LEFT).frame(false));
     if prev.clicked() {
@@ -830,10 +837,15 @@ pub(super) fn key_buttons(ui: &mut egui::Ui, keys: &KeyMark, linear: bool) -> Op
     if diamond.clicked() {
         click = Some(KeyClick::Toggle);
     }
-    if keys.on && !linear {
+    if keys.on && !eases.is_empty() {
         diamond.context_menu(|ui| {
-            for e in Ease::ALL {
-                if ui.button(ease_label(e)).clicked() {
+            for &e in eases {
+                let text = match now {
+                    Some(n) if n == e => format!("{CHECK}  {}", ease_label(e)),
+                    Some(_) => format!("     {}", ease_label(e)),
+                    None => ease_label(e).to_string(),
+                };
+                if ui.button(text).clicked() {
                     click = Some(KeyClick::Ease(e));
                 }
             }
@@ -846,13 +858,7 @@ pub(super) fn key_buttons(ui: &mut egui::Ui, keys: &KeyMark, linear: bool) -> Op
     click
 }
 
-pub(super) fn next_key(
-    c: &Clip,
-    times: impl Iterator<Item = i64>,
-    at: i64,
-    dir: i64,
-) -> Option<i64> {
-    let times = times.filter(|t| c.start <= *t && *t < c.end());
+pub(super) fn next_key(times: impl Iterator<Item = i64>, at: i64, dir: i64) -> Option<i64> {
     if dir < 0 {
         times.filter(|t| *t < at).max()
     } else {
@@ -862,17 +868,22 @@ pub(super) fn next_key(
 
 pub(super) fn mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
     let time = |k: &Keyframe| c.key_time(k.frame).round() as i64;
-    let inside = |t: i64| c.start <= t && t < c.end();
     KeyMark {
         on: keys.iter().any(|k| time(k) == at),
-        prev: keys.iter().any(|k| {
-            let t = time(k);
-            inside(t) && t < at
-        }),
-        next: keys.iter().any(|k| {
-            let t = time(k);
-            inside(t) && t > at
-        }),
+        prev: keys.iter().any(|k| time(k) < at),
+        next: keys.iter().any(|k| time(k) > at),
+    }
+}
+
+fn speed_mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
+    let inside: Vec<Keyframe> = keys
+        .iter()
+        .copied()
+        .filter(|k| (c.start..c.end()).contains(&(c.key_time(k.frame).round() as i64)))
+        .collect();
+    KeyMark {
+        on: mark(c, keys, at).on,
+        ..mark(c, &inside, at)
     }
 }
 
@@ -935,7 +946,8 @@ fn field(
         }
         if let Some(keys) = keys {
             let linear = matches!(f, Key::Picture(Field::AnchorX | Field::AnchorY));
-            match key_buttons(ui, &keys, linear) {
+            let eases: &[Ease] = if linear { &[] } else { &Ease::ALL };
+            match key_buttons(ui, &keys, eases, None) {
                 Some(KeyClick::Step(dir)) => acts.push(Act::Step(f, dir)),
                 Some(KeyClick::Toggle) => acts.push(Act::Toggle(f)),
                 Some(KeyClick::Ease(e)) => acts.push(Act::KeyEase(f, e)),
@@ -953,7 +965,7 @@ fn field(
             }
         }
     });
-    if reset(ui, set) {
+    if reset(ui, set || look.dead_reset) && !look.dead_reset {
         acts.push(match f {
             Key::Volume => Act::Unkey,
             Key::Picture(field) if field.channel().is_some() => Act::ResetChannel(field),
@@ -1410,7 +1422,7 @@ fn speed_section(
         .filter(|c| count == 1 && c.compound.is_none())
         .map(|c| {
             let keys = c.speed.as_ref().map(Speed::keyframes).unwrap_or_default();
-            (mark(c, &keys, at), c.start < at && at < c.end())
+            (speed_mark(c, &keys, at), c.start < at && at < c.end())
         });
     let header = |ui: &mut egui::Ui| {
         let mut act = keys.and_then(|k| speed_keys(ui, k));
@@ -1488,6 +1500,7 @@ fn speed_section(
                 (!frozen && !ripple).then_some("Needs Ripple Timeline")
             },
             timecode: Some((p, dropped)),
+            dead_reset: false,
         };
         field(
             ui,
@@ -1902,7 +1915,10 @@ impl Workspace {
         let Some(c) = key_clips(key, lists).first().and_then(|id| p.clip(id)) else {
             return;
         };
-        if let Some(t) = next_key(c, key_times(c, key).into_iter(), at, dir) {
+        let times = key_times(c, key)
+            .into_iter()
+            .filter(|t| key != Key::Speed || (c.start..c.end()).contains(t));
+        if let Some(t) = next_key(times, at, dir) {
             self.seek(PlayerId::Timeline, t, false);
         }
     }
@@ -1992,9 +2008,13 @@ impl Workspace {
         let sets: Vec<Value> = chosen
             .iter()
             .filter_map(|c| {
-                let base = c.stored.adopt(c.frame as f64);
+                let mut plain = c.stored.clone();
+                plain.clear_channel(v);
+                let mut base = plain.clone();
+                let now = c.stored.channel_at(v, c.frame as f64);
+                vidcut_core::keyframes::write_channel(&mut base, v, now);
                 let to = field.put_at(&base, &c.shape, field.usual(), Some(c.frame));
-                changed(&c.id, &base, &to).map(|mut p| {
+                changed(&c.id, &plain, &to).map(|mut p| {
                     p["at"] = json!(at);
                     p
                 })

@@ -13,7 +13,7 @@ const FADES: [(&str, bool); 4] = [
     ("faderOut", false),
 ];
 
-pub(super) fn rounded(v: f64) -> f64 {
+pub(crate) fn rounded(v: f64) -> f64 {
     (v * 1e6).round() / 1e6
 }
 

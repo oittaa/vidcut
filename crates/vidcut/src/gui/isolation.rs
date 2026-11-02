@@ -4,7 +4,7 @@ use vidcut_core::Project;
 
 use super::workspace::Workspace;
 
-pub(super) const FIRST_AMOUNT: f64 = 75.0;
+pub(super) const FIRST_AMOUNT: f64 = 100.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Isolate {
@@ -100,7 +100,7 @@ impl Workspace {
             let r = ui.add(
                 egui::DragValue::new(&mut value)
                     .update_while_editing(false)
-                    .range(1.0..=100.0)
+                    .range(vidcut_core::ops::ISOLATION)
                     .speed(0.5)
                     .fixed_decimals(0)
                     .prefix("Amount "),

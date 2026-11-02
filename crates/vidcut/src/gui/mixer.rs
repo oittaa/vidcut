@@ -19,9 +19,9 @@ const HOLD_SECS: f32 = 1.5;
 
 const BAR_W: f32 = 10.0;
 
-const FADER_DB: std::ops::RangeInclusive<f64> = -60.0..=24.0;
+const FADER_DB: std::ops::RangeInclusive<f64> = vidcut_core::validate::FADER;
 
-const FADER_MARKS: [f32; 7] = [0.0, 12.0, -12.0, -24.0, 24.0, -60.0, -40.0];
+const FADER_MARKS: [f32; 7] = [0.0, 10.0, -12.0, -24.0, -100.0, -60.0, -40.0];
 
 const FADER_SCALE_W: f32 = 26.0;
 
