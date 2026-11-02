@@ -157,6 +157,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Minimize Subtitle Track, Boring Detector.
   - **Timeline Actions:**
     - Add Video/Audio/Subtitle Track, Split Clips, Join Match Edit Clips, Add Marker.
+    - The Add Tracks window of Resolve Studio 21.1.2 takes 0 to 99 video tracks and 0 to 999 audio tracks. `track.add` takes the same.
     - Detect Scene Cuts, Add Dissolve to All Edits, Clear Transition from All Edits.
     - vidcut also has Add Subtitle (deviation X44), Create Subtitles from Audio (X46), Re-time Subtitles to Speech (X49) and Ripple Delete Silence.
   - **Edit Actions:** Trim Start to Playhead, Trim End to Playhead.
