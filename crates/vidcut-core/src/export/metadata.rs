@@ -290,7 +290,7 @@ pub fn choose(
     let black_in = |pieces: &mut dyn Iterator<Item = &VideoPiece>| -> i64 {
         pieces
             .map(|p| match p {
-                VideoPiece::Black { frames, .. } => *frames,
+                VideoPiece::Black { frames, .. } | VideoPiece::Generated { frames, .. } => *frames,
                 _ => 0,
             })
             .sum()
@@ -299,7 +299,7 @@ pub fn choose(
     let leading_black = black_in(
         &mut video
             .iter()
-            .take_while(|p| matches!(p, VideoPiece::Black { .. })),
+            .take_while(|p| matches!(p, VideoPiece::Black { .. } | VideoPiece::Generated { .. })),
     );
 
     if out == Hdr::Pq {
@@ -431,7 +431,7 @@ pub fn choose(
                 percent(total - with, total)
             )),
             Some(_) if leading_black > 0 => Some(format!(
-                "the black frames at the start ({}) have none, and every frame needs it",
+                "the frames with no file at the start ({}) have none, and every frame needs it",
                 percent(leading_black, total + black)
             )),
             Some(_) if !matches!(v.codec, VideoCodec::Hevc | VideoCodec::Av1) => {
@@ -563,8 +563,8 @@ mod tests {
         assert_eq!(c.mode, HdrMetadata::Hdr10plus, "{:?}", c.why);
         assert!(
             c.why.iter().any(|w| w
-                == "No Dolby Vision: the black frames at the start (25%) have none, and every \
-                    frame needs it"),
+                == "No Dolby Vision: the frames with no file at the start (25%) have none, and \
+                    every frame needs it"),
             "{:?}",
             c.why
         );

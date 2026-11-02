@@ -136,9 +136,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Marks, faders and the rest of the project go in the metadata of vidcut. Resolve does not keep this metadata.
   - A project holds one timeline (X2). Thus File > Import Timeline (`timeline import`) appends, replaces the timeline, adds one compound clip, or brings in only the media.
   - An OTIO file also opens as a new project.
-  - Clip effects, transitions, generators, compound clips and speed changes come in as data. vidcut writes them back while they fit.
+  - Clip effects, transitions, generators other than Solid Color, compound clips and speed changes come in as data. vidcut writes them back while they fit.
   - Dissolves, cross fades ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), wipes ([X89](#x89-a-wipe-reveals-from-one-edge)) and speeds ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) play.
-  - Other transitions play as cuts, and generators play as gaps. Other effects do not play.
+  - Solid Color plays ([spec §8.17](cut-page-spec.md#817-generators-p-766)).
+  - Other transitions play as cuts, and other generators play as gaps. Other effects do not play.
   - The keyframes of the clip volume effect play as volume keyframes ([D81](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Text and lower-third titles of Resolve come in as titles of vidcut. The titles of vidcut go out in the shape that Resolve uses ([D67](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Transform, Cropping, Dynamic Zoom, Composite and Retime and Scaling of Resolve come in as the picture of a clip. The picture of a clip goes out as these effects ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
@@ -2241,3 +2242,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Keyframe button of the other values is orange on a keyframe (p. 1250).
 - **vidcut:** Each Keyframe button is orange on a keyframe. This includes the diamond of the Speed section.
 - **Why:** The same button has the same color in each place.
+
+## X108. A double-click on a generator adds it at the playhead
+
+- **Resolve:** A double-click on a card of the Generators tab loads the generator in the viewer as a source of 5 s. It adds no clip (measured in Resolve Studio 21.1.2, with Window).
+- **vidcut:** A double-click on a card adds the generator at the playhead.
+- **Why:** The same gesture does the same thing in the Titles tab and on the Generators page.
+
+## X109. A generator has no speed
+
+- **Resolve:** The Settings tab of a generator has Speed Change (measured in Resolve Studio 21.1.2).
+- **vidcut:** A generator has no Speed section, and the speed requests refuse it. A title has no speed in the same way.
+- **Why:** Solid Color has the same picture on each frame. Thus a speed changes only its length, and a trim does that.

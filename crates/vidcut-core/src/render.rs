@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipCache, ClipRetime, ColorSpace, DuckDetect, Hdr, Keyframe, Media, MediaSuperScale,
-    Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings, SlidePreset,
-    SmoothMode, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
+    Clip, ClipCache, ClipRetime, ColorSpace, DuckDetect, Generator, Hdr, Keyframe, Media,
+    MediaSuperScale, Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings,
+    SlidePreset, SmoothMode, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -214,10 +214,23 @@ pub enum VideoPiece {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         excluded: bool,
     },
+    /// A generator's picture (decision D99), made at the plan's size.
+    Generated {
+        frames: i64,
+        picture: Generated,
+        /// Where its picture goes over the frame, as a source's. Empty, it
+        /// covers the whole frame.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        placed: Vec<Placed>,
+        /// Its track is out of the render cache's User mode.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        excluded: bool,
+    },
     /// Pictures over each other: `under`, then each of `over` on top of it,
     /// at its level while a dissolve plays (decision D50), each as long as
-    /// the piece. `under` is a source, black or a titled picture; each of
-    /// `over` a source or black.
+    /// the piece. `under` is a source, a generator's picture, black or a
+    /// titled picture; each of `over` a source, a generator's picture or
+    /// black.
     Mix {
         under: Box<VideoPiece>,
         over: Vec<Over>,
@@ -229,6 +242,23 @@ pub enum VideoPiece {
         under: Box<VideoPiece>,
         titles: Vec<ShownTitle>,
     },
+}
+
+/// What a [`VideoPiece::Generated`] shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Generated {
+    /// One color: `[r, g, b]`, each from 0 to 255.
+    SolidColor { color: [u8; 3] },
+}
+
+impl Generated {
+    pub fn of(g: &Generator) -> Option<Self> {
+        match g {
+            Generator::SolidColor { color } => Some(Self::SolidColor { color: *color }),
+            Generator::Carried { .. } => None,
+        }
+    }
 }
 
 /// A title of a [`VideoPiece::Titled`], with where the piece is in its clip.
@@ -898,8 +928,17 @@ impl VideoPiece {
     }
     pub fn frames(&self) -> i64 {
         match self {
-            Self::Source { frames, .. } | Self::Black { frames, .. } => *frames,
+            Self::Source { frames, .. }
+            | Self::Black { frames, .. }
+            | Self::Generated { frames, .. } => *frames,
             Self::Mix { under, .. } | Self::Titled { under, .. } => under.frames(),
+        }
+    }
+
+    pub fn placed(&self) -> &[Placed] {
+        match self {
+            Self::Source { placed, .. } | Self::Generated { placed, .. } => placed,
+            _ => &[],
         }
     }
 
@@ -1071,6 +1110,17 @@ impl VideoPiece {
                 color: *color,
                 excluded: *excluded,
             },
+            Self::Generated {
+                picture,
+                placed,
+                excluded,
+                ..
+            } => Self::Generated {
+                frames,
+                picture: *picture,
+                placed: placed.iter().map(|p| p.after(k)).collect(),
+                excluded: *excluded,
+            },
             Self::Mix { under, over } => Self::Mix {
                 under: Box::new(under.part(k, frames)),
                 over: over
@@ -1105,6 +1155,25 @@ impl VideoPiece {
                     ..
                 },
             ) => a == b && x == y,
+            (
+                Self::Generated {
+                    frames,
+                    picture,
+                    placed,
+                    excluded,
+                },
+                Self::Generated {
+                    picture: p2,
+                    placed: l2,
+                    excluded: e2,
+                    ..
+                },
+            ) => {
+                picture == p2
+                    && excluded == e2
+                    && placed.len() == l2.len()
+                    && placed.iter().zip(l2).all(|(a, b)| a.after(*frames) == *b)
+            }
             (
                 Self::Source {
                     media,
@@ -1172,7 +1241,9 @@ impl VideoPiece {
 
     fn lengthen(&mut self, more: i64) {
         match self {
-            Self::Source { frames, .. } | Self::Black { frames, .. } => *frames += more,
+            Self::Source { frames, .. }
+            | Self::Black { frames, .. }
+            | Self::Generated { frames, .. } => *frames += more,
             Self::Mix { under, over } => {
                 under.lengthen(more);
                 for o in over {
@@ -1427,7 +1498,7 @@ impl VideoPiece {
             VideoPiece::Source {
                 source_frame, pace, ..
             } => source_frame + pace.offset(k),
-            VideoPiece::Black { .. } => 0,
+            VideoPiece::Black { .. } | VideoPiece::Generated { .. } => 0,
             VideoPiece::Mix { under, .. } | VideoPiece::Titled { under, .. } => under.position(k),
         }
     }
@@ -1437,7 +1508,7 @@ impl VideoPiece {
             VideoPiece::Source {
                 source_frame, pace, ..
             } => *source_frame as f64 + pace.exact(k),
-            VideoPiece::Black { .. } => 0.0,
+            VideoPiece::Black { .. } | VideoPiece::Generated { .. } => 0.0,
             VideoPiece::Mix { under, .. } | VideoPiece::Titled { under, .. } => under.exact(k),
         }
     }
@@ -1828,9 +1899,8 @@ enum Layer {
 impl Layer {
     fn inside(&self, outer: &[Placed]) -> bool {
         match self {
-            Layer::Placed(VideoPiece::Source { placed, .. }, _)
-            | Layer::Crossing(VideoPiece::Source { placed, .. }, _)
-            | Layer::Moved(VideoPiece::Source { placed, .. }, ..) => {
+            Layer::Placed(piece, _) | Layer::Crossing(piece, _) | Layer::Moved(piece, ..) => {
+                let placed = piece.placed();
                 placed.len() > outer.len() && placed.ends_with(outer)
             }
             Layer::Title(t) => !outer.is_empty() && t.placed.ends_with(outer),
@@ -1876,7 +1946,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     let sample = |t: i64| s.fps.frame_to_sample(t - a, s.sample_rate);
 
     let visible = |t: &crate::model::Track, c: &Clip| {
-        t.video_enabled && c.enabled && c.video && !c.is_block()
+        t.video_enabled && c.enabled && c.video && (!c.is_block() || c.draws())
     };
     let titled =
         |t: &crate::model::Track, c: &Clip| t.video_enabled && c.enabled && c.title.is_some();
@@ -1915,13 +1985,22 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     cuts.dedup();
     let fills = |c: &Clip| {
         c.picture.as_ref().is_none_or(Picture::is_usual)
-            && pool
-                .get(c.media.as_str())
-                .and_then(|m| m.info.video.as_ref())
-                .is_some_and(|v| crate::place::fills(v, (s.width, s.height)))
+            && (c.draws()
+                || pool
+                    .get(c.media.as_str())
+                    .and_then(|m| m.info.video.as_ref())
+                    .is_some_and(|v| crate::place::fills(v, (s.width, s.height))))
     };
     let picture =
         |c: &Clip, nest: Option<&Nest>, over: bool, x: i64, y: i64| -> Result<VideoPiece> {
+            if let Some(picture) = c.generator.as_ref().and_then(Generated::of) {
+                return Ok(VideoPiece::Generated {
+                    frames: y - x,
+                    picture,
+                    placed: placed_of(c, nest, over, x),
+                    excluded: false,
+                });
+            }
             let m = found(pool.get(c.media.as_str()).copied(), &c.media)?;
             let (path, origin) = origin_of(m);
             Ok(VideoPiece::Source {
@@ -1957,14 +2036,14 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 let nest =
                     within.and_then(|w| w.get(t.clips.iter().position(|x| std::ptr::eq(x, c))?));
                 let mut piece = picture(c, nest, below && !fills(c), x, y)?;
-                if let VideoPiece::Source { excluded: e, .. } = &mut piece {
+                if let VideoPiece::Source { excluded: e, .. }
+                | VideoPiece::Generated { excluded: e, .. } = &mut piece
+                {
                     *e = excluded;
                 }
-                Ok(match &piece {
-                    VideoPiece::Source { placed, .. } if !placed.is_empty() => {
-                        Layer::Placed(piece, ramp)
-                    }
-                    _ => Layer::Picture(piece, ramp),
+                Ok(match piece.placed().is_empty() {
+                    false => Layer::Placed(piece, ramp),
+                    true => Layer::Picture(piece, ramp),
                 })
             };
             let smoothed = |d: &transitions::Playing,
@@ -1980,18 +2059,19 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     let Layer::Picture(mut piece, _) = shown(c, None, below)? else {
                         return Ok(None);
                     };
-                    if let VideoPiece::Source {
+                    let VideoPiece::Source {
                         source_frame,
                         pace,
                         retime,
                         ..
                     } = &mut piece
-                    {
-                        *retime = Retime::Nearest;
-                        if mode == SmoothMode::Faster {
-                            *source_frame = c.source_at(at);
-                            *pace = Pace::of(0.0, 0);
-                        }
+                    else {
+                        return Ok(None);
+                    };
+                    *retime = Retime::Nearest;
+                    if mode == SmoothMode::Faster {
+                        *source_frame = c.source_at(at);
+                        *pace = Pace::of(0.0, 0);
                     }
                     Ok(Some(piece))
                 };
@@ -2091,10 +2171,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     if let Some(c) = t.clip_covering(x).map(|ci| &t.clips[ci]).filter(shows) {
                         match shown(c, None, !stack.is_empty())? {
                             Layer::Placed(piece, ramp) => {
-                                if let VideoPiece::Source { placed, .. } = &piece
-                                    && fills(c)
-                                {
-                                    let outer = &placed[1..];
+                                if fills(c) {
+                                    let outer = &piece.placed()[1..];
                                     stack.retain(|l| !l.inside(outer));
                                 }
                                 stack.push(Layer::Placed(piece, ramp));
@@ -2825,6 +2903,7 @@ mod tests {
                     ..
                 } => format!("{media}@{source_frame}+{frames}"),
                 VideoPiece::Black { frames, .. } => format!("black+{frames}"),
+                VideoPiece::Generated { frames, .. } => format!("generated+{frames}"),
                 VideoPiece::Mix { under, over } => {
                     let over: Vec<String> = over
                         .iter()
@@ -3039,6 +3118,7 @@ mod tests {
                     ..
                 } => (format!("{media}@{source_frame}"), *frames),
                 VideoPiece::Black { frames, .. } => ("black".into(), *frames),
+                VideoPiece::Generated { frames, .. } => ("generated".into(), *frames),
                 VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => ("mix".into(), v.frames()),
             })
             .collect();

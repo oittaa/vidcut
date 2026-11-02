@@ -31,10 +31,12 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 | "picture"
                 | "effects"
                 | "speed"
+                | "generators"
         )
     ) && !matches!(
         method,
-        "media.list"
+        "generators.list"
+            | "media.list"
             | "media.get"
             | "media.details"
             | "media.transcribe"

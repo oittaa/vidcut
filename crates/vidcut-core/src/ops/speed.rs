@@ -13,7 +13,7 @@ fn clip_of(p: &Project, id: &str) -> Result<Clip> {
     } else if c.compound.is_some() {
         "a compound clip"
     } else if c.is_generator() {
-        "a generator from another editor"
+        "a generator"
     } else {
         return Ok(c.clone());
     };

@@ -15,6 +15,13 @@ pub const GROUPS: [(&str, &[Card]); 1] = [("Blur", &[("Gaussian Blur", EffectTyp
 const CARD_WIDTH: f32 = 120.0;
 const CARD_HEIGHT: f32 = 68.0;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EffectsTab {
+    #[default]
+    Video,
+    Generators,
+}
+
 fn paint(painter: &Painter, rect: Rect, kind: EffectType) {
     let colors = theme::colors();
     painter.rect_filled(rect, 0.0, colors.track);
@@ -58,6 +65,23 @@ impl Workspace {
     pub(super) fn effects_panel(&mut self, ui: &mut egui::Ui) {
         if self.project_shared().is_none() {
             ui.label(dim("Open a project to add effects"));
+            return;
+        }
+        ui.horizontal(|ui| {
+            for (tab, label) in [
+                (EffectsTab::Video, "Video"),
+                (EffectsTab::Generators, "Generators"),
+            ] {
+                if ui
+                    .selectable_label(self.effects_tab == tab, label)
+                    .clicked()
+                {
+                    self.effects_tab = tab;
+                }
+            }
+        });
+        if self.effects_tab == EffectsTab::Generators {
+            self.generators_panel(ui);
             return;
         }
         let cell = vec2(

@@ -2,6 +2,7 @@ mod dissolve;
 pub mod effect;
 pub mod filmstrip;
 mod follow;
+pub mod generators;
 pub mod keyframes;
 pub mod normalize;
 pub mod picture;
@@ -1515,7 +1516,7 @@ pub fn change_speed(
         }
         if c.is_generator() {
             return Err(Error::invalid(format!(
-                "{id} is a generator from another editor: it has no speed to change"
+                "{id} is a generator: it has no speed to change"
             )));
         }
         targets.push((c.start, id.clone()));

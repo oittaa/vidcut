@@ -27,10 +27,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
+- generators: Solid Color (§8.17)
 - Quick Export, plus our Export dialog
 
 **Later (later):**
-- other effects, other transitions, other titles, generators
+- other effects, other transitions, other titles, other generators
 - keyframes other than Transform, Crop, the clip volume and the Position, Zoom, Rotation and Opacity of a title
 - color ([todo](todo/auto-color.md)), Fusion
 - LUTs ([todo](todo/luts.md))
@@ -57,6 +58,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - A Transitions tab shows the transitions in the place of the Media Pool (p. 759, §8.11).
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - An Effects tab shows the video effects in the place of the Media Pool (p. 765, §8.16).
+  - The Effects tab also has a Generators page (p. 766, §8.17).
   - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X70).
   - A Keyframes tab sits beside the Inspector ([X87](deviations.md#x87-the-keyframes-tab-has-an-ease-menu)).
   - The Timeline menu opens that tab.
@@ -144,7 +146,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - Group tracks for each effect, under a track with the clip's name.
       - A curve view, and a Parameters menu that chooses the shown values.
       - With no clip selected, the clip under the playhead. With more than one clip selected, a group for each clip.
-  - Later: the Sync Bin and Effects tabs.
+  - Later: the Sync Bin tab.
   - vidcut's bar also has Import, Export and Jobs (deviation X3), and Help (X23).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
 - **Below the Media Pool:** the edit-function buttons (§7), and Cut and Dissolve (§8.11).
@@ -1093,6 +1095,60 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A portrait timeline gives a sigma 3% smaller than the rule ([X102](deviations.md#x102-a-portrait-timeline-blurs-by-the-width-rule)).
 - **Compound clips:** vidcut: the effects of a compound clip work on each picture inside it ([todo](todo/compound-opacity.md)).
 - **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
+
+### 8.17 Generators (p. 766)
+
+A generator is a clip that makes its own picture. It has no media and no sound.
+
+- **The Generators page:**
+  - Measured in Resolve Studio 21.1.2: the Effects panel has the tabs Video, Audio, Generators and Favorites.
+  - vidcut: the Effects tab has the pages Video and Generators. `gui.show generators` opens the Generators page.
+  - Measured: the Generators section has these kinds, in this order:
+    - 10 Step and 100mV Steps
+    - BT.2111 Color Bar HLG Narrow, BT.2111 Color Bar PQ Full and BT.2111 Color Bar PQ Narrow
+    - EBU Color Bar, Four Color Gradient, Grey Scale and SMPTE Color Bar
+    - Solid Color, Window and YCbCr Ramp
+  - vidcut has Solid Color. The other kinds are open work ([todo](todo/effects-library.md)).
+  - The tab also has a Fusion Generators section. It is part of Fusion (§1).
+  - The pointer on a card previews the generator (p. 766). vidcut does not have this preview yet ([todo](todo/effects-library.md)).
+- **Adding a generator:**
+  - Drag a card onto the upper timeline or the lower timeline (p. 766).
+  - A drop puts the generator where the pointer is, on the video track under it, as `generators.add` with that track and frame does.
+  - A double-click on a card adds the generator at the playhead ([X108](deviations.md#x108-a-double-click-on-a-generator-adds-it-at-the-playhead)).
+  - `generators.add` without a track uses the track that D66 gives a title.
+  - A new generator is 5 s long, and it adds no sound clip (measured).
+- **Inspector:**
+  - Measured: the Generator tab of Solid Color has one row, Color. Color has no keyframes.
+  - Measured: the Settings tab has Transform, Cropping, Dynamic Zoom, Composite, Speed Change and Stabilization.
+  - vidcut: the Inspector shows a Generator section with the Color row, over the picture sections (X70).
+  - vidcut: the picture sections act as on any clip (§8.15). Renders of Position, Zoom, Crop and Opacity in Resolve Studio 21.1.2 agree.
+  - vidcut: a generator has no speed ([X109](deviations.md#x109-a-generator-has-no-speed)).
+- **Solid Color:**
+  - It has one value, Color. Black is the default (measured).
+  - `generators.set` and the Color row change it.
+  - Measured: these are its code values in the timeline. `c` is the color, each channel from 0 to 1.
+    - SDR timeline: `c`
+    - PQ timeline: P(0.01) × P(M · P⁻¹(c))
+    - HLG timeline: H(0.1^(1/1.2)) × H(S(M · D(H⁻¹(c))))
+  - The parts of these sums:
+    - P is the PQ curve, with 1.0 at 10000 nits.
+    - H is the HLG curve.
+    - M is the matrix from BT.709 to BT.2020.
+    - D changes HLG scene light to display light, with a system gamma of 1.2. S is its inverse. Both use the BT.2020 luma weights.
+  - Thus white is 100 nits in a PQ timeline. In an HLG timeline, the code value of white is 0.6296.
+- **Length and dissolves:**
+  - Measured: a generator can have any length.
+  - Measured: Resolve keeps the source start of a generator at 0. A left trim moves the keyframes, and the picture does not move.
+  - vidcut: a left trim moves the source start, and the keyframes stay on their source frames. The picture does not move.
+  - Measured: a dissolve between two generators runs past the ends of both clips. Thus it needs no extra frames.
+- **In OTIO files:**
+  - vidcut writes Solid Color in the shape of Resolve's own file.
+    - It is a `Clip.2`. Its media is a `GeneratorReference` with the `generator_kind` `Solid Color`.
+    - The color is in the group named `Generator`, in the `Resolve_OTIO` parameters.
+    - A placed generator also has the effects of D75.
+    - Its keyframes count from the first frame of the clip. Measured: Resolve reads them so, and its import sets the source start to 0.
+  - vidcut reads Solid Color back from that shape.
+  - vidcut keeps the other kinds as data. They play as gaps, and an import warns about them (X9).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -2116,7 +2172,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - then `Drop Shadow` and `Background`, with no `Stroke`
   - vidcut writes the left edge, middle or right edge of its lines there, in plain text, because Resolve's Scroll has no rich text.
   - vidcut reads a Scroll back with no outline.
-  - vidcut carries other generators.
+  - vidcut reads Solid Color (§8.17). It carries the other generators.
   - Resolve writes Text+ as a `MissingReference`, and loses it itself.
   - vidcut leaves Text+ out with a warning, as it does any clip without media.
   - Resolve Studio 21.1.1 draws a file that vidcut writes as vidcut does, within a few pixels at 3840×2160, except for the outline.

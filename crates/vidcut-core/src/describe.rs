@@ -257,6 +257,8 @@ pub fn describe_at(
         "subtitles.match_speaker" => format!("Match the speaker's cues to {}", d.cues("cue")),
         "titles.add" => format!("Title {} at {}", quoted(&d.text("text")), d.time("at")),
         "titles.set" => d.title_set(),
+        "generators.add" => format!("Generator at {}", d.time("at")),
+        "generators.set" => format!("Change generator {}", d.clips("clip")),
         "picture.set" => d.picture_set(),
         "effects.add" => format!("Add {} to {}", d.effect_name(), d.clips("clips")),
         "effects.set" => format!("Change effect {} of {}", d.effect(), d.clips("clip")),

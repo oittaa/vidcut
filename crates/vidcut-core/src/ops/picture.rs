@@ -108,7 +108,7 @@ fn zoom_checked(z: &DynamicZoom) -> Result<()> {
 }
 
 pub fn has_picture(c: &Clip) -> bool {
-    c.video && c.title.is_none() && c.generator.is_none()
+    c.video && c.title.is_none() && (c.generator.is_none() || c.draws())
 }
 
 pub(super) fn takes(p: &Project, ti: usize, c: &Clip) -> Result<()> {
@@ -118,7 +118,7 @@ pub(super) fn takes(p: &Project, ti: usize, c: &Clip) -> Result<()> {
             c.id
         )));
     }
-    if c.generator.is_some() {
+    if c.generator.is_some() && !c.draws() {
         return Err(Error::invalid(format!(
             "{} is another editor's generator, which plays as a gap",
             c.id

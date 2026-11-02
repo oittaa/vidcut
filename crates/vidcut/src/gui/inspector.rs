@@ -10,7 +10,8 @@ use serde_json::{Value, json};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     Border, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, Effect, EffectKind, GaussianBlur,
-    Keyframe, Picture, PictureTool, Project, Retime, Speed, TrackKind, Upscaler, ZoomBox,
+    Generator, Keyframe, Picture, PictureTool, Project, Retime, Speed, TrackKind, Upscaler,
+    ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::upright_fit;
@@ -564,8 +565,9 @@ pub(super) fn shape(p: &Project, c: &Clip) -> Shape {
 }
 
 fn name(p: &Project, c: &Clip) -> String {
-    match &c.name {
-        Some(n) if !n.is_empty() => n.clone(),
+    match (&c.name, &c.generator) {
+        (Some(n), _) if !n.is_empty() => n.clone(),
+        (_, Some(g)) => vidcut_core::generators::name(g).to_string(),
         _ => p
             .media(&c.media)
             .map_or_else(|| c.id.clone(), |m| m.name.clone()),
@@ -680,6 +682,15 @@ pub struct Inspector {
     focus: Option<egui::Id>,
     moved: bool,
     commit: bool,
+    recolored: Option<Recolored>,
+}
+
+#[derive(Debug)]
+struct Recolored {
+    clip: String,
+    from: [u8; 3],
+    to: [u8; 3],
+    since: Option<Instant>,
 }
 
 enum Act {
@@ -2063,6 +2074,43 @@ impl Workspace {
         }
     }
 
+    fn generator_section(&mut self, ui: &mut egui::Ui, id: &str, stored: [u8; 3]) {
+        let held = self.inspector.recolored.take().filter(|r| {
+            r.clip == id
+                && r.since
+                    .is_none_or(|s| landing(r.to, s.elapsed(), r.from, stored).is_some())
+        });
+        let mut rgb = held.as_ref().map_or(stored, |r| r.to);
+        let mut changed = false;
+        group(
+            ui,
+            "Generator",
+            |_| (),
+            |ui| {
+                label(ui, "Color", rgb != [0, 0, 0]);
+                changed = ui.color_edit_button_srgb(&mut rgb).changed();
+                ui.end_row();
+            },
+        );
+        let mut held = match changed {
+            true => Some(Recolored {
+                clip: id.to_string(),
+                from: stored,
+                to: rgb,
+                since: None,
+            }),
+            false => held,
+        };
+        if let Some(r) = held.as_mut().filter(|r| r.since.is_none())
+            && !ui.input(|i| i.pointer.any_down())
+        {
+            let color = vidcut_core::model::hex(r.to);
+            self.send("generators.set", json!({ "clip": id, "color": color }));
+            r.since = Some(Instant::now());
+        }
+        self.inspector.recolored = held;
+    }
+
     fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
         use super::super_scale::{SHARPNESS, UPSCALERS, label_of, unfit, upscaler_text};
         let mut media: Vec<String> = chosen
@@ -2487,6 +2535,9 @@ impl Workspace {
                         });
                     });
                 });
+                if let Some(Generator::SolidColor { color }) = &first.generator {
+                    self.generator_section(ui, &first.id, *color);
+                }
                 if !chosen.is_empty() {
                     let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
                     let i = &self.inspector;

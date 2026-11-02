@@ -67,6 +67,7 @@ Colors:
 - `export::choose_metadata` picks the HDR metadata, by the rules of `vidcut_core::export` (spec D46). With an SDR timeline, each picture counts as SDR.
 - An export first measures the light that the files do not state (`light::analysis`), and caches it.
   - The GPU measures the HDR pictures that stay on the GPU ([gpu](gpu.md#the-light-meter)).
+  - A generator has no file. Thus it adds no light (`light::sampled`).
 
 The plan:
 
@@ -114,14 +115,17 @@ The plan:
 - `hdr` puts HDR10+ into each HEVC or AV1 frame. Why: the FFmpeg encoders do not do this.
 - vidcut keeps Dolby Vision from a source of profile 8 or 10, with compatibility 1 in PQ or 4 in HLG.
   - It writes profile 8, or profile 10 in AV1. Only libx265 and libsvtav1 write it.
-  - Each frame needs it. Thus a black frame takes the metadata of the frame before it.
-  - Black frames at the start have no frame before them. Then the export has no Dolby Vision.
+  - Each frame needs it. Thus a black or generated frame takes the metadata of the frame before it.
+  - Black or generated frames at the start have no frame before them. Then the export has no Dolby Vision.
 
 Sources:
 
 - `VideoFrames` reads the pieces in order. A piece of the same file keeps its decoder.
 - While the current piece encodes, `Ahead` opens the next file on `vidcut-open`, seeks, and decodes the first frame.
 - Each layer of a dissolve reads its own file.
+- A `VideoPiece::Generated` has no file. `VideoFrames::generated_frame` makes its frame at the size of the plan.
+  - In an SDR timeline, the frame is RGB24.
+  - In an HDR timeline, the frame is RGB48LE. It holds the code values of `generators::timeline_code`, with the tag of the timeline colors (`screen::held::tag`).
 
 Notes:
 
