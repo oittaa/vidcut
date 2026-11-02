@@ -2492,7 +2492,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 
     | Mode | Loudness (LUFS) | Peak limit (dBTP) |
     |---|---|---|
-    | Sample Peak, True Peak | the target is a peak, −1 by default | none |
+    | Sample Peak | the target is a peak, −9 by default | none |
+    | True Peak | the target is a peak, −2 by default | none |
     | ITU-R BS.1770-1 | −23, can change | none |
     | ITU-R BS.1770-4 | −23, can change | −2, can change |
     | ATSC A/85, OP-59, AGCOM 219/09/CSP | −24 | −2 |
@@ -2506,9 +2507,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - **Defaults:**
     - The mode is YouTube: −14 LUFS with a −1 dBTP peak limit.
     - It is the value for YouTube that the export's loudness setting names. The limit keeps loud peaks under full scale.
-    - Sample Peak and True Peak start at −1 dB. Resolve's window showed −9.0 and −2.0, which it can have kept from earlier use.
+    - Sample Peak starts at −9 dBFS, and True Peak at −2 dBTP.
+    - These two come from the Deliver page of Resolve Studio 21.1.2, in a project that never used it.
     - Set Level is Independent.
-  - **Range:** −60 to −5 LUFS, as the export's loudness setting takes. A peak target and a peak limit are from −60 to 0 dB.
+  - **Range** (measured in Resolve Studio 21.1.2):
+    - A loudness target is from −30 to 0 LUFS. The export's loudness setting takes the same range.
+    - A peak target and a peak limit are from −20 to 0 dB.
   - **Measured part:** the sound that the clip plays, with its J or L cut and at its speed.
     - The clip is measured alone, without its volume, mute and Voice Isolation, and without transitions.
     - Its track's volume, mute, solo, Voice Isolation and ducking do not apply.
