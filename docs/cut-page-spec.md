@@ -2132,7 +2132,20 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Zoom draws the text larger, and the outline and the background box grow with it. The zoom scales the outline, measured in Resolve Studio 21.1.2.
   - Rotation turns the whole title, box and shadow too, counterclockwise.
   - Zoom and rotation work about the middle of a Text title.
-  - For a lower third, they work about the point where its lines meet. Resolve turns each line of a lower third about that point (D67).
+  - For a lower third, they work about the point where its lines meet (D67).
+  - Each line of a lower third has its own `position`, `zoom`, `rotation` and keyframes (p. 1178):
+    - `line` in `titles.set` names the line.
+    - In the `keyframes` requests, these values name the line: `upper_position`, `upper_zoom`, `upper_rotation`, `lower_position`, `lower_zoom` and `lower_rotation`.
+    - The Title section has Across, Down, Zoom and Rotation under Upper Line and under Lower Line.
+    - The two lines go together until a request names a line. Each line then keeps its values and goes apart.
+    - A request that names no line then changes the lower line.
+    - The upper line stands on its point, and the lower line hangs from its point. Each line's zoom and rotation work about its point (measured in Resolve Studio 21.1.2).
+    - The background box follows the place, zoom and rotation of the lower line. The upper line does not move it (measured in Resolve Studio 21.1.2).
+    - Each line has its own shadow, which turns with the line (measured in Resolve Studio 21.1.2).
+    - From the bottom, the order is the box, the lower line and the upper line. Each line is over its own shadow (measured in Resolve Studio 21.1.2).
+    - Opacity fades them as one picture. Text at half opacity over the box does not show the box (measured in Resolve Studio 21.1.2).
+    - Opacity, text and style are the whole title's.
+    - A switch to Text or Scroll drops the upper line's values.
   - Over the tracks below (§8.14):
     - A clip on a track above covers the title where its picture covers the frame (D75).
     - A clip that fades in or out above the title fades over it.
@@ -2174,8 +2187,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The group has the alignment of the lines.
     - Its `anchor` is on a 3×3 grid, counted from the bottom left: 0 bottom left, 4 middle, 8 top right.
     - Its `position` is in fractions of the picture, from its left and bottom.
-    - Its `transformationZoomX` and `Y` are the zoom of the title.
-    - Its `transformationRotationAngle` is the rotation of the title in degrees, counterclockwise.
+    - Its `transformationZoomX` and `Y` are the zoom of its title or line.
+    - Its `transformationRotationAngle` is the rotation of its title or line in degrees, counterclockwise.
     - The zoom and the rotation are about its anchor point.
     - Resolve zooms the text alone, and turns the background and shadow with it.
   - **Points:**
@@ -2186,6 +2199,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The upper line of a lower third stands on the point where its lines meet (anchor 0, 1 or 2).
     - Its lower line hangs from that point (6, 7 or 8).
     - That point is one line, 1.31 times the text height, above the corner of the title.
+    - Lines apart each have their own point.
     - Resolve's own lower thirds put their upper line first.
   - **Stroke:**
     - `strokeSize` is the width of the outline in pixels of the timeline, as a whole number. Thus 16 is the maximum of both.
@@ -2214,8 +2228,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - its other spans as markup, where they are different from that line
     - a background, from a `backgroundHeight` above 0
     - a drop shadow, from an offset other than 0
-    - the zoom (X) and the rotation of its lower line or Text group
-  - Keyframes, and a second zoom or rotation, are lost. The warnings of the import tell so.
+    - the place, the zoom (X), the rotation and the keyframes of its Text group, or of each line of a lower third
+  - The lines of a lower third go apart when the place, zoom, rotation or keyframes of their two groups are different.
+  - Resolve's own lower thirds are different: the upper line stands at 20% from the bottom, and the lower line hangs from 22%.
   - The lower line of a lower third is the group anchored by its top, else its second group.
   - The lines of a Text title are centered, whatever their alignment.
   - If a Text title is anchored at a point other than its middle, that point is taken as its middle.
@@ -2389,7 +2404,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A clip covers the tracks below it only where its picture covers the frame, at its usual values too.
     - The tracks below show in the bars around a picture of another shape, outside a placed picture, and where it is cropped.
     - Where there are no tracks below, these areas are black.
-    - A clip whose fitted picture fills the frame, to within half a pixel, covers them all.
+    - A clip whose fitted picture leaves no bar covers them all ([§13](#the-limit-for-a-thin-bar)).
     - Its edges are smoothed over a pixel.
     - The two sides of a dissolve mix into each other first, and then go over the tracks below.
     - Thus the tracks below do not show through where both sides cover the frame (D50).
@@ -3064,3 +3079,60 @@ The display LUT of the Color page is on a branch after Data Burn-In. The output 
 - Output Sizing does not go back to the source. It enlarges the picture that the earlier stages give (p. 296).
 
 The chart does not show titles, generators or transitions.
+
+### The scaling filter
+
+The default Resize Filter of a project is Sharper. These facts are measured in Resolve Studio 21.1.2.
+
+- An export uses this filter for a zoom, a fit to the timeline, a rotation and a move by a fraction of a pixel.
+- It also uses this filter when it rounds an odd frame size for an encoder.
+- For each output pixel, the filter reads 16 source pixels across and 16 down. A rotated picture reads along its own axes.
+- `d` is the distance from the output pixel to a source pixel, in source pixels.
+- `s` is the output size divided by the source size. `s` is 1 when the picture enlarges.
+- At each half pixel of `d`, the weight is `s × sinc(s × d) × (0.5 + 0.5 × cos(π × d / 8))`. From `d` = 8, the weight is 0.
+- Between two half pixels, the weight is on a straight line.
+- The weights of each axis are divided by their sum.
+- A read past the edge of the picture takes the edge pixel.
+- The filter works in the timeline gamma.
+- This formula is measured down to a shrink of 18.6:1. Above a shrink of 8:1, vidcut is different ([X110](deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).
+
+### The fit to the timeline
+
+These facts are measured in Resolve Studio 21.1.2, in a default project that scales a picture to fit.
+
+- One factor scales the picture on both axes. It is the smaller of two values: frame width / picture width, and frame height / picture height.
+- The picture is centered. A bar at its side can be a part of a pixel.
+- A pixel that the picture covers in part reads that part of its value, over the track below or over black.
+- The Zoom and the Position of a clip work on this fit. They do not start from a rounded size.
+- These pictures were measured in a timeline of 1280 x 720:
+  - 1000 x 562: the factor is 1.28 and the height is 719.36. Each bar is 0.32 of a pixel, and the top and bottom rows read 0.68 of their value.
+  - 999 x 800: the factor is 0.9 and the width is 899.1. Each bar is 190.45 pixels, and the edge columns read 0.55 of their value.
+- 1920 x 1080 in a timeline of 1921 x 1081 has the factor 1921 / 1920 and a bar of 0.21875 of a pixel. The edge rows read a part of their value.
+- A picture with pixels that are not square, or with a rotation in its file, was not measured.
+  - vidcut gives such a picture a fitted size that is rounded to even, and a place in whole pixels.
+
+### The limit for a thin bar
+
+These facts are measured in Resolve Studio 21.1.2, in timelines of 1280 x 720 and 1920 x 1080.
+
+- For each corner of the frame, take its distance to the picture. The distance is 0 when the corner is inside the picture.
+- If all four distances are under 0.2 of a timeline pixel, no bar shows.
+  - Each edge pixel reads its full value, and the track below does not show.
+  - The picture keeps its exact scale and place. It does not stretch to the frame.
+- If a distance is 0.2 or more, each bar shows at its exact width. This includes a thinner bar at another side.
+- The limit is the same for the fit, the Zoom, the Position and the Rotation, alone or together.
+- These cases were measured in a timeline of 1280 x 720:
+  - 3840 x 2159: the fit leaves bars of 0.1667 of a pixel. No bar shows, and the scale on both axes is 1/3.
+  - The same picture with a Position of 0.1 down: the bars are 0.0667 and 0.2667, and both show.
+  - Position 0.198 across: no bar. Position 0.2 across: the edge column reads 0.8 of its value.
+  - Position 0.14 across and down: the distance is 0.198, and no bar shows.
+  - Position 0.15 across and down: the distance is 0.212, and the bars show.
+  - A Zoom that leaves bars of 0.17 and 0.0956: the distance is 0.195, and no bar shows.
+  - A Zoom that leaves bars of 0.18 and 0.10125: the distance is 0.2065, and the bars show.
+  - Rotation 0.016: no bar. Rotation 0.02: the bars show. The rule gives the change at 0.0179. That value was not measured.
+  - A part of the picture past the frame does not count. A left bar of 0.15 on an enlarged picture shows no bar.
+- These cases were not measured:
+  - Softness: vidcut does not use the limit on a picture with Softness.
+  - Pitch and Yaw: vidcut uses the same rule on the corners of the leaned picture.
+  - A compound clip: vidcut uses the rule on each level by itself.
+  - The rounding of an odd frame size for an encoder: vidcut does not use the limit there.

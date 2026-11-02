@@ -2,7 +2,7 @@ use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::keyframes::{PictureValue, ease_of, eases};
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
-use vidcut_core::model::{Clip, Ease, Title, TitleAlign, TitleKind};
+use vidcut_core::model::{Clip, Ease, LowerThirdLine, Title, TitleAlign, TitleKind, TitleLine};
 
 use super::export::Ask;
 use super::inspector::{KeyClick, key_buttons, mark, next_key};
@@ -12,6 +12,25 @@ use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
 
+#[derive(Debug, Default)]
+struct LineFields {
+    across: String,
+    down: String,
+    zoom: String,
+    rotation: String,
+}
+
+impl LineFields {
+    fn of(t: &Title) -> Self {
+        Self {
+            across: percent(t.position.map(|p| p[0])),
+            down: percent(t.position.map(|p| p[1])),
+            zoom: percent(t.zoom),
+            rotation: plain(t.rotation),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct TitleDialog {
     clip: String,
@@ -20,10 +39,8 @@ pub struct TitleDialog {
     align: TitleAlign,
     text: String,
     fields: TextFields,
-    across: String,
-    down: String,
-    zoom: String,
-    rotation: String,
+    line: LineFields,
+    upper: LineFields,
     title_opacity: String,
     error: String,
     families: Vec<String>,
@@ -55,10 +72,8 @@ impl TitleDialog {
             align: TitleAlign::Left,
             text: String::new(),
             fields: TextFields::default(),
-            across: String::new(),
-            down: String::new(),
-            zoom: String::new(),
-            rotation: String::new(),
+            line: LineFields::default(),
+            upper: LineFields::default(),
             title_opacity: String::new(),
             error: String::new(),
             families: vidcut_av::burn::families(),
@@ -86,10 +101,8 @@ impl TitleDialog {
         self.text = t.text.clone();
         self.fields = TextFields::load(&Parts::of_title(&t.style));
         self.base = Some(t.clone());
-        self.across = percent(t.position.map(|p| p[0]));
-        self.down = percent(t.position.map(|p| p[1]));
-        self.zoom = percent(t.zoom);
-        self.rotation = plain(t.rotation);
+        self.line = LineFields::of(t);
+        self.upper = LineFields::of(&t.upper_view());
         self.title_opacity = percent(t.opacity);
         self.loaded = true;
     }
@@ -105,10 +118,8 @@ impl TitleDialog {
     }
 
     pub(super) fn placed(&mut self, t: &Title) {
-        self.across = percent(t.position.map(|p| p[0]));
-        self.down = percent(t.position.map(|p| p[1]));
-        self.zoom = percent(t.zoom);
-        self.rotation = plain(t.rotation);
+        self.line = LineFields::of(t);
+        self.upper = LineFields::of(&t.upper_view());
         self.shown = self.shown.is_some().then(|| t.clone());
     }
 }
@@ -155,15 +166,13 @@ fn key_eases(c: &Clip, t: &Title, v: PictureValue, at: i64) -> (Vec<Ease>, Optio
     }
 }
 
-fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
-    let stored = d.base.as_ref().unwrap_or(stored);
-    let was = Parts::of_title(&stored.style);
-    let style = d.fields.refilled(&was).parts(&was, None)?.title();
-    let kept = |shown: &str, value: Option<f64>, what: &str| {
-        kept_number(&filled(shown, value), value, what)
-    };
-    let across = kept(&d.across, stored.position.map(|p| p[0]), "position")?;
-    let down = kept(&d.down, stored.position.map(|p| p[1]), "position")?;
+fn kept(shown: &str, value: Option<f64>, what: &str) -> Result<Option<f64>, String> {
+    kept_number(&filled(shown, value), value, what)
+}
+
+fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine, String> {
+    let across = kept(&f.across, stored.position.map(|p| p[0]), "position")?;
+    let down = kept(&f.down, stored.position.map(|p| p[1]), "position")?;
     let scroll = d.kind == TitleKind::Scroll;
     let position = match (across, down) {
         (Some(x), _) if scroll => Some([x, stored.position.map_or(0.5, |p| p[1])]),
@@ -174,41 +183,72 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
             Some([x.unwrap_or(usual[0]), y.unwrap_or(usual[1])])
         }
     };
+    Ok(TitleLine {
+        position,
+        zoom: if scroll {
+            None
+        } else {
+            kept(&f.zoom, stored.zoom, "zoom")?
+        },
+        rotation: if scroll {
+            None
+        } else if f.rotation.trim().is_empty() {
+            stored.rotation
+        } else {
+            kept_plain(&f.rotation, stored.rotation, "rotation")?
+        },
+        ..stored.line()
+    })
+}
+
+fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
+    let stored = d.base.as_ref().unwrap_or(stored);
+    let was = Parts::of_title(&stored.style);
+    let style = d.fields.refilled(&was).parts(&was, None)?.title();
+    let lower = line_of(d, &d.line, stored)?;
+    let high = stored.upper_view();
+    let upper = line_of(d, &d.upper, &high)?;
+    let apart = stored.upper.is_some() || upper != high.line() || lower != stored.line();
     let align = match d.kind {
         TitleKind::Text => None,
         k if stored.kind == k && stored.align() == d.align => stored.align,
         _ => Some(d.align),
     };
+    let lines = d.kind == TitleKind::LowerThird && stored.kind == TitleKind::LowerThird;
     let title = Title {
         kind: d.kind,
         align,
         text: d.text.clone(),
         style,
-        position,
+        position: lower.position,
         position_keys: stored.position_keys.clone(),
         position_y: stored.position_y.clone(),
         position_handles: stored.position_handles.clone(),
-        zoom: if scroll {
-            None
-        } else {
-            kept(&d.zoom, stored.zoom, "zoom")?
-        },
+        zoom: lower.zoom,
         zoom_keys: stored.zoom_keys.clone(),
-        rotation: if scroll {
-            None
-        } else if d.rotation.trim().is_empty() {
-            stored.rotation
-        } else {
-            kept_plain(&d.rotation, stored.rotation, "rotation")?
-        },
+        rotation: lower.rotation,
         rotation_keys: stored.rotation_keys.clone(),
         opacity: kept(&d.title_opacity, stored.opacity, "title opacity")?,
         opacity_keys: stored.opacity_keys.clone(),
+        upper: (lines && apart).then_some(upper),
     };
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
 }
 
-fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Option<Value> {
+fn line_changes(params: &mut Value, t: &Title, stored: &Title) -> bool {
+    if t.position != stored.position {
+        params["position"] = json!(t.position.map_or_else(Vec::new, |p| p.to_vec()));
+    }
+    if t.zoom != stored.zoom {
+        params["zoom"] = json!(t.scale());
+    }
+    if t.rotation != stored.rotation {
+        params["rotation"] = json!(t.turn());
+    }
+    t.position != stored.position || t.zoom != stored.zoom || t.rotation != stored.rotation
+}
+
+fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Vec<Value> {
     let mut params = json!({ "clip": clip });
     if t.text != stored.text {
         params["text"] = json!(t.text);
@@ -222,39 +262,57 @@ fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Option<Value> {
     if t.style != stored.style {
         params["style"] = serde_json::to_value(&t.style).unwrap_or(json!({}));
     }
-    if t.position != stored.position {
-        params["position"] = json!(t.position.map_or_else(Vec::new, |p| p.to_vec()));
-    }
-    if t.zoom != stored.zoom {
-        params["zoom"] = json!(t.scale());
-    }
-    if t.rotation != stored.rotation {
-        params["rotation"] = json!(t.turn());
+    if line_changes(&mut params, t, stored) && t.upper.is_some() {
+        params["line"] = json!(LowerThirdLine::Lower);
     }
     if t.opacity != stored.opacity {
         params["opacity"] = json!(t.opaque());
     }
-    if params.as_object().is_none_or(|o| o.len() < 2) {
-        return None;
+    let mut out = Vec::new();
+    if params.as_object().is_some_and(|o| o.len() > 1) {
+        params["at"] = json!(at);
+        out.push(params);
     }
-    params["at"] = json!(at);
-    Some(params)
+    let mut upper = json!({ "clip": clip, "line": LowerThirdLine::Upper, "at": at });
+    if t.upper.is_some() && line_changes(&mut upper, &t.upper_view(), &stored.upper_view()) {
+        out.push(upper);
+    }
+    out
 }
 
 impl Workspace {
-    fn title_changes(&self, d: &TitleDialog) -> Option<(String, Value, Title)> {
+    fn title_changes(&self, d: &TitleDialog) -> Option<(String, Vec<Value>, Title)> {
         let c = self.project()?.clip(&d.clip)?;
         let stored = sampled_at(c, c.title.as_ref()?, d.at);
         let t = title_of(d, &stored).ok()?;
-        Some((d.clip.clone(), changes(&d.clip, &t, &stored, d.at)?, t))
+        let sends = changes(&d.clip, &t, &stored, d.at);
+        (!sends.is_empty()).then(|| (d.clip.clone(), sends, t))
     }
 
-    fn title_key(&mut self, c: &Clip, t: &Title, v: PictureValue, click: KeyClick, at: i64) {
-        let times = t
+    fn title_key(
+        &mut self,
+        c: &Clip,
+        t: &Title,
+        (v, line): (PictureValue, Option<LowerThirdLine>),
+        click: KeyClick,
+        at: i64,
+    ) {
+        let high = t.upper_view();
+        let view = if line == Some(LowerThirdLine::Upper) {
+            &high
+        } else {
+            t
+        };
+        let times = view
             .keys_of(v)
             .iter()
             .map(|k| c.key_time(k.frame).round() as i64);
-        let mut body = json!({ "clips": [c.id], "param": v.name(), "at": at });
+        let param = match line {
+            Some(LowerThirdLine::Upper) => format!("upper_{}", v.name()),
+            Some(LowerThirdLine::Lower) => format!("lower_{}", v.name()),
+            None => v.name().to_string(),
+        };
+        let mut body = json!({ "clips": [c.id], "param": param, "at": at });
         match click {
             KeyClick::Step(dir) => {
                 if let Some(to) = next_key(times, at, dir) {
@@ -308,14 +366,16 @@ impl Workspace {
     }
 
     pub(super) fn close_title_form(&mut self) {
-        if let Some((clip, params, t)) = self
+        if let Some((clip, sends, t)) = self
             .timeline
             .title_dialog
             .take()
             .filter(|d| d.dirty)
             .and_then(|d| self.title_changes(&d))
         {
-            self.send("titles.set", params);
+            for params in sends {
+                self.send("titles.set", params);
+            }
             self.title_landing(&clip, &t);
         }
     }
@@ -502,33 +562,53 @@ impl Workspace {
                 )
                 .changed()
             };
-            let mut keys = |ui: &mut egui::Ui, v: PictureValue| {
+            let mut keys = |ui: &mut egui::Ui, v: PictureValue, line: Option<LowerThirdLine>| {
                 let Some((_, clip, t)) = found else {
                     return;
                 };
-                let marks = mark(clip, t.keys_of(v), frame);
-                let (eases, now) = key_eases(clip, t, v, frame);
+                let high = t.upper_view();
+                let view = if line == Some(LowerThirdLine::Upper) {
+                    &high
+                } else {
+                    t
+                };
+                let marks = mark(clip, view.keys_of(v), frame);
+                let (eases, now) = key_eases(clip, view, v, frame);
                 ui.horizontal(|ui| {
                     if let Some(click) = key_buttons(ui, &marks, &eases, now) {
-                        clicks.push((v, click));
+                        clicks.push(((v, line), click));
                     }
                 });
             };
-            changed |= row(ui, "Across", &mut d.across, &across_hint);
-            keys(ui, PictureValue::Position);
-            ui.end_row();
-            if !scroll {
-                changed |= row(ui, "Down", &mut d.down, &down_hint);
+            let mut line_rows =
+                |ui: &mut egui::Ui, f: &mut LineFields, line: Option<LowerThirdLine>| {
+                    let mut moved = row(ui, "Across", &mut f.across, &across_hint);
+                    keys(ui, PictureValue::Position, line);
+                    ui.end_row();
+                    if !scroll {
+                        moved |= row(ui, "Down", &mut f.down, &down_hint);
+                        ui.end_row();
+                        moved |= row(ui, "Zoom", &mut f.zoom, "100%");
+                        keys(ui, PictureValue::Zoom, line);
+                        ui.end_row();
+                        moved |= row(ui, "Rotation", &mut f.rotation, "0°");
+                        keys(ui, PictureValue::Rotation, line);
+                        ui.end_row();
+                    }
+                    moved
+                };
+            if d.kind == TitleKind::LowerThird {
+                ui.label(RichText::new("Upper Line").strong());
                 ui.end_row();
-                changed |= row(ui, "Zoom", &mut d.zoom, "100%");
-                keys(ui, PictureValue::Zoom);
+                changed |= line_rows(ui, &mut d.upper, Some(LowerThirdLine::Upper));
+                ui.label(RichText::new("Lower Line").strong());
                 ui.end_row();
-                changed |= row(ui, "Rotation", &mut d.rotation, "0°");
-                keys(ui, PictureValue::Rotation);
-                ui.end_row();
+                changed |= line_rows(ui, &mut d.line, Some(LowerThirdLine::Lower));
+            } else {
+                changed |= line_rows(ui, &mut d.line, None);
             }
             changed |= row(ui, "Title opacity", &mut d.title_opacity, "100%");
-            keys(ui, PictureValue::Opacity);
+            keys(ui, PictureValue::Opacity, None);
             ui.end_row();
         });
         ui.label(dim(match d.kind {
@@ -546,12 +626,14 @@ impl Workspace {
         {
             match title_of(&d, s) {
                 Ok(t) => {
-                    match changes(&d.clip, &t, s, d.at) {
-                        Some(params) => {
+                    let sends = changes(&d.clip, &t, s, d.at);
+                    if sends.is_empty() {
+                        d.loaded = false;
+                    } else {
+                        for params in sends {
                             self.send("titles.set", params);
-                            self.title_landing(&d.clip, &t);
                         }
-                        None => d.loaded = false,
+                        self.title_landing(&d.clip, &t);
                     }
                     d.dirty = false;
                     d.error.clear();

@@ -169,7 +169,8 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
 - With the frame rate conversion of macOS, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
   - The draw puts both frames into P416 VideoToolbox frames in the timeline color space first (`Source::frame_of`). They are sized and placed as the RGB pair is.
 - The pair is sized and placed before the frame is made. Why: Edit Sizing comes before Speed Effects ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
-  - A clip with no placed picture: each frame becomes RGB on the GPU, upright, at the size that it fills in the frame (`fitted_size`).
+  - A clip with no placed picture: each frame becomes RGB on the GPU, upright. The size of the RGB is the size that it fills in the frame, rounded up to even (`fitted_size`).
+    - The picture has its exact fit in that RGB (`Look::fitted`). Thus the part of a pixel at its edge is in the RGB, and the RGB goes into the frame at a whole pixel.
   - A placed clip: the draw places each frame into RGB with its Transform, Crop and Dynamic Zoom (`Sampling::Colors`). The RGB covers only the bounds of the placed picture (`placed_look`).
   - Super Scale enlarges each frame with the kernel of its Sharpness, as the draw of an export does (`screen::kernel`).
   - `Source::rgb_from` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next, while the placing stays the same (`Look`).
@@ -255,7 +256,7 @@ The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-7
 - `export::validate` refuses an odd `video.width` or `video.height`. Thus only a timeline can have an odd side.
 - With a rounded side, the draw of the timeline stays at the size of the timeline (`VideoFrames::written_at`, `Screen::write_at`).
 - `Screen::encoded` then draws that `Wide` as one picture into a second `Wide` at the written size (`scale_whole`). `fs_encode` reads the second `Wide`.
-  - Why: a draw at the written size can stretch each axis by its own factor. `place::fit` rounds the size of a layer to even, and 1281 x 721 fills 1282 x 722.
+  - Why: the fit of a layer is at the size of the timeline ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)). A draw at the written size gives another factor and other bars.
   - `Level::centered` gives one factor for both axes and centers the picture. It takes the smaller factor, so that the whole picture fits.
   - 1281 x 720 into 1282 x 720 has the factor 1. Thus the picture moves by half a pixel and has half a pixel of black at each side.
   - The draw is the shader of the layers (`fs`), with the export's kernel for a change of size (`RESIZE`, `WIDENS`). Colors outside 0 to 1 stay between the two `Wide` pictures.
@@ -369,7 +370,8 @@ Cancel:
   - A clip that fades in or out above a title nests the other way: its `Mix` is over the titled picture.
   - `VideoPiece::titles` tells how many of the `VideoPiece::layers` each title goes over.
 - `Screen::draw` lays the layers under a title, then the title, then the layers over it, and then the subtitles.
-- `burn::title` lays out a title with the code of the burn-in (`lay_out`).
+- `burn::title_blocks` draws each `TitleBlock` of a title with the code of the burn-in (`lay_out`). `burn::title` merges the blocks into one `Sprite`.
+  - A `TitlePart::Backing` block lays out the two lines at the lower line's values and draws only their box (`Look`, its `bare` field).
   - `lay_out` strokes the outlines of the glyphs with zeno. When a glyph has no outline, it grows the drawn letters instead (`dilate`).
   - A stroke goes over the letters. An `outside` stroke goes behind them, at the same width.
   - `Edge` holds its width in pixels of the picture. `burn::title` and `burn::paint` take the timeline height for this, because a width is in pixels of the timeline.
@@ -393,8 +395,8 @@ The plan:
 
 - A placed clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) is a source piece with `placed` pictures (`render::Placed`). They are the picture of its clip, then the pictures of the compound clips around it.
 - `render::flatten_lanes` lays it over the tracks below, as an `Over` of a `VideoPiece::Mix` without a ramp. In a dissolve with a placed side, the incoming side is marked `cross`.
-- A clip at its usual values goes over the same way where its fitted picture leaves bars and something is below it.
-- Where its fitted picture fills the frame, it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.
+- A clip at its usual values goes over the same way where its fitted picture leaves bars and something is below it. A bar can be a part of a pixel ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)).
+- Where its fitted picture leaves no bar ([spec §13](../cut-page-spec.md#the-limit-for-a-thin-bar)), it takes the place of the layers below (`place::fills`). Inside a placed compound clip, it takes the place of the layers of the compound.
 - A picture with an alpha channel (`VideoInfo::alpha`) never fills the frame. It goes over the layers below by its straight alpha ([todo](../todo/clip-alpha.md)).
 - With nothing below it, it is drawn with black bars. Why: this costs less.
 

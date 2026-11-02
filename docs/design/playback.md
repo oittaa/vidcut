@@ -171,12 +171,13 @@ flowchart TD
 **Titles and subtitles**
 
 - Titles and subtitles are not in the kept pictures. Thus an edit of a title or a cue keeps the frames decoded.
-- `player::titles` draws each title of the plan at the size of the plan, with `burn::title`, on the decoding thread. Then it wakes the viewer.
+- `player::titles` draws each `TitleBlock` of each title of the plan at the size of the plan, with `burn::title_blocks`, on the decoding thread. Then it wakes the viewer.
   - It draws before it keeps a frame under the title, for the prepared frame, and for the frame at the playhead.
   - It keeps the drawings used last (an `Lru`).
   - Each drawing is where its kind puts it, without its own place, opacity or rotation. Thus a moved or turned title is not drawn again.
+  - A title with its lines apart and a level under 1 is one drawing of all its blocks (`burn::title`), with their places. Thus text over the box does not show the box. A new place of a line draws it again.
 - `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan.
-- `Player::present` hands each title of a frame as a `TitleOver`:
+- `Player::present` hands each block of a title of a frame as a `TitleOver`:
   - the picture, in premultiplied RGBA, and how many layers go under it
   - its move from how it was drawn: its place, zoom and rotation, or the `Run::top` of a scroll. The viewer's shader does the transform.
   - its level, from a fade or its opacity (`Lettering`)
@@ -252,17 +253,27 @@ The audio device:
 - An export, a proxy and a thumbnail draw with the same `Screen`, always into `Wide` (`Screen::for_export`). They write the planes of the output from there ([export](export.md#timeline-colors)).
 - The drawing:
   - It fits the picture and turns it upright.
+    - `place::fitted` gives the place of the picture in the frame, in parts of a pixel ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)).
+    - `fs` covers a pixel at the edge of that place in part.
+    - Where `place::no_bars_at` is true, `fs` covers each edge pixel in full ([spec §13](../cut-page-spec.md#the-limit-for-a-thin-bar)).
+    - `Placing::new` opens the `edge` of a level where `place::no_bars` is true. The place of the picture does not change.
+    - The rule works at the size of the draw. The size of the viewer is in whole pixels of the screen, so its shape can differ a little from the timeline. Thus a picture that fills the timeline can leave a part of a pixel in the viewer.
+    - A thumbnail, a proxy and a picture for an AI upscaler draw into a size that is already rounded (`Sampling::Rounded`, `place::rounded_place`). Why: the picture must fill that size, with no bar.
   - It first converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `shader_colors`). In an SDR timeline, it tone-maps HDR.
     - Then it deinterlaces an interlaced picture (`fs_bwdif`, [gpu](gpu.md#deinterlacing-and-hdr)).
     - The converted picture is 16-bit floats. The scaling below reads it.
     - Why: the spec converts the input before the sizing ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)). A conversion that is not linear gives other edges after a scale.
   - It reads the chroma of each frame at the site that the frame's chroma location gives (`chroma_site`). An H.264 or HEVC 4:2:0 frame with no chroma location is sited left, the default of these formats (`color::default_site`). Another frame with no chroma location is read as centered.
   - The viewer enlarges with one bilinear sample, and shrinks with a box of bilinear samples.
-  - An export, a proxy and a thumbnail scale with a bicubic kernel (`sharp`). The kernel widens when the picture shrinks.
-  - The kernel widens up to 4 times. Above a shrink of 4:1, the draw first halves the converted picture into smaller levels (`halvings`, `fs_halve`).
-  - The kernel then reads the level where the shrink is 4:1 or less. The larger shrink of the two axes selects the level.
-  - Why: each pixel has the same work at any shrink. A kernel that widens without a limit puts all the work of a small picture on few GPU threads.
-  - Why: the viewer must be fast, and an export must keep the detail of the picture.
+  - An export, a proxy and a thumbnail scale with the filter of the spec (`resized`, [spec §13](../cut-page-spec.md#the-scaling-filter)).
+    - Each pixel reads the same number of samples at any scale.
+    - A pixel with no scale and a whole-pixel place reads one sample (`resamples`).
+    - Above a shrink of 8:1, the filter reads the level of `halvings` where the shrink is 8:1 or less ([X110](../deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).
+  - In an export, the kernels of Super Scale widen when the picture shrinks (`sharp`).
+    - They widen up to 4 times. Above a shrink of 4:1, the draw first halves the converted picture into smaller levels (`halvings`, `fs_halve`).
+    - The kernel then reads the level where the shrink is 4:1 or less. The larger shrink of the two axes selects the level.
+    - Why: each pixel has the same work at any shrink. A kernel that widens without a limit puts all the work of a small picture on few GPU threads.
+  - Why: the viewer must be fast, and an export must have the same picture as the spec.
   - The layers of a dissolve are more draws in the pass.
   - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
   - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).

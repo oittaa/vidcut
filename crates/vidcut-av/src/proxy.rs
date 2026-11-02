@@ -1030,8 +1030,9 @@ fn encode_into(
                     w => w,
                 });
             }
-            let picture =
-                std::sync::Arc::new(crate::player::Picture::new(made, rotation, None, None));
+            let picture = crate::player::Picture::new(made, rotation, None, None)
+                .with_sampling(crate::player::Sampling::Rounded);
+            let picture = std::sync::Arc::new(picture);
             let out = drawer.frame(
                 &picture,
                 &[],

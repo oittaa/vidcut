@@ -211,6 +211,7 @@ impl Workspace {
                 zoom: None,
                 rotation: None,
                 opacity: None,
+                upper: None,
                 ..title.clone()
             };
             let Some([bx, by, bw, bh]) = self.timeline.title_grab.upright_box(&base, size) else {

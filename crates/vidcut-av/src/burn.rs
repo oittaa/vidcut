@@ -6,8 +6,8 @@ use cosmic_text::{
 };
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
-    Place, SubtitleAlign, SubtitleStyle, TextStroke, Title, TitleAlign, TitleKind, TitleShadow,
-    TitleStyle,
+    Place, SubtitleAlign, SubtitleStyle, TextStroke, Title, TitleAlign, TitleBlock, TitlePart,
+    TitleShadow, TitleStyle,
 };
 use vidcut_core::subtitles::{Piece, Shown, rgb};
 
@@ -203,6 +203,7 @@ struct Look<'a> {
     frame: Frame,
     shadow: Option<Shade>,
     markup: Markup<'a>,
+    bare: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -614,7 +615,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
             }
         },
     };
-    for run in buffer.layout_runs() {
+    for run in buffer.layout_runs().filter(|_| !look.bare) {
         for g in run.glyphs.iter().filter(|g| g.metadata & HIDDEN == 0) {
             painter.glyph(
                 g.physical((0., run.line_y), 1.0),
@@ -741,6 +742,7 @@ fn block(
         },
         shadow: style.shadow.as_ref().and_then(|s| shade(s, w, h)),
         markup: Markup::Pieces(pieces),
+        bare: false,
     };
     let line = Line {
         pieces: pieces.to_vec(),
@@ -866,15 +868,60 @@ pub fn draw(cues: &[(&Shown, Place)], width: u32, height: u32, style: &SubtitleS
 }
 
 pub fn title(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Sprite> {
+    let blocks = title_blocks(t, width, height, timeline);
+    merged(blocks.into_iter().flatten().collect())
+        .into_iter()
+        .collect()
+}
+
+pub fn title_blocks(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Option<Sprite>> {
     if t.text.trim().is_empty() {
         return Vec::new();
     }
+    t.blocks()
+        .iter()
+        .map(|b| title_block(t, b, width, height, timeline))
+        .collect()
+}
+
+fn merged(mut sprites: Vec<Sprite>) -> Option<Sprite> {
+    if sprites.len() < 2 {
+        return sprites.pop();
+    }
+    let x0 = sprites.iter().map(|s| s.x).min()?;
+    let y0 = sprites.iter().map(|s| s.y).min()?;
+    let x1 = sprites.iter().map(|s| s.x + s.width as i32).max()?;
+    let y1 = sprites.iter().map(|s| s.y + s.height as i32).max()?;
+    let mut rgba = Vec::with_capacity((x1 - x0) as usize * (y1 - y0) as usize);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            rgba.push(sprites.iter().fold([0.0; 4], |a, s| over(a, s.at(x, y))));
+        }
+    }
+    Some(Sprite {
+        x: x0,
+        y: y0,
+        width: (x1 - x0) as u32,
+        height: (y1 - y0) as u32,
+        rgba,
+    })
+}
+
+fn title_block(
+    t: &Title,
+    block: &TitleBlock,
+    width: u32,
+    height: u32,
+    timeline: u32,
+) -> Option<Sprite> {
     let (w, h) = (f64::from(width), f64::from(height));
-    let zoom = t.scale();
+    let zoom = block.zoom;
     let size = (h * t.text_fraction() * zoom).max(1.0) as f32;
     let pixel = h / f64::from(timeline.max(1));
     let slack = (size * Title::PADDING as f32).ceil();
-    let text = t.sized_text();
+    let text = t.block_text(block.part);
+    let bare = block.part == TitlePart::Backing;
+    let boxed = matches!(block.part, TitlePart::Whole | TitlePart::Backing);
     let look = Look {
         font: t.style.font.as_deref(),
         size,
@@ -886,36 +933,43 @@ pub fn title(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Sprite> {
             TitleAlign::Right => Align::Right,
         },
         ink: t.ink(),
-        stroke: t.stroke().map(|s| Edge::of(s, pixel * zoom)),
-        backing: t.backing(),
+        stroke: t
+            .stroke()
+            .filter(|_| !bare)
+            .map(|s| Edge::of(s, pixel * zoom)),
+        backing: t.backing().filter(|_| boxed),
         frame: Frame {
             across: slack,
             down: slack,
             corner: 0.0,
         },
-        shadow: t.style.shadow.as_ref().and_then(|s| shade(s, w, h)),
+        shadow: t
+            .style
+            .shadow
+            .as_ref()
+            .filter(|_| !bare)
+            .and_then(|s| shade(s, w, h)),
         markup: Markup::Title(&text, (h * zoom) as f32),
+        bare,
     };
-    let Some(Laid {
+    let Laid {
         sprite: Some(sprite),
         lines,
         ..
-    }) = lay_out(&look)
+    } = lay_out(&look)?
     else {
-        return Vec::new();
+        return None;
     };
-    let [x, y] = t.place();
+    let [px, py] = block.pivot;
     let [across, down] = t.anchor();
-    let bottom = match t.kind {
-        TitleKind::Text => y,
-        TitleKind::LowerThird => y + t.lower_line() * (zoom - 1.0),
-        TitleKind::Scroll => 1.0,
-    };
-    let left = (x * w) as f32 - across as f32 * look.wrap;
-    let top = (bottom * h) as f32 - down as f32 * lines;
+    let left = (px * w) as f32 - across as f32 * look.wrap;
+    let top = (block.bottom * h) as f32 - down as f32 * lines;
     let sprite = placed(sprite, left, top);
-    let [px, py] = t.pivot();
-    vec![turned(sprite, ((px * w) as f32, (py * h) as f32), t.turn())]
+    Some(turned(
+        sprite,
+        ((px * w) as f32, (py * h) as f32),
+        block.turn,
+    ))
 }
 
 fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
@@ -990,6 +1044,7 @@ pub fn backing_box(t: &Title, width: u32, height: u32) -> Option<[f64; 4]> {
     t.backing()?;
     let upright = Title {
         rotation: None,
+        upper: None,
         style: TitleStyle {
             shadow: None,
             ..t.style.clone()

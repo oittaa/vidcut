@@ -2331,8 +2331,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     read_titles.dedup();
     if !read_titles.is_empty() {
         warnings.push(format!(
-            "titles read without what vidcut's titles lack (rich text, a size, zoom or \
-             rotation for each line, keyframes): {}",
+            "titles read without what vidcut's titles lack (tracking, keyframes of the shadow \
+             and the background, the clip's Transform and Cropping): {}",
             read_titles.join(", ")
         ));
     }
