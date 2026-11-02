@@ -565,7 +565,8 @@ The background render (`live::render_cache::Background`):
   - It finds the slow media first (`find_slow`). Thus its answer lists the parts of that media.
   - It runs the same `Render` on the thread of the request, from the start. It ends when the mode has nothing left to render.
 - A dry run of `cache.render` renders nothing. Its answer is that of `Background::status`.
-  - In a GUI, it does not stop a render that runs. Only the slow media that the background render has found gives parts.
+  - In a GUI, it does not stop a render that runs.
+  - In a GUI, it lists the parts of slow media only after the background render finds that media.
     - Why: `find_slow` can read each file. A network drive that does not answer can stop the live thread for seconds.
   - Without a GUI, it does not add the project to `projects.json`.
 - `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
@@ -579,7 +580,8 @@ The background render (`live::render_cache::Background`):
     - At the clip level, `Cache::names` gives only the frames of the media of each clip.
     - A compound clip gives the media of the clips in it (`otio::played_by`).
   - `deleted` in the answer is the number of videos that the request removes. All counts the videos in the folder before and after (`render_caches::videos`).
-  - A dry run of `cache.delete` deletes nothing and does not stop the render. `deleted` is the number that a real request removes (`Index::holding`, `Index::sparing`).
+  - A dry run of `cache.delete` deletes nothing. It does not stop the render.
+  - In a dry run, `deleted` is the number that a real request removes (`Index::holding`, `Index::sparing`).
 
 Manage Render Cache (`render_caches`):
 
