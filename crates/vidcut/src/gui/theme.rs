@@ -10,6 +10,8 @@ use eframe::egui::{
 
 use crate::themes::{Buttons, Colors, Fonts, Style, Theme};
 
+pub const KEY_ON: Color32 = Color32::from_rgb(240, 140, 0);
+
 thread_local! {
     static CURRENT: RefCell<Rc<Theme>> =
         RefCell::new(Rc::new(crate::themes::default_theme().clone()));

@@ -1,5 +1,5 @@
 use eframe::egui::{self, Key, RichText};
-use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, CARET_LEFT, CARET_RIGHT, DIAMOND};
+use egui_phosphor::regular::{ARROW_COUNTER_CLOCKWISE, CARET_LEFT, CARET_RIGHT};
 use serde_json::{Value, json};
 use vidcut_core::model::{
     MAX_BORDER, MotionEase, PictureTransition, Project, PushPreset, SlidePreset, SmoothMode,
@@ -10,6 +10,7 @@ use vidcut_core::otio::transitions;
 use vidcut_core::time::{Rational, format_timecode, parse_media_timecode};
 
 use super::{EditSel, TrackRef, geometry};
+use crate::gui::inspector::key_diamond;
 use crate::gui::workspace::Workspace;
 use crate::live::PlayerId;
 
@@ -632,7 +633,7 @@ fn motion_rows(
         if ui.add_enabled(prev.is_some(), back).clicked() {
             seek = prev;
         }
-        let diamond = egui::Button::selectable(keys.contains(&at), DIAMOND).frame(false);
+        let diamond = key_diamond(keys.contains(&at));
         if ui.add(diamond).clicked() {
             transitions::toggle_key(m, frames, at);
             done = true;

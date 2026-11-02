@@ -358,6 +358,7 @@ The bar and the Jobs button:
   - On a clip with speed keyframes, it shows the section under the playhead (`Paced`). `section_speed` sends `speed.set`, `speed.freeze` or `speed.reverse` there.
   - The Ease row shows `ops::speed::section_eases` and sends `speed.ease` for each clip (`Workspace::ease_sections`).
   - `speed_keys` draws the diamond and the arrows of the header. They act as the keyframe buttons of the picture and volume fields.
+- `key_diamond` draws each Keyframe button. It has the color `KEY_ON` when the playhead is on a keyframe. The mark on a clip with keyframes has this color too, and the clip's name starts after the mark.
 
 **The Keyframes tab** (`keyframe_editor::Editor`, `Workspace::keyframe_panel`).
 

@@ -2210,3 +2210,11 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The DNxHR encoder of FFmpeg has no pixel format with alpha.
   - With a checked effect or a Retime Process, the file of the clip level holds only the colors of the placed clip. An alpha channel there needs another kind of file.
   - The timeline level gives the same picture with one simple path. The cost is only more renders after edits.
+
+## X107. The diamond of Speed Change is orange
+
+- **Resolve:**
+  - The diamond in the header of the Speed Change group is red with the playhead on a speed keyframe (measured in Resolve Studio 21.1.2).
+  - The Keyframe button of the other values is orange on a keyframe (p. 1250).
+- **vidcut:** Each Keyframe button is orange on a keyframe. This includes the diamond of the Speed section.
+- **Why:** The same button has the same color in each place.

@@ -460,9 +460,9 @@ fn clip(
         };
         speed_marks(&painter, tr, scale, c, strip, bottom);
     }
-    if c.audio.as_ref().is_some_and(|a| a.is_keyed())
-        || c.picture.as_ref().is_some_and(|p| p.is_keyed())
-    {
+    let keyed = c.audio.as_ref().is_some_and(|a| a.is_keyed())
+        || c.picture.as_ref().is_some_and(|p| p.is_keyed());
+    if keyed {
         let band = if has_picture { video } else { rect };
         let top = strip.map_or(band.top(), |s| s.bottom());
         let at = pos2(x0.max(painter.clip_rect().left()) + 8.0, top + 8.0);
@@ -474,7 +474,7 @@ fn clip(
         ];
         painter.add(egui::Shape::convex_polygon(
             diamond,
-            theme::colors().accent,
+            theme::KEY_ON,
             Stroke::new(1.0, Color32::from_black_alpha(180)),
         ));
     }
@@ -487,7 +487,7 @@ fn clip(
             .or_else(|| c.generator.as_ref().map(vidcut_core::otio::generator_kind))
             .or_else(|| c.compound.as_ref().map(vidcut_core::otio::compound_kind))
             .unwrap_or_default();
-        let left = x0.max(painter.clip_rect().left());
+        let left = x0.max(painter.clip_rect().left()) + if keyed { 12.0 } else { 0.0 };
         let told = c.audio.is_some() && assets.transcribed.contains(&c.media);
         let room = x1 - left - if told { 16.0 } else { 0.0 };
         let mut label = elide(&name, ((room - 8.0) / 6.5).max(3.0) as usize);
