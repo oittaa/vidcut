@@ -533,9 +533,10 @@ pub enum Request {
         /// Shorter speech doesn't count (`detect: speech`).
         #[serde(default = "min_speech")]
         min_speech: TimeSpec,
-        /// The shortest silence reported.
-        #[serde(default = "silence_min")]
-        min: TimeSpec,
+        /// The shortest silence reported. Default: 30 frames with
+        /// `detect: level`, 0.5 s with `detect: speech`.
+        #[serde(default)]
+        min: Option<TimeSpec>,
         /// `detect: speech` hears with transcribe.cpp's library and Silero VAD:
         /// download them if this computer doesn't have them yet, each checked
         /// against its SHA-256. Without it, a missing one is an error that
@@ -950,7 +951,8 @@ pub enum Request {
         /// What counts as silence.
         #[serde(default)]
         detect: Detect,
-        /// Sound below this level (dBFS) is silence (`detect: level`).
+        /// Sound below this level (dBFS) is silence (`detect: level`), from
+        /// -100 to 10.
         #[serde(default = "silence_threshold")]
         threshold_db: f64,
         /// Speech probability (0..1) from which a moment is speech
@@ -960,15 +962,21 @@ pub enum Request {
         /// Shorter speech doesn't count (`detect: speech`).
         #[serde(default = "min_speech")]
         min_speech: TimeSpec,
-        /// Silence kept before each audible part ("pre head").
-        #[serde(default = "silence_margin")]
-        pre_head: TimeSpec,
-        /// Silence kept after each audible part ("post tail").
-        #[serde(default = "silence_margin")]
-        post_tail: TimeSpec,
-        /// The shortest silence removed ("minimum to trip").
-        #[serde(default = "silence_min")]
-        min: TimeSpec,
+        /// Silence kept before each audible part ("pre head"). With
+        /// `detect: level`, from 0 to 60 frames, and none by default. With
+        /// `detect: speech`, 0.15 s by default.
+        #[serde(default)]
+        pre_head: Option<TimeSpec>,
+        /// Silence kept after each audible part ("post tail"). With
+        /// `detect: level`, from 0 to 60 frames, and none by default. With
+        /// `detect: speech`, 0.15 s by default.
+        #[serde(default)]
+        post_tail: Option<TimeSpec>,
+        /// The shortest silence removed ("minimum to trip"). With
+        /// `detect: level`, from 2 to 60 frames, and 30 by default. With
+        /// `detect: speech`, 0.5 s by default.
+        #[serde(default)]
+        min: Option<TimeSpec>,
         /// Cross Fade Audio: a 2-frame Cross Fade 0 dB on the sound where
         /// two parts that stay meet after the cut.
         #[serde(default)]
@@ -3663,7 +3671,7 @@ fn one() -> u32 {
 }
 
 fn silence_threshold() -> f64 {
-    -40.0
+    crate::analysis::SILENCE_THRESHOLD
 }
 
 fn speech_threshold() -> f64 {
@@ -3672,14 +3680,6 @@ fn speech_threshold() -> f64 {
 
 fn min_speech() -> TimeSpec {
     TimeSpec::Seconds(0.25)
-}
-
-fn silence_margin() -> TimeSpec {
-    TimeSpec::Seconds(0.15)
-}
-
-fn silence_min() -> TimeSpec {
-    TimeSpec::Seconds(0.5)
 }
 
 fn scene_threshold() -> f64 {

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, Color32, CornerRadius, Painter, Pos2, Rect, Stroke, pos2};
 use serde_json::{Value, json};
+use vidcut_core::analysis;
 use vidcut_core::model::Project;
 use vidcut_core::ops::{self, Edge};
 use vidcut_core::request::Detect;
@@ -30,6 +31,9 @@ struct Shot {
     pre_head: f64,
     post_tail: f64,
     min: f64,
+    pre_frames: i64,
+    post_frames: i64,
+    min_frames: i64,
     stripes: Vec<Stripe>,
     found: Vec<Stripe>,
     found_for: Option<Value>,
@@ -46,6 +50,9 @@ pub struct SilenceDialog {
     pub pre_head: f64,
     pub post_tail: f64,
     pub min: f64,
+    pub pre_frames: i64,
+    pub post_frames: i64,
+    pub min_frames: i64,
     pub stripes: Vec<Stripe>,
     found: Vec<Stripe>,
     pub error: Option<String>,
@@ -64,12 +71,15 @@ impl SilenceDialog {
         Self {
             clips,
             detect: Detect::Level,
-            threshold_db: -40.0,
+            threshold_db: analysis::SILENCE_THRESHOLD,
             speech_threshold: 0.5,
             min_speech: 0.25,
-            pre_head: 0.15,
-            post_tail: 0.15,
-            min: 0.5,
+            pre_head: analysis::SPEECH_MARGIN,
+            post_tail: analysis::SPEECH_MARGIN,
+            min: analysis::SPEECH_MIN,
+            pre_frames: 0,
+            post_frames: 0,
+            min_frames: analysis::SILENCE_MIN,
             stripes: Vec::new(),
             found: Vec::new(),
             error: None,
@@ -88,13 +98,18 @@ impl SilenceDialog {
         let mut p = json!({
             "clips": self.clips,
             "detect": self.detect,
-            "pre_head": format!("{}s", self.pre_head),
-            "post_tail": format!("{}s", self.post_tail),
-            "min": format!("{}s", self.min),
         });
         match self.detect {
-            Detect::Level => p["threshold_db"] = json!(self.threshold_db),
+            Detect::Level => {
+                p["threshold_db"] = json!(self.threshold_db);
+                p["pre_head"] = json!(self.pre_frames);
+                p["post_tail"] = json!(self.post_frames);
+                p["min"] = json!(self.min_frames);
+            }
             Detect::Speech => {
+                p["pre_head"] = json!(format!("{}s", self.pre_head));
+                p["post_tail"] = json!(format!("{}s", self.post_tail));
+                p["min"] = json!(format!("{}s", self.min));
                 p["speech_threshold"] = json!(self.speech_threshold);
                 p["min_speech"] = json!(format!("{}s", self.min_speech));
                 if self.download {
@@ -118,6 +133,9 @@ impl SilenceDialog {
             pre_head: self.pre_head,
             post_tail: self.post_tail,
             min: self.min,
+            pre_frames: self.pre_frames,
+            post_frames: self.post_frames,
+            min_frames: self.min_frames,
             stripes: self.stripes.clone(),
             found: self.found.clone(),
             found_for: self.found_for.clone(),
@@ -133,6 +151,9 @@ impl SilenceDialog {
         self.pre_head = s.pre_head;
         self.post_tail = s.post_tail;
         self.min = s.min;
+        self.pre_frames = s.pre_frames;
+        self.post_frames = s.post_frames;
+        self.min_frames = s.min_frames;
         self.stripes = s.stripes;
         self.found = s.found;
         self.found_for = s.found_for;
@@ -682,7 +703,7 @@ impl Workspace {
                         ui.add(
                             egui::DragValue::new(&mut d.threshold_db)
                                 .update_while_editing(false)
-                                .range(-90.0..=0.0)
+                                .range(analysis::SILENCE_LEVELS)
                                 .speed(0.5)
                                 .suffix(" dB"),
                         );
@@ -700,34 +721,41 @@ impl Workspace {
                         );
                     });
                 }
-                dialog::row(ui, "Pre Head", |ui| {
+                let seconds = |ui: &mut egui::Ui, v: &mut f64, low: f64, high: f64| {
                     ui.add(
-                        egui::DragValue::new(&mut d.pre_head)
+                        egui::DragValue::new(v)
                             .update_while_editing(false)
-                            .range(0.0..=5.0)
+                            .range(low..=high)
                             .speed(0.01)
                             .suffix(" s"),
                     );
+                };
+                let frames = |ui: &mut egui::Ui, v: &mut i64, range| {
+                    ui.add(
+                        egui::DragValue::new(v)
+                            .update_while_editing(false)
+                            .range(range)
+                            .speed(0.25)
+                            .suffix(" frames"),
+                    );
+                };
+                dialog::row(ui, "Pre Head", |ui| {
+                    match speech {
+                        true => seconds(ui, &mut d.pre_head, 0.0, 5.0),
+                        false => frames(ui, &mut d.pre_frames, analysis::SILENCE_MARGINS),
+                    }
                     ui.label(dim(format!("kept before each {kept} part")));
                 });
                 dialog::row(ui, "Post Tail", |ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut d.post_tail)
-                            .update_while_editing(false)
-                            .range(0.0..=5.0)
-                            .speed(0.01)
-                            .suffix(" s"),
-                    );
+                    match speech {
+                        true => seconds(ui, &mut d.post_tail, 0.0, 5.0),
+                        false => frames(ui, &mut d.post_frames, analysis::SILENCE_MARGINS),
+                    }
                     ui.label(dim(format!("kept after each {kept} part")));
                 });
-                dialog::row(ui, "Shortest Cut", |ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut d.min)
-                            .update_while_editing(false)
-                            .range(1.0 / fps..=60.0)
-                            .speed(0.01)
-                            .suffix(" s"),
-                    );
+                dialog::row(ui, "Shortest Cut", |ui| match speech {
+                    true => seconds(ui, &mut d.min, 1.0 / fps, 60.0),
+                    false => frames(ui, &mut d.min_frames, analysis::SILENCE_MINS),
                 });
                 dialog::row(ui, "Cross Fade Audio", |ui| {
                     ui.checkbox(&mut d.cross_fade, "")
