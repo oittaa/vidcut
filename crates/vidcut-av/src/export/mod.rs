@@ -139,6 +139,15 @@ fn tried(encoder: Option<&str>, e: &Error) -> Tried {
     }
 }
 
+impl Tried {
+    pub fn text(&self) -> String {
+        match &self.encoder {
+            Some(e) if !self.error.starts_with(e.as_str()) => format!("{e}: {}", self.error),
+            _ => self.error.clone(),
+        }
+    }
+}
+
 impl Progress {
     pub fn single(frames: i64, total: i64, elapsed: Duration) -> Self {
         Self {
@@ -962,10 +971,7 @@ fn encode(
                 }
                 let why: Vec<String> = failed
                     .iter()
-                    .map(|(name, e)| match name {
-                        Some(n) => format!("{n}: {e}"),
-                        None => e.to_string(),
-                    })
+                    .map(|(name, e)| tried(name.as_deref(), e).text())
                     .collect();
                 return Err(Error::Invalid(format!(
                     "no video encoder would open: {}",
