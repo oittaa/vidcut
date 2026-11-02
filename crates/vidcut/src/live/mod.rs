@@ -2743,13 +2743,17 @@ impl Live {
                 Step::Now(Ok(self.state_response()))
             }
             Request::CacheStatus {} => match &self.project {
-                Some(open) => Step::Now(Ok(answer(self.render.status(open.project())))),
+                Some(open) => {
+                    let mut r = answer(self.render.status(open.project(), envelope.dry_run));
+                    r.dry_run = envelope.dry_run;
+                    Step::Now(Ok(r))
+                }
                 None => Step::Now(Err(no_project())),
             },
             Request::CacheRender {} => match &self.project {
                 Some(open) => {
                     let value = match envelope.dry_run {
-                        true => self.render.status(open.project()),
+                        true => self.render.status(open.project(), true),
                         false => {
                             let at = self.player.position(TIMELINE);
                             self.render.render_now(open.project(), at)

@@ -466,6 +466,11 @@ An example of a `.made` file, with one frame of one layer:
 The index:
 
 - `Index::scan` reads the cache `.keys` files on `vidcut-render-index`, when the mode first is not Off. It removes a cache `.keys` file and its `.made` file when their video is gone. Another `.keys` file stays.
+- A dry run does not scan.
+  - Why: a scan can remove files. A dry run changes nothing.
+  - When a dry run needs the index and no scan has ended, it reads the cache `.keys` files with `Index::read`.
+  - `Index::read` removes no file.
+  - A dry run does not mark the index as scanned (`Background::read_index`). Thus a later scan still removes a cache `.keys` file whose video is gone.
 - The disk cache can remove a video at any time. `Cache::apply` removes from the index each file of the plan that is gone (`Index::remove`). Thus the background render makes its frames again.
 
 The jobs:
@@ -561,7 +566,8 @@ The background render (`live::render_cache::Background`):
 - `cache.render` in a GUI starts the render at once (`Background::render_now`). It does not wait for the time without activity.
   - It first stops a render that runs. Thus only one render writes the cache.
 - Without a GUI, the CLI process renders the cache (`render_all`).
-  - It makes the plan of the viewer, as the live core does (`flatten_lanes`, `shown`), and scans the index.
+  - It makes the plan of the viewer, as the live core does (`flatten_lanes`, `shown`).
+  - It scans the index, except in a dry run.
   - It finds the slow media first (`find_slow`). Thus its answer lists the parts of that media.
   - It runs the same `Render` on the thread of the request, from the start. It ends when the mode has nothing left to render.
 - A dry run of `cache.render` renders nothing. Its answer is that of `Background::status`.
@@ -572,7 +578,7 @@ The background render (`live::render_cache::Background`):
 - `cache.status` (`Background::status`) and `cache.delete` (`Live::cache_delete`) are live requests.
   - `cache.status` gives the folder of the cache.
   - All also removes the marks (`Index::clear`).
-  - They scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
+  - Except in a dry run, they scan the index on the live thread when `vidcut-render-index` has not ended. The later result of that thread is then dropped.
   - All removes each cache file in the folder (`render_caches::empty`).
     - A cache file is `drops.marks`, or a video, keys file or made file whose name is 32 hex characters.
     - A part file of one of those, left when a write stops, is a cache file too.

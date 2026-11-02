@@ -378,11 +378,14 @@ impl Background {
         {
             self.start(project, base, from);
         }
-        self.status(project)
+        self.status(project, false)
     }
 
-    pub(super) fn status(&mut self, project: &Project) -> Value {
-        self.indexed();
+    pub(super) fn status(&mut self, project: &Project, dry_run: bool) -> Value {
+        match dry_run {
+            true => self.read_index(),
+            false => self.indexed(),
+        }
         let mode = project.settings.render_cache;
         let look = self.look(project);
         let slow = |id: &str| slow_media(project, &self.proxies, &self.decodes, id);
@@ -434,6 +437,12 @@ impl Background {
         }
     }
 
+    fn read_index(&mut self) {
+        if self.index != Scan::Done {
+            *self.lock().index_mut() = Index::read(&self.dir());
+        }
+    }
+
     fn stopped(&mut self) {
         self.stop();
         self.done = false;
@@ -465,7 +474,7 @@ impl Background {
         dry_run: bool,
     ) -> usize {
         if dry_run {
-            self.indexed();
+            self.read_index();
         } else {
             self.stopped();
         }
@@ -492,7 +501,7 @@ impl Background {
 
     pub(super) fn delete_unused(&mut self, project: &Project, dry_run: bool) -> usize {
         if dry_run {
-            self.indexed();
+            self.read_index();
         } else {
             self.stopped();
         }
@@ -530,11 +539,11 @@ pub(crate) fn render_all(
     let prefs = crate::preferences::load().unwrap_or_default();
     let (tx, _rx) = std::sync::mpsc::channel();
     let mut background = Background::new(tx, &prefs);
+    background.open(file);
     if !dry_run {
         crate::render_caches::remember(file);
+        background.indexed();
     }
-    background.open(file);
-    background.indexed();
     let end = project.end();
     if end > 0 && project.settings.render_cache != Mode::Off {
         let (plan, _) = vidcut_core::render::flatten_lanes(project, 0, end)?;
@@ -556,7 +565,7 @@ pub(crate) fn render_all(
             }
         }
     }
-    Ok(background.status(project))
+    Ok(background.status(project, dry_run))
 }
 
 fn keys_in(cache: &mut Cache, base: &RenderPlan, setup: &Setup, spans: &[Span]) -> HashSet<Key> {

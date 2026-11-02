@@ -1027,6 +1027,17 @@ pub struct Index {
 
 impl Index {
     pub fn scan(dir: &Path) -> Self {
+        Self::listed(dir, |keys| {
+            let _ = std::fs::remove_file(keys);
+            let _ = std::fs::remove_file(keys.with_extension(MADE));
+        })
+    }
+
+    pub fn read(dir: &Path) -> Self {
+        Self::listed(dir, |_| {})
+    }
+
+    fn listed(dir: &Path, mut unusable: impl FnMut(&Path)) -> Self {
         let mut index = Self {
             marks: read_keys(&marks_file(dir))
                 .unwrap_or_default()
@@ -1046,10 +1057,7 @@ impl Index {
             let file = path.with_extension(FILE);
             match (file.is_file(), read_keys(&path)) {
                 (true, Some(keys)) => index.add(&file, &keys),
-                _ => {
-                    let _ = std::fs::remove_file(&path);
-                    let _ = std::fs::remove_file(path.with_extension(MADE));
-                }
+                _ => unusable(&path),
             }
         }
         index
