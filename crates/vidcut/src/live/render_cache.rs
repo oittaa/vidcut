@@ -15,6 +15,7 @@ use super::Msg;
 use crate::threads::Work;
 
 const SECONDS_EACH: i64 = 2;
+const FAIL_STREAK: u32 = 3;
 
 pub(crate) enum Event {
     Scanned(Index),
@@ -23,6 +24,7 @@ pub(crate) enum Event {
         decodes: HashMap<PathBuf, bool>,
     },
     Written,
+    Problem(String),
     Ended {
         job: Arc<AtomicBool>,
         done: bool,
@@ -149,6 +151,7 @@ impl Background {
             self.proxies = prefs.proxies.clone();
             self.done = false;
             self.lock().unblock();
+            self.error = None;
         }
         if folder {
             let before = self.dir();
@@ -218,6 +221,7 @@ impl Background {
             self.done = false;
             self.stop();
             self.lock().unblock();
+            self.error = None;
         }
         if project.settings.render_cache == Mode::Off {
             self.stop();
@@ -278,15 +282,19 @@ impl Background {
                 self.decodes = Arc::new(decodes);
                 changed
             }
-            Event::Written => {
-                self.error = None;
+            Event::Written => true,
+            Event::Problem(error) => {
+                self.error = Some(error);
                 true
             }
             Event::Ended { job, done, error } => {
                 if self.running.as_ref().is_some_and(|r| Arc::ptr_eq(r, &job)) {
                     self.running = None;
-                    self.done |= done || error.is_some();
-                    self.error = error;
+                    let failed = error.is_some();
+                    if let Some(error) = error {
+                        self.error = Some(error);
+                    }
+                    self.done |= done || failed;
                 }
                 false
             }
@@ -411,6 +419,7 @@ impl Background {
         self.stop();
         self.done = false;
         self.lock().unblock();
+        self.error = None;
         self.indexed();
     }
 
@@ -603,6 +612,7 @@ impl Render {
         let kept = vidcut_av::player::Kept::of(&self.base, &shown);
         let mut from = kept.played_from(self.from);
         let mut failed: Option<String> = None;
+        let mut streak = 0u32;
         loop {
             if self.cancel.load(Ordering::Relaxed) {
                 return Ok(false);
@@ -625,6 +635,7 @@ impl Render {
             );
             match written {
                 Ok(w) => {
+                    streak = 0;
                     self.lock().index_mut().add(&w.path, &job.keys);
                     self.send(Event::Written);
                     from = match job.layer {
@@ -634,8 +645,14 @@ impl Render {
                 }
                 Err(_) if self.cancel.load(Ordering::Relaxed) => return Ok(false),
                 Err(e) => {
+                    let message = e.to_string();
                     self.lock().block(&job.keys);
-                    failed = Some(e.to_string());
+                    self.send(Event::Problem(message.clone()));
+                    streak += 1;
+                    if streak >= FAIL_STREAK {
+                        return Err(message);
+                    }
+                    failed = Some(message);
                 }
             }
         }
@@ -709,6 +726,23 @@ mod tests {
             done: true,
             error: None,
         });
+        assert!(!bg.done);
+    }
+
+    #[test]
+    fn a_stopped_render_keeps_the_error() {
+        let (tx, _rx) = mpsc::channel();
+        let mut bg = Background::new(tx, &Preferences::default());
+        let job = Arc::new(AtomicBool::new(false));
+        bg.running = Some(job.clone());
+        assert!(bg.event(Event::Problem("the disk cache has no room".into())));
+        assert_eq!(bg.error.as_deref(), Some("the disk cache has no room"));
+        bg.event(Event::Ended {
+            job,
+            done: false,
+            error: None,
+        });
+        assert_eq!(bg.error.as_deref(), Some("the disk cache has no room"));
         assert!(!bg.done);
     }
 }
