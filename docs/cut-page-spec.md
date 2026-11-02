@@ -1165,6 +1165,10 @@ Video Only and Audio Only limit what an edit takes (p. 694).
 - **In vidcut:**
   - The Quick Export row, the Export dialog and jobs are deviation X3.
   - The suggested file name is the name of the project.
+  - AAC takes 96 to 320 kb/s, and 320 by default.
+  - The sample rate of AAC is the project's, 44100 Hz or 48000 Hz, and 48000 Hz by default.
+  - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another value.
+  - The TikTok preset has AAC at 256 kb/s. That number was not measured.
 
 ## 11. Keyboard shortcuts
 

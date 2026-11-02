@@ -402,9 +402,10 @@ impl Multipass {
 #[serde(deny_unknown_fields)]
 pub struct AudioSettings {
     pub codec: AudioCodec,
-    /// Bits per second (lossy codecs).
+    /// Bits per second (lossy codecs). AAC takes 96000 to 320000.
     #[serde(default)]
     pub bitrate: Option<u64>,
+    /// In Hz. Left out, the project's. AAC takes 44100 or 48000.
     #[serde(default)]
     pub sample_rate: Option<u32>,
     #[serde(default)]
@@ -467,11 +468,19 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
     }
 }
 
+pub const AAC_BITRATE: u64 = 320_000;
+pub const AAC_BITRATES: std::ops::RangeInclusive<u64> = 96_000..=320_000;
+pub const AAC_RATES: [u32; 2] = [44_100, 48_000];
+
+pub fn usual_rate(codec: AudioCodec) -> Option<u32> {
+    (codec == AudioCodec::Aac).then_some(48_000)
+}
+
 fn audio(codec: AudioCodec, kbps: Option<u64>) -> AudioSettings {
     AudioSettings {
         codec,
         bitrate: kbps.map(|k| k * 1000),
-        sample_rate: None,
+        sample_rate: usual_rate(codec),
         channels: None,
         loudness: None,
     }
@@ -657,9 +666,9 @@ pub fn builtin_presets() -> Vec<Preset> {
         preset(
             "audio-aac",
             "Audio: AAC",
-            "AAC 256 kb/s in M4A",
+            "AAC 320 kb/s in M4A",
             false,
-            audio_only(C::M4a, audio(A::Aac, Some(256))),
+            audio_only(C::M4a, audio(A::Aac, Some(320))),
         ),
         preset(
             "audio-opus",
@@ -704,6 +713,21 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         return Err(Error::usage(format!(
             "audio.loudness {l} LUFS is outside -60..-5"
         )));
+    }
+    if let Some(a) = s.audio.as_ref().filter(|a| a.codec == A::Aac) {
+        if let Some(b) = a.bitrate.filter(|b| !AAC_BITRATES.contains(b)) {
+            return Err(Error::usage(format!(
+                "audio.bitrate {b} is outside {}..{} for AAC",
+                AAC_BITRATES.start(),
+                AAC_BITRATES.end()
+            )));
+        }
+        if let Some(r) = a.sample_rate.filter(|r| !AAC_RATES.contains(r)) {
+            return Err(Error::usage(format!(
+                "audio.sample_rate {r} for AAC is neither {} nor {}",
+                AAC_RATES[0], AAC_RATES[1]
+            )));
+        }
     }
     if s.video.is_none() && s.audio.is_none() {
         return Err(Error::usage("export needs video or audio"));
