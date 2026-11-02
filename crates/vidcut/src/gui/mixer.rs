@@ -19,11 +19,49 @@ const HOLD_SECS: f32 = 1.5;
 
 const BAR_W: f32 = 10.0;
 
-const FADER_DB: std::ops::RangeInclusive<f64> = vidcut_core::validate::FADER;
+const FADER_TRAVEL: f64 = 66.0;
 
-const FADER_MARKS: [f32; 7] = [0.0, 10.0, -12.0, -24.0, -100.0, -60.0, -40.0];
+const FADER_LAW: [(f64, f64); 23] = [
+    (0.0, 10.0),
+    (3.0, 8.5),
+    (6.0, 6.6),
+    (9.0, 4.8),
+    (12.0, 3.1),
+    (15.0, 1.3),
+    (18.0, -0.3),
+    (21.0, -2.1),
+    (24.0, -3.8),
+    (27.0, -5.6),
+    (30.0, -7.4),
+    (33.0, -9.1),
+    (36.0, -12.0),
+    (39.0, -16.0),
+    (42.0, -19.0),
+    (45.0, -24.0),
+    (48.0, -31.0),
+    (51.0, -38.0),
+    (54.0, -45.0),
+    (57.0, -54.0),
+    (60.0, -68.0),
+    (63.0, -95.0),
+    (66.0, -100.0),
+];
 
-const FADER_SCALE_W: f32 = 26.0;
+const FADER_ZERO_TICK: f64 = 17.0;
+
+const FADER_TICKS: [f64; 9] = [
+    0.0,
+    FADER_ZERO_TICK,
+    35.0,
+    42.7,
+    47.7,
+    51.7,
+    57.0,
+    60.0,
+    63.0,
+];
+
+const STRIP_SPARE_W: f32 = 66.0;
 
 const STRIP_ROOM: f32 = 106.0;
 
@@ -35,10 +73,6 @@ fn ducking_room(p: &Project) -> f32 {
         .iter()
         .any(|t| t.duck.as_ref().is_some_and(|d| d.on));
     DUCK_ROW + if ducked { 3.0 * DUCK_ROW } else { 0.0 }
-}
-
-fn scale_font() -> egui::FontId {
-    egui::FontId::proportional(10.0)
 }
 
 fn linear(db: f64) -> f32 {
@@ -57,45 +91,50 @@ fn position(level: f32) -> f32 {
     ((db(level) + 60.0) / 60.0).clamp(0.0, 1.0)
 }
 
-fn fitting_marks(marks: &[f32], y: impl Fn(f32) -> f32, gap: f32) -> Vec<(f32, f32)> {
-    let mut kept: Vec<(f32, f32)> = Vec::new();
-    for &m in marks {
-        let at = y(m);
-        if kept.iter().all(|&(_, k)| (k - at).abs() >= gap) {
-            kept.push((m, at));
-        }
-    }
-    kept
+fn fader_db(px: f64) -> f64 {
+    let px = px.clamp(0.0, FADER_TRAVEL);
+    let at = FADER_LAW
+        .partition_point(|&(p, _)| p <= px)
+        .clamp(1, FADER_LAW.len() - 1);
+    let ((p0, d0), (p1, d1)) = (FADER_LAW[at - 1], FADER_LAW[at]);
+    d0 + (d1 - d0) * (px - p0) / (p1 - p0)
 }
 
-fn mark_text(db: f32) -> String {
-    match db {
-        d if d > 0.0 => format!("+{d}"),
-        d if d < 0.0 => format!("−{}", -d),
-        _ => "0".to_string(),
+fn fader_px(db: f64) -> f64 {
+    let at = FADER_LAW
+        .partition_point(|&(_, d)| d >= db)
+        .clamp(1, FADER_LAW.len() - 1);
+    let ((p0, d0), (p1, d1)) = (FADER_LAW[at - 1], FADER_LAW[at]);
+    (p0 + (p1 - p0) * (db - d0) / (d1 - d0)).clamp(0.0, FADER_TRAVEL)
+}
+
+fn fader_text(db: f64) -> String {
+    if vidcut_core::validate::fader_silent(db) {
+        "-∞ dB".into()
+    } else {
+        format!("{db:+.1} dB")
     }
 }
 
-fn fader_y(db: f32, rect: Rect, handle: egui::style::HandleShape) -> f32 {
+fn fader_y(px: f64, rect: Rect, handle: egui::style::HandleShape) -> f32 {
     let mut radius = rect.width() / 2.5;
     if let egui::style::HandleShape::Rect { aspect_ratio } = handle {
         radius *= aspect_ratio;
     }
-    let (lo, hi) = (*FADER_DB.start() as f32, *FADER_DB.end() as f32);
-    let t = (db.clamp(lo, hi) - lo) / (hi - lo);
-    let (bottom, top) = (rect.bottom() - radius, rect.top() + radius);
-    bottom + (top - bottom) * t
+    let (top, bottom) = (rect.top() + radius, rect.bottom() - radius);
+    top + (bottom - top) * (px / FADER_TRAVEL) as f32
 }
 
-fn fader_ticks(slider: Rect, marks: &[(f32, f32)]) -> egui::Shape {
-    let ticks = marks
+fn fader_ticks(slider: Rect, handle: egui::style::HandleShape) -> egui::Shape {
+    let ticks = FADER_TICKS
         .iter()
-        .map(|&(db, y)| {
-            let (reach, stroke) = if db == 0.0 {
-                (3.0, Stroke::new(2.0, theme::colors().accent))
+        .map(|&px| {
+            let (reach, stroke) = if px == FADER_ZERO_TICK {
+                (3.0, Stroke::new(2.0, theme::colors().text))
             } else {
                 (-2.0, Stroke::new(1.0, theme::colors().text_dim))
             };
+            let y = fader_y(px, slider, handle);
             egui::Shape::line_segment(
                 [
                     pos2(slider.left() - reach, y),
@@ -106,24 +145,6 @@ fn fader_ticks(slider: Rect, marks: &[(f32, f32)]) -> egui::Shape {
         })
         .collect();
     egui::Shape::Vec(ticks)
-}
-
-fn fader_numbers(painter: &egui::Painter, column: Rect, marks: &[(f32, f32)]) {
-    for &(db, y) in marks {
-        let color = if db == 0.0 {
-            theme::colors().accent
-        } else {
-            theme::colors().text_dim
-        };
-        let y = y.clamp(column.top() + 5.0, column.bottom() - 5.0);
-        painter.text(
-            pos2(column.left() + 4.0, y),
-            egui::Align2::LEFT_CENTER,
-            mark_text(db),
-            scale_font(),
-            color,
-        );
-    }
 }
 
 fn project_channels(p: &Project) -> usize {
@@ -404,12 +425,19 @@ impl Workspace {
     fn strip(&mut self, ui: &mut egui::Ui, p: &Project, t: &Track, level: &[f32], height: f32) {
         let n = level.len().max(1);
         ui.vertical(|ui| {
-            ui.set_width(meter_column_width(n) + FADER_SCALE_W + 40.0);
+            ui.set_width(meter_column_width(n) + STRIP_SPARE_W);
             let name = t.name.clone().unwrap_or_else(|| t.id.clone());
             ui.label(RichText::new(name).strong());
             let held = self.hold_channels(&t.id, level);
             let bars = height - STRIP_ROOM;
-            let value = ui.horizontal_top(|ui| {
+            let (number, _) = ui.allocate_exact_size(
+                vec2(
+                    ui.available_width(),
+                    ui.text_style_height(&egui::TextStyle::Small),
+                ),
+                egui::Sense::hover(),
+            );
+            let row = ui.horizontal_top(|ui| {
                 self.channel_bars(ui, level, &held, bars, "track meter");
                 let mut value = self
                     .mixer
@@ -419,24 +447,18 @@ impl Workspace {
                     .unwrap_or(t.volume_db);
                 ui.spacing_mut().slider_width = bars;
                 let under = ui.painter().add(egui::Shape::Noop);
+                let mut up = FADER_TRAVEL - fader_px(value);
                 let r = ui.add(
-                    egui::Slider::new(&mut value, FADER_DB)
+                    egui::Slider::new(&mut up, 0.0..=FADER_TRAVEL)
                         .vertical()
                         .show_value(false)
-                        .step_by(0.5),
+                        .smart_aim(false),
                 );
+                if r.changed() {
+                    value = (fader_db(FADER_TRAVEL - up) * 10.0).round() / 10.0;
+                }
                 let handle = ui.style().visuals.handle_shape;
-                let marks = fitting_marks(
-                    &FADER_MARKS,
-                    |db| fader_y(db, r.rect, handle),
-                    scale_font().size + 4.0,
-                );
-                ui.painter().set(under, fader_ticks(r.rect, &marks));
-                let (column, _) = ui.allocate_exact_size(
-                    vec2(FADER_SCALE_W, r.rect.height()),
-                    egui::Sense::hover(),
-                );
-                fader_numbers(ui.painter(), column, &marks);
+                ui.painter().set(under, fader_ticks(r.rect, handle));
                 if r.double_clicked() {
                     self.mixer.dragging.remove(&t.id);
                     self.send("track.set", json!({ "track": t.id, "volume_db": 0.0 }));
@@ -455,13 +477,17 @@ impl Workspace {
                 {
                     self.send("track.set", json!({ "track": t.id, "volume_db": v }));
                 }
-                value
+                (value, r.rect)
             });
-            ui.label(
-                RichText::new(format!("{:+.1} dB", value.inner))
-                    .small()
-                    .monospace(),
-            );
+            let (value, fader) = row.inner;
+            let over =
+                Rect::from_center_size(pos2(fader.center().x, number.center().y), number.size());
+            ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(over)
+                    .layout(egui::Layout::top_down(egui::Align::Center)),
+            )
+            .add(egui::Label::new(RichText::new(fader_text(value)).small().monospace()).extend());
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 if ui.selectable_label(t.muted, "M").clicked() {

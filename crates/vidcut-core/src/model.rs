@@ -1098,7 +1098,8 @@ pub struct Track {
     /// While any track is soloed, only soloed tracks are heard (the mixer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub solo: bool,
-    /// The mixer fader, in dB, from -100 to 10.
+    /// The mixer fader, in dB, from -100 to 10. -100 stands for the fader's
+    /// bottom, minus infinity: the track is silent.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub volume_db: f64,
     /// Voice Isolation on the track's clips that have none of their own,
@@ -3893,8 +3894,12 @@ impl Track {
         self.kind == TrackKind::Audio || self.clips.iter().any(|c| c.audio.is_some())
     }
 
-    pub fn audible(&self, any_solo: bool) -> bool {
+    pub fn in_mix(&self, any_solo: bool) -> bool {
         !self.muted && (self.solo || !any_solo)
+    }
+
+    pub fn audible(&self, any_solo: bool) -> bool {
+        self.in_mix(any_solo) && !crate::validate::fader_silent(self.volume_db)
     }
 
     pub fn clip_covering(&self, t: i64) -> Option<usize> {

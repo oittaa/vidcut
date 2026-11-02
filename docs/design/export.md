@@ -247,6 +247,8 @@ To the encoder:
 - A piece of a clip with volume keyframes carries them (`Keyed`), and its `gain_db` holds only the fader of the track.
   - `AudioMix` multiplies each sample by `Keyed::gain` at the place of the sample on the keyframes' frames (`Keyed::at`).
   - Thus the player and the export play the same curve ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- A track at the bottom of its fader (`fader_silent`) keeps its lanes, and its pieces are `silent`. `AudioMix` gives such a piece no sound.
+  - Why: a fader preview ([playback](playback.md#sound)) can raise the lane with no new plan.
 - A clip with speed keyframes gives a sound piece for each section. A piece that plays on into the next section is `joined`.
   - `AudioMix` plays a run of joined pieces through one `Stretch`, with the speeds of all their sections (`Paced::mapped`).
   - A run plays in one direction, forward or backward. Where the clip turns, a new run starts.
