@@ -2091,11 +2091,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The title goes on the video track above the highest track with clips in its frames. If there is no such track, it is made.
   - This is the track of Place On Top (D24).
   - With nothing in those frames, the title goes on Track 1. With Ripple On, it is no later than the end of Track 1 (D10).
-  - The title of Add Title is a Text title that reads `Title`.
-  - A title dragged or double-clicked from the Titles tab reads as its card does:
-    - `Title`
-    - `Name` over `Title`, for a lower third
-    - a few lines of credits, for a scroll
+  - The title of Add Title is a Text title that reads `Basic Title`.
+  - A title dragged or double-clicked from the Titles tab reads as its card does. These are Resolve's own default texts (measured in Resolve Studio 21.1.2):
+    - `Basic Title`
+    - `TITLE` over `Sample`, for a lower third
+    - `Scroll Title`, for a scroll
   - A drop puts the title where the pointer is, on the video track under it, as `titles.add` with that track and frame does.
 - **D67. Titles in OTIO files** (§8.14; deviation X9).
   - The manual does not say how a title goes into an OTIO file.
