@@ -735,8 +735,11 @@ pub fn apply_overrides(settings: &mut ExportSettings, sets: &[String]) -> Result
         let (path, raw) = set
             .split_once('=')
             .ok_or_else(|| Error::usage(format!("--set {set:?}: expected key=value")))?;
-        let value: Value =
-            serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_string()));
+        let value = match serde_json::from_str(raw) {
+            Ok(Value::Number(_)) if path == "video.profile" => Value::String(raw.to_string()),
+            Ok(parsed) => parsed,
+            Err(_) => Value::String(raw.to_string()),
+        };
         let mut node = &mut v;
         let keys: Vec<&str> = path.split('.').collect();
         for key in &keys[..keys.len() - 1] {
