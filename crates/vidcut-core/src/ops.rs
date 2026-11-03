@@ -4,6 +4,7 @@ pub mod filmstrip;
 mod follow;
 pub mod generators;
 pub mod keyframes;
+pub mod linked;
 pub mod normalize;
 pub mod picture;
 mod source_overwrite;
@@ -408,6 +409,7 @@ pub fn insert_at_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<
         fix_audio(p, ti);
         return Ok(ids);
     }
+    linked::split_main(p, at, &[]);
     let before = Before::of(p);
     let at = if p.settings.ripple_on {
         at.min(p.tracks[ti].end())
@@ -614,6 +616,7 @@ pub fn place_on_top_block(
 }
 
 pub fn split(p: &mut Project, at: &[i64], selected: &[String]) -> Result<Vec<String>> {
+    let selected = &linked::with_ties(p, selected);
     for id in selected {
         locate(p, id)?;
     }
@@ -700,6 +703,7 @@ fn joined(t: &Track, a: &Clip, b: &Clip) -> Option<Clip> {
 }
 
 pub fn join(p: &mut Project, at: Option<i64>, selected: &[String]) -> Result<Vec<String>> {
+    let selected = &linked::with_ties(p, selected);
     for id in selected {
         locate(p, id)?;
     }
@@ -757,7 +761,7 @@ pub fn join(p: &mut Project, at: Option<i64>, selected: &[String]) -> Result<Vec
 
 pub fn delete(p: &mut Project, ids: &[String], lift: bool) -> Result<()> {
     let ripple = !lift && p.settings.ripple_on;
-    delete_clips(p, ids, ripple)
+    delete_clips(p, &linked::with_ties(p, ids), ripple)
 }
 
 fn delete_clips(p: &mut Project, ids: &[String], ripple: bool) -> Result<()> {
@@ -884,6 +888,8 @@ pub fn removed_time(parts: &[ClipSpans]) -> Vec<(i64, i64)> {
 }
 
 pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
+    let lead = linked::leads(p, &[id.to_string()]);
+    let id = lead.first().map_or(id, String::as_str);
     let (ti, ci) = locate(p, id)?;
     if by == 0 {
         return Ok(());
@@ -898,6 +904,12 @@ pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
         )));
     };
     let (mut before_c, mut moved, mut after_c) = (t.clips[l].clone(), c, t.clips[r].clone());
+    let parts: Vec<_> = [&before_c, &moved, &after_c]
+        .into_iter()
+        .flat_map(|x| linked::tied_to(p, &x.id))
+        .collect();
+    let (left_id, moved_id) = (before_c.id.clone(), moved.id.clone());
+    let taken = linked::take(p, &parts)?;
     before_c.duration += by;
     moved.start += by;
     after_c.move_head(by);
@@ -911,6 +923,17 @@ pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
     fix_audio(p, ti);
     if let Some(before) = before {
         follow::follow(p, &before, &Edit::default());
+    }
+    for mut part in taken {
+        if part.lead == left_id {
+            part.clip.duration += by;
+        } else if part.lead == moved_id {
+            part.clip.start += by;
+        } else {
+            part.clip.move_head(by);
+        }
+        check_source(p, &part.clip)?;
+        linked::put(p, &part.track, part.clip);
     }
     Ok(())
 }
@@ -1008,7 +1031,101 @@ fn extract(p: &mut Project, ti: usize, clips: &[Clip], to: i64) -> Result<i64> {
     Ok(mapped)
 }
 
+fn fits_track(p: &Project, ti: usize, c: &Clip) -> Result<()> {
+    let t = &p.tracks[ti];
+    if t.kind == TrackKind::Audio && c.video {
+        return Err(Error::invalid(format!(
+            "{} is an audio track: only audio clips go there",
+            t.id
+        )));
+    }
+    if t.kind == TrackKind::Video && c.is_sound_block() {
+        return Err(Error::invalid(format!(
+            "{} is a video track: the sound of a block goes on audio tracks",
+            t.id
+        )));
+    }
+    Ok(())
+}
+
+fn sent_to_track(
+    p: &Project,
+    ti: usize,
+    ids: &[String],
+    parts: &linked::Parts,
+) -> Result<Vec<String>> {
+    let fits = |id: &String| p.clip(id).is_some_and(|c| fits_track(p, ti, c).is_ok());
+    if let Some(c) = p.clip(&ids[0])
+        && !ids.iter().any(fits)
+    {
+        fits_track(p, ti, c)?;
+    }
+    if parts.leads.iter().all(fits) {
+        return Ok(Vec::new());
+    }
+    let sent: Vec<String> = parts
+        .rest
+        .iter()
+        .map(|(id, _)| id)
+        .filter(|id| ids.contains(id) && fits(id))
+        .cloned()
+        .collect();
+    let from = |id: &String| p.find_clip(id).map(|(i, _)| i);
+    if sent.iter().any(|id| from(id) != from(&sent[0])) {
+        return Err(Error::usage(
+            "clips from several tracks keep their tracks; move them to another track one track at a time",
+        ));
+    }
+    Ok(sent)
+}
+
 pub fn move_clips(
+    p: &mut Project,
+    ids: &[String],
+    to: i64,
+    mode: MoveMode,
+    track: Option<&str>,
+) -> Result<()> {
+    let parts = linked::parts(p, ids);
+    let to_main = match track {
+        Some(t) => t == MAIN,
+        None => parts
+            .leads
+            .first()
+            .and_then(|id| p.find_clip(id))
+            .is_some_and(|(ti, _)| ti == main_index(p)),
+    };
+    if mode == MoveMode::Insert && to_main {
+        linked::split_main(p, to, &parts.leads);
+    }
+    if parts.rest.is_empty() {
+        return move_leads(p, ids, to, mode, track);
+    }
+    let dest = track.map(|id| tracks::resolve(p, id)).transpose()?;
+    let sent = match dest {
+        Some(ti) => sent_to_track(p, ti, ids, &parts)?,
+        None => Vec::new(),
+    };
+    let lead_track = track.filter(|_| sent.is_empty());
+    let leaves = dest.is_some_and(|d| {
+        sent.is_empty() && p.find_clip(&parts.leads[0]).is_some_and(|(ti, _)| ti != d)
+    });
+    let dest = dest.map(|ti| p.tracks[ti].id.clone());
+    let taken = linked::take(p, &parts.rest)?;
+    move_leads(p, &parts.leads, to, mode, lead_track)?;
+    for part in taken {
+        let mut c = part.clip;
+        c.start = p.clip(&part.lead).map_or(c.start, |l| l.start);
+        match &dest {
+            Some(d) if sent.contains(&c.id) => linked::put(p, d, c),
+            _ if leaves => linked::put_free(p, &part.track, c),
+            _ => linked::put(p, &part.track, c),
+        }
+    }
+    Ok(())
+}
+
+fn move_leads(
     p: &mut Project,
     ids: &[String],
     to: i64,
@@ -1038,17 +1155,8 @@ pub fn move_clips(
             "clips from several tracks keep their tracks; move them to another track one track at a time",
         ));
     }
-    if p.tracks[dest].kind == TrackKind::Audio && clips.iter().any(|(_, c)| c.video) {
-        return Err(Error::invalid(format!(
-            "{} is an audio track: only audio clips go there",
-            p.tracks[dest].id
-        )));
-    }
-    if p.tracks[dest].kind == TrackKind::Video && clips.iter().any(|(_, c)| c.is_sound_block()) {
-        return Err(Error::invalid(format!(
-            "{} is a video track: the sound of a block goes on audio tracks",
-            p.tracks[dest].id
-        )));
+    for (_, c) in &clips {
+        fits_track(p, dest, c)?;
     }
     let on_main: Vec<Clip> = clips
         .iter()
@@ -1230,6 +1338,8 @@ pub fn move_replace(p: &mut Project, id: &str, onto: &str) -> Result<()> {
         ));
     }
     let clip = p.tracks[main].clips[ci].clone();
+    let taken = linked::take(p, &linked::tied_to(p, id))?;
+    linked::take(p, &linked::tied_to(p, onto))?;
     let before = Before::of(p);
     extract(p, main, std::slice::from_ref(&clip), 0)?;
     let target = &p.tracks[main].clips[clip_index(&p.tracks[main], onto)];
@@ -1250,6 +1360,11 @@ pub fn move_replace(p: &mut Project, id: &str, onto: &str) -> Result<()> {
             ..Edit::default()
         },
     );
+    for part in taken {
+        let mut c = part.clip;
+        c.start = a;
+        linked::put(p, &part.track, c);
+    }
     Ok(())
 }
 
@@ -1308,6 +1423,35 @@ fn check_source(p: &Project, c: &Clip) -> Result<()> {
 }
 
 pub fn trim(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bool>) -> Result<()> {
+    let parts = linked::parts(p, &[id.to_string()]);
+    let lead = parts.leads.first().map_or(id, String::as_str);
+    if parts.rest.is_empty() {
+        return trim_one(p, id, edge, delta, ripple);
+    }
+    let (ti, _) = locate(p, lead)?;
+    let taken = linked::take(p, &parts.rest)?;
+    trim_one(p, lead, edge, delta, ripple)?;
+    let main = ti == main_index(p);
+    let start = p.clip(lead).map_or(0, |c| c.start);
+    for part in taken {
+        let mut c = part.clip;
+        let (from, old_end) = (c.start, c.end());
+        match edge {
+            Edge::Tail => c.duration += delta,
+            Edge::Head => c.move_head(delta),
+        }
+        c.start = start;
+        check_source(p, &c)?;
+        let own = p.track_index(&part.track).expect("tracks stay");
+        if !main && ripples(p, own, from, ripple) {
+            shift_from(p, own, old_end, c.end() - old_end);
+        }
+        linked::put(p, &part.track, c);
+    }
+    Ok(())
+}
+
+fn trim_one(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bool>) -> Result<()> {
     let (ti, ci) = locate(p, id)?;
     let main = ti == main_index(p);
     let c = p.tracks[ti].clips[ci].clone();
@@ -1370,25 +1514,42 @@ fn edit_pair(p: &Project, ti: usize, id: &str, edge: Edge) -> Result<(usize, usi
 }
 
 pub fn roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
+    let lead = linked::leads(p, &[id.to_string()]);
+    let id = lead.first().map_or(id, String::as_str);
     let (ti, _) = locate(p, id)?;
     let (a, b) = edit_pair(p, ti, id, edge)?;
     let mut out = p.tracks[ti].clips[a].clone();
     let mut inc = p.tracks[ti].clips[b].clone();
+    let outgoing = out.id.clone();
+    let mut parts = linked::tied_to(p, &out.id);
+    parts.extend(linked::tied_to(p, &inc.id));
     out.duration += delta;
     inc.move_head(delta);
     check_source(p, &out)?;
     check_source(p, &inc)?;
     p.tracks[ti].clips[a] = out;
     p.tracks[ti].clips[b] = inc;
+    let taken = linked::take(p, &parts)?;
+    for mut part in taken {
+        if part.lead == outgoing {
+            part.clip.duration += delta;
+        } else {
+            part.clip.move_head(delta);
+        }
+        check_source(p, &part.clip)?;
+        linked::put(p, &part.track, part.clip);
+    }
     Ok(())
 }
 
 pub fn slip(p: &mut Project, id: &str, delta: i64) -> Result<()> {
-    let (ti, ci) = locate(p, id)?;
-    let mut c = p.tracks[ti].clips[ci].clone();
-    c.walk(delta);
-    check_source(p, &c)?;
-    p.tracks[ti].clips[ci] = c;
+    for id in linked::with_ties(p, &[id.to_string()]) {
+        let (ti, ci) = locate(p, &id)?;
+        let mut c = p.tracks[ti].clips[ci].clone();
+        c.walk(delta);
+        check_source(p, &c)?;
+        p.tracks[ti].clips[ci] = c;
+    }
     Ok(())
 }
 
@@ -1459,7 +1620,7 @@ pub fn change_duration(
         return Err(Error::invalid("duration must be at least one frame"));
     }
     let mut targets = Vec::new();
-    for id in ids {
+    for id in &linked::leads(p, ids) {
         let c = p
             .clip(id)
             .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
@@ -1513,7 +1674,7 @@ pub fn change_speed(
     }
     let ripple = ripple.unwrap_or(p.settings.ripple_on);
     let mut targets = Vec::new();
-    for id in ids {
+    for id in &linked::with_ties(p, ids) {
         let c = p
             .clip(id)
             .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
@@ -1758,7 +1919,7 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
 
 pub fn extend_to_media_end(p: &mut Project, ids: &[String], ripple: Option<bool>) -> Result<()> {
     let mut targets = Vec::new();
-    for id in ids {
+    for id in &linked::leads(p, ids) {
         let c = p
             .clip(id)
             .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
@@ -2272,7 +2433,7 @@ pub fn copy_clips(p: &Project, ids: &[String]) -> Result<Vec<TrackClip>> {
     if ids.is_empty() {
         return Err(Error::usage("no clips to copy"));
     }
-    let mut clips = ids
+    let mut clips = linked::with_ties(p, ids)
         .iter()
         .map(|id| {
             p.find_clip(id)

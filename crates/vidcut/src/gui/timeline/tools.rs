@@ -1091,7 +1091,11 @@ impl Workspace {
             return Some(DynamicTarget::Edits(edits));
         }
         let clips = &self.snap.selection.clips;
-        (!clips.is_empty()).then(|| DynamicTarget::Clips(clips.clone()))
+        let clips = match self.project() {
+            Some(p) => ops::linked::leads(p, clips),
+            None => clips.clone(),
+        };
+        (!clips.is_empty()).then_some(DynamicTarget::Clips(clips))
     }
 
     pub(crate) fn toggle_dynamic(&mut self) {
