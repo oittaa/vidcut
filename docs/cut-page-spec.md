@@ -2400,6 +2400,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The zoom works across and down in the picture's own axes, before the turn.
     - The rotation is counterclockwise.
     - The crop cuts the source picture, and what is left stays where it was.
+    - The crop cuts only whole source pixels. These facts are measured in Resolve Studio 21.1.2, in a timeline of 1280 x 720.
+      - The number of pixels that a side loses is its crop in source pixels, rounded down.
+      - On a 1280 x 720 picture, Crop Left 0.75 cuts nothing, and Crop Left 1.5 cuts one column.
+      - On a 3840 x 2160 picture, Crop Left 1.5 is 4.5 source pixels. It cuts 4, so the edge is at x = 1.333.
+      - On a 1000 x 562 picture, Crop Top 1 is 0.78 of a source pixel, and it cuts nothing.
+      - The rule is the same with Zoom, Rotation and Softness.
+      - A crop with keyframes, pixels that are not square and a rotation in the file were not measured. vidcut uses the same rule, in the pixels of the upright file.
+      - A compound clip was not measured. vidcut counts its crop in pixels of the frame.
   - **Over the tracks below:**
     - A clip covers the tracks below it only where its picture covers the frame, at its usual values too.
     - The tracks below show in the bars around a picture of another shape, outside a placed picture, and where it is cropped.
