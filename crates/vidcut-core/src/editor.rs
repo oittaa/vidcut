@@ -2647,6 +2647,20 @@ fn mutate(
             crate::multicam::move_to_bin(p, group, bin)?;
             Value::Null
         }
+        Request::MulticamMarksSet {
+            group,
+            mark_in,
+            out,
+        } => json!(crate::multicam::set_marks(
+            p,
+            group,
+            mark_in.as_ref(),
+            out.as_ref()
+        )?),
+        Request::MulticamMarksClear { group } => {
+            crate::multicam::group_mut(p, group)?.marks = Marks::default();
+            Value::Null
+        }
         Request::MediaRemove { media, force } => {
             p.media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
@@ -5139,6 +5153,8 @@ fn groups_to_rate(p: &mut Project, from: Rational) {
         for a in &mut g.angles {
             a.at = rescale(a.at, from, to);
         }
+        g.marks.mark_in = g.marks.mark_in.map(|f| rescale(f, from, to));
+        g.marks.mark_out = g.marks.mark_out.map(|f| rescale(f, from, to));
     }
 }
 

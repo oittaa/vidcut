@@ -53,6 +53,10 @@ pub fn describe_at(
             d.text("group"),
             d.text("name")
         ),
+        "multicam.marks.set" => {
+            format!("Synced group {} marks: {}", d.text("group"), d.in_out())
+        }
+        "multicam.marks.clear" => format!("Clear the marks of synced group {}", d.text("group")),
         "multicam.move" => format!(
             "Move synced group {} to bin {}",
             d.text("group"),
@@ -980,6 +984,7 @@ impl Words<'_> {
                 "timeline" => "Timeline".into(),
                 "source_clip" => "Source Clip".into(),
                 "source_tape" => "Source Tape".into(),
+                "multi_source" => "Multi Source".into(),
                 m => m.to_string(),
             };
         }

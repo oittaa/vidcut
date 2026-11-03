@@ -448,7 +448,14 @@ The bar and the Jobs button:
 - `dialog::form_width` gives the width of a window whose fields have one width.
 - The looks of Create Subtitles from Audio are tiles (`look_tiles::Tiles`). `burn::draw` draws a sample in each look.
 
-**The two-up**: `Cells` owns its players on the UI thread. `Screens` draws them.
+**The two-up and Multi Source**: `Cells` owns their players on the UI thread. `Screens` draws them.
+
+**Multi Source** ([spec §4.1](../cut-page-spec.md#41-modes)).
+
+- `SourceContent::Group` loads `render::group_tape` in the source player. The plan is as long as the group, with the active angle at its place and black around it. Thus the transport and the sound work as in the other source modes.
+- `Live.tape` then holds one entry, the active angle. `Snapshot::source_at` is empty when the playhead is outside it.
+- `Live::pick_angle` keeps the active angle in `source_media` and the group in `source_group`.
+- `Workspace::multi_view` draws the grid. It gives each cell the frame of its file, or black.
 
 **J and L with K held** ([spec D54](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `Shuttle` tells a tap from a hold by the time between the press and the release of a key. It gives a frame step, slow play or its stop, for the player or for Dynamic Trim.
 

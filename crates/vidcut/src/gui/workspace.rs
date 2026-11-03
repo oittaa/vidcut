@@ -573,6 +573,32 @@ impl Workspace {
         )
     }
 
+    pub(super) fn multi_group(&self) -> Option<&vidcut_core::model::SyncGroup> {
+        if self.snap.viewer != ViewerMode::MultiSource {
+            return None;
+        }
+        self.project()?.group(self.snap.source_group.as_deref()?)
+    }
+
+    pub(super) fn multi_span(&self) -> Option<(i64, i64)> {
+        let g = self.multi_group()?;
+        let end = self.snap.source.frames;
+        Some((
+            g.marks.mark_in.unwrap_or(0),
+            g.marks.mark_out.unwrap_or(end),
+        ))
+    }
+
+    fn multi_range(&self) -> Option<vidcut_core::Result<(i64, i64)>> {
+        let g = self.multi_group()?;
+        let media = self.snap.source_media.as_deref()?;
+        Some(vidcut_core::multicam::marked_range(
+            self.project()?,
+            g,
+            media,
+        ))
+    }
+
     pub(super) fn edit_sources(&self) -> Vec<Value> {
         if self.snap.viewer == ViewerMode::SourceTape && self.crossing_span().is_some() {
             return vec![json!({ "tape": true })];
@@ -587,6 +613,20 @@ impl Workspace {
             let b = m.marks.mark_out.unwrap_or(frames);
             (b > a).then(|| json!({ "media": media, "range": format!("{a}f..{b}f") }))
         };
+        if let Some(g) = self.multi_group() {
+            let Some(media) = self.snap.source_media.as_deref() else {
+                return Vec::new();
+            };
+            if g.marks.is_empty() {
+                return range(media).into_iter().collect();
+            }
+            return match self.multi_range() {
+                Some(Ok((a, b))) => {
+                    vec![json!({ "media": media, "range": format!("{a}f..{b}f") })]
+                }
+                _ => Vec::new(),
+            };
+        }
         match self.snap.source_at() {
             Some((media, _)) => range(media).into_iter().collect(),
             None => self
@@ -624,13 +664,23 @@ impl Workspace {
     }
 
     pub(super) fn edit_function(&mut self, method: &str) {
-        let sources = self.edit_sources();
+        if let Some(Err(e)) = self.multi_range() {
+            self.say(e.to_string());
+            return;
+        }
+        let mut sources = self.edit_sources();
+        if method == "edit.source_overwrite" && self.snap.viewer == ViewerMode::MultiSource {
+            for s in &mut sources {
+                s["group"] = json!(true);
+            }
+        }
         self.edit_from(method, sources);
     }
 
     pub(super) fn edit_from(&mut self, method: &str, sources: Vec<Value>) {
         let playhead = self.snap.timeline.position;
         let mark_in = self.project().and_then(|p| p.marks.mark_in);
+        let group_marked = self.multi_group().is_some_and(|g| !g.marks.is_empty());
         let with_position = |mut s: Value| {
             match method {
                 "edit.smart_insert" => s["playhead"] = json!(playhead),
@@ -640,7 +690,7 @@ impl Workspace {
                 }
                 "edit.source_overwrite" => {
                     s["at"] = json!(playhead);
-                    if let Some(params) = s.as_object_mut() {
+                    if let Some(params) = s.as_object_mut().filter(|_| !group_marked) {
                         params.remove("range");
                     }
                 }
@@ -1668,6 +1718,15 @@ impl Workspace {
                     v.dedup();
                     v
                 }
+                ViewerMode::MultiSource => {
+                    let mut v = vec![0, self.snap.source.frames];
+                    if let Some(g) = self.multi_group() {
+                        v.extend(g.marks.mark_in);
+                        v.extend(g.marks.mark_out);
+                    }
+                    v.sort_unstable();
+                    v
+                }
                 _ => {
                     let mut v = vec![0, self.snap.source.frames];
                     if let Some((m, _)) = self.snap.source_at()
@@ -1701,6 +1760,18 @@ impl Workspace {
             self.send("tape.marks.set", json!({ key: value, "order": order }));
             return;
         }
+        if self.hover.is_none()
+            && let Some(g) = self.multi_group()
+        {
+            let frame = self.snap.source.position;
+            let (key, value) = if is_in {
+                ("in", frame)
+            } else {
+                ("out", frame + 1)
+            };
+            self.send("multicam.marks.set", json!({ "group": g.id, key: value }));
+            return;
+        }
         let (media, frame) = match (&self.hover, self.snap.source_at()) {
             (Some((m, f)), _) => (Some(m.clone()), *f),
             (None, Some((m, f))) => (Some(m.to_string()), f),
@@ -1725,6 +1796,17 @@ impl Workspace {
             && let Some((a, b)) = self.crossing_span()
         {
             self.seek(PlayerId::Source, if is_in { a } else { b - 1 }, false);
+            return;
+        }
+        if let Some(g) = self.multi_group() {
+            let mark = if is_in {
+                g.marks.mark_in
+            } else {
+                g.marks.mark_out.map(|o| o - 1)
+            };
+            if let Some(f) = mark {
+                self.seek(PlayerId::Source, f, false);
+            }
             return;
         }
         match self.snap.source_at() {
@@ -1768,6 +1850,10 @@ impl Workspace {
         if self.snap.viewer == ViewerMode::SourceTape {
             let media = self.snap.source_at().map(|(m, _)| m.to_string());
             self.send("tape.marks.clear", json!({ "media": media }));
+            return;
+        }
+        if let Some(g) = self.multi_group() {
+            self.send("multicam.marks.clear", json!({ "group": g.id }));
             return;
         }
         match self.snap.source_at() {

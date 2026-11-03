@@ -1463,7 +1463,7 @@ impl Workspace {
                             );
                         }
                     }
-                    ViewerMode::Timeline => {}
+                    ViewerMode::MultiSource | ViewerMode::Timeline => {}
                 }
             }
         }

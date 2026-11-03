@@ -519,6 +519,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         source: PlayerSnap::default(),
         timeline: PlayerSnap::default(),
         source_media: None,
+        source_group: None,
         tape: Arc::new(Vec::new()),
         selection: Selection::default(),
         pool: PoolView::default(),
@@ -582,6 +583,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         viewer_frame: ViewerFrame::Page,
         last_source: ViewerMode::SourceClip,
         source_media: None,
+        source_group: None,
         source_content: None,
         source_positions: HashMap::new(),
         tape_position: 0,
@@ -720,6 +722,7 @@ fn start_previews(
 enum SourceContent {
     Clip(String),
     Tape,
+    Group(String),
 }
 
 enum Until {
@@ -863,6 +866,7 @@ struct Live {
     viewer_frame: ViewerFrame,
     last_source: ViewerMode,
     source_media: Option<String>,
+    source_group: Option<String>,
     source_content: Option<SourceContent>,
     source_positions: HashMap<String, i64>,
     tape_position: i64,
@@ -1473,6 +1477,7 @@ impl Live {
             source: self.player.snap(SOURCE),
             timeline: self.player.snap(TIMELINE),
             source_media: self.source_media.clone(),
+            source_group: self.source_group.clone(),
             tape: self.tape.clone(),
             selection: self.selection.clone(),
             pool: self.pool.clone(),
@@ -2627,7 +2632,9 @@ impl Live {
                 display,
                 reset_timer1,
                 paste,
-            } => self.viewer_set(mode, display, reset_timer1, paste),
+                group,
+                angle,
+            } => self.viewer_set(mode, display, reset_timer1, paste, group, angle),
             Request::ViewerLoad { media, at } => match self.load_source(&media, at.as_ref()) {
                 Ok(motion) => self.shown(motion),
                 Err(e) => Step::Now(Err(e)),
@@ -2637,8 +2644,8 @@ impl Live {
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerPlay { speed, viewer } => {
-                if let Some(v) = viewer {
-                    self.set_viewer(v);
+                if let Err(e) = self.use_viewer(viewer) {
+                    return Step::Now(Err(e));
                 }
                 let omitted = speed.is_none();
                 let speed = speed.unwrap_or(1.0);
@@ -2656,16 +2663,16 @@ impl Live {
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerPause { viewer } => {
-                if let Some(v) = viewer {
-                    self.set_viewer(v);
+                if let Err(e) = self.use_viewer(viewer) {
+                    return Step::Now(Err(e));
                 }
                 self.review_speed = None;
                 self.player.pause();
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerToggle { viewer } => {
-                if let Some(v) = viewer {
-                    self.set_viewer(v);
+                if let Err(e) = self.use_viewer(viewer) {
+                    return Step::Now(Err(e));
                 }
                 if self.player.playing() {
                     self.review_speed = None;
@@ -2679,8 +2686,8 @@ impl Live {
                 Step::Now(Ok(self.state_response()))
             }
             Request::PlayerSeek { at, viewer, .. } => {
-                if let Some(v) = viewer {
-                    self.set_viewer(v);
+                if let Err(e) = self.use_viewer(viewer) {
+                    return Step::Now(Err(e));
                 }
                 let id = PlayerId::of(self.viewer);
                 let target = match self.viewer_context() {
@@ -2696,8 +2703,8 @@ impl Live {
                 }
             }
             Request::PlayerStep { frames, viewer } => {
-                if let Some(v) = viewer {
-                    self.set_viewer(v);
+                if let Err(e) = self.use_viewer(viewer) {
+                    return Step::Now(Err(e));
                 }
                 let id = PlayerId::of(self.viewer);
                 if id == PlayerId::Timeline && self.timeline_due.take().is_some() {
@@ -3460,6 +3467,7 @@ impl Live {
         self.project = Some(open);
         self.selection = Selection::default();
         self.source_media = None;
+        self.source_group = None;
         self.source_content = None;
         self.source_positions.clear();
         self.tape_position = 0;
@@ -3680,7 +3688,7 @@ impl Live {
                 .as_ref()
                 .and_then(|id| p.media(id).map(|m| p.media_frames(m)))
                 .unwrap_or(0),
-            ViewerMode::SourceTape => {
+            ViewerMode::SourceTape | ViewerMode::MultiSource => {
                 let at = self.player.position(SOURCE);
                 tape_at(&self.tape, at)
                     .map(|e| e.frames.max(0))
@@ -3941,8 +3949,18 @@ impl Live {
         let all: Vec<String> = self.pool.media(&p);
         let tape = render::tape(&p, &all).map(|(_, e)| e).unwrap_or_default();
         self.tape = Arc::new(tape);
+        let group = self.source_group.as_deref().and_then(|g| p.group(g));
+        if self.last_source == ViewerMode::MultiSource && group.is_none() {
+            self.last_source = ViewerMode::SourceClip;
+            if self.viewer == ViewerMode::MultiSource {
+                self.viewer = ViewerMode::SourceClip;
+            }
+        }
         let want = match self.last_source {
             ViewerMode::SourceTape => SourceContent::Tape,
+            ViewerMode::MultiSource => {
+                SourceContent::Group(self.source_group.clone().unwrap_or_default())
+            }
             _ => match &self.source_media {
                 Some(m) => SourceContent::Clip(m.clone()),
                 None => {
@@ -3953,22 +3971,31 @@ impl Live {
                 }
             },
         };
-        let ids = match &want {
-            SourceContent::Tape => all,
-            SourceContent::Clip(m) => vec![m.clone()],
+        let made = match &want {
+            SourceContent::Tape => render::tape(&p, &all),
+            SourceContent::Clip(m) => render::tape(&p, std::slice::from_ref(m)),
+            SourceContent::Group(_) => group
+                .zip(self.source_media.as_deref())
+                .ok_or_else(|| Error::usage("no synced group is open"))
+                .and_then(|(g, m)| render::group_tape(&p, g, m)),
         };
-        let Ok((plan, _)) = render::tape(&p, &ids) else {
+        let Ok((plan, entries)) = made else {
             self.source_content = None;
             self.player.unload(SOURCE);
             return None;
         };
+        if matches!(want, SourceContent::Group(_)) {
+            self.tape = Arc::new(entries);
+        }
         let at = if self.source_content.as_ref() == Some(&want) {
             None
         } else {
             self.stash_source_position();
             Some(match &want {
                 SourceContent::Tape => self.tape_position,
-                SourceContent::Clip(m) => self.source_positions.get(m).copied().unwrap_or(0),
+                SourceContent::Clip(m) | SourceContent::Group(m) => {
+                    self.source_positions.get(m).copied().unwrap_or(0)
+                }
             })
         };
         let plan = self.preview_plan(plan);
@@ -3979,7 +4006,7 @@ impl Live {
     fn stash_source_position(&mut self) {
         let pos = self.player.position(SOURCE);
         match &self.source_content {
-            Some(SourceContent::Clip(m)) => {
+            Some(SourceContent::Clip(m) | SourceContent::Group(m)) => {
                 self.source_positions.insert(m.clone(), pos);
             }
             Some(SourceContent::Tape) => self.tape_position = pos,
@@ -4009,13 +4036,32 @@ impl Live {
         display: Option<TimecodeDisplay>,
         reset_timer1: bool,
         paste: Option<String>,
+        group: Option<String>,
+        angle: Option<String>,
     ) -> Step {
-        if mode.is_none() && display.is_none() && !reset_timer1 && paste.is_none() {
+        if mode.is_none()
+            && display.is_none()
+            && !reset_timer1
+            && paste.is_none()
+            && angle.is_none()
+        {
             return Step::Now(Err(Error::usage(
-                "viewer.set needs mode, display, reset_timer1, or paste",
+                "viewer.set needs mode, display, reset_timer1, paste, or angle",
             )));
         }
         let viewer = mode.unwrap_or(self.viewer);
+        let picks = group.is_some() || angle.is_some();
+        if picks && viewer != ViewerMode::MultiSource {
+            return Step::Now(Err(Error::usage(
+                "group and angle go with the Multi Source viewer",
+            )));
+        }
+        if viewer == ViewerMode::MultiSource
+            && (picks || mode.is_some())
+            && let Err(e) = self.pick_angle(group.as_deref(), angle.as_deref())
+        {
+            return Step::Now(Err(e));
+        }
         let shown = display.unwrap_or(self.timecode_display);
         let id = PlayerId::of(viewer);
         let playhead = self.player.position(id);
@@ -4041,7 +4087,13 @@ impl Live {
         } else {
             None
         };
+        let before = self.viewer;
         let motion = mode.and_then(|mode| self.set_viewer(mode));
+        let motion = if picks && before == self.viewer {
+            self.refresh_source()
+        } else {
+            motion
+        };
         if reset_timer1 {
             let id = PlayerId::of(self.viewer);
             self.timer1_origin.reset(id, self.player.position(id));
@@ -4059,6 +4111,51 @@ impl Live {
         let id = PlayerId::of(self.viewer);
         let motion = self.seek(id, frame, true).or(motion);
         self.shown(motion)
+    }
+
+    fn pick_angle(&mut self, group: Option<&str>, angle: Option<&str>) -> Result<()> {
+        let open = self.project.as_ref().ok_or_else(no_project)?;
+        let p = open.project();
+        let named = group
+            .map(|g| {
+                p.group(g)
+                    .ok_or_else(|| Error::not_found(format!("no synced group {g}")))
+            })
+            .transpose()?;
+        let g = named
+            .or_else(|| p.group_of(angle?))
+            .or_else(|| p.group_of(self.source_media.as_deref()?))
+            .ok_or_else(|| Error::invalid("Open a clip of a synced group first"))?;
+        if g.angles.len() > vidcut_core::multicam::MULTI_SOURCE_ANGLES {
+            return Err(Error::invalid(format!(
+                "Multi Source shows {} angles at most",
+                vidcut_core::multicam::MULTI_SOURCE_ANGLES
+            )));
+        }
+        if let Some(a) = angle.filter(|a| g.at_of(a).is_none()) {
+            return Err(Error::invalid(format!("{a} is not in {}", g.name)));
+        }
+        let shown = angle
+            .or(self
+                .source_media
+                .as_deref()
+                .filter(|m| g.at_of(m).is_some()))
+            .or(g.angles.first().map(|a| a.media.as_str()))
+            .map(str::to_string);
+        self.source_group = Some(g.id.clone());
+        self.source_media = shown;
+        Ok(())
+    }
+
+    fn use_viewer(&mut self, viewer: Option<ViewerMode>) -> Result<()> {
+        let Some(v) = viewer else {
+            return Ok(());
+        };
+        if v == ViewerMode::MultiSource {
+            self.pick_angle(None, None)?;
+        }
+        self.set_viewer(v);
+        Ok(())
     }
 
     fn set_viewer(&mut self, mode: ViewerMode) -> Option<u64> {
@@ -4125,6 +4222,22 @@ impl Live {
                     None => return Err(Error::usage("no source clip is open")),
                 }
             }
+            ViewerMode::MultiSource => {
+                let g = self
+                    .source_group
+                    .as_ref()
+                    .and_then(|g| p.group(g))
+                    .ok_or_else(|| Error::usage("no synced group is open"))?;
+                TimeContext {
+                    fps: p.settings.fps,
+                    start_tc: g.start,
+                    drop_frame: p.settings.counts_drop_frame(),
+                    end: vidcut_core::multicam::frames(p, g),
+                    mark_in: g.marks.mark_in,
+                    mark_out: g.marks.mark_out,
+                    playhead: Some(self.player.position(SOURCE)),
+                }
+            }
             ViewerMode::SourceTape => {
                 let position = self.player.position(SOURCE);
                 let entry = tape_at(&self.tape, position);
@@ -4176,9 +4289,12 @@ impl Live {
         let position = self.player.position(SOURCE);
         match (&self.source_content, self.viewer) {
             (Some(SourceContent::Clip(m)), ViewerMode::SourceClip) if m == media => Some(position),
-            (Some(SourceContent::Tape), ViewerMode::SourceTape) => tape_at(&self.tape, position)
-                .filter(|e| e.media == media)
-                .map(|e| position - e.start),
+            (Some(SourceContent::Tape), ViewerMode::SourceTape)
+            | (Some(SourceContent::Group(_)), ViewerMode::MultiSource) => {
+                tape_at(&self.tape, position)
+                    .filter(|e| e.media == media)
+                    .map(|e| position - e.start)
+            }
             _ => None,
         }
     }
@@ -4379,6 +4495,13 @@ impl Live {
             Some(SourceContent::Tape) => {
                 tape_at(&self.tape, position).map(|e| (e.media.clone(), position - e.start))
             }
+            Some(SourceContent::Group(g)) => {
+                source["group"] = json!(g);
+                self.tape
+                    .first()
+                    .filter(|e| e.start <= position && position < e.start + e.frames)
+                    .map(|e| (e.media.clone(), position - e.start))
+            }
             None => None,
         };
         if let Some((m, f)) = under {
@@ -4388,6 +4511,7 @@ impl Live {
         source["content"] = json!(match &self.source_content {
             Some(SourceContent::Clip(_)) => "source_clip",
             Some(SourceContent::Tape) => "source_tape",
+            Some(SourceContent::Group(_)) => "multi_source",
             None => "none",
         });
         json!({

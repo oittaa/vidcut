@@ -306,6 +306,9 @@ pub struct SyncGroup {
     pub start: i64,
     /// Its files, in angle order. A file is in one group at most.
     pub angles: Vec<GroupAngle>,
+    /// In and Out for all its files, in frames of the group.
+    #[serde(default, skip_serializing_if = "Marks::is_empty")]
+    pub marks: Marks,
 }
 
 impl SyncGroup {

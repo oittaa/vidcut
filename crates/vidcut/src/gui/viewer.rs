@@ -17,6 +17,8 @@ use super::theme;
 use super::workspace::{Drag, PasteWatch, TimecodeEntry, Workspace, dim, fit};
 use crate::live::{PlayerId, seek_frame};
 
+const ACTIVE_ANGLE: Color32 = Color32::from_rgb(230, 50, 50);
+
 #[derive(Clone)]
 pub struct TwoUp {
     pub mode: TwoUpMode,
@@ -110,7 +112,7 @@ fn offline_name(
             }
             c.media.as_str()
         }
-        ViewerMode::SourceClip | ViewerMode::SourceTape => source?,
+        ViewerMode::SourceClip | ViewerMode::SourceTape | ViewerMode::MultiSource => source?,
     };
     p.media(media)
         .filter(|_| missing.contains(media))
@@ -201,12 +203,13 @@ impl Workspace {
             Header::Mode(ViewerMode::SourceClip),
             Header::Mode(ViewerMode::SourceTape),
             Header::Mode(ViewerMode::Timeline),
+            Header::Mode(ViewerMode::MultiSource),
         ];
         let row = Row {
             left: &modes,
             fill: Some((Header::Title, Align::Min)),
             right: &[Header::FullScreen, Header::Duration],
-            leaving: &[modes[1], modes[0], modes[2], Header::FullScreen],
+            leaving: &[modes[3], modes[1], modes[0], modes[2], Header::FullScreen],
             group: |h| match h {
                 Header::Mode(_) => 0,
                 Header::Title => 1,
@@ -219,6 +222,7 @@ impl Workspace {
                     let label = match m {
                         ViewerMode::SourceClip => "Source Clip",
                         ViewerMode::SourceTape => "Source Tape",
+                        ViewerMode::MultiSource => "Multi Source",
                         ViewerMode::Timeline => "Timeline",
                     };
                     let r = ui.selectable_label(mode == m, label);
@@ -292,6 +296,7 @@ impl Workspace {
         }
         if !dynamic
             && trim.is_none()
+            && mode != ViewerMode::MultiSource
             && let Some(cells) = &mut self.cells
         {
             cells.close();
@@ -302,6 +307,10 @@ impl Workspace {
         }
         if let Some(e) = trim {
             self.trim_editor_view(ui, area, e);
+            return;
+        }
+        if mode == ViewerMode::MultiSource {
+            self.multi_view(ui, area);
             return;
         }
         let area_resp = ui.allocate_rect(area, Sense::click_and_drag());
@@ -342,6 +351,7 @@ impl Workspace {
                         "Double-click a clip in the Media Pool to open it".to_string()
                     }
                     (None, ViewerMode::SourceTape) => "The Media Pool is empty".to_string(),
+                    (None, ViewerMode::MultiSource) => String::new(),
                 };
                 if !player.loaded {
                     painter.text(
@@ -408,16 +418,130 @@ impl Workspace {
             });
         }
         if mode.is_source() {
-            ui.horizontal(|ui| {
-                self.jog_edge(ui, true);
-                let width = (ui.available_width() - 88.0).max(40.0);
-                ui.allocate_ui(vec2(width, 28.0), |ui| self.scroll_bar(ui));
-                self.jog_edge(ui, false);
-            });
+            self.source_scroll_row(ui);
         } else {
             self.clip_edge_hint(ui);
         }
         self.transport(ui, id, None);
+    }
+
+    fn source_scroll_row(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            self.jog_edge(ui, true);
+            let width = (ui.available_width() - 88.0).max(40.0);
+            ui.allocate_ui(vec2(width, 28.0), |ui| self.scroll_bar(ui));
+            self.jog_edge(ui, false);
+        });
+    }
+
+    fn multi_view(&mut self, ui: &mut egui::Ui, area: Rect) {
+        let Some(p) = self.shown_project() else {
+            return;
+        };
+        let group = self.snap.source_group.as_deref().and_then(|g| p.group(g));
+        let Some(group) = group else {
+            return;
+        };
+        let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
+        ui.allocate_rect(area, Sense::hover());
+        let painter = ui.painter_at(area);
+        painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
+        let count = group.angles.len();
+        let cols = (1..3).find(|c| c * c >= count).unwrap_or(3);
+        let size = vec2(
+            area.width() / cols as f32,
+            area.height() / count.div_ceil(cols).max(1) as f32,
+        );
+        let ppp = ui.ctx().pixels_per_point();
+        let source = &self.snap.source;
+        let (position, speed) = (
+            source.position,
+            if source.playing { source.speed } else { 0.0 },
+        );
+        let gpu_pictures = self.screens.as_ref().map(|s| s.gpu_pictures());
+        let ctx = ui.ctx().clone();
+        let players = self
+            .cells
+            .get_or_insert_with(|| super::cells::Cells::new(ctx, gpu_pictures.unwrap_or_default()));
+        players.keep(count);
+        let mut picked = None;
+        for (i, angle) in group.angles.iter().enumerate() {
+            let cell = Rect::from_min_size(
+                area.min + vec2(size.x * (i % cols) as f32, size.y * (i / cols) as f32),
+                size,
+            );
+            let picture = fit(cell.shrink(6.0), aspect);
+            painter.rect_filled(picture, CornerRadius::ZERO, Color32::BLACK);
+            let Some(m) = p.media(&angle.media) else {
+                continue;
+            };
+            let frame = position - angle.at;
+            let piece = if self.snap.missing.contains(&m.id) {
+                painter.rect_filled(picture, CornerRadius::ZERO, theme::colors().offline);
+                None
+            } else if (0..p.media_frames(m)).contains(&frame) {
+                vidcut_core::render::media_frame(&p, &m.id, frame).ok()
+            } else {
+                Some(vidcut_core::render::VideoPiece::black(1))
+            };
+            let pixels = [picture.width(), picture.height()].map(|x| (x * ppp).round() as u32);
+            let texture = piece
+                .and_then(|piece| players.show(i, &p, &piece, speed))
+                .zip(self.screens.as_mut())
+                .and_then(|(g, s)| s.draw(i, &g.picture, pixels));
+            if let Some(texture) = texture {
+                painter.image(
+                    texture,
+                    picture,
+                    Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            }
+            let active = self.snap.source_media.as_deref() == Some(m.id.as_str());
+            let number = if active { ACTIVE_ANGLE } else { Color32::WHITE };
+            painter.text(
+                picture.left_top() + vec2(6.0, 6.0),
+                Align2::LEFT_TOP,
+                (i + 1).to_string(),
+                FontId::proportional(14.0),
+                number,
+            );
+            let label = m
+                .camera
+                .as_ref()
+                .map_or_else(|| m.name.clone(), |c| format!("Camera {c}"));
+            painter.text(
+                picture.center_bottom() - vec2(0.0, 6.0),
+                Align2::CENTER_BOTTOM,
+                elide(&label, 28),
+                FontId::proportional(12.0),
+                Color32::WHITE,
+            );
+            if active {
+                painter.rect_stroke(
+                    picture,
+                    CornerRadius::ZERO,
+                    Stroke::new(2.0, ACTIVE_ANGLE),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            if ui
+                .interact(
+                    picture,
+                    ui.scope_id().with(("multi-angle", i)),
+                    Sense::click(),
+                )
+                .clicked()
+            {
+                picked = Some(m.id.clone());
+            }
+        }
+        if let Some(media) = picked {
+            self.send("viewer.set", json!({ "angle": media }));
+        }
+        ui.add_space(4.0);
+        self.source_scroll_row(ui);
+        self.transport(ui, PlayerId::Source, None);
     }
 
     fn trim_editor_view(
@@ -655,6 +779,9 @@ impl Workspace {
         };
         match self.snap.viewer {
             ViewerMode::Timeline => "Timeline".into(),
+            ViewerMode::MultiSource => self
+                .multi_group()
+                .map_or_else(String::new, |g| elide(&g.name, 60)),
             _ => match self.snap.source_at() {
                 Some((m, _)) => elide(&name(m), 60),
                 None => String::new(),
@@ -697,7 +824,11 @@ impl Workspace {
                 }
             }
         }
-        let span = tape.then(|| self.crossing_span()).flatten();
+        let span = match self.snap.viewer {
+            ViewerMode::SourceTape => self.crossing_span(),
+            ViewerMode::MultiSource => self.multi_span(),
+            _ => None,
+        };
         let shown = self.snap.source_at().map(|(m, _)| m.to_string());
         let mut handles = None;
         if let Some((mut a, mut b)) = span {
@@ -708,11 +839,15 @@ impl Workspace {
                     b = *frame;
                 }
             }
-            painter.rect_filled(
-                Rect::from_min_max(Pos2::new(x(a), rect.top()), Pos2::new(x(b), rect.bottom())),
-                CornerRadius::ZERO,
-                theme::colors().marked,
-            );
+            let unmarked = self.multi_group().is_some_and(|g| g.marks.is_empty())
+                && !matches!(self.drag, Some(Drag::TapeMark { .. }));
+            if !unmarked {
+                painter.rect_filled(
+                    Rect::from_min_max(Pos2::new(x(a), rect.top()), Pos2::new(x(b), rect.bottom())),
+                    CornerRadius::ZERO,
+                    theme::colors().marked,
+                );
+            }
             self.mark_handles(&painter, rect, x(a), x(b));
             handles = Some(MarkHandles::Tape {
                 in_frame: a,
@@ -843,9 +978,13 @@ impl Workspace {
                     self.send("media.marks.set", json!({ "media": media, key: frame }));
                 }
                 Some(Drag::TapeMark { is_in, frame }) => {
-                    let order = self.tape_order();
                     let key = if is_in { "in" } else { "out" };
-                    self.send("tape.marks.set", json!({ key: frame, "order": order }));
+                    if let Some(g) = self.multi_group() {
+                        self.send("multicam.marks.set", json!({ "group": g.id, key: frame }));
+                    } else {
+                        let order = self.tape_order();
+                        self.send("tape.marks.set", json!({ key: frame, "order": order }));
+                    }
                 }
                 None => {}
             }
@@ -954,6 +1093,12 @@ impl Workspace {
             } else {
                 self.send("tape.marks.set", json!({ "out": out, "order": order }));
             }
+            return;
+        }
+        if let (Some(g), Some((inn, out))) = (self.multi_group(), self.multi_span()) {
+            let (inn, out) = jogged_mark(is_in, inn, out, by, self.snap.source.frames);
+            let (key, value) = if is_in { ("in", inn) } else { ("out", out) };
+            self.send("multicam.marks.set", json!({ "group": g.id, key: value }));
             return;
         }
         let Some(media) = self.snap.source_at().map(|(m, _)| m.to_string()) else {
@@ -1426,6 +1571,12 @@ impl Workspace {
     }
 
     fn duration_field(&mut self, ui: &mut egui::Ui) {
+        if let Some((a, b)) = self.multi_span() {
+            let text = self.src_tc(b - a);
+            ui.label(RichText::new(text).font(FontId::monospace(13.0)));
+            ui.label(dim("Duration"));
+            return;
+        }
         let Some(p) = self.project() else { return };
         let (marks, end, media) = match self.snap.source_at() {
             Some((media, _)) => (
