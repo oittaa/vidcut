@@ -5905,7 +5905,8 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
     let pool = meta
         .as_ref()
         .is_some_and(|m| mode == ImportMode::Media && !m.media.is_empty());
-    if t.clips.is_empty() && !pool {
+    let empties = mode == ImportMode::Replace && t.warnings.is_empty();
+    if t.clips.is_empty() && !pool && !empties {
         return Err(Error::invalid(format!(
             "nothing to import: the timeline has no clips{}",
             if t.warnings.is_empty() {
@@ -6284,7 +6285,7 @@ pub fn project_from_otio(
     let import = Import {
         path: Some(path),
         doc: None,
-        mode: ImportMode::Append,
+        mode: ImportMode::Replace,
         search: &[],
         unpack: None,
         write,

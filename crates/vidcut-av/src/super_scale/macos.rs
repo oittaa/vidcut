@@ -1,10 +1,9 @@
-use vidcut_core::model::{Media, Project, Upscaler};
-use vidcut_core::render::VideoPiece;
-
 use crate::error::{Error, Result};
 use crate::ffmpeg::frame::Video;
 
 pub const MOST: (u32, u32) = (1920, 1080);
+
+pub(super) const TOO_LARGE: &str = "pictures over 1920x1080";
 
 const NEEDS: &str = "the AI upscaler of macOS needs macOS 26 or later";
 
@@ -21,14 +20,8 @@ pub fn needed() -> Vec<crate::models::Need> {
     }]
 }
 
-pub fn unfit(m: &Media) -> Option<&'static str> {
-    let v = m.video_as_read()?;
-    let (w, h) = if v.rotation % 180 == 90 {
-        (v.height, v.width)
-    } else {
-        (v.width, v.height)
-    };
-    (w > MOST.0 || h > MOST.1).then_some("pictures over 1920x1080")
+pub(super) fn too_large((w, h): (u32, u32)) -> bool {
+    w > MOST.0 || h > MOST.1
 }
 
 pub fn formats() -> Result<Vec<String>> {
@@ -48,45 +41,6 @@ pub(super) fn factor(size: (u32, u32), shown: (u32, u32)) -> u32 {
         .find(|f| f64::from(*f) >= need)
         .or_else(|| factors.last().copied())
         .unwrap_or(1)
-}
-
-pub fn check<'a>(
-    p: &Project,
-    pieces: impl IntoIterator<Item = &'a VideoPiece>,
-    download: bool,
-) -> Result<()> {
-    let mut media: Vec<&str> = Vec::new();
-    for piece in pieces {
-        for (layer, _) in piece.layers() {
-            if let VideoPiece::Source {
-                media: id,
-                super_scale,
-                ..
-            } = layer
-                && super_scale.ai()
-                && super_scale.upscaler == Upscaler::Macos
-                && !media.contains(&id.as_str())
-            {
-                media.push(id);
-            }
-        }
-    }
-    if media.is_empty() {
-        return Ok(());
-    }
-    let refused: Vec<String> = media
-        .iter()
-        .filter_map(|id| p.media(id))
-        .filter_map(|m| unfit(m).map(|why| format!("{} ({why})", m.name)))
-        .collect();
-    if !refused.is_empty() {
-        return Err(Error::Invalid(format!(
-            "the AI upscaler of macOS can't take {}: set their Upscaler to Classic, or their \
-             Super Scale to Off",
-            refused.join(", ")
-        )));
-    }
-    get_ready(download)
 }
 
 pub(crate) struct Run {
