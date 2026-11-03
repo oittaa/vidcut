@@ -1976,6 +1976,7 @@ fn job_method(j: &JobInfo) -> Option<&'static str> {
         "transcript" => Some("media.transcribe"),
         "retime" => Some("subtitles.retime"),
         "word_times" => Some("subtitles.time_words"),
+        "sync" => Some("multicam.create"),
         _ => None,
     }
 }

@@ -26,8 +26,7 @@ The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-
 - For the Edit page stage, open a multicam clip as a timeline (p. 1040).
 - Read the Sync Bin in the Cut page chapters, then measure it in Resolve.
 - Record how angles sync, and how a cut chooses an angle.
-- Sync by start timecode when both files have one.
-- Otherwise sync by the waveform.
+- Measure sync by sound with files from real cameras, each with its own microphone. Then check `SOUND_MATCH_SCORE`.
 - A marker is the sync point when the user sets one.
 - An angle switch replaces the picture and keeps the sound the user chose.
 - The switch is one timeline edit.
