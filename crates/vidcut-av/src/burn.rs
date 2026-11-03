@@ -107,6 +107,7 @@ const HIDDEN: usize = 1;
 const POPPED: usize = 2;
 const RAISED: usize = 4;
 const LOWERED: usize = 8;
+const FULL_SIZE_BIT: u32 = 4;
 const LTSH_HEAD: usize = 4;
 
 fn spans<'a>(
@@ -880,12 +881,10 @@ fn shifts(system: &mut FontSystem, run: &LayoutRun<'_>, seat: bool) -> Vec<f32> 
             };
             let m = font.metrics();
             let em = g.font_size / f32::from(m.units_per_em);
-            let (rise, fall) = (m.ascent * em, -m.descent * em);
-            let height = if seat {
-                (Title::baseline(f64::from(rise)) + Title::baseline(f64::from(fall))) as f32
-            } else {
-                rise + fall
-            };
+            let own = font_heights(system, g.font_id, g.font_weight).filter(|_| seat);
+            let height = own.map_or((m.ascent - m.descent) * em, |[ascent, descent, _]| {
+                (ascent + descent) as f32 * g.font_size
+            });
             let lift = if g.metadata & RAISED != 0 {
                 -height / 2.0
             } else {
@@ -901,23 +900,18 @@ fn ascents(system: &mut FontSystem, buffer: &Buffer) -> Vec<f32> {
     buffer
         .layout_runs()
         .map(|r| {
-            let ascent = r
-                .glyphs
+            r.glyphs
                 .iter()
                 .filter_map(|g| {
                     let [ascent, ..] = font_heights(system, g.font_id, g.font_weight)?;
-                    Some(ascent as f32 * g.font_size)
+                    let size = if g.metadata & (RAISED | LOWERED) != 0 {
+                        f32::from_bits((g.metadata >> FULL_SIZE_BIT) as u32)
+                    } else {
+                        g.font_size
+                    };
+                    Some(ascent as f32 * size)
                 })
-                .fold(0.0, f32::max);
-            let whole = r
-                .glyphs
-                .iter()
-                .all(|g| g.metadata & (RAISED | LOWERED) != 0);
-            if whole {
-                ascent / Title::SHIFTED_SIZE as f32
-            } else {
-                ascent
-            }
+                .fold(0.0, f32::max)
         })
         .collect()
 }
@@ -1088,12 +1082,15 @@ fn lay_out(look: &Look) -> Option<Laid> {
                 let full = r.look.size.map_or(size, |s| (s as f32 * per).max(1.0));
                 let gap = line_gap(&mut f.system, look, &a, full);
                 let px = match r.look.shift {
-                    Some(_) => full * Title::SHIFTED_SIZE as f32,
+                    Some(_) => {
+                        Title::shifted_size(f64::from(full), f64::from(look.spacing.1)) as f32
+                    }
                     None => full,
                 };
+                let full_bits = (full.to_bits() as usize) << FULL_SIZE_BIT;
                 a = a.metadata(match r.look.shift {
-                    Some(Shift::Up) => RAISED,
-                    Some(Shift::Down) => LOWERED,
+                    Some(Shift::Up) => RAISED | full_bits,
+                    Some(Shift::Down) => LOWERED | full_bits,
                     None => 0,
                 });
                 let tracking = r.look.tracking.map_or(look.tracking, |t| t as f32);
