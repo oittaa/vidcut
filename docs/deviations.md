@@ -1131,15 +1131,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Thus the text leaves the top before the clip ends.
     - Its lines are 1.5 to 1.9 times the text size apart, by font and size.
     - Its default lines align left, at 1% of the width of the picture.
+    - Its text box stays at 51% of the width when the alignment changes. Thus its middle alignment is 1% right of the middle, and its right alignment goes 1% past the right edge and cuts the last letters.
 - **vidcut:**
   - A `scroll` title rises at a steady speed.
   - It starts just below the picture at the first frame of the clip. It ends just above the picture at the last frame.
   - Its lines are 1.31 times their size apart, as in other titles (D65).
-  - They align in the middle of the picture, unless its `align` and `position` tell otherwise.
+  - Its middle alignment is at the middle of the picture. Its right alignment ends at 99% of the width.
 - **Why:**
   - Credits need a scroll that uses the full clip, and that starts and ends clear of the picture.
   - Its speed comes from the length of the clip alone.
   - The distance in Resolve cannot be found from the size of the text and of the picture.
+  - A right alignment that cuts letters is a fault in Resolve.
 
 ## X56. Create Subtitles from Audio reads each clip's file
 
