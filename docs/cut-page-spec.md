@@ -2124,6 +2124,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Resolve's upper line also has a tracking of 11. A title in vidcut has no tracking.
     - Lines the font's own line height apart, rounded up to a whole pixel (measured in Resolve Studio 21.1.2 with four fonts).
     - The lines of a scroll are 4/3 of the font's line height plus 10 timeline pixels apart. This fits Resolve Studio 21.1.2 within 5 pixels with four fonts.
+    - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
+    - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
+    - Below the last line, a positive value makes the block taller and a negative value does nothing (measured in Resolve Studio 21.1.2).
+    - A very negative value keeps all the lines (X111).
+    - A scroll has no line spacing, as in Resolve's own Scroll.
     - Lines wrap at the width of title safe, 90% of the picture width.
   - The block of a Text title is as wide as its widest line (measured in Resolve Studio 21.1.2).
     - `align` sets each line in the block: left, middle or right. By default, it is middle.
@@ -2136,7 +2141,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The upper line stands on a point 80% down, at the same place across.
   - These are the points of Resolve's own lower thirds (measured in Resolve Studio 21.1.2). The two lines overlap by 2% of the picture height.
   - `position` moves the point of the lower line (X54). Lines that go together keep the 2% between their points.
-  - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>` and `<font>` with a `color`, a `face` and a `size`.
+  - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>` and `<font>` with a `color`, a `face`, a `size` and a `spacing`.
   - A line takes the height of its largest size.
   - A larger size grows the upper line up from its point and the lower line down from its point (measured in Resolve Studio 21.1.2).
   - `size` is from 1/1080 to 4096/1080, also in markup. Size 1..4096 is the range of a title, measured in Resolve Studio 21.1.2.
@@ -2200,6 +2205,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It has a span for each run of words with the same style.
     - A span has its font: for a title that names none, the family that vidcut draws it in.
     - A span also has its size in points, its weight (700 bold, else 400), italic, underline and color.
+    - Each paragraph has its line spacing in `line-height`. A Text title has 0, and the upper and lower line of a lower third have 1 and 0, unless a title sets another value.
     - The group has the alignment of the lines.
     - Its `anchor` is on a 3×3 grid, counted from the bottom left: 0 bottom left, 4 middle, 8 top right.
     - Its `position` is in fractions of the picture, from its left and bottom.

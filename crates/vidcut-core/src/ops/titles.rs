@@ -19,6 +19,8 @@ const PLACE: &str =
 const ZOOMED: &str = "a title's zoom is from 1/4 to 4";
 const TURNED: &str = "a title's rotation is degrees, from -100000 to 100000";
 const FADED: &str = "a title's opacity is from 0 to 1";
+const SPACED: &str = "a title's line spacing is from -4096 to 4096";
+const SCROLL_SPACED: &str = "a scroll has no line spacing";
 const POSITION_HANDLED: &str =
     "a title's position keyframes take `ease`, not `in` or `out`: their handles are points";
 const SCROLL_HANDLES: &str = "a scroll's position keyframes have no handles";
@@ -150,10 +152,21 @@ pub fn checked(t: &Title) -> Result<Title> {
         }
         None => None,
     };
+    let spaced = crate::rich::lines(&text)
+        .iter()
+        .any(|l| crate::rich::spacing(l).is_some());
+    if t.kind == TitleKind::Scroll && (spaced || t.style.line_spacing.is_some()) {
+        return Err(Error::invalid(SCROLL_SPACED));
+    }
     let s = &t.style;
     let style = TitleStyle {
         font: checked_font(s.font.as_deref(), "title")?,
         size: super::subtitles::checked_size(s.size, "title", Title::MOST_SIZE)?,
+        line_spacing: match s.line_spacing {
+            Some(v) if Title::spacing_fits(v) => (v != 0.0).then_some(v),
+            Some(_) => return Err(Error::invalid(SPACED)),
+            None => None,
+        },
         color: checked_color(s.color.as_deref(), "title")?,
         outline: checked_outline(s.outline.as_ref())?,
         background: checked_background(s.background.as_ref())?,
@@ -331,6 +344,7 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
         t.upper = None;
     }
     if t.kind == TitleKind::Scroll {
+        t.style.line_spacing = None;
         t.position_handles.clear();
         t.zoom_keys.clear();
         t.rotation_keys.clear();

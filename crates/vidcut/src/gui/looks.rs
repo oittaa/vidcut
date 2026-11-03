@@ -365,6 +365,7 @@ impl Parts {
         TitleStyle {
             font: self.font,
             size: self.size,
+            line_spacing: None,
             color: self.color,
             outline: self.outline,
             background: self.background,
@@ -512,6 +513,7 @@ impl TextFields {
         salt: &str,
         families: &[String],
         usual: &Usual,
+        line_spacing: Option<&mut String>,
     ) -> (bool, bool) {
         let mut enter = false;
         let mut changed = false;
@@ -535,6 +537,10 @@ impl TextFields {
         ui.end_row();
         changed |= row(ui, true, "Size", &mut self.size, usual.size);
         ui.end_row();
+        if let Some(spacing) = line_spacing {
+            changed |= row(ui, true, "Line Spacing", spacing, "0");
+            ui.end_row();
+        }
         changed |= row(ui, true, "Color", &mut self.color, "#ffffff");
         changed |= swatch(ui, &mut self.color, [255, 255, 255]);
         ui.end_row();

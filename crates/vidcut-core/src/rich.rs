@@ -9,6 +9,7 @@ pub struct Look {
     pub color: Option<String>,
     pub face: Option<String>,
     pub size: Option<f64>,
+    pub spacing: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,6 +27,7 @@ enum Open {
         color: Option<String>,
         face: Option<String>,
         size: Option<f64>,
+        spacing: Option<f64>,
     },
 }
 
@@ -92,6 +94,9 @@ fn tag(s: &str) -> Option<(bool, Option<Open>, usize)> {
                 .map(|f| f.trim().to_string())
                 .filter(|f| !f.is_empty()),
             size: attribute(rest, "size").and_then(|s| size_of(&s)),
+            spacing: attribute(rest, "spacing")
+                .and_then(|s| s.trim().parse().ok())
+                .filter(|s| Title::spacing_fits(*s)),
         },
         _ => return None,
     };
@@ -122,7 +127,12 @@ fn look_of(stack: &[Open]) -> Look {
             Open::Bold => look.bold = true,
             Open::Italic => look.italic = true,
             Open::Underline => look.underline = true,
-            Open::Font { color, face, size } => {
+            Open::Font {
+                color,
+                face,
+                size,
+                spacing,
+            } => {
                 if color.is_some() {
                     look.color.clone_from(color);
                 }
@@ -131,6 +141,9 @@ fn look_of(stack: &[Open]) -> Look {
                 }
                 if size.is_some() {
                     look.size = *size;
+                }
+                if spacing.is_some() {
+                    look.spacing = *spacing;
                 }
             }
         }
@@ -222,6 +235,12 @@ pub fn largest(line: &[Span], base: f64) -> f64 {
         .unwrap_or(base)
 }
 
+pub fn spacing(line: &[Span]) -> Option<f64> {
+    line.iter()
+        .filter_map(|s| s.look.spacing)
+        .fold(None, |m: Option<f64>, v| Some(m.map_or(v, |m| m.max(v))))
+}
+
 fn number(v: f64) -> String {
     let s = format!("{v:.4}");
     s.trim_end_matches('0').trim_end_matches('.').to_string()
@@ -240,6 +259,9 @@ pub fn write(line: &[Span], base: &Look) -> String {
         }
         if let Some(size) = l.size.filter(|_| l.size != base.size) {
             font.push_str(&format!(" size=\"{}\"", number(size)));
+        }
+        if let Some(spacing) = l.spacing.filter(|_| l.spacing != base.spacing) {
+            font.push_str(&format!(" spacing=\"{}\"", number(spacing)));
         }
         let mut open = String::new();
         let mut close = String::new();

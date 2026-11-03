@@ -7,6 +7,11 @@
 - Position, zoom, rotation and opacity take keyframes ([keyframes](keyframes.md#titles)).
 - vidcut reads and writes them in OTIO in Resolve's shape ([D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
+## Line Spacing in the Inspector
+
+- The measurements read files. Measure the range and the units of the control in Resolve's Inspector.
+- vidcut accepts -4096 to 4096 until then. The reason is that Resolve draws 2000 from a file.
+
 ## Anchor of a lower third and a scroll
 
 - In vidcut, only a Text title has `anchor`.
