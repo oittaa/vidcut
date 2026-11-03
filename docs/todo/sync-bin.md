@@ -31,3 +31,4 @@ The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-
 - Measure the cases that Source Overwrite refuses ([spec §7.2](../cut-page-spec.md#72-edit-functions)).
   - Do audio-only files and other frame rates first, because sound recorders make them.
 - Measure how Source Overwrite treats hidden tracks, titles and compound clips.
+- Measure what Resolve imports from the multicam files that `timeline.import` refuses ([spec D40](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).

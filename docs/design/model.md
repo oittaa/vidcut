@@ -489,6 +489,7 @@ flowchart LR
 | Clip Color | the item's `color` |
 | title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | Solid Color | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::generators::reference`, [spec §8.17](../cut-page-spec.md#817-generators-p-766)) |
+| clip with no media | a `Clip.2` of a `MissingReference` on the `Video` track and on the `Audio` track, in one link group, with the kept `Channels` |
 | markers | the top-level stack's, with their lengths |
 
 The metadata:
@@ -515,6 +516,8 @@ Import:
 - Video tracks become V1, V2, …. An audio clip that lines up with a video clip of the same media (and link group) becomes its sound. Other audio clips go on A1, A2, ….
 - Names other than the defaults (`default_track_name`) name tracks. Markers on clips, tracks and the stack become timeline markers.
 - Nested tracks, unknown items, clips without media and clips that overlap are left out, with a warning.
+- A multicam `Stack` is the exception: it becomes one clip with no media ([spec D40](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `check_multicams` refuses the multicam files that D40 lists.
 - A clip and its sound keep only the frames inside their media, at the clip's speed and direction. A warning tells how many frames went.
 - An import looks for media at the path, then by their last parts beside the file (`MediaRef::paths`). Then it looks by name in `search` and the folder of the bundle (`find_media`).
 - It looks for the media of a compound clip in the same way.
@@ -537,6 +540,7 @@ Kept data:
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`). `Generator::SolidColor` when it is Solid Color (`otio::generators::read`). Else `Generator::Carried`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
+| multicam `Stack`, or a `MissingReference` on a clip with `vidcut` metadata | `Generator::Carried` with a `MissingReference`: a block with no media that plays as a gap (`Clip::is_offline`). The `Channels` of the sound stay in its `vidcut` metadata |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `TimeEffect` with `Key Frames` | `Speed`, a section for each key (`ramp`). It is written back while the sections stay, else made again (`ramp_effect`) |
 

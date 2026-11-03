@@ -5,7 +5,7 @@ use eframe::egui::{
     pos2, vec2,
 };
 use serde_json::json;
-use vidcut_core::model::{Media, Project, TrackKind};
+use vidcut_core::model::{Project, TrackKind};
 use vidcut_core::request::{
     TimecodeDisplay, ViewerFrame, ViewerFrameKey, ViewerMode, viewer_frame_after,
 };
@@ -86,29 +86,35 @@ impl MarkHandles {
     }
 }
 
-fn offline_media<'a>(
-    p: &'a Project,
+fn offline_name(
+    p: &Project,
     missing: &HashSet<String>,
     mode: ViewerMode,
     position: i64,
     source: Option<&str>,
-) -> Option<&'a Media> {
+) -> Option<String> {
     let media = match mode {
-        ViewerMode::Timeline => p
-            .tracks
-            .iter()
-            .rev()
-            .filter(|t| t.kind == TrackKind::Video && t.video_enabled)
-            .find_map(|t| {
-                t.clip_at(position)
-                    .map(|i| &t.clips[i])
-                    .filter(|c| c.enabled && c.video)
-            })?
-            .media
-            .as_str(),
+        ViewerMode::Timeline => {
+            let c = p
+                .tracks
+                .iter()
+                .rev()
+                .filter(|t| t.kind == TrackKind::Video && t.video_enabled)
+                .find_map(|t| {
+                    t.clip_at(position)
+                        .map(|i| &t.clips[i])
+                        .filter(|c| c.enabled && c.video)
+                })?;
+            if c.is_offline() {
+                return Some(c.name.clone().unwrap_or_default());
+            }
+            c.media.as_str()
+        }
         ViewerMode::SourceClip | ViewerMode::SourceTape => source?,
     };
-    p.media(media).filter(|_| missing.contains(media))
+    p.media(media)
+        .filter(|_| missing.contains(media))
+        .map(|m| m.name.clone())
 }
 
 impl Workspace {
@@ -351,8 +357,7 @@ impl Workspace {
         paint_guides(&painter, picture, &self.snap.guides);
         let offline = self.project().and_then(|p| {
             let source = self.snap.source_at().map(|(m, _)| m);
-            offline_media(p, &self.snap.missing, mode, player.position, source)
-                .map(|m| m.name.clone())
+            offline_name(p, &self.snap.missing, mode, player.position, source)
         });
         if mode == ViewerMode::Timeline {
             self.sync_subtitles();

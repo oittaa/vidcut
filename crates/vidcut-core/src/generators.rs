@@ -87,6 +87,7 @@ pub fn timeline_code(color: [u8; 3], colors: Option<Hdr>) -> [f64; 3] {
 pub fn name(g: &Generator) -> &str {
     match g {
         Generator::SolidColor { .. } => Generator::SOLID_COLOR,
+        Generator::Carried { .. } if g.is_offline() => "Media Offline",
         Generator::Carried { reference } => [&reference["generator_kind"], &reference["name"]]
             .into_iter()
             .filter_map(Value::as_str)

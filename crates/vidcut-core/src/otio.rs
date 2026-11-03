@@ -21,6 +21,7 @@ pub mod transitions;
 
 const VIDCUT: &str = "vidcut";
 const EDITOR: &str = "Resolve_OTIO";
+const MULTICAM: &str = "Multicam Clip";
 pub const COMPOUNDS_KEPT: &str =
     "compound clips and nested timelines kept as blocks, playing their clips";
 const EFFECTS_KEPT: &str = "clip effects kept on their clips but not shown or played";
@@ -788,7 +789,12 @@ pub fn export_drawn(
             let shows = c.video && e > s;
             let sounds = audio_part(c, a, b).map(|(s, e)| (s.max(ta), e));
             let sounds = sounds.filter(|(s, e)| e > s);
-            let group = (shows && sounds.is_some()).then(|| {
+            let kept_sound = c
+                .generator
+                .as_ref()
+                .and_then(generators::kept_sound)
+                .filter(|_| shows && e > s.max(ta));
+            let group = (shows && (sounds.is_some() || kept_sound.is_some())).then(|| {
                 groups += 1;
                 groups
             });
@@ -865,6 +871,33 @@ pub fn export_drawn(
                     video.push(x);
                 }
                 tv = e;
+            }
+            if let Some(kept) = kept_sound {
+                let s = s.max(ta);
+                if s > ta {
+                    audio.push(gap(s - ta, rate));
+                }
+                channels.push(kept.len() as u16);
+                let mut editor = json!({ "Channels": kept });
+                if let Some(g) = group {
+                    editor["Link Group ID"] = json!(g);
+                }
+                let meta = json!({ "clip": c.id, "media": c.media, "color": c.color });
+                let mut it = item(
+                    &label,
+                    c,
+                    m,
+                    written_start(c, s, e - s),
+                    e - s,
+                    c.enabled,
+                    with(json!({}), [(VIDCUT, meta), (EDITOR, editor)]),
+                    Vec::new(),
+                );
+                if let Some(x) = shown_color(c) {
+                    it["color"] = x;
+                }
+                audio.push(it);
+                ta = e;
             }
             if let (Some(au), Some((s, e))) = (&c.audio, sounds) {
                 if s > ta {
@@ -1130,6 +1163,65 @@ fn compound_item(
     v
 }
 
+fn is_multicam(item: &Value) -> bool {
+    schema(item).starts_with("Stack") && item["metadata"][EDITOR]["Sequence Type"] == MULTICAM
+}
+
+fn multicams<'a>(tracks: &[&'a Value], fps: Rational) -> Vec<(i64, i64, &'a Value)> {
+    tracks
+        .iter()
+        .copied()
+        .flat_map(|t| walk(t, fps, &mut Vec::new()).0)
+        .filter(|(_, _, item)| is_multicam(item))
+        .collect()
+}
+
+fn check_multicams(video: &[&Value], audio: &[&Value], fps: Rational) -> Result<()> {
+    let (pictures, sounds) = (multicams(video, fps), multicams(audio, fps));
+    for (kind, found) in [("picture", &pictures), ("sound", &sounds)] {
+        if found.len() > 1 {
+            return Err(Error::invalid(format!(
+                "this file has {} multicam items on its {kind} tracks: vidcut reads only one",
+                found.len()
+            )));
+        }
+    }
+    let at_other_rate = pictures.iter().chain(&sounds).find(|(_, _, item)| {
+        item["metadata"][EDITOR]["Sequence Fps"]
+            .as_f64()
+            .is_some_and(|x| rational(x).ok() != Some(fps))
+    });
+    if let Some((_, _, item)) = at_other_rate {
+        return Err(Error::invalid(format!(
+            "multicam clip {}: its rate is not the timeline's {fps} fps: vidcut reads only the same rate",
+            item["name"]
+        )));
+    }
+    if let ([p], [s]) = (&pictures[..], &sounds[..])
+        && ((p.0, p.1) != (s.0, s.1)
+            || p.2["name"] != s.2["name"]
+            || p.2["source_range"] != s.2["source_range"])
+    {
+        return Err(Error::invalid(format!(
+            "multicam clip {}: its sound {} differs in name, place or length: vidcut reads only a \
+             picture and sound that agree",
+            p.2["name"], s.2["name"]
+        )));
+    }
+    Ok(())
+}
+
+fn plain_reference(item: &Value) -> Option<Value> {
+    if is_multicam(item) {
+        return Some(generators::no_media());
+    }
+    let r = media_reference_of(item);
+    (schema(r).starts_with("MissingReference")
+        && r["metadata"][EDITOR]["Media Url"].is_null()
+        && item["metadata"][VIDCUT]["clip"].is_string())
+    .then(|| r.clone())
+}
+
 fn sequence_id(k: &Compound) -> Option<&str> {
     k.stack["metadata"][EDITOR]["Sequence ID"].as_str()
 }
@@ -1285,6 +1377,12 @@ impl ImportedClip {
                 .generator
                 .as_ref()
                 .is_none_or(|r| generators::read(r).is_some())
+    }
+
+    fn has_no_media(&self) -> bool {
+        self.generator
+            .as_ref()
+            .is_some_and(|r| schema(r).starts_with("MissingReference"))
     }
 
     fn block(
@@ -1958,6 +2056,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     let mut warnings = Vec::new();
     let mut read_titles: Vec<String> = Vec::new();
     let fps = file_rate(tl, &tracks)?;
+    check_multicams(&video_tracks, &audio_tracks, fps)?;
     let start_tc = time(&tl["global_start_time"]).map_or(0, |(v, r)| frames(v, r, fps));
     let mut markers = Vec::new();
     let mut notes = SpeedNotes::default();
@@ -1971,13 +2070,15 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         let (items, between) = walk(v, fps, &mut warnings);
         let mut keys = vec![None; items.len()];
         for (i, (start, len, item)) in items.into_iter().enumerate() {
-            let stack = schema(item).starts_with("Stack");
-            if !(is_clip(item) || stack) || len <= 0 {
+            let plain = plain_reference(item);
+            let stack = plain.is_none() && schema(item).starts_with("Stack");
+            if !(is_clip(item) || stack || plain.is_some()) || len <= 0 {
                 continue;
             }
             let (effects, speed) = effects::read(item);
             let reference = media_reference_of(item);
-            let block = stack || schema(reference).starts_with("GeneratorReference");
+            let block =
+                stack || plain.is_some() || schema(reference).starts_with("GeneratorReference");
             let mut speed = speed_of(speed, item, fps, !block, &mut notes);
             if block {
                 clip_markers(item, start, len, fps, &mut markers);
@@ -1988,6 +2089,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if stack {
                     c.compound = Some(compound_of(item, fps));
                     c.picture = our_picture(item);
+                } else if plain.is_some() {
+                    c.generator = plain;
                 } else if let Some(mut t) =
                     titles::read(item, reference, titles::UNKNOWN_HEIGHT, c.source_in)
                 {
@@ -2082,7 +2185,25 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         let (items, between) = walk(a, fps, &mut warnings);
         let mut keys = vec![None; items.len()];
         for (i, (start, len, item)) in items.into_iter().enumerate() {
-            let stack = schema(item).starts_with("Stack");
+            let plain = plain_reference(item).is_some();
+            let stack = !plain && schema(item).starts_with("Stack");
+            if plain && len > 0 {
+                let name = item["name"].as_str().unwrap_or("");
+                let owner = clips.iter_mut().find(|c| {
+                    c.has_no_media() && (c.start, c.duration) == (start, len) && c.name == name
+                });
+                match owner.and_then(|c| Some((c.key, c.generator.as_mut()?))) {
+                    Some((key, reference)) => {
+                        let channels = &item["metadata"][EDITOR]["Channels"];
+                        generators::keep_sound(reference, channels.clone());
+                        keys[i] = Some(key);
+                    }
+                    None => warnings.push(format!(
+                        "clip {name:?} has no media file and no picture; left as a gap"
+                    )),
+                }
+                continue;
+            }
             if !(is_clip(item) || stack) || len <= 0 {
                 continue;
             }
@@ -2318,13 +2439,18 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         }
     }
     note_kept(&mut warnings, &kept);
-    let mut made: Vec<&str> = Vec::new();
+    let (mut made, mut no_media): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
     for c in clips
         .iter()
         .filter(|c| c.generator.is_some() && !c.has_picture())
     {
-        if !made.contains(&c.name.as_str()) {
-            made.push(&c.name);
+        let list = if c.has_no_media() {
+            &mut no_media
+        } else {
+            &mut made
+        };
+        if !list.contains(&c.name.as_str()) {
+            list.push(&c.name);
         }
     }
     read_titles.sort();
@@ -2340,6 +2466,12 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
         warnings.push(format!(
             "generators and titles kept as blocks but played as gaps: {}",
             made.join(", ")
+        ));
+    }
+    if !no_media.is_empty() {
+        warnings.push(format!(
+            "multicam clips read as plain clips with no media, which play as gaps: {}",
+            no_media.join(", ")
         ));
     }
     if !notes.unplayed.is_empty() {

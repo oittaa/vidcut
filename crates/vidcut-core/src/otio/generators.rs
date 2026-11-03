@@ -1,17 +1,43 @@
 use serde_json::{Value, json};
 
-use super::EDITOR;
+use super::{EDITOR, VIDCUT};
 use crate::model::{Generator, hex};
 
 const COLOR: &str = "color";
 const BLACK: &str = "#000000";
+const CHANNELS: &str = "channels";
+
+pub fn no_media() -> Value {
+    json!({
+        "OTIO_SCHEMA": "MissingReference.1",
+        "metadata": {},
+        "name": "",
+        "available_range": null,
+        "available_image_bounds": null,
+    })
+}
+
+pub fn keep_sound(reference: &mut Value, channels: Value) {
+    reference["metadata"][VIDCUT][CHANNELS] = channels;
+}
+
+pub fn kept_sound(g: &Generator) -> Option<&Vec<Value>> {
+    let Generator::Carried { reference } = g else {
+        return None;
+    };
+    reference["metadata"][VIDCUT][CHANNELS].as_array()
+}
 
 pub fn reference(g: &Generator) -> Value {
     let Generator::SolidColor { color } = g else {
         let Generator::Carried { reference } = g else {
             unreachable!("the two kinds");
         };
-        return (**reference).clone();
+        let mut written = (**reference).clone();
+        if let Some(meta) = written["metadata"].as_object_mut() {
+            meta.remove(VIDCUT);
+        }
+        return written;
     };
     let kind = Generator::SOLID_COLOR;
     let group = json!({

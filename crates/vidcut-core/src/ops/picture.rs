@@ -124,7 +124,7 @@ pub(super) fn takes(p: &Project, ti: usize, c: &Clip) -> Result<()> {
     }
     if c.generator.is_some() && !c.draws() {
         return Err(Error::invalid(format!(
-            "{} is another editor's generator, which plays as a gap",
+            "{} is a block from another editor's file, which plays as a gap",
             c.id
         )));
     }
