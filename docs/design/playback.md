@@ -177,6 +177,8 @@ flowchart TD
   - Each drawing is where its kind puts it, without its own place, opacity or rotation. Thus a moved or turned title is not drawn again.
   - A title whose box goes past the picture's edge keeps its place in the drawing, because that edge cuts the box before it turns (`Title::shape_past_edge`).
   - A lower third with a level under 1 is one drawing of all its blocks (`burn::title`), with their places. Thus text over the box does not show the box. A new place of a line draws it again.
+  - `burn` draws the letters of a Text title or a lower third one at a time on a `Canvas`. The exact place comes from `Title::seated_left` ([spec D65](../cut-page-spec.md)).
+  - A drawing's top is on a whole pixel. A moved block goes by whole pixels between the rounded middles. Thus it lands on the same row as a new drawing at that place.
 - `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan.
 - `Player::present` hands each block of a title of a frame as a `TitleOver`:
   - the picture, in premultiplied RGBA, and how many layers go under it

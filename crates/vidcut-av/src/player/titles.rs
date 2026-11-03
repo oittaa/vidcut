@@ -140,7 +140,10 @@ impl Titles {
                         ((x - x0) * w).round() as i32,
                         shown.run.top(0, h, f64::from(p.height)).round() as i32 - p.top,
                     ),
-                    None => (((x - x0) * w).round() as i32, ((y - y0) * h).round() as i32),
+                    None => (
+                        ((x * w).round() - (x0 * w).round()) as i32,
+                        ((y * h).round() - (y0 * h).round()) as i32,
+                    ),
                 };
                 out.push(TitleOver {
                     above: *above,
