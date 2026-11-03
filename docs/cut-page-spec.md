@@ -1668,21 +1668,20 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The `Stack` has one video track and one audio track for each angle.
     - The shift of an angle is its leading `Gap` and the source start of its clip. No field holds a shift.
     - Only the name of the `Stack` tells the video angle. The file does not hold the audio angle.
-    - With `importSourceClips` off, Resolve imports it as one plain clip, with the name and the source range of the `Stack`.
-    - That clip has no pool item, and the multicam is lost. Its export is a `Clip` with a `MissingReference`.
-    - With `importSourceClips` on, the import returned nothing for this file. The reason is not known.
-  - **A multicam clip in `timeline.import`:**
-    - It makes one clip on the video track, with the name and the source range of the `Stack`.
+    - With `importSourceClips` off, Resolve imports each `Stack` as one plain clip, with the name and the source range of the `Stack`.
+    - The clip has no pool item, and the multicam is lost. Its export is a `Clip` with a `MissingReference`.
+    - A cut multicam clip has one `Stack` for each part. It gives one clip for each part, on the video track and on the audio track.
+    - The audio mode All has one audio `Stack` on each audio track. It gives one clip on each audio track.
+    - A `Sequence Fps` that is not the rate of the timeline does not change the result. The clip has the frame count of the file.
+    - With `importSourceClips` on, the import returned nothing for one file. The reason is not known.
+  - **A clip with no media in `timeline.import`.** This is a multicam `Stack`, or a `Clip` with a `MissingReference` that has no `Media Url`:
+    - Each one makes one clip on its track, with its name and its source range.
     - The pool gets no media. The import does not read the files of the angles.
     - The clip plays as a gap, with no sound.
-    - The timeline shows it red, and the viewer shows Media Offline.
+    - The timeline shows it red, and the viewer shows Media Offline for a clip on a video track.
     - An import warning names the clip.
-    - An OTIO export writes it as Resolve does. It writes a `Clip` with a `MissingReference` on the video track and on the audio track.
-    - These two clips are in one link group.
-  - **Multicam files that `timeline.import` refuses.** No measurement tells what Resolve imports from these files:
-    - more than one multicam `Stack` on the video tracks or on the audio tracks, as in a cut multicam clip or the audio mode All
-    - a video `Stack` and an audio `Stack` with different names, places or lengths, as in the audio mode Adaptive or a saved Sync Clips group
-    - a `Sequence Fps` that is not the rate of the timeline
+    - An OTIO export writes a `Clip` with a `MissingReference` on its track.
+    - Clips with the same place and the same link group in the file stay in one link group.
 - **D41. Proxies** (deviation X18; the proxy chapters, pp. 207–218, are outside the Cut page).
   - Videos and image sequences get proxies on demand (Generate Proxy).
   - A running GUI also makes proxies for media that are hard to play (preferences `proxies.*`):
@@ -2390,7 +2389,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut reads a Scroll back with no outline.
   - vidcut reads Solid Color (§8.17). It carries the other generators.
   - Resolve writes Text+ as a `MissingReference`, and loses it itself.
-  - vidcut leaves Text+ out with a warning, as it does any clip without media.
+  - vidcut reads Text+ as a clip with no media (D40).
   - Resolve Studio 21.1.1 draws a file that vidcut writes as vidcut does, within a few pixels at 3840×2160, except for the outline.
   - vidcut reads Resolve's export of that file back to the same titles (checked through its scripting API).
 - **D68. Delete with In and Out past the end** (§8.4; pp. 721, 724–725).

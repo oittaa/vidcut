@@ -407,7 +407,7 @@ fn clip(
             );
         }
     }
-    if c.compound.is_some() && !c.video {
+    if c.is_sound_block() {
         let band = Rect::from_x_y_ranges(x0..=x1, tr.audio_top..=rect.bottom());
         painter.rect_filled(parted(band), corners, fill);
     }

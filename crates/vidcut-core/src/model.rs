@@ -1940,11 +1940,13 @@ pub enum Generator {
     },
     /// A generator, a title or a clip with no media from another editor's
     /// file that vidcut doesn't draw (deviation X9): a block that plays as a
-    /// gap.
+    /// gap. On an audio track, a clip with no media stands for its sound
+    /// (`video` false).
     Carried {
         /// The OTIO media reference as read: a `GeneratorReference`, or a
         /// `MissingReference` for a clip with no media. The `vidcut` metadata
-        /// of a `MissingReference` holds the `channels` of the clip's sound.
+        /// of a `MissingReference` holds the `channels` of its sound and the
+        /// `link` group of the file.
         reference: Kept,
     },
 }
@@ -3447,6 +3449,10 @@ impl Clip {
 
     pub fn is_block(&self) -> bool {
         self.is_generator() || self.compound.is_some()
+    }
+
+    pub fn is_sound_block(&self) -> bool {
+        self.is_block() && !self.video
     }
 
     pub fn draws(&self) -> bool {

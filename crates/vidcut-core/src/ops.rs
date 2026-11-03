@@ -1044,11 +1044,9 @@ pub fn move_clips(
             p.tracks[dest].id
         )));
     }
-    if p.tracks[dest].kind == TrackKind::Video
-        && clips.iter().any(|(_, c)| c.compound.is_some() && !c.video)
-    {
+    if p.tracks[dest].kind == TrackKind::Video && clips.iter().any(|(_, c)| c.is_sound_block()) {
         return Err(Error::invalid(format!(
-            "{} is a video track: a compound clip's sound goes on audio tracks",
+            "{} is a video track: the sound of a block goes on audio tracks",
             p.tracks[dest].id
         )));
     }
@@ -2422,7 +2420,7 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
         clip.id = p.alloc_clip_id();
         clip.start = start;
         let on_video = p.tracks[ti].kind == TrackKind::Video;
-        let sound_block = clip.compound.is_some() && !clip.video;
+        let sound_block = clip.is_sound_block();
         clip.video = clip.video && has_video && on_video;
         if !clip.video {
             clip.picture = None;

@@ -6,6 +6,7 @@ use crate::model::{Generator, hex};
 const COLOR: &str = "color";
 const BLACK: &str = "#000000";
 const CHANNELS: &str = "channels";
+const LINK: &str = "link";
 
 pub fn no_media() -> Value {
     json!({
@@ -17,15 +18,27 @@ pub fn no_media() -> Value {
     })
 }
 
-pub fn keep_sound(reference: &mut Value, channels: Value) {
-    reference["metadata"][VIDCUT][CHANNELS] = channels;
+pub fn keep_ties(reference: &mut Value, editor: &Value) {
+    for (key, from) in [(CHANNELS, "Channels"), (LINK, "Link Group ID")] {
+        if !editor[from].is_null() {
+            reference["metadata"][VIDCUT][key] = editor[from].clone();
+        }
+    }
 }
 
-pub fn kept_sound(g: &Generator) -> Option<&Vec<Value>> {
+fn kept<'a>(g: &'a Generator, key: &str) -> Option<&'a Value> {
     let Generator::Carried { reference } = g else {
         return None;
     };
-    reference["metadata"][VIDCUT][CHANNELS].as_array()
+    reference["metadata"][VIDCUT].get(key)
+}
+
+pub fn kept_channels(g: &Generator) -> Option<&Vec<Value>> {
+    kept(g, CHANNELS)?.as_array()
+}
+
+pub fn kept_link(g: &Generator) -> Option<i64> {
+    kept(g, LINK)?.as_i64()
 }
 
 pub fn reference(g: &Generator) -> Value {

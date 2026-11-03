@@ -5851,7 +5851,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         .is_some_and(|m| mode == ImportMode::Media && !m.media.is_empty());
     if t.clips.is_empty() && !pool {
         return Err(Error::invalid(format!(
-            "nothing to import: the timeline has no clips with media files{}",
+            "nothing to import: the timeline has no clips{}",
             if t.warnings.is_empty() {
                 String::new()
             } else {
