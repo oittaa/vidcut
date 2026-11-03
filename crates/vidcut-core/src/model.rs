@@ -2286,6 +2286,7 @@ impl Title {
     pub const MOST_SPACING: f64 = 4096.0;
     pub const TRACKING_PIXEL: f64 = 0.75;
     pub const SHIFTED_SIZE: f64 = 2.0 / 3.0;
+    pub const ASCENT_SLACK: f64 = 0.25;
     pub const LINE: f64 = 1.31;
     pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;
@@ -2384,6 +2385,10 @@ impl Title {
 
     pub fn text_fraction(&self) -> f64 {
         self.style.size.unwrap_or(Self::usual_size(self.kind))
+    }
+
+    pub fn baseline(ascent: f64) -> f64 {
+        (ascent - Self::ASCENT_SLACK).ceil()
     }
 
     pub fn line_gap(&self, font_line: f64, text: f64, pixel: f64) -> f64 {

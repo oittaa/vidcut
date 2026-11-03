@@ -7,7 +7,7 @@ use cosmic_text::{
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
     Place, SubtitleAlign, SubtitleStyle, TextStroke, Title, TitleAlign, TitleBlock, TitleCase,
-    TitlePart, TitleShadow, TitleStyle,
+    TitleKind, TitlePart, TitleShadow, TitleStyle,
 };
 use vidcut_core::rich::Shift;
 use vidcut_core::subtitles::{Piece, Shown, rgb};
@@ -551,7 +551,7 @@ fn line_gap(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) ->
         .unwrap_or(px * look.line)
 }
 
-fn shifts(system: &mut FontSystem, run: &LayoutRun<'_>) -> Vec<f32> {
+fn shifts(system: &mut FontSystem, run: &LayoutRun<'_>, seat: bool) -> Vec<f32> {
     let shifted = |g: &LayoutGlyph| g.metadata & (RAISED | LOWERED) != 0;
     let whole = run.glyphs.iter().all(shifted);
     run.glyphs
@@ -565,20 +565,29 @@ fn shifts(system: &mut FontSystem, run: &LayoutRun<'_>) -> Vec<f32> {
             };
             let m = font.metrics();
             let em = g.font_size / f32::from(m.units_per_em);
-            let height = (m.ascent - m.descent) * em;
+            let (rise, fall) = (m.ascent * em, -m.descent * em);
+            let height = if seat {
+                (Title::baseline(f64::from(rise)) + Title::baseline(f64::from(fall))) as f32
+            } else {
+                rise + fall
+            };
             let lift = if g.metadata & RAISED != 0 {
                 -height / 2.0
             } else {
                 height / 6.0
             };
             let seated = (m.ascent + m.descent) * em / 4.0;
-            if whole { lift + seated } else { lift }
+            if whole && !seat { lift + seated } else { lift }
         })
         .collect()
 }
 
-fn spaced<'a>(buffer: &'a Buffer, below: &[f32]) -> Vec<LayoutRun<'a>> {
+fn spaced<'a>(buffer: &'a Buffer, below: &[f32], seat: bool) -> Vec<LayoutRun<'a>> {
     let count = buffer.layout_runs().count();
+    let mut layouts = buffer
+        .lines
+        .iter()
+        .flat_map(|l| l.layout_opt().into_iter().flatten());
     let mut shift = 0.0;
     buffer
         .layout_runs()
@@ -586,8 +595,23 @@ fn spaced<'a>(buffer: &'a Buffer, below: &[f32]) -> Vec<LayoutRun<'a>> {
         .map(|(i, r)| {
             let own = below.get(r.line_i).copied().unwrap_or(0.0);
             let grown = if i + 1 == count { own.max(0.0) } else { own };
+            let ascent = layouts.next().map_or(0.0, |l| l.max_ascent);
+            let whole = r
+                .glyphs
+                .iter()
+                .all(|g| g.metadata & (RAISED | LOWERED) != 0);
+            let full = if whole {
+                ascent / Title::SHIFTED_SIZE as f32
+            } else {
+                ascent
+            };
+            let y = if seat {
+                r.line_top + Title::baseline(f64::from(full)) as f32
+            } else {
+                r.line_y
+            };
             let run = LayoutRun {
-                line_y: r.line_y + shift,
+                line_y: y + shift,
                 line_top: r.line_top + shift,
                 line_height: r.line_height + grown,
                 ..r
@@ -708,8 +732,14 @@ fn lay_out(look: &Look) -> Option<Laid> {
             .collect(),
         Markup::Pieces(..) => Vec::new(),
     };
-    let runs = spaced(&buffer, &below);
-    let lifts: Vec<Vec<f32>> = runs.iter().map(|r| shifts(&mut f.system, r)).collect();
+    let seat = look
+        .title_gap
+        .is_some_and(|(t, _)| t.kind != TitleKind::Scroll);
+    let runs = spaced(&buffer, &below, seat);
+    let lifts: Vec<Vec<f32>> = runs
+        .iter()
+        .map(|r| shifts(&mut f.system, r, seat))
+        .collect();
     let lines: f32 = runs.iter().map(|r| r.line_height).sum();
     let rise = runs.iter().map(|r| r.line_top).fold(0.0, f32::min);
     let inked = runs
@@ -1185,6 +1215,11 @@ fn title_block(
         TitlePart::Backing => above,
     };
     let top = (block.edge * h) as f32 - up;
+    let top = if t.kind == TitleKind::Scroll {
+        top
+    } else {
+        top.floor()
+    };
     let sprite = placed(sprite, left, top);
     Some(turned(
         sprite,

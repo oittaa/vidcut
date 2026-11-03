@@ -2123,6 +2123,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A `size` in the style goes on both lines of a lower third.
     - Resolve's Inspector shows a tracking of 11 on its upper line, but its file has no `letter-spacing`. vidcut's usual upper line has no tracking.
     - Lines the font's own line height apart, rounded up to a whole pixel (measured in Resolve Studio 21.1.2 with four fonts).
+    - The baseline of a line of a Text title or a lower third is the font's ascent below the top of the line. The font's leading goes below the text.
+    - The ascent goes up to a whole pixel when it is more than a quarter past one. This fits Resolve Studio 21.1.2 with four fonts at five sizes.
+    - The top of a block goes down to a whole pixel, as in the same renders.
     - The lines of a scroll are 4/3 of the font's line height plus 10 timeline pixels apart. This fits Resolve Studio 21.1.2 within 5 pixels with four fonts.
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
