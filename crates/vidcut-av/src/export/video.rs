@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
 use vidcut_core::place::Placing;
-use vidcut_core::render::{Image, Moving, Placed, Ramp, Shape, Smooth, VideoPiece, WHOLE, Wipe};
+use vidcut_core::render::{
+    Generated, Image, Moving, Placed, Ramp, Shape, Smooth, VideoPiece, WHOLE, Wipe,
+};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -1581,6 +1583,59 @@ fn heaviest(layers: &[Layer]) -> usize {
     best.0
 }
 
+#[derive(Clone, Copy, Hash)]
+enum Side {
+    File(usize),
+    Color([u8; 3]),
+}
+
+struct ColorSides {
+    drawn: Option<Single>,
+    rgb: Drawn,
+    framed: Drawn,
+    fitting: Fitting,
+}
+
+impl ColorSides {
+    fn new() -> Self {
+        Self {
+            drawn: None,
+            rgb: Lru::new(),
+            framed: Lru::new(),
+            fitting: Fitting::none(),
+        }
+    }
+
+    fn picture(
+        &mut self,
+        color: [u8; 3],
+        colors: Option<Hdr>,
+        look: &Look,
+        frames: bool,
+    ) -> Result<frame::Video> {
+        if self.drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
+            self.drawn = None;
+            self.rgb.clear();
+            self.framed.clear();
+        }
+        let [r, g, b] = color;
+        let key = Some(i64::from(u32::from_be_bytes([0, r, g, b])));
+        let drawn = &mut self.drawn;
+        let filled = || filled_generator(color, look.size, colors);
+        let path = Path::new("");
+        match frames {
+            true => drawn_once(&mut self.framed, (key, look), || {
+                let f = filled();
+                shown_frame(drawn, (&f, (None, None)), (0, look), Reading::Frames, path)
+            }),
+            false => drawn_once(&mut self.rgb, (key, look), || {
+                let f = filled();
+                shown_rgb(drawn, (&f, (None, None)), 0, look, Reading::Frames, path)
+            }),
+        }
+    }
+}
+
 pub struct VideoFrames {
     pieces: Vec<VideoPiece>,
     fps: Rational,
@@ -1591,6 +1646,8 @@ pub struct VideoFrames {
     ahead: Ahead<Source, (Input, u64, i64)>,
     black: Option<frame::Video>,
     colored: Option<([u8; 3], frame::Video)>,
+    generated: Option<([u8; 3], frame::Video)>,
+    color_sides: ColorSides,
     decoder: Option<crate::hw::GpuDecoder>,
     maker: Maker,
     gpu_made: i64,
@@ -1606,6 +1663,7 @@ pub struct VideoFrames {
     sources: Vec<super::SourceNote>,
     out: (format::Pixel, Option<Hdr>),
     timeline: Option<Hdr>,
+    drawn_in: Option<Hdr>,
     titles: crate::player::Titles,
     subtitles: crate::player::Subtitles,
     timeline_height: u32,
@@ -1901,6 +1959,8 @@ impl VideoFrames {
             ahead: Ahead::new(),
             black: None,
             colored: None,
+            generated: None,
+            color_sides: ColorSides::new(),
             decoder: None,
             maker: Maker::new(
                 (width, height, format::Pixel::YUV420P),
@@ -1919,6 +1979,7 @@ impl VideoFrames {
             sources: Vec::new(),
             out: (pixel, target),
             timeline: None,
+            drawn_in: None,
             titles: Default::default(),
             subtitles: Default::default(),
             timeline_height: height,
@@ -1950,7 +2011,13 @@ impl VideoFrames {
 
     pub fn with_timeline(mut self, timeline: Option<Hdr>) -> Result<Self> {
         self.timeline = timeline;
+        self.drawn_in = timeline;
         Ok(self)
+    }
+
+    pub fn drawing_in(mut self, colors: Option<Hdr>) -> Self {
+        self.drawn_in = colors;
+        self
     }
 
     pub fn with_burn(
@@ -2274,12 +2341,19 @@ impl VideoFrames {
                 } = layer
                 else {
                     if take == Take::Picture {
-                        let color = match layer {
-                            VideoPiece::Black { color, .. } => *color,
-                            _ => vidcut_core::render::BLACK,
+                        let (frame, color) = match layer {
+                            VideoPiece::Generated { picture, .. } => {
+                                let Generated::SolidColor { color } = *picture;
+                                (self.generated_frame(color)?, color)
+                            }
+                            VideoPiece::Black { color, .. } => (self.solid_frame(*color)?, *color),
+                            _ => {
+                                let black = vidcut_core::render::BLACK;
+                                (self.solid_frame(black)?, black)
+                            }
                         };
                         made.push(Layer {
-                            frame: Some(self.solid_frame(color)?),
+                            frame: Some(frame),
                             weight,
                             rotation: 0,
                             sampling: Sampling::Own,
@@ -2298,6 +2372,9 @@ impl VideoFrames {
                                 cached: None,
                             }),
                         });
+                        if let Some(smooth) = smooth {
+                            self.smoothed(&mut made, &piece, i, smooth, started)?;
+                        }
                     }
                     continue;
                 };
@@ -2378,34 +2455,48 @@ impl VideoFrames {
                         cached: self.open[s].cached(),
                     }),
                 });
-                if let Some((smooth, t)) = smooth
+                if let Some(smooth) = smooth
                     && !backward
-                    && let Some((frame, took)) = self.smooth_frame(i, smooth, t)?
                 {
-                    let last = made.last_mut().expect("just made");
-                    last.frame = Some(frame);
-                    last.origin = Some(Origin {
-                        made: Made::Smooth {
-                            retime: smooth.retime,
-                            at: t,
-                            took,
-                        },
-                        upscaled: None,
-                        when: Instant::now(),
-                        took: started.elapsed(),
-                        cached: None,
-                    });
-                    last.weight = None;
-                    last.rotation = 0;
-                    last.sampling = Sampling::Own;
-                    last.wipe = None;
-                    last.moving = None;
-                    last.share = 1.0;
-                    last.woven = None;
+                    self.smoothed(&mut made, &piece, i, smooth, started)?;
                 }
             }
             return Ok(Some((take == Take::Picture).then_some(made)));
         }
+    }
+
+    fn smoothed(
+        &mut self,
+        made: &mut [Layer],
+        piece: &VideoPiece,
+        i: usize,
+        (smooth, t): (&Smooth, f64),
+        started: Instant,
+    ) -> Result<()> {
+        let Some((frame, took)) = self.smooth_frame(piece, i, smooth, t)? else {
+            return Ok(());
+        };
+        let last = made.last_mut().expect("just made");
+        last.frame = Some(frame);
+        last.origin = Some(Origin {
+            made: Made::Smooth {
+                retime: smooth.retime,
+                at: t,
+                took,
+            },
+            upscaled: None,
+            when: Instant::now(),
+            took: started.elapsed(),
+            cached: None,
+        });
+        last.weight = None;
+        last.rotation = 0;
+        last.sampling = Sampling::Own;
+        last.wipe = None;
+        last.moving = None;
+        last.share = 1.0;
+        last.woven = None;
+        Ok(())
     }
 
     fn share_of(&self, s: usize, rotation: u16, placed: Option<&Vec<Placed>>) -> f64 {
@@ -2435,6 +2526,22 @@ impl VideoFrames {
             self.colored = Some((color, filled(color, (w, h))));
         }
         &self.colored.as_ref().expect("just set").1
+    }
+
+    fn generated_frame(&mut self, color: [u8; 3]) -> Result<frame::Video> {
+        let colors = self.drawn_in;
+        let mut out = match colors {
+            None => frame_ref(self.colored(color))?,
+            Some(_) => {
+                if self.generated.as_ref().is_none_or(|(c, _)| *c != color) {
+                    let (w, h, _) = self.maker.out();
+                    self.generated = Some((color, filled_generator(color, (w, h), colors)));
+                }
+                frame_ref(&self.generated.as_ref().expect("just set").1)?
+            }
+        };
+        self.black_metadata(&mut out)?;
+        Ok(out)
     }
 
     fn black_metadata(&self, out: &mut frame::Video) -> Result<()> {
@@ -3137,17 +3244,33 @@ impl VideoFrames {
         self.finished_layer(s, made)
     }
 
+    fn side_of(&self, piece: &VideoPiece, i: usize) -> Option<Side> {
+        match piece.layers().get(i)?.0 {
+            VideoPiece::Source { .. } => self.reading.get(i).copied().flatten().map(Side::File),
+            VideoPiece::Generated { picture, .. } => {
+                let Generated::SolidColor { color } = *picture;
+                Some(Side::Color(color))
+            }
+            _ => None,
+        }
+    }
+
     fn smooth_frame(
         &mut self,
+        piece: &VideoPiece,
         i: usize,
         smooth: &Smooth,
         t: f64,
     ) -> Result<Option<(frame::Video, Duration)>> {
-        let reading_of = |j: usize| self.reading.get(j).copied().flatten();
-        let (Some(sa), Some(sb)) = (i.checked_sub(1).and_then(reading_of), reading_of(i)) else {
+        let side_of = |j: usize| self.side_of(piece, j);
+        let (Some(sa), Some(sb)) = (i.checked_sub(1).and_then(side_of), side_of(i)) else {
             return Ok(None);
         };
-        if self.open[sa].current.is_none() || self.open[sb].current.is_none() {
+        let no_frame = |side: Side| match side {
+            Side::File(s) => self.open[s].current.is_none(),
+            Side::Color(_) => false,
+        };
+        if no_frame(sa) || no_frame(sb) {
             return Ok(None);
         }
         let retime = smooth.retime;
@@ -3159,7 +3282,15 @@ impl VideoFrames {
         let look = Look::fitted(size, crate::screen::kernel(None), (true, self.timeline));
         let frames = retime == Retime::Macos;
         let made_reading = self.maker.reading();
-        let mut picture = |s: usize| -> Result<(frame::Video, Option<i64>, u64)> {
+        let colors = self.drawn_in;
+        let mut picture = |side: Side| -> Result<(frame::Video, Option<i64>, u64)> {
+            let s = match side {
+                Side::File(s) => s,
+                Side::Color(color) => {
+                    let made = self.color_sides.picture(color, colors, &look, frames)?;
+                    return Ok((made, None, 0));
+                }
+            };
             let src = &mut self.open[s];
             let reading = src.pictures.reading(made_reading);
             let rotation = src.reader.rotation();
@@ -3172,15 +3303,14 @@ impl VideoFrames {
         };
         let (a, pa, la) = picture(sa)?;
         let (b, pb, lb) = picture(sb)?;
+        let path_of = |side: Side| match side {
+            Side::File(s) => self.open[s].reader.path(),
+            Side::Color(_) => Path::new(""),
+        };
         let mut pair = std::hash::DefaultHasher::new();
-        (self.open[sb].reader.path(), pb, la, lb, size).hash(&mut pair);
+        (path_of(sb), pb, la, lb, size, sa, sb).hash(&mut pair);
         let at = 2 * pa.unwrap_or(0);
-        let key = (
-            self.open[sa].reader.path().to_path_buf(),
-            pair.finish(),
-            at,
-            at + 1,
-        );
+        let key = (path_of(sa).to_path_buf(), pair.finish(), at, at + 1);
         let clock = Instant::now();
         let big = match frames {
             true => crate::interpolate::between_frames(&key, &a, &b, size, t)?,
@@ -3196,13 +3326,30 @@ impl VideoFrames {
             crate::interpolate::name(retime),
             took.as_secs_f64() * 1e3
         );
-        let src = &mut self.open[sb];
-        let reading = src.pictures.reading(made_reading);
-        let made = self
-            .maker
-            .make_layer(i, &mut src.fitting, &big, src.reader.path(), reading)?;
-        src.normalized = None;
-        Ok(Some((self.finished_layer(sb, made)?, took)))
+        let finished = match sb {
+            Side::File(s) => {
+                let src = &mut self.open[s];
+                let reading = src.pictures.reading(made_reading);
+                let made =
+                    self.maker
+                        .make_layer(i, &mut src.fitting, &big, src.reader.path(), reading)?;
+                src.normalized = None;
+                self.finished_layer(s, made)?
+            }
+            Side::Color(_) => {
+                let mut made = self.maker.make_layer(
+                    i,
+                    &mut self.color_sides.fitting,
+                    &big,
+                    Path::new(""),
+                    Reading::Frames,
+                )?;
+                crate::hdr::strip(&mut made);
+                self.black_metadata(&mut made)?;
+                made
+            }
+        };
+        Ok(Some((finished, took)))
     }
 
     fn shown(
@@ -3377,6 +3524,29 @@ fn filled(color: [u8; 3], (w, h): (u32, u32)) -> frame::Video {
         line[..n].copy_from_slice(&row[..n]);
     }
     crate::color::tag_frame(&mut f, None);
+    f
+}
+
+fn filled_generator(color: [u8; 3], size: (u32, u32), colors: Option<Hdr>) -> frame::Video {
+    match colors {
+        None => filled(color, size),
+        Some(_) => {
+            let code = vidcut_core::generators::timeline_code(color, colors);
+            filled_deep(code, size, colors)
+        }
+    }
+}
+
+fn filled_deep(code: [f64; 3], (w, h): (u32, u32), hdr: Option<Hdr>) -> frame::Video {
+    let mut f = frame::Video::new(format::Pixel::RGB48LE, w, h);
+    let stride = f.stride(0);
+    let pixel = code.map(|v| ((v * 65535.0).round() as u16).to_le_bytes());
+    let row = pixel.as_flattened().repeat(w as usize);
+    for line in f.data_mut(0).chunks_mut(stride) {
+        let n = row.len().min(line.len());
+        line[..n].copy_from_slice(&row[..n]);
+    }
+    crate::screen::held::tag(&mut f, hdr);
     f
 }
 

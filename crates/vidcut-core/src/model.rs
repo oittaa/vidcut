@@ -1570,9 +1570,8 @@ pub struct Clip {
     /// Effects on its picture, carried from another editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
-    /// A generator or title another editor made, carried (deviation X9):
-    /// a block that plays as a gap. It has no media (`media` is empty) and
-    /// no audio, and any length.
+    /// A generator: a picture made with no file. It has no
+    /// media (`media` is empty) and no audio, and any length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generator: Option<Generator>,
     /// A title (decision D65): its text drawn over the picture of the
@@ -1921,11 +1920,38 @@ impl Speed {
     }
 }
 
-/// A generator or title from another editor's file (deviation X9).
+/// A kind of generator that vidcut draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GeneratorKind {
+    SolidColor,
+}
+
+/// What a generator makes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Generator {
-    /// The OTIO media reference as read: a `GeneratorReference`.
-    pub reference: Kept,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Generator {
+    /// One color over the whole picture.
+    SolidColor {
+        /// `#rrggbb`.
+        #[serde(with = "hex_rgb")]
+        #[schemars(with = "String")]
+        color: [u8; 3],
+    },
+    /// A generator or title from another editor's file that vidcut doesn't
+    /// draw (deviation X9): a block that plays as a gap.
+    Carried {
+        /// The OTIO media reference as read: a `GeneratorReference`.
+        reference: Kept,
+    },
+}
+
+impl Generator {
+    pub const SOLID_COLOR: &str = "Solid Color";
+
+    pub fn draws(&self) -> bool {
+        !matches!(self, Self::Carried { .. })
+    }
 }
 
 /// A title: text drawn over the picture (decision D65). A field left out
@@ -2462,12 +2488,11 @@ impl Title {
 }
 
 /// Where a clip's picture goes over the frame, and the effects on it:
-/// footage, a still, an image sequence or a compound clip. A field left out
-/// is at its usual value; at all of them the picture is fitted into the
-/// frame. The tracks below show
-/// wherever it doesn't cover the frame: in the bars around a picture of
-/// another shape, around it, where it is cropped and through its soft edges
-/// and its opacity.
+/// footage, a still, an image sequence, a compound clip or a generator,
+/// which has no effects. A field left out is at its usual value; at all of
+/// them the picture is fitted into the frame. The tracks below show wherever
+/// it doesn't cover the frame: in the bars around a picture of another shape,
+/// around it, where it is cropped and through its soft edges and its opacity.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Picture {
     /// Where the middle of the whole picture goes before the zoom and the
@@ -3203,6 +3228,10 @@ impl Clip {
 
     pub fn is_block(&self) -> bool {
         self.is_generator() || self.compound.is_some()
+    }
+
+    pub fn draws(&self) -> bool {
+        self.generator.as_ref().is_some_and(Generator::draws)
     }
 
     pub fn end(&self) -> i64 {

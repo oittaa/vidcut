@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EffectType, Handle, LowerThirdLine,
-    PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle,
-    TrackClip, ZoomBox,
+    Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EffectType, GeneratorKind, Handle,
+    LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign, TitleKind,
+    TitleStyle, TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2111,6 +2111,47 @@ pub enum Request {
         at: Option<TimeSpec>,
     },
 
+    /// Generator clips with their times in frames: every video track's, or
+    /// `track`'s; those in `range` only, if given.
+    #[serde(rename = "generators.list")]
+    GeneratorsList {
+        #[serde(default)]
+        track: Option<String>,
+        #[serde(default)]
+        range: Option<RangeSpec>,
+    },
+    /// Add a generator clip: a picture made with no file, from `at` (default:
+    /// the playhead) for `duration` (default: 5 s). On `track` (default: the
+    /// video track above the highest one with clips in those frames, made
+    /// when there is none, or V1 when nothing is there), over what is there.
+    /// Returns its clip id. `picture.set` places it. It has no speed and takes
+    /// no effects.
+    #[serde(rename = "generators.add")]
+    GeneratorsAdd {
+        /// `solid_color`: one color over the whole picture.
+        kind: GeneratorKind,
+        /// A `solid_color`'s color: `#rrggbb`, `#rgb` or a name such as
+        /// `yellow`. Default: black.
+        #[serde(default)]
+        color: Option<String>,
+        #[serde(default)]
+        at: Option<TimeSpec>,
+        #[serde(default)]
+        duration: Option<TimeSpec>,
+        #[serde(default)]
+        track: Option<String>,
+    },
+    /// Change a generator clip (`c3`, or `V2@15s` for the clip on V2 at 15
+    /// s). Moves and trims are `edit.*`'s.
+    #[serde(rename = "generators.set")]
+    GeneratorsSet {
+        clip: ClipRef,
+        /// A `solid_color`'s color: `#rrggbb`, `#rgb` or a name such as
+        /// `yellow`.
+        #[serde(default)]
+        color: Option<String>,
+    },
+
     /// Where a clip's picture goes over the frame (`c3`, or `V2@15s`): the
     /// `position` of its middle, its `zoom` across and down, its `rotation`,
     /// its `anchor`, its `pitch`, its `yaw`, its flips, its `crop`, its
@@ -2119,12 +2160,12 @@ pub enum Request {
     #[serde(rename = "picture.get")]
     PictureGet { clip: ClipRef },
     /// Move, zoom, turn, pitch, yaw, flip, crop, mix or fade clips' pictures,
-    /// or give them a Dynamic Zoom: footage, stills, image sequences and
-    /// compound clips; a title has its own place (`titles.set`). Each field
-    /// given replaces its own. At its usual values a picture is fitted into
-    /// the frame; the tracks below show wherever it doesn't cover the frame:
-    /// in its bars, around it, where it is cropped and through its soft
-    /// edges and its opacity.
+    /// or give them a Dynamic Zoom: footage, stills, image sequences,
+    /// compound clips and generators; a title has its own place
+    /// (`titles.set`). Each field given replaces its own. At its usual values
+    /// a picture is fitted into the frame; the tracks below show wherever it
+    /// doesn't cover the frame: in its bars, around it, where it is cropped
+    /// and through its soft edges and its opacity.
     #[serde(rename = "picture.set")]
     PictureSet {
         clips: OneOrMany<ClipRef>,
@@ -2216,10 +2257,11 @@ pub enum Request {
         tool: Option<PictureTool>,
     },
     /// Add an effect at its usual values after the effects of clips:
-    /// footage, stills, image sequences and compound clips. The effects work
-    /// in their order, on the picture as its transform and its crop put it
-    /// in the frame, before its composite mode and its opacity. Returns each
-    /// clip with the place of its new effect, counted from 0.
+    /// footage, stills, image sequences and compound clips. A generator takes
+    /// no effects. The effects work in their order, on the picture as its
+    /// transform and its crop put it in the frame, before its composite mode
+    /// and its opacity.
+    /// Returns each clip with the place of its new effect, counted from 0.
     #[serde(rename = "effects.add")]
     EffectsAdd {
         clips: OneOrMany<ClipRef>,
@@ -3695,6 +3737,9 @@ pub enum GuiPanel {
     /// The Effects tab, in the Media Pool's place: the effects to drag
     /// onto a clip.
     Effects,
+    /// The Generators page of the Effects tab: the generators to drag onto
+    /// the timeline.
+    Generators,
     /// The Inspector tab, in the Media Pool's place: the transform, crop
     /// and Dynamic Zoom of the selected clips, as numbers to type or drag.
     Inspector,
@@ -4295,6 +4340,7 @@ impl Request {
                     | Self::MarkersList {}
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }
+                    | Self::GeneratorsList { .. }
                     | Self::PictureGet { .. }
                     | Self::SubtitlesExport { .. }
                     | Self::AnalyzeWords { .. }

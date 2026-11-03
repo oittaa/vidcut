@@ -338,7 +338,7 @@ impl Workspace {
     }
 
     pub(crate) fn add_title(&mut self, ctx: &egui::Context) {
-        let params = json!({ "text": "Title", "at": self.snap.timeline.position });
+        let params = json!({ "text": "Basic Title", "at": self.snap.timeline.position });
         self.timeline.adding_title = Some(Ask::send(&self.live, ctx, "titles.add", params));
     }
 

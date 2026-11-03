@@ -67,6 +67,7 @@ Colors:
 - `export::choose_metadata` picks the HDR metadata, by the rules of `vidcut_core::export` (spec D46). With an SDR timeline, each picture counts as SDR.
 - An export first measures the light that the files do not state (`light::analysis`), and caches it.
   - The GPU measures the HDR pictures that stay on the GPU ([gpu](gpu.md#the-light-meter)).
+  - A generator has no file. Thus it adds no light (`light::sampled`).
 
 The plan:
 
@@ -114,14 +115,17 @@ The plan:
 - `hdr` puts HDR10+ into each HEVC or AV1 frame. Why: the FFmpeg encoders do not do this.
 - vidcut keeps Dolby Vision from a source of profile 8 or 10, with compatibility 1 in PQ or 4 in HLG.
   - It writes profile 8, or profile 10 in AV1. Only libx265 and libsvtav1 write it.
-  - Each frame needs it. Thus a black frame takes the metadata of the frame before it.
-  - Black frames at the start have no frame before them. Then the export has no Dolby Vision.
+  - Each frame needs it. Thus a black or generated frame takes the metadata of the frame before it.
+  - Black or generated frames at the start have no frame before them. Then the export has no Dolby Vision.
 
 Sources:
 
 - `VideoFrames` reads the pieces in order. A piece of the same file keeps its decoder.
 - While the current piece encodes, `Ahead` opens the next file on `vidcut-open`, seeks, and decodes the first frame.
 - Each layer of a dissolve reads its own file.
+- A `VideoPiece::Generated` has no file. `VideoFrames::generated_frame` makes its frame at the size of the plan.
+  - In an SDR timeline, the frame is RGB24.
+  - In an HDR timeline, the frame is RGB48LE. It holds the code values of `generators::timeline_code`, with the tag of the timeline colors (`screen::held::tag`).
 
 Notes:
 
@@ -201,10 +205,11 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - `render::flatten` puts the incoming side over the outgoing side. Its `Over` holds a `render::Smooth`: the `Retime` of the Process and the keys of the curve.
 - Each side takes Nearest. With Faster, each side stays on one source frame (`Pace::of` at the speed 0).
 - Two sides with no placed picture morph. Other sides play as a cross dissolve. Why: the models take whole RGB frames, with no alpha.
-- `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`).
+- A side is a file or a Solid Color (`Side`). Why: a Solid Color acts as a still in a Smooth Cut ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
+- `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`). `ColorSides` draws a Solid Color the same way.
 - `interpolate::between` makes the frame at `Smooth::at`. On macOS, `interpolate::between_frames` makes it from two VideoToolbox frames (`Source::frame_from`).
 - The made frame replaces the incoming layer, at full weight. Thus it covers the outgoing layer.
-- The key of the pair holds both files, both frames and both looks. The time of the outgoing frame orders the pairs. Why: the session of macOS takes times that go up.
+- The key of the pair holds both files, both frames, both looks and both sides. The time of the outgoing frame orders the pairs. Why: the session of macOS takes times that go up.
 - The morph has no shot-change test. Why: a Smooth Cut always joins two shots.
 - A side played backward takes the usual path. The transition then plays as a cross dissolve.
 - The morph takes the decoded frames. AI Super Scale does not enlarge them.
@@ -246,10 +251,11 @@ To the encoder:
 
 The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
 
-- `VideoSettings::drawn_size` gives the size of the draw: `video.width` and `video.height`, or else the size of the timeline.
 - `VideoSettings::written_size` gives the size that the encoder gets. H.264 and HEVC round an odd side up. The other codecs keep the side.
-- `export::validate` refuses an odd `video.width` or `video.height`. Thus only a timeline can have an odd side.
-- With a rounded side, the draw of the timeline stays at the size of the timeline (`VideoFrames::written_at`, `Screen::write_at`).
+- `VideoSettings::drawn_size` gives the size of the draw: the written size with a `video.width` and `video.height`, or else the size of the timeline.
+  - Why: a custom size fits the picture into the file's size with one draw ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
+- `export::validate` refuses a `video.width` or `video.height` outside `TIMELINE_SIDE`.
+- With a rounded side of the timeline, the draw stays at the size of the timeline (`VideoFrames::written_at`, `Screen::write_at`).
 - `Screen::encoded` then draws that `Wide` as one picture into a second `Wide` at the written size (`scale_whole`). `fs_encode` reads the second `Wide`.
   - Why: the fit of a layer is at the size of the timeline ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)). A draw at the written size gives another factor and other bars.
   - `Level::centered` gives one factor for both axes and centers the picture. It takes the smaller factor, so that the whole picture fits.

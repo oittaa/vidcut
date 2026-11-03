@@ -147,7 +147,7 @@ The schema describes the parameters, not the results. This list gives the result
     - `gpu_frames`: the frames made on the GPU.
     - `copies`: the GPU frames copied `down` and `up`.
     - `through_memory`: why the frames went to a GPU encoder through memory, when they did.
-    - `rounded`: the size of the timeline, the size of the file and a `message`, when the two sizes are different.
+    - `rounded`: the size asked for (`asked`), the size of the file (`written`) and a `message`, when the two sizes are different.
     - `color` and `metadata`: what was chosen, and `why`.
     - `tried`: the video encoders that did not open, and why.
     - `sources`: each file, and how it was decoded.
@@ -174,6 +174,7 @@ The schema describes the parameters, not the results. This list gives the result
     - `fps`, only while the job encodes.
 - `proxy generate`: `proxies[]`: `media`, `path`, `made_with` (how it was decoded and encoded), `copies`.
 - `titles add`: `clip` and `track` (where the title went).
+- `generators add`: `clip` and `track` (where the generator went).
 - `looks list`:
   - `looks[]`:
     - `name`, `kind` (`subtitles` or `titles`) and `built_in`.
@@ -183,6 +184,9 @@ The schema describes the parameters, not the results. This list gives the result
 - `looks save`: `look` and `path` (the file written).
 - `looks delete`: `deleted`, `kind` and `path`.
 - `titles list`: for each title, `clip`, `track`, `start`, `end` (frames), `start_tc`, `end_tc`, `enabled` and `title`.
+- `generators list`: for each generator, `clip`, `track`, `start`, `end` (frames), `start_tc`, `end_tc`, `enabled` and `generator`.
+  - `generator` has `kind` (`solid_color` or `carried`) and `name`.
+  - A `solid_color` also has `color`.
 - `subtitles export`:
   - `path`, `track`, `format` and `cues` (how many).
   - `warnings`: the cues of an IMSC1 file that have more lines than their region holds, and an outline wider than the file holds.
