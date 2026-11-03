@@ -318,7 +318,7 @@ impl Canvas {
         }
     }
 
-    fn cut(&mut self, t: &Traced, pen: f32) {
+    fn pen(&mut self, t: &Traced, width: f32) {
         let lines = flattened(t);
         let (x0, y0, x1, y1) = lines.iter().fold(
             (f32::MAX, f32::MAX, f32::MIN, f32::MIN),
@@ -334,7 +334,7 @@ impl Canvas {
         if x1 < x0 {
             return;
         }
-        let r = pen / 2.0;
+        let r = width / 2.0;
         let (left, top) = ((x0 - r).floor() as i32, (y0 - r).floor() as i32);
         let wide = ((x1 + r).ceil() as i32 - left) as usize + 1;
         let tall = ((y1 + r).ceil() as i32 - top) as usize + 1;
@@ -382,9 +382,11 @@ impl Canvas {
         }
         for j in 0..tall {
             for i in 0..wide {
-                let keep = 1.0 - (cover[j * wide + i] / SUB_ROWS as f32).min(1.0);
+                let inked = (cover[j * wide + i] / SUB_ROWS as f32).min(1.0);
                 if let Some(at) = self.index(left + i as i32, top + j as i32) {
-                    self.pixels[at] = self.pixels[at].map(|v| v * keep);
+                    let [r, g, b, a] = self.pixels[at];
+                    let keep = 1.0 - inked;
+                    self.pixels[at] = [r * keep, g * keep, b * keep, inked + a * keep];
                 }
             }
         }
@@ -649,7 +651,7 @@ fn letters(
             };
             canvas.fill(&t, ink);
             if let Some(pen) = pen {
-                canvas.cut(&t, pen);
+                canvas.pen(&t, pen);
             }
         }
     }
