@@ -2130,9 +2130,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The letters of a Text title or a lower third have no hinting. Their advances are the font's own (same renders).
     - The font's kerning also goes across a space, a hyphen and a slash, inside one style. A change of style stops it, and tracking keeps it (measured in Resolve Studio 21.1.2).
     - A scroll and subtitles do not have this kerning across words, because it is not measured there.
-    - Each letter goes over the letters before it. Then a pen of 1 timeline pixel along its edge removes the part under the pen, also from the letters before it (same renders).
+    - Each letter goes over the letters before it. Then an opaque black pen of 1 timeline pixel goes along its edge, over the letter and over all that is under it (same renders).
+    - Thus letters look thin on a dark picture, and they have a thin dark line on a bright picture.
+    - The pen is black with any text color. A file's `strokeColor` and `strokeSize` do not change it (measured in Resolve Studio 21.1.2 over a green clip).
     - The pen is a diamond, as wide as it is tall. Curves are straight lines within 1/6 of a pixel.
-    - These rules give thinner letters than a plain fill. In Resolve Studio 21.1.2, straight edges come within 8 levels of 255 at most sizes. Round letters and serifs come close, and they are not exact.
+    - In Resolve Studio 21.1.2, straight edges come within 8 levels of 255 at most sizes. Round letters and serifs come close, and they are not exact.
     - Zoom draws the letters as the bigger font, and zoom scales the pen. The top of the block stays between whole pixels. This rule is within half a pixel at zoom 2, 3 and 4, and it is less exact at other values.
     - A scroll keeps hinted letters with no pen (measured in Resolve Studio 21.1.2). Subtitles keep them too.
     - A title with an outline has no pen, because a Resolve file draws no outline to compare with.
