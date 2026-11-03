@@ -2246,7 +2246,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It holds its lines as Qt rich text (`title blob`).
     - It has a span for each run of words with the same style.
     - A span has its font: for a title that names none, the family that vidcut draws it in.
-    - A span also has its size in points, its weight (700 bold, else 400), italic, underline and color.
+    - A span also has its size in points, its weight (600 bold, else 400), italic, underline and color.
     - A span with tracking has it in `letter-spacing`, in `px`.
     - A span with lines has `underline`, `overline` or `line-through` in `text-decoration`.
     - A shifted span has `super` or `sub` in `vertical-align`.
