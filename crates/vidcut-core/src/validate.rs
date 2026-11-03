@@ -180,12 +180,18 @@ pub fn violations(p: &Project) -> Vec<String> {
         if !g.bin.is_empty() && !p.bins.contains(&g.bin) {
             v.push(format!("group {} is in unknown bin {:?}", g.id, g.bin));
         }
-        for a in &g.angles {
-            if !pool.contains_key(a.media.as_str()) {
-                v.push(format!("group {} uses unknown media {}", g.id, a.media));
+        for c in g.clips() {
+            if !pool.contains_key(c.media.as_str()) {
+                v.push(format!("group {} uses unknown media {}", g.id, c.media));
             }
-            if !grouped.insert(a.media.as_str()) {
-                v.push(format!("media {} is in two groups", a.media));
+            if !grouped.insert(c.media.as_str()) {
+                v.push(format!("media {} is in two groups", c.media));
+            }
+            if c.head < 0 || c.tail < 0 {
+                v.push(format!(
+                    "group {} gives {} a negative head or tail",
+                    g.id, c.media
+                ));
             }
         }
     }

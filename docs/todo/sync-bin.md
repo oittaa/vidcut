@@ -13,30 +13,25 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
 - `Source::advance` shows the frame whose presentation time has reached the target.
 - `VideoInfo.vfr` records a variable frame rate. The reader still follows presentation time.
 - Waveforms draw on clips.
-- `multicam.layout` works out where angles lie, by timecode or marks. It stores nothing.
+- `multicam.layout` works out where files lie, by timecode or marks. It stores nothing.
 - `multicam.create` stores a synced group, a pool item.
 - `edit.source_overwrite` with `group` lines up by a synced group.
 - `multicam.rows` and `multicam.pick` give the rows of the Sync Bin and choose a camera.
-- `multicam.set` stores the places that the Sync Clips window gives.
+- `multicam.set` stores the rows that the Sync Clips window gives.
 - No command switches angles.
 
 **To do:**
 
 - For the Edit page stage, open a multicam clip as a timeline (p. 1040).
 - For the stage `multicam-clip`, a clip of a group on the timeline follows Save Sync ([deviation X122](../deviations.md#x122-a-clip-on-the-timeline-does-not-follow-save-sync)).
-- Put two files with one camera name on one row:
-  - The Sync Clips window and the Sync Bin refuse them now.
-  - One row holds both files, each at its timecode (measured.md, C3c).
-  - With an overlap, the first file stays whole, and the later file loses the overlap (measured.md, S2, through the API).
 - Measure the Sync Clips window parts that are not measured:
   - Sync by Marker;
+  - Sync by Out on a row of many files;
   - Shift+Comma on a keyboard layout that is not Finnish;
   - the rule of far gaps at other frame rates, and the exact limit between 10:00 and 10:01;
   - the ruler labels of a reopened group with far tags;
   - the Sync Bin for a group whose first tag is not 01:00:00:00;
   - the rows of a file in two groups;
-  - more than 12 cameras: vidcut refuses them now, and the limit in DaVinci Resolve is not known;
-  - a still or a file with no picture in the bin: vidcut refuses them now;
   - files of two different saved groups in one bin: vidcut refuses them now.
 - Measure the Sync Bin parts that are not measured:
   - the number keys and Escape;

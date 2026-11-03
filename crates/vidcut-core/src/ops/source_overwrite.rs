@@ -158,11 +158,33 @@ pub fn file_start_at(p: &Project, m: &Media, at: i64, by_group: bool) -> Result<
     let l = Lining { p, group };
     let o = l.origin(m).unwrap_or_default();
     let whole = o..o + p.media_frames(m);
-    let Some(reference) = by_playhead(l, &whole, at)? else {
+    let Some(reference) = at_playhead(l, &whole, at)? else {
         return Ok(None);
     };
     unchanged_speed(reference)?;
     Ok(Some(lag(l, reference) + o))
+}
+
+fn at_playhead<'a>(l: Lining<'a>, file: &Range<i64>, at: i64) -> Result<Option<&'a Clip>> {
+    let here = |kind: TrackKind| {
+        l.p.tracks
+            .iter()
+            .filter(move |t| t.kind == kind)
+            .flat_map(|t| &t.clips)
+            .filter(move |c| c.start <= at && at < c.end())
+    };
+    let met = |kind: TrackKind| here(kind).find(|c| meets(l, c, file));
+    match (met(TrackKind::Video), met(TrackKind::Audio)) {
+        (Some(v), Some(a)) if lag(l, v) != lag(l, a) => Err(disagree()),
+        (None, None) => match here(TrackKind::Video)
+            .chain(here(TrackKind::Audio))
+            .find(|c| c.speed.is_none() && shown(l, c).is_some())
+        {
+            Some(c) => Ok(Some(c)),
+            None => first_where(l, file, |_| true),
+        },
+        (v, a) => Ok(v.or(a)),
+    }
 }
 
 pub fn source_overwrite(

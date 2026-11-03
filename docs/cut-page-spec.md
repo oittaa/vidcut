@@ -227,17 +227,27 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - `media.get` and the metadata strip show it.
   - vidcut does not read the name from a file. No measurement shows which file tags give it.
 - **Multicam layout** (p. 1037):
-  - `multicam.layout` tells where the angles of a multicam clip lie. It changes nothing, and the project does not store the result.
-  - The angles are in the order of the request.
+  - `multicam.layout` tells where the files of a multicam clip lie. It changes nothing, and the project does not store the result.
+  - The answer has rows. A row holds all files of one camera name. A file with no camera name has its own row.
+  - Named rows come first, in camera order. Rows with no name follow in the order of the request.
   - `sync` is `timecode`, `in`, `out` or `sound`.
   - By `timecode`, each file starts at its start timecode. A file with no timecode starts at 00:00:00:00.
-    - The length is the union of the angles, with any gaps. A gap of hours is not an error.
-    - The start timecode of the whole is the earliest angle.
+    - The length is the union of the files, with any gaps. A gap of hours is not an error.
+    - The start timecode of the whole is the earliest file.
   - By `in` or `out`, the marks of the items line up. The start timecode of the whole is 01:00:00:00.
-  - An item with marks uses only the frames between them. The shift stays.
+    - One mark counts for each row: the mark of the file with the earliest timecode.
+    - The other files of the row keep their timecode distance from that file. The order of the request plays no part.
+    - The measurements cover `in` on a row of many files. `out` follows the same rule and is not measured.
+  - **The row rule:** files of one row do not overlap.
+    - Files go in timecode order. With one timecode, they go in the order of the request.
+    - A file keeps only the part after everything before it. A file with no such part is not on the row, and `dropped` names it.
+    - A file does not move. It loses frames at its start, and `head` gives those frames.
+    - Example: tags 01:00:05:00 and 01:00:10:00 on one row, 750 frames each. The first stays whole. The second keeps 125 frames from 01:00:35:00.
+  - An item with marks uses only the frames between them. The shift stays. `head` and `tail` give the frames that it does not use.
   - `full_extents` uses each whole file. By `in` or `out`, its marks only line it up.
+  - A file with no picture has a row of its own kind, with sound only.
   - No measurement settles these cases, so `multicam.layout` refuses them:
-    - a still, or an item with no picture
+    - a still
     - an item that the request names twice
     - without `full_extents`, an item with one mark only
     - by `in` or `out`, an item without that mark
@@ -251,12 +261,15 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Thus with two files and no match, both are at the start and `unmatched` names both.
   - Two sets of files that do not match each other do not overlap. The later set starts one frame after the earlier one ends.
   - vidcut compares the first sound stream of each file, with all its channels. No measurement shows which channel the Cut page uses.
-  - The angles stay in the order of the request. The measurements show another order, but no rule for it.
+  - Each file is placed by its own sound. The row rule then acts in the order of the request, not in time order.
+    - Thus files c1 and c2 keep c1 whole, and c2 loses its head. Files c2 and c1 keep c2 whole, and c1 is not on the row, although its first frames have nothing over them.
   - `multicam.layout` also gives `pairs`: for each two files the shift, the score and whether they match.
   - While the GUI runs, `multicam.create` by sound is a job.
 - **Synced group** (p. 708):
   - `multicam.create` stores files as a synced group, a pool item with the name "Media Sync", the date and the time. `name` gives another name.
-  - Each file stays whole, as in `multicam.layout` with `full_extents`. Its marks and its start timecode do not change.
+  - It keeps the rows of `multicam.layout` with `full_extents`. A file's marks and its start timecode do not change.
+  - The group stores its rows. A camera name that changes later does not move a file until Auto Sync reads the names again.
+  - A stored file has its visible part: the frames lost at its head and at its tail. A file with no visible part is not in the group, and `dropped` names it.
   - The files stay in their bins. `bin` tells where the group goes, and the top level is the default.
   - `multicam.list` gives each group with its layout. `media.get` and `media.list` give `group` for a file in a group.
   - `multicam.rename` and `multicam.move` act on the group. `multicam.remove` removes the group, and its files stay.
@@ -267,9 +280,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - `multicam.marks.set` and `multicam.marks.clear` act on the In and Out of the group ([§4.1](#41-modes)). `multicam.list` gives them.
   - No command places a group on the timeline.
   - The pool does not show a group as an item. A file in a group has a blue sync badge.
-  - `multicam.set` sets the places and the sync locks of a group ([§7.5](#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). `multicam.create` takes them as `angles`, and the group then starts at 01:00:00:00.
-  - `multicam.set` and `multicam.create` with `angles` apply the rules of far gaps and of the earliest row. `at` plus `hidden` is the place of a file in real time.
-  - `multicam.create` without `angles` keeps each gap. Its start is the first timecode, or 01:00:00:00 by sound, In or Out.
+  - `multicam.set` sets the rows and the sync locks of a group ([§7.5](#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). `multicam.create` takes them as `rows`, and the group then starts at 01:00:00:00.
+    - They refuse files of one row that overlap, and a file with no visible part. A file that no row names is not in the group.
+  - `multicam.set` and `multicam.create` with `rows` apply the rules of far gaps and of the earliest row. `at` plus `hidden` is the place of the first visible frame in real time.
+  - `multicam.create` without `rows` keeps each gap. Its start is the first timecode, or 01:00:00:00 by sound, In or Out.
+  - `multicam.place` moves one file as a drag does, by the rules of overlap in [§7.5](#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112). It refuses a file on a row with the sync lock.
 - **Input Color Space** (pp. 228, 230):
   - The color tags of a file tell how to read the colors of its pictures.
   - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.
@@ -593,21 +608,27 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 
 ### 7.4 Sync Bin (pp. 708–710; measured in Resolve Studio 21.1.2)
 - The Sync Bin tab takes the Media Pool's place. `gui.show sync_bin` opens it. The viewer goes to the timeline.
-- **The rows:** one row for each file of the current bin and its subfolders.
+- **The rows:** one row and one cell for each camera of the current bin and its subfolders.
   - The rows are in camera order and have the numbers 1, 2, 3 up to 9.
-  - Each row shows its file on the timeline's time. All rows move with the playhead.
+  - Each row shows its files on the timeline's time. All rows move with the playhead.
   - A drag to the right moves the playhead earlier. A click on the rows or the ruler does not move it.
   - `multicam.rows` gives the rows at a time.
+- **The files of a row:** a saved group gives its stored rows. With no saved group, the row rule of [§3](#3-media-pool-ch-34-pp-653675) acts on the timecodes.
+  - The file of a row at a time is the file whose visible part holds that time.
+  - Example: tags 01:00:05:00 and 01:00:10:00 on one camera. At source 01:00:15:00 the row shows the first file. At source 01:00:38:00 it shows the second file, 5 seconds long.
 - **The time of a file:** by its synced group when it is in one, and by its timecode otherwise.
-  - The reference is the reference of Source Overwrite with no marks ([§7.2](#72-edit-functions)).
+  - The rows follow the source timecode of the clip at the playhead, not the record time.
+  - Example: a timeline of three files in a row, with the second file at the playhead. The rows read that file's source timecode.
+  - With several clips at the playhead, the clip on the lowest track that overlaps the file counts. A video clip and an audio clip that disagree refuse.
+  - With no clip at the playhead, the first clip that overlaps the whole file counts.
   - A file with no time in common with the timeline has an empty row.
-- **The grid:** the viewer shows the files at the playhead, with the title "Sync Bin". The sound is the timeline's sound.
+- **The grid:** the viewer shows the cameras at the playhead, with the title "Sync Bin". The sound is the timeline's sound.
   - A cell has its number at the top left and "Camera" with its name at the bottom.
-  - The file on top at the playhead is the active camera. Its cell has a red outline and a red corner, and its row number is red.
-  - A file with no frame at the playhead shows a black cell.
+  - The camera with the file on top at the playhead is the active camera. Its cell has a red outline and a red corner, and its row number is red.
+  - A camera with no file at the playhead shows a black cell with its number and label.
 - **Choosing a camera:** a click on its cell, a click on its row number, or its number key (p. 709).
-  - The viewer shows that file alone, with its name as the title and a close button at the top left.
-  - `multicam.pick` sets the source marks: In at the playhead, five seconds long, stopping at the file's end.
+  - The viewer shows the camera's file at the playhead alone. Its name is the title, and a close button is at the top left.
+  - `multicam.pick` sets the source marks of that file only: In at the playhead, five seconds long, stopping at the file's end. Marks on other files stay.
   - A click on a black cell only shows a white outline. It sets no marks and opens no view.
   - The close button or Escape returns to the grid and writes nothing (p. 709).
 - **Source Overwrite** writes the marked range by the rules of [§7.2](#72-edit-functions), with `group` for a file in a group.
@@ -619,8 +640,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The reference is then the first clip that overlaps the whole file, as the marked range overlaps no clip.
 - vidcut refuses these cases with an error, because they are not measured:
   - a file with no picture, or a still;
-  - a file with no camera name, or two files with one camera name;
-  - more than 9 files;
+  - a file with no camera name;
+  - more than 9 cameras;
   - files of different groups, or files in a group with files in none;
   - a file with no timecode tag and no group.
 
@@ -635,18 +656,25 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The window is inside vidcut's main window ([deviation X121](deviations.md#x121-the-sync-clips-window-is-inside-the-main-window)).
 - **Which files it takes:**
   - A file with no camera name opens the window. Its camera name stays empty after Save Sync.
-  - The window takes 12 cameras. The measurements stop at 12, so vidcut refuses more.
-  - vidcut refuses a still, a file with no picture, and files of different groups.
-  - Two files with one camera name in a bin with other cameras refuse.
+  - The window has no limit of cameras. The measurements open 24 cameras.
+  - A still is left out.
+  - A file with no picture has a row with a waveform, and its cell shows a waveform symbol.
+  - vidcut refuses files of different groups.
+  - Two files with one camera name in a bin with other cameras share one row.
 - **The window:**
-  - Left: "Sync View", a grid of all files. Right: the viewer of the chosen cell, with the name of its file.
+  - Left: "Sync View", a grid of all cameras. Right: the viewer of the chosen cell, with the name of its file.
   - The measured grids: 2 cameras side by side, 3 or 4 in 2 by 2, 6 in 3 by 2, 12 in 4 by 3.
-  - One row for each file. Named files come first, in camera order, with 10 after 9. Files with no name follow in bin order.
+  - More measured grids: 13 cameras in 4 by 4, 24 in 5 by 5.
+  - One row and one cell for each camera. A row holds all files of that camera. Named rows come first, in camera order, with 10 after 9. Files with no name follow in bin order.
   - The numbers of the rows and the cells are positions. The label of a cell is the camera name, for example cells 1 to 6 with Camera 7 to Camera 12.
   - A file with no name has the label Camera and its row position.
+  - A cell whose camera has no file at the playhead is black, with its number and label.
 - **Selection:**
-  - A click on a row selects the row. The row gets a red outline, and a nudge, a drag and the sync icon act on it. The viewer and the red number do not change.
-  - A click on a cell selects its row. The viewer shows that file, and the red number follows the cell.
+  - A click on a clip selects that clip only, with a red outline. The viewer and the red cell number do not change.
+  - A click on the empty part of a row selects the row. Its cell turns red, the viewer shows that camera, and no clip is selected. The other clips have blue outlines.
+  - A click on the row header selects the row number, which turns red.
+  - A click on a cell selects its row. The viewer shows that camera, the red number follows the cell, and no clip is selected.
+  - The sync icon acts on the row of the last click.
 - **Play:**
   - A click or a drag on the ruler moves the playhead of the window.
   - Play and Space play the pictures and the sound. Space also stops.
@@ -659,6 +687,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Places at open:** each file lies at its timecode, and no row has a sync icon.
   - Tags 01:00:00:00, 01:00:05:00 and 01:00:10:00 give rows at 0, 125 and 250.
   - A file with no tag reads 00:00:00:00. Thus with no tags, all files start at one point.
+  - The row rule of [§3](#3-media-pool-ch-34-pp-653675) acts on two files of one camera.
 - **The ruler** shows the timecodes of the files.
   - It starts at the earliest timecode of the files. Where all files read 00:00:00:00, it starts at 01:00:00:00.
   - Its start does not change when rows move.
@@ -671,21 +700,29 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The empty front goes away. The frames of the group fall, and its start stays.
   - One measurement gave 936 frames from 1005.
 - **Auto Sync:** it runs the method under "Sync By" and replaces the places: Timecode, Sound, In or Out.
-  - Each row that it lines up gets a sync icon, the sync lock.
-  - With In or Out, each file needs that mark. A file stays whole.
+  - It reads the camera names again, so the rows can change. It gives whole files at their places, and the row rule acts again.
+  - Each row that it lines up gets one sync icon, the sync lock.
+  - With In or Out, each file needs that mark. One mark counts for each row ([§3](#3-media-pool-ch-34-pp-653675)). A file stays whole.
   - By sound, a file that matches no other file stays at the start, with no icon. "Auto Sync Failed" names such files.
   - Auto Sync reads the marks at that moment.
   - On a saved group, the result waits for Save Sync ([deviation X119](deviations.md#x119-auto-sync-on-a-saved-group-waits-for-save-sync)).
 - **By hand:**
-  - A drag moves a row with no sync icon. A row with one does not move.
+  - Keys and drags act on the selected or dragged clip only. The other clips of the row stay.
+  - A drag moves a clip on a row with no sync icon. On a row with one, nothing moves.
   - The sync icon in the bar turns the sync lock of the selected row on and off.
-  - Period moves the selected row 1 frame later, and Shift+Period 5 frames later. Comma moves it 1 frame earlier.
+  - Period moves the selected clip 1 frame later, and Shift+Period 5 frames later. Comma moves it 1 frame earlier. With no clip selected, these keys move nothing.
   - Shift+Comma moves it 5 frames earlier, by the manual (p. 707). No measurement on a Finnish keyboard shows that move.
   - These keys work by the key's place too, so Shift+Comma and Shift+Period work on a layout that makes them other signs.
-  - Comma on a row at the start changes nothing. A drag before the start stops the row at the start, and the other rows stay.
+  - Comma on a clip at the start changes nothing. A drag before the start stops the clip at the start, and the other clips stay.
   - A drag on an opened group changes the group at Save Sync ([deviation X120](deviations.md#x120-a-drag-in-an-opened-group-changes-the-group-at-save-sync)).
-- **Save Sync** stores the places and the sync locks, and closes the window.
-  - The first Save Sync makes a group. It is `multicam.create` with `angles`.
+- **Overlap by a drag:** the moved clip stays as it is. The other clip of the row gives way when the drag ends.
+  - The moved clip's start is inside the other: the other ends at the moved clip's start. Its tail is gone, also past the moved clip's end.
+  - The moved clip covers the other's start and ends inside it: the other starts at the moved clip's end. Its tail stays in place.
+  - The moved clip covers all of the other: the other leaves the row and the group.
+  - A cut stays when the clip is dragged away again. A part keeps its length when dragged.
+  - `multicam.place` and a nudge follow these rules too.
+- **Save Sync** stores the places, the rows and the sync locks, and closes the window.
+  - The first Save Sync makes a group. It is `multicam.create` with `rows`.
   - The start of that group is always 01:00:00:00: tags from 01:00:00:00, tags from 01:02:00:00, no tags, mixed, and after Auto Sync.
   - After the rule of far gaps, the frames of a group run from the first row's start to the last row's end.
   - A Save Sync on an opened group keeps the group, its name and its start. It is `multicam.set`.

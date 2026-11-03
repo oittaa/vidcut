@@ -2621,27 +2621,35 @@ fn mutate(
             sync,
             name,
             bin,
-            angles,
+            rows,
         } => {
             let new = crate::multicam::NewGroup {
                 sync: *sync,
-                angles: angles.as_deref(),
+                rows: rows.as_deref(),
                 name: name
                     .clone()
                     .unwrap_or_else(|| format!("Media Sync {}", env.local_stamp())),
                 bin: bin.as_deref().unwrap_or_default(),
             };
-            let (id, unmatched) = crate::multicam::create(p, env, &media.to_vec(), new)?;
-            let g = p.group(&id).expect("just made");
+            let made = crate::multicam::create(p, env, &media.to_vec(), new)?;
+            let g = p.group(&made.id).expect("just made");
             let mut v = crate::multicam::group_json(p, g);
-            if !unmatched.is_empty() {
-                v["unmatched"] = json!(unmatched);
+            if !made.unmatched.is_empty() {
+                v["unmatched"] = json!(made.unmatched);
+            }
+            if !made.dropped.is_empty() {
+                v["dropped"] = json!(made.dropped);
             }
             v
         }
-        Request::MulticamSet { group, angles } => {
-            crate::multicam::set_angles(p, group, angles)?;
+        Request::MulticamSet { group, rows } => {
+            crate::multicam::set_rows(p, group, rows)?;
             let g = p.group(group).expect("just set");
+            crate::multicam::group_json(p, g)
+        }
+        Request::MulticamPlace { group, media, at } => {
+            crate::multicam::place(p, group, media, *at)?;
+            let g = p.group(group).expect("just placed");
             crate::multicam::group_json(p, g)
         }
         Request::MulticamRemove { group } => {
@@ -5166,9 +5174,11 @@ fn groups_to_rate(p: &mut Project, from: Rational) {
     let to = p.settings.fps;
     for g in &mut p.groups {
         g.start = rescale(g.start, from, to);
-        for a in &mut g.angles {
-            a.at = rescale(a.at, from, to);
-            a.hidden = rescale(a.hidden, from, to);
+        for c in g.rows.iter_mut().flat_map(|r| &mut r.clips) {
+            c.at = rescale(c.at, from, to);
+            c.hidden = rescale(c.hidden, from, to);
+            c.head = rescale(c.head, from, to);
+            c.tail = rescale(c.tail, from, to);
         }
         g.marks.mark_in = g.marks.mark_in.map(|f| rescale(f, from, to));
         g.marks.mark_out = g.marks.mark_out.map(|f| rescale(f, from, to));
