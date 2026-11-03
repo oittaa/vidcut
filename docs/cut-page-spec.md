@@ -38,7 +38,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
-- Sync Bin ([todo](todo/sync-bin.md)), Multi Source, Source Overwrite, Live Overwrite
+- Sync Bin ([todo](todo/sync-bin.md)), Multi Source, Live Overwrite
 - making a compound clip from timeline clips ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
@@ -468,7 +468,45 @@ Video Only and Audio Only limit what an edit takes (p. 694).
     2. a lone timeline Out with the source Out (backtimed);
     3. with no marks, within 5 frames of an edit, with that edit;
     4. otherwise with the playhead.
-- **Close Up, Source Overwrite (later).**
+- **Source Overwrite** (pp. 700–701; measured in Resolve Studio 21.1.2):
+  - It puts a file in sync by timecode with a reference clip on the timeline.
+    - The clip's position is the reference's start, plus the file's timecode, minus the timecode of the reference at its start.
+    - The timeline's own start timecode plays no part.
+    - A file with no timecode tag has timecode 0.
+  - A clip counts when the timecode range that it shows overlaps the file. The rest of its media does not count.
+    - Audio clips count. Generators do not count.
+  - **With timeline marks,** the source marks play no part.
+    - The reference is the first of these: a clip at In, a clip in the marked range, any clip.
+    - In each, the lowest track comes first, then the earliest clip.
+    - The new clip goes from In to Out. With no Out, it goes to the file's end.
+    - It stops at the file's end. It starts at the file's start ([deviation X113](deviations.md#x113-source-overwrite-starts-where-the-file-starts)).
+  - **With source marks and no timeline marks,** the playhead plays no part.
+    - The reference is the first clip that overlaps the marked range: lowest track first, then the earliest clip.
+    - The marked range goes in.
+  - **With no marks,** the whole file goes in.
+    - Take the lowest track with a clip under the playhead that overlaps the file.
+    - T is the source timecode of that clip at the playhead.
+    - The reference is the first clip on that track that overlaps the file and starts at or before T.
+    - With no such clip under the playhead, the reference is the first clip that overlaps: lowest track first, then the earliest clip.
+  - With source marks or no marks, the clip is cut at the timeline start, and it can pass the timeline end.
+  - **Track:** the first video track above the highest track with a clip in the new clip's range.
+    - With no clip in the range, the track is V1, even into a gap.
+    - It makes the track if necessary. It never fills a free lower track.
+    - An audio-only edit always makes a new top audio track.
+  - **After the edit,** the timeline marks clear, and the source marks stay.
+    - The playhead goes to the clip's end.
+    - When the edit made a new track, the playhead stops at the old timeline end at the latest.
+  - With no overlap, or on an empty timeline, nothing changes and vidcut tells why ([deviation X114](deviations.md#x114-source-overwrite-tells-when-it-writes-nothing)).
+  - vidcut refuses these cases with an error, because they are not measured:
+    - an Out mark with no In, on the timeline or on the source;
+    - an In mark with no Out, when no clip that overlaps is at In;
+    - a reference clip with a changed speed;
+    - a file or a reference clip at another frame rate than the timeline;
+    - a source with no picture, or a still;
+    - a video clip and an audio clip that give different positions under the same rule;
+    - a range with left-out frames, `tape` and `track`;
+    - several selected pool items in the window.
+- **Close Up (later).**
 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
 - **Onto an empty timeline, or left of the first clip:** the clip becomes the first clip.
@@ -1359,6 +1397,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The target track is V1 by default, and A1 for sound alone (D26).
   - The manual does not say which track Append uses. Append always uses Track 1.
   - Place On Top selects its own track (D24).
+  - Source Overwrite selects its own track ([§7.2](#72-edit-functions)).
 - **D4. Trim Start/End to Playhead.**
   - It applies to the selected clips.
   - With no clip selected, it applies to the Track 1 clip under the playhead.
