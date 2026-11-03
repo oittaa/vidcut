@@ -475,6 +475,7 @@ pub struct TitlePicture {
     pub width: u32,
     pub height: u32,
     pub frame: (u32, u32),
+    pub rest: f64,
     pub rgba: Vec<u8>,
 }
 

@@ -140,7 +140,10 @@ impl Titles {
                         ((x - x0) * w).round() as i32,
                         shown.run.top(0, h, f64::from(p.height)).round() as i32 - p.top,
                     ),
-                    None => (((x - x0) * w).round() as i32, ((y - y0) * h).round() as i32),
+                    None => (
+                        ((x * w).round() - (x0 * w).round()) as i32,
+                        ((y - y0) * h + p.rest).floor() as i32,
+                    ),
                 };
                 out.push(TitleOver {
                     above: *above,
@@ -218,6 +221,7 @@ fn drawn((t, (width, height), whole): &Key, timeline: u32) -> Vec<Option<Arc<Tit
                     width: sprite.width,
                     height: sprite.height,
                     frame: (width, height),
+                    rest: f64::from(sprite.rest),
                     rgba: sprite.premultiplied(),
                 })
             })

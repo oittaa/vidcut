@@ -2123,9 +2123,18 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A `size` in the style goes on both lines of a lower third.
     - Resolve's Inspector shows a tracking of 11 on its upper line, but its file has no `letter-spacing`. vidcut's usual upper line has no tracking.
     - Lines the font's own line height apart, rounded up to a whole pixel (measured in Resolve Studio 21.1.2 with four fonts).
-    - The baseline of a line of a Text title or a lower third is the font's ascent below the top of the line. The font's leading goes below the text.
-    - The ascent goes up to a whole pixel when it is more than a quarter past one. This fits Resolve Studio 21.1.2 with four fonts at five sizes.
-    - The top of a block goes down to a whole pixel, as in the same renders.
+    - A line's baseline in a Text title or a lower third is half a pixel below the font's ascent, from the line's top. The font's leading goes below the text.
+    - The top of a block goes down to a whole pixel (measured in Resolve Studio 21.1.2 with four fonts at four sizes).
+    - The left of a block starts at its middle, rounded to a whole pixel. It goes left by the anchor's part of the width, then right by half a pixel. That width is the whole pixels of the widest line, plus 1 (same renders).
+    - Each line sits in the block by the exact difference from the widest line, with no rounding (same renders).
+    - The letters of a Text title or a lower third have no hinting. Their advances are the font's own (same renders).
+    - Each letter goes over the letters before it. Then a pen of 1 timeline pixel along its edge removes the part under the pen, also from the letters before it (same renders).
+    - The pen is a diamond, as wide as it is tall. Curves are straight lines within 1/6 of a pixel.
+    - These rules give thinner letters than a plain fill. In Resolve Studio 21.1.2, straight edges come within 8 levels of 255 at most sizes. Round letters and serifs come close, and they are not exact.
+    - Zoom draws the letters as the bigger font, and zoom scales the pen. The top of the block stays between whole pixels. This rule is within half a pixel at zoom 2, 3 and 4, and it is less exact at other values.
+    - A scroll keeps hinted letters with no pen (measured in Resolve Studio 21.1.2). Subtitles keep them too.
+    - A title with an outline has no pen, because a Resolve file draws no outline to compare with.
+    - The lines `<u>`, `<o>` and `<s>` round the ascent up when it is more than a quarter past a whole pixel. The height of `<sup>` and `<sub>` does the same.
     - The lines of a scroll are 4/3 of the font's line height plus 10 timeline pixels apart. This fits Resolve Studio 21.1.2 within 5 pixels with four fonts.
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
