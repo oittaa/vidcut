@@ -1975,7 +1975,8 @@ pub struct Title {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<TitleAnchor>,
     /// Its lines, separated by `\n`: two at most for a lower third. `<b>`,
-    /// `<i>`, `<u>` and `<font color="…" face="…" size="…" spacing="…"
+    /// `<i>`, `<u>`, `<o>` (a line over), `<s>` (a line through), `<sup>`,
+    /// `<sub>` and `<font color="…" face="…" size="…" spacing="…"
     /// tracking="…">` style the words between them apart from the rest, `size`
     /// a fraction of the picture height like the style's, `spacing` the line
     /// spacing of their line, `tracking` like the style's; `&lt;`, `&gt;` and
@@ -2279,6 +2280,7 @@ impl Title {
     pub const MOST_SIZE: u32 = 4096;
     pub const MOST_SPACING: f64 = 4096.0;
     pub const TRACKING_PIXEL: f64 = 0.75;
+    pub const SHIFTED_SIZE: f64 = 2.0 / 3.0;
     pub const LINE: f64 = 1.31;
     pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;

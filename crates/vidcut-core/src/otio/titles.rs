@@ -8,7 +8,7 @@ use crate::model::{
     Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, TextStroke, Title,
     TitleAlign, TitleAnchor, TitleKind, TitleLine, TitleShadow, TitleStyle, size_fits,
 };
-use crate::rich::{self, Look, Span};
+use crate::rich::{self, Look, Shift, Span};
 
 pub const UNKNOWN_HEIGHT: u32 = 1080;
 const USUAL_FAMILY: &str = "Open Sans";
@@ -279,17 +279,30 @@ fn span_html(text: &str, look: &Look, base: &Base) -> String {
     } else {
         ""
     };
-    let under = if look.underline {
-        " text-decoration: underline;"
+    let bars: Vec<&str> = [
+        (look.underline, "underline"),
+        (look.overline, "overline"),
+        (look.strike, "line-through"),
+    ]
+    .into_iter()
+    .filter_map(|(on, name)| on.then_some(name))
+    .collect();
+    let under = if bars.is_empty() {
+        String::new()
     } else {
-        ""
+        format!(" text-decoration: {};", bars.join(" "))
+    };
+    let shifted = match look.shift {
+        Some(Shift::Up) => " vertical-align:super;",
+        Some(Shift::Down) => " vertical-align:sub;",
+        None => "",
     };
     let tracked = match look.tracking.unwrap_or(base.tracking) {
         0.0 => String::new(),
         t => format!(" letter-spacing:{}px;", number(t)),
     };
     format!(
-        "<span style=\" font-family:'{family}'; font-size:{}pt; font-weight:{weight};{italic}{under}{tracked} \
+        "<span style=\" font-family:'{family}'; font-size:{}pt; font-weight:{weight};{italic}{under}{shifted}{tracked} \
          color:{color};\">{}</span>",
         number(points),
         escaped(text)
@@ -700,6 +713,9 @@ struct Styled {
     bold: bool,
     italic: bool,
     underline: bool,
+    overline: bool,
+    strike: bool,
+    shift: Option<Shift>,
     tracking: f64,
 }
 
@@ -725,6 +741,13 @@ fn styled(style: &str) -> Styled {
             .is_some_and(|w| w >= 600),
         italic: style_value(style, "font-style") == Some("italic"),
         underline: style_value(style, "text-decoration").is_some_and(|d| d.contains("underline")),
+        overline: style_value(style, "text-decoration").is_some_and(|d| d.contains("overline")),
+        strike: style_value(style, "text-decoration").is_some_and(|d| d.contains("line-through")),
+        shift: match style_value(style, "vertical-align") {
+            Some("super") => Some(Shift::Up),
+            Some("sub") => Some(Shift::Down),
+            _ => None,
+        },
         tracking: style_value(style, "letter-spacing")
             .and_then(|s| s.strip_suffix("px"))
             .and_then(|s| s.trim().parse().ok())
@@ -750,6 +773,9 @@ fn markup(
                 bold: st.bold,
                 italic: st.italic,
                 underline: st.underline,
+                overline: st.overline,
+                strike: st.strike,
+                shift: st.shift,
                 spacing,
                 tracking: (st.tracking != tracking).then_some(st.tracking),
                 color: st

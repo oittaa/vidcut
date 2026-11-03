@@ -567,6 +567,16 @@ impl Workspace {
             if ui.button(RichText::new("U").underline()).clicked() {
                 changed |= wrap(&mut d, "<u>".into(), "</u>");
             }
+            for (label, open, close) in [
+                ("Overline", "<o>", "</o>"),
+                ("Strike", "<s>", "</s>"),
+                ("Super", "<sup>", "</sup>"),
+                ("Sub", "<sub>", "</sub>"),
+            ] {
+                if ui.button(label).clicked() {
+                    changed |= wrap(&mut d, open.into(), close);
+                }
+            }
             swatch(ui, &mut d.word_color, [255, 215, 0]);
             if ui.button("Color").clicked()
                 && let Some(c) = vidcut_core::subtitles::color(&d.word_color)

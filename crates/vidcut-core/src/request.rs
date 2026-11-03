@@ -2009,7 +2009,8 @@ pub enum Request {
     #[serde(rename = "titles.add")]
     TitlesAdd {
         /// Its lines, separated by a line break: two at most for a lower
-        /// third. `<b>`, `<i>`, `<u>` and `<font color="…" face="…"
+        /// third. `<b>`, `<i>`, `<u>`, `<o>`, `<s>`, `<sup>`, `<sub>` and
+        /// `<font color="…" face="…"
         /// size="…">` style words apart; `&lt;`, `&gt;` and `&amp;` stand for
         /// `<`, `>` and `&`.
         text: String,

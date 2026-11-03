@@ -1,14 +1,15 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use cosmic_text::{
-    Align, Attrs, Buffer, Color, Family, FontSystem, LayoutRun, Metrics, Renderer, Shaping, Style,
-    SwashCache, UnderlineStyle, Weight, Wrap, fontdb,
+    Align, Attrs, Buffer, Color, Family, FontSystem, LayoutGlyph, LayoutRun, Metrics, Renderer,
+    Shaping, Style, SwashCache, UnderlineStyle, Weight, Wrap, fontdb,
 };
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
     Place, SubtitleAlign, SubtitleStyle, TextStroke, Title, TitleAlign, TitleBlock, TitlePart,
     TitleShadow, TitleStyle,
 };
+use vidcut_core::rich::Shift;
 use vidcut_core::subtitles::{Piece, Shown, rgb};
 
 const FAMILIES: &[&str] = &[
@@ -101,6 +102,8 @@ fn unit([r, g, b]: [u8; 3], a: f32) -> [f32; 4] {
 
 const HIDDEN: usize = 1;
 const POPPED: usize = 2;
+const RAISED: usize = 4;
+const LOWERED: usize = 8;
 
 fn spans<'a>(
     pieces: &[Piece],
@@ -407,11 +410,64 @@ impl Renderer for Bars {
     fn glyph(&mut self, _: cosmic_text::PhysicalGlyph, _: Color) {}
 }
 
-fn traces(runs: &[LayoutRun<'_>], f: &mut Fonts) -> Option<Vec<Traced>> {
+fn decorate<R: Renderer>(renderer: &mut R, run: &LayoutRun<'_>, ink: Color, scale: Option<f32>) {
+    let Some(scale) = scale else {
+        cosmic_text::render_decoration(renderer, run, ink);
+        return;
+    };
+    for span in run.decorations {
+        let (x0, x1) = run.glyphs[span.glyph_range.clone()]
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, b), g| {
+                (a.min(g.x), b.max(g.x + g.w))
+            });
+        if x1 <= x0 {
+            continue;
+        }
+        let deco = &span.data;
+        let full = deco.underline_metrics.thickness * span.font_size;
+        let ascent = deco.ascent * span.font_size;
+        let height = (full - scale).max(scale);
+        let color = span.color_opt.unwrap_or(ink);
+        let mut bar = |from: f32| {
+            let top = run.line_y.trunc() + from;
+            let bottom = top + height;
+            let mut row = top.floor();
+            while row < bottom {
+                let cover = (row + 1.0).min(bottom) - row.max(top);
+                let alpha = f32::from(color.a()) * cover;
+                let faded = Color::rgba(color.r(), color.g(), color.b(), alpha as u8);
+                renderer.rectangle(x0 as i32, row as i32, (x1 - x0) as u32, 1, faded);
+                row += 1.0;
+            }
+        };
+        if deco.text_decoration.underline != UnderlineStyle::None {
+            bar(full / 3.0 + 1.5 * scale);
+        }
+        if deco.text_decoration.strikethrough {
+            bar(scale - ascent / 3.0);
+        }
+        if deco.text_decoration.overline {
+            bar(-ascent);
+        }
+    }
+}
+
+fn traces(
+    runs: &[LayoutRun<'_>],
+    lifts: &[Vec<f32>],
+    scale: Option<f32>,
+    f: &mut Fonts,
+) -> Option<Vec<Traced>> {
     let mut bars = Bars(Vec::new());
-    for run in runs {
-        for g in run.glyphs.iter().filter(|g| g.metadata & HIDDEN == 0) {
-            let p = g.physical((0., run.line_y), 1.0);
+    for (run, lift) in runs.iter().zip(lifts) {
+        for (g, up) in run
+            .glyphs
+            .iter()
+            .zip(lift)
+            .filter(|(g, _)| g.metadata & HIDDEN == 0)
+        {
+            let p = g.physical((0., run.line_y + up), 1.0);
             let path = f.cache.get_outline_commands(&mut f.system, p.cache_key)?;
             bars.0.push(Traced {
                 x: p.x,
@@ -423,7 +479,7 @@ fn traces(runs: &[LayoutRun<'_>], f: &mut Fonts) -> Option<Vec<Traced>> {
                 ),
             });
         }
-        cosmic_text::render_decoration(&mut bars, run, Color::rgb(255, 255, 255));
+        decorate(&mut bars, run, Color::rgb(255, 255, 255), scale);
     }
     Some(bars.0)
 }
@@ -492,6 +548,32 @@ fn line_gap(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) ->
             Some(title.line_gap(f64::from(own), f64::from(px), pixel) as f32)
         })
         .unwrap_or(px * look.line)
+}
+
+fn shifts(system: &mut FontSystem, run: &LayoutRun<'_>) -> Vec<f32> {
+    let shifted = |g: &LayoutGlyph| g.metadata & (RAISED | LOWERED) != 0;
+    let whole = run.glyphs.iter().all(shifted);
+    run.glyphs
+        .iter()
+        .map(|g| {
+            let font = shifted(g)
+                .then(|| system.get_font(g.font_id, g.font_weight))
+                .flatten();
+            let Some(font) = font else {
+                return 0.0;
+            };
+            let m = font.metrics();
+            let em = g.font_size / f32::from(m.units_per_em);
+            let height = (m.ascent - m.descent) * em;
+            let lift = if g.metadata & RAISED != 0 {
+                -height / 2.0
+            } else {
+                height / 6.0
+            };
+            let seated = (m.ascent + m.descent) * em / 4.0;
+            if whole { lift + seated } else { lift }
+        })
+        .collect()
 }
 
 fn spaced<'a>(buffer: &'a Buffer, below: &[f32]) -> Vec<LayoutRun<'a>> {
@@ -564,9 +646,25 @@ fn lay_out(look: &Look) -> Option<Laid> {
                 if r.look.underline {
                     a = a.underline(UnderlineStyle::Single);
                 }
-                let px = r.look.size.map_or(size, |s| (s as f32 * per).max(1.0));
-                let gap = line_gap(&mut f.system, look, &a, px);
-                a = a.metrics(Metrics::new(px, gap));
+                if r.look.overline {
+                    a = a.overline();
+                }
+                if r.look.strike {
+                    a = a.strikethrough();
+                }
+                let full = r.look.size.map_or(size, |s| (s as f32 * per).max(1.0));
+                let gap = line_gap(&mut f.system, look, &a, full);
+                let px = match r.look.shift {
+                    Some(_) => full * Title::SHIFTED_SIZE as f32,
+                    None => full,
+                };
+                a = a
+                    .metrics(Metrics::new(px, gap))
+                    .metadata(match r.look.shift {
+                        Some(Shift::Up) => RAISED,
+                        Some(Shift::Down) => LOWERED,
+                        None => 0,
+                    });
                 let tracking = r.look.tracking.map_or(look.tracking, |t| t as f32);
                 if tracking != 0.0 {
                     let pixels = tracking * Title::TRACKING_PIXEL as f32 * look.spacing.1;
@@ -597,6 +695,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
         Markup::Pieces(..) => Vec::new(),
     };
     let runs = spaced(&buffer, &below);
+    let lifts: Vec<Vec<f32>> = runs.iter().map(|r| shifts(&mut f.system, r)).collect();
     let lines: f32 = runs.iter().map(|r| r.line_height).sum();
     let rise = runs.iter().map(|r| r.line_top).fold(0.0, f32::min);
     let inked = runs
@@ -670,6 +769,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     let (w, h) = (cw as usize, ch as usize);
     let mut canvas = vec![[0.0f32; 4]; w * h];
     let white = Color::rgb(255, 255, 255);
+    let scale = look.title_gap.map(|_| look.spacing.1);
     let mut painter = cosmic_text::LegacyRenderer {
         font_system: &mut f.system,
         cache: &mut f.cache,
@@ -694,16 +794,21 @@ fn lay_out(look: &Look) -> Option<Laid> {
             }
         },
     };
-    for run in runs.iter().filter(|_| !look.bare) {
-        for g in run.glyphs.iter().filter(|g| g.metadata & HIDDEN == 0) {
+    for (run, lift) in runs.iter().zip(&lifts).filter(|_| !look.bare) {
+        for (g, up) in run
+            .glyphs
+            .iter()
+            .zip(lift)
+            .filter(|(g, _)| g.metadata & HIDDEN == 0)
+        {
             painter.glyph(
-                g.physical((0., run.line_y), 1.0),
+                g.physical((0., run.line_y + up), 1.0),
                 g.color_opt.unwrap_or(white),
             );
         }
-        cosmic_text::render_decoration(&mut painter, run, white);
+        decorate(&mut painter, run, white, scale);
     }
-    let traced = stroke.and_then(|_| traces(&runs, f));
+    let traced = stroke.and_then(|_| traces(&runs, &lifts, scale, f));
     drop(held);
     let alpha: Vec<f32> = canvas.iter().map(|p| p[3]).collect();
     let on_top = traced.is_some() && stroke.is_some_and(|s| !s.outside);
