@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use crate::error::{Error, Result};
-use crate::model::{Clip, Media, Project, TrackKind, uncovered};
+use crate::model::{Clip, Media, Project, SyncGroup, TrackKind, uncovered};
 
 use super::{Source, fix_audio, make_clip, place_block, track_above, tracks, unlocked};
 
@@ -40,19 +40,34 @@ fn lines_up(p: &Project, m: &Media) -> Result<()> {
     }
 }
 
-fn shown(p: &Project, c: &Clip) -> Option<Range<i64>> {
-    let m = p.media(&c.media).filter(|m| !m.is_still())?;
+#[derive(Clone, Copy)]
+struct Lining<'a> {
+    p: &'a Project,
+    group: Option<&'a SyncGroup>,
+}
+
+impl Lining<'_> {
+    fn origin(&self, m: &Media) -> Option<i64> {
+        match self.group {
+            Some(g) => g.at_of(&m.id),
+            None => Some(origin(self.p, m)),
+        }
+    }
+}
+
+fn shown(l: Lining<'_>, c: &Clip) -> Option<Range<i64>> {
+    let m = l.p.media(&c.media).filter(|m| !m.is_still())?;
     let (a, b) = (c.source_at(c.start), c.source_at(c.end() - 1));
-    let o = origin(p, m);
+    let o = l.origin(m)?;
     Some(o + a.min(b)..o + a.max(b) + 1)
 }
 
-fn meets(p: &Project, c: &Clip, file: &Range<i64>) -> bool {
-    shown(p, c).is_some_and(|s| s.start < file.end && file.start < s.end)
+fn meets(l: Lining<'_>, c: &Clip, file: &Range<i64>) -> bool {
+    shown(l, c).is_some_and(|s| s.start < file.end && file.start < s.end)
 }
 
-fn lag(p: &Project, c: &Clip) -> i64 {
-    c.start - shown(p, c).map_or(0, |s| s.start)
+fn lag(l: Lining<'_>, c: &Clip) -> i64 {
+    c.start - shown(l, c).map_or(0, |s| s.start)
 }
 
 fn disagree() -> Error {
@@ -60,69 +75,69 @@ fn disagree() -> Error {
 }
 
 fn first_where<'a>(
-    p: &'a Project,
+    l: Lining<'a>,
     file: &Range<i64>,
     test: impl Fn(&Clip) -> bool,
 ) -> Result<Option<&'a Clip>> {
-    let mut found = p
-        .tracks
-        .iter()
-        .flat_map(|t| t.clips.iter().map(move |c| (t.kind, c)))
-        .filter(|(_, c)| meets(p, c, file) && test(c));
+    let mut found =
+        l.p.tracks
+            .iter()
+            .flat_map(|t| t.clips.iter().map(move |c| (t.kind, c)))
+            .filter(|(_, c)| meets(l, c, file) && test(c));
     let Some((kind, c)) = found.next() else {
         return Ok(None);
     };
     match found.find(|(k, _)| *k != kind) {
-        Some((_, other)) if lag(p, other) != lag(p, c) => Err(disagree()),
+        Some((_, other)) if lag(l, other) != lag(l, c) => Err(disagree()),
         _ => Ok(Some(c)),
     }
 }
 
 fn by_marks<'a>(
-    p: &'a Project,
+    l: Lining<'a>,
     file: &Range<i64>,
     a: i64,
     b: Option<i64>,
 ) -> Result<Option<&'a Clip>> {
-    let at_in = first_where(p, file, |c| c.start <= a && a < c.end())?;
+    let at_in = first_where(l, file, |c| c.start <= a && a < c.end())?;
     if at_in.is_some() {
         return Ok(at_in);
     }
     let Some(b) = b else {
-        return first_where(p, file, |_| true)?.map_or(Ok(None), |_| {
+        return first_where(l, file, |_| true)?.map_or(Ok(None), |_| {
             Err(Error::invalid(
                 "Source Overwrite needs a clip at the In mark or an Out mark",
             ))
         });
     };
-    let in_range = first_where(p, file, |c| c.start < b && a < c.end())?;
+    let in_range = first_where(l, file, |c| c.start < b && a < c.end())?;
     if in_range.is_some() {
         return Ok(in_range);
     }
-    first_where(p, file, |_| true)
+    first_where(l, file, |_| true)
 }
 
-fn by_playhead<'a>(p: &'a Project, file: &Range<i64>, at: i64) -> Result<Option<&'a Clip>> {
+fn by_playhead<'a>(l: Lining<'a>, file: &Range<i64>, at: i64) -> Result<Option<&'a Clip>> {
     let on = |kind: TrackKind| -> Result<Option<&'a Clip>> {
-        let mut clips = p
-            .tracks
-            .iter()
-            .filter(|t| t.kind == kind)
-            .flat_map(|t| t.clips.iter().map(move |c| (t, c)));
-        let found = clips.find(|(_, c)| meets(p, c, file) && c.start <= at && at < c.end());
+        let mut clips =
+            l.p.tracks
+                .iter()
+                .filter(|t| t.kind == kind)
+                .flat_map(|t| t.clips.iter().map(move |c| (t, c)));
+        let found = clips.find(|(_, c)| meets(l, c, file) && c.start <= at && at < c.end());
         let Some((track, c)) = found else {
             return Ok(None);
         };
         unchanged_speed(c)?;
-        let time = shown(p, c).map_or(0, |s| s.start) + at - c.start;
+        let time = shown(l, c).map_or(0, |s| s.start) + at - c.start;
         Ok(track
             .clips
             .iter()
-            .find(|x| meets(p, x, file) && shown(p, x).is_some_and(|s| s.start <= time)))
+            .find(|x| meets(l, x, file) && shown(l, x).is_some_and(|s| s.start <= time)))
     };
     match (on(TrackKind::Video)?, on(TrackKind::Audio)?) {
-        (Some(v), Some(a)) if lag(p, v) != lag(p, a) => Err(disagree()),
-        (None, None) => first_where(p, file, |_| true),
+        (Some(v), Some(a)) if lag(l, v) != lag(l, a) => Err(disagree()),
+        (None, None) => first_where(l, file, |_| true),
         (v, a) => Ok(v.or(a)),
     }
 }
@@ -142,6 +157,7 @@ pub fn source_overwrite(
     src: &Source,
     source_marked: bool,
     playhead: Option<i64>,
+    by_group: bool,
 ) -> Result<Placed> {
     let m = p
         .media(&src.media)
@@ -150,7 +166,15 @@ pub fn source_overwrite(
     if p.tracks.iter().all(|t| t.clips.is_empty()) {
         return Err(Error::invalid("The timeline is empty"));
     }
-    let (o, frames) = (origin(p, m), p.media_frames(m));
+    let group = match by_group {
+        true => Some(
+            p.group_of(&m.id)
+                .ok_or_else(|| Error::invalid(format!("{} is in no synced group", m.name)))?,
+        ),
+        false => None,
+    };
+    let l = Lining { p, group };
+    let (o, frames) = (l.origin(m).unwrap_or_default(), p.media_frames(m));
     let whole = o..o + frames;
     let part = o + src.range.0..o + src.range.1;
     let marks = (p.marks.mark_in, p.marks.mark_out);
@@ -160,11 +184,11 @@ pub fn source_overwrite(
                 "Source Overwrite can't use an Out mark with no In",
             ));
         }
-        (Some(a), b) => by_marks(p, &whole, a, b)?,
-        (None, None) if source_marked => first_where(p, &part, |_| true)?,
+        (Some(a), b) => by_marks(l, &whole, a, b)?,
+        (None, None) if source_marked => first_where(l, &part, |_| true)?,
         (None, None) => {
             let at = playhead.ok_or_else(|| Error::usage("at is required (no live playhead)"))?;
-            by_playhead(p, &whole, at)?
+            by_playhead(l, &whole, at)?
         }
     }
     .ok_or_else(no_common_time)?;
@@ -173,7 +197,7 @@ pub fn source_overwrite(
         .media(&reference.media)
         .expect("a clip that matches has media");
     lines_up(p, shown_by)?;
-    let file_start = lag(p, reference) + o;
+    let file_start = lag(l, reference) + o;
     let (a, b) = match marks {
         (Some(a), b) => (a - file_start, b.map_or(frames, |b| b - file_start)),
         _ => src.range,
