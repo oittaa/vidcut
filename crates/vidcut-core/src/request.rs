@@ -2048,7 +2048,8 @@ pub enum Request {
         /// (`#rrggbb`, `#rgb` or a name such as `yellow`), `line_spacing`
         /// (pixels of the timeline added below each line, from -4096 to
         /// 4096), `tracking` (space after each letter, from -4096 to 4096, a
-        /// unit being 3/4 of a pixel of the timeline), `case` (`mixed`,
+        /// unit being 1/100 of the width of the font's letter X, and 1/200
+        /// below 0), `case` (`mixed`,
         /// `upper`, `lower`, `small` or `title`), `outline` (a
         /// color, a `size` in pixels of the timeline from 0 to 16, `0`
         /// drawing none, and `outside`, true to leave the letters whole),

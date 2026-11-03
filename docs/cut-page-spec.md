@@ -2160,7 +2160,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Text 108/1080 for Scroll (measured in Resolve Studio 21.1.2).
     - For a lower third, 76/1080 on its lower line and 48/1080 on its upper line (measured in Resolve Studio 21.1.2).
     - A `size` in the style goes on both lines of a lower third.
-    - Resolve's Inspector shows a tracking of 11 on its upper line, but its file has no `letter-spacing`. vidcut's usual upper line has no tracking.
+    - A lower third has a tracking of 11 on its upper line, unless the style has a `tracking` (measured in Resolve Studio 21.1.2).
+    - Resolve's OTIO export leaves that tracking out, and its reader then draws none. Thus a lower third from a file has only the tracking of the file.
     - Lines the font's own line height apart, rounded up to a whole pixel (measured in Resolve Studio 21.1.2 with four fonts).
     - A line's baseline in a Text title or a lower third is the font's ascent below the line's top. The font's leading goes below the text.
     - The middle of a block rounds to a whole pixel. The top of the block goes up by the anchor's part of the height. Then it goes down to a whole pixel (measured in Resolve Studio 21.1.2 with four fonts at four sizes).
@@ -2183,7 +2184,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Below the last line, a positive value makes the block taller and a negative value does nothing (measured in Resolve Studio 21.1.2).
     - A very negative value keeps all the lines (X111).
     - Tracking adds space after each letter, also after the last letter (p. 1184). `tracking` in the style goes on each letter. `tracking` in markup goes on its words.
-    - One unit is 3/4 of a pixel of the timeline at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
+    - One unit is 1/100 of the width of the font's letter X, and 1/200 below 0. Zoom scales it.
+    - The width of X is in whole pixels, for the size in whole pixels of the timeline, with no zoom.
+      - Below the size in the font's `LTSH` table for X, it is the width from the font's hinting for one-bit drawing.
+      - Otherwise, it is the font's own width of X, rounded.
+    - The space on a letter goes toward 0, to a step of 1/64 of a pixel.
+    - A negative value does not go after the last letter of a line. Thus it does not make the block narrower there.
+    - These rules are measurements in Resolve Studio 21.1.2 on Windows, with 12 fonts at sizes 24 to 384.
+    - In these renders, some blocks with a negative value are up to 1 pixel from this rule, as "Ab" in Arial 96. The reason is not known.
     - A scroll has no line spacing, tracking or case, as in Resolve's own Scroll.
     - Font case is `mixed`, `upper`, `lower`, `small` or `title`: Mixed, All Caps, All Lowercase, Small Caps and Title Caps (p. 1184).
     - `small` draws small letters as capitals at 0.7 of the size (measured in Resolve Studio 21.1.2).
@@ -2286,7 +2294,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It has a span for each run of words with the same style.
     - A span has its font: for a title that names none, the family that vidcut draws it in.
     - A span also has its size in points, its weight (600 bold, else 400), italic, underline and color.
-    - A span with tracking has it in `letter-spacing`, in `px`.
+    - A span with tracking has it in `letter-spacing`, in `px`. One `px` is 100/85 of a unit, and 200/85 below 0 (measured in Resolve Studio 21.1.2).
     - A span with lines has `underline`, `overline` or `line-through` in `text-decoration`.
     - A shifted span has `super` or `sub` in `vertical-align`.
     - A span has its case in `text-transform` (`uppercase`, `lowercase`) or in `font-variant` (`small-caps`).
