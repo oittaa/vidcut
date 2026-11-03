@@ -148,6 +148,13 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - It shows the cues of the shown subtitle track, as the viewer does.
 - Without `--viewer`, `frame render` draws the frame with the export's pipeline.
 - The answer names the renderer. It gives the layout and the place of each layer of the picture, from the bottom up.
+- If the player cannot make the frame, the error is the error of the player.
+
+**The refusals of Super Scale:** `scripts/super-scale-check.sh` asks an export and the viewer about three clips, with the upscaler of macOS. In each case, the two answers must agree.
+
+- It builds vidcut and makes its clips with `make_fixture`. It needs no clicks.
+- On macOS, the clip that the scaler enlarges works in both. Elsewhere, both refuse it.
+- `VIDCUT` gives another build of vidcut.
 
 **Debugging:**
 

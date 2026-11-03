@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use vidcut_core::model::{Hdr, Media, Project, SuperScale, Upscaler};
-use vidcut_core::render::{RenderPlan, VideoPiece};
+use vidcut_core::model::{Hdr, Media, Project, SuperScale, Upscaler, VideoInfo};
+use vidcut_core::render::{RenderPlan, Shape, VideoPiece};
 
 use vidcut_core::catalog::{self, Measure};
 
@@ -48,20 +48,57 @@ pub fn unfit(m: &Media, upscaler: Upscaler, timeline: Option<Hdr>) -> Option<&'s
     if off_here(upscaler) {
         return Some("pictures on macOS for now");
     }
-    let model = match upscaler {
-        Upscaler::AiSlow => &catalog::FLASHVSR,
-        Upscaler::Macos => return macos::unfit(m),
-        Upscaler::AiFast | Upscaler::Classic => return None,
-    };
-    let hdr = takes_hdr(m, timeline)?;
-    let verdict = catalog::check(model, &[(Measure::HdrPictures, f64::from(u8::from(hdr)))]);
-    verdict.refusals.first().map(|_| HDR_IN_HDR)
+    let v = m.video_as_read()?;
+    let from = crate::export::video::display_of(shape_of(&v));
+    why_not(upscaler, from, v.hdr.is_some() && timeline.is_some())
 }
 
-pub const HDR_IN_HDR: &str = "HDR pictures in an HDR timeline";
+const HDR_IN_HDR: &str = "HDR pictures in an HDR timeline";
 
-pub fn takes_hdr(m: &Media, timeline: Option<Hdr>) -> Option<bool> {
-    Some(m.video_as_read()?.hdr.is_some() && timeline.is_some())
+fn why_not(upscaler: Upscaler, from: (u32, u32), hdr: bool) -> Option<&'static str> {
+    match upscaler {
+        Upscaler::AiSlow => {
+            let hdr = f64::from(u8::from(hdr));
+            let verdict = catalog::check(&catalog::FLASHVSR, &[(Measure::HdrPictures, hdr)]);
+            verdict.refusals.first().map(|_| HDR_IN_HDR)
+        }
+        Upscaler::Macos => macos::too_large(from).then_some(macos::TOO_LARGE),
+        Upscaler::AiFast | Upscaler::Classic => None,
+    }
+}
+
+fn shape_of(v: &VideoInfo) -> Shape {
+    Shape {
+        size: (v.width, v.height),
+        sar: (v.sar[0], v.sar[1]),
+        rotation: v.rotation,
+    }
+}
+
+fn off(files: &str) -> Error {
+    Error::Invalid(format!(
+        "AI Fast and AI Slow are off on macOS for now: set the Upscaler of {files} to AI or \
+         Classic"
+    ))
+}
+
+fn refused(upscaler: Upscaler, files: &str) -> Error {
+    Error::Invalid(format!(
+        "{} can't take {files}: set their Upscaler to Classic, or their Super Scale to Off",
+        name(upscaler)
+    ))
+}
+
+pub(crate) fn refusal(
+    upscaler: Upscaler,
+    from: (u32, u32),
+    hdr: bool,
+    file: &str,
+) -> Option<Error> {
+    if off_here(upscaler) {
+        return Some(off(file));
+    }
+    why_not(upscaler, from, hdr).map(|why| refused(upscaler, &format!("{file} ({why})")))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -368,6 +405,56 @@ pub fn name(upscaler: Upscaler) -> &'static str {
     }
 }
 
+struct Enlarging<'a> {
+    media: &'a Media,
+    upscaler: Upscaler,
+    from: (u32, u32),
+    made: (u32, u32),
+    hdr: bool,
+}
+
+fn enlarging<'a>(p: &'a Project, plans: &[&RenderPlan]) -> Vec<Enlarging<'a>> {
+    let mut work = Vec::new();
+    for plan in plans {
+        for (layer, _) in plan.video.iter().flat_map(|piece| piece.layers()) {
+            let VideoPiece::Source {
+                media,
+                super_scale,
+                placed,
+                ..
+            } = layer
+            else {
+                continue;
+            };
+            let Some(m) = p.media(media) else {
+                continue;
+            };
+            let Some(v) = m.video_as_read() else {
+                continue;
+            };
+            let out = (plan.width, plan.height);
+            let sizes = crate::export::video::ai_sizes(shape_of(&v), out, placed, *super_scale);
+            if let Some((from, made)) = sizes {
+                work.push(Enlarging {
+                    media: m,
+                    upscaler: super_scale.upscaler,
+                    from,
+                    made,
+                    hdr: v.hdr.is_some() && plan.colors.is_some(),
+                });
+            }
+        }
+    }
+    work
+}
+
+fn listed(files: impl Iterator<Item = String>) -> String {
+    let mut files: Vec<String> = files.collect();
+    files.sort();
+    files.dedup();
+    files.join(", ")
+}
+
 pub fn check<'a>(
     p: &Project,
     plans: impl IntoIterator<Item = &'a RenderPlan>,
@@ -375,30 +462,42 @@ pub fn check<'a>(
     download: bool,
 ) -> Result<()> {
     let plans: Vec<&RenderPlan> = plans.into_iter().collect();
-    let mut off: Vec<String> = plans
-        .iter()
-        .flat_map(|plan| &plan.video)
-        .flat_map(|piece| piece.layers())
-        .filter_map(|(layer, _)| match layer {
-            VideoPiece::Source {
-                media, super_scale, ..
-            } if super_scale.ai() && off_here(super_scale.upscaler) => {
-                p.media(media).map(|m| m.name.clone())
-            }
-            _ => None,
-        })
-        .collect();
-    off.sort();
-    off.dedup();
-    if !off.is_empty() {
-        return Err(Error::Invalid(format!(
-            "AI Fast and AI Slow are off on macOS for now: set the Upscaler of {} to AI or \
-             Classic",
-            off.join(", ")
-        )));
+    let work = enlarging(p, &plans);
+    let files = listed(
+        work.iter()
+            .filter(|w| off_here(w.upscaler))
+            .map(|w| w.media.name.clone()),
+    );
+    if !files.is_empty() {
+        return Err(off(&files));
     }
-    let pieces = || plans.iter().flat_map(|plan| &plan.video);
-    nanovsr::check(pieces(), dir, download)?;
-    flashvsr::check(p, plans.iter().copied(), dir, download)?;
-    macos::check(p, pieces(), download)
+    for upscaler in [Upscaler::AiSlow, Upscaler::Macos] {
+        let files = listed(
+            work.iter()
+                .filter(|w| w.upscaler == upscaler)
+                .filter_map(|w| {
+                    why_not(upscaler, w.from, w.hdr).map(|why| format!("{} ({why})", w.media.name))
+                }),
+        );
+        if !files.is_empty() {
+            return Err(refused(upscaler, &files));
+        }
+    }
+    if work.iter().any(|w| w.upscaler == Upscaler::AiFast) {
+        nanovsr::check(dir, download)?;
+    }
+    let mut sizes: Vec<flashvsr::Sizes> = work
+        .iter()
+        .filter(|w| w.upscaler == Upscaler::AiSlow)
+        .map(|w| (w.from, w.made))
+        .collect();
+    sizes.sort();
+    sizes.dedup();
+    if !sizes.is_empty() {
+        flashvsr::check(&sizes, dir, download)?;
+    }
+    if work.iter().any(|w| w.upscaler == Upscaler::Macos) {
+        macos::get_ready(download)?;
+    }
+    Ok(())
 }

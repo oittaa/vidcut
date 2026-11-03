@@ -496,8 +496,9 @@ pub enum Upscaler {
     Macos,
     /// A diffusion network (FlashVSR+ Turbo) on the GPU, for SDR pictures:
     /// slow, with more detail. It reads the frames of a clip in order from
-    /// its first frame. Its weights (7.0 GB) download at their first use. An
-    /// export refuses media that it cannot take. Off on macOS for now.
+    /// its first frame. Its weights (7.0 GB) download at their first use. The
+    /// viewer and an export refuse a picture that it cannot take, where the
+    /// picture needs enlarging. Off on macOS for now.
     AiSlow,
     /// A neural network (NanoVSR 5.4M) on the GPU, for SDR and HDR pictures.
     /// It reads 15 frames at a time. Its weights (25 MB) download at their

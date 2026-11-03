@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use vidcut_core::model::Upscaler;
-use vidcut_core::render::VideoPiece;
 
 use crate::compute::{self, bytes, group, halves, words};
 use crate::error::{Error, Result};
@@ -58,20 +57,7 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn check<'a>(
-    pieces: impl IntoIterator<Item = &'a VideoPiece>,
-    dir: &Path,
-    download: bool,
-) -> Result<()> {
-    let used = pieces.into_iter().any(|piece| {
-        piece.layers().iter().any(|(layer, _)| {
-            matches!(layer, VideoPiece::Source { super_scale, .. }
-                if super_scale.ai() && super_scale.upscaler == Upscaler::AiFast)
-        })
-    });
-    if !used {
-        return Ok(());
-    }
+pub fn check(dir: &Path, download: bool) -> Result<()> {
     get_ready(dir, download)?;
     with_engine(|_| Ok(()))
 }

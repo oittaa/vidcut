@@ -1058,14 +1058,13 @@ impl Source {
         let Some((size, made)) = enlarged(shape, target, upscaler) else {
             return Ok(None);
         };
-        let form = upscale_form(upscaler, timeline);
-        if crate::color::Source::of(frame).hdr.is_some() && timeline.is_some() && form.1.is_none() {
-            return Err(Error::Invalid(format!(
-                "{}: {} takes SDR pictures, and this one is HDR in an HDR timeline",
-                self.reader.path().display(),
-                crate::super_scale::name(upscaler)
-            )));
+        let hdr = crate::color::Source::of(frame).hdr.is_some() && timeline.is_some();
+        let path = self.reader.path();
+        let file = path.file_name().unwrap_or(path.as_os_str()).display();
+        if let Some(e) = crate::super_scale::refusal(upscaler, size, hdr, &file.to_string()) {
+            return Err(e);
         }
+        let form = upscale_form(upscaler, timeline);
         let pts = frame.pts();
         let id = PictureId {
             input: self.reader.input().clone(),
@@ -1483,6 +1482,15 @@ pub fn ai_size(
     placed: &[Placed],
     super_scale: SuperScale,
 ) -> Option<(u32, u32)> {
+    ai_sizes(shape, out, placed, super_scale).map(|(_, made)| made)
+}
+
+pub(crate) fn ai_sizes(
+    shape: Shape,
+    out: (u32, u32),
+    placed: &[Placed],
+    super_scale: SuperScale,
+) -> Option<((u32, u32), (u32, u32))> {
     if !super_scale.ai() {
         return None;
     }
@@ -1491,7 +1499,27 @@ pub fn ai_size(
         true => out,
         false => layer_size(out, (w, h, shape.sar), shape.rotation, placed, super_scale),
     };
-    enlarged(shape, aim, super_scale.upscaler).map(|(_, made)| made)
+    enlarged(shape, aim, super_scale.upscaler)
+}
+
+pub(crate) fn display_of(shape: Shape) -> (u32, u32) {
+    let Shape {
+        size,
+        sar,
+        rotation,
+    } = shape;
+    let across = if sar.0 > 0 && sar.1 > 0 {
+        f64::from(sar.0) / f64::from(sar.1)
+    } else {
+        1.0
+    };
+    let (dw, dh) = (f64::from(size.0) * across, f64::from(size.1));
+    let (dw, dh) = match rotation % 180 == 90 {
+        true => (dh, dw),
+        false => (dw, dh),
+    };
+    let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
+    (even(dw), even(dh))
 }
 
 fn enlarged(
@@ -1508,18 +1536,11 @@ fn enlarged(
     if !super::normalize::enlarges(size, sar, 0, shown) {
         return None;
     }
-    let across = if sar.0 > 0 && sar.1 > 0 {
-        f64::from(sar.0) / f64::from(sar.1)
-    } else {
-        1.0
+    let up = match rotation % 180 == 90 {
+        true => (shown.1, shown.0),
+        false => shown,
     };
-    let (dw, dh) = (f64::from(size.0) * across, f64::from(size.1));
-    let ((dw, dh), up) = match rotation % 180 == 90 {
-        true => ((dh, dw), (shown.1, shown.0)),
-        false => ((dw, dh), shown),
-    };
-    let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
-    let display = (even(dw), even(dh));
+    let display = display_of(shape);
     Some((
         display,
         crate::super_scale::made_size(upscaler, display, up),
