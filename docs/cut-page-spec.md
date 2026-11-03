@@ -1264,13 +1264,19 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another bitrate or chosen rate.
   - A project at another rate, for example 96000 Hz, with AAC was not measured.
   - The TikTok preset has AAC at 256 kb/s. That number was not measured.
-  - H.264 and H.265 round an odd side of the timeline up to even.
-    - A timeline of 1281 x 721 gives a file of 1282 x 722. A timeline of 1281 x 720 gives a file of 1282 x 720.
-    - One factor scales the whole picture on both axes, and the picture stays centered. Thus part of a pixel can stay black at two edges.
-    - Resolve Studio 21.1.2 does this at 1281 x 721 with H.264 and H.265. Other odd sizes were not measured.
+  - H.264 and H.265 round an odd side up to even. The side is of the timeline or of a custom size.
+    - A size of 1281 x 721 gives a file of 1282 x 722. A size of 1281 x 720 gives a file of 1282 x 720.
+    - With a timeline of an odd side, one factor scales the whole picture on both axes, and the picture stays centered. Thus part of a pixel can stay black at two edges.
+    - With a custom size, the picture fits into the rounded size with one draw.
+    - Resolve Studio 21.1.2 writes these sizes at 1281 x 721 with H.264 and H.265, on a timeline and as a custom size. It writes 258 x 258 for 257 x 257 with H.264. Other odd sizes were not measured.
     - The Export dialog and the report of the export show both sizes.
   - ProRes, DNxHR, VP9 and AV1 on the CPU keep an odd side.
   - AV1 on NVENC writes an even size by itself. The report shows that size after the export.
+  - A side of a custom size is from 256 to 32768.
+    - Measured with the render settings of the scripting API in Resolve Studio 21.1.2. The Deliver page was not seen.
+    - Resolve makes a side under 256 into 256 with H.264 and ProRes. It makes a side over 32768 into 32768 with ProRes.
+    - Resolve writes H.264 at 8192 x 4320. A job of H.264 at 8193 x 4321 stops its scripting API. It writes ProRes at 8193 x 4321.
+    - vidcut refuses a side outside these limits. It does not change a setting without a word.
 
 ## 11. Keyboard shortcuts
 
