@@ -470,8 +470,14 @@ The bar and the Jobs button:
 - `SyncClips` holds the places in the GUI. Only Save Sync writes to the project, so Cancel has nothing to undo and the history has one entry.
 - Auto Sync sends `multicam.layout` with `Ask`, because a sync by sound can take long and must not hold the window.
 - The pictures come from `Workspace::camera_cells`, the code of the grid. They use `Cells`, so the viewer draws no grid while the window is open.
-- The window's playhead runs on the clock of the GUI. Live does not know it, so the transport and the timeline's playhead do not move.
-- `multicam::hand_start` gives the start of a group whose places come by hand. The ruler and the saved group use it, so they agree.
+- `multicam::sync_clips_files` gives the files of the icon. `multicam::cameras` stays the listing of the Sync Bin, because the Sync Bin has its own refusals.
+- `multicam::close_far_gaps` is the one place for the rules of far gaps and of the earliest row. The window calls it at each change, and `multicam.set` and `multicam.create` call it on what they store.
+- A row keeps `hidden` beside `at`. A drag or a nudge works on their sum, the real time, so a closed gap can open again and the ruler keeps its labels.
+- `multicam::ruler_start` gives the base of the ruler. It reads only the timecodes of the files, so it does not change when rows move. The start of the group is a separate value.
+- The sound has its own `Player`, made at the first Play, on the real output. `render::places_sound` gives it a black picture and one sound lane for each row.
+- That `Player` reuses the engine's mix, which adds lanes with no scaling. `Player::set_lane_gain` silences the other lanes under Solo. Each new plan clears the gains, so `SyncClips::hear` sets them again.
+- The clock of that `Player` is the window's playhead. Live does not know it, so the transport and the timeline's playhead do not move.
+- `nudge_of` reads the key events and also takes the key's place, as the other shortcuts do. The key check of egui compares only the sign of the key, and on a Nordic layout Shift+Comma makes another sign.
 
 **J and L with K held** ([spec D54](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `Shuttle` tells a tap from a hold by the time between the press and the release of a key. It gives a frame step, slow play or its stop, for the player or for Dynamic Trim.
 

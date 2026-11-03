@@ -21,6 +21,7 @@ pub(super) const ACTIVE_ANGLE: Color32 = Color32::from_rgb(230, 50, 50);
 
 pub(super) struct GridCell {
     pub number: Option<usize>,
+    pub label: Option<String>,
     pub media: String,
     pub frame: Option<i64>,
     pub active: bool,
@@ -29,7 +30,7 @@ pub(super) struct GridCell {
 
 pub(super) fn grid_pictures(area: Rect, p: &Project, count: usize) -> Vec<Rect> {
     let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
-    let cols = (1..3).find(|c| c * c >= count).unwrap_or(3);
+    let cols = (1..=count).find(|c| c * c >= count).unwrap_or(1);
     let size = vec2(
         area.width() / cols as f32,
         area.height() / count.div_ceil(cols).max(1) as f32,
@@ -497,6 +498,7 @@ impl Workspace {
                 let frame = position - angle.at;
                 GridCell {
                     number: Some(i + 1),
+                    label: None,
                     media: angle.media.clone(),
                     frame: (0..frames).contains(&frame).then_some(frame),
                     active: active == Some(angle.media.as_str()),
@@ -588,10 +590,11 @@ impl Workspace {
                     Color32::WHITE,
                 );
             }
-            let label = m
-                .camera
-                .as_ref()
-                .map_or_else(|| m.name.clone(), |c| format!("Camera {c}"));
+            let label = shown.label.clone().unwrap_or_else(|| {
+                m.camera
+                    .as_ref()
+                    .map_or_else(|| m.name.clone(), |c| format!("Camera {c}"))
+            });
             painter.text(
                 picture.center_bottom() - vec2(0.0, 6.0),
                 Align2::CENTER_BOTTOM,

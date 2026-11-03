@@ -151,17 +151,20 @@ pub enum Request {
         /// Into this bin (default: the top level).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bin: Option<String>,
-        /// The place of each file by hand, as `multicam.set` takes them.
-        /// `sync` then only gives the start of the group, 01:00:00:00 when no
-        /// file has a timecode. With none, `sync` works out the places, and a
-        /// file that it lines up is `locked`.
+        /// The place of each file by hand, as `multicam.set` takes them. The
+        /// group then starts at 01:00:00:00, and `sync` plays no part. With
+        /// none, `sync` works out the places, and a file that it lines up is
+        /// `locked`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         angles: Option<Vec<crate::model::GroupAngle>>,
     },
     /// Set the place of each file of a synced group: its `media`, the frame
     /// `at` which it starts, and `locked`, the sync lock. `angles` names each
-    /// file of the group once. Returns the group. The clips on the timeline
-    /// and the marks of the group do not change.
+    /// file of the group once. The earliest file goes to the group's start. A
+    /// stretch of more than 10 minutes with no file closes to 1 second: `at`
+    /// falls, and `hidden` holds the closed frames. `at` plus `hidden` is the
+    /// place in real time, and a request can give both. Returns the group. The
+    /// clips on the timeline, the group's start and its marks do not change.
     #[serde(rename = "multicam.set")]
     MulticamSet {
         group: String,

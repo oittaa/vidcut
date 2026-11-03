@@ -23,12 +23,18 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
 **To do:**
 
 - For the Edit page stage, open a multicam clip as a timeline (p. 1040).
+- For the stage `multicam-clip`, a clip of a group on the timeline follows Save Sync ([deviation X122](../deviations.md#x122-a-clip-on-the-timeline-does-not-follow-save-sync)).
+- Put two files with one camera name on one row:
+  - The Sync Clips window and the Sync Bin refuse them now.
+  - One row holds both files, each at its timecode (measured.md, C3c).
+  - With an overlap, the first file stays whole, and the later file loses the overlap (measured.md, S2, through the API).
 - Measure the Sync Clips window parts that are not measured:
-  - the Comma and Period nudge keys;
   - Sync by Marker;
-  - the places at open for files with timecode tags;
-  - a drag before the start of the group;
-  - a Save Sync of files with no tag, by timecode, with no Auto Sync.
+  - Shift+Comma on a keyboard layout that is not Finnish;
+  - the rule of far gaps at other frame rates, and the exact limit between 10:00 and 10:01;
+  - the ruler labels of a reopened group with far tags;
+  - the Sync Bin for a group whose first tag is not 01:00:00:00;
+  - the rows of a file in two groups.
 - Measure the Sync Bin parts that are not measured:
   - the number keys and Escape;
   - the sound of the grid with Video Only off and on (p. 708);

@@ -5168,6 +5168,7 @@ fn groups_to_rate(p: &mut Project, from: Rational) {
         g.start = rescale(g.start, from, to);
         for a in &mut g.angles {
             a.at = rescale(a.at, from, to);
+            a.hidden = rescale(a.hidden, from, to);
         }
         g.marks.mark_in = g.marks.mark_in.map(|f| rescale(f, from, to));
         g.marks.mark_out = g.marks.mark_out.map(|f| rescale(f, from, to));

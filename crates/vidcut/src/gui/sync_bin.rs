@@ -183,6 +183,7 @@ impl Workspace {
                     .iter()
                     .map(|row| GridCell {
                         number: Some(row.number),
+                        label: None,
                         media: row.media.clone(),
                         frame: row.frame,
                         active: row.active,
