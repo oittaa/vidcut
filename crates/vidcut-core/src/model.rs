@@ -1977,10 +1977,10 @@ pub struct Title {
     /// Its lines, separated by `\n`: two at most for a lower third. `<b>`,
     /// `<i>`, `<u>`, `<o>` (a line over), `<s>` (a line through), `<sup>`,
     /// `<sub>` and `<font color="…" face="…" size="…" spacing="…"
-    /// tracking="…">` style the words between them apart from the rest, `size`
-    /// a fraction of the picture height like the style's, `spacing` the line
-    /// spacing of their line, `tracking` like the style's; `&lt;`, `&gt;` and
-    /// `&amp;` stand for `<`, `>` and `&`.
+    /// tracking="…" case="…">` style the words between them apart from the
+    /// rest, `size` a fraction of the picture height like the style's, `spacing`
+    /// the line spacing of their line, `tracking` and `case` like the style's;
+    /// `&lt;`, `&gt;` and `&amp;` stand for `<`, `>` and `&`.
     pub text: String,
     #[serde(default, skip_serializing_if = "TitleStyle::is_empty")]
     pub style: TitleStyle,
@@ -2200,6 +2200,11 @@ pub struct TitleStyle {
     /// of the timeline. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracking: Option<f64>,
+    /// How its letters draw: `mixed` (as typed), `upper`, `lower`, `small`
+    /// (small letters as small capitals) or `title` (each word starts with a
+    /// capital). Usual: `mixed`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case: Option<TitleCase>,
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -3597,6 +3602,81 @@ pub enum SubtitleAlign {
     Right,
 }
 
+/// How a title's letters draw.
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum TitleCase {
+    #[default]
+    Mixed,
+    Upper,
+    Lower,
+    Small,
+    Title,
+}
+
+impl TitleCase {
+    pub const SMALL_CAPS: f64 = 0.7;
+
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Mixed => "mixed",
+            Self::Upper => "upper",
+            Self::Lower => "lower",
+            Self::Small => "small",
+            Self::Title => "title",
+        }
+    }
+
+    pub fn from_word(word: &str) -> Option<Self> {
+        [
+            Self::Mixed,
+            Self::Upper,
+            Self::Lower,
+            Self::Small,
+            Self::Title,
+        ]
+        .into_iter()
+        .find(|c| c.word() == word)
+    }
+
+    pub fn pieces(self, text: &str, word_start: bool) -> Vec<(String, bool)> {
+        match self {
+            Self::Mixed => vec![(text.to_string(), false)],
+            Self::Upper => vec![(text.to_uppercase(), false)],
+            Self::Lower => vec![(text.to_lowercase(), false)],
+            Self::Title => {
+                let mut out = String::with_capacity(text.len());
+                let mut start = word_start;
+                for c in text.chars() {
+                    if start {
+                        out.extend(c.to_uppercase());
+                    } else {
+                        out.push(c);
+                    }
+                    start = c.is_whitespace();
+                }
+                vec![(out, false)]
+            }
+            Self::Small => {
+                let mut out: Vec<(String, bool)> = Vec::new();
+                for c in text.chars() {
+                    let small = c.is_lowercase();
+                    if out.last().is_none_or(|(_, s)| *s != small) {
+                        out.push((String::new(), small));
+                    }
+                    let last = out.last_mut().expect("just pushed");
+                    if small {
+                        last.0.extend(c.to_uppercase());
+                    } else {
+                        last.0.push(c);
+                    }
+                }
+                out
+            }
+        }
+    }
+}
+
 /// Letters drawn all as capitals or all as small letters.
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -4354,6 +4434,7 @@ impl Hash for TitleStyle {
             size,
             line_spacing,
             tracking,
+            case,
             color,
             outline,
             background,
@@ -4364,6 +4445,7 @@ impl Hash for TitleStyle {
             floats_bits(*size),
             floats_bits(*line_spacing),
             floats_bits(*tracking),
+            case,
             color,
             outline,
             background,
