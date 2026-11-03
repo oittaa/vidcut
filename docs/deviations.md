@@ -136,9 +136,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Marks, faders and the rest of the project go in the metadata of vidcut. Resolve does not keep this metadata.
   - A project holds one timeline (X2). Thus File > Import Timeline (`timeline import`) appends, replaces the timeline, adds one compound clip, or brings in only the media.
   - An OTIO file also opens as a new project.
-  - Clip effects, transitions, generators, compound clips and speed changes come in as data. vidcut writes them back while they fit.
+  - Clip effects, transitions, generators other than Solid Color, compound clips and speed changes come in as data. vidcut writes them back while they fit.
   - Dissolves, cross fades ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), wipes ([X89](#x89-a-wipe-reveals-from-one-edge)) and speeds ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) play.
-  - Other transitions play as cuts, and generators play as gaps. Other effects do not play.
+  - Solid Color plays ([spec §8.17](cut-page-spec.md#817-generators-p-766)).
+  - Other transitions play as cuts, and other generators play as gaps. Other effects do not play.
   - The keyframes of the clip volume effect play as volume keyframes ([D81](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Text and lower-third titles of Resolve come in as titles of vidcut. The titles of vidcut go out in the shape that Resolve uses ([D67](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Transform, Cropping, Dynamic Zoom, Composite and Retime and Scaling of Resolve come in as the picture of a clip. The picture of a clip goes out as these effects ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
