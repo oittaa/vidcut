@@ -116,6 +116,21 @@ pub enum Request {
     /// picture.
     #[serde(rename = "media.details")]
     MediaDetails { media: String },
+    /// Where the angles of a multicam clip lie, for media in angle order.
+    /// This changes nothing. The answer is the `start_timecode` and `frames`
+    /// of the whole, and for each angle its `media`, the frame `at` which it
+    /// starts, and the `source` frames it uses. An item with marks uses only
+    /// the frames between them. A file with no timecode starts at 00:00:00:00.
+    #[serde(rename = "multicam.layout")]
+    MulticamLayout {
+        media: OneOrMany<String>,
+        /// `timecode`, or `in` or `out`, for items that all have marks.
+        #[serde(default)]
+        sync: crate::model::AngleSync,
+        /// Use each whole file and ignore its marks. It needs `timecode`.
+        #[serde(default)]
+        full_extents: bool,
+    },
     /// Remove from the pool; `force` also deletes the clips that use it.
     #[serde(rename = "media.remove")]
     MediaRemove {
@@ -4388,6 +4403,7 @@ impl Request {
                     | Self::MediaList {}
                     | Self::MediaGet { .. }
                     | Self::MediaDetails { .. }
+                    | Self::MulticamLayout { .. }
                     | Self::Probe { .. }
                     | Self::TimelineGet { .. }
                     | Self::TimelineAt { .. }

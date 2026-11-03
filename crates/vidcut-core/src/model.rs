@@ -649,6 +649,17 @@ pub enum Sharpness {
     High,
 }
 
+/// How the angles of a multicam clip line up: by their start timecodes, or
+/// so that the In or the Out marks of the items meet.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AngleSync {
+    #[default]
+    Timecode,
+    In,
+    Out,
+}
+
 /// How a media item's pictures' colors are read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

@@ -226,6 +226,21 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The Camera row of Clip Info edits it. `media.set` sets it on one or more items. An empty name clears it.
   - `media.get` and the metadata strip show it.
   - vidcut does not read the name from a file. No measurement shows which file tags give it.
+- **Multicam layout** (p. 1037):
+  - `multicam.layout` tells where the angles of a multicam clip lie. It changes nothing, and the project does not store the result.
+  - The angles are in the order of the request.
+  - `sync` is `timecode`, `in` or `out`.
+  - By `timecode`, each file starts at its start timecode. A file with no timecode starts at 00:00:00:00.
+    - The length is the union of the angles, with any gaps. A gap of hours is not an error.
+    - The start timecode of the whole is the earliest angle.
+  - By `in` or `out`, the marks of the items line up. The start timecode of the whole is 01:00:00:00.
+  - An item with marks uses only the frames between them. The shift stays.
+  - `full_extents` uses each whole file and ignores its marks.
+  - No measurement settles these cases, so `multicam.layout` refuses them:
+    - a still, or an item with no picture
+    - an item that the request names twice
+    - an item with one mark only
+    - `full_extents` with `in` or `out`
 - **Input Color Space** (pp. 228, 230):
   - The color tags of a file tell how to read the colors of its pictures.
   - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.
