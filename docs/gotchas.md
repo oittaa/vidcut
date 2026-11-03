@@ -109,6 +109,10 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 - **FFmpeg's Vulkan ProRes encoder works on one frame at a time:**
   - `prores_ks_vulkan` (9.0.2) makes its pool of GPU work with one slot. Thus `async_depth` changes nothing.
   - vidcut does not set `async_depth`.
+- **ProRes has a green right edge at a width of 16n + 1:**
+  - `prores_ks` files of 1281 and 1297 wide have a green last column. A file of 1283 wide does not.
+  - Resolve Studio 21.1.2 reads the green in the file from vidcut. Its own ProRes file of 1281 wide has the same edge.
+  - vidcut keeps the size and writes this edge.
 - **Set packet durations when muxing from an encoder with delay** (x264 with B-frames).
   - If you do not, the edit list of MP4 drops the last frame (`VideoOut::drain`).
 - **Clear a decoded frame's picture type before encoding it** (`set_kind(picture::Type::None)`).

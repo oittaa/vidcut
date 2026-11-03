@@ -27,10 +27,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
+- generators: Solid Color (§8.17)
 - Quick Export, plus our Export dialog
 
 **Later (later):**
-- other effects, other transitions, other titles, generators
+- other effects, other transitions, other titles, other generators
 - keyframes other than Transform, Crop, the clip volume and the Position, Zoom, Rotation and Opacity of a title
 - color ([todo](todo/auto-color.md)), Fusion
 - LUTs ([todo](todo/luts.md))
@@ -57,6 +58,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - A Transitions tab shows the transitions in the place of the Media Pool (p. 759, §8.11).
   - A Titles tab shows the title kinds in the place of the Media Pool (p. 762).
   - An Effects tab shows the video effects in the place of the Media Pool (p. 765, §8.16).
+  - The Effects tab also has a Generators page (p. 766, §8.17).
   - The Inspector button is at the top right of the UI toolbar (§8.15). vidcut has an Inspector tab beside the Titles tab instead (deviation X70).
   - A Keyframes tab sits beside the Inspector ([X87](deviations.md#x87-the-keyframes-tab-has-an-ease-menu)).
   - The Timeline menu opens that tab.
@@ -144,7 +146,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - Group tracks for each effect, under a track with the clip's name.
       - A curve view, and a Parameters menu that chooses the shown values.
       - With no clip selected, the clip under the playhead. With more than one clip selected, a group for each clip.
-  - Later: the Sync Bin and Effects tabs.
+  - Later: the Sync Bin tab.
   - vidcut's bar also has Import, Export and Jobs (deviation X3), and Help (X23).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
 - **Below the Media Pool:** the edit-function buttons (§7), and Cut and Dissolve (§8.11).
@@ -706,6 +708,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - The Process makes the frames between the two pictures: AI Fast, AI Slow or Frame Blend (deviation X99). Frame Blend gives a Cross Dissolve.
   - Ease and Transition Curve are as for a Push. Frame f of n frames shows the morph at curve(f) + 0.5 / n, at most 1.
   - The morph takes the nearest source frame of each clip. A clip with a speed change shows no frames between its source frames.
+  - A Solid Color side acts as a still side. Measured in Resolve Studio 21.1.2: two Solid Colors give the same picture as two stills of those colors.
   - It morphs two pictures that each cover the frame alone, with the usual Inspector values. It plays as a Cross Dissolve in these cases:
     - A side is a gap, a clip in a compound clip, or a clip over other tracks that does not fill the frame.
     - A side has other Inspector values, or plays backward.
@@ -1061,6 +1064,8 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - vidcut: the Effects tab has the Blur group with Gaussian Blur. The other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
   - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
+  - Measured in Resolve Studio 21.1.2: a generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API all leave it with none.
+  - vidcut: `effects.add` refuses a generator. A drag of a card onto a generator does nothing, and the double-click and Add to Selected Clips skip it.
 - **Inspector** (vidcut, X70):
   - The Inspector shows the effects of the first selected clip, after its Super Scale section. A change applies to that clip only.
   - Each effect is a section with an on/off box, Move Up, Move Down, Reset and Delete.
@@ -1095,6 +1100,73 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - A portrait timeline gives a sigma 3% smaller than the rule ([X102](deviations.md#x102-a-portrait-timeline-blurs-by-the-width-rule)).
 - **Compound clips:** vidcut: the effects of a compound clip work on each picture inside it ([todo](todo/compound-opacity.md)).
 - **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
+
+### 8.17 Generators (p. 766)
+
+A generator is a clip that makes its own picture. It has no media and no sound.
+
+- **The Generators page:**
+  - Measured in Resolve Studio 21.1.2: the Effects panel has the tabs Video, Audio, Generators and Favorites.
+  - vidcut: the Effects tab has the pages Video and Generators. `gui.show generators` opens the Generators page.
+  - Measured: the Generators section has these kinds, in this order:
+    - 10 Step and 100mV Steps
+    - BT.2111 Color Bar HLG Narrow, BT.2111 Color Bar PQ Full and BT.2111 Color Bar PQ Narrow
+    - EBU Color Bar, Four Color Gradient, Grey Scale and SMPTE Color Bar
+    - Solid Color, Window and YCbCr Ramp
+  - vidcut has Solid Color. The other kinds are open work ([todo](todo/effects-library.md)).
+  - The tab also has a Fusion Generators section. It is part of Fusion (§1).
+  - The pointer on a card previews the generator (p. 766). vidcut does not have this preview yet ([todo](todo/effects-library.md)).
+- **Adding a generator:**
+  - Drag a card onto the upper timeline or the lower timeline (p. 766).
+  - vidcut: a drop puts the generator where the pointer is, on the video track under it, as `generators.add` with that track and frame does.
+  - Not measured: the track and the frame of a drop in Resolve.
+  - Measured: a double-click on a card loads the generator in the viewer as a source of 5 s. The timeline does not change. The Inspector shows nothing to inspect, so it has no Color row.
+  - Measured: a drag from the viewer onto a clip on V1 overwrites from the frame under the pointer. The clip then has its Color row.
+  - vidcut: a double-click on a card adds the generator at the playhead. The source viewer takes only media ([todo](todo/effects-library.md)).
+  - `generators.add` without a track uses the track that D66 gives a title.
+  - A new generator is 5 s long, and it adds no sound clip (measured).
+- **Inspector:**
+  - Measured: the Generator tab of Solid Color has one row, Color. Color has no keyframes.
+  - Measured: the Settings tab has Transform, Cropping, Dynamic Zoom, Composite, Speed Change and Stabilization.
+  - vidcut: the Inspector shows a Generator section with the Color row, over the picture sections (X70).
+- **Picture sections:**
+  - Measured in Resolve Studio 21.1.2: a Solid Color gives the same picture as a still of its color. The largest difference is 0.1 of 255. The renders have Rotation, Pitch, Yaw, Flip Vertical, Crop, Zoom, Overlay and Hue.
+  - Measured: vidcut's frames and renders of vidcut's OTIO file differ by at most 0.6 of 255. The cases are Rotation, Anchor, Flip Vertical, Flip Horizontal with Crop Left, Zoom, Opacity and the 26 composite modes.
+  - Measured: Pitch and Yaw differ at the edge pixels, by at most 78.2 of 255. These pixels are 0.3% of the values. A still in Resolve gives the same picture.
+  - Not measured on a generator: Dynamic Zoom, Stabilization, keyframes in a render, Push, Slide, Wipe and Dip To Color.
+  - vidcut: the sections and these transitions act as on a still. On a Solid Color and on a still, the same requests give the same frames (0.0 of 255).
+- **Speed:**
+  - Measured: Speed Change on a generator has a dim dot and does not open. A still acts the same.
+  - Measured: the right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
+  - Measured: the scripting API refuses a speed. An import of a time warp on a Solid Color keeps the length and drops the warp.
+  - vidcut: the speed requests refuse a generator. The right-click menu has Change Speed and Add Speed Keyframe grey, and Change Duration on.
+  - vidcut: an import of a time warp on a Solid Color keeps the length and drops the warp.
+- **Solid Color:**
+  - It has one value, Color. Black is the default (measured).
+  - `generators.set` and the Color row change it.
+  - Measured: these are its code values in the timeline. `c` is the color, each channel from 0 to 1.
+    - SDR timeline: `c`
+    - PQ timeline: P(0.01) × P(M · P⁻¹(c))
+    - HLG timeline: H(0.1^(1/1.2)) × H(S(M · D(H⁻¹(c))))
+  - The parts of these sums:
+    - P is the PQ curve, with 1.0 at 10000 nits.
+    - H is the HLG curve.
+    - M is the matrix from BT.709 to BT.2020.
+    - D changes HLG scene light to display light, with a system gamma of 1.2. S is its inverse. Both use the BT.2020 luma weights.
+  - Thus white is 100 nits in a PQ timeline. In an HLG timeline, the code value of white is 0.6296.
+- **Length and dissolves:**
+  - Measured: a generator can have any length.
+  - Measured: Resolve keeps the source start of a generator at 0. A left trim moves the keyframes, and the picture does not move.
+  - vidcut: a left trim moves the source start, and the keyframes stay on their source frames. The picture does not move.
+  - Measured: a dissolve between two generators runs past the ends of both clips. Thus it needs no extra frames.
+- **In OTIO files:**
+  - vidcut writes Solid Color in the shape of Resolve's own file.
+    - It is a `Clip.2`. Its media is a `GeneratorReference` with the `generator_kind` `Solid Color`.
+    - The color is in the group named `Generator`, in the `Resolve_OTIO` parameters.
+    - A placed generator also has the effects of D75.
+    - Its keyframes count from the first frame of the clip. Measured: Resolve reads them so, and its import sets the source start to 0.
+  - vidcut reads Solid Color back from that shape.
+  - vidcut keeps the other kinds as data. They play as gaps, and an import warns about them (X9).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -1192,13 +1264,22 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - These are the values of the Deliver page of Resolve Studio 21.1.2. An export refuses another bitrate or chosen rate.
   - A project at another rate, for example 96000 Hz, with AAC was not measured.
   - The TikTok preset has AAC at 256 kb/s. That number was not measured.
-  - H.264 and H.265 round an odd side of the timeline up to even.
-    - A timeline of 1281 x 721 gives a file of 1282 x 722. A timeline of 1281 x 720 gives a file of 1282 x 720.
-    - One factor scales the whole picture on both axes, and the picture stays centered. Thus part of a pixel can stay black at two edges.
-    - Resolve Studio 21.1.2 does this at 1281 x 721 with H.264 and H.265. Other odd sizes were not measured.
+  - H.264 and H.265 round an odd side up to even. The side is of the timeline or of a custom size.
+    - A size of 1281 x 721 gives a file of 1282 x 722. A size of 1281 x 720 gives a file of 1282 x 720.
+    - With a timeline of an odd side, one factor scales the whole picture on both axes, and the picture stays centered. Thus part of a pixel can stay black at two edges.
+    - With a custom size, the picture fits into the rounded size with one draw.
+    - Resolve Studio 21.1.2 writes these sizes at 1281 x 721 with H.264 and H.265, on a timeline and as a custom size. It writes 258 x 258 for 257 x 257 with H.264. Other odd sizes were not measured.
     - The Export dialog and the report of the export show both sizes.
-  - ProRes, DNxHR, VP9 and AV1 on the CPU keep an odd side.
+  - DNxHR LB, SQ, HQ and HQX round an odd width up to even. They keep an odd height.
+    - A size of 1281 x 721 gives a file of 1282 x 721. A size of 1283 x 723 gives a file of 1284 x 723.
+    - Resolve Studio 21.1.2 does this with these four. Its DNxHR 444 keeps 1281 x 721.
+  - ProRes, DNxHR 444, VP9 and AV1 on the CPU keep an odd side.
   - AV1 on NVENC writes an even size by itself. The report shows that size after the export.
+  - A side of a custom size is from 256 to 32768.
+    - Measured with the render settings of the scripting API in Resolve Studio 21.1.2. The Deliver page was not seen.
+    - Resolve makes a side under 256 into 256 with H.264 and ProRes. It makes a side over 32768 into 32768 with ProRes.
+    - Resolve writes H.264 at 8192 x 4320. A job of H.264 at 8193 x 4321 stops its scripting API. It writes ProRes at 8193 x 4321.
+    - vidcut refuses a side outside these limits. It does not change a setting without a word.
 
 ## 11. Keyboard shortcuts
 
@@ -2058,15 +2139,21 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `<sup>` and `<sub>` draw the words at 2/3 of their size (p. 1184).
     - `<sup>` raises them by half of the small font's height, and `<sub>` lowers them by 1/6 of it. The rows of the lines stay (measured in Resolve Studio 21.1.2).
     - Lines wrap at the width of title safe, 90% of the picture width.
-  - The lines of a Text title are centered. The middle of the block is at the middle of the picture.
+  - The block of a Text title is as wide as its widest line (measured in Resolve Studio 21.1.2).
+    - `align` sets each line in the block: left, middle or right. By default, it is middle.
+    - `anchor` names the point of the block that goes to `position`: a corner, the middle of a side, or the middle.
+    - By default, `anchor` is the middle, and `position` is the middle of the picture.
+    - A change of `align` or `anchor` keeps `position`.
+    - A file's `justify` reads as left. Resolve draws it as left, because its lines do not wrap (measured in Resolve Studio 21.1.2).
   - The lines of a lower third align left, center or right.
-  - The bottom-left corner, bottom middle or bottom-right corner of its block is 10%, 50% or 90% across and 88% down.
-  - Thus the top of its lower line is about a fifth up the picture, where Resolve's own lower thirds put it (D67).
-  - `position` moves that point (X54).
+  - The lower line of a lower third hangs from a point that is 10%, 50% or 90% across and 78% down, by its alignment.
+  - The upper line stands on a point 80% down, at the same place across.
+  - These are the points of Resolve's own lower thirds (measured in Resolve Studio 21.1.2). The two lines overlap by 2% of the picture height.
+  - `position` moves the point of the lower line (X54). Lines that go together keep the 2% between their points.
   - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>`, `<o>`, `<s>`, `<sup>`, `<sub>` and `<font>`.
   - `<font>` takes a `color`, a `face`, a `size`, a `spacing` and a `tracking`.
   - A line takes the height of its largest size.
-  - The lines of a lower third meet one lower-line height above its corner.
+  - A larger size grows the upper line up from its point and the lower line down from its point (measured in Resolve Studio 21.1.2).
   - `size` is from 1/1080 to 4096/1080, also in markup. Size 1..4096 is the range of a title, measured in Resolve Studio 21.1.2.
   - Color, outline and background take the values and limits of the subtitle style (D61).
   - The background is one box behind the block. It reaches 0.15 of the text height past its lines.
@@ -2075,15 +2162,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Its offset is 0, which draws no shadow (measured in Resolve Studio 21.1.2).
   - Zoom draws the text larger, and the outline and the background box grow with it. The zoom scales the outline, measured in Resolve Studio 21.1.2.
   - Rotation turns the whole title, box and shadow too, counterclockwise.
-  - Zoom and rotation work about the middle of a Text title.
-  - For a lower third, they work about the point where its lines meet (D67).
+  - Zoom and rotation work about the `position` of a Text title (measured in Resolve Studio 21.1.2).
+  - For a lower third, they work on each line about its own point (D67).
   - Each line of a lower third has its own `position`, `zoom`, `rotation` and keyframes (p. 1178):
     - `line` in `titles.set` names the line.
     - In the `keyframes` requests, these values name the line: `upper_position`, `upper_zoom`, `upper_rotation`, `lower_position`, `lower_zoom` and `lower_rotation`.
     - The Title section has Across, Down, Zoom and Rotation under Upper Line and under Lower Line.
     - The two lines go together until a request names a line. Each line then keeps its values and goes apart.
     - A request that names no line then changes the lower line.
-    - The upper line stands on its point, and the lower line hangs from its point. Each line's zoom and rotation work about its point (measured in Resolve Studio 21.1.2).
+    - The `position` of a line is its own point. The Title section shows each line's point.
     - The background box follows the place, zoom and rotation of the lower line. The upper line does not move it (measured in Resolve Studio 21.1.2).
     - Each line has its own shadow, which turns with the line (measured in Resolve Studio 21.1.2).
     - From the bottom, the order is the box, the lower line and the upper line. Each line is over its own shadow (measured in Resolve Studio 21.1.2).
@@ -2108,11 +2195,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The title goes on the video track above the highest track with clips in its frames. If there is no such track, it is made.
   - This is the track of Place On Top (D24).
   - With nothing in those frames, the title goes on Track 1. With Ripple On, it is no later than the end of Track 1 (D10).
-  - The title of Add Title is a Text title that reads `Title`.
-  - A title dragged or double-clicked from the Titles tab reads as its card does:
-    - `Title`
-    - `Name` over `Title`, for a lower third
-    - a few lines of credits, for a scroll
+  - The title of Add Title is a Text title that reads `Basic Title`.
+  - A title dragged or double-clicked from the Titles tab reads as its card does. These are Resolve's own default texts (measured in Resolve Studio 21.1.2):
+    - `Basic Title`
+    - `TITLE` over `Sample`, for a lower third
+    - `Scroll Title`, for a scroll
   - A drop puts the title where the pointer is, on the video track under it, as `titles.add` with that track and frame does.
 - **D67. Titles in OTIO files** (§8.14; deviation X9).
   - The manual does not say how a title goes into an OTIO file.
@@ -2143,11 +2230,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A point is a pixel of the picture, as Resolve draws a title that it reads from a file.
     - Resolve's own titles have 1/1080 of the picture height to a point ([gotchas](gotchas.md#resolves-otio-files)).
   - **Positions:**
-    - The `position` of a Text title is its middle (anchor 4).
-    - The upper line of a lower third stands on the point where its lines meet (anchor 0, 1 or 2).
-    - Its lower line hangs from that point (6, 7 or 8).
-    - That point is one line, 1.31 times the text height, above the corner of the title.
-    - Lines apart each have their own point.
+    - The `position` of a Text title is the point of its block that its `anchor` names.
+    - The upper line of a lower third stands on its point (anchor 0, 1 or 2). By default, this is 20% up the picture.
+    - Its lower line hangs from its point (6, 7 or 8). By default, this is 22% up the picture.
+    - The file holds the points of `position`, with y counted from the bottom.
     - Resolve's own lower thirds put their upper line first.
   - **Stroke:**
     - `strokeSize` is the width of the outline in pixels of the timeline, as a whole number. Thus 16 is the maximum of both.
@@ -2180,15 +2266,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The lines of a lower third go apart when the place, zoom, rotation or keyframes of their two groups are different.
   - Resolve's own lower thirds are different: the upper line stands at 20% from the bottom, and the lower line hangs from 22%.
   - The lower line of a lower third is the group anchored by its top, else its second group.
-  - The lines of a Text title are centered, whatever their alignment.
-  - If a Text title is anchored at a point other than its middle, that point is taken as its middle.
+  - A Text title takes the alignment of its first line and the `anchor` of its group. The manual gives one alignment and one anchor for the entire title (p. 1178).
   - **A Scroll** has these parts:
     - a `Text` group, with its plain `text` and its `position`. The x of the position is the middle of a text box as wide as the picture.
     - a `Formatting` group, with its `font` as Qt writes one, its `size` in points (pixels, as above), its `alignment`, `anchor` and `color`. The `alignment` is 0 left, 1 middle or 2 right in that box.
     - then `Drop Shadow` and `Background`, with no `Stroke`
   - vidcut writes the left edge, middle or right edge of its lines there, in plain text, because Resolve's Scroll has no rich text.
   - vidcut reads a Scroll back with no outline.
-  - vidcut carries other generators.
+  - vidcut reads Solid Color (§8.17). It carries the other generators.
   - Resolve writes Text+ as a `MissingReference`, and loses it itself.
   - vidcut leaves Text+ out with a warning, as it does any clip without media.
   - Resolve Studio 21.1.1 draws a file that vidcut writes as vidcut does, within a few pixels at 3840×2160, except for the outline.

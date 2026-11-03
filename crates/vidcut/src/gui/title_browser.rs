@@ -39,9 +39,9 @@ const KEPT: usize = 64;
 
 fn sample_text(kind: TitleKind) -> &'static str {
     match kind {
-        TitleKind::Text => "Title",
-        TitleKind::LowerThird => "Name\nTitle",
-        TitleKind::Scroll => "Directed by\nName\n\nMusic by\nName",
+        TitleKind::Text => "Basic Title",
+        TitleKind::LowerThird => "TITLE\nSample",
+        TitleKind::Scroll => "Scroll Title",
     }
 }
 
