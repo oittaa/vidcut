@@ -7,7 +7,7 @@ use crate::editor::Env;
 use crate::error::{Error, Result};
 use crate::model::{
     LetterCase, SubtitleBackground, SubtitleOutline, SubtitleStyle, SubtitleWords, TextStroke,
-    Title, TitleAlign, TitleKind, TitleShadow, TitleStyle, WordsShow,
+    Title, TitleAlign, TitleAnchor, TitleKind, TitleShadow, TitleStyle, WordsShow,
 };
 
 /// What a look styles: a subtitle track, or a title.
@@ -65,9 +65,12 @@ pub struct TitleLook {
     /// `text`, `lower_third` or `scroll`. Usual: `text`.
     #[serde(default, skip_serializing_if = "TitleKind::is_text")]
     pub kind: TitleKind,
-    /// How a lower third or a scroll lines up: `left`, `middle` or `right`.
+    /// How it lines up: `left`, `middle` or `right`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<TitleAlign>,
+    /// The point of a `text` title's block that goes to its position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<TitleAnchor>,
     /// `[x, y]` as fractions of the picture. Usual: the kind's place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
@@ -89,6 +92,7 @@ impl TitleLook {
         Self {
             kind: t.kind,
             align: t.align,
+            anchor: t.anchor,
             position: t.position,
             zoom: t.zoom,
             rotation: t.rotation,
@@ -101,6 +105,7 @@ impl TitleLook {
         Title {
             kind: self.kind,
             align: self.align,
+            anchor: self.anchor,
             style: self.style.clone(),
             position: self.position,
             zoom: self.zoom,

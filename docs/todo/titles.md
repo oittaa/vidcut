@@ -11,3 +11,13 @@
 
 - The measurements read files. Measure the range and the units of the control in Resolve's Inspector.
 - vidcut accepts -4096 to 4096 until then. The reason is that Resolve draws 2000 from a file.
+
+## Anchor of a lower third and a scroll
+
+- In vidcut, only a Text title has `anchor`.
+- In Resolve, each line of a lower third and a Scroll have an anchor too.
+- A Scroll's anchor works on a text box as wide as the picture (measured in Resolve Studio 21.1.2):
+  - The left column puts the left edge of the lines at the middle of the picture.
+  - The right column puts the lines off the picture.
+  - The row moves the lines by half of a text height, up or down.
+- **Why it is open:** the shape of this control in Resolve's Inspector is not checked.

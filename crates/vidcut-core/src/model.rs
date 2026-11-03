@@ -1963,10 +1963,17 @@ pub struct Title {
     /// picture to above it over the clip.
     #[serde(default, skip_serializing_if = "TitleKind::is_text")]
     pub kind: TitleKind,
-    /// How a lower third or a scroll lines up: `left`, `middle` or `right`.
-    /// Usual: left.
+    /// How it lines up: `left`, `middle` or `right`. On a `text` title, this
+    /// sets each line in the block, which is as wide as its widest line.
+    /// Usual: middle for a `text` title, left for a lower third and a scroll.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<TitleAlign>,
+    /// The point of a `text` title's block that goes to its `position`:
+    /// `top_left`, `top`, `top_right`, `left`, `middle`, `right`,
+    /// `bottom_left`, `bottom` or `bottom_right`. Usual: `middle`. Left out
+    /// on a lower third and a scroll.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<TitleAnchor>,
     /// Its lines, separated by `\n`: two at most for a lower third. `<b>`,
     /// `<i>`, `<u>` and `<font color="…" face="…" size="…" spacing="…">`
     /// style the words between them apart from the rest, `size` a fraction of
@@ -1976,7 +1983,7 @@ pub struct Title {
     #[serde(default, skip_serializing_if = "TitleStyle::is_empty")]
     pub style: TitleStyle,
     /// Where it goes, as fractions of the picture's width and height from
-    /// its top left, from -4 to 4 across and from -3 to 5 down: the middle
+    /// its top left, from -4 to 4 across and from -3 to 5 down: the `anchor`
     /// of a `text` title's block (usual: `[0.5, 0.5]`), the left, middle or
     /// right end of the top edge of a lower third's lower line by its `align`
     /// (usual: 10%, 50% or 90% across and 78% down: `[0.1, 0.78]`,
@@ -2001,9 +2008,9 @@ pub struct Title {
     /// none. Left out when no keyframe has a handle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_handles: Vec<PositionHandles>,
-    /// How much larger its text is drawn, from 1/4 to 4, about the middle of
-    /// a `text` title or the `position` of a lower third's line; a scroll has
-    /// none. Usual: 1. With `zoom_keys`, the zoom at a frame is that curve.
+    /// How much larger its text is drawn, from 1/4 to 4, about the `position`
+    /// of a `text` title or a lower third's line; a scroll has none. Usual: 1.
+    /// With `zoom_keys`, the zoom at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zoom: Option<f64>,
     /// Zoom keyframes, on the clip's source frames. Left out when the zoom
@@ -2117,8 +2124,8 @@ impl TitleKind {
     }
 }
 
-/// Where a lower third sits at the bottom of the title-safe area, or a
-/// scroll across the picture, and how their lines line up.
+/// How a title's lines line up. It also sets where a lower third sits at the
+/// bottom of the title-safe area, and a scroll across the picture.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TitleAlign {
@@ -2126,6 +2133,48 @@ pub enum TitleAlign {
     Left,
     Middle,
     Right,
+}
+
+impl TitleAlign {
+    pub fn fraction(self) -> f64 {
+        match self {
+            Self::Left => 0.0,
+            Self::Middle => 0.5,
+            Self::Right => 1.0,
+        }
+    }
+}
+
+/// The point of a `text` title's block that goes to its position.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TitleAnchor {
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    #[default]
+    Middle,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+
+impl TitleAnchor {
+    pub fn fractions(self) -> [f64; 2] {
+        let across = match self {
+            Self::TopLeft | Self::Left | Self::BottomLeft => 0.0,
+            Self::Top | Self::Middle | Self::Bottom => 0.5,
+            Self::TopRight | Self::Right | Self::BottomRight => 1.0,
+        };
+        let down = match self {
+            Self::TopLeft | Self::Top | Self::TopRight => 0.0,
+            Self::Left | Self::Middle | Self::Right => 0.5,
+            Self::BottomLeft | Self::Bottom | Self::BottomRight => 1.0,
+        };
+        [across, down]
+    }
 }
 
 /// How a title looks. A field left out keeps the usual look.
@@ -2249,6 +2298,7 @@ impl Title {
         Self {
             kind: TitleKind::Text,
             align: None,
+            anchor: None,
             text: text.into(),
             style: TitleStyle::default(),
             position: None,
@@ -2267,7 +2317,7 @@ impl Title {
 
     pub fn align(&self) -> TitleAlign {
         match self.kind {
-            TitleKind::Text => TitleAlign::Middle,
+            TitleKind::Text => self.align.unwrap_or(TitleAlign::Middle),
             TitleKind::LowerThird | TitleKind::Scroll => self.align.unwrap_or_default(),
         }
     }
@@ -2290,14 +2340,9 @@ impl Title {
     }
 
     pub fn anchor(&self) -> [f64; 2] {
-        let across = match self.align() {
-            TitleAlign::Left => 0.0,
-            TitleAlign::Middle => 0.5,
-            TitleAlign::Right => 1.0,
-        };
         match self.kind {
-            TitleKind::Text => [0.5, 0.5],
-            TitleKind::LowerThird | TitleKind::Scroll => [across, 0.0],
+            TitleKind::Text => self.anchor.unwrap_or_default().fractions(),
+            TitleKind::LowerThird | TitleKind::Scroll => [self.align().fraction(), 0.0],
         }
     }
 
@@ -4261,6 +4306,7 @@ impl Hash for Title {
         let Title {
             kind,
             align,
+            anchor,
             text,
             style,
             position,
@@ -4270,7 +4316,7 @@ impl Hash for Title {
             upper,
             ..
         } = self;
-        (kind, align, text, style).hash(h);
+        (kind, align, anchor, text, style).hash(h);
         pair_bits(*position).hash(h);
         (
             floats_bits(*zoom),
