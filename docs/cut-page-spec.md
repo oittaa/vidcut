@@ -2040,21 +2040,23 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Text 108/1080 for Scroll (measured in Resolve Studio 21.1.2).
     - For a lower third, 76/1080 on its lower line and 48/1080 on its upper line (measured in Resolve Studio 21.1.2).
     - A `size` in the style goes on both lines of a lower third.
-    - Resolve's upper line also has a tracking of 11. A title in vidcut has no tracking.
+    - Resolve's Inspector shows a tracking of 11 on its upper line, but its file has no `letter-spacing`. vidcut's usual upper line has no tracking.
     - Lines the font's own line height apart, rounded up to a whole pixel (measured in Resolve Studio 21.1.2 with four fonts).
     - The lines of a scroll are 4/3 of the font's line height plus 10 timeline pixels apart. This fits Resolve Studio 21.1.2 within 5 pixels with four fonts.
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
     - Below the last line, a positive value makes the block taller and a negative value does nothing (measured in Resolve Studio 21.1.2).
     - A very negative value keeps all the lines (X111).
-    - A scroll has no line spacing, as in Resolve's own Scroll.
+    - Tracking adds space after each letter, also after the last letter (p. 1184). `tracking` in the style goes on each letter. `tracking` in markup goes on its words.
+    - One unit is 3/4 of a pixel of the timeline at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
+    - A scroll has no line spacing or tracking, as in Resolve's own Scroll.
     - Lines wrap at the width of title safe, 90% of the picture width.
   - The lines of a Text title are centered. The middle of the block is at the middle of the picture.
   - The lines of a lower third align left, center or right.
   - The bottom-left corner, bottom middle or bottom-right corner of its block is 10%, 50% or 90% across and 88% down.
   - Thus the top of its lower line is about a fifth up the picture, where Resolve's own lower thirds put it (D67).
   - `position` moves that point (X54).
-  - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>` and `<font>` with a `color`, a `face`, a `size` and a `spacing`.
+  - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>` and `<font>` with a `color`, a `face`, a `size`, a `spacing` and a `tracking`.
   - A line takes the height of its largest size.
   - The lines of a lower third meet one lower-line height above its corner.
   - `size` is from 1/1080 to 4096/1080, also in markup. Size 1..4096 is the range of a title, measured in Resolve Studio 21.1.2.
@@ -2118,6 +2120,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It has a span for each run of words with the same style.
     - A span has its font: for a title that names none, the family that vidcut draws it in.
     - A span also has its size in points, its weight (700 bold, else 400), italic, underline and color.
+    - A span with tracking has it in `letter-spacing`, in `px`.
     - Each paragraph has its line spacing in `line-height`. A Text title has 0, and the upper and lower line of a lower third have 1 and 0, unless a title sets another value.
     - The group has the alignment of the lines.
     - Its `anchor` is on a 3×3 grid, counted from the bottom left: 0 bottom left, 4 middle, 8 top right.

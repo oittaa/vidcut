@@ -20,7 +20,8 @@ const ZOOMED: &str = "a title's zoom is from 1/4 to 4";
 const TURNED: &str = "a title's rotation is degrees, from -100000 to 100000";
 const FADED: &str = "a title's opacity is from 0 to 1";
 const SPACED: &str = "a title's line spacing is from -4096 to 4096";
-const SCROLL_SPACED: &str = "a scroll has no line spacing";
+const TRACKED: &str = "a title's tracking is from -4096 to 4096";
+const SCROLL_SPACED: &str = "a scroll has no line spacing or tracking";
 const POSITION_HANDLED: &str =
     "a title's position keyframes take `ease`, not `in` or `out`: their handles are points";
 const SCROLL_HANDLES: &str = "a scroll's position keyframes have no handles";
@@ -155,8 +156,9 @@ pub fn checked(t: &Title) -> Result<Title> {
     };
     let spaced = crate::rich::lines(&text)
         .iter()
-        .any(|l| crate::rich::spacing(l).is_some());
-    if t.kind == TitleKind::Scroll && (spaced || t.style.line_spacing.is_some()) {
+        .any(|l| crate::rich::spacing(l).is_some() || l.iter().any(|s| s.look.tracking.is_some()));
+    let styled = t.style.line_spacing.is_some() || t.style.tracking.is_some();
+    if t.kind == TitleKind::Scroll && (spaced || styled) {
         return Err(Error::invalid(SCROLL_SPACED));
     }
     let s = &t.style;
@@ -166,6 +168,11 @@ pub fn checked(t: &Title) -> Result<Title> {
         line_spacing: match s.line_spacing {
             Some(v) if Title::spacing_fits(v) => (v != 0.0).then_some(v),
             Some(_) => return Err(Error::invalid(SPACED)),
+            None => None,
+        },
+        tracking: match s.tracking {
+            Some(v) if Title::spacing_fits(v) => (v != 0.0).then_some(v),
+            Some(_) => return Err(Error::invalid(TRACKED)),
             None => None,
         },
         color: checked_color(s.color.as_deref(), "title")?,
@@ -332,6 +339,7 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
     }
     if t.kind == TitleKind::Scroll {
         t.style.line_spacing = None;
+        t.style.tracking = None;
         t.position_handles.clear();
         t.zoom_keys.clear();
         t.rotation_keys.clear();
