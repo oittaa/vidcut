@@ -1833,7 +1833,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - It is Auto, the default, AI Slow, AI Fast or Classic.
     - Auto is AI on macOS, and AI Fast elsewhere.
   - The lists name the upscaler that Auto and Project Settings give on this computer, as in Auto (AI Fast).
-  - On macOS, the upscalers are AI and Classic. AI Fast and AI Slow are off there for now: exports and the viewer refuse them.
+  - On macOS, the upscalers are AI and Classic. AI Fast and AI Slow are off there: exports and the viewer refuse them.
   - On macOS, AI is the upscaler of Auto. It is the super-resolution scaler of macOS 26 and later (`VTFrameProcessor` of VideoToolbox), `macos` in requests.
     - It enlarges by a factor that macOS offers. It takes the smallest of these that reaches the shown size.
     - Then it makes the picture at the size that it shows at, as AI Slow does.
@@ -1891,8 +1891,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The rest of its difference is in the detail that it makes.
   - vidcut makes a picture only as large as the output shows it. A factor would only limit placed pictures. Thus On is sufficient.
   - Auto lets a project move between macOS and other systems. Each computer uses its own AI.
+    - Thus an export of one project has different pixels on macOS and on other systems. The owner accepts this.
   - On macOS, the scaler of macOS is the default because it is part of the system. vidcut needs no weights for it, and the owner chose it.
-  - AI Fast and AI Slow are off on macOS because they are too slow there. On the owner's M4 MacBook Air, AI Fast took 345 s for 30 frames, 854×480 enlarged to 1920×1080.
+  - AI Fast and AI Slow stay off on macOS, because macOS has its own AI scaler. The owner decided this.
+    - They are also slow there. On the owner's M4 MacBook Air, AI Fast took 345 s for 30 frames, 854×480 enlarged to 1920×1080.
   - FlashVSR+ Turbo is one step of a diffusion model, with Apache 2.0 code and weights. It streams over the frames, so a clip has no chunk edges.
   - The network has only 3×3 and 1×1 convolutions. Shaders of its own run it on the GPU of every maker through wgpu, with no new library.
   - The shaders keep the values between the layers as 16-bit floats, and add in 32-bit floats. This halves the memory traffic. It needs no GPU feature.

@@ -46,7 +46,7 @@ pub fn off_here(_upscaler: Upscaler) -> bool {
 
 pub fn unfit(m: &Media, upscaler: Upscaler, timeline: Option<Hdr>) -> Option<&'static str> {
     if off_here(upscaler) {
-        return Some("pictures on macOS for now");
+        return Some("pictures on macOS");
     }
     let v = m.video_as_read()?;
     let from = crate::export::video::display_of(shape_of(&v));
@@ -77,8 +77,7 @@ fn shape_of(v: &VideoInfo) -> Shape {
 
 fn off(files: &str) -> Error {
     Error::Invalid(format!(
-        "AI Fast and AI Slow are off on macOS for now: set the Upscaler of {files} to AI or \
-         Classic"
+        "AI Fast and AI Slow are off on macOS: set the Upscaler of {files} to AI or Classic"
     ))
 }
 
@@ -379,7 +378,7 @@ pub(crate) fn open(
 ) -> Result<Box<dyn Run>> {
     if off_here(upscaler) {
         return Err(Error::Invalid(format!(
-            "{} is off on macOS for now: set the Upscaler to AI or Classic",
+            "{} is off on macOS: set the Upscaler to AI or Classic",
             name(upscaler)
         )));
     }
