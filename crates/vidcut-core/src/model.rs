@@ -2320,8 +2320,7 @@ impl Title {
     pub const TRACKING_SHARE_LESS: f64 = 200.0;
     pub const TRACKING_FILE: f64 = 0.85;
     pub const PIXEL_STEPS: f64 = 64.0;
-    pub const SHIFTED_SIZE: f64 = 2.0 / 3.0;
-    pub const ASCENT_SLACK: f64 = 0.25;
+    pub const SHIFTED_SHARE: [f64; 2] = [2.0, 3.0];
     pub const WIDTH_SLACK: f64 = 1e-3;
     pub const BOX_MOST: f64 = 2.0;
     pub const BOX_WIDTH: f64 = 0.9;
@@ -2464,8 +2463,9 @@ impl Title {
         tracking * Self::TRACKING_SHARE * Self::TRACKING_FILE / Self::tracking_share(tracking)
     }
 
-    pub fn baseline(ascent: f64) -> f64 {
-        (ascent - Self::ASCENT_SLACK).ceil()
+    pub fn shifted_size(text: f64, scale: f64) -> f64 {
+        let [part, whole] = Self::SHIFTED_SHARE;
+        ((text / scale).round() * part / whole).floor().max(1.0) * scale
     }
 
     pub fn underline_drop(thickness: f64) -> f64 {
