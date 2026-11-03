@@ -107,6 +107,7 @@ const HIDDEN: usize = 1;
 const POPPED: usize = 2;
 const RAISED: usize = 4;
 const LOWERED: usize = 8;
+const LTSH_HEAD: usize = 4;
 
 fn spans<'a>(
     pieces: &[Piece],
@@ -743,16 +744,61 @@ fn rounded_past(x: f32, y: f32, half: [f32; 2], corner: f32) -> f32 {
     k0 * (k0 - 1.0) / k1
 }
 
-fn font_line(system: &mut FontSystem, attrs: &Attrs<'_>) -> Option<f32> {
-    let id = system.db().query(&fontdb::Query {
+fn face_of(system: &FontSystem, attrs: &Attrs<'_>) -> Option<fontdb::ID> {
+    system.db().query(&fontdb::Query {
         families: &[attrs.family],
         weight: attrs.weight,
         stretch: attrs.stretch,
         style: attrs.style,
-    })?;
+    })
+}
+
+fn font_line(system: &mut FontSystem, attrs: &Attrs<'_>) -> Option<f32> {
+    let id = face_of(system, attrs)?;
     let font = system.get_font(id, attrs.weight)?;
     let m = font.metrics();
     Some((m.ascent - m.descent + m.leading) / f32::from(m.units_per_em))
+}
+
+fn letter_x_width(system: &mut FontSystem, attrs: &Attrs<'_>, size: f32) -> Option<f32> {
+    use skrifa::MetadataProvider;
+    use skrifa::outline::pen::NullPen;
+    use skrifa::outline::{DrawSettings, Engine, HintingInstance, HintingOptions, Target};
+    let id = face_of(system, attrs)?;
+    let index = system.db().face(id)?.index;
+    let font = system.get_font(id, attrs.weight)?;
+    let face = skrifa::FontRef::from_index(font.data(), index).ok()?;
+    let glyph = face.charmap().map('X').unwrap_or(skrifa::GlyphId::NOTDEF);
+    let whole = (size + 0.5).floor();
+    let at = skrifa::instance::Size::new(whole);
+    let place = skrifa::instance::LocationRef::default();
+    let plain = face.glyph_metrics(at, place).advance_width(glyph)?.round();
+    let linear = face
+        .table_data(skrifa::Tag::new(b"LTSH"))
+        .and_then(|table| {
+            let from = table.as_bytes().get(LTSH_HEAD + glyph.to_u32() as usize)?;
+            Some(f32::from(*from))
+        })
+        .is_some_and(|from| whole >= from);
+    if linear {
+        return Some(plain);
+    }
+    let outlines = face.outline_glyphs();
+    let options = HintingOptions {
+        engine: Engine::Interpreter,
+        target: Target::Mono,
+    };
+    let fitted = HintingInstance::new(&outlines, at, place, options)
+        .ok()
+        .and_then(|instance| {
+            let drawn = DrawSettings::hinted(&instance, false);
+            outlines
+                .get(glyph)?
+                .draw(drawn, &mut NullPen)
+                .ok()?
+                .advance_width
+        });
+    Some(fitted.map_or(plain, f32::round))
 }
 
 fn line_gap(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) -> f32 {
@@ -859,6 +905,23 @@ fn pair_kerning(font: &Font, first: &str, next: &str) -> f32 {
     };
     let units = width(&format!("{first}{next}")) - width(first) - width(next);
     units as f32 / f32::from(font.metrics().units_per_em)
+}
+
+fn free_line_ends(buffer: &mut Buffer) -> bool {
+    let mut changed = false;
+    for line in &mut buffer.lines {
+        let Some((at, last)) = line.text().char_indices().last() else {
+            continue;
+        };
+        let own = line.attrs_list().get_span(at);
+        if own.letter_spacing_opt.is_some_and(|s| s.0 < 0.0) {
+            let mut list = line.attrs_list().clone();
+            list.add_span(at..at + last.len_utf8(), &own.letter_spacing(0.0));
+            line.set_attrs_list(list);
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn kern_words(system: &mut FontSystem, buffer: &mut Buffer) -> bool {
@@ -971,7 +1034,14 @@ fn lay_out(look: &Look) -> Option<Laid> {
                     None => 0,
                 });
                 let tracking = r.look.tracking.map_or(look.tracking, |t| t as f32);
-                let pixels = tracking * Title::TRACKING_PIXEL as f32 * look.spacing.1;
+                let pixels = if tracking == 0.0 {
+                    0.0
+                } else {
+                    let unzoomed = full / look.spacing.1;
+                    let letter = letter_x_width(&mut f.system, &a, unzoomed).unwrap_or(unzoomed);
+                    Title::tracking_pixels(f64::from(tracking), f64::from(letter)) as f32
+                        * look.spacing.1
+                };
                 let pieces = r.look.case.unwrap_or(look.case).pieces(&r.text, word_start);
                 word_start = r
                     .text
@@ -1002,6 +1072,9 @@ fn lay_out(look: &Look) -> Option<Laid> {
     );
     buffer.shape_until_scroll(&mut f.system, false);
     if seat && kern_words(&mut f.system, &mut buffer) {
+        buffer.shape_until_scroll(&mut f.system, false);
+    }
+    if seat && free_line_ends(&mut buffer) {
         buffer.shape_until_scroll(&mut f.system, false);
     }
     if buffer.layout_runs().map(|r| r.line_height).sum::<f32>() <= 0.0 {

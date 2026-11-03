@@ -317,7 +317,7 @@ fn span_html(text: &str, look: &Look, word_start: bool, base: &Base) -> String {
     };
     let tracked = match look.tracking.unwrap_or(base.tracking) {
         0.0 => String::new(),
-        t => format!(" letter-spacing:{}px;", number(t)),
+        t => format!(" letter-spacing:{}px;", number(Title::tracking_to_file(t))),
     };
     format!(
         "<span style=\" font-family:'{family}'; font-size:{}pt; font-weight:{weight};{italic}{under}{shifted}{tracked}{cased} \
@@ -804,6 +804,7 @@ fn styled(style: &str) -> Styled {
         tracking: style_value(style, "letter-spacing")
             .and_then(|s| s.strip_suffix("px"))
             .and_then(|s| s.trim().parse().ok())
+            .map(Title::tracking_from_file)
             .filter(|v| Title::spacing_fits(*v))
             .unwrap_or(0.0),
         case: if style_value(style, "font-variant") == Some("small-caps") {
@@ -1304,7 +1305,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
                 .collect()
         };
     let mut line_spacing = None;
-    let mut tracking = None;
+    let tracking;
     let mut case = None;
     let (lines, style_from, at, lowered, turned_by) = match kind {
         TitleKind::Scroll => return None,
@@ -1354,6 +1355,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
                 .filter(|l| !l.is_empty())
                 .collect();
             let at = point(value(lower, "position")).unwrap_or([0.1, 0.22]);
+            tracking = Some(0.0);
             (lines, style_from, at, Some(row(lower)), lower)
         }
     };
