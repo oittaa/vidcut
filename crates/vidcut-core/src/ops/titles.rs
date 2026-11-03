@@ -2,8 +2,8 @@ use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, plain_channel, title_keys_problem};
 use crate::looks::TitleLook;
 use crate::model::{
-    Clip, Keyframe, LowerThirdLine, Picture, PositionHandles, Project, Title, TitleAlign,
-    TitleKind, TitleShadow, TitleStyle, Track, TrackKind,
+    Clip, Generator, Keyframe, LowerThirdLine, Picture, PositionHandles, Project, Title,
+    TitleAlign, TitleKind, TitleShadow, TitleStyle, Track, TrackKind,
 };
 
 use super::subtitles::{checked_background, checked_color, checked_font, checked_outline};
@@ -147,7 +147,8 @@ pub fn checked(t: &Title) -> Result<Title> {
             return Err(Error::invalid("only a lower third has lines apart"));
         }
         Some(_) => {
-            let mut high = t.upper_view();
+            let mut high = t.clone();
+            high.swap_lines();
             high.upper = None;
             Some(checked(&high)?.line())
         }
@@ -232,20 +233,31 @@ pub fn add(
     duration: i64,
     title: &Title,
 ) -> Result<(String, String)> {
+    let title = checked(title)?;
+    add_block(p, "title", track, (start, duration), Some(title), None)
+}
+
+pub(super) fn add_block(
+    p: &mut Project,
+    what: &str,
+    track: Option<&str>,
+    (start, duration): (i64, i64),
+    title: Option<Title>,
+    generator: Option<Generator>,
+) -> Result<(String, String)> {
     if start < 0 {
-        return Err(Error::invalid("a title can't start before 0"));
+        return Err(Error::invalid(format!("a {what} can't start before 0")));
     }
     if duration < 1 {
-        return Err(Error::invalid("a title lasts at least one frame"));
+        return Err(Error::invalid(format!("a {what} lasts at least one frame")));
     }
-    let title = checked(title)?;
     let end = start + duration;
     let ti = match track {
         Some(id) => {
             let ti = tracks::resolve(p, id)?;
             if p.tracks[ti].kind != TrackKind::Video {
                 return Err(Error::invalid(format!(
-                    "a title goes on a video track, not {id}"
+                    "a {what} goes on a video track, not {id}"
                 )));
             }
             ti
@@ -279,8 +291,8 @@ pub fn add(
             enabled: true,
             name: None,
             effects: None,
-            generator: None,
-            title: Some(title),
+            generator,
+            title,
             picture: None,
             compound: None,
             speed: None,

@@ -218,8 +218,8 @@ impl Workspace {
                 continue;
             };
             let z = title.scale() as f32;
-            let [qx, qy] = base.pivot().map(|v| v as f32);
-            let [rx, ry] = title.pivot().map(|v| v as f32);
+            let [qx, qy] = base.place().map(|v| v as f32);
+            let [rx, ry] = title.place().map(|v| v as f32);
             let (fw, fh) = (w as f32, h as f32);
             let x = rx * fw + (bx - qx * fw) * z;
             let y = if title.moves() {
@@ -239,7 +239,7 @@ impl Workspace {
                 0.0
             };
             let frame = |fx: f32, fy: f32| picture.min + vec2(fx * scale.x, fy * scale.y);
-            let [px, py] = title.pivot();
+            let [px, py] = title.place();
             let pivot = frame((px * w) as f32, (py * h) as f32);
             let angle = title.turn().to_radians() as f32;
             let (sin, cos) = angle.sin_cos();
@@ -338,7 +338,7 @@ impl Workspace {
     }
 
     fn pivot_on(&self, t: &Title, picture: Rect) -> Pos2 {
-        let [px, py] = t.pivot();
+        let [px, py] = t.place();
         picture.min + vec2(px as f32 * picture.width(), py as f32 * picture.height())
     }
 

@@ -206,6 +206,7 @@ struct Look<'a> {
     shadow: Option<Shade>,
     markup: Markup<'a>,
     bare: bool,
+    drop: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -246,6 +247,7 @@ enum Markup<'a> {
 struct Laid {
     sprite: Option<Sprite>,
     lines: f32,
+    above: f32,
     popped: Option<(f32, f32)>,
 }
 
@@ -595,6 +597,12 @@ fn lay_out(look: &Look) -> Option<Laid> {
         .zip(buffer.layout_runs())
         .map(|(r, plain)| r.line_top + plain.line_height)
         .fold(lines, f32::max);
+    let last = runs.iter().map(|r| r.line_i).max();
+    let above: f32 = runs
+        .iter()
+        .filter(|r| Some(r.line_i) != last)
+        .map(|r| r.line_height)
+        .sum();
     let popped = runs.iter().find_map(|run| {
         let (x0, x1) = run
             .glyphs
@@ -630,9 +638,10 @@ fn lay_out(look: &Look) -> Option<Laid> {
                 .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3)))
         })
         .map(|(x0, y0, x1, y1)| {
+            let dropped = if above > 0.0 { look.drop } else { 0.0 };
             (
                 (x0 - frame.across).floor() as i32,
-                (y0 - frame.down).floor() as i32,
+                (y0 + dropped - frame.down).floor() as i32,
                 (x1 + frame.across).ceil() as i32,
                 (y1 + frame.down).ceil() as i32,
             )
@@ -767,6 +776,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     Some(Laid {
         sprite,
         lines,
+        above,
         popped,
     })
 }
@@ -807,6 +817,7 @@ fn block(
         shadow: style.shadow.as_ref().and_then(|s| shade(s, w, h)),
         markup: Markup::Pieces(pieces),
         bare: false,
+        drop: 0.0,
     };
     let line = Line {
         pieces: pieces.to_vec(),
@@ -1020,10 +1031,12 @@ fn title_block(
             .and_then(|s| shade(s, w, h)),
         markup: Markup::Title(&text, (h * zoom) as f32),
         bare,
+        drop: (h * Title::UPPER_DROP) as f32,
     };
     let Laid {
         sprite: Some(sprite),
         lines,
+        above,
         ..
     } = lay_out(&look)?
     else {
@@ -1032,7 +1045,12 @@ fn title_block(
     let [px, py] = block.pivot;
     let [across, down] = t.anchor();
     let left = (px * w) as f32 - across as f32 * look.wrap;
-    let top = (block.bottom * h) as f32 - down as f32 * lines;
+    let up = match block.part {
+        TitlePart::Whole | TitlePart::Lower => down as f32 * lines,
+        TitlePart::Upper => lines,
+        TitlePart::Backing => above,
+    };
+    let top = (block.edge * h) as f32 - up;
     let sprite = placed(sprite, left, top);
     Some(turned(
         sprite,

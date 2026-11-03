@@ -485,7 +485,11 @@ fn clip(
             .clone()
             .or_else(|| media.map(|m| m.name.clone()))
             .or_else(|| c.title.as_ref().map(vidcut_core::model::Title::label))
-            .or_else(|| c.generator.as_ref().map(vidcut_core::otio::generator_kind))
+            .or_else(|| {
+                c.generator
+                    .as_ref()
+                    .map(|g| vidcut_core::generators::name(g).to_string())
+            })
             .or_else(|| c.compound.as_ref().map(vidcut_core::otio::compound_kind))
             .unwrap_or_default();
         let left = x0.max(painter.clip_rect().left()) + if keyed { 12.0 } else { 0.0 };

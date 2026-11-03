@@ -1570,9 +1570,8 @@ pub struct Clip {
     /// Effects on its picture, carried from another editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
-    /// A generator or title another editor made, carried (deviation X9):
-    /// a block that plays as a gap. It has no media (`media` is empty) and
-    /// no audio, and any length.
+    /// A generator: a picture made with no file. It has no
+    /// media (`media` is empty) and no audio, and any length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generator: Option<Generator>,
     /// A title (decision D65): its text drawn over the picture of the
@@ -1921,11 +1920,38 @@ impl Speed {
     }
 }
 
-/// A generator or title from another editor's file (deviation X9).
+/// A kind of generator that vidcut draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GeneratorKind {
+    SolidColor,
+}
+
+/// What a generator makes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Generator {
-    /// The OTIO media reference as read: a `GeneratorReference`.
-    pub reference: Kept,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Generator {
+    /// One color over the whole picture.
+    SolidColor {
+        /// `#rrggbb`.
+        #[serde(with = "hex_rgb")]
+        #[schemars(with = "String")]
+        color: [u8; 3],
+    },
+    /// A generator or title from another editor's file that vidcut doesn't
+    /// draw (deviation X9): a block that plays as a gap.
+    Carried {
+        /// The OTIO media reference as read: a `GeneratorReference`.
+        reference: Kept,
+    },
+}
+
+impl Generator {
+    pub const SOLID_COLOR: &str = "Solid Color";
+
+    pub fn draws(&self) -> bool {
+        !matches!(self, Self::Carried { .. })
+    }
 }
 
 /// A title: text drawn over the picture (decision D65). A field left out
@@ -1951,11 +1977,10 @@ pub struct Title {
     pub style: TitleStyle,
     /// Where it goes, as fractions of the picture's width and height from
     /// its top left, from -4 to 4 across and from -3 to 5 down: the middle
-    /// of a `text` title's block (usual: `[0.5, 0.5]`), a lower third's
-    /// bottom left, middle or
-    /// right corner by its `align` (usual: 10%, 50% or 90% across and 88%
-    /// down, so that its lower line's top sits about a fifth up the picture:
-    /// `[0.1, 0.88]`, `[0.5, 0.88]` and `[0.9, 0.88]`). A scroll's `x` is
+    /// of a `text` title's block (usual: `[0.5, 0.5]`), the left, middle or
+    /// right end of the top edge of a lower third's lower line by its `align`
+    /// (usual: 10%, 50% or 90% across and 78% down: `[0.1, 0.78]`,
+    /// `[0.5, 0.78]` and `[0.9, 0.78]`). A scroll's `x` is
     /// where its lines' left edge, middle or right edge goes by its `align`
     /// (usual: 1%, 50% or 99% across); its `y` is not used. With
     /// `position_keys`, the place at a frame is that curve.
@@ -1977,9 +2002,8 @@ pub struct Title {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub position_handles: Vec<PositionHandles>,
     /// How much larger its text is drawn, from 1/4 to 4, about the middle of
-    /// a `text` title or the point where a lower third's lines meet; a
-    /// scroll has none. Usual: 1. With `zoom_keys`, the zoom at a frame is
-    /// that curve.
+    /// a `text` title or the `position` of a lower third's line; a scroll has
+    /// none. Usual: 1. With `zoom_keys`, the zoom at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zoom: Option<f64>,
     /// Zoom keyframes, on the clip's source frames. Left out when the zoom
@@ -2019,9 +2043,10 @@ pub enum LowerThirdLine {
 }
 
 /// The place, zoom and rotation of a lower third's upper line. The fields
-/// work as the title's fields with the same names. The same values on both
-/// lines draw them as one block. `zoom` and `rotation` work about the left,
-/// middle or right end of this line's bottom edge, by the title's `align`.
+/// work as the title's fields with the same names. `position` is the left,
+/// middle or right end of this line's bottom edge, by the title's `align`,
+/// and `zoom` and `rotation` work about it. With no `upper`, this point is
+/// 2% of the picture height below the lower line's point.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TitleLine {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2054,7 +2079,7 @@ pub enum TitlePart {
 pub struct TitleBlock {
     pub part: TitlePart,
     pub pivot: [f64; 2],
-    pub bottom: f64,
+    pub edge: f64,
     pub zoom: f64,
     pub turn: f64,
 }
@@ -2203,7 +2228,8 @@ impl Title {
     pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;
     pub const LOWER_IN: f64 = 0.1;
-    pub const LOWER_DOWN: f64 = 0.88;
+    pub const LOWER_DOWN: f64 = 0.78;
+    pub const UPPER_DROP: f64 = 0.02;
     pub const SCROLL_IN: f64 = 0.01;
     pub const SCROLL_LINE: f64 = 4.0 / 3.0;
     pub const SCROLL_LEAD: f64 = 10.0;
@@ -2271,8 +2297,7 @@ impl Title {
         };
         match self.kind {
             TitleKind::Text => [0.5, 0.5],
-            TitleKind::LowerThird => [across, 1.0],
-            TitleKind::Scroll => [across, 0.0],
+            TitleKind::LowerThird | TitleKind::Scroll => [across, 0.0],
         }
     }
 
@@ -2338,14 +2363,6 @@ impl Title {
         self.opacity.unwrap_or(1.0)
     }
 
-    pub fn pivot(&self) -> [f64; 2] {
-        let [x, y] = self.place();
-        match self.kind {
-            TitleKind::Text | TitleKind::Scroll => [x, y],
-            TitleKind::LowerThird => [x, y - self.lower_line()],
-        }
-    }
-
     pub fn lower_line(&self) -> f64 {
         let lines = crate::rich::lines(&self.text);
         let base = self.text_fraction();
@@ -2368,9 +2385,19 @@ impl Title {
         }
     }
 
+    pub fn upper_with_lower(&self) -> TitleLine {
+        let dropped = |y: f64| crate::otio::effects::rounded(y + Self::UPPER_DROP);
+        let [x, y] = self.place();
+        TitleLine {
+            position: Some([x, dropped(y)]),
+            position_y: self.position_y.iter().map(|y| dropped(*y)).collect(),
+            ..self.line()
+        }
+    }
+
     pub fn part_lines(&mut self) {
         if self.upper.is_none() {
-            self.upper = Some(self.line());
+            self.upper = Some(self.upper_with_lower());
         }
     }
 
@@ -2391,7 +2418,10 @@ impl Title {
 
     pub fn upper_view(&self) -> Title {
         let mut t = self.clone();
+        t.part_lines();
         t.swap_lines();
+        let [x, y] = Self::usual_position(self.kind, self.align());
+        t.position.get_or_insert([x, y + Self::UPPER_DROP]);
         t
     }
 
@@ -2405,40 +2435,30 @@ impl Title {
     }
 
     fn block(&self, part: TitlePart) -> TitleBlock {
-        let [_, y] = self.place();
-        let bottom = match self.kind {
-            TitleKind::Text => y,
-            TitleKind::LowerThird => y + self.lower_line() * (self.scale() - 1.0),
-            TitleKind::Scroll => 1.0,
-        };
+        let place = self.place();
         TitleBlock {
             part,
-            pivot: self.pivot(),
-            bottom,
+            pivot: place,
+            edge: if self.kind == TitleKind::Scroll {
+                1.0
+            } else {
+                place[1]
+            },
             zoom: self.scale(),
             turn: self.turn(),
         }
     }
 
     pub fn blocks(&self) -> Vec<TitleBlock> {
-        if self.upper.is_none() {
+        if self.kind != TitleKind::LowerThird {
             return vec![self.block(TitlePart::Whole)];
         }
-        let high = self.upper_view();
-        let pivot = high.pivot();
-        let upper = TitleBlock {
-            part: TitlePart::Upper,
-            pivot,
-            bottom: pivot[1],
-            zoom: high.scale(),
-            turn: high.turn(),
-        };
         let mut out = Vec::new();
         if self.backing().is_some() {
             out.push(self.block(TitlePart::Backing));
         }
         out.push(self.block(TitlePart::Lower));
-        out.push(upper);
+        out.push(self.upper_view().block(TitlePart::Upper));
         out
     }
 
@@ -2470,12 +2490,11 @@ impl Title {
 }
 
 /// Where a clip's picture goes over the frame, and the effects on it:
-/// footage, a still, an image sequence or a compound clip. A field left out
-/// is at its usual value; at all of them the picture is fitted into the
-/// frame. The tracks below show
-/// wherever it doesn't cover the frame: in the bars around a picture of
-/// another shape, around it, where it is cropped and through its soft edges
-/// and its opacity.
+/// footage, a still, an image sequence, a compound clip or a generator,
+/// which has no effects. A field left out is at its usual value; at all of
+/// them the picture is fitted into the frame. The tracks below show wherever
+/// it doesn't cover the frame: in the bars around a picture of another shape,
+/// around it, where it is cropped and through its soft edges and its opacity.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Picture {
     /// Where the middle of the whole picture goes before the zoom and the
@@ -3211,6 +3230,10 @@ impl Clip {
 
     pub fn is_block(&self) -> bool {
         self.is_generator() || self.compound.is_some()
+    }
+
+    pub fn draws(&self) -> bool {
+        self.generator.as_ref().is_some_and(Generator::draws)
     }
 
     pub fn end(&self) -> i64 {

@@ -542,7 +542,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                 let h = rows * line + 2.0 * Title::PADDING * size;
                 let top = match t.kind {
                     TitleKind::Text | TitleKind::Scroll => y - h / 2.0,
-                    TitleKind::LowerThird => y + Title::PADDING * size - h,
+                    TitleKind::LowerThird => y + t.lower_line() + Title::PADDING * size - h,
                 };
                 let middle = if t.kind == TitleKind::Text { x } else { 0.5 };
                 [middle - Title::SAFE / 2.0, top, Title::SAFE, h]
@@ -1000,7 +1000,7 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
     let lift = if t.kind == TitleKind::Text {
         0.0
     } else {
-        row(main) as f64 / 2.0 * t.lower_line()
+        (row(main) as f64 / 2.0 - 1.0) * t.lower_line()
     };
     (t.position_keys, t.position_y) = point_keys(parameter(main, "position"), origin, |[x, y]| {
         [x, 1.0 - y + lift]
@@ -1019,7 +1019,7 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
             });
         line.position_handles = point_handles(parameter(high, "position"), origin);
         read_turn_keys(&mut line, high, origin);
-        t.upper = Some(line.line()).filter(|u| *u != t.line());
+        t.upper = Some(line.line()).filter(|u| *u != t.upper_with_lower());
     }
 }
 
@@ -1038,7 +1038,7 @@ fn upper_lift(t: &Title, high: &Value) -> f64 {
     let lines = rich::lines(&t.sized_text());
     let base = t.text_fraction();
     let size = lines.first().map_or(base, |l| rich::largest(l, base));
-    row(high) as f64 / 2.0 * size * Title::LINE + t.lower_line()
+    row(high) as f64 / 2.0 * size * Title::LINE
 }
 
 fn read_zoom(g: &Value) -> Option<f64> {
@@ -1210,7 +1210,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let [x, from_bottom] = at;
     let mut y = 1.0 - from_bottom;
     if let Some(row) = lowered {
-        y += row as f64 / 2.0 * title.lower_line();
+        y += (row as f64 / 2.0 - 1.0) * title.lower_line();
     }
     title.position = Some([across(x), down(y)]);
     if kind == TitleKind::LowerThird
@@ -1227,7 +1227,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             rotation: read_rotation(high),
             ..TitleLine::default()
         };
-        title.upper = Some(line).filter(|u| *u != title.line());
+        title.upper = Some(line).filter(|u| *u != title.upper_with_lower());
     }
     crate::ops::titles::checked(&title).ok()
 }

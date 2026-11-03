@@ -47,7 +47,10 @@ pub fn render(
             let mut x = a;
             for piece in &plan.video {
                 let n = piece.frames();
-                if matches!(piece, VideoPiece::Source { .. }) {
+                if matches!(
+                    piece,
+                    VideoPiece::Source { .. } | VideoPiece::Generated { .. }
+                ) {
                     cells.push(Cell {
                         frame: x + n / 2,
                         piece: at(piece, n / 2),

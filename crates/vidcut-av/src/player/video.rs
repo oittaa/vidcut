@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
+use vidcut_core::model::Hdr;
 use vidcut_core::render::{RenderPlan, VideoPiece, WHOLE};
 use vidcut_core::time::Rational;
 
@@ -50,9 +51,11 @@ enum Direction {
     Back,
 }
 
+type ReaderKey = (Rational, u32, u32, Option<Hdr>, bool);
+
 struct Decoder {
     shared: Arc<Shared>,
-    frames: Option<((Rational, u32, u32, bool), VideoFrames)>,
+    frames: Option<(ReaderKey, VideoFrames)>,
     hardware: bool,
     gpu: Option<Option<crate::hw::GpuDecoder>>,
     picture_bytes: usize,
@@ -653,7 +656,7 @@ impl Decoder {
     fn reader(&mut self) -> &mut VideoFrames {
         let plan = self.plan.clone();
         let p = &plan.plan;
-        let key = (p.fps, p.width, p.height, self.hardware);
+        let key = (p.fps, p.width, p.height, p.colors, self.hardware);
         if self.frames.as_ref().is_none_or(|(k, _)| *k != key) {
             let frames = self.new_reader(p);
             if self.frames.replace((key, frames)).is_some() {
@@ -665,7 +668,8 @@ impl Decoder {
     }
 
     fn new_reader(&mut self, p: &RenderPlan) -> VideoFrames {
-        let frames = VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None);
+        let frames = VideoFrames::new(&[], p.fps, p.width, p.height, format::Pixel::YUV420P, None)
+            .drawing_in(p.colors);
         if !self.hardware {
             crate::debug!(
                 "player",

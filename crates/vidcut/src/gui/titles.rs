@@ -29,6 +29,18 @@ impl LineFields {
             rotation: plain(t.rotation),
         }
     }
+
+    fn of_upper(t: &Title) -> Self {
+        let f = Self::of(&t.upper_view());
+        match (&t.upper, t.position) {
+            (None, None) => Self {
+                across: String::new(),
+                down: String::new(),
+                ..f
+            },
+            _ => f,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -105,7 +117,7 @@ impl TitleDialog {
         self.line_spacing = plain(t.style.line_spacing);
         self.base = Some(t.clone());
         self.line = LineFields::of(t);
-        self.upper = LineFields::of(&t.upper_view());
+        self.upper = LineFields::of_upper(t);
         self.title_opacity = percent(t.opacity);
         self.loaded = true;
     }
@@ -122,7 +134,7 @@ impl TitleDialog {
 
     pub(super) fn placed(&mut self, t: &Title) {
         self.line = LineFields::of(t);
-        self.upper = LineFields::of(&t.upper_view());
+        self.upper = LineFields::of_upper(t);
         self.shown = self.shown.is_some().then(|| t.clone());
     }
 }
@@ -342,7 +354,7 @@ impl Workspace {
     }
 
     pub(crate) fn add_title(&mut self, ctx: &egui::Context) {
-        let params = json!({ "text": "Title", "at": self.snap.timeline.position });
+        let params = json!({ "text": "Basic Title", "at": self.snap.timeline.position });
         self.timeline.adding_title = Some(Ask::send(&self.live, ctx, "titles.add", params));
     }
 
@@ -551,6 +563,7 @@ impl Workspace {
         );
         let across_hint = format!("{}%", percent(Some(usual[0])));
         let down_hint = format!("{}%", percent(Some(usual[1])));
+        let upper_hint = format!("{}%", percent(Some(usual[1] + Title::UPPER_DROP)));
         let mut clicks = Vec::new();
         egui::Grid::new("title-style-fields").show(ui, |ui| {
             changed |= d
@@ -596,7 +609,12 @@ impl Workspace {
                     keys(ui, PictureValue::Position, line);
                     ui.end_row();
                     if !scroll {
-                        moved |= row(ui, "Down", &mut f.down, &down_hint);
+                        let hint = if line == Some(LowerThirdLine::Upper) {
+                            &upper_hint
+                        } else {
+                            &down_hint
+                        };
+                        moved |= row(ui, "Down", &mut f.down, hint);
                         ui.end_row();
                         moved |= row(ui, "Zoom", &mut f.zoom, "100%");
                         keys(ui, PictureValue::Zoom, line);
@@ -622,7 +640,7 @@ impl Workspace {
             ui.end_row();
         });
         ui.label(dim(match d.kind {
-            TitleKind::LowerThird => "Across and Down: the corner, in percents of the picture.",
+            TitleKind::LowerThird => "Across and Down: where the lines meet, in percents.",
             TitleKind::Scroll => "Across: the lines' edge by Align, in percents of the picture.",
             TitleKind::Text => "Across and Down: the text's middle, in percents of the picture.",
         }));
