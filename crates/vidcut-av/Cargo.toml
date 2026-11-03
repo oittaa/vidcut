@@ -12,6 +12,7 @@ ash.workspace = true
 ffmpeg-next.workspace = true
 cosmic-text.workspace = true
 harfrust.workspace = true
+skrifa.workspace = true
 zeno.workspace = true
 thiserror.workspace = true
 serde.workspace = true

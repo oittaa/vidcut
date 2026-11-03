@@ -179,7 +179,9 @@ pub fn checked(t: &Title) -> Result<Title> {
             None => None,
         },
         tracking: match s.tracking {
-            Some(v) if Title::spacing_fits(v) => (v != 0.0).then_some(v),
+            Some(v) if Title::spacing_fits(v) => {
+                (v != 0.0 || t.kind == TitleKind::LowerThird).then_some(v)
+            }
             Some(_) => return Err(Error::invalid(TRACKED)),
             None => None,
         },

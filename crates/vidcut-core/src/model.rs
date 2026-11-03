@@ -2197,8 +2197,9 @@ pub struct TitleStyle {
     /// Below the last line, it only makes the block taller. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_spacing: Option<f64>,
-    /// Space after each letter, from -4096 to 4096. One unit is 3/4 of a pixel
-    /// of the timeline. Usual: 0.
+    /// Space after each letter, from -4096 to 4096. One unit is 1/100 of the
+    /// width of the font's letter X, and 1/200 below 0. Usual: 0, and 11 on
+    /// the upper line of a lower third.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracking: Option<f64>,
     /// How its letters draw: `mixed` (as typed), `upper`, `lower`, `small`
@@ -2315,7 +2316,10 @@ pub fn size_fits(v: f64, most: u32) -> bool {
 impl Title {
     pub const MOST_SIZE: u32 = 4096;
     pub const MOST_SPACING: f64 = 4096.0;
-    pub const TRACKING_PIXEL: f64 = 0.75;
+    pub const TRACKING_SHARE: f64 = 100.0;
+    pub const TRACKING_SHARE_LESS: f64 = 200.0;
+    pub const TRACKING_FILE: f64 = 0.85;
+    pub const TRACKING_STEPS: f64 = 64.0;
     pub const SHIFTED_SIZE: f64 = 2.0 / 3.0;
     pub const ASCENT_SLACK: f64 = 0.25;
     pub const WIDTH_SLACK: f64 = 1e-3;
@@ -2334,6 +2338,7 @@ impl Title {
     pub const SCROLL_LINE: f64 = 4.0 / 3.0;
     pub const SCROLL_LEAD: f64 = 10.0;
     pub const UPPER_SIZE: f64 = 48.0 / 1080.0;
+    pub const UPPER_TRACKING: f64 = 11.0;
     pub const ACROSS: (f64, f64) = (-Picture::REACH, Picture::REACH);
     pub const DOWN: (f64, f64) = (1.0 - Picture::REACH, 1.0 + Picture::REACH);
 
@@ -2405,13 +2410,27 @@ impl Title {
         }
     }
 
+    fn usual_upper(&self, text: &str) -> String {
+        let size = match self.style.size {
+            Some(_) => String::new(),
+            None => format!(" size=\"{}\"", Self::UPPER_SIZE),
+        };
+        let tracking = match self.style.tracking {
+            Some(_) => String::new(),
+            None => format!(" tracking=\"{}\"", Self::UPPER_TRACKING),
+        };
+        if size.is_empty() && tracking.is_empty() {
+            text.to_string()
+        } else {
+            format!("<font{size}{tracking}>{text}</font>")
+        }
+    }
+
     pub fn sized_text(&self) -> std::borrow::Cow<'_, str> {
-        match (self.kind, self.style.size, self.text.split_once('\n')) {
-            (TitleKind::LowerThird, None, Some((upper, lower))) => format!(
-                "<font size=\"{}\">{upper}</font>\n{lower}",
-                Self::UPPER_SIZE
-            )
-            .into(),
+        match (self.kind, self.text.split_once('\n')) {
+            (TitleKind::LowerThird, Some((upper, lower))) => {
+                format!("{}\n{lower}", self.usual_upper(upper)).into()
+            }
             _ => self.text.as_str().into(),
         }
     }
@@ -2422,6 +2441,27 @@ impl Title {
 
     pub fn text_fraction(&self) -> f64 {
         self.style.size.unwrap_or(Self::usual_size(self.kind))
+    }
+
+    fn tracking_share(tracking: f64) -> f64 {
+        if tracking < 0.0 {
+            Self::TRACKING_SHARE_LESS
+        } else {
+            Self::TRACKING_SHARE
+        }
+    }
+
+    pub fn tracking_pixels(tracking: f64, letter: f64) -> f64 {
+        let pixels = tracking * letter / Self::tracking_share(tracking);
+        (pixels * Self::TRACKING_STEPS).trunc() / Self::TRACKING_STEPS
+    }
+
+    pub fn tracking_from_file(pixels: f64) -> f64 {
+        pixels * Self::tracking_share(pixels) / (Self::TRACKING_SHARE * Self::TRACKING_FILE)
+    }
+
+    pub fn tracking_to_file(tracking: f64) -> f64 {
+        tracking * Self::TRACKING_SHARE * Self::TRACKING_FILE / Self::tracking_share(tracking)
     }
 
     pub fn baseline(ascent: f64) -> f64 {
@@ -2624,13 +2664,9 @@ impl Title {
                 .map_or(String::new(), |l| crate::rich::write(l, &none))
                 .into(),
             TitlePart::Upper if lines.len() < 2 => "".into(),
-            TitlePart::Upper => {
-                let text = crate::rich::write(&lines[0], &none);
-                match self.style.size {
-                    Some(_) => text.into(),
-                    None => format!("<font size=\"{}\">{text}</font>", Self::UPPER_SIZE).into(),
-                }
-            }
+            TitlePart::Upper => self
+                .usual_upper(&crate::rich::write(&lines[0], &none))
+                .into(),
         }
     }
 

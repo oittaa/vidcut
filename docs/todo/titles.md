@@ -15,10 +15,12 @@
 
 ## Line Spacing and Tracking in the Inspector
 
-- The measurements read files. Measure the range and the units of the two controls in Resolve's Inspector.
-- vidcut holds the number of the file until then.
+- Measure the range of the two controls in Resolve's Inspector, and the unit of Line Spacing.
+- vidcut holds the number of the file for Line Spacing until then.
 - vidcut accepts -4096 to 4096 until then. The reason is that Resolve draws a line spacing of 2000 from a file.
-- Measure why Resolve's Inspector shows a tracking of 11 on an upper line when the file has none.
+- Measure Tracking on bold letters, and with `<sup>`, `<sub>` and small capitals. vidcut uses the width of X in the bold font, at the size before the shift or the small capitals.
+- Measure a tracking with a fraction of a pixel at a zoom. vidcut takes the step of 1/64 of a pixel before the zoom.
+- Find why some blocks with a negative tracking are up to 1 pixel from the rule, as "Ab" in Arial 96.
 
 ## Background in the Inspector
 
