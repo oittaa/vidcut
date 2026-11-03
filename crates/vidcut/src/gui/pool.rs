@@ -31,6 +31,9 @@ const LIST_COLUMNS: [&str; 9] = [
 const LIST_GAP: Vec2 = Vec2::new(12.0, 4.0);
 const STRIP_HEIGHT: f32 = 54.0;
 const HEADER: f32 = 20.0;
+const EDIT_ICONS: f32 = 8.0;
+const EDIT_ICON: f32 = 16.0;
+const EDIT_ICON_GAP: f32 = 4.0;
 
 #[derive(Default)]
 pub(super) struct BinsUi {
@@ -1774,7 +1777,13 @@ impl Workspace {
 
     fn edit_buttons(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
+            let spare = ui.available_width() - EDIT_ICONS * (EDIT_ICON + EDIT_ICON_GAP);
+            let spacing = ui.spacing_mut();
+            spacing.item_spacing.x = EDIT_ICON_GAP;
+            spacing.button_padding.x = spacing
+                .button_padding
+                .x
+                .min((spare / (2.0 * EDIT_ICONS)).max(0.0));
             let buttons = [
                 (icon::SMART_INSERT, "Smart Insert", "edit.smart_insert"),
                 (icon::APPEND, "Append", "edit.append"),
@@ -1837,7 +1846,7 @@ mod icon {
 
 fn edit_icon(ui: &mut egui::Ui, glyph: &str, name: &str) -> bool {
     let r = ui
-        .add(egui::Button::new(RichText::new(glyph).size(16.0)))
+        .add(egui::Button::new(RichText::new(glyph).size(EDIT_ICON)))
         .on_hover_text(name);
     r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
     r.clicked()
