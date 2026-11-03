@@ -21,6 +21,7 @@
 - Measure Tracking on bold letters, and with `<sup>`, `<sub>` and small capitals. vidcut uses the width of X in the bold font, at the size before the shift or the small capitals.
 - Measure a tracking with a fraction of a pixel at a zoom. vidcut takes the step of 1/64 of a pixel before the zoom.
 - Find why some blocks with a negative tracking are up to 1 pixel from the rule, as "Ab" in Arial 96.
+- Measure `<u>`, `<o>` and `<s>` with Tracking. vidcut draws them across the last letter's space. Also measure them on part of a line, and on `<sup>`.
 
 ## Font heights
 

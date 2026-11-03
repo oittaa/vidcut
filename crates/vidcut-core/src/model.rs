@@ -2468,6 +2468,14 @@ impl Title {
         (ascent - Self::ASCENT_SLACK).ceil()
     }
 
+    pub fn underline_drop(thickness: f64) -> f64 {
+        (thickness / 3.0 + 0.5).ceil() + 0.5
+    }
+
+    pub fn line_width(width: f64, scale: f64) -> f64 {
+        ((width / scale + Self::WIDTH_SLACK).floor() * scale).floor()
+    }
+
     pub fn seated_left(&self, middle: f64, widest: f64, wrap: f64, pixel: f64) -> f64 {
         let lined = self.align().fraction();
         let width = (widest / pixel + Self::WIDTH_SLACK).floor();

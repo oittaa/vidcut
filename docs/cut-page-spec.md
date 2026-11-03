@@ -2181,7 +2181,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Zoom draws the letters as the bigger font. The height of a line is its height at zoom 1, in whole pixels, times the zoom (same renders).
     - A scroll keeps hinted letters (measured in Resolve Studio 21.1.2). Subtitles keep them too.
     - A title that Resolve reads from an OTIO file has one more edge on its letters. vidcut does not draw that edge ([X112](deviations.md#x112-a-title-from-an-otio-file-has-no-black-edge)).
-    - The lines `<u>`, `<o>` and `<s>` round the ascent up when it is more than a quarter past a whole pixel. The height of `<sup>` and `<sub>` does the same.
+    - The height of `<sup>` and `<sub>` rounds the ascent up when it is more than a quarter past a whole pixel.
     - The lines of a scroll are 4/3 of the sum of the three heights plus 10 timeline pixels apart. This fits Resolve Studio 21.1.2 within 5 pixels with four fonts.
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
@@ -2201,10 +2201,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `small` draws small letters as capitals at 0.7 of the size (measured in Resolve Studio 21.1.2).
     - `title` makes the first letter of each word a capital, and it keeps the other letters.
     - `<o>` draws a line over the words and `<s>` a line through them (p. 1184).
-    - These lines and `<u>` go across the advance of the words. Their height is the font's underline thickness less 1 pixel.
-    - The top of `<u>` is a third of that thickness plus 1.5 pixels under the baseline.
-    - The top of `<o>` is the font's ascent over the baseline. The top of `<s>` is a third of the ascent less 1 pixel over it.
-    - These rules fit Resolve Studio 21.1.2 within a pixel with four fonts at five sizes.
+    - The height of these lines and `<u>` is `underlineThickness` in the font's `post` table.
+    - The left end is the start of the words, rounded up to a whole pixel.
+    - The right end is the exact start plus the width. The width goes down to whole pixels at zoom 1, and again after the zoom.
+    - The middle of `<u>` is under the baseline by a third of the thickness plus 1/2, rounded up, plus 1/2 pixel.
+    - That distance comes from the thickness at zoom 1, and the zoom scales it.
+    - The middle of `<s>` is a third of the ascent over the baseline. The middle of `<o>` is the ascent over the baseline.
+    - The top of the block cuts these lines. Thus `<o>` on the first line shows only its lower half.
+    - These rules are measurements in Resolve Studio 21.1.2 on Windows, with 10 fonts at sizes 48 to 200, at three zooms and on two lines.
     - `<sup>` and `<sub>` draw the words at 2/3 of their size (p. 1184).
     - `<sup>` raises them by half of the small font's height, and `<sub>` lowers them by 1/6 of it. The rows of the lines stay (measured in Resolve Studio 21.1.2).
     - Lines wrap at the width of title safe, 90% of the picture width.
