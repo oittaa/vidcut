@@ -2647,6 +2647,20 @@ fn mutate(
             crate::multicam::move_to_bin(p, group, bin)?;
             Value::Null
         }
+        Request::MulticamMarksSet {
+            group,
+            mark_in,
+            out,
+        } => json!(crate::multicam::set_marks(
+            p,
+            group,
+            mark_in.as_ref(),
+            out.as_ref()
+        )?),
+        Request::MulticamMarksClear { group } => {
+            crate::multicam::group_mut(p, group)?.marks = Marks::default();
+            Value::Null
+        }
         Request::MediaRemove { media, force } => {
             p.media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
@@ -2979,17 +2993,27 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            let source = source(p, src)?;
-            let marks = &p
-                .media(&source.media)
-                .expect("source checked the media")
-                .marks;
+            let mut source = source(p, src)?;
+            let shared = p
+                .group_of(&source.media)
+                .filter(|g| *group && src.range.is_none() && !g.marks.is_empty());
+            let marks = match shared {
+                Some(g) => &g.marks,
+                None => {
+                    &p.media(&source.media)
+                        .expect("source checked the media")
+                        .marks
+                }
+            };
             if src.range.is_none() && marks.mark_in.is_none() && marks.mark_out.is_some() {
                 return Err(Error::invalid(
                     "Source Overwrite can't use a source Out mark with no In",
                 ));
             }
             let marked = src.range.is_some() || marks.mark_in.is_some() || marks.mark_out.is_some();
+            if let Some(g) = shared {
+                source.range = crate::multicam::marked_range(p, g, &source.media)?;
+            }
             let placed = ops::source_overwrite(p, &source, marked, at, *group)?;
             json!({
                 "clip": placed.clip,
@@ -5139,6 +5163,8 @@ fn groups_to_rate(p: &mut Project, from: Rational) {
         for a in &mut g.angles {
             a.at = rescale(a.at, from, to);
         }
+        g.marks.mark_in = g.marks.mark_in.map(|f| rescale(f, from, to));
+        g.marks.mark_out = g.marks.mark_out.map(|f| rescale(f, from, to));
     }
 }
 

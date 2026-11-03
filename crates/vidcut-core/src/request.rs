@@ -162,6 +162,20 @@ pub enum Request {
     MulticamRename { group: String, name: String },
     #[serde(rename = "multicam.move")]
     MulticamMove { group: String, bin: String },
+    /// Set the In and/or Out of a synced group. They are frames of the group
+    /// and hold for each of its files; `out` is exclusive. The files' own
+    /// source marks do not change.
+    #[serde(rename = "multicam.marks.set")]
+    MulticamMarksSet {
+        group: String,
+        #[serde(rename = "in", default)]
+        mark_in: Option<TimeSpec>,
+        #[serde(default)]
+        out: Option<TimeSpec>,
+    },
+    /// Clear the In and Out of a synced group.
+    #[serde(rename = "multicam.marks.clear")]
+    MulticamMarksClear { group: String },
     /// Remove from the pool; `force` also deletes the clips that use it.
     #[serde(rename = "media.remove")]
     MediaRemove {
@@ -2710,12 +2724,13 @@ pub enum Request {
         start_tc: Option<TimeSpec>,
     },
     /// What the viewer shows, and how its timecode field counts.
-    /// `mode` is `source_clip`, `source_tape`, or `timeline`. Omitted, the viewer stays.
+    /// `mode` is `source_clip`, `source_tape`, `multi_source`, or `timeline`.
+    /// Omitted, the viewer stays.
     /// `display` is the count (decision D91). Omitted, the count stays.
     /// `reset_timer1` stores the playhead on screen as Timer 1's zero for that player.
     /// The zero lasts for this session.
     /// `paste` seeks that playhead to a copied count, read in the display this call leaves.
-    /// Give one of `mode`, `display`, `reset_timer1`, or `paste`.
+    /// Give one of `mode`, `display`, `reset_timer1`, `paste`, or `angle`.
     #[serde(rename = "viewer.set")]
     ViewerSet {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2726,6 +2741,14 @@ pub enum Request {
         reset_timer1: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         paste: Option<String>,
+        /// The synced group for `multi_source`. Omitted, the group of the
+        /// open clip or of `angle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<String>,
+        /// In `multi_source`, the file of the group that plays and that
+        /// edits use. Omitted, the open clip, or else the first file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<String>,
     },
     /// Viewer framing and safe-area guides (decision D90). Stored in
     /// preferences, not the project. A field that is left out stays as it is.
@@ -3670,6 +3693,8 @@ pub enum ViewerMode {
     SourceClip,
     #[serde(alias = "tape")]
     SourceTape,
+    #[serde(alias = "multi")]
+    MultiSource,
     Timeline,
 }
 
@@ -4840,6 +4865,8 @@ mod tests {
                 display: Some(TimecodeDisplay::Timer1),
                 reset_timer1: false,
                 paste: None,
+                group: None,
+                angle: None,
             }
         );
     }

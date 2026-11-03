@@ -38,7 +38,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
-- Sync Bin ([todo](todo/sync-bin.md)), Multi Source, Live Overwrite
+- Sync Bin ([todo](todo/sync-bin.md)), Live Overwrite
 - making a compound clip from timeline clips ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
@@ -264,7 +264,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - a group of one file
     - a file in two groups
     - `media.remove` of a file in a group
-  - No command places a group on the timeline. No window shows a group yet.
+  - `multicam.marks.set` and `multicam.marks.clear` act on the In and Out of the group ([§4.1](#41-modes)). `multicam.list` gives them.
+  - No command places a group on the timeline. The pool does not show a group yet.
 - **Input Color Space** (pp. 228, 230):
   - The color tags of a file tell how to read the colors of its pictures.
   - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.
@@ -313,6 +314,21 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Source Tape** (pp. 680–681, 704–706):
   - All pool clips play end to end as one tape, in the pool sort order.
   - The clip under the playhead becomes selected in the pool.
+- **Multi Source** (pp. 679, 682):
+  - The Viewer lays out the files of one synced group in a grid. All of them follow one playhead.
+  - `viewer.set` with `multi_source` opens it. `group` names the group, and the group of the open clip is the default.
+  - One file is the active angle. It plays its sound, edits use it, and it has a red outline.
+  - A click on a cell, or `viewer.set` with `angle`, selects the active angle. The first file is the default, unless the open clip is in the group.
+  - A cell has its number at the top left and its camera or file name at the bottom.
+  - A file with no frame at the playhead shows a black cell.
+  - The scroll area stands for the whole group.
+  - In and Out are frames of the group, so they hold when the active angle changes (p. 682). The source marks of the files do not change.
+  - An edit takes the marks' part of the active angle. Source Overwrite lines up by the group.
+  - A grid has 1, 2 or 3 columns, up to 9 files.
+  - These cases are not measured, so vidcut refuses them:
+    - a group of more than 9 files
+    - no group at all, also for files with one timecode
+    - an edit when a mark is outside the active angle
 - **Timeline** (p. 681):
   - The Viewer shows the timeline at its playhead, with no scroll area.
   - Icons mark the first and the last frame of a clip.
@@ -546,6 +562,7 @@ Video Only and Audio Only limit what an edit takes (p. 694).
     - The rules above do not change. The place in the group takes the place of the timecode.
     - Only clips of that group count as the reference.
     - A file in no group is refused.
+    - The In and Out of the group take the place of the source marks when the group has them.
   - vidcut refuses these cases with an error, because they are not measured:
     - an Out mark with no In, on the timeline or on the source;
     - an In mark with no Out, when no clip that overlaps is at In;

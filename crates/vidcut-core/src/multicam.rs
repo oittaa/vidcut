@@ -7,7 +7,7 @@ use crate::editor::Env;
 use crate::error::{Error, Result};
 use crate::model::{AngleSync, GroupAngle, Marks, Media, Project, SyncGroup};
 use crate::ops::has_bin;
-use crate::time::{format_timecode, timecode_frames};
+use crate::time::{TimeContext, TimeSpec, format_timecode, timecode_frames};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Angle {
@@ -39,6 +39,8 @@ pub struct Layout {
 }
 
 pub const SOUND_MATCH_SCORE: f32 = 25.0;
+
+pub const MULTI_SOURCE_ANGLES: usize = 9;
 
 fn has_picture(m: &Media) -> Result<()> {
     match &m.info.video {
@@ -249,6 +251,7 @@ pub fn create(
                 at: a.at,
             })
             .collect(),
+        marks: Marks::default(),
     });
     Ok((id, lined_up.unmatched))
 }
@@ -306,6 +309,72 @@ fn layout_of(p: &Project, g: &SyncGroup) -> Layout {
     }
 }
 
+pub fn frames(p: &Project, g: &SyncGroup) -> i64 {
+    layout_of(p, g).frames
+}
+
+pub fn set_marks(
+    p: &mut Project,
+    id: &str,
+    mark_in: Option<&TimeSpec>,
+    out: Option<&TimeSpec>,
+) -> Result<Marks> {
+    if mark_in.is_none() && out.is_none() {
+        return Err(Error::usage("multicam.marks.set needs `in` and/or `out`"));
+    }
+    let g = group_mut(p, id)?.clone();
+    let end = frames(p, &g);
+    let ctx = TimeContext {
+        fps: p.settings.fps,
+        start_tc: g.start,
+        drop_frame: p.settings.counts_drop_frame(),
+        end,
+        mark_in: g.marks.mark_in,
+        mark_out: g.marks.mark_out,
+        playhead: None,
+    };
+    let mut marks = g.marks;
+    if let Some(t) = mark_in {
+        marks.mark_in = Some(ctx.resolve(t)?);
+    }
+    if let Some(t) = out {
+        marks.mark_out = Some(ctx.resolve(t)?);
+    }
+    if let (Some(i), Some(o)) = (marks.mark_in, marks.mark_out)
+        && i >= o
+    {
+        return Err(Error::invalid(format!("In ({i}) must be before Out ({o})")));
+    }
+    if marks.mark_in.is_some_and(|i| i < 0 || i >= end)
+        || marks.mark_out.is_some_and(|o| o < 1 || o > end)
+    {
+        return Err(Error::invalid(format!(
+            "marks must be inside {id} (0..{end} frames)"
+        )));
+    }
+    group_mut(p, id)?.marks = marks.clone();
+    Ok(marks)
+}
+
+pub fn marked_range(p: &Project, g: &SyncGroup, media: &str) -> Result<(i64, i64)> {
+    let m = p
+        .media(media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+    let at = g
+        .at_of(media)
+        .ok_or_else(|| Error::invalid(format!("{} is not in {}", m.name, g.name)))?;
+    let frames = p.media_frames(m);
+    let a = g.marks.mark_in.map_or(0, |i| i - at);
+    let b = g.marks.mark_out.map_or(frames, |o| o - at);
+    if a < 0 || b > frames || a >= b {
+        return Err(Error::invalid(format!(
+            "The marks of {} are outside {}",
+            g.name, m.name
+        )));
+    }
+    Ok((a, b))
+}
+
 pub fn group_json(p: &Project, g: &SyncGroup) -> Value {
     let lined_up = layout_of(p, g);
     let mut v = json!({
@@ -317,6 +386,9 @@ pub fn group_json(p: &Project, g: &SyncGroup) -> Value {
     });
     if !g.bin.is_empty() {
         v["bin"] = json!(g.bin);
+    }
+    if !g.marks.is_empty() {
+        v["marks"] = json!(g.marks);
     }
     v
 }
