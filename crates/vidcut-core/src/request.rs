@@ -3591,7 +3591,8 @@ pub enum ImportMode {
     /// Its tracks after the last clip.
     #[default]
     Append,
-    /// Its tracks instead of the timeline's clips, markers and marks.
+    /// Its tracks instead of the timeline's clips, markers and marks. A file
+    /// with tracks and no clips leaves an empty timeline.
     Replace,
     /// One compound clip after the last clip, holding its tracks.
     Compound,
