@@ -175,7 +175,7 @@ flowchart TD
   - It draws before it keeps a frame under the title, for the prepared frame, and for the frame at the playhead.
   - It keeps the drawings used last (an `Lru`).
   - Each drawing is where its kind puts it, without its own place, opacity or rotation. Thus a moved or turned title is not drawn again.
-  - A title with its lines apart and a level under 1 is one drawing of all its blocks (`burn::title`), with their places. Thus text over the box does not show the box. A new place of a line draws it again.
+  - A lower third with a level under 1 is one drawing of all its blocks (`burn::title`), with their places. Thus text over the box does not show the box. A new place of a line draws it again.
 - `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan.
 - `Player::present` hands each block of a title of a frame as a `TitleOver`:
   - the picture, in premultiplied RGBA, and how many layers go under it

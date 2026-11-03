@@ -2035,8 +2035,8 @@ pub enum Request {
         style: Option<TitleStyle>,
         /// Where it goes, `[x, y]` as fractions of the picture from its top
         /// left, from -4 to 4 across and from -3 to 5 down: a `text` title's
-        /// middle, a lower third's corner by its `align`. Default: the
-        /// kind's usual place.
+        /// middle, the end of the top edge of a lower third's lower line by
+        /// its `align`. Default: the kind's usual place.
         #[serde(default)]
         position: Option<[f64; 2]>,
         /// How much larger its text is drawn, from 1/4 to 4. Default: 1.

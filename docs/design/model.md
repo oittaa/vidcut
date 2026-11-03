@@ -349,13 +349,13 @@ Writing:
 - `Title::sampled` gives the title of one frame, without keyframes.
 - The upper line of a lower third can go apart from its lower line:
   - `Title::upper` holds a `TitleLine`: the place, zoom, rotation and keyframes of the upper line. The other fields are then those of the lower line.
-  - Without `Title::upper`, the two lines go together.
-  - `Title::swap_lines` swaps the values of the two lines, and `Title::upper_view` gives a title with them swapped. Thus `ops::keyframes`, `ops::titles` and `otio::titles` have one code for the two lines.
-  - `Title::part_lines` copies the values into a `TitleLine`. `ops::titles::on_line` parts and swaps the lines around one edit.
+  - Without `Title::upper`, the two lines go together. The point of the upper line is then `Title::UPPER_DROP` below the point of the lower line (`Title::upper_with_lower`).
+  - `Title::swap_lines` swaps the values of the two lines, and `Title::upper_view` gives a title with the upper line's values in the fields of the title. Thus `ops::keyframes`, `ops::titles` and `otio::titles` have one code for the two lines.
+  - `Title::part_lines` puts the values of `Title::upper_with_lower` into a `TitleLine`. `ops::titles::on_line` parts and swaps the lines around one edit.
   - `Title::each_line` makes one change on each line.
-- `Title::blocks` tells what to draw. A `TitleBlock` has its `TitlePart`, its pivot, the bottom of its text, its zoom and its rotation:
-  - Lines that go together are one `TitlePart::Whole`.
-  - Lines apart are a `TitlePart::Lower` under a `TitlePart::Upper`, with a `TitlePart::Backing` under them when the title has a background.
+- `Title::blocks` tells what to draw. A `TitleBlock` has its `TitlePart`, its pivot, the edge of its text, its zoom and its rotation:
+  - A Text title or a scroll is one `TitlePart::Whole`.
+  - A lower third is a `TitlePart::Lower` under a `TitlePart::Upper`, with a `TitlePart::Backing` under them when the title has a background. Each line has its own point, as in the file.
   - `Title::block_text` gives the text of a block.
 - A title's zoom is one number.
 - A handle of a title's position key is a point in the picture, not frames and a value. Thus it is not a `Handle` of the `Keyframe`:
