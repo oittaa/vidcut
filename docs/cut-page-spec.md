@@ -2165,6 +2165,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The background is one box behind the block. It reaches 0.15 of the text height past its lines.
   - `shape` gives the background its own size and place (p. 1185). All of these are measured in Resolve Studio 21.1.2:
     - `size` is its width and height, as fractions of the picture, from 0 to 2. A side of 0 draws no box.
+    - The box has hard edges on whole pixels. Its width and height round down, and then its left and top round to the nearest pixel.
     - Its middle is the title's `position` plus `center`, at any anchor and any text. `center` is in fractions of the picture.
     - A lower third's box takes the position of the lower line. The upper line does not move it or turn it.
     - A Scroll's box stands at the middle of the text box as wide as the picture. It does not scroll with the text.

@@ -2320,6 +2320,7 @@ impl Title {
     pub const ASCENT_SLACK: f64 = 0.25;
     pub const BOX_MOST: f64 = 2.0;
     pub const BOX_WIDTH: f64 = 0.9;
+    pub const BOX_WHOLE: f64 = 1e-6;
     pub const BOX_CORNER: f64 = 1.0 / 27.0;
     pub const BOX_MOST_OUTLINE: f64 = 30.0;
     pub const LINE: f64 = 1.31;
@@ -2449,17 +2450,24 @@ impl Title {
         self.backing().and(self.style.shape.as_ref())
     }
 
+    pub fn shape_pixels(&self, pivot: [f64; 2], (width, height): (f64, f64)) -> Option<[f64; 4]> {
+        let s = self.shape()?;
+        let [ox, oy] = s.center.unwrap_or([0.0, 0.0]);
+        let across = (s.size[0] * width + Self::BOX_WHOLE).floor();
+        let down = (s.size[1] * height + Self::BOX_WHOLE).floor();
+        let left = ((pivot[0] + ox) * width - across / 2.0 + 0.5).floor();
+        let top = ((pivot[1] + oy) * height - down / 2.0 + 0.5).floor();
+        Some([left, top, across, down])
+    }
+
     pub fn shape_past_edge(&self, (width, height): (u32, u32)) -> bool {
-        let Some(s) = self.shape() else {
+        let (w, h) = (f64::from(width), f64::from(height));
+        let pivot = self.block(TitlePart::Shape).pivot;
+        let Some([left, top, across, down]) = self.shape_pixels(pivot, (w, h)) else {
             return false;
         };
-        let [px, py] = self.block(TitlePart::Shape).pivot;
-        let [ox, oy] = s.center.unwrap_or([0.0, 0.0]);
         let ring = self.shape_outline().1 / 2.0;
-        let across = s.size[0] / 2.0 + ring / f64::from(width.max(1));
-        let down = s.size[1] / 2.0 + ring / f64::from(height.max(1));
-        let (x, y) = (px + ox, py + oy);
-        x - across < 0.0 || x + across > 1.0 || y - down < 0.0 || y + down > 1.0
+        left - ring < 0.0 || top - ring < 0.0 || left + across + ring > w || top + down + ring > h
     }
 
     pub fn shape_outline(&self) -> ([u8; 3], f64) {

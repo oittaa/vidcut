@@ -1162,12 +1162,12 @@ fn shaped_box(t: &Title, block: &TitleBlock, (w, h): (f64, f64), pixel: f64) -> 
     let shape = t.shape()?;
     let (fill, opacity) = t.backing()?;
     let (ring, ring_width) = t.shape_outline();
-    let half = [shape.size[0] * w / 2.0, shape.size[1] * h / 2.0].map(|v| v as f32);
+    let [left, top, across, down] = t.shape_pixels(block.pivot, (w, h))?;
+    let half = [across / 2.0, down / 2.0].map(|v| v as f32);
     if half[0] <= 0.0 || half[1] <= 0.0 {
         return None;
     }
-    let [ox, oy] = shape.center.unwrap_or([0.0, 0.0]);
-    let middle = [(block.pivot[0] + ox) * w, (block.pivot[1] + oy) * h].map(|v| v as f32);
+    let middle = [left + across / 2.0, top + down / 2.0].map(|v| v as f32);
     let corner = (shape.corner.unwrap_or(Title::BOX_CORNER) * h) as f32;
     let line = (ring_width * pixel) as f32;
     let reach = line / 2.0 + 1.0;

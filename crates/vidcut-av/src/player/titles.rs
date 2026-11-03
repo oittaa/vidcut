@@ -130,15 +130,22 @@ impl Titles {
                 };
                 let [x0, y0] = from.pivot;
                 let [x, y] = now.pivot;
-                let dy = if to.moves() && now.part != TitlePart::Shape {
-                    shown.run.top(0, h, f64::from(p.height)).round() as i32 - p.top
-                } else {
-                    ((y - y0) * h).round() as i32
+                let boxes = (now.part == TitlePart::Shape)
+                    .then(|| key.0.shape_pixels(from.pivot, (w, h)))
+                    .flatten()
+                    .zip(to.shape_pixels(now.pivot, (w, h)));
+                let (dx, dy) = match boxes {
+                    Some((a, b)) => ((b[0] - a[0]) as i32, (b[1] - a[1]) as i32),
+                    None if to.moves() => (
+                        ((x - x0) * w).round() as i32,
+                        shown.run.top(0, h, f64::from(p.height)).round() as i32 - p.top,
+                    ),
+                    None => (((x - x0) * w).round() as i32, ((y - y0) * h).round() as i32),
                 };
                 out.push(TitleOver {
                     above: *above,
                     picture: p,
-                    dx: ((x - x0) * w).round() as i32,
+                    dx,
                     dy,
                     turn: [
                         (x * w) as f32,
