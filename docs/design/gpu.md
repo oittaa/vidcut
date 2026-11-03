@@ -180,6 +180,18 @@ The AI upscalers share one path in the reader:
 - `super_scale::report` tells what the upscaler makes now and its last work. The stats panel shows it (`SuperScaleStats`).
 - Each kept picture tells its own upscaler and sizes (`Origin`, [playback](playback.md#the-engine)).
 
+Refusals:
+
+- The viewer and the export use one rule (`super_scale::why_not`) and one message (`super_scale::refusal`).
+  - Why: a picture that plays in the viewer also exports, and a picture that an export refuses shows the same error in the viewer.
+- The rule applies only to a picture that needs enlarging (`ai_sizes`).
+  - Why: a picture that needs no enlarging does not go to the upscaler.
+- `super_scale::check` applies the rule to each layer of the plans before an export starts (`enlarging`). `ai_picture` applies it to each frame.
+- The check asks for a model only when a layer needs that model.
+- `super_scale::unfit` applies the rule to a media at any size. The Inspector and the pool show its result.
+- The viewer plays the original of a clip that is unfit, not its proxy (`apply_proxies`).
+  - Why: the original gives the size and the colors that the export reads. Thus the viewer takes the same decision as the export.
+
 GPU memory:
 
 - Each AI model has one engine for the whole process. Each upscaler has a static `super_scale::Slot`, and the Retime Processes have the `ENGINE` of `interpolate`.
@@ -204,7 +216,7 @@ AI Fast (`nanovsr`):
 AI Slow (`flashvsr`):
 
 - FlashVSR+ Turbo on the shared off-screen device. A run is a `flashvsr::Stream` with no last frame.
-- `flashvsr::check` refuses media that it cannot take, and sizes that do not fit (`run::plan`).
+- `flashvsr::check` refuses sizes that do not fit (`run::plan`).
 - It looks at the stop flag (`cancel::stop`) before each block. Why: a picture that the viewer no longer needs stops soon.
 - Its KV caches stay on the GPU while they fit in the room (`run::plan`). Else some stay in main memory between chunks (`Keys::Host`).
   - `Stream::fit` measures the room before each chunk. Why: the encoder takes GPU memory after the plan.
@@ -220,7 +232,7 @@ The scaler of macOS (`macos`):
 - Its own buffers are RGhA (`HALF`, [gotchas](../gotchas.md#operating-systems-and-libraries)). Their IOSurfaces are also Metal textures.
 - After the scaler, the color fix of AI Slow runs on these buffers on the GPU, with no copy (`fix::on_buffers`).
   - The two upscalers use one shader for the fix. It reads packed buffers for AI Slow and textures for the scaler (`fix::Pictures`).
-- `macos::check` refuses pictures over `macos::MOST`.
+- It takes pictures up to `macos::MOST`.
 - `macos::needed` and `macos::get_ready` let macOS download its models.
 - The draw puts each frame into a VideoToolbox frame in the timeline color space, upright (`shown_frame`). It reaches the scaler on the GPU (`Run::push_frame`).
   - The frame is P416, as for Retime Process. Why: Super Scale gets the picture in full color ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
@@ -230,6 +242,7 @@ The scaler of macOS (`macos`):
   - Why: a picture of 4 times the source fills the cache of the viewer.
 - Its buffers lose the color labels of the transfers. Why: with labels, it makes less detail.
 - AI Fast and AI Slow are off on macOS (`super_scale::off_here`).
+  - Why: macOS has its own AI scaler. Auto takes it there, so a project moves between systems ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)).
 
 ## Frame interpolation
 
