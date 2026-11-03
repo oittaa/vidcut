@@ -17,7 +17,14 @@ use super::theme;
 use super::workspace::{Drag, PasteWatch, TimecodeEntry, Workspace, dim, fit};
 use crate::live::{PlayerId, seek_frame};
 
-const ACTIVE_ANGLE: Color32 = Color32::from_rgb(230, 50, 50);
+pub(super) const ACTIVE_ANGLE: Color32 = Color32::from_rgb(230, 50, 50);
+
+pub(super) struct GridCell {
+    pub media: String,
+    pub frame: Option<i64>,
+    pub active: bool,
+    pub outlined: bool,
+}
 
 #[derive(Clone)]
 pub struct TwoUp {
@@ -178,6 +185,7 @@ impl Workspace {
             self.send_frame(ViewerFrame::Page);
             return;
         }
+        self.sync_keys(ctx);
         let key = ctx.input_mut(|i| {
             if i.consume_key(egui::Modifiers::SHIFT, Key::F) {
                 Some(ViewerFrameKey::FullScreen)
@@ -256,10 +264,12 @@ impl Workspace {
             .is_some_and(crate::gui::timeline::tools::Dynamic::running)
             && self.dynamic_target().is_some();
         let trim = self.trim_editor_edit();
+        let sync_grid = self.sync_grid_on();
         let tools = mode == ViewerMode::Timeline
             && self.timeline.picture_grab.row
             && !dynamic
-            && trim.is_none();
+            && trim.is_none()
+            && !sync_grid;
         let below = 34.0 + 36.0 + if tools { TOOLS_ROW + 4.0 } else { 0.0 };
         let avail = ui.available_rect_before_wrap();
         let meter_w = self.viewer_meter_width();
@@ -297,6 +307,7 @@ impl Workspace {
         if !dynamic
             && trim.is_none()
             && mode != ViewerMode::MultiSource
+            && !sync_grid
             && let Some(cells) = &mut self.cells
         {
             cells.close();
@@ -311,6 +322,10 @@ impl Workspace {
         }
         if mode == ViewerMode::MultiSource {
             self.multi_view(ui, area);
+            return;
+        }
+        if sync_grid {
+            self.sync_grid(ui, area);
             return;
         }
         let area_resp = ui.allocate_rect(area, Sense::click_and_drag());
@@ -365,6 +380,7 @@ impl Workspace {
             }
         }
         paint_guides(&painter, picture, &self.snap.guides);
+        self.sync_close_button(ui, picture);
         let offline = self.project().and_then(|p| {
             let source = self.snap.source_at().map(|(m, _)| m);
             offline_name(p, &self.snap.missing, mode, player.position, source)
@@ -442,22 +458,53 @@ impl Workspace {
         let Some(group) = group else {
             return;
         };
+        let source = &self.snap.source;
+        let (position, speed) = (
+            source.position,
+            if source.playing { source.speed } else { 0.0 },
+        );
+        let active = self.snap.source_media.as_deref();
+        let cells: Vec<GridCell> = group
+            .angles
+            .iter()
+            .map(|angle| {
+                let frames = p.media(&angle.media).map_or(0, |m| p.media_frames(m));
+                let frame = position - angle.at;
+                GridCell {
+                    media: angle.media.clone(),
+                    frame: (0..frames).contains(&frame).then_some(frame),
+                    active: active == Some(angle.media.as_str()),
+                    outlined: false,
+                }
+            })
+            .collect();
+        if let Some(media) = self.camera_grid(ui, area, &p, &cells, speed) {
+            self.send("viewer.set", json!({ "angle": media }));
+        }
+        ui.add_space(4.0);
+        self.source_scroll_row(ui);
+        self.transport(ui, PlayerId::Source, None);
+    }
+
+    pub(super) fn camera_grid(
+        &mut self,
+        ui: &mut egui::Ui,
+        area: Rect,
+        p: &Project,
+        cells: &[GridCell],
+        speed: f64,
+    ) -> Option<String> {
         let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
         ui.allocate_rect(area, Sense::hover());
         let painter = ui.painter_at(area);
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
-        let count = group.angles.len();
+        let count = cells.len();
         let cols = (1..3).find(|c| c * c >= count).unwrap_or(3);
         let size = vec2(
             area.width() / cols as f32,
             area.height() / count.div_ceil(cols).max(1) as f32,
         );
         let ppp = ui.ctx().pixels_per_point();
-        let source = &self.snap.source;
-        let (position, speed) = (
-            source.position,
-            if source.playing { source.speed } else { 0.0 },
-        );
         let gpu_pictures = self.screens.as_ref().map(|s| s.gpu_pictures());
         let ctx = ui.ctx().clone();
         let players = self
@@ -465,28 +512,28 @@ impl Workspace {
             .get_or_insert_with(|| super::cells::Cells::new(ctx, gpu_pictures.unwrap_or_default()));
         players.keep(count);
         let mut picked = None;
-        for (i, angle) in group.angles.iter().enumerate() {
+        for (i, shown) in cells.iter().enumerate() {
             let cell = Rect::from_min_size(
                 area.min + vec2(size.x * (i % cols) as f32, size.y * (i / cols) as f32),
                 size,
             );
             let picture = fit(cell.shrink(6.0), aspect);
             painter.rect_filled(picture, CornerRadius::ZERO, Color32::BLACK);
-            let Some(m) = p.media(&angle.media) else {
+            let Some(m) = p.media(&shown.media) else {
                 continue;
             };
-            let frame = position - angle.at;
             let piece = if self.snap.missing.contains(&m.id) {
                 painter.rect_filled(picture, CornerRadius::ZERO, theme::colors().offline);
                 None
-            } else if (0..p.media_frames(m)).contains(&frame) {
-                vidcut_core::render::media_frame(&p, &m.id, frame).ok()
             } else {
-                Some(vidcut_core::render::VideoPiece::black(1))
+                match shown.frame {
+                    Some(frame) => vidcut_core::render::media_frame(p, &m.id, frame).ok(),
+                    None => Some(vidcut_core::render::VideoPiece::black(1)),
+                }
             };
             let pixels = [picture.width(), picture.height()].map(|x| (x * ppp).round() as u32);
             let texture = piece
-                .and_then(|piece| players.show(i, &p, &piece, speed))
+                .and_then(|piece| players.show(i, p, &piece, speed))
                 .zip(self.screens.as_mut())
                 .and_then(|(g, s)| s.draw(i, &g.picture, pixels));
             if let Some(texture) = texture {
@@ -497,14 +544,20 @@ impl Workspace {
                     Color32::WHITE,
                 );
             }
-            let active = self.snap.source_media.as_deref() == Some(m.id.as_str());
-            let number = if active { ACTIVE_ANGLE } else { Color32::WHITE };
+            if shown.active {
+                let corner = picture.left_top();
+                painter.add(egui::Shape::convex_polygon(
+                    vec![corner, corner + vec2(26.0, 0.0), corner + vec2(0.0, 26.0)],
+                    ACTIVE_ANGLE,
+                    Stroke::NONE,
+                ));
+            }
             painter.text(
-                picture.left_top() + vec2(6.0, 6.0),
+                picture.left_top() + vec2(5.0, 3.0),
                 Align2::LEFT_TOP,
                 (i + 1).to_string(),
                 FontId::proportional(14.0),
-                number,
+                Color32::WHITE,
             );
             let label = m
                 .camera
@@ -517,18 +570,23 @@ impl Workspace {
                 FontId::proportional(12.0),
                 Color32::WHITE,
             );
-            if active {
+            let outline = match (shown.active, shown.outlined) {
+                (true, _) => Some(ACTIVE_ANGLE),
+                (false, true) => Some(Color32::WHITE),
+                (false, false) => None,
+            };
+            if let Some(color) = outline {
                 painter.rect_stroke(
                     picture,
                     CornerRadius::ZERO,
-                    Stroke::new(2.0, ACTIVE_ANGLE),
+                    Stroke::new(2.0, color),
                     egui::StrokeKind::Inside,
                 );
             }
             if ui
                 .interact(
                     picture,
-                    ui.scope_id().with(("multi-angle", i)),
+                    ui.scope_id().with(("camera-grid", i)),
                     Sense::click(),
                 )
                 .clicked()
@@ -536,12 +594,7 @@ impl Workspace {
                 picked = Some(m.id.clone());
             }
         }
-        if let Some(media) = picked {
-            self.send("viewer.set", json!({ "angle": media }));
-        }
-        ui.add_space(4.0);
-        self.source_scroll_row(ui);
-        self.transport(ui, PlayerId::Source, None);
+        picked
     }
 
     fn trim_editor_view(
@@ -778,6 +831,7 @@ impl Workspace {
                 .map_or(m.to_string(), |x| x.name.clone())
         };
         match self.snap.viewer {
+            ViewerMode::Timeline if self.sync_grid_on() => "Sync Bin".into(),
             ViewerMode::Timeline => "Timeline".into(),
             ViewerMode::MultiSource => self
                 .multi_group()
@@ -995,7 +1049,7 @@ impl Workspace {
         }
     }
 
-    fn clip_edge_hint(&self, ui: &mut egui::Ui) {
+    pub(super) fn clip_edge_hint(&self, ui: &mut egui::Ui) {
         let at = self.snap.timeline.position;
         let text = self
             .project()
@@ -1154,7 +1208,7 @@ impl Workspace {
         self.seek(id, frame, true);
     }
 
-    fn transport(
+    pub(super) fn transport(
         &mut self,
         ui: &mut egui::Ui,
         id: PlayerId,

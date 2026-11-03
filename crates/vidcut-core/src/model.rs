@@ -4382,6 +4382,23 @@ impl Project {
             .find(|g| g.angles.iter().any(|a| a.media == media))
     }
 
+    pub fn shown_clip(&self, playhead: i64) -> Option<&Clip> {
+        for ti in self.tracks_of(TrackKind::Video).into_iter().rev() {
+            let track = &self.tracks[ti];
+            if !track.video_enabled {
+                continue;
+            }
+            let Some(ci) = track.clip_at(playhead) else {
+                continue;
+            };
+            let clip = &track.clips[ci];
+            if clip.enabled && clip.video && !clip.is_block() {
+                return Some(clip);
+            }
+        }
+        None
+    }
+
     pub fn track_index(&self, id: &str) -> Option<usize> {
         self.tracks.iter().position(|t| t.id == id)
     }

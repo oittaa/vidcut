@@ -152,6 +152,19 @@ fn unchanged_speed(c: &Clip) -> Result<()> {
     Ok(())
 }
 
+pub fn file_start_at(p: &Project, m: &Media, at: i64, by_group: bool) -> Result<Option<i64>> {
+    lines_up(p, m)?;
+    let group = if by_group { p.group_of(&m.id) } else { None };
+    let l = Lining { p, group };
+    let o = l.origin(m).unwrap_or_default();
+    let whole = o..o + p.media_frames(m);
+    let Some(reference) = by_playhead(l, &whole, at)? else {
+        return Ok(None);
+    };
+    unchanged_speed(reference)?;
+    Ok(Some(lag(l, reference) + o))
+}
+
 pub fn source_overwrite(
     p: &mut Project,
     src: &Source,
@@ -185,7 +198,10 @@ pub fn source_overwrite(
             ));
         }
         (Some(a), b) => by_marks(l, &whole, a, b)?,
-        (None, None) if source_marked => first_where(l, &part, |_| true)?,
+        (None, None) if source_marked => match first_where(l, &part, |_| true)? {
+            None if playhead.is_some_and(|at| at >= p.end()) => first_where(l, &whole, |_| true)?,
+            found => found,
+        },
         (None, None) => {
             let at = playhead.ok_or_else(|| Error::usage("at is required (no live playhead)"))?;
             by_playhead(l, &whole, at)?
