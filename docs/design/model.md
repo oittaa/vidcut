@@ -95,6 +95,10 @@ classDiagram
     position, zoom, rotation
     anchor, flips, crop
   }
+  class Generator {
+    SolidColor color
+    Carried reference
+  }
   Project *-- Settings : settings
   Project *-- "*" Media : media
   Project *-- "*" Track : tracks
@@ -111,7 +115,9 @@ classDiagram
   Clip *-- "0..1" Title : title
   Clip *-- "0..1" Picture : picture
   Clip ..> Media : media id
-  Clip *-- Kept : effects, generator, compound, speed
+  Clip *-- "0..1" Generator : generator
+  Generator *-- "0..1" Kept : reference
+  Clip *-- Kept : effects, compound, speed
   Transition *-- Kept : otio
 ```
 
@@ -329,7 +335,7 @@ Writing:
 ## Titles
 
 - A clip with a `title` is a title ([spec §8.14](../cut-page-spec.md#814-titles-pp-762764-11761178)): no media, no audio, no speed, any length, on a video track.
-- `Clip::is_generator` and `Clip::is_block` count it. Thus edits treat it as a carried generator.
+- `Clip::is_generator` and `Clip::is_block` count it. Thus edits treat it as a generator.
 - Its `Title` holds:
   - a `TitleKind`: `text`, `lower_third` or `scroll`
   - the `TitleAlign` of a lower third or a scroll
@@ -362,9 +368,22 @@ Writing:
 - `ops::titles` holds the edits. `ops::titles::checked` is the check that `titles.add`, `titles.set` and `validate::violations` share.
 - It checks the style through the checks of the subtitle style (`checked_font`, `checked_size`, `checked_color`, `checked_outline`, `checked_background`).
 
+## Generators
+
+- A clip with a `generator` makes its own picture ([spec §8.17](../cut-page-spec.md#817-generators-p-766)): no media, no audio, no speed, no effects, any length, on a video track.
+- `Clip::is_generator` and `Clip::is_block` count it.
+- A `Generator` is one of two kinds:
+  - `Generator::SolidColor` holds a `color`.
+  - `Generator::Carried` holds the OTIO reference of a kind that vidcut does not model, as `Kept`. It plays as a gap.
+- `Generator::draws` and `Clip::draws` tell whether a generator has a picture.
+- `generators::timeline_code` gives the code values of a color in the colors of the timeline.
+- `generators::name` gives the name of a generator. `generators::shown` gives its JSON form, for `generators.list` and `clip_json`.
+- `ops::generators` holds the edits. `generators.add` and `titles.add` share `ops::titles::add_block`.
+- `GeneratorKind` is the kind that `generators.add` takes.
+
 ## Pictures
 
-- A clip of footage, a still, an image sequence or a compound clip can carry a `Picture` ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+- A clip of footage, a still, an image sequence, a compound clip or a generator that draws can carry a `Picture` ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
   - `position`: where the middle of the whole picture goes, before the zoom and the rotation
   - its `zoom` across and down, and its `rotation`
   - its `anchor`: the point that the zoom and the turn work about (`Picture::pivot`)
@@ -381,7 +400,8 @@ Writing:
   - A handle `value` moves X. Y keeps the handle `frames`, with a value offset of 0 (`value_paired`).
 - `ops::picture` holds the edits:
   - `ops::picture::checked` is the check that `picture.set`, `validate::violations` and the metadata of an OTIO file share.
-  - `ops::picture::has_picture` tells which clips take a picture: not titles, generators or sound.
+  - `ops::picture::has_picture` tells which clips take a picture: not titles, sound or generators that do not draw.
+  - `ops::picture::takes_effects` tells which of them take effects: not generators ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
   - `ops::picture::clear` puts back one `PictureTool`, or all of them. `ops::picture::cleared` is the reset of one `PictureTool`, which the Inspector also uses.
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
   - `ops::picture::effect_checked` checks an effect. It is part of `ops::picture::checked`.
@@ -453,6 +473,7 @@ flowchart LR
 | media | `ExternalReference` by plain path, relative in a bundle; a still one frame long, its clips from source 0; an image sequence an `ImageSequenceReference` at its rate |
 | Clip Color | the item's `color` |
 | title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
+| Solid Color | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::generators::reference`, [spec §8.17](../cut-page-spec.md#817-generators-p-766)) |
 | markers | the top-level stack's, with their lengths |
 
 The metadata:
@@ -499,7 +520,7 @@ Kept data:
 | clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`. Keyframes stay on their source frames (the `from` field of `Effects`, set by `carry`), and fades stay at the clip's ends through splits; the clip volume's level is the gain |
 | the `Key Frames` of the clip volume (`effects::gain_keys`) | `ClipAudio::gain_keys`, taken out of the kept effect (`effects::drop_gain_keys`) |
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
-| `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`), else `Generator`, a block that plays as a gap |
+| `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`). `Generator::SolidColor` when it is Solid Color (`otio::generators::read`). Else `Generator::Carried`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `TimeEffect` with `Key Frames` | `Speed`, a section for each key (`ramp`). It is written back while the sections stay, else made again (`ramp_effect`) |

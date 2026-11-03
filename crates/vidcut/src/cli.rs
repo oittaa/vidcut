@@ -69,6 +69,9 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("titles.list", &["track"]),
     ("titles.add", &["text"]),
     ("titles.set", &["clip"]),
+    ("generators.list", &["track"]),
+    ("generators.add", &["kind"]),
+    ("generators.set", &["clip"]),
     ("picture.get", &["clip"]),
     ("picture.set", &["clips"]),
     ("picture.clear", &["clips"]),
@@ -155,6 +158,7 @@ const GROUPS: &[(&str, &str)] = &[
         "Export the timeline: a video, audio, frames per clip, or OpenTimelineIO",
     ),
     ("frame", "Single frames as PNG"),
+    ("generators", "Pictures made with no file: Solid Color"),
     (
         "gui",
         "The running GUI: its window, command log, screenshots, panels, target track and timeline view",
@@ -348,6 +352,11 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut titles set V2@10s --kind lower_third --align middle\n  \
          vidcut titles set c4 --position 0.5,0.2",
     ),
+    (
+        "generators.add",
+        "vidcut generators add solid_color --color '#204060' --at 10s --duration 4s",
+    ),
+    ("generators.set", "vidcut generators set c4 --color yellow"),
     (
         "picture.set",
         "vidcut picture set c3 --zoom 0.33 --position 0.8,0.2\n  \

@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 use eframe::egui::{Pos2, Rect};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    Clip, EffectType, Handle, Keyframe, Marks, PictureTransition, Project, Track, TrackKind,
+    Clip, EffectType, GeneratorKind, Handle, Keyframe, Marks, PictureTransition, Project, Track,
+    TrackKind,
 };
 use vidcut_core::ops::{Edge, MAIN};
 use vidcut_core::validate::GAIN;
@@ -101,6 +102,11 @@ pub enum Gesture {
     },
     Title {
         template: Box<crate::gui::title_browser::Template>,
+        len: i64,
+    },
+    Generator {
+        kind: GeneratorKind,
+        label: &'static str,
         len: i64,
     },
     Transition {
@@ -378,7 +384,12 @@ impl Drag {
             | Gesture::KeyHandle { .. } => Preview::default(),
 
             Gesture::Subtitles { media, cues } => subtitles_preview(ctx, pos, media, cues),
-            Gesture::Title { template, len } => title_preview(ctx, pos, template, *len),
+            Gesture::Title { template, len } => {
+                block_preview(ctx, pos, *len, "titles.add", template.params())
+            }
+            Gesture::Generator { kind, len, .. } => {
+                block_preview(ctx, pos, *len, "generators.add", json!({ "kind": kind }))
+            }
             Gesture::Transition { kind, .. } => transition_preview(ctx, pos, kind),
             Gesture::Effect { kind, .. } => effect_preview(ctx, pos, *kind),
             Gesture::Trim {
@@ -726,12 +737,7 @@ fn subtitles_preview(ctx: &Ctx, pos: Pos2, media: &str, cues: &[(i64, i64)]) -> 
     }
 }
 
-fn title_preview(
-    ctx: &Ctx,
-    pos: Pos2,
-    template: &crate::gui::title_browser::Template,
-    len: i64,
-) -> Preview {
+fn block_preview(ctx: &Ctx, pos: Pos2, len: i64, method: &str, mut params: Value) -> Preview {
     let Some(dest) = ctx
         .rows
         .target(ctx.project, pos.y)
@@ -746,14 +752,13 @@ fn title_preview(
         None => (raw, None),
     };
     let at = at.max(0);
-    let mut params = template.params();
     params["at"] = json!(at);
     params["duration"] = json!(len);
     if ctx.project.track(&dest).is_some() {
         params["track"] = json!(dest);
     }
     Preview {
-        request: request("titles.add", params),
+        request: request(method, params),
         target: Target::Overwrite(at, at + len),
         ghost: Some((at, at + len)),
         snapped,
@@ -833,7 +838,7 @@ fn effect_preview(ctx: &Ctx, pos: Pos2, kind: EffectType) -> Preview {
     let Some(c) = track
         .clip_at(ctx.scale.under(pos.x))
         .map(|i| &track.clips[i])
-        .filter(|c| vidcut_core::ops::picture::has_picture(c))
+        .filter(|c| vidcut_core::ops::picture::takes_effects(c))
     else {
         return Preview::default();
     };

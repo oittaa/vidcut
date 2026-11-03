@@ -74,6 +74,7 @@ flowchart TD
 **Decoding**
 
 - Decoding uses the reader of the export, `VideoFrames`, with `VideoFrames::keeping`: frames at their own size.
+- `VideoFrames::drawing_in` gives the reader the colors of the timeline for the frames of a `VideoPiece::Generated` ([export](export.md#encoding-one-output)).
   - GPU frames of the kinds that the viewer takes stay on the GPU.
 - Each turn does the first of these:
   1. the viewer's frame
@@ -256,6 +257,7 @@ The audio device:
     - `fs` covers a pixel at the edge of that place in part.
     - Where `place::no_bars_at` is true, `fs` covers each edge pixel in full ([spec §13](../cut-page-spec.md#the-limit-for-a-thin-bar)).
     - `Placing::new` opens the `edge` of a level where `place::no_bars` is true. The place of the picture does not change.
+    - `Placing::new` counts a crop in whole pixels of the frame that it draws (`Fit::pixels`, [spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
     - The rule works at the size of the draw. The size of the viewer is in whole pixels of the screen, so its shape can differ a little from the timeline. Thus a picture that fills the timeline can leave a part of a pixel in the viewer.
     - A thumbnail, a proxy and a picture for an AI upscaler draw into a size that is already rounded (`Sampling::Rounded`, `place::rounded_place`). Why: the picture must fill that size, with no bar.
   - It first converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `shader_colors`). In an SDR timeline, it tone-maps HDR.
@@ -384,7 +386,7 @@ What it renders:
 - An `Effect` with `render_cache` on gives `Reason::Effect`. An effect that is off gives none.
   - A `Placed` around a title under another track gives it. The cache file holds that title.
   - A `Placed` around a title on top of all tracks gives none. The cache file does not hold that title.
-- Each `VideoPiece::Source` and `VideoPiece::Black` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
+- Each `VideoPiece::Source`, `VideoPiece::Black` and `VideoPiece::Generated` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
   - In User mode, an excluded piece gives no `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime`, `Reason::Transition`, `Reason::Opacity` or `Reason::Composite`.
   - Why the black pieces: the black side of a Push or a dip is a part of the transition of the track.
 - Slow media (`Reason::Media`) are of two kinds:

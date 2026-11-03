@@ -12,6 +12,7 @@ use crate::store::{absolute_elsewhere, is_drive, windows_absolute};
 use crate::time::Rational;
 
 pub mod effects;
+pub mod generators;
 pub mod picture;
 #[cfg(test)]
 mod tests;
@@ -688,7 +689,7 @@ pub fn export_drawn(
                     (Some(t), _) => {
                         titles::reference(t, p.settings.height, &drawn(t), source.round() as i64)
                     }
-                    (None, Some(g)) => (*g.reference).clone(),
+                    (None, Some(g)) => generators::reference(g),
                     (None, None) => Value::Null,
                 },
             ),
@@ -777,6 +778,11 @@ pub fn export_drawn(
                 .clone()
                 .or_else(|| m.map(|m| m.name.clone()))
                 .or_else(|| c.title.as_ref().map(|t| titles::name(t).to_string()))
+                .or_else(|| {
+                    c.generator
+                        .as_ref()
+                        .map(|g| crate::generators::name(g).to_string())
+                })
                 .unwrap_or_default();
             let (s, e) = (c.start.max(a), c.end().min(b));
             let shows = c.video && e > s;
@@ -1202,16 +1208,6 @@ pub fn compound_kind(k: &Compound) -> String {
         .to_string()
 }
 
-pub fn generator_kind(g: &crate::model::Generator) -> String {
-    let r = &g.reference;
-    [&r["generator_kind"], &r["name"]]
-        .into_iter()
-        .filter_map(Value::as_str)
-        .find(|n| !n.is_empty())
-        .unwrap_or("generator")
-        .to_string()
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct MediaRef {
     pub url: String,
@@ -1283,7 +1279,12 @@ impl ImportedClip {
     }
 
     pub fn has_picture(&self) -> bool {
-        self.video && self.title.is_none() && self.generator.is_none()
+        self.video
+            && self.title.is_none()
+            && self
+                .generator
+                .as_ref()
+                .is_none_or(|r| generators::read(r).is_some())
     }
 
     fn block(
@@ -2006,6 +2007,13 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     }
                     c.title = Some(t);
                 } else {
+                    if generators::read(reference).is_some() {
+                        c.picture = our_picture(item);
+                        c.speed = None;
+                        if c.name == reference["name"].as_str().unwrap_or_default() {
+                            c.name.clear();
+                        }
+                    }
                     c.generator = Some(reference.clone());
                 }
                 clips.push(c);
@@ -2311,7 +2319,10 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
     }
     note_kept(&mut warnings, &kept);
     let mut made: Vec<&str> = Vec::new();
-    for c in clips.iter().filter(|c| c.generator.is_some()) {
+    for c in clips
+        .iter()
+        .filter(|c| c.generator.is_some() && !c.has_picture())
+    {
         if !made.contains(&c.name.as_str()) {
             made.push(&c.name);
         }
