@@ -2181,6 +2181,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Its offset is 0, which draws no shadow (measured in Resolve Studio 21.1.2).
   - Zoom draws the text larger, and the outline and the background box grow with it. The zoom scales the outline, measured in Resolve Studio 21.1.2.
   - Rotation turns the whole title, box and shadow too, counterclockwise.
+  - The picture's edges cut a title after its zoom and before it turns. Thus a turned title does not show what is past those edges (measured in Resolve Studio 21.1.2).
   - Zoom and rotation work about the `position` of a Text title (measured in Resolve Studio 21.1.2).
   - For a lower third, they work on each line about its own point (D67).
   - Each line of a lower third has its own `position`, `zoom`, `rotation` and keyframes (p. 1178):

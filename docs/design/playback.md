@@ -181,6 +181,7 @@ flowchart TD
 - `Player::present` hands each block of a title of a frame as a `TitleOver`:
   - the picture, in premultiplied RGBA, and how many layers go under it
   - its move from how it was drawn: its place, zoom and rotation, or the `Run::top` of a scroll. The viewer's shader does the transform.
+  - For a turned title, the shader first cuts the picture at the edges of the frame (`Lettering`).
   - its level, from a fade or its opacity (`Lettering`)
   - the pictures of the compound clips around it (`ShownTitle::placed`)
 - Until a title is drawn, the newest drawing of its clip shows, moved to its place. Thus a drag, a new color or new text does not blink. The frame is not exact until then.

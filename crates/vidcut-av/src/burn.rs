@@ -951,6 +951,29 @@ fn lay_out(look: &Look) -> Option<Laid> {
     })
 }
 
+fn inside(s: Sprite, (w, h): (f64, f64)) -> Option<Sprite> {
+    let x0 = s.x.max(0);
+    let y0 = s.y.max(0);
+    let x1 = (s.x + s.width as i32).min(w as i32);
+    let y1 = (s.y + s.height as i32).min(h as i32);
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let mut rgba = Vec::with_capacity((x1 - x0) as usize * (y1 - y0) as usize);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            rgba.push(s.at(x, y));
+        }
+    }
+    Some(Sprite {
+        x: x0,
+        y: y0,
+        width: (x1 - x0) as u32,
+        height: (y1 - y0) as u32,
+        rgba,
+    })
+}
+
 fn placed(mut sprite: Sprite, left: f32, top: f32) -> Sprite {
     sprite.x += left.round() as i32;
     sprite.y += top.round() as i32;
@@ -1305,8 +1328,11 @@ fn title_block(
         top.floor()
     };
     let sprite = placed(sprite, left, top);
+    if block.turn == 0.0 {
+        return Some(sprite);
+    }
     Some(turned(
-        sprite,
+        inside(sprite, (w, h))?,
         ((px * w) as f32, (py * h) as f32),
         block.turn,
     ))
