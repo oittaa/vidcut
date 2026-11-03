@@ -1774,6 +1774,7 @@ impl Workspace {
 
     fn edit_buttons(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
             let buttons = [
                 (icon::SMART_INSERT, "Smart Insert", "edit.smart_insert"),
                 (icon::APPEND, "Append", "edit.append"),
