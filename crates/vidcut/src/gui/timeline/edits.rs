@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 use vidcut_core::model::Project;
 use vidcut_core::ops::{self, Edge};
+use vidcut_core::otio::tied;
 
 use super::{EditSel, Side, audio_edit_outgoing, ripples};
 
@@ -91,6 +92,10 @@ impl Plan {
                 return Err(vidcut_core::Error::usage(
                     "a roll and a trim cannot move together",
                 ));
+            }
+            let part_of = |x: &Cut| tied(p, x.clip()).iter().any(|o| o == c.clip());
+            if cuts.iter().any(|(_, x, _)| part_of(x)) {
+                continue;
             }
             let facing = matches!(
                 (&first, &c),
