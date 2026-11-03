@@ -361,7 +361,7 @@ pub enum Request {
         /// The upscaler of Super Scale: `project` (the default: the upscaler
         /// of the project settings), `macos` (macOS 26 and later, called AI
         /// there), `ai_slow`, `ai_fast` or `classic`. `ai_slow` and `ai_fast`
-        /// are off on macOS for now.
+        /// are off on macOS.
         /// Where a picture needs enlarging, the viewer and an export refuse
         /// `ai_slow` for HDR media in an HDR timeline, and `macos` for
         /// pictures over 1920x1080 or without macOS 26.

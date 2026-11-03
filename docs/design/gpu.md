@@ -242,6 +242,7 @@ The scaler of macOS (`macos`):
   - Why: a picture of 4 times the source fills the cache of the viewer.
 - Its buffers lose the color labels of the transfers. Why: with labels, it makes less detail.
 - AI Fast and AI Slow are off on macOS (`super_scale::off_here`).
+  - Why: macOS has its own AI scaler. Auto takes it there, so a project moves between systems ([X91](../deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)).
 
 ## Frame interpolation
 
