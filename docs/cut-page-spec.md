@@ -2128,6 +2128,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The left of a block starts at its middle, rounded to a whole pixel. It goes left by the anchor's part of the width, then right by half a pixel. That width is the whole pixels of the widest line, plus 1 (same renders).
     - Each line sits in the block by the exact difference from the widest line, with no rounding (same renders).
     - The letters of a Text title or a lower third have no hinting. Their advances are the font's own (same renders).
+    - The font's kerning also goes across a space, a hyphen and a slash, inside one style. A change of style stops it, and tracking keeps it (measured in Resolve Studio 21.1.2).
+    - A scroll and subtitles do not have this kerning across words, because it is not measured there.
     - Each letter goes over the letters before it. Then a pen of 1 timeline pixel along its edge removes the part under the pen, also from the letters before it (same renders).
     - The pen is a diamond, as wide as it is tall. Curves are straight lines within 1/6 of a pixel.
     - These rules give thinner letters than a plain fill. In Resolve Studio 21.1.2, straight edges come within 8 levels of 255 at most sizes. Round letters and serifs come close, and they are not exact.

@@ -1,7 +1,7 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use cosmic_text::{
-    Align, Attrs, Buffer, CacheKey, CacheKeyFlags, Color, Family, FontSystem, LayoutGlyph,
+    Align, Attrs, Buffer, CacheKey, CacheKeyFlags, Color, Family, Font, FontSystem, LayoutGlyph,
     LayoutRun, Metrics, Renderer, Shaping, Style, SwashCache, SwashContent, UnderlineStyle, Weight,
     Wrap, fontdb,
 };
@@ -976,6 +976,57 @@ fn spaced<'a>(buffer: &'a Buffer, below: &[f32], seat: bool) -> Vec<LayoutRun<'a
         .collect()
 }
 
+fn pair_kerning(font: &Font, first: &str, next: &str) -> f32 {
+    let width = |text: &str| {
+        let mut buffer = harfrust::UnicodeBuffer::new();
+        buffer.push_str(text);
+        buffer.guess_segment_properties();
+        let shaped = font.shaper().shape(buffer, &[]);
+        shaped
+            .glyph_positions()
+            .iter()
+            .map(|p| p.x_advance)
+            .sum::<i32>()
+    };
+    let units = width(&format!("{first}{next}")) - width(first) - width(next);
+    units as f32 / f32::from(font.metrics().units_per_em)
+}
+
+fn kern_words(system: &mut FontSystem, buffer: &mut Buffer) -> bool {
+    let mut changed = false;
+    for line in &mut buffer.lines {
+        let mut list = line.attrs_list().clone();
+        let mut found = false;
+        let words = line.shape_opt().into_iter().flat_map(|s| &s.spans);
+        for span in words.filter(|s| !s.level.is_rtl()) {
+            for pair in span.words.windows(2) {
+                let (Some(a), Some(b)) = (pair[0].glyphs.last(), pair[1].glyphs.first()) else {
+                    continue;
+                };
+                let own = line.attrs_list().get_span(a.start);
+                if a.font_id != b.font_id || own != line.attrs_list().get_span(b.start) {
+                    continue;
+                }
+                let Some(font) = system.get_font(a.font_id, a.font_weight) else {
+                    continue;
+                };
+                let text = line.text();
+                let kerning = pair_kerning(&font, &text[a.start..a.end], &text[b.start..b.end]);
+                if kerning != 0.0 {
+                    let spacing = own.letter_spacing_opt.map_or(0.0, |s| s.0) + kerning;
+                    list.add_span(a.start..a.end, &own.letter_spacing(spacing));
+                    found = true;
+                }
+            }
+        }
+        if found {
+            line.set_attrs_list(list);
+            changed = true;
+        }
+    }
+    changed
+}
+
 fn lay_out(look: &Look) -> Option<Laid> {
     let size = look.size;
     let line = look.line;
@@ -1081,6 +1132,9 @@ fn lay_out(look: &Look) -> Option<Laid> {
         Some(look.align),
     );
     buffer.shape_until_scroll(&mut f.system, false);
+    if seat && kern_words(&mut f.system, &mut buffer) {
+        buffer.shape_until_scroll(&mut f.system, false);
+    }
     if buffer.layout_runs().map(|r| r.line_height).sum::<f32>() <= 0.0 {
         return None;
     }
