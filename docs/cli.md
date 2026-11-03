@@ -141,6 +141,7 @@ Other clients: `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}
 The schema describes the parameters, not the results. This list gives the result fields that are commonly read.
 
 - `apply`: `results`, in order.
+- `edit source-overwrite`: `clip`, `track`, `reference` (the clip that gave the position) and `playhead` (the frame where the GUI puts the playhead).
 - `export start`:
   - `outputs[]`:
     - `frames`, `video_encoder` and `gpu_decoded`.

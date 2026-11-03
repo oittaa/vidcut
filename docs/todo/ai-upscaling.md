@@ -115,21 +115,16 @@ AI Slow and AI Fast memory and time on the owner's RTX 4080 SUPER (16 GB), on 20
 
 These parts are open:
 
-1. AI Slow (FlashVSR+ Turbo). Its engine and its place in Super Scale are in the code.
-   1. The caches in main memory. At 4K, the waits for their copies take 54% of chunk 1 and 62% of chunk 2.
-      - Find what fills the GPU before the plan: the load leaves 1 GB more than vidcut counts, and 1.7 GB comes with the 1080p decoder.
-      - Then keep more caches on the GPU.
-   2. Speed: find where the time goes, then use the tensor cores through wgpu's cooperative matrices, on Vulkan and Metal.
-2. A test of the chunk edges: each chunk starts from zero. A carried forward state or overlapping chunks may hide a change every 15 frames.
-3. AI Fast's memory plan. At 4K, the peak is 2.5 GB over the plan. The 1.7 GB that comes with the decoder is part of this.
-4. Speed. The gain of each step is not known until it is measured.
-   1. Measure where the time goes, with GPU timestamps: the network, the copies, the decoding and the encoding.
-   2. Use the tensor cores. PyTorch's convolutions use them through cuDNN; vidcut's shaders do not. wgpu's cooperative matrices take only 8×8 32-bit floats.
-   3. More sums in each thread of the Winograd shader. Reads of workgroup memory limit its main loop.
-   4. 16-bit arithmetic in the shaders (`shader-f16`), on GPUs that run it faster than 32-bit.
-   5. Make the bind groups once for each chunk, not for each pass.
-   6. Decode each frame once. The chunk reader decodes the frames a second time.
-   7. Keep the frames on the GPU, from the decoder through the shaders to the encoder. They go through memory. The viewer and the export both need it.
-   8. Let the CPU decode and encode while the GPU runs the network.
+- **Memory at 4K:** the runs of 2026-10-28 took 8-bit pictures, and both models now take 16-bit pictures. Thus measure again first.
+  - AI Slow keeps caches in main memory. The waits for their copies take 54% of chunk 1 and 62% of chunk 2.
+  - The peak of AI Fast is 2.5 GB over its plan.
+  - Find what fills the GPU: the load of AI Slow leaves 1 GB more than vidcut counts, and 1.7 GB comes with the 1080p decoder.
+  - Then count this memory in the plans, and keep more caches of AI Slow on the GPU.
+- **The chunk edges of AI Fast:** a test. Each chunk starts from zero. A carried forward state or overlapping chunks may hide a change every 15 frames.
+- **Speed of both models:** the gain of each step is not known until it is measured.
+  - Measure where the time goes, with GPU timestamps: the network, the copies, the decoding and the encoding.
+  - Use the tensor cores through wgpu's cooperative matrices, on Vulkan. PyTorch's convolutions use them through cuDNN; vidcut's shaders do not. wgpu's cooperative matrices take only 8×8 32-bit floats.
+  - More sums in each thread of AI Fast's Winograd shader. Reads of workgroup memory limit its main loop.
+  - 16-bit arithmetic in the shaders, on GPUs that run it faster than 32-bit. naga 30 cannot bit-cast to `vec2<f16>`. Thus this waits for a newer naga.
 
 The files of both models, with their sources, sizes and SHA-256, are in `crates/vidcut-core/src/catalog.rs`.

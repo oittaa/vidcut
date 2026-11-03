@@ -1787,6 +1787,9 @@ impl Workspace {
             if ui.button("Place On Top").clicked() {
                 self.edit_function("edit.place_on_top");
             }
+            if ui.button("Source Overwrite").clicked() {
+                self.edit_function("edit.source_overwrite");
+            }
             let at = self.snap.timeline.position;
             if ui.button("Cut").clicked() {
                 self.send("edit.remove_transition", json!({ "at": at }));

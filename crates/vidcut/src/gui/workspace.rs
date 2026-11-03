@@ -638,6 +638,12 @@ impl Workspace {
                 "edit.overwrite" | "edit.ripple_overwrite" | "edit.place_on_top" => {
                     s["at"] = json!(playhead)
                 }
+                "edit.source_overwrite" => {
+                    s["at"] = json!(playhead);
+                    if let Some(params) = s.as_object_mut() {
+                        params.remove("range");
+                    }
+                }
                 _ => {}
             }
             s
@@ -646,7 +652,12 @@ impl Workspace {
         let target = self
             .target
             .clone()
-            .filter(|_| !matches!(method, "edit.append" | "edit.place_on_top"))
+            .filter(|_| {
+                !matches!(
+                    method,
+                    "edit.append" | "edit.place_on_top" | "edit.source_overwrite"
+                )
+            })
             .filter(|t| self.project().is_some_and(|p| p.track(t).is_some()));
         let sources: Vec<Value> = sources
             .into_iter()
@@ -677,6 +688,7 @@ impl Workspace {
                 let label = format!("append {} clips", commands.len());
                 self.send("apply", json!({ "commands": commands, "label": label }));
             }
+            _ if method == "edit.source_overwrite" => self.say("Select one clip first"),
             _ => self.send(
                 method,
                 with_position(sources.into_iter().next().expect("one")),

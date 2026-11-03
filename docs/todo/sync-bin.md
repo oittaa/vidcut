@@ -28,3 +28,6 @@ The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-
 - An angle switch replaces the picture and keeps the sound the user chose.
 - The switch is one timeline edit.
 - The CLI, IPC and MCP perform the same action as the GUI.
+- Measure the cases that Source Overwrite refuses ([spec §7.2](../cut-page-spec.md#72-edit-functions)).
+  - Do audio-only files and other frame rates first, because sound recorders make them.
+- Measure how Source Overwrite treats hidden tracks, titles and compound clips.
