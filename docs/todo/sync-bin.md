@@ -21,8 +21,8 @@ The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-
 
 **To do:**
 
-- Decide where a synced group lives. Resolve shows it as a pool clip and opens it as a timeline (pp. 708, 1040). A vidcut project has one timeline.
-- Then add `multicam.create`, which stores the layout.
+- Add `multicam.create`, which stores the layout. A synced group is a pool item that opens in the Sync Clips window (p. 708).
+- For the Edit page stage, open a multicam clip as a timeline (p. 1040).
 - Read the Sync Bin in the Cut page chapters, then measure it in Resolve.
 - Record how angles sync, and how a cut chooses an angle.
 - Sync by start timecode when both files have one.
