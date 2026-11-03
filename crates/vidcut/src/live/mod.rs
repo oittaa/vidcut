@@ -3805,11 +3805,13 @@ impl Live {
 
     fn proxied(&self, mut plan: RenderPlan) -> RenderPlan {
         if let Some(open) = &self.project {
+            let timeline = plan.colors;
             vidcut_core::preview::apply_proxies(
                 &mut plan,
                 open.project(),
                 &self.proxy_dir,
                 Path::is_file,
+                |m, s| s.ai() && vidcut_av::super_scale::unfit(m, s.upscaler, timeline).is_some(),
             );
         }
         plan

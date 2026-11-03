@@ -60,11 +60,17 @@ pub fn render(
     player.follow(t, 0.0);
     let started = Instant::now();
     let shown = loop {
-        match player.present(Instant::now()) {
-            Some(shown) if shown.exact => break shown,
-            _ if started.elapsed() > WAIT => return Err(failed("the player gave no picture")),
-            _ => std::thread::sleep(Duration::from_millis(5)),
+        if let Some(shown) = player.present(Instant::now()).filter(|s| s.exact) {
+            break shown;
         }
+        let status = player.status();
+        if status.failed.is_some() {
+            return Err(Error::media(status.error.unwrap_or_default()));
+        }
+        if started.elapsed() > WAIT {
+            return Err(failed("the player gave no picture"));
+        }
+        std::thread::sleep(Duration::from_millis(5));
     };
     let preview = crate::preferences::load().is_ok_and(|p| p.viewer.super_scale);
     let kernels: Vec<u32> = match preview {

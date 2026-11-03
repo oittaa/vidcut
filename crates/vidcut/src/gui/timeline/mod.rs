@@ -1413,7 +1413,7 @@ impl Workspace {
         }
     }
 
-    pub(super) fn edit_only_toggles(&mut self, ui: &mut egui::Ui) {
+    fn edit_only_toggles(&mut self, ui: &mut egui::Ui) {
         let video = self.video_only;
         if ui.selectable_label(video, "Video Only").clicked() {
             let on = !video;

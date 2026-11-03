@@ -466,9 +466,10 @@ pub enum Request {
         /// The upscaler of Super Scale: `project` (the default: the upscaler
         /// of the project settings), `macos` (macOS 26 and later, called AI
         /// there), `ai_slow`, `ai_fast` or `classic`. `ai_slow` and `ai_fast`
-        /// are off on macOS for now.
-        /// In an HDR timeline, an export refuses `ai_slow` for HDR media. It
-        /// refuses `macos` for pictures over 1920x1080 or without macOS 26.
+        /// are off on macOS.
+        /// Where a picture needs enlarging, the viewer and an export refuse
+        /// `ai_slow` for HDR media in an HDR timeline, and `macos` for
+        /// pictures over 1920x1080 or without macOS 26.
         #[serde(default)]
         upscaler: Option<crate::model::MediaUpscaler>,
         /// Download the weights of the AI upscaler that the media then use,
@@ -3710,7 +3711,8 @@ pub enum ImportMode {
     /// Its tracks after the last clip.
     #[default]
     Append,
-    /// Its tracks instead of the timeline's clips, markers and marks.
+    /// Its tracks instead of the timeline's clips, markers and marks. A file
+    /// with tracks and no clips leaves an empty timeline.
     Replace,
     /// One compound clip after the last clip, holding its tracks.
     Compound,

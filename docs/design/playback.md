@@ -44,7 +44,7 @@ flowchart TD
     - `fs_motion` still hides the other side where the gap side covers it. Thus the tracks below show there.
   - A Smooth Cut is the outgoing side, then the incoming side with a `render::Smooth` (`Over::smooth`). The `Smooth` holds the process and the keys of the morph ([export](export.md#smooth-cuts)).
 - The source viewer plays `render::tape`.
-- Where the project plays proxies (spec D41), `preview::apply_proxies` puts in the video of fresh proxies. Proxy frames keep the timestamps of their sources, so the player picks the same frames. The sound stays on the originals.
+- Where the project plays proxies (spec D41), `preview::apply_proxies` puts in the video of fresh proxies. Proxy frames keep the timestamps of their sources, so the player picks the same frames. The sound stays on the originals. A clip that its upscaler cannot take stays on its original ([GPU](gpu.md)).
 - Before the proxies, `Cache::apply` puts in the frames of the render cache ([the render cache](#the-render-cache)).
 - After each edit or file reload, `Live::project_changed` reloads the source plan and schedules `Live::refresh_timeline_at`. Thus a burst of edits makes one plan.
 
