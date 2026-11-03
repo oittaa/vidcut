@@ -753,11 +753,25 @@ fn face_of(system: &FontSystem, attrs: &Attrs<'_>) -> Option<fontdb::ID> {
     })
 }
 
-fn font_line(system: &mut FontSystem, attrs: &Attrs<'_>) -> Option<f32> {
-    let id = face_of(system, attrs)?;
-    let font = system.get_font(id, attrs.weight)?;
+fn font_heights(system: &mut FontSystem, id: fontdb::ID, weight: Weight) -> Option<[f64; 3]> {
+    use skrifa::raw::TableProvider;
+    use skrifa::raw::tables::os2::SelectionFlags;
+    let index = system.db().face(id)?.index;
+    let font = system.get_font(id, weight)?;
     let m = font.metrics();
-    Some((m.ascent - m.descent + m.leading) / f32::from(m.units_per_em))
+    let face = skrifa::FontRef::from_index(font.data(), index).ok()?;
+    let line = m.ascent - m.descent + m.leading;
+    let parts = face
+        .os2()
+        .ok()
+        .filter(|t| !t.fs_selection().contains(SelectionFlags::USE_TYPO_METRICS))
+        .map_or([m.ascent, -m.descent, m.leading], |t| {
+            let ascent = f32::from(t.us_win_ascent());
+            let descent = f32::from(t.us_win_descent());
+            [ascent, descent, (line - ascent - descent).max(0.0)]
+        });
+    let em = f64::from(m.units_per_em);
+    Some(parts.map(|part| f64::from(part) / em))
 }
 
 fn letter_x_width(system: &mut FontSystem, attrs: &Attrs<'_>, size: f32) -> Option<f32> {
@@ -804,9 +818,10 @@ fn letter_x_width(system: &mut FontSystem, attrs: &Attrs<'_>, size: f32) -> Opti
 fn line_gap(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) -> f32 {
     look.title_gap
         .and_then(|(title, pixel)| {
-            let own = font_line(system, attrs)?;
+            let id = face_of(system, attrs)?;
+            let own = font_heights(system, id, attrs.weight)?;
             let zoom = f64::from(look.spacing.1) / pixel;
-            Some(title.line_gap(f64::from(own), f64::from(px), pixel, zoom) as f32)
+            Some(title.line_gap(own, f64::from(px), pixel, zoom) as f32)
         })
         .unwrap_or(px * look.line)
 }
@@ -842,15 +857,18 @@ fn shifts(system: &mut FontSystem, run: &LayoutRun<'_>, seat: bool) -> Vec<f32> 
         .collect()
 }
 
-fn ascents(buffer: &Buffer) -> Vec<f32> {
-    let mut layouts = buffer
-        .lines
-        .iter()
-        .flat_map(|l| l.layout_opt().into_iter().flatten());
+fn ascents(system: &mut FontSystem, buffer: &Buffer) -> Vec<f32> {
     buffer
         .layout_runs()
         .map(|r| {
-            let ascent = layouts.next().map_or(0.0, |l| l.max_ascent);
+            let ascent = r
+                .glyphs
+                .iter()
+                .filter_map(|g| {
+                    let [ascent, ..] = font_heights(system, g.font_id, g.font_weight)?;
+                    Some(ascent as f32 * g.font_size)
+                })
+                .fold(0.0, f32::max);
             let whole = r
                 .glyphs
                 .iter()
@@ -864,9 +882,14 @@ fn ascents(buffer: &Buffer) -> Vec<f32> {
         .collect()
 }
 
-fn spaced<'a>(buffer: &'a Buffer, below: &[f32], seat: bool) -> Vec<LayoutRun<'a>> {
+fn spaced<'a>(
+    system: &mut FontSystem,
+    buffer: &'a Buffer,
+    below: &[f32],
+    seat: bool,
+) -> Vec<LayoutRun<'a>> {
     let count = buffer.layout_runs().count();
-    let fulls = ascents(buffer);
+    let fulls = ascents(system, buffer);
     let mut shift = 0.0;
     buffer
         .layout_runs()
@@ -1089,7 +1112,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
             .collect(),
         Markup::Pieces(..) => Vec::new(),
     };
-    let runs = spaced(&buffer, &below, seat);
+    let runs = spaced(&mut f.system, &buffer, &below, seat);
     let lifts: Vec<Vec<f32>> = runs
         .iter()
         .map(|r| shifts(&mut f.system, r, seat))
@@ -1117,7 +1140,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     });
     let seats: Vec<f32> = runs
         .iter()
-        .zip(ascents(&buffer))
+        .zip(ascents(&mut f.system, &buffer))
         .map(|(r, a)| r.line_top + a)
         .collect();
     let exact = seated.map(|at| (seats.as_slice(), at.map(|v| v - v.round())));
