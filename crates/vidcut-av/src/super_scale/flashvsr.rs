@@ -1,7 +1,6 @@
 use std::path::Path;
 
-use vidcut_core::model::{Hdr, Media, Project, Upscaler};
-use vidcut_core::render::{RenderPlan, VideoPiece};
+use vidcut_core::model::Upscaler;
 
 use crate::compute::Gpu;
 use crate::error::{Error, Result};
@@ -61,92 +60,12 @@ pub fn get_ready(dir: &Path, download: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn unfit(m: &Media, timeline: Option<Hdr>) -> Option<&'static str> {
-    super::unfit(m, Upscaler::AiSlow, timeline)
-}
+pub type Sizes = ((u32, u32), (u32, u32));
 
-pub fn enlarged(m: &Media, (ow, oh): (u32, u32)) -> Option<((u32, u32), (u32, u32))> {
-    let v = m.video_as_read()?;
-    let across = if v.sar[0] > 0 && v.sar[1] > 0 {
-        f64::from(v.sar[0]) / f64::from(v.sar[1])
-    } else {
-        1.0
-    };
-    let (dw, dh) = (f64::from(v.width) * across, f64::from(v.height));
-    let (dw, dh) = if v.rotation % 180 == 90 {
-        (dh, dw)
-    } else {
-        (dw, dh)
-    };
-    let even = |x: f64| ((x / 2.0).round() as u32 * 2).max(2);
-    let shown = (even(dw), even(dh));
-    let s = (f64::from(ow) / f64::from(shown.0))
-        .min(f64::from(oh) / f64::from(shown.1))
-        .min(f64::from(SCALE));
-    (s > 1.0).then(|| {
-        (
-            shown,
-            (
-                even(f64::from(shown.0) * s).max(shown.0),
-                even(f64::from(shown.1) * s).max(shown.1),
-            ),
-        )
-    })
-}
-
-pub fn check<'a>(
-    p: &Project,
-    plans: impl IntoIterator<Item = &'a RenderPlan>,
-    dir: &Path,
-    download: bool,
-) -> Result<()> {
-    let mut media: Vec<&str> = Vec::new();
-    let mut sizes: Vec<((u32, u32), (u32, u32))> = Vec::new();
-    let mut timeline = None;
-    for plan in plans {
-        timeline = timeline.or(plan.colors);
-        for (layer, _) in plan.video.iter().flat_map(|piece| piece.layers()) {
-            let VideoPiece::Source {
-                media: id,
-                super_scale,
-                ..
-            } = layer
-            else {
-                continue;
-            };
-            if !super_scale.ai() || super_scale.upscaler != Upscaler::AiSlow {
-                continue;
-            }
-            if !media.contains(&id.as_str()) {
-                media.push(id);
-            }
-            if let Some(size) = p
-                .media(id)
-                .and_then(|m| enlarged(m, (plan.width, plan.height)))
-                && !sizes.contains(&size)
-            {
-                sizes.push(size);
-            }
-        }
-    }
-    if media.is_empty() {
-        return Ok(());
-    }
-    let refused: Vec<String> = media
-        .iter()
-        .filter_map(|id| p.media(id))
-        .filter_map(|m| unfit(m, timeline).map(|why| format!("{} ({why})", m.name)))
-        .collect();
-    if !refused.is_empty() {
-        return Err(Error::Invalid(format!(
-            "the AI Slow upscaler of Super Scale can't take {}: set their Upscaler to Classic, \
-             or their Super Scale to Off",
-            refused.join(", ")
-        )));
-    }
+pub fn check(sizes: &[Sizes], dir: &Path, download: bool) -> Result<()> {
     get_ready(dir, download)?;
     with_engine(|gpu, _| {
-        for (source, size) in &sizes {
+        for (source, size) in sizes {
             run::plan(gpu, &run::Geometry::new(*source, *size))?;
         }
         Ok(())

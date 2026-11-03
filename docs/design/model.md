@@ -549,6 +549,7 @@ Modes:
 
 - `ImportMode` is `append`, `replace`, `compound` (`otio::as_compound`) or `media`. `flatten` decomposes compound clips.
 - An empty timeline takes the rate, start timecode and track settings of the file.
+- `replace` and `project_from_otio` take a file with tracks and no clips, and make its tracks ([spec D40](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). The other modes refuse it.
 - A file that vidcut wrote brings its pool items (`join_pool`) into a bin named after it, with new ids, without proxies.
 
 Kept data:
