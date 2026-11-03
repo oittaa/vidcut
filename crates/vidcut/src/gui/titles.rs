@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use vidcut_core::keyframes::{PictureValue, ease_of, eases};
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
 use vidcut_core::model::{
-    Clip, Ease, LowerThirdLine, Title, TitleAlign, TitleCase, TitleKind, TitleLine,
+    Clip, Ease, LowerThirdLine, Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine,
 };
 
 use super::export::Ask;
@@ -31,6 +31,18 @@ impl LineFields {
             rotation: plain(t.rotation),
         }
     }
+
+    fn of_upper(t: &Title) -> Self {
+        let f = Self::of(&t.upper_view());
+        match (&t.upper, t.position) {
+            (None, None) => Self {
+                across: String::new(),
+                down: String::new(),
+                ..f
+            },
+            _ => f,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -39,6 +51,7 @@ pub struct TitleDialog {
     at: i64,
     kind: TitleKind,
     align: TitleAlign,
+    anchor: TitleAnchor,
     text: String,
     fields: TextFields,
     line_spacing: String,
@@ -76,6 +89,20 @@ const ALIGNS: [(TitleAlign, &str); 3] = [
     (TitleAlign::Right, "Right"),
 ];
 
+const ANCHORS: [[TitleAnchor; 3]; 3] = [
+    [
+        TitleAnchor::TopLeft,
+        TitleAnchor::Top,
+        TitleAnchor::TopRight,
+    ],
+    [TitleAnchor::Left, TitleAnchor::Middle, TitleAnchor::Right],
+    [
+        TitleAnchor::BottomLeft,
+        TitleAnchor::Bottom,
+        TitleAnchor::BottomRight,
+    ],
+];
+
 impl TitleDialog {
     fn new(clip: &str, t: Option<&Title>) -> Self {
         let mut d = Self {
@@ -83,6 +110,7 @@ impl TitleDialog {
             at: 0,
             kind: TitleKind::Text,
             align: TitleAlign::Left,
+            anchor: TitleAnchor::default(),
             text: String::new(),
             fields: TextFields::default(),
             line_spacing: String::new(),
@@ -114,6 +142,7 @@ impl TitleDialog {
     fn load(&mut self, t: &Title) {
         self.kind = t.kind;
         self.align = t.align();
+        self.anchor = t.anchor.unwrap_or_default();
         self.text = t.text.clone();
         self.fields = TextFields::load(&Parts::of_title(&t.style));
         self.line_spacing = plain(t.style.line_spacing);
@@ -121,7 +150,7 @@ impl TitleDialog {
         self.case = t.style.case.unwrap_or_default();
         self.base = Some(t.clone());
         self.line = LineFields::of(t);
-        self.upper = LineFields::of(&t.upper_view());
+        self.upper = LineFields::of_upper(t);
         self.title_opacity = percent(t.opacity);
         self.loaded = true;
     }
@@ -138,7 +167,7 @@ impl TitleDialog {
 
     pub(super) fn placed(&mut self, t: &Title) {
         self.line = LineFields::of(t);
-        self.upper = LineFields::of(&t.upper_view());
+        self.upper = LineFields::of_upper(t);
         self.shown = self.shown.is_some().then(|| t.clone());
     }
 }
@@ -232,14 +261,16 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     let upper = line_of(d, &d.upper, &high)?;
     let apart = stored.upper.is_some() || upper != high.line() || lower != stored.line();
     let align = match d.kind {
-        TitleKind::Text => None,
         k if stored.kind == k && stored.align() == d.align => stored.align,
         _ => Some(d.align),
     };
+    let anchor =
+        (d.kind == TitleKind::Text && d.anchor != TitleAnchor::default()).then_some(d.anchor);
     let lines = d.kind == TitleKind::LowerThird && stored.kind == TitleKind::LowerThird;
     let title = Title {
         kind: d.kind,
         align,
+        anchor,
         text: d.text.clone(),
         style,
         position: lower.position,
@@ -278,8 +309,13 @@ fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Vec<Value> {
     if t.kind != stored.kind {
         params["kind"] = json!(t.kind);
     }
-    if t.kind != TitleKind::Text && (t.kind != stored.kind || t.align() != stored.align()) {
+    if t.kind != stored.kind || t.align() != stored.align() {
         params["align"] = json!(t.align());
+    }
+    if t.kind == TitleKind::Text
+        && t.anchor.unwrap_or_default() != stored.anchor.unwrap_or_default()
+    {
+        params["anchor"] = json!(t.anchor.unwrap_or_default());
     }
     if t.style != stored.style {
         params["style"] = serde_json::to_value(&t.style).unwrap_or(json!({}));
@@ -360,7 +396,7 @@ impl Workspace {
     }
 
     pub(crate) fn add_title(&mut self, ctx: &egui::Context) {
-        let params = json!({ "text": "Title", "at": self.snap.timeline.position });
+        let params = json!({ "text": "Basic Title", "at": self.snap.timeline.position });
         self.timeline.adding_title = Some(Ask::send(&self.live, ctx, "titles.add", params));
     }
 
@@ -490,18 +526,33 @@ impl Workspace {
                 ..Title::new("")
             }
             .align();
+            d.anchor = TitleAnchor::default();
         }
         ui.horizontal(|ui| {
-            ui.add_enabled_ui(d.kind != TitleKind::Text, |ui| {
-                ui.label("Align");
-                for (align, label) in ALIGNS {
-                    changed |= ui.radio_value(&mut d.align, align, label).changed();
-                }
-            });
-            if d.kind == TitleKind::Text {
-                super::dialog::why(ui, "a Text title is centered on its position");
+            ui.label("Align");
+            for (align, label) in ALIGNS {
+                changed |= ui.radio_value(&mut d.align, align, label).changed();
             }
         });
+        if d.kind == TitleKind::Text {
+            let [across, down] = d.anchor.fractions().map(|v| (v * 2.0) as usize);
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Anchor");
+                for (i, label) in ["Left", "Middle", "Right"].into_iter().enumerate() {
+                    if ui.radio(across == i, label).clicked() {
+                        d.anchor = ANCHORS[down][i];
+                        changed = true;
+                    }
+                }
+                ui.separator();
+                for (i, label) in ["Top", "Middle", "Bottom"].into_iter().enumerate() {
+                    if ui.radio(down == i, label).clicked() {
+                        d.anchor = ANCHORS[i][across];
+                        changed = true;
+                    }
+                }
+            });
+        }
         if d.kind != TitleKind::Scroll {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Case");
@@ -587,6 +638,7 @@ impl Workspace {
         );
         let across_hint = format!("{}%", percent(Some(usual[0])));
         let down_hint = format!("{}%", percent(Some(usual[1])));
+        let upper_hint = format!("{}%", percent(Some(usual[1] + Title::UPPER_DROP)));
         let mut clicks = Vec::new();
         egui::Grid::new("title-style-fields").show(ui, |ui| {
             changed |= d
@@ -632,7 +684,12 @@ impl Workspace {
                     keys(ui, PictureValue::Position, line);
                     ui.end_row();
                     if !scroll {
-                        moved |= row(ui, "Down", &mut f.down, &down_hint);
+                        let hint = if line == Some(LowerThirdLine::Upper) {
+                            &upper_hint
+                        } else {
+                            &down_hint
+                        };
+                        moved |= row(ui, "Down", &mut f.down, hint);
                         ui.end_row();
                         moved |= row(ui, "Zoom", &mut f.zoom, "100%");
                         keys(ui, PictureValue::Zoom, line);
@@ -658,9 +715,9 @@ impl Workspace {
             ui.end_row();
         });
         ui.label(dim(match d.kind {
-            TitleKind::LowerThird => "Across and Down: the corner, in percents of the picture.",
+            TitleKind::LowerThird => "Across and Down: where the lines meet, in percents.",
             TitleKind::Scroll => "Across: the lines' edge by Align, in percents of the picture.",
-            TitleKind::Text => "Across and Down: the text's middle, in percents of the picture.",
+            TitleKind::Text => "Across and Down: the anchor's place, in percents of the picture.",
         }));
         if !d.error.is_empty() {
             ui.colored_label(ui.visuals().error_fg_color, &d.error);

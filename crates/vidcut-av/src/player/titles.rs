@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{Picture, Title, TitleLine};
+use vidcut_core::model::{Picture, Title, TitleKind, TitleLine};
 use vidcut_core::render::ShownTitle;
 
 use super::frame::{TitleOver, TitlePicture};
@@ -34,7 +34,7 @@ fn level(t: &Title, s: &ShownTitle) -> f64 {
 }
 
 fn key_of(t: &Title, s: &ShownTitle, size: (u32, u32)) -> Key {
-    if t.upper.is_some() && level(t, s) < 1.0 {
+    if t.kind == TitleKind::LowerThird && level(t, s) < 1.0 {
         let whole = Title {
             opacity: None,
             ..t.clone()

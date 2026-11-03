@@ -74,6 +74,7 @@ flowchart TD
 **Decoding**
 
 - Decoding uses the reader of the export, `VideoFrames`, with `VideoFrames::keeping`: frames at their own size.
+- `VideoFrames::drawing_in` gives the reader the colors of the timeline for the frames of a `VideoPiece::Generated` ([export](export.md#encoding-one-output)).
   - GPU frames of the kinds that the viewer takes stay on the GPU.
 - Each turn does the first of these:
   1. the viewer's frame
@@ -174,7 +175,7 @@ flowchart TD
   - It draws before it keeps a frame under the title, for the prepared frame, and for the frame at the playhead.
   - It keeps the drawings used last (an `Lru`).
   - Each drawing is where its kind puts it, without its own place, opacity or rotation. Thus a moved or turned title is not drawn again.
-  - A title with its lines apart and a level under 1 is one drawing of all its blocks (`burn::title`), with their places. Thus text over the box does not show the box. A new place of a line draws it again.
+  - A lower third with a level under 1 is one drawing of all its blocks (`burn::title`), with their places. Thus text over the box does not show the box. A new place of a line draws it again.
 - `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan.
 - `Player::present` hands each block of a title of a frame as a `TitleOver`:
   - the picture, in premultiplied RGBA, and how many layers go under it
@@ -385,7 +386,7 @@ What it renders:
 - An `Effect` with `render_cache` on gives `Reason::Effect`. An effect that is off gives none.
   - A `Placed` around a title under another track gives it. The cache file holds that title.
   - A `Placed` around a title on top of all tracks gives none. The cache file does not hold that title.
-- Each `VideoPiece::Source` and `VideoPiece::Black` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
+- Each `VideoPiece::Source`, `VideoPiece::Black` and `VideoPiece::Generated` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
   - In User mode, an excluded piece gives no `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime`, `Reason::Transition`, `Reason::Opacity` or `Reason::Composite`.
   - Why the black pieces: the black side of a Push or a dip is a part of the transition of the track.
 - Slow media (`Reason::Media`) are of two kinds:
