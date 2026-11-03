@@ -324,6 +324,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The scroll area stands for the whole group.
   - In and Out are frames of the group, so they hold when the active angle changes (p. 682). The source marks of the files do not change.
   - An edit takes the marks' part of the active angle. Source Overwrite lines up by the group.
+  - With no marks on the group, an edit uses the source marks of the active angle.
   - A grid has 1, 2 or 3 columns, up to 9 files.
   - These cases are not measured, so vidcut refuses them:
     - a group of more than 9 files

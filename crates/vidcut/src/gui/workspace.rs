@@ -603,14 +603,6 @@ impl Workspace {
         if self.snap.viewer == ViewerMode::SourceTape && self.crossing_span().is_some() {
             return vec![json!({ "tape": true })];
         }
-        if self.snap.viewer == ViewerMode::MultiSource {
-            return match (self.multi_range(), &self.snap.source_media) {
-                (Some(Ok((a, b))), Some(media)) => {
-                    vec![json!({ "media": media, "range": format!("{a}f..{b}f") })]
-                }
-                _ => Vec::new(),
-            };
-        }
         let Some(p) = self.project() else {
             return Vec::new();
         };
@@ -621,6 +613,20 @@ impl Workspace {
             let b = m.marks.mark_out.unwrap_or(frames);
             (b > a).then(|| json!({ "media": media, "range": format!("{a}f..{b}f") }))
         };
+        if let Some(g) = self.multi_group() {
+            let Some(media) = self.snap.source_media.as_deref() else {
+                return Vec::new();
+            };
+            if g.marks.is_empty() {
+                return range(media).into_iter().collect();
+            }
+            return match self.multi_range() {
+                Some(Ok((a, b))) => {
+                    vec![json!({ "media": media, "range": format!("{a}f..{b}f") })]
+                }
+                _ => Vec::new(),
+            };
+        }
         match self.snap.source_at() {
             Some((media, _)) => range(media).into_iter().collect(),
             None => self
