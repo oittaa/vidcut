@@ -2249,6 +2249,14 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             _ => {}
         }
     }
+    if clips.is_empty() {
+        let foreign = audio_tracks
+            .iter()
+            .filter(|a| a["metadata"][VIDCUT]["track"].is_null());
+        for (n, a) in foreign.enumerate() {
+            settings.push(ImportedTrack::of(a, &format!("A{}", n + 1), true));
+        }
+    }
     clips.sort_by(|x, y| x.track.cmp(&y.track).then(x.start.cmp(&y.start)));
     let (mut dropped, mut gone) = (0, 0);
     let mut kept: Vec<ImportedClip> = Vec::new();
@@ -2302,7 +2310,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             "{gone} clip(s) that overlapped others on their track were left out"
         ));
     }
-    settings.retain(|t| t.id.starts_with('V') || clips.iter().any(|c| c.track == t.id));
+    settings.retain(|t| {
+        clips.is_empty() || t.id.starts_with('V') || clips.iter().any(|c| c.track == t.id)
+    });
     let mut kept: Vec<String> = Vec::new();
     for c in &clips {
         let placed = c.has_picture() && picture::taken(&c.effects, c.picture.is_some());

@@ -1662,6 +1662,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The manual describes Resolve's OTIO import and export, not the files.
   - vidcut's OTIO uses the shapes that Resolve writes and needs: source ranges in media timecode, plain paths, link groups, marker notes.
   - Thus a cut goes to Resolve and back with its media linked, and with its audio together with its video.
+  - **A file with tracks and no clips.** Resolve Studio 21.1.2 imports it as an empty timeline, with V1, A1 and the start timecode of the file (measured).
+    - `project create --from` and `timeline.import` with `replace` make an empty timeline. It takes the rate and the start timecode of the file.
+    - `timeline.import` with `append`, `compound` or `media` refuses such a file. Resolve was not measured for these modes.
+    - A file whose clips cannot be read also refuses, and the error names them.
   - Mapping: [deviation X9](deviations.md#x9-opentimelineio-interchange), [model](design/model.md#opentimelineio).
 - **D41. Proxies** (deviation X18; the proxy chapters, pp. 207–218, are outside the Cut page).
   - Videos and image sequences get proxies on demand (Generate Proxy).
