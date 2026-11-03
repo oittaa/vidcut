@@ -288,8 +288,8 @@ pub struct VideoSettings {
     pub bit_depth: Option<u8>,
     /// Output frame size, each side from 256 to 32768; the picture is fit
     /// inside and padded. Default: the project's. H.264 and HEVC round an odd
-    /// side up: a custom size fits into the rounded size, and the project's
-    /// size scales as a whole picture to fit.
+    /// side up, DNxHR but for 444 an odd width: a custom size fits into the
+    /// rounded size, and the project's size scales as a whole picture to fit.
     #[serde(default)]
     pub width: Option<u32>,
     #[serde(default)]
@@ -379,6 +379,9 @@ impl VideoSettings {
         let (w, h) = self.asked_size(timeline);
         match self.codec {
             VideoCodec::H264 | VideoCodec::Hevc => (w.next_multiple_of(2), h.next_multiple_of(2)),
+            VideoCodec::Dnxhr if self.profile.as_deref() != Some("444") => {
+                (w.next_multiple_of(2), h)
+            }
             _ => (w, h),
         }
     }

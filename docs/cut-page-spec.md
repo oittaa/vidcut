@@ -1270,7 +1270,10 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - With a custom size, the picture fits into the rounded size with one draw.
     - Resolve Studio 21.1.2 writes these sizes at 1281 x 721 with H.264 and H.265, on a timeline and as a custom size. It writes 258 x 258 for 257 x 257 with H.264. Other odd sizes were not measured.
     - The Export dialog and the report of the export show both sizes.
-  - ProRes, DNxHR, VP9 and AV1 on the CPU keep an odd side.
+  - DNxHR LB, SQ, HQ and HQX round an odd width up to even. They keep an odd height.
+    - A size of 1281 x 721 gives a file of 1282 x 721. A size of 1283 x 723 gives a file of 1284 x 723.
+    - Resolve Studio 21.1.2 does this with these four. Its DNxHR 444 keeps 1281 x 721.
+  - ProRes, DNxHR 444, VP9 and AV1 on the CPU keep an odd side.
   - AV1 on NVENC writes an even size by itself. The report shows that size after the export.
   - A side of a custom size is from 256 to 32768.
     - Measured with the render settings of the scripting API in Resolve Studio 21.1.2. The Deliver page was not seen.

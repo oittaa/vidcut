@@ -251,7 +251,7 @@ To the encoder:
 
 The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
 
-- `VideoSettings::written_size` gives the size that the encoder gets. H.264 and HEVC round an odd side up. The other codecs keep the side.
+- `VideoSettings::written_size` gives the size that the encoder gets. H.264 and HEVC round an odd side up. DNxHR rounds an odd width up, but DNxHR 444 keeps it. The other codecs keep the side.
 - `VideoSettings::drawn_size` gives the size of the draw: the written size with a `video.width` and `video.height`, or else the size of the timeline.
   - Why: a custom size fits the picture into the file's size with one draw ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - `export::validate` refuses a `video.width` or `video.height` outside `TIMELINE_SIDE`.
