@@ -38,7 +38,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
-- Sync Bin ([todo](todo/sync-bin.md)), Multi Source, Live Overwrite
+- the Sync Clips window and angle switches ([todo](todo/sync-bin.md)), Live Overwrite
 - making a compound clip from timeline clips ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
@@ -146,7 +146,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
       - Group tracks for each effect, under a track with the clip's name.
       - A curve view, and a Parameters menu that chooses the shown values.
       - With no clip selected, the clip under the playhead. With more than one clip selected, a group for each clip.
-  - Later: the Sync Bin tab.
+  - The Sync Bin tab ([§7.4](#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
   - vidcut's bar also has Import, Export and Jobs (deviation X3), and Help (X23).
   - Items that do not fit a narrow window go into a ⋯ menu at the right end of the bar (D72).
 - **Below the Media Pool:** the edit-function buttons (§7), and Cut and Dissolve (§8.11).
@@ -229,7 +229,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Multicam layout** (p. 1037):
   - `multicam.layout` tells where the angles of a multicam clip lie. It changes nothing, and the project does not store the result.
   - The angles are in the order of the request.
-  - `sync` is `timecode`, `in` or `out`.
+  - `sync` is `timecode`, `in`, `out` or `sound`.
   - By `timecode`, each file starts at its start timecode. A file with no timecode starts at 00:00:00:00.
     - The length is the union of the angles, with any gaps. A gap of hours is not an error.
     - The start timecode of the whole is the earliest angle.
@@ -241,6 +241,19 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - an item that the request names twice
     - without `full_extents`, an item with one mark only
     - by `in` or `out`, an item without that mark
+    - by `sound` without `full_extents`, an item with marks
+- **Sync by sound** (pp. 706–707):
+  - `sync` `sound` lines up files by their sound. `multicam.layout` and `multicam.create` take it.
+  - A shift is in whole frames. Half a frame rounds up.
+  - One shift holds for the whole file. vidcut does not follow drift. The shift falls between the error at the start and the error at the end.
+  - The start timecode of the whole is 01:00:00:00.
+  - A file that matches no other file stays at the start of the whole. `unmatched` names it. A file with no sound is such a file.
+    - Thus with two files and no match, both are at the start and `unmatched` names both.
+  - Two sets of files that do not match each other do not overlap. The later set starts one frame after the earlier one ends.
+  - vidcut compares the first sound stream of each file, with all its channels. No measurement shows which channel the Cut page uses.
+  - The angles stay in the order of the request. The measurements show another order, but no rule for it.
+  - `multicam.layout` also gives `pairs`: for each two files the shift, the score and whether they match.
+  - While the GUI runs, `multicam.create` by sound is a job.
 - **Synced group** (p. 708):
   - `multicam.create` stores files as a synced group, a pool item with the name "Media Sync", the date and the time. `name` gives another name.
   - Each file stays whole, as in `multicam.layout` with `full_extents`. Its marks and its start timecode do not change.
@@ -251,7 +264,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - a group of one file
     - a file in two groups
     - `media.remove` of a file in a group
-  - No command places a group on the timeline. No window shows a group yet.
+  - `multicam.marks.set` and `multicam.marks.clear` act on the In and Out of the group ([§4.1](#41-modes)). `multicam.list` gives them.
+  - No command places a group on the timeline. The pool does not show a group yet.
 - **Input Color Space** (pp. 228, 230):
   - The color tags of a file tell how to read the colors of its pictures.
   - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.
@@ -300,6 +314,22 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Source Tape** (pp. 680–681, 704–706):
   - All pool clips play end to end as one tape, in the pool sort order.
   - The clip under the playhead becomes selected in the pool.
+- **Multi Source** (pp. 679, 682):
+  - The Viewer lays out the files of one synced group in a grid. All of them follow one playhead.
+  - `viewer.set` with `multi_source` opens it. `group` names the group, and the group of the open clip is the default.
+  - One file is the active angle. It plays its sound, edits use it, and it has a red outline.
+  - A click on a cell, or `viewer.set` with `angle`, selects the active angle. The first file is the default, unless the open clip is in the group.
+  - A cell has its number at the top left and its camera or file name at the bottom.
+  - A file with no frame at the playhead shows a black cell.
+  - The scroll area stands for the whole group.
+  - In and Out are frames of the group, so they hold when the active angle changes (p. 682). The source marks of the files do not change.
+  - An edit takes the marks' part of the active angle. Source Overwrite lines up by the group.
+  - With no marks on the group, an edit uses the source marks of the active angle.
+  - A grid has 1, 2 or 3 columns, up to 9 files.
+  - These cases are not measured, so vidcut refuses them:
+    - a group of more than 9 files
+    - no group at all, also for files with one timecode
+    - an edit when a mark is outside the active angle
 - **Timeline** (p. 681):
   - The Viewer shows the timeline at its playhead, with no scroll area.
   - Icons mark the first and the last frame of a clip.
@@ -514,9 +544,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - In each, the lowest track comes first, then the earliest clip.
     - The new clip goes from In to Out. With no Out, it goes to the file's end.
     - It stops at the file's end. It starts at the file's start ([deviation X113](deviations.md#x113-source-overwrite-starts-where-the-file-starts)).
-  - **With source marks and no timeline marks,** the playhead plays no part.
+  - **With source marks and no timeline marks,** the playhead plays no part, except past the timeline's end.
     - The reference is the first clip that overlaps the marked range: lowest track first, then the earliest clip.
     - The marked range goes in.
+    - With no such clip and the playhead at or past the timeline's end, the first clip that overlaps the whole file is the reference ([§7.4](#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
   - **With no marks,** the whole file goes in.
     - Take the lowest track with a clip under the playhead that overlaps the file.
     - T is the source timecode of that clip at the playhead.
@@ -531,6 +562,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The playhead goes to the clip's end.
     - When the edit made a new track, the playhead stops at the old timeline end at the latest.
   - With no overlap, or on an empty timeline, nothing changes and vidcut tells why ([deviation X114](deviations.md#x114-source-overwrite-tells-when-it-writes-nothing)).
+  - **By the synced group:** `group` lines up the file by its synced group, as the Sync Bin does. In the other views, the edit does not use the group.
+    - The rules above do not change. The place in the group takes the place of the timecode.
+    - Only clips of that group count as the reference.
+    - A file in no group is refused.
   - vidcut refuses these cases with an error, because they are not measured:
     - an Out mark with no In, on the timeline or on the source;
     - an In mark with no Out, when no clip that overlaps is at In;
@@ -551,6 +586,39 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Into the gray area above the top track:** this makes a new video+audio track.
 - **Below the bottom track:** an audio clip makes an audio-only track.
 - **Onto another track:** an overwrite there, never a ripple. Only Track 1 pushes clips (D23).
+
+### 7.4 Sync Bin (pp. 708–710; measured in Resolve Studio 21.1.2)
+- The Sync Bin tab takes the Media Pool's place. `gui.show sync_bin` opens it. The viewer goes to the timeline.
+- **The rows:** one row for each file of the current bin and its subfolders.
+  - The rows are in camera order and have the numbers 1, 2, 3 up to 9.
+  - Each row shows its file on the timeline's time. All rows move with the playhead.
+  - A drag to the right moves the playhead earlier. A click on the rows or the ruler does not move it.
+  - `multicam.rows` gives the rows at a time.
+- **The time of a file:** by its synced group when it is in one, and by its timecode otherwise.
+  - The reference is the reference of Source Overwrite with no marks ([§7.2](#72-edit-functions)).
+  - A file with no time in common with the timeline has an empty row.
+- **The grid:** the viewer shows the files at the playhead, with the title "Sync Bin". The sound is the timeline's sound.
+  - A cell has its number at the top left and "Camera" with its name at the bottom.
+  - The file on top at the playhead is the active camera. Its cell has a red outline and a red corner, and its row number is red.
+  - A file with no frame at the playhead shows a black cell.
+- **Choosing a camera:** a click on its cell, a click on its row number, or its number key (p. 709).
+  - The viewer shows that file alone, with its name as the title and a close button at the top left.
+  - `multicam.pick` sets the source marks: In at the playhead, five seconds long, stopping at the file's end.
+  - A click on a black cell only shows a white outline. It sets no marks and opens no view.
+  - The close button or Escape returns to the grid and writes nothing (p. 709).
+- **Source Overwrite** writes the marked range by the rules of [§7.2](#72-edit-functions), with `group` for a file in a group.
+  - The playhead moves to the clip's end, and the grid returns. The source marks stay.
+  - With no camera chosen, an edit tells the user to select one.
+- **Past the timeline's end:** a drag can pass the end, up to the end of the last file.
+  - In is the file's frame at the timeline's end. Out is its frame at the playhead (p. 710).
+  - The edit fills the timeline from its end to the playhead, and the playhead stays.
+  - The reference is then the first clip that overlaps the whole file, as the marked range overlaps no clip.
+- vidcut refuses these cases with an error, because they are not measured:
+  - a file with no picture, or a still;
+  - a file with no camera name, or two files with one camera name;
+  - more than 9 files;
+  - files of different groups, or files in a group with files in none;
+  - a file with no timecode tag and no group.
 
 ## 8. Timeline editing (Ch. 36, pp. 715–732)
 

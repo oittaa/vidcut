@@ -167,9 +167,15 @@ Multicam layout:
 - `multicam::layout` works out where the angles of a multicam clip lie (spec §3).
 - It works in frames at the project's rate. A start timecode at another rate rounds down (`StartTimecode::frames_at`).
 - `Layout` is the answer to `multicam.layout`.
+- `by_sound` joins the files by the best `SoundMatch` first, while the score reaches `SOUND_MATCH_SCORE`.
+  - `Env::sound_match` compares two files by the levels that `Env::audio_levels` keeps. Thus a sync decodes a file once.
+  - `vidcut_av::analysis::sound_match` correlates the rises of the level, because a rise does not depend on the microphone's level.
+  - The score grows with the length that the two files have in common, so a short overlap does not match by chance.
+  - A triangle over the lags (`SMEAR`) finds the middle of a broad peak, which is what drift gives.
 - `Project.groups` stores `SyncGroup`, the result of `multicam.create`. It is a list beside `Project.media`, because a group has no file.
 - A `GroupAngle` stores only the media and `at`, since each file stays whole. `multicam.list` works out `frames` from the media.
-- `start` and `at` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
+- `start`, `at` and `marks` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
+- `multicam::marked_range` turns the `marks` of a group into a range of one file. Thus one pair of marks holds for each file.
 
 Media fields:
 

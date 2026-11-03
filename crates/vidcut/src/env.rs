@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, VoiceActivity};
+use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, SoundMatch, VoiceActivity};
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::editor::GeneratedProxy;
 use vidcut_core::fingerprint::Origin;
@@ -90,6 +90,8 @@ type Memo<T> = LazyLock<Mutex<HashMap<(PathBuf, Origin), Arc<T>>>>;
 static LEVELS: Memo<AudioLevels> = LazyLock::new(Default::default);
 static PICTURES: Memo<PictureStats> = LazyLock::new(Default::default);
 static VOICES: Memo<VoiceActivity> = LazyLock::new(Default::default);
+type Matches = HashMap<(Origin, Origin), Option<SoundMatch>>;
+static MATCHES: LazyLock<Mutex<Matches>> = LazyLock::new(Default::default);
 type Transcripts = HashMap<(Origin, u32), Vec<Kept>>;
 static TRANSCRIPTS: LazyLock<Mutex<Transcripts>> = LazyLock::new(Default::default);
 
@@ -301,6 +303,21 @@ impl Env for AvEnv {
             AudioLevels::to_bytes,
             AudioLevels::from_bytes,
         )
+    }
+
+    fn sound_match(&self, a: &Media, b: &Media) -> Result<Option<SoundMatch>> {
+        if a.info.audio.is_empty() || b.info.audio.is_empty() {
+            return Ok(None);
+        }
+        let key = (paths::media_origin(a), paths::media_origin(b));
+        let lock = || MATCHES.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(found) = lock().get(&key) {
+            return Ok(*found);
+        }
+        let (x, y) = (self.audio_levels(a, 0)?, self.audio_levels(b, 0)?);
+        let found = vidcut_av::analysis::sound_match(&x, &y);
+        lock().insert(key, found);
+        Ok(found)
     }
 
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>> {

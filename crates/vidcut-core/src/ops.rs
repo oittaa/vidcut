@@ -21,7 +21,7 @@ pub use dissolve::{
     to_cut,
 };
 use serde_json::json;
-pub use source_overwrite::{Placed, source_overwrite};
+pub use source_overwrite::{Placed, file_start_at, source_overwrite};
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
@@ -2621,7 +2621,7 @@ pub fn has_bin(p: &Project, path: &str) -> bool {
     path.is_empty() || p.bins.iter().any(|b| b == path)
 }
 
-fn within(path: &str, bin: &str) -> bool {
+pub(crate) fn within(path: &str, bin: &str) -> bool {
     path == bin || path.starts_with(&format!("{bin}/"))
 }
 

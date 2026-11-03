@@ -28,10 +28,12 @@ pub struct Cells {
     ctx: egui::Context,
     gpu_pictures: vidcut_av::hw::GpuPictures,
     cells: [Option<Cell>; CELLS],
+    part: usize,
     counts: Counts,
 }
 
-pub const CELLS: usize = 4;
+pub const CELLS: usize = 9;
+const LEAST_PART: usize = 4;
 
 impl Cells {
     pub fn new(ctx: egui::Context, gpu_pictures: vidcut_av::hw::GpuPictures) -> Self {
@@ -39,6 +41,7 @@ impl Cells {
             ctx,
             gpu_pictures,
             cells: std::array::from_fn(|_| None),
+            part: LEAST_PART,
             counts: Counts::default(),
         }
     }
@@ -52,10 +55,13 @@ impl Cells {
     }
 
     pub fn keep(&mut self, n: usize) {
+        let part = n.max(LEAST_PART);
+        let kept = if part == self.part { n } else { 0 };
+        self.part = part;
         let cells: Vec<Cell> = self
             .cells
             .iter_mut()
-            .skip(n)
+            .skip(kept)
             .filter_map(Option::take)
             .collect();
         if cells.is_empty() {
@@ -85,7 +91,7 @@ impl Cells {
         {
             let ctx = self.ctx.clone();
             let config = Config {
-                part: CELLS,
+                part: self.part,
                 audio_scrubbing: false,
                 on_picture: Some(Arc::new(move || ctx.request_repaint())),
                 hardware: crate::preferences::gpu_decoding().on,

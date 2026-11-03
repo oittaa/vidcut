@@ -132,6 +132,8 @@ pub trait Env {
 
     fn audio_levels(&self, media: &Media, stream: u32) -> Result<Arc<AudioLevels>>;
 
+    fn sound_match(&self, a: &Media, b: &Media) -> Result<Option<crate::analysis::SoundMatch>>;
+
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>>;
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness>;
@@ -2624,9 +2626,14 @@ fn mutate(
                 .clone()
                 .unwrap_or_else(|| format!("Media Sync {}", env.local_stamp()));
             let bin = bin.as_deref().unwrap_or_default();
-            let id = crate::multicam::create(p, &media.to_vec(), *sync, name, bin)?;
+            let (id, unmatched) =
+                crate::multicam::create(p, env, &media.to_vec(), *sync, name, bin)?;
             let g = p.group(&id).expect("just made");
-            crate::multicam::group_json(p, g)
+            let mut v = crate::multicam::group_json(p, g);
+            if !unmatched.is_empty() {
+                v["unmatched"] = json!(unmatched);
+            }
+            v
         }
         Request::MulticamRemove { group } => {
             crate::multicam::remove(p, group)?;
@@ -2639,6 +2646,27 @@ fn mutate(
         Request::MulticamMove { group, bin } => {
             crate::multicam::move_to_bin(p, group, bin)?;
             Value::Null
+        }
+        Request::MulticamMarksSet {
+            group,
+            mark_in,
+            out,
+        } => json!(crate::multicam::set_marks(
+            p,
+            group,
+            mark_in.as_ref(),
+            out.as_ref()
+        )?),
+        Request::MulticamMarksClear { group } => {
+            crate::multicam::group_mut(p, group)?.marks = Marks::default();
+            Value::Null
+        }
+        Request::MulticamPick { media, at } => {
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            json!(crate::multicam::pick(p, media, need(at, "at")?)?)
         }
         Request::MediaRemove { media, force } => {
             p.media(media)
@@ -2955,7 +2983,11 @@ fn mutate(
             v["track"] = json!(track);
             v
         }
-        Request::EditSourceOverwrite { source: src, at } => {
+        Request::EditSourceOverwrite {
+            source: src,
+            at,
+            group,
+        } => {
             if src.track.is_some() {
                 return Err(Error::usage(
                     "Source Overwrite picks its own track; leave out `track`",
@@ -2979,7 +3011,7 @@ fn mutate(
                 ));
             }
             let marked = src.range.is_some() || marks.mark_in.is_some() || marks.mark_out.is_some();
-            let placed = ops::source_overwrite(p, &source, marked, at)?;
+            let placed = ops::source_overwrite(p, &source, marked, at, *group)?;
             json!({
                 "clip": placed.clip,
                 "track": placed.track,
@@ -5128,6 +5160,8 @@ fn groups_to_rate(p: &mut Project, from: Rational) {
         for a in &mut g.angles {
             a.at = rescale(a.at, from, to);
         }
+        g.marks.mark_in = g.marks.mark_in.map(|f| rescale(f, from, to));
+        g.marks.mark_out = g.marks.mark_out.map(|f| rescale(f, from, to));
     }
 }
 
@@ -6676,6 +6710,7 @@ pub fn query(
         } => {
             json!(crate::multicam::layout(
                 p,
+                env,
                 &media.to_vec(),
                 *sync,
                 *full_extents
@@ -6688,6 +6723,17 @@ pub fn query(
                     .map(|g| crate::multicam::group_json(p, g))
                     .collect::<Vec<_>>()
             )
+        }
+        Request::MulticamRows { bin, at } => {
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            json!(crate::multicam::sync_rows(
+                p,
+                bin.as_deref().unwrap_or_default(),
+                need(at, "at")?
+            )?)
         }
         Request::MediaGet { media } => {
             let m = p

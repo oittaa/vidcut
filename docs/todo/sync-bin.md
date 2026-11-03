@@ -2,12 +2,12 @@
 
 **When:** not decided.
 
-The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-scope)). vidcut has no synced angles and no Sync Bin.
+The Sync Bin tab, the synced group and Multi Source are in vidcut ([spec §7.4](../cut-page-spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)). This file lists what is still open.
 
 **Why:**
 
-- The Cut page gathers several angles of one moment in a Sync Bin.
-- vidcut stores no synced group.
+- The Cut page reopens a group in the Sync Clips window.
+- The Edit page opens a multicam clip as a timeline, and a cut chooses an angle.
 
 **In the code:**
 
@@ -18,16 +18,25 @@ The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-
 - Waveforms draw on clips.
 - `multicam.layout` works out where angles lie, by timecode or marks. It stores nothing.
 - `multicam.create` stores a synced group, a pool item.
+- `edit.source_overwrite` with `group` lines up by a synced group.
+- `multicam.rows` and `multicam.pick` give the rows of the Sync Bin and choose a camera.
 - No command switches angles.
 
 **To do:**
 
 - Open a group in the Sync Clips window (p. 708).
 - For the Edit page stage, open a multicam clip as a timeline (p. 1040).
-- Read the Sync Bin in the Cut page chapters, then measure it in Resolve.
-- Record how angles sync, and how a cut chooses an angle.
-- Sync by start timecode when both files have one.
-- Otherwise sync by the waveform.
+- Measure the Sync Bin parts that are not measured:
+  - the number keys and Escape;
+  - the sound of the grid with Video Only off and on (p. 708);
+  - a grid of more than 4 cameras;
+  - the Out mark by hand in the view of one camera;
+  - a drag on the rows in the view of one camera;
+  - rows for files with no tag and no saved group, with no camera name, and with no picture;
+  - a timeline whose clips disagree on the time of a file.
+- Show the Sync Bin grid in the Cinema Viewer with P (p. 709).
+- Record how a cut chooses an angle.
+- Measure sync by sound with files from real cameras, each with its own microphone. Then check `SOUND_MATCH_SCORE`.
 - A marker is the sync point when the user sets one.
 - An angle switch replaces the picture and keeps the sound the user chose.
 - The switch is one timeline edit.

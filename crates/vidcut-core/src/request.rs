@@ -124,7 +124,9 @@ pub enum Request {
     #[serde(rename = "multicam.layout")]
     MulticamLayout {
         media: OneOrMany<String>,
-        /// `timecode`, or `in` or `out`, for items that all have that mark.
+        /// `timecode`, `in` or `out` for items that all have that mark, or
+        /// `sound`. By sound the answer also has `unmatched`, the media that
+        /// match no other file, and `pairs`, how well each two files match.
         #[serde(default)]
         sync: crate::model::AngleSync,
         /// Use each whole file. Its marks only line it up.
@@ -133,11 +135,13 @@ pub enum Request {
     },
     /// Store files as a synced group, a pool item that lines them up. Each
     /// file stays whole and its marks stay. A file is in one group at most.
-    /// Returns the group.
+    /// Returns the group. By sound, `unmatched` lists the files that match no
+    /// other file. Such a file stays in the group, at the group's start.
     #[serde(rename = "multicam.create")]
     MulticamCreate {
         media: OneOrMany<String>,
-        /// `timecode`, or `in` or `out`, for items that all have that mark.
+        /// `timecode`, `in` or `out` for items that all have that mark, or
+        /// `sound`.
         #[serde(default)]
         sync: crate::model::AngleSync,
         /// Default: `Media Sync` with the date and the time.
@@ -158,6 +162,49 @@ pub enum Request {
     MulticamRename { group: String, name: String },
     #[serde(rename = "multicam.move")]
     MulticamMove { group: String, bin: String },
+    /// Set the In and/or Out of a synced group. They are frames of the group
+    /// and hold for each of its files; `out` is exclusive. The files' own
+    /// source marks do not change.
+    #[serde(rename = "multicam.marks.set")]
+    MulticamMarksSet {
+        group: String,
+        #[serde(rename = "in", default)]
+        mark_in: Option<TimeSpec>,
+        #[serde(default)]
+        out: Option<TimeSpec>,
+    },
+    /// Clear the In and Out of a synced group.
+    #[serde(rename = "multicam.marks.clear")]
+    MulticamMarksClear { group: String },
+    /// The Sync Bin at a time: the files of a bin and its subfolders, in
+    /// camera order. Each row has its `number`, `media`, `camera` and
+    /// `frames`. `start` is the timeline frame of the file's first frame, by
+    /// its synced group or its timecode; a file with no time in common has
+    /// none. `frame` is the file's frame at `at`, if it has one. `active`
+    /// says that the file is on top at `at`. It refuses a file with no
+    /// picture, no camera name or no time to line up by, two files with one
+    /// camera name, more than nine files, and files of different groups.
+    #[serde(rename = "multicam.rows")]
+    MulticamRows {
+        /// Default: the top level.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bin: Option<String>,
+        /// Default: the playhead. It can pass the timeline's end.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+    },
+    /// Choose a camera of the Sync Bin: set the file's source marks at `at`.
+    /// In is the file's frame at `at`. The marks are five seconds long and
+    /// stop at the file's end. Past the timeline's end, In is the file's
+    /// frame at that end and Out is its frame at `at`. Returns the marks. It
+    /// refuses a file with no frame at `at`.
+    #[serde(rename = "multicam.pick")]
+    MulticamPick {
+        media: String,
+        /// Default: the playhead. It can pass the timeline's end.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<TimeSpec>,
+    },
     /// Remove from the pool; `force` also deletes the clips that use it.
     #[serde(rename = "media.remove")]
     MediaRemove {
@@ -815,9 +862,15 @@ pub enum Request {
     EditSourceOverwrite {
         #[serde(flatten)]
         source: SourceParams,
-        /// The playhead. Only an edit with no marks reads it.
+        /// The playhead. An edit with no marks reads it. With source marks, a
+        /// playhead at or past the timeline's end lets the marks pass the end
+        /// of every clip.
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// Line up by the file's synced group in place of the timecode. Only
+        /// clips of that group count as the reference.
+        #[serde(default)]
+        group: bool,
     },
 
     /// Split at one or more frames (Ctrl+\).
@@ -2703,12 +2756,13 @@ pub enum Request {
         start_tc: Option<TimeSpec>,
     },
     /// What the viewer shows, and how its timecode field counts.
-    /// `mode` is `source_clip`, `source_tape`, or `timeline`. Omitted, the viewer stays.
+    /// `mode` is `source_clip`, `source_tape`, `multi_source`, or `timeline`.
+    /// Omitted, the viewer stays.
     /// `display` is the count (decision D91). Omitted, the count stays.
     /// `reset_timer1` stores the playhead on screen as Timer 1's zero for that player.
     /// The zero lasts for this session.
     /// `paste` seeks that playhead to a copied count, read in the display this call leaves.
-    /// Give one of `mode`, `display`, `reset_timer1`, or `paste`.
+    /// Give one of `mode`, `display`, `reset_timer1`, `paste`, or `angle`.
     #[serde(rename = "viewer.set")]
     ViewerSet {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2719,6 +2773,14 @@ pub enum Request {
         reset_timer1: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         paste: Option<String>,
+        /// The synced group for `multi_source`. Omitted, the group of the
+        /// open clip or of `angle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<String>,
+        /// In `multi_source`, the file of the group that plays and that
+        /// edits use. Omitted, the open clip, or else the first file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angle: Option<String>,
     },
     /// Viewer framing and safe-area guides (decision D90). Stored in
     /// preferences, not the project. A field that is left out stays as it is.
@@ -3664,6 +3726,8 @@ pub enum ViewerMode {
     SourceClip,
     #[serde(alias = "tape")]
     SourceTape,
+    #[serde(alias = "multi")]
+    MultiSource,
     Timeline,
 }
 
@@ -3808,6 +3872,9 @@ pub enum GuiPanel {
     /// Manage Render Cache: the render cache of each project that vidcut
     /// opened on this computer (`cache.list`), to clear (`cache.clear`).
     ManageRenderCache,
+    /// The Sync Bin tab, in the Media Pool's place: a row for each camera of
+    /// the bin, and a grid of the cameras in the viewer.
+    SyncBin,
     /// The Transitions tab, in the Media Pool's place: the transitions to
     /// drag onto an edit.
     Transitions,
@@ -4432,6 +4499,7 @@ impl Request {
                     | Self::MediaDetails { .. }
                     | Self::MulticamLayout { .. }
                     | Self::MulticamList {}
+                    | Self::MulticamRows { .. }
                     | Self::Probe { .. }
                     | Self::TimelineGet { .. }
                     | Self::TimelineAt { .. }
@@ -4834,6 +4902,8 @@ mod tests {
                 display: Some(TimecodeDisplay::Timer1),
                 reset_timer1: false,
                 paste: None,
+                group: None,
+                angle: None,
             }
         );
     }

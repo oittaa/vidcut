@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value;
-use vidcut_core::model::{Clip, TrackKind};
+use vidcut_core::model::Clip;
 use vidcut_core::render::TapeEntry;
 use vidcut_core::request::{TimecodeDisplay, ViewerFrame, ViewerMode};
 use vidcut_core::steps::{Span, Steps};
@@ -185,6 +185,7 @@ pub struct Snapshot {
     pub source: PlayerSnap,
     pub timeline: PlayerSnap,
     pub source_media: Option<String>,
+    pub source_group: Option<String>,
     pub tape: Arc<Vec<TapeEntry>>,
     pub selection: Selection,
     pub pool: PoolView,
@@ -239,8 +240,10 @@ impl Snapshot {
                 .source_media
                 .as_deref()
                 .map(|m| (m, self.source.position)),
-            ViewerMode::SourceTape => tape_at(&self.tape, self.source.position)
-                .map(|e| (e.media.as_str(), self.source.position - e.start)),
+            ViewerMode::SourceTape | ViewerMode::MultiSource => {
+                source_entry(self.viewer, &self.tape, self.source.position)
+                    .map(|e| (e.media.as_str(), self.source.position - e.start))
+            }
             ViewerMode::Timeline => None,
         }
     }
@@ -267,6 +270,16 @@ pub fn tape_at(tape: &[TapeEntry], position: i64) -> Option<&TapeEntry> {
     tape.iter()
         .find(|e| position < e.start + e.frames)
         .or(tape.last())
+}
+
+fn source_entry(viewer: ViewerMode, tape: &[TapeEntry], position: i64) -> Option<&TapeEntry> {
+    match viewer {
+        ViewerMode::SourceTape => tape_at(tape, position),
+        ViewerMode::MultiSource => tape
+            .first()
+            .filter(|e| e.start <= position && position < e.start + e.frames),
+        ViewerMode::SourceClip | ViewerMode::Timeline => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -299,27 +312,11 @@ pub fn source_frame_at(
 ) -> Option<i64> {
     match viewer {
         ViewerMode::SourceClip => Some(playhead),
-        ViewerMode::SourceTape => tape_at(tape, playhead).map(|e| playhead - e.start),
-        ViewerMode::Timeline => shown_clip(project?, playhead).map(|c| c.source_at(playhead)),
-    }
-}
-
-fn shown_clip(project: &Project, playhead: i64) -> Option<&Clip> {
-    let tracks = project.tracks_of(TrackKind::Video);
-    for ti in tracks.into_iter().rev() {
-        let track = &project.tracks[ti];
-        if !track.video_enabled {
-            continue;
+        ViewerMode::SourceTape | ViewerMode::MultiSource => {
+            source_entry(viewer, tape, playhead).map(|e| playhead - e.start)
         }
-        let Some(ci) = track.clip_at(playhead) else {
-            continue;
-        };
-        let clip = &track.clips[ci];
-        if clip.enabled && clip.video && !clip.is_block() {
-            return Some(clip);
-        }
+        ViewerMode::Timeline => project?.shown_clip(playhead).map(|c| c.source_at(playhead)),
     }
-    None
 }
 
 pub struct TimecodeView<'a> {
@@ -346,11 +343,7 @@ pub fn timecode_view<'a>(
     timer_zero: i64,
     source_media: Option<&str>,
 ) -> TimecodeView<'a> {
-    let entry = if viewer == ViewerMode::SourceTape {
-        tape_at(tape, playhead)
-    } else {
-        None
-    };
+    let entry = source_entry(viewer, tape, playhead);
     let (fps, drop, start_tc) = match project {
         Some(p) => (
             p.settings.fps,
@@ -360,12 +353,12 @@ pub fn timecode_view<'a>(
         None => (Rational::new(30, 1).expect("valid"), false, 0),
     };
     let clip = match viewer {
-        ViewerMode::Timeline => project.and_then(|p| shown_clip(p, playhead)),
-        ViewerMode::SourceClip | ViewerMode::SourceTape => None,
+        ViewerMode::Timeline => project.and_then(|p| p.shown_clip(playhead)),
+        ViewerMode::SourceClip | ViewerMode::SourceTape | ViewerMode::MultiSource => None,
     };
     let media = match viewer {
         ViewerMode::SourceClip => source_media,
-        ViewerMode::SourceTape => entry.map(|e| e.media.as_str()),
+        ViewerMode::SourceTape | ViewerMode::MultiSource => entry.map(|e| e.media.as_str()),
         ViewerMode::Timeline => clip.map(|c| c.media.as_str()),
     };
     let source_tc = project
@@ -462,7 +455,7 @@ fn read_count(text: &str, view: &TimecodeView<'_>) -> Result<i64, Error> {
 fn source_playhead(n: i64, view: &TimecodeView<'_>) -> Result<i64, Error> {
     match view.viewer {
         ViewerMode::SourceClip => Ok(n),
-        ViewerMode::SourceTape => {
+        ViewerMode::SourceTape | ViewerMode::MultiSource => {
             let frames = view
                 .tape_frames
                 .ok_or_else(|| Error::usage("no source frame here"))?;

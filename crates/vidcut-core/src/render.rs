@@ -2546,11 +2546,41 @@ pub struct TapeEntry {
 }
 
 pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>)> {
+    laid_out(p, media, 0, 0)
+}
+
+pub fn group_tape(
+    p: &Project,
+    group: &crate::model::SyncGroup,
+    media: &str,
+) -> Result<(RenderPlan, Vec<TapeEntry>)> {
+    let at = group
+        .at_of(media)
+        .ok_or_else(|| Error::not_found(format!("{media} is not in {}", group.id)))?;
+    let end = crate::multicam::frames(p, group);
+    laid_out(p, &[media.to_string()], at, end)
+}
+
+fn laid_out(
+    p: &Project,
+    media: &[String],
+    first: i64,
+    end: i64,
+) -> Result<(RenderPlan, Vec<TapeEntry>)> {
     let s = &p.settings;
     let sample = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
     let (mut video, mut lane, mut entries) = (Vec::new(), Vec::new(), Vec::new());
     let pool = p.pool();
-    let mut t = 0;
+    let mut t = first;
+    if first > 0 {
+        push_video(&mut video, VideoPiece::black(first));
+        push_audio(
+            &mut lane,
+            AudioPiece::Silence {
+                samples: sample(first),
+            },
+        );
+    }
     for id in media {
         let m = found(pool.get(id.as_str()).copied(), id)?;
         let frames = p.media_frames(m);
@@ -2611,8 +2641,18 @@ pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
         });
         t += frames;
     }
-    if t == 0 {
+    if entries.is_empty() {
         return Err(Error::invalid("no media to show"));
+    }
+    if end > t {
+        push_video(&mut video, VideoPiece::black(end - t));
+        push_audio(
+            &mut lane,
+            AudioPiece::Silence {
+                samples: sample(end) - sample(t),
+            },
+        );
+        t = end;
     }
     let plan = RenderPlan {
         fps: s.fps,

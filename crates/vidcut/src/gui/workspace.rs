@@ -141,6 +141,7 @@ pub struct Workspace {
     pub(super) cache_manager: super::cache_manager::CacheManager,
     pub(super) metadata_strip: bool,
     pub(super) key_editor: super::keyframe_editor::Editor,
+    pub(super) sync_bin: super::sync_bin::SyncBin,
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -234,6 +235,7 @@ impl Workspace {
             cache_manager: Default::default(),
             metadata_strip: super::pool::strip_kept(),
             key_editor: Default::default(),
+            sync_bin: Default::default(),
         }
     }
 
@@ -265,6 +267,10 @@ impl Workspace {
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
             GuiPanel::Transcription => self.transcription.open = true,
+            GuiPanel::SyncBin => {
+                self.left = LeftTab::SyncBin;
+                self.show_timeline();
+            }
             GuiPanel::Transitions => self.left = LeftTab::Transitions,
             GuiPanel::Titles => self.left = LeftTab::Titles,
             GuiPanel::Effects => {
@@ -331,12 +337,14 @@ impl Workspace {
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
-            GuiPanel::Transitions
+            GuiPanel::SyncBin
+            | GuiPanel::Transitions
             | GuiPanel::Titles
             | GuiPanel::Effects
             | GuiPanel::Inspector
             | GuiPanel::Keyframes => {
                 let tab = match panel {
+                    GuiPanel::SyncBin => LeftTab::SyncBin,
                     GuiPanel::Transitions => LeftTab::Transitions,
                     GuiPanel::Titles => LeftTab::Titles,
                     GuiPanel::Effects => LeftTab::Effects,
@@ -384,6 +392,7 @@ impl Workspace {
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
+            (GuiPanel::SyncBin, self.left == LeftTab::SyncBin),
             (GuiPanel::Transitions, self.left == LeftTab::Transitions),
             (GuiPanel::Titles, self.left == LeftTab::Titles),
             (
@@ -573,7 +582,36 @@ impl Workspace {
         )
     }
 
+    pub(super) fn multi_group(&self) -> Option<&vidcut_core::model::SyncGroup> {
+        if self.snap.viewer != ViewerMode::MultiSource {
+            return None;
+        }
+        self.project()?.group(self.snap.source_group.as_deref()?)
+    }
+
+    pub(super) fn multi_span(&self) -> Option<(i64, i64)> {
+        let g = self.multi_group()?;
+        let end = self.snap.source.frames;
+        Some((
+            g.marks.mark_in.unwrap_or(0),
+            g.marks.mark_out.unwrap_or(end),
+        ))
+    }
+
+    fn multi_range(&self) -> Option<vidcut_core::Result<(i64, i64)>> {
+        let g = self.multi_group()?;
+        let media = self.snap.source_media.as_deref()?;
+        Some(vidcut_core::multicam::marked_range(
+            self.project()?,
+            g,
+            media,
+        ))
+    }
+
     pub(super) fn edit_sources(&self) -> Vec<Value> {
+        if self.sync_grid_on() {
+            return Vec::new();
+        }
         if self.snap.viewer == ViewerMode::SourceTape && self.crossing_span().is_some() {
             return vec![json!({ "tape": true })];
         }
@@ -587,6 +625,20 @@ impl Workspace {
             let b = m.marks.mark_out.unwrap_or(frames);
             (b > a).then(|| json!({ "media": media, "range": format!("{a}f..{b}f") }))
         };
+        if let Some(g) = self.multi_group() {
+            let Some(media) = self.snap.source_media.as_deref() else {
+                return Vec::new();
+            };
+            if g.marks.is_empty() {
+                return range(media).into_iter().collect();
+            }
+            return match self.multi_range() {
+                Some(Ok((a, b))) => {
+                    vec![json!({ "media": media, "range": format!("{a}f..{b}f") })]
+                }
+                _ => Vec::new(),
+            };
+        }
         match self.snap.source_at() {
             Some((media, _)) => range(media).into_iter().collect(),
             None => self
@@ -624,13 +676,32 @@ impl Workspace {
     }
 
     pub(super) fn edit_function(&mut self, method: &str) {
-        let sources = self.edit_sources();
+        if let Some(Err(e)) = self.multi_range() {
+            self.say(e.to_string());
+            return;
+        }
+        let mut sources = self.edit_sources();
+        if method == "edit.source_overwrite" && self.snap.viewer == ViewerMode::MultiSource {
+            for s in &mut sources {
+                s["group"] = json!(true);
+            }
+        }
         self.edit_from(method, sources);
+    }
+
+    pub(super) fn only_toggles(&self, source: &mut Value) {
+        if self.video_only {
+            source["video_only"] = json!(true);
+        }
+        if self.audio_only {
+            source["audio_only"] = json!(true);
+        }
     }
 
     pub(super) fn edit_from(&mut self, method: &str, sources: Vec<Value>) {
         let playhead = self.snap.timeline.position;
         let mark_in = self.project().and_then(|p| p.marks.mark_in);
+        let group_marked = self.multi_group().is_some_and(|g| !g.marks.is_empty());
         let with_position = |mut s: Value| {
             match method {
                 "edit.smart_insert" => s["playhead"] = json!(playhead),
@@ -640,7 +711,7 @@ impl Workspace {
                 }
                 "edit.source_overwrite" => {
                     s["at"] = json!(playhead);
-                    if let Some(params) = s.as_object_mut() {
+                    if let Some(params) = s.as_object_mut().filter(|_| !group_marked) {
                         params.remove("range");
                     }
                 }
@@ -648,7 +719,6 @@ impl Workspace {
             }
             s
         };
-        let (video_only, audio_only) = (self.video_only, self.audio_only);
         let target = self
             .target
             .clone()
@@ -662,12 +732,7 @@ impl Workspace {
         let sources: Vec<Value> = sources
             .into_iter()
             .map(|mut s| {
-                if video_only {
-                    s["video_only"] = json!(true);
-                }
-                if audio_only {
-                    s["audio_only"] = json!(true);
-                }
+                self.only_toggles(&mut s);
                 if let Some(t) = &target {
                     s["track"] = json!(t);
                 }
@@ -675,6 +740,7 @@ impl Workspace {
             })
             .collect();
         match sources.len() {
+            0 if self.sync_grid_on() => self.say("Select a Camera First"),
             0 => self.say("Open a clip or select pool media first"),
             1 => self.send(
                 method,
@@ -1668,6 +1734,15 @@ impl Workspace {
                     v.dedup();
                     v
                 }
+                ViewerMode::MultiSource => {
+                    let mut v = vec![0, self.snap.source.frames];
+                    if let Some(g) = self.multi_group() {
+                        v.extend(g.marks.mark_in);
+                        v.extend(g.marks.mark_out);
+                    }
+                    v.sort_unstable();
+                    v
+                }
                 _ => {
                     let mut v = vec![0, self.snap.source.frames];
                     if let Some((m, _)) = self.snap.source_at()
@@ -1701,6 +1776,18 @@ impl Workspace {
             self.send("tape.marks.set", json!({ key: value, "order": order }));
             return;
         }
+        if self.hover.is_none()
+            && let Some(g) = self.multi_group()
+        {
+            let frame = self.snap.source.position;
+            let (key, value) = if is_in {
+                ("in", frame)
+            } else {
+                ("out", frame + 1)
+            };
+            self.send("multicam.marks.set", json!({ "group": g.id, key: value }));
+            return;
+        }
         let (media, frame) = match (&self.hover, self.snap.source_at()) {
             (Some((m, f)), _) => (Some(m.clone()), *f),
             (None, Some((m, f))) => (Some(m.to_string()), f),
@@ -1725,6 +1812,17 @@ impl Workspace {
             && let Some((a, b)) = self.crossing_span()
         {
             self.seek(PlayerId::Source, if is_in { a } else { b - 1 }, false);
+            return;
+        }
+        if let Some(g) = self.multi_group() {
+            let mark = if is_in {
+                g.marks.mark_in
+            } else {
+                g.marks.mark_out.map(|o| o - 1)
+            };
+            if let Some(f) = mark {
+                self.seek(PlayerId::Source, f, false);
+            }
             return;
         }
         match self.snap.source_at() {
@@ -1768,6 +1866,10 @@ impl Workspace {
         if self.snap.viewer == ViewerMode::SourceTape {
             let media = self.snap.source_at().map(|(m, _)| m.to_string());
             self.send("tape.marks.clear", json!({ "media": media }));
+            return;
+        }
+        if let Some(g) = self.multi_group() {
+            self.send("multicam.marks.clear", json!({ "group": g.id }));
             return;
         }
         match self.snap.source_at() {
@@ -1931,8 +2033,10 @@ impl Workspace {
                     if self.left != LeftTab::Keyframes && !self.key_tray {
                         self.key_editor.leave();
                     }
+                    self.sync_tick();
                     match self.left {
                         LeftTab::Pool => self.pool_panel(ui),
+                        LeftTab::SyncBin => self.sync_bin_panel(ui),
                         LeftTab::Transitions => {
                             self.pool_focus = false;
                             self.transitions_panel(ui);
