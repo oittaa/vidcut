@@ -2121,6 +2121,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Text 108/1080 for Scroll (measured in Resolve Studio 21.1.2).
     - For a lower third, 76/1080 on its lower line and 48/1080 on its upper line (measured in Resolve Studio 21.1.2).
     - A `size` in the style goes on both lines of a lower third.
+    - A Text title and a lower third draw a whole number of timeline pixels for the size. The style keeps the exact number.
+    - The size goes to the nearest whole number, and .5 goes up. Thus 99.5 and 100.4 draw as 100, and 100.5 draws as 101 (measured in Resolve Studio 21.1.2).
+    - The letters, the line height, the text lines, the tracking and the small size of `<sup>` and `<sub>` all use that whole number.
     - A lower third has a tracking of 11 on its upper line, unless the style has a `tracking` (measured in Resolve Studio 21.1.2).
     - Resolve's OTIO export leaves that tracking out, and its reader then draws none. Thus a lower third from a file has only the tracking of the file.
     - A font gives three heights for a line: ascent, descent and gap (measured in Resolve Studio 21.1.2 on Windows with 14 fonts).

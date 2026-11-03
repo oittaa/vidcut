@@ -29,6 +29,7 @@
 - **Scroll:** in Resolve, the line distance of a Scroll does not follow the sum of the three heights.
   - Arial and Times New Roman have the same sum, and the distances differ by 3 pixels at the same size.
   - The distance follows ascent plus descent, with no gap, in these two fonts and in Calibri. Measure it at more sizes, then replace the rule with 4/3.
+  - vidcut keeps the exact size of a Scroll, because its rounding is not measured. Measure a Scroll at a size with a fraction.
 - **Variable fonts:** a stored title with only the family name draws Bahnschrift narrower in Resolve than in vidcut. Choose the font and its face in the Inspector, and measure which face Resolve takes.
 - **Family names:** vidcut draws `Sitka Text` in its sans-serif font, though the font is installed. Find why vidcut does not find that family.
 - **Gabriola:** the letters are 0.3 pixels left of Resolve, and the rows match. Find the reason.

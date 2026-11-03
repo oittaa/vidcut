@@ -2463,6 +2463,10 @@ impl Title {
         tracking * Self::TRACKING_SHARE * Self::TRACKING_FILE / Self::tracking_share(tracking)
     }
 
+    pub fn whole_size(text: f64, scale: f64) -> f64 {
+        (text / scale + Self::WIDTH_SLACK).round().max(1.0) * scale
+    }
+
     pub fn shifted_size(text: f64, scale: f64) -> f64 {
         let [part, whole] = Self::SHIFTED_SHARE;
         ((text / scale).round() * part / whole).floor().max(1.0) * scale
@@ -2488,7 +2492,7 @@ impl Title {
                 heights.iter().sum::<f64>() * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel
             }
             TitleKind::Text | TitleKind::LowerThird => {
-                let size = text / zoom / pixel;
+                let size = (text / zoom / pixel).round();
                 let line: f64 = heights
                     .iter()
                     .map(|part| (part * size * Self::PIXEL_STEPS).floor() / Self::PIXEL_STEPS)
