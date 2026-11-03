@@ -6,6 +6,7 @@ pub mod generators;
 pub mod keyframes;
 pub mod normalize;
 pub mod picture;
+mod source_overwrite;
 pub mod speed;
 pub mod subtitles;
 pub mod titles;
@@ -19,6 +20,7 @@ pub use dissolve::{
     to_cut,
 };
 use serde_json::json;
+pub use source_overwrite::{Placed, source_overwrite};
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
@@ -555,6 +557,16 @@ pub fn ripple_overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Resu
     Ok(ids)
 }
 
+fn busy(t: &Track, start: i64, end: i64) -> bool {
+    t.clips.iter().any(|c| c.start < end && start < c.end())
+}
+
+fn track_above(p: &mut Project, start: i64, end: i64) -> usize {
+    let video = p.tracks_of(TrackKind::Video);
+    let top = video.iter().rposition(|&i| busy(&p.tracks[i], start, end));
+    tracks::nth(p, TrackKind::Video, top.map_or(0, |k| k + 1))
+}
+
 pub fn place_on_top(p: &mut Project, src: &Source, playhead: i64) -> Result<(String, String)> {
     let (ids, track) = place_on_top_block(p, std::slice::from_ref(src), playhead)?;
     Ok((only(ids), track))
@@ -582,14 +594,11 @@ pub fn place_on_top_block(
     }
     let clips = make_clips(p, &srcs)?;
     let end = start + block_len(&clips);
-    let busy = |t: &Track| t.clips.iter().any(|c| c.start < end && start < c.end());
     let ti = if clips.iter().any(|c| c.video) {
-        let video = p.tracks_of(TrackKind::Video);
-        let top = video.iter().rposition(|&i| busy(&p.tracks[i]));
-        tracks::nth(p, TrackKind::Video, top.map_or(0, |k| k + 1))
+        track_above(p, start, end)
     } else {
         let audio = p.tracks_of(TrackKind::Audio);
-        let free = audio.iter().position(|&i| !busy(&p.tracks[i]));
+        let free = audio.iter().position(|&i| !busy(&p.tracks[i], start, end));
         tracks::nth(p, TrackKind::Audio, free.unwrap_or(audio.len()))
     };
     unlocked(p, ti)?;

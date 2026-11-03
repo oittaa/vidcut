@@ -67,6 +67,7 @@ pub fn describe_at(
         "edit.overwrite" => format!("Overwrite {} at {}", d.source(), d.time("at")),
         "edit.ripple_overwrite" => format!("Ripple Overwrite {}", d.source()),
         "edit.place_on_top" => format!("Place On Top {} at {}", d.source(), d.time("at")),
+        "edit.source_overwrite" => format!("Source Overwrite {}", d.source()),
         "edit.split" => d.split(),
         "edit.join" if d.list("clips").len() > 1 => format!("Join {}", d.clips("clips")),
         "edit.join" => format!("Join the clips at {}", d.time("at")),

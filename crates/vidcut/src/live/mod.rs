@@ -4153,6 +4153,10 @@ impl Live {
     }
 
     fn playhead_after_edit(&mut self, r: &Response) {
+        if let Some(at) = r.result["playhead"].as_i64() {
+            self.seek(TIMELINE, at, false);
+            return;
+        }
         let Some(open) = &self.project else { return };
         let p = open.project();
         let placed: Vec<&str> = match &r.result["clips"] {
@@ -4576,6 +4580,7 @@ fn is_edit_function(r: &Request) -> bool {
             | Request::EditInsert { .. }
             | Request::EditOverwrite { .. }
             | Request::EditRippleOverwrite { .. }
+            | Request::EditSourceOverwrite { .. }
             | Request::EditPaste { .. }
     )
 }
