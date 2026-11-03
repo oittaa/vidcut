@@ -253,6 +253,10 @@ impl Env for FakeEnv {
         })
     }
 
+    fn sound_match(&self, _a: &Media, _b: &Media) -> Result<Option<crate::analysis::SoundMatch>> {
+        Ok(None)
+    }
+
     fn proxy_dir(&self) -> PathBuf {
         PathBuf::from("/proxies")
     }

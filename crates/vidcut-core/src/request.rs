@@ -124,7 +124,9 @@ pub enum Request {
     #[serde(rename = "multicam.layout")]
     MulticamLayout {
         media: OneOrMany<String>,
-        /// `timecode`, or `in` or `out`, for items that all have that mark.
+        /// `timecode`, `in` or `out` for items that all have that mark, or
+        /// `sound`. By sound the answer also has `unmatched`, the media that
+        /// match no other file, and `pairs`, how well each two files match.
         #[serde(default)]
         sync: crate::model::AngleSync,
         /// Use each whole file. Its marks only line it up.
@@ -133,11 +135,13 @@ pub enum Request {
     },
     /// Store files as a synced group, a pool item that lines them up. Each
     /// file stays whole and its marks stay. A file is in one group at most.
-    /// Returns the group.
+    /// Returns the group. By sound, `unmatched` lists the files that match no
+    /// other file. Such a file stays in the group, at the group's start.
     #[serde(rename = "multicam.create")]
     MulticamCreate {
         media: OneOrMany<String>,
-        /// `timecode`, or `in` or `out`, for items that all have that mark.
+        /// `timecode`, `in` or `out` for items that all have that mark, or
+        /// `sound`.
         #[serde(default)]
         sync: crate::model::AngleSync,
         /// Default: `Media Sync` with the date and the time.

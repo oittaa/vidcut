@@ -1,7 +1,9 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats};
+use rustfft::FftPlanner;
+use rustfft::num_complex::Complex32;
+use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, SoundMatch};
 use vidcut_core::render::{AudioPiece, Ducking, RenderPlan};
 
 use crate::decode::decode_stream;
@@ -87,6 +89,100 @@ pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioL
         per_second,
         start: start.unwrap_or(0.0),
         peaks,
+    })
+}
+
+const MIN_COMMON_SECONDS: u32 = 5;
+const SMEAR: usize = 4;
+
+fn rises(levels: &AudioLevels) -> Vec<f32> {
+    let loud: Vec<f32> = levels
+        .peaks
+        .iter()
+        .map(|p| (1.0 + 1000.0 * p).ln())
+        .collect();
+    let mut out: Vec<f32> = loud.windows(2).map(|w| (w[1] - w[0]).max(0.0)).collect();
+    let mean = out.iter().sum::<f32>() / out.len().max(1) as f32;
+    out.iter_mut().for_each(|v| *v -= mean);
+    out
+}
+
+fn squares_so_far(values: &[f32]) -> Vec<f64> {
+    let mut sum = 0.0;
+    let mut out = Vec::with_capacity(values.len() + 1);
+    out.push(0.0);
+    for v in values {
+        sum += f64::from(*v) * f64::from(*v);
+        out.push(sum);
+    }
+    out
+}
+
+fn together(x: &[f32], y: &[f32]) -> Vec<Complex32> {
+    let n = (x.len() + y.len()).next_power_of_two();
+    let mut planner = FftPlanner::<f32>::new();
+    let (forward, inverse) = (planner.plan_fft_forward(n), planner.plan_fft_inverse(n));
+    let spectrum = |values: &[f32]| {
+        let mut buffer = vec![Complex32::new(0.0, 0.0); n];
+        for (b, v) in buffer.iter_mut().zip(values) {
+            b.re = *v;
+        }
+        forward.process(&mut buffer);
+        buffer
+    };
+    let (mut a, b) = (spectrum(x), spectrum(y));
+    for (p, q) in a.iter_mut().zip(&b) {
+        *p *= q.conj() / n as f32;
+    }
+    inverse.process(&mut a);
+    a
+}
+
+pub fn sound_match(a: &AudioLevels, b: &AudioLevels) -> Option<SoundMatch> {
+    if a.per_second != b.per_second || a.per_second == 0 {
+        return None;
+    }
+    let (x, y) = (rises(a), rises(b));
+    if x.is_empty() || y.is_empty() {
+        return None;
+    }
+    let (px, py) = (squares_so_far(&x), squares_so_far(&y));
+    let least = (MIN_COMMON_SECONDS * a.per_second) as usize;
+    let least = least.min(x.len()).min(y.len()).max(1);
+    let sums = together(&x, &y);
+    let n = sums.len() as i64;
+    let (xl, yl) = (x.len() as i64, y.len() as i64);
+    let scores: Vec<f32> = (-(yl - 1)..xl)
+        .map(|lag| {
+            let (x_from, y_from) = (lag.max(0), (-lag).max(0));
+            let common = (xl - x_from).min(yl - y_from);
+            let energy_x = px[(x_from + common) as usize] - px[x_from as usize];
+            let energy_y = py[(y_from + common) as usize] - py[y_from as usize];
+            let energy = (energy_x * energy_y).sqrt();
+            if (common as usize) < least || energy <= 0.0 {
+                return 0.0;
+            }
+            let sum = f64::from(sums[lag.rem_euclid(n) as usize].re);
+            (sum / energy * (common as f64).sqrt()) as f32
+        })
+        .collect();
+    let lean = |i: usize| -> f32 {
+        let from = i.saturating_sub(SMEAR);
+        let to = (i + SMEAR).min(scores.len() - 1);
+        (from..=to)
+            .map(|k| scores[k] * (SMEAR + 1 - k.abs_diff(i)) as f32)
+            .sum()
+    };
+    let at = (0..scores.len()).max_by(|p, q| lean(*p).total_cmp(&lean(*q)))?;
+    let near = at.saturating_sub(SMEAR)..=(at + SMEAR).min(scores.len() - 1);
+    let score = scores[near].iter().copied().fold(0.0, f32::max);
+    if score <= 0.0 {
+        return None;
+    }
+    let lag = at as i64 - (yl - 1);
+    Some(SoundMatch {
+        shift: lag as f64 / f64::from(a.per_second) + a.start - b.start,
+        score,
     })
 }
 

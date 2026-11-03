@@ -132,6 +132,8 @@ pub trait Env {
 
     fn audio_levels(&self, media: &Media, stream: u32) -> Result<Arc<AudioLevels>>;
 
+    fn sound_match(&self, a: &Media, b: &Media) -> Result<Option<crate::analysis::SoundMatch>>;
+
     fn picture_stats(&self, media: &Media) -> Result<Arc<PictureStats>>;
 
     fn loudness(&self, plan: &RenderPlan) -> Result<Loudness>;
@@ -2624,9 +2626,14 @@ fn mutate(
                 .clone()
                 .unwrap_or_else(|| format!("Media Sync {}", env.local_stamp()));
             let bin = bin.as_deref().unwrap_or_default();
-            let id = crate::multicam::create(p, &media.to_vec(), *sync, name, bin)?;
+            let (id, unmatched) =
+                crate::multicam::create(p, env, &media.to_vec(), *sync, name, bin)?;
             let g = p.group(&id).expect("just made");
-            crate::multicam::group_json(p, g)
+            let mut v = crate::multicam::group_json(p, g);
+            if !unmatched.is_empty() {
+                v["unmatched"] = json!(unmatched);
+            }
+            v
         }
         Request::MulticamRemove { group } => {
             crate::multicam::remove(p, group)?;
@@ -6675,6 +6682,7 @@ pub fn query(
         } => {
             json!(crate::multicam::layout(
                 p,
+                env,
                 &media.to_vec(),
                 *sync,
                 *full_extents

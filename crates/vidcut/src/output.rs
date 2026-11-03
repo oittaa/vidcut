@@ -78,6 +78,10 @@ pub fn print(method: &str, r: &Response, json: bool) {
         if let Some(bin) = r.result.get("bin").and_then(Value::as_str) {
             println!("  bin      {bin}");
         }
+        if let Some(media) = r.result.get("unmatched").and_then(Value::as_array) {
+            let ids: Vec<&str> = media.iter().filter_map(Value::as_str).collect();
+            println!("  no match {}", ids.join(" "));
+        }
         for x in r.result["skipped"].as_array().into_iter().flatten() {
             let field = |k: &str| x[k].as_str().unwrap_or_default();
             println!("  skipped  {}: {}", field("path"), field("why"));

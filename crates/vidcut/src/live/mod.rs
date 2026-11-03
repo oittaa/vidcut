@@ -3230,6 +3230,35 @@ impl Live {
                 };
                 Step::Encode(Box::new(hear), Box::new(envelope), title.into(), kind)
             }
+            Request::MulticamCreate {
+                sync: vidcut_core::model::AngleSync::Sound,
+                ..
+            }
+            | Request::MulticamLayout {
+                sync: vidcut_core::model::AngleSync::Sound,
+                ..
+            } => {
+                let Some(open) = &self.project else {
+                    return Step::Now(Err(no_project()));
+                };
+                let (project, path) = (open.project().clone(), open.store.path().to_path_buf());
+                let copy = envelope.clone();
+                let hear = move || {
+                    let env = AvEnv::for_project(&path);
+                    vidcut_core::Editor::new(project, Default::default())
+                        .apply(copy, &env, None)
+                        .map(drop)
+                };
+                match envelope.request {
+                    Request::MulticamCreate { .. } => Step::Encode(
+                        Box::new(hear),
+                        Box::new(envelope),
+                        "Sync by Sound".into(),
+                        "sync",
+                    ),
+                    _ => Step::Measure(Box::new(hear), Box::new(envelope)),
+                }
+            }
             Request::TimelineImport {
                 path: Some(path),
                 unpack,

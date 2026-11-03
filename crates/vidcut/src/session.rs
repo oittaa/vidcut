@@ -358,6 +358,12 @@ pub fn run_with(
                 Request::SubtitlesTimeWords { .. } => {
                     work_first(&store, &envelope, &env, hooks, "vidcut-transcribe")?;
                 }
+                Request::MulticamCreate {
+                    sync: vidcut_core::model::AngleSync::Sound,
+                    ..
+                } => {
+                    work_first(&store, &envelope, &env, hooks, "vidcut-sound-sync")?;
+                }
                 _ => {}
             }
             if envelope.request.is_mutation() {

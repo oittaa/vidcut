@@ -3,6 +3,7 @@ use std::ops::Range;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::editor::Env;
 use crate::error::{Error, Result};
 use crate::model::{AngleSync, GroupAngle, Marks, Media, Project, SyncGroup};
 use crate::ops::has_bin;
@@ -16,13 +17,28 @@ pub struct Angle {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SoundPair {
+    pub a: String,
+    pub b: String,
+    pub shift: f64,
+    pub score: f32,
+    pub matched: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Layout {
     pub start_timecode: String,
     #[serde(skip)]
     pub start: i64,
     pub frames: i64,
     pub angles: Vec<Angle>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unmatched: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pairs: Vec<SoundPair>,
 }
+
+pub const SOUND_MATCH_SCORE: f32 = 25.0;
 
 fn has_picture(m: &Media) -> Result<()> {
     match &m.info.video {
@@ -51,7 +67,7 @@ fn used(p: &Project, m: &Media, whole: bool) -> Result<Range<i64>> {
 
 fn record_start(p: &Project, m: &Media, sync: AngleSync, part: &Range<i64>) -> Result<i64> {
     let mark = match sync {
-        AngleSync::Timecode => return Ok(origin(p, m) + part.start),
+        AngleSync::Timecode | AngleSync::Sound => return Ok(origin(p, m) + part.start),
         AngleSync::In => m.marks.mark_in,
         AngleSync::Out => m.marks.mark_out,
     };
@@ -65,22 +81,38 @@ fn start_timecode(p: &Project, start: i64) -> String {
     format_timecode(start, fps, 0, drop)
 }
 
-pub fn layout(p: &Project, ids: &[String], sync: AngleSync, full_extents: bool) -> Result<Layout> {
+pub fn layout(
+    p: &Project,
+    env: &dyn Env,
+    ids: &[String],
+    sync: AngleSync,
+    full_extents: bool,
+) -> Result<Layout> {
     if ids.is_empty() {
         return Err(Error::usage("name the media of the angles"));
     }
-    let mut placed: Vec<(&str, i64, Range<i64>)> = Vec::with_capacity(ids.len());
+    let mut placed: Vec<(&Media, i64, Range<i64>)> = Vec::with_capacity(ids.len());
     for id in ids {
         let m = p
             .media(id)
             .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
-        if placed.iter().any(|(seen, ..)| *seen == m.id) {
+        if placed.iter().any(|(seen, ..)| seen.id == m.id) {
             return Err(Error::invalid(format!("{id} is named twice")));
         }
         has_picture(m)?;
+        if sync == AngleSync::Sound && !full_extents && !m.marks.is_empty() {
+            return Err(Error::invalid(format!(
+                "{} has marks: sync by sound needs whole files",
+                m.name
+            )));
+        }
         let part = used(p, m, full_extents)?;
-        placed.push((m.id.as_str(), record_start(p, m, sync, &part)?, part));
+        placed.push((m, record_start(p, m, sync, &part)?, part));
     }
+    let (unmatched, pairs) = match sync {
+        AngleSync::Sound => by_sound(p, env, &mut placed)?,
+        _ => Default::default(),
+    };
     let first = placed.iter().map(|(_, at, _)| *at).min().unwrap_or(0);
     let last = placed
         .iter()
@@ -90,7 +122,9 @@ pub fn layout(p: &Project, ids: &[String], sync: AngleSync, full_extents: bool) 
     let (fps, drop) = (p.settings.fps, p.settings.counts_drop_frame());
     let start = match sync {
         AngleSync::Timecode => first,
-        AngleSync::In | AngleSync::Out => timecode_frames(1, 0, 0, 0, fps, drop).unwrap_or(0),
+        AngleSync::In | AngleSync::Out | AngleSync::Sound => {
+            timecode_frames(1, 0, 0, 0, fps, drop).unwrap_or(0)
+        }
     };
     Ok(Layout {
         start_timecode: start_timecode(p, start),
@@ -98,8 +132,8 @@ pub fn layout(p: &Project, ids: &[String], sync: AngleSync, full_extents: bool) 
         frames: last - first,
         angles: placed
             .into_iter()
-            .map(|(id, at, part)| Angle {
-                media: id.to_string(),
+            .map(|(m, at, part)| Angle {
+                media: m.id.clone(),
                 at: at - first,
                 source: Marks {
                     mark_in: Some(part.start),
@@ -107,16 +141,85 @@ pub fn layout(p: &Project, ids: &[String], sync: AngleSync, full_extents: bool) 
                 },
             })
             .collect(),
+        unmatched,
+        pairs,
     })
+}
+
+fn by_sound(
+    p: &Project,
+    env: &dyn Env,
+    placed: &mut [(&Media, i64, Range<i64>)],
+) -> Result<(Vec<String>, Vec<SoundPair>)> {
+    let n = placed.len();
+    let mut found = Vec::new();
+    for i in 0..n {
+        for j in i + 1..n {
+            if let Some(s) = env.sound_match(placed[i].0, placed[j].0)? {
+                found.push((i, j, s));
+            }
+        }
+    }
+    found.sort_by(|a, b| b.2.score.total_cmp(&a.2.score));
+    let mut party: Vec<usize> = (0..n).collect();
+    let mut secs = vec![0.0f64; n];
+    for (i, j, s) in found.iter().filter(|x| x.2.score >= SOUND_MATCH_SCORE) {
+        let (keep, join) = (party[*i], party[*j]);
+        if keep == join {
+            continue;
+        }
+        let by = secs[*i] + s.shift - secs[*j];
+        for k in 0..n {
+            if party[k] == join {
+                secs[k] += by;
+                party[k] = keep;
+            }
+        }
+    }
+    let fps = p.settings.fps.as_f64();
+    let mut base = 0;
+    let mut unmatched = Vec::new();
+    for k in 0..n {
+        if party[k] == k && party.iter().filter(|o| **o == k).count() == 1 {
+            placed[k].1 = 0;
+            unmatched.push(placed[k].0.id.clone());
+        }
+        if !party[..k].contains(&party[k]) && party.iter().filter(|o| **o == party[k]).count() > 1 {
+            let who = party[k];
+            let least = (0..n)
+                .filter(|o| party[*o] == who)
+                .map(|o| secs[o])
+                .fold(f64::INFINITY, f64::min);
+            let mut end = base;
+            for o in (0..n).filter(|o| party[*o] == who) {
+                let at = base + ((secs[o] - least) * fps + 1e-6).round() as i64;
+                placed[o].1 = at;
+                end = end.max(at + placed[o].2.end - placed[o].2.start);
+            }
+            base = end + 1;
+        }
+    }
+    let pairs = found
+        .iter()
+        .map(|(i, j, s)| SoundPair {
+            a: placed[*i].0.id.clone(),
+            b: placed[*j].0.id.clone(),
+            shift: s.shift,
+            score: s.score,
+            matched: s.score >= SOUND_MATCH_SCORE,
+        })
+        .collect();
+    Ok((unmatched, pairs))
 }
 
 pub fn create(
     p: &mut Project,
+    env: &dyn Env,
     ids: &[String],
     sync: AngleSync,
     name: String,
     bin: &str,
-) -> Result<String> {
+) -> Result<(String, Vec<String>)> {
     if ids.len() < 2 {
         return Err(Error::invalid("a synced group needs two files or more"));
     }
@@ -131,7 +234,7 @@ pub fn create(
             g.name
         )));
     }
-    let lined_up = layout(p, ids, sync, true)?;
+    let lined_up = layout(p, env, ids, sync, true)?;
     let id = p.new_group_id();
     p.groups.push(SyncGroup {
         id: id.clone(),
@@ -147,7 +250,7 @@ pub fn create(
             })
             .collect(),
     });
-    Ok(id)
+    Ok((id, lined_up.unmatched))
 }
 
 pub fn group_mut<'a>(p: &'a mut Project, id: &str) -> Result<&'a mut SyncGroup> {
@@ -198,6 +301,8 @@ fn layout_of(p: &Project, g: &SyncGroup) -> Layout {
             .max()
             .unwrap_or(0),
         angles,
+        unmatched: Vec::new(),
+        pairs: Vec::new(),
     }
 }
 

@@ -229,7 +229,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Multicam layout** (p. 1037):
   - `multicam.layout` tells where the angles of a multicam clip lie. It changes nothing, and the project does not store the result.
   - The angles are in the order of the request.
-  - `sync` is `timecode`, `in` or `out`.
+  - `sync` is `timecode`, `in`, `out` or `sound`.
   - By `timecode`, each file starts at its start timecode. A file with no timecode starts at 00:00:00:00.
     - The length is the union of the angles, with any gaps. A gap of hours is not an error.
     - The start timecode of the whole is the earliest angle.
@@ -241,6 +241,19 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - an item that the request names twice
     - without `full_extents`, an item with one mark only
     - by `in` or `out`, an item without that mark
+    - by `sound` without `full_extents`, an item with marks
+- **Sync by sound** (pp. 706–707):
+  - `sync` `sound` lines up files by their sound. `multicam.layout` and `multicam.create` take it.
+  - A shift is in whole frames. Half a frame rounds up.
+  - One shift holds for the whole file. vidcut does not follow drift. The shift falls between the error at the start and the error at the end.
+  - The start timecode of the whole is 01:00:00:00.
+  - A file that matches no other file stays at the start of the whole. `unmatched` names it. A file with no sound is such a file.
+    - Thus with two files and no match, both are at the start and `unmatched` names both.
+  - Two sets of files that do not match each other do not overlap. The later set starts one frame after the earlier one ends.
+  - vidcut compares the first sound stream of each file, with all its channels. No measurement shows which channel the Cut page uses.
+  - The angles stay in the order of the request. The measurements show another order, but no rule for it.
+  - `multicam.layout` also gives `pairs`: for each two files the shift, the score and whether they match.
+  - While the GUI runs, `multicam.create` by sound is a job.
 - **Synced group** (p. 708):
   - `multicam.create` stores files as a synced group, a pool item with the name "Media Sync", the date and the time. `name` gives another name.
   - Each file stays whole, as in `multicam.layout` with `full_extents`. Its marks and its start timecode do not change.

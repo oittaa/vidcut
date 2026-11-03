@@ -13,6 +13,12 @@ pub struct AudioLevels {
     pub peaks: Vec<f32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SoundMatch {
+    pub shift: f64,
+    pub score: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct VoiceActivity {
     pub rate: u32,
