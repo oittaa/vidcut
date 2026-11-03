@@ -2769,11 +2769,10 @@ fn settings_form(
                         v.height = Some(size.1);
                     }
                     if let (Some(w), Some(h)) = (&mut v.width, &mut v.height) {
-                        ui.add(egui::DragValue::new(w).range(16..=8192).speed(2));
+                        let (low, high) = vidcut_core::model::TIMELINE_SIDE;
+                        ui.add(egui::DragValue::new(w).range(low..=high));
                         ui.label("×");
-                        ui.add(egui::DragValue::new(h).range(16..=8192).speed(2));
-                        *w &= !1;
-                        *h &= !1;
+                        ui.add(egui::DragValue::new(h).range(low..=high));
                     }
                 });
                 ui.end_row();

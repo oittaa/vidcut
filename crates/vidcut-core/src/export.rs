@@ -286,9 +286,9 @@ pub struct VideoSettings {
     /// (not H.264), else 8 (decision D44).
     #[serde(default)]
     pub bit_depth: Option<u8>,
-    /// Output frame size; the picture is fit inside and padded. Default: the project's.
-    /// H.264 and HEVC round an odd side of the project's size up, and scale
-    /// the whole picture to fit.
+    /// Output frame size, each side from 256 to 32768; the picture is fit
+    /// inside and padded. Default: the project's. H.264 and HEVC round an odd
+    /// side up, and scale the whole picture to fit.
     #[serde(default)]
     pub width: Option<u32>,
     #[serde(default)]
@@ -383,25 +383,25 @@ impl VideoSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Rounded {
-    pub timeline: (u32, u32),
+    pub drawn: (u32, u32),
     pub written: (u32, u32),
     pub message: String,
 }
 
 impl Rounded {
-    fn for_codec(timeline: (u32, u32), written: (u32, u32), codec: VideoCodec) -> Self {
-        let (a, b) = (size_words(timeline), size_words(written));
+    fn for_codec(drawn: (u32, u32), written: (u32, u32), codec: VideoCodec) -> Self {
+        let (a, b) = (size_words(drawn), size_words(written));
         Self {
-            timeline,
+            drawn,
             written,
             message: format!("{a} rounded up to {b} for {}", codec.title()),
         }
     }
 
-    pub fn by_encoder(timeline: (u32, u32), written: (u32, u32), encoder: &str) -> Self {
-        let (a, b) = (size_words(timeline), size_words(written));
+    pub fn by_encoder(drawn: (u32, u32), written: (u32, u32), encoder: &str) -> Self {
+        let (a, b) = (size_words(drawn), size_words(written));
         Self {
-            timeline,
+            drawn,
             written,
             message: format!("{a} written as {b} by {encoder}"),
         }
@@ -890,12 +890,15 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         if v.width.is_some() != v.height.is_some() {
             return Err(Error::usage("set both video.width and video.height"));
         }
-        if v.width.is_some_and(|w| w < 16 || w % 2 != 0)
-            || v.height.is_some_and(|h| h < 16 || h % 2 != 0)
+        let (low, high) = crate::model::TIMELINE_SIDE;
+        if [v.width, v.height]
+            .into_iter()
+            .flatten()
+            .any(|side| !(low..=high).contains(&side))
         {
-            return Err(Error::usage(
-                "output width and height must be even and at least 16",
-            ));
+            return Err(Error::usage(format!(
+                "output width and height are {low} to {high}"
+            )));
         }
     } else if !s.container.audio_only() && !matches!(s.container, C::Mkv | C::Mov | C::Mp4) {
         return Err(Error::usage(format!(

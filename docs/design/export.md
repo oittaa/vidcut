@@ -248,8 +248,8 @@ The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-7
 
 - `VideoSettings::drawn_size` gives the size of the draw: `video.width` and `video.height`, or else the size of the timeline.
 - `VideoSettings::written_size` gives the size that the encoder gets. H.264 and HEVC round an odd side up. The other codecs keep the side.
-- `export::validate` refuses an odd `video.width` or `video.height`. Thus only a timeline can have an odd side.
-- With a rounded side, the draw of the timeline stays at the size of the timeline (`VideoFrames::written_at`, `Screen::write_at`).
+- `export::validate` refuses a `video.width` or `video.height` outside `TIMELINE_SIDE`.
+- With a rounded side, the draw stays at `VideoSettings::drawn_size` (`VideoFrames::written_at`, `Screen::write_at`).
 - `Screen::encoded` then draws that `Wide` as one picture into a second `Wide` at the written size (`scale_whole`). `fs_encode` reads the second `Wide`.
   - Why: the fit of a layer is at the size of the timeline ([spec §13](../cut-page-spec.md#the-fit-to-the-timeline)). A draw at the written size gives another factor and other bars.
   - `Level::centered` gives one factor for both axes and centers the picture. It takes the smaller factor, so that the whole picture fits.

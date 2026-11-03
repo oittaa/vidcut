@@ -147,7 +147,7 @@ The schema describes the parameters, not the results. This list gives the result
     - `gpu_frames`: the frames made on the GPU.
     - `copies`: the GPU frames copied `down` and `up`.
     - `through_memory`: why the frames went to a GPU encoder through memory, when they did.
-    - `rounded`: the size of the timeline, the size of the file and a `message`, when the two sizes are different.
+    - `rounded`: the size of the draw, the size of the file and a `message`, when the two sizes are different.
     - `color` and `metadata`: what was chosen, and `why`.
     - `tried`: the video encoders that did not open, and why.
     - `sources`: each file, and how it was decoded.
