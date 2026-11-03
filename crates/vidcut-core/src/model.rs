@@ -1991,7 +1991,7 @@ pub struct Title {
     /// (usual: 10%, 50% or 90% across and 78% down: `[0.1, 0.78]`,
     /// `[0.5, 0.78]` and `[0.9, 0.78]`). A scroll's `x` is
     /// where its lines' left edge, middle or right edge goes by its `align`
-    /// (usual: 1%, 50% or 99% across); its `y` is not used. With
+    /// (usual: 1%, 50% or 99% across); its `y` moves only a `shape`. With
     /// `position_keys`, the place at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
@@ -2079,6 +2079,7 @@ pub struct TitleLine {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TitlePart {
     Whole,
+    Shape,
     Backing,
     Upper,
     Lower,
@@ -2214,10 +2215,40 @@ pub struct TitleStyle {
     /// A box behind the whole block of text. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<SubtitleBackground>,
+    /// The size and place of the `background`, which it needs for its color
+    /// and opacity. Usual: a box that fits the text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<TitleShape>,
     /// A soft copy of the text behind it, over its background. An offset of
     /// 0 draws nothing. Usual: none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<TitleShadow>,
+}
+
+/// A title's background at its own size and place. It keeps them for any
+/// text and any zoom. It moves and turns with the title's `position` and
+/// `rotation`, a lower third's with its lower line.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TitleShape {
+    /// Its width and height, as fractions of the picture's width and height,
+    /// from 0 to 2. A side of 0 draws no box.
+    pub size: [f64; 2],
+    /// Its middle from the title's `position`, as fractions of the picture,
+    /// `[x, y]` to the right and down, from -4 to 4. Usual: `[0, 0]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// The radius of its corners, as a fraction of the picture's height, from
+    /// 0 to 1. No radius passes half of a side. Usual: 1/27.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corner: Option<f64>,
+    /// The color of its outline: `#rrggbb`, `#rgb` or a name. It is not
+    /// changed by the background's opacity. Usual: black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline_color: Option<String>,
+    /// The width of its outline in pixels of the timeline, from 0 to 30. Half
+    /// of it is outside the box. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline_width: Option<f64>,
 }
 
 /// A title's drop shadow. A field left out keeps the usual look.
@@ -2287,6 +2318,10 @@ impl Title {
     pub const TRACKING_PIXEL: f64 = 0.75;
     pub const SHIFTED_SIZE: f64 = 2.0 / 3.0;
     pub const ASCENT_SLACK: f64 = 0.25;
+    pub const BOX_MOST: f64 = 2.0;
+    pub const BOX_WIDTH: f64 = 0.9;
+    pub const BOX_CORNER: f64 = 1.0 / 27.0;
+    pub const BOX_MOST_OUTLINE: f64 = 30.0;
     pub const LINE: f64 = 1.31;
     pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;
@@ -2410,6 +2445,31 @@ impl Title {
         backing_of(self.style.background.as_ref())
     }
 
+    pub fn shape(&self) -> Option<&TitleShape> {
+        self.backing().and(self.style.shape.as_ref())
+    }
+
+    pub fn shape_past_edge(&self, (width, height): (u32, u32)) -> bool {
+        let Some(s) = self.shape() else {
+            return false;
+        };
+        let [px, py] = self.block(TitlePart::Shape).pivot;
+        let [ox, oy] = s.center.unwrap_or([0.0, 0.0]);
+        let ring = self.shape_outline().1 / 2.0;
+        let across = s.size[0] / 2.0 + ring / f64::from(width.max(1));
+        let down = s.size[1] / 2.0 + ring / f64::from(height.max(1));
+        let (x, y) = (px + ox, py + oy);
+        x - across < 0.0 || x + across > 1.0 || y - down < 0.0 || y + down > 1.0
+    }
+
+    pub fn shape_outline(&self) -> ([u8; 3], f64) {
+        let s = self.style.shape.as_ref();
+        (
+            paint(s.and_then(|s| s.outline_color.as_deref()), [0, 0, 0]),
+            s.and_then(|s| s.outline_width).unwrap_or(0.0),
+        )
+    }
+
     pub fn wrap_width(&self, picture_width: f64, picture_height: f64) -> f64 {
         (picture_width * Self::SAFE).max(self.text_fraction() * picture_height)
     }
@@ -2501,23 +2561,35 @@ impl Title {
         let place = self.place();
         TitleBlock {
             part,
-            pivot: place,
+            pivot: if part == TitlePart::Shape && self.kind == TitleKind::Scroll {
+                [place[0] + 0.5 - self.align().fraction(), place[1]]
+            } else {
+                place
+            },
             edge: if self.kind == TitleKind::Scroll {
                 1.0
             } else {
                 place[1]
             },
-            zoom: self.scale(),
+            zoom: if part == TitlePart::Shape {
+                1.0
+            } else {
+                self.scale()
+            },
             turn: self.turn(),
         }
     }
 
     pub fn blocks(&self) -> Vec<TitleBlock> {
-        if self.kind != TitleKind::LowerThird {
-            return vec![self.block(TitlePart::Whole)];
-        }
         let mut out = Vec::new();
-        if self.backing().is_some() {
+        if self.shape().is_some() {
+            out.push(self.block(TitlePart::Shape));
+        }
+        if self.kind != TitleKind::LowerThird {
+            out.push(self.block(TitlePart::Whole));
+            return out;
+        }
+        if self.backing().is_some() && self.shape().is_none() {
             out.push(self.block(TitlePart::Backing));
         }
         out.push(self.block(TitlePart::Lower));
@@ -2529,7 +2601,7 @@ impl Title {
         let lines = crate::rich::lines(&self.text);
         let none = crate::rich::Look::default();
         match part {
-            TitlePart::Whole | TitlePart::Backing => self.sized_text(),
+            TitlePart::Whole | TitlePart::Backing | TitlePart::Shape => self.sized_text(),
             TitlePart::Lower => lines
                 .last()
                 .map_or(String::new(), |l| crate::rich::write(l, &none))
@@ -4443,6 +4515,7 @@ impl Hash for TitleStyle {
             color,
             outline,
             background,
+            shape,
             shadow,
         } = self;
         (
@@ -4454,6 +4527,7 @@ impl Hash for TitleStyle {
             color,
             outline,
             background,
+            shape,
             shadow,
         )
             .hash(h);
@@ -4461,6 +4535,28 @@ impl Hash for TitleStyle {
 }
 
 impl Eq for TitleStyle {}
+
+impl Hash for TitleShape {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        let TitleShape {
+            size,
+            center,
+            corner,
+            outline_color,
+            outline_width,
+        } = self;
+        (
+            pair_bits(Some(*size)),
+            pair_bits(*center),
+            floats_bits(*corner),
+            outline_color,
+            floats_bits(*outline_width),
+        )
+            .hash(h);
+    }
+}
+
+impl Eq for TitleShape {}
 
 impl Hash for TitleShadow {
     fn hash<H: Hasher>(&self, h: &mut H) {

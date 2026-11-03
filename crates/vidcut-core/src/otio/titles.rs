@@ -6,7 +6,8 @@ use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
     Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, TextStroke, Title,
-    TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine, TitleShadow, TitleStyle, size_fits,
+    TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine, TitleShadow, TitleShape, TitleStyle,
+    size_fits,
 };
 use crate::rich::{self, Look, Shift, Span};
 
@@ -188,7 +189,7 @@ fn kind_named(kind: &str) -> Option<(TitleKind, Option<TitleAlign>)> {
 }
 
 fn scrolling(t: &Title, family: &str, points: f64, color: &str, origin: i64) -> Vec<Value> {
-    let [x, _] = t.place();
+    let [x, y] = t.place();
     let (shift, alignment) = match t.align() {
         TitleAlign::Left => (0.5, 0),
         TitleAlign::Middle => (0.0, 1),
@@ -209,11 +210,11 @@ fn scrolling(t: &Title, family: &str, points: f64, color: &str, origin: i64) -> 
                 with_frames(
                     keyed(
                         "position",
-                        json!([rounded(x + shift), 0.5]),
+                        json!([rounded(x + shift), rounded(1.0 - y)]),
                         json!([0.51, 0.5]),
                         "POINTF",
                     ),
-                    point_frames(t, origin, |[x, _]| [x + shift, 0.5]),
+                    point_frames(t, origin, |[x, y]| [x + shift, 1.0 - y]),
                 ),
             ],
         ),
@@ -608,7 +609,21 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
     if t.kind != TitleKind::Scroll {
         groups.push(stroked);
     }
-    let (back_color, opacity, extent, center, corner) = match t.backing() {
+    let (back_color, opacity, extent, center, corner, ring, ring_width) = match t.backing() {
+        Some((rgb, a)) if t.shape().is_some() => {
+            let s = t.shape().expect("just checked");
+            let [across, down] = s.center.unwrap_or([0.0, 0.0]);
+            let (ring, width) = t.shape_outline();
+            (
+                hex(rgb),
+                (a * 100.0).round() as i64,
+                s.size,
+                [across, -down],
+                s.corner.unwrap_or(Title::BOX_CORNER),
+                hex(ring),
+                width.round() as i64,
+            )
+        }
         Some((rgb, a)) => {
             let [left, top, w, h] = drawn.backing.unwrap_or_else(|| {
                 let rows = lines.len().max(1) as f64;
@@ -637,9 +652,19 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                     ]
                 }),
                 0.0,
+                "#000000".to_string(),
+                0,
             )
         }
-        None => ("#000000".into(), 50, [0.9, 0.0], [0.0, 0.0], 1.0 / 27.0),
+        None => (
+            "#000000".into(),
+            50,
+            [0.9, 0.0],
+            [0.0, 0.0],
+            Title::BOX_CORNER,
+            "#000000".to_string(),
+            0,
+        ),
     };
     groups.push(group(
         "Background",
@@ -654,12 +679,12 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
             ),
             plain(
                 "backgroundOutlineColor",
-                json!("#000000"),
+                json!(ring),
                 json!("#000000"),
                 "Color",
             ),
             ranged(
-                keyed("backgroundOutlineWidth", json!(0), json!(0), "Int"),
+                keyed("backgroundOutlineWidth", json!(ring_width), json!(0), "Int"),
                 0.0,
                 30.0,
             ),
@@ -677,7 +702,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                 keyed(
                     "backgroundCornerRadius",
                     json!(corner),
-                    json!(1.0 / 27.0),
+                    json!(Title::BOX_CORNER),
                     "Double",
                 ),
                 0.0,
@@ -973,9 +998,39 @@ fn read_html(blob: &str) -> Read {
     read
 }
 
+fn box_size(g: &Value) -> Option<[f64; 2]> {
+    let side = |name| value(g, name).as_f64().unwrap_or(0.0);
+    let size = [side("backgroundWidth"), side("backgroundHeight")];
+    (size[0] > 0.0 && size[1] > 0.0).then(|| size.map(|v| rounded(v.min(Title::BOX_MOST))))
+}
+
+fn shape_of(all: &[&Value]) -> Option<TitleShape> {
+    let groups = named(all, "Background");
+    let g = groups.first()?;
+    let [across, up] = point(value(g, "backgroundCenter")).unwrap_or([0.0, 0.0]);
+    let width = value(g, "backgroundOutlineWidth")
+        .as_f64()
+        .unwrap_or(0.0)
+        .clamp(0.0, Title::BOX_MOST_OUTLINE);
+    Some(TitleShape {
+        size: box_size(g)?,
+        center: (across != 0.0 || up != 0.0)
+            .then(|| [across, -up].map(|v| rounded(v.clamp(-Picture::REACH, Picture::REACH)))),
+        corner: value(g, "backgroundCornerRadius")
+            .as_f64()
+            .map(|c| c.clamp(0.0, 1.0)),
+        outline_color: (width > 0.0)
+            .then(|| value(g, "backgroundOutlineColor").as_str())
+            .flatten()
+            .filter(|c| crate::ops::subtitles::checked_color(Some(c), "outline").is_ok())
+            .map(str::to_string),
+        outline_width: (width > 0.0).then_some(width),
+    })
+}
+
 fn backing_of(all: &[&Value]) -> Option<SubtitleBackground> {
     named(all, "Background").first().and_then(|g| {
-        (value(g, "backgroundHeight").as_f64().unwrap_or(0.0) > 0.0).then(|| SubtitleBackground {
+        box_size(g).map(|_| SubtitleBackground {
             color: value(g, "backgroundColor")
                 .as_str()
                 .unwrap_or("#000000")
@@ -1019,7 +1074,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         Some(2) => TitleAlign::Right,
         _ => TitleAlign::Left,
     };
-    let middle = point(value(text_group, "position")).map_or(0.51, |p| p[0]);
+    let [middle, up] = point(value(text_group, "position")).unwrap_or([0.51, 0.5]);
     let x = match align {
         TitleAlign::Left => middle - 0.5,
         TitleAlign::Middle => middle,
@@ -1056,9 +1111,10 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
                 outside: None,
             }),
             background: backing_of(all),
+            shape: shape_of(all),
             shadow: shadow_of(all),
         },
-        position: Some([across(x), 0.5]),
+        position: Some([across(x), down(1.0 - up)]),
         position_keys: Vec::new(),
         position_y: Vec::new(),
         position_handles: Vec::new(),
@@ -1108,8 +1164,8 @@ fn read_scroll_keys(t: &mut Title, all: &[&Value], origin: i64) {
         TitleAlign::Middle => 0.0,
         TitleAlign::Right => -0.5,
     };
-    (t.position_keys, t.position_y) = point_keys(parameter(text, "position"), origin, |[x, _]| {
-        [x - shift, 0.5]
+    (t.position_keys, t.position_y) = point_keys(parameter(text, "position"), origin, |[x, y]| {
+        [x - shift, 1.0 - y]
     });
 }
 
@@ -1354,6 +1410,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             color,
             outline,
             background,
+            shape: shape_of(&all),
             shadow,
         },
         position: None,

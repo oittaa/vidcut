@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{Picture, Title, TitleKind, TitleLine};
+use vidcut_core::model::{Picture, Title, TitleKind, TitleLine, TitlePart};
 use vidcut_core::render::ShownTitle;
 
 use super::frame::{TitleOver, TitlePicture};
@@ -15,8 +15,8 @@ type Preview = Option<(String, Title)>;
 
 type Key = (Title, (u32, u32), bool);
 
-fn steady(t: &Title) -> Title {
-    Title {
+fn steady(t: &Title, size: (u32, u32)) -> Title {
+    let bare = Title {
         position: None,
         rotation: None,
         opacity: None,
@@ -26,6 +26,11 @@ fn steady(t: &Title) -> Title {
             ..u
         }),
         ..t.clone()
+    };
+    let cut = t.shape_past_edge(size) || bare.shape_past_edge(size);
+    Title {
+        position: t.position.filter(|_| cut),
+        ..bare
     }
 }
 
@@ -41,7 +46,7 @@ fn key_of(t: &Title, s: &ShownTitle, size: (u32, u32)) -> Key {
         };
         return (whole, size, true);
     }
-    (steady(t), size, false)
+    (steady(t, size), size, false)
 }
 
 fn wanted(preview: &Preview, s: &ShownTitle) -> Title {
@@ -125,7 +130,7 @@ impl Titles {
                 };
                 let [x0, y0] = from.pivot;
                 let [x, y] = now.pivot;
-                let dy = if to.moves() {
+                let dy = if to.moves() && now.part != TitlePart::Shape {
                     shown.run.top(0, h, f64::from(p.height)).round() as i32 - p.top
                 } else {
                     ((y - y0) * h).round() as i32

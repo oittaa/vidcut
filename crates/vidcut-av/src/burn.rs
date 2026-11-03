@@ -530,6 +530,18 @@ fn covered((x0, y0, x1, y1): (i32, i32, i32, i32), x: i32, y: i32, corner: f32) 
     (0.5 - past).clamp(0.0, 1.0)
 }
 
+fn rounded_past(x: f32, y: f32, half: [f32; 2], corner: f32) -> f32 {
+    let r = [corner.min(half[0]), corner.min(half[1])];
+    let (ax, ay) = (x.abs(), y.abs());
+    let (qx, qy) = (ax - half[0] + r[0], ay - half[1] + r[1]);
+    if qx <= 0.0 || qy <= 0.0 || r[0] <= 0.0 || r[1] <= 0.0 {
+        return (ax - half[0]).max(ay - half[1]);
+    }
+    let k0 = (qx / r[0]).hypot(qy / r[1]);
+    let k1 = (qx / (r[0] * r[0])).hypot(qy / (r[1] * r[1]));
+    k0 * (k0 - 1.0) / k1
+}
+
 fn font_line(system: &mut FontSystem, attrs: &Attrs<'_>) -> Option<f32> {
     let id = system.db().query(&fontdb::Query {
         families: &[attrs.family],
@@ -1104,9 +1116,13 @@ pub fn draw(cues: &[(&Shown, Place)], width: u32, height: u32, style: &SubtitleS
 
 pub fn title(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Sprite> {
     let blocks = title_blocks(t, width, height, timeline);
-    merged(blocks.into_iter().flatten().collect())
+    let parts = t.blocks();
+    let kept = blocks
         .into_iter()
-        .collect()
+        .zip(parts)
+        .filter(|(_, b)| !(t.moves() && b.part == TitlePart::Shape))
+        .filter_map(|(s, _)| s);
+    merged(kept.collect()).into_iter().collect()
 }
 
 pub fn title_blocks(t: &Title, width: u32, height: u32, timeline: u32) -> Vec<Option<Sprite>> {
@@ -1142,6 +1158,71 @@ fn merged(mut sprites: Vec<Sprite>) -> Option<Sprite> {
     })
 }
 
+fn shaped_box(t: &Title, block: &TitleBlock, (w, h): (f64, f64), pixel: f64) -> Option<Sprite> {
+    let shape = t.shape()?;
+    let (fill, opacity) = t.backing()?;
+    let (ring, ring_width) = t.shape_outline();
+    let half = [shape.size[0] * w / 2.0, shape.size[1] * h / 2.0].map(|v| v as f32);
+    if half[0] <= 0.0 || half[1] <= 0.0 {
+        return None;
+    }
+    let [ox, oy] = shape.center.unwrap_or([0.0, 0.0]);
+    let middle = [(block.pivot[0] + ox) * w, (block.pivot[1] + oy) * h].map(|v| v as f32);
+    let corner = (shape.corner.unwrap_or(Title::BOX_CORNER) * h) as f32;
+    let line = (ring_width * pixel) as f32;
+    let reach = line / 2.0 + 1.0;
+    let x0 = ((middle[0] - half[0] - reach).floor() as i32).max(0);
+    let x1 = ((middle[0] + half[0] + reach).ceil() as i32).min(w as i32);
+    let y0 = ((middle[1] - half[1] - reach).floor() as i32).max(0);
+    let y1 = ((middle[1] + half[1] + reach).ceil() as i32).min(h as i32);
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let (fill, ring) = (unit(fill, 1.0), unit(ring, 1.0));
+    let mut rgba = Vec::with_capacity((x1 - x0) as usize * (y1 - y0) as usize);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let past = rounded_past(
+                x as f32 + 0.5 - middle[0],
+                y as f32 + 0.5 - middle[1],
+                half,
+                corner,
+            );
+            let inside = (0.5 - past).clamp(0.0, 1.0) * opacity as f32;
+            let edge = if line > 0.0 {
+                (line / 2.0 + 0.5 - past.abs()).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let under = inside * (1.0 - edge);
+            let a = edge + under;
+            rgba.push(if a > 0.0 {
+                [
+                    (ring[0] * edge + fill[0] * under) / a,
+                    (ring[1] * edge + fill[1] * under) / a,
+                    (ring[2] * edge + fill[2] * under) / a,
+                    a,
+                ]
+            } else {
+                [0.0; 4]
+            });
+        }
+    }
+    let sprite = Sprite {
+        x: x0,
+        y: y0,
+        width: (x1 - x0) as u32,
+        height: (y1 - y0) as u32,
+        rgba,
+    };
+    let [px, py] = block.pivot;
+    Some(turned(
+        sprite,
+        ((px * w) as f32, (py * h) as f32),
+        block.turn,
+    ))
+}
+
 fn title_block(
     t: &Title,
     block: &TitleBlock,
@@ -1150,6 +1231,9 @@ fn title_block(
     timeline: u32,
 ) -> Option<Sprite> {
     let (w, h) = (f64::from(width), f64::from(height));
+    if block.part == TitlePart::Shape {
+        return shaped_box(t, block, (w, h), h / f64::from(timeline.max(1)));
+    }
     let zoom = block.zoom;
     let size = (h * t.text_fraction() * zoom).max(1.0) as f32;
     let pixel = h / f64::from(timeline.max(1));
@@ -1179,7 +1263,7 @@ fn title_block(
             .stroke()
             .filter(|_| !bare)
             .map(|s| Edge::of(s, pixel * zoom)),
-        backing: t.backing().filter(|_| boxed),
+        backing: t.backing().filter(|_| boxed && t.shape().is_none()),
         frame: Frame {
             across: slack,
             down: slack,
@@ -1210,7 +1294,7 @@ fn title_block(
     let lined = t.align().fraction() as f32;
     let left = (px * w) as f32 + (lined - across as f32) * widest - lined * look.wrap;
     let up = match block.part {
-        TitlePart::Whole | TitlePart::Lower => down as f32 * lines,
+        TitlePart::Whole | TitlePart::Lower | TitlePart::Shape => down as f32 * lines,
         TitlePart::Upper => lines,
         TitlePart::Backing => above,
     };
@@ -1298,6 +1382,9 @@ fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
 
 pub fn backing_box(t: &Title, width: u32, height: u32) -> Option<[f64; 4]> {
     t.backing()?;
+    if t.shape().is_some() {
+        return None;
+    }
     let upright = Title {
         rotation: None,
         upper: None,

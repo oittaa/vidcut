@@ -2163,6 +2163,18 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - `size` is from 1/1080 to 4096/1080, also in markup. Size 1..4096 is the range of a title, measured in Resolve Studio 21.1.2.
   - Color, outline and background take the values and limits of the subtitle style (D61).
   - The background is one box behind the block. It reaches 0.15 of the text height past its lines.
+  - `shape` gives the background its own size and place (p. 1185). All of these are measured in Resolve Studio 21.1.2:
+    - `size` is its width and height, as fractions of the picture, from 0 to 2. A side of 0 draws no box.
+    - Its middle is the title's `position` plus `center`, at any anchor and any text. `center` is in fractions of the picture.
+    - A lower third's box takes the position of the lower line. The upper line does not move it or turn it.
+    - A Scroll's box stands at the middle of the text box as wide as the picture. It does not scroll with the text.
+    - The y of a Scroll's `position` moves its box, and it does not move its text.
+    - Zoom does not scale the box. Rotation turns the box and its `center` about the position.
+    - The picture's edges cut the box before it turns. A cut edge has no outline.
+    - `corner` is its radius, as a fraction of the picture height. No radius passes half of a side, on each axis apart.
+    - `outline_width` is in pixels of the timeline, and half of it is outside the box.
+    - The outline is not changed by the background's opacity.
+  - The Title section shows `shape` as Box Width, Box Height, Box Across, Box Down, Box Corner, Box Outline and Box Outline Width. Empty Width and Height fit the box to the text. Empty Width alone takes 90%, the usual width in a file.
   - A drop shadow is a blurred copy of the text and its outline. It is over the background and under the text, as in Resolve.
   - By default, the shadow is black, 75% opaque and blurred 20. These are Resolve's own values.
   - Its offset is 0, which draws no shadow (measured in Resolve Studio 21.1.2).
@@ -2248,9 +2260,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `strokeOutsideOnly` holds `outside`.
     - An outline of 0 is `strokeSize` 0.
   - **Background:**
-    - It is the box that vidcut draws, with square corners.
+    - With `shape`, these are its values. Without `shape`, it is the box that vidcut draws, with square corners.
     - `backgroundWidth` and `backgroundHeight` are in fractions of the picture.
     - `backgroundCenter` is from the anchor point of the last `Rich Text` group. Resolve centers its box on that point.
+    - `backgroundCornerRadius` is `corner`, and `backgroundOutlineWidth` and `backgroundOutlineColor` are the outline.
     - No background is a height of 0.
   - **Drop shadow:**
     - `shadow offset` is in fractions of the picture, right and up.
@@ -2268,7 +2281,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - the font, size and color of its upper line (of the first line, for a Text title)
     - an outline, from a `strokeSize` above 0
     - its other spans as markup, where they are different from that line
-    - a background, from a `backgroundHeight` above 0
+    - a background with its `shape`, from a `backgroundWidth` and a `backgroundHeight` above 0
     - a drop shadow, from an offset other than 0
     - the place, the zoom (X), the rotation and the keyframes of its Text group, or of each line of a lower third
   - The lines of a lower third go apart when the place, zoom, rotation or keyframes of their two groups are different.

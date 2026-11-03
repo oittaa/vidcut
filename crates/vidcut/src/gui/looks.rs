@@ -5,7 +5,7 @@ use eframe::egui::{self, Key};
 use serde_json::json;
 use vidcut_core::looks::{Look, LookKind, Styled, SubtitleLook};
 use vidcut_core::model::{
-    SubtitleBackground, SubtitleOutline, SubtitleStyle, TitleShadow, TitleStyle,
+    SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleShadow, TitleShape, TitleStyle,
 };
 
 use super::export::Ask;
@@ -371,6 +371,7 @@ impl Parts {
             color: self.color,
             outline: self.outline,
             background: self.background,
+            shape: None,
             shadow: self.shadow,
         }
     }
@@ -393,6 +394,70 @@ pub(super) struct TextFields {
     shadow_across: String,
     shadow_down: String,
     shadow_blur: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct ShapeFields {
+    width: String,
+    height: String,
+    across: String,
+    down: String,
+    corner: String,
+    outline: String,
+    outline_width: String,
+}
+
+impl ShapeFields {
+    pub(super) fn load(s: Option<&TitleShape>) -> Self {
+        let center = s.and_then(|s| s.center);
+        Self {
+            width: percent(s.map(|s| s.size[0])),
+            height: percent(s.map(|s| s.size[1])),
+            across: percent(center.map(|c| c[0])),
+            down: percent(center.map(|c| c[1])),
+            corner: percent(s.and_then(|s| s.corner)),
+            outline: s.and_then(|s| s.outline_color.clone()).unwrap_or_default(),
+            outline_width: plain(s.and_then(|s| s.outline_width)),
+        }
+    }
+
+    pub(super) fn shape(&self, stored: Option<&TitleShape>) -> Result<Option<TitleShape>, String> {
+        let bare = [
+            &self.width,
+            &self.height,
+            &self.across,
+            &self.down,
+            &self.corner,
+            &self.outline,
+            &self.outline_width,
+        ]
+        .iter()
+        .all(|f| f.trim().is_empty());
+        if bare {
+            return Ok(None);
+        }
+        let size = stored.map(|s| s.size);
+        let center = stored.and_then(|s| s.center);
+        let width = kept_number(&self.width, size.map(|s| s[0]), "box width")?;
+        let height = kept_number(&self.height, size.map(|s| s[1]), "box height")?;
+        let across = kept_number(&self.across, center.map(|c| c[0]), "box across")?;
+        let down = kept_number(&self.down, center.map(|c| c[1]), "box down")?;
+        let Some(height) = height else {
+            return Err("a box needs a height".into());
+        };
+        Ok(Some(TitleShape {
+            size: [width.unwrap_or(Title::BOX_WIDTH), height],
+            center: (across.is_some() || down.is_some())
+                .then(|| [across.unwrap_or(0.0), down.unwrap_or(0.0)]),
+            corner: kept_number(&self.corner, stored.and_then(|s| s.corner), "box corner")?,
+            outline_color: field(&self.outline),
+            outline_width: kept_plain(
+                &self.outline_width,
+                stored.and_then(|s| s.outline_width),
+                "box outline width",
+            )?,
+        }))
+    }
 }
 
 fn usual_font() -> &'static str {
@@ -516,6 +581,7 @@ impl TextFields {
         families: &[String],
         usual: &Usual,
         spaced: Option<(&mut String, &mut String)>,
+        shaped: Option<&mut ShapeFields>,
     ) -> (bool, bool) {
         let mut enter = false;
         let mut changed = false;
@@ -573,6 +639,26 @@ impl TextFields {
         ui.end_row();
         changed |= row(ui, on, "Opacity", &mut self.opacity, usual.opacity);
         ui.end_row();
+        if let Some(s) = shaped {
+            let corner = format!("{}%", percent(Some(Title::BOX_CORNER)));
+            changed |= row(ui, on, "Box Width", &mut s.width, "Fits Text");
+            ui.end_row();
+            changed |= row(ui, on, "Box Height", &mut s.height, "Fits Text");
+            ui.end_row();
+            changed |= row(ui, on, "Box Across", &mut s.across, "0%");
+            ui.end_row();
+            changed |= row(ui, on, "Box Down", &mut s.down, "0%");
+            ui.end_row();
+            changed |= row(ui, on, "Box Corner", &mut s.corner, &corner);
+            ui.end_row();
+            changed |= row(ui, on, "Box Outline", &mut s.outline, "#000000");
+            changed |= ui
+                .add_enabled_ui(on, |ui| swatch(ui, &mut s.outline, [0, 0, 0]))
+                .inner;
+            ui.end_row();
+            changed |= row(ui, on, "Box Outline Width", &mut s.outline_width, "0");
+            ui.end_row();
+        }
         if usual.switches {
             changed |= switched(ui, "Show Shadow", &mut self.shadow_off);
         }

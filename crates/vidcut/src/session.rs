@@ -239,7 +239,7 @@ pub fn run_with(
         } => {
             let styled = match (subtitles, titles) {
                 (Some(s), None) => looks::Styled::Subtitles(s.clone()),
-                (None, Some(t)) => looks::Styled::Titles(t.clone()),
+                (None, Some(t)) => looks::Styled::Titles((**t).clone()),
                 _ => {
                     return Err(Error::usage(
                         "looks.save needs exactly one of `subtitles` and `titles`",

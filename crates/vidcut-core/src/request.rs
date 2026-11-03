@@ -2440,7 +2440,7 @@ pub enum Request {
         #[serde(default)]
         subtitles: Option<SubtitleLook>,
         #[serde(default)]
-        titles: Option<TitleLook>,
+        titles: Option<Box<TitleLook>>,
         /// Replace your look of that name.
         #[serde(default)]
         overwrite: bool,

@@ -8,7 +8,7 @@ use vidcut_core::model::{
 
 use super::export::Ask;
 use super::inspector::{KeyClick, key_buttons, mark, next_key};
-use super::looks::{Parts, Picker, TextFields, Usual, kept_plain, plain};
+use super::looks::{Parts, Picker, ShapeFields, TextFields, Usual, kept_plain, plain};
 use super::subtitles::{filled, font_list, kept_number, percent, swatch};
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
@@ -54,6 +54,7 @@ pub struct TitleDialog {
     anchor: TitleAnchor,
     text: String,
     fields: TextFields,
+    shape: ShapeFields,
     line_spacing: String,
     tracking: String,
     case: TitleCase,
@@ -113,6 +114,7 @@ impl TitleDialog {
             anchor: TitleAnchor::default(),
             text: String::new(),
             fields: TextFields::default(),
+            shape: ShapeFields::default(),
             line_spacing: String::new(),
             tracking: String::new(),
             case: TitleCase::Mixed,
@@ -145,6 +147,7 @@ impl TitleDialog {
         self.anchor = t.anchor.unwrap_or_default();
         self.text = t.text.clone();
         self.fields = TextFields::load(&Parts::of_title(&t.style));
+        self.shape = ShapeFields::load(t.style.shape.as_ref());
         self.line_spacing = plain(t.style.line_spacing);
         self.tracking = plain(t.style.tracking);
         self.case = t.style.case.unwrap_or_default();
@@ -256,6 +259,7 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     style.line_spacing = kept_plain(&d.line_spacing, stored.style.line_spacing, "line spacing")?;
     style.tracking = kept_plain(&d.tracking, stored.style.tracking, "tracking")?;
     style.case = (d.case != TitleCase::Mixed).then_some(d.case);
+    style.shape = d.shape.shape(stored.style.shape.as_ref())?;
     let lower = line_of(d, &d.line, stored)?;
     let high = stored.upper_view();
     let upper = line_of(d, &d.upper, &high)?;
@@ -649,6 +653,7 @@ impl Workspace {
                     &d.families,
                     &Usual::title(&size_hint),
                     (!scroll).then_some((&mut d.tracking, &mut d.line_spacing)),
+                    Some(&mut d.shape),
                 )
                 .0;
             let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
