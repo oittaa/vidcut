@@ -750,6 +750,7 @@ impl Words<'_> {
             self.params,
         );
         s.put("color", "Color", &raw, |m| json!(m.color));
+        s.put("camera", "Camera", &text, |m| json!(m.camera));
         s.put("color_space", "Color Space", &color_space, |m| {
             json!(m.color_space)
         });

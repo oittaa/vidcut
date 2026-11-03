@@ -31,3 +31,4 @@ The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-
 - Measure the cases that Source Overwrite refuses ([spec §7.2](../cut-page-spec.md#72-edit-functions)).
   - Do audio-only files and other frame rates first, because sound recorders make them.
 - Measure how Source Overwrite treats hidden tracks, titles and compound clips.
+- Measure which file tags give the camera name, with files from real cameras. Then `media.add` reads the name.

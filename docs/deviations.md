@@ -1241,14 +1241,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The File tab of the Inspector shows the clip details and edits the logging fields (p. 412).
 - **vidcut:**
   - The tag icon shows a strip at the top of the pool. The strip stays on until the user turns it off.
-  - The strip shows the size, frame rate, codec, bits and chroma subsampling, SDR or HDR, and length of the selected clip.
+  - The strip shows the camera name, when the clip has one.
+  - It shows the size, frame rate, codec, bits and chroma subsampling, SDR or HDR, and length of the selected clip.
   - It also shows the start timecode, the sound and the file size.
   - Clip Info shows all that vidcut knows of the file.
   - The info button of the strip or of a thumbnail corner opens it. The menu of a pool item and `gui.show clip_info` also open it.
   - It reads the file again for its container and streams: codecs and profiles, bit rates, color tags, channel layouts, languages and tags (`media.details`).
   - Copy puts all of it on the clipboard as text.
 - **Why:**
-  - vidcut keeps no logging fields (camera, scene, shot, take). Thus the strip shows the format, which every file has.
+  - vidcut keeps no scene, shot or take. Thus the strip shows the format, which every file has.
   - One window with all the information, read fresh from the file, tells the format without a separate tool.
 
 ## X61. Speakers are numbered per file or per run, and joined by hand

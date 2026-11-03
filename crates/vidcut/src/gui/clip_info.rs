@@ -14,9 +14,12 @@ pub struct ClipInfo {
     media: Option<String>,
     asked: Option<(String, Ask)>,
     read: Option<(String, Result<MediaDetails, String>)>,
+    camera: Option<(String, String)>,
 }
 
 type Section = (String, Vec<(String, String)>);
+
+const CAMERA_ROW: &str = "Camera";
 
 pub(super) fn bytes(n: u64) -> String {
     match n {
@@ -125,6 +128,7 @@ pub(super) fn glance(m: &Media) -> Vec<String> {
         ];
     }
     let mut out = Vec::new();
+    out.extend(m.camera.as_ref().map(|c| format!("Camera {c}")));
     if let Some(v) = &m.info.video {
         let (w, h) = v.display_size();
         out.push(format!("{w}×{h}"));
@@ -222,6 +226,9 @@ fn sections(app: &Workspace, m: &Media, read: Option<&MediaDetails>) -> Vec<Sect
     }
     if let Some(c) = &m.color {
         file.push(("Clip Color".into(), c.clone()));
+    }
+    if m.subtitles.is_none() {
+        file.push((CAMERA_ROW.into(), m.camera.clone().unwrap_or_default()));
     }
     let mut out: Vec<Section> = vec![("File".into(), file)];
     let mut format = vec![(
@@ -361,6 +368,20 @@ impl Workspace {
         self.clip_info.open = true;
     }
 
+    fn camera_field(&mut self, ui: &mut egui::Ui, m: &Media) {
+        let now = m.camera.clone().unwrap_or_default();
+        let mut text = match &self.clip_info.camera {
+            Some((id, draft)) if *id == m.id => draft.clone(),
+            _ => now.clone(),
+        };
+        let field = ui.add(egui::TextEdit::singleline(&mut text).desired_width(160.0));
+        let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if field.lost_focus() && !cancelled && text != now {
+            self.send("media.set", json!({ "media": m.id, "camera": text }));
+        }
+        self.clip_info.camera = field.has_focus().then(|| (m.id.clone(), text));
+    }
+
     pub(super) fn clip_info_window(&mut self, ctx: &egui::Context) {
         if !self.clip_info.open {
             return;
@@ -434,7 +455,11 @@ impl Workspace {
                                 ui.end_row();
                                 for (k, v) in rows {
                                     ui.label(dim(k));
-                                    ui.add(egui::Label::new(v).wrap());
+                                    if k == CAMERA_ROW {
+                                        self.camera_field(ui, m);
+                                    } else {
+                                        ui.add(egui::Label::new(v).wrap());
+                                    }
                                     ui.end_row();
                                 }
                             }
