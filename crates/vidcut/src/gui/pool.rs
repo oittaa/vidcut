@@ -32,6 +32,9 @@ const LIST_COLUMNS: [&str; 9] = [
 const LIST_GAP: Vec2 = Vec2::new(12.0, 4.0);
 const STRIP_HEIGHT: f32 = 54.0;
 const HEADER: f32 = 20.0;
+const EDIT_ICONS: f32 = 8.0;
+const EDIT_ICON: f32 = 16.0;
+const EDIT_ICON_GAP: f32 = 4.0;
 
 #[derive(Default)]
 pub(super) struct BinsUi {
@@ -1774,21 +1777,30 @@ impl Workspace {
     }
 
     pub(super) fn edit_buttons(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
+        ui.horizontal(|ui| {
+            let spare = ui.available_width() - EDIT_ICONS * (EDIT_ICON + EDIT_ICON_GAP);
+            let spacing = ui.spacing_mut();
+            spacing.item_spacing.x = EDIT_ICON_GAP;
+            spacing.button_padding.x = spacing
+                .button_padding
+                .x
+                .min((spare / (2.0 * EDIT_ICONS)).max(0.0));
             let buttons = [
-                ("Smart Insert", "edit.smart_insert"),
-                ("Append", "edit.append"),
-                ("Ripple Overwrite", "edit.ripple_overwrite"),
+                (icon::SMART_INSERT, "Smart Insert", "edit.smart_insert"),
+                (icon::APPEND, "Append", "edit.append"),
+                (
+                    icon::RIPPLE_OVERWRITE,
+                    "Ripple Overwrite",
+                    "edit.ripple_overwrite",
+                ),
+                (icon::PLACE_ON_TOP, "Place On Top", "edit.place_on_top"),
             ];
-            for (label, method) in buttons {
-                if ui.button(label).clicked() {
+            for (glyph, name, method) in buttons {
+                if edit_icon(ui, glyph, name) {
                     self.edit_function(method);
                 }
             }
-            if ui.button("Place On Top").clicked() {
-                self.edit_function("edit.place_on_top");
-            }
-            if ui.button("Source Overwrite").clicked() {
+            if edit_icon(ui, icon::SOURCE_OVERWRITE, "Source Overwrite") {
                 if self.left == LeftTab::SyncBin && self.snap.viewer == ViewerMode::SourceClip {
                     self.sync_overwrite(ui.ctx());
                 } else {
@@ -1796,17 +1808,18 @@ impl Workspace {
                 }
             }
             let at = self.snap.timeline.position;
-            if ui.button("Cut").clicked() {
-                self.send("edit.remove_transition", json!({ "at": at }));
-            }
-            if ui.button("Dissolve").clicked() {
-                self.send("edit.dissolve", json!({ "at": at }));
-            }
-            if ui.button("Smooth Cut").clicked() {
-                let smooth = json!({ "type": "smooth_cut" });
-                self.send_asking("edit.dissolve", json!({ "at": at, "transition": smooth }));
-            }
-            self.edit_only_toggles(ui);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if edit_icon(ui, icon::SMOOTH_CUT, "Smooth Cut") {
+                    let smooth = json!({ "type": "smooth_cut" });
+                    self.send_asking("edit.dissolve", json!({ "at": at, "transition": smooth }));
+                }
+                if edit_icon(ui, icon::DISSOLVE, "Dissolve") {
+                    self.send("edit.dissolve", json!({ "at": at }));
+                }
+                if edit_icon(ui, icon::CUT, "Cut") {
+                    self.send("edit.remove_transition", json!({ "at": at }));
+                }
+            });
         });
         let sources = self.edit_sources();
         let text = match sources.len() {
@@ -1825,6 +1838,22 @@ impl Workspace {
         };
         ui.label(dim(text).small());
     }
+}
+
+mod icon {
+    pub use egui_phosphor::regular::{
+        ARROW_LINE_DOWN as SMART_INSERT, ARROW_LINE_RIGHT as APPEND,
+        ARROWS_LEFT_RIGHT as RIPPLE_OVERWRITE, CLOCK as SOURCE_OVERWRITE, INTERSECT as DISSOLVE,
+        LINE_VERTICAL as CUT, STACK as PLACE_ON_TOP, WAVE_SINE as SMOOTH_CUT,
+    };
+}
+
+fn edit_icon(ui: &mut egui::Ui, glyph: &str, name: &str) -> bool {
+    let r = ui
+        .add(egui::Button::new(RichText::new(glyph).size(EDIT_ICON)))
+        .on_hover_text(name);
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
+    r.clicked()
 }
 
 fn range_text(app: &Workspace, source: &serde_json::Value) -> String {
