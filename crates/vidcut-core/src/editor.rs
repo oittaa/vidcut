@@ -2621,19 +2621,28 @@ fn mutate(
             sync,
             name,
             bin,
+            angles,
         } => {
-            let name = name
-                .clone()
-                .unwrap_or_else(|| format!("Media Sync {}", env.local_stamp()));
-            let bin = bin.as_deref().unwrap_or_default();
-            let (id, unmatched) =
-                crate::multicam::create(p, env, &media.to_vec(), *sync, name, bin)?;
+            let new = crate::multicam::NewGroup {
+                sync: *sync,
+                angles: angles.as_deref(),
+                name: name
+                    .clone()
+                    .unwrap_or_else(|| format!("Media Sync {}", env.local_stamp())),
+                bin: bin.as_deref().unwrap_or_default(),
+            };
+            let (id, unmatched) = crate::multicam::create(p, env, &media.to_vec(), new)?;
             let g = p.group(&id).expect("just made");
             let mut v = crate::multicam::group_json(p, g);
             if !unmatched.is_empty() {
                 v["unmatched"] = json!(unmatched);
             }
             v
+        }
+        Request::MulticamSet { group, angles } => {
+            crate::multicam::set_angles(p, group, angles)?;
+            let g = p.group(group).expect("just set");
+            crate::multicam::group_json(p, g)
         }
         Request::MulticamRemove { group } => {
             crate::multicam::remove(p, group)?;

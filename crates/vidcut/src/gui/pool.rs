@@ -409,6 +409,12 @@ impl Workspace {
             if ui.add(tag).clicked() {
                 self.show_metadata_strip(!self.metadata_strip);
             }
+            let sync = egui::Button::new(
+                RichText::new(egui_phosphor::regular::ARROWS_CLOCKWISE).size(14.0),
+            );
+            if ui.add(sync).on_hover_text("Sync Clips").clicked() {
+                self.open_sync_clips(ui.ctx());
+            }
             if ui.available_width() >= 120.0 {
                 search(ui, &mut self.search);
             } else {
@@ -1141,6 +1147,17 @@ impl Workspace {
         if let Some(px) = &proxy {
             badge(px.badge, px.color, true);
         }
+        if self.project().is_some_and(|p| p.group_of(&m.id).is_some()) {
+            let top = if proxy.is_some() { 20.0 } else { 3.0 };
+            let at = Pos2::new(rect.right() - 20.0, rect.top() + top);
+            painter.text(
+                at,
+                egui::Align2::LEFT_TOP,
+                egui_phosphor::regular::ARROWS_CLOCKWISE,
+                egui::FontId::proportional(13.0),
+                Color32::from_rgb(90, 170, 240),
+            );
+        }
         let transcribed = self.snap.transcribed.contains(&m.id);
         if transcribed {
             let galley = painter.layout_no_wrap(
@@ -1487,6 +1504,16 @@ impl Workspace {
             }
             if ui.button("Open in Viewer").clicked() {
                 self.send("viewer.load", json!({ "media": m.id }));
+                ui.close();
+            }
+            let group = self
+                .project()
+                .and_then(|p| p.group_of(&m.id))
+                .map(|g| g.id.clone());
+            if let Some(group) = group
+                && ui.button("Open Sync Group…").clicked()
+            {
+                self.open_sync_group(&group);
                 ui.close();
             }
             if ui.button("Append to Timeline").clicked() {

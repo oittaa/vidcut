@@ -465,6 +465,14 @@ The bar and the Jobs button:
 - The player stops at the end of its plan. Thus `SyncBin` holds a playhead past the timeline's end for the GUI, and the requests take it as `at`.
 - `Workspace::sync_overwrite` waits for the answer of the edit with `Ask`, because only a done edit returns to the grid.
 
+**The Sync Clips window** ([spec §7.5](../cut-page-spec.md#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)).
+
+- `SyncClips` holds the places in the GUI. Only Save Sync writes to the project, so Cancel has nothing to undo and the history has one entry.
+- Auto Sync sends `multicam.layout` with `Ask`, because a sync by sound can take long and must not hold the window.
+- The pictures come from `Workspace::camera_cells`, the code of the grid. They use `Cells`, so the viewer draws no grid while the window is open.
+- The window's playhead runs on the clock of the GUI. Live does not know it, so the transport and the timeline's playhead do not move.
+- `multicam::hand_start` gives the start of a group whose places come by hand. The ruler and the saved group use it, so they agree.
+
 **J and L with K held** ([spec D54](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `Shuttle` tells a tap from a hold by the time between the press and the release of a key. It gives a frame step, slow play or its stop, for the player or for Dynamic Trim.
 
 ## Themes and keys

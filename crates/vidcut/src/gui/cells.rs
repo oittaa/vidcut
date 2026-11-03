@@ -32,7 +32,7 @@ pub struct Cells {
     counts: Counts,
 }
 
-pub const CELLS: usize = 9;
+pub const CELLS: usize = 10;
 const LEAST_PART: usize = 4;
 
 impl Cells {

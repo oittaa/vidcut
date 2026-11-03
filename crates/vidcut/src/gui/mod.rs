@@ -36,6 +36,7 @@ mod speech;
 mod subtitles;
 mod super_scale;
 mod sync_bin;
+mod sync_clips;
 mod theme;
 mod tiles;
 mod timeline;

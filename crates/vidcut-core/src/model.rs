@@ -323,6 +323,10 @@ pub struct GroupAngle {
     pub media: String,
     /// The frame of the group at which the file's first frame lies.
     pub at: i64,
+    /// The sync lock: a drag or a nudge in the Sync Clips window does not
+    /// move the file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
 }
 
 /// A file in the media pool.

@@ -15,6 +15,8 @@ pub struct Angle {
     pub media: String,
     pub at: i64,
     pub source: Marks,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -29,7 +31,6 @@ pub struct SoundPair {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Layout {
     pub start_timecode: String,
-    #[serde(skip)]
     pub start: i64,
     pub frames: i64,
     pub angles: Vec<Angle>,
@@ -137,13 +138,7 @@ pub fn layout(
         .map(|(_, at, part)| at + part.end - part.start)
         .max()
         .unwrap_or(0);
-    let (fps, drop) = (p.settings.fps, p.settings.counts_drop_frame());
-    let start = match sync {
-        AngleSync::Timecode => first,
-        AngleSync::In | AngleSync::Out | AngleSync::Sound => {
-            timecode_frames(1, 0, 0, 0, fps, drop).unwrap_or(0)
-        }
-    };
+    let start = group_start(p, sync, first);
     Ok(Layout {
         start_timecode: start_timecode(p, start),
         start,
@@ -157,11 +152,30 @@ pub fn layout(
                     mark_in: Some(part.start),
                     mark_out: Some(part.end),
                 },
+                locked: false,
             })
             .collect(),
         unmatched,
         pairs,
     })
+}
+
+fn group_start(p: &Project, sync: AngleSync, first: i64) -> i64 {
+    let (fps, drop) = (p.settings.fps, p.settings.counts_drop_frame());
+    match sync {
+        AngleSync::Timecode => first,
+        AngleSync::In | AngleSync::Out | AngleSync::Sound => {
+            timecode_frames(1, 0, 0, 0, fps, drop).unwrap_or(0)
+        }
+    }
+}
+
+pub fn hand_start(p: &Project, ids: &[String], sync: AngleSync, first: i64) -> i64 {
+    let tagged = ids
+        .iter()
+        .filter_map(|id| p.media(id))
+        .any(|m| m.info.timecode.is_some());
+    group_start(p, if tagged { sync } else { AngleSync::Sound }, first)
 }
 
 fn by_sound(
@@ -230,14 +244,46 @@ fn by_sound(
     Ok((unmatched, pairs))
 }
 
+fn by_hand(ids: &[String], angles: &[GroupAngle]) -> Result<Vec<GroupAngle>> {
+    if let Some(a) = angles.iter().find(|a| !ids.contains(&a.media)) {
+        return Err(Error::invalid(format!(
+            "{} is not one of the files",
+            a.media
+        )));
+    }
+    ids.iter()
+        .map(|id| {
+            let a = angles
+                .iter()
+                .find(|a| a.media == *id)
+                .ok_or_else(|| Error::invalid(format!("`angles` leaves out {id}")))?;
+            if a.at < 0 {
+                return Err(Error::invalid(format!("{id} can't start before the group")));
+            }
+            Ok(a.clone())
+        })
+        .collect()
+}
+
+pub struct NewGroup<'a> {
+    pub sync: AngleSync,
+    pub angles: Option<&'a [GroupAngle]>,
+    pub name: String,
+    pub bin: &'a str,
+}
+
 pub fn create(
     p: &mut Project,
     env: &dyn Env,
     ids: &[String],
-    sync: AngleSync,
-    name: String,
-    bin: &str,
+    new: NewGroup<'_>,
 ) -> Result<(String, Vec<String>)> {
+    let NewGroup {
+        sync,
+        angles,
+        name,
+        bin,
+    } = new;
     if ids.len() < 2 {
         return Err(Error::invalid("a synced group needs two files or more"));
     }
@@ -252,24 +298,47 @@ pub fn create(
             g.name
         )));
     }
-    let lined_up = layout(p, env, ids, sync, true)?;
+    let (start, angles, unmatched) = match angles {
+        Some(angles) => {
+            let first = layout(p, env, ids, AngleSync::Timecode, true)?.start;
+            (
+                hand_start(p, ids, sync, first),
+                by_hand(ids, angles)?,
+                Vec::new(),
+            )
+        }
+        None => {
+            let lined_up = layout(p, env, ids, sync, true)?;
+            let unmatched = lined_up.unmatched;
+            let angles = lined_up
+                .angles
+                .into_iter()
+                .map(|a| GroupAngle {
+                    locked: !unmatched.contains(&a.media),
+                    media: a.media,
+                    at: a.at,
+                })
+                .collect();
+            (lined_up.start, angles, unmatched)
+        }
+    };
     let id = p.new_group_id();
     p.groups.push(SyncGroup {
         id: id.clone(),
         name,
         bin: bin.to_string(),
-        start: lined_up.start,
-        angles: lined_up
-            .angles
-            .into_iter()
-            .map(|a| GroupAngle {
-                media: a.media,
-                at: a.at,
-            })
-            .collect(),
+        start,
+        angles,
         marks: Marks::default(),
     });
-    Ok((id, lined_up.unmatched))
+    Ok((id, unmatched))
+}
+
+pub fn set_angles(p: &mut Project, id: &str, angles: &[GroupAngle]) -> Result<()> {
+    let g = group_mut(p, id)?;
+    let ids: Vec<String> = g.angles.iter().map(|a| a.media.clone()).collect();
+    g.angles = by_hand(&ids, angles)?;
+    Ok(())
 }
 
 pub fn group_mut<'a>(p: &'a mut Project, id: &str) -> Result<&'a mut SyncGroup> {
@@ -308,6 +377,7 @@ fn layout_of(p: &Project, g: &SyncGroup) -> Layout {
                     mark_in: Some(0),
                     mark_out: Some(p.media_limit(m)),
                 },
+                locked: a.locked,
             })
         })
         .collect();
@@ -402,7 +472,7 @@ fn sync_start(p: &Project, m: &Media, at: i64) -> Result<Option<i64>> {
     ops::file_start_at(p, m, at, by_group)
 }
 
-fn camera_order(a: &str, b: &str) -> Ordering {
+pub fn camera_order(a: &str, b: &str) -> Ordering {
     match (a.parse::<u64>(), b.parse::<u64>()) {
         (Ok(x), Ok(y)) => x.cmp(&y),
         (Ok(_), Err(_)) => Ordering::Less,
@@ -411,7 +481,7 @@ fn camera_order(a: &str, b: &str) -> Ordering {
     }
 }
 
-fn cameras<'a>(p: &'a Project, bin: &str) -> Result<Vec<(&'a Media, &'a str)>> {
+pub fn cameras<'a>(p: &'a Project, bin: &str) -> Result<Vec<(&'a Media, &'a str)>> {
     let mut files: Vec<(&Media, &str)> = Vec::new();
     for m in p
         .media
@@ -433,7 +503,7 @@ fn cameras<'a>(p: &'a Project, bin: &str) -> Result<Vec<(&'a Media, &'a str)>> {
     }
     if files.len() > MULTI_SOURCE_ANGLES {
         return Err(Error::invalid(format!(
-            "The Sync Bin holds {MULTI_SOURCE_ANGLES} cameras at most"
+            "A bin to sync holds {MULTI_SOURCE_ANGLES} cameras at most"
         )));
     }
     let group_of = |m: &Media| p.group_of(&m.id).map(|g| g.id.as_str());

@@ -38,7 +38,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
-- the Sync Clips window and angle switches ([todo](todo/sync-bin.md)), Live Overwrite
+- angle switches ([todo](todo/sync-bin.md)), Live Overwrite
 - making a compound clip from timeline clips ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
@@ -265,7 +265,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - a file in two groups
     - `media.remove` of a file in a group
   - `multicam.marks.set` and `multicam.marks.clear` act on the In and Out of the group ([§4.1](#41-modes)). `multicam.list` gives them.
-  - No command places a group on the timeline. The pool does not show a group yet.
+  - No command places a group on the timeline.
+  - The pool does not show a group as an item. A file in a group has a blue sync badge.
+  - `multicam.set` sets the places and the sync locks of a group ([§7.5](#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). `multicam.create` takes them as `angles`.
 - **Input Color Space** (pp. 228, 230):
   - The color tags of a file tell how to read the colors of its pictures.
   - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.
@@ -617,6 +619,32 @@ Video Only and Audio Only limit what an edit takes (p. 694).
   - more than 9 files;
   - files of different groups, or files in a group with files in none;
   - a file with no timecode tag and no group.
+
+### 7.5 Sync Clips window (pp. 706–708; measured in Resolve Studio 21.1.2)
+- **Opening:**
+  - The Sync Clips icon in the Media Pool opens the files of the current bin and its subfolders. `gui.show sync_clips` does the same.
+  - When the files are in a synced group, the window opens that group.
+  - "Open Sync Group…" in the menu of a file in a group opens that group.
+- **The window:**
+  - Left: "Sync View", a grid of all files. Right: the viewer of the selected row, with the name of its file.
+  - One row for each file, in camera order, with the numbers 1, 2, 3 up to 9. A click selects a row or a cell.
+  - The selected row has a red outline and a red number. The ruler shows the start of the group.
+  - A click or a drag on the ruler moves the playhead of the window. Play and Space play the pictures, with no sound.
+- **Places at open:** each file lies by its timecode. No row has a sync icon. With no tags, all files start at one point, and the ruler starts at 01:00:00:00.
+- **Auto Sync:** it runs the method under "Sync By" and replaces the places: Timecode, Sound, In or Out.
+  - Each row that it lines up gets a sync icon, the sync lock.
+  - With In or Out, each file needs that mark. A file stays whole.
+  - By sound, a file that matches no other file stays at the start, with no icon. "Auto Sync Failed" names such files.
+  - Auto Sync reads the marks at that moment.
+- **By hand:**
+  - A drag moves a row with no sync icon. A row with one does not move.
+  - The sync icon in the bar turns the sync lock of the selected row on and off.
+  - Comma and Period move the selected row by 1 frame. Shift moves it by 5 frames (p. 707).
+- **Save Sync** stores the places and the sync locks, and closes the window.
+  - The first Save Sync makes a group. It is `multicam.create` with `angles`.
+  - A Save Sync on an opened group keeps the group, its name and its start. It is `multicam.set`.
+- **Cancel,** Escape or the close button changes nothing.
+- vidcut refuses the cases of [§7.4](#74-sync-bin-pp-708710-measured-in-resolve-studio-2112) with an error, except a file with no timecode tag. A bin with one file also opens no window.
 
 ## 8. Timeline editing (Ch. 36, pp. 715–732)
 

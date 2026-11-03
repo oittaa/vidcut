@@ -2,12 +2,9 @@
 
 **When:** not decided.
 
-The Sync Bin tab, the synced group and Multi Source are in vidcut ([spec §7.4](../cut-page-spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)). This file lists what is still open.
+The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are in vidcut ([spec §7.4](../cut-page-spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112), [§7.5](../cut-page-spec.md#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). This file lists what is still open.
 
-**Why:**
-
-- The Cut page reopens a group in the Sync Clips window.
-- The Edit page opens a multicam clip as a timeline, and a cut chooses an angle.
+**Why:** the Edit page opens a multicam clip as a timeline, and a cut chooses an angle.
 
 **In the code:**
 
@@ -20,12 +17,18 @@ The Sync Bin tab, the synced group and Multi Source are in vidcut ([spec §7.4](
 - `multicam.create` stores a synced group, a pool item.
 - `edit.source_overwrite` with `group` lines up by a synced group.
 - `multicam.rows` and `multicam.pick` give the rows of the Sync Bin and choose a camera.
+- `multicam.set` stores the places that the Sync Clips window gives.
 - No command switches angles.
 
 **To do:**
 
-- Open a group in the Sync Clips window (p. 708).
 - For the Edit page stage, open a multicam clip as a timeline (p. 1040).
+- Measure the Sync Clips window parts that are not measured:
+  - the Comma and Period nudge keys;
+  - Sync by Marker;
+  - the places at open for files with timecode tags;
+  - a drag before the start of the group;
+  - a Save Sync of files with no tag, by timecode, with no Auto Sync.
 - Measure the Sync Bin parts that are not measured:
   - the number keys and Escape;
   - the sound of the grid with Video Only off and on (p. 708);

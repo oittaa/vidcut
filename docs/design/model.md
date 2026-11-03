@@ -173,7 +173,8 @@ Multicam layout:
   - The score grows with the length that the two files have in common, so a short overlap does not match by chance.
   - A triangle over the lags (`SMEAR`) finds the middle of a broad peak, which is what drift gives.
 - `Project.groups` stores `SyncGroup`, the result of `multicam.create`. It is a list beside `Project.media`, because a group has no file.
-- A `GroupAngle` stores only the media and `at`, since each file stays whole. `multicam.list` works out `frames` from the media.
+- A `GroupAngle` stores only the media, `at` and `locked`, since each file stays whole. `multicam.list` works out `frames` from the media.
+- `locked` is the sync lock of the Sync Clips window. The file leaves it out when it is off.
 - `start`, `at` and `marks` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
 - `multicam::marked_range` turns the `marks` of a group into a range of one file. Thus one pair of marks holds for each file.
 

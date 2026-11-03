@@ -142,6 +142,7 @@ pub struct Workspace {
     pub(super) metadata_strip: bool,
     pub(super) key_editor: super::keyframe_editor::Editor,
     pub(super) sync_bin: super::sync_bin::SyncBin,
+    pub(super) sync_clips: super::sync_clips::SyncClips,
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -236,6 +237,7 @@ impl Workspace {
             metadata_strip: super::pool::strip_kept(),
             key_editor: Default::default(),
             sync_bin: Default::default(),
+            sync_clips: Default::default(),
         }
     }
 
@@ -271,6 +273,7 @@ impl Workspace {
                 self.left = LeftTab::SyncBin;
                 self.show_timeline();
             }
+            GuiPanel::SyncClips => self.open_sync_clips(ctx),
             GuiPanel::Transitions => self.left = LeftTab::Transitions,
             GuiPanel::Titles => self.left = LeftTab::Titles,
             GuiPanel::Effects => {
@@ -337,6 +340,7 @@ impl Workspace {
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
+            GuiPanel::SyncClips => self.close_sync_clips(),
             GuiPanel::SyncBin
             | GuiPanel::Transitions
             | GuiPanel::Titles
@@ -393,6 +397,7 @@ impl Workspace {
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
             (GuiPanel::SyncBin, self.left == LeftTab::SyncBin),
+            (GuiPanel::SyncClips, self.sync_clips.open),
             (GuiPanel::Transitions, self.left == LeftTab::Transitions),
             (GuiPanel::Titles, self.left == LeftTab::Titles),
             (
@@ -1282,6 +1287,7 @@ impl Workspace {
             || self.export.asking(&self.snap.jobs)
             || self.removing.is_some()
             || self.key_editor.asking()
+            || self.sync_clips.open
     }
 
     fn take_timecode_paste(&mut self, ctx: &egui::Context) {
@@ -1338,6 +1344,7 @@ impl Workspace {
         if self.transcription.over {
             self.transcription.take_keys(ctx);
         }
+        self.sync_clips_keys(ctx);
         if self.asking() {
             ctx.input_mut(|i| {
                 i.events.retain(|e| match e {
@@ -1969,6 +1976,7 @@ impl Workspace {
         self.transcription_window(&ctx);
         self.clip_info_window(&ctx);
         self.cache_manager_window(&ctx);
+        self.sync_clips_window(&ctx);
         let panel = theme::colors().panel;
         egui::Panel::top("top").frame(theme::bar()).show(ui, |ui| {
             theme::decorated(ui, Deco::Bar, |ui| self.top_bar(ui))

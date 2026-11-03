@@ -98,7 +98,7 @@ impl Workspace {
         }
     }
 
-    fn media_name(&self, id: &str) -> String {
+    pub(super) fn media_name(&self, id: &str) -> String {
         self.project()
             .and_then(|p| p.media(id))
             .map_or_else(|| id.to_string(), |m| m.name.clone())
