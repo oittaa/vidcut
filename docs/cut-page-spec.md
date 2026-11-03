@@ -1131,9 +1131,8 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - vidcut: the Inspector shows a Generator section with the Color row, over the picture sections (X70).
 - **Picture sections:**
   - Measured in Resolve Studio 21.1.2: a Solid Color gives the same picture as a still of its color. The largest difference is 0.1 of 255. The renders have Rotation, Pitch, Yaw, Flip Vertical, Crop, Zoom, Overlay and Hue.
-  - Measured: vidcut's frames and renders of vidcut's OTIO file differ by at most 0.6 of 255. The cases are Rotation, Anchor, Flip Vertical, Zoom, Opacity and the 26 composite modes.
+  - Measured: vidcut's frames and renders of vidcut's OTIO file differ by at most 0.6 of 255. The cases are Rotation, Anchor, Flip Vertical, Flip Horizontal with Crop Left, Zoom, Opacity and the 26 composite modes.
   - Measured: Pitch and Yaw differ at the edge pixels, by at most 78.2 of 255. These pixels are 0.3% of the values. A still in Resolve gives the same picture.
-  - Measured: Flip Horizontal with Crop Left differs in one column. This is the rule of a crop, not of a generator.
   - Not measured on a generator: Dynamic Zoom, Stabilization, keyframes in a render, Push, Slide, Wipe and Dip To Color.
   - vidcut: the sections and these transitions act as on a still. On a Solid Color and on a still, the same requests give the same frames (0.0 of 255).
 - **Speed:**
