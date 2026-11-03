@@ -214,6 +214,20 @@ Ranges and resolution:
   - The playhead keyword resolves only when the caller gives a frame. The live core gives the frame of the timeline. Thus a command that the GUI runs can use the playhead, and a headless command cannot.
 - A clip reference is an id, or "V1@15s": the clip under that frame on V1 (`resolve_clip`).
 
+## Source Overwrite
+
+`ops::source_overwrite` holds `edit.source_overwrite`. The behavior is in [spec §7.2](../cut-page-spec.md#72-edit-functions).
+
+- `origin` turns `MediaInfo.timecode` into project frames with `StartTimecode::frames_at`. A file with no tag counts as 0.
+- `shown` gives the timecode range that a clip shows, from `Clip::source_at`.
+  - A clip with no media or with a still has no such range. Thus generators, titles and compound clips do not count.
+- `first_where` takes clips by the order of the tracks: video from the lowest, then audio.
+  - `by_marks` and `by_playhead` choose the reference clip with it.
+  - A video clip and an audio clip that give different positions under one rule make the edit fail (`disagree`). No measurement tells which of them wins.
+- `track_above` gives the track. `place_on_top` uses it too.
+- The result names the clip, its track, the `reference` and the `playhead`. `playhead_after_edit` seeks to this `playhead`.
+- The GUI sends no `range` (`edit_from`). The core then reads `Media.marks`, and it can tell source marks from no marks.
+
 ## Ids
 
 | Thing | Id | Made by |

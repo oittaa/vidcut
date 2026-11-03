@@ -86,6 +86,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("edit.overwrite", &["media"]),
     ("edit.ripple_overwrite", &["media"]),
     ("edit.place_on_top", &["media"]),
+    ("edit.source_overwrite", &["media"]),
     ("edit.delete", &["clips"]),
     ("edit.delete_range", &["range"]),
     ("edit.move", &["clips"]),
