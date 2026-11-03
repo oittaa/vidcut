@@ -6615,6 +6615,18 @@ pub fn query(
             v["size"] = json!(m.size);
             v
         }
+        Request::MulticamLayout {
+            media,
+            sync,
+            full_extents,
+        } => {
+            json!(crate::multicam::layout(
+                p,
+                &media.to_vec(),
+                *sync,
+                *full_extents
+            )?)
+        }
         Request::MediaGet { media } => {
             let m = p
                 .media(media)

@@ -162,6 +162,12 @@ Stills ([D38](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
 - A GIF or animated WebP (`gif`, `webp_anim`) of one frame is also a still.
 - An animated WebP of more frames lasts as long as its frames do. Why: `webp_anim` reports no duration.
 
+Multicam layout:
+
+- `multicam::layout` works out where the angles of a multicam clip lie (spec §3).
+- It works in frames at the project's rate. A start timecode at another rate rounds down (`StartTimecode::frames_at`).
+- The project stores nothing. `Layout` is only the answer to `multicam.layout`.
+
 Media fields:
 
 - `camera` is the name of the camera, as text (spec §3). The file does not give it, and `media.set` sets it.

@@ -7,7 +7,7 @@ The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-
 **Why:**
 
 - The Cut page gathers several angles of one moment in a Sync Bin.
-- vidcut has no command that aligns two pool items.
+- vidcut stores no synced group.
 
 **In the code:**
 
@@ -16,10 +16,13 @@ The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-
 - `Source::advance` shows the frame whose presentation time has reached the target.
 - `VideoInfo.vfr` records a variable frame rate. The reader still follows presentation time.
 - Waveforms draw on clips.
-- No command aligns two pool items. No command switches angles.
+- `multicam.layout` works out where angles lie, by timecode or marks. It stores nothing.
+- No command stores a synced group. No command switches angles.
 
 **To do:**
 
+- Decide where a synced group lives. Resolve shows it as a pool clip and opens it as a timeline (pp. 708, 1040). A vidcut project has one timeline.
+- Then add `multicam.create`, which stores the layout.
 - Read the Sync Bin in the Cut page chapters, then measure it in Resolve.
 - Record how angles sync, and how a cut chooses an angle.
 - Sync by start timecode when both files have one.

@@ -16,6 +16,7 @@ pub mod keyframes;
 pub mod looks;
 pub mod lru;
 pub mod model;
+pub mod multicam;
 pub mod ops;
 pub mod otio;
 pub mod past;
