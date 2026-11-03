@@ -10,6 +10,7 @@ pub mod error;
 pub mod export;
 pub mod fingerprint;
 pub mod folder;
+pub mod generators;
 mod history;
 pub mod keyframes;
 pub mod looks;

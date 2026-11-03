@@ -374,6 +374,18 @@ pub fn reasons(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> V
     out
 }
 
+fn faded(placed: &[Placed]) -> bool {
+    placed
+        .iter()
+        .any(|p| p.picture.opaque() < 1.0 || !p.picture.opacity_keys.is_empty())
+}
+
+fn composited(placed: &[Placed]) -> bool {
+    placed
+        .iter()
+        .any(|p| p.picture.mode() != CompositeMode::Normal)
+}
+
 fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<Vec<Reason>> {
     let mut out = Vec::new();
     let layers = piece.layers();
@@ -393,11 +405,25 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
             ..
         } = layer
         else {
-            let excluded = matches!(layer, VideoPiece::Black { excluded: true, .. });
-            out.push(match moved && !(user && excluded) {
-                true => vec![Reason::Transition],
-                false => Vec::new(),
-            });
+            let excluded = matches!(
+                layer,
+                VideoPiece::Black { excluded: true, .. }
+                    | VideoPiece::Generated { excluded: true, .. }
+            );
+            let mixed = !(user && excluded);
+            let placed = layer.placed();
+            out.push(
+                [
+                    (checked(placed), Reason::Effect),
+                    (mixed && moved, Reason::Transition),
+                    (mixed && faded(placed), Reason::Opacity),
+                    (mixed && composited(placed), Reason::Composite),
+                ]
+                .into_iter()
+                .filter(|(on, _)| *on)
+                .map(|(_, r)| r)
+                .collect(),
+            );
             continue;
         };
         let own = *cache != ClipCache::Off;
@@ -418,20 +444,8 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
                 Reason::SuperScale(super_scale.upscaler),
             ),
             (mixed && moved, Reason::Transition),
-            (
-                mixed
-                    && placed
-                        .iter()
-                        .any(|p| p.picture.opaque() < 1.0 || !p.picture.opacity_keys.is_empty()),
-                Reason::Opacity,
-            ),
-            (
-                mixed
-                    && placed
-                        .iter()
-                        .any(|p| p.picture.mode() != CompositeMode::Normal),
-                Reason::Composite,
-            ),
+            (mixed && faded(placed), Reason::Opacity),
+            (mixed && composited(placed), Reason::Composite),
         ];
         out.push(
             found
@@ -468,6 +482,12 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
             placed.iter_mut().for_each(plain_placed);
         }
         VideoPiece::Black { excluded, .. } => *excluded = false,
+        VideoPiece::Generated {
+            placed, excluded, ..
+        } => {
+            *excluded = false;
+            placed.iter_mut().for_each(plain_placed);
+        }
         VideoPiece::Mix { under, over } => {
             plain(under, name);
             for o in over {

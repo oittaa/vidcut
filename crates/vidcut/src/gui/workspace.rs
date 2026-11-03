@@ -12,6 +12,7 @@ pub use super::timeline::tools::{DynamicMode, DynamicTarget, heard};
 pub use super::timeline::{EditSel, Side, TrackRef};
 pub use super::viewer::{TwoUp, TwoUpCell, TwoUpMode};
 
+use super::effect_browser::EffectsTab;
 use super::shuttle::Jkl;
 use super::theme::{self, Deco};
 use super::timeline::TimelineView;
@@ -92,6 +93,7 @@ pub struct Workspace {
     pub(super) titles: super::title_browser::Browser,
     pub(super) inspector: super::inspector::Inspector,
     pub(super) title_thumbs: super::title_browser::Thumbs,
+    pub(super) effects_tab: EffectsTab,
     pub(super) looks: super::looks::Looks,
     pub(super) scrub: Option<(PlayerId, i64)>,
     pub(super) recent: Vec<PathBuf>,
@@ -183,6 +185,7 @@ impl Workspace {
             titles: Default::default(),
             inspector: Default::default(),
             title_thumbs: Default::default(),
+            effects_tab: Default::default(),
             looks: Default::default(),
             scrub: None,
             recent: recent_projects(),
@@ -264,7 +267,14 @@ impl Workspace {
             GuiPanel::Transcription => self.transcription.open = true,
             GuiPanel::Transitions => self.left = LeftTab::Transitions,
             GuiPanel::Titles => self.left = LeftTab::Titles,
-            GuiPanel::Effects => self.left = LeftTab::Effects,
+            GuiPanel::Effects => {
+                self.left = LeftTab::Effects;
+                self.effects_tab = EffectsTab::Video;
+            }
+            GuiPanel::Generators => {
+                self.left = LeftTab::Effects;
+                self.effects_tab = EffectsTab::Generators;
+            }
             GuiPanel::Inspector => self.left = LeftTab::Inspector,
             GuiPanel::Keyframes => self.left = LeftTab::Keyframes,
             GuiPanel::Metadata => self.show_metadata_strip(true),
@@ -337,6 +347,11 @@ impl Workspace {
                     self.left = LeftTab::Pool;
                 }
             }
+            GuiPanel::Generators => {
+                if self.left == LeftTab::Effects && self.effects_tab == EffectsTab::Generators {
+                    self.left = LeftTab::Pool;
+                }
+            }
             GuiPanel::Metadata => self.show_metadata_strip(false),
             GuiPanel::ClipInfo => self.clip_info.open = false,
             GuiPanel::ManageRenderCache => self.cache_manager.open = false,
@@ -371,7 +386,14 @@ impl Workspace {
             (GuiPanel::Transcription, self.transcription.open),
             (GuiPanel::Transitions, self.left == LeftTab::Transitions),
             (GuiPanel::Titles, self.left == LeftTab::Titles),
-            (GuiPanel::Effects, self.left == LeftTab::Effects),
+            (
+                GuiPanel::Effects,
+                self.left == LeftTab::Effects && self.effects_tab == EffectsTab::Video,
+            ),
+            (
+                GuiPanel::Generators,
+                self.left == LeftTab::Effects && self.effects_tab == EffectsTab::Generators,
+            ),
             (GuiPanel::Inspector, self.left == LeftTab::Inspector),
             (GuiPanel::Keyframes, self.left == LeftTab::Keyframes),
             (GuiPanel::Metadata, self.metadata_strip),
