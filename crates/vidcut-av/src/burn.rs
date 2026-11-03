@@ -247,6 +247,7 @@ struct Laid {
     sprite: Option<Sprite>,
     lines: f32,
     above: f32,
+    widest: f32,
     popped: Option<(f32, f32)>,
 }
 
@@ -559,6 +560,10 @@ fn lay_out(look: &Look) -> Option<Laid> {
     if lines <= 0.0 {
         return None;
     }
+    let widest = buffer
+        .layout_runs()
+        .map(|r| r.line_w)
+        .fold(0.0_f32, f32::max);
     let last = buffer.layout_runs().map(|r| r.line_i).max();
     let above: f32 = buffer
         .layout_runs()
@@ -739,6 +744,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
         sprite,
         lines,
         above,
+        widest,
         popped,
     })
 }
@@ -994,6 +1000,7 @@ fn title_block(
         sprite: Some(sprite),
         lines,
         above,
+        widest,
         ..
     } = lay_out(&look)?
     else {
@@ -1001,7 +1008,8 @@ fn title_block(
     };
     let [px, py] = block.pivot;
     let [across, down] = t.anchor();
-    let left = (px * w) as f32 - across as f32 * look.wrap;
+    let lined = t.align().fraction() as f32;
+    let left = (px * w) as f32 + (lined - across as f32) * widest - lined * look.wrap;
     let up = match block.part {
         TitlePart::Whole | TitlePart::Lower => down as f32 * lines,
         TitlePart::Upper => lines,

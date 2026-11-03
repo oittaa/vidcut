@@ -344,7 +344,8 @@ const EXAMPLES: &[(&str, &str)] = &[
         "titles.add",
         "vidcut titles add \"Opening night\" --at 10s\n  \
          vidcut titles add \"Ada Lovelace\" --kind lower_third --align right --at 1m --duration 4s\n  \
-         vidcut titles add \"The end\" --at 2m --position 0.5,0.8 --style '{\"color\":\"yellow\",\"size\":0.1}'",
+         vidcut titles add \"The end\" --at 2m --position 0.5,0.8 --style '{\"color\":\"yellow\",\"size\":0.1}'\n  \
+         vidcut titles add \"Notes\" --at 3m --align left --anchor bottom_left --position 0.1,0.9",
     ),
     (
         "titles.set",

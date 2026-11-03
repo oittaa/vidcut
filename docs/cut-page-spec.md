@@ -2125,7 +2125,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Lines the font's own line height apart, rounded up to a whole pixel (measured in Resolve Studio 21.1.2 with four fonts).
     - The lines of a scroll are 4/3 of the font's line height plus 10 timeline pixels apart. This fits Resolve Studio 21.1.2 within 5 pixels with four fonts.
     - Lines wrap at the width of title safe, 90% of the picture width.
-  - The lines of a Text title are centered. The middle of the block is at the middle of the picture.
+  - The block of a Text title is as wide as its widest line (measured in Resolve Studio 21.1.2).
+    - `align` sets each line in the block: left, middle or right. By default, it is middle.
+    - `anchor` names the point of the block that goes to `position`: a corner, the middle of a side, or the middle.
+    - By default, `anchor` is the middle, and `position` is the middle of the picture.
+    - A change of `align` or `anchor` keeps `position`.
+    - A file's `justify` reads as left. Resolve draws it as left, because its lines do not wrap (measured in Resolve Studio 21.1.2).
   - The lines of a lower third align left, center or right.
   - The lower line of a lower third hangs from a point that is 10%, 50% or 90% across and 78% down, by its alignment.
   - The upper line stands on a point 80% down, at the same place across.
@@ -2142,7 +2147,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Its offset is 0, which draws no shadow (measured in Resolve Studio 21.1.2).
   - Zoom draws the text larger, and the outline and the background box grow with it. The zoom scales the outline, measured in Resolve Studio 21.1.2.
   - Rotation turns the whole title, box and shadow too, counterclockwise.
-  - Zoom and rotation work about the middle of a Text title.
+  - Zoom and rotation work about the `position` of a Text title (measured in Resolve Studio 21.1.2).
   - For a lower third, they work on each line about its own point (D67).
   - Each line of a lower third has its own `position`, `zoom`, `rotation` and keyframes (p. 1178):
     - `line` in `titles.set` names the line.
@@ -2206,7 +2211,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A point is a pixel of the picture, as Resolve draws a title that it reads from a file.
     - Resolve's own titles have 1/1080 of the picture height to a point ([gotchas](gotchas.md#resolves-otio-files)).
   - **Positions:**
-    - The `position` of a Text title is its middle (anchor 4).
+    - The `position` of a Text title is the point of its block that its `anchor` names.
     - The upper line of a lower third stands on its point (anchor 0, 1 or 2). By default, this is 20% up the picture.
     - Its lower line hangs from its point (6, 7 or 8). By default, this is 22% up the picture.
     - The file holds the points of `position`, with y counted from the bottom.
@@ -2242,8 +2247,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The lines of a lower third go apart when the place, zoom, rotation or keyframes of their two groups are different.
   - Resolve's own lower thirds are different: the upper line stands at 20% from the bottom, and the lower line hangs from 22%.
   - The lower line of a lower third is the group anchored by its top, else its second group.
-  - The lines of a Text title are centered, whatever their alignment.
-  - If a Text title is anchored at a point other than its middle, that point is taken as its middle.
+  - A Text title takes the alignment of its first line and the `anchor` of its group. The manual gives one alignment and one anchor for the entire title (p. 1178).
   - **A Scroll** has these parts:
     - a `Text` group, with its plain `text` and its `position`. The x of the position is the middle of a text box as wide as the picture.
     - a `Formatting` group, with its `font` as Qt writes one, its `size` in points (pixels, as above), its `alignment`, `anchor` and `color`. The `alignment` is 0 left, 1 middle or 2 right in that box.

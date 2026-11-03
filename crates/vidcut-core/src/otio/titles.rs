@@ -6,7 +6,7 @@ use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
     Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, TextStroke, Title,
-    TitleAlign, TitleKind, TitleLine, TitleShadow, TitleStyle, size_fits,
+    TitleAlign, TitleAnchor, TitleKind, TitleLine, TitleShadow, TitleStyle, size_fits,
 };
 use crate::rich::{self, Look, Span};
 
@@ -321,6 +321,33 @@ fn plain_lines(lines: &[&[Span]]) -> String {
         .join("\n")
 }
 
+const ANCHORS: [TitleAnchor; 9] = [
+    TitleAnchor::BottomLeft,
+    TitleAnchor::Bottom,
+    TitleAnchor::BottomRight,
+    TitleAnchor::Left,
+    TitleAnchor::Middle,
+    TitleAnchor::Right,
+    TitleAnchor::TopLeft,
+    TitleAnchor::Top,
+    TitleAnchor::TopRight,
+];
+
+fn anchor_number(anchor: TitleAnchor) -> u32 {
+    ANCHORS
+        .iter()
+        .position(|a| *a == anchor)
+        .map_or(4, |i| i as u32)
+}
+
+fn anchor_read(g: &Value) -> Option<TitleAnchor> {
+    let number = usize::try_from(value(g, "anchor").as_u64()?).ok()?;
+    ANCHORS
+        .get(number)
+        .copied()
+        .filter(|a| *a != TitleAnchor::default())
+}
+
 fn placed(t: &Title, usual: [f64; 2], origin: i64) -> Value {
     let [x, y] = t.in_file(t.place());
     with_frames(
@@ -414,24 +441,29 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
         height: f64::from(height),
         color: &color,
     };
+    let align = match t.align() {
+        TitleAlign::Left => None,
+        TitleAlign::Middle => Some("center"),
+        TitleAlign::Right => Some("right"),
+    };
     let (mut groups, hold) = match t.kind {
         TitleKind::Scroll => (scrolling(t, family, points, &color, origin), None),
         TitleKind::Text => (
             vec![rich_text(
                 t,
                 &lines,
-                html(&lines, Some("center"), 0, &base),
-                4,
+                html(&lines, align, 0, &base),
+                anchor_number(t.anchor.unwrap_or_default()),
                 placed(t, [0.5, 0.5], origin),
                 origin,
             )],
             Some(t.in_file([x, y])),
         ),
         TitleKind::LowerThird => {
-            let (align, column, usual_x) = match t.align() {
-                TitleAlign::Left => (None, 0, 0.1),
-                TitleAlign::Middle => (Some("center"), 1, 0.5),
-                TitleAlign::Right => (Some("right"), 2, 0.9),
+            let (column, usual_x) = match t.align() {
+                TitleAlign::Left => (0, 0.1),
+                TitleAlign::Middle => (1, 0.5),
+                TitleAlign::Right => (2, 0.9),
             };
             let none: &[Span] = &[];
             let (upper, lower) = match lines.as_slice() {
@@ -534,11 +566,17 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
             let [left, top, w, h] = drawn.backing.unwrap_or_else(|| {
                 let rows = lines.len().max(1) as f64;
                 let h = rows * line + 2.0 * Title::PADDING * size;
+                let [across, down] = t.anchor();
                 let top = match t.kind {
-                    TitleKind::Text | TitleKind::Scroll => y - h / 2.0,
+                    TitleKind::Text => y - h * down,
+                    TitleKind::Scroll => y - h / 2.0,
                     TitleKind::LowerThird => y + t.lower_line() + Title::PADDING * size - h,
                 };
-                let middle = if t.kind == TitleKind::Text { x } else { 0.5 };
+                let middle = if t.kind == TitleKind::Text {
+                    x + (0.5 - across) * Title::SAFE
+                } else {
+                    0.5
+                };
                 [middle - Title::SAFE / 2.0, top, Title::SAFE, h]
             });
             (
@@ -660,6 +698,7 @@ struct Styled {
 #[derive(Debug, Default)]
 struct Read {
     lines: Vec<Vec<(String, Styled)>>,
+    align: Option<TitleAlign>,
     family: Option<String>,
     points: Option<f64>,
     color: Option<String>,
@@ -777,6 +816,14 @@ fn read_html(blob: &str) -> Read {
         let Some(open) = after.find('>') else {
             break;
         };
+        read.align
+            .get_or_insert(if after[..open].contains("align=\"center\"") {
+                TitleAlign::Middle
+            } else if after[..open].contains("align=\"right\"") {
+                TitleAlign::Right
+            } else {
+                TitleAlign::Left
+            });
         let inner = &after[open + 1..];
         let close = inner.find("</p>").unwrap_or(inner.len());
         let paragraph = &inner[..close];
@@ -901,6 +948,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
     let title = Title {
         kind: TitleKind::Scroll,
         align: Some(align),
+        anchor: None,
         text,
         style: TitleStyle {
             font,
@@ -1125,6 +1173,14 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     };
     let zoom = read_zoom(turned_by);
     let rotation = read_rotation(turned_by);
+    let (align, anchor) = if kind == TitleKind::Text {
+        (
+            style_from.align.filter(|a| *a != TitleAlign::Middle),
+            anchor_read(first),
+        )
+    } else {
+        (align, None)
+    };
     let size = style_from
         .points
         .map(|p| p / h)
@@ -1157,6 +1213,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let mut title = Title {
         kind,
         align,
+        anchor,
         text: lines.join("\n"),
         style: TitleStyle {
             font,
