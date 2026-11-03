@@ -331,7 +331,7 @@ fn seconds(v: &Value) -> String {
         .map_or_else(|| raw(v), |n| format!("{}s", trim(n)))
 }
 
-const STYLE: [(&str, &str); 25] = [
+const STYLE: [(&str, &str); 30] = [
     ("font", "Font"),
     ("size", "Size"),
     ("line_spacing", "Line Spacing"),
@@ -345,6 +345,11 @@ const STYLE: [(&str, &str); 25] = [
     ("background.color", "Background"),
     ("background.opacity", "Opacity"),
     ("background.off", "Background Off"),
+    ("shape.size", "Box Size"),
+    ("shape.center", "Box Center"),
+    ("shape.corner", "Box Corner"),
+    ("shape.outline_color", "Box Outline"),
+    ("shape.outline_width", "Box Outline Width"),
     ("shadow", "Shadow"),
     ("shadow.color", "Shadow Color"),
     ("shadow.opacity", "Shadow Opacity"),
@@ -361,9 +366,12 @@ const STYLE: [(&str, &str); 25] = [
 
 fn style_show(key: &str) -> Show<'static> {
     match key {
-        "size" | "background.opacity" | "shadow.opacity" | "margin" | "words.pop" => &percent,
-        "shadow.offset" => &percents,
-        "outline.size" | "shadow.blur" | "line_spacing" | "tracking" => &number,
+        "size" | "background.opacity" | "shadow.opacity" | "margin" | "words.pop"
+        | "shape.corner" => &percent,
+        "shadow.offset" | "shape.size" | "shape.center" => &percents,
+        "outline.size" | "shadow.blur" | "line_spacing" | "tracking" | "shape.outline_width" => {
+            &number
+        }
         "case" | "words.show" | "speaker_color" => &word,
         _ => &raw,
     }

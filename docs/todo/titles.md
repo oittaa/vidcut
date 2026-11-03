@@ -20,6 +20,11 @@
 - vidcut accepts -4096 to 4096 until then. The reason is that Resolve draws a line spacing of 2000 from a file.
 - Measure why Resolve's Inspector shows a tracking of 11 on an upper line when the file has none.
 
+## Background in the Inspector
+
+- The measurements of `shape` read files. Measure the range and the units of these controls in Resolve's Inspector.
+- vidcut uses the numbers of the file until then.
+
 ## Anchor of a lower third and a scroll
 
 - In vidcut, only a Text title has `anchor`.

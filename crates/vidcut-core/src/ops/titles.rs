@@ -3,7 +3,8 @@ use crate::keyframes::{PictureValue, plain_channel, title_keys_problem};
 use crate::looks::TitleLook;
 use crate::model::{
     Clip, Generator, Keyframe, LowerThirdLine, Picture, PositionHandles, Project, Title,
-    TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleShadow, TitleStyle, Track, TrackKind,
+    TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleShadow, TitleShape, TitleStyle, Track,
+    TrackKind,
 };
 
 use super::subtitles::{checked_background, checked_color, checked_font, checked_outline};
@@ -21,6 +22,11 @@ const TURNED: &str = "a title's rotation is degrees, from -100000 to 100000";
 const FADED: &str = "a title's opacity is from 0 to 1";
 const SPACED: &str = "a title's line spacing is from -4096 to 4096";
 const TRACKED: &str = "a title's tracking is from -4096 to 4096";
+const SHAPED: &str = "a background shape needs a background";
+const SHAPE_SIZE: &str = "a background's width and height are from 0 to 2";
+const SHAPE_CENTER: &str = "a background's center is from -4 to 4";
+const SHAPE_CORNER: &str = "a background's corner is from 0 to 1";
+const SHAPE_OUTLINE: &str = "a background's outline width is from 0 to 30";
 const SCROLL_SPACED: &str = "a scroll has no line spacing, tracking or case";
 const POSITION_HANDLED: &str =
     "a title's position keyframes take `ease`, not `in` or `out`: their handles are points";
@@ -181,6 +187,7 @@ pub fn checked(t: &Title) -> Result<Title> {
         color: checked_color(s.color.as_deref(), "title")?,
         outline: checked_outline(s.outline.as_ref())?,
         background: checked_background(s.background.as_ref())?,
+        shape: checked_shape(s)?,
         shadow: s.shadow.as_ref().map(checked_shadow).transpose()?,
     };
     Ok(Title {
@@ -201,6 +208,42 @@ pub fn checked(t: &Title) -> Result<Title> {
         opacity_keys: t.opacity_keys.clone(),
         upper,
     })
+}
+
+fn checked_shape(s: &TitleStyle) -> Result<Option<TitleShape>> {
+    let Some(shape) = s.shape.as_ref() else {
+        return Ok(None);
+    };
+    if s.background.is_none() {
+        return Err(Error::invalid(SHAPED));
+    }
+    let within = |v: f64, from: f64, to: f64| v.is_finite() && (from..=to).contains(&v);
+    if !shape.size.iter().all(|v| within(*v, 0.0, Title::BOX_MOST)) {
+        return Err(Error::invalid(SHAPE_SIZE));
+    }
+    let center = shape.center.unwrap_or([0.0, 0.0]);
+    if !center
+        .iter()
+        .all(|v| within(*v, -Picture::REACH, Picture::REACH))
+    {
+        return Err(Error::invalid(SHAPE_CENTER));
+    }
+    if !shape.corner.is_none_or(|v| within(v, 0.0, 1.0)) {
+        return Err(Error::invalid(SHAPE_CORNER));
+    }
+    if !shape
+        .outline_width
+        .is_none_or(|v| within(v, 0.0, Title::BOX_MOST_OUTLINE))
+    {
+        return Err(Error::invalid(SHAPE_OUTLINE));
+    }
+    Ok(Some(TitleShape {
+        size: shape.size,
+        center: shape.center.filter(|c| *c != [0.0, 0.0]),
+        corner: shape.corner,
+        outline_color: checked_color(shape.outline_color.as_deref(), "background outline")?,
+        outline_width: shape.outline_width.filter(|v| *v > 0.0),
+    }))
 }
 
 pub(crate) fn checked_shadow(s: &TitleShadow) -> Result<TitleShadow> {
