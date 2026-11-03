@@ -472,6 +472,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 
 Video Only and Audio Only limit what an edit takes (p. 694).
 
+The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). Cut, Dissolve and Smooth Cut are at the right of this row (p. 758). A tooltip gives the name of each icon.
+
 ### 7.1 Smart Indicator (p. 696)
 - A marker on the ruler shows the edit point nearest the playhead.
 - Some functions use this edit point instead of the exact playhead frame.
