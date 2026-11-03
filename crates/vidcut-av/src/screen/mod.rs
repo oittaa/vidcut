@@ -1059,7 +1059,7 @@ impl Mixing {
         let (w, h) = (f64::from(size.0), f64::from(size.1));
         let whole = [1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0];
         gpu.queue
-            .write_buffer(&params, 0, &lettering_of(whole, 1.0, None, None));
+            .write_buffer(&params, 0, &lettering_of(whole, KEEP_ALL, 1.0, None, None));
         let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("vidcut dissolve"),
             layout: &gpu.lettering_layout,
@@ -1321,7 +1321,14 @@ impl Letters {
         let map = placing
             .as_ref()
             .map_or(own, |l| chain(&l.inner(frame), &own));
-        let bytes = lettering_of(map, f64::from(t.alpha), placing.as_ref(), colors);
+        let keep = if t.turn[3] == 0.0 {
+            KEEP_ALL
+        } else {
+            let (left, top) = (f64::from(p.left + t.dx), f64::from(p.top + t.dy));
+            let (pw, ph) = (f64::from(p.width.max(1)), f64::from(p.height.max(1)));
+            [-left / pw, -top / ph, (fw - left) / pw, (fh - top) / ph]
+        };
+        let bytes = lettering_of(map, keep, f64::from(t.alpha), placing.as_ref(), colors);
         gpu.queue.write_buffer(&self.params, 0, &bytes);
     }
 }
@@ -3286,7 +3293,8 @@ const PER_LEVEL: usize = 5;
 
 const PARAMS: usize = (15 + PER_LEVEL * LEVELS) * 16;
 
-const LETTERING: usize = (3 + PER_LEVEL * LEVELS) * 16;
+const LETTERING: usize = (4 + PER_LEVEL * LEVELS) * 16;
+const KEEP_ALL: [f64; 4] = [-1e6, -1e6, 1e6, 1e6];
 
 fn halvings(
     picture: &Picture,
@@ -3379,6 +3387,7 @@ fn level_floats(levels: &[Level]) -> Vec<f64> {
 
 fn lettering_of(
     map: [f64; 8],
+    keep: [f64; 4],
     alpha: f64,
     placing: Option<&Placing>,
     colors: Option<Hdr>,
@@ -3400,6 +3409,7 @@ fn lettering_of(
         transfer,
         0.0,
     ];
+    floats.extend(keep);
     floats.extend(level_floats(levels));
     floats
         .into_iter()

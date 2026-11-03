@@ -623,6 +623,7 @@ struct Lettering {
     across: vec4<f32>,
     down: vec4<f32>,
     tilt: vec4<f32>,
+    keep: vec4<f32>,
     levels: array<vec4<f32>, 5u * LEVELS>,
 };
 
@@ -664,7 +665,9 @@ fn fs_title(in: Out) -> @location(0) vec4<f32> {
             let q = at + across * o.x + down * o.y;
             let t = q * size;
             let e = clamp(t + 0.5, vec2<f32>(0.0), vec2<f32>(1.0)) * clamp(size + 0.5 - t, vec2<f32>(0.0), vec2<f32>(1.0));
-            sum += textureSampleLevel(letters, bilinear, q, 0.0) * (e.x * e.y);
+            let kept = clamp((q - lettering.keep.xy) * size + 0.5, vec2<f32>(0.0), vec2<f32>(1.0))
+                * clamp((lettering.keep.zw - q) * size + 0.5, vec2<f32>(0.0), vec2<f32>(1.0));
+            sum += textureSampleLevel(letters, bilinear, q, 0.0) * (e.x * e.y * kept.x * kept.y);
         }
     }
     var shown = sum / f32(taps.x * taps.y);
