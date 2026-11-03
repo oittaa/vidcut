@@ -925,7 +925,7 @@ fn title_block(
     let look = Look {
         font: t.style.font.as_deref(),
         size,
-        line: Title::LINE as f32,
+        line: t.line_spacing(timeline) as f32,
         wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
         align: match t.align() {
             TitleAlign::Left => Align::Left,

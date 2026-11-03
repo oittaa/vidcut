@@ -1129,19 +1129,20 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The text rises at a steady speed.
     - How far it goes past the height of the frame changes with the text size and the picture size. It is 1.9 to 2.9 times the text size.
     - Thus the text leaves the top before the clip ends.
-    - Its lines are 1.5 to 1.9 times the text size apart, by font and size.
+    - The spacing of its lines changes with the font. Per point of text it is 1.815 for Open Sans, 1.76 for Segoe UI, 1.54 for Times New Roman and 1.48 for Arial.
     - Its default lines align left, at 1% of the width of the picture.
     - Its text box stays at 51% of the width when the alignment changes. Thus its middle alignment is 1% right of the middle, and its right alignment goes 1% past the right edge and cuts the last letters.
 - **vidcut:**
   - A `scroll` title rises at a steady speed.
   - It starts just below the picture at the first frame of the clip. It ends just above the picture at the last frame.
-  - Its lines are 1.31 times their size apart, as in other titles (D65).
+  - Its lines have the spacing of Open Sans in every font (D65).
   - Its middle alignment is at the middle of the picture. Its right alignment ends at 99% of the width.
 - **Why:**
   - Credits need a scroll that uses the full clip, and that starts and ends clear of the picture.
   - Its speed comes from the length of the clip alone.
   - The distance in Resolve cannot be found from the size of the text and of the picture.
   - A right alignment that cuts letters is a fault in Resolve.
+  - Resolve's spacing for four fonts gives no rule for all fonts.
 
 ## X56. Create Subtitles from Audio reads each clip's file
 
