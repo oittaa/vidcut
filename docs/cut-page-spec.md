@@ -235,12 +235,23 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - The start timecode of the whole is the earliest angle.
   - By `in` or `out`, the marks of the items line up. The start timecode of the whole is 01:00:00:00.
   - An item with marks uses only the frames between them. The shift stays.
-  - `full_extents` uses each whole file and ignores its marks.
+  - `full_extents` uses each whole file. By `in` or `out`, its marks only line it up.
   - No measurement settles these cases, so `multicam.layout` refuses them:
     - a still, or an item with no picture
     - an item that the request names twice
-    - an item with one mark only
-    - `full_extents` with `in` or `out`
+    - without `full_extents`, an item with one mark only
+    - by `in` or `out`, an item without that mark
+- **Synced group** (p. 708):
+  - `multicam.create` stores files as a synced group, a pool item with the name "Media Sync", the date and the time. `name` gives another name.
+  - Each file stays whole, as in `multicam.layout` with `full_extents`. Its marks and its start timecode do not change.
+  - The files stay in their bins. `bin` tells where the group goes, and the top level is the default.
+  - `multicam.list` gives each group with its layout. `media.get` and `media.list` give `group` for a file in a group.
+  - `multicam.rename` and `multicam.move` act on the group. `multicam.remove` removes the group, and its files stay.
+  - No measurement settles these cases, so vidcut refuses them:
+    - a group of one file
+    - a file in two groups
+    - `media.remove` of a file in a group
+  - No command places a group on the timeline. No window shows a group yet.
 - **Input Color Space** (pp. 228, 230):
   - The color tags of a file tell how to read the colors of its pictures.
   - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.

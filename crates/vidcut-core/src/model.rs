@@ -44,6 +44,10 @@ pub struct Project {
     /// (`Interviews`, `Interviews/Day 1`), sorted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bins: Vec<String>,
+    /// Synced groups: pool items that line up whole files (`multicam.create`).
+    /// Left out while there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<SyncGroup>,
     /// Who speaks: names, the files' speakers joined as one person, and
     /// words given to another (`speakers.*`).
     #[serde(default, skip_serializing_if = "Speakers::is_empty")]
@@ -287,6 +291,29 @@ pub fn proxy_size(width: u32, height: u32, longest: u32) -> (u32, u32) {
     let scale = f64::from(longest) / f64::from(w.max(h));
     let even = |v: f64| (v.round() as u32).max(2) & !1;
     (even(f64::from(w) * scale), even(f64::from(h) * scale))
+}
+
+/// A pool item that holds angles of one moment: whole files, lined up.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SyncGroup {
+    /// `g<N>`, never reused.
+    pub id: String,
+    pub name: String,
+    /// The bin it is in (a path from [`Project::bins`]); empty: the top level.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub bin: String,
+    /// The timecode of its first frame, as a frame count from 00:00:00:00.
+    pub start: i64,
+    /// Its files, in angle order. A file is in one group at most.
+    pub angles: Vec<GroupAngle>,
+}
+
+/// A file of a synced group.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GroupAngle {
+    pub media: String,
+    /// The frame of the group at which the file's first frame lies.
+    pub at: i64,
 }
 
 /// A file in the media pool.
@@ -4302,6 +4329,7 @@ pub struct NextIds {
     pub transition: u64,
     #[serde(default = "first_id")]
     pub cue: u64,
+    pub group: u64,
 }
 
 fn first_id() -> u64 {
@@ -4326,10 +4354,22 @@ impl Project {
                 marker: 1,
                 transition: 1,
                 cue: 1,
+                group: 1,
             },
             bins: Vec::new(),
+            groups: Vec::new(),
             speakers: Default::default(),
         }
+    }
+
+    pub fn group(&self, id: &str) -> Option<&SyncGroup> {
+        self.groups.iter().find(|g| g.id == id)
+    }
+
+    pub fn group_of(&self, media: &str) -> Option<&SyncGroup> {
+        self.groups
+            .iter()
+            .find(|g| g.angles.iter().any(|a| a.media == media))
     }
 
     pub fn track_index(&self, id: &str) -> Option<usize> {
@@ -4457,6 +4497,12 @@ impl Project {
     pub fn alloc_media_id(&mut self) -> String {
         let id = format!("m{}", self.next_id.media);
         self.next_id.media += 1;
+        id
+    }
+
+    pub fn new_group_id(&mut self) -> String {
+        let id = format!("g{}", self.next_id.group);
+        self.next_id.group += 1;
         id
     }
 

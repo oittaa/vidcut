@@ -1086,6 +1086,7 @@ pub fn export_drawn(
             settings: p.settings.clone(),
             media: p.media.iter().map(|m| written(m, locations)).collect(),
             bins: p.bins.clone(),
+            groups: p.groups.clone(),
             tape_marks: p.tape_marks.clone(),
             next_id: p.next_id.clone(),
             subtitles: p.subtitles.clone(),
@@ -1542,6 +1543,8 @@ pub struct ProjectMeta {
     pub settings: crate::model::Settings,
     pub media: Vec<Media>,
     pub bins: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<crate::model::SyncGroup>,
     pub tape_marks: crate::model::TapeMarks,
     pub next_id: crate::model::NextIds,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
