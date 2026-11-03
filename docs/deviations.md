@@ -2311,3 +2311,33 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A title draws the same from any source: as a title typed in the Inspector.
 - **Why:**
   - The edge is a fault in the reader. The manual does not name it, and the author of the title never set it.
+
+## X113. Source Overwrite starts where the file starts
+
+- **Resolve:**
+  - With timeline marks, the clip keeps the marked length before the file's start. These are measurements in Resolve Studio 21.1.2.
+  - The clip holds the file's first frame for the frames before the file starts. With marks that end before the file's start, the whole clip is that frame.
+  - Its OTIO export does not hold this offset. The OTIO alone thus places the file early.
+  - At the file's end, the clip stops.
+- **vidcut:**
+  - The clip starts where the file starts. It holds no frozen frame.
+  - At the file's end, the clip stops, as in Resolve.
+  - When nothing of the marked range is left, the edit writes nothing ([X114](#x114-source-overwrite-tells-when-it-writes-nothing)).
+- **Why:**
+  - Source Overwrite makes a synced cutaway. A frozen frame is not in sync with the timeline.
+  - The file also keeps its place in an OTIO export.
+  - The owner approved this difference.
+
+## X114. Source Overwrite tells when it writes nothing
+
+- **Resolve:**
+  - With no overlapping timecode, the edit does nothing (p. 700).
+  - These are measurements in Resolve Studio 21.1.2: the timeline, the marks and the playhead do not change, and no message comes. An empty timeline acts the same.
+- **vidcut:**
+  - The timeline, the marks and the playhead do not change.
+  - The request returns the error `INVALID_EDIT` for the CLI, IPC and MCP.
+  - The window shows a short message.
+- **Why:**
+  - A button that does nothing looks broken.
+  - A script needs to know that no clip went in.
+  - The owner approved this difference.

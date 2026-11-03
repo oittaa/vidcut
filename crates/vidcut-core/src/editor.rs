@@ -2910,6 +2910,38 @@ fn mutate(
             v["track"] = json!(track);
             v
         }
+        Request::EditSourceOverwrite { source: src, at } => {
+            if src.track.is_some() {
+                return Err(Error::usage(
+                    "Source Overwrite picks its own track; leave out `track`",
+                ));
+            }
+            if src.tape {
+                return Err(Error::usage("Source Overwrite takes one media item"));
+            }
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            let source = source(p, src)?;
+            let marks = &p
+                .media(&source.media)
+                .expect("source checked the media")
+                .marks;
+            if src.range.is_none() && marks.mark_in.is_none() && marks.mark_out.is_some() {
+                return Err(Error::invalid(
+                    "Source Overwrite can't use a source Out mark with no In",
+                ));
+            }
+            let marked = src.range.is_some() || marks.mark_in.is_some() || marks.mark_out.is_some();
+            let placed = ops::source_overwrite(p, &source, marked, at)?;
+            json!({
+                "clip": placed.clip,
+                "track": placed.track,
+                "reference": placed.reference,
+                "playhead": placed.playhead,
+            })
+        }
         Request::EditRippleOverwrite {
             source: src,
             at,
