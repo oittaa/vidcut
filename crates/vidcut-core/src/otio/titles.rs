@@ -274,7 +274,7 @@ fn span_html(text: &str, look: &Look, word_start: bool, base: &Base) -> String {
         .color
         .as_deref()
         .map_or_else(|| base.color.to_string(), str::to_string);
-    let weight = if look.bold { 700 } else { 400 };
+    let weight = if look.bold { 600 } else { 400 };
     let italic = if look.italic {
         " font-style:italic;"
     } else {
