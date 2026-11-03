@@ -472,6 +472,11 @@ impl Env for AvEnv {
             .unwrap_or_default()
     }
 
+    fn local_stamp(&self) -> String {
+        crate::when::local_time(crate::when::now_ms())
+            .map_or_else(String::new, |t| t.full().replacen(' ', "-", 1))
+    }
+
     fn proxy_dir(&self) -> PathBuf {
         let dir = self.project_dir.clone().unwrap_or_else(paths::cache_dir);
         crate::preferences::load()

@@ -124,13 +124,40 @@ pub enum Request {
     #[serde(rename = "multicam.layout")]
     MulticamLayout {
         media: OneOrMany<String>,
-        /// `timecode`, or `in` or `out`, for items that all have marks.
+        /// `timecode`, or `in` or `out`, for items that all have that mark.
         #[serde(default)]
         sync: crate::model::AngleSync,
-        /// Use each whole file and ignore its marks. It needs `timecode`.
+        /// Use each whole file. Its marks only line it up.
         #[serde(default)]
         full_extents: bool,
     },
+    /// Store files as a synced group, a pool item that lines them up. Each
+    /// file stays whole and its marks stay. A file is in one group at most.
+    /// Returns the group.
+    #[serde(rename = "multicam.create")]
+    MulticamCreate {
+        media: OneOrMany<String>,
+        /// `timecode`, or `in` or `out`, for items that all have that mark.
+        #[serde(default)]
+        sync: crate::model::AngleSync,
+        /// Default: `Media Sync` with the date and the time.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// Into this bin (default: the top level).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bin: Option<String>,
+    },
+    /// The synced groups: for each its `id`, `name`, `bin`,
+    /// `start_timecode`, `frames` and `angles`.
+    #[serde(rename = "multicam.list")]
+    MulticamList {},
+    /// Remove a synced group from the pool. Its files stay.
+    #[serde(rename = "multicam.remove")]
+    MulticamRemove { group: String },
+    #[serde(rename = "multicam.rename")]
+    MulticamRename { group: String, name: String },
+    #[serde(rename = "multicam.move")]
+    MulticamMove { group: String, bin: String },
     /// Remove from the pool; `force` also deletes the clips that use it.
     #[serde(rename = "media.remove")]
     MediaRemove {
@@ -4402,6 +4429,7 @@ impl Request {
                     | Self::MediaGet { .. }
                     | Self::MediaDetails { .. }
                     | Self::MulticamLayout { .. }
+                    | Self::MulticamList {}
                     | Self::Probe { .. }
                     | Self::TimelineGet { .. }
                     | Self::TimelineAt { .. }

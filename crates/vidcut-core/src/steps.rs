@@ -313,6 +313,7 @@ pub fn category(kind: &str) -> &'static str {
         }
         k if k.starts_with("media.")
             || k.starts_with("bins.")
+            || k.starts_with("multicam.")
             || k.starts_with("proxy.")
             || k == "timeline.import" =>
         {
@@ -735,7 +736,11 @@ pub fn since(before: &Project, after: &Project) -> Since {
         media: Counts::of(
             before.media.iter().map(|m| (m.id.as_str(), m)),
             after.media.iter().map(|m| (m.id.as_str(), m)),
-        ),
+        )
+        .plus(Counts::of(
+            before.groups.iter().map(|g| (g.id.as_str(), g)),
+            after.groups.iter().map(|g| (g.id.as_str(), g)),
+        )),
         tracks: Counts::of(
             bare(before).iter().map(|t| (t.id.as_str(), t)),
             bare(after).iter().map(|t| (t.id.as_str(), t)),

@@ -207,6 +207,8 @@ pub trait Env {
 
     fn proxy_dir(&self) -> PathBuf;
 
+    fn local_stamp(&self) -> String;
+
     fn generate_proxy(
         &self,
         media: &Media,
@@ -1568,11 +1570,15 @@ fn diff(before: &Project, after: &Project) -> Changes {
         Clip(&'a str, &'a Clip),
         Marker(&'a crate::model::Marker),
         Cue(&'a str, &'a crate::model::Cue),
+        Group(&'a crate::model::SyncGroup),
     }
     fn index(p: &Project) -> HashMap<&str, Named<'_>> {
         let mut m = HashMap::new();
         for media in &p.media {
             m.insert(media.id.as_str(), Named::Media(media));
+        }
+        for g in &p.groups {
+            m.insert(g.id.as_str(), Named::Group(g));
         }
         for t in &p.tracks {
             for c in &t.clips {
@@ -2608,9 +2614,41 @@ fn mutate(
             ops::rename_bin(p, path, to)?;
             Value::Null
         }
+        Request::MulticamCreate {
+            media,
+            sync,
+            name,
+            bin,
+        } => {
+            let name = name
+                .clone()
+                .unwrap_or_else(|| format!("Media Sync {}", env.local_stamp()));
+            let bin = bin.as_deref().unwrap_or_default();
+            let id = crate::multicam::create(p, &media.to_vec(), *sync, name, bin)?;
+            let g = p.group(&id).expect("just made");
+            crate::multicam::group_json(p, g)
+        }
+        Request::MulticamRemove { group } => {
+            crate::multicam::remove(p, group)?;
+            Value::Null
+        }
+        Request::MulticamRename { group, name } => {
+            crate::multicam::group_mut(p, group)?.name = name.clone();
+            Value::Null
+        }
+        Request::MulticamMove { group, bin } => {
+            crate::multicam::move_to_bin(p, group, bin)?;
+            Value::Null
+        }
         Request::MediaRemove { media, force } => {
             p.media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+            if let Some(g) = p.group_of(media) {
+                return Err(Error::invalid(format!(
+                    "{media} is in the synced group {}; remove the group first",
+                    g.name
+                )));
+            }
             let users: Vec<String> = p
                 .tracks
                 .iter()
@@ -5083,6 +5121,16 @@ fn find_media<'a>(
     Ok((ids, media))
 }
 
+fn groups_to_rate(p: &mut Project, from: Rational) {
+    let to = p.settings.fps;
+    for g in &mut p.groups {
+        g.start = rescale(g.start, from, to);
+        for a in &mut g.angles {
+            a.at = rescale(a.at, from, to);
+        }
+    }
+}
+
 fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
     let pool: HashMap<&str, &Media> = p.media.iter().map(|m| (m.id.as_str(), m)).collect();
     let (from, to) = (t.fps, p.settings.fps);
@@ -5970,6 +6018,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
         if !adopt_rate {
             p.settings.set_fps(rate);
         }
+        groups_to_rate(p, rate);
         p.settings.auto_format = false;
     }
     if t.fps != p.settings.fps {
@@ -6158,6 +6207,7 @@ pub fn open_otio(
     p.next_id = meta.next_id;
     p.media = meta.media;
     p.bins = meta.bins;
+    p.groups = meta.groups;
     p.tape_marks = meta.tape_marks;
     p.subtitles = meta.subtitles;
     p.settings.start_tc = t.start_tc;
@@ -6335,7 +6385,9 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
                 "the frame rate can only change while the timeline is empty",
             ));
         }
+        let rate = p.settings.fps;
         p.settings.set_fps(fps);
+        groups_to_rate(p, rate);
         p.settings.auto_format = false;
     }
     if set.width.is_some() || set.height.is_some() {
@@ -6595,6 +6647,7 @@ pub fn query(
                 "track": t.id, "name": t.display_name(), "cues": t.cues.len(), "shown": t.shown,
             })).collect::<Vec<_>>(),
             "bins": p.bins,
+            "groups": p.groups.len(),
             "tape_marks": p.tape_marks,
         }),
         Request::MediaList {} => {
@@ -6626,6 +6679,14 @@ pub fn query(
                 *sync,
                 *full_extents
             )?)
+        }
+        Request::MulticamList {} => {
+            json!(
+                p.groups
+                    .iter()
+                    .map(|g| crate::multicam::group_json(p, g))
+                    .collect::<Vec<_>>()
+            )
         }
         Request::MediaGet { media } => {
             let m = p
@@ -8139,6 +8200,9 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
     }
     if let Some(c) = &m.camera {
         v["camera"] = json!(c);
+    }
+    if let Some(g) = p.group_of(&m.id) {
+        v["group"] = json!(g.id);
     }
     if !m.color_space.is_tagged() {
         v["color_space"] = json!(m.color_space);

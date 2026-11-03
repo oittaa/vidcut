@@ -2652,6 +2652,11 @@ pub fn remove_bin(p: &mut Project, path: &str) -> Result<()> {
             m.bin = parent.clone();
         }
     }
+    for g in &mut p.groups {
+        if within(&g.bin, path) {
+            g.bin = parent.clone();
+        }
+    }
     Ok(())
 }
 
@@ -2677,6 +2682,11 @@ pub fn rename_bin(p: &mut Project, path: &str, to: &str) -> Result<()> {
     for m in &mut p.media {
         if within(&m.bin, path) {
             m.bin = rebase(&m.bin);
+        }
+    }
+    for g in &mut p.groups {
+        if within(&g.bin, path) {
+            g.bin = rebase(&g.bin);
         }
     }
     add_bin(p, to)?;

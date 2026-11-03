@@ -17,11 +17,12 @@ The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-
 - `VideoInfo.vfr` records a variable frame rate. The reader still follows presentation time.
 - Waveforms draw on clips.
 - `multicam.layout` works out where angles lie, by timecode or marks. It stores nothing.
-- No command stores a synced group. No command switches angles.
+- `multicam.create` stores a synced group, a pool item.
+- No command switches angles.
 
 **To do:**
 
-- Add `multicam.create`, which stores the layout. A synced group is a pool item that opens in the Sync Clips window (p. 708).
+- Open a group in the Sync Clips window (p. 708).
 - For the Edit page stage, open a multicam clip as a timeline (p. 1040).
 - Read the Sync Bin in the Cut page chapters, then measure it in Resolve.
 - Record how angles sync, and how a cut chooses an angle.

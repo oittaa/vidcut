@@ -257,6 +257,10 @@ impl Env for FakeEnv {
         PathBuf::from("/proxies")
     }
 
+    fn local_stamp(&self) -> String {
+        "2026-01-01-00:00:00".into()
+    }
+
     fn proxy_rules(&self) -> crate::preferences::Proxies {
         self.proxy_rules.clone()
     }

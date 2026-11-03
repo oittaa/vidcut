@@ -46,6 +46,18 @@ pub fn describe_at(
         "tape.marks.set" => format!("Source Tape marks: {}", d.in_out()),
         "tape.marks.clear" => "Clear the Source Tape marks".into(),
         "media.move" => format!("Move {} to bin {}", d.media("media"), d.bin("bin")),
+        "multicam.create" => format!("Sync {}", d.media("media")),
+        "multicam.remove" => format!("Remove synced group {}", d.text("group")),
+        "multicam.rename" => format!(
+            "Rename synced group {} to {}",
+            d.text("group"),
+            d.text("name")
+        ),
+        "multicam.move" => format!(
+            "Move synced group {} to bin {}",
+            d.text("group"),
+            d.bin("bin")
+        ),
         "proxy.generate" if d.flag("auto") => format!(
             "Make proxies by themselves: {}",
             d.media_or("media", "the pool")

@@ -166,7 +166,10 @@ Multicam layout:
 
 - `multicam::layout` works out where the angles of a multicam clip lie (spec §3).
 - It works in frames at the project's rate. A start timecode at another rate rounds down (`StartTimecode::frames_at`).
-- The project stores nothing. `Layout` is only the answer to `multicam.layout`.
+- `Layout` is the answer to `multicam.layout`.
+- `Project.groups` stores `SyncGroup`, the result of `multicam.create`. It is a list beside `Project.media`, because a group has no file.
+- A `GroupAngle` stores only the media and `at`, since each file stays whole. `multicam.list` works out `frames` from the media.
+- `start` and `at` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
 
 Media fields:
 

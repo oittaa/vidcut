@@ -172,6 +172,23 @@ pub fn violations(p: &Project) -> Vec<String> {
     if p.track("V1").is_none() {
         v.push("no track V1".into());
     }
+    let mut grouped = HashSet::new();
+    for g in &p.groups {
+        if !ids.insert(g.id.as_str()) {
+            v.push(format!("duplicate id {}", g.id));
+        }
+        if !g.bin.is_empty() && !p.bins.contains(&g.bin) {
+            v.push(format!("group {} is in unknown bin {:?}", g.id, g.bin));
+        }
+        for a in &g.angles {
+            if !pool.contains_key(a.media.as_str()) {
+                v.push(format!("group {} uses unknown media {}", g.id, a.media));
+            }
+            if !grouped.insert(a.media.as_str()) {
+                v.push(format!("media {} is in two groups", a.media));
+            }
+        }
+    }
     for m in &p.media {
         if !m.bin.is_empty() && !p.bins.contains(&m.bin) {
             v.push(format!("{} is in unknown bin {:?}", m.id, m.bin));
