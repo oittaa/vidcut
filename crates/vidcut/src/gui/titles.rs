@@ -55,6 +55,7 @@ pub struct TitleDialog {
     text: String,
     fields: TextFields,
     line_spacing: String,
+    tracking: String,
     line: LineFields,
     upper: LineFields,
     title_opacity: String,
@@ -104,6 +105,7 @@ impl TitleDialog {
             text: String::new(),
             fields: TextFields::default(),
             line_spacing: String::new(),
+            tracking: String::new(),
             line: LineFields::default(),
             upper: LineFields::default(),
             title_opacity: String::new(),
@@ -134,6 +136,7 @@ impl TitleDialog {
         self.text = t.text.clone();
         self.fields = TextFields::load(&Parts::of_title(&t.style));
         self.line_spacing = plain(t.style.line_spacing);
+        self.tracking = plain(t.style.tracking);
         self.base = Some(t.clone());
         self.line = LineFields::of(t);
         self.upper = LineFields::of_upper(t);
@@ -240,6 +243,7 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     let was = Parts::of_title(&stored.style);
     let mut style = d.fields.refilled(&was).parts(&was, None)?.title();
     style.line_spacing = kept_plain(&d.line_spacing, stored.style.line_spacing, "line spacing")?;
+    style.tracking = kept_plain(&d.tracking, stored.style.tracking, "tracking")?;
     let lower = line_of(d, &d.line, stored)?;
     let high = stored.upper_view();
     let upper = line_of(d, &d.upper, &high)?;
@@ -614,7 +618,7 @@ impl Workspace {
                     "title",
                     &d.families,
                     &Usual::title(&size_hint),
-                    (!scroll).then_some(&mut d.line_spacing),
+                    (!scroll).then_some((&mut d.tracking, &mut d.line_spacing)),
                 )
                 .0;
             let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {

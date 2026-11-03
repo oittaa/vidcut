@@ -197,6 +197,7 @@ struct Look<'a> {
     line: f32,
     title_gap: Option<(&'a Title, f64)>,
     spacing: (f32, f32),
+    tracking: f32,
     wrap: f32,
     align: Align,
     ink: [u8; 3],
@@ -566,6 +567,11 @@ fn lay_out(look: &Look) -> Option<Laid> {
                 let px = r.look.size.map_or(size, |s| (s as f32 * per).max(1.0));
                 let gap = line_gap(&mut f.system, look, &a, px);
                 a = a.metrics(Metrics::new(px, gap));
+                let tracking = r.look.tracking.map_or(look.tracking, |t| t as f32);
+                if tracking != 0.0 {
+                    let pixels = tracking * Title::TRACKING_PIXEL as f32 * look.spacing.1;
+                    a = a.letter_spacing(pixels / px);
+                }
                 (r.text.clone(), a)
             })
             .collect(),
@@ -807,6 +813,7 @@ fn block(
         line: SubtitleStyle::LINE as f32,
         title_gap: None,
         spacing: (0.0, 0.0),
+        tracking: 0.0,
         wrap: (style.wrap_width(w, h) as f32).max(size),
         align: text_align(style),
         ink: style.ink(),
@@ -1009,6 +1016,7 @@ fn title_block(
             t.style.line_spacing.unwrap_or(0.0) as f32,
             (pixel * zoom) as f32,
         ),
+        tracking: t.style.tracking.unwrap_or(0.0) as f32,
         wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
         align: match t.align() {
             TitleAlign::Left => Align::Left,

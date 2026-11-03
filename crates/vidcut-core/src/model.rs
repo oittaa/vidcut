@@ -1975,10 +1975,11 @@ pub struct Title {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<TitleAnchor>,
     /// Its lines, separated by `\n`: two at most for a lower third. `<b>`,
-    /// `<i>`, `<u>` and `<font color="…" face="…" size="…" spacing="…">`
-    /// style the words between them apart from the rest, `size` a fraction of
-    /// the picture height like the style's, `spacing` the line spacing of
-    /// their line; `&lt;`, `&gt;` and `&amp;` stand for `<`, `>` and `&`.
+    /// `<i>`, `<u>` and `<font color="…" face="…" size="…" spacing="…"
+    /// tracking="…">` style the words between them apart from the rest, `size`
+    /// a fraction of the picture height like the style's, `spacing` the line
+    /// spacing of their line, `tracking` like the style's; `&lt;`, `&gt;` and
+    /// `&amp;` stand for `<`, `>` and `&`.
     pub text: String,
     #[serde(default, skip_serializing_if = "TitleStyle::is_empty")]
     pub style: TitleStyle,
@@ -2194,6 +2195,10 @@ pub struct TitleStyle {
     /// Below the last line, it only makes the block taller. Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line_spacing: Option<f64>,
+    /// Space after each letter, from -4096 to 4096. One unit is 3/4 of a pixel
+    /// of the timeline. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracking: Option<f64>,
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -2273,6 +2278,7 @@ pub fn size_fits(v: f64, most: u32) -> bool {
 impl Title {
     pub const MOST_SIZE: u32 = 4096;
     pub const MOST_SPACING: f64 = 4096.0;
+    pub const TRACKING_PIXEL: f64 = 0.75;
     pub const LINE: f64 = 1.31;
     pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;
@@ -4345,6 +4351,7 @@ impl Hash for TitleStyle {
             font,
             size,
             line_spacing,
+            tracking,
             color,
             outline,
             background,
@@ -4354,6 +4361,7 @@ impl Hash for TitleStyle {
             font,
             floats_bits(*size),
             floats_bits(*line_spacing),
+            floats_bits(*tracking),
             color,
             outline,
             background,

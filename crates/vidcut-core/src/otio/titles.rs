@@ -263,6 +263,7 @@ struct Base<'a> {
     size: f64,
     height: f64,
     color: &'a str,
+    tracking: f64,
 }
 
 fn span_html(text: &str, look: &Look, base: &Base) -> String {
@@ -283,8 +284,12 @@ fn span_html(text: &str, look: &Look, base: &Base) -> String {
     } else {
         ""
     };
+    let tracked = match look.tracking.unwrap_or(base.tracking) {
+        0.0 => String::new(),
+        t => format!(" letter-spacing:{}px;", number(t)),
+    };
     format!(
-        "<span style=\" font-family:'{family}'; font-size:{}pt; font-weight:{weight};{italic}{under} \
+        "<span style=\" font-family:'{family}'; font-size:{}pt; font-weight:{weight};{italic}{under}{tracked} \
          color:{color};\">{}</span>",
         number(points),
         escaped(text)
@@ -441,6 +446,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
         size,
         height: f64::from(height),
         color: &color,
+        tracking: t.style.tracking.unwrap_or(0.0),
     };
     let align = match t.align() {
         TitleAlign::Left => None,
@@ -694,6 +700,7 @@ struct Styled {
     bold: bool,
     italic: bool,
     underline: bool,
+    tracking: f64,
 }
 
 #[derive(Debug, Default)]
@@ -718,11 +725,17 @@ fn styled(style: &str) -> Styled {
             .is_some_and(|w| w >= 600),
         italic: style_value(style, "font-style") == Some("italic"),
         underline: style_value(style, "text-decoration").is_some_and(|d| d.contains("underline")),
+        tracking: style_value(style, "letter-spacing")
+            .and_then(|s| s.strip_suffix("px"))
+            .and_then(|s| s.trim().parse().ok())
+            .filter(|v| Title::spacing_fits(*v))
+            .unwrap_or(0.0),
     }
 }
 
 fn markup(
     spacing: Option<f64>,
+    tracking: f64,
     line: &[(String, Styled)],
     family: Option<&str>,
     points: Option<f64>,
@@ -738,6 +751,7 @@ fn markup(
                 italic: st.italic,
                 underline: st.underline,
                 spacing,
+                tracking: (st.tracking != tracking).then_some(st.tracking),
                 color: st
                     .color
                     .as_deref()
@@ -966,6 +980,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
             font,
             size,
             line_spacing: None,
+            tracking: None,
             color,
             outline: Some(SubtitleOutline {
                 color: None,
@@ -1147,13 +1162,14 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let first = *texts.first()?;
     let read_of = |g: &Value| read_html(value(g, "title blob").as_str().unwrap_or(""));
     let h = f64::from(height.max(1));
-    let marked = |r: &Read, base: &Read, usual: f64| -> Vec<String> {
+    let marked = |r: &Read, base: &Read, usual: f64, tracked: f64| -> Vec<String> {
         r.lines
             .iter()
             .enumerate()
             .map(|(i, l)| {
                 markup(
                     r.spacings.get(i).copied().flatten().filter(|v| *v != usual),
+                    tracked,
                     l,
                     base.family.as_deref(),
                     base.points,
@@ -1164,6 +1180,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             .collect()
     };
     let mut line_spacing = None;
+    let mut tracking = None;
     let (lines, style_from, at, lowered, turned_by) = match kind {
         TitleKind::Scroll => return None,
         TitleKind::Text => {
@@ -1176,7 +1193,15 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
                 0.0
             };
             line_spacing = (usual != 0.0).then_some(usual);
-            (marked(&r, &r, usual), r, at, None, first)
+            let mut spans = r.lines.iter().flatten().map(|(_, st)| st.tracking);
+            let shared = spans.next().unwrap_or(0.0);
+            let tracked = if spans.all(|t| t == shared) {
+                shared
+            } else {
+                0.0
+            };
+            tracking = (tracked != 0.0).then_some(tracked);
+            (marked(&r, &r, usual, tracked), r, at, None, first)
         }
         TitleKind::LowerThird => {
             let (upper, lower) = upper_lower(&texts)?;
@@ -1185,7 +1210,12 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             let style_from = if high.points.is_some() { high } else { low };
             let low = read_of(lower);
             let high = upper.map(read_of).unwrap_or_default();
-            let text = |r: &Read, usual| marked(r, &style_from, usual).join(" ").trim().to_string();
+            let text = |r: &Read, usual| {
+                marked(r, &style_from, usual, 0.0)
+                    .join(" ")
+                    .trim()
+                    .to_string()
+            };
             let lines: Vec<String> = [text(&high, 1.0), text(&low, 0.0)]
                 .into_iter()
                 .filter(|l| !l.is_empty())
@@ -1242,6 +1272,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             font,
             size,
             line_spacing,
+            tracking,
             color,
             outline,
             background,

@@ -10,6 +10,7 @@ pub struct Look {
     pub face: Option<String>,
     pub size: Option<f64>,
     pub spacing: Option<f64>,
+    pub tracking: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +29,7 @@ enum Open {
         face: Option<String>,
         size: Option<f64>,
         spacing: Option<f64>,
+        tracking: Option<f64>,
     },
 }
 
@@ -97,6 +99,9 @@ fn tag(s: &str) -> Option<(bool, Option<Open>, usize)> {
             spacing: attribute(rest, "spacing")
                 .and_then(|s| s.trim().parse().ok())
                 .filter(|s| Title::spacing_fits(*s)),
+            tracking: attribute(rest, "tracking")
+                .and_then(|s| s.trim().parse().ok())
+                .filter(|s| Title::spacing_fits(*s)),
         },
         _ => return None,
     };
@@ -132,6 +137,7 @@ fn look_of(stack: &[Open]) -> Look {
                 face,
                 size,
                 spacing,
+                tracking,
             } => {
                 if color.is_some() {
                     look.color.clone_from(color);
@@ -144,6 +150,9 @@ fn look_of(stack: &[Open]) -> Look {
                 }
                 if spacing.is_some() {
                     look.spacing = *spacing;
+                }
+                if tracking.is_some() {
+                    look.tracking = *tracking;
                 }
             }
         }
@@ -262,6 +271,9 @@ pub fn write(line: &[Span], base: &Look) -> String {
         }
         if let Some(spacing) = l.spacing.filter(|_| l.spacing != base.spacing) {
             font.push_str(&format!(" spacing=\"{}\"", number(spacing)));
+        }
+        if let Some(tracking) = l.tracking.filter(|_| l.tracking != base.tracking) {
+            font.push_str(&format!(" tracking=\"{}\"", number(tracking)));
         }
         let mut open = String::new();
         let mut close = String::new();

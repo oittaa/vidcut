@@ -2030,7 +2030,8 @@ pub enum Request {
         /// fraction of the picture height, from 1/1080 to 4096/1080), `color`
         /// (`#rrggbb`, `#rgb` or a name such as `yellow`), `line_spacing`
         /// (pixels of the timeline added below each line, from -4096 to
-        /// 4096), `outline` (a
+        /// 4096), `tracking` (space after each letter, from -4096 to 4096, a
+        /// unit being 3/4 of a pixel of the timeline), `outline` (a
         /// color, a `size` in pixels of the timeline from 0 to 16, `0`
         /// drawing none, and `outside`, true to leave the letters whole),
         /// `background` (a color and an `opacity`
