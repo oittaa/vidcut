@@ -2042,6 +2042,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A `size` in the style goes on both lines of a lower third.
     - Resolve's upper line also has a tracking of 11. A title in vidcut has no tracking.
     - Lines 1.31 times the text height apart, wrapped at the width of title safe, 90% of the picture width.
+    - The lines of a scroll are 1.815 times the text height plus 10/1080 of the picture height apart. This is Resolve's spacing for its default font, Open Sans (measured in Resolve Studio 21.1.2).
   - The lines of a Text title are centered. The middle of the block is at the middle of the picture.
   - The lines of a lower third align left, center or right.
   - The bottom-left corner, bottom middle or bottom-right corner of its block is 10%, 50% or 90% across and 88% down.

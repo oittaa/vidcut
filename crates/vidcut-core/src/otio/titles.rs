@@ -404,7 +404,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
     let size = t.text_fraction();
     let points = size * f64::from(height);
     let color = hex(t.ink());
-    let line = size * Title::LINE;
+    let line = size * t.line_spacing();
     let [x, y] = t.place();
     let spanned = rich::lines(&t.sized_text());
     let lines: Vec<&[Span]> = spanned.iter().map(Vec::as_slice).collect();

@@ -2200,6 +2200,8 @@ impl Title {
     pub const LOWER_IN: f64 = 0.1;
     pub const LOWER_DOWN: f64 = 0.88;
     pub const SCROLL_IN: f64 = 0.01;
+    pub const SCROLL_LINE: f64 = 1.815;
+    pub const SCROLL_LEAD: f64 = 10.0 / 1080.0;
     pub const UPPER_SIZE: f64 = 48.0 / 1080.0;
     pub const ACROSS: (f64, f64) = (-Picture::REACH, Picture::REACH);
     pub const DOWN: (f64, f64) = (1.0 - Picture::REACH, 1.0 + Picture::REACH);
@@ -2290,6 +2292,13 @@ impl Title {
 
     pub fn text_fraction(&self) -> f64 {
         self.style.size.unwrap_or(Self::usual_size(self.kind))
+    }
+
+    pub fn line_spacing(&self) -> f64 {
+        match self.kind {
+            TitleKind::Scroll => Self::SCROLL_LINE + Self::SCROLL_LEAD / self.text_fraction(),
+            TitleKind::Text | TitleKind::LowerThird => Self::LINE,
+        }
     }
 
     pub fn ink(&self) -> [u8; 3] {
