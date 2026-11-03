@@ -220,6 +220,12 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Clip Color** (pp. 667–668):
   - Right-click clips in the pool or the timeline. Then select one of 16 colors, or Clear Color.
   - A timeline clip has its own color. If it has none, it has the color of its pool item.
+- **Camera name** (p. 706):
+  - A camera can record its name in the file, and Resolve reads it. The Camera # field of the Metadata Editor sets it by hand.
+  - A media item has a camera name (`camera`). It is text, such as a letter or a number.
+  - The Camera row of Clip Info edits it. `media.set` sets it on one or more items. An empty name clears it.
+  - `media.get` and the metadata strip show it.
+  - vidcut does not read the name from a file. No measurement shows which file tags give it.
 - **Input Color Space** (pp. 228, 230):
   - The color tags of a file tell how to read the colors of its pictures.
   - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.

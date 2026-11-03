@@ -2718,6 +2718,7 @@ fn mutate(
         Request::MediaSet {
             media,
             color,
+            camera,
             color_space,
             super_scale,
             sharpness,
@@ -2729,15 +2730,21 @@ fn mutate(
                 sharpness: *sharpness,
                 upscaler: *upscaler,
             };
-            if color.is_none() && color_space.is_none() && set.is_empty() {
+            if color.is_none() && camera.is_none() && color_space.is_none() && set.is_empty() {
                 return Err(Error::usage(
-                    "give color, color_space, or a Super Scale field: super_scale, sharpness or \
-                     upscaler",
+                    "give color, camera, color_space, or a Super Scale field: super_scale, \
+                     sharpness or upscaler",
                 ));
             }
             if let Some(color) = color {
                 let color = (!color.is_empty()).then(|| color.clone());
                 ops::set_media_color(p, &media.to_vec(), color)?;
+            }
+            if let Some(camera) = camera {
+                let camera = (!camera.is_empty()).then(|| camera.clone());
+                for id in media.to_vec() {
+                    pool_item_mut(p, &id)?.camera.clone_from(&camera);
+                }
             }
             if let Some(space) = color_space {
                 ops::set_media_color_space(p, &media.to_vec(), *space)?;
@@ -4672,6 +4679,7 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         sequence: probed.sequence,
         proxy: None,
         color: None,
+        camera: None,
         fingerprint: probed.fingerprint,
         subtitles: probed.subtitles,
     });
@@ -8116,6 +8124,9 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
     }
     if let Some(c) = &m.color {
         v["color"] = json!(c);
+    }
+    if let Some(c) = &m.camera {
+        v["camera"] = json!(c);
     }
     if !m.color_space.is_tagged() {
         v["color_space"] = json!(m.color_space);

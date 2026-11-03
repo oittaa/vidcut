@@ -422,6 +422,7 @@ The bar and the Jobs button:
 
 - The metadata strip of the pool (`Workspace::metadata_strip`) shows what the project keeps of the chosen media (`clip_info::glance`). `pool.json` in the config folder keeps it on or off.
 - Clip Info (`Workspace::clip_info_window`) adds what `media.details` reads from the file (`probe::details`).
+- Its Camera row is a text field (`Workspace::camera_field`). Enter or a click elsewhere sends `media.set`, and Escape cancels.
 
 **The Transcription window** (`TranscriptionUi`, `Workspace::transcription_window`).
 

@@ -321,6 +321,10 @@ pub struct Media {
     /// their own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// The name of the camera that recorded it: text, such as a letter or a
+    /// number. Left out until `media.set` gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<String>,
     /// SHA-256 of the file when it was added or relinked
     /// ([`fingerprint`](crate::fingerprint)): of the whole file up to
     /// 10 MiB (its `sha256sum`), else of 1 MiB from its start, middle and

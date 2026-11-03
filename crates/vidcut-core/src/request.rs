@@ -331,14 +331,19 @@ pub enum Request {
         #[serde(default)]
         back: bool,
     },
-    /// Set the Clip Color, the Input Color Space and the Super Scale of media
-    /// items. Their clips show the Clip Color unless they have their own.
+    /// Set the Clip Color, the camera name, the Input Color Space and the
+    /// Super Scale of media items. Their clips show the Clip Color unless
+    /// they have their own.
     #[serde(rename = "media.set")]
     MediaSet {
         media: OneOrMany<String>,
         /// A color as `clip.set` takes it. Empty string clears it.
         #[serde(default)]
         color: Option<String>,
+        /// The name of the camera that recorded them, such as a letter or a
+        /// number. Empty string clears it.
+        #[serde(default)]
+        camera: Option<String>,
         /// How its pictures' colors are read: `tagged`, as the file says, or
         /// `bt709`, `bt601`, `pq` or `hlg` in place of the file's tags, for a
         /// file whose tags are wrong. The viewer, thumbnails and exports

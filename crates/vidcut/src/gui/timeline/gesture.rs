@@ -1538,6 +1538,7 @@ mod tests {
             sequence: None,
             proxy: None,
             color: None,
+            camera: None,
             color_space: Default::default(),
             super_scale: Default::default(),
             left_out: Vec::new(),

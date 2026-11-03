@@ -25,7 +25,7 @@ classDiagram
   }
   class Media {
     id
-    path, name, bin, color
+    path, name, bin, color, camera
     size, mtime_ns, fingerprint
     info: MediaInfo
     color_space, super_scale, left_out
@@ -164,6 +164,7 @@ Stills ([D38](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
 
 Media fields:
 
+- `camera` is the name of the camera, as text (spec §3). The file does not give it, and `media.set` sets it.
 - `color_space` (`ColorSpace`, spec §3) reads a file whose color tags are wrong as another space.
   - `Media::video_as_read` is the `VideoInfo` of the file, read in that space. Render pieces carry it.
   - `VideoReader` retags each decoded frame with it (`color::retag`). This drops the HDR side data.
