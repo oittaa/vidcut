@@ -308,6 +308,12 @@ pub struct SyncGroup {
     pub angles: Vec<GroupAngle>,
 }
 
+impl SyncGroup {
+    pub fn at_of(&self, media: &str) -> Option<i64> {
+        self.angles.iter().find(|a| a.media == media).map(|a| a.at)
+    }
+}
+
 /// A file of a synced group.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct GroupAngle {

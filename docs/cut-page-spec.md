@@ -542,6 +542,10 @@ Video Only and Audio Only limit what an edit takes (p. 694).
     - The playhead goes to the clip's end.
     - When the edit made a new track, the playhead stops at the old timeline end at the latest.
   - With no overlap, or on an empty timeline, nothing changes and vidcut tells why ([deviation X114](deviations.md#x114-source-overwrite-tells-when-it-writes-nothing)).
+  - **By the synced group:** `group` lines up the file by its synced group, as the Sync Bin does. In the other views, the edit does not use the group.
+    - The rules above do not change. The place in the group takes the place of the timecode.
+    - Only clips of that group count as the reference.
+    - A file in no group is refused.
   - vidcut refuses these cases with an error, because they are not measured:
     - an Out mark with no In, on the timeline or on the source;
     - an In mark with no Out, when no clip that overlaps is at In;

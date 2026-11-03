@@ -18,6 +18,7 @@ The Cut page names the Sync Bin as later work ([spec §1](../cut-page-spec.md#1-
 - Waveforms draw on clips.
 - `multicam.layout` works out where angles lie, by timecode or marks. It stores nothing.
 - `multicam.create` stores a synced group, a pool item.
+- `edit.source_overwrite` with `group` lines up by a synced group.
 - No command switches angles.
 
 **To do:**

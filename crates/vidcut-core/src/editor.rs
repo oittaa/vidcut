@@ -2962,7 +2962,11 @@ fn mutate(
             v["track"] = json!(track);
             v
         }
-        Request::EditSourceOverwrite { source: src, at } => {
+        Request::EditSourceOverwrite {
+            source: src,
+            at,
+            group,
+        } => {
             if src.track.is_some() {
                 return Err(Error::usage(
                     "Source Overwrite picks its own track; leave out `track`",
@@ -2986,7 +2990,7 @@ fn mutate(
                 ));
             }
             let marked = src.range.is_some() || marks.mark_in.is_some() || marks.mark_out.is_some();
-            let placed = ops::source_overwrite(p, &source, marked, at)?;
+            let placed = ops::source_overwrite(p, &source, marked, at, *group)?;
             json!({
                 "clip": placed.clip,
                 "track": placed.track,

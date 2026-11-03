@@ -822,6 +822,10 @@ pub enum Request {
         /// The playhead. Only an edit with no marks reads it.
         #[serde(default)]
         at: Option<TimeSpec>,
+        /// Line up by the file's synced group in place of the timecode. Only
+        /// clips of that group count as the reference.
+        #[serde(default)]
+        group: bool,
     },
 
     /// Split at one or more frames (Ctrl+\).
