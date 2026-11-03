@@ -332,7 +332,8 @@ Writing:
 - `Clip::is_generator` and `Clip::is_block` count it. Thus edits treat it as a carried generator.
 - Its `Title` holds:
   - a `TitleKind`: `text`, `lower_third` or `scroll`
-  - the `TitleAlign` of a lower third or a scroll
+  - the `TitleAlign` of its lines
+  - the `TitleAnchor` of a Text title
   - its lines, with markup that `rich::spans` reads into `Span`s
   - a `TitleStyle`
   - an optional `position`: the point that its anchor goes to (`Title::place`, `Title::anchor`, [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))

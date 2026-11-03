@@ -9,8 +9,8 @@ use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EffectType, Handle, LowerThirdLine,
-    PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign, TitleKind, TitleStyle,
-    TrackClip, ZoomBox,
+    PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind,
+    TitleStyle, TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2016,10 +2016,16 @@ pub enum Request {
         /// `text` (the default), `lower_third` or `scroll`.
         #[serde(default)]
         kind: Option<TitleKind>,
-        /// How a lower third or a scroll lines up: `left`, `middle` or
-        /// `right` (a lower third's default left, a scroll's middle).
+        /// How it lines up: `left`, `middle` or `right` (a lower third's
+        /// default left, the others' middle). On a `text` title, this sets
+        /// each line in the block, which is as wide as its widest line.
         #[serde(default)]
         align: Option<TitleAlign>,
+        /// The point of a `text` title's block that goes to its `position`:
+        /// `top_left`, `top`, `top_right`, `left`, `middle`, `right`,
+        /// `bottom_left`, `bottom` or `bottom_right`. Default: `middle`.
+        #[serde(default)]
+        anchor: Option<TitleAnchor>,
         /// Its look: `font` (a family name), `size` (the text height as a
         /// fraction of the picture height, from 1/1080 to 4096/1080), `color`
         /// (`#rrggbb`, `#rgb` or a name such as `yellow`), `outline` (a
@@ -2035,7 +2041,7 @@ pub enum Request {
         style: Option<TitleStyle>,
         /// Where it goes, `[x, y]` as fractions of the picture from its top
         /// left, from -4 to 4 across and from -3 to 5 down: a `text` title's
-        /// middle, the end of the top edge of a lower third's lower line by
+        /// `anchor`, the end of the top edge of a lower third's lower line by
         /// its `align`. Default: the kind's usual place.
         #[serde(default)]
         position: Option<[f64; 2]>,
@@ -2062,9 +2068,10 @@ pub enum Request {
     },
     /// Change a title clip (`c3`, or `V2@15s` for the clip on V2 at 15 s):
     /// each field given replaces its own. A `style` replaces the whole
-    /// style, a field left out going back to the usual look. Switching to
-    /// `text` drops the `align`. Switching to `scroll` drops the zoom and
-    /// rotation keyframes and the position handles. A `look` replaces all but
+    /// style, a field left out going back to the usual look. Switching to or
+    /// from `text` drops the `align` and the `anchor`. Switching to `scroll`
+    /// drops the zoom and rotation keyframes and the position handles. A
+    /// `look` replaces all but
     /// the text and the keyframes, and the other fields given go on top. A
     /// look that makes a scroll drops what that switch drops. A look adds no
     /// keyframe: its number for a value with keyframes shows when the last of
@@ -2080,6 +2087,8 @@ pub enum Request {
         kind: Option<TitleKind>,
         #[serde(default)]
         align: Option<TitleAlign>,
+        #[serde(default)]
+        anchor: Option<TitleAnchor>,
         #[serde(default)]
         style: Option<TitleStyle>,
         /// `[x, y]` as fractions of the picture, from -4 to 4 across and
