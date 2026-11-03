@@ -11,6 +11,7 @@ mod file_manager;
 mod fillers;
 mod folders;
 pub mod frame;
+mod generator_browser;
 mod help;
 mod history;
 mod import;
