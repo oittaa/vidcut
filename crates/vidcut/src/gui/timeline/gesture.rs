@@ -1321,14 +1321,15 @@ fn edits_preview(ctx: &Ctx, target: i64, edits: &[EditSel], lead: EditSel) -> Pr
 fn slip_preview(ctx: &Ctx, pos: Pos2, press: Pos2, clips: &[String]) -> Preview {
     let moved = (f64::from(pos.x - press.x) / ctx.scale.ppf).round() as i64;
     let mut by = -moved;
-    for id in clips {
+    let clips = vidcut_core::ops::linked::leads(ctx.project, clips);
+    for id in &clips {
         if let Some(c) = ctx.clip(id) {
             let have = ctx.source_range(c);
             let lo = -c.room(false, have.clone());
             by = by.clamp(lo, c.room(true, have).max(lo));
         }
     }
-    let req = match clips {
+    let req = match clips.as_slice() {
         [] => None,
         _ if by == 0 => None,
         [one] => request("edit.slip", json!({ "clip": one, "by": by })),

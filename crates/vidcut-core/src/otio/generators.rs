@@ -1,17 +1,56 @@
 use serde_json::{Value, json};
 
-use super::EDITOR;
+use super::{EDITOR, VIDCUT};
 use crate::model::{Generator, hex};
 
 const COLOR: &str = "color";
 const BLACK: &str = "#000000";
+const CHANNELS: &str = "channels";
+const LINK: &str = "link";
+
+pub fn no_media() -> Value {
+    json!({
+        "OTIO_SCHEMA": "MissingReference.1",
+        "metadata": {},
+        "name": "",
+        "available_range": null,
+        "available_image_bounds": null,
+    })
+}
+
+pub fn keep_ties(reference: &mut Value, editor: &Value) {
+    for (key, from) in [(CHANNELS, "Channels"), (LINK, "Link Group ID")] {
+        if !editor[from].is_null() {
+            reference["metadata"][VIDCUT][key] = editor[from].clone();
+        }
+    }
+}
+
+fn kept<'a>(g: &'a Generator, key: &str) -> Option<&'a Value> {
+    let Generator::Carried { reference } = g else {
+        return None;
+    };
+    reference["metadata"][VIDCUT].get(key)
+}
+
+pub fn kept_channels(g: &Generator) -> Option<&Vec<Value>> {
+    kept(g, CHANNELS)?.as_array()
+}
+
+pub fn kept_link(g: &Generator) -> Option<i64> {
+    kept(g, LINK)?.as_i64()
+}
 
 pub fn reference(g: &Generator) -> Value {
     let Generator::SolidColor { color } = g else {
         let Generator::Carried { reference } = g else {
             unreachable!("the two kinds");
         };
-        return (**reference).clone();
+        let mut written = (**reference).clone();
+        if let Some(meta) = written["metadata"].as_object_mut() {
+            meta.remove(VIDCUT);
+        }
+        return written;
     };
     let kind = Generator::SOLID_COLOR;
     let group = json!({

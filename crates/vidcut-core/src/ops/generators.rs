@@ -47,7 +47,7 @@ pub fn set(p: &mut Project, id: &str, new_color: Option<&str>) -> Result<()> {
             Ok(())
         }
         Some(Generator::Carried { .. }) => Err(Error::invalid(format!(
-            "{id} is another editor's generator, which plays as a gap"
+            "{id} is a block from another editor's file, which plays as a gap"
         ))),
         None => Err(Error::invalid(format!("{id} is not a generator"))),
     }

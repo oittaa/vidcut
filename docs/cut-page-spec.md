@@ -1663,6 +1663,39 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut's OTIO uses the shapes that Resolve writes and needs: source ranges in media timecode, plain paths, link groups, marker notes.
   - Thus a cut goes to Resolve and back with its media linked, and with its audio together with its video.
   - Mapping: [deviation X9](deviations.md#x9-opentimelineio-interchange), [model](design/model.md#opentimelineio).
+  - **A multicam clip in a file of Resolve** (measured in Resolve Studio 21.1.2):
+    - It is a `Stack` with the `Sequence Type` "Multicam Clip".
+    - The `Stack` has one video track and one audio track for each angle.
+    - The shift of an angle is its leading `Gap` and the source start of its clip. No field holds a shift.
+    - Only the name of the `Stack` tells the video angle. The file does not hold the audio angle.
+    - With `importSourceClips` off, Resolve imports each `Stack` as one plain clip, with the name and the source range of the `Stack`.
+    - The clip has no pool item, and the multicam is lost. Its export is a `Clip` with a `MissingReference`.
+    - A cut multicam clip has one `Stack` for each part. It gives one clip for each part, on the video track and on the audio track.
+    - The audio mode All has one audio `Stack` on each audio track. It gives one clip on each audio track.
+    - A `Sequence Fps` that is not the rate of the timeline does not change the result. The clip has the frame count of the file.
+    - With `importSourceClips` on, the import returned nothing for one file. The reason is not known.
+  - **A clip with no media in `timeline.import`.** This is a multicam `Stack`, or a `Clip` with a `MissingReference` that has no `Media Url`:
+    - Each one makes one clip on its track, with its name and its source range.
+    - The pool gets no media. The import does not read the files of the angles.
+    - The clip plays as a gap, with no sound.
+    - The timeline shows it red, and the viewer shows Media Offline for a clip on a video track.
+    - An import warning names the clip.
+    - An OTIO export writes a `Clip` with a `MissingReference` on its track.
+    - Clips with the same place and the same link group in the file stay in one link group.
+    - A sound transition at such a clip stays in the export. vidcut plays no fade on the clip with no media, and no fade on the sound of a compound clip.
+  - **The linked parts of a clip with no media or of a compound clip.** Each part is a clip on its track. The parts act together, as linked clips do in Resolve:
+    - Clips with no media are parts of one clip when they have the same link group, start and length.
+    - A picture and a sound of a compound clip are one clip when they have the same sequence, start, length, source start and speed.
+    - A request that names one part acts on each part: `edit.delete`, `edit.cut`, `edit.copy`, `edit.move`, `edit.replace`, `edit.trim`, `edit.roll`, `edit.slip`, `edit.slide`, `edit.split`, `edit.join`, `edit.change_duration` and `edit.change_speed`.
+    - The part on V1 leads. The rules of V1 apply to it, and the other parts take its new place.
+    - An insert into such a clip on V1 splits each part at that frame.
+    - A move to another video track keeps the sound on its audio track, at the new place. When that track has a clip at the new place, the sound goes on the next free audio track.
+    - A move of a sound part to another audio track moves its picture to the new place on the picture's own track.
+    - A part on a locked track refuses the edit.
+    - An edit that writes on one track does not write on the other parts: `edit.overwrite`, `edit.ripple_overwrite`, `edit.place_on_top`, `edit.source_overwrite` and `edit.paste`.
+    - After such an edit the parts can differ in place or length. Then they are separate clips, and an export gives them no link group.
+    - A timeline drag shows only the part under the pointer. The other parts move when the drag ends.
+    - Resolve was not measured for a locked part, or for a move to another track.
 - **D41. Proxies** (deviation X18; the proxy chapters, pp. 207–218, are outside the Cut page).
   - Videos and image sequences get proxies on demand (Generate Proxy).
   - A running GUI also makes proxies for media that are hard to play (preferences `proxies.*`):
@@ -2370,7 +2403,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - vidcut reads a Scroll back with no outline.
   - vidcut reads Solid Color (§8.17). It carries the other generators.
   - Resolve writes Text+ as a `MissingReference`, and loses it itself.
-  - vidcut leaves Text+ out with a warning, as it does any clip without media.
+  - vidcut reads Text+ as a clip with no media (D40).
   - Resolve Studio 21.1.1 draws a file that vidcut writes as vidcut does, within a few pixels at 3840×2160, except for the outline.
   - vidcut reads Resolve's export of that file back to the same titles (checked through its scripting API).
 - **D68. Delete with In and Out past the end** (§8.4; pp. 721, 724–725).

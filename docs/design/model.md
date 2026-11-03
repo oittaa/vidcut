@@ -489,6 +489,7 @@ flowchart LR
 | Clip Color | the item's `color` |
 | title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | Solid Color | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::generators::reference`, [spec §8.17](../cut-page-spec.md#817-generators-p-766)) |
+| clip with no media | a `Clip.2` of a `MissingReference` on its track, with the kept `Channels`. Clips with the same kept link, start and length stay in one link group (`no_media_ties`). A sound transition is written as on other audio clips (`transitions::head`, `transitions::tail`) |
 | markers | the top-level stack's, with their lengths |
 
 The metadata:
@@ -514,8 +515,16 @@ Import:
 - It takes media named by a `file` URL; a plain, Windows or relative path; or the `Media Url` of an offline `MissingReference`. `locate` gives no path for other schemes.
 - Video tracks become V1, V2, …. An audio clip that lines up with a video clip of the same media (and link group) becomes its sound. Other audio clips go on A1, A2, ….
 - Names other than the defaults (`default_track_name`) name tracks. Markers on clips, tracks and the stack become timeline markers.
-- Nested tracks, unknown items, clips without media and clips that overlap are left out, with a warning.
+- Nested tracks, unknown items, clips with no reference and clips that overlap are left out, with a warning.
+- A multicam `Stack`, and a `MissingReference` with no `Media Url`, become a clip with no media on their track (`plain_reference`, [spec D40](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - A clip and its sound keep only the frames inside their media, at the clip's speed and direction. A warning tells how many frames went.
+- `otio::tied` finds the other parts of a clip with no media or of a compound clip. It uses the rules of `no_media_tie` and `compound_links`. The model holds no link field, because the parts of a block are separate clips only while they have one place.
+- `ops::linked` makes an edit act on each part ([spec D40](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+  - `linked::parts` selects one part as the lead: the part on V1, else the part that the request names.
+  - `linked::take` removes the other parts before the edit, so `follow::follow` does not move them.
+  - `linked::put` writes them back at the place of the lead.
+  - `linked::split_main` splits each part before an insert on V1, so that the sound keeps its place under the picture.
+  - The GUI sends one lead for a selection that holds two parts (`linked::leads`, `edits::Plan::new`), because each part acts on the other parts.
 - An import looks for media at the path, then by their last parts beside the file (`MediaRef::paths`). Then it looks by name in `search` and the folder of the bundle (`find_media`).
 - It looks for the media of a compound clip in the same way.
 - `edit.decompose` first takes the media that the compound clip already plays (`otio::same_media`: by path, then by a file name that no other of them has).
@@ -537,6 +546,7 @@ Kept data:
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`). `Generator::SolidColor` when it is Solid Color (`otio::generators::read`). Else `Generator::Carried`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
+| multicam `Stack`, or a `MissingReference` with no `Media Url` | `Generator::Carried` with a `MissingReference`: a block with no media that plays as a gap (`Clip::is_offline`). Its `channels` and `link` stay in the reference (`keep_ties`). On an audio track, `Clip::is_sound_block` is true |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
 | `TimeEffect` with `Key Frames` | `Speed`, a section for each key (`ramp`). It is written back while the sections stay, else made again (`ramp_effect`) |
 

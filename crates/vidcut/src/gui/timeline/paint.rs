@@ -347,7 +347,7 @@ fn clip(
         rect.y_range(),
     )));
     let enabled = c.enabled && t.video_enabled;
-    let offline = assets.missing.contains(&c.media);
+    let offline = assets.missing.contains(&c.media) || c.is_offline();
     let media = assets.pool.get(c.media.as_str()).copied();
     let tint = c.shown_color(media).and_then(theme::clip_color);
     let fill = if offline {
@@ -407,7 +407,7 @@ fn clip(
             );
         }
     }
-    if c.compound.is_some() && !c.video {
+    if c.is_sound_block() {
         let band = Rect::from_x_y_ranges(x0..=x1, tr.audio_top..=rect.bottom());
         painter.rect_filled(parted(band), corners, fill);
     }

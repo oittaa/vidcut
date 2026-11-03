@@ -706,6 +706,7 @@ pub fn heard_at(fades: &[Playing], c: &Clip, at: i64) -> Option<f64> {
 fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
     if sound {
         c.audio_range()
+            .or_else(|| c.is_sound_block().then(|| (c.start, c.end())))
     } else {
         c.video.then(|| (c.start, c.end()))
     }
