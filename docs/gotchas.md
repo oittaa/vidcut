@@ -266,6 +266,10 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - `otio::titles` reads and writes a point as a pixel of the picture, as the import of Resolve does.
   - Thus a title that vidcut writes looks the same in Resolve, and comes back the same.
   - A title made in Resolve on a picture that is not 1080 lines tall comes in at another size, in vidcut as in Resolve.
+- **A bold title in a file has `font-weight:600`.**
+  - In Arial, Resolve Studio 21.1.2 draws Bold from 576, 600 and 648.
+  - It draws Arial Black from 696 and 700.
+  - `otio::titles` writes 600 and reads 600 or more as bold.
 - **Resolve draws no stroke on a title read from a file.**
   - It keeps `strokeSize` and `strokeColor`, and writes them back. But it draws nothing at 4, 8 or 16.
   - It drops `-qt-stroke` styles from the rich text.
