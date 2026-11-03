@@ -1570,9 +1570,8 @@ pub struct Clip {
     /// Effects on its picture, carried from another editor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<Effects>,
-    /// A generator or title another editor made, carried (deviation X9):
-    /// a block that plays as a gap. It has no media (`media` is empty) and
-    /// no audio, and any length.
+    /// A generator: a picture made with no file. It has no
+    /// media (`media` is empty) and no audio, and any length.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generator: Option<Generator>,
     /// A title (decision D65): its text drawn over the picture of the
@@ -1921,11 +1920,38 @@ impl Speed {
     }
 }
 
-/// A generator or title from another editor's file (deviation X9).
+/// A kind of generator that vidcut draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GeneratorKind {
+    SolidColor,
+}
+
+/// What a generator makes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Generator {
-    /// The OTIO media reference as read: a `GeneratorReference`.
-    pub reference: Kept,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Generator {
+    /// One color over the whole picture.
+    SolidColor {
+        /// `#rrggbb`.
+        #[serde(with = "hex_rgb")]
+        #[schemars(with = "String")]
+        color: [u8; 3],
+    },
+    /// A generator or title from another editor's file that vidcut doesn't
+    /// draw (deviation X9): a block that plays as a gap.
+    Carried {
+        /// The OTIO media reference as read: a `GeneratorReference`.
+        reference: Kept,
+    },
+}
+
+impl Generator {
+    pub const SOLID_COLOR: &str = "Solid Color";
+
+    pub fn draws(&self) -> bool {
+        !matches!(self, Self::Carried { .. })
+    }
 }
 
 /// A title: text drawn over the picture (decision D65). A field left out
@@ -1939,7 +1965,7 @@ pub struct Title {
     pub kind: TitleKind,
     /// How it lines up: `left`, `middle` or `right`. On a `text` title, this
     /// sets each line in the block, which is as wide as its widest line.
-    /// Usual: middle for a `text` title and a scroll, left for a lower third.
+    /// Usual: middle for a `text` title, left for a lower third and a scroll.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<TitleAlign>,
     /// The point of a `text` title's block that goes to its `position`:
@@ -1963,7 +1989,7 @@ pub struct Title {
     /// (usual: 10%, 50% or 90% across and 78% down: `[0.1, 0.78]`,
     /// `[0.5, 0.78]` and `[0.9, 0.78]`). A scroll's `x` is
     /// where its lines' left edge, middle or right edge goes by its `align`
-    /// (usual: 5%, 50% or 95% across); its `y` is not used. With
+    /// (usual: 1%, 50% or 99% across); its `y` is not used. With
     /// `position_keys`, the place at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
@@ -2248,6 +2274,9 @@ impl Title {
     pub const LOWER_IN: f64 = 0.1;
     pub const LOWER_DOWN: f64 = 0.78;
     pub const UPPER_DROP: f64 = 0.02;
+    pub const SCROLL_IN: f64 = 0.01;
+    pub const SCROLL_LINE: f64 = 4.0 / 3.0;
+    pub const SCROLL_LEAD: f64 = 10.0;
     pub const UPPER_SIZE: f64 = 48.0 / 1080.0;
     pub const ACROSS: (f64, f64) = (-Picture::REACH, Picture::REACH);
     pub const DOWN: (f64, f64) = (1.0 - Picture::REACH, 1.0 + Picture::REACH);
@@ -2279,21 +2308,20 @@ impl Title {
 
     pub fn align(&self) -> TitleAlign {
         match self.kind {
-            TitleKind::LowerThird => self.align.unwrap_or_default(),
-            TitleKind::Text | TitleKind::Scroll => self.align.unwrap_or(TitleAlign::Middle),
+            TitleKind::Text => self.align.unwrap_or(TitleAlign::Middle),
+            TitleKind::LowerThird | TitleKind::Scroll => self.align.unwrap_or_default(),
         }
     }
 
     pub fn usual_position(kind: TitleKind, align: TitleAlign) -> [f64; 2] {
-        let edge = (1.0 - Self::SAFE) / 2.0;
         match (kind, align) {
             (TitleKind::Text, _) => [0.5, 0.5],
             (TitleKind::LowerThird, TitleAlign::Left) => [Self::LOWER_IN, Self::LOWER_DOWN],
             (TitleKind::LowerThird, TitleAlign::Middle) => [0.5, Self::LOWER_DOWN],
             (TitleKind::LowerThird, TitleAlign::Right) => [1.0 - Self::LOWER_IN, Self::LOWER_DOWN],
-            (TitleKind::Scroll, TitleAlign::Left) => [edge, 0.5],
+            (TitleKind::Scroll, TitleAlign::Left) => [Self::SCROLL_IN, 0.5],
             (TitleKind::Scroll, TitleAlign::Middle) => [0.5, 0.5],
-            (TitleKind::Scroll, TitleAlign::Right) => [1.0 - edge, 0.5],
+            (TitleKind::Scroll, TitleAlign::Right) => [1.0 - Self::SCROLL_IN, 0.5],
         }
     }
 
@@ -2334,6 +2362,13 @@ impl Title {
 
     pub fn text_fraction(&self) -> f64 {
         self.style.size.unwrap_or(Self::usual_size(self.kind))
+    }
+
+    pub fn line_gap(&self, font_line: f64, text: f64, pixel: f64) -> f64 {
+        match self.kind {
+            TitleKind::Scroll => font_line * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel,
+            TitleKind::Text | TitleKind::LowerThird => (font_line * text).ceil(),
+        }
     }
 
     pub fn ink(&self) -> [u8; 3] {
@@ -2491,12 +2526,11 @@ impl Title {
 }
 
 /// Where a clip's picture goes over the frame, and the effects on it:
-/// footage, a still, an image sequence or a compound clip. A field left out
-/// is at its usual value; at all of them the picture is fitted into the
-/// frame. The tracks below show
-/// wherever it doesn't cover the frame: in the bars around a picture of
-/// another shape, around it, where it is cropped and through its soft edges
-/// and its opacity.
+/// footage, a still, an image sequence, a compound clip or a generator,
+/// which has no effects. A field left out is at its usual value; at all of
+/// them the picture is fitted into the frame. The tracks below show wherever
+/// it doesn't cover the frame: in the bars around a picture of another shape,
+/// around it, where it is cropped and through its soft edges and its opacity.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Picture {
     /// Where the middle of the whole picture goes before the zoom and the
@@ -3232,6 +3266,10 @@ impl Clip {
 
     pub fn is_block(&self) -> bool {
         self.is_generator() || self.compound.is_some()
+    }
+
+    pub fn draws(&self) -> bool {
+        self.generator.as_ref().is_some_and(Generator::draws)
     }
 
     pub fn end(&self) -> i64 {

@@ -2137,6 +2137,7 @@ impl Workspace {
             d.drag.gesture,
             Gesture::Media { .. }
                 | Gesture::Title { .. }
+                | Gesture::Generator { .. }
                 | Gesture::Transition { .. }
                 | Gesture::Effect { .. }
                 | Gesture::Subtitles { .. }
@@ -2763,7 +2764,10 @@ impl Workspace {
             self.timeline.duration_dialog = Some(String::new());
             ui.close();
         }
-        if !c.is_generator() && ui.button(keys("Change Speed…  (R)")).clicked() {
+        if c.generator.is_some() {
+            ui.add_enabled(false, egui::Button::new(keys("Change Speed…  (R)")));
+            ui.add_enabled(false, egui::Button::new("Add Speed Keyframe"));
+        } else if !c.is_generator() && ui.button(keys("Change Speed…  (R)")).clicked() {
             self.open_speed_dialog();
             ui.close();
         }
@@ -2999,6 +3003,27 @@ impl Workspace {
         });
     }
 
+    pub(crate) fn start_generator_drag(
+        &mut self,
+        p: &Project,
+        (kind, label): (vidcut_core::model::GeneratorKind, &'static str),
+        press: Pos2,
+    ) {
+        self.timeline.snap_flipped = false;
+        self.timeline.drag = Some(ActiveDrag {
+            drag: Drag::new(
+                Gesture::Generator {
+                    kind,
+                    label,
+                    len: vidcut_core::ops::titles::default_length(p),
+                },
+                press,
+            ),
+            upper: false,
+            preview: Preview::default(),
+        });
+    }
+
     pub(crate) fn start_transition_drag(
         &mut self,
         (kind, label): (vidcut_core::model::PictureTransition, &'static str),
@@ -3058,6 +3083,7 @@ impl Workspace {
                 Some((0, cues.iter().map(|c| c.1).max().unwrap_or(0))),
             ),
             Gesture::Title { template, len } => (template.label.clone(), Some((0, *len))),
+            Gesture::Generator { label, len, .. } => ((*label).to_string(), Some((0, *len))),
             Gesture::Transition { label, kind } => (
                 (*label).to_string(),
                 Some((

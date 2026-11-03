@@ -286,9 +286,10 @@ pub struct VideoSettings {
     /// (not H.264), else 8 (decision D44).
     #[serde(default)]
     pub bit_depth: Option<u8>,
-    /// Output frame size; the picture is fit inside and padded. Default: the project's.
-    /// H.264 and HEVC round an odd side of the project's size up, and scale
-    /// the whole picture to fit.
+    /// Output frame size, each side from 256 to 32768; the picture is fit
+    /// inside and padded. Default: the project's. H.264 and HEVC round an odd
+    /// side up, DNxHR but for 444 an odd width: a custom size fits into the
+    /// rounded size, and the project's size scales as a whole picture to fit.
     #[serde(default)]
     pub width: Option<u32>,
     #[serde(default)]
@@ -360,48 +361,58 @@ impl VideoSettings {
         }
     }
 
-    pub fn drawn_size(&self, timeline: (u32, u32)) -> (u32, u32) {
+    fn asked_size(&self, timeline: (u32, u32)) -> (u32, u32) {
         (
             self.width.unwrap_or(timeline.0),
             self.height.unwrap_or(timeline.1),
         )
     }
 
+    pub fn drawn_size(&self, timeline: (u32, u32)) -> (u32, u32) {
+        match self.width {
+            Some(_) => self.written_size(timeline),
+            None => timeline,
+        }
+    }
+
     pub fn written_size(&self, timeline: (u32, u32)) -> (u32, u32) {
-        let (w, h) = self.drawn_size(timeline);
+        let (w, h) = self.asked_size(timeline);
         match self.codec {
             VideoCodec::H264 | VideoCodec::Hevc => (w.next_multiple_of(2), h.next_multiple_of(2)),
+            VideoCodec::Dnxhr if self.profile.as_deref() != Some("444") => {
+                (w.next_multiple_of(2), h)
+            }
             _ => (w, h),
         }
     }
 
     pub fn rounded(&self, timeline: (u32, u32)) -> Option<Rounded> {
-        let (drawn, written) = (self.drawn_size(timeline), self.written_size(timeline));
-        (drawn != written).then(|| Rounded::for_codec(drawn, written, self.codec))
+        let (asked, written) = (self.asked_size(timeline), self.written_size(timeline));
+        (asked != written).then(|| Rounded::for_codec(asked, written, self.codec))
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Rounded {
-    pub timeline: (u32, u32),
+    pub asked: (u32, u32),
     pub written: (u32, u32),
     pub message: String,
 }
 
 impl Rounded {
-    fn for_codec(timeline: (u32, u32), written: (u32, u32), codec: VideoCodec) -> Self {
-        let (a, b) = (size_words(timeline), size_words(written));
+    fn for_codec(asked: (u32, u32), written: (u32, u32), codec: VideoCodec) -> Self {
+        let (a, b) = (size_words(asked), size_words(written));
         Self {
-            timeline,
+            asked,
             written,
             message: format!("{a} rounded up to {b} for {}", codec.title()),
         }
     }
 
-    pub fn by_encoder(timeline: (u32, u32), written: (u32, u32), encoder: &str) -> Self {
-        let (a, b) = (size_words(timeline), size_words(written));
+    pub fn by_encoder(asked: (u32, u32), written: (u32, u32), encoder: &str) -> Self {
+        let (a, b) = (size_words(asked), size_words(written));
         Self {
-            timeline,
+            asked,
             written,
             message: format!("{a} written as {b} by {encoder}"),
         }
@@ -735,8 +746,11 @@ pub fn apply_overrides(settings: &mut ExportSettings, sets: &[String]) -> Result
         let (path, raw) = set
             .split_once('=')
             .ok_or_else(|| Error::usage(format!("--set {set:?}: expected key=value")))?;
-        let value: Value =
-            serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_string()));
+        let value = match serde_json::from_str(raw) {
+            Ok(Value::Number(_)) if path == "video.profile" => Value::String(raw.to_string()),
+            Ok(parsed) => parsed,
+            Err(_) => Value::String(raw.to_string()),
+        };
         let mut node = &mut v;
         let keys: Vec<&str> = path.split('.').collect();
         for key in &keys[..keys.len() - 1] {
@@ -890,12 +904,15 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         if v.width.is_some() != v.height.is_some() {
             return Err(Error::usage("set both video.width and video.height"));
         }
-        if v.width.is_some_and(|w| w < 16 || w % 2 != 0)
-            || v.height.is_some_and(|h| h < 16 || h % 2 != 0)
+        let (low, high) = crate::model::TIMELINE_SIDE;
+        if [v.width, v.height]
+            .into_iter()
+            .flatten()
+            .any(|side| !(low..=high).contains(&side))
         {
-            return Err(Error::usage(
-                "output width and height must be even and at least 16",
-            ));
+            return Err(Error::usage(format!(
+                "output width and height are {low} to {high}"
+            )));
         }
     } else if !s.container.audio_only() && !matches!(s.container, C::Mkv | C::Mov | C::Mp4) {
         return Err(Error::usage(format!(

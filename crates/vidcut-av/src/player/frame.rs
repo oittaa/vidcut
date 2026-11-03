@@ -80,6 +80,10 @@ impl Fit {
     pub fn placement(&self, frame: (u32, u32)) -> [f64; 4] {
         vidcut_core::place::fitted(self.size, self.sar, self.rotation, frame)
     }
+
+    pub fn pixels(&self) -> (f64, f64) {
+        vidcut_core::place::upright_pixels(self.size, self.rotation)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -317,7 +321,7 @@ impl Picture {
         }
     }
 
-    pub fn placed_in(&self, size: (u32, u32)) -> ((f64, f64), [f64; 4]) {
+    pub fn placed_in(&self, size: (u32, u32)) -> ((f64, f64), [f64; 4], (f64, f64)) {
         let own = Fit::of(&self.frame, self.rotation);
         let (frame, fit) = match &self.sampling {
             Sampling::Own | Sampling::Rounded => (size, own),
@@ -327,6 +331,7 @@ impl Picture {
         (
             (f64::from(frame.0), f64::from(frame.1)),
             fit.placement(frame),
+            fit.pixels(),
         )
     }
 

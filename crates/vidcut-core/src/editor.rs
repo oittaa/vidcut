@@ -3848,6 +3848,30 @@ fn mutate(
             ops::titles::set(p, &id, &change, at)?;
             Value::Null
         }
+        Request::GeneratorsAdd {
+            kind,
+            color,
+            at,
+            duration,
+            track,
+        } => {
+            let start = match at {
+                Some(t) => resolve(p, t, playhead)?,
+                None => need(playhead, "at")?,
+            };
+            let frames = match duration {
+                Some(d) => length(p, d)?,
+                None => ops::titles::default_length(p),
+            };
+            let made = ops::generators::made(*kind, color.as_deref())?;
+            let (id, track) = ops::generators::add(p, track.as_deref(), start, frames, made)?;
+            json!({ "clip": id, "track": track })
+        }
+        Request::GeneratorsSet { clip, color } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            ops::generators::set(p, &id, color.as_deref())?;
+            Value::Null
+        }
         Request::PictureSet {
             clips,
             position,
@@ -5193,10 +5217,8 @@ fn place_imported(
                 .zip(c.title.as_ref())
                 .map(|(t, read)| otio::titles::with_keys_of(t, read))
                 .or_else(|| c.title.clone());
-            let shape = c
-                .compound
-                .as_ref()
-                .map(|_| otio::picture::Shape::whole(frame));
+            let shape = (c.compound.is_some() || c.has_picture())
+                .then(|| otio::picture::Shape::whole(frame));
             let (effects, picture) = imported_picture(c, shape, warnings);
             let id = clip_id(p, &c.id);
             clips.push(id.clone());
@@ -5213,8 +5235,10 @@ fn place_imported(
                 enabled: c.enabled,
                 name: (!c.name.is_empty()).then(|| c.name.clone()),
                 effects: carry(&effects, source_in),
-                generator: c.generator.as_ref().map(|reference| Generator {
-                    reference: reference.clone().into(),
+                generator: c.generator.as_ref().map(|reference| {
+                    otio::generators::read(reference).unwrap_or_else(|| Generator::Carried {
+                        reference: reference.clone().into(),
+                    })
                 }),
                 title,
                 picture,
@@ -5715,10 +5739,14 @@ fn give_picture(p: &mut Project, block: &Clip, picture: &Picture, made: &[String
             continue;
         };
         let c = &p.tracks[ti].clips[ci];
-        if !c.video || c.generator.is_some() || p.tracks[ti].kind != TrackKind::Video {
+        if !c.video
+            || (c.generator.is_some() && !c.draws())
+            || p.tracks[ti].kind != TrackKind::Video
+        {
             continue;
         }
         let fills = c.compound.is_some()
+            || c.draws()
             || p.media(&c.media)
                 .and_then(|m| m.info.video.as_ref())
                 .is_some_and(|v| crate::place::fills(v, frame));
@@ -6674,6 +6702,38 @@ pub fn query(
                             "end_tc": tc(c.end()),
                             "enabled": c.enabled,
                             "title": title,
+                        }))
+                    })
+                    .collect::<Vec<_>>()
+            )
+        }
+        Request::GeneratorsList { track, range } => {
+            let (a, b) = match range {
+                Some(r) => ctx(p, playhead).range(r)?,
+                None => (0, i64::MAX),
+            };
+            if let Some(id) = track
+                && p.track(id).is_none_or(|t| t.kind != TrackKind::Video)
+            {
+                return Err(Error::not_found(format!("no video track {id}")));
+            }
+            json!(
+                p.tracks
+                    .iter()
+                    .filter(|t| track.as_ref().is_none_or(|id| *id == t.id))
+                    .flat_map(|t| t.clips.iter().map(move |c| (t, c)))
+                    .filter(|(_, c)| c.start < b && c.end() > a)
+                    .filter_map(|(t, c)| {
+                        let g = c.generator.as_ref()?;
+                        Some(json!({
+                            "clip": c.id,
+                            "track": t.id,
+                            "start": c.start,
+                            "end": c.end(),
+                            "start_tc": tc(c.start),
+                            "end_tc": tc(c.end()),
+                            "enabled": c.enabled,
+                            "generator": crate::generators::shown(g),
                         }))
                     })
                     .collect::<Vec<_>>()
@@ -8104,7 +8164,7 @@ pub fn clip_json(p: &Project, c: &Clip, media: Option<&Media>, track: &str) -> V
         v["color"] = json!(color);
     }
     if let Some(g) = &c.generator {
-        v["generator"] = json!(otio::generator_kind(g));
+        v["generator"] = crate::generators::shown(g);
     }
     if let Some(t) = &c.title {
         v["title"] = json!(t);
