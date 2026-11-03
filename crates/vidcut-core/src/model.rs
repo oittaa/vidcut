@@ -2319,7 +2319,7 @@ impl Title {
     pub const TRACKING_SHARE: f64 = 100.0;
     pub const TRACKING_SHARE_LESS: f64 = 200.0;
     pub const TRACKING_FILE: f64 = 0.85;
-    pub const TRACKING_STEPS: f64 = 64.0;
+    pub const PIXEL_STEPS: f64 = 64.0;
     pub const SHIFTED_SIZE: f64 = 2.0 / 3.0;
     pub const ASCENT_SLACK: f64 = 0.25;
     pub const WIDTH_SLACK: f64 = 1e-3;
@@ -2453,7 +2453,7 @@ impl Title {
 
     pub fn tracking_pixels(tracking: f64, letter: f64) -> f64 {
         let pixels = tracking * letter / Self::tracking_share(tracking);
-        (pixels * Self::TRACKING_STEPS).trunc() / Self::TRACKING_STEPS
+        (pixels * Self::PIXEL_STEPS).trunc() / Self::PIXEL_STEPS
     }
 
     pub fn tracking_from_file(pixels: f64) -> f64 {
@@ -2474,11 +2474,18 @@ impl Title {
         ((middle / pixel).round() - self.anchor()[0] * width) * pixel + lined * (widest - wrap)
     }
 
-    pub fn line_gap(&self, font_line: f64, text: f64, pixel: f64, zoom: f64) -> f64 {
+    pub fn line_gap(&self, heights: [f64; 3], text: f64, pixel: f64, zoom: f64) -> f64 {
         match self.kind {
-            TitleKind::Scroll => font_line * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel,
+            TitleKind::Scroll => {
+                heights.iter().sum::<f64>() * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel
+            }
             TitleKind::Text | TitleKind::LowerThird => {
-                (font_line * text / zoom / pixel).ceil() * zoom * pixel
+                let size = text / zoom / pixel;
+                let line: f64 = heights
+                    .iter()
+                    .map(|part| (part * size * Self::PIXEL_STEPS).floor() / Self::PIXEL_STEPS)
+                    .sum();
+                line.ceil() * zoom * pixel
             }
         }
     }
