@@ -246,6 +246,9 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 - **zeno's mask is placed one mask too low** (0.3) when it renders with the origin at the bottom left before it has measured itself.
   - The top that it reports is the bottom edge of the mask.
   - swash measures first. `stroked` in `burn.rs` calls `inspect` before `render` to do the same.
+- **cosmic-text shapes each word apart** (0.19).
+  - A pair of letters across a space or a hyphen gets no kerning.
+  - `kern_words` in `burn.rs` reads the kerning of each such pair with harfrust. It adds the kerning to the spacing of the pair's first letter.
 - **cosmic-text draws a glyph's coverage, not its color's alpha** (0.19).
   - `Buffer::draw` paints a glyph with alpha 0 at full strength in the RGB of its color.
   - Thus text colored transparent still shows.

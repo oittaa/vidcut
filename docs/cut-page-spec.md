@@ -2129,6 +2129,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - In Resolve Studio 21.1.2, some blocks are half a pixel from this rule, as "HHH" at anchor middle in Arial 96. The reason is not known.
     - Each line sits in the block by the exact difference from the widest line, with no rounding (same renders).
     - The letters of a Text title or a lower third have no hinting. Their advances are the font's own (same renders).
+    - The font's kerning also goes across a space, a hyphen and a slash, inside one style. A change of style stops it, and tracking keeps it (measured in Resolve Studio 21.1.2).
+    - A scroll and subtitles do not have this kerning across words, because it is not measured there.
     - Each letter goes over the letters before it. A letter has only its fill, with no edge around it (same renders).
     - Curves are straight lines within 1/6 of a pixel.
     - In Resolve Studio 21.1.2, Arial, Segoe UI and Verdana at sizes 48 to 384 come within 8 levels of 255. Times New Roman comes within 31 levels.
