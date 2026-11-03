@@ -756,6 +756,22 @@ pub enum Request {
         use_marks: bool,
     },
 
+    /// Source Overwrite: in sync by timecode with a clip on the timeline, on
+    /// the first track above every clip in its span (made if needed). An
+    /// audio-only edit makes a new top audio track. The timeline marks win
+    /// over the source marks. With neither, the whole file goes in, by the
+    /// clip at `at`. Clears the timeline marks. Returns the clip, its track,
+    /// the `reference` clip and the `playhead` after the edit. It refuses
+    /// when the file has no timecode in common with the timeline.
+    #[serde(rename = "edit.source_overwrite")]
+    EditSourceOverwrite {
+        #[serde(flatten)]
+        source: SourceParams,
+        /// The playhead. Only an edit with no marks reads it.
+        #[serde(default)]
+        at: Option<TimeSpec>,
+    },
+
     /// Split at one or more frames (Ctrl+\).
     #[serde(rename = "edit.split")]
     EditSplit {
