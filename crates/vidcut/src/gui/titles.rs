@@ -78,16 +78,18 @@ const ALIGNS: [(TitleAlign, &str); 3] = [
     (TitleAlign::Right, "Right"),
 ];
 
-const ANCHORS: [(TitleAnchor, &str); 9] = [
-    (TitleAnchor::TopLeft, "Top Left"),
-    (TitleAnchor::Top, "Top"),
-    (TitleAnchor::TopRight, "Top Right"),
-    (TitleAnchor::Left, "Left"),
-    (TitleAnchor::Middle, "Middle"),
-    (TitleAnchor::Right, "Right"),
-    (TitleAnchor::BottomLeft, "Bottom Left"),
-    (TitleAnchor::Bottom, "Bottom"),
-    (TitleAnchor::BottomRight, "Bottom Right"),
+const ANCHORS: [[TitleAnchor; 3]; 3] = [
+    [
+        TitleAnchor::TopLeft,
+        TitleAnchor::Top,
+        TitleAnchor::TopRight,
+    ],
+    [TitleAnchor::Left, TitleAnchor::Middle, TitleAnchor::Right],
+    [
+        TitleAnchor::BottomLeft,
+        TitleAnchor::Bottom,
+        TitleAnchor::BottomRight,
+    ],
 ];
 
 impl TitleDialog {
@@ -513,19 +515,22 @@ impl Workspace {
             }
         });
         if d.kind == TitleKind::Text {
-            ui.horizontal(|ui| {
+            let [across, down] = d.anchor.fractions().map(|v| (v * 2.0) as usize);
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Anchor");
-                let shown = ANCHORS
-                    .iter()
-                    .find(|(a, _)| *a == d.anchor)
-                    .map_or("Middle", |(_, label)| *label);
-                egui::ComboBox::from_id_salt("title_anchor")
-                    .selected_text(shown)
-                    .show_ui(ui, |ui| {
-                        for (anchor, label) in ANCHORS {
-                            changed |= ui.selectable_value(&mut d.anchor, anchor, label).changed();
-                        }
-                    });
+                for (i, label) in ["Left", "Middle", "Right"].into_iter().enumerate() {
+                    if ui.radio(across == i, label).clicked() {
+                        d.anchor = ANCHORS[down][i];
+                        changed = true;
+                    }
+                }
+                ui.separator();
+                for (i, label) in ["Top", "Middle", "Bottom"].into_iter().enumerate() {
+                    if ui.radio(down == i, label).clicked() {
+                        d.anchor = ANCHORS[i][across];
+                        changed = true;
+                    }
+                }
             });
         }
         let out = egui::TextEdit::multiline(&mut d.text)

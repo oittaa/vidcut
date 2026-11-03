@@ -2047,6 +2047,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `anchor` names the point of the block that goes to `position`: a corner, the middle of a side, or the middle.
     - By default, `anchor` is the middle, and `position` is the middle of the picture.
     - A change of `align` or `anchor` keeps `position`.
+    - A file's `justify` reads as left. Resolve draws it as left, because its lines do not wrap (measured in Resolve Studio 21.1.2).
   - The lines of a lower third align left, center or right.
   - The lower line of a lower third hangs from a point that is 10%, 50% or 90% across and 78% down, by its alignment.
   - The upper line stands on a point 80% down, at the same place across.
