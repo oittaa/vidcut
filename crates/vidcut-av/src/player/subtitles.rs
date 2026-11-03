@@ -211,7 +211,6 @@ impl Subtitles {
                         width: s.width,
                         height: s.height,
                         frame: (w, h),
-                        rest: 0.0,
                         rgba: s.premultiplied(),
                     })
                 })

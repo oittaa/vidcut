@@ -2297,3 +2297,16 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It draws all the lines at any line spacing.
 - **Why:**
   - Lines that disappear are a fault in Resolve. The manual does not name them.
+
+## X112. A title from an OTIO file has no black edge
+
+- **Resolve:**
+  - In Resolve Studio 21.1.2, a title read from an OTIO file has a black edge of 1 pixel on each letter. The edge goes over all that is under it.
+  - Its letters are 1 pixel thinner, and they sit half a pixel higher.
+  - The cause is one stored value: the reader gives each piece of text an outline width of 1.
+  - With that value removed from the stored title, the picture is the same as a typed title, with 0 pixels different.
+  - The same title typed in the Inspector, saved and opened again, or read from a `.drt` file has no such edge.
+- **vidcut:**
+  - A title draws the same from any source: as a title typed in the Inspector.
+- **Why:**
+  - The edge is a fault in the reader. The manual does not name it, and the author of the title never set it.
