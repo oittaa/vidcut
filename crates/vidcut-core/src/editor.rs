@@ -2993,27 +2993,17 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            let mut source = source(p, src)?;
-            let shared = p
-                .group_of(&source.media)
-                .filter(|g| *group && src.range.is_none() && !g.marks.is_empty());
-            let marks = match shared {
-                Some(g) => &g.marks,
-                None => {
-                    &p.media(&source.media)
-                        .expect("source checked the media")
-                        .marks
-                }
-            };
+            let source = source(p, src)?;
+            let marks = &p
+                .media(&source.media)
+                .expect("source checked the media")
+                .marks;
             if src.range.is_none() && marks.mark_in.is_none() && marks.mark_out.is_some() {
                 return Err(Error::invalid(
                     "Source Overwrite can't use a source Out mark with no In",
                 ));
             }
             let marked = src.range.is_some() || marks.mark_in.is_some() || marks.mark_out.is_some();
-            if let Some(g) = shared {
-                source.range = crate::multicam::marked_range(p, g, &source.media)?;
-            }
             let placed = ops::source_overwrite(p, &source, marked, at, *group)?;
             json!({
                 "clip": placed.clip,

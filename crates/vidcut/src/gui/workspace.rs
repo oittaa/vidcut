@@ -680,6 +680,7 @@ impl Workspace {
     pub(super) fn edit_from(&mut self, method: &str, sources: Vec<Value>) {
         let playhead = self.snap.timeline.position;
         let mark_in = self.project().and_then(|p| p.marks.mark_in);
+        let group_marked = self.multi_group().is_some_and(|g| !g.marks.is_empty());
         let with_position = |mut s: Value| {
             match method {
                 "edit.smart_insert" => s["playhead"] = json!(playhead),
@@ -689,7 +690,7 @@ impl Workspace {
                 }
                 "edit.source_overwrite" => {
                     s["at"] = json!(playhead);
-                    if let Some(params) = s.as_object_mut() {
+                    if let Some(params) = s.as_object_mut().filter(|_| !group_marked) {
                         params.remove("range");
                     }
                 }

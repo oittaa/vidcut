@@ -563,7 +563,6 @@ Video Only and Audio Only limit what an edit takes (p. 694).
     - The rules above do not change. The place in the group takes the place of the timecode.
     - Only clips of that group count as the reference.
     - A file in no group is refused.
-    - The In and Out of the group take the place of the source marks when the group has them.
   - vidcut refuses these cases with an error, because they are not measured:
     - an Out mark with no In, on the timeline or on the source;
     - an In mark with no Out, when no clip that overlaps is at In;
