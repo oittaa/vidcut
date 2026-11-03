@@ -1,4 +1,4 @@
-use crate::model::{Title, size_fits};
+use crate::model::{Title, TitleCase, size_fits};
 use crate::subtitles::color;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +20,7 @@ pub struct Look {
     pub size: Option<f64>,
     pub spacing: Option<f64>,
     pub tracking: Option<f64>,
+    pub case: Option<TitleCase>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +44,7 @@ enum Open {
         size: Option<f64>,
         spacing: Option<f64>,
         tracking: Option<f64>,
+        case: Option<TitleCase>,
     },
 }
 
@@ -123,6 +125,7 @@ fn tag(s: &str) -> Option<(bool, Option<Open>, usize)> {
             tracking: attribute(rest, "tracking")
                 .and_then(|s| s.trim().parse().ok())
                 .filter(|s| Title::spacing_fits(*s)),
+            case: attribute(rest, "case").and_then(|c| TitleCase::from_word(c.trim())),
         },
         _ => return None,
     };
@@ -163,6 +166,7 @@ fn look_of(stack: &[Open]) -> Look {
                 size,
                 spacing,
                 tracking,
+                case,
             } => {
                 if color.is_some() {
                     look.color.clone_from(color);
@@ -178,6 +182,9 @@ fn look_of(stack: &[Open]) -> Look {
                 }
                 if tracking.is_some() {
                     look.tracking = *tracking;
+                }
+                if case.is_some() {
+                    look.case = *case;
                 }
             }
         }
@@ -299,6 +306,9 @@ pub fn write(line: &[Span], base: &Look) -> String {
         }
         if let Some(tracking) = l.tracking.filter(|_| l.tracking != base.tracking) {
             font.push_str(&format!(" tracking=\"{}\"", number(tracking)));
+        }
+        if let Some(case) = l.case.filter(|_| l.case != base.case) {
+            font.push_str(&format!(" case=\"{}\"", case.word()));
         }
         let mut open = String::new();
         let mut close = String::new();

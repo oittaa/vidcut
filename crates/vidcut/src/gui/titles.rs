@@ -2,7 +2,9 @@ use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_core::keyframes::{PictureValue, ease_of, eases};
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
-use vidcut_core::model::{Clip, Ease, LowerThirdLine, Title, TitleAlign, TitleKind, TitleLine};
+use vidcut_core::model::{
+    Clip, Ease, LowerThirdLine, Title, TitleAlign, TitleCase, TitleKind, TitleLine,
+};
 
 use super::export::Ask;
 use super::inspector::{KeyClick, key_buttons, mark, next_key};
@@ -41,6 +43,7 @@ pub struct TitleDialog {
     fields: TextFields,
     line_spacing: String,
     tracking: String,
+    case: TitleCase,
     line: LineFields,
     upper: LineFields,
     title_opacity: String,
@@ -59,6 +62,14 @@ pub struct TitleDialog {
     picker: Option<Picker>,
 }
 
+const CASES: [(TitleCase, &str); 5] = [
+    (TitleCase::Mixed, "Mixed"),
+    (TitleCase::Upper, "All Caps"),
+    (TitleCase::Lower, "All Lowercase"),
+    (TitleCase::Small, "Small Caps"),
+    (TitleCase::Title, "Title Caps"),
+];
+
 const ALIGNS: [(TitleAlign, &str); 3] = [
     (TitleAlign::Left, "Left"),
     (TitleAlign::Middle, "Middle"),
@@ -76,6 +87,7 @@ impl TitleDialog {
             fields: TextFields::default(),
             line_spacing: String::new(),
             tracking: String::new(),
+            case: TitleCase::Mixed,
             line: LineFields::default(),
             upper: LineFields::default(),
             title_opacity: String::new(),
@@ -106,6 +118,7 @@ impl TitleDialog {
         self.fields = TextFields::load(&Parts::of_title(&t.style));
         self.line_spacing = plain(t.style.line_spacing);
         self.tracking = plain(t.style.tracking);
+        self.case = t.style.case.unwrap_or_default();
         self.base = Some(t.clone());
         self.line = LineFields::of(t);
         self.upper = LineFields::of(&t.upper_view());
@@ -213,6 +226,7 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     let mut style = d.fields.refilled(&was).parts(&was, None)?.title();
     style.line_spacing = kept_plain(&d.line_spacing, stored.style.line_spacing, "line spacing")?;
     style.tracking = kept_plain(&d.tracking, stored.style.tracking, "tracking")?;
+    style.case = (d.case != TitleCase::Mixed).then_some(d.case);
     let lower = line_of(d, &d.line, stored)?;
     let high = stored.upper_view();
     let upper = line_of(d, &d.upper, &high)?;
@@ -488,6 +502,14 @@ impl Workspace {
                 super::dialog::why(ui, "a Text title is centered on its position");
             }
         });
+        if d.kind != TitleKind::Scroll {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Case");
+                for (case, label) in CASES {
+                    changed |= ui.radio_value(&mut d.case, case, label).changed();
+                }
+            });
+        }
         let out = egui::TextEdit::multiline(&mut d.text)
             .desired_rows(3)
             .desired_width(f32::INFINITY)

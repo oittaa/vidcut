@@ -6,7 +6,7 @@ use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
     Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, TextStroke, Title,
-    TitleAlign, TitleKind, TitleLine, TitleShadow, TitleStyle, size_fits,
+    TitleAlign, TitleCase, TitleKind, TitleLine, TitleShadow, TitleStyle, size_fits,
 };
 use crate::rich::{self, Look, Shift, Span};
 
@@ -264,9 +264,10 @@ struct Base<'a> {
     height: f64,
     color: &'a str,
     tracking: f64,
+    case: TitleCase,
 }
 
-fn span_html(text: &str, look: &Look, base: &Base) -> String {
+fn span_html(text: &str, look: &Look, word_start: bool, base: &Base) -> String {
     let family = look.face.as_deref().unwrap_or(base.family);
     let points = look.size.unwrap_or(base.size) * base.height;
     let color = look
@@ -297,15 +298,31 @@ fn span_html(text: &str, look: &Look, base: &Base) -> String {
         Some(Shift::Down) => " vertical-align:sub;",
         None => "",
     };
+    let case = look.case.unwrap_or(base.case);
+    let cased = match case {
+        TitleCase::Mixed => "",
+        TitleCase::Upper => " text-transform:uppercase;",
+        TitleCase::Lower => " text-transform:lowercase;",
+        TitleCase::Title => " text-transform:capitalize;",
+        TitleCase::Small => " font-variant:small-caps;",
+    };
+    let letters: String = match case {
+        TitleCase::Title => case
+            .pieces(text, word_start)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect(),
+        _ => text.to_string(),
+    };
     let tracked = match look.tracking.unwrap_or(base.tracking) {
         0.0 => String::new(),
         t => format!(" letter-spacing:{}px;", number(t)),
     };
     format!(
-        "<span style=\" font-family:'{family}'; font-size:{}pt; font-weight:{weight};{italic}{under}{shifted}{tracked} \
+        "<span style=\" font-family:'{family}'; font-size:{}pt; font-weight:{weight};{italic}{under}{shifted}{tracked}{cased} \
          color:{color};\">{}</span>",
         number(points),
-        escaped(text)
+        escaped(&letters)
     )
 }
 
@@ -315,10 +332,19 @@ fn html(lines: &[&[Span]], align: Option<&str>, spacing: f64, base: &Base) -> St
         .iter()
         .map(|line| {
             let spans: String = if line.is_empty() {
-                span_html("", &Look::default(), base)
+                span_html("", &Look::default(), true, base)
             } else {
+                let mut word_start = true;
                 line.iter()
-                    .map(|s| span_html(&s.text, &s.look, base))
+                    .map(|s| {
+                        let span = span_html(&s.text, &s.look, word_start, base);
+                        word_start = s
+                            .text
+                            .chars()
+                            .last()
+                            .map_or(word_start, char::is_whitespace);
+                        span
+                    })
                     .collect()
             };
             let spacing = number(rich::spacing(line).unwrap_or(spacing));
@@ -433,6 +459,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
         height: f64::from(height),
         color: &color,
         tracking: t.style.tracking.unwrap_or(0.0),
+        case: t.style.case.unwrap_or_default(),
     };
     let (mut groups, hold) = match t.kind {
         TitleKind::Scroll => (scrolling(t, family, points, &color, origin), None),
@@ -684,6 +711,7 @@ struct Styled {
     strike: bool,
     shift: Option<Shift>,
     tracking: f64,
+    case: TitleCase,
 }
 
 #[derive(Debug, Default)]
@@ -719,18 +747,30 @@ fn styled(style: &str) -> Styled {
             .and_then(|s| s.trim().parse().ok())
             .filter(|v| Title::spacing_fits(*v))
             .unwrap_or(0.0),
+        case: if style_value(style, "font-variant") == Some("small-caps") {
+            TitleCase::Small
+        } else {
+            match style_value(style, "text-transform") {
+                Some("uppercase") => TitleCase::Upper,
+                Some("lowercase") => TitleCase::Lower,
+                Some("capitalize") => TitleCase::Title,
+                _ => TitleCase::Mixed,
+            }
+        },
     }
 }
 
 fn markup(
     spacing: Option<f64>,
     tracking: f64,
+    case: TitleCase,
     line: &[(String, Styled)],
-    family: Option<&str>,
-    points: Option<f64>,
-    color: Option<&str>,
+    base: &Read,
     height: f64,
 ) -> String {
+    let family = base.family.as_deref();
+    let points = base.points;
+    let color = base.color.as_deref();
     let spans: Vec<Span> = line
         .iter()
         .map(|(text, st)| Span {
@@ -744,6 +784,7 @@ fn markup(
                 shift: st.shift,
                 spacing,
                 tracking: (st.tracking != tracking).then_some(st.tracking),
+                case: (st.case != case).then_some(st.case),
                 color: st
                     .color
                     .as_deref()
@@ -964,6 +1005,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
             size,
             line_spacing: None,
             tracking: None,
+            case: None,
             color,
             outline: Some(SubtitleOutline {
                 color: None,
@@ -1145,25 +1187,26 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let first = *texts.first()?;
     let read_of = |g: &Value| read_html(value(g, "title blob").as_str().unwrap_or(""));
     let h = f64::from(height.max(1));
-    let marked = |r: &Read, base: &Read, usual: f64, tracked: f64| -> Vec<String> {
-        r.lines
-            .iter()
-            .enumerate()
-            .map(|(i, l)| {
-                markup(
-                    r.spacings.get(i).copied().flatten().filter(|v| *v != usual),
-                    tracked,
-                    l,
-                    base.family.as_deref(),
-                    base.points,
-                    base.color.as_deref(),
-                    h,
-                )
-            })
-            .collect()
-    };
+    let marked =
+        |r: &Read, base: &Read, usual: f64, tracked: f64, cased: TitleCase| -> Vec<String> {
+            r.lines
+                .iter()
+                .enumerate()
+                .map(|(i, l)| {
+                    markup(
+                        r.spacings.get(i).copied().flatten().filter(|v| *v != usual),
+                        tracked,
+                        cased,
+                        l,
+                        base,
+                        h,
+                    )
+                })
+                .collect()
+        };
     let mut line_spacing = None;
     let mut tracking = None;
+    let mut case = None;
     let (lines, style_from, at, lowered, turned_by) = match kind {
         TitleKind::Scroll => return None,
         TitleKind::Text => {
@@ -1184,7 +1227,15 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
                 0.0
             };
             tracking = (tracked != 0.0).then_some(tracked);
-            (marked(&r, &r, usual, tracked), r, at, None, first)
+            let mut letters = r.lines.iter().flatten().map(|(_, st)| st.case);
+            let first_case = letters.next().unwrap_or_default();
+            let cased = if letters.all(|c| c == first_case) {
+                first_case
+            } else {
+                TitleCase::Mixed
+            };
+            case = (cased != TitleCase::Mixed).then_some(cased);
+            (marked(&r, &r, usual, tracked, cased), r, at, None, first)
         }
         TitleKind::LowerThird => {
             let (upper, lower) = upper_lower(&texts)?;
@@ -1194,7 +1245,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             let low = read_of(lower);
             let high = upper.map(read_of).unwrap_or_default();
             let text = |r: &Read, usual| {
-                marked(r, &style_from, usual, 0.0)
+                marked(r, &style_from, usual, 0.0, TitleCase::Mixed)
                     .join(" ")
                     .trim()
                     .to_string()
@@ -1247,6 +1298,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             size,
             line_spacing,
             tracking,
+            case,
             color,
             outline,
             background,

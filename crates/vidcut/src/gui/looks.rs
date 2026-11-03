@@ -366,6 +366,7 @@ impl Parts {
             size: self.size,
             line_spacing: None,
             tracking: None,
+            case: None,
             color: self.color,
             outline: self.outline,
             background: self.background,

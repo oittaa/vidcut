@@ -6,8 +6,8 @@ use cosmic_text::{
 };
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
-    Place, SubtitleAlign, SubtitleStyle, TextStroke, Title, TitleAlign, TitleBlock, TitlePart,
-    TitleShadow, TitleStyle,
+    Place, SubtitleAlign, SubtitleStyle, TextStroke, Title, TitleAlign, TitleBlock, TitleCase,
+    TitlePart, TitleShadow, TitleStyle,
 };
 use vidcut_core::rich::Shift;
 use vidcut_core::subtitles::{Piece, Shown, rgb};
@@ -201,6 +201,7 @@ struct Look<'a> {
     title_gap: Option<(&'a Title, f64)>,
     spacing: (f32, f32),
     tracking: f32,
+    case: TitleCase,
     wrap: f32,
     align: Align,
     ink: [u8; 3],
@@ -624,12 +625,13 @@ fn lay_out(look: &Look) -> Option<Laid> {
             .collect(),
         Markup::Title(..) => Vec::new(),
     };
+    let mut word_start = true;
     let spans = match look.markup {
         Markup::Pieces(pieces) => spans(pieces, family, &word_faces, color(look.ink), size, line),
         Markup::Title(_, per) => runs
             .iter()
             .zip(&faces)
-            .map(|(r, face)| {
+            .flat_map(|(r, face)| {
                 let ink = r.look.color.as_deref().and_then(rgb).unwrap_or(look.ink);
                 let mut a = Attrs::new()
                     .family(face.as_deref().map_or(family, Family::Name))
@@ -655,19 +657,31 @@ fn lay_out(look: &Look) -> Option<Laid> {
                     Some(_) => full * Title::SHIFTED_SIZE as f32,
                     None => full,
                 };
-                a = a
-                    .metrics(Metrics::new(px, gap))
-                    .metadata(match r.look.shift {
-                        Some(Shift::Up) => RAISED,
-                        Some(Shift::Down) => LOWERED,
-                        None => 0,
-                    });
+                a = a.metadata(match r.look.shift {
+                    Some(Shift::Up) => RAISED,
+                    Some(Shift::Down) => LOWERED,
+                    None => 0,
+                });
                 let tracking = r.look.tracking.map_or(look.tracking, |t| t as f32);
-                if tracking != 0.0 {
-                    let pixels = tracking * Title::TRACKING_PIXEL as f32 * look.spacing.1;
-                    a = a.letter_spacing(pixels / px);
-                }
-                (r.text.clone(), a)
+                let pixels = tracking * Title::TRACKING_PIXEL as f32 * look.spacing.1;
+                let pieces = r.look.case.unwrap_or(look.case).pieces(&r.text, word_start);
+                word_start = r
+                    .text
+                    .chars()
+                    .last()
+                    .map_or(word_start, char::is_whitespace);
+                pieces.into_iter().map(move |(text, small)| {
+                    let px = if small {
+                        px * TitleCase::SMALL_CAPS as f32
+                    } else {
+                        px
+                    };
+                    let mut b = a.clone().metrics(Metrics::new(px, gap));
+                    if pixels != 0.0 {
+                        b = b.letter_spacing(pixels / px);
+                    }
+                    (text, b)
+                })
             })
             .collect(),
     };
@@ -906,6 +920,7 @@ fn block(
         title_gap: None,
         spacing: (0.0, 0.0),
         tracking: 0.0,
+        case: TitleCase::Mixed,
         wrap: (style.wrap_width(w, h) as f32).max(size),
         align: text_align(style),
         ink: style.ink(),
@@ -1108,6 +1123,7 @@ fn title_block(
             (pixel * zoom) as f32,
         ),
         tracking: t.style.tracking.unwrap_or(0.0) as f32,
+        case: t.style.case.unwrap_or_default(),
         wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
         align: match t.align() {
             TitleAlign::Left => Align::Left,

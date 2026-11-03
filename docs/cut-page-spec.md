@@ -2049,7 +2049,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A very negative value keeps all the lines (X111).
     - Tracking adds space after each letter, also after the last letter (p. 1184). `tracking` in the style goes on each letter. `tracking` in markup goes on its words.
     - One unit is 3/4 of a pixel of the timeline at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
-    - A scroll has no line spacing or tracking, as in Resolve's own Scroll.
+    - A scroll has no line spacing, tracking or case, as in Resolve's own Scroll.
+    - Font case is `mixed`, `upper`, `lower`, `small` or `title`: Mixed, All Caps, All Lowercase, Small Caps and Title Caps (p. 1184).
+    - `small` draws small letters as capitals at 0.7 of the size (measured in Resolve Studio 21.1.2).
+    - `title` makes the first letter of each word a capital, and it keeps the other letters.
     - `<o>` draws a line over the words and `<s>` a line through them (p. 1184).
     - These lines and `<u>` go across the advance of the words. Their height is the font's underline thickness less 1 pixel.
     - The top of `<u>` is a third of that thickness plus 1.5 pixels under the baseline.
@@ -2064,7 +2067,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Thus the top of its lower line is about a fifth up the picture, where Resolve's own lower thirds put it (D67).
   - `position` moves that point (X54).
   - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>`, `<o>`, `<s>`, `<sup>`, `<sub>` and `<font>`.
-  - `<font>` takes a `color`, a `face`, a `size`, a `spacing` and a `tracking`.
+  - `<font>` takes a `color`, a `face`, a `size`, a `spacing`, a `tracking` and a `case`.
   - A line takes the height of its largest size.
   - The lines of a lower third meet one lower-line height above its corner.
   - `size` is from 1/1080 to 4096/1080, also in markup. Size 1..4096 is the range of a title, measured in Resolve Studio 21.1.2.
@@ -2131,6 +2134,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A span with tracking has it in `letter-spacing`, in `px`.
     - A span with lines has `underline`, `overline` or `line-through` in `text-decoration`.
     - A shifted span has `super` or `sub` in `vertical-align`.
+    - A span has its case in `text-transform` (`uppercase`, `lowercase`) or in `font-variant` (`small-caps`).
+    - Resolve does not draw `text-transform:capitalize` from a file. Thus for `title` vidcut writes it and the capital letters.
     - Each paragraph has its line spacing in `line-height`. A Text title has 0, and the upper and lower line of a lower third have 1 and 0, unless a title sets another value.
     - The group has the alignment of the lines.
     - Its `anchor` is on a 3×3 grid, counted from the bottom left: 0 bottom left, 4 middle, 8 top right.
