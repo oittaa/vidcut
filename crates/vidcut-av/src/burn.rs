@@ -13,7 +13,6 @@ use vidcut_core::model::{
 use vidcut_core::rich::Shift;
 use vidcut_core::subtitles::{Piece, Shown, rgb};
 
-const SUB_ROWS: usize = 64;
 const CHORD_LIMIT: f32 = 1.0 / 6.0;
 const CHORD_SHORTEST: f32 = 1.0 / 256.0;
 const FAMILIES: &[&str] = &[
@@ -33,7 +32,6 @@ pub struct Sprite {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<[f32; 4]>,
-    pub rest: f32,
 }
 
 impl Sprite {
@@ -225,7 +223,6 @@ struct Seat {
     middle: f32,
     edge: f32,
     part: TitlePart,
-    zoomed: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -314,80 +311,6 @@ impl Canvas {
                 let a = u32::from(mask[(j * mw + i) as usize]) * u32::from(ink.a()) / 255;
                 let shade = Color::rgba(ink.r(), ink.g(), ink.b(), a as u8);
                 self.rectangle(t.x + at.left + i, t.y - at.top + j, 1, 1, shade);
-            }
-        }
-    }
-
-    fn pen(&mut self, t: &Traced, width: f32) {
-        let lines = flattened(t);
-        let (x0, y0, x1, y1) = lines.iter().fold(
-            (f32::MAX, f32::MAX, f32::MIN, f32::MIN),
-            |(a, b, c, d), (p, q)| {
-                (
-                    a.min(p.x).min(q.x),
-                    b.min(p.y).min(q.y),
-                    c.max(p.x).max(q.x),
-                    d.max(p.y).max(q.y),
-                )
-            },
-        );
-        if x1 < x0 {
-            return;
-        }
-        let r = width / 2.0;
-        let (left, top) = ((x0 - r).floor() as i32, (y0 - r).floor() as i32);
-        let wide = ((x1 + r).ceil() as i32 - left) as usize + 1;
-        let tall = ((y1 + r).ceil() as i32 - top) as usize + 1;
-        let mut spans = vec![Vec::new(); tall * SUB_ROWS];
-        for (p, q) in &lines {
-            let corners = [p, q].map(|at| {
-                [
-                    (at.x - r, at.y),
-                    (at.x + r, at.y),
-                    (at.x, at.y - r),
-                    (at.x, at.y + r),
-                ]
-            });
-            let corners = corners.concat();
-            let (lo, hi) = corners
-                .iter()
-                .fold((f32::MAX, f32::MIN), |(a, b), c| (a.min(c.1), b.max(c.1)));
-            let first = (((lo - top as f32) * SUB_ROWS as f32).floor() as usize).min(spans.len());
-            let last = (((hi - top as f32) * SUB_ROWS as f32).ceil() as usize).min(spans.len());
-            for (i, row) in spans.iter_mut().enumerate().take(last).skip(first) {
-                let y = top as f32 + (i as f32 + 0.5) / SUB_ROWS as f32;
-                if let Some(span) = across(&corners, y) {
-                    row.push(span);
-                }
-            }
-        }
-        let mut cover = vec![0.0f32; wide * tall];
-        for (i, row) in spans.iter_mut().enumerate() {
-            row.sort_by(|a: &(f32, f32), b| a.0.total_cmp(&b.0));
-            let line = &mut cover[i / SUB_ROWS * wide..][..wide];
-            let mut open: Option<(f32, f32)> = None;
-            for &(a, b) in row.iter() {
-                open = match open {
-                    Some((from, to)) if a <= to => Some((from, to.max(b))),
-                    Some(done) => {
-                        covered_row(line, left, done);
-                        Some((a, b))
-                    }
-                    None => Some((a, b)),
-                };
-            }
-            if let Some(done) = open {
-                covered_row(line, left, done);
-            }
-        }
-        for j in 0..tall {
-            for i in 0..wide {
-                let inked = (cover[j * wide + i] / SUB_ROWS as f32).min(1.0);
-                if let Some(at) = self.index(left + i as i32, top + j as i32) {
-                    let [r, g, b, a] = self.pixels[at];
-                    let keep = 1.0 - inked;
-                    self.pixels[at] = [r * keep, g * keep, b * keep, inked + a * keep];
-                }
             }
         }
     }
@@ -621,7 +544,6 @@ fn letters(
     runs: &[LayoutRun<'_>],
     lifts: &[Vec<f32>],
     (seats, nudge): (&[f32], [f32; 2]),
-    pen: Option<f32>,
     white: Color,
     f: &mut Fonts,
 ) {
@@ -650,9 +572,6 @@ fn letters(
                 continue;
             };
             canvas.fill(&t, ink);
-            if let Some(pen) = pen {
-                canvas.pen(&t, pen);
-            }
         }
     }
 }
@@ -759,59 +678,6 @@ fn straightened(path: &[zeno::Command]) -> Vec<zeno::Command> {
     out
 }
 
-fn flattened(t: &Traced) -> Vec<(zeno::Vector, zeno::Vector)> {
-    use zeno::Command::{Close, LineTo, MoveTo};
-    let world = |p: zeno::Vector| {
-        zeno::Vector::new(t.x as f32 + p.x + t.offset.x, t.y as f32 - p.y - t.offset.y)
-    };
-    let mut out = Vec::new();
-    let (mut start, mut now) = (zeno::Vector::ZERO, zeno::Vector::ZERO);
-    for command in &t.path {
-        match *command {
-            MoveTo(p) => {
-                start = p;
-                now = p;
-            }
-            LineTo(p) => {
-                out.push((world(now), world(p)));
-                now = p;
-            }
-            Close => {
-                if now != start {
-                    out.push((world(now), world(start)));
-                }
-                now = start;
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
-fn across(corners: &[(f32, f32)], y: f32) -> Option<(f32, f32)> {
-    let mut span: Option<(f32, f32)> = None;
-    for (i, a) in corners.iter().enumerate() {
-        for b in &corners[i + 1..] {
-            let (lo, hi) = if a.1 <= b.1 { (a, b) } else { (b, a) };
-            if y < lo.1 || y > hi.1 || hi.1 == lo.1 {
-                continue;
-            }
-            let x = lo.0 + (hi.0 - lo.0) * (y - lo.1) / (hi.1 - lo.1);
-            span = Some(span.map_or((x, x), |(from, to)| (from.min(x), to.max(x))));
-        }
-    }
-    span
-}
-
-fn covered_row(line: &mut [f32], left: i32, (from, to): (f32, f32)) {
-    let (from, to) = (from - left as f32, to - left as f32);
-    let first = from.floor().max(0.0) as usize;
-    let last = (to.ceil().max(0.0) as usize).min(line.len());
-    for (i, v) in line.iter_mut().enumerate().take(last).skip(first) {
-        *v += ((i + 1) as f32).min(to) - (i as f32).max(from);
-    }
-}
-
 fn masked(t: &Traced, pen: Option<f32>) -> (Vec<u8>, zeno::Placement) {
     use zeno::{Cap, Format, Join, Mask, Origin, Stroke};
     let mut mask = Mask::new(&t.path[..]);
@@ -893,7 +759,8 @@ fn line_gap(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) ->
     look.title_gap
         .and_then(|(title, pixel)| {
             let own = font_line(system, attrs)?;
-            Some(title.line_gap(f64::from(own), f64::from(px), pixel) as f32)
+            let zoom = f64::from(look.spacing.1) / pixel;
+            Some(title.line_gap(f64::from(own), f64::from(px), pixel, zoom) as f32)
         })
         .unwrap_or(px * look.line)
 }
@@ -1171,16 +1038,14 @@ fn lay_out(look: &Look) -> Option<Laid> {
     let seated = look.seat.zip(look.title_gap).map(|(s, (t, pixel))| {
         let (middle, wide, wrap) = (s.middle, widest, look.wrap);
         let left = t.seated_left(f64::from(middle), f64::from(wide), f64::from(wrap), pixel);
-        let top = block_top(s.edge, s.part, t.anchor()[1] as f32, lines, above);
-        [left as f32, if s.zoomed { top } else { top.floor() }]
+        let edge = ((f64::from(s.edge) / pixel).round() * pixel) as f32;
+        let top = block_top(edge, s.part, t.anchor()[1] as f32, lines, above);
+        [left as f32, top.ceil()]
     });
-    let half = look
-        .title_gap
-        .map_or(0.0, |(_, pixel)| (pixel * Title::SEAT) as f32);
     let seats: Vec<f32> = runs
         .iter()
         .zip(ascents(&buffer))
-        .map(|(r, a)| r.line_top + a + half)
+        .map(|(r, a)| r.line_top + a)
         .collect();
     let exact = seated.map(|at| (seats.as_slice(), at.map(|v| v - v.round())));
     let popped = runs.iter().find_map(|run| {
@@ -1250,8 +1115,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     let white = Color::rgb(255, 255, 255);
     let scale = look.title_gap.map(|_| look.spacing.1);
     if let Some(at) = exact.filter(|_| !look.bare) {
-        let pen = stroke.is_none().then_some(look.spacing.1);
-        letters(&mut canvas, &runs, &lifts, at, pen, white, f);
+        letters(&mut canvas, &runs, &lifts, at, white, f);
     }
     let mut painter = cosmic_text::LegacyRenderer {
         font_system: &mut f.system,
@@ -1352,7 +1216,6 @@ fn lay_out(look: &Look) -> Option<Laid> {
         rgba: (y0..y1)
             .flat_map(|y| rgba[y * w + x0..y * w + x1].iter().copied())
             .collect(),
-        rest: 0.0,
     });
     Some(Laid {
         sprite,
@@ -1384,7 +1247,6 @@ fn inside(s: Sprite, (w, h): (f64, f64)) -> Option<Sprite> {
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
         rgba,
-        rest: s.rest,
     })
 }
 
@@ -1601,7 +1463,6 @@ fn merged(mut sprites: Vec<Sprite>) -> Option<Sprite> {
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
         rgba,
-        rest: 0.0,
     })
 }
 
@@ -1661,7 +1522,6 @@ fn shaped_box(t: &Title, block: &TitleBlock, (w, h): (f64, f64), pixel: f64) -> 
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
         rgba,
-        rest: 0.0,
     };
     let [px, py] = block.pivot;
     Some(turned(
@@ -1698,7 +1558,6 @@ fn title_block(
             middle: (block.pivot[0] * w) as f32,
             edge: (block.edge * h) as f32,
             part: block.part,
-            zoomed: zoom != 1.0,
         }),
         spacing: (
             t.style.line_spacing.unwrap_or(0.0) as f32,
@@ -1758,17 +1617,7 @@ fn title_block(
         (px * w) as f32 + (lined - across as f32) * widest - lined * look.wrap,
         exact,
     ]);
-    let rest = if t.kind == TitleKind::Scroll {
-        0.0
-    } else if zoom == 1.0 {
-        exact - top
-    } else {
-        0.5
-    };
-    let sprite = Sprite {
-        rest,
-        ..placed(sprite, left, top)
-    };
+    let sprite = placed(sprite, left, top);
     if block.turn == 0.0 {
         return Some(sprite);
     }
@@ -1844,7 +1693,6 @@ fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
         width: ow as u32,
         height: oh as u32,
         rgba,
-        rest: s.rest,
     }
 }
 

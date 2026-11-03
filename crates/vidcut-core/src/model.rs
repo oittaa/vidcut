@@ -2318,7 +2318,6 @@ impl Title {
     pub const TRACKING_PIXEL: f64 = 0.75;
     pub const SHIFTED_SIZE: f64 = 2.0 / 3.0;
     pub const ASCENT_SLACK: f64 = 0.25;
-    pub const SEAT: f64 = 0.5;
     pub const WIDTH_SLACK: f64 = 1e-3;
     pub const BOX_MOST: f64 = 2.0;
     pub const BOX_WIDTH: f64 = 0.9;
@@ -2431,15 +2430,16 @@ impl Title {
 
     pub fn seated_left(&self, middle: f64, widest: f64, wrap: f64, pixel: f64) -> f64 {
         let lined = self.align().fraction();
-        let width = (widest / pixel + Self::WIDTH_SLACK).floor() + 1.0;
-        ((middle / pixel).round() - self.anchor()[0] * width + Self::SEAT) * pixel
-            + lined * (widest - wrap)
+        let width = (widest / pixel + Self::WIDTH_SLACK).floor();
+        ((middle / pixel).round() - self.anchor()[0] * width) * pixel + lined * (widest - wrap)
     }
 
-    pub fn line_gap(&self, font_line: f64, text: f64, pixel: f64) -> f64 {
+    pub fn line_gap(&self, font_line: f64, text: f64, pixel: f64, zoom: f64) -> f64 {
         match self.kind {
             TitleKind::Scroll => font_line * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel,
-            TitleKind::Text | TitleKind::LowerThird => (font_line * text).ceil(),
+            TitleKind::Text | TitleKind::LowerThird => {
+                (font_line * text / zoom / pixel).ceil() * zoom * pixel
+            }
         }
     }
 
