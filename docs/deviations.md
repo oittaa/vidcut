@@ -1859,10 +1859,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The AI upscalers:
     - Each picture goes into the timeline color space first, as in Resolve (§13, p. 3407). In an SDR timeline, an HDR picture is tone-mapped.
     - In an HDR timeline, AI Slow takes SDR media only. It refuses HDR media ([X98](#x98-in-an-hdr-timeline-ai-slow-works-before-the-conversion)).
-    - Before an export starts, vidcut refuses media that the upscaler cannot take. The error names each file and the reason.
-    - It also refuses an AI upscaler without its weights, or without a GPU that can run the network.
+    - vidcut refuses a picture when the picture needs enlarging and the upscaler cannot take it. A picture that needs no enlarging plays and exports with no upscaler.
+    - The viewer and an export use one rule and one message. The message names the file and the reason.
+    - An export refuses before it starts. The viewer shows the same message over its picture.
+    - The viewer plays the original of a clip that the upscaler cannot take, not its proxy.
+    - An export also refuses an AI upscaler that it needs without its weights, or without a GPU that can run the network.
     - It refuses AI Slow for a size that does not fit in the GPU's memory and main memory.
-    - The Inspector and the pool show a warning under Upscaler for media that the AI upscaler cannot take.
+    - The Inspector and the pool show a warning under Upscaler for media that the AI upscaler cannot take. The warning does not depend on the timeline's size.
     - The export's report names the files that an AI upscaler enlarged, and the upscaler.
   - Classic has a Sharpness of Low, Medium or High.
   - A placed picture is made at most 4 times as large as its source. A picture that fills the frame takes the better upscaler for all of its enlargement.
@@ -1893,6 +1896,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The network has only 3×3 and 1×1 convolutions. Shaders of its own run it on the GPU of every maker through wgpu, with no new library.
   - The shaders keep the values between the layers as 16-bit floats, and add in 32-bit floats. This halves the memory traffic. It needs no GPU feature.
   - A different upscaler would change the result without the user's choice. Thus an export refuses, and the user selects another upscaler or Off.
+  - The viewer shows the same decision as the export. Thus a picture that plays also exports, and a refusal is no surprise at the end of an edit.
   - The switch is there to check what the export makes. Thus with an AI upscaler, the viewer shows its result, not a preview of it, however slow it is.
   - The classic upscalers of the GPU are free and run on every computer. They do not need a separate download.
   - These upscalers can go to any size in one step. Thus all of the enlargement gets the better upscaler, not only the factor.
