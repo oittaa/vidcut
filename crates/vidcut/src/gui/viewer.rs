@@ -210,14 +210,14 @@ impl Workspace {
         let modes = [
             Header::Mode(ViewerMode::SourceClip),
             Header::Mode(ViewerMode::SourceTape),
-            Header::Mode(ViewerMode::MultiSource),
             Header::Mode(ViewerMode::Timeline),
+            Header::Mode(ViewerMode::MultiSource),
         ];
         let row = Row {
             left: &modes,
             fill: Some((Header::Title, Align::Min)),
             right: &[Header::FullScreen, Header::Duration],
-            leaving: &[modes[2], modes[1], modes[0], modes[3], Header::FullScreen],
+            leaving: &[modes[3], modes[1], modes[0], modes[2], Header::FullScreen],
             group: |h| match h {
                 Header::Mode(_) => 0,
                 Header::Title => 1,
