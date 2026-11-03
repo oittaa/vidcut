@@ -141,6 +141,7 @@ pub struct Workspace {
     pub(super) cache_manager: super::cache_manager::CacheManager,
     pub(super) metadata_strip: bool,
     pub(super) key_editor: super::keyframe_editor::Editor,
+    pub(super) sync_bin: super::sync_bin::SyncBin,
 }
 
 fn edited_text(edited: &LocalTime, today: &LocalTime) -> String {
@@ -234,6 +235,7 @@ impl Workspace {
             cache_manager: Default::default(),
             metadata_strip: super::pool::strip_kept(),
             key_editor: Default::default(),
+            sync_bin: Default::default(),
         }
     }
 
@@ -265,6 +267,10 @@ impl Workspace {
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
             GuiPanel::Transcription => self.transcription.open = true,
+            GuiPanel::SyncBin => {
+                self.left = LeftTab::SyncBin;
+                self.show_timeline();
+            }
             GuiPanel::Transitions => self.left = LeftTab::Transitions,
             GuiPanel::Titles => self.left = LeftTab::Titles,
             GuiPanel::Effects => {
@@ -331,12 +337,14 @@ impl Workspace {
             GuiPanel::Help => self.help.open = false,
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
-            GuiPanel::Transitions
+            GuiPanel::SyncBin
+            | GuiPanel::Transitions
             | GuiPanel::Titles
             | GuiPanel::Effects
             | GuiPanel::Inspector
             | GuiPanel::Keyframes => {
                 let tab = match panel {
+                    GuiPanel::SyncBin => LeftTab::SyncBin,
                     GuiPanel::Transitions => LeftTab::Transitions,
                     GuiPanel::Titles => LeftTab::Titles,
                     GuiPanel::Effects => LeftTab::Effects,
@@ -384,6 +392,7 @@ impl Workspace {
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
+            (GuiPanel::SyncBin, self.left == LeftTab::SyncBin),
             (GuiPanel::Transitions, self.left == LeftTab::Transitions),
             (GuiPanel::Titles, self.left == LeftTab::Titles),
             (
@@ -600,6 +609,9 @@ impl Workspace {
     }
 
     pub(super) fn edit_sources(&self) -> Vec<Value> {
+        if self.sync_grid_on() {
+            return Vec::new();
+        }
         if self.snap.viewer == ViewerMode::SourceTape && self.crossing_span().is_some() {
             return vec![json!({ "tape": true })];
         }
@@ -677,6 +689,15 @@ impl Workspace {
         self.edit_from(method, sources);
     }
 
+    pub(super) fn only_toggles(&self, source: &mut Value) {
+        if self.video_only {
+            source["video_only"] = json!(true);
+        }
+        if self.audio_only {
+            source["audio_only"] = json!(true);
+        }
+    }
+
     pub(super) fn edit_from(&mut self, method: &str, sources: Vec<Value>) {
         let playhead = self.snap.timeline.position;
         let mark_in = self.project().and_then(|p| p.marks.mark_in);
@@ -698,7 +719,6 @@ impl Workspace {
             }
             s
         };
-        let (video_only, audio_only) = (self.video_only, self.audio_only);
         let target = self
             .target
             .clone()
@@ -712,12 +732,7 @@ impl Workspace {
         let sources: Vec<Value> = sources
             .into_iter()
             .map(|mut s| {
-                if video_only {
-                    s["video_only"] = json!(true);
-                }
-                if audio_only {
-                    s["audio_only"] = json!(true);
-                }
+                self.only_toggles(&mut s);
                 if let Some(t) = &target {
                     s["track"] = json!(t);
                 }
@@ -725,6 +740,7 @@ impl Workspace {
             })
             .collect();
         match sources.len() {
+            0 if self.sync_grid_on() => self.say("Select a Camera First"),
             0 => self.say("Open a clip or select pool media first"),
             1 => self.send(
                 method,
@@ -2017,8 +2033,10 @@ impl Workspace {
                     if self.left != LeftTab::Keyframes && !self.key_tray {
                         self.key_editor.leave();
                     }
+                    self.sync_tick();
                     match self.left {
                         LeftTab::Pool => self.pool_panel(ui),
+                        LeftTab::SyncBin => self.sync_bin_panel(ui),
                         LeftTab::Transitions => {
                             self.pool_focus = false;
                             self.transitions_panel(ui);

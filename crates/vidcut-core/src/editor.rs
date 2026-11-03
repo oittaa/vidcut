@@ -2661,6 +2661,13 @@ fn mutate(
             crate::multicam::group_mut(p, group)?.marks = Marks::default();
             Value::Null
         }
+        Request::MulticamPick { media, at } => {
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            json!(crate::multicam::pick(p, media, need(at, "at")?)?)
+        }
         Request::MediaRemove { media, force } => {
             p.media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
@@ -6715,6 +6722,17 @@ pub fn query(
                     .map(|g| crate::multicam::group_json(p, g))
                     .collect::<Vec<_>>()
             )
+        }
+        Request::MulticamRows { bin, at } => {
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            json!(crate::multicam::sync_rows(
+                p,
+                bin.as_deref().unwrap_or_default(),
+                need(at, "at")?
+            )?)
         }
         Request::MediaGet { media } => {
             let m = p

@@ -43,6 +43,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
             | "media.transcribe"
             | "multicam.layout"
             | "multicam.list"
+            | "multicam.rows"
             | "project.get"
             | "project.summary"
             | "project.create"

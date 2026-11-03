@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::ops::Range;
 
 use serde::Serialize;
@@ -6,7 +7,7 @@ use serde_json::{Value, json};
 use crate::editor::Env;
 use crate::error::{Error, Result};
 use crate::model::{AngleSync, GroupAngle, Marks, Media, Project, SyncGroup};
-use crate::ops::has_bin;
+use crate::ops::{self, has_bin};
 use crate::time::{TimeContext, TimeSpec, format_timecode, timecode_frames};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -41,6 +42,21 @@ pub struct Layout {
 pub const SOUND_MATCH_SCORE: f32 = 25.0;
 
 pub const MULTI_SOURCE_ANGLES: usize = 9;
+
+const PICK_SECONDS: f64 = 5.0;
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SyncRow {
+    pub number: usize,
+    pub media: String,
+    pub camera: String,
+    pub frames: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame: Option<i64>,
+    pub active: bool,
+}
 
 fn has_picture(m: &Media) -> Result<()> {
     match &m.info.video {
@@ -373,6 +389,120 @@ pub fn marked_range(p: &Project, g: &SyncGroup, media: &str) -> Result<(i64, i64
         )));
     }
     Ok((a, b))
+}
+
+fn sync_start(p: &Project, m: &Media, at: i64) -> Result<Option<i64>> {
+    let by_group = p.group_of(&m.id).is_some();
+    if !by_group && m.info.timecode.is_none() {
+        return Err(Error::invalid(format!(
+            "{} has no timecode and no synced group",
+            m.name
+        )));
+    }
+    ops::file_start_at(p, m, at, by_group)
+}
+
+fn camera_order(a: &str, b: &str) -> Ordering {
+    match (a.parse::<u64>(), b.parse::<u64>()) {
+        (Ok(x), Ok(y)) => x.cmp(&y),
+        (Ok(_), Err(_)) => Ordering::Less,
+        (Err(_), Ok(_)) => Ordering::Greater,
+        (Err(_), Err(_)) => a.to_lowercase().cmp(&b.to_lowercase()),
+    }
+}
+
+fn cameras<'a>(p: &'a Project, bin: &str) -> Result<Vec<(&'a Media, &'a str)>> {
+    let mut files: Vec<(&Media, &str)> = Vec::new();
+    for m in p
+        .media
+        .iter()
+        .filter(|m| bin.is_empty() || ops::within(&m.bin, bin))
+    {
+        has_picture(m)?;
+        let camera = m
+            .camera
+            .as_deref()
+            .ok_or_else(|| Error::invalid(format!("{} has no camera name", m.name)))?;
+        if let Some((other, _)) = files.iter().find(|(_, c)| *c == camera) {
+            return Err(Error::invalid(format!(
+                "{} and {} have one camera name",
+                other.name, m.name
+            )));
+        }
+        files.push((m, camera));
+    }
+    if files.len() > MULTI_SOURCE_ANGLES {
+        return Err(Error::invalid(format!(
+            "The Sync Bin holds {MULTI_SOURCE_ANGLES} cameras at most"
+        )));
+    }
+    let group_of = |m: &Media| p.group_of(&m.id).map(|g| g.id.as_str());
+    if let Some(((first, _), (other, _))) = files.first().zip(
+        files
+            .iter()
+            .find(|(m, _)| group_of(m) != files.first().and_then(|(f, _)| group_of(f))),
+    ) {
+        return Err(Error::invalid(format!(
+            "{} and {} are not in one synced group",
+            first.name, other.name
+        )));
+    }
+    files.sort_by(|a, b| camera_order(a.1, b.1));
+    Ok(files)
+}
+
+pub fn sync_rows(p: &Project, bin: &str, at: i64) -> Result<Vec<SyncRow>> {
+    if !bin.is_empty() && !has_bin(p, bin) {
+        return Err(Error::not_found(format!("no bin {bin:?}")));
+    }
+    let shown = p.shown_clip(at).map(|c| c.media.as_str());
+    cameras(p, bin)?
+        .into_iter()
+        .enumerate()
+        .map(|(i, (m, camera))| {
+            let start = sync_start(p, m, at)?;
+            let frames = p.media_frames(m);
+            Ok(SyncRow {
+                number: i + 1,
+                media: m.id.clone(),
+                camera: camera.to_string(),
+                frames,
+                start,
+                frame: start.map(|s| at - s).filter(|f| (0..frames).contains(f)),
+                active: shown == Some(m.id.as_str()),
+            })
+        })
+        .collect()
+}
+
+pub fn pick(p: &mut Project, media: &str, at: i64) -> Result<Marks> {
+    let m = p
+        .media(media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+    has_picture(m)?;
+    let frames = p.media_frames(m);
+    let start = sync_start(p, m, at)?
+        .filter(|s| (0..frames).contains(&(at - s)))
+        .ok_or_else(|| Error::invalid(format!("{} has no frame at the playhead", m.name)))?;
+    let end = p.end();
+    let (a, b) = if at > end {
+        (end - start, at - start)
+    } else {
+        let length = (PICK_SECONDS * p.settings.fps.as_f64()).round() as i64;
+        (at - start, at - start + length)
+    };
+    let (a, b) = (a.max(0), b.min(frames));
+    if a >= b {
+        return Err(Error::invalid(format!(
+            "{} has no frames before the playhead",
+            m.name
+        )));
+    }
+    ops::set_media_marks(p, media, Some(Some(a)), Some(Some(b)))?;
+    Ok(Marks {
+        mark_in: Some(a),
+        mark_out: Some(b),
+    })
 }
 
 pub fn group_json(p: &Project, g: &SyncGroup) -> Value {

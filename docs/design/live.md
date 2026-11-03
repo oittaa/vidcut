@@ -455,7 +455,15 @@ The bar and the Jobs button:
 - `SourceContent::Group` loads `render::group_tape` in the source player. The plan is as long as the group, with the active angle at its place and black around it. Thus the transport and the sound work as in the other source modes.
 - `Live.tape` then holds one entry, the active angle. `Snapshot::source_at` is empty when the playhead is outside it.
 - `Live::pick_angle` keeps the active angle in `source_media` and the group in `source_group`.
-- `Workspace::multi_view` draws the grid. It gives each cell the frame of its file, or black.
+- `Workspace::multi_view` gives each cell the frame of its file, or black. `Workspace::camera_grid` draws the grid.
+
+**The Sync Bin** ([spec §7.4](../cut-page-spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
+
+- `LeftTab::SyncBin` is only a state of the GUI. Live has no Sync Bin mode. Thus the grid runs on `ViewerMode::Timeline`, and the transport and the sound stay the timeline's.
+- `multicam::sync_rows` works out the rows at a time. `ops::file_start_at` gives the place of a file by the rule of Source Overwrite with no marks. Thus the rows and the edit agree.
+- `multicam::pick` sets the source marks. The GUI then sends `viewer.load`, so the chosen camera is an ordinary source clip: its marks, scroll area and edits need nothing more.
+- The player stops at the end of its plan. Thus `SyncBin` holds a playhead past the timeline's end for the GUI, and the requests take it as `at`.
+- `Workspace::sync_overwrite` waits for the answer of the edit with `Ask`, because only a done edit returns to the grid.
 
 **J and L with K held** ([spec D54](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `Shuttle` tells a tap from a hold by the time between the press and the release of a key. It gives a frame step, slow play or its stop, for the player or for Dynamic Trim.
 

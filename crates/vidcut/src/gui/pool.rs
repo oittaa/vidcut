@@ -11,6 +11,7 @@ use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
 
 use super::theme;
 use super::timeline::gesture::Gesture;
+use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim, fit};
 use crate::live::PoolView;
 
@@ -215,7 +216,7 @@ fn bin_name(path: &str) -> &str {
     }
 }
 
-const FULL: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+pub(super) const FULL: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
 
 fn frame_at(rect: Rect, x: f32, frames: i64) -> i64 {
     let f = ((x - rect.left()) / rect.width()).clamp(0.0, 1.0);
@@ -1045,7 +1046,7 @@ impl Workspace {
         self.media_interaction(&resp, m);
     }
 
-    fn pool_picture(
+    pub(super) fn pool_picture(
         &self,
         ctx: &egui::Context,
         m: &Media,
@@ -1772,7 +1773,7 @@ impl Workspace {
         }
     }
 
-    fn edit_buttons(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn edit_buttons(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             let buttons = [
                 ("Smart Insert", "edit.smart_insert"),
@@ -1788,7 +1789,11 @@ impl Workspace {
                 self.edit_function("edit.place_on_top");
             }
             if ui.button("Source Overwrite").clicked() {
-                self.edit_function("edit.source_overwrite");
+                if self.left == LeftTab::SyncBin && self.snap.viewer == ViewerMode::SourceClip {
+                    self.sync_overwrite(ui.ctx());
+                } else {
+                    self.edit_function("edit.source_overwrite");
+                }
             }
             let at = self.snap.timeline.position;
             if ui.button("Cut").clicked() {
@@ -1805,6 +1810,7 @@ impl Workspace {
         });
         let sources = self.edit_sources();
         let text = match sources.len() {
+            0 if self.sync_grid_on() => "No source: select a camera".to_string(),
             0 => "No source: open a clip or select pool media".to_string(),
             1 => {
                 let s = &sources[0];

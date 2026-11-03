@@ -154,6 +154,7 @@ struct Card {
 pub enum LeftTab {
     #[default]
     Pool,
+    SyncBin,
     Transitions,
     Titles,
     Effects,
@@ -282,6 +283,7 @@ impl Workspace {
         ui.horizontal(|ui| {
             for (tab, label) in [
                 (LeftTab::Pool, "Media Pool"),
+                (LeftTab::SyncBin, "Sync Bin"),
                 (LeftTab::Transitions, "Transitions"),
                 (LeftTab::Titles, "Titles"),
                 (LeftTab::Effects, "Effects"),
@@ -290,6 +292,9 @@ impl Workspace {
             ] {
                 if ui.selectable_label(self.left == tab, label).clicked() {
                     self.left = tab;
+                    if tab == LeftTab::SyncBin {
+                        self.show_timeline();
+                    }
                 }
             }
         });

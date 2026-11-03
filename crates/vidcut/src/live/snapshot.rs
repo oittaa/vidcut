@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value;
-use vidcut_core::model::{Clip, TrackKind};
+use vidcut_core::model::Clip;
 use vidcut_core::render::TapeEntry;
 use vidcut_core::request::{TimecodeDisplay, ViewerFrame, ViewerMode};
 use vidcut_core::steps::{Span, Steps};
@@ -315,26 +315,8 @@ pub fn source_frame_at(
         ViewerMode::SourceTape | ViewerMode::MultiSource => {
             source_entry(viewer, tape, playhead).map(|e| playhead - e.start)
         }
-        ViewerMode::Timeline => shown_clip(project?, playhead).map(|c| c.source_at(playhead)),
+        ViewerMode::Timeline => project?.shown_clip(playhead).map(|c| c.source_at(playhead)),
     }
-}
-
-fn shown_clip(project: &Project, playhead: i64) -> Option<&Clip> {
-    let tracks = project.tracks_of(TrackKind::Video);
-    for ti in tracks.into_iter().rev() {
-        let track = &project.tracks[ti];
-        if !track.video_enabled {
-            continue;
-        }
-        let Some(ci) = track.clip_at(playhead) else {
-            continue;
-        };
-        let clip = &track.clips[ci];
-        if clip.enabled && clip.video && !clip.is_block() {
-            return Some(clip);
-        }
-    }
-    None
 }
 
 pub struct TimecodeView<'a> {
@@ -371,7 +353,7 @@ pub fn timecode_view<'a>(
         None => (Rational::new(30, 1).expect("valid"), false, 0),
     };
     let clip = match viewer {
-        ViewerMode::Timeline => project.and_then(|p| shown_clip(p, playhead)),
+        ViewerMode::Timeline => project.and_then(|p| p.shown_clip(playhead)),
         ViewerMode::SourceClip | ViewerMode::SourceTape | ViewerMode::MultiSource => None,
     };
     let media = match viewer {

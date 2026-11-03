@@ -35,6 +35,7 @@ mod shuttle;
 mod speech;
 mod subtitles;
 mod super_scale;
+mod sync_bin;
 mod theme;
 mod tiles;
 mod timeline;
