@@ -1079,7 +1079,15 @@ fn lay_out(look: &Look) -> Option<Laid> {
                 if r.look.strike {
                     a = a.strikethrough();
                 }
-                let full = r.look.size.map_or(size, |s| (s as f32 * per).max(1.0));
+                let full = r.look.size.map_or(size, |s| {
+                    let exact = s * f64::from(per);
+                    let drawn = if seat {
+                        Title::whole_size(exact, f64::from(look.spacing.1))
+                    } else {
+                        exact
+                    };
+                    (drawn as f32).max(1.0)
+                });
                 let gap = line_gap(&mut f.system, look, &a, full);
                 let px = match r.look.shift {
                     Some(_) => {
@@ -1678,8 +1686,13 @@ fn title_block(
         return shaped_box(t, block, (w, h), h / f64::from(timeline.max(1)));
     }
     let zoom = block.zoom;
-    let size = (h * t.text_fraction() * zoom).max(1.0) as f32;
     let pixel = h / f64::from(timeline.max(1));
+    let exact = h * t.text_fraction() * zoom;
+    let drawn = match t.kind {
+        TitleKind::Scroll => exact,
+        TitleKind::Text | TitleKind::LowerThird => Title::whole_size(exact, pixel * zoom),
+    };
+    let size = drawn.max(1.0) as f32;
     let slack = (size * Title::PADDING as f32).ceil();
     let text = t.block_text(block.part);
     let bare = block.part == TitlePart::Backing;
