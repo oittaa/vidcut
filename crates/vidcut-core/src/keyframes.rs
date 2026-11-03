@@ -933,11 +933,7 @@ impl Title {
     }
 
     pub fn in_file(&self, [x, y]: [f64; 2]) -> [f64; 2] {
-        let lift = match self.kind {
-            TitleKind::LowerThird => self.lower_line(),
-            TitleKind::Text | TitleKind::Scroll => 0.0,
-        };
-        [x, 1.0 - y + lift]
+        [x, 1.0 - y]
     }
 
     pub fn ease_position(&mut self, frame: i64, ease: Ease) {

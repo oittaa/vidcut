@@ -25,6 +25,11 @@ pub fn add(p: &mut Project, ids: &[String], kind: EffectType) -> Result<Value> {
     for id in ids {
         let (ti, ci) = locate(p, id)?;
         takes(p, ti, &p.tracks[ti].clips[ci])?;
+        if p.tracks[ti].clips[ci].generator.is_some() {
+            return Err(Error::invalid(format!(
+                "{id} is a generator, which takes no effects"
+            )));
+        }
         let picture = p.tracks[ti].clips[ci]
             .picture
             .get_or_insert_with(Default::default);

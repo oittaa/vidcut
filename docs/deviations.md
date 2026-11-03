@@ -136,9 +136,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Marks, faders and the rest of the project go in the metadata of vidcut. Resolve does not keep this metadata.
   - A project holds one timeline (X2). Thus File > Import Timeline (`timeline import`) appends, replaces the timeline, adds one compound clip, or brings in only the media.
   - An OTIO file also opens as a new project.
-  - Clip effects, transitions, generators, compound clips and speed changes come in as data. vidcut writes them back while they fit.
+  - Clip effects, transitions, generators other than Solid Color, compound clips and speed changes come in as data. vidcut writes them back while they fit.
   - Dissolves, cross fades ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), wipes ([X89](#x89-a-wipe-reveals-from-one-edge)) and speeds ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) play.
-  - Other transitions play as cuts, and generators play as gaps. Other effects do not play.
+  - Solid Color plays ([spec §8.17](cut-page-spec.md#817-generators-p-766)).
+  - Other transitions play as cuts, and other generators play as gaps. Other effects do not play.
   - The keyframes of the clip volume effect play as volume keyframes ([D81](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Text and lower-third titles of Resolve come in as titles of vidcut. The titles of vidcut go out in the shape that Resolve uses ([D67](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Transform, Cropping, Dynamic Zoom, Composite and Retime and Scaling of Resolve come in as the picture of a clip. The picture of a clip goes out as these effects ([D75](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
@@ -1042,7 +1043,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The section has these controls:
     - a Look list ([X59](#x59-looks-for-titles-too-some-built-in))
     - the kind of the title
-    - the alignment of a lower third or a scroll
+    - the alignment
+    - the anchor of a Text title
     - the text
     - the font, typed or selected from the installed fonts
     - the size, the color, the outline, the background and the drop shadow, each color typed or picked with a swatch
@@ -1112,11 +1114,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The `position` of a title is `[x, y]`, in fractions of the width and the height of the picture, from its top left.
   - The x goes from -4 to 4, and the y goes from -3 to 5. Thus a title can start and end outside the picture.
   - The Title section of the Inspector shows it as percents.
-  - It is where the middle of a Text title goes, or the bottom corner or middle of a lower third (D65).
+  - It is where the anchor of a Text title goes, or the point of a line of a lower third (D65).
   - Without a position, the title takes the usual place of its kind.
 - **Why:**
   - Fractions mean the same at any picture size, and a script sets them exactly.
-  - A lower third hung from its corner stays inside title safe, whatever the length of its text.
   - The y counts down from the top. Thus it is 1 minus the y of Resolve's position, and the limits are the same.
 
 ## X55. A scroll rises over the whole clip, its lines spaced as other titles'

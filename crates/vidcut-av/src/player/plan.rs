@@ -369,6 +369,11 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             vidcut_core::model::hex(*color)
         )
         .into(),
+        VideoPiece::Generated { picture, .. } => format!(
+            "generated|{}x{}|{:?}|{picture:?}",
+            plan.width, plan.height, plan.colors
+        )
+        .into(),
         VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => {
             format!("black|{}x{}", plan.width, plan.height).into()
         }
@@ -426,12 +431,9 @@ pub(crate) fn placed_of(
     piece
         .layers()
         .into_iter()
-        .map(|(l, _)| match l {
-            VideoPiece::Source { placed, .. } => {
-                let placed: Vec<Placed> = placed.iter().map(|p| p.after(k)).collect();
-                previewed(&placed, preview)
-            }
-            _ => Vec::new(),
+        .map(|(l, _)| {
+            let placed: Vec<Placed> = l.placed().iter().map(|p| p.after(k)).collect();
+            previewed(&placed, preview)
         })
         .collect()
 }

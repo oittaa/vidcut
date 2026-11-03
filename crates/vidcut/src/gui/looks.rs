@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Key};
@@ -393,6 +394,11 @@ pub(super) struct TextFields {
     shadow_blur: String,
 }
 
+fn usual_font() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| vidcut_av::burn::usual_family().unwrap_or_else(|| "Sans Serif".to_string()))
+}
+
 fn switched(ui: &mut egui::Ui, label: &str, off: &mut bool) -> bool {
     ui.label(label);
     let mut on = !*off;
@@ -527,7 +533,7 @@ impl TextFields {
         let shadow_across = format!("{}%", percent(Some(TitleShadow::OFFSET[0])));
         let shadow_down = format!("{}%", percent(Some(TitleShadow::OFFSET[1])));
         let shadow_blur = plain(Some(TitleShadow::BLUR));
-        changed |= row(ui, true, "Font", &mut self.font, "Open Sans");
+        changed |= row(ui, true, "Font", &mut self.font, usual_font());
         changed |= font_list(ui, &format!("{salt}-font"), &mut self.font, families);
         ui.end_row();
         changed |= row(ui, true, "Size", &mut self.size, usual.size);
