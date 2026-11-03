@@ -880,6 +880,9 @@ pub fn export_drawn(
                 if s > ta {
                     audio.push(gap(s - ta, rate));
                 }
+                if let Some(x) = transitions::head(p, &edits, c, true, s, &audio, rate) {
+                    audio.push(x);
+                }
                 let mut editor = json!({});
                 if let Some(kept) = c.generator.as_ref().and_then(generators::kept_channels) {
                     channels.push(kept.len() as u16);
@@ -906,6 +909,9 @@ pub fn export_drawn(
                     it["color"] = x;
                 }
                 audio.push(it);
+                if let Some(x) = transitions::tail(p, &edits, c, true, e, rate) {
+                    audio.push(x);
+                }
                 ta = e;
             }
             if let (Some(au), Some((s, e))) = (&c.audio, sounds) {
@@ -978,6 +984,9 @@ pub fn export_drawn(
                     if s > ta {
                         audio.push(gap(s - ta, rate));
                     }
+                    if let Some(x) = transitions::head(p, &edits, c, true, s, &audio, rate) {
+                        audio.push(x);
+                    }
                     let effects = with_speed(
                         c,
                         m.map(|m| p.media_limit(m)),
@@ -989,6 +998,9 @@ pub fn export_drawn(
                     let mut it = block(c, k, &label, c.source_at(s), e - s, effects);
                     tie(&mut it, c, k, &links, &mut given, &mut groups);
                     audio.push(it);
+                    if let Some(x) = transitions::tail(p, &edits, c, true, e, rate) {
+                        audio.push(x);
+                    }
                     ta = e;
                 }
             }
@@ -1232,6 +1244,33 @@ fn sequence_of(k: &Compound) -> String {
         },
         str::to_string,
     )
+}
+
+pub fn tied(p: &Project, id: &str) -> Vec<String> {
+    let Some(c) = p.clip(id) else {
+        return Vec::new();
+    };
+    if let Some(k) = no_media_tie(c) {
+        return p
+            .tracks
+            .iter()
+            .flat_map(|t| &t.clips)
+            .filter(|o| o.id != id && no_media_tie(o) == Some(k))
+            .map(|o| o.id.clone())
+            .collect();
+    }
+    if c.compound.is_none() {
+        return Vec::new();
+    }
+    let links = compound_links(p, i64::MIN, i64::MAX);
+    let Some((n, _)) = links.get(id) else {
+        return Vec::new();
+    };
+    links
+        .iter()
+        .filter(|(o, (m, _))| **o != id && m == n)
+        .map(|(o, _)| (*o).to_string())
+        .collect()
 }
 
 type Links<'a> = HashMap<&'a str, (usize, String)>;

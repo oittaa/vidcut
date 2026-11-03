@@ -1682,6 +1682,20 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - An import warning names the clip.
     - An OTIO export writes a `Clip` with a `MissingReference` on its track.
     - Clips with the same place and the same link group in the file stay in one link group.
+    - A sound transition at such a clip stays in the export. vidcut plays no fade on the clip with no media, and no fade on the sound of a compound clip.
+  - **The linked parts of a clip with no media or of a compound clip.** Each part is a clip on its track. The parts act together, as linked clips do in Resolve:
+    - Clips with no media are parts of one clip when they have the same link group, start and length.
+    - A picture and a sound of a compound clip are one clip when they have the same sequence, start, length, source start and speed.
+    - A request that names one part acts on each part: `edit.delete`, `edit.cut`, `edit.copy`, `edit.move`, `edit.replace`, `edit.trim`, `edit.roll`, `edit.slip`, `edit.slide`, `edit.split`, `edit.join`, `edit.change_duration` and `edit.change_speed`.
+    - The part on V1 leads. The rules of V1 apply to it, and the other parts take its new place.
+    - An insert into such a clip on V1 splits each part at that frame.
+    - A move to another video track keeps the sound on its audio track, at the new place. When that track has a clip at the new place, the sound goes on the next free audio track.
+    - A move of a sound part to another audio track moves its picture to the new place on the picture's own track.
+    - A part on a locked track refuses the edit.
+    - An edit that writes on one track does not write on the other parts: `edit.overwrite`, `edit.ripple_overwrite`, `edit.place_on_top`, `edit.source_overwrite` and `edit.paste`.
+    - After such an edit the parts can differ in place or length. Then they are separate clips, and an export gives them no link group.
+    - A timeline drag shows only the part under the pointer. The other parts move when the drag ends.
+    - Resolve was not measured for a locked part, or for a move to another track.
 - **D41. Proxies** (deviation X18; the proxy chapters, pp. 207–218, are outside the Cut page).
   - Videos and image sequences get proxies on demand (Generate Proxy).
   - A running GUI also makes proxies for media that are hard to play (preferences `proxies.*`):
