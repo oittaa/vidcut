@@ -2,7 +2,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use cosmic_text::{
     Align, Attrs, Buffer, Color, Family, FontSystem, Metrics, Renderer, Shaping, Style, SwashCache,
-    UnderlineStyle, Weight, Wrap,
+    UnderlineStyle, Weight, Wrap, fontdb,
 };
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
@@ -195,6 +195,7 @@ struct Look<'a> {
     font: Option<&'a str>,
     size: f32,
     line: f32,
+    title_gap: Option<(&'a Title, f64)>,
     wrap: f32,
     align: Align,
     ink: [u8; 3],
@@ -467,20 +468,42 @@ fn covered((x0, y0, x1, y1): (i32, i32, i32, i32), x: i32, y: i32, corner: f32) 
     (0.5 - past).clamp(0.0, 1.0)
 }
 
+fn font_line(system: &mut FontSystem, attrs: &Attrs<'_>) -> Option<f32> {
+    let id = system.db().query(&fontdb::Query {
+        families: &[attrs.family],
+        weight: attrs.weight,
+        stretch: attrs.stretch,
+        style: attrs.style,
+    })?;
+    let font = system.get_font(id, attrs.weight)?;
+    let m = font.metrics();
+    Some((m.ascent - m.descent + m.leading) / f32::from(m.units_per_em))
+}
+
+fn line_gap(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) -> f32 {
+    look.title_gap
+        .and_then(|(title, pixel)| {
+            let own = font_line(system, attrs)?;
+            Some(title.line_gap(f64::from(own), f64::from(px), pixel) as f32)
+        })
+        .unwrap_or(px * look.line)
+}
+
 fn lay_out(look: &Look) -> Option<Laid> {
     let size = look.size;
     let line = look.line;
     let wrap = look.wrap;
     let mut held = fonts().lock().unwrap_or_else(|e| e.into_inner());
     let f = &mut *held;
-    let mut buffer = Buffer::new(&mut f.system, Metrics::new(size, size * line));
-    buffer.set_wrap(Wrap::WordOrGlyph);
-    buffer.set_size(Some(wrap), None);
     let installed_family = look.font.and_then(|name| installed(f, name));
     let family = match installed_family.as_deref() {
         Some(name) => Family::Name(name),
         None => Family::SansSerif,
     };
+    let gap = line_gap(&mut f.system, look, &Attrs::new().family(family), size);
+    let mut buffer = Buffer::new(&mut f.system, Metrics::new(size, gap));
+    buffer.set_wrap(Wrap::WordOrGlyph);
+    buffer.set_size(Some(wrap), None);
     let runs = match look.markup {
         Markup::Title(text, _) => vidcut_core::rich::spans(text),
         Markup::Pieces(..) => Vec::new(),
@@ -516,7 +539,8 @@ fn lay_out(look: &Look) -> Option<Laid> {
                     a = a.underline(UnderlineStyle::Single);
                 }
                 let px = r.look.size.map_or(size, |s| (s as f32 * per).max(1.0));
-                a = a.metrics(Metrics::new(px, px * line));
+                let gap = line_gap(&mut f.system, look, &a, px);
+                a = a.metrics(Metrics::new(px, gap));
                 (r.text.clone(), a)
             })
             .collect(),
@@ -730,6 +754,7 @@ fn block(
         font: style.font.as_deref(),
         size,
         line: SubtitleStyle::LINE as f32,
+        title_gap: None,
         wrap: (style.wrap_width(w, h) as f32).max(size),
         align: text_align(style),
         ink: style.ink(),
@@ -925,7 +950,8 @@ fn title_block(
     let look = Look {
         font: t.style.font.as_deref(),
         size,
-        line: t.line_spacing(timeline) as f32,
+        line: Title::LINE as f32,
+        title_gap: Some((t, pixel)),
         wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
         align: match t.align() {
             TitleAlign::Left => Align::Left,

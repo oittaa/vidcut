@@ -2200,7 +2200,7 @@ impl Title {
     pub const LOWER_IN: f64 = 0.1;
     pub const LOWER_DOWN: f64 = 0.88;
     pub const SCROLL_IN: f64 = 0.01;
-    pub const SCROLL_LINE: f64 = 1.815;
+    pub const SCROLL_LINE: f64 = 4.0 / 3.0;
     pub const SCROLL_LEAD: f64 = 10.0;
     pub const UPPER_SIZE: f64 = 48.0 / 1080.0;
     pub const ACROSS: (f64, f64) = (-Picture::REACH, Picture::REACH);
@@ -2294,11 +2294,10 @@ impl Title {
         self.style.size.unwrap_or(Self::usual_size(self.kind))
     }
 
-    pub fn line_spacing(&self, timeline_height: u32) -> f64 {
-        let text = self.text_fraction() * f64::from(timeline_height.max(1));
+    pub fn line_gap(&self, font_line: f64, text: f64, pixel: f64) -> f64 {
         match self.kind {
-            TitleKind::Scroll => Self::SCROLL_LINE + Self::SCROLL_LEAD / text,
-            TitleKind::Text | TitleKind::LowerThird => Self::LINE,
+            TitleKind::Scroll => font_line * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel,
+            TitleKind::Text | TitleKind::LowerThird => (font_line * text).ceil(),
         }
     }
 
