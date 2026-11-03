@@ -291,7 +291,7 @@ fn span_html(text: &str, look: &Look, base: &Base) -> String {
     )
 }
 
-fn html(lines: &[&[Span]], align: Option<&str>, spacing: u8, base: &Base) -> String {
+fn html(lines: &[&[Span]], align: Option<&str>, spacing: f64, base: &Base) -> String {
     let align = align.map_or(String::new(), |a| format!(" align=\"{a}\""));
     let paragraphs: Vec<String> = lines
         .iter()
@@ -303,6 +303,7 @@ fn html(lines: &[&[Span]], align: Option<&str>, spacing: u8, base: &Base) -> Str
                     .map(|s| span_html(&s.text, &s.look, base))
                     .collect()
             };
+            let spacing = number(rich::spacing(line).unwrap_or(spacing));
             format!(
                 "<p{align} style=\" margin-top:0px; margin-bottom:0px; margin-left:0px; \
                  margin-right:0px; -qt-block-indent:0; text-indent:0px; line-height:{spacing}; \
@@ -420,7 +421,12 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
             vec![rich_text(
                 t,
                 &lines,
-                html(&lines, Some("center"), 0, &base),
+                html(
+                    &lines,
+                    Some("center"),
+                    t.style.line_spacing.unwrap_or(0.0),
+                    &base,
+                ),
                 4,
                 placed(t, [0.5, 0.5], origin),
                 origin,
@@ -445,7 +451,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                     rich_text(
                         &high,
                         &[upper],
-                        html(&[upper], align, 1, &base),
+                        html(&[upper], align, t.style.line_spacing.unwrap_or(1.0), &base),
                         column,
                         placed(&high, [usual_x, 0.2], origin),
                         origin,
@@ -453,7 +459,7 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                     rich_text(
                         t,
                         &[lower],
-                        html(&[lower], align, 0, &base),
+                        html(&[lower], align, t.style.line_spacing.unwrap_or(0.0), &base),
                         6 + column,
                         placed(t, [usual_x, 0.22], origin),
                         origin,
@@ -660,6 +666,7 @@ struct Styled {
 #[derive(Debug, Default)]
 struct Read {
     lines: Vec<Vec<(String, Styled)>>,
+    spacings: Vec<Option<f64>>,
     family: Option<String>,
     points: Option<f64>,
     color: Option<String>,
@@ -681,6 +688,7 @@ fn styled(style: &str) -> Styled {
 }
 
 fn markup(
+    spacing: Option<f64>,
     line: &[(String, Styled)],
     family: Option<&str>,
     points: Option<f64>,
@@ -695,6 +703,7 @@ fn markup(
                 bold: st.bold,
                 italic: st.italic,
                 underline: st.underline,
+                spacing,
                 color: st
                     .color
                     .as_deref()
@@ -777,6 +786,12 @@ fn read_html(blob: &str) -> Read {
         let Some(open) = after.find('>') else {
             break;
         };
+        let spacing = after[..open]
+            .split_once("style=\"")
+            .and_then(|(_, s)| s.split_once('"'))
+            .and_then(|(s, _)| style_value(s, "line-height"))
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| Title::spacing_fits(*v));
         let inner = &after[open + 1..];
         let close = inner.find("</p>").unwrap_or(inner.len());
         let paragraph = &inner[..close];
@@ -827,6 +842,8 @@ fn read_html(blob: &str) -> Read {
         let current = stack.last().cloned().unwrap_or_default();
         put(entities(cursor), &current, &mut line);
         lines.push(line);
+        read.spacings
+            .extend(std::iter::repeat_n(spacing, lines.len()));
         read.lines.extend(lines);
         rest = &inner[(close + 4).min(inner.len())..];
     }
@@ -905,6 +922,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
         style: TitleStyle {
             font,
             size,
+            line_spacing: None,
             color,
             outline: Some(SubtitleOutline {
                 color: None,
@@ -1086,11 +1104,13 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let first = *texts.first()?;
     let read_of = |g: &Value| read_html(value(g, "title blob").as_str().unwrap_or(""));
     let h = f64::from(height.max(1));
-    let marked = |r: &Read, base: &Read| -> Vec<String> {
+    let marked = |r: &Read, base: &Read, usual: f64| -> Vec<String> {
         r.lines
             .iter()
-            .map(|l| {
+            .enumerate()
+            .map(|(i, l)| {
                 markup(
+                    r.spacings.get(i).copied().flatten().filter(|v| *v != usual),
                     l,
                     base.family.as_deref(),
                     base.points,
@@ -1100,12 +1120,20 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             })
             .collect()
     };
+    let mut line_spacing = None;
     let (lines, style_from, at, lowered, turned_by) = match kind {
         TitleKind::Scroll => return None,
         TitleKind::Text => {
             let r = read_of(first);
             let at = point(value(first, "position")).unwrap_or([0.5, 0.5]);
-            (marked(&r, &r), r, at, None, first)
+            let shared = r.spacings.first().copied().flatten().unwrap_or(0.0);
+            let usual = if r.spacings.iter().all(|s| s.unwrap_or(0.0) == shared) {
+                shared
+            } else {
+                0.0
+            };
+            line_spacing = (usual != 0.0).then_some(usual);
+            (marked(&r, &r, usual), r, at, None, first)
         }
         TitleKind::LowerThird => {
             let (upper, lower) = upper_lower(&texts)?;
@@ -1114,8 +1142,8 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
             let style_from = if high.points.is_some() { high } else { low };
             let low = read_of(lower);
             let high = upper.map(read_of).unwrap_or_default();
-            let text = |r: &Read| marked(r, &style_from).join(" ").trim().to_string();
-            let lines: Vec<String> = [text(&high), text(&low)]
+            let text = |r: &Read, usual| marked(r, &style_from, usual).join(" ").trim().to_string();
+            let lines: Vec<String> = [text(&high, 1.0), text(&low, 0.0)]
                 .into_iter()
                 .filter(|l| !l.is_empty())
                 .collect();
@@ -1161,6 +1189,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         style: TitleStyle {
             font,
             size,
+            line_spacing,
             color,
             outline,
             background,

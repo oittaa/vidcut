@@ -2283,3 +2283,16 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Above 8:1, the filter gives some source pixels more weight than others. Thin lines then make bands.
   - A 4K picture with one-pixel lines every 25 pixels has a mean of 70.4. At a shrink of 32:1, the filter alone reads 64 to 84. With the halving, it reads 69 to 71.
   - Timeline thumbnails and storyboards often shrink this far.
+
+## X111. A very negative line spacing keeps all the lines
+
+- **Resolve:**
+  - Line spacing moves the lines closer, and lines can overlap (p. 1184).
+  - These are measurements in Resolve Studio 21.1.2 from files, with Arial at size 96:
+    - At -112, it draws both lines.
+    - At -200 and at -500, it draws only the first of two lines.
+    - At -200 on the first line alone, or on the last line alone, it also draws only the first line.
+- **vidcut:**
+  - It draws all the lines at any line spacing.
+- **Why:**
+  - Lines that disappear are a fault in Resolve. The manual does not name them.

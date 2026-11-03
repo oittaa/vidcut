@@ -1942,10 +1942,10 @@ pub struct Title {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<TitleAlign>,
     /// Its lines, separated by `\n`: two at most for a lower third. `<b>`,
-    /// `<i>`, `<u>` and `<font color="…" face="…" size="…">` style the words
-    /// between them apart from the rest, `size` a fraction of the picture
-    /// height like the style's; `&lt;`, `&gt;` and `&amp;` stand for `<`,
-    /// `>` and `&`.
+    /// `<i>`, `<u>` and `<font color="…" face="…" size="…" spacing="…">`
+    /// style the words between them apart from the rest, `size` a fraction of
+    /// the picture height like the style's, `spacing` the line spacing of
+    /// their line; `&lt;`, `&gt;` and `&amp;` stand for `<`, `>` and `&`.
     pub text: String,
     #[serde(default, skip_serializing_if = "TitleStyle::is_empty")]
     pub style: TitleStyle,
@@ -2116,6 +2116,10 @@ pub struct TitleStyle {
     /// A size set here goes on both lines.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<f64>,
+    /// Pixels of the timeline added below each line, from -4096 to 4096.
+    /// Below the last line, it only makes the block taller. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_spacing: Option<f64>,
     /// `#rrggbb`, `#rgb` or a name such as `yellow`. Usual: white.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -2194,6 +2198,7 @@ pub fn size_fits(v: f64, most: u32) -> bool {
 
 impl Title {
     pub const MOST_SIZE: u32 = 4096;
+    pub const MOST_SPACING: f64 = 4096.0;
     pub const LINE: f64 = 1.31;
     pub const PADDING: f64 = 0.15;
     pub const SAFE: f64 = 0.9;
@@ -2205,6 +2210,10 @@ impl Title {
     pub const UPPER_SIZE: f64 = 48.0 / 1080.0;
     pub const ACROSS: (f64, f64) = (-Picture::REACH, Picture::REACH);
     pub const DOWN: (f64, f64) = (1.0 - Picture::REACH, 1.0 + Picture::REACH);
+
+    pub fn spacing_fits(v: f64) -> bool {
+        v.is_finite() && v.abs() <= Self::MOST_SPACING
+    }
 
     pub fn places([x, y]: [f64; 2]) -> bool {
         (Self::ACROSS.0..=Self::ACROSS.1).contains(&x) && (Self::DOWN.0..=Self::DOWN.1).contains(&y)
@@ -4266,12 +4275,22 @@ impl Hash for TitleStyle {
         let TitleStyle {
             font,
             size,
+            line_spacing,
             color,
             outline,
             background,
             shadow,
         } = self;
-        (font, floats_bits(*size), color, outline, background, shadow).hash(h);
+        (
+            font,
+            floats_bits(*size),
+            floats_bits(*line_spacing),
+            color,
+            outline,
+            background,
+            shadow,
+        )
+            .hash(h);
     }
 }
 

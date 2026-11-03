@@ -2022,7 +2022,9 @@ pub enum Request {
         align: Option<TitleAlign>,
         /// Its look: `font` (a family name), `size` (the text height as a
         /// fraction of the picture height, from 1/1080 to 4096/1080), `color`
-        /// (`#rrggbb`, `#rgb` or a name such as `yellow`), `outline` (a
+        /// (`#rrggbb`, `#rgb` or a name such as `yellow`), `line_spacing`
+        /// (pixels of the timeline added below each line, from -4096 to
+        /// 4096), `outline` (a
         /// color, a `size` in pixels of the timeline from 0 to 16, `0`
         /// drawing none, and `outside`, true to leave the letters whole),
         /// `background` (a color and an `opacity`

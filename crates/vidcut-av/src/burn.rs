@@ -1,8 +1,8 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use cosmic_text::{
-    Align, Attrs, Buffer, Color, Family, FontSystem, Metrics, Renderer, Shaping, Style, SwashCache,
-    UnderlineStyle, Weight, Wrap, fontdb,
+    Align, Attrs, Buffer, Color, Family, FontSystem, LayoutRun, Metrics, Renderer, Shaping, Style,
+    SwashCache, UnderlineStyle, Weight, Wrap, fontdb,
 };
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
@@ -196,6 +196,7 @@ struct Look<'a> {
     size: f32,
     line: f32,
     title_gap: Option<(&'a Title, f64)>,
+    spacing: (f32, f32),
     wrap: f32,
     align: Align,
     ink: [u8; 3],
@@ -402,9 +403,9 @@ impl Renderer for Bars {
     fn glyph(&mut self, _: cosmic_text::PhysicalGlyph, _: Color) {}
 }
 
-fn traces(buffer: &Buffer, f: &mut Fonts) -> Option<Vec<Traced>> {
+fn traces(runs: &[LayoutRun<'_>], f: &mut Fonts) -> Option<Vec<Traced>> {
     let mut bars = Bars(Vec::new());
-    for run in buffer.layout_runs() {
+    for run in runs {
         for g in run.glyphs.iter().filter(|g| g.metadata & HIDDEN == 0) {
             let p = g.physical((0., run.line_y), 1.0);
             let path = f.cache.get_outline_commands(&mut f.system, p.cache_key)?;
@@ -418,7 +419,7 @@ fn traces(buffer: &Buffer, f: &mut Fonts) -> Option<Vec<Traced>> {
                 ),
             });
         }
-        cosmic_text::render_decoration(&mut bars, &run, Color::rgb(255, 255, 255));
+        cosmic_text::render_decoration(&mut bars, run, Color::rgb(255, 255, 255));
     }
     Some(bars.0)
 }
@@ -489,6 +490,27 @@ fn line_gap(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) ->
         .unwrap_or(px * look.line)
 }
 
+fn spaced<'a>(buffer: &'a Buffer, below: &[f32]) -> Vec<LayoutRun<'a>> {
+    let count = buffer.layout_runs().count();
+    let mut shift = 0.0;
+    buffer
+        .layout_runs()
+        .enumerate()
+        .map(|(i, r)| {
+            let own = below.get(r.line_i).copied().unwrap_or(0.0);
+            let grown = if i + 1 == count { own.max(0.0) } else { own };
+            let run = LayoutRun {
+                line_y: r.line_y + shift,
+                line_top: r.line_top + shift,
+                line_height: r.line_height + grown,
+                ..r
+            };
+            shift += own;
+            run
+        })
+        .collect()
+}
+
 fn lay_out(look: &Look) -> Option<Laid> {
     let size = look.size;
     let line = look.line;
@@ -553,11 +575,27 @@ fn lay_out(look: &Look) -> Option<Laid> {
         Some(look.align),
     );
     buffer.shape_until_scroll(&mut f.system, false);
-    let lines: f32 = buffer.layout_runs().map(|r| r.line_height).sum();
-    if lines <= 0.0 {
+    if buffer.layout_runs().map(|r| r.line_height).sum::<f32>() <= 0.0 {
         return None;
     }
-    let popped = buffer.layout_runs().find_map(|run| {
+    let below: Vec<f32> = match look.markup {
+        Markup::Title(text, _) => vidcut_core::rich::lines(text)
+            .iter()
+            .map(|l| {
+                vidcut_core::rich::spacing(l).map_or(look.spacing.0, |s| s as f32) * look.spacing.1
+            })
+            .collect(),
+        Markup::Pieces(..) => Vec::new(),
+    };
+    let runs = spaced(&buffer, &below);
+    let lines: f32 = runs.iter().map(|r| r.line_height).sum();
+    let rise = runs.iter().map(|r| r.line_top).fold(0.0, f32::min);
+    let inked = runs
+        .iter()
+        .zip(buffer.layout_runs())
+        .map(|(r, plain)| r.line_top + plain.line_height)
+        .fold(lines, f32::max);
+    let popped = runs.iter().find_map(|run| {
         let (x0, x1) = run
             .glyphs
             .iter()
@@ -578,11 +616,11 @@ fn lay_out(look: &Look) -> Option<Laid> {
         (outline.ceil() as i32 + 2).max(frame.down.ceil() as i32)
     } else {
         outline.ceil() as i32 + 2
-    } + reach;
+    } + reach
+        + (-rise).ceil() as i32;
     let band = backing
         .and_then(|_| {
-            buffer
-                .layout_runs()
+            runs.iter()
                 .filter_map(|run| {
                     let (x0, x1) = run.glyphs.iter().fold((f32::MAX, f32::MIN), |(a, b), g| {
                         (a.min(g.x), b.max(g.x + g.w))
@@ -600,7 +638,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
             )
         });
     let (mut gx0, mut gx1) = (i32::MAX, i32::MIN);
-    for run in buffer.layout_runs() {
+    for run in &runs {
         for g in run.glyphs {
             gx0 = gx0.min(g.x.floor() as i32);
             gx1 = gx1.max((g.x + g.w).ceil() as i32);
@@ -611,7 +649,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     }
     let margin = (size * 0.5).ceil() as i32 + pad;
     let left = gx0 - margin;
-    let (cw, ch) = (gx1 - gx0 + 2 * margin, lines.ceil() as i32 + 2 * pad);
+    let (cw, ch) = (gx1 - gx0 + 2 * margin, inked.ceil() as i32 + 2 * pad);
     let (w, h) = (cw as usize, ch as usize);
     let mut canvas = vec![[0.0f32; 4]; w * h];
     let white = Color::rgb(255, 255, 255);
@@ -639,16 +677,16 @@ fn lay_out(look: &Look) -> Option<Laid> {
             }
         },
     };
-    for run in buffer.layout_runs().filter(|_| !look.bare) {
+    for run in runs.iter().filter(|_| !look.bare) {
         for g in run.glyphs.iter().filter(|g| g.metadata & HIDDEN == 0) {
             painter.glyph(
                 g.physical((0., run.line_y), 1.0),
                 g.color_opt.unwrap_or(white),
             );
         }
-        cosmic_text::render_decoration(&mut painter, &run, white);
+        cosmic_text::render_decoration(&mut painter, run, white);
     }
-    let traced = stroke.and_then(|_| traces(&buffer, f));
+    let traced = stroke.and_then(|_| traces(&runs, f));
     drop(held);
     let alpha: Vec<f32> = canvas.iter().map(|p| p[3]).collect();
     let on_top = traced.is_some() && stroke.is_some_and(|s| !s.outside);
@@ -755,6 +793,7 @@ fn block(
         size,
         line: SubtitleStyle::LINE as f32,
         title_gap: None,
+        spacing: (0.0, 0.0),
         wrap: (style.wrap_width(w, h) as f32).max(size),
         align: text_align(style),
         ink: style.ink(),
@@ -952,6 +991,10 @@ fn title_block(
         size,
         line: Title::LINE as f32,
         title_gap: Some((t, pixel)),
+        spacing: (
+            t.style.line_spacing.unwrap_or(0.0) as f32,
+            (pixel * zoom) as f32,
+        ),
         wrap: ((t.wrap_width(w, h) * zoom) as f32).max(size),
         align: match t.align() {
             TitleAlign::Left => Align::Left,

@@ -39,6 +39,7 @@ pub struct TitleDialog {
     align: TitleAlign,
     text: String,
     fields: TextFields,
+    line_spacing: String,
     line: LineFields,
     upper: LineFields,
     title_opacity: String,
@@ -72,6 +73,7 @@ impl TitleDialog {
             align: TitleAlign::Left,
             text: String::new(),
             fields: TextFields::default(),
+            line_spacing: String::new(),
             line: LineFields::default(),
             upper: LineFields::default(),
             title_opacity: String::new(),
@@ -100,6 +102,7 @@ impl TitleDialog {
         self.align = t.align();
         self.text = t.text.clone();
         self.fields = TextFields::load(&Parts::of_title(&t.style));
+        self.line_spacing = plain(t.style.line_spacing);
         self.base = Some(t.clone());
         self.line = LineFields::of(t);
         self.upper = LineFields::of(&t.upper_view());
@@ -204,7 +207,8 @@ fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine,
 fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     let stored = d.base.as_ref().unwrap_or(stored);
     let was = Parts::of_title(&stored.style);
-    let style = d.fields.refilled(&was).parts(&was, None)?.title();
+    let mut style = d.fields.refilled(&was).parts(&was, None)?.title();
+    style.line_spacing = kept_plain(&d.line_spacing, stored.style.line_spacing, "line spacing")?;
     let lower = line_of(d, &d.line, stored)?;
     let high = stored.upper_view();
     let upper = line_of(d, &d.upper, &high)?;
@@ -551,7 +555,13 @@ impl Workspace {
         egui::Grid::new("title-style-fields").show(ui, |ui| {
             changed |= d
                 .fields
-                .rows(ui, "title", &d.families, &Usual::title(&size_hint))
+                .rows(
+                    ui,
+                    "title",
+                    &d.families,
+                    &Usual::title(&size_hint),
+                    (!scroll).then_some(&mut d.line_spacing),
+                )
                 .0;
             let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
                 ui.label(label);
