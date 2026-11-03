@@ -2305,6 +2305,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Its letters are 1 pixel thinner, and they sit half a pixel higher.
   - The cause is one stored value: the reader gives each piece of text an outline width of 1.
   - With that value removed from the stored title, the picture is the same as a typed title, with 0 pixels different.
+  - The same value moves the lines `<u>`, `<o>` and `<s>` 2 to 3 pixels down. At 0, `<o>` and `<s>` are the same as typed, with 0 pixels different.
   - The same title typed in the Inspector, saved and opened again, or read from a `.drt` file has no such edge.
 - **vidcut:**
   - A title draws the same from any source: as a title typed in the Inspector.

@@ -471,45 +471,84 @@ impl Renderer for Bars {
     fn glyph(&mut self, _: cosmic_text::PhysicalGlyph, _: Color) {}
 }
 
-fn decorate<R: Renderer>(renderer: &mut R, run: &LayoutRun<'_>, ink: Color, scale: Option<f32>) {
-    let Some(scale) = scale else {
-        cosmic_text::render_decoration(renderer, run, ink);
-        return;
-    };
+struct TextLine {
+    left: f32,
+    right: f32,
+    top: f32,
+    bottom: f32,
+    color: Color,
+}
+
+fn text_lines(
+    system: &mut FontSystem,
+    run: &LayoutRun<'_>,
+    (scale, nudge, ceiling): (f32, f32, f32),
+    ink: Color,
+) -> Vec<TextLine> {
+    let mut lines = Vec::new();
     for span in run.decorations {
-        let (x0, x1) = run.glyphs[span.glyph_range.clone()]
-            .iter()
-            .fold((f32::MAX, f32::MIN), |(a, b), g| {
-                (a.min(g.x), b.max(g.x + g.w))
-            });
+        let glyphs = &run.glyphs[span.glyph_range.clone()];
+        let (x0, x1) = glyphs.iter().fold((f32::MAX, f32::MIN), |(a, b), g| {
+            (a.min(g.x), b.max(g.x + g.w))
+        });
         if x1 <= x0 {
             continue;
         }
         let deco = &span.data;
         let full = deco.underline_metrics.thickness * span.font_size;
-        let ascent = deco.ascent * span.font_size;
-        let height = (full - scale).max(scale);
-        let color = span.color_opt.unwrap_or(ink);
-        let mut bar = |from: f32| {
-            let top = run.line_y.trunc() + from;
-            let bottom = top + height;
-            let mut row = top.floor();
-            while row < bottom {
-                let cover = (row + 1.0).min(bottom) - row.max(top);
-                let alpha = f32::from(color.a()) * cover;
-                let faded = Color::rgba(color.r(), color.g(), color.b(), alpha as u8);
-                renderer.rectangle(x0 as i32, row as i32, (x1 - x0) as u32, 1, faded);
-                row += 1.0;
-            }
+        let ascent = glyphs
+            .first()
+            .and_then(|g| font_heights(system, g.font_id, g.font_weight))
+            .map_or(deco.ascent, |[ascent, ..]| ascent as f32)
+            * span.font_size;
+        let mut line = |middle: f32| {
+            lines.push(TextLine {
+                left: (x0 + nudge).ceil(),
+                right: x0 + nudge + Title::line_width(f64::from(x1 - x0), f64::from(scale)) as f32,
+                top: (middle - full / 2.0).max(ceiling),
+                bottom: middle + full / 2.0,
+                color: span.color_opt.unwrap_or(ink),
+            });
         };
         if deco.text_decoration.underline != UnderlineStyle::None {
-            bar(full / 3.0 + 1.5 * scale);
+            let drop = Title::underline_drop(f64::from(full / scale)) as f32;
+            line(run.line_y + drop * scale);
         }
         if deco.text_decoration.strikethrough {
-            bar(scale - ascent / 3.0);
+            line(run.line_y - ascent / 3.0);
         }
         if deco.text_decoration.overline {
-            bar(-ascent);
+            line(run.line_y - ascent);
+        }
+    }
+    lines
+}
+
+fn decorate<R: Renderer>(
+    renderer: &mut R,
+    run: &LayoutRun<'_>,
+    ink: Color,
+    lines: Option<&[TextLine]>,
+) {
+    let Some(lines) = lines else {
+        cosmic_text::render_decoration(renderer, run, ink);
+        return;
+    };
+    for line in lines {
+        let color = line.color;
+        let width = line.right - line.left;
+        let whole = width.floor();
+        let mut row = line.top.floor();
+        while row < line.bottom {
+            let cover = (row + 1.0).min(line.bottom) - row.max(line.top);
+            let shade = |share: f32| {
+                let alpha = f32::from(color.a()) * cover * share;
+                Color::rgba(color.r(), color.g(), color.b(), alpha as u8)
+            };
+            let (x, y) = (line.left as i32, row as i32);
+            renderer.rectangle(x, y, whole as u32, 1, shade(1.0));
+            renderer.rectangle(x + whole as i32, y, 1, 1, shade(width - whole));
+            row += 1.0;
         }
     }
 }
@@ -544,11 +583,11 @@ fn letters(
     canvas: &mut Canvas,
     runs: &[LayoutRun<'_>],
     lifts: &[Vec<f32>],
-    (seats, nudge): (&[f32], [f32; 2]),
+    nudge: [f32; 2],
     white: Color,
     f: &mut Fonts,
 ) {
-    for ((run, lift), seat) in runs.iter().zip(lifts).zip(seats) {
+    for (run, lift) in runs.iter().zip(lifts) {
         for (g, up) in run
             .glyphs
             .iter()
@@ -562,7 +601,7 @@ fn letters(
                 .as_ref()
                 .is_some_and(|i| i.content == SwashContent::Color);
             let traced = (!colored)
-                .then(|| letter(g, (nudge[0], seat + nudge[1] + up), f))
+                .then(|| letter(g, (nudge[0], run.line_y + nudge[1] + up), f))
                 .flatten();
             let Some(t) = traced else {
                 let p = g.physical((nudge[0], run.line_y + up), 1.0);
@@ -580,8 +619,8 @@ fn letters(
 fn traces(
     runs: &[LayoutRun<'_>],
     lifts: &[Vec<f32>],
-    exact: Option<(&[f32], [f32; 2])>,
-    scale: Option<f32>,
+    exact: Option<[f32; 2]>,
+    lines: Option<&[Vec<TextLine>]>,
     f: &mut Fonts,
 ) -> Option<Vec<Traced>> {
     let mut bars = Bars(Vec::new());
@@ -592,9 +631,9 @@ fn traces(
             .zip(lift)
             .filter(|(g, _)| g.metadata & HIDDEN == 0)
         {
-            if let Some((seats, nudge)) = exact {
+            if let Some(nudge) = exact {
                 bars.0
-                    .push(letter(g, (nudge[0], seats[i] + nudge[1] + up), f)?);
+                    .push(letter(g, (nudge[0], run.line_y + nudge[1] + up), f)?);
                 continue;
             }
             let p = g.physical((0., run.line_y + up), 1.0);
@@ -609,7 +648,8 @@ fn traces(
                 ),
             });
         }
-        decorate(&mut bars, run, Color::rgb(255, 255, 255), scale);
+        let own = lines.map(|all| all[i].as_slice());
+        decorate(&mut bars, run, Color::rgb(255, 255, 255), own);
     }
     Some(bars.0)
 }
@@ -898,7 +938,7 @@ fn spaced<'a>(
             let own = below.get(r.line_i).copied().unwrap_or(0.0);
             let grown = if i + 1 == count { own.max(0.0) } else { own };
             let y = if seat {
-                r.line_top + Title::baseline(f64::from(fulls[i])) as f32
+                r.line_top + fulls[i]
             } else {
                 r.line_y
             };
@@ -1138,12 +1178,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
         let top = block_top(edge, s.part, t.anchor()[1] as f32, lines, above);
         [left as f32, top.ceil()]
     });
-    let seats: Vec<f32> = runs
-        .iter()
-        .zip(ascents(&mut f.system, &buffer))
-        .map(|(r, a)| r.line_top + a)
-        .collect();
-    let exact = seated.map(|at| (seats.as_slice(), at.map(|v| v - v.round())));
+    let exact = seated.map(|at| at.map(|v| v - v.round()));
     let popped = runs.iter().find_map(|run| {
         let (x0, x1) = run
             .glyphs
@@ -1209,7 +1244,13 @@ fn lay_out(look: &Look) -> Option<Laid> {
         top: -pad,
     };
     let white = Color::rgb(255, 255, 255);
-    let scale = look.title_gap.map(|_| look.spacing.1);
+    let drawn_lines: Option<Vec<Vec<TextLine>>> = look.title_gap.map(|_| {
+        let nudge = exact.map_or(0.0, |at| at[0]);
+        let place = (look.spacing.1, nudge, rise);
+        runs.iter()
+            .map(|run| text_lines(&mut f.system, run, place, white))
+            .collect()
+    });
     if let Some(at) = exact.filter(|_| !look.bare) {
         letters(&mut canvas, &runs, &lifts, at, white, f);
     }
@@ -1220,7 +1261,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
             canvas.rectangle(x, y, bw, bh, color);
         },
     };
-    for (run, lift) in runs.iter().zip(&lifts).filter(|_| !look.bare) {
+    for (i, (run, lift)) in runs.iter().zip(&lifts).enumerate().filter(|_| !look.bare) {
         for (g, up) in run
             .glyphs
             .iter()
@@ -1232,9 +1273,10 @@ fn lay_out(look: &Look) -> Option<Laid> {
                 g.color_opt.unwrap_or(white),
             );
         }
-        decorate(&mut painter, run, white, scale);
+        let own = drawn_lines.as_ref().map(|all| all[i].as_slice());
+        decorate(&mut painter, run, white, own);
     }
-    let traced = stroke.and_then(|_| traces(&runs, &lifts, exact, scale, f));
+    let traced = stroke.and_then(|_| traces(&runs, &lifts, exact, drawn_lines.as_deref(), f));
     drop(held);
     let canvas = canvas.pixels;
     let alpha: Vec<f32> = canvas.iter().map(|p| p[3]).collect();
