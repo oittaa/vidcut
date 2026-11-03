@@ -2016,8 +2016,8 @@ pub enum Request {
         /// `text` (the default), `lower_third` or `scroll`.
         #[serde(default)]
         kind: Option<TitleKind>,
-        /// How a lower third or a scroll lines up: `left`, `middle` or
-        /// `right` (a lower third's default left, a scroll's middle).
+        /// How a lower third or a scroll lines up: `left` (the default),
+        /// `middle` or `right`.
         #[serde(default)]
         align: Option<TitleAlign>,
         /// Its look: `font` (a family name), `size` (the text height as a

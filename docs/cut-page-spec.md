@@ -2077,7 +2077,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A clip on a track above covers the title where its picture covers the frame (D75).
     - A clip that fades in or out above the title fades over it.
     - Subtitles go over the title.
-  - The lines of a scroll wrap at title safe, and align left, in the middle or right. By default they are in the middle of the picture.
+  - The lines of a scroll wrap at title safe, and align left, in the middle or right. By default they align left, 1% of the picture width in from its left edge (measured in Resolve Studio 21.1.2).
   - They rise at a steady speed (X55). At the first frame of the clip, they are just below the picture. At its last frame, they are just above it.
   - A dissolve at the edge of a title fades it in or out, as Resolve does.
   - The title is drawn through all of the frames of the dissolve, at the level of the dissolve, on both sides of its edge.
