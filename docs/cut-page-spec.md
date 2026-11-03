@@ -2050,13 +2050,21 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Tracking adds space after each letter, also after the last letter (p. 1184). `tracking` in the style goes on each letter. `tracking` in markup goes on its words.
     - One unit is 3/4 of a pixel of the timeline at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
     - A scroll has no line spacing or tracking, as in Resolve's own Scroll.
+    - `<o>` draws a line over the words and `<s>` a line through them (p. 1184).
+    - These lines and `<u>` go across the advance of the words. Their height is the font's underline thickness less 1 pixel.
+    - The top of `<u>` is a third of that thickness plus 1.5 pixels under the baseline.
+    - The top of `<o>` is the font's ascent over the baseline. The top of `<s>` is a third of the ascent less 1 pixel over it.
+    - These rules fit Resolve Studio 21.1.2 within a pixel with four fonts at five sizes.
+    - `<sup>` and `<sub>` draw the words at 2/3 of their size (p. 1184).
+    - `<sup>` raises them by half of the small font's height, and `<sub>` lowers them by 1/6 of it. The rows of the lines stay (measured in Resolve Studio 21.1.2).
     - Lines wrap at the width of title safe, 90% of the picture width.
   - The lines of a Text title are centered. The middle of the block is at the middle of the picture.
   - The lines of a lower third align left, center or right.
   - The bottom-left corner, bottom middle or bottom-right corner of its block is 10%, 50% or 90% across and 88% down.
   - Thus the top of its lower line is about a fifth up the picture, where Resolve's own lower thirds put it (D67).
   - `position` moves that point (X54).
-  - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>` and `<font>` with a `color`, a `face`, a `size`, a `spacing` and a `tracking`.
+  - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>`, `<o>`, `<s>`, `<sup>`, `<sub>` and `<font>`.
+  - `<font>` takes a `color`, a `face`, a `size`, a `spacing` and a `tracking`.
   - A line takes the height of its largest size.
   - The lines of a lower third meet one lower-line height above its corner.
   - `size` is from 1/1080 to 4096/1080, also in markup. Size 1..4096 is the range of a title, measured in Resolve Studio 21.1.2.
@@ -2121,6 +2129,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A span has its font: for a title that names none, the family that vidcut draws it in.
     - A span also has its size in points, its weight (700 bold, else 400), italic, underline and color.
     - A span with tracking has it in `letter-spacing`, in `px`.
+    - A span with lines has `underline`, `overline` or `line-through` in `text-decoration`.
+    - A shifted span has `super` or `sub` in `vertical-align`.
     - Each paragraph has its line spacing in `line-height`. A Text title has 0, and the upper and lower line of a lower third have 1 and 0, unless a title sets another value.
     - The group has the alignment of the lines.
     - Its `anchor` is on a 3×3 grid, counted from the bottom left: 0 bottom left, 4 middle, 8 top right.

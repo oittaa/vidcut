@@ -1,11 +1,20 @@
 use crate::model::{Title, size_fits};
 use crate::subtitles::color;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shift {
+    Up,
+    Down,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Look {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
+    pub overline: bool,
+    pub strike: bool,
+    pub shift: Option<Shift>,
     pub color: Option<String>,
     pub face: Option<String>,
     pub size: Option<f64>,
@@ -24,6 +33,10 @@ enum Open {
     Bold,
     Italic,
     Underline,
+    Overline,
+    Strike,
+    Up,
+    Down,
     Font {
         color: Option<String>,
         face: Option<String>,
@@ -39,6 +52,10 @@ impl Open {
             Self::Bold => "b",
             Self::Italic => "i",
             Self::Underline => "u",
+            Self::Overline => "o",
+            Self::Strike => "s",
+            Self::Up => "sup",
+            Self::Down => "sub",
             Self::Font { .. } => "font",
         }
     }
@@ -90,6 +107,10 @@ fn tag(s: &str) -> Option<(bool, Option<Open>, usize)> {
         "b" => Open::Bold,
         "i" => Open::Italic,
         "u" => Open::Underline,
+        "o" => Open::Overline,
+        "s" => Open::Strike,
+        "sup" => Open::Up,
+        "sub" => Open::Down,
         "font" => Open::Font {
             color: attribute(rest, "color").and_then(|c| color(&c)),
             face: attribute(rest, "face")
@@ -132,6 +153,10 @@ fn look_of(stack: &[Open]) -> Look {
             Open::Bold => look.bold = true,
             Open::Italic => look.italic = true,
             Open::Underline => look.underline = true,
+            Open::Overline => look.overline = true,
+            Open::Strike => look.strike = true,
+            Open::Up => look.shift = Some(Shift::Up),
+            Open::Down => look.shift = Some(Shift::Down),
             Open::Font {
                 color,
                 face,
@@ -281,6 +306,18 @@ pub fn write(line: &[Span], base: &Look) -> String {
             (l.bold, base.bold, "b"),
             (l.italic, base.italic, "i"),
             (l.underline, base.underline, "u"),
+            (l.overline, base.overline, "o"),
+            (l.strike, base.strike, "s"),
+            (
+                l.shift == Some(Shift::Up),
+                base.shift == Some(Shift::Up),
+                "sup",
+            ),
+            (
+                l.shift == Some(Shift::Down),
+                base.shift == Some(Shift::Down),
+                "sub",
+            ),
         ] {
             if on && !base_on {
                 open.push_str(&format!("<{name}>"));
