@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use vidcut_core::lru::Lru;
@@ -59,7 +58,7 @@ fn wanted(preview: &Preview, s: &ShownTitle) -> Title {
 #[derive(Default)]
 struct Kept {
     pictures: Lru<Key, Vec<Option<Arc<TitlePicture>>>, KEPT>,
-    last: HashMap<String, Key>,
+    last: Lru<String, Key, KEPT>,
 }
 
 #[derive(Default)]
