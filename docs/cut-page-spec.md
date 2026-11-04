@@ -1814,7 +1814,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
 - macOS keeps the keys of the manual.
 - Shortcuts do nothing while a text field has focus, or while a modal question shows.
 - Esc dismisses the question and does nothing (Cancel, or Keep Running when quitting).
-- The table gives the default keys. The Keys page of Preferences, `keys.set` and `keys.reset` change them.
+- The table gives the default keys. The Keys page of Preferences (X138), `keys.set` and `keys.reset` change them.
   - An action can have several keys, or no key.
   - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
   - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.

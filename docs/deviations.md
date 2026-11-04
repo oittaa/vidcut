@@ -2618,3 +2618,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - One key on two actions is confusing.
   - The rule that selects the action in Resolve is not known.
   - The owner approved this difference.
+
+## X138. The keys are a page of Preferences
+
+- **Resolve:**
+  - Keyboard Customization is a separate window (p. 121).
+- **vidcut:**
+  - The keys are the Keys page of the Preferences window.
+- **Why:**
+  - vidcut stores the keys in the preferences, with the other settings of the user.
+  - The owner approved this difference.
