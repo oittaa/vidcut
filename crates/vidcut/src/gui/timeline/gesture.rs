@@ -73,7 +73,8 @@ pub enum Gesture {
         sound: bool,
     },
     AudioRoll {
-        outgoing: String,
+        clip: String,
+        edge: Edge,
         from: i64,
     },
     Marquee {
@@ -441,8 +442,8 @@ impl Drag {
                     ..Preview::default()
                 }
             }
-            Gesture::AudioRoll { outgoing, from } => {
-                audio_roll_preview(ctx, *from + moved(ctx, self.press, pos), outgoing, *from)
+            Gesture::AudioRoll { clip, edge, from } => {
+                audio_roll_preview(ctx, *from + moved(ctx, self.press, pos), clip, *edge, *from)
             }
             Gesture::Marquee { additive } => marquee_preview(ctx, self.press, pos, *additive),
             Gesture::CueMove {
@@ -1302,7 +1303,7 @@ fn edits_preview(ctx: &Ctx, target: i64, edits: &[EditSel], lead: EditSel) -> Pr
     let by = match want {
         0 => 0,
         w if fits(w) => w,
-        w => super::tools::furthest(0, w.signum(), fits),
+        w => vidcut_core::ops::furthest(0, w.signum(), fits),
     };
     let trims = match by {
         0 => Vec::new(),
@@ -1348,24 +1349,18 @@ fn slip_preview(ctx: &Ctx, pos: Pos2, press: Pos2, clips: &[String]) -> Preview 
     }
 }
 
-fn audio_roll_preview(ctx: &Ctx, target: i64, outgoing: &str, from: i64) -> Preview {
-    let (Some(t), Some(a)) = (ctx.track_of(outgoing), ctx.clip(outgoing)) else {
+fn audio_roll_preview(ctx: &Ctx, target: i64, clip: &str, edge: Edge, from: i64) -> Preview {
+    let Ok((least, most)) = vidcut_core::ops::audio_roll_room(ctx.project, clip, edge) else {
         return Preview::default();
     };
-    let Some(b) = t.clips.iter().find(|c| c.start == a.end()) else {
-        return Preview::default();
-    };
-    let tail = a.audio.as_ref().map_or(0, |x| x.tail);
     let (target, snapped) = ctx.snapped(target);
-    let lo = 1 - a.duration - tail;
-    let hi = b.duration - 1 - tail;
-    let delta = (target - from).clamp(lo.min(0), hi.max(0));
+    let delta = (target - from).clamp(least, most);
     Preview {
         request: (delta != 0)
             .then(|| {
                 request(
                     "edit.audio_roll",
-                    json!({ "clip": outgoing, "edge": "tail", "by": delta }),
+                    json!({ "clip": clip, "edge": edge, "by": delta }),
                 )
             })
             .flatten(),
