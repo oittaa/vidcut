@@ -380,9 +380,9 @@ fn ten_step(w: u32) -> Vec<Code> {
 }
 
 fn hundred_mv_steps(w: u32) -> Vec<Code> {
+    let band = w.div_ceil(10);
     columns(w, |x| {
-        let step = u64::from(x) * 10 / u64::from(w);
-        grey(step.saturating_sub(1).min(7) as f64 / 7.0)
+        grey(f64::from((x / band).saturating_sub(1).min(7)) / 7.0)
     })
 }
 
@@ -407,9 +407,13 @@ fn ebu_bars(level: EbuLevel, w: u32) -> Vec<Code> {
 }
 
 fn smpte_bars(w: u32, h: u32) -> Vec<Band> {
-    let base = (f64::from(h) * 16.0 / 9.0)
-        .min(f64::from(w) * 4.0 / 3.0)
-        .max(1920.0);
+    let base = if w < 1920 {
+        1920.0
+    } else {
+        f64::from(2 * (8 * h / 9))
+            .min(f64::from(w) * 4.0 / 3.0)
+            .max(1920.0)
+    };
     let c = (base * 3.0 / 28.0).ceil() as usize;
     let u = 2 * c.div_ceil(6);
     let full = (w as usize).max(1920);

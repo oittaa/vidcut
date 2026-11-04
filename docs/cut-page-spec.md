@@ -1387,17 +1387,16 @@ A generator is a clip that makes its own picture. It has no media and no sound.
 - **Ramps and bars:**
   - Measured: these are the pictures, at a timeline of W × H. All values are fractions, and x and y count from 0.
   - 10 Step: a band is ⌈W / 11⌉ wide. The grey is min(⌊x / band⌋, 10) / 10.
-  - 100mV Steps: k = ⌊10 x / W⌋, and the grey is clamp(k − 1, 0, 7) / 7.
+  - 100mV Steps: a band is ⌈W / 10⌉ wide. The grey is clamp(⌊x / band⌋ − 1, 0, 7) / 7.
   - Grey Scale: the grey is x / W.
   - YCbCr Ramp: t = x / W, and each channel is clamp(0.5 + s (t − 0.5), 0, 1).
     - s is 2.539648 for red, 0.359182 for green and 2.814179 for blue.
-  - EBU Color Bar has eight bars of W / 8.
+  - EBU Color Bar has eight bars. A bar is ⌈W / 8⌉ wide.
     - The bars are white at 1, then yellow, cyan, green, magenta, red and blue at the Level, and then black.
     - The Level is 75% or 100%. 75% is the default (measured).
-    - vidcut: a bar is ⌈W / 8⌉ wide when W / 8 is not a whole number. The frame at 1001 wide shows this.
   - The rows of the bars end at ⌊k / 12 × H⌋, with 32-bit floats.
   - SMPTE Color Bar has four rows, with these sizes:
-    - B = max(1920, min(H × 16 / 9, W × 4 / 3))
+    - B = 1920 when W is less than 1920. Else B = max(1920, min(2 ⌊8 H / 9⌋, W × 4 / 3)).
     - c = ⌈B × 3 / 28⌉, and U = 2 ⌈c / 6⌉
     - F = max(W, 1920), and d = max(0, ⌊(F − 7 c) / 2⌋)
   - The picture is F wide. It is cut off at the right when W is less than F.
