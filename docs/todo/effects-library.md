@@ -5,14 +5,22 @@
 The Cut page has separate tabs for transitions, titles and effects (p. 636). vidcut follows it.
 
 - The Transitions tab, the Transition Inspector, Dip To Color Dissolve, Smooth Cut, Push and Slide are there ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
-- The Effects tab, the effects of the Inspector and Gaussian Blur are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
+- The Effects tab, the effects of the Inspector, Gaussian Blur and Mosaic Blur are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - The Generators page and Solid Color are there ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
 - If the bar gets too full, one Effects tab with categories can replace the tabs, as the Edit page has (p. 802).
 
 Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
-1. **More effects:** Mosaic, Sharpen, Vignette, Film Grain and Glow.
+1. **More effects:** Sharpen, Vignette, Film Grain and Glow.
    - Measure each one in Resolve first: its values, their ranges and defaults, and its math.
+   - **Mosaic Blur, the controls that are not there:** Blur Alpha and Whole Cells Only. Measure them on a clip with alpha, for example at Zoom 0.5 over a lower track. All renders that exist are opaque.
+   - **Mosaic Blur, measure these on the Edit page:**
+     - Pixel Frequency 25 on 3840×2160 and 1080×1920 timelines, and with a 3840×2160 source on a 1920×1080 timeline.
+     - Zoom 2 and Zoom X 2 on the clip: the size and the place of the cells.
+     - Smooth Strength with Hexagon, with Triangle and with other Aliasing values.
+     - The default of Border Type, and if Border Type changes the picture.
+     - Aspect and the offsets with Hexagon and Triangle, Antialias Result with Triangle, and a picture with fine lines with Hexagon and Triangle.
+     - The range of Position.
 2. **Generators** (p. 766), one pull request for each line:
    - Four Color Gradient.
    - The ramps and the SDR bars: 10 Step, 100mV Steps, Grey Scale, YCbCr Ramp, EBU Color Bar and SMPTE Color Bar.

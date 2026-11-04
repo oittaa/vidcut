@@ -10,7 +10,13 @@ use super::workspace::{Workspace, dim};
 
 type Card = (&'static str, EffectType);
 
-pub const GROUPS: [(&str, &[Card]); 1] = [("Blur", &[("Gaussian Blur", EffectType::GaussianBlur)])];
+pub const GROUPS: [(&str, &[Card]); 1] = [(
+    "Blur",
+    &[
+        ("Gaussian Blur", EffectType::GaussianBlur),
+        ("Mosaic Blur", EffectType::MosaicBlur),
+    ],
+)];
 
 const CARD_WIDTH: f32 = 120.0;
 const CARD_HEIGHT: f32 = 68.0;
@@ -39,6 +45,23 @@ fn paint(painter: &Painter, rect: Rect, kind: EffectType) {
                     a,
                 );
                 painter.circle_filled(c, r * (0.6 + t), fill);
+            }
+        }
+        EffectType::MosaicBlur => {
+            let side = rect.height() / 5.0;
+            for row in 0..5 {
+                for column in 0..(rect.width() / side).ceil() as i32 {
+                    let a = (20 + (column * 7 + row * 13).rem_euclid(5) * 22) as u8;
+                    let fill = Color32::from_rgba_unmultiplied(
+                        colors.text.r(),
+                        colors.text.g(),
+                        colors.text.b(),
+                        a,
+                    );
+                    let at = rect.min + vec2(column as f32, row as f32) * side;
+                    let cell = Rect::from_min_size(at, vec2(side, side)).intersect(rect);
+                    painter.rect_filled(cell, 0.0, fill);
+                }
             }
         }
     }

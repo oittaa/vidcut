@@ -1018,32 +1018,16 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 );
             }
             for (i, e) in v["effects"].as_array().into_iter().flatten().enumerate() {
-                let n = |k: &str| e[k].as_f64().unwrap_or_default();
-                let list = |k: &str| {
-                    let all: Vec<String> = e[k]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .map(|x| x.as_f64().unwrap_or_default().to_string())
-                        .collect();
-                    all.join(", ")
-                };
-                let strength = match e["split"] == true {
-                    true => format!(
-                        "strength {} across, {} down",
-                        n("strength"),
-                        n("vertical_strength")
-                    ),
-                    false => format!("strength {}", n("strength")),
+                let values = match e["kind"].as_str() {
+                    Some("mosaic_blur") => mosaic_values(e),
+                    _ => gaussian_values(e),
                 };
                 println!(
-                    "  effect {i} {}{}  {strength}  channels across {}  down {}  border {}  blend {}{}{}",
+                    "  effect {i} {}{}  {values}  border {}  blend {}{}{}",
                     e["kind"].as_str().unwrap_or_default(),
                     if e["on"] == true { "" } else { " (off)" },
-                    list("horizontal_channels"),
-                    list("vertical_channels"),
                     e["border"].as_str().unwrap_or_default(),
-                    n("blend"),
+                    effect_number(e, "blend"),
                     if e["use_alpha"] == true {
                         ""
                     } else {
@@ -1092,6 +1076,58 @@ pub fn print(method: &str, r: &Response, json: bool) {
             serde_json::to_string_pretty(&r.result).unwrap_or_default()
         ),
     }
+}
+
+fn effect_number(e: &Value, key: &str) -> f64 {
+    e[key].as_f64().unwrap_or_default()
+}
+
+fn gaussian_values(e: &Value) -> String {
+    let n = |k: &str| effect_number(e, k);
+    let list = |k: &str| {
+        let all: Vec<String> = e[k]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|x| x.as_f64().unwrap_or_default().to_string())
+            .collect();
+        all.join(", ")
+    };
+    let strength = match e["split"] == true {
+        true => format!(
+            "strength {} across, {} down",
+            n("strength"),
+            n("vertical_strength")
+        ),
+        false => format!("strength {}", n("strength")),
+    };
+    format!(
+        "{strength}  channels across {}  down {}",
+        list("horizontal_channels"),
+        list("vertical_channels"),
+    )
+}
+
+fn mosaic_values(e: &Value) -> String {
+    let n = |k: &str| effect_number(e, k);
+    let at = |i: usize| e["position"][i].as_f64().unwrap_or_default();
+    format!(
+        "pixel frequency {}  smooth strength {}  {} cells  aliasing {}  offset {}, {}  aspect {}  position {}, {}{}",
+        n("pixel_frequency"),
+        n("smooth_strength"),
+        e["cell_shape"].as_str().unwrap_or_default(),
+        n("aliasing"),
+        n("x_offset"),
+        n("y_offset"),
+        n("aspect"),
+        at(0),
+        at(1),
+        if e["antialias"] == true {
+            "  antialias"
+        } else {
+            ""
+        },
+    )
 }
 
 fn live(method: &str, r: &Response) -> Option<()> {

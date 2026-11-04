@@ -438,18 +438,30 @@ Soft crop edges:
 The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)):
 
 - `place::Placing` holds the effects of the picture and of the compound clips around it, the inner ones first (`Placing.effects`).
-- Each `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas. It also holds the border, the blend and Use Alpha.
-  - The sigma is that of `GaussianBlur::spreads` at the width of the canvas.
-  - It is multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it, at the frame.
-  - An effect that is off, or at a blend of 0, is left out. So is a blur with no sigma and Use Alpha on.
+- Each `place::Working` holds the blend, Use Alpha and the `place::Work` of its kind.
+  - An effect that is off, or at a blend of 0, is left out (`Working::of`).
+  - The width of the canvas is multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it, at the frame. Each kind uses that width.
+- `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas, and the border.
+  - The sigma is that of `GaussianBlur::spreads` at that width.
+  - A blur with no sigma and Use Alpha on is left out.
+- `place::Tiling` holds the grid of a Mosaic Blur.
+  - That is the cell shape, the size of a cell, the step between columns, the origin and the size of the box.
+  - Its sizes are in samples. Antialias Result gives two samples for each pixel.
+  - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
 
 The draw:
 
 - `Screen::draw` draws a layer with effects into a picture of its own, with no opacity (`bared`).
 - `blur::Blurred` keeps that picture for each such layer. It also keeps two pictures for the passes.
+- `blur::steps` gives the passes of one effect: a pipeline and its parameters for each pass. `blur::effects_into` runs them.
 - `fs_blur` blurs across and then down, in passes (`blur::passes`).
-- The last pass of an effect mixes the blur with the picture that came in, by the blend.
-- With Use Alpha off, the first pass takes the colors without their alpha. Thus a clear part of the picture does not make it darker.
+- `fs_mosaic` makes the mosaic in three passes (`blur::mosaic_bytes`):
+  - The color of a cell is the mean of a box. The first two passes make a table of these means, across and then down.
+  - Only the columns and the rows that hold a middle of a cell get a mean. Thus the cost does not grow with the size of a cell.
+  - The third pass finds the cell of each pixel and reads its color from the table (`mosaic_nearest`).
+  - With Antialias Result, the third pass finds the cell of each of the four samples of a pixel, and takes their mean.
+- The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
+- With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
 

@@ -1,24 +1,11 @@
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Border, Effect, EffectKind, EffectType, Project};
+use crate::model::{Effect, EffectKind, EffectType, GaussianBlur, MosaicBlur, Project};
+use crate::request::EffectChange;
 
 use super::locate;
 use super::picture::{checked, effect_checked, takes};
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct EffectChange {
-    pub on: Option<bool>,
-    pub blend: Option<f64>,
-    pub use_alpha: Option<bool>,
-    pub render_cache: Option<bool>,
-    pub strength: Option<f64>,
-    pub split: Option<bool>,
-    pub vertical_strength: Option<f64>,
-    pub horizontal_channels: Option<[f64; 4]>,
-    pub vertical_channels: Option<[f64; 4]>,
-    pub border: Option<Border>,
-}
 
 pub fn add(p: &mut Project, ids: &[String], kind: EffectType) -> Result<Value> {
     let mut out = Vec::new();
@@ -63,45 +50,70 @@ fn tidied(p: &mut Project, id: &str) -> Result<()> {
     Ok(())
 }
 
+fn taken<T>(from: &mut Option<T>, to: &mut T) {
+    if let Some(v) = from.take() {
+        *to = v;
+    }
+}
+
+fn given<T>(from: &mut Option<T>, to: &mut Option<T>) {
+    if from.is_some() {
+        *to = from.take();
+    }
+}
+
+fn gaussian_values(c: &mut EffectChange, b: &mut GaussianBlur) -> Result<()> {
+    given(&mut c.strength, &mut b.strength);
+    taken(&mut c.split, &mut b.split);
+    given(&mut c.vertical_strength, &mut b.vertical_strength);
+    if let Some(k) = c.horizontal_channels.take() {
+        b.horizontal_channels = Some(channels("horizontal_channels", &k)?);
+    }
+    if let Some(k) = c.vertical_channels.take() {
+        b.vertical_channels = Some(channels("vertical_channels", &k)?);
+    }
+    given(&mut c.border, &mut b.border);
+    Ok(())
+}
+
+fn mosaic_values(c: &mut EffectChange, m: &mut MosaicBlur) -> Result<()> {
+    given(&mut c.pixel_frequency, &mut m.pixel_frequency);
+    given(&mut c.smooth_strength, &mut m.smooth_strength);
+    given(&mut c.cell_shape, &mut m.cell_shape);
+    given(&mut c.aliasing, &mut m.aliasing);
+    given(&mut c.x_offset, &mut m.x_offset);
+    given(&mut c.y_offset, &mut m.y_offset);
+    given(&mut c.aspect, &mut m.aspect);
+    if let Some(at) = c.position.take() {
+        let at = <[f64; 2]>::try_from(at)
+            .map_err(|_| Error::usage("position is two numbers: x and y"))?;
+        m.position = Some(at);
+    }
+    given(&mut c.border, &mut m.border);
+    taken(&mut c.antialias, &mut m.antialias);
+    Ok(())
+}
+
 pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result<()> {
     if *change == EffectChange::default() {
         return Err(Error::usage("effects.set needs a value to change"));
     }
     let e = &mut effects_of(p, id, n)?[n];
     let mut next = e.clone();
-    if let Some(v) = change.on {
-        next.on = v;
-    }
-    if let Some(v) = change.blend {
-        next.blend = Some(v);
-    }
-    if let Some(v) = change.use_alpha {
-        next.use_alpha = v;
-    }
-    if let Some(v) = change.render_cache {
-        next.render_cache = v;
-    }
+    let mut left = change.clone();
+    taken(&mut left.on, &mut next.on);
+    given(&mut left.blend, &mut next.blend);
+    taken(&mut left.use_alpha, &mut next.use_alpha);
+    taken(&mut left.render_cache, &mut next.render_cache);
     match &mut next.kind {
-        EffectKind::GaussianBlur(b) => {
-            if let Some(v) = change.strength {
-                b.strength = Some(v);
-            }
-            if let Some(v) = change.split {
-                b.split = v;
-            }
-            if let Some(v) = change.vertical_strength {
-                b.vertical_strength = Some(v);
-            }
-            if let Some(v) = change.horizontal_channels {
-                b.horizontal_channels = Some(v);
-            }
-            if let Some(v) = change.vertical_channels {
-                b.vertical_channels = Some(v);
-            }
-            if let Some(v) = change.border {
-                b.border = Some(v);
-            }
-        }
+        EffectKind::GaussianBlur(b) => gaussian_values(&mut left, b)?,
+        EffectKind::MosaicBlur(m) => mosaic_values(&mut left, m)?,
+    }
+    if left != EffectChange::default() {
+        return Err(Error::invalid(format!(
+            "effects.set has a value that a {} doesn't have",
+            e.kind().name()
+        )));
     }
     *e = effect_checked(&next)?;
     Ok(())
@@ -136,7 +148,7 @@ pub fn shift(p: &mut Project, id: &str, n: usize, to: usize) -> Result<()> {
     Ok(())
 }
 
-pub fn channels(what: &str, raw: &[f64]) -> Result<[f64; 4]> {
+fn channels(what: &str, raw: &[f64]) -> Result<[f64; 4]> {
     <[f64; 4]>::try_from(raw).map_err(|_| {
         Error::usage(format!(
             "{what} is four numbers: red, green, blue and alpha"

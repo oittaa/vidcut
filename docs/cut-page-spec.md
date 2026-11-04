@@ -1370,7 +1370,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - On the Cut page, a double-click on an effect adds it to the selected clip.
   - Measured in Resolve Studio 21.1.2: with several selected clips, only the first selected clip gets it.
   - The Effects panel of the Inspector has the values of the effects.
-  - vidcut: the Effects tab has the Blur group with Gaussian Blur. The other effects come later ([todo](todo/effects-library.md)).
+  - vidcut: the Effects tab has the Blur group with Gaussian Blur and Mosaic Blur. The other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
   - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
   - Measured in Resolve Studio 21.1.2: a generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API all leave it with none.
@@ -1407,6 +1407,36 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It also blurs the alpha. Over a lower track, the edge of a smaller picture fades into that track.
   - Reflect and Wrap-Around match a blur of one pass. Black and Replicate do not ([X101](deviations.md#x101-black-and-replicate-borders-follow-their-plain-definitions)).
   - A portrait timeline gives a sigma 3% smaller than the rule ([X102](deviations.md#x102-a-portrait-timeline-blurs-by-the-width-rule)).
+- **Mosaic Blur** (p. 3538). Its values and their defaults, measured in Resolve Studio 21.1.2:
+  - Pixel Frequency goes from 0.1 to 4000 and is 100.
+  - Smooth Strength goes from 0 to 1 and is 0.
+  - Cell Shape is Square, Hexagon or Triangle. Square is the default.
+  - Aliasing goes from 0 to 2 and is 1.
+  - Advanced Controls has these values:
+    - X Offset and Y Offset go from −1 to 1. Each is 0.
+    - Aspect goes from 0.001 to 1000 and is 1.
+    - Position is the middle of the frame.
+    - Border Type has Black, Replicate, Reflect and Wrap-Around.
+    - Antialias Result is off.
+    - Blur Alpha is on, and Whole Cells Only is off. vidcut does not have these two yet ([todo](todo/effects-library.md)).
+- **How the mosaic works,** measured in Resolve Studio 21.1.2 with 16-bit renders of a 1920×1080 picture:
+  - A cell is S high and S × Aspect wide, with S = 1.5 × the frame width / Pixel Frequency.
+  - Position sets the place of the grid. Position Y goes up from the bottom of the frame.
+  - X Offset moves the grid right, and Y Offset moves it up. An offset of 1 is half a cell.
+  - Hexagon: the cells have a flat top and bottom. Their columns are √3/2 of a cell width apart, and each odd column is half a cell lower.
+  - Triangle: the columns are 1/√3 of a cell width apart. The triangles point down and up in turn.
+  - A pixel of the frame takes the color of the cell around it.
+  - The color of a cell is the mean of a box around the middle of the cell, with equal weights.
+    - The box has the same form for each Cell Shape.
+    - Aliasing sets its size. At 0 it is one pixel, at 1 it is one cell, and at 2 it is two cells.
+    - Beyond the frame, the box takes the pixels of the edge. At the edge, the edge pixel thus weighs more.
+  - Antialias Result makes all of this at twice the size, from a linearly enlarged picture. Then each pixel is the mean of its four samples.
+  - Border Type and Smooth Strength do not change the renders. The manual does not name Smooth Strength for this effect.
+- **Mosaic in vidcut:**
+  - vidcut keeps Smooth Strength and Border Type on the effect. They do not change its picture.
+  - The width of the cell comes from the timeline width and the Zoom of the clip, as for the sigma of Gaussian Blur. Not measured for Mosaic Blur: another timeline size and Zoom ([todo](todo/effects-library.md)).
+  - Not measured: the alpha. vidcut takes the mean of the colors with their alpha, as Gaussian Blur does.
+  - Where a cell edge falls exactly on a pixel, Resolve gives that line of pixels to either cell, with no rule that the renders show. vidcut gives it to the cell on the right or below.
 - **Compound clips:** vidcut: the effects of a compound clip work on each picture inside it ([todo](todo/compound-opacity.md)).
 - **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
 

@@ -1,4 +1,6 @@
-use crate::model::{Border, CompositeMode, Effect, EffectKind, Picture, VideoInfo};
+use crate::model::{
+    Border, CellShape, CompositeMode, Effect, EffectKind, MosaicBlur, Picture, VideoInfo,
+};
 use crate::render::Placed;
 
 const LEAST_ZOOM: f64 = 1e-9;
@@ -69,7 +71,20 @@ impl Soft {
 pub struct Placing {
     pub levels: Vec<Level>,
     pub mode: CompositeMode,
-    pub effects: Vec<Blurring>,
+    pub effects: Vec<Working>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Working {
+    pub work: Work,
+    pub blend: f64,
+    pub use_alpha: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Work {
+    Blur(Blurring),
+    Mosaic(Tiling),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -77,28 +92,74 @@ pub struct Blurring {
     pub across: [f64; 4],
     pub down: [f64; 4],
     pub border: Border,
-    pub blend: f64,
-    pub use_alpha: bool,
 }
 
-impl Blurring {
-    fn of(e: &Effect, width: f64) -> Option<Self> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tiling {
+    pub shape: CellShape,
+    pub cell: [f64; 2],
+    pub step: f64,
+    pub origin: [f64; 2],
+    pub reach: [u32; 2],
+    pub samples: u32,
+}
+
+impl Tiling {
+    const LEAST: f64 = 1e-3;
+    const MOST_REACH: f64 = 1e9;
+
+    fn of(m: &MosaicBlur, (w, h): (f64, f64), zoom: f64) -> Self {
+        let samples = if m.antialias { 2.0 } else { 1.0 };
+        let high = (samples * MosaicBlur::CELL * w * zoom / m.frequency()).max(Self::LEAST);
+        let cell = [(high * m.stretch()).max(Self::LEAST), high];
+        let step = match m.shape() {
+            CellShape::Square => cell[0],
+            CellShape::Hexagon => (cell[0] * 3.0_f64.sqrt() / 2.0).max(Self::LEAST),
+            CellShape::Triangle => (cell[0] / 3.0_f64.sqrt()).max(Self::LEAST),
+        };
+        let [px, py] = m.place();
+        let [dx, dy] = m.offsets();
+        let origin = [
+            (samples * px * w + dx * 0.5 * cell[0]).rem_euclid(2.0 * step),
+            (samples * (1.0 - py) * h - dy * 0.5 * cell[1]).rem_euclid(2.0 * cell[1]),
+        ];
+        let reach = cell.map(|c| (m.box_size() * c / 2.0 + 1e-9).min(Self::MOST_REACH) as u32);
+        Self {
+            shape: m.shape(),
+            cell,
+            step,
+            origin,
+            reach,
+            samples: samples as u32,
+        }
+    }
+}
+
+impl Working {
+    fn of(e: &Effect, frame: (f64, f64), zoom: f64) -> Option<Self> {
         if !e.on || e.mixed() <= 0.0 {
             return None;
         }
-        match &e.kind {
+        let work = match &e.kind {
             EffectKind::GaussianBlur(b) => {
-                let (across, down) = b.spreads(width);
+                let (across, down) = b.spreads(frame.0 * zoom);
                 let still = across.iter().chain(&down).all(|s| *s <= 0.0);
-                (!(still && e.use_alpha)).then_some(Self {
+                if still && e.use_alpha {
+                    return None;
+                }
+                Work::Blur(Blurring {
                     across,
                     down,
                     border: b.edge(),
-                    blend: e.mixed(),
-                    use_alpha: e.use_alpha,
                 })
             }
-        }
+            EffectKind::MosaicBlur(m) => Work::Mosaic(Tiling::of(m, frame, zoom)),
+        };
+        Some(Self {
+            work,
+            blend: e.mixed(),
+            use_alpha: e.use_alpha,
+        })
     }
 }
 
@@ -283,11 +344,11 @@ impl Placing {
         for (i, p) in placed.iter().enumerate().rev() {
             let [zx, zy] = p.picture.scale_at(p.source as f64);
             zoom *= (zx * zy).abs().sqrt();
-            let mut own: Vec<Blurring> = p
+            let mut own: Vec<Working> = p
                 .picture
                 .effects
                 .iter()
-                .filter_map(|e| Blurring::of(e, frame.0 * zoom))
+                .filter_map(|e| Working::of(e, frame, zoom))
                 .collect();
             own.append(&mut effects);
             effects = own;

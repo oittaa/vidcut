@@ -1,4 +1,4 @@
-use vidcut_core::place::{Blurring, Level, Placing, Soft};
+use vidcut_core::place::{Blurring, Level, Placing, Soft, Tiling, Work, Working};
 
 use super::{Gpu, MIXING, begin};
 
@@ -14,9 +14,12 @@ const LEFT: f64 = 1e-3;
 
 const PARAMS: usize = 48;
 
+const MOSAIC_STAGES: u32 = 3;
+
 pub(super) struct Pipes {
     layout: wgpu::BindGroupLayout,
-    pipeline: wgpu::RenderPipeline,
+    blur: wgpu::RenderPipeline,
+    mosaic: wgpu::RenderPipeline,
 }
 
 impl Pipes {
@@ -53,32 +56,55 @@ impl Pipes {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("vidcut blur"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: shader,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: shader,
-                entry_point: Some("fs_blur"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: MIXING,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
-        Self { layout, pipeline }
+        let pipeline = |entry: &str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: MIXING,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        Self {
+            blur: pipeline("fs_blur"),
+            mosaic: pipeline("fs_mosaic"),
+            layout,
+        }
+    }
+}
+
+struct Step<'a> {
+    pipeline: &'a wgpu::RenderPipeline,
+    params: Vec<u8>,
+}
+
+fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
+    match &effect.work {
+        Work::Blur(blur) => blur_steps(&pipes.blur, blur, effect),
+        Work::Mosaic(tiling) => (0..MOSAIC_STAGES)
+            .map(|stage| Step {
+                pipeline: &pipes.mosaic,
+                params: mosaic_bytes(tiling, effect, stage),
+            })
+            .collect(),
     }
 }
 
@@ -120,21 +146,73 @@ fn passes(want: [f64; 4]) -> Vec<Pass> {
     }
 }
 
-fn bytes(pass: &Pass, down: bool, blur: &Blurring, (first, last): (bool, bool)) -> Vec<u8> {
-    let mut out = Vec::with_capacity(PARAMS);
-    for v in pass.spread {
-        out.extend_from_slice(&(v as f32).to_le_bytes());
-    }
-    let border = blur.border.code();
-    for v in [u32::from(down), pass.step, pass.taps, border] {
+fn flag(on: bool) -> f64 {
+    if on { 1.0 } else { 0.0 }
+}
+
+fn blur_bytes(
+    pass: &Pass,
+    down: bool,
+    (blur, effect): (&Blurring, &Working),
+    (first, last): (bool, bool),
+) -> Vec<u8> {
+    let mut out = float_bytes(&pass.spread);
+    for v in [u32::from(down), pass.step, pass.taps, blur.border.code()] {
         out.extend_from_slice(&v.to_le_bytes());
     }
-    let use_alpha = if blur.use_alpha { 1.0 } else { 0.0 };
-    let first = if first { 1.0 } else { 0.0 };
-    let last = if last { 1.0 } else { 0.0 };
-    for v in [blur.blend, use_alpha, last, first] {
-        out.extend_from_slice(&(v as f32).to_le_bytes());
+    let more = [
+        effect.blend,
+        flag(effect.use_alpha),
+        flag(last),
+        flag(first),
+    ];
+    out.extend(float_bytes(&more));
+    out
+}
+
+fn blur_steps<'a>(
+    pipeline: &'a wgpu::RenderPipeline,
+    blur: &Blurring,
+    effect: &Working,
+) -> Vec<Step<'a>> {
+    let mut ways: Vec<(Pass, bool)> = passes(blur.across)
+        .into_iter()
+        .map(|p| (p, false))
+        .chain(passes(blur.down).into_iter().map(|p| (p, true)))
+        .collect();
+    if ways.is_empty() {
+        let still = Pass {
+            spread: [0.0; 4],
+            step: 1,
+            taps: 0,
+        };
+        ways.push((still, false));
     }
+    let count = ways.len();
+    ways.iter()
+        .enumerate()
+        .map(|(j, (pass, down))| Step {
+            pipeline,
+            params: blur_bytes(pass, *down, (blur, effect), (j == 0, j + 1 == count)),
+        })
+        .collect()
+}
+
+fn mosaic_bytes(tiling: &Tiling, effect: &Working, stage: u32) -> Vec<u8> {
+    let [cw, ch] = tiling.cell;
+    let [ox, oy] = tiling.origin;
+    let mut out = float_bytes(&[cw, ch, ox, oy]);
+    let [rx, ry] = tiling.reach;
+    for v in [rx, ry, tiling.shape.code(), tiling.samples] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    let more = [
+        tiling.step,
+        effect.blend,
+        flag(effect.use_alpha),
+        f64::from(stage),
+    ];
+    out.extend(float_bytes(&more));
     out
 }
 
@@ -201,7 +279,7 @@ impl Blurred {
         gpu: &Gpu,
         i: usize,
         drawn: &wgpu::BindGroup,
-        effects: &[Blurring],
+        effects: &[Working],
         encoder: &mut wgpu::CommandEncoder,
     ) -> &wgpu::TextureView {
         let size = self.size;
@@ -211,7 +289,7 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        blur_into(gpu, own, scratch, effects, encoder);
+        effects_into(gpu, own, scratch, effects, encoder);
         &own.view
     }
 
@@ -220,7 +298,7 @@ impl Blurred {
         gpu: &Gpu,
         i: usize,
         (drawn, placing): (&wgpu::BindGroup, &Placing),
-        (effects, live): (&[Blurring], &[Blurring]),
+        (effects, live): (&[Working], &[Working]),
         encoder: &mut wgpu::CommandEncoder,
     ) -> (&wgpu::TextureView, &wgpu::TextureView, f64) {
         let size = self.size;
@@ -236,7 +314,7 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        blur_into(gpu, mask, scratch, effects, encoder);
+        effects_into(gpu, mask, scratch, effects, encoder);
         if live.is_empty() {
             return (&own.view, &mask.view, 5.0);
         }
@@ -252,7 +330,7 @@ impl Blurred {
             own.texture.as_image_copy(),
             own.texture.size(),
         );
-        blur_into(gpu, own, scratch, live, encoder);
+        effects_into(gpu, own, scratch, live, encoder);
         (&own.view, &own.view, 3.0)
     }
 }
@@ -269,31 +347,18 @@ fn add(
     pass.draw(0..3, 0..1);
 }
 
-fn blur_into(
+fn effects_into(
     gpu: &Gpu,
     own: &Texture,
     scratch: &[Texture; 2],
-    effects: &[Blurring],
+    effects: &[Working],
     encoder: &mut wgpu::CommandEncoder,
 ) {
     let pipes = &gpu.blur;
     for effect in effects {
-        let mut ways: Vec<(Pass, bool)> = passes(effect.across)
-            .into_iter()
-            .map(|p| (p, false))
-            .chain(passes(effect.down).into_iter().map(|p| (p, true)))
-            .collect();
-        if ways.is_empty() {
-            let still = Pass {
-                spread: [0.0; 4],
-                step: 1,
-                taps: 0,
-            };
-            ways.push((still, false));
-        }
         let mut from = &own.view;
         let mut k = 0;
-        for (j, (pass, down)) in ways.iter().enumerate() {
+        for step in steps(pipes, effect) {
             let to = &scratch[k];
             let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("vidcut blur"),
@@ -301,9 +366,7 @@ fn blur_into(
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            let last = j + 1 == ways.len();
-            gpu.queue
-                .write_buffer(&params, 0, &bytes(pass, *down, effect, (j == 0, last)));
+            gpu.queue.write_buffer(&params, 0, &step.params);
             let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("vidcut blur"),
                 layout: &pipes.layout,
@@ -323,7 +386,7 @@ fn blur_into(
                 ],
             });
             let mut drawing = begin(encoder, &to.view, None);
-            drawing.set_pipeline(&pipes.pipeline);
+            drawing.set_pipeline(step.pipeline);
             drawing.set_bind_group(0, &bind, &[]);
             drawing.draw(0..3, 0..1);
             drop(drawing);
