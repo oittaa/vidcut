@@ -3665,19 +3665,32 @@ The chart does not show titles, generators or transitions.
 
 ### The LUT tables
 
-These facts are measured in Resolve Studio 21.1.2, with no color management, with a LUT on the node of a clip.
+These facts are measured in Resolve Studio 21.1.2, with no color management. The LUT is on the node of a clip, or it is the `Input LUT` property of a Media Pool clip.
 
 - A 3D table is trilinear. Red changes fastest, then green, then blue.
 - A 1D table is linear on each channel.
 - The input is clamped to 0..1 before the lookup. The values of the table and the output are not clamped.
 - `DOMAIN_MIN` and `DOMAIN_MAX` have no effect.
 - `LUT_1D_INPUT_RANGE lo hi` and `LUT_3D_INPUT_RANGE lo hi` apply: the place in the table is `(x - lo) / (hi - lo)`, clamped to 0..1.
+  - The same rule applies when `lo` is above `hi`. A range of `1 0` reads the table backward.
+  - When `lo` equals `hi`, each pixel gets the first row of the table.
 - A file with both tables runs the 1D table, then the 3D table. Each table uses its own range. The 1D rows come first in the file.
 - These sizes work:
   - `LUT_3D_SIZE`: 2, 3, 5, 17, 33, 65, 129 and 256.
   - `LUT_1D_SIZE`: 2, 5, 17 and 65536.
 - `TITLE`, comments, blank lines and tabs are read.
 - With no LUT, the input comes out unchanged, also below 0 and above 1.
+- A LUT does not change the alpha of a picture. In these results, `T` is the table, `C` is the color in the file and `A` is the alpha:
+  - With the Alpha Mode Straight, the result is `T(C) * A`.
+  - With the Alpha Mode Premultiplied, the result is `T(C / A) * A`. With `A` at 0, the result is 0.
+
+**Where a LUT goes:**
+
+- The `Input LUT` of a clip and a LUT on its node use the same math. On 15 tables, a few pixels differ, by 0.014 at most.
+- The `Input LUT` is a property of the Media Pool clip (p. 3480). Each use of the file in a timeline gets it.
+- A script cannot set the `Input LUT` of a compound clip or of a timeline.
+- A LUT on the node of a compound clip gives the same picture as a LUT on the node of a plain clip.
+- A generator and a title have no Media Pool clip. A script gets no node graph for them, so it cannot give them a LUT.
 
 A script gets no error for a broken file:
 
