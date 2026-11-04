@@ -2716,7 +2716,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Zoom draws the letters as the bigger font. The height of a line is its height at zoom 1, in whole pixels, times the zoom (same renders).
     - A scroll keeps hinted letters (measured in Resolve Studio 21.1.2). Subtitles keep them too.
     - A title that Resolve reads from an OTIO file has one more edge on its letters. vidcut does not draw that edge ([X112](deviations.md#x112-a-title-from-an-otio-file-has-no-black-edge)).
-    - The lines of a scroll are 4/3 of the sum of the three heights plus 10 timeline pixels apart. This fits Resolve Studio 21.1.2 within 5 pixels with four fonts.
+    - The distance between the lines of a scroll is 4/3 of the font's ascent plus its descent, plus 10 timeline pixels.
+    - This fits Resolve Studio 21.1.2 within 1.5 pixels with five fonts and with eight sizes of Arial. Times New Roman is 4.5 pixels too near.
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
     - Below the last line, a positive value makes the block taller and a negative value does nothing (measured in Resolve Studio 21.1.2).
