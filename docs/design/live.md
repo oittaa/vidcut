@@ -438,16 +438,16 @@ The bar and the Jobs button:
 
 **The pool's cards** ([spec §3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675)).
 
-- `Workspace::cards` draws the Metadata view. `cluster` gives the heading of each card, and `main_description` gives its first line. Each run of one heading is a block of rows, and only the rows in view are drawn.
+- `Workspace::cards` draws the Metadata view. `cluster` gives the heading of each card, and `main_description` gives its first line. `card_row` draws each other line. Each run of one heading is a block of rows, and only the rows in view are drawn.
 - `Workspace::tile_picture` draws the picture of a tile and of a card.
-- `PoolView::media` gives the order. With `PoolMode::Metadata` and `PoolSort::Name`, it goes by `first_letter` and then by timecode. `named_order` puts a clip with no value first.
+- `PoolView::media` gives the order. With `PoolMode::Metadata` and `PoolSort::Name`, it goes by `first_letter` and then by timecode. With `PoolMode::Metadata` and `PoolSort::Timecode`, it goes by `created` and then by timecode. `named_order` puts a clip with no value first.
   - Why: Source Tape reads the same order. Thus `pool.set` refreshes the tape when the view goes to or from the cards.
 
 **Media details.**
 
 - The metadata strip of the pool (`Workspace::metadata_strip`) shows what the project keeps of the chosen media (`clip_info::glance`). `pool.json` in the config folder keeps it on or off.
 - Clip Info (`Workspace::clip_info_window`) adds what `media.details` reads from the file (`probe::details`).
-- Its Date Created, Camera, Scene, Shot and Take rows are text fields (`Workspace::note_field`). Enter or a click elsewhere sends `media.set`, and Escape cancels.
+- Its Date Created, Camera, Scene, Shot, Take and Comment rows are text fields (`Workspace::note_field`). Enter or a click elsewhere sends `media.set`, and Escape cancels.
 
 **The Transcription window** (`TranscriptionUi`, `Workspace::transcription_window`).
 

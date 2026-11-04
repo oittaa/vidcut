@@ -9,6 +9,7 @@ use serde_json::json;
 use vidcut_core::model::{Media, Project};
 use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
 
+use super::clip_info::scene_shot_take;
 use super::theme;
 use super::timeline::gesture::Gesture;
 use super::title_browser::LeftTab;
@@ -35,11 +36,11 @@ const HEADER: f32 = 20.0;
 const EDIT_ICONS: f32 = 8.0;
 const EDIT_ICON: f32 = 16.0;
 const EDIT_ICON_GAP: f32 = 4.0;
-const CARD_HEIGHT: f32 = 84.0;
+const CARD_HEIGHT: f32 = 96.0;
 const CARD_LEAST_WIDTH: f32 = 300.0;
 const CARD_MARGIN: f32 = 6.0;
 const CARD_PICTURE: egui::Vec2 = egui::Vec2::new(128.0, 72.0);
-const CARD_LINES: [f32; 2] = [28.0, 53.0];
+const CARD_LINES: [f32; 3] = [28.0, 50.0, 72.0];
 const CLUSTER_HEADING: f32 = 26.0;
 const NO_VALUE: &str = "---";
 
@@ -140,7 +141,7 @@ fn cluster(sort: PoolSort, m: &Media) -> Option<String> {
         PoolSort::Name => Some(crate::live::first_letter(&m.name)),
         PoolSort::Date => Some(file_time(m).map_or_else(|| "-".to_string(), |d| d.day())),
         PoolSort::Camera => m.camera.as_deref().map(super::clip_info::camera_label),
-        PoolSort::DateTime => m.created.clone(),
+        PoolSort::DateTime | PoolSort::Timecode => m.created.clone(),
         PoolSort::Bin => Some(match m.bin.as_str() {
             "" => bin_name("").to_string(),
             path => path.to_string(),
@@ -154,26 +155,13 @@ fn cluster(sort: PoolSort, m: &Media) -> Option<String> {
             }
             .to_string(),
         ),
-        PoolSort::Added | PoolSort::Duration | PoolSort::Timecode => None,
-    }
-}
-
-fn scene_shot_take(m: &Media) -> String {
-    let parts: Vec<String> = [("Scene", &m.scene), ("Shot", &m.shot), ("Take", &m.take)]
-        .into_iter()
-        .filter_map(|(word, value)| value.as_ref().map(|v| format!("{word} {v}")))
-        .collect();
-    if parts.is_empty() {
-        NO_VALUE.to_string()
-    } else {
-        parts.join(", ")
+        PoolSort::Added | PoolSort::Duration => None,
     }
 }
 
 fn main_description(sort: PoolSort, m: &Media, start: &str) -> String {
     let date = m.created.as_deref().unwrap_or(NO_VALUE);
     match sort {
-        PoolSort::Timecode => start.to_string(),
         PoolSort::Camera => {
             let camera = m
                 .camera
@@ -181,18 +169,33 @@ fn main_description(sort: PoolSort, m: &Media, start: &str) -> String {
                 .map_or_else(|| NO_VALUE.to_string(), super::clip_info::camera_label);
             format!("{camera}  {start}")
         }
-        PoolSort::DateTime => {
+        PoolSort::DateTime | PoolSort::Date | PoolSort::Added => {
             let file = m.path.file_name().unwrap_or_default().to_string_lossy();
             format!("{date}  {file}")
         }
-        PoolSort::SceneShot => scene_shot_take(m),
-        PoolSort::ClipColor => format!("{date}  {start}"),
-        PoolSort::Added
-        | PoolSort::Name
-        | PoolSort::Duration
-        | PoolSort::Date
-        | PoolSort::Bin
-        | PoolSort::OnlineStatus => m.name.clone(),
+        PoolSort::SceneShot => {
+            let parts: Vec<String> = scene_shot_take(m).into_iter().flatten().collect();
+            match parts.is_empty() {
+                true => NO_VALUE.to_string(),
+                false => parts.join(", "),
+            }
+        }
+        PoolSort::Timecode | PoolSort::ClipColor => format!("{date}  {start}"),
+        PoolSort::Name | PoolSort::Duration | PoolSort::Bin | PoolSort::OnlineStatus => {
+            m.name.clone()
+        }
+    }
+}
+
+fn card_row(painter: &egui::Painter, x: Rangef, y: f32, cells: &[String], color: Color32) {
+    let each = x.span() / cells.len() as f32;
+    for (i, cell) in cells.iter().enumerate() {
+        let galley = one_line(painter, cell.clone(), 12.0, color, each - CARD_MARGIN);
+        let left = match i > 0 && i + 1 == cells.len() {
+            true => x.max - galley.size().x,
+            false => x.min + i as f32 * each,
+        };
+        painter.galley(Pos2::new(left, y), galley, color);
     }
 }
 
@@ -1210,28 +1213,27 @@ impl Workspace {
             one_line(&painter, title, 14.0, text, room),
             text,
         );
-        painter.hline(left..=left + room, at(CARD_LINES[0]), line);
-        let details = self.cues_text(m).unwrap_or(start);
-        painter.galley(
-            Pos2::new(left, at(CARD_LINES[0] + 5.0)),
-            one_line(&painter, details, 12.0, dim, room * 0.6),
-            dim,
-        );
-        if m.subtitles.is_none() {
-            let camera = m
-                .camera
-                .as_deref()
-                .map_or_else(|| NO_VALUE.to_string(), super::clip_info::camera_label);
-            let camera = one_line(&painter, camera, 12.0, dim, room * 0.4);
-            let x = left + room - camera.size().x;
-            painter.galley(Pos2::new(x, at(CARD_LINES[0] + 5.0)), camera, dim);
+        let x = Rangef::new(left, left + room);
+        for y in CARD_LINES {
+            painter.hline(x, at(y), line);
         }
-        painter.hline(left..=left + room, at(CARD_LINES[1]), line);
-        painter.galley(
-            Pos2::new(left, at(CARD_LINES[1] + 5.0)),
-            one_line(&painter, m.name.clone(), 12.0, dim, room),
-            dim,
-        );
+        let row = |y: f32, cells: &[String]| card_row(&painter, x, at(y + 4.0), cells, dim);
+        let name = m.name.clone();
+        match self.cues_text(m) {
+            Some(cues) => {
+                row(CARD_LINES[0], &[cues]);
+                row(CARD_LINES[2], &[name]);
+            }
+            None => {
+                let note =
+                    |value: &Option<String>| value.clone().unwrap_or_else(|| NO_VALUE.to_string());
+                let camera = m.camera.as_ref().map(|name| format!("Cam {name}"));
+                row(CARD_LINES[0], &[start, note(&m.created), note(&camera)]);
+                let scene = scene_shot_take(m).map(|cell| note(&cell));
+                row(CARD_LINES[1], &scene);
+                row(CARD_LINES[2], &[name, note(&m.comment)]);
+            }
+        }
         self.media_interaction(&resp, m);
     }
 

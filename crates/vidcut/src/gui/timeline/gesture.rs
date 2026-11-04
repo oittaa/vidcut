@@ -1539,6 +1539,7 @@ mod tests {
             scene: None,
             shot: None,
             take: None,
+            comment: None,
             color_space: Default::default(),
             super_scale: Default::default(),
             left_out: Vec::new(),
