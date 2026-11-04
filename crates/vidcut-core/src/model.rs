@@ -7,6 +7,8 @@ use std::sync::Arc;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use unicode_general_category::{GeneralCategory, get_general_category};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, label_frames};
 
@@ -2758,6 +2760,13 @@ impl Title {
         ((text / scale).round() * part / whole).floor().max(1.0) * scale
     }
 
+    pub fn small_size(text: f64, scale: f64) -> f64 {
+        ((text / scale).round() * TitleCase::SMALL_CAPS + Self::WIDTH_SLACK)
+            .round()
+            .max(1.0)
+            * scale
+    }
+
     pub fn underline_drop(thickness: f64) -> f64 {
         (thickness / 3.0 + 0.5).ceil() + 0.5
     }
@@ -4181,6 +4190,22 @@ pub enum SubtitleAlign {
     Right,
 }
 
+fn one_upper(c: char) -> char {
+    let mut mapped = c.to_uppercase();
+    match (mapped.next(), mapped.next()) {
+        (Some(one), None) => one,
+        _ => c,
+    }
+}
+
+fn one_lower(c: char) -> char {
+    let mut mapped = c.to_lowercase();
+    match (mapped.next(), mapped.next()) {
+        (Some(one), None) => one,
+        _ => c,
+    }
+}
+
 /// How a title's letters draw.
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -4218,37 +4243,34 @@ impl TitleCase {
         .find(|c| c.word() == word)
     }
 
-    pub fn pieces(self, text: &str, word_start: bool) -> Vec<(String, bool)> {
+    pub fn pieces(self, text: &str, before: &str) -> Vec<(String, bool)> {
         match self {
             Self::Mixed => vec![(text.to_string(), false)],
-            Self::Upper => vec![(text.to_uppercase(), false)],
-            Self::Lower => vec![(text.to_lowercase(), false)],
+            Self::Upper => vec![(text.chars().map(one_upper).collect(), false)],
+            Self::Lower => vec![(text.chars().map(one_lower).collect(), false)],
             Self::Title => {
+                let whole = format!("{before}{text}");
                 let mut out = String::with_capacity(text.len());
-                let mut start = word_start;
-                for c in text.chars() {
-                    if start {
-                        out.extend(c.to_uppercase());
-                    } else {
-                        out.push(c);
+                for (at, word) in whole.split_word_bound_indices() {
+                    let mut start = true;
+                    for (i, c) in word.char_indices() {
+                        if at + i >= before.len() {
+                            out.push(if start { one_upper(c) } else { c });
+                        }
+                        start = matches!(c, '.' | ':');
                     }
-                    start = c.is_whitespace();
                 }
                 vec![(out, false)]
             }
             Self::Small => {
                 let mut out: Vec<(String, bool)> = Vec::new();
                 for c in text.chars() {
-                    let small = c.is_lowercase();
+                    let small = get_general_category(c) == GeneralCategory::LowercaseLetter;
                     if out.last().is_none_or(|(_, s)| *s != small) {
                         out.push((String::new(), small));
                     }
                     let last = out.last_mut().expect("just pushed");
-                    if small {
-                        last.0.extend(c.to_uppercase());
-                    } else {
-                        last.0.push(c);
-                    }
+                    last.0.push(if small { one_upper(c) } else { c });
                 }
                 out
             }
@@ -4827,6 +4849,11 @@ impl Project {
             Some(s) => self.frames_in(s.end - s.start),
             None => self.file_frames(media),
         }
+    }
+
+    pub fn subclip_span(&self, media: &Media) -> Option<(i64, i64)> {
+        let first = self.frames_in(media.subclip?.start);
+        Some((first, first + self.media_frames(media)))
     }
 
     pub fn file_frames(&self, media: &Media) -> i64 {

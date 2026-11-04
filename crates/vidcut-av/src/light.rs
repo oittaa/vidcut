@@ -466,7 +466,10 @@ fn peak(s: &Samples, r: &Reading) -> [f32; 3] {
 
 fn readable(p: format::Pixel) -> bool {
     use format::Pixel as P;
-    matches!(p, P::P010LE | P::NV12 | P::YUV420P | P::YUVJ420P)
+    matches!(
+        p,
+        P::P010LE | P::NV12 | P::YUV420P | P::YUVJ420P | P::GBRP16LE | P::GBRAP16LE
+    )
 }
 
 fn reading(f: &frame::Video) -> Result<(Samples<'_>, Reading)> {
@@ -514,7 +517,10 @@ impl Spread {
     }
 
     fn add(&mut self, r: &Reading, y: u16, cb: u16, cr: u16) {
-        let rgb = r.light(r.codes(y, cb, cr));
+        self.add_light(r.light(r.codes(y, cb, cr)));
+    }
+
+    fn add_light(&mut self, rgb: [f32; 3]) {
         let m = rgb[0].max(rgb[1]).max(rgb[2]);
         self.sum += f64::from(m);
         self.n += 1;
@@ -548,6 +554,12 @@ fn measure_with(
     relayout: &mut crate::export::normalize::Relayout,
 ) -> Result<FrameLight> {
     let f = relayout.run(f, crate::decode::Reading::Stream)?;
+    if matches!(
+        f.format(),
+        format::Pixel::GBRP16LE | format::Pixel::GBRAP16LE
+    ) {
+        return Ok(measure_rgb(&f));
+    }
     let (s, r) = reading(&f)?;
     let maxscl = peak(&s, &r);
     let (w, h) = (s.w, s.h);
@@ -560,6 +572,33 @@ fn measure_with(
         }
     }
     Ok(spread.light(maxscl))
+}
+
+fn measure_rgb(f: &frame::Video) -> FrameLight {
+    let r = Reading::of(&crate::color::pq_light(f), 16);
+    let (w, h) = (f.width() as usize, f.height() as usize);
+    let planes = [2, 0, 1].map(|plane| (f.data(plane), f.stride(plane)));
+    let light = |x: usize, y: usize| {
+        r.light(planes.map(|(data, stride)| {
+            let at = y * stride + 2 * x;
+            f64::from(u16::from_le_bytes([data[at], data[at + 1]])) / 65535.0
+        }))
+    };
+    let mut maxscl = [0f32; 3];
+    for y in 0..h {
+        for x in 0..w {
+            let l = light(x, y);
+            maxscl = std::array::from_fn(|i| maxscl[i].max(l[i]));
+        }
+    }
+    let step = step_of(w, h);
+    let mut spread = Spread::new();
+    for y in (0..h).step_by(step) {
+        for x in (0..w).step_by(step) {
+            spread.add_light(light(x, y));
+        }
+    }
+    spread.light(maxscl)
 }
 
 struct Ranks {

@@ -1486,7 +1486,7 @@ impl Workspace {
             t.footer = (ui.cursor().top() - footer_top).ceil();
             over = ui.ui_contains_pointer() && !separate;
             self.filler_words_window(ctx, t, &p.settings.fillers, &preferred);
-            self.subclip_window(ctx, "Create Subclip", &mut t.subclip);
+            self.subclip_window(ctx, "Create Subclip", false, &mut t.subclip);
         });
         t.window = window;
         if let (Some(to), Some(items)) = (go, &items)

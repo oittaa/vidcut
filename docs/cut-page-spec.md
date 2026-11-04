@@ -665,6 +665,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - **A range with left-out frames:** each kept part goes in at its own place.
     - **`tape` across files:** each file lines up by itself, and the edit is one step.
     - **Several selected pool items:** each file lines up by itself, the timeline marks hold for all of them (`keep_marks`), and the edit is one step.
+    - **A generator as the source:** it has timecode 00:00:00:00 and 5 s of frames, as a still has one timecode. A timeline Out can make it longer. `group` refuses it.
 - **Close Up (later).**
 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
@@ -1254,9 +1255,20 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Mark > Create Subclip and Alt+B open the New Subclip window.
     - Create Subclip in the menu of the scroll area also opens it. A drag from the viewer to the pool also opens it.
     - A drop on a bin of the pool moves the clip to that bin. The window does not open.
-    - The window has a Name and Create. The subclip goes in the bin that the pool shows (p. 864).
+    - The window has a Name, Use Full Clip Extents and Create. The subclip goes in the bin that the pool shows (p. 864).
     - Without an In, the subclip starts at the first frame of the clip. Without an Out, it ends at the last frame.
-    - `media.subclip` does this.
+    - Use Full Clip Extents makes the subclip hold the whole file (pp. 460–461).
+    - `media.subclip` does this. `full_extents` is the checkbox.
+  - Edit Subclip changes the part of the file that a subclip holds (pp. 461, 886).
+    - It is in the right-click menu of a subclip in the pool, and of a clip of a subclip in the timeline.
+    - The window title is Edit and the name. It shows the Current Subclip times, the New Subclip times and Use Full Clip Extents.
+    - Update stays off until the new times differ from the current times.
+    - Ends is the frame after the last frame of the subclip.
+    - `media.subclip_set` does this. It takes a `range` in frames from the first frame of the file, or `full_extents`.
+    - The clips of the subclip, its marks and its markers stay on the same frames of the file.
+    - A clip outside the new times refuses the change. A synced group outside the new times also refuses it.
+    - A mark outside the new times is cleared.
+    - A marker outside the new times stays and does not show. It shows again when the times hold it.
   - Add Marker puts a marker at one selected word, or a marker with a duration over more words (p. 998).
     - On a source clip, the marker is on that clip, at its source frame (`markers.add` with `media`).
     - The scroll area of the Source Clip viewer shows it. A marker with a duration also shows as a bar (p. 1018).
@@ -1544,7 +1556,14 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Not measured: the track and the frame of a drop in Resolve.
   - Measured: a double-click on a card loads the generator in the viewer as a source of 5 s. The timeline does not change. The Inspector shows nothing to inspect, so it has no Color row.
   - Measured: a drag from the viewer onto a clip on V1 overwrites from the frame under the pointer. The clip then has its Color row.
-  - vidcut: a double-click on a card adds the generator at the playhead. The source viewer takes only media ([todo](todo/effects-library.md)).
+  - vidcut: a double-click on a card opens the generator in the Source Clip viewer (`viewer.load` with `generator`). The source is 5 s long, and the timeline does not change.
+  - vidcut: In and Out work on this source (`viewer.marks.set`). They last until another source opens, and they are not in the project.
+  - vidcut: Append, Smart Insert, Overwrite, Ripple Overwrite, Place On Top and Source Overwrite take `generator` as a source, with the settings of `generators.add`.
+    - The clip is the same as a clip of `generators.add`. Its source start is 0, because a generator keeps its source start at 0 (measured).
+    - Timeline marks can make it longer than 5 s, because a generator can have any length (measured).
+    - It has no sound. Audio Only and an audio track refuse it.
+    - The edits follow [§7.2](#72-edit-functions), with the rules of a media source. Not measured: each of these edits with a generator in Resolve.
+  - vidcut: a drag from the viewer drops as `generators.add`, with the length between the marks. Not measured: a drop on another track, and a drop with marks.
   - `generators.add` without a track uses the track that D66 gives a title.
   - A new generator is 5 s long, and it adds no sound clip (measured).
 - **Inspector:**
@@ -2728,8 +2747,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - In these renders, some blocks with a negative value are up to 1 pixel from this rule, as "Ab" in Arial 96. The reason is not known.
     - A scroll has no line spacing, tracking or case, as in Resolve's own Scroll.
     - Font case is `mixed`, `upper`, `lower`, `small` or `title`: Mixed, All Caps, All Lowercase, Small Caps and Title Caps (p. 1184).
-    - `small` draws small letters as capitals at 0.7 of the size (measured in Resolve Studio 21.1.2).
-    - `title` makes the first letter of each word a capital, and it keeps the other letters.
+    - `small` draws small letters as capitals at 0.7 of the size in whole pixels at zoom 1, rounded to a whole pixel. The zoom scales it (measured in Resolve Studio 21.1.2).
+    - Digits, punctuation and capitals stay at the full size.
+    - A small letter is a letter of the Unicode category `Ll`. `ª`, `º`, `ʰ`, `ⅷ` and `ⓐ` are in other categories, so they stay as they are, at the full size (measured in Resolve Studio 21.1.2).
+    - `title` makes the first letter of each word a capital, and it keeps the other letters. `mcDONALD` becomes `McDONALD`.
+    - A word starts as in Unicode word boundaries (UAX 29), and also after `.` and `:` (measured in Resolve Studio 21.1.2).
+      - A letter becomes a capital after a space, a hyphen, a comma, a bracket, or an apostrophe that is not between two letters.
+      - A letter stays after a letter, a digit, `_`, a combining mark, or an apostrophe between two letters. `rock'n'roll` becomes `Rock'n'roll`.
+    - `upper`, `lower`, `small` and `title` change each letter alone (measured in Resolve Studio 21.1.2).
+      - A letter stays when its other form has more than one letter: `ß`, `ﬁ` and `ŉ` in capitals, and `İ` in small letters. With `small`, `ß`, `ﬁ` and `ŉ` draw at the small size, and `İ` at the full size.
+      - `Σ` becomes `σ` also at the end of a word.
     - `<o>` draws a line over the words and `<s>` a line through them (p. 1184).
     - The height of these lines and `<u>` is `underlineThickness` in the font's `post` table.
     - The left end is the start of the words, rounded up to a whole pixel.
@@ -2840,6 +2867,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A shifted span has `super` or `sub` in `vertical-align`.
     - A span has its case in `text-transform` (`uppercase`, `lowercase`) or in `font-variant` (`small-caps`).
     - Resolve does not draw `text-transform:capitalize` from a file. Thus for `title` vidcut writes it and the capital letters.
+    - Title Caps in Resolve's Inspector writes nothing in the file, and the text stays as typed.
     - Each paragraph has its line spacing in `line-height`. A Text title has 0, and the upper and lower line of a lower third have 1 and 0, unless a title sets another value.
     - The group has the alignment of the lines.
     - Its `anchor` is on a 3×3 grid, counted from the bottom left: 0 bottom left, 4 middle, 8 top right.
@@ -3162,10 +3190,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
-    - Its soft edges and its opacity fade each picture and title inside it ([todo](todo/compound-opacity.md)).
-    - A picture inside it at the Normal mode takes the composite mode of the compound clip.
+    - Its tracks mix first, as the tracks of the timeline do. Its opacity then fades that mix, or its composite mode mixes that mix with the tracks below.
+      - Measured in Resolve Studio 21.1.2, with 16-bit renders. Inside the compound clip, a picture cropped to its left half is over a full picture.
+      - At an opacity of 50% over white, the frame is 0.5 × the mix + 0.5.
+      - At Multiply over 50% gray, the frame is 0.5 × the mix.
+    - Its soft edges fade each picture and title inside it ([todo](todo/compound-opacity.md)).
     - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
-    - Its tracks play over each other as the tracks of the timeline do.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.
     - `edit.decompose` gives the picture of the compound clip to each of its clips that has no picture of its own and fills the frame.
@@ -3746,19 +3776,32 @@ The chart does not show titles, generators or transitions.
 
 ### The LUT tables
 
-These facts are measured in Resolve Studio 21.1.2, with no color management, with a LUT on the node of a clip.
+These facts are measured in Resolve Studio 21.1.2, with no color management. The LUT is on the node of a clip, or it is the `Input LUT` property of a Media Pool clip.
 
 - A 3D table is trilinear. Red changes fastest, then green, then blue.
 - A 1D table is linear on each channel.
 - The input is clamped to 0..1 before the lookup. The values of the table and the output are not clamped.
 - `DOMAIN_MIN` and `DOMAIN_MAX` have no effect.
 - `LUT_1D_INPUT_RANGE lo hi` and `LUT_3D_INPUT_RANGE lo hi` apply: the place in the table is `(x - lo) / (hi - lo)`, clamped to 0..1.
+  - The same rule applies when `lo` is above `hi`. A range of `1 0` reads the table backward.
+  - When `lo` equals `hi`, each pixel gets the first row of the table.
 - A file with both tables runs the 1D table, then the 3D table. Each table uses its own range. The 1D rows come first in the file.
 - These sizes work:
   - `LUT_3D_SIZE`: 2, 3, 5, 17, 33, 65, 129 and 256.
   - `LUT_1D_SIZE`: 2, 5, 17 and 65536.
 - `TITLE`, comments, blank lines and tabs are read.
 - With no LUT, the input comes out unchanged, also below 0 and above 1.
+- A LUT does not change the alpha of a picture. In these results, `T` is the table, `C` is the color in the file and `A` is the alpha:
+  - With the Alpha Mode Straight, the result is `T(C) * A`.
+  - With the Alpha Mode Premultiplied, the result is `T(C / A) * A`. With `A` at 0, the result is 0.
+
+**Where a LUT goes:**
+
+- The `Input LUT` of a clip and a LUT on its node use the same math. On 15 tables, a few pixels differ, by 0.014 at most.
+- The `Input LUT` is a property of the Media Pool clip (p. 3480). Each use of the file in a timeline gets it.
+- A script cannot set the `Input LUT` of a compound clip or of a timeline.
+- A LUT on the node of a compound clip gives the same picture as a LUT on the node of a plain clip.
+- A generator and a title have no Media Pool clip. A script gets no node graph for them, so it cannot give them a LUT.
 
 A script gets no error for a broken file:
 

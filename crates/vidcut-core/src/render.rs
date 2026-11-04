@@ -2552,6 +2552,30 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     Ok(plan)
 }
 
+pub fn generator_tape(p: &Project, generator: &Generator, a: i64, b: i64) -> Result<RenderPlan> {
+    let mut alone = p.clone();
+    for t in &mut alone.tracks {
+        t.clips.clear();
+        t.transitions.clear();
+        t.video_enabled = true;
+    }
+    let clip = crate::ops::block_clip(
+        String::from("generator"),
+        (0, b),
+        None,
+        Some(generator.clone()),
+    );
+    alone
+        .track_mut(crate::ops::MAIN)
+        .expect("every project has V1")
+        .clips
+        .push(clip);
+    let mut plan = flatten(&alone, a, b)?;
+    plan.colors = timeline_colors(p);
+    plan.name = crate::generators::name(generator).to_string();
+    Ok(plan)
+}
+
 pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
     let c = p
         .clip(clip)

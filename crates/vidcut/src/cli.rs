@@ -32,6 +32,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("media.relink", &["media", "path"]),
     ("media.rename", &["media", "name"]),
     ("media.subclip", &["media"]),
+    ("media.subclip_set", &["media"]),
     ("media.set", &["media"]),
     ("media.marks.set", &["media"]),
     ("media.marks.clear", &["media"]),
@@ -319,7 +320,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "edit.append",
-        "vidcut edit append m1\n  vidcut edit append m1 --range 10s..+20s --track V2",
+        "vidcut edit append m1\n  vidcut edit append m1 --range 10s..+20s --track V2\n  \
+         vidcut edit append --generator solid_color --color '#204060'",
     ),
     ("edit.split", "vidcut edit split --at 1m,1m30s"),
     (

@@ -20,7 +20,6 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
      - Position away from the middle with a Zoom or a Pan. A rotated clip, a crop, a Dynamic Zoom box and a compound clip.
      - A speed change or a render cache frame with Blur Alpha off or Whole Cells Only. vidcut keeps no color at an alpha of 0 there.
 2. **Generators** (p. 766), one pull request for each line:
-   - A double-click on a card loads the generator in the source viewer, as a source of 5 s. The source viewer and the edits from it take only media now ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
    - Measure on a generator: Dynamic Zoom, Stabilization, keyframes in a render, Push, Slide, Wipe and Dip To Color. vidcut plays them as on a still.
 3. **Later:**
    - Measure Smooth Cut in Resolve with a side that is a gap, a moved or resized side, and a side played backward. vidcut plays these as a Cross Dissolve now ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
