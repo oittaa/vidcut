@@ -2433,3 +2433,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The new clip goes in sync from where the file starts to Out.
 - **Why:**
   - Source Overwrite makes a synced cutaway. A clip that is out of sync is the fault that this edit is there to prevent.
+
+## X128. Removing a file takes it out of its groups
+
+- **Resolve:**
+  - This is a measurement in Resolve Studio 21.1.2. A file deleted from the Media Pool stays in its group. The group keeps its 3 angles.
+- **vidcut:**
+  - `media.remove` also takes the file out of its groups. A group with no file left goes too.
+- **Why:**
+  - A group in vidcut holds only files that are in the project.
+  - The owner approved this difference.
