@@ -5,7 +5,7 @@ use cosmic_text::{
     LayoutRun, Metrics, Renderer, Shaping, Style, SwashCache, SwashContent, UnderlineStyle, Weight,
     Wrap, fontdb,
 };
-use vidcut_core::lru::Lru;
+use vidcut_core::lru::ByBytes;
 use vidcut_core::model::{
     Place, SubtitleAlign, SubtitleStyle, TextStroke, Title, TitleAlign, TitleBlock, TitleCase,
     TitleKind, TitlePart, TitleShadow, TitleStyle,
@@ -375,10 +375,12 @@ struct Line {
     style: SubtitleStyle,
 }
 
-const LINES: usize = 8;
+const LINES_BYTES: usize = 64 << 20;
 
-fn lines() -> MutexGuard<'static, Lru<Line, Laid, LINES>> {
-    static LINES_KEPT: Mutex<Lru<Line, Laid, LINES>> = Mutex::new(Lru::new());
+const LINE_ENTRY_BYTES: usize = 4 << 10;
+
+fn lines() -> MutexGuard<'static, ByBytes<Line, Laid>> {
+    static LINES_KEPT: Mutex<ByBytes<Line, Laid>> = Mutex::new(ByBytes::new());
     LINES_KEPT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -387,7 +389,11 @@ fn laid_line(line: Line, look: &Look) -> Option<Laid> {
         return Some(laid.clone());
     }
     let laid = lay_out(look)?;
-    lines().insert(line, laid.clone());
+    let pixels = laid.sprite.as_ref().map_or(0, |s| s.rgba.len());
+    let bytes = pixels * size_of::<[f32; 4]>() + LINE_ENTRY_BYTES;
+    let mut kept = lines();
+    kept.insert(line, laid.clone(), bytes);
+    kept.fit(LINES_BYTES);
     Some(laid)
 }
 
