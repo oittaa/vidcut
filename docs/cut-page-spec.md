@@ -27,7 +27,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
-- generators: Solid Color and Four Color Gradient (§8.17)
+- generators: Solid Color, Four Color Gradient, the ramps, and the EBU and SMPTE bars (§8.17)
 - Quick Export, plus our Export dialog
 
 **Later (later):**
@@ -1326,7 +1326,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - BT.2111 Color Bar HLG Narrow, BT.2111 Color Bar PQ Full and BT.2111 Color Bar PQ Narrow
     - EBU Color Bar, Four Color Gradient, Grey Scale and SMPTE Color Bar
     - Solid Color, Window and YCbCr Ramp
-  - vidcut has Solid Color and Four Color Gradient. The other kinds are open work ([todo](todo/effects-library.md)).
+  - The three BT.2111 Color Bars and Window are open work in vidcut ([todo](todo/effects-library.md)).
   - The tab also has a Fusion Generators section. It is part of Fusion (§1).
   - The pointer on a card previews the generator (p. 766). vidcut does not have this preview yet ([todo](todo/effects-library.md)).
 - **Adding a generator:**
@@ -1342,6 +1342,8 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: the Generator tab of Solid Color has one row, Color. Color has no keyframes.
   - Measured: the Generator tab of Four Color Gradient has Center X and Center Y, as sliders with keyframes.
   - Measured: this tab also has Upper Left Color, Upper Right Color, Lower Left Color and Lower Right Color. The colors have no keyframes.
+  - Measured: the Generator tab of EBU Color Bar has a Level menu, with 75% (SMPTE) and 100%.
+  - Measured: Window has no Generator tab. The OTIO shape of 10 Step, 100mV Steps, Grey Scale, YCbCr Ramp and SMPTE Color Bar is the same as for Window. Their tabs were not opened.
   - Measured: the Settings tab has Transform, Cropping, Dynamic Zoom, Composite, Speed Change and Stabilization.
   - vidcut: the Inspector shows a Generator section with these rows, over the picture sections (X70).
 - **Picture sections:**
@@ -1381,6 +1383,31 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: in an HDR timeline, the corners mix in code values first. Then each pixel has the conversion of a Solid Color.
   - Measured: the keyframes of a center count on clip frames, and they are linear. At frame 10 of −1 at frame 0 and 1 at frame 29, Center X is −0.310.
   - `keyframes.add` with `center_x` or `center_y` adds a keyframe. With keyframes, `generators.set` puts the value on a keyframe at `at`.
+- **Ramps and bars:**
+  - Measured: these are the pictures, at a timeline of W × H. All values are fractions, and x and y count from 0.
+  - 10 Step: a band is ⌈W / 11⌉ wide. The grey is min(⌊x / band⌋, 10) / 10.
+  - 100mV Steps: k = ⌊10 x / W⌋, and the grey is clamp(k − 1, 0, 7) / 7.
+  - Grey Scale: the grey is x / W.
+  - YCbCr Ramp: t = x / W, and each channel is clamp(0.5 + s (t − 0.5), 0, 1).
+    - s is 2.539648 for red, 0.359182 for green and 2.814179 for blue.
+  - EBU Color Bar has eight bars of W / 8.
+    - The bars are white at 1, then yellow, cyan, green, magenta, red and blue at the Level, and then black.
+    - The Level is 75% or 100%. 75% is the default (measured).
+    - vidcut: a bar is ⌈W / 8⌉ wide when W / 8 is not a whole number. The frame at 1001 wide shows this.
+  - The rows of the bars end at ⌊k / 12 × H⌋, with 32-bit floats.
+  - SMPTE Color Bar has four rows, with these sizes:
+    - B = max(1920, min(H × 16 / 9, W × 4 / 3))
+    - c = ⌈B × 3 / 28⌉, and U = 2 ⌈c / 6⌉
+    - F = max(W, 1920), and d = max(0, ⌊(F − 7 c) / 2⌋)
+  - The picture is F wide. It is cut off at the right when W is less than F.
+  - Row 1 ends at k = 7. The sides are 0.4. From d, seven bars of c are white, yellow, cyan, green, magenta, red and blue at 0.75.
+  - Row 2 ends at k = 8. The left side is cyan at 1. The first bar is white at 1, and the other bars are 0.75. The right side is blue at 1.
+  - Row 3 ends at k = 9. The left side is yellow at 1, and the right side is red at 1. Between them is the grey (x − (d + c)) / (min(d + 7 c, F) − (d + c)), held from 0 to 1.
+  - Row 4 goes to the bottom. The sides are 0.15.
+    - From d, it has black for 4.5 U, white for 6 U and black for 4.5 U.
+    - Then it has 0.02 for U, black for U, 0.04 for U, and black to d + 7 c.
+  - Measured: in an HDR timeline, these kinds keep their SDR code values.
+  - vidcut does not copy two faults in these pictures ([X125](deviations.md#x125-generators-have-the-correct-picture-where-resolve-has-a-fault)).
 - **Length and dissolves:**
   - Measured: a generator can have any length.
   - Measured: Resolve keeps the source start of a generator at 0. A left trim moves the keyframes, and the picture does not move.
@@ -1393,6 +1420,9 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - A placed generator also has the effects of D75.
     - Its keyframes count from the first frame of the clip. Measured: Resolve reads them so, and its import sets the source start to 0.
   - Measured: Four Color Gradient has the `Effect Name` `Four Color Gradient`, `Type` 66 and `Display Type` 0. Its parameters are `centerX`, `centerY`, `upperLeft`, `upperRight`, `lowerLeft` and `lowerRight`.
+  - Measured: EBU Color Bar has the `Effect Name` `EBU Color Bar`, `Type` 65 and `Display Type` 0.
+    - Its parameter `level` is a `UInt`: 0 is 75% and 1 is 100%. The values 2 to 4 play as 0.
+  - Measured: 10 Step, 100mV Steps, Grey Scale, YCbCr Ramp and SMPTE Color Bar have the `Effect Name` `Generator`, `Type` 42 and `Display Type` 3. They have only the `Display Name` parameter.
   - vidcut reads its kinds back from that shape.
   - vidcut keeps the other kinds as data. They play as gaps, and an import warns about them (X9).
 
@@ -2595,7 +2625,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - then `Drop Shadow` and `Background`, with no `Stroke`
   - vidcut writes the left edge, middle or right edge of its lines there, in plain text, because Resolve's Scroll has no rich text.
   - vidcut reads a Scroll back with no outline.
-  - vidcut reads Solid Color and Four Color Gradient (§8.17). It carries the other generators.
+  - vidcut reads the generators that it draws (§8.17). It carries the other generators.
   - Resolve writes Text+ as a `MissingReference`, and loses it itself.
   - vidcut reads Text+ as a clip with no media (D40).
   - Resolve Studio 21.1.1 draws a file that vidcut writes as vidcut does, within a few pixels at 3840×2160, except for the outline.

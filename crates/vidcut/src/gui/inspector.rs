@@ -10,9 +10,9 @@ use serde_json::{Value, json};
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Border, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, Effect, EffectKind, GaussianBlur,
-    Generator, Gradient, Keyframe, Picture, PictureTool, Project, Retime, Speed, TrackKind,
-    Upscaler, ZoomBox,
+    Border, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel, Effect, EffectKind,
+    GaussianBlur, Generator, Gradient, Keyframe, Picture, PictureTool, Project, Retime, Speed,
+    TrackKind, Upscaler, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -825,6 +825,20 @@ fn gradient_of(c: &Clip) -> Option<&Gradient> {
     match &c.generator {
         Some(Generator::FourColorGradient(g)) => Some(g),
         _ => None,
+    }
+}
+
+fn ebu_level_of(c: &Clip) -> Option<EbuLevel> {
+    match &c.generator {
+        Some(Generator::EbuColorBar { level }) => Some(*level),
+        _ => None,
+    }
+}
+
+fn ebu_level_label(level: EbuLevel) -> &'static str {
+    match level {
+        EbuLevel::Percent75 => "75% (SMPTE)",
+        EbuLevel::Percent100 => "100%",
     }
 }
 
@@ -2272,9 +2286,11 @@ impl Workspace {
     fn generator_section(&mut self, ui: &mut egui::Ui, c: &Clip, acts: &mut Vec<Act>) {
         let rows = color_rows(c);
         let gradient = gradient_of(c);
-        if rows.is_empty() && gradient.is_none() {
+        let level = ebu_level_of(c);
+        if rows.is_empty() && gradient.is_none() && level.is_none() {
             return;
         }
+        let mut new_level = None;
         let stored_of = |param: &str| rows.iter().find(|r| r.param == param).map(|r| r.stored);
         let mut held = self.inspector.recolored.take().filter(|r| {
             r.clip == c.id
@@ -2290,6 +2306,21 @@ impl Workspace {
             "Generator",
             |_| (),
             |ui| {
+                if let Some(now) = level {
+                    label(ui, "Level", now != EbuLevel::default());
+                    egui::ComboBox::from_id_salt("inspector-ebu-level")
+                        .selected_text(ebu_level_label(now))
+                        .show_ui(ui, |ui| {
+                            for l in EbuLevel::ALL {
+                                if ui.selectable_label(l == now, ebu_level_label(l)).clicked()
+                                    && l != now
+                                {
+                                    new_level = Some(l);
+                                }
+                            }
+                        });
+                    ui.end_row();
+                }
                 for axis in [Axis::X, Axis::Y] {
                     let Some(g) = gradient else {
                         break;
@@ -2328,6 +2359,9 @@ impl Workspace {
             r.since = Some(Instant::now());
         }
         self.inspector.recolored = held;
+        if let Some(l) = new_level {
+            self.send("generators.set", json!({ "clip": c.id, "level": l }));
+        }
     }
 
     fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {

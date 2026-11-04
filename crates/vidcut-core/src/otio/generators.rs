@@ -3,9 +3,9 @@ use serde_json::{Value, json};
 use super::effects::{key_frames, keyed, plain, ranged};
 use super::picture::read_keys;
 use super::{EDITOR, VIDCUT};
-use crate::generators::{CENTER, checked_center};
+use crate::generators::{CENTER, checked_center, name};
 use crate::keyframes::scaled;
-use crate::model::{Generator, Gradient, Keyframe, hex};
+use crate::model::{EbuLevel, Generator, Gradient, Keyframe, hex};
 
 const COLOR: &str = "color";
 const BLACK: &str = "#000000";
@@ -17,6 +17,15 @@ const UPPER_LEFT: &str = "upperLeft";
 const UPPER_RIGHT: &str = "upperRight";
 const LOWER_LEFT: &str = "lowerLeft";
 const LOWER_RIGHT: &str = "lowerRight";
+const LEVEL: &str = "level";
+const NO_VALUES: (&str, u32, u32) = ("Generator", 3, 42);
+const WITH_NO_VALUES: [Generator; 5] = [
+    Generator::TenStep,
+    Generator::HundredMvSteps,
+    Generator::GreyScale,
+    Generator::YcbcrRamp,
+    Generator::SmpteColorBar,
+];
 
 pub fn no_media() -> Value {
     json!({
@@ -117,6 +126,19 @@ pub fn reference(g: &Generator, origin: i64) -> Value {
             )
         }
         Generator::FourColorGradient(gradient) => gradient_reference(gradient, origin),
+        Generator::EbuColorBar { level } => {
+            let kind = Generator::EBU_COLOR_BAR;
+            let value = match level {
+                EbuLevel::Percent75 => 0,
+                EbuLevel::Percent100 => 1,
+            };
+            made(
+                kind,
+                kind,
+                (kind, 0, 65),
+                vec![plain(LEVEL, json!(value), json!(0), "UInt")],
+            )
+        }
         Generator::Carried { reference } => {
             let mut written = (**reference).clone();
             if let Some(meta) = written["metadata"].as_object_mut() {
@@ -124,6 +146,7 @@ pub fn reference(g: &Generator, origin: i64) -> Value {
             }
             written
         }
+        other => made(name(other), name(other), NO_VALUES, Vec::new()),
     }
 }
 
@@ -179,7 +202,18 @@ pub fn read(reference: &Value, origin: i64) -> Option<Generator> {
             color: color_of(reference, kind, COLOR, [0, 0, 0])?,
         }),
         Generator::FOUR_COLOR_GRADIENT => gradient_of(reference, origin),
-        _ => None,
+        Generator::EBU_COLOR_BAR => {
+            let value =
+                parameter(reference, kind, LEVEL).and_then(|p| p["Parameter Value"].as_u64());
+            Some(Generator::EbuColorBar {
+                level: if value == Some(1) {
+                    EbuLevel::Percent100
+                } else {
+                    EbuLevel::Percent75
+                },
+            })
+        }
+        _ => WITH_NO_VALUES.into_iter().find(|g| name(g) == kind),
     }
 }
 
