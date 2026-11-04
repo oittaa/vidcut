@@ -374,13 +374,13 @@ impl Workspace {
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
         {
             let media = media.to_string();
-            let frames = self.media_frames(&media);
-            let marks = self
-                .project()
-                .and_then(|p| p.media(&media).map(|m| m.marks.clone()))
-                .unwrap_or_default();
-            let range = (marks.mark_in.unwrap_or(0), marks.mark_out.unwrap_or(frames));
+            let range = self.marked_range(&media);
             self.start_media_drag(&media, range, press);
+            if mode == ViewerMode::SourceClip
+                && let Some(d) = &mut self.timeline.drag
+            {
+                d.drag.from_source_clip = true;
+            }
         }
         if mode.is_source()
             && area_resp.drag_started()
@@ -1221,6 +1221,9 @@ impl Workspace {
             && let Some(pos) = resp.interact_pointer_pos()
         {
             self.seek(PlayerId::Source, frame_at(pos.x), false);
+        }
+        if self.snap.viewer == ViewerMode::SourceClip {
+            resp.context_menu(|ui| self.create_subclip_button(ui));
         }
     }
 

@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::duck::Unmeasured;
 use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue, source_context};
+use vidcut_core::lru::Lru;
 use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
@@ -599,7 +600,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         multi_media: None,
         generator_position: 0,
         source_content: None,
-        source_positions: HashMap::new(),
+        source_positions: Lru::new(),
         tape_position: 0,
         tape: Arc::new(Vec::new()),
         tape_media: None,
@@ -774,6 +775,8 @@ const CLIENT_POLL: Duration = Duration::from_millis(50);
 
 const JOBS_KEPT: usize = 50;
 
+const POSITIONS_KEPT: usize = 4096;
+
 const LOG_CAP: usize = 500;
 const NOTICE_CAP: usize = 20;
 
@@ -894,7 +897,7 @@ struct Live {
     multi_position: i64,
     multi_media: Option<String>,
     source_content: Option<SourceContent>,
-    source_positions: HashMap<String, i64>,
+    source_positions: Lru<String, i64, POSITIONS_KEPT>,
     tape_position: i64,
     tape: Arc<Vec<TapeEntry>>,
     tape_media: Option<String>,
@@ -4170,7 +4173,7 @@ impl Live {
             Some(match &want {
                 SourceContent::Tape => self.tape_position,
                 SourceContent::Multi(_) => self.multi_position,
-                SourceContent::Clip(m) => self.source_positions.get(m).copied().unwrap_or(0),
+                SourceContent::Clip(m) => self.source_positions.peek(m).copied().unwrap_or(0),
                 SourceContent::Generator => self.generator_position,
             })
         };
@@ -4478,7 +4481,7 @@ impl Live {
             .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
         let position = match at {
             Some(t) => {
-                let current = self.source_positions.get(media).copied().unwrap_or(0);
+                let current = self.source_positions.peek(media).copied().unwrap_or(0);
                 Some(media_context(p, m, Some(current)).resolve_from(t, current)?)
             }
             None => None,
