@@ -459,7 +459,7 @@ Writing:
   - a `Crop` of each side, and the softness of its edges (`crop_softness`)
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
   - its `composite_mode` (`CompositeMode`, `Picture::mode`) and its `opacity` (`Picture::opaque`)
-  - its `effects`, in their order: each an `Effect` with an `EffectKind`, a `GaussianBlur` or a `MosaicBlur` ([export](export.md#effects))
+  - its `effects`, in their order: each an `Effect` with an `EffectKind`, a `GaussianBlur`, a `MosaicBlur` or a `Vignette` ([export](export.md#effects))
 - Each value is left out at its usual value. A picture that `Picture::is_usual` accepts is only fitted into the frame.
 - Each value of `keyframes::PictureValue` can hold `Keyframe`s beside the plain value. `Picture::is_usual` is false while a value has keyframes.
   - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.

@@ -5,14 +5,22 @@
 The Cut page has separate tabs for transitions, titles and effects (p. 636). vidcut follows it.
 
 - The Transitions tab, the Transition Inspector, Dip To Color Dissolve, Smooth Cut, Push and Slide are there ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
-- The Effects tab, the effects of the Inspector, Gaussian Blur and Mosaic Blur are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
+- The Effects tab, the effects of the Inspector, Gaussian Blur, Mosaic Blur and Vignette are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - The Generators page and its twelve kinds are there ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
 - If the bar gets too full, one Effects tab with categories can replace the tabs, as the Edit page has (p. 802).
 
 Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
-1. **More effects:** Sharpen, Vignette, Film Grain and Glow.
+1. **More effects:** Sharpen, Film Grain and Glow.
    - Measure each one in Resolve first: its values, their ranges and defaults, and its math.
+   - **Vignette, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
+     - LIGHTER_COLOR and DARKER_COLOR at an exact tie: a flat (1, 0, 0) input with Color (0, 1, 0).
+     - A picture with alpha and a Color that is not black.
+     - Blend on the Edit page, at 0.5.
+     - The smallest value of the blur: a Triangle at Softness 1 and Anamorphism 1.
+     - Center outside the frame: (-0.25, 0.5) and (1.5, 0.5) at Softness 0.5.
+     - Hue at another gray: Color (0.2, 0.2, 0.2).
+     - A Pan in another frame shape: a 1920×1080 source in a 1080×1920 timeline, Pan Y 800.
    - **Mosaic Blur, measure these on the Edit page.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - Blur Alpha off and Whole Cells Only.
      - Whole Cells Only with Hexagon, with Triangle, with other Aliasing values and with Antialias Result. The alpha limit of a whole cell.

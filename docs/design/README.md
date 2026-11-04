@@ -68,7 +68,7 @@ flowchart TD
   between["A frame between two pictures<br>VideoFrames::retimed_frame"]
   earlier["An earlier source frame<br>VideoFrames::reversed_frame"]
   place["The picture is placed<br>Screen::draw"]
-  fx["The effects work on it<br>fs_blur, fs_mosaic"]
+  fx["The effects work on it<br>fs_blur, fs_mosaic, fs_vignette"]
   mix["The layers are on the canvas<br>Screen::draw"]
   show["The viewer shows this frame"]
   mapped["Fitted to the display<br>fs_screen"]
@@ -117,7 +117,7 @@ A clip skips each step that it does not use. The steps run in this order:
 - `Screen::draw` places the picture and mixes the layers (`place::Placing`, `screen::kernel`, [export](export.md#placed-pictures)).
   - A transition's two sides, and each clip placed over another, are layers of the same draw.
   - Titles and burned subtitles are draws in that same pass (`fs_title`, [export](export.md#subtitles)).
-  - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, [export](export.md#effects)).
+  - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, `fs_vignette`, [export](export.md#effects)).
 - The viewer shows the canvas. A wide canvas goes through `fs_screen` first ([playback](playback.md#the-viewer-thread)).
 - The scopes read the canvas before `fs_screen` ([gpu](gpu.md#the-scopes)).
 - An export encodes that canvas (`Screen::encoded`) and skips `fs_screen` ([export](export.md#timeline-colors)).
@@ -131,7 +131,7 @@ vidcut has none of the other stages of the spec:
 
 - Camera Raw, Lens Correction, the LUTs and Fusion;
 - Input Sizing, Image Stabilization and the grades;
-- Open FX, the Resolve FX other than Gaussian Blur and Mosaic Blur, Output Sizing and Data Burn-In.
+- Open FX, the Resolve FX other than Gaussian Blur, Mosaic Blur and Vignette, Output Sizing and Data Burn-In.
 
 ## Rules the code follows
 

@@ -3140,6 +3140,8 @@ pub enum EffectKind {
     GaussianBlur(GaussianBlur),
     /// The picture as cells of one color each.
     MosaicBlur(MosaicBlur),
+    /// A soft shape with the picture inside it and a color around it.
+    Vignette(Vignette),
 }
 
 /// The effects there are.
@@ -3148,6 +3150,7 @@ pub enum EffectKind {
 pub enum EffectType {
     GaussianBlur,
     MosaicBlur,
+    Vignette,
 }
 
 /// A Gaussian blur. Its spread (the sigma of its curve) is 0.05625 × the
@@ -3237,6 +3240,105 @@ pub struct MosaicBlur {
     pub whole_cells: bool,
 }
 
+/// A vignette: a soft shape, with the picture inside it and `color` around
+/// it. The shape's radius is 0.7 × (`size` + 0.01) × the picture's height. Its
+/// softness is three box blurs, on cells 2 pixels apart. The picture's size is
+/// its fit in the frame, before its zoom and its position. They do not move
+/// the shape. It works on the code values, after the transform and the crop.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Vignette {
+    /// `basic` is an oval in the middle, with `color` in the `normal` mode.
+    /// It uses only `size`, `softness`, `anamorphism` and `color`. `advanced`
+    /// uses all the values. Usual: `basic`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operating_mode: Option<VignetteMode>,
+    /// The shape, in `advanced`. Usual: `oval`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_shape: Option<VignetteShape>,
+    /// How large the shape is, from 0.01 to 2. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// Turns the shape counter-clockwise, in `advanced`, in degrees from
+    /// -360 to 360. It comes before `anamorphism`. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f64>,
+    /// How much wider than high the shape is, from 0.2 to 5. Usual: 1.78.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anamorphism: Option<f64>,
+    /// The middle of the shape, in `advanced`, `[x, y]` as fractions of the
+    /// picture from its bottom left, each from -1000000 to 1000000. Usual:
+    /// `[0.5, 0.5]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<[f64; 2]>,
+    /// How soft the edge of the shape is, from 0 to 1. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness: Option<f64>,
+    /// How much of the picture shows through the color, in `advanced`, from
+    /// 0 (none) to 1 (all). Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transparency: Option<f64>,
+    /// The color around the shape, `[r, g, b]` in code values. Usual: black,
+    /// `[0, 0, 0]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[f64; 3]>,
+    /// How the color mixes with the picture, in `advanced`. The formulas are
+    /// those of a clip's composite mode, with these differences: nothing
+    /// stops the result of `color_dodge`, `color_burn`, `divide` and
+    /// `vivid_light` at 0 or 1 before the mix, `linear_burn` stops at 0, and
+    /// `hue` with a gray color gives one fixed hue. Usual: `multiply`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composite_type: Option<CompositeMode>,
+}
+
+/// Which values of a vignette work.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VignetteMode {
+    /// Only its size, softness, anamorphism and color.
+    #[default]
+    Basic,
+    /// All of them.
+    Advanced,
+}
+
+impl VignetteMode {
+    pub const ALL: [VignetteMode; 2] = [VignetteMode::Basic, VignetteMode::Advanced];
+}
+
+/// The shape of a vignette.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VignetteShape {
+    /// An oval.
+    #[default]
+    Oval,
+    /// A triangle with a flat top and its point down.
+    Triangle,
+    /// A square on its corner.
+    Diamond,
+    /// A rectangle.
+    Rectangle,
+    /// A hexagon, flat at the top and the bottom.
+    Hexagon,
+    /// An octagon.
+    Octagon,
+}
+
+impl VignetteShape {
+    pub const ALL: [VignetteShape; 6] = [
+        VignetteShape::Oval,
+        VignetteShape::Triangle,
+        VignetteShape::Diamond,
+        VignetteShape::Rectangle,
+        VignetteShape::Hexagon,
+        VignetteShape::Octagon,
+    ];
+
+    pub fn code(self) -> u32 {
+        Self::ALL.iter().position(|s| *s == self).unwrap_or(0) as u32
+    }
+}
+
 /// The shape of a mosaic's cells.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -3289,12 +3391,17 @@ impl Border {
 }
 
 impl EffectType {
-    pub const ALL: [EffectType; 2] = [EffectType::GaussianBlur, EffectType::MosaicBlur];
+    pub const ALL: [EffectType; 3] = [
+        EffectType::GaussianBlur,
+        EffectType::MosaicBlur,
+        EffectType::Vignette,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::GaussianBlur => "Gaussian Blur",
             Self::MosaicBlur => "Mosaic Blur",
+            Self::Vignette => "Vignette",
         }
     }
 
@@ -3302,6 +3409,7 @@ impl EffectType {
         let kind = match self {
             Self::GaussianBlur => EffectKind::GaussianBlur(GaussianBlur::default()),
             Self::MosaicBlur => EffectKind::MosaicBlur(MosaicBlur::default()),
+            Self::Vignette => EffectKind::Vignette(Vignette::default()),
         };
         Effect {
             on: true,
@@ -3318,6 +3426,7 @@ impl Effect {
         match self.kind {
             EffectKind::GaussianBlur(_) => EffectType::GaussianBlur,
             EffectKind::MosaicBlur(_) => EffectType::MosaicBlur,
+            EffectKind::Vignette(_) => EffectType::Vignette,
         }
     }
 
@@ -3411,6 +3520,60 @@ impl MosaicBlur {
 
     pub fn edge(&self) -> Border {
         self.border.unwrap_or_default()
+    }
+}
+
+impl Vignette {
+    pub const SIZE: f64 = 0.5;
+    pub const SIZES: (f64, f64) = (0.01, 2.0);
+    pub const TURNS: (f64, f64) = (-360.0, 360.0);
+    pub const STRETCH: f64 = 1.78;
+    pub const STRETCHES: (f64, f64) = (0.2, 5.0);
+    pub const MIDDLE: [f64; 2] = [0.5, 0.5];
+    pub const PLACES: (f64, f64) = (-1e6, 1e6);
+    pub const SOFTNESS: f64 = 0.5;
+    pub const SHARES: (f64, f64) = (0.0, 1.0);
+    pub const BLACK: [f64; 3] = [0.0; 3];
+    pub const MIXING: CompositeMode = CompositeMode::Multiply;
+
+    pub fn mode(&self) -> VignetteMode {
+        self.operating_mode.unwrap_or_default()
+    }
+
+    pub fn shape(&self) -> VignetteShape {
+        self.border_shape.unwrap_or_default()
+    }
+
+    pub fn large(&self) -> f64 {
+        self.size.unwrap_or(Self::SIZE)
+    }
+
+    pub fn turn(&self) -> f64 {
+        self.rotation.unwrap_or(0.0)
+    }
+
+    pub fn stretch(&self) -> f64 {
+        self.anamorphism.unwrap_or(Self::STRETCH)
+    }
+
+    pub fn middle(&self) -> [f64; 2] {
+        self.center.unwrap_or(Self::MIDDLE)
+    }
+
+    pub fn soft(&self) -> f64 {
+        self.softness.unwrap_or(Self::SOFTNESS)
+    }
+
+    pub fn through(&self) -> f64 {
+        self.transparency.unwrap_or(0.0)
+    }
+
+    pub fn tint(&self) -> [f64; 3] {
+        self.color.unwrap_or(Self::BLACK)
+    }
+
+    pub fn mixing(&self) -> CompositeMode {
+        self.composite_type.unwrap_or(Self::MIXING)
     }
 }
 

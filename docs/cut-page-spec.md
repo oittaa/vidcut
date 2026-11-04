@@ -1410,7 +1410,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - On the Cut page, a double-click on an effect adds it to the selected clip.
   - Measured in Resolve Studio 21.1.2: with several selected clips, only the first selected clip gets it.
   - The Effects panel of the Inspector has the values of the effects.
-  - vidcut: the Effects tab has the Blur group with Gaussian Blur and Mosaic Blur. The other effects come later ([todo](todo/effects-library.md)).
+  - vidcut: the Effects tab has the Blur group with Gaussian Blur and Mosaic Blur, and the Film Emulation group with Vignette. The other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
   - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
   - Measured in Resolve Studio 21.1.2: a generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API all leave it with none.
@@ -1505,6 +1505,44 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - With Use Alpha off, Blur Alpha and Whole Cells Only change nothing.
     - Whole Cells Only tests each sample's cell, with each Cell Shape and each Aliasing.
     - A made frame of a speed change, and a frame from the render cache, keep no color at an alpha of 0.
+- **Vignette.** Its values and their defaults, measured in Resolve Studio 21.1.2:
+  - Operating Mode is Basic or Advanced. Basic is the default.
+  - Border Shape is Oval, Triangle, Diamond, Rectangle, Hexagon or Octagon. Oval is the default.
+  - Size goes from 0.01 to 2 and is 0.5.
+  - Rotation goes from −360 to 360 and is 0.
+  - Anamorphism goes from 0.2 to 5 and is 1.78.
+  - Center goes from −1000000 to 1000000. It is the middle of the picture.
+  - Softness goes from 0 to 1 and is 0.5.
+  - Transparency goes from 0 to 1 and is 0.
+  - Color is black.
+  - Composite Type has the 27 modes of the Composite section. Multiply is the default.
+- **How the vignette works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
+  - The output is b + (m − b) × (1 − v) × (1 − Transparency), held between 0 and 1. Here b is the picture that comes in, m is the Composite Type of Color and b, and v is the shape picture.
+  - Basic uses Size, Softness, Anamorphism and Color. It always has an Oval, the Normal mode, no Rotation, no Transparency and the Center in the middle.
+  - The size of the picture is its fit in the frame, before Zoom and Position. The shape does not follow them.
+  - The radius of the shape is 0.7 × (Size + 0.01) × the height of the picture.
+  - The mask has one cell for each 2 pixels, around the middle of the shape. Each cell is 1 inside the shape and 0 outside it.
+  - The cells go from −W to W − 2 across and from −H to H − 2 down, in pixels from the middle of the shape.
+  - Anamorphism divides x. Then Rotation turns the shape. A rotated rectangle is thus a parallelogram.
+  - Three box blurs go across and then three go down, the widest first. Beyond the cells they take 0.
+  - The sigma of the blurs is (966 / 1080) × the height × √Size × (0.05 + Softness²), in pixels.
+  - Then v = min(1, B / (B0 − L) − L). Here B is the blurred cell, B0 is the cell at the middle of the shape, and L is the smallest cell.
+  - The value of a pixel is the linear mix of the four cells around it.
+  - The alpha does not change.
+  - Composite Type differs from the Composite section in these ways:
+    - Color Dodge, Color Burn, Divide and Vivid Light do not stop at 0 or 1 before the mix.
+    - Divide is b / a, with an a of at least 0.000001. This is measured at one Color with a channel of 0.
+    - Linear Burn stops at 0.
+    - Hue with a gray Color gives one fixed hue. This is measured at one gray.
+- **Vignette in vidcut:**
+  - A source that fits with a half pixel takes the next whole pixel as its size. Only 607.5 and 608 were tried.
+  - The smallest cell is the smallest of the four corners. A blurred shape with no holes has its smallest value at a corner.
+  - The GUI shows only the values that work in the Operating Mode.
+  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+    - The rule works on the premultiplied colors. A clear part of the picture thus adds a Color that is not black to the lower track.
+    - Beyond the cells, a pixel takes the value of the nearest cell.
+    - Color takes any number. The GUI gives 0 to 1.
+    - On a compound clip, the size of the picture is the size of the frame.
 - **Compound clips:** vidcut: the effects of a compound clip work on each picture inside it ([todo](todo/compound-opacity.md)).
 - **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
 
