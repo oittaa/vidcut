@@ -17,7 +17,7 @@ use super::make::{Fitting, Maker};
 use crate::decode::{Input, Reading, VideoReader};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, format, frame};
-use crate::player::{Cached, Fit, Made, Origin, Sampling, Upscaled};
+use crate::player::{AlphaUse, Cached, Fit, Made, Origin, Sampling, Upscaled};
 
 pub(crate) fn target(fps: Rational, origin: f64, pos: i64) -> f64 {
     origin + fps.frames_to_secs(pos) - 0.5 * fps.frames_to_secs(1)
@@ -102,6 +102,12 @@ fn upscale_form(upscaler: Upscaler, timeline: Option<Hdr>) -> Form {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+struct Through {
+    mode: AlphaMode,
+    matte: bool,
+}
+
 #[derive(Clone, PartialEq)]
 struct Look {
     size: (u32, u32),
@@ -111,6 +117,36 @@ struct Look {
     origin: (u32, u32),
     form: Form,
     rounded: bool,
+    alpha: Option<Through>,
+}
+
+struct Matte {
+    frame: frame::Video,
+    mode: AlphaMode,
+    alpha_use: AlphaUse,
+}
+
+impl Matte {
+    fn of(frame: frame::Video, source: AlphaMode, straight_colors: bool) -> Self {
+        let (mode, alpha_use) = match (source, straight_colors) {
+            (AlphaMode::Premultiplied, _) => (AlphaMode::Premultiplied, AlphaUse::Shown),
+            (_, true) => (AlphaMode::Straight, AlphaUse::Shown),
+            (_, false) => (AlphaMode::Premultiplied, AlphaUse::TakenOut),
+        };
+        Self {
+            frame,
+            mode,
+            alpha_use,
+        }
+    }
+
+    fn again(&self) -> Result<Self> {
+        Ok(Self {
+            frame: frame_ref(&self.frame)?,
+            mode: self.mode,
+            alpha_use: self.alpha_use,
+        })
+    }
 }
 
 impl Look {
@@ -123,6 +159,7 @@ impl Look {
             origin: (0, 0),
             form,
             rounded: false,
+            alpha: None,
         }
     }
 
@@ -142,11 +179,19 @@ impl Look {
             origin: (0, 0),
             form,
             rounded: false,
+            alpha: None,
         }
     }
 
     fn plain(&self, size: (u32, u32)) -> bool {
         self.placed.is_empty() && self.size == size
+    }
+
+    fn with_alpha(self, mode: AlphaMode, matte: bool) -> Self {
+        Self {
+            alpha: Some(Through { mode, matte }),
+            ..self
+        }
     }
 }
 
@@ -163,6 +208,8 @@ struct Source {
     retime: Retime,
     retimer: Option<crate::interpolate::User>,
     rgb: Drawn,
+    mattes: Drawn,
+    matte: Option<Matte>,
     dynamic: frame::Video,
     meter: Option<crate::light::Meter>,
     light: Option<crate::light::FrameLight>,
@@ -244,6 +291,7 @@ struct Reversed {
     pos: i64,
     at: Option<i64>,
     frame: frame::Video,
+    matte: Option<Matte>,
     dolby_vision: frame::Video,
     woven: Option<Weave>,
     how: Made,
@@ -285,6 +333,8 @@ impl Source {
             retime: Retime::Nearest,
             retimer: None,
             rgb: Lru::new(),
+            mattes: Lru::new(),
+            matte: None,
             dynamic: frame::Video::empty(),
             meter: measure.then(crate::light::Meter::new),
             light: None,
@@ -354,6 +404,8 @@ impl Source {
             retime: Retime::Nearest,
             retimer: None,
             rgb: Lru::new(),
+            mattes: Lru::new(),
+            matte: None,
             dynamic: frame::Video::empty(),
             meter: measure.then(crate::light::Meter::new),
             light: None,
@@ -520,6 +572,7 @@ impl Source {
         self.ai = None;
         self.retimer = None;
         self.rgb.clear();
+        self.mattes.clear();
         self.scaled.clear();
     }
 
@@ -542,6 +595,7 @@ impl Source {
         self.prev = None;
         self.prev2 = None;
         self.rgb.clear();
+        self.mattes.clear();
         self.framed.clear();
         self.scaled.clear();
         self.lumas.clear();
@@ -551,6 +605,7 @@ impl Source {
         if self.drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
             self.drawn = None;
             self.rgb.clear();
+            self.mattes.clear();
             self.framed.clear();
         }
     }
@@ -663,7 +718,11 @@ impl Source {
     ) -> Result<frame::Video> {
         self.follow_offscreen();
         let path = self.reader.path();
-        drawn_once(&mut self.rgb, (f.pts(), look), || {
+        let kept = match look.alpha {
+            Some(Through { matte: true, .. }) => &mut self.mattes,
+            _ => &mut self.rgb,
+        };
+        drawn_once(kept, (f.pts(), look), || {
             shown_rgb(&mut self.drawn, (f, around), rotation, look, reading, path)
         })
     }
@@ -747,6 +806,8 @@ pub(crate) struct Layer {
     pub(crate) woven: Option<Weave>,
     pub(crate) origin: Option<Origin>,
     pub(crate) alpha_mode: AlphaMode,
+    pub(crate) alpha_use: AlphaUse,
+    pub(crate) matte: Option<frame::Video>,
 }
 
 fn mask_of(ramp: Option<Ramp>, k: i64) -> Option<Wipe> {
@@ -1320,7 +1381,7 @@ impl Source {
             return self.end_run();
         }
         let clock = Instant::now();
-        let look = Look::rounded(run.size, 0, run.id.form);
+        let look = Look::rounded(run.size, 0, run.id.form).with_alpha(AlphaMode::None, false);
         let path = self.reader.path();
         let input = match run.id.upscaler {
             Upscaler::Macos => Fed::Frame(shown_frame(
@@ -1472,6 +1533,7 @@ fn placed_look(
         origin: (x0, y0),
         form,
         rounded: false,
+        alpha: None,
     })
 }
 
@@ -1940,6 +2002,15 @@ impl Single {
         (pixel, sink): (format::Pixel, crate::screen::Sink<'_>),
     ) -> Result<frame::Video> {
         let picture = self.woven(frames, rotation, path)?;
+        let picture = match look.alpha {
+            Some(Through { mode, matte }) => {
+                picture.with_alpha_mode(mode).with_alpha_use(match matte {
+                    true => AlphaUse::Matte,
+                    false => AlphaUse::Multiplied,
+                })
+            }
+            None => picture,
+        };
         let placed = [look.placed.clone()];
         let (picture, placed) = match look.placed.is_empty() {
             true if look.rounded => (picture.with_sampling(Sampling::Rounded), &placed[..0]),
@@ -2417,6 +2488,8 @@ impl VideoFrames {
                                 cached: None,
                             }),
                             alpha_mode: AlphaMode::Straight,
+                            alpha_use: AlphaUse::Shown,
+                            matte: None,
                         });
                         if let Some(smooth) = smooth {
                             self.smoothed(&mut made, &piece, i, smooth, started)?;
@@ -2481,6 +2554,10 @@ impl VideoFrames {
                     (false, None) => self.open[s].sampling.clone(),
                 };
                 let woven = self.open[s].woven.as_ref().map(weave_ref).transpose()?;
+                let (matte, alpha_mode, alpha_use) = match &self.open[s].matte {
+                    Some(m) => (Some(frame_ref(&m.frame)?), m.mode, m.alpha_use),
+                    None => (None, *alpha_mode, AlphaUse::Shown),
+                };
                 made.push(Layer {
                     frame: Some(frame),
                     weight,
@@ -2500,7 +2577,9 @@ impl VideoFrames {
                         took: started.elapsed(),
                         cached: self.open[s].cached(),
                     }),
-                    alpha_mode: *alpha_mode,
+                    alpha_mode,
+                    alpha_use,
+                    matte,
                 });
                 if let Some(smooth) = smooth
                     && !backward
@@ -2544,6 +2623,8 @@ impl VideoFrames {
         last.share = 1.0;
         last.woven = None;
         last.alpha_mode = AlphaMode::Straight;
+        last.alpha_use = AlphaUse::Shown;
+        last.matte = None;
         Ok(())
     }
 
@@ -3023,11 +3104,13 @@ impl VideoFrames {
                     let woven = self.open[s].woven.as_ref().map(weave_ref).transpose()?;
                     let src = &mut self.open[s];
                     let (how, upscaled) = (src.how, src.upscaled);
+                    let matte = src.matte.as_ref().map(Matte::again).transpose()?;
                     src.reversed.push(Reversed {
                         input: input.clone(),
                         pos: p,
                         at: j,
                         frame,
+                        matte,
                         dolby_vision,
                         woven,
                         how,
@@ -3044,7 +3127,9 @@ impl VideoFrames {
         self.last_dolby_vision = dolby_vision(&r.dolby_vision)?;
         let (frame, woven) = (frame_ref(&r.frame)?, r.woven.as_ref().map(weave_ref));
         let (how, upscaled) = (r.how, r.upscaled);
+        let matte = r.matte.as_ref().map(Matte::again).transpose()?;
         let src = &mut self.open[s];
+        src.matte = matte;
         src.woven = woven.transpose()?;
         src.how = how;
         src.upscaled = upscaled;
@@ -3084,6 +3169,7 @@ impl VideoFrames {
         let VideoPiece::Source {
             retime,
             super_scale,
+            alpha_mode,
             ..
         } = layer
         else {
@@ -3121,6 +3207,7 @@ impl VideoFrames {
         let src = &mut self.open[s];
         let rotation = src.reader.rotation();
         let (cur, _) = src.current.as_ref().expect("a frame");
+        let has_alpha = !colors && super::normalize::has_alpha(crate::hw::sw_format(cur));
         let upscaled = super_scale.ai().then(|| Upscaled {
             upscaler: super_scale.upscaler,
             sizes: scaled
@@ -3143,7 +3230,21 @@ impl VideoFrames {
         let Some(look) = look else {
             return self.shown(i, s, layer, changed);
         };
+        let look = match has_alpha {
+            true => look.with_alpha(*alpha_mode, false),
+            false => look,
+        };
         let size = look.size;
+        let mattes = match has_alpha && *alpha_mode != AlphaMode::None {
+            true => {
+                let matte = look.clone().with_alpha(*alpha_mode, true);
+                Some((
+                    src.rgb_of(true, &matte, reading)?,
+                    src.rgb_of(false, &matte, reading)?,
+                ))
+            }
+            false => None,
+        };
         let pair = match (*retime == Retime::Macos, &scaled) {
             (false, _) => None,
             (true, Some((a, b, _))) => Some((
@@ -3178,7 +3279,20 @@ impl VideoFrames {
         );
         let clock = Instant::now();
         let converted = clock - start;
-        let (big, how) = if src.cut(measured, reading)? {
+        let cut = src.cut(measured, reading)?;
+        let matte = match &mattes {
+            None => None,
+            Some((a, b)) if cut => Some(frame_ref(if weight < 0.5 { a } else { b })?),
+            Some((a, b)) => {
+                let by = match *retime {
+                    Retime::Macos => Retime::FrameBlend,
+                    other => other,
+                };
+                let made = crate::interpolate::matte_between(by, &key, a, b, size, weight)?;
+                Some(made_picture(made, size, pb, form_of(a))?)
+            }
+        };
+        let (big, how) = if cut {
             crate::debug!(
                 "interpolate",
                 "{}: a cut between the frames at {weight:.3}",
@@ -3230,6 +3344,7 @@ impl VideoFrames {
         src.upright = true;
         src.how = how;
         src.upscaled = upscaled;
+        src.matte = matte.map(|m| Matte::of(m, *alpha_mode, scaled.is_some()));
         src.sampling = match look.placed.is_empty() || colors {
             true => Sampling::Own,
             false => {
@@ -3292,6 +3407,7 @@ impl VideoFrames {
         src.normalized = None;
         src.woven = None;
         src.upright = true;
+        src.matte = None;
         src.sampling = Sampling::Own;
         src.how = src.shown_as_is();
         src.upscaled = super_scale.ai().then(|| Upscaled {
@@ -3421,13 +3537,14 @@ impl VideoFrames {
         layer: &VideoPiece,
         changed: bool,
     ) -> Result<frame::Video> {
-        let (placed, super_scale) = match layer {
+        let (placed, super_scale, alpha_mode) = match layer {
             VideoPiece::Source {
                 placed,
                 super_scale,
+                alpha_mode,
                 ..
-            } => (placed.as_slice(), *super_scale),
-            _ => (&[][..], SuperScale::default()),
+            } => (placed.as_slice(), *super_scale, *alpha_mode),
+            _ => (&[][..], SuperScale::default(), AlphaMode::None),
         };
         let aim = self.aim(s, placed, super_scale);
         let timeline = self.timeline;
@@ -3443,6 +3560,22 @@ impl VideoFrames {
             let woven = crate::decode::FrameProps::of(&frame)
                 .top_field_first
                 .is_some();
+            src.matte = match &big {
+                Some(b)
+                    if alpha_mode != AlphaMode::None
+                        && super::normalize::has_alpha(crate::hw::sw_format(&frame)) =>
+                {
+                    let rotation = src.reader.rotation();
+                    let kernel = crate::screen::kernel(None);
+                    let form = (true, timeline);
+                    let look = Look::rounded((b.width(), b.height()), kernel, form)
+                        .with_alpha(alpha_mode, true);
+                    let around = (&frame, (None, None));
+                    let made = src.rgb_from(around, rotation, &look, reading)?;
+                    Some(Matte::of(made, alpha_mode, true))
+                }
+                _ => None,
+            };
             let clock = Instant::now();
             src.woven = None;
             let made = match &big {

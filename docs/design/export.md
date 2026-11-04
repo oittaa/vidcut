@@ -181,6 +181,10 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
 - With an AI upscaler of Super Scale, the upscaler enlarges the two frames of the pair first (`scaled_pair`). The frame is then made from the two enlarged pictures.
   - Why: Super Scale works on the source, before the retime ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
   - The `Source` keeps the last two enlarged pictures (`Source::ai_picture`). Thus the later picture of one pair is the earlier picture of the next.
+- An AI upscaler takes the colors of a picture with no alpha in them. Why: its model has three channels.
+  - The alpha of the source frame is enlarged by the draw to the size of the enlarged picture (`Matte`). This occurs at each speed (`VideoFrames::shown`).
+  - The layer goes over the layers below as Straight, or as Premultiplied when its media has that Alpha Mode.
+  - Two enlarged pictures of a pair mix with no alpha in them. Thus a change of alpha between the two frames gives a darker edge than the plain pair below.
 - With the frame rate conversion of macOS, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
   - The draw puts both frames into P416 VideoToolbox frames in the timeline color space first (`Source::frame_of`). They are sized and placed as the RGB pair is.
 - The pair is sized and placed before the frame is made. Why: Edit Sizing comes before Speed Effects ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
@@ -195,6 +199,15 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - The draw uses the placing that the frame was made with. Thus during a drag in the viewer, a made frame moves only when it is made again.
 - An exact source frame, the first frame of a file, a piece played backward and a still take the usual path.
 - The RGB of the pair is 16-bit, in the timeline color space (`Form`). In an SDR timeline, an HDR frame is tone-mapped into it.
+- A picture with an alpha channel keeps it through the pair. The RGB has three channels, thus the alpha is a second picture (`Matte`).
+  - The draw makes each frame of the pair twice (`Look::with_alpha`): its colors by its Alpha Mode, and its alpha as gray (`AlphaUse::Matte`).
+  - The colors have the alpha in them (`AlphaUse::Multiplied`). Why: a mix of two such pictures gives the mix of the two frames over any picture below.
+  - `interpolate::matte_between` makes the gray picture from its own pair. The `Engine` holds that pair beside the pair of colors. Why: otherwise each pair would push the other out at each frame.
+  - With the frame rate conversion of macOS, Frame Blend makes the gray picture. Why: that conversion takes VideoToolbox frames, and the gray pair is RGB.
+  - At a shot change, the gray picture comes from the same frame as the colors.
+  - The layer goes over the layers below as Premultiplied (`Matte::of`). With a composite mode, the draw first takes the alpha out of the colors (`AlphaUse::TakenOut`). A media with the Alpha Mode Premultiplied keeps its colors.
+  - The Alpha Mode None makes no gray picture, and its colors have no alpha in them.
+  - A job of the clip level has no gray picture (`VideoFrames::colors_only`). Such a clip stays at the timeline level ([playback](playback.md#the-render-cache)).
 
 Seeks:
 

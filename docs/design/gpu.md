@@ -79,7 +79,7 @@ In the viewer, exports, proxies and thumbnails:
   - Each job opens a new display (`own_decoder`). Thus each list is an `Lru` with a limit.
   - vidcut finds a fact again after it leaves its list.
 
-- ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
+- ProRes 4444 on VideoToolbox takes P416, which has no alpha plane. With Export Alpha, it takes `AYUV64LE` ([export](export.md#encoding-one-output)).
 - A Vulkan picture with an alpha channel has a fourth image. The draw takes it as the alpha plane (`Import::alpha`).
   - The image holds 12-bit values in 16-bit samples. Thus the shader scales them (`ALPHA_OF_16`).
   - A picture with alpha that comes without its fourth image comes down from the GPU.

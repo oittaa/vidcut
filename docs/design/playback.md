@@ -319,6 +319,7 @@ The audio device:
   - `opacity` gives the alpha that the mode reads: 1 with None, and 1 − alpha with Invert. A picture with no alpha channel gives 1 in each mode.
   - A Premultiplied picture keeps its colors at each alpha. Only the placement multiplies them (`placed_share`). Why: spec §3 has c + b × (1 − α), so an alpha of 0 still adds the color. Thus the shader does not divide by alpha.
   - Above 1 the sum stays in the wide canvas, and the output clamps it. Why: the canvas holds values above 1 for every mix.
+  - A made picture has no alpha of its own. Its alpha is a second picture (`Picture::matte`, [export](export.md#which-source-frame)). `write_matte` puts that picture in the fourth texture.
 - A picture in memory in RGB or 4:4:4 is `yuv444p12le`, and a 4:2:2 picture stays 4:2:2 (`Relayout`). Why: 4:2:0 loses color detail.
 
 ## Sound
@@ -516,7 +517,7 @@ The jobs:
   - A job of the clip level draws in the colors mode of the export (`VideoFrames::colors_only`). Thus a placed layer gives its made frames, with no edges and no alpha ([export](export.md#effects)).
   - The job of a layer with an alpha channel keeps the alpha (`Job::alpha`, `VideoFrames::keeping_alpha`).
     - Only the CPU encoder of ProRes 4444 and 4444 XQ takes it, in `YUVA444P10LE` (`cache_encoder`). Another encoder refuses the job. Then the next encoder takes it.
-    - Why not Apple's encoder: vidcut gives it P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
+    - Why not Apple's encoder: vidcut gives it P416, which has no alpha plane.
     - The draw clears the frame to transparent and writes the alpha of the layer (`Screen::keep_alpha`).
     - The encoder writes that alpha in the alpha plane. It writes the colors without the alpha in them, as the straight alpha of ProRes.
   - At the same place, the clip level renders first. Then the render goes on from there at the timeline level.
