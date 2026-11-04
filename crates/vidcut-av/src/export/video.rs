@@ -2287,11 +2287,12 @@ impl VideoFrames {
             .as_ref()
             .map(|p| crate::player::titles_of(p, k))
             .unwrap_or_default();
-        self.titles.draw_at(&at, (w, h), self.timeline_height);
-        let (mut titles, _) = self.titles.shown_at(&at, (w, h), &[]);
+        let timeline = self.timeline_height;
+        self.titles.hold_at(&at, (w, h), timeline);
+        let (mut titles, _) = self.titles.shown_at(&at, (w, h), timeline, &[]);
         let fps = self.fps.as_f64();
-        self.subtitles.draw_at(fps, (w, h), self.timeline_height, j);
-        titles.extend(self.subtitles.shown_at(fps, (w, h), j).0);
+        self.subtitles.hold_at(fps, (w, h), timeline, j);
+        titles.extend(self.subtitles.shown_at(fps, (w, h), timeline, j).0);
         let placed = piece
             .as_ref()
             .filter(|_| !self.colors)
