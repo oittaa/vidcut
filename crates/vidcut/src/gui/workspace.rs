@@ -706,6 +706,13 @@ impl Workspace {
         if self.multi_on()
             && let Some(refusal) = self.multi_refusal(method)
         {
+            if method == "edit.smart_insert"
+                && self.snap.multi_marks.is_empty()
+                && let Some(p) = self.project()
+            {
+                let at = vidcut_core::ops::nearest_edit(p, self.snap.timeline.position);
+                self.seek(PlayerId::Timeline, at, false);
+            }
             self.say(refusal);
             return;
         }
