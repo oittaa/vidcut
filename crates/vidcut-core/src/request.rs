@@ -4033,6 +4033,12 @@ pub enum PoolMode {
     Filmstrip,
     /// A row for each, its details in columns.
     List,
+    /// A card for each: a picture that scrubs, a line that follows the sort,
+    /// its start timecode, its camera and its name. By `name`, the cards go
+    /// by first letter under a heading, and by timecode inside a letter;
+    /// Source Tape takes that order. By `date`, they go under a heading for
+    /// each day.
+    Metadata,
 }
 
 /// What `gui.screenshot` captures.
