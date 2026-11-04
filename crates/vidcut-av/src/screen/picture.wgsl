@@ -255,7 +255,9 @@ fn tone_mapped(c_in: vec3<f32>, tone: vec4<f32>) -> vec3<f32> {
 
 fn rgb(s: vec3<f32>) -> vec3<f32> {
     var c = s;
-    if p.flags.z != 3u {
+    if p.flags.z == 4u {
+        c = s.zxy;
+    } else if p.flags.z != 3u {
         let y = (s.x - p.range.x) * p.range.y;
         let cb = (s.y - p.range.z) * p.range.w;
         let cr = (s.z - p.range.z) * p.range.w;
