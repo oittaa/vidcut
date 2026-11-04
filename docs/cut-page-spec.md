@@ -814,6 +814,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Right-click the button to select slip or slide.
   - With nothing selected, J/K/L play.
   - A slide keeps the media of a clip. It makes the clip before it longer as it makes the clip after it shorter (p. 731).
+    - On a side with a gap, the gap changes in place of a clip. These are measurements in Resolve Studio 21.1.2.
+    - The slide stops one frame short of an earlier clip that does not touch it. It stops at the timeline's start.
+    - A slide right stops in the same way at a later clip. The measurements show this only with a gap of one frame.
+    - A clip with a gap on both sides also slides. No measurement shows this case.
   - L slides the clip right. It also slips its content right, to earlier frames, as a drag does.
   - Space plays around the playhead, and Up/Down go to another edit (D32, deviations X11, X28, X29).
   - W again deselects the edit.
