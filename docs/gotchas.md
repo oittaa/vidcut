@@ -78,6 +78,11 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - `hw::Keeper` copies the kept pictures of NVDEC, Direct3D 11 and VA-API (with `vaCopy`) into memory of their own.
   - CPU decoders decode into vidcut's buffers (`buffers.rs`, its `get_buffer2`).
   - The kept pictures of Mesa VA-API and Vulkan stay pool surfaces. `Store::evict` lets the pictures of a pool go together ([playback](design/playback.md#the-engine)).
+- **FFmpeg 8 has no demuxer or decoder for an animated WebP** (8.0.1). FFmpeg has them from 9.0.
+  - FFmpeg 8 reads the file with `webp_pipe`, as one image that it cannot decode. An animated WebP of one frame gives the same result.
+  - Without a check, the file comes in as a still of 2×2 pixels, and its picture never renders.
+  - Thus `probe` refuses a file that `webp_pipe` reads, when the animation flag of its VP8X chunk is on (`animated_webp`). The message says that the file needs FFmpeg 9.0.
+  - FFmpeg 9 reads a file with this flag with `webp_anim`. Thus the refusal does not occur there.
 - **`AVHWDeviceContext.user_opaque` is FFmpeg's** on the devices that `av_hwdevice_ctx_create` makes.
   - VA-API keeps its DRM file there, and frees the file through that pointer.
   - vidcut uses the field only on the CUDA devices that it allocates itself (`CudaDevice::with_own_stream`).

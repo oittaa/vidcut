@@ -2592,3 +2592,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - vidcut has one fixed rule where the renders show none.
   - The owner approved this difference.
+
+## X134. With FFmpeg 8, vidcut refuses an animated WebP
+
+- **Resolve:**
+  - Resolve imports an animated WebP.
+- **vidcut:**
+  - With FFmpeg 8, vidcut refuses an animated WebP on import. The message says that the file needs FFmpeg 9.0.
+  - FFmpeg 9 reads the file with `webp_anim`. Thus the check does not run there.
+- **Why:**
+  - FFmpeg 8 reads the file as a still of 2×2 pixels, and its picture never renders ([gotchas](gotchas.md#ffmpeg-reading-and-decoding)).
+  - A refusal gives the reason. A still that shows nothing does not.
+  - The owner approved this difference.
