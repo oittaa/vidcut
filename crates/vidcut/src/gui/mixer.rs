@@ -198,14 +198,7 @@ fn track_channels(p: &Project, t: &Track, at: i64, waveforms: &Waves) -> Vec<f32
         let Some(w) = waveforms.get(&c.media) else {
             continue;
         };
-        let origin = p.media(&c.media).map_or(0.0, |m| {
-            m.info
-                .video
-                .as_ref()
-                .map(|v| v.first_pts)
-                .or_else(|| m.info.audio.first().map(|a| a.first_pts))
-                .unwrap_or(0.0)
-        });
+        let origin = p.media(&c.media).map_or(0.0, |m| m.origin());
         let s = c.source_at(at) as f64 / fps + origin;
         let gained = map_channels(&source_peaks(w, s, s + 1.0 / fps), n);
         let gain = c.gain_at(at as f64).unwrap_or(audio.gain_db);
@@ -340,14 +333,7 @@ impl Workspace {
             return vec![0.0; n];
         };
         let fps = p.settings.fps.as_f64();
-        let origin = p.media(media).map_or(0.0, |m| {
-            m.info
-                .video
-                .as_ref()
-                .map(|v| v.first_pts)
-                .or_else(|| m.info.audio.first().map(|a| a.first_pts))
-                .unwrap_or(0.0)
-        });
+        let origin = p.media(media).map_or(0.0, |m| m.origin());
         let s = frame as f64 / fps + origin;
         map_channels(&source_peaks(w, s, s + 1.0 / fps), n)
     }

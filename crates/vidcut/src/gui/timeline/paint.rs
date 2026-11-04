@@ -814,24 +814,14 @@ fn waveform(
         return;
     }
     let source = |at: f64| c.sound_at(at);
-    let origin = p
-        .media(&c.media)
-        .map(|m| {
-            m.info
-                .video
-                .as_ref()
-                .map(|v| v.first_pts)
-                .or_else(|| m.info.audio.first().map(|a| a.first_pts))
-                .unwrap_or(0.0)
-        })
-        .unwrap_or(0.0);
+    let origin = p.media(&c.media).map_or(0.0, |m| m.origin());
     let visible = painter.clip_rect().intersect(rect);
     if visible.width() <= 0.0 {
         return;
     }
     let (mid, half) = (rect.center().y, rect.height() / 2.0 - 1.0);
     let f = fps.as_f64();
-    let color = Color32::from_rgb(170, 230, 190);
+    let color = theme::WAVEFORM;
     let mut x = visible.left().floor();
     while x < visible.right() {
         let (a, b) = (source(scale.frame(x)), source(scale.frame(x + 1.0)));

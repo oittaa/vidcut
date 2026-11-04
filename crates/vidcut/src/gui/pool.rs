@@ -1087,7 +1087,7 @@ impl Workspace {
             return no_pictures(painter, rect, m);
         };
         let secs = p.settings.fps.frames_to_secs(p.media_frames(m));
-        let origin = m.info.audio.first().map_or(0.0, |a| a.first_pts);
+        let origin = m.origin();
         let per_px = secs / f64::from(rect.width().max(1.0));
         let (mid, half) = (rect.center().y, rect.height() / 2.0 - 1.0);
         painter.rect_filled(rect, CornerRadius::same(3), theme::colors().audio);
@@ -1100,7 +1100,7 @@ impl Workspace {
                         Pos2::new(x + 0.5, mid - hi * half),
                         Pos2::new(x + 0.5, mid - lo * half + 0.5),
                     ],
-                    Stroke::new(1.0, Color32::from_rgb(170, 230, 190)),
+                    Stroke::new(1.0, theme::WAVEFORM),
                 );
             }
             x += 1.0;

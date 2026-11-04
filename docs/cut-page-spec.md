@@ -310,6 +310,9 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Source Clip** (p. 680):
   - The Viewer shows the selected pool clip.
   - A scroll area under the picture stands for the whole clip. It has the playhead, a zoomed-in waveform and In/Out handles that you can drag.
+  - vidcut draws the waveform of the whole clip across the scroll area, from the bottom edge up.
+    - With marks, the waveform is green between In and Out, and gray outside them.
+    - Without marks, the waveform is green.
   - Jog In and Jog Out controls at its ends move the marks frame by frame (p. 692).
     - Jog In is at the left of the scroll area. Jog Out is at the right.
     - A drag moves that mark. 8 pixels is one frame (D97).

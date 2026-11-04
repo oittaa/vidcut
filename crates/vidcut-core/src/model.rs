@@ -816,6 +816,15 @@ impl Media {
         self.info.video.as_ref().is_some_and(|v| v.still)
     }
 
+    pub fn origin(&self) -> f64 {
+        self.info
+            .video
+            .as_ref()
+            .map(|v| v.first_pts)
+            .or_else(|| self.info.audio.first().map(|a| a.first_pts))
+            .unwrap_or(0.0)
+    }
+
     pub fn sequence_file(&self, k: u64) -> Option<PathBuf> {
         let s = self.sequence.as_ref()?;
         Some(s.file(self.path.parent().unwrap_or(Path::new("")), k))
