@@ -469,7 +469,7 @@ The bar and the Jobs button:
 - `dialog::window`, `dialog::form`, `dialog::row`, `dialog::switch`, `dialog::advanced` and `dialog::footer` build the windows (AGENTS.md, rule 12).
 - `dialog::tall_row` puts the label at the top of a tall row. Why: the content does not cover the next row.
 - `dialog::form_width` gives the width of a window whose fields have one width.
-- The looks of Create Subtitles from Audio are tiles (`look_tiles::Tiles`). `burn::draw` draws a sample in each look.
+- The looks of Create Subtitles from Audio are tiles (`look_tiles::Tiles`). `burn::draw` draws a sample in each look. The window keeps only the textures of the looks that it shows.
 
 **The two-up and Multi Source**: `Cells` owns their players on the UI thread. `Screens` draws them.
 
