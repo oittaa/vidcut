@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -903,66 +904,62 @@ fn from_bytes(b: &[u8]) -> Option<LightAnalysis> {
     Some(LightAnalysis { frames, spans })
 }
 
-pub fn analysis(
-    span: &Span,
-    measure_now: bool,
-    decoder: Option<&crate::hw::GpuDecoder>,
-    cancel: Option<&AtomicBool>,
-    progress: &mut dyn FnMut(f64),
-) -> Result<Option<Arc<LightAnalysis>>> {
-    static MEMORY: OnceLock<Mutex<HashMap<Origin, Arc<LightAnalysis>>>> = OnceLock::new();
-    let origin = origin(&span.input, span.color_space);
-    let memory = MEMORY.get_or_init(Default::default);
-    let file = CACHE
-        .get()
-        .map(|d| d.join(format!("light-{}", origin.name)));
-    let known = {
-        let mut m = memory.lock().unwrap();
-        if !m.contains_key(&origin)
-            && let Some(a) = file
-                .as_ref()
-                .and_then(|f| vidcut_core::disk_cache::read(f))
-                .and_then(|b| from_bytes(origin.check(&b)?))
-        {
-            m.insert(origin.clone(), Arc::new(a));
+#[derive(Default)]
+pub struct Lights(RefCell<HashMap<Origin, Arc<LightAnalysis>>>);
+
+impl Lights {
+    pub fn analysis(
+        &self,
+        span: &Span,
+        measure_now: bool,
+        decoder: Option<&crate::hw::GpuDecoder>,
+        cancel: Option<&AtomicBool>,
+        progress: &mut dyn FnMut(f64),
+    ) -> Result<Option<Arc<LightAnalysis>>> {
+        let origin = origin(&span.input, span.color_space);
+        let file = CACHE
+            .get()
+            .map(|d| d.join(format!("light-{}", origin.name)));
+        let held = self.0.borrow().get(&origin).cloned();
+        let known = held.or_else(|| {
+            let read = vidcut_core::disk_cache::read(file.as_ref()?)?;
+            let a = Arc::new(from_bytes(origin.check(&read)?)?);
+            self.0.borrow_mut().insert(origin.clone(), a.clone());
+            Some(a)
+        });
+        if let Some(a) = known.as_ref().filter(|a| a.covers(span.from, span.to)) {
+            return Ok(Some(a.clone()));
         }
-        m.get(&origin).cloned()
-    };
-    if let Some(a) = known.filter(|a| a.covers(span.from, span.to)) {
-        return Ok(Some(a));
-    }
-    if !measure_now {
-        return Ok(None);
-    }
-    let (frames, ended) = measure(span, decoder, cancel, progress)?;
-    let to = if ended { f64::INFINITY } else { span.to };
-    let a = {
-        let mut m = memory.lock().unwrap();
-        let mut a = m.get(&origin).map(|a| (**a).clone()).unwrap_or_default();
+        if !measure_now {
+            return Ok(None);
+        }
+        let (frames, ended) = measure(span, decoder, cancel, progress)?;
+        let to = if ended { f64::INFINITY } else { span.to };
+        let mut a = known.map(|a| (*a).clone()).unwrap_or_default();
         a.add(span.from, to, frames);
         let a = Arc::new(a);
-        m.insert(origin.clone(), a.clone());
-        a
-    };
-    if let Some(f) = &file {
-        let _ = vidcut_core::disk_cache::write(f, &origin.stamp(&to_bytes(&a)));
+        self.0.borrow_mut().insert(origin.clone(), a.clone());
+        if let Some(f) = &file {
+            let _ = vidcut_core::disk_cache::write(f, &origin.stamp(&to_bytes(&a)));
+        }
+        Ok(Some(a))
     }
-    Ok(Some(a))
-}
 
-pub fn piece_level(
-    piece: &VideoPiece,
-    fps: Rational,
-    measure_now: bool,
-    decoder: Option<&crate::hw::GpuDecoder>,
-    cancel: Option<&AtomicBool>,
-    progress: &mut dyn FnMut(f64),
-) -> Result<Option<LightLevel>> {
-    let Some(span) = Span::of(piece, fps) else {
-        return Ok(None);
-    };
-    let a = analysis(&span, measure_now, decoder, cancel, progress)?;
-    Ok(a.and_then(|a| a.level(sampled(piece, fps))))
+    pub fn piece_level(
+        &self,
+        piece: &VideoPiece,
+        fps: Rational,
+        measure_now: bool,
+        decoder: Option<&crate::hw::GpuDecoder>,
+        cancel: Option<&AtomicBool>,
+        progress: &mut dyn FnMut(f64),
+    ) -> Result<Option<LightLevel>> {
+        let Some(span) = Span::of(piece, fps) else {
+            return Ok(None);
+        };
+        let a = self.analysis(&span, measure_now, decoder, cancel, progress)?;
+        Ok(a.and_then(|a| a.level(sampled(piece, fps))))
+    }
 }
 
 pub(crate) struct Meter(crate::export::normalize::Relayout, OnGpu);

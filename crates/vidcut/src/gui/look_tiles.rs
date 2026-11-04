@@ -37,6 +37,7 @@ fn sample(style: &SubtitleStyle, (w, h): (u32, u32)) -> Vec<Sprite> {
 #[derive(Default)]
 pub(super) struct Tiles {
     kept: HashMap<String, TextureHandle>,
+    shown: HashMap<String, TextureHandle>,
 }
 
 impl std::fmt::Debug for Tiles {
@@ -61,16 +62,19 @@ impl Tiles {
             size.1,
             serde_json::to_string(style).unwrap_or_default()
         );
-        self.kept
-            .entry(key)
-            .or_insert_with(|| {
-                ctx.load_texture(
-                    format!("look-tile-{name}"),
-                    picture(&sample(style, size), size, 0),
-                    TextureOptions::LINEAR,
-                )
-            })
-            .id()
+        if let Some(shown) = self.shown.get(&key) {
+            return shown.id();
+        }
+        let texture = self.kept.remove(&key).unwrap_or_else(|| {
+            ctx.load_texture(
+                format!("look-tile-{name}"),
+                picture(&sample(style, size), size, 0),
+                TextureOptions::LINEAR,
+            )
+        });
+        let id = texture.id();
+        self.shown.insert(key, texture);
+        id
     }
 
     pub(super) fn show<'a>(
@@ -125,6 +129,7 @@ impl Tiles {
                 }
             }
         });
+        self.kept = std::mem::take(&mut self.shown);
         took
     }
 }

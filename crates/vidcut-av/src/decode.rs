@@ -536,24 +536,27 @@ pub fn h264_open_gop(source: &Input) -> bool {
 }
 
 fn remembered(source: &Input, scan: impl FnOnce(&Input) -> Option<bool>) -> bool {
-    use std::collections::HashMap;
     use std::sync::Mutex;
-    static KNOWN: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
+    use vidcut_core::lru::Lru;
+    const KEPT: usize = 256;
+    static KNOWN: Mutex<Lru<String, bool, KEPT>> = Mutex::new(Lru::new());
     let known = || KNOWN.lock().unwrap_or_else(|e| e.into_inner());
     let meta = std::fs::metadata(source.path()).ok();
     let mtime = meta.as_ref().and_then(|m| m.modified().ok());
     let key = format!("{source:?}|{:?}|{mtime:?}", meta.map(|m| m.len()));
-    let kept = known().as_ref().and_then(|k| k.get(&key).copied());
+    let kept = known().get(&key).copied();
     if let Some(open) = kept {
         return open;
     }
     let Some(open) = scan(source) else {
         return true;
     };
-    *known()
-        .get_or_insert_with(HashMap::new)
-        .entry(key)
-        .or_insert(open)
+    let mut known = known();
+    if let Some(&first) = known.get(&key) {
+        return first;
+    }
+    known.insert(key, open);
+    open
 }
 
 fn keyframes_not_idr(source: &Input) -> Result<Option<bool>> {

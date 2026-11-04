@@ -471,16 +471,22 @@ The bar and the Jobs button:
 - `dialog::window`, `dialog::form`, `dialog::row`, `dialog::switch`, `dialog::advanced` and `dialog::footer` build the windows (AGENTS.md, rule 12).
 - `dialog::tall_row` puts the label at the top of a tall row. Why: the content does not cover the next row.
 - `dialog::form_width` gives the width of a window whose fields have one width.
-- The looks of Create Subtitles from Audio are tiles (`look_tiles::Tiles`). `burn::draw` draws a sample in each look.
+- The looks of Create Subtitles from Audio are tiles (`look_tiles::Tiles`). `burn::draw` draws a sample in each look. The window keeps only the textures of the looks that it shows.
 
 **The two-up and Multi Source**: `Cells` owns their players on the UI thread. `Screens` draws them.
 
 **Multi Source** ([spec §4.1](../cut-page-spec.md#41-modes)).
 
-- `SourceContent::Group` loads `render::group_tape` in the source player. The plan is as long as the group, with the active angle at its place and black around it. Thus the transport and the sound work as in the other source modes.
-- `Live.tape` then holds one entry, the active angle. `Snapshot::source_at` is empty when the playhead is outside it.
-- `Live::pick_angle` keeps the active angle in `source_media` and the group in `source_group`.
-- `Workspace::multi_view` gives each cell the frame of its file, or black. `Workspace::camera_grid` draws the grid.
+- `multicam::source_grid` works out the cameras of the pool's files and closes the gaps between the files.
+- `SourceContent::Multi` loads `render::camera_tape` in the source player. The plan has the active camera's files at their places and black around them. Thus the transport and the sound work as in the other source modes.
+- `Live.tape` then holds the active camera's files. `Snapshot::source_at` is empty when the playhead is outside them.
+- `source_media` holds the active file. `Live::sync_camera` changes it when the playhead moves.
+- `Live.multi_media` keeps the active file while another source mode is open. Why: a clip open in Source Clip does not change the active camera.
+- `Live.multi_marks` holds the marks of the grid, for this session. Why: a change of bin clears them, and they are not on a file.
+- `Live.multi_alone` tells that one camera is open. `Live::open_camera` gives the file the marks with `SourceGrid::file_marks`. Then the ordinary source clip code draws the picture, the marks and the edits.
+- `SourceGrid::part` gives the frames of an edit in the grid. `SourceParams.lead` keeps the part before the file empty.
+- `SourceLining::Grid` is the reference rule of Source Overwrite in the grid. Why: it is not the rule of the Media Pool view.
+- `Workspace::multi_view` gives each cell the frame of its file. `Workspace::camera_grid` draws the grid.
 
 **The Sync Bin** ([spec §7.4](../cut-page-spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
 

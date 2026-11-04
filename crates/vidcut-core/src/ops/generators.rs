@@ -92,6 +92,10 @@ pub fn made(kind: GeneratorKind, s: &GeneratorSettings) -> Result<Generator> {
             })
         }
         GeneratorKind::SmpteColorBar => plain(Generator::SmpteColorBar),
+        GeneratorKind::Bt2111HlgNarrow => plain(Generator::Bt2111HlgNarrow),
+        GeneratorKind::Bt2111PqFull => plain(Generator::Bt2111PqFull),
+        GeneratorKind::Bt2111PqNarrow => plain(Generator::Bt2111PqNarrow),
+        GeneratorKind::Window => plain(Generator::Window),
     }
 }
 
