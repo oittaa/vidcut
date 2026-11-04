@@ -2783,7 +2783,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Soft: a lower third at 5.5%, with a soft shadow and no outline
   - Your looks are one TOML file each, in `looks/subtitles` and `looks/titles` in the config folder.
   - The file has the name of the look:
-    - up to 64 characters, without `/ \ : * ? " < > |`
+    - without `/ \ : * ? " < > |`
     - not starting or ending with a dot
     - matched whatever its case
   - A built-in look cannot be replaced or deleted, and its name cannot be taken.

@@ -2686,8 +2686,7 @@ pub enum Request {
     /// `titles.add` takes them. Built-in looks can't be replaced.
     #[serde(rename = "looks.save")]
     LooksSave {
-        /// Up to 64 characters, without `/ \ : * ? " < > |`; names match
-        /// whatever their case.
+        /// Without `/ \ : * ? " < > |`; names match whatever their case.
         name: String,
         #[serde(default)]
         subtitles: Option<SubtitleLook>,
