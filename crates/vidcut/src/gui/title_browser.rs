@@ -245,7 +245,8 @@ impl Browser {
 
 #[derive(Default)]
 pub struct Thumbs {
-    kept: Lru<String, TextureHandle, KEPT>,
+    drawn_for: (u32, u32),
+    kept: Lru<Title, TextureHandle, KEPT>,
     shown: HashMap<String, TextureId>,
 }
 
@@ -256,12 +257,16 @@ impl Thumbs {
         let w = ((f64::from(h) * f64::from(p.settings.width) / f64::from(p.settings.height.max(1)))
             .round() as u32)
             .max(1);
+        let drawn_for = (w, p.settings.height);
+        if self.drawn_for != drawn_for {
+            self.drawn_for = drawn_for;
+            self.kept.clear();
+        }
         for c in p.tracks.iter().flat_map(|t| &t.clips) {
             let Some(t) = &c.title else {
                 continue;
             };
-            let key = format!("{w}x{h} {}", serde_json::to_string(t).unwrap_or_default());
-            let id = match self.kept.get(&key) {
+            let id = match self.kept.get(t) {
                 Some(texture) => texture.id(),
                 None => {
                     let sprite = vidcut_av::burn::title(t, w, h, p.settings.height)
@@ -277,7 +282,7 @@ impl Thumbs {
                             TextureOptions::LINEAR
                         });
                     let id = texture.id();
-                    self.kept.insert(key, texture);
+                    self.kept.insert(t.clone(), texture);
                     id
                 }
             };

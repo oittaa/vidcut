@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, DefaultHasher, Hash};
 
@@ -16,6 +17,8 @@ pub struct Lru<K, V, const N: usize> {
     oldest: Option<usize>,
     newest: Option<usize>,
 }
+
+pub type Uncapped<K, V> = Lru<K, V, { usize::MAX }>;
 
 impl<K, V, const N: usize> Default for Lru<K, V, N> {
     fn default() -> Self {
@@ -72,19 +75,35 @@ impl<K, V, const N: usize> Lru<K, V, N> {
 }
 
 impl<K: Hash + Eq + Clone, V, const N: usize> Lru<K, V, N> {
-    pub fn contains(&self, key: &K) -> bool {
+    pub fn contains<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         self.at.contains_key(key)
     }
 
-    pub fn peek(&self, key: &K) -> Option<&V> {
+    pub fn peek<Q>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         self.at.get(key).map(|&i| &self.nodes[i].value)
     }
 
-    pub fn get(&mut self, key: &K) -> Option<&V> {
+    pub fn get<Q>(&mut self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         self.get_mut(key).map(|v| &*v)
     }
 
-    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let i = *self.at.get(key)?;
         if self.newest != Some(i) {
             self.unlink(i);
@@ -94,8 +113,9 @@ impl<K: Hash + Eq + Clone, V, const N: usize> Lru<K, V, N> {
     }
 
     pub fn pop_oldest(&mut self) -> Option<(K, V)> {
-        let k = self.nodes[self.oldest?].key.clone();
-        self.remove(&k)
+        let i = self.oldest?;
+        self.at.remove(&self.nodes[i].key);
+        Some(self.take(i))
     }
 
     pub fn insert(&mut self, key: K, value: V) {
@@ -126,8 +146,16 @@ impl<K: Hash + Eq + Clone, V, const N: usize> Lru<K, V, N> {
         self.newest = None;
     }
 
-    pub fn remove(&mut self, key: &K) -> Option<(K, V)> {
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<(K, V)>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         let i = self.at.remove(key)?;
+        Some(self.take(i))
+    }
+
+    fn take(&mut self, i: usize) -> (K, V) {
         self.unlink(i);
         let last = self.nodes.len() - 1;
         if i != last {
@@ -145,7 +173,7 @@ impl<K: Hash + Eq + Clone, V, const N: usize> Lru<K, V, N> {
             }
         }
         let gone = self.nodes.swap_remove(i);
-        Some((gone.key, gone.value))
+        (gone.key, gone.value)
     }
 }
 

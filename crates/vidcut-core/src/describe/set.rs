@@ -781,9 +781,7 @@ impl Words<'_> {
 
     pub(super) fn marker_set(&self) -> String {
         let id = self.text("marker");
-        let found = self
-            .project
-            .and_then(|pr| pr.markers.iter().find(|m| m.id == id).map(|m| (pr, m)));
+        let found = self.project.and_then(|pr| pr.marker(&id).map(|m| (pr, m)));
         let thing = found.map_or_else(
             || format!("Marker {id}"),
             |(pr, m)| format!("Marker at {}", pr.settings.timecode(m.at)),

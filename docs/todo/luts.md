@@ -26,6 +26,7 @@ vidcut applies no LUT. The spec has an input LUT, an output LUT and a display LU
 - An output LUT on the timeline, after subtitles, in the viewer and in the export.
 - This item's LUTs are in the viewer and in the export.
 - The display LUT is the viewer's own branch in §13, and it is separate work.
+- The scopes show the picture after the output LUT. They read the canvas ([gpu](../design/gpu.md#the-scopes)).
 - The project stores the path as it stores a media path.
 - The LUT runs in the timeline color space.
 - A conversion for the LUT is shown where the user sets it, and in the export report.

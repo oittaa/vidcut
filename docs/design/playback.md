@@ -70,6 +70,7 @@ flowchart TD
 - `player::plan::Plan` gives each frame an `Id`. The `Id` names what the picture shows (file, color reading, source position, layers over it), not where it shows. Thus kept pictures survive edits that move them.
   - Each layer over it adds its level, the edge of its wipe and the frame of its move (`Moving::key`). Why: a change of a wipe's edge or of a Border keeps the level, and the picture is a new one.
   - The incoming layer of a Smooth Cut also adds the point and the process of its morph (`Smooth::at`). Why: a change of the Ease or the Process keeps the level.
+  - A generator with keyframes adds its frame in the piece. Why: its picture changes on each frame, and it has no source position.
 
 **Decoding**
 
@@ -97,6 +98,7 @@ flowchart TD
 - Apple silicon has one shared budget.
 - While an AI upscaler holds GPU memory, the video budget is smaller (`store::Lent`, [gpu](gpu.md)).
 - The least recently used pictures go first, whichever engine decoded them. The prepared picture of each engine never goes (`Store::hold`).
+- `Store::kept_run` and `Store::touch` make their ids in small batches, outside the lock. They take the lock for one batch at a time. Why: the decoding threads and the presenter wait on this lock, and a long run must not hold them up.
 - An engine can show a picture that another engine decoded, by its `Id`.
 - Each engine plans its decoding with its part of the budget (`Config::part`). When the last engine ends, the cache empties.
 
@@ -296,6 +298,7 @@ The audio device:
     - A Push blurs the whole result. A Slide mixes the blur in by the part of the box that the moving side covers.
     - Why: these rules give Resolve's renders within about 1 pixel ([gotchas](../gotchas.md#resolves-otio-files)).
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
+- With a scope on, each turn also calls `Screen::scopes` after `Screen::draw` ([gpu](gpu.md#the-scopes)). `Viewer::sync_scopes` shows each scope's target in the same way.
 - A present answers with the frame drawn, if it is exact. A `gui.screenshot` of the viewer reads the target back, to the pixel.
 - Submissions go through `Gate::pass`. They wait until the UI thread runs `logic` or `ui`, because eframe configures the surface of the window outside these. If the UI is away for long, submissions do not wait.
 
@@ -445,7 +448,9 @@ The names of frames:
     - Thus a change of the Transform or of an effect renders a placed clip again.
     - Without a Retime Process, `alone` keeps the effects up to the last checked effect (`render_cache::baked`). Thus a change of a later effect keeps the names.
     - `alone` takes the opacity and the composite mode out of the placement. Why: they change only the alpha and the mix, not the colors in the file.
-- An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
+- `PieceKeys` keeps the frame names of each piece in memory. vidcut does not hash a piece again when the piece only moves, for example after a ripple edit.
+  - When it holds more than `KEYS_KEPT` frame names, it removes the least recently used pieces.
+  - The limit counts frame names, not pieces. An hour of video at 60 fps has 216,000 frame names.
 - `Look::of` gives the size and the codec. With proxies on, the size is that of proxies. With proxies off, the size is that of the timeline.
   - The codec is `render_cache.codec` (`CacheCodec`). With Automatic and proxies on, it is that of proxies.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.

@@ -14,6 +14,7 @@ use vidcut_core::time::parse_frame_number;
 use super::pool::elide;
 use super::row::Row;
 use super::theme;
+use super::timeline::paint::marker_color;
 use super::workspace::{Drag, PasteWatch, TimecodeEntry, Workspace, dim, fit};
 use crate::live::{PlayerId, seek_frame};
 
@@ -237,12 +238,19 @@ impl Workspace {
         let row = Row {
             left: &modes,
             fill: Some((Header::Title, Align::Min)),
-            right: &[Header::FullScreen, Header::Duration],
-            leaving: &[modes[3], modes[1], modes[0], modes[2], Header::FullScreen],
+            right: &[Header::Scopes, Header::FullScreen, Header::Duration],
+            leaving: &[
+                Header::Scopes,
+                modes[3],
+                modes[1],
+                modes[0],
+                modes[2],
+                Header::FullScreen,
+            ],
             group: |h| match h {
                 Header::Mode(_) => 0,
                 Header::Title => 1,
-                Header::FullScreen | Header::Duration => 2,
+                Header::Scopes | Header::FullScreen | Header::Duration => 2,
             },
         };
         ui.horizontal(|ui| {
@@ -263,6 +271,7 @@ impl Workspace {
                 Header::Title => {
                     ui.add(egui::Label::new(RichText::new(ws.viewer_title()).strong()).truncate())
                 }
+                Header::Scopes => ui.menu_button("Scopes", |ui| ws.scopes_menu(ui)).response,
                 Header::FullScreen => {
                     let on = ws.snap.viewer_frame == ViewerFrame::FullScreen;
                     let r = ui.selectable_label(on, "Full Screen");
@@ -310,6 +319,9 @@ impl Workspace {
             p.settings.width as f32 / p.settings.height.max(1) as f32
         });
         let ppp = ui.ctx().pixels_per_point();
+        let one_picture =
+            !dynamic && trim.is_none() && mode != ViewerMode::MultiSource && !sync_grid;
+        let (area, plots) = self.scope_column(area, one_picture, ppp);
         let picture = {
             use eframe::emath::GuiRounding;
             fit(area.shrink(2.0), aspect).round_to_pixels(ppp)
@@ -355,6 +367,7 @@ impl Workspace {
             return;
         }
         let area_resp = ui.allocate_rect(area, Sense::click_and_drag());
+        self.paint_scopes(ui, &plots);
         if mode.is_source()
             && area_resp.drag_started()
             && let Some((media, _)) = self.snap.source_at()
@@ -999,6 +1012,7 @@ impl Workspace {
         };
         let shown = self.snap.source_at().map(|(m, _)| m.to_string());
         let mut handles = None;
+        let mut opened = None;
         if let Some((mut a, mut b)) = span {
             if let Some(Drag::TapeMark { is_in, frame }) = &self.drag {
                 if *is_in {
@@ -1069,6 +1083,37 @@ impl Workspace {
                 self.clip_waveform(&painter, rect, m, frames, marked.then_some((a, b)));
             }
             self.mark_handles(&painter, rect, x(base + a), x(base + b));
+            for k in &m.markers {
+                let color = marker_color(&k.color);
+                let at = x(base + k.at);
+                if k.duration > 1 {
+                    let end = x(base + k.at + k.duration);
+                    painter.rect_filled(
+                        Rect::from_min_max(
+                            Pos2::new(at, rect.top()),
+                            Pos2::new(end, rect.top() + 3.0),
+                        ),
+                        CornerRadius::ZERO,
+                        color,
+                    );
+                }
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        Pos2::new(at - 4.0, rect.top()),
+                        Pos2::new(at + 4.0, rect.top()),
+                        Pos2::new(at, rect.top() + 7.0),
+                    ],
+                    color,
+                    Stroke::NONE,
+                ));
+                if resp.double_clicked()
+                    && resp
+                        .interact_pointer_pos()
+                        .is_some_and(|p| (p.x - at).abs() <= 5.0)
+                {
+                    opened = Some(k.id.clone());
+                }
+            }
             handles = Some(MarkHandles::Clip {
                 media: media.clone(),
                 base,
@@ -1084,6 +1129,9 @@ impl Workspace {
             [Pos2::new(px, rect.top()), Pos2::new(px, rect.bottom())],
             Stroke::new(2.0, theme::colors().playhead),
         );
+        if let (Some(id), Some(p)) = (opened, self.project_shared()) {
+            self.open_marker(id, &p);
+        }
 
         if resp.drag_started()
             && let Some(pos) = resp.interact_pointer_pos()
@@ -1796,6 +1844,7 @@ impl Workspace {
 enum Header {
     Mode(ViewerMode),
     Title,
+    Scopes,
     FullScreen,
     Duration,
 }

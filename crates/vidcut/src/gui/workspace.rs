@@ -5,6 +5,7 @@ use std::sync::Arc;
 use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
 use vidcut_core::model::{PictureTool, Project, RenderCache};
+use vidcut_core::preferences::Scope;
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{Rational, format_timecode};
 
@@ -72,12 +73,20 @@ pub struct Picture {
     pub has_frame: bool,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ScopePictures {
+    pub textures: Vec<(Scope, egui::TextureId)>,
+    pub colors: Option<vidcut_core::model::Hdr>,
+}
+
 pub struct Workspace {
     pub(super) live: live::Handle,
     pub(super) snap: Arc<Snapshot>,
     pub(super) thumbs: HashMap<String, Thumbs>,
     pub picture: Picture,
     pub want: [i32; 2],
+    pub scope_pictures: ScopePictures,
+    pub scope_want: Vec<(Scope, [i32; 2])>,
     pub stats: Option<live::stats::PlayerStats>,
     pub display: Option<String>,
     pub levels: Option<vidcut_av::player::Levels>,
@@ -173,6 +182,8 @@ impl Workspace {
             picture: Picture::default(),
             stats: None,
             want: [640, 360],
+            scope_pictures: ScopePictures::default(),
+            scope_want: Vec::new(),
             display: None,
             levels: None,
             main_window: None,
@@ -1106,6 +1117,7 @@ impl Workspace {
             });
             ui.menu_button("View", |ui| {
                 ui.menu_button("Safe Area", |ui| self.safe_area_menu(ui));
+                ui.menu_button("Scopes", |ui| self.scopes_menu(ui));
                 let mut on = self.snap.show_super_scale;
                 if ui.checkbox(&mut on, "Show Super Scale").clicked() {
                     self.send(

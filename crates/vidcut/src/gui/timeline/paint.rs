@@ -784,7 +784,10 @@ fn filmstrip(
                 t.want(&key, || t.job(p, &key, width))
                     .or_else(|| t.nearest(&c.media, height, frame, span))
             })
-            .or_else(|| pool?.nearest(fps.frames_to_secs(frame)));
+            .or_else(|| {
+                let skipped = p.media(&c.media).map_or(0.0, |m| m.skipped());
+                pool?.nearest(fps.frames_to_secs(frame) + skipped)
+            });
         if let Some(texture) = texture {
             let tile = Rect::from_min_size(pos2(x, rect.top()), vec2(tile_w, rect.height()));
             painter.image(
