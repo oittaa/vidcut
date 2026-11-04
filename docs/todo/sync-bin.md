@@ -31,13 +31,13 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
 - Measure the Sync Clips window parts that are not measured:
   - Sync by Marker;
   - Shift+Comma on a keyboard layout that is not Finnish;
-  - the rule of far gaps at other frame rates, and the exact limit between 10:00 and 10:01;
   - the ruler labels of a reopened group with far tags;
   - the Sync Bin for a group whose first tag is not 01:00:00:00;
-  - the rows of a file in two groups;
-  - more than 12 cameras: vidcut refuses them now, and the limit in DaVinci Resolve is not known;
-  - a still or a file with no picture in the bin: vidcut refuses them now;
-  - files of two different saved groups in one bin: vidcut refuses them now.
+  - the rows of a file in two groups.
+- Take out the refusals of the window that DaVinci Resolve does not have (measured.md, C3e):
+  - more than 12 cameras;
+  - a still or a file with no picture in the bin;
+  - files of two different saved groups in one bin.
 - Measure the Sync Bin parts that are not measured:
   - the number keys and Escape;
   - the sound of the grid with Video Only off and on (p. 708);
