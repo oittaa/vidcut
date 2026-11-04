@@ -355,7 +355,7 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     if resamples(uv, spans) {
         return vec4<f32>(sharp(uv, spans), a);
     }
-    let taps = vec2<u32>(clamp(ceil(spans), vec2<f32>(1.0), vec2<f32>(8.0)));
+    let taps = vec2<u32>(clamp(ceil(spans - vec2<f32>(1e-4)), vec2<f32>(1.0), vec2<f32>(8.0)));
     let half = vec2<f32>(0.5) / size;
     var sum = vec3<f32>(0.0);
     for (var j = 0u; j < taps.y; j++) {
