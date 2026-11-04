@@ -1592,14 +1592,7 @@ fn found<'a>(m: Option<&'a Media>, id: &str) -> Result<&'a Media> {
 }
 
 fn origin_of(m: &Media) -> (PathBuf, f64) {
-    let origin = m
-        .info
-        .video
-        .as_ref()
-        .map(|v| v.first_pts)
-        .or_else(|| m.info.audio.first().map(|a| a.first_pts))
-        .unwrap_or(0.0);
-    (m.path.clone(), origin)
+    (m.path.clone(), m.origin())
 }
 
 pub fn retime_of(c: &Clip, t: i64, m: &Media, s: &Settings) -> Retime {
@@ -2516,11 +2509,11 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
         .media(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
     Ok(match &m.info.video {
-        Some(v) => VideoPiece::Source {
+        Some(_) => VideoPiece::Source {
             pace: Default::default(),
             media: media.into(),
             path: m.path.clone(),
-            origin: v.first_pts,
+            origin: m.origin(),
             source_frame: at,
             frames: 1,
             image: p.media_image(media),

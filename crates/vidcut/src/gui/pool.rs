@@ -1328,7 +1328,7 @@ impl Workspace {
             return no_pictures(painter, rect, m);
         };
         let secs = p.settings.fps.frames_to_secs(p.media_frames(m));
-        let origin = m.info.audio.first().map_or(0.0, |a| a.first_pts);
+        let origin = m.origin();
         let per_px = secs / f64::from(rect.width().max(1.0));
         painter.rect_filled(rect, CornerRadius::same(3), theme::colors().audio);
         super::timeline::paint::wave_columns(painter, rect, |x| {

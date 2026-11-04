@@ -814,17 +814,7 @@ fn waveform(
         return;
     }
     let source = |at: f64| c.sound_at(at);
-    let origin = p
-        .media(&c.media)
-        .map(|m| {
-            m.info
-                .video
-                .as_ref()
-                .map(|v| v.first_pts)
-                .or_else(|| m.info.audio.first().map(|a| a.first_pts))
-                .unwrap_or(0.0)
-        })
-        .unwrap_or(0.0);
+    let origin = p.media(&c.media).map_or(0.0, |m| m.origin());
     let f = fps.as_f64();
     wave_columns(painter, rect, |x| {
         let (a, b) = (source(scale.frame(x)), source(scale.frame(x + 1.0)));
@@ -835,8 +825,6 @@ fn waveform(
         w.range(origin + t0 / f, origin + t1 / f)
     });
 }
-
-pub const WAVE: Color32 = Color32::from_rgb(170, 230, 190);
 
 pub fn wave_columns(painter: &Painter, rect: Rect, range_at: impl Fn(f32) -> Option<(f32, f32)>) {
     let visible = painter.clip_rect().intersect(rect);
@@ -852,7 +840,7 @@ pub fn wave_columns(painter: &Painter, rect: Rect, range_at: impl Fn(f32) -> Opt
                     pos2(x + 0.5, mid - hi * half),
                     pos2(x + 0.5, mid - lo * half + 0.5),
                 ],
-                Stroke::new(1.0, WAVE),
+                Stroke::new(1.0, theme::WAVEFORM),
             );
         }
         x += 1.0;
