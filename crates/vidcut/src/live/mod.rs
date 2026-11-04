@@ -260,6 +260,7 @@ pub(crate) enum Msg {
     },
     DuckHeard {
         measured: Vec<Unmeasured>,
+        kept: Vec<(crate::env::MeasureKey, vidcut_core::duck::Measured)>,
         failed: Option<String>,
     },
     FileChanged,
@@ -662,6 +663,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         flash_seq: 0,
         duck_measuring: HashSet::new(),
         duck_failed: HashSet::new(),
+        duck_kept: HashMap::new(),
     };
     live.watch_omarchy();
     let project = config.project;
@@ -939,6 +941,7 @@ struct Live {
     flash_seq: u64,
     duck_measuring: HashSet<Unmeasured>,
     duck_failed: HashSet<Unmeasured>,
+    duck_kept: HashMap<crate::env::MeasureKey, vidcut_core::duck::Measured>,
     render: render_cache::Background,
     drops: drops::Drops,
 }
@@ -1129,15 +1132,22 @@ impl Live {
                 self.finish(job, result);
                 self.refresh_transcribed(ended);
             }
-            Msg::DuckHeard { measured, failed } => {
-                for m in &measured {
-                    self.duck_measuring.remove(m);
+            Msg::DuckHeard {
+                measured,
+                kept,
+                failed,
+            } => {
+                self.duck_kept.extend(kept);
+                if !measured.is_empty() {
+                    for m in &measured {
+                        self.duck_measuring.remove(m);
+                    }
+                    if let Some(e) = failed {
+                        self.duck_failed.extend(measured);
+                        self.notice(format!("Ducking isn't heard: {e}"), true);
+                    }
+                    self.refresh_timeline();
                 }
-                if let Some(e) = failed {
-                    self.duck_failed.extend(measured);
-                    self.notice(format!("Ducking isn't heard: {e}"), true);
-                }
-                self.refresh_timeline();
             }
             Msg::PreferencesChanged => {
                 disk_cache::set_policy(crate::preferences::cache_policy());
@@ -1750,7 +1760,6 @@ impl Live {
     }
 
     fn duck_measure(&self, envelope: &Envelope) -> Option<Measure> {
-        use vidcut_core::model::DuckDetect;
         let p = self.project.as_ref()?.project();
         let Request::TrackSet {
             track,
@@ -1772,7 +1781,11 @@ impl Live {
             true => vidcut_core::duck::sounds(p, track, &d)
                 .into_iter()
                 .filter(|(m, _)| !self.missing.contains(&m.id))
-                .filter(|(m, s)| crate::env::kept_measure(m, *s, detect).is_none())
+                .filter(|(m, s)| {
+                    !self
+                        .duck_kept
+                        .contains_key(&crate::env::measure_key(m, *s, detect))
+                })
                 .map(|(m, s)| (m.clone(), s))
                 .collect(),
             false => Vec::new(),
@@ -1781,19 +1794,22 @@ impl Live {
             return None;
         }
         let download = *download;
+        let tx = self.tx.clone();
         Some(Box::new(move || {
             if isolate {
                 vidcut_av::isolate::get_ready(&paths::models_dir(), true).map_err(|e| {
                     crate::export::av_error(&e, vidcut_core::ErrorCode::Media, String::new())
                 })?;
             }
-            let env = AvEnv::new();
-            for (m, stream) in &needed {
-                match detect {
-                    DuckDetect::Speech => env.voice_activity(m, *stream, download).map(drop)?,
-                    DuckDetect::Level => env.audio_levels(m, *stream).map(drop)?,
-                }
-            }
+            let kept = needed
+                .iter()
+                .map(|(m, stream)| crate::env::measure_duck(m, *stream, detect, download))
+                .collect::<Result<Vec<_>>>()?;
+            let _ = tx.send(Msg::DuckHeard {
+                measured: Vec::new(),
+                kept,
+                failed: None,
+            });
             Ok(())
         }))
     }
@@ -3524,6 +3540,7 @@ impl Live {
         self.thumbs_wanted.clear();
         self.waveforms = Arc::new(HashMap::new());
         self.waveforms_wanted.clear();
+        self.duck_kept.clear();
         self.remember_recent(path);
         self.register();
         self.project_changed(None);
@@ -3797,11 +3814,14 @@ impl Live {
         if plan.ducking.is_empty() {
             return;
         }
+        let held = &self.duck_kept;
         let mut kept = |m: &vidcut_core::model::Media,
                         stream: u32,
                         detect: vidcut_core::model::DuckDetect|
          -> Result<Option<vidcut_core::duck::Measured>> {
-            Ok(crate::env::kept_measure(m, stream, detect))
+            Ok(held
+                .get(&crate::env::measure_key(m, stream, detect))
+                .cloned())
         };
         let Ok(missing) = vidcut_core::duck::hear(plan, p, &mut kept) else {
             return;
@@ -3822,20 +3842,18 @@ impl Live {
         let tx = self.tx.clone();
         let _ = crate::threads::spawn("vidcut-measure", Work::Job, move || {
             let mut failed = None;
+            let mut kept = Vec::new();
             for (m, stream, detect) in &wanted {
-                let env = AvEnv::new();
-                let result = match detect {
-                    vidcut_core::model::DuckDetect::Speech => {
-                        env.voice_activity(m, *stream, false).map(drop)
+                match crate::env::measure_duck(m, *stream, *detect, false) {
+                    Ok(one) => kept.push(one),
+                    Err(e) => {
+                        failed.get_or_insert(e.message);
                     }
-                    vidcut_core::model::DuckDetect::Level => env.audio_levels(m, *stream).map(drop),
-                };
-                if let Err(e) = result {
-                    failed.get_or_insert(e.message);
                 }
             }
             let _ = tx.send(Msg::DuckHeard {
                 measured: missing,
+                kept,
                 failed,
             });
         });
