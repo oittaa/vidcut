@@ -325,16 +325,16 @@ flowchart TD
 
 - `reset` with `keep_downloads` keeps `models` and `speech-replies`.
 - `Tiles::evict` drops kept pictures past the memory budget of the tile cache.
-- The disk cache holds the levels, voice activity, picture stats and sound matches. Thus `cache` limits them.
-- Each `AvEnv` also keeps a few results and transcripts in memory (`Memos`). Why: one request can ask for the same file many times.
-  - An `AvEnv` lives for one request or one job. Its memory goes with it.
-  - A result that the disk cache refuses also goes with it. The next request measures again.
+- The disk cache holds the levels, voice activity, picture stats and sound matches. The `cache` setting limits the disk cache.
+- Each `AvEnv` keeps a few results and transcripts in memory (`Memos`). One request can ask for the same file many times.
+  - An `AvEnv` lives for one request or one job. Its results leave the memory when it ends.
+  - The disk cache can refuse a result. The next request then measures that file again.
 - The core holds the measurements of ducking for the open project ([playback](playback.md#sound)).
 - Light is also kept in memory.
-- A job makes some results on a copy of the project, and the edit after it finds them. Each of these is in an `Lru` of a fixed size:
-  - `HEARD` and `PAID`: the last results heard. Why: a transcription costs minutes or money.
+- A job gives some results to the edit after it. These maps hold those results, and each is an `Lru` of a fixed size:
+  - `HEARD` and `PAID`: the last transcriptions. A new transcription costs minutes or money.
   - `LOUD`: the loudness of a plan.
-  - `MADE_WITH`: how a proxy was written. Past its size, the report of the oldest proxy lacks that line.
+  - `MADE_WITH`: how a proxy was written. When this map is full, the report of the oldest proxy does not have this line.
 
 ### The disk cache limit
 
