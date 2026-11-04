@@ -2669,14 +2669,18 @@ impl Slot {
                 | Layout::Yuv420p10
                 | Layout::Yuv422p
                 | Layout::Yuv422p10
-                | Layout::Yuv444p12 => Planes {
+                | Layout::Yuv444p12
+                | Layout::Gbrp16 => Planes {
                     key,
                     y: make((w, h), one),
                     u: make((cw, ch), one),
                     v: make((cw, ch), one),
                     a: make(
                         if alpha { (w, h) } else { (1, 1) },
-                        wgpu::TextureFormat::R8Unorm,
+                        match layout {
+                            Layout::Gbrp16 => one,
+                            _ => wgpu::TextureFormat::R8Unorm,
+                        },
                     ),
                 },
                 Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => Planes {
@@ -2733,16 +2737,22 @@ impl Slot {
                 put(&planes.u, 1, (cw, ch), 1);
                 put(&planes.v, 2, (cw, ch), 1);
             }
-            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12, true) => {
+            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 | Layout::Gbrp16, true) => {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 2);
                 put(&planes.v, 2, (cw, ch), 2);
-                if picture.alpha_plane() {
-                    write_alpha(gpu, &planes.a, frame, (w, h));
+                match (picture.alpha_plane(), layout) {
+                    (true, Layout::Gbrp16) => put(&planes.a, 3, (w, h), 2),
+                    (true, _) => write_alpha(gpu, &planes.a, frame, (w, h)),
+                    (false, _) => {}
                 }
             }
-            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12, false) => {
-                let shift = if layout == Layout::Yuv444p12 { 4 } else { 2 };
+            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 | Layout::Gbrp16, false) => {
+                let shift = match layout {
+                    Layout::Gbrp16 => 8,
+                    Layout::Yuv444p12 => 4,
+                    _ => 2,
+                };
                 if picture.alpha_plane() {
                     write_alpha(gpu, &planes.a, frame, (w, h));
                 }
@@ -3158,7 +3168,8 @@ fn nvdec_bytes(gpu: &Gpu, layout: Layout) -> Result<u64, String> {
         | Layout::Yuv420p10
         | Layout::Yuv422p
         | Layout::Yuv422p10
-        | Layout::Yuv444p12 => Err("planar pictures aren't NVDEC's".into()),
+        | Layout::Yuv444p12
+        | Layout::Gbrp16 => Err("planar pictures aren't NVDEC's".into()),
     }
 }
 
@@ -3181,7 +3192,8 @@ fn vaapi_formats(
         | Layout::Yuv420p10
         | Layout::Yuv422p
         | Layout::Yuv422p10
-        | Layout::Yuv444p12 => Err("planar pictures aren't VA-API's".into()),
+        | Layout::Yuv444p12
+        | Layout::Gbrp16 => Err("planar pictures aren't VA-API's".into()),
     }
 }
 
@@ -3216,7 +3228,8 @@ fn d3d11_formats(
         | Layout::Yuv420p10
         | Layout::Yuv422p
         | Layout::Yuv422p10
-        | Layout::Yuv444p12 => Err("planar pictures aren't Direct3D 11's".into()),
+        | Layout::Yuv444p12
+        | Layout::Gbrp16 => Err("planar pictures aren't Direct3D 11's".into()),
     }
 }
 
@@ -3245,7 +3258,8 @@ fn videotoolbox_formats(
         | Layout::Yuv420p10
         | Layout::Yuv422p
         | Layout::Yuv422p10
-        | Layout::Yuv444p12 => Err("planar pictures aren't VideoToolbox's".into()),
+        | Layout::Yuv444p12
+        | Layout::Gbrp16 => Err("planar pictures aren't VideoToolbox's".into()),
     }
 }
 
@@ -3262,6 +3276,7 @@ fn vulkan_layout(gpu: &Gpu, layout: Layout) -> Result<(), String> {
         | Layout::Ayuv64
         | Layout::Rgb
         | Layout::Rgb48
+        | Layout::Gbrp16
         | Layout::Yuv420p
         | Layout::Yuv422p => Err(format!("{layout:?} pictures aren't Vulkan's")),
     }
@@ -3518,6 +3533,10 @@ fn write_alpha(
     frame: &crate::ffmpeg::frame::Video,
     (w, h): (u32, u32),
 ) {
+    let shift = match Layout::of(frame.format()) {
+        Layout::Gbrp16 => 8,
+        _ => 4,
+    };
     let (stride, data) = (frame.stride(3), frame.data(3));
     let row = w as usize;
     let mut top = Vec::with_capacity(row * h as usize);
@@ -3527,7 +3546,7 @@ fn write_alpha(
             line.as_chunks::<2>()
                 .0
                 .iter()
-                .map(|s| (u16::from_le_bytes(*s) >> 4) as u8),
+                .map(|s| (u16::from_le_bytes(*s) >> shift) as u8),
         );
     }
     write_plane(&gpu.queue, texture, &top, row, (w, h), 1);
@@ -3542,7 +3561,8 @@ fn sixteen(layout: Layout) -> bool {
         | Layout::P210
         | Layout::Yuv444p12
         | Layout::P416
-        | Layout::Ayuv64 => true,
+        | Layout::Ayuv64
+        | Layout::Gbrp16 => true,
     }
 }
 
@@ -3569,6 +3589,7 @@ fn packing(layout: Layout) -> u32 {
         Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => 1,
         Layout::Ayuv64 => 2,
         Layout::Rgb | Layout::Rgb48 => 3,
+        Layout::Gbrp16 => 4,
     }
 }
 
@@ -3576,7 +3597,12 @@ fn per_chroma(layout: Layout) -> (u32, u32) {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => (2, 2),
         Layout::Yuv422p | Layout::Yuv422p10 | Layout::P210 => (2, 1),
-        Layout::Yuv444p12 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 => (1, 1),
+        Layout::Yuv444p12
+        | Layout::P416
+        | Layout::Ayuv64
+        | Layout::Rgb
+        | Layout::Rgb48
+        | Layout::Gbrp16 => (1, 1),
     }
 }
 

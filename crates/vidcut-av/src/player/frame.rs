@@ -23,10 +23,11 @@ pub enum Layout {
     Ayuv64,
     Rgb,
     Rgb48,
+    Gbrp16,
 }
 
 impl Layout {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Yuv420p,
         Self::Nv12,
         Self::P010,
@@ -39,6 +40,7 @@ impl Layout {
         Self::Ayuv64,
         Self::Rgb,
         Self::Rgb48,
+        Self::Gbrp16,
     ];
 
     pub(crate) fn of(p: format::Pixel) -> Self {
@@ -55,6 +57,7 @@ impl Layout {
             P::AYUV64LE => Self::Ayuv64,
             P::RGB24 => Self::Rgb,
             P::RGB48LE => Self::Rgb48,
+            P::GBRP16LE | P::GBRAP16LE => Self::Gbrp16,
             _ => Self::Yuv420p,
         }
     }
@@ -284,7 +287,10 @@ impl Picture {
     }
 
     pub fn alpha_plane(&self) -> bool {
-        crate::hw::sw_format(&self.frame) == format::Pixel::YUVA444P12LE
+        matches!(
+            crate::hw::sw_format(&self.frame),
+            format::Pixel::YUVA444P12LE | format::Pixel::GBRAP16LE
+        )
     }
 
     pub(crate) fn in_video_memory(&self) -> Option<crate::hw::Kind> {
