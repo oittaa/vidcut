@@ -28,13 +28,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
 - generators: the twelve kinds of the Generators section (§8.17)
+- the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
 **Later (later):**
 - other effects, other transitions, other titles, other generators
 - keyframes other than Transform, Crop, the clip volume and the Position, Zoom, Rotation and Opacity of a title
 - color ([todo](todo/auto-color.md)), Fusion
-- LUTs ([todo](todo/luts.md))
+- the display LUT, and LUT files other than `.cube` ([todo](todo/luts.md))
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
@@ -3719,6 +3720,29 @@ The display LUT of the Color page is on a branch after Data Burn-In. The output 
 - Output Sizing does not go back to the source. It enlarges the picture that the earlier stages give (p. 296).
 
 The chart does not show titles, generators or transitions.
+
+### The LUT tables
+
+These facts are measured in Resolve Studio 21.1.2, with no color management, with a LUT on the node of a clip.
+
+- A 3D table is trilinear. Red changes fastest, then green, then blue.
+- A 1D table is linear on each channel.
+- The input is clamped to 0..1 before the lookup. The values of the table and the output are not clamped.
+- `DOMAIN_MIN` and `DOMAIN_MAX` have no effect.
+- `LUT_1D_INPUT_RANGE lo hi` and `LUT_3D_INPUT_RANGE lo hi` apply: the place in the table is `(x - lo) / (hi - lo)`, clamped to 0..1.
+- A file with both tables runs the 1D table, then the 3D table. Each table uses its own range. The 1D rows come first in the file.
+- These sizes work:
+  - `LUT_3D_SIZE`: 2, 3, 5, 17, 33, 65, 129 and 256.
+  - `LUT_1D_SIZE`: 2, 5, 17 and 65536.
+- `TITLE`, comments, blank lines and tabs are read.
+- With no LUT, the input comes out unchanged, also below 0 and above 1.
+
+A script gets no error for a broken file:
+
+- A lower-case `lut_3d_size` line, or no size line, gives no LUT.
+- 100 rows where 125 are due give a changed picture, which the rule above does not fit.
+- 130 rows where 125 are due use the first 125 rows.
+- `LUT_3D_SIZE 1` gives a black picture.
 
 ### The scaling filter
 

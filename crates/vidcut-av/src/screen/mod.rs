@@ -20,6 +20,7 @@ mod carried;
 mod gate;
 pub(crate) mod held;
 pub(crate) mod light;
+mod lut;
 mod out;
 pub mod scope;
 mod shared;
@@ -27,6 +28,7 @@ mod shared;
 mod vulkan;
 
 pub use gate::Gate;
+pub use lut::{Lut, load as load_lut};
 pub use out::Sink;
 pub(crate) use out::filled;
 
@@ -72,6 +74,7 @@ pub struct Gpu {
     encoders: out::Encoders,
     held: held::Pipes,
     light: OnceLock<light::Pipes>,
+    luts: OnceLock<lut::Pipes>,
     scope: OnceLock<scope::Pipes>,
     blur: blur::Pipes,
 }
@@ -308,6 +311,10 @@ pub fn kernel(sharp: Option<vidcut_core::model::Sharpness>) -> u32 {
 }
 
 impl Gpu {
+    fn luts(&self) -> &lut::Pipes {
+        self.luts.get_or_init(|| lut::Pipes::new(self))
+    }
+
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("vidcut picture"),
@@ -685,6 +692,7 @@ impl Gpu {
             encoders: out::Encoders::new(device, &shader),
             held: held::Pipes::new(device),
             light: OnceLock::new(),
+            luts: OnceLock::new(),
             scope: OnceLock::new(),
             blur: blur::Pipes::new(device, &shader),
         }
@@ -1034,6 +1042,9 @@ pub struct Screen {
     encoded: out::Encoded,
     spent: (std::time::Duration, std::time::Duration),
     blurred: blur::Blurred,
+    output_lut: Option<Lut>,
+    drawn_output_lut: Option<Lut>,
+    looked_up: Option<lut::LookedUp>,
     scoping: bool,
     drawn_scoping: bool,
     draws: u64,
@@ -1488,6 +1499,10 @@ impl Screen {
         self.imports_before + self.slots.iter().map(Slot::all_imports).sum::<u64>()
     }
 
+    pub fn set_output_lut(&mut self, lut: Option<Lut>) {
+        self.output_lut = lut;
+    }
+
     pub fn draw(
         &mut self,
         gpu: &Gpu,
@@ -1513,6 +1528,7 @@ impl Screen {
                 && self.drawn_crosses == crosses
                 && self.drawn_kernels == kernels
                 && self.drawn_colors == colors
+                && self.drawn_output_lut == self.output_lut
                 && self.drawn_scoping == self.scoping;
             if same {
                 return Drawn::Same;
@@ -1678,7 +1694,12 @@ impl Screen {
         }
         let mut moves = self.moves.iter();
         let blending = binds.iter().any(|b| b.3 != 0);
-        let floats = self.exported || self.scoping || colors.is_some() || blending || n > 1;
+        let floats = self.exported
+            || self.scoping
+            || colors.is_some()
+            || blending
+            || n > 1
+            || self.output_lut.is_some();
         if !floats {
             self.wide = None;
         } else if self
@@ -1696,6 +1717,11 @@ impl Screen {
                 .is_none_or(|b| b.size != size || b.format != format)
         {
             self.below = Some(Below::new(gpu, size, format));
+        }
+        if self.output_lut.is_none() {
+            self.looked_up = None;
+        } else if self.looked_up.as_ref().is_none_or(|l| l.size != size) {
+            self.looked_up = Some(lut::LookedUp::new(gpu, size));
         }
         let target = self.target.as_ref().expect("made above");
         let wide = self.wide.as_ref();
@@ -1885,6 +1911,23 @@ impl Screen {
                 i += 1;
             }
         }
+        if let (Some(w), Some(table), Some(out), true) =
+            (wide, &self.output_lut, &self.looked_up, n > 0)
+        {
+            let table = gpu.luts().table(gpu, table);
+            {
+                let mut pass = begin(&mut encoder, &out.view, Some(wgpu::Color::TRANSPARENT));
+                pass.set_pipeline(&gpu.luts().timeline);
+                pass.set_bind_group(0, &w.bind, &[]);
+                pass.set_bind_group(1, &table, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            encoder.copy_texture_to_texture(
+                out.texture.as_image_copy(),
+                w.texture.as_image_copy(),
+                whole,
+            );
+        }
         if let Some(w) = wide
             && n > 0
             && !self.exported
@@ -1925,6 +1968,7 @@ impl Screen {
         self.drawn_crosses = crosses.to_vec();
         self.drawn_kernels = kernels.to_vec();
         self.drawn_colors = colors;
+        self.drawn_output_lut = self.output_lut.clone();
         self.drawn_scoping = self.scoping;
         self.draws += 1;
         drawn
@@ -2083,6 +2127,18 @@ impl Slot {
             pass.set_bind_group(0, from, &[]);
             pass.draw(0..3, 0..1);
         };
+        let convert =
+            |encoder: &mut wgpu::CommandEncoder, to: &wgpu::TextureView, from: &wgpu::BindGroup| {
+                let Some(table) = picture.lut() else {
+                    return draw(encoder, to, &gpu.converting, from);
+                };
+                let table = gpu.luts().table(gpu, table);
+                let mut pass = begin(encoder, to, Some(wgpu::Color::TRANSPARENT));
+                pass.set_pipeline(&gpu.luts().converting);
+                pass.set_bind_group(0, from, &[]);
+                pass.set_bind_group(1, &table, &[]);
+                pass.draw(0..3, 0..1);
+            };
         match picture.woven().filter(|_| weave) {
             Some(woven) => {
                 if self
@@ -2111,7 +2167,7 @@ impl Slot {
                     .as_ref()
                     .expect("made above")
                     .create_view(&Default::default());
-                draw(encoder, &own, &gpu.converting, &bind(&gpu.blank));
+                convert(encoder, &own, &bind(&gpu.blank));
                 let [first, last] = &mut **self.around.get_or_insert_with(Default::default);
                 let before = woven
                     .before
@@ -2161,7 +2217,7 @@ impl Slot {
                 });
                 draw(encoder, &level(0), &gpu.weaving, &three);
             }
-            None => draw(encoder, &level(0), &gpu.converting, &bind(&gpu.blank)),
+            None => convert(encoder, &level(0), &bind(&gpu.blank)),
         }
         for k in 1..wanted.2 {
             draw(encoder, &level(k), &gpu.halving, &bind(&level(k - 1)));
