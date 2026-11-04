@@ -371,7 +371,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - F1, or Help in the top bar, opens the Help window. It lists every shortcut, with one action in each row.
   - A ? beside a less obvious action explains it in a few plain words.
-  - The user cannot change keys.
   - Under the shortcuts, Help tells in a few words what each upscaler of Super Scale does ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
   - It also tells what each Retime Process does ([X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
   - It lists only the choices that this computer has.

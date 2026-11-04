@@ -9,10 +9,12 @@ use vidcut_core::model::{Media, Project, TrackKind};
 use vidcut_core::request::{
     TimecodeDisplay, ViewerFrame, ViewerFrameKey, ViewerMode, viewer_frame_after,
 };
+use vidcut_core::shortcuts::Action;
 use vidcut_core::time::parse_frame_number;
 
 use super::pool::elide;
 use super::row::Row;
+use super::shortcuts::take;
 use super::theme;
 use super::timeline::paint::marker_color;
 use super::workspace::{Drag, PasteWatch, TimecodeEntry, Workspace, dim, fit};
@@ -200,8 +202,9 @@ impl Workspace {
             return;
         }
         let frame = self.snap.viewer_frame;
+        let bindings = self.snap.bindings.clone();
         if frame != ViewerFrame::Page
-            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape))
+            && ctx.input_mut(|i| take(&bindings, i, Action::LeaveFullScreen))
         {
             self.send_frame(ViewerFrame::Page);
             return;
@@ -209,9 +212,9 @@ impl Workspace {
         self.sync_keys(ctx);
         self.multi_keys(ctx);
         let key = ctx.input_mut(|i| {
-            if i.consume_key(egui::Modifiers::SHIFT, Key::F) {
+            if take(&bindings, i, Action::FullScreen) {
                 Some(ViewerFrameKey::FullScreen)
-            } else if i.consume_key(egui::Modifiers::ALT, Key::F) {
+            } else if take(&bindings, i, Action::EnhancedViewer) {
                 Some(ViewerFrameKey::Enhanced)
             } else {
                 None
@@ -540,6 +543,11 @@ impl Workspace {
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape))
         {
             self.send("viewer.set", json!({ "alone": false }));
+        }
+    }
+
+    pub(super) fn multi_numbers(&mut self, ctx: &egui::Context) {
+        if self.snap.viewer != ViewerMode::MultiSource {
             return;
         }
         let number = ctx.input_mut(|i| {
@@ -723,9 +731,14 @@ impl Workspace {
             _ => "a roll",
         };
         let text = if self.timeline.dynamic.is_some() {
+            let b = &self.snap.bindings;
             format!(
-                "Dynamic Trim: {side} at {}. L/J trim, K stops, W leaves",
-                self.tc(e.at)
+                "Dynamic Trim: {side} at {}. {}/{} trim, {} stops, {} leaves",
+                self.tc(e.at),
+                b.first_or_none(Action::PlayForward),
+                b.first_or_none(Action::PlayBackward),
+                b.first_or_none(Action::Stop),
+                b.first_or_none(Action::DynamicTrim),
             )
         } else {
             format!("Trim Editor: {side} at {}", self.tc(e.at))
@@ -819,7 +832,15 @@ impl Workspace {
                     .monospace()
                     .color(Color32::from_rgb(240, 200, 40)),
             );
-            ui.label(dim("K or Space stops, L/J again for speed, W leaves"));
+            let b = &self.snap.bindings;
+            ui.label(dim(format!(
+                "{} or {} stops, {}/{} again for speed, {} leaves",
+                b.first_or_none(Action::Stop),
+                b.first_or_none(Action::PlayOrStop),
+                b.first_or_none(Action::PlayForward),
+                b.first_or_none(Action::PlayBackward),
+                b.first_or_none(Action::DynamicTrim),
+            )));
         });
     }
 
@@ -1348,9 +1369,12 @@ impl Workspace {
         if ui.ctx().egui_wants_keyboard_input() || self.asking() {
             return;
         }
+        let bindings = self.snap.bindings.clone();
         let (held, pos) = ui.input(|i| {
-            let held = i.key_down(Key::C) && !i.modifiers.command && !i.modifiers.alt;
-            (held, i.pointer.hover_pos())
+            (
+                super::shortcuts::held(&bindings, i, Action::Skim),
+                i.pointer.hover_pos(),
+            )
         });
         let key = egui::Id::unique("skim-frame");
         if !held {

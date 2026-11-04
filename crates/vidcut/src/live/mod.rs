@@ -554,6 +554,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
+        bindings: Arc::new(crate::preferences::bindings()),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
         history_preview: None,
@@ -652,6 +653,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
+        bindings: Arc::new(crate::preferences::bindings()),
         audio_noticed: None,
         playing: false,
         waits: Vec::new(),
@@ -935,6 +937,7 @@ struct Live {
     guides: vidcut_core::preferences::Guides,
     scopes: vidcut_core::preferences::Scopes,
     show_super_scale: bool,
+    bindings: Arc<vidcut_core::shortcuts::Bindings>,
     audio_noticed: Option<String>,
     playing: bool,
     waits: Vec<Wait>,
@@ -1192,6 +1195,11 @@ impl Live {
                     self.show_super_scale = show_super_scale;
                     self.schedule_timeline();
                     self.refresh_source();
+                    changed = true;
+                }
+                let bindings = crate::preferences::bindings();
+                if *self.bindings != bindings {
+                    self.bindings = Arc::new(bindings);
                     changed = true;
                 }
                 self.follow_budget();
@@ -1544,6 +1552,7 @@ impl Live {
             guides: self.guides,
             scopes: self.scopes,
             show_super_scale: self.show_super_scale,
+            bindings: self.bindings.clone(),
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
             history_preview: self.history_preview.clone(),

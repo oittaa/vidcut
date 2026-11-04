@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use vidcut_core::model::{PictureTool, Project, RenderCache};
 use vidcut_core::preferences::Scope;
 use vidcut_core::request::ViewerMode;
+use vidcut_core::shortcuts::Action;
 use vidcut_core::time::{Rational, format_timecode};
 
 pub use super::timeline::tools::{DynamicMode, DynamicTarget, heard};
@@ -14,6 +15,7 @@ pub use super::timeline::{EditSel, Side, TrackRef};
 pub use super::viewer::{TwoUp, TwoUpCell, TwoUpMode};
 
 use super::effect_browser::EffectsTab;
+use super::shortcuts::Fired;
 use super::shuttle::Jkl;
 use super::theme::{self, Deco};
 use super::timeline::TimelineView;
@@ -999,7 +1001,14 @@ impl Workspace {
                 }
                 ui.separator();
                 if ui
-                    .add(egui::Button::new("Preferences…").shortcut_text(super::keys("Ctrl+,")))
+                    .add(
+                        egui::Button::new("Preferences…").shortcut_text(
+                            self.snap
+                                .bindings
+                                .first(Action::Preferences)
+                                .unwrap_or_default(),
+                        ),
+                    )
                     .clicked()
                 {
                     self.open_preferences(ui.ctx());
@@ -1038,8 +1047,9 @@ impl Workspace {
                 if ui
                     .add_enabled(
                         undo.is_some(),
-                        egui::Button::new(named("Undo", &undo))
-                            .shortcut_text(super::keys("Ctrl+Z")),
+                        egui::Button::new(named("Undo", &undo)).shortcut_text(
+                            self.snap.bindings.first(Action::Undo).unwrap_or_default(),
+                        ),
                     )
                     .clicked()
                 {
@@ -1051,8 +1061,9 @@ impl Workspace {
                 if ui
                     .add_enabled(
                         redo.is_some(),
-                        egui::Button::new(named("Redo", &redo))
-                            .shortcut_text(super::keys("Ctrl+Shift+Z")),
+                        egui::Button::new(named("Redo", &redo)).shortcut_text(
+                            self.snap.bindings.first(Action::Redo).unwrap_or_default(),
+                        ),
                     )
                     .clicked()
                 {
@@ -1087,8 +1098,8 @@ impl Workspace {
                 for cmd in super::keyframe_editor::KeyCmd::ALL {
                     let why = self.key_cmd_why(cmd);
                     let mut button = egui::Button::new(cmd.label());
-                    if let Some(keys) = cmd.keys() {
-                        button = button.shortcut_text(super::keys(keys));
+                    if let Some(key) = cmd.action().and_then(|a| self.snap.bindings.first(a)) {
+                        button = button.shortcut_text(key);
                     }
                     let r = ui.add_enabled(why.is_none(), button);
                     let r = match why.filter(|_| shared.is_none()) {
@@ -1317,6 +1328,7 @@ impl Workspace {
             || self.removing.is_some()
             || self.key_editor.asking()
             || self.sync_clips.open
+            || self.preferences.capturing()
     }
 
     fn take_timecode_paste(&mut self, ctx: &egui::Context) {
@@ -1366,12 +1378,16 @@ impl Workspace {
                 }
             });
         }
+        if self.capture_key(ctx) {
+            return;
+        }
         self.take_timecode_paste(ctx);
         if ctx.egui_wants_keyboard_input() {
             return;
         }
+        let bindings = self.snap.bindings.clone();
         if self.transcription.over {
-            self.transcription.take_keys(ctx);
+            self.transcription.take_keys(ctx, &bindings);
         }
         self.sync_clips_keys(ctx);
         if self.asking() {
@@ -1393,82 +1409,74 @@ impl Workspace {
             });
             return;
         }
-        if ctx.input(|i| i.key_pressed(Key::F1)) {
-            self.help.open = !self.help.open;
-        }
         if self.help.open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) {
             self.help.open = false;
         }
         self.history_keys(ctx);
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Comma)) {
+        self.sync_numbers(ctx);
+        self.multi_numbers(ctx);
+        let input = ctx.input(|i| i.clone());
+        let fired = Fired::of(&bindings, &input);
+        if fired.pressed(Action::Help) {
+            self.help.open = !self.help.open;
+        }
+        if fired.pressed(Action::Preferences) {
             self.open_preferences(ctx);
         }
         if self.snap.project.is_none() {
             return;
         }
-        let input = ctx.input(|i| i.clone());
-        let m = input.modifiers;
-        let pressed = |k: Key| input.key_pressed(k);
         let viewer = self.snap.viewer;
         let id = PlayerId::of(viewer);
         let player = self.snap.player(id).clone();
         let fps = self.fps().as_f64().round().max(1.0) as i64;
-        self.timeline_keys(&input);
-        let struck = |k: Key| {
-            input.events.iter().any(|e| {
-                matches!(e, egui::Event::Key { key, physical_key, pressed: true, repeat: false, .. }
-                    if *key == k || *physical_key == Some(k))
-            })
-        };
-        if struck(Key::OpenBracket) && m.command && !m.alt && !m.shift {
+        self.timeline_keys(&fired);
+        if fired.struck(Action::AddKeyframe) {
             self.key_cmd(super::keyframe_editor::KeyCmd::Add);
         }
-        if struck(Key::CloseBracket) && m.alt && !m.command && !m.shift {
+        if fired.struck(Action::DeleteKeyframe) {
             self.key_cmd(super::keyframe_editor::KeyCmd::Delete);
         }
 
-        for e in &input.events {
-            match e {
-                egui::Event::Copy | egui::Event::Cut
-                    if self.copy_editor_keys(matches!(e, egui::Event::Cut)) => {}
-                egui::Event::Copy | egui::Event::Cut if !self.snap.selection.clips.is_empty() => {
-                    let clips = self.snap.selection.clips.clone();
-                    if let Some(p) = self.project()
-                        && let Ok(data) = vidcut_core::ops::copy_clips(p, &clips)
-                    {
-                        ctx.copy_text(json!(data).to_string());
-                    }
-                    let method = if matches!(e, egui::Event::Cut) {
-                        "edit.cut"
-                    } else {
-                        "edit.copy"
-                    };
-                    self.send(method, json!({ "clips": clips }));
+        for (action, cut, method) in [
+            (Action::Copy, false, "edit.copy"),
+            (Action::Cut, true, "edit.cut"),
+        ] {
+            if fired.pressed(action)
+                && !self.copy_editor_keys(cut)
+                && !self.snap.selection.clips.is_empty()
+            {
+                let clips = self.snap.selection.clips.clone();
+                if let Some(p) = self.project()
+                    && let Ok(data) = vidcut_core::ops::copy_clips(p, &clips)
+                {
+                    ctx.copy_text(json!(data).to_string());
                 }
-                egui::Event::Paste(_) if self.paste_editor_keys() => {}
-                egui::Event::Paste(_) => self.send("edit.paste", json!({})),
-                _ => {}
+                self.send(method, json!({ "clips": clips }));
             }
+        }
+        if fired.pressed(Action::Paste) && !self.paste_editor_keys() {
+            self.send("edit.paste", json!({}));
         }
 
         let dynamic = self.timeline.dynamic.is_some();
         let trimming = dynamic && self.dynamic_target().is_some();
         if dynamic {
-            self.dynamic_keys(&input);
+            self.dynamic_keys(&fired);
         }
-        if pressed(Key::Space) && !dynamic {
+        if fired.pressed(Action::PlayOrStop) && !dynamic {
             self.send("player.toggle", json!({}));
         }
-        if pressed(Key::S) && m.shift && !m.command && !m.alt {
+        if fired.pressed(Action::AudioScrubbing) {
             self.send("player.audio_scrubbing", json!({}));
         }
-        if pressed(Key::Slash) && m.command && !m.alt {
+        if fired.pressed(Action::Loop) {
             self.send("player.loop", json!({}));
         }
-        if super::shuttle::first_press(&input, Key::K) && !trimming {
+        if fired.struck(Action::Stop) && !trimming {
             self.send("player.pause", json!({}));
         }
-        for jkl in self.shuttle.input(&input) {
+        for jkl in self.shuttle.input(&bindings, &input) {
             if trimming {
                 self.dynamic_jkl(jkl, input.time);
                 continue;
@@ -1486,22 +1494,31 @@ impl Workspace {
         if let Some(wait) = self.shuttle.due(input.time) {
             super::timeline::repaint_in(ctx, std::time::Duration::from_secs_f64(wait));
         }
-        if pressed(Key::ArrowLeft) {
-            let n = if m.shift { fps } else { 1 };
-            self.send("player.step", json!({ "frames": -n }));
+        for (action, frames) in [
+            (Action::FrameBack, -1),
+            (Action::FrameForward, 1),
+            (Action::SecondBack, -fps),
+            (Action::SecondForward, fps),
+        ] {
+            if fired.pressed(action) {
+                self.send("player.step", json!({ "frames": frames }));
+            }
         }
-        if pressed(Key::ArrowRight) {
-            let n = if m.shift { fps } else { 1 };
-            self.send("player.step", json!({ "frames": n }));
-        }
-        if pressed(Key::Home) {
+        if fired.pressed(Action::TimelineStart) {
             self.seek(id, 0, false);
         }
-        if pressed(Key::End) {
+        if fired.pressed(Action::TimelineEnd) {
             self.seek(id, player.frames, false);
         }
-        if pressed(Key::ArrowUp) || pressed(Key::ArrowDown) {
-            let up = pressed(Key::ArrowUp);
+        let hop = [
+            (Action::PreviousCut, true, false),
+            (Action::NextCut, false, false),
+            (Action::PreviousMarker, true, true),
+            (Action::NextMarker, false, true),
+        ]
+        .into_iter()
+        .find(|(action, ..)| fired.pressed(*action));
+        if let Some((_, up, markers)) = hop {
             let dynamic_track = self
                 .timeline
                 .lead_edit()
@@ -1514,7 +1531,7 @@ impl Workspace {
                 ),
                 None => (id, player.clone()),
             };
-            let points = match (m.shift, dynamic_track) {
+            let points = match (markers, dynamic_track) {
                 (true, _) => self.marker_points(),
                 (false, Some(t)) => self.track_edit_points(&t.id()),
                 (false, None) => self.edit_points(id),
@@ -1530,7 +1547,7 @@ impl Workspace {
             };
             if let Some(&f) = target {
                 self.seek(id, f, false);
-                if dynamic && !m.shift {
+                if dynamic && !markers {
                     self.dynamic_commit();
                     let (side, track) = self.timeline.lead_edit().map_or(
                         (
@@ -1552,7 +1569,7 @@ impl Workspace {
                 }
             }
         }
-        if pressed(Key::Q) && !m.command {
+        if fired.pressed(Action::TimelineOrSource) {
             let mode = if viewer == ViewerMode::Timeline {
                 self.snap.last_source
             } else {
@@ -1561,102 +1578,101 @@ impl Workspace {
             self.send("viewer.set", json!({ "mode": mode }));
         }
 
-        if (pressed(Key::I) || pressed(Key::O)) && !m.command {
-            let is_in = pressed(Key::I);
-            if m.shift {
-                self.go_to_mark(is_in);
-            } else {
+        for (is_in, mark, go) in [
+            (true, Action::MarkIn, Action::GoToIn),
+            (false, Action::MarkOut, Action::GoToOut),
+        ] {
+            if fired.pressed(mark) {
                 self.mark(is_in);
             }
+            if fired.pressed(go) {
+                self.go_to_mark(is_in);
+            }
         }
-        if pressed(Key::X) && m.alt {
+        if fired.pressed(Action::ClearMarks) {
             self.clear_marks();
         }
 
-        if pressed(Key::F9) {
-            self.edit_function("edit.smart_insert");
+        for (action, method) in [
+            (Action::SmartInsert, "edit.smart_insert"),
+            (Action::Overwrite, "edit.overwrite"),
+            (Action::RippleOverwrite, "edit.ripple_overwrite"),
+            (Action::PlaceOnTop, "edit.place_on_top"),
+            (Action::Append, "edit.append"),
+        ] {
+            if fired.pressed(action) {
+                self.edit_function(method);
+            }
         }
-        if pressed(Key::F10) {
-            self.edit_function(if m.shift {
-                "edit.ripple_overwrite"
-            } else {
-                "edit.overwrite"
-            });
-        }
-        if pressed(Key::F12) {
-            self.edit_function(if m.shift {
-                "edit.append"
-            } else {
-                "edit.place_on_top"
-            });
-        }
-        if pressed(Key::T) && m.command && !m.shift && !m.alt {
+        if fired.pressed(Action::Dissolve) {
             self.send("edit.dissolve", self.dissolve_target());
         }
-        if pressed(Key::T) && !m.command && !(m.alt && m.shift) {
-            self.picture_tool(match (m.alt, m.shift) {
-                (true, _) => PictureTool::DynamicZoom,
-                (_, true) => PictureTool::Crop,
-                _ => PictureTool::Transform,
-            });
+        for (action, tool) in [
+            (Action::Transform, PictureTool::Transform),
+            (Action::Crop, PictureTool::Crop),
+            (Action::DynamicZoom, PictureTool::DynamicZoom),
+        ] {
+            if fired.pressed(action) {
+                self.picture_tool(tool);
+            }
         }
-        if (pressed(Key::Backslash) || pressed(Key::B)) && m.command {
+        if fired.pressed(Action::Split) {
             self.split_at_playhead();
         }
-        if pressed(Key::Enter)
-            && !m.any()
+        if fired.pressed(Action::EditSubtitle)
             && let [cue] = self.snap.selection.cues.as_slice()
         {
             let cue = cue.clone();
             self.open_cue(&cue);
         }
-        if (pressed(Key::Delete) || pressed(Key::Backspace)) && !m.command {
+        let lift = fired.pressed(Action::Lift);
+        if fired.pressed(Action::Delete) || lift {
             if self.pool_focus {
                 let selected = self.snap.selection.media.clone();
                 self.removing = (!selected.is_empty()).then_some(selected);
             } else if !self.delete_editor_keys() && !self.delete_keys() {
-                self.delete_key(m.alt);
+                self.delete_key(lift);
             }
         }
-        if pressed(Key::Z) && m.command {
-            match (&mut self.timeline.silence, m.shift) {
-                (Some(d), true) => d.redo(),
-                (Some(d), false) => d.undo(),
-                (None, true) => self.send("history.redo", json!({})),
-                (None, false) => self.send("history.undo", json!({})),
+        if fired.pressed(Action::Undo) {
+            match &mut self.timeline.silence {
+                Some(d) => d.undo(),
+                None => self.send("history.undo", json!({})),
             }
         }
-        if pressed(Key::I) && m.command {
+        if fired.pressed(Action::Redo) {
+            match &mut self.timeline.silence {
+                Some(d) => d.redo(),
+                None => self.send("history.redo", json!({})),
+            }
+        }
+        if fired.pressed(Action::Import) {
             self.import_media();
         }
-        if pressed(Key::N) && m.command && m.shift {
+        if fired.pressed(Action::NewBin) {
             self.new_bin();
         }
-        if pressed(Key::M) && !m.command {
-            if m.alt {
-                let at = self.snap.timeline.position;
-                if let Some(k) = self
-                    .project()
-                    .and_then(|p| p.markers.iter().find(|k| k.at == at))
-                {
-                    self.send("markers.remove", json!({ "marker": k.id }));
-                }
-            } else {
-                let at = self.snap.timeline.position;
-                let existing = self
-                    .project()
-                    .and_then(|p| p.markers.iter().find(|k| k.at == at))
-                    .map(|k| k.id.clone());
-                match (existing, self.project_shared()) {
-                    (Some(id), Some(p)) => self.open_marker(id, &p),
-                    _ => self.send("markers.add", json!({ "at": at })),
-                }
+        if fired.pressed(Action::DeleteMarker) {
+            let at = self.snap.timeline.position;
+            if let Some(k) = self
+                .project()
+                .and_then(|p| p.markers.iter().find(|k| k.at == at))
+            {
+                self.send("markers.remove", json!({ "marker": k.id }));
             }
         }
-        if pressed(Key::D)
-            && m.alt
-            && !m.command
-            && !m.shift
+        if fired.pressed(Action::AddMarker) {
+            let at = self.snap.timeline.position;
+            let existing = self
+                .project()
+                .and_then(|p| p.markers.iter().find(|k| k.at == at))
+                .map(|k| k.id.clone());
+            match (existing, self.project_shared()) {
+                (Some(id), Some(p)) => self.open_marker(id, &p),
+                _ => self.send("markers.add", json!({ "at": at })),
+            }
+        }
+        if fired.pressed(Action::Ducking)
             && let Some(track) = self.project().and_then(|p| {
                 let id = self.snap.selection.clips.first()?;
                 p.find_clip(id).map(|(t, _)| p.tracks[t].id.clone())
@@ -1664,7 +1680,7 @@ impl Workspace {
         {
             self.toggle_duck(&track);
         }
-        if pressed(Key::D) && !m.command && !m.alt && !self.snap.selection.clips.is_empty() {
+        if fired.pressed(Action::PictureOff) && !self.snap.selection.clips.is_empty() {
             let enabled = self
                 .project()
                 .and_then(|p| p.clip(&self.snap.selection.clips[0]))
@@ -1674,7 +1690,7 @@ impl Workspace {
                 json!({ "clips": self.snap.selection.clips, "enabled": !enabled }),
             );
         }
-        if pressed(Key::V) && m.alt && !m.shift && !m.command {
+        if fired.pressed(Action::VoiceIsolation) {
             let clips = self.snap.selection.clips.clone();
             let current = self
                 .project()
@@ -1686,18 +1702,20 @@ impl Workspace {
                 );
             }
         }
-        if pressed(Key::A) && m.command && self.pool_focus {
+        let all = fired.pressed(Action::SelectAll);
+        let nothing = fired.pressed(Action::SelectNothing);
+        if (all || nothing) && self.pool_focus {
             let media: Vec<String> = match self.project() {
-                Some(p) if !m.shift => super::pool::shown_media(p, &self.snap.pool, &self.search)
+                Some(p) if all => super::pool::shown_media(p, &self.snap.pool, &self.search)
                     .iter()
                     .map(|m| m.id.clone())
                     .collect(),
                 _ => Vec::new(),
             };
             self.send("selection.set", json!({ "media": media }));
-        } else if pressed(Key::A) && m.command {
+        } else if all || nothing {
             let (clips, cues): (Vec<String>, Vec<String>) = match self.project() {
-                Some(p) if !m.shift => (
+                Some(p) if all => (
                     p.tracks
                         .iter()
                         .flat_map(|t| &t.clips)
@@ -1713,7 +1731,7 @@ impl Workspace {
             };
             self.send("selection.set", json!({ "clips": clips, "cues": cues }));
         }
-        if pressed(Key::V) && m.alt && m.shift {
+        if fired.pressed(Action::SelectAtPlayhead) {
             let at = self.snap.timeline.position;
             let clips: Vec<String> = self
                 .project()
@@ -1727,17 +1745,16 @@ impl Workspace {
             self.send("selection.set", json!({ "clips": clips }));
         }
 
-        let typed: Option<char> = input.events.iter().find_map(|e| match e {
-            egui::Event::Text(t) if t == "=" || t == "+" || t == "-" => t.chars().next(),
-            _ => None,
-        });
-        if let Some(c) = typed {
+        let typed = [
+            (Action::GoToTimecode, None),
+            (Action::JumpForward, Some(1)),
+            (Action::JumpBack, Some(-1)),
+        ]
+        .into_iter()
+        .find(|(action, _)| fired.pressed(*action));
+        if let Some((_, sign)) = typed {
             self.timecode = Some(TimecodeEntry {
-                sign: match c {
-                    '+' => Some(1),
-                    '-' => Some(-1),
-                    _ => None,
-                },
+                sign,
                 text: String::new(),
                 focus: true,
             });

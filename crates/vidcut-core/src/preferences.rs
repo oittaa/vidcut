@@ -24,6 +24,12 @@ pub struct Preferences {
     pub transcripts: Transcripts,
     pub services: Services,
     pub viewer: ViewerPrefs,
+    /// The keys that differ from the defaults, by action. `keys.list` names
+    /// the actions. An action that is not here has its default keys, and an
+    /// empty list leaves an action with no key. `keys.set` and `keys.reset`
+    /// change them.
+    #[schemars(with = "BTreeMap<String, Vec<String>>")]
+    pub keys: crate::shortcuts::Custom,
 }
 
 /// How this computer makes the render cache of the project that is open
@@ -1028,6 +1034,7 @@ impl Preferences {
     }
 
     pub fn check(&self) -> Result<()> {
+        crate::shortcuts::Bindings::of(&self.keys)?;
         for (key, mb) in [
             ("player.memory_mb", self.player.memory_mb),
             ("player.video_memory_mb", self.player.video_memory_mb),
