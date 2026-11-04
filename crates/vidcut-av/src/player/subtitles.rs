@@ -90,6 +90,7 @@ fn drawn_at(timed: &[Timed], fps: f64, size: (u32, u32), t: i64) -> Drawn {
                     picture: picture.clone(),
                     run: None,
                     source: t - c.start,
+                    frame: t - c.start,
                     start: c.start,
                     ready: true,
                 }],

@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Effect, EffectKind, EffectType, GaussianBlur, MosaicBlur, Project};
+use crate::model::{Effect, EffectKind, EffectType, GaussianBlur, Glow, MosaicBlur, Project};
 use crate::request::EffectChange;
 
 use super::locate;
@@ -96,6 +96,55 @@ fn mosaic_values(c: &mut EffectChange, m: &mut MosaicBlur) -> Result<()> {
     Ok(())
 }
 
+fn color(what: &str, raw: Option<Vec<f64>>, to: &mut Option<[f64; 3]>) -> Result<()> {
+    if let Some(k) = raw {
+        let k = <[f64; 3]>::try_from(k)
+            .map_err(|_| Error::usage(format!("{what} is three numbers: red, green and blue")))?;
+        *to = Some(k);
+    }
+    Ok(())
+}
+
+fn glow_values(c: &mut EffectChange, g: &mut Glow) -> Result<()> {
+    given(&mut c.output, &mut g.output);
+    given(&mut c.input_alpha, &mut g.input_alpha);
+    given(&mut c.threshold, &mut g.threshold);
+    given(&mut c.alpha_threshold, &mut g.alpha_threshold);
+    given(&mut c.spread, &mut g.spread);
+    given(&mut c.hv_ratio, &mut g.hv_ratio);
+    color(
+        "relative_spread",
+        c.relative_spread.take(),
+        &mut g.relative_spread,
+    )?;
+    given(&mut c.gain, &mut g.gain);
+    given(&mut c.gamma, &mut g.gamma);
+    given(&mut c.saturation, &mut g.saturation);
+    color("color_filter", c.color_filter.take(), &mut g.color_filter)?;
+    taken(&mut c.secondary, &mut g.secondary);
+    given(&mut c.secondary_gain, &mut g.secondary_gain);
+    given(&mut c.secondary_spread, &mut g.secondary_spread);
+    color(
+        "secondary_color",
+        c.secondary_color.take(),
+        &mut g.secondary_color,
+    )?;
+    taken(&mut c.atmosphere, &mut g.atmosphere);
+    given(&mut c.atmosphere_strength, &mut g.atmosphere_strength);
+    given(&mut c.atmosphere_detail, &mut g.atmosphere_detail);
+    given(&mut c.atmosphere_scale, &mut g.atmosphere_scale);
+    given(&mut c.atmosphere_ratio, &mut g.atmosphere_ratio);
+    given(&mut c.atmosphere_evolution, &mut g.atmosphere_evolution);
+    given(&mut c.atmosphere_seethe, &mut g.atmosphere_seethe);
+    taken(&mut c.atmosphere_tracked, &mut g.atmosphere_tracked);
+    given(&mut c.framing, &mut g.framing);
+    given(&mut c.composite, &mut g.composite);
+    given(&mut c.opacity, &mut g.opacity);
+    taken(&mut c.invert, &mut g.invert);
+    given(&mut c.recovery, &mut g.recovery);
+    Ok(())
+}
+
 pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result<()> {
     if *change == EffectChange::default() {
         return Err(Error::usage("effects.set needs a value to change"));
@@ -110,6 +159,7 @@ pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result
     match &mut next.kind {
         EffectKind::GaussianBlur(b) => gaussian_values(&mut left, b)?,
         EffectKind::MosaicBlur(m) => mosaic_values(&mut left, m)?,
+        EffectKind::Glow(g) => glow_values(&mut left, g)?,
     }
     if left != EffectChange::default() {
         return Err(Error::invalid(format!(

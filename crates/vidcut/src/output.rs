@@ -1029,13 +1029,17 @@ pub fn print(method: &str, r: &Response, json: bool) {
             for (i, e) in v["effects"].as_array().into_iter().flatten().enumerate() {
                 let values = match e["kind"].as_str() {
                     Some("mosaic_blur") => mosaic_values(e),
+                    Some("glow") => glow_values(e),
                     _ => gaussian_values(e),
                 };
+                let border = match e["border"].as_str() {
+                    Some(b) => format!("  border {b}"),
+                    None => String::new(),
+                };
                 println!(
-                    "  effect {i} {}{}  {values}  border {}  blend {}{}{}",
+                    "  effect {i} {}{}  {values}{border}  blend {}{}{}",
                     e["kind"].as_str().unwrap_or_default(),
                     if e["on"] == true { "" } else { " (off)" },
-                    e["border"].as_str().unwrap_or_default(),
                     effect_number(e, "blend"),
                     if e["use_alpha"] == true {
                         ""
@@ -1093,15 +1097,7 @@ fn effect_number(e: &Value, key: &str) -> f64 {
 
 fn gaussian_values(e: &Value) -> String {
     let n = |k: &str| effect_number(e, k);
-    let list = |k: &str| {
-        let all: Vec<String> = e[k]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|x| x.as_f64().unwrap_or_default().to_string())
-            .collect();
-        all.join(", ")
-    };
+    let list = |k: &str| number_list(e, k);
     let strength = match e["split"] == true {
         true => format!(
             "strength {} across, {} down",
@@ -1114,6 +1110,65 @@ fn gaussian_values(e: &Value) -> String {
         "{strength}  channels across {}  down {}",
         list("horizontal_channels"),
         list("vertical_channels"),
+    )
+}
+
+fn number_list(e: &Value, key: &str) -> String {
+    let all: Vec<String> = e[key]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|x| x.as_f64().unwrap_or_default().to_string())
+        .collect();
+    all.join(", ")
+}
+
+fn glow_values(e: &Value) -> String {
+    let n = |k: &str| effect_number(e, k);
+    let s = |k: &str| e[k].as_str().unwrap_or_default().to_string();
+    let second = match e["secondary"] == true {
+        true => format!(
+            "  secondary gain {} spread {} color {}",
+            n("secondary_gain"),
+            n("secondary_spread"),
+            number_list(e, "secondary_color"),
+        ),
+        false => String::new(),
+    };
+    let atmosphere = match e["atmosphere"] == true {
+        true => format!(
+            "  atmosphere strength {} detail {} scale {} ratio {} evolution {} seethe {}",
+            n("atmosphere_strength"),
+            n("atmosphere_detail"),
+            n("atmosphere_scale"),
+            n("atmosphere_ratio"),
+            n("atmosphere_evolution"),
+            n("atmosphere_seethe"),
+        ),
+        false => String::new(),
+    };
+    format!(
+        "{}  alpha {}  threshold {} alpha threshold {}  spread {} ratio {} relative {}  gain {} gamma {} saturation {} filter {}{second}{atmosphere}  {} {} opacity {} recovery {}{}",
+        s("output"),
+        s("input_alpha"),
+        n("threshold"),
+        n("alpha_threshold"),
+        n("spread"),
+        n("hv_ratio"),
+        number_list(e, "relative_spread"),
+        n("gain"),
+        n("gamma"),
+        n("saturation"),
+        number_list(e, "color_filter"),
+        s("framing"),
+        s("composite"),
+        n("opacity"),
+        n("recovery"),
+        if e["invert"] == true {
+            "  inverted"
+        } else {
+            ""
+        },
     )
 }
 

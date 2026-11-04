@@ -457,6 +457,10 @@ The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3
   - The origin is the middle of the picture on the frame, moved by Position and the offsets.
   - Its sizes are in samples. Antialias Result gives two samples for each pixel.
   - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
+- `place::Glowing` holds what `fs_glow` needs for a Glow.
+  - `place::GlowSpread` holds the sigma of each color across and down, for one glow, and its grid. The sigma comes from the area of the picture on the frame (`Glow::SIGMA`).
+  - `place::GlowNoise` holds the Atmosphere noise at this frame. `Placed.frame` gives the frame of the clip.
+  - `Effect::moves_by_itself` is true for a Glow with Atmosphere. Then `render_cache` keeps a frame for each frame of the clip, and not one frame for a still.
 
 The draw:
 
@@ -470,6 +474,16 @@ The draw:
   - The third pass finds the cell of each pixel and reads its color from the table (`mosaic_nearest`).
   - With Antialias Result, the third pass finds the cell of each of the four samples of a pixel, and takes their mean.
   - The third pass applies Blur Alpha and Whole Cells Only to each sample (`mosaic_alpha`). With Use Alpha off, it does not.
+- `fs_glow` makes the last pass of a Glow (`blur::glow_into`):
+  - `fs_glow_mask` draws the mask of the shiny parts into a picture of its own. All the blurs read it, and `fs_glow` reads it for Source Recovery.
+  - A large sigma blurs on a coarse grid (`blur::GlowGrid`). Why: the cost of `fs_blur` grows with the sigma, and a glow can have a sigma of hundreds of pixels.
+    - `fs_glow_cells` takes the mask to the grid with a tent filter. A box filter moves the small details by up to half a cell.
+    - `fs_blur` then blurs on the grid, and `glow_blurred` reads the grid with a cubic curve.
+    - The blurs of one Glow share a grid where they can. A grid with a sigma of less than a fixed number of cells gets smaller cells.
+  - A small sigma blurs each pixel, through the same `fs_blur`.
+  - The tail window of the blur is in `blur_end`.
+  - `blur::Blurred` keeps the grid pictures of a Glow in an `Lru` (`Spare`). A change of the frame size clears it. Its size bounds the bytes.
+  - `glow_atmosphere` makes the noise in the shader, with no picture of its own.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.

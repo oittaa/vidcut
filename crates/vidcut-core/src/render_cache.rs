@@ -6,7 +6,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::lru::Uncapped;
-use crate::model::{ClipCache, CompositeMode, Project, RenderCache, Retime, SuperScale, Upscaler};
+use crate::model::{
+    ClipCache, CompositeMode, Effect, Project, RenderCache, Retime, SuperScale, Upscaler,
+};
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
 use crate::render::{Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
 
@@ -510,6 +512,9 @@ fn plain_placed(p: &mut Placed) {
     p.clip.clear();
     if p.ready {
         p.start = 0;
+    }
+    if !p.picture.effects.iter().any(Effect::moves_by_itself) {
+        p.frame = 0;
     }
     p.picture
         .effects
@@ -1348,6 +1353,7 @@ mod tests {
                     picture,
                     run: None,
                     source: 0,
+                    frame: 0,
                     start: 0,
                     ready: false,
                 }],

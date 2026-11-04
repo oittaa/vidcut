@@ -1,5 +1,6 @@
 use crate::model::{
-    Border, CellShape, CompositeMode, Effect, EffectKind, MosaicBlur, Picture, VideoInfo,
+    Border, CellShape, CompositeMode, Effect, EffectKind, Glow, GlowAlpha, GlowFraming, GlowOutput,
+    MosaicBlur, Picture, VideoInfo,
 };
 use crate::render::Placed;
 
@@ -74,17 +75,18 @@ pub struct Placing {
     pub effects: Vec<Working>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Working {
     pub work: Work,
     pub blend: f64,
     pub use_alpha: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Work {
     Blur(Blurring),
     Mosaic(Tiling),
+    Glow(Box<Glowing>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -107,10 +109,120 @@ pub struct Tiling {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GlowSpread {
+    pub across: [f64; 3],
+    pub down: [f64; 3],
+    pub grid: u32,
+}
+
+impl GlowSpread {
+    const GRIDS: (u32, u32) = (8, 16);
+    const WIDE: f64 = 2.0;
+
+    fn of(spread: f64, ratio: f64, relative: [f64; 3], area: f64) -> Self {
+        let sigma = Glow::SIGMA * spread * area;
+        Self {
+            across: relative.map(|r| sigma * r * (1.0 + ratio)),
+            down: relative.map(|r| sigma * r * (1.0 - ratio)),
+            grid: if spread > Self::WIDE {
+                Self::GRIDS.1
+            } else {
+                Self::GRIDS.0
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GlowNoise {
+    pub strength: f64,
+    pub detail: f64,
+    pub cell: [f64; 2],
+    pub depth: f64,
+}
+
+impl GlowNoise {
+    const CELL: f64 = 340.0 / (0.6 * 1440.0);
+    const EVOLUTION: f64 = 1.8;
+    const SEETHE: f64 = 0.0708;
+    const SEETHE_POWER: f64 = 1.75;
+    const DEPTHS: f64 = 4096.0;
+
+    fn of(g: &Glow, area: f64, frame: i64) -> Self {
+        let cell = Self::CELL * g.noise_scale() * area;
+        let moved = frame.max(0) as f64 * Self::SEETHE * g.noise_seethe().powf(Self::SEETHE_POWER);
+        Self {
+            strength: g.noise_strength(),
+            detail: g.noise_detail(),
+            cell: [
+                cell * (1.0 + g.noise_ratio()),
+                cell * (1.0 - g.noise_ratio()),
+            ],
+            depth: (g.noise_evolution() * Self::EVOLUTION + moved).rem_euclid(Self::DEPTHS),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Glowing {
+    pub output: GlowOutput,
+    pub alpha: GlowAlpha,
+    pub shine: f64,
+    pub alpha_shine: f64,
+    pub first: GlowSpread,
+    pub second: Option<GlowSpread>,
+    pub gain: f64,
+    pub second_gain: f64,
+    pub filter: [f64; 3],
+    pub second_color: [f64; 3],
+    pub gamma: f64,
+    pub saturation: f64,
+    pub noise: Option<GlowNoise>,
+    pub seen_only: bool,
+    pub mode: CompositeMode,
+    pub opacity: f64,
+    pub invert: bool,
+    pub recovery: f64,
+}
+
+impl Glowing {
+    const GAIN: f64 = 4.0;
+
+    fn of(g: &Glow, on: &OnFrame) -> Self {
+        let area = (on.size[0] * on.size[1]).sqrt();
+        let second = g.secondary.then(|| {
+            let wide = Glow::SECOND * g.second_wide();
+            GlowSpread::of(wide, g.ratio(), g.relative(), area)
+        });
+        Self {
+            output: g.shows(),
+            alpha: g.alpha(),
+            shine: g.shine(),
+            alpha_shine: g.alpha_shine(),
+            first: GlowSpread::of(g.wide(), g.ratio(), g.relative(), area),
+            second,
+            gain: Self::GAIN * g.bright(),
+            second_gain: Self::GAIN * g.second_bright(),
+            filter: g.filter(),
+            second_color: g.second_color(),
+            gamma: g.curve(),
+            saturation: g.colorful(),
+            noise: g.atmosphere.then(|| GlowNoise::of(g, area, on.frame)),
+            seen_only: g.frames() == GlowFraming::OnlyAsSeen,
+            mode: g.over(),
+            opacity: g.shown(),
+            invert: g.invert,
+            recovery: g.recovers(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct OnFrame {
     width: f64,
     size: [f64; 2],
     middle: [f64; 2],
+    frame: i64,
 }
 
 impl Tiling {
@@ -167,6 +279,7 @@ impl Working {
                 })
             }
             EffectKind::MosaicBlur(m) => Work::Mosaic(Tiling::of(m, on)),
+            EffectKind::Glow(g) => Work::Glow(Box::new(Glowing::of(g, on))),
         };
         Some(Self {
             work,
@@ -374,6 +487,7 @@ impl Placing {
                 width: frame.0 * (stretch[0] * stretch[1]).sqrt(),
                 size: [at[2] * stretch[0], at[3] * stretch[1]],
                 middle: ahead(&back, unzoomed),
+                frame: p.frame,
             };
             let mut made: Vec<Working> = p
                 .picture
@@ -633,6 +747,7 @@ mod tests {
             picture,
             run: None,
             source: 0,
+            frame: 0,
             start: 0,
             ready: true,
         };
@@ -666,6 +781,7 @@ mod tests {
             picture,
             run: None,
             source: 0,
+            frame: 0,
             start: 0,
             ready: true,
         };

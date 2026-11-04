@@ -1042,6 +1042,7 @@ mod tests {
             picture,
             run: None,
             source: 0,
+            frame: 0,
             start: 0,
             ready: true,
         };

@@ -5,14 +5,19 @@
 The Cut page has separate tabs for transitions, titles and effects (p. 636). vidcut follows it.
 
 - The Transitions tab, the Transition Inspector, Dip To Color Dissolve, Smooth Cut, Push and Slide are there ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
-- The Effects tab, the effects of the Inspector, Gaussian Blur and Mosaic Blur are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
+- The Effects tab, the effects of the Inspector, Gaussian Blur, Mosaic Blur and Glow are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - The Generators page and its twelve kinds are there ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
 - If the bar gets too full, one Effects tab with categories can replace the tabs, as the Edit page has (p. 802).
 
 Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
-1. **More effects:** Sharpen, Vignette, Film Grain and Glow.
+1. **More effects:** Sharpen, Vignette and Film Grain.
    - Measure each one in Resolve first: its values, their ranges and defaults, and its math.
+   - **Glow, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
+     - On the Edit page: a smaller picture over a color, with each Input Alpha and each Select Output.
+     - Atmosphere and Secondary Glow on other timeline sizes.
+     - Spread 2.5 and 3 on a dot near the edge. Which sigma moves the mirror to the grid of 16.
+     - The place of Source Recovery and Atmosphere against Saturation and Gamma.
    - **Mosaic Blur, measure these on the Edit page.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - Blur Alpha off and Whole Cells Only.
      - Whole Cells Only with Hexagon, with Triangle, with other Aliasing values and with Antialias Result. The alpha limit of a whole cell.
