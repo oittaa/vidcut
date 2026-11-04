@@ -1117,7 +1117,9 @@ pub enum Request {
     EditDecompose { clips: OneOrMany<ClipRef> },
     /// Slide a clip (Dynamic Trim's Slide mode): it keeps its media and moves,
     /// the clip before it getting longer and the one after it shorter (or the
-    /// reverse).
+    /// reverse). On a side with a gap, the gap changes in place of a clip. The
+    /// slide stops one frame short of a clip that does not touch it, and at
+    /// the timeline's start.
     #[serde(rename = "edit.slide")]
     EditSlide { clip: ClipRef, by: TimeSpec },
     /// Ripple Delete Silence: cut the silent parts out of `clips` and close the
