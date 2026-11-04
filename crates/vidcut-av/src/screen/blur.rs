@@ -219,15 +219,15 @@ fn mosaic_bytes(tiling: &Tiling, effect: &Working, stage: u32) -> Vec<u8> {
     out
 }
 
-struct Texture {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
+pub(super) struct Texture {
+    pub(super) texture: wgpu::Texture,
+    pub(super) view: wgpu::TextureView,
 }
 
 impl Texture {
-    fn new(gpu: &Gpu, size: (u32, u32)) -> Self {
+    pub(super) fn new(gpu: &Gpu, size: (u32, u32)) -> Self {
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("vidcut blur"),
+            label: Some("vidcut layer"),
             size: wgpu::Extent3d {
                 width: size.0,
                 height: size.1,
