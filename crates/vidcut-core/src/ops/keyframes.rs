@@ -4,9 +4,11 @@ use serde_json::{Value, json};
 
 use super::locate;
 use crate::error::{Error, Result};
+use crate::generators::{Axis, CENTER, checked_center};
 use crate::keyframes::{PictureValue, checked, checked_handle, ease_of, reshape};
 use crate::model::{
-    Clip, ClipAudio, Ease, Handle, Keyframe, LowerThirdLine, Picture, Project, Title, TitleKind,
+    Clip, ClipAudio, Ease, Generator, Gradient, Handle, Keyframe, LowerThirdLine, Picture, Project,
+    Title, TitleKind,
 };
 use crate::request::{CopiedKey, KeyParam, KeyPicks, KeyValue};
 use crate::validate::GAIN;
@@ -51,8 +53,8 @@ pub fn check_keyed_gain(p: &Project, ids: &[String], at: Option<i64>) -> Result<
     }
 }
 
-pub fn put_value(a: &mut ClipAudio, frame: i64, value: f64) {
-    reshape(&mut a.gain_keys, |marked| {
+pub fn put_value(keys: &mut Vec<Keyframe>, frame: i64, value: f64) {
+    reshape(keys, |marked| {
         match marked.iter_mut().find(|(k, _)| k.frame == frame) {
             Some((k, _)) => k.value = value,
             None => marked.push((
@@ -68,18 +70,102 @@ pub fn put_value(a: &mut ClipAudio, frame: i64, value: f64) {
     });
 }
 
-fn audio_mut<'a>(p: &'a mut Project, id: &str) -> Result<(&'a mut ClipAudio, Clip)> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Number {
+    Volume,
+    Center(Axis),
+}
+
+impl Number {
+    fn of(param: KeyParam) -> Self {
+        match param {
+            KeyParam::CenterX => Self::Center(Axis::X),
+            KeyParam::CenterY => Self::Center(Axis::Y),
+            _ => Self::Volume,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Volume => "volume",
+            Self::Center(Axis::X) => "center x",
+            Self::Center(Axis::Y) => "center y",
+        }
+    }
+
+    fn takes(self, c: &Clip) -> bool {
+        match self {
+            Self::Volume => c.audio_range().is_some(),
+            Self::Center(_) => gradient(c).is_some(),
+        }
+    }
+
+    fn missing(self) -> &'static str {
+        match self {
+            Self::Volume => "has no sound",
+            Self::Center(_) => "is not a Four Color Gradient",
+        }
+    }
+
+    fn keys(self, c: &Clip) -> &[Keyframe] {
+        match self {
+            Self::Volume => c.audio.as_ref().map_or(&[], |a| a.gain_keys.as_slice()),
+            Self::Center(axis) => gradient(c).map_or(&[], |g| g.keys(axis)),
+        }
+    }
+
+    fn keys_mut(self, c: &mut Clip) -> Option<&mut Vec<Keyframe>> {
+        match self {
+            Self::Volume => c.audio.as_mut().map(|a| &mut a.gain_keys),
+            Self::Center(axis) => match &mut c.generator {
+                Some(Generator::FourColorGradient(g)) => Some(g.keys_mut(axis)),
+                _ => None,
+            },
+        }
+    }
+
+    fn value_at(self, c: &Clip, frame: f64) -> f64 {
+        match self {
+            Self::Volume => c.audio.as_ref().map_or(0.0, |a| a.db_at(frame)),
+            Self::Center(axis) => gradient(c).map_or(0.0, |g| g.center_at(axis, frame)),
+        }
+    }
+
+    fn checked(self, value: f64) -> Result<f64> {
+        match self {
+            Self::Volume => checked(value),
+            Self::Center(_) => checked_center(value),
+        }
+    }
+
+    fn limited(self, value: f64) -> f64 {
+        let range = match self {
+            Self::Volume => GAIN,
+            Self::Center(_) => CENTER,
+        };
+        value.clamp(*range.start(), *range.end())
+    }
+}
+
+fn gradient(c: &Clip) -> Option<&Gradient> {
+    match &c.generator {
+        Some(Generator::FourColorGradient(g)) => Some(g),
+        _ => None,
+    }
+}
+
+fn number_mut<'a>(
+    p: &'a mut Project,
+    id: &str,
+    number: Number,
+) -> Result<(&'a mut Vec<Keyframe>, Clip)> {
     let (ti, ci) = locate(p, id)?;
     let c = &mut p.tracks[ti].clips[ci];
-    let shape = Clip {
-        audio: None,
-        ..c.clone()
-    };
-    let a = c
-        .audio
-        .as_mut()
-        .ok_or_else(|| Error::invalid(format!("{id} has no sound")))?;
-    Ok((a, shape))
+    let shape = c.clone();
+    let keys = number
+        .keys_mut(c)
+        .ok_or_else(|| Error::invalid(format!("{id} {}", number.missing())))?;
+    Ok((keys, shape))
 }
 
 pub fn add(
@@ -101,18 +187,19 @@ pub fn add(
         return add_picture(p, ids, v, at, value, ease);
     }
     let value = scalar(param, value)?;
-    add_volume(p, ids, at, value, ease)
+    add_number(p, ids, Number::of(param), at, value, ease)
 }
 
-fn add_volume(
+fn add_number(
     p: &mut Project,
     ids: &[String],
+    number: Number,
     at: i64,
     value: Option<f64>,
     ease: Option<Ease>,
 ) -> Result<Vec<(String, i64)>> {
-    let value = value.map(checked).transpose()?;
-    let takes = |c: &Clip| c.audio_range().is_some();
+    let value = value.map(|v| number.checked(v)).transpose()?;
+    let takes = |c: &Clip| number.takes(c);
     let targets: Vec<String> = ids
         .iter()
         .filter(|id| p.clip(id).is_some_and(takes))
@@ -123,16 +210,20 @@ fn add_volume(
             locate(p, id)?;
         }
         return Err(Error::invalid(format!(
-            "no clip of {} has sound",
-            ids.join(", ")
+            "no clip of {} {}",
+            ids.join(", "),
+            match number {
+                Number::Volume => "has sound",
+                Number::Center(_) => "is a Four Color Gradient",
+            }
         )));
     }
     let mut added = Vec::new();
     for id in &targets {
-        let (a, c) = audio_mut(p, id)?;
+        let (keys, c) = number_mut(p, id, number)?;
         let frame = c.content_at(at);
-        let v = value.unwrap_or_else(|| a.db_at(frame as f64));
-        reshape(&mut a.gain_keys, |marked| {
+        let v = value.unwrap_or_else(|| number.value_at(&c, frame as f64));
+        reshape(keys, |marked| {
             let i = match marked.iter().position(|(k, _)| k.frame == frame) {
                 Some(i) => {
                     marked[i].0.value = v;
@@ -167,10 +258,6 @@ fn eased((k, mark): &mut (Keyframe, Option<Ease>), e: Ease) {
     }
 }
 
-fn picked(c: &Clip, keys: &[Keyframe], pick: &Pick) -> Result<HashSet<i64>> {
-    picked_as(c, keys, pick, "volume")
-}
-
 pub(super) fn picked_as(
     c: &Clip,
     keys: &[Keyframe],
@@ -203,12 +290,19 @@ pub(super) fn picked_as(
     Ok(out)
 }
 
-fn keyed_audio<'a>(p: &'a mut Project, id: &str) -> Result<(&'a mut ClipAudio, Clip)> {
-    let (a, c) = audio_mut(p, id)?;
-    if !a.is_keyed() {
-        return Err(Error::invalid(format!("{id} has no volume keyframes")));
+fn keyed_number<'a>(
+    p: &'a mut Project,
+    id: &str,
+    number: Number,
+) -> Result<(&'a mut Vec<Keyframe>, Clip)> {
+    let (keys, c) = number_mut(p, id, number)?;
+    if keys.is_empty() {
+        return Err(Error::invalid(format!(
+            "{id} has no {} keyframes",
+            number.name()
+        )));
     }
-    Ok((a, c))
+    Ok((keys, c))
 }
 
 pub fn set(
@@ -232,12 +326,13 @@ pub fn set(
     if let Some(v) = picture_param(param) {
         return set_picture(p, ids, v, pick, change);
     }
+    let number = Number::of(param);
     let value = change
         .value
         .map(|v| scalar(param, Some(v)))
         .transpose()?
         .flatten()
-        .map(checked)
+        .map(|v| number.checked(v))
         .transpose()?;
     let by = change
         .by
@@ -245,7 +340,10 @@ pub fn set(
         .transpose()?
         .flatten();
     if by.is_some_and(|b| !b.is_finite()) {
-        return Err(Error::invalid("`by` needs a number of dB"));
+        return Err(Error::invalid(match number {
+            Number::Volume => "`by` needs a number of dB",
+            Number::Center(_) => "`by` needs a number",
+        }));
     }
     if value.is_some() && by.is_some() {
         return Err(Error::usage("give `value` or `by`, not both"));
@@ -263,15 +361,15 @@ pub fn set(
         .map(|h| h.map(|h| checked_handle(h, false)).transpose())
         .transpose()?;
     for id in ids {
-        let (a, c) = keyed_audio(p, id)?;
-        let chosen = picked(&c, &a.gain_keys, pick)?;
-        reshape(&mut a.gain_keys, |marked| {
+        let (keys, c) = keyed_number(p, id, number)?;
+        let chosen = picked_as(&c, keys, pick, number.name())?;
+        reshape(keys, |marked| {
             for entry in marked.iter_mut().filter(|(k, _)| chosen.contains(&k.frame)) {
                 if let Some(v) = value {
                     entry.0.value = v;
                 }
                 if let Some(by) = by {
-                    entry.0.value = (entry.0.value + by).clamp(*GAIN.start(), *GAIN.end());
+                    entry.0.value = number.limited(entry.0.value + by);
                 }
                 if let Some(e) = change.ease {
                     eased(entry, e);
@@ -303,12 +401,13 @@ pub fn shift(
     if let Some(v) = picture_param(param) {
         return shift_picture(p, ids, v, pick, by, to);
     }
-    shift_volume(p, ids, pick, by, to)
+    shift_number(p, ids, Number::of(param), pick, by, to)
 }
 
-fn shift_volume(
+fn shift_number(
     p: &mut Project,
     ids: &[String],
+    number: Number,
     pick: &Pick,
     by: Option<i64>,
     to: Option<i64>,
@@ -317,8 +416,8 @@ fn shift_volume(
         return Err(Error::usage("give `by` or `to`"));
     }
     for id in ids {
-        let (a, c) = keyed_audio(p, id)?;
-        let chosen = picked(&c, &a.gain_keys, pick)?;
+        let (keys, c) = keyed_number(p, id, number)?;
+        let chosen = picked_as(&c, keys, pick, number.name())?;
         if to.is_some() && chosen.len() != 1 {
             return Err(Error::usage(format!(
                 "`to` moves one keyframe; {id} has {} chosen",
@@ -330,8 +429,7 @@ fn shift_volume(
             (_, Some(t)) => c.content_at(t),
             _ => f,
         };
-        let mut taken: HashSet<i64> = a
-            .gain_keys
+        let mut taken: HashSet<i64> = keys
             .iter()
             .map(|k| k.frame)
             .filter(|f| !chosen.contains(f))
@@ -339,12 +437,13 @@ fn shift_volume(
         for f in &chosen {
             if !taken.insert(moved(*f)) {
                 return Err(Error::invalid(format!(
-                    "{id} already has a volume keyframe on source frame {}",
+                    "{id} already has a {} keyframe on source frame {}",
+                    number.name(),
                     moved(*f)
                 )));
             }
         }
-        reshape(&mut a.gain_keys, |marked| {
+        reshape(keys, |marked| {
             for (k, _) in marked.iter_mut().filter(|(k, _)| chosen.contains(&k.frame)) {
                 k.frame = moved(k.frame);
             }
@@ -361,14 +460,14 @@ pub fn remove(p: &mut Project, ids: &[String], param: KeyParam, pick: &Pick) -> 
     if let Some(v) = picture_param(param) {
         return remove_picture(p, ids, v, pick);
     }
-    remove_volume(p, ids, pick)
+    remove_number(p, ids, Number::of(param), pick)
 }
 
-fn remove_volume(p: &mut Project, ids: &[String], pick: &Pick) -> Result<()> {
+fn remove_number(p: &mut Project, ids: &[String], number: Number, pick: &Pick) -> Result<()> {
     for id in ids {
-        let (a, c) = keyed_audio(p, id)?;
-        let chosen = picked(&c, &a.gain_keys, pick)?;
-        reshape(&mut a.gain_keys, |marked| {
+        let (keys, c) = keyed_number(p, id, number)?;
+        let chosen = picked_as(&c, keys, pick, number.name())?;
+        reshape(keys, |marked| {
             marked.retain(|(k, _)| !chosen.contains(&k.frame));
         });
     }
@@ -383,9 +482,17 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
             if !wanted {
                 continue;
             }
-            if let Some(a) = c.audio.as_ref().filter(|a| a.is_keyed()) {
-                let keys: Vec<Value> = a
-                    .gain_keys
+            let numbers = [
+                ("volume", Number::Volume),
+                ("center_x", Number::Center(Axis::X)),
+                ("center_y", Number::Center(Axis::Y)),
+            ];
+            for (param, number) in numbers {
+                let held = number.keys(c);
+                if held.is_empty() {
+                    continue;
+                }
+                let keys: Vec<Value> = held
                     .iter()
                     .enumerate()
                     .map(|(i, k)| {
@@ -395,7 +502,7 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                             "at": at,
                             "at_tc": p.settings.timecode(at),
                             "value": k.value,
-                            "ease": ease_of(&a.gain_keys, i),
+                            "ease": ease_of(held, i),
                         });
                         if let Some(h) = k.in_handle {
                             v["in"] = json!(h);
@@ -407,7 +514,7 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
                     })
                     .collect();
                 clips.push(
-                    json!({ "clip": c.id, "track": t.id, "param": "volume", "keyframes": keys }),
+                    json!({ "clip": c.id, "track": t.id, "param": param, "keyframes": keys }),
                 );
             }
             if let Some(speed) = c.speed.as_ref().filter(|s| s.sections.len() > 1) {
@@ -531,13 +638,15 @@ fn keys_of(c: &Clip, param: KeyParam) -> &[Keyframe] {
         (KeyParam::Speed, _, _) => &[],
         (_, Some(v), Some(t)) => t.keys_of(v),
         (_, Some(v), None) => c.picture.as_ref().map_or(&[], |p| p.keys_of(v)),
-        (_, None, _) => c.audio.as_ref().map_or(&[], |a| a.gain_keys.as_slice()),
+        (_, None, _) => Number::of(param).keys(c),
     }
 }
 
 fn param_name(param: KeyParam) -> &'static str {
     match param {
         KeyParam::Speed => "speed",
+        KeyParam::CenterX => "center_x",
+        KeyParam::CenterY => "center_y",
         _ => picture_param(param).map_or("volume", PictureValue::name),
     }
 }
@@ -586,7 +695,7 @@ pub fn chosen(p: &Project, id: &str, picks: Option<&[KeyPicks]>) -> Result<Vec<C
         let pick = Pick { frames, at: None };
         let mut taken: Vec<i64> = match picture_param(value) {
             Some(v) => picked_name(c, keys, &pick, v)?,
-            None => picked(c, keys, &pick)?,
+            None => picked_as(c, keys, &pick, Number::of(value).name())?,
         }
         .into_iter()
         .collect();
@@ -717,7 +826,7 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
 
 fn picture_param(param: KeyParam) -> Option<PictureValue> {
     match param {
-        KeyParam::Volume => None,
+        KeyParam::Volume | KeyParam::CenterX | KeyParam::CenterY => None,
         KeyParam::Position | KeyParam::UpperPosition | KeyParam::LowerPosition => {
             Some(PictureValue::Position)
         }
@@ -744,10 +853,7 @@ fn scalar(param: KeyParam, value: Option<KeyValue>) -> Result<Option<f64>> {
         Some(KeyValue::Scalar(n)) => Ok(Some(n)),
         Some(KeyValue::Pair(_)) => Err(Error::usage(format!(
             "{} takes one number",
-            match param {
-                KeyParam::Volume => "volume",
-                other => picture_param(other).map_or("value", PictureValue::name),
-            }
+            param_name(param)
         ))),
     }
 }

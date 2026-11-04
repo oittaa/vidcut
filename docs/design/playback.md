@@ -70,6 +70,7 @@ flowchart TD
 - `player::plan::Plan` gives each frame an `Id`. The `Id` names what the picture shows (file, color reading, source position, layers over it), not where it shows. Thus kept pictures survive edits that move them.
   - Each layer over it adds its level, the edge of its wipe and the frame of its move (`Moving::key`). Why: a change of a wipe's edge or of a Border keeps the level, and the picture is a new one.
   - The incoming layer of a Smooth Cut also adds the point and the process of its morph (`Smooth::at`). Why: a change of the Ease or the Process keeps the level.
+  - A generator with keyframes adds its frame in the piece. Why: its picture changes on each frame, and it has no source position.
 
 **Decoding**
 

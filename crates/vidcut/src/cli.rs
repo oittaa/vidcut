@@ -172,7 +172,7 @@ const GROUPS: &[(&str, &str)] = &[
         "Export the timeline: a video, audio, frames per clip, or OpenTimelineIO",
     ),
     ("frame", "Single frames as PNG"),
-    ("generators", "Pictures made with no file: Solid Color"),
+    ("generators", "Pictures made with no file"),
     (
         "gui",
         "The running GUI: its window, command log, screenshots, panels, target track and timeline view",

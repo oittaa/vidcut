@@ -4029,7 +4029,7 @@ fn mutate(
         }
         Request::GeneratorsAdd {
             kind,
-            color,
+            settings,
             at,
             duration,
             track,
@@ -4042,13 +4042,17 @@ fn mutate(
                 Some(d) => length(p, d)?,
                 None => ops::titles::default_length(p),
             };
-            let made = ops::generators::made(*kind, color.as_deref())?;
+            let made = ops::generators::made(*kind, settings)?;
             let (id, track) = ops::generators::add(p, track.as_deref(), start, frames, made)?;
             json!({ "clip": id, "track": track })
         }
-        Request::GeneratorsSet { clip, color } => {
+        Request::GeneratorsSet { clip, settings, at } => {
             let id = resolve_clip(p, clip, playhead)?;
-            ops::generators::set(p, &id, color.as_deref())?;
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            ops::generators::set(p, &id, settings, at)?;
             Value::Null
         }
         Request::PictureSet {
@@ -5290,6 +5294,9 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
                     line.take_picture(&picture);
                 });
             }
+            if let Some(reference) = c.generator.as_mut() {
+                otio::generators::scale_keys(reference, conv, ratio);
+            }
         }
         (c.start, c.duration) = (start, end - start);
     }
@@ -5434,8 +5441,10 @@ fn place_imported(
                 name: (!c.name.is_empty()).then(|| c.name.clone()),
                 effects: carry(&effects, source_in),
                 generator: c.generator.as_ref().map(|reference| {
-                    otio::generators::read(reference).unwrap_or_else(|| Generator::Carried {
-                        reference: reference.clone().into(),
+                    otio::generators::read(reference, source_in).unwrap_or_else(|| {
+                        Generator::Carried {
+                            reference: reference.clone().into(),
+                        }
                     })
                 }),
                 title,

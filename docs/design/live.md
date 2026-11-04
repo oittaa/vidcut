@@ -336,6 +336,7 @@ The bar and the Jobs button:
 - The Effects tab (`effect_browser::GROUPS`) draws its cards. A dragged card (`Gesture::Effect`) drops as `effects.add` on the clip under the pointer.
 - A hovered card previews with `Handle::preview_free_title`: the core adds the title at the playhead to its copy of the project (`FreeTitle`).
 - The Generators page of the Effects tab (`EffectsTab`, `generator_browser::CARDS`) draws its cards. A dragged card (`Gesture::Generator`) drops as `generators.add`.
+  - Each card shows the picture of its kind with the default values, through `generators::draw`.
 
 **Pictures.**
 
@@ -361,8 +362,9 @@ The bar and the Jobs button:
   - A picture from the handles, the wheel or the Inspector goes first (`Workspace::picture_wanted`). Thus the fields follow a drag in the viewer.
   - Each change is one undo step: one `picture.set`, or an `apply` of one `picture.set` for each clip. Reset sends `picture.clear`.
   - Why the `apply`: a `position` holds X and Y, so Position X goes with the Y of each clip. A crop in pixels is a different fraction of each picture.
-- The Generator section (`Workspace::generator_section`) shows the Color row of a Solid Color.
-  - It sends one `generators.set` when the pointer is up. Then `Recolored` shows the sent color until the project has it (`tools::landing`).
+- The Generator section (`Workspace::generator_section`) shows the rows of the first selected clip's generator.
+  - A color row sends one `generators.set` when the pointer is up. Then `Recolored` shows the sent color until the project has it (`tools::landing`).
+  - The Center rows of a Four Color Gradient act as the other keyed rows. A value goes with `generators.set`, and its keyframes go with `keyframes.add`. Reset removes the keyframes and sets 0.
 - The effect sections show the effects of the first selected clip (`effect_block`). Each change is one `effects.set` for that clip.
   - A dragged value previews as a picture with the changed effect (`knob_picture`). `Picture::preview` takes the effects of the dragged picture.
   - On, Move Up, Move Down, Reset and Delete send `effects.set`, `effects.move`, `effects.reset` and `effects.remove`.
