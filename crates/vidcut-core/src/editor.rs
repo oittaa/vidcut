@@ -2685,12 +2685,6 @@ fn mutate(
         Request::MediaRemove { media, force } => {
             p.media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-            if let Some(g) = p.group_of(media) {
-                return Err(Error::invalid(format!(
-                    "{media} is in the synced group {}; remove the group first",
-                    g.name
-                )));
-            }
             let users: Vec<String> = p
                 .tracks
                 .iter()
@@ -2710,7 +2704,12 @@ fn mutate(
             p.media.retain(|m| &m.id != media);
             for g in &mut p.groups {
                 g.dropped.retain(|m| m != media);
+                for row in &mut g.rows {
+                    row.clips.retain(|c| &c.media != media);
+                }
+                g.rows.retain(|row| !row.clips.is_empty());
             }
+            p.groups.retain(|g| !g.rows.is_empty());
             forget_tape_marks(p, media);
             Value::Null
         }
@@ -3010,25 +3009,25 @@ fn mutate(
                     "Source Overwrite picks its own track; leave out `track`",
                 ));
             }
-            if src.tape {
-                return Err(Error::usage("Source Overwrite takes one media item"));
-            }
             let at = match at {
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            let source = source(p, src)?;
-            let marks = &p
-                .media(&source.media)
-                .expect("source checked the media")
-                .marks;
-            if src.range.is_none() && marks.mark_in.is_none() && marks.mark_out.is_some() {
-                return Err(Error::invalid(
-                    "Source Overwrite can't use a source Out mark with no In",
-                ));
+            let sources = if src.tape {
+                tape_sources(p, src)?
+            } else {
+                vec![source(p, src)?]
+            };
+            let mut landed = Vec::with_capacity(sources.len());
+            for s in &sources {
+                let marks = &p.media(&s.media).expect("source checked the media").marks;
+                let marked = src.tape || src.range.is_some() || !marks.is_empty();
+                landed.push(ops::source_overwrite(p, s, marked, at, *group)?);
             }
-            let marked = src.range.is_some() || marks.mark_in.is_some() || marks.mark_out.is_some();
-            let placed = ops::source_overwrite(p, &source, marked, at, *group)?;
+            p.marks = Default::default();
+            let placed = landed
+                .pop()
+                .ok_or_else(|| Error::invalid("nothing to edit in"))?;
             json!({
                 "clip": placed.clip,
                 "track": placed.track,

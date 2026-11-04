@@ -2402,7 +2402,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - The icon on files that are already one saved group opens that group.
   - A file that the group dropped does not count as new, so the icon opens the saved group.
-  - A group plus a new file refuses.
+  - A group plus a new file opens all the files as a new group, as in Resolve.
 - **Why:**
   - Two groups on one file leave the older one hard to reach.
   - In the one case measured, "Open Sync Group..." opened only the newer group.

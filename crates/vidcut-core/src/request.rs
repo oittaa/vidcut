@@ -127,19 +127,23 @@ pub enum Request {
     /// with no name follow. By timecode, a file with no name goes on the first
     /// such row where it does not overlap. By sound, In or Out, it has its own
     /// row. A file with no picture and no name has its own row, after the
-    /// others. An item with marks uses only the frames between them. A file
-    /// with no timecode starts at 00:00:00:00. It refuses a still.
+    /// others. An item with marks uses only the frames between them, and one
+    /// mark uses the frames to that end of the file. A file with no timecode
+    /// starts at 00:00:00:00. A still takes the length of a new still. A file
+    /// named twice counts once.
     #[serde(rename = "multicam.layout")]
     MulticamLayout {
         media: OneOrMany<String>,
-        /// `timecode`, `in` or `out` for items that all have that mark, or
-        /// `sound`. By timecode, In and Out, files of a row go in timecode
+        /// `timecode`, `in`, `out` or `sound`. By In, a file with no In lines
+        /// up at its first frame. By Out, a file with no Out lines up at its
+        /// end. By timecode, In and Out, files of a row go in timecode
         /// order; with one timecode, they go in the given order. By In, the
         /// mark of a row's earliest file lines up the row. By Out, the mark of
         /// its latest file does. By sound, files of a row go in the order of
         /// their places; with one place, they go in the given order. By sound
         /// the answer also has `unmatched`, the media that
         /// match no other file, and `pairs`, how well each two files match.
+        /// The whole files line up by sound, and an empty front stays.
         #[serde(default)]
         sync: crate::model::AngleSync,
         /// Use each whole file. Its marks only line it up.
@@ -156,8 +160,7 @@ pub enum Request {
     #[serde(rename = "multicam.create")]
     MulticamCreate {
         media: OneOrMany<String>,
-        /// `timecode`, `in` or `out` for items that all have that mark, or
-        /// `sound`.
+        /// `timecode`, `in`, `out` or `sound`, as in `multicam.layout`.
         #[serde(default)]
         sync: crate::model::AngleSync,
         /// Default: `Media Sync` with the date and the time.
@@ -231,9 +234,10 @@ pub enum Request {
     MulticamMarksClear { group: String },
     /// The Sync Bin at a time: the rows of a bin and its subfolders. With a
     /// synced group in the bin, they are its stored rows, and other files of
-    /// the bin do not show. With two groups or more, the newest group of the
-    /// clip at `at` counts. With no group, the rows are the ones that
-    /// `multicam.layout` gives by timecode. Each row has its `number` and
+    /// the bin do not show. With two groups or more, the group of the clip at
+    /// `at` counts, and with no such clip the newest group does. With no group,
+    /// the rows are the ones that `multicam.layout` gives by timecode, with no
+    /// stills. Each row has its `number` and
     /// `camera`, and `clips`: each file's `media`, its visible `frames`, its
     /// `head`, the frames that it loses at its start, and `start`, the timeline
     /// frame of its first visible frame. The clip at `at` sets `start`: its
@@ -241,9 +245,7 @@ pub enum Request {
     /// none. `media` and `frame` are the file of the row at `at` and its frame.
     /// A row with no file at `at` has no `frame`, and `media` is its first file.
     /// `active` says that a file of the row is on top at `at`. A file with no
-    /// timecode and no synced group lies at 00:00:00:00. It refuses a file on
-    /// a row with no picture, and two groups when the clip at `at` is in
-    /// neither of them.
+    /// timecode and no synced group lies at 00:00:00:00.
     #[serde(rename = "multicam.rows")]
     MulticamRows {
         /// Default: the top level.
@@ -257,7 +259,7 @@ pub enum Request {
     /// In is the file's frame at `at`. The marks are five seconds long and
     /// stop at the file's end. Past the timeline's end, In is the file's
     /// frame at that end and Out is its frame at `at`. Returns the marks. It
-    /// refuses a file with no frame at `at`, and a file at another frame rate.
+    /// refuses a file with no frame at `at`.
     #[serde(rename = "multicam.pick")]
     MulticamPick {
         media: String,
@@ -265,7 +267,8 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<TimeSpec>,
     },
-    /// Remove from the pool; `force` also deletes the clips that use it.
+    /// Remove from the pool and from its synced groups. `force` also deletes
+    /// the clips that use it. A group with no file left goes too.
     #[serde(rename = "media.remove")]
     MediaRemove {
         media: String,

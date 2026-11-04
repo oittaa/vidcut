@@ -35,10 +35,11 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
   - the sound of the grid with Video Only off and on (p. 708);
   - the Out mark by hand in the view of one camera;
   - a drag on the rows in the view of one camera;
-  - rows for files with no picture;
+  - rows for stills and for files with no picture;
   - two groups in a bin, when the clip at the playhead is in neither;
   - a click on a camera at another frame rate;
-  - a timeline whose clips disagree on the time of a file.
+  - a timeline whose clips disagree on the time of a file;
+  - an edit in Multi Source with a mark outside the active angle.
 - Show the Sync Bin grid in the Cinema Viewer with P (p. 709).
 - Record how a cut chooses an angle.
 - Measure sync by sound with files from real cameras, each with its own microphone. Then check `SOUND_MATCH_SCORE`.
@@ -46,7 +47,8 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
 - An angle switch replaces the picture and keeps the sound the user chose.
 - The switch is one timeline edit.
 - The CLI, IPC and MCP perform the same action as the GUI.
-- Measure the cases that Source Overwrite refuses ([spec §7.2](../cut-page-spec.md#72-edit-functions)).
+- Open Multi Source with no synced group (measured.md, C3e).
+- Measure the Source Overwrite cases that [spec §7.2](../cut-page-spec.md#72-edit-functions) lists as not measured.
   - Do audio-only files and other frame rates first, because sound recorders make them.
 - Measure how Source Overwrite treats hidden tracks, titles and compound clips.
 - Measure which file tags give the camera name, with files from real cameras. Then `media.add` reads the name.
