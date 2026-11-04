@@ -104,6 +104,7 @@ Ducking:
 - `Workspace::ducking_controls` puts Ducking, its sources and its Amount on each strip of the Mixer.
 - Each change is one `track.set` with `duck`, thus one undo step. The Amount goes when its drag ends.
 - Advanced opens the Ducking window (`Workspace::ducking_windows`). Apply sends its values in one `track.set`.
+- The graph of that window sends `analyze.ducking` with the values of the window (`Workspace::ask_graph`). It asks again when the values or the project change, or when the playhead leaves the frames that it has.
 - Alt+D turns ducking on or off for the track of the selected clip (`Workspace::toggle_duck`).
 - Before a change that needs the speech detector, the GUI asks to download it (`Workspace::duck`).
 

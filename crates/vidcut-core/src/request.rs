@@ -742,6 +742,23 @@ pub enum Request {
         #[serde(default)]
         range: Option<RangeSpec>,
     },
+    /// The level of a track's ducking sources against its ducking, over
+    /// `range` (default: In–Out if set, else everything), 100 points a
+    /// second. `source_db` is the peak of the loudest source in dBFS, after
+    /// its clip gain and fader, or null where no source sounds. `duck_db`
+    /// is what the ducking takes from the track, in dB. It tells what the
+    /// ducking does when on, whether it is on or off.
+    #[serde(rename = "analyze.ducking")]
+    AnalyzeDucking {
+        /// The ducked track (`A1`).
+        track: String,
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        /// Values to try in place of the track's, as `track.set` takes
+        /// them. Nothing is saved.
+        #[serde(default)]
+        duck: Option<DuckSet>,
+    },
     /// The words said, each with its frames, for `edit.ripple_delete_words`.
     /// With `media` or `clips`, from their media's transcripts
     /// (`media.transcribe`), heard nothing new: the media's source frames,
@@ -4584,6 +4601,7 @@ impl Request {
                     | Self::AnalyzeScenes { .. }
                     | Self::AnalyzeBlack { .. }
                     | Self::AnalyzeLoudness { .. }
+                    | Self::AnalyzeDucking { .. }
                     | Self::StoryboardRender { .. }
                     | Self::HistoryGet { .. }
                     | Self::Schema { .. }

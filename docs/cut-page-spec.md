@@ -1485,7 +1485,13 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - vidcut gives every track the timing of a mono track (X68).
   - vidcut adds Detect: Speech, the default, or Sound level (X69).
   - The curve, the timing and the limits are in D76.
-  - vidcut has no graph yet ([gaps](todo/cut-page-gaps.md)).
+  - vidcut: the Ducking window draws the graph above its controls. `analyze.ducking` gives its numbers.
+    - The graph shows the seconds around the playhead, with the playhead at the center. It needs no playback.
+    - The graph follows the values in the window before Apply.
+    - The filled shape is the level of the loudest source, after its clip gain and its fader.
+    - The line is what the ducking takes from the track.
+    - Both use one dB scale, from 0 dB at the top.
+    - With Detect at Sound level, a second line shows the threshold.
 - **Viewer meter** (p. 642):
   - It shows what the viewer plays.
   - Its speaker button mutes only the playback, not the export.

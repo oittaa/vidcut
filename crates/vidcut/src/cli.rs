@@ -17,6 +17,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("media.get", &["media"]),
     ("media.details", &["media"]),
     ("multicam.layout", &["media"]),
+    ("analyze.ducking", &["track"]),
     ("multicam.create", &["media"]),
     ("multicam.remove", &["group"]),
     ("multicam.rename", &["group", "name"]),
@@ -149,7 +150,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
 const GROUPS: &[(&str, &str)] = &[
     (
         "analyze",
-        "Measure media or clips: silences, shots, black, loudness, the words said",
+        "Measure media or clips: silences, shots, black, loudness, ducking, the words said",
     ),
     ("bins", "Media Pool bins"),
     (

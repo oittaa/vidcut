@@ -7,13 +7,137 @@ use vidcut_core::model::{Duck, DuckDetect, Project, Track};
 use vidcut_core::request::DuckSet;
 
 use super::dialog;
+use super::export::Ask;
+use super::theme;
 use super::workspace::Workspace;
+
+const GRAPH_HEIGHT: f32 = 110.0;
+const SHOWN_SECS: f64 = 8.0;
+const ASKED_SECS: f64 = 60.0;
+const FLOOR_DB: f64 = -60.0;
 
 #[derive(Default)]
 pub(super) struct DuckingUi {
     asking: Option<(String, Value)>,
     amount: Option<(String, f64)>,
     advanced: Option<Advanced>,
+    graph: GraphUi,
+}
+
+#[derive(Default)]
+struct GraphUi {
+    ask: Option<Ask>,
+    asked: Option<GraphAsk>,
+    curve: Option<Curve>,
+    failed: Option<String>,
+}
+
+struct GraphAsk {
+    set: Value,
+    rev: u64,
+    from: i64,
+    to: i64,
+}
+
+struct Curve {
+    from: i64,
+    per_second: f64,
+    source_db: Vec<Option<f64>>,
+    duck_db: Vec<f64>,
+}
+
+impl Curve {
+    fn of(v: &Value) -> Self {
+        let list = |k: &str| v[k].as_array().cloned().unwrap_or_default();
+        Self {
+            from: v["from"].as_i64().unwrap_or(0),
+            per_second: v["per_second"].as_f64().unwrap_or(1.0),
+            source_db: list("source_db").iter().map(Value::as_f64).collect(),
+            duck_db: list("duck_db").iter().filter_map(Value::as_f64).collect(),
+        }
+    }
+}
+
+fn points_within<T>(v: &[T], i: i64, j: i64) -> &[T] {
+    let n = v.len() as i64;
+    &v[i.clamp(0, n) as usize..j.clamp(0, n) as usize]
+}
+
+fn paint_graph(ui: &mut egui::Ui, g: &GraphUi, threshold: Option<f64>, at: f64, fps: f64) {
+    let c = theme::colors();
+    let size = egui::vec2(ui.available_width(), GRAPH_HEIGHT);
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 2.0, c.track);
+    let y = |db: f64| rect.top() + rect.height() * (db / FLOOR_DB).clamp(0.0, 1.0) as f32;
+    if let Some(t) = threshold {
+        painter.hline(rect.x_range(), y(t), egui::Stroke::new(1.0, c.text_dim));
+    }
+    if let Some(curve) = &g.curve {
+        let secs_per_pixel = SHOWN_SECS / f64::from(rect.width());
+        let shown_from = at / fps - SHOWN_SECS / 2.0 - curve.from as f64 / fps;
+        let point =
+            |px: i64| ((shown_from + px as f64 * secs_per_pixel) * curve.per_second).floor() as i64;
+        let mut dip = Vec::new();
+        for px in 0..rect.width() as i64 {
+            let (i, j) = (point(px), point(px + 1));
+            let j = j.max(i + 1);
+            let x = rect.left() + px as f32;
+            let level = points_within(&curve.source_db, i, j)
+                .iter()
+                .flatten()
+                .copied()
+                .reduce(f64::max);
+            if let Some(level) = level {
+                let top = y(level);
+                painter.vline(x, top..=rect.bottom(), egui::Stroke::new(1.0, c.audio));
+            }
+            let deepest = points_within(&curve.duck_db, i, j)
+                .iter()
+                .copied()
+                .reduce(f64::min);
+            if let Some(d) = deepest {
+                dip.push(egui::pos2(x, y(d)));
+            }
+        }
+        painter.add(egui::Shape::line(dip, egui::Stroke::new(1.5, c.accent)));
+    }
+    painter.vline(
+        rect.center().x,
+        rect.y_range(),
+        egui::Stroke::new(1.0, c.playhead),
+    );
+    let font = egui::FontId::proportional(11.0);
+    let inset = egui::vec2(4.0, 2.0);
+    painter.text(
+        rect.left_top() + inset,
+        egui::Align2::LEFT_TOP,
+        "0 dB",
+        font.clone(),
+        c.text_dim,
+    );
+    painter.text(
+        rect.left_bottom() + egui::vec2(inset.x, -inset.y),
+        egui::Align2::LEFT_BOTTOM,
+        format!("{FLOOR_DB} dB"),
+        font.clone(),
+        c.text_dim,
+    );
+    let right = rect.right_top() + egui::vec2(-inset.x, inset.y);
+    painter.text(
+        right,
+        egui::Align2::RIGHT_TOP,
+        "Ducking",
+        font.clone(),
+        c.accent,
+    );
+    painter.text(
+        right + egui::vec2(0.0, 14.0),
+        egui::Align2::RIGHT_TOP,
+        "Source",
+        font,
+        c.audio,
+    );
 }
 
 struct Advanced {
@@ -183,7 +307,55 @@ impl Workspace {
         }
         if ui.button("Advanced").clicked() {
             self.ducking.advanced = Some(Advanced::of(t, d));
+            self.ducking.graph = GraphUi::default();
         }
+    }
+
+    fn ask_graph(&mut self, ctx: &egui::Context, a: &Advanced, playhead: i64) {
+        let Some((rev, end, fps)) = self
+            .project()
+            .map(|p| (p.rev, p.end(), p.settings.fps.as_f64()))
+        else {
+            return;
+        };
+        let g = &mut self.ducking.graph;
+        if let Some(result) = g.ask.as_ref().and_then(Ask::take) {
+            g.ask = None;
+            match result {
+                Ok(r) => {
+                    g.curve = Some(Curve::of(&r.result));
+                    g.failed = None;
+                }
+                Err(e) => g.failed = Some(e.message),
+            }
+        }
+        if g.ask.is_some() {
+            return;
+        }
+        let frames = |secs: f64| (secs * fps).ceil() as i64;
+        let set = a.set();
+        let shown = (
+            (playhead - frames(SHOWN_SECS / 2.0)).max(0),
+            (playhead + frames(SHOWN_SECS / 2.0)).min(end),
+        );
+        let covered = g
+            .asked
+            .as_ref()
+            .is_some_and(|x| x.set == set && x.rev == rev && x.from <= shown.0 && shown.1 <= x.to);
+        let (from, to) = (
+            (playhead - frames(ASKED_SECS / 2.0)).max(0),
+            (playhead + frames(ASKED_SECS / 2.0)).min(end),
+        );
+        if covered || to <= from {
+            return;
+        }
+        let params = json!({
+            "track": a.track,
+            "range": format!("{from}f..{to}f"),
+            "duck": set,
+        });
+        g.asked = Some(GraphAsk { set, rev, from, to });
+        g.ask = Some(Ask::send(&self.live, ctx, "analyze.ducking", params));
     }
 
     pub(super) fn ducking_windows(&mut self, ctx: &egui::Context) {
@@ -212,7 +384,19 @@ impl Workspace {
             DuckDetect::Speech => speech_needs(),
             DuckDetect::Level => Vec::new(),
         };
+        let playhead = self.drawn_playhead();
+        if needs.is_empty() {
+            self.ask_graph(ctx, &a, playhead);
+        }
+        let at = self.glided_playhead(playhead);
+        let fps = self.project().map_or(1.0, |p| p.settings.fps.as_f64());
+        let graph = &self.ducking.graph;
         dialog::window(ctx, "Ducking", &mut open, |ui| {
+            let threshold = (a.detect == DuckDetect::Level).then_some(a.threshold_db);
+            paint_graph(ui, graph, threshold, at, fps);
+            if let Some(failed) = &graph.failed {
+                dialog::warn(ui, failed.as_str());
+            }
             dialog::form(ui, "ducking-form", |ui| {
                 dialog::row(ui, "Track", |ui| ui.label(a.name.as_str()));
                 dialog::row(ui, "Detect", |ui| {
