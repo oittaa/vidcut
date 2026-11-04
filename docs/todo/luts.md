@@ -23,7 +23,7 @@ vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../desi
 - Measure in Resolve:
   - The Output LUT of the project: does it use the math of the node LUT?
   - A picture with an alpha channel through a LUT.
-  - The right-click menu of the Media Pool on a compound clip: does it give an input LUT? A script cannot set one.
+  - A LUT on a generator and on a compound clip.
   - A gap through the Output LUT.
   - A table range with equal low and high values.
   - The messages of the GUI for a broken file.
