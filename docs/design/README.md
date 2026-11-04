@@ -157,7 +157,7 @@ vidcut has none of the other stages of the spec:
 | snapshot | what the GUI draws, published by the live core | `Snapshot` |
 | origin | a cache stamp of the path, size and time of a file | `Origin` |
 | kept | data of another editor that vidcut carries without a model of it | `Kept` |
-| lru | a cache of a set number of entries that lets the least recently used go | `Lru` |
+| lru | a cache of a set number of entries that lets the least recently used go; an `Uncapped` one has no set number, and its owner decides what goes | `Lru`, `Uncapped` |
 
 ## Pages
 

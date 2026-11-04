@@ -200,11 +200,24 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Remove** (p. 654):
   - Delete or Backspace removes the pool entry, after a confirmation.
   - Only the pool entry goes. The files on disk stay.
-- **Views** (pp. 638, 664–665):
+- **Views** (pp. 638, 661–665):
   - **Thumbnail:** a hover scrubs the clip, and I/O mark its source In/Out. A click on the lower-right corner of a thumbnail shows its metadata (deviation X60).
   - **Filmstrip:** each clip is a row of its pictures, as wide as the pool, under its name. Hover and I/O work as on a thumbnail.
   - **List:** a column for each field. A click on a header sorts by that field.
-  - **Metadata:** a card for each clip, with a thumbnail that scrubs and basic metadata.
+  - **Metadata** (pp. 661–663): a card for each clip, in as many columns as fit the pool.
+    - A thumbnail is at the left of the card. A hover on it scrubs the clip, and I/O mark its source In/Out.
+    - Beside the thumbnail, from the top:
+      - The main description, which follows the sort (p. 662). Timecode gives the start timecode. Each other sort gives the clip name.
+      - The start timecode and the camera name. A file with no timecode shows 00:00:00:00. A clip with no camera name shows `---`.
+      - A subtitle file shows its cue count and its length on that line, and no camera name.
+      - The clip name.
+    - Sorted by Clip Name, the clips are in clusters by the first letter of the name, each under a heading (pp. 662–663).
+      - Inside a cluster, the order is by timecode. The Source Tape takes this order.
+    - Sorted by Date Modified, the clusters are the days of the file's modification time (p. 662).
+    - Sorted by Timecode, Date Imported or Duration, there are no clusters. vidcut keeps no creation date and no date of import.
+    - Descending reverses the whole order (p. 663).
+    - vidcut keeps no Date Created, scene, shot, take or comment ([todo](todo/cut-page-gaps.md)). Thus the card and the main description leave them out.
+    - `pool.set` with `view` `metadata` opens this view.
   - A sound file shows its waveform.
   - **Metadata Display** (p. 665): a tag icon beside the search field shows metadata of the selected clip at the top of the pool (deviation X60). The metadata is the camera name, scene, shot and take, frame rate and resolution.
 - **Sort and search** (pp. 666–667):
@@ -346,6 +359,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Source Clip** (p. 680):
   - The Viewer shows the selected pool clip.
   - A scroll area under the picture stands for the whole clip. It has the playhead, a zoomed-in waveform and In/Out handles that you can drag.
+  - vidcut draws the waveform of the whole clip across the scroll area, from the bottom edge up.
+    - With marks, the waveform is green between In and Out, and gray outside them.
+    - Without marks, the waveform is green.
+    - The waveform does not zoom ([gaps](todo/cut-page-gaps.md)).
   - Jog In and Jog Out controls at its ends move the marks frame by frame (p. 692).
     - Jog In is at the left of the scroll area. Jog Out is at the right.
     - A drag moves that mark. 8 pixels is one frame (D97).
@@ -830,6 +847,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A tooltip shows the frame delta and the new duration.
     - On Track 1 with Ripple On, it ripples. On other tracks, only that clip changes.
   - **Edit center: roll.**
+    - Trim > Roll > Start to Playhead next to a gap moves only the picture edge. The sound stays.
+    - `edit.roll` does this. vidcut has no menu command for it ([gaps](todo/cut-page-gaps.md)).
     - The total duration stays the same.
     - A white overlay shows the available handle media.
   - **Slip handle at the clip center: slip.** Several selected clips slip together.
@@ -895,6 +914,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - Hover over the lower audio part of a clip at an edit until the cursor shows a note. Then drag.
 - Only the audio edit moves, as an audio roll.
 - A click selects that audio edit, and `,` / `.` move it (D20).
+- The edit needs sound on one side only.
+  - With sound on the outgoing side only, the sound goes on past the picture. It goes into a gap, or under a clip with no sound.
+  - With sound on the incoming side only, the sound starts before the picture.
+  - vidcut stops the edit at the nearest sound on the track, at the timeline's start and where the media runs out.
 
 ### 8.8 Snapping (pp. 716–717)
 - N toggles snapping.
@@ -1684,11 +1707,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D13. Keys.**
   - Keys that the Cut chapters do not give come from the Edit page.
   - §11 marks them with †.
-- **D14. J/L cuts belong to an edit point.**
-  - A J/L cut (§8.7) is the `tail` of the outgoing clip that matches the `head` of the incoming clip.
-  - An edit that gives a clip another neighbor there resets the J/L cut to a straight cut.
+- **D14. J/L cuts at an edit point.**
+  - Between two touching clips with sound, a J/L cut (§8.7) is the `tail` of the outgoing clip that matches the `head` of the incoming clip.
+  - An edit that gives such a clip another neighbor with sound there resets the J/L cut to a straight cut.
   - The edit also resets the other cut of the clip, if the clip would have no sound of its own.
-  - Reason: otherwise audio could overlap on a track, or run into gaps.
+  - With a gap or a clip with no sound there, the `head` or `tail` stays. It gets shorter when it would overlap other sound.
+  - Reason: sound does not overlap on a track.
 - **D15. Playhead after an edit function.**
   - After Smart Insert, Append, Overwrite, Ripple Overwrite or Paste, the playhead moves to the frame after the new clips.
   - The Viewer keeps its mode, so Q reviews the result (p. 696).

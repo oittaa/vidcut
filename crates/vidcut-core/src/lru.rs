@@ -17,6 +17,8 @@ pub struct Lru<K, V, const N: usize> {
     newest: Option<usize>,
 }
 
+pub type Uncapped<K, V> = Lru<K, V, { usize::MAX }>;
+
 impl<K, V, const N: usize> Default for Lru<K, V, N> {
     fn default() -> Self {
         Self::new()

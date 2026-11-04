@@ -429,6 +429,13 @@ The bar and the Jobs button:
 - `Boxing` keeps the start of the box from the top of the content. Thus the start stays on its clip when the wheel scrolls the pool.
 - On release, one `selection.set` carries the new selection (`boxed`).
 
+**The pool's cards** ([spec §3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675)).
+
+- `Workspace::cards` draws the Metadata view. `cluster` gives the heading of each card. Each run of one heading is a block of rows, and only the rows in view are drawn.
+- `Workspace::tile_picture` draws the picture of a tile and of a card.
+- `PoolView::media` gives the order. With `PoolMode::Metadata` and `PoolSort::Name`, it goes by `first_letter` and then by timecode.
+  - Why: Source Tape reads the same order. Thus `pool.set` refreshes the tape when the view goes to or from the cards.
+
 **Media details.**
 
 - The metadata strip of the pool (`Workspace::metadata_strip`) shows what the project keeps of the chosen media (`clip_info::glance`). `pool.json` in the config folder keeps it on or off.

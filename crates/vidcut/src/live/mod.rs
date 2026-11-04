@@ -24,7 +24,7 @@ use vidcut_core::model::{Clip, Format, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    Client, ClientKind, Detect, DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget,
+    Client, ClientKind, Detect, DynamicTrimMode, GuiPanel, OneOrMany, PoolMode, ScreenshotTarget,
     TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
 };
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
@@ -2788,7 +2788,11 @@ impl Live {
                 view,
                 search,
             } => {
-                let tape = bin.is_some() || sort.is_some() || descending.is_some();
+                let cards = |mode: PoolMode| mode == PoolMode::Metadata;
+                let tape = bin.is_some()
+                    || sort.is_some()
+                    || descending.is_some()
+                    || view.is_some_and(|v| cards(v) != cards(self.pool.view));
                 if let Some(b) = bin {
                     let known = b.is_empty()
                         || self
