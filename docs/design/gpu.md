@@ -333,11 +333,11 @@ The Waveform, the Parade and the Vectorscope show the picture that the viewer dr
 
 What they read:
 
-- `Screen::scopes` reads the canvas of the last `Screen::draw`. That is the mix, in the timeline color space, before `fs_screen`.
+- `Screen::scopes` reads the canvas of the last `Screen::draw`. That is the mix after the output LUT, in the timeline color space, before `fs_screen`.
 - While a scope is on, `Screen::scoping` makes the canvas `Wide`, also for one SDR layer.
   - Why: an 8-bit canvas loses the values above 1 and below 0, and the steps between the 10-bit levels.
   - `fs_screen` only clips an SDR canvas. Thus the picture on the screen stays the same, but for rounding.
-- vidcut has no grade and no LUT. They are items in the todo files ([primary-grade](../todo/primary-grade.md), [luts](../todo/luts.md)).
+- vidcut has no grade. It is an item in the todo files ([primary-grade](../todo/primary-grade.md)).
 - The source viewer has no timeline color space. There, the scopes read SDR values.
 
 How the GPU makes one scope (`scope.wgsl`, `Plots::paint`):
