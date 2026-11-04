@@ -37,6 +37,7 @@ pub fn describe_at(
         ),
         "media.rename" => format!("Rename {} to {}", d.media("media"), d.text("name")),
         "media.subclip" => format!("Create subclip {} of {}", d.text("name"), d.media("media")),
+        "media.subclip_set" => format!("Change the limits of subclip {}", d.media("media")),
         "media.set" => d.media_set(),
         "media.marks.set" => d.marks_set(
             format!("Source marks of {}", d.media("media")),

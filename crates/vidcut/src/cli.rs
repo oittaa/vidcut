@@ -30,6 +30,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("media.relink", &["media", "path"]),
     ("media.rename", &["media", "name"]),
     ("media.subclip", &["media"]),
+    ("media.subclip_set", &["media"]),
     ("media.set", &["media"]),
     ("media.marks.set", &["media"]),
     ("media.marks.clear", &["media"]),

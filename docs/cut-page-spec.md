@@ -1252,9 +1252,20 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Mark > Create Subclip and Alt+B open the New Subclip window.
     - Create Subclip in the menu of the scroll area also opens it. A drag from the viewer to the pool also opens it.
     - A drop on a bin of the pool moves the clip to that bin. The window does not open.
-    - The window has a Name and Create. The subclip goes in the bin that the pool shows (p. 864).
+    - The window has a Name, Use Full Clip Extents and Create. The subclip goes in the bin that the pool shows (p. 864).
     - Without an In, the subclip starts at the first frame of the clip. Without an Out, it ends at the last frame.
-    - `media.subclip` does this.
+    - Use Full Clip Extents makes the subclip hold the whole file (pp. 460–461).
+    - `media.subclip` does this. `full_extents` is the checkbox.
+  - Edit Subclip changes the part of the file that a subclip holds (pp. 461, 886).
+    - It is in the right-click menu of a subclip in the pool, and of a clip of a subclip in the timeline.
+    - The window title is Edit and the name. It shows the Current Subclip times, the New Subclip times and Use Full Clip Extents.
+    - Update stays off until the new times differ from the current times.
+    - Ends is the frame after the last frame of the subclip.
+    - `media.subclip_set` does this. It takes a `range` in frames from the first frame of the file, or `full_extents`.
+    - The clips of the subclip, its marks and its markers stay on the same frames of the file.
+    - A clip outside the new times refuses the change. A synced group outside the new times also refuses it.
+    - A mark outside the new times is cleared.
+    - A marker outside the new times stays and does not show. It shows again when the times hold it.
   - Add Marker puts a marker at one selected word, or a marker with a duration over more words (p. 998).
     - On a source clip, the marker is on that clip, at its source frame (`markers.add` with `media`).
     - The scroll area of the Source Clip viewer shows it. A marker with a duration also shows as a bar (p. 1018).

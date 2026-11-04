@@ -1824,6 +1824,10 @@ impl Workspace {
             self.open_clip_info(Some(m.id.clone()));
             ui.close();
         }
+        if m.subclip.is_some() && ui.button("Edit Subclip…").clicked() {
+            self.open_edit_subclip(&m.id);
+            ui.close();
+        }
         ui.menu_button("Clip Color", |ui| {
             if let Some(color) = theme::clip_color_menu(ui, current.as_deref()) {
                 self.send("media.set", json!({ "media": ids, "color": color }));

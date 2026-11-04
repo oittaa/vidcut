@@ -295,6 +295,25 @@ pub enum Request {
         /// The bin it goes in. Default: the bin of `media`.
         #[serde(default)]
         bin: Option<String>,
+        /// Use Full Clip Extents: it holds the whole file, in place of
+        /// `range` and the marks.
+        #[serde(default)]
+        full_extents: bool,
+    },
+    /// Edit Subclip: change the part of its file that a subclip holds.
+    /// Its clips, marks and markers stay on the same frames of the file.
+    /// A clip or a synced group that uses frames outside the new part
+    /// refuses the change. A mark outside the new part is cleared. A marker
+    /// outside it is kept, not shown, and is back when the part holds it.
+    #[serde(rename = "media.subclip_set")]
+    MediaSubclipSet {
+        media: String,
+        /// The new part, in frames from the first frame of the file.
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        /// Use Full Clip Extents: the whole file, in place of `range`.
+        #[serde(default)]
+        full_extents: bool,
     },
     /// Transcribe Audio: hear each pool item's own sound (`stream`, counted
     /// from 0) and keep its words, with their times, with the media, for
