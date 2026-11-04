@@ -351,6 +351,11 @@ pub fn describe_at(
         "export.start" => format!("Export {}", d.file("output")),
         "export.plan" => format!("Plan an export to {}", d.file("output")),
         "frame.render" => format!("Render the frame at {}", d.time("at")),
+        "frame.scope" => format!(
+            "Render the {} of the frame at {}",
+            params["scope"].as_str().unwrap_or("scope"),
+            d.time("at")
+        ),
         "storyboard.render" => format!("Storyboard {}", d.file("out")),
         "presets.save" => format!("Save preset {}", d.text("name")),
         "presets.delete" => format!("Delete preset {}", d.text("name")),
@@ -388,6 +393,7 @@ pub fn describe_at(
             }
             None => format!("Viewer guides: {}", compact(params)),
         },
+        "viewer.scopes" => format!("Viewer scopes: {}", compact(params)),
         "viewer.load" => format!("Show {} in the viewer", d.media("media")),
         "player.play" => "Play".into(),
         "player.pause" => "Pause".into(),

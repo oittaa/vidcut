@@ -304,6 +304,18 @@ pub fn run_with(
             };
             answer(crate::preferences::set_guides(patch, envelope.dry_run)?)
         }
+        Request::ViewerScopes {
+            waveform,
+            parade,
+            vectorscope,
+        } => {
+            let patch = vidcut_core::preferences::ScopesPatch {
+                waveform: *waveform,
+                parade: *parade,
+                vectorscope: *vectorscope,
+            };
+            answer(crate::preferences::set_scopes(patch, envelope.dry_run)?)
+        }
         Request::ExportStart(params) if params.background => {
             return Err(Error::no_instance(
                 "background exports run in a vidcut GUI (they would stop with this \
@@ -313,6 +325,7 @@ pub fn run_with(
         Request::ExportPlan(_)
         | Request::ExportStart(_)
         | Request::FrameRender { .. }
+        | Request::FrameScope { .. }
         | Request::StoryboardRender { .. }
         | Request::AnalyzeSilence { .. }
         | Request::AnalyzeScenes { .. }
@@ -478,6 +491,19 @@ pub fn render(
             media.as_deref(),
             *width,
             None,
+        )?),
+        Request::FrameScope {
+            at,
+            out,
+            scope,
+            width,
+            height,
+        } => answer(crate::gui::frame::scope(
+            project,
+            at,
+            out,
+            *scope,
+            (*width, *height),
         )?),
         Request::StoryboardRender {
             out,
@@ -667,6 +693,7 @@ fn watches_cancel(request: &Request) -> bool {
     matches!(
         request,
         Request::FrameRender { .. }
+            | Request::FrameScope { .. }
             | Request::StoryboardRender { .. }
             | Request::AnalyzeSilence { .. }
             | Request::AnalyzeScenes { .. }

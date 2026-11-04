@@ -7411,6 +7411,7 @@ pub fn query(
         | Request::ExportPlan(_)
         | Request::ExportStart(_)
         | Request::FrameRender { .. }
+        | Request::FrameScope { .. }
         | Request::StoryboardRender { .. }
         | Request::PresetsList {}
         | Request::PresetsGet { .. }
@@ -7421,7 +7422,8 @@ pub fn query(
         | Request::LooksDelete { .. }
         | Request::EncodersList { .. }
         | Request::DecodersList {}
-        | Request::ViewerGuides { .. } => {
+        | Request::ViewerGuides { .. }
+        | Request::ViewerScopes { .. } => {
             return Err(Error::internal(format!(
                 "{} is answered by the session, not the editor",
                 request.method()
