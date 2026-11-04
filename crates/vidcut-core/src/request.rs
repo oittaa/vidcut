@@ -2525,13 +2525,13 @@ pub enum Request {
     PresetsList {},
     #[serde(rename = "presets.get")]
     PresetsGet { name: String },
-    /// Save a user preset (`~/.config/vidcut/presets/NAME.toml`, on Windows
-    /// in `%APPDATA%\vidcut`, on macOS in `~/Library/Application
+    /// Save a user preset (a TOML file in `~/.config/vidcut/presets`, on
+    /// Windows in `%APPDATA%\vidcut`, on macOS in `~/Library/Application
     /// Support/vidcut`): `settings`, or preset `from` with `set` overrides.
     /// `quick_export` puts it in Quick Export.
     #[serde(rename = "presets.save")]
     PresetsSave {
-        /// File-name safe: letters, digits, `-`, `_` and `.`.
+        /// Any text but an empty one.
         name: String,
         #[serde(default)]
         title: Option<String>,

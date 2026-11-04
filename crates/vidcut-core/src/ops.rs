@@ -2605,11 +2605,7 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
 }
 
 fn check_bin(path: &str) -> Result<()> {
-    if path.is_empty()
-        || path
-            .split('/')
-            .any(|n| n.trim().is_empty() || n != n.trim())
-    {
+    if path.split('/').any(str::is_empty) {
         return Err(Error::usage(format!(
             "bin {path:?}: use names separated by '/', like \"Interviews/Day 1\""
         )));
