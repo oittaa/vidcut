@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectKind, GaussianBlur, Picture, PictureTool,
-    Project, TrackKind, ZoomBox,
+    Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectKind, GaussianBlur,
+    MosaicBlur, Picture, PictureTool, Project, TrackKind, ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -44,41 +44,95 @@ pub fn checked(p: &Picture) -> Result<Option<Picture>> {
     Ok((!out.is_usual()).then_some(out))
 }
 
-pub fn effect_checked(e: &Effect) -> Result<Effect> {
-    let share = |v: f64| v.is_finite() && (0.0..=1.0).contains(&v);
-    if !e.blend.is_none_or(share) {
-        return Err(Error::invalid("an effect's blend is from 0 to 1"));
+fn within(v: Option<f64>, (low, high): (f64, f64), why: &str) -> Result<()> {
+    match v.is_none_or(|v| v.is_finite() && (low..=high).contains(&v)) {
+        true => Ok(()),
+        false => Err(Error::invalid(why)),
     }
+}
+
+fn gaussian_checked(b: &GaussianBlur) -> Result<GaussianBlur> {
+    for v in [b.strength, b.vertical_strength] {
+        within(v, (0.0, 1.0), "a Gaussian Blur's strength is from 0 to 1")?;
+    }
+    for k in [b.horizontal_channels, b.vertical_channels]
+        .iter()
+        .flatten()
+        .flatten()
+    {
+        within(
+            Some(*k),
+            (0.0, 2.0),
+            "a Gaussian Blur's channel values are from 0 to 2",
+        )?;
+    }
+    let usual = |v: f64| v != GaussianBlur::STRENGTH;
+    let same = |k: &[f64; 4]| *k != GaussianBlur::SAME;
+    Ok(GaussianBlur {
+        strength: b.strength.filter(|v| usual(*v)),
+        vertical_strength: b.vertical_strength.filter(|v| usual(*v)),
+        horizontal_channels: b.horizontal_channels.filter(same),
+        vertical_channels: b.vertical_channels.filter(same),
+        border: b.border.filter(|v| *v != Border::default()),
+        ..b.clone()
+    })
+}
+
+fn mosaic_checked(m: &MosaicBlur) -> Result<MosaicBlur> {
+    within(
+        m.pixel_frequency,
+        MosaicBlur::FREQUENCIES,
+        "a Mosaic Blur's pixel_frequency is from 0.1 to 4000",
+    )?;
+    within(
+        m.smooth_strength,
+        MosaicBlur::SMOOTHS,
+        "a Mosaic Blur's smooth_strength is from 0 to 1",
+    )?;
+    within(
+        m.aliasing,
+        MosaicBlur::ALIASINGS,
+        "a Mosaic Blur's aliasing is from 0 to 2",
+    )?;
+    for v in [m.x_offset, m.y_offset] {
+        within(
+            v,
+            MosaicBlur::OFFSETS,
+            "a Mosaic Blur's offsets are from -1 to 1",
+        )?;
+    }
+    within(
+        m.aspect,
+        MosaicBlur::STRETCHES,
+        "a Mosaic Blur's aspect is from 0.001 to 1000",
+    )?;
+    for v in m.position.into_iter().flatten() {
+        within(
+            Some(v),
+            MosaicBlur::PLACES,
+            "a Mosaic Blur's position is from -1000000 to 1000000",
+        )?;
+    }
+    Ok(MosaicBlur {
+        pixel_frequency: m.pixel_frequency.filter(|v| *v != MosaicBlur::FREQUENCY),
+        smooth_strength: m.smooth_strength.filter(|v| *v != 0.0),
+        cell_shape: m.cell_shape.filter(|v| *v != CellShape::default()),
+        aliasing: m.aliasing.filter(|v| *v != MosaicBlur::ALIASING),
+        x_offset: m.x_offset.filter(|v| *v != 0.0),
+        y_offset: m.y_offset.filter(|v| *v != 0.0),
+        aspect: m.aspect.filter(|v| *v != MosaicBlur::STRETCH),
+        position: m.position.filter(|v| *v != MosaicBlur::MIDDLE),
+        border: m.border.filter(|v| *v != Border::default()),
+        blur_alpha: m.blur_alpha.filter(|on| !*on),
+        ..m.clone()
+    })
+}
+
+pub fn effect_checked(e: &Effect) -> Result<Effect> {
+    within(e.blend, (0.0, 1.0), "an effect's blend is from 0 to 1")?;
     let kind = match &e.kind {
-        EffectKind::GaussianBlur(b) => {
-            if ![b.strength, b.vertical_strength]
-                .into_iter()
-                .flatten()
-                .all(share)
-            {
-                return Err(Error::invalid("a Gaussian Blur's strength is from 0 to 1"));
-            }
-            let channel = |v: &f64| v.is_finite() && (0.0..=2.0).contains(v);
-            if ![b.horizontal_channels, b.vertical_channels]
-                .iter()
-                .flatten()
-                .all(|k| k.iter().all(channel))
-            {
-                return Err(Error::invalid(
-                    "a Gaussian Blur's channel values are from 0 to 2",
-                ));
-            }
-            let usual = |v: f64| v != GaussianBlur::STRENGTH;
-            let same = |k: &[f64; 4]| *k != GaussianBlur::SAME;
-            EffectKind::GaussianBlur(GaussianBlur {
-                strength: b.strength.filter(|v| usual(*v)),
-                vertical_strength: b.vertical_strength.filter(|v| usual(*v)),
-                horizontal_channels: b.horizontal_channels.filter(same),
-                vertical_channels: b.vertical_channels.filter(same),
-                border: b.border.filter(|v| *v != crate::model::Border::Reflect),
-                ..b.clone()
-            })
-        }
+        EffectKind::GaussianBlur(b) => EffectKind::GaussianBlur(gaussian_checked(b)?),
+        EffectKind::MosaicBlur(m) => EffectKind::MosaicBlur(mosaic_checked(m)?),
     };
     Ok(Effect {
         kind,
@@ -389,20 +443,32 @@ pub fn effect_shown(e: &Effect) -> Value {
         "use_alpha": e.use_alpha,
         "render_cache": e.render_cache,
     });
-    match &e.kind {
-        EffectKind::GaussianBlur(b) => {
-            let more = json!({
-                "strength": b.across(),
-                "split": b.split,
-                "vertical_strength": b.vertical_strength.unwrap_or(GaussianBlur::STRENGTH),
-                "horizontal_channels": b.across_channels(),
-                "vertical_channels": b.down_channels(),
-                "border": b.edge(),
-            });
-            if let (Some(out), Some(more)) = (out.as_object_mut(), more.as_object()) {
-                out.extend(more.clone());
-            }
-        }
+    let more = match &e.kind {
+        EffectKind::GaussianBlur(b) => json!({
+            "strength": b.across(),
+            "split": b.split,
+            "vertical_strength": b.vertical_strength.unwrap_or(GaussianBlur::STRENGTH),
+            "horizontal_channels": b.across_channels(),
+            "vertical_channels": b.down_channels(),
+            "border": b.edge(),
+        }),
+        EffectKind::MosaicBlur(m) => json!({
+            "pixel_frequency": m.frequency(),
+            "smooth_strength": m.smooth(),
+            "cell_shape": m.shape(),
+            "aliasing": m.box_size(),
+            "x_offset": m.offsets()[0],
+            "y_offset": m.offsets()[1],
+            "aspect": m.stretch(),
+            "position": m.place(),
+            "border": m.edge(),
+            "antialias": m.antialias,
+            "blur_alpha": m.blurs_alpha(),
+            "whole_cells": m.whole_cells,
+        }),
+    };
+    if let (Some(out), Some(more)) = (out.as_object_mut(), more.as_object()) {
+        out.extend(more.clone());
     }
     out
 }

@@ -46,6 +46,7 @@ const CLUSTER_HEADING: f32 = 26.0;
 #[derive(Default)]
 pub(super) struct BinsUi {
     pub(super) targets: Vec<(Rect, String)>,
+    pub(super) area: Option<Rect>,
     order: Vec<String>,
     rename: Option<Rename>,
     list: Option<ListLayout>,
@@ -413,6 +414,7 @@ impl Workspace {
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
         self.hover = None;
         self.bins.targets.clear();
+        self.bins.area = Some(ui.max_rect());
         let press = ui.input(|i| i.pointer.press_origin().filter(|_| i.pointer.any_pressed()));
         let snap = self.snap.clone();
         let project = snap.project();

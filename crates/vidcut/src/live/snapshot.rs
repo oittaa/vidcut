@@ -514,6 +514,7 @@ mod tests {
 
     fn placed(start: i64, source_in: i64) -> Clip {
         Clip {
+            input_lut: None,
             id: "c1".into(),
             media: "m".into(),
             start,

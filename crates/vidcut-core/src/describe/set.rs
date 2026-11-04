@@ -732,6 +732,7 @@ impl Words<'_> {
         s.put("render_cache", "Render Cache", &word, |c| {
             json!(c.render_cache)
         });
+        s.put("input_lut", "Input LUT", &text, |c| json!(c.input_lut));
         s.f.text()
     }
 
@@ -854,6 +855,7 @@ impl Words<'_> {
         s.put("render_cache", "Render Cache", &word, |x| {
             json!(x.render_cache)
         });
+        s.put("output_lut", "Output LUT", &text, |x| json!(x.output_lut));
         let spec = |key: &str| serde_json::from_value::<TimeSpec>(p[key].clone()).ok();
         if !p["start_tc"].is_null() {
             let new = first.zip(spec("start_tc")).and_then(|(x, t)| {

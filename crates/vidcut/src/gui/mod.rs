@@ -35,6 +35,7 @@ mod scopes;
 pub(crate) mod shortcuts;
 mod shuttle;
 mod speech;
+mod subclip;
 mod subtitles;
 mod super_scale;
 mod sync_bin;

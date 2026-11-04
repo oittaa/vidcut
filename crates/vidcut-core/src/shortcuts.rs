@@ -99,6 +99,7 @@ actions! {
     ClearMarks "clear_marks",
     AddMarker "add_marker",
     DeleteMarker "delete_marker",
+    CreateSubclip "create_subclip",
     SmartInsert "smart_insert",
     Overwrite "overwrite",
     RippleOverwrite "ripple_overwrite",
@@ -128,6 +129,7 @@ actions! {
     SelectAll "select_all",
     SelectNothing "select_nothing",
     SelectAtPlayhead "select_at_playhead",
+    SelectClipAtPlayhead "select_clip_at_playhead",
     NearestCut "nearest_cut",
     CutSide "cut_side",
     TrimLeft "trim_left",
@@ -891,6 +893,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         None,
     ),
     own(
+        Mark,
+        Action::CreateSubclip,
+        &["Alt+B"],
+        "Create a subclip",
+        Some("In the Source Clip viewer, from the In and Out of the clip."),
+    ),
+    own(
         Edit,
         Action::SmartInsert,
         &["F9"],
@@ -1172,6 +1181,13 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["Alt+Shift+V"],
         "Select the clips at the playhead",
         Some("Every clip under the playhead, on every track."),
+    ),
+    own(
+        Trim,
+        Action::SelectClipAtPlayhead,
+        &["Shift+V"],
+        "Select the clip at the playhead",
+        Some("The clip under the playhead on the lowest track that has one."),
     ),
     own(
         Trim,

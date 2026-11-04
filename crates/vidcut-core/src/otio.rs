@@ -818,6 +818,9 @@ pub fn export_drawn(
                 if let Some(x) = &c.picture {
                     meta["picture"] = json!(x);
                 }
+                if let Some(x) = &c.input_lut {
+                    meta["input_lut"] = json!(x);
+                }
                 if let Some(au) = &c.audio {
                     meta["stream"] = json!(au.stream);
                     meta["gain_db"] = json!(au.gain_db);
@@ -1374,6 +1377,7 @@ pub struct ImportedClip {
     pub speed: Option<Speed>,
     pub color: Option<String>,
     pub own_color: Option<Option<String>>,
+    pub input_lut: Option<PathBuf>,
 }
 
 impl ImportedClip {
@@ -1457,6 +1461,7 @@ impl ImportedClip {
             speed: None,
             color: clip_color(item),
             own_color: kept_color(item),
+            input_lut: None,
         }
     }
 
@@ -2197,6 +2202,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         speed,
                         color: clip_color(item),
                         own_color: kept_color(item),
+                        input_lut: meta["input_lut"].as_str().map(PathBuf::from),
                     });
                 }
                 Err(e) => warnings.push(format!("{}; left as a gap", e.message)),
@@ -2384,6 +2390,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 speed,
                 color: clip_color(item),
                 own_color: kept_color(item),
+                input_lut: None,
             });
         }
         transitions_of(between, &keys, true, fps, &mut found);
