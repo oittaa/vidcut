@@ -2434,6 +2434,31 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - Source Overwrite makes a synced cutaway. A clip that is out of sync is the fault that this edit is there to prevent.
 
+## X127. The viewer has scopes
+
+- **Resolve:**
+  - The Cut page has no scope. The video scopes open on the Color, Media and Deliver pages (pp. 3092–3093).
+  - They are docked on the Color page, in a floating window or on a second display (pp. 3092–3093).
+  - By default, the Waveform and the Parade have a 10-bit scale from 0 to 1023, whatever the data levels of the project are (p. 3093).
+  - A menu changes that scale to 12-bit, percent, millivolts or nits (p. 3093).
+  - The Vectorscope has targets for 75 percent color bars, and a skin tone line that the user can turn on (p. 3098).
+  - The Waveform overlays Y, CbCr or RGB (p. 3097).
+  - The Parade shows RGB, YRGB or YCbCr. It has options for color, extents, brightness and reference levels (p. 3102).
+  - There are five scopes (p. 3097). The Histogram is one of the others (p. 3093).
+- **vidcut:**
+  - The View menu and the header of the viewer turn on the Waveform, the Parade and the Vectorscope, each one by itself.
+  - The scopes are in a column at the right of the viewer picture, one above the other.
+  - The Trim Editor, Dynamic Trim, Multi Source and the grid of a synced group show no scopes.
+  - `viewer.scopes` turns them on and off. `frame.scope` renders one scope to a PNG with no window.
+  - The Waveform shows luma. The Parade shows red, green and blue, each in its color.
+  - The scale follows the timeline color space: 10-bit in SDR, and nits in HDR PQ and HDR HLG. There is no menu for the scale.
+  - The Vectorscope has the 75 percent targets. It has no skin tone line.
+  - vidcut has only these three scopes, and none of the options of a scope.
+- **Why:**
+  - vidcut has no Color, Media or Deliver page. Thus the viewer is the place for the scopes.
+  - A cut that vidcut delivers does not go through another page. The scopes let the user see the levels of that cut.
+  - The scale follows the timeline, because the same color space then gives the same scale with no setting to change.
+
 ## X128. Removing a file takes it out of its groups
 
 - **Resolve:**

@@ -2597,6 +2597,23 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         viewer: bool,
     },
+    /// Render one scope of the viewer picture as PNG: the timeline at `at`,
+    /// drawn as the viewer draws it, with no window. The answer gives the
+    /// timeline color space and the marks of the scale.
+    #[serde(rename = "frame.scope")]
+    FrameScope {
+        at: TimeSpec,
+        out: PathBuf,
+        scope: crate::preferences::Scope,
+        /// Width of the scope, 16 to 4096. Default: 1024, or 512 for the
+        /// vectorscope.
+        #[serde(default)]
+        width: Option<u32>,
+        /// Height of the scope, 16 to 4096. Default: half the width, or the
+        /// width for the vectorscope.
+        #[serde(default)]
+        height: Option<u32>,
+    },
     /// A storyboard: one PNG with a picture of every shot (or every
     /// `every`), labeled with timecode and clip, to look at an edit at a
     /// glance. Over `range` (default: everything).
@@ -2913,6 +2930,19 @@ pub enum Request {
         title: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         center: Option<bool>,
+    },
+    /// The scopes of the viewer: a waveform, a parade and a vectorscope of
+    /// its picture, in the timeline color space. Stored in preferences, not
+    /// the project. A field that is left out stays as it is. With no fields,
+    /// tells which scopes are on.
+    #[serde(rename = "viewer.scopes")]
+    ViewerScopes {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parade: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        vectorscope: Option<bool>,
     },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
@@ -4590,6 +4620,7 @@ impl Request {
                 | Self::PreferencesSet(_)
                 | Self::PreferencesReset {}
                 | Self::ViewerGuides { .. }
+                | Self::ViewerScopes { .. }
                 | Self::KeysList {}
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
@@ -4647,6 +4678,7 @@ impl Request {
                     | Self::ExportPlan(_)
                     | Self::ExportStart(_)
                     | Self::FrameRender { .. }
+                    | Self::FrameScope { .. }
                     | Self::PresetsList {}
                     | Self::PresetsGet { .. }
                     | Self::PresetsSave { .. }
@@ -4660,6 +4692,7 @@ impl Request {
                     | Self::PreferencesSet(_)
                     | Self::PreferencesReset {}
                     | Self::ViewerGuides { .. }
+                    | Self::ViewerScopes { .. }
                     | Self::KeysList {}
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }
@@ -4713,6 +4746,7 @@ impl Request {
                 .collect(),
             Self::ExportPlan(p) | Self::ExportStart(p) => vec![&mut p.output],
             Self::FrameRender { out, .. }
+            | Self::FrameScope { out, .. }
             | Self::StoryboardRender { out, .. }
             | Self::GuiScreenshot { out, .. } => vec![out],
             Self::Apply { commands, .. } => commands.iter_mut().flat_map(Self::paths_mut).collect(),

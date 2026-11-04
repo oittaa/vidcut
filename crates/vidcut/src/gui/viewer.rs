@@ -237,12 +237,19 @@ impl Workspace {
         let row = Row {
             left: &modes,
             fill: Some((Header::Title, Align::Min)),
-            right: &[Header::FullScreen, Header::Duration],
-            leaving: &[modes[3], modes[1], modes[0], modes[2], Header::FullScreen],
+            right: &[Header::Scopes, Header::FullScreen, Header::Duration],
+            leaving: &[
+                Header::Scopes,
+                modes[3],
+                modes[1],
+                modes[0],
+                modes[2],
+                Header::FullScreen,
+            ],
             group: |h| match h {
                 Header::Mode(_) => 0,
                 Header::Title => 1,
-                Header::FullScreen | Header::Duration => 2,
+                Header::Scopes | Header::FullScreen | Header::Duration => 2,
             },
         };
         ui.horizontal(|ui| {
@@ -263,6 +270,7 @@ impl Workspace {
                 Header::Title => {
                     ui.add(egui::Label::new(RichText::new(ws.viewer_title()).strong()).truncate())
                 }
+                Header::Scopes => ui.menu_button("Scopes", |ui| ws.scopes_menu(ui)).response,
                 Header::FullScreen => {
                     let on = ws.snap.viewer_frame == ViewerFrame::FullScreen;
                     let r = ui.selectable_label(on, "Full Screen");
@@ -310,6 +318,9 @@ impl Workspace {
             p.settings.width as f32 / p.settings.height.max(1) as f32
         });
         let ppp = ui.ctx().pixels_per_point();
+        let one_picture =
+            !dynamic && trim.is_none() && mode != ViewerMode::MultiSource && !sync_grid;
+        let (area, plots) = self.scope_column(area, one_picture, ppp);
         let picture = {
             use eframe::emath::GuiRounding;
             fit(area.shrink(2.0), aspect).round_to_pixels(ppp)
@@ -355,6 +366,7 @@ impl Workspace {
             return;
         }
         let area_resp = ui.allocate_rect(area, Sense::click_and_drag());
+        self.paint_scopes(ui, &plots);
         if mode.is_source()
             && area_resp.drag_started()
             && let Some((media, _)) = self.snap.source_at()
@@ -1800,6 +1812,7 @@ impl Workspace {
 enum Header {
     Mode(ViewerMode),
     Title,
+    Scopes,
     FullScreen,
     Duration,
 }

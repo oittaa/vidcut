@@ -604,6 +604,7 @@ The file:
 - Preferences are not in the project. They are in `preferences.toml` in the config dir (`preferences::path`).
 - The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services and viewer ([the disk cache limit](analysis.md#the-disk-cache-limit)).
 - `ViewerPrefs.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
+- `ViewerPrefs.scopes` (`Scopes`) holds which scopes of the viewer are on.
 - No key of a service is ever in the file.
 
 Requests:
@@ -614,8 +615,9 @@ Requests:
 - `preferences.reset` keeps the old file under the first free backup name (`preferences.toml.bak`, then `.bak.2` and on), then writes the defaults. Why: a second reset never replaces the backup of the first.
 - `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it, and replaces the file atomically.
 - `viewer.guides` changes the same `Guides` (`Guides::applied`). With no fields, it toggles the framing guides.
+- `viewer.scopes` changes the same `Scopes` (`ScopesPatch`). With no fields, it tells which scopes are on.
 - Code reads the file when it needs a value (`preferences::load`).
-- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words, the viewer guides and the render cache.
+- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words and the render cache. It also follows the viewer guides and the viewer scopes.
 
 Reset:
 

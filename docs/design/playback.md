@@ -296,6 +296,7 @@ The audio device:
     - A Push blurs the whole result. A Slide mixes the blur in by the part of the box that the moving side covers.
     - Why: these rules give Resolve's renders within about 1 pixel ([gotchas](../gotchas.md#resolves-otio-files)).
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
+- With a scope on, each turn also calls `Screen::scopes` after `Screen::draw` ([gpu](gpu.md#the-scopes)). `Viewer::sync_scopes` shows each scope's target in the same way.
 - A present answers with the frame drawn, if it is exact. A `gui.screenshot` of the viewer reads the target back, to the pixel.
 - Submissions go through `Gate::pass`. They wait until the UI thread runs `logic` or `ui`, because eframe configures the surface of the window outside these. If the UI is away for long, submissions do not wait.
 

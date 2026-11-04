@@ -134,7 +134,7 @@ Other clients: `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}
 - `use_project` selects a project. With `create: true`, it makes one.
 - Calls route like the calls of the CLI. Arguments can carry `dry_run` and `if_rev`.
 - Results are the response JSON. Failures are tool errors that give the error code.
-- `frame_render`, `gui_screenshot` and `storyboard_render` also return the PNG as an image.
+- `frame_render`, `frame_scope`, `gui_screenshot` and `storyboard_render` also return the PNG as an image.
 
 ## Result fields
 
