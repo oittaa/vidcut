@@ -1,4 +1,6 @@
-use crate::model::{Border, CompositeMode, Effect, EffectKind, Picture, VideoInfo};
+use crate::model::{
+    Border, CellShape, CompositeMode, Effect, EffectKind, MosaicBlur, Picture, VideoInfo,
+};
 use crate::render::Placed;
 
 const LEAST_ZOOM: f64 = 1e-9;
@@ -69,7 +71,20 @@ impl Soft {
 pub struct Placing {
     pub levels: Vec<Level>,
     pub mode: CompositeMode,
-    pub effects: Vec<Blurring>,
+    pub effects: Vec<Working>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Working {
+    pub work: Work,
+    pub blend: f64,
+    pub use_alpha: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Work {
+    Blur(Blurring),
+    Mosaic(Tiling),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -77,28 +92,87 @@ pub struct Blurring {
     pub across: [f64; 4],
     pub down: [f64; 4],
     pub border: Border,
-    pub blend: f64,
-    pub use_alpha: bool,
 }
 
-impl Blurring {
-    fn of(e: &Effect, width: f64) -> Option<Self> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tiling {
+    pub shape: CellShape,
+    pub cell: [f64; 2],
+    pub step: f64,
+    pub origin: [f64; 2],
+    pub reach: [u32; 2],
+    pub samples: u32,
+    pub blur_alpha: bool,
+    pub whole: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct OnFrame {
+    width: f64,
+    size: [f64; 2],
+    middle: [f64; 2],
+}
+
+impl Tiling {
+    const LEAST: f64 = 1e-3;
+    const MOST_REACH: f64 = 1e9;
+
+    fn of(m: &MosaicBlur, on: &OnFrame) -> Self {
+        let samples = if m.antialias { 2.0 } else { 1.0 };
+        let [w, h] = on.size;
+        let [mx, my] = on.middle;
+        let high = (samples * MosaicBlur::CELL * (w * h).sqrt() / m.frequency()).max(Self::LEAST);
+        let cell = [(high * m.stretch()).max(Self::LEAST), high];
+        let step = match m.shape() {
+            CellShape::Square => cell[0],
+            CellShape::Hexagon => (cell[0] * 3.0_f64.sqrt() / 2.0).max(Self::LEAST),
+            CellShape::Triangle => (cell[0] / 3.0_f64.sqrt()).max(Self::LEAST),
+        };
+        let [px, py] = m.place();
+        let [dx, dy] = m.offsets();
+        let origin = [
+            (samples * (mx + (px - 0.5) * w) + dx * 0.5 * cell[0]).rem_euclid(2.0 * step),
+            (samples * (my + (0.5 - py) * h) - dy * 0.5 * cell[1]).rem_euclid(2.0 * cell[1]),
+        ];
+        let reach = cell.map(|c| (m.box_size() * c / 2.0 + 1e-9).min(Self::MOST_REACH) as u32);
+        Self {
+            shape: m.shape(),
+            cell,
+            step,
+            origin,
+            reach,
+            samples: samples as u32,
+            blur_alpha: m.blurs_alpha(),
+            whole: m.whole_cells,
+        }
+    }
+}
+
+impl Working {
+    fn of(e: &Effect, on: &OnFrame) -> Option<Self> {
         if !e.on || e.mixed() <= 0.0 {
             return None;
         }
-        match &e.kind {
+        let work = match &e.kind {
             EffectKind::GaussianBlur(b) => {
-                let (across, down) = b.spreads(width);
+                let (across, down) = b.spreads(on.width);
                 let still = across.iter().chain(&down).all(|s| *s <= 0.0);
-                (!(still && e.use_alpha)).then_some(Self {
+                if still && e.use_alpha {
+                    return None;
+                }
+                Work::Blur(Blurring {
                     across,
                     down,
                     border: b.edge(),
-                    blend: e.mixed(),
-                    use_alpha: e.use_alpha,
                 })
             }
-        }
+            EffectKind::MosaicBlur(m) => Work::Mosaic(Tiling::of(m, on)),
+        };
+        Some(Self {
+            work,
+            blend: e.mixed(),
+            use_alpha: e.use_alpha,
+        })
     }
 }
 
@@ -279,31 +353,39 @@ impl Placing {
         let whole = [0.0, 0.0, frame.0, frame.1];
         let mut levels: Vec<Level> = Vec::with_capacity(placed.len());
         let mut effects = Vec::new();
-        let mut zoom = 1.0;
+        let mut stretch = [1.0, 1.0];
         for (i, p) in placed.iter().enumerate().rev() {
             let [zx, zy] = p.picture.scale_at(p.source as f64);
-            zoom *= (zx * zy).abs().sqrt();
-            let mut own: Vec<Blurring> = p
-                .picture
-                .effects
-                .iter()
-                .filter_map(|e| Blurring::of(e, frame.0 * zoom))
-                .collect();
-            own.append(&mut effects);
-            effects = own;
+            stretch = [stretch[0] * zx.abs(), stretch[1] * zy.abs()];
             let (at, size) = if i == 0 {
                 (fitted, pixels)
             } else {
                 (whole, frame)
             };
-            if i == 0 && !levels.is_empty() && at == whole && p.picture.is_usual() {
-                continue;
-            }
             let own = level(p, frame, at, size);
             let back = match levels.last() {
                 Some(outer) => then(&outer.back, &own.back, frame),
                 None => own.back,
             };
+            let unzoomed = p
+                .zoomed()
+                .map_or(Picture::MIDDLE, |b| flipped(&p.picture, b.center));
+            let on = OnFrame {
+                width: frame.0 * (stretch[0] * stretch[1]).sqrt(),
+                size: [at[2] * stretch[0], at[3] * stretch[1]],
+                middle: ahead(&back, unzoomed),
+            };
+            let mut made: Vec<Working> = p
+                .picture
+                .effects
+                .iter()
+                .filter_map(|e| Working::of(e, &on))
+                .collect();
+            made.append(&mut effects);
+            effects = made;
+            if i == 0 && !levels.is_empty() && at == whole && p.picture.is_usual() {
+                continue;
+            }
             levels.push(Level { back, ..own });
         }
         for l in &mut levels {
