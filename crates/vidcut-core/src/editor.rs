@@ -6538,12 +6538,9 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
         p.settings.sample_rate = sr;
     }
     if let Some(ch) = set.channels {
-        use crate::model::Settings;
-        if !Settings::channels_fit(ch) {
-            return Err(Error::invalid(format!(
-                "channels must be {}",
-                Settings::CHANNELS
-            )));
+        let most = crate::model::Settings::MOST_CHANNELS;
+        if !(1..=most).contains(&ch) {
+            return Err(Error::invalid(format!("channels must be 1..{most}")));
         }
         p.settings.channels = ch;
     }

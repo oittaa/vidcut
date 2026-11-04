@@ -732,7 +732,7 @@ impl AudioOut {
         use format::sample::Type::{Packed, Planar};
         let ch = usize::from(self.spec.channels);
         let n = samples.len() / ch;
-        let layout = ffmpeg::ChannelLayout::default(i32::from(self.spec.channels));
+        let layout = audio::channel_layout(self.spec.channels);
         let mut f = frame::Audio::new(self.spec.sample, n, layout);
         f.set_rate(self.spec.rate);
         match self.spec.sample {
@@ -1087,7 +1087,7 @@ fn encode(
                 .audio()
                 .ctx(|| format!("creating {}", spec.name))?;
             ctx.set_rate(spec.rate as i32);
-            ctx.set_channel_layout(ffmpeg::ChannelLayout::default(i32::from(spec.channels)));
+            ctx.set_channel_layout(audio::channel_layout(spec.channels));
             ctx.set_format(spec.sample);
             ctx.set_time_base(ffmpeg::Rational(1, spec.rate as i32));
             if let Some(b) = spec.bitrate {

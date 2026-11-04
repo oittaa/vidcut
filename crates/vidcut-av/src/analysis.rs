@@ -8,7 +8,7 @@ use vidcut_core::render::{AudioPiece, Ducking, RenderPlan};
 
 use crate::decode::decode_stream;
 use crate::error::{Context, Error, Result};
-use crate::export::audio::{AudioMix, Resampler, discard_others};
+use crate::export::audio::{AudioMix, Resampler, channel_layout, discard_others};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
 
 pub fn audio_levels(path: &Path, ordinal: u32, per_second: u32) -> Result<AudioLevels> {
@@ -490,12 +490,7 @@ pub fn mix_loudness(
     let channels = channels.max(1);
     let mut mix = AudioMix::new(lanes, rate, channels, declick_ms).ducked(ducking);
     let mut graph = crate::pool::graph(crate::decode::Reading::Stream);
-    let layout = ffmpeg::ChannelLayout::default(i32::from(channels)).bits();
-    if layout == 0 {
-        return Err(Error::Invalid(format!(
-            "{channels} channels: can't measure"
-        )));
-    }
+    let layout = channel_layout(channels).bits();
     let args =
         format!("sample_rate={rate}:sample_fmt=flt:channel_layout=0x{layout:x}:time_base=1/{rate}");
     graph
@@ -562,7 +557,7 @@ pub fn mix_loudness(
         let mut f = frame::Audio::new(
             format::Sample::F32(format::sample::Type::Packed),
             n,
-            ffmpeg::ChannelLayout::default(i32::from(channels)),
+            channel_layout(channels),
         );
         f.set_rate(rate);
         f.set_pts(Some(done));
