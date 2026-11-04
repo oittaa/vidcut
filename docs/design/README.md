@@ -190,7 +190,7 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
 | snapshot | what the GUI draws, published by the live core | `Snapshot` |
 | origin | a cache stamp of the path, size and time of a file | `Origin` |
 | kept | data of another editor that vidcut carries without a model of it | `Kept` |
-| lru | a cache of a set number of entries that lets the least recently used go; an `Uncapped` one has no set number, and its owner decides what goes | `Lru`, `Uncapped` |
+| lru | a cache of a set number of entries that lets the least recently used go; a `ByBytes` one has a limit in bytes; an `Uncapped` one has no set number, and its owner decides what goes | `Lru`, `ByBytes`, `Uncapped` |
 
 ## Pages
 

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::lru::Uncapped;
+use crate::lru::ByBytes;
 use crate::model::{ClipCache, CompositeMode, Project, RenderCache, Retime, SuperScale, Upscaler};
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
 use crate::render::{Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
@@ -561,12 +561,11 @@ impl Part {
     }
 }
 
-const KEYS_KEPT: usize = 1 << 22;
+const KEYS_BYTES: usize = 64 << 20;
 
 #[derive(Default)]
 struct PieceKeys {
-    pieces: Uncapped<Key, Arc<[Key]>>,
-    kept: usize,
+    pieces: ByBytes<Key, Arc<[Key]>>,
 }
 
 impl PieceKeys {
@@ -575,14 +574,9 @@ impl PieceKeys {
     }
 
     fn insert(&mut self, memo: Key, keys: Arc<[Key]>) {
-        self.kept += keys.len() + 1;
-        self.pieces.insert(memo, keys);
-        while self.kept > KEYS_KEPT && self.pieces.len() > 1 {
-            let Some((_, old)) = self.pieces.pop_oldest() else {
-                break;
-            };
-            self.kept -= old.len() + 1;
-        }
+        let bytes = (keys.len() + 1) * size_of::<Key>();
+        self.pieces.insert(memo, keys, bytes);
+        self.pieces.fit(KEYS_BYTES);
     }
 }
 
