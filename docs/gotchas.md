@@ -87,6 +87,9 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 
 ## FFmpeg: filters and colors
 
+- **FFmpeg's `buffer` source takes the frame it is given** (`av_buffersrc_add_frame`, which ffmpeg-next's `Source::add` calls).
+  - It moves the buffers out of the frame, and leaves the frame empty.
+  - Thus `hw::run_graph` gives the graph of a turn a reference of its own (`av_frame_ref`).
 - **FFmpeg's scaler makes RGB and gray of more than 8 bits too bright when it converts them to YUV** (9.0.1, `scale`).
   - The top of an input of N bits acts as 255 × 2^(N-8), not as 2^N - 1.
   - Thus luma and chroma have a gain: 1.0039 at 16 bits, 1.0037 at 12 bits, 1.0029 at 10 bits.
@@ -98,9 +101,6 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - The conversion through `rgb48le`, `rgba64le` or `gray16le` gives 65535 at each of these depths.
   - Thus `Relayout` converts a picture of 9 to 15 bits through these forms.
 - **FFmpeg's scaler ignores the range of a gray input** (9.0.1, `scale`). It reads the codes as full range, with a tag or `in_range`. Thus vidcut reads all gray in full range.
-- **FFmpeg's `buffer` source takes the frame it is given** (`av_buffersrc_add_frame`, which ffmpeg-next's `Source::add` calls).
-  - It moves the buffers out of the frame, and leaves the frame empty.
-  - Thus `hw::run_graph` gives the graph of a turn a reference of its own (`av_frame_ref`).
 - **FFmpeg's GPU deinterlacers aren't `bwdif`** (9.0.1).
   - `bwdif_vulkan` reads black past the top and bottom edges, and does not clip to the bits of the frame.
   - Thus its 10-bit edge rows come out at half level, or overshoot.
