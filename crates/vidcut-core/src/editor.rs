@@ -3367,6 +3367,12 @@ fn mutate(
             ops::trim_to(p, *edge, at, &ids, *ripple)?;
             Value::Null
         }
+        Request::EditRollToPlayhead { edge, at, clips } => {
+            let at = resolve(p, at, playhead)?;
+            let ids = resolve_clips(p, clips, playhead)?;
+            ops::roll_to(p, *edge, at, &ids)?;
+            Value::Null
+        }
         Request::EditChangeDuration {
             clips,
             duration,
@@ -6534,8 +6540,9 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
         p.settings.sample_rate = sr;
     }
     if let Some(ch) = set.channels {
-        if !(1..=8).contains(&ch) {
-            return Err(Error::invalid("channels must be 1..8"));
+        let most = crate::model::Settings::MOST_CHANNELS;
+        if !(1..=most).contains(&ch) {
+            return Err(Error::invalid(format!("channels must be 1..{most}")));
         }
         p.settings.channels = ch;
     }

@@ -2538,3 +2538,16 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Each kind follows its rule at each size, in each column.
 - **Why:**
   - These are faults in Resolve. vidcut has the correct picture.
+
+## X130. A camera opened alone keeps the length of the grid marks
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2.
+  - In the Multi Source grid, an In at 250 and an Out at 350 give 101 frames.
+  - Opening a camera alone gives the file an In at 250 and an Out at 349. An edit then takes 100 frames.
+- **vidcut:**
+  - Opening a camera alone gives the file the marks of the grid as they are.
+  - An edit from the grid and an edit from the camera alone take the same frames.
+- **Why:**
+  - The same marks give the same frames in both views.
+  - The owner approved this difference.
