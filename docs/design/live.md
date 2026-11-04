@@ -137,6 +137,8 @@ The snapshot:
 
 - The `Snapshot` carries the project, players, selection, notices, filmstrips, waveforms, missing media and jobs.
 - It also carries the timecode count (`TimecodeDisplay`) and the Timer 1 zeros (`Timer1Origin`) of this session.
+- Each change of the project calls `Live::forget_removed`. The filmstrips, waveforms and ducking measurements of removed media leave memory.
+- An undo that brings the media back makes them again.
 - `Port` passes `Renderer::attach`, `Renderer::present` and `Renderer::capture_viewer` to the viewer thread, and the rest to the UI.
 
 ## Steps and waits
