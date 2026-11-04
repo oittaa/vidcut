@@ -2632,10 +2632,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A title that Resolve reads from an OTIO file has one more edge on its letters. vidcut does not draw that edge ([X112](deviations.md#x112-a-title-from-an-otio-file-has-no-black-edge)).
     - The lines of a scroll are 4/3 of the sum of the three heights plus 10 timeline pixels apart. This fits Resolve Studio 21.1.2 within 5 pixels with four fonts.
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
+    - The Inspector takes -270 to 540, and the file holds the same number in `line-height`. A file can hold more, and Resolve draws 2000 from a file. Thus vidcut takes -4096 to 4096 (measured in Resolve Studio 21.1.2).
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
     - Below the last line, a positive value makes the block taller and a negative value does nothing (measured in Resolve Studio 21.1.2).
     - A very negative value keeps all the lines (X111).
     - Tracking adds space after each letter, also after the last letter (p. 1184). `tracking` in the style goes on each letter. `tracking` in markup goes on its words.
+    - The Inspector takes -100 to 100 (measured in Resolve Studio 21.1.2).
     - One unit is 1/100 of the width of the font's letter X, and 1/200 below 0. Zoom scales it.
     - The width of X is in whole pixels, for the size in whole pixels of the timeline, with no zoom.
       - Below the size in the font's `LTSH` table for X, it is the width from the font's hinting for one-bit drawing.
@@ -2657,12 +2659,17 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - `Σ` becomes `σ` also at the end of a word.
     - `<o>` draws a line over the words and `<s>` a line through them (p. 1184).
     - The height of these lines and `<u>` is `underlineThickness` in the font's `post` table.
-    - The left end is the start of the words, rounded up to a whole pixel.
-    - The right end is the exact start plus the width. The width goes down to whole pixels at zoom 1, and again after the zoom.
+    - The ends of a line come from the distance of the words from the left edge of the block, in exact pixels at zoom 1.
+    - The left end is that distance, rounded down to a whole pixel, times the zoom, from the edge of the block.
+    - The right end starts as that distance plus the width of the words. It then follows the same steps as the left end.
+    - The edge of the block cuts the line. Thus a line at the start of the block starts at the first whole pixel.
+    - At other places, each end can cover part of a pixel.
+    - The width of the words has a negative tracking after the last letter of a line. The width of the block does not.
     - The middle of `<u>` is under the baseline by a third of the thickness plus 1/2, rounded up, plus 1/2 pixel.
     - That distance comes from the thickness at zoom 1, and the zoom scales it.
     - The middle of `<s>` is a third of the ascent over the baseline. The middle of `<o>` is the ascent over the baseline.
-    - The top of the block cuts these lines. Thus `<o>` on the first line shows only its lower half.
+    - The top of the block cuts these lines. Thus `<o>` on the first line shows only its lower half, and `<o>` on a whole line of `<sup>` does not show.
+    - On `<sup>` and `<sub>`, these lines follow the shifted baseline. Their height and distance come from the small size.
     - These rules are measurements in Resolve Studio 21.1.2 on Windows, with 10 fonts at sizes 48 to 200, at three zooms and on two lines.
     - `<sup>` and `<sub>` draw the words at 2/3 of their size (p. 1184).
     - The small size is 2/3 of the size in whole pixels at zoom 1, rounded down to a whole pixel. The zoom scales it.
