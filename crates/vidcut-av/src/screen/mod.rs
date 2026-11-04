@@ -1438,7 +1438,7 @@ struct D3d11Shared {
 }
 
 #[cfg(windows)]
-type D3d11Pool = vidcut_core::lru::Lru<ash::vk::Image, D3d11Shared, { usize::MAX }>;
+type D3d11Pool = vidcut_core::lru::Uncapped<ash::vk::Image, D3d11Shared>;
 
 #[cfg(windows)]
 type D3d11Formats = (
