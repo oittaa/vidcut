@@ -107,6 +107,7 @@ The draw:
       - After the loss, `screen::offscreen` gives an error for that device. Thus no new work goes to it.
       - The AI frames fail with that error, and the viewer shows it. The frames without AI play on.
       - Play, seek, step, an export and a frame render make a new device (`screen::retry_lost`).
+      - The lost device goes from memory when its last user stops (`Offscreen`, in an `Arc`).
       - After a loss, the next play, seek or step of a player clears its error. It also drops the pictures that a GPU held (`Store::forget_held`). The lost device cannot give them back.
       - Why: the cause can be gone, for example another program that used much of the GPU.
       - After `RETRIES` losses in one minute, vidcut makes no new device until that minute ends. Why: Windows stops the computer after more than five resets in one minute ([gotchas](../gotchas.md#wgpu-and-egui)).
