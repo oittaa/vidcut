@@ -2205,7 +2205,7 @@ fn ctx(p: &Project, playhead: Option<i64>) -> TimeContext {
     p.time_context(playhead)
 }
 
-fn mark_duration(
+pub fn mark_duration(
     d: &DurationSpec,
     c: &TimeContext,
     mark_in: Option<i64>,
@@ -2661,20 +2661,6 @@ fn mutate(
             crate::multicam::move_to_bin(p, group, bin)?;
             Value::Null
         }
-        Request::MulticamMarksSet {
-            group,
-            mark_in,
-            out,
-        } => json!(crate::multicam::set_marks(
-            p,
-            group,
-            mark_in.as_ref(),
-            out.as_ref()
-        )?),
-        Request::MulticamMarksClear { group } => {
-            crate::multicam::group_mut(p, group)?.marks = Marks::default();
-            Value::Null
-        }
         Request::MulticamPick { media, at } => {
             let at = match at {
                 Some(t) => Some(resolve(p, t, playhead)?),
@@ -2955,7 +2941,7 @@ fn mutate(
         }
         Request::EditAppend(src) => {
             let sources = resolve_sources(p, src)?;
-            clip_ids(&ops::append_block(p, &sources)?)
+            clip_ids(&ops::append_block(p, &sources, src.lead.unwrap_or(0))?)
         }
         Request::EditSmartInsert {
             source: src,
@@ -2964,14 +2950,15 @@ fn mutate(
             let at = resolve(p, at, playhead)?;
             let sources = resolve_sources(p, src)?;
             let edit = ops::nearest_edit(p, at);
-            let mut v = clip_ids(&ops::smart_insert_block(p, &sources, at)?);
+            let lead = src.lead.unwrap_or(0);
+            let mut v = clip_ids(&ops::smart_insert_block(p, &sources, at, lead)?);
             v["at"] = json!(edit);
             v
         }
         Request::EditInsert { source: src, at } => {
             let at = resolve(p, at, playhead)?;
             let sources = resolve_sources(p, src)?;
-            clip_ids(&ops::insert_at_block(p, &sources, at)?)
+            clip_ids(&ops::insert_at_block(p, &sources, at, 0)?)
         }
         Request::EditOverwrite {
             source: src,
@@ -3013,8 +3000,9 @@ fn mutate(
             } else {
                 need(at, "at")?
             };
-            let (ids, track) =
-                without_marks(p, !use_marks, |p| ops::place_on_top_block(p, &sources, at))?;
+            let (ids, track) = without_marks(p, !use_marks, |p| {
+                ops::place_on_top_block(p, &sources, at, src.lead)
+            })?;
             let mut v = clip_ids(&ids);
             v["track"] = json!(track);
             v
@@ -3024,11 +3012,15 @@ fn mutate(
             at,
             group,
             keep_marks,
+            grid,
         } => {
             if src.track.is_some() {
                 return Err(Error::usage(
                     "Source Overwrite picks its own track; leave out `track`",
                 ));
+            }
+            if *grid && src.range.is_none() {
+                return Err(Error::usage("`grid` needs `range`"));
             }
             let at = match at {
                 Some(t) => Some(resolve(p, t, playhead)?),
@@ -3043,7 +3035,12 @@ fn mutate(
             for s in &sources {
                 let marks = &p.media(&s.media).expect("source checked the media").marks;
                 let marked = src.tape || src.range.is_some() || !marks.is_empty();
-                landed.push(ops::source_overwrite(p, s, marked, at, *group)?);
+                let lining = match (*grid, marked) {
+                    (true, _) => ops::SourceLining::Grid,
+                    (false, true) => ops::SourceLining::Marked,
+                    (false, false) => ops::SourceLining::Playhead,
+                };
+                landed.push(ops::source_overwrite(p, s, lining, at, *group)?);
             }
             if !keep_marks {
                 p.marks = Default::default();
@@ -3074,8 +3071,9 @@ fn mutate(
             } else {
                 need(at, "at")?
             };
+            let lead = src.lead.unwrap_or(0);
             let ids = without_marks(p, !use_marks, |p| {
-                ops::ripple_overwrite_block(p, &sources, at)
+                ops::ripple_overwrite_block(p, &sources, at, lead)
             })?;
             clip_ids(&ids)
         }
@@ -5247,8 +5245,6 @@ fn groups_to_rate(p: &mut Project, from: Rational) {
             c.head = rescale(c.head, from, to);
             c.tail = rescale(c.tail, from, to);
         }
-        g.marks.mark_in = g.marks.mark_in.map(|f| rescale(f, from, to));
-        g.marks.mark_out = g.marks.mark_out.map(|f| rescale(f, from, to));
     }
 }
 

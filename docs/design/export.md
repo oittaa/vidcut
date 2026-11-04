@@ -70,7 +70,7 @@ Colors:
 - With a LUT in the plan (`RenderPlan::has_lut`), `metadata::choose_through_lut` takes nothing from the sources. Why: a LUT changes the light of the picture.
   - It keeps the mastering display and the light that the user gives. The report says this.
   - It does not measure the light. The [todo](../todo/luts.md) holds that work.
-- An export first measures the light that the files do not state (`light::analysis`), and caches it.
+- An export first measures the light that the files do not state (`Lights::analysis`), and caches it.
   - The GPU measures the HDR pictures that stay on the GPU ([gpu](gpu.md#the-light-meter)).
   - A generator has no file. Thus it adds no light (`light::sampled`).
 

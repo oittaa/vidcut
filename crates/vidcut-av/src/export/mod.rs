@@ -223,9 +223,10 @@ pub fn probed_metadata<'a>(
     cancel: Option<&'a AtomicBool>,
 ) -> impl FnMut(&VideoPiece) -> PieceMeta + 'a {
     let mut probe = probed_files(decoder);
+    let lights = crate::light::Lights::default();
     move |piece| {
         let mut m = probe(piece);
-        m.measured = measured_light(piece, fps, v, &m, true, decoder, cancel);
+        m.measured = measured_light(&lights, piece, fps, v, &m, true, decoder, cancel);
         m
     }
 }
@@ -245,7 +246,9 @@ pub fn needs_light(v: &VideoSettings, m: &PieceMeta) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn measured_light(
+    lights: &crate::light::Lights,
     piece: &VideoPiece,
     fps: Rational,
     v: &VideoSettings,
@@ -257,7 +260,7 @@ pub fn measured_light(
     if !needs_light(v, m) {
         return Measured::No;
     }
-    match crate::light::piece_level(piece, fps, measure_now, decoder, cancel, &mut |_| {}) {
+    match lights.piece_level(piece, fps, measure_now, decoder, cancel, &mut |_| {}) {
         Ok(Some(l)) => Measured::Known(l),
         Ok(None) if !measure_now => Measured::Pending,
         Err(e) if is_cancelled(&e) => Measured::No,
@@ -520,6 +523,7 @@ fn made_hdr10plus_light(
         return Ok(out);
     }
     let mut probe = probed_files(decoder);
+    let lights = crate::light::Lights::default();
     for (piece, _) in plan.video.iter().flat_map(VideoPiece::layers) {
         let Some(span) = crate::light::Span::of(piece, plan.fps) else {
             continue;
@@ -527,7 +531,7 @@ fn made_hdr10plus_light(
         if probe(piece).hdr10plus {
             continue;
         }
-        match crate::light::analysis(&span, true, decoder, Some(cancel), &mut |_| {}) {
+        match lights.analysis(&span, true, decoder, Some(cancel), &mut |_| {}) {
             Ok(Some(a)) => {
                 out.insert(span.input.path().to_path_buf(), a);
             }

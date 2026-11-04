@@ -22,7 +22,7 @@ pub use dissolve::{
     to_cut,
 };
 use serde_json::json;
-pub use source_overwrite::{Placed, file_start_at, source_overwrite};
+pub use source_overwrite::{Placed, SourceLining, file_start_at, source_overwrite};
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
@@ -360,13 +360,13 @@ fn is_main(p: &Project, ti: usize) -> bool {
 }
 
 pub fn append(p: &mut Project, src: &Source) -> Result<String> {
-    append_block(p, std::slice::from_ref(src)).map(only)
+    append_block(p, std::slice::from_ref(src), 0).map(only)
 }
 
-pub fn append_block(p: &mut Project, srcs: &[Source]) -> Result<Vec<String>> {
+pub fn append_block(p: &mut Project, srcs: &[Source], lead: i64) -> Result<Vec<String>> {
     let mut clips = make_clips(p, srcs)?;
     let ti = home(p, &mut clips, &srcs[0])?;
-    let start = p.tracks[ti].end();
+    let start = p.tracks[ti].end() + lead.max(0);
     let ids = place_block(p, ti, clips, start);
     fix_audio(p, ti);
     Ok(ids)
@@ -397,28 +397,39 @@ pub fn edit_has_handles(p: &Project, e: i64) -> bool {
 }
 
 pub fn smart_insert(p: &mut Project, src: &Source, playhead: i64) -> Result<String> {
-    smart_insert_block(p, std::slice::from_ref(src), playhead).map(only)
+    smart_insert_block(p, std::slice::from_ref(src), playhead, 0).map(only)
 }
 
-pub fn smart_insert_block(p: &mut Project, srcs: &[Source], playhead: i64) -> Result<Vec<String>> {
+pub fn smart_insert_block(
+    p: &mut Project,
+    srcs: &[Source],
+    playhead: i64,
+    lead: i64,
+) -> Result<Vec<String>> {
     let at = nearest_edit(p, playhead);
-    insert_at_block(p, srcs, at)
+    insert_at_block(p, srcs, at, lead)
 }
 
 pub fn insert_at(p: &mut Project, src: &Source, at: i64) -> Result<String> {
-    insert_at_block(p, std::slice::from_ref(src), at).map(only)
+    insert_at_block(p, std::slice::from_ref(src), at, 0).map(only)
 }
 
-pub fn insert_at_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<String>> {
+pub fn insert_at_block(
+    p: &mut Project,
+    srcs: &[Source],
+    at: i64,
+    lead: i64,
+) -> Result<Vec<String>> {
     if at < 0 {
         return Err(Error::invalid("insert position before 0"));
     }
     let mut clips = make_clips(p, srcs)?;
     let ti = home(p, &mut clips, &srcs[0])?;
+    let lead = lead.max(0);
     let len = block_len(&clips);
     if !is_main(p, ti) {
-        clear_range(p, ti, at, at + len);
-        let ids = place_block(p, ti, clips, at);
+        clear_range(p, ti, at + lead, at + lead + len);
+        let ids = place_block(p, ti, clips, at + lead);
         fix_audio(p, ti);
         return Ok(ids);
     }
@@ -430,8 +441,8 @@ pub fn insert_at_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<
         at
     };
     split_at(p, ti, at);
-    shift_from(p, ti, at, len);
-    let ids = place_block(p, ti, clips, at);
+    shift_from(p, ti, at, lead + len);
+    let ids = place_block(p, ti, clips, at + lead);
     fix_audio(p, ti);
     follow::follow(
         p,
@@ -444,13 +455,14 @@ pub fn insert_at_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<
     Ok(ids)
 }
 
-fn marked_start(p: &Project, srcs: &[Source], at: i64) -> (i64, Vec<Source>) {
+fn marked_start(p: &Project, srcs: &[Source], at: i64, lead: Option<i64>) -> (i64, Vec<Source>) {
     let len: i64 = srcs.iter().map(|s| s.range.1 - s.range.0).sum();
+    let gap = lead.unwrap_or(0).max(0);
     match (p.marks.mark_in, p.marks.mark_out) {
-        (Some(i), Some(o)) => (i, fit_to(p, srcs, o - i)),
-        (Some(i), None) => (i, srcs.to_vec()),
+        (Some(i), Some(o)) if lead.is_none() => (i, fit_to(p, srcs, o - i)),
+        (Some(i), _) => (i + gap, srcs.to_vec()),
         (None, Some(o)) => (o - len, srcs.to_vec()),
-        (None, None) => (at, srcs.to_vec()),
+        (None, None) => (at + gap, srcs.to_vec()),
     }
 }
 
@@ -508,7 +520,7 @@ pub fn overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
 }
 
 pub fn overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<String>> {
-    let (start, srcs) = marked_start(p, srcs, at);
+    let (start, srcs) = marked_start(p, srcs, at, None);
     if start < 0 {
         return Err(Error::invalid("overwrite would start before 0"));
     }
@@ -526,10 +538,16 @@ pub fn overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<
 }
 
 pub fn ripple_overwrite(p: &mut Project, src: &Source, at: i64) -> Result<String> {
-    ripple_overwrite_block(p, std::slice::from_ref(src), at).map(only)
+    ripple_overwrite_block(p, std::slice::from_ref(src), at, 0).map(only)
 }
 
-pub fn ripple_overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Result<Vec<String>> {
+pub fn ripple_overwrite_block(
+    p: &mut Project,
+    srcs: &[Source],
+    at: i64,
+    lead: i64,
+) -> Result<Vec<String>> {
+    let lead = lead.max(0);
     let mut clips = make_clips(p, srcs)?;
     let ti = home(p, &mut clips, &srcs[0])?;
     let (a, b) = match (p.marks.mark_in, p.marks.mark_out) {
@@ -544,8 +562,8 @@ pub fn ripple_overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Resu
     };
     let len = block_len(&clips);
     if !is_main(p, ti) {
-        clear_range(p, ti, a, b.max(a + len));
-        let ids = place_block(p, ti, clips, a);
+        clear_range(p, ti, a, b.max(a + lead + len));
+        let ids = place_block(p, ti, clips, a + lead);
         fix_audio(p, ti);
         return Ok(ids);
     }
@@ -557,15 +575,16 @@ pub fn ripple_overwrite_block(p: &mut Project, srcs: &[Source], at: i64) -> Resu
     };
     let before = Before::of(p);
     clear_range(p, ti, a, b);
-    shift_from(p, ti, b, len - (b - a));
-    let ids = place_block(p, ti, clips, a);
+    shift_from(p, ti, b, lead + len - (b - a));
+    let ids = place_block(p, ti, clips, a + lead);
     fix_audio(p, ti);
     follow::follow(
         p,
         &before,
         &Edit {
             created: &ids,
-            kept: &[(a, a + len.min(b - a))],
+            kept: &[(a, a + (lead + len).min(b - a))],
+            replaced: (b > a).then_some((a + lead + len, b)),
             ..Edit::default()
         },
     );
@@ -583,7 +602,7 @@ fn track_above(p: &mut Project, start: i64, end: i64) -> usize {
 }
 
 pub fn place_on_top(p: &mut Project, src: &Source, playhead: i64) -> Result<(String, String)> {
-    let (ids, track) = place_on_top_block(p, std::slice::from_ref(src), playhead)?;
+    let (ids, track) = place_on_top_block(p, std::slice::from_ref(src), playhead, None)?;
     Ok((only(ids), track))
 }
 
@@ -591,6 +610,7 @@ pub fn place_on_top_block(
     p: &mut Project,
     srcs: &[Source],
     playhead: i64,
+    lead: Option<i64>,
 ) -> Result<(Vec<String>, String)> {
     let marked = p.marks.mark_in.is_some() || p.marks.mark_out.is_some();
     let at = if marked {
@@ -603,7 +623,7 @@ pub fn place_on_top_block(
             playhead
         }
     };
-    let (start, srcs) = marked_start(p, srcs, at);
+    let (start, srcs) = marked_start(p, srcs, at, lead);
     if start < 0 {
         return Err(Error::invalid("the clip would start before 0"));
     }

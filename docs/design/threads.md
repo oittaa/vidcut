@@ -56,7 +56,7 @@ The values in the Priority column:
 | `vidcut-audio-out` | `CpalOutput`, `PacedOutput` | the stream of the device, or paced silence | inherited |
 | `vidcut-encode` | `Worker::spawn` | the encoders and muxer of an output | starter's |
 | `vidcut-open` | `Ahead::start` | opens sources ahead | starter's |
-| `vidcut-light-N`, `vidcut-scenes` | `light::analysis`, `analysis::picture_stats` | HDR light; frame scores | starter's |
+| `vidcut-light-N`, `vidcut-scenes` | `Lights::analysis`, `analysis::picture_stats` | HDR light; frame scores | starter's |
 | `vidcut-cpu-N`, `vidcut-cpu-job-N` | the first `pool::run` or `pool::give` | the two CPU pools | inherited; lowest class |
 | `vidcut-give-back` | `buffers::give_back` | `malloc_trim` (Linux, glibc) | inherited |
 | `vidcut-upscale-rest` | `nanovsr::upscale` | the other frames of an AI chunk, after the asked frame | inherited |

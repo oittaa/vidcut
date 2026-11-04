@@ -194,7 +194,9 @@ pub struct Snapshot {
     pub source: PlayerSnap,
     pub timeline: PlayerSnap,
     pub source_media: Option<String>,
-    pub source_group: Option<String>,
+    pub source_grid: Arc<vidcut_core::multicam::SourceGrid>,
+    pub multi_marks: vidcut_core::model::Marks,
+    pub multi_alone: bool,
     pub tape: Arc<Vec<TapeEntry>>,
     pub selection: Selection,
     pub pool: PoolView,
@@ -282,12 +284,12 @@ pub fn tape_at(tape: &[TapeEntry], position: i64) -> Option<&TapeEntry> {
         .or(tape.last())
 }
 
-fn source_entry(viewer: ViewerMode, tape: &[TapeEntry], position: i64) -> Option<&TapeEntry> {
+pub fn source_entry(viewer: ViewerMode, tape: &[TapeEntry], position: i64) -> Option<&TapeEntry> {
     match viewer {
         ViewerMode::SourceTape => tape_at(tape, position),
         ViewerMode::MultiSource => tape
-            .first()
-            .filter(|e| e.start <= position && position < e.start + e.frames),
+            .iter()
+            .find(|e| e.start <= position && position < e.start + e.frames),
         ViewerMode::SourceClip | ViewerMode::Timeline => None,
     }
 }

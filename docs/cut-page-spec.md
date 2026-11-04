@@ -301,7 +301,6 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - `multicam.rename` and `multicam.move` act on the group. `multicam.remove` removes the group, and its files stay.
   - A group can have one file.
   - `media.remove` also takes the file out of its groups. A group with no file left goes too ([deviation X128](deviations.md#x128-removing-a-file-takes-it-out-of-its-groups)).
-  - `multicam.marks.set` and `multicam.marks.clear` act on the In and Out of the group ([§4.1](#41-modes)). `multicam.list` gives them.
   - No command places a group on the timeline.
   - The pool does not show a group as an item. A file in a group has a blue sync badge.
   - `multicam.set` sets the rows and the sync locks of a group ([§7.5](#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). `multicam.create` takes them as `rows`, and the group then starts at 01:00:00:00.
@@ -372,22 +371,52 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Source Tape** (pp. 680–681, 704–706):
   - All pool clips play end to end as one tape, in the pool sort order.
   - The clip under the playhead becomes selected in the pool.
-- **Multi Source** (pp. 679, 682):
-  - The Viewer lays out the files of one synced group in a grid. All of them follow one playhead.
-  - `viewer.set` with `multi_source` opens it. `group` names the group, and the group of the open clip is the default.
-  - One file is the active angle. It plays its sound, edits use it, and it has a red outline.
-  - A click on a cell, or `viewer.set` with `angle`, selects the active angle. The first file is the default, unless the open clip is in the group.
-  - A cell has its number at the top left and its camera or file name at the bottom.
-  - Only a row with a file at the playhead has a cell. The first file of the row with a frame there shows.
-    - The measurements show 24 rows with 15 cells in a grid of 4 by 4, and 3 files on 2 rows with 2 cells.
-  - The scroll area stands for the whole group.
-  - In and Out are frames of the group, so they hold when the active angle changes (p. 682). The source marks of the files do not change.
-  - An edit takes the marks' part of the active angle. Source Overwrite lines up by the group.
-  - With no marks on the group, an edit uses the source marks of the active angle.
-  - The grid has no limit of rows.
-  - vidcut needs a group here, also for files with one timecode. [The todo](todo/sync-bin.md) holds the view with no group.
-  - An edit with a mark outside the active angle takes the part of the angle between the marks. No measurement shows this case.
-    - With no such part, nothing changes and vidcut tells why.
+- **Multi Source** (pp. 679, 682, measured in Resolve Studio 21.1.2):
+  - The Viewer shows the video files and stills of the current bin and its subfolders in a grid. All of them follow one playhead.
+  - `viewer.set` with `multi_source` opens it. It needs no synced group and no timeline.
+  - An audio file gets no cell and is not counted. The title is the count and the bin, for example "3 Clips - S1".
+  - Files line up by file timecode. A saved synced group plays no part.
+  - The scroll area stands for all the material, and it closes the gaps between files.
+  - A grid cell:
+    - Each camera name has one cell. Each file with no camera name has its own cell.
+    - Named cameras come first, by name. The others follow in pool order.
+    - The label is "Camera", then the name. A camera with no name counts from 1 among the unnamed cameras.
+    - The number at the top left stays with the camera.
+    - A camera with no frame at the playhead has no cell, and the grid closes up. The measurements show 24 cameras with 15 cells in a grid of 4 by 4.
+    - Two files of one camera at one time show the first file.
+  - The grid has the round-up of the square root of its cells as columns. It has no limit on cells.
+  - One camera is active. It plays its sound, edits use it, and it has a red outline and a red corner.
+    - The first camera is the default.
+    - When the active camera has no frame at the playhead, the first cell becomes active. It does not come back by itself.
+  - A click on a cell, or a number key, opens that camera alone (`viewer.set` with `angle` and `alone`).
+    - The title is the file name, the pool selects the file, and the position stays.
+    - A number key also changes the camera in that view.
+    - The close button returns to the grid, with that camera active.
+  - In and Out in the grid are marks of the viewer (`viewer.marks.set`, `viewer.marks.clear`). They are not on the files (p. 682).
+    - A change of bin clears them, sets the position to 0 and makes the first camera active.
+    - Opening a camera alone gives its file these marks, cut at the ends of the file. With no marks, the file loses its marks.
+    - In and Out in the view of one camera are on that file only.
+    - The Duration field takes a typed length (`viewer.marks.set` with `duration`). The Out moves to the In plus it. With no In, the In goes to the first frame. The marks hold exactly the typed length.
+  - An edit in the grid takes the marks' part of the active camera. The marks of the files play no part, and the viewer's marks stay:
+    - An In with no Out takes the file to its end.
+    - An Out with no In counts position 0 as the In.
+    - Marks outside the file: nothing happens.
+    - With no marks, Append and Smart Insert do nothing. Ripple Overwrite, Place On Top and Source Overwrite take the whole file, with no empty part.
+    - An In before the file: the part before the file stays empty on the timeline, before the clip (`lead`).
+      - Append: after the last clip.
+      - Smart Insert: at the nearest edit. Later clips move by the empty part plus the clip.
+      - Ripple Overwrite: from the start of the clip at the playhead, or from the timeline In. Later clips move.
+      - Place On Top: from the playhead, or from the timeline In.
+    - Place On Top and Ripple Overwrite keep the clip's length between timeline marks.
+    - Source Overwrite has no empty part, because it lines up by file timecode (`grid`):
+      - The reference is the clip under the playhead if it shows part of the marks, or of the file with no marks. Else it is the first clip that does.
+      - The playhead goes to the clip's end, also on a new track.
+  - An edit in the view of one camera uses the marks of the file. With no marks, it takes the whole file. Then the grid comes back.
+  - Escape leaves the view of one camera, as the close button does.
+  - Multi Source keeps its own active camera and position. A clip open in Source Clip does not change them.
+  - No measurement shows these cases:
+    - F10 Overwrite in the grid places the marks' part at the playhead, with no empty part. With no marks, it places the whole file.
+    - A bin with no video files opens an empty grid.
 - **Timeline** (p. 681):
   - The Viewer shows the timeline at its playhead, with no scroll area.
   - Icons mark the first and the last frame of a clip.
@@ -578,6 +607,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - With no timeline marks, it replaces the whole clip under the playhead.
   - With a timeline In/Out, it replaces exactly that range, possibly across clips.
   - In both cases, everything after it moves by (incoming − replaced) duration. The source duration always wins.
+  - The button, the key and a drop treat the other tracks in the same way (D21).
 - **Overwrite** (F10; p. 701):
   - It writes over the target track at the playhead, at the timeline In, or backtimed to a lone timeline Out.
   - Other clips do not move.
@@ -640,7 +670,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
 - **Onto an empty timeline, or left of the first clip:** the clip becomes the first clip.
 - **Past either end of all clips:** the clip is appended or prepended.
-- **Onto a clip, released immediately** (the whole clip highlights): Ripple Overwrite replaces that clip.
+- **Onto a clip, released immediately** (the whole clip highlights): Ripple Overwrite replaces that clip. It ignores the timeline marks, and they stay (measured in Resolve Studio 21.1.2).
 - **Onto a clip after a short hover** (the highlight narrows to the incoming footprint): a plain Overwrite with no ripple. It can split the target.
 - **Onto an edit point:** insert at that edit.
 - **Into the gray area above the top track:** this makes a new video+audio track.
@@ -1838,10 +1868,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - When that Track 1 clip is deleted, the attached clip goes where Track 1 closed up.
   - A trim of the tail of that Track 1 clip past the attached clip deletes the attached clip (p. 727).
   - A trim of its head moves the attached clip to the new start.
-  - A replacement of that Track 1 clip leaves the attached clip in place.
+  - A Ripple Overwrite has its own rule. The new end is where the new clip ends. The old end is where the replaced part ended. These are measurements in Resolve Studio 21.1.2:
+    - A clip that starts before the new end stays where it is, and it stays whole.
+    - A clip from the old end on moves by the change in length, also past the last Track 1 clip.
+    - A clip on a video track that starts from the new end to the old end goes away.
+    - A clip on an audio track that starts there stays where it is.
+    - The first clip that moves back on a track ends the clips that stayed on that track. The clip under its first frame stops there. Clips that stayed after that frame go away.
   - Over a gap, the clip keeps its distance to the Track 1 clips around it.
   - Clips on locked tracks do not follow.
-  - A clip that would land on another clip moves to the next free track of its kind.
+  - In other edits, a clip that would land on another clip moves to the next free track of its kind.
 - **D22. Rippling other tracks** (p. 721).
   - With Ripple On, a delete or a trim of a clip on another track can ripple that track.
   - It ripples only when Track 1 has no clips from the start of that clip on. Otherwise it leaves a gap.
@@ -2369,6 +2404,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It drops a cue that has no frames left.
     - An insert inside a cue splits it. Both parts keep the text.
     - Overwrite and lift leave cues where they are.
+    - A Ripple Overwrite takes the part of a cue over the frames that it takes out. A longer clip splits a cue across the end of the replaced part.
     - A timeline In–Out delete takes its range out of cues too.
   - A locked subtitle track does not move.
   - Resolve Studio 21.1.1 does the same in a ripple delete of a Track 1 clip (Edit page, through its scripting API).

@@ -317,9 +317,6 @@ pub struct SyncGroup {
     /// Left out when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dropped: Vec<String>,
-    /// In and Out for all its files, in frames of the group.
-    #[serde(default, skip_serializing_if = "Marks::is_empty")]
-    pub marks: Marks,
 }
 
 impl SyncGroup {
