@@ -34,6 +34,7 @@ mod row;
 mod scopes;
 mod shuttle;
 mod speech;
+mod subclip;
 mod subtitles;
 mod super_scale;
 mod sync_bin;
