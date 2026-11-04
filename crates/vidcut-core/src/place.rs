@@ -144,8 +144,8 @@ pub struct GlowNoise {
 impl GlowNoise {
     const CELL: f64 = 340.0 / (0.6 * 1440.0);
     const EVOLUTION: f64 = 1.8;
-    const SEETHE: f64 = 0.0708;
-    const SEETHE_POWER: f64 = 1.75;
+    const SEETHE: f64 = 0.0208;
+    const SEETHE_POWER: f64 = 1.9;
     const DEPTHS: f64 = 4096.0;
 
     fn of(g: &Glow, area: f64, frame: i64) -> Self {

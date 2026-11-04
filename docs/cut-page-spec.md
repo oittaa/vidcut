@@ -1575,6 +1575,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Its size is proportional to Scale × √(width × height) of the picture on the frame. The renders show only 1920×1080.
     - Follow FX Tracker changes nothing, as with no tracker in the renders.
     - Evolution and Seethe move the noise along a third direction. Seethe moves it at each frame from the start of the clip.
+    - Each octave has its own scale in that direction, so Detail also changes the speed.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - Source Recovery and Atmosphere work before Saturation and Gamma.
     - Source Recovery works on the sum of the glows.

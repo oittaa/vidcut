@@ -1461,7 +1461,7 @@ fn glow_atmosphere(px: vec2<f32>) -> f32 {
     var size = 1.0;
     for (var i = 0; i < GLOW_OCTAVES; i++) {
         let layer = GLOW_LAYERS * f32(i);
-        let at = vec3<f32>(px * glowing.noise.zw * size + layer, glowing.depth.x + layer);
+        let at = vec3<f32>(px * glowing.noise.zw * size + layer, glowing.depth.x * size + layer);
         sum += amount * glow_cloud(at);
         total += amount;
         amount *= glowing.noise.y;
