@@ -12,7 +12,6 @@ use super::{clear_range, fix_audio, is_main, locate, place, tracks, unlocked};
 
 pub const DEFAULT_SECS: f64 = 5.0;
 
-const TEXT_MOST: usize = 2000;
 const ZOOM: (f64, f64) = (0.25, 4.0);
 
 const PLACE: &str =
@@ -102,19 +101,6 @@ fn checked_keys(t: &Title) -> Result<()> {
 
 pub fn checked(t: &Title) -> Result<Title> {
     let text = t.text.replace("\r\n", "\n").replace('\r', "\n");
-    if text.chars().count() > TEXT_MOST {
-        return Err(Error::invalid(format!(
-            "a title's text is at most {TEXT_MOST} characters"
-        )));
-    }
-    if text
-        .chars()
-        .any(|c| c.is_control() && c != '\n' && c != '\t')
-    {
-        return Err(Error::invalid(
-            "a title's text holds no control characters but line breaks and tabs",
-        ));
-    }
     if t.kind == TitleKind::LowerThird && text.lines().count() > 2 {
         return Err(Error::invalid("a lower third has two lines at the most"));
     }

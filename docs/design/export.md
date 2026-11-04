@@ -38,6 +38,8 @@ flowchart TD
 - **Settings:** `settings`, a `preset`, or the default preset of the extension.
   - `set` changes fields (`apply_overrides`). `encoder` sets the video encoder. The extension sets the container.
   - The presets are `builtin_presets` and the user's TOML files (`export::presets`).
+  - A preset's name is any text that is not empty. The file holds the name.
+  - The file name is the preset's name when that name is short, lowercase ASCII and safe on each system (`user_preset_path`). Otherwise it is a digest of the name. Why: two names that differ only in case stay two files.
 - **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
   - The plan uses the sample rate and channels of the audio encoder (`resolve_audio`). Why: the sample math then agrees with the encoder.
