@@ -3029,6 +3029,7 @@ pub enum Request {
     /// Process does), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
     /// Media Pool), `clip_info` (the media selected in the pool),
+    /// `media_pool` (`gui.close` hides the pool, and the viewer takes its room),
     /// `transitions`, `titles`, `inspector` or `keyframes` (tabs in the Media
     /// Pool's place), or the
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
@@ -3891,6 +3892,9 @@ pub enum GuiPanel {
     /// Manage Render Cache: the render cache of each project that vidcut
     /// opened on this computer (`cache.list`), to clear (`cache.clear`).
     ManageRenderCache,
+    /// The Media Pool tab. `gui.close` hides the pool, and the viewer takes
+    /// its room.
+    MediaPool,
     /// The Sync Bin tab, in the Media Pool's place: a row for each camera of
     /// the bin, and a grid of the cameras in the viewer.
     SyncBin,

@@ -160,6 +160,15 @@ pub enum LeftTab {
     Effects,
     Inspector,
     Keyframes,
+    Hidden,
+}
+
+fn tab_after_click(open: LeftTab, clicked: LeftTab) -> LeftTab {
+    if open == LeftTab::Pool && clicked == LeftTab::Pool {
+        LeftTab::Hidden
+    } else {
+        clicked
+    }
 }
 
 pub struct Browser {
@@ -291,7 +300,8 @@ impl Workspace {
                 (LeftTab::Keyframes, "Keyframes"),
             ] {
                 if ui.selectable_label(self.left == tab, label).clicked() {
-                    self.left = tab;
+                    self.left = tab_after_click(self.left, tab);
+                    ui.ctx().request_repaint();
                     if tab == LeftTab::SyncBin {
                         self.show_timeline();
                     }

@@ -53,6 +53,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - You can move the seam between them, and change the timeline height.
 - **Top bar:**
   - On the left: the Media Pool and Mixer tabs (p. 649).
+    - A click on the Media Pool tab while the pool shows hides the pool. The Viewer takes its room (p. 636).
+    - With the pool hidden, the tabs are in a row above the Viewer. A click on a tab shows what that tab holds.
+    - The edit-function buttons go with the pool, as they do for the other tabs. vidcut: no measurement tells where they go in Resolve.
+    - `gui.close media_pool` hides the pool. `gui.show media_pool` shows it.
   - On the right: Quick Export and the Full Screen viewer.
     - vidcut's Full Screen button is on the viewer (deviation X86).
   - A Transitions tab shows the transitions in the place of the Media Pool (p. 759, §8.11).
