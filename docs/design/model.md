@@ -407,7 +407,7 @@ Writing:
 - `Clip::is_generator` and `Clip::is_block` count it.
 - A left trim of a generator changes `source_in`, as on any clip. Its keyframes stay on their source frames.
   - Thus they stay on the same timeline frames, and the picture does not move.
-  - An OTIO file counts them from the first frame of the clip, with a source start of 0.
+  - An OTIO file counts them from the first frame of the clip (`generators::reference`).
 - A `Generator` is one of these kinds:
   - `Generator::SolidColor` holds a `color`.
   - `Generator::FourColorGradient` holds a `Gradient`.
