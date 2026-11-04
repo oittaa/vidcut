@@ -2286,7 +2286,9 @@ pub enum Request {
         /// `10_step`: eleven grey bars. `100mv_steps`: eight grey steps.
         /// `grey_scale`: a grey ramp. `ycbcr_ramp`: a ramp in each channel.
         /// `ebu_color_bar`: eight bars. `smpte_color_bar`: bars, a ramp and
-        /// patches.
+        /// patches. `bt2111_hlg_narrow`, `bt2111_pq_full` and
+        /// `bt2111_pq_narrow`: the BT.2111 bars in those code values.
+        /// `window`: a white box on black.
         kind: GeneratorKind,
         #[serde(flatten)]
         settings: GeneratorSettings,

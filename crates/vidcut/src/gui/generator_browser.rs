@@ -14,9 +14,12 @@ use super::workspace::Workspace;
 
 type Card = (&'static str, GeneratorKind);
 
-pub const CARDS: [Card; 8] = [
+pub const CARDS: [Card; 12] = [
     (Generator::TEN_STEP, GeneratorKind::TenStep),
     (Generator::HUNDRED_MV_STEPS, GeneratorKind::HundredMvSteps),
+    (Generator::BT2111_HLG_NARROW, GeneratorKind::Bt2111HlgNarrow),
+    (Generator::BT2111_PQ_FULL, GeneratorKind::Bt2111PqFull),
+    (Generator::BT2111_PQ_NARROW, GeneratorKind::Bt2111PqNarrow),
     (Generator::EBU_COLOR_BAR, GeneratorKind::EbuColorBar),
     (
         Generator::FOUR_COLOR_GRADIENT,
@@ -25,6 +28,7 @@ pub const CARDS: [Card; 8] = [
     (Generator::GREY_SCALE, GeneratorKind::GreyScale),
     (Generator::SMPTE_COLOR_BAR, GeneratorKind::SmpteColorBar),
     (Generator::SOLID_COLOR, GeneratorKind::SolidColor),
+    (Generator::WINDOW, GeneratorKind::Window),
     (Generator::YCBCR_RAMP, GeneratorKind::YcbcrRamp),
 ];
 
