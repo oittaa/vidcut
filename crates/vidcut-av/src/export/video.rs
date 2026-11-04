@@ -2493,7 +2493,9 @@ impl VideoFrames {
                 let frame = if backward {
                     self.reversed_frame(i, s, (&piece, layer), k, colors)?
                 } else if retimed {
-                    self.retimed_frame(i, s, layer, k, at)?
+                    let mut own = at.to_vec();
+                    vidcut_core::render_cache::own_effects(&mut own);
+                    self.retimed_frame(i, s, layer, k, &own)?
                 } else if colors {
                     self.colors_source_frame(i, s, layer, k, at)?
                 } else {

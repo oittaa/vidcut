@@ -321,7 +321,7 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
         }
         return vec4<f32>(c.rgb / c.a, c.a * p.placed.y);
     }
-    if p.made.x > 4.5 {
+    if p.made.x > 4.5 && p.made.x < 5.5 {
         let a = textureLoad(halved, vec2<i32>(px), 0).a;
         if a <= 0.0 {
             discard;
@@ -347,6 +347,13 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     }
     if cover <= 0.0 {
         discard;
+    }
+    if p.made.x > 5.5 {
+        let c = textureLoad(halved, vec2<i32>(px), 0);
+        if c.a <= 0.0 {
+            discard;
+        }
+        return vec4<f32>(c.rgb / c.a, c.a * cover * p.placed.y);
     }
     if p.made.x > 3.5 {
         return vec4<f32>(1.0, 1.0, 1.0, cover * p.placed.y);
@@ -657,7 +664,15 @@ fn mixed(mode: u32, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
 fn fs_mode(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
     let top = shown(px);
-    let b = textureLoad(below, vec2<i32>(px), 0).rgb;
+    let under = textureLoad(below, vec2<i32>(px), 0);
+    if p.placed.w > 1.5 {
+        var alone = top.rgb;
+        if under.a > 0.0 {
+            alone = mix(top.rgb, mixed(u32(p.placed.z + 0.5), top.rgb, under.rgb / under.a), under.a);
+        }
+        return vec4<f32>(alone * top.a, top.a);
+    }
+    let b = under.rgb;
     let m = mixed(u32(p.placed.z + 0.5), top.rgb, b);
     if p.placed.w > 0.5 {
         return vec4<f32>(m * top.a, top.a);

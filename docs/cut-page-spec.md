@@ -1517,7 +1517,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - With Use Alpha off, Blur Alpha and Whole Cells Only change nothing.
     - Whole Cells Only tests each sample's cell, with each Cell Shape and each Aliasing.
     - A made frame of a speed change, and a frame from the render cache, keep no color at an alpha of 0.
-- **Compound clips:** vidcut: the effects of a compound clip work on each picture inside it ([todo](todo/compound-opacity.md)).
+- **Compound clips:** the effects of a compound clip work on the mix of its tracks, after its transform ([D75](#12-decisions-on-gaps-and-contradictions)).
 - **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
 
 ### 8.17 Generators (p. 766)
@@ -3156,11 +3156,36 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
-    - Its tracks mix first, as the tracks of the timeline do. Its opacity then fades that mix, or its composite mode mixes that mix with the tracks below.
-      - Measured in Resolve Studio 21.1.2, with 16-bit renders. Inside the compound clip, a picture cropped to its left half is over a full picture.
-      - At an opacity of 50% over white, the frame is 0.5 × the mix + 0.5.
-      - At Multiply over 50% gray, the frame is 0.5 × the mix.
-    - Its soft edges fade each picture and title inside it ([todo](todo/compound-opacity.md)).
+    - The pictures of the compound clip in the frame set how they mix (measured in Resolve Studio 21.1.2). This rule is for each frame.
+    - **One picture in the frame:** it acts as if it were on the timeline.
+      - Its composite mode mixes with the tracks below the compound clip.
+      - Its opacity and the opacity of the compound clip multiply.
+      - A composite mode on the compound clip replaces its mode.
+      - A nested compound clip with one picture acts in the same way.
+    - **Two or more pictures in the frame:** they mix alone, over nothing.
+      - Where a picture has nothing of the compound clip below it, its mode does nothing.
+      - Where the picture below it is partly clear, the result is (1 − ab) × Cs + ab × blend(Cb, Cs), with an alpha of 1.
+        - Cb and ab are the color and the alpha below. Cs is the color above.
+      - The values are not clipped between the layers.
+      - The alpha of a soft edge of the upper picture mixes between the color below and that result.
+      - The opacity of the compound clip then fades the finished mix. At 50% over white, the frame is 0.5 × the mix + 0.5.
+      - Its composite mode mixes the finished mix with the tracks below. At Multiply over 50% gray, the frame is 0.5 × the mix.
+    - **Soft edges:** the soft edges of the compound clip fade the mix once, at the frame of the compound clip.
+      - A picture inside it at Zoom 0.5, away from the edge of that frame, gets no fade.
+      - The soft edges of a picture inside it also act.
+    - **Effects:** the effects of the compound clip work on the mix, after its transform, as on a plain clip.
+      - The width of a Gaussian Blur follows the Zoom of the compound clip. The Zoom of a picture inside it does not change that width.
+      - A blur spreads past the edge of the compound clip, over the tracks below.
+      - A picture alone with a composite mode keeps the mode, on the blurred picture.
+    - **Titles:** a title counts as a picture.
+      - A title alone takes the composite mode of the compound clip.
+      - The compound clip crops and fades a title at its own frame.
+    - vidcut's own choices, not measured ([todo](todo/compound-opacity.md)):
+      - A hard edge of the compound clip covers the mix once, as a soft edge does.
+      - A picture at an opacity of 0 counts as a picture.
+      - An upper soft edge over a partly clear picture gives the premultiplied sum of the same formula.
+      - The effects of the compound clip work on a title alone.
+      - A Mosaic Blur on the compound clip follows the rule of the Gaussian Blur.
     - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.
@@ -3608,8 +3633,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It holds stills too.
     - It holds a Retime Process other than Nearest, and the checked effects (p. 204).
       - It holds the frame at the size of the timeline. Why: a Retime Process and an effect make each frame at the size that the clip shows.
-      - With a checked effect, it holds the effects up to the last checked effect. The viewer applies the later effects, as in Resolve (p. 202).
-      - With a Retime Process, it holds all the effects. Why: the effects come before the frames between two source frames (§13).
+      - With a checked effect, it holds the effects of the clip up to the last checked effect. The viewer applies the later effects, as in Resolve (p. 202).
+      - With a Retime Process, it holds all the effects of the clip. Why: the effects come before the frames between two source frames (§13).
+      - It never holds the effects of a compound clip around the clip. A checked effect there makes no file. Why: that effect can work on the mix of the compound clip.
       - For a placed clip, it holds the colors of the frame, with no edges and no alpha. The viewer makes them again from the placement. Thus the cache needs no alpha.
       - A change of the Transform, the crop or an effect that it holds renders it again.
       - A move, a split, a trim, or a change of the opacity, the composite mode or an effect after the last checked effect keeps it.

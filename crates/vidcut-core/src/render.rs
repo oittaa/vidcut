@@ -7,9 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
-    Chart, Clip, ClipCache, ClipRetime, ColorSpace, DuckDetect, Generator, Gradient, Hdr, Keyframe,
-    Media, MediaSuperScale, Picture, PictureTransition, Project, PushPreset, Retime, Section,
-    Settings, SlidePreset, SmoothMode, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
+    Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, DuckDetect, Generator, Gradient,
+    Hdr, Keyframe, Media, MediaSuperScale, Picture, PictureTransition, Project, PushPreset, Retime,
+    Section, Settings, SlidePreset, SmoothMode, SuperScale, TimelineColors, Title, TrackKind,
+    WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -1733,6 +1734,17 @@ pub(crate) fn plays_inside(c: &Clip) -> bool {
     c.compound.as_ref().is_some_and(|k| !k.tracks.is_empty())
 }
 
+fn holds_mode(c: &Clip) -> bool {
+    c.compound
+        .iter()
+        .flat_map(|k| &k.tracks)
+        .flat_map(|t| &t.clips)
+        .any(|x| {
+            let moded = x.picture.as_ref().map(Picture::mode);
+            moded.is_some_and(|m| m != CompositeMode::Normal) || holds_mode(x)
+        })
+}
+
 #[derive(Debug, Clone, Default)]
 struct Nest {
     outer: Vec<Placed>,
@@ -1780,11 +1792,10 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 if !c.enabled {
                     continue;
                 }
-                let chain: Vec<Placed> = c
-                    .picture
-                    .iter()
-                    .filter(|x| !x.is_usual())
-                    .map(|x| Placed::of(c, x.clone(), run_of(c, nest.run)))
+                let own = c.picture.clone().unwrap_or_default();
+                let chain: Vec<Placed> = (!own.is_usual() || holds_mode(c))
+                    .then(|| Placed::of(c, own, run_of(c, nest.run)))
+                    .into_iter()
                     .chain(nest.outer.iter().cloned())
                     .collect();
                 let k = c.compound.as_ref().expect("plays inside");
