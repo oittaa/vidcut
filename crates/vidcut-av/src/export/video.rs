@@ -4,12 +4,11 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use vidcut_core::generators::Pattern;
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
 use vidcut_core::place::Placing;
-use vidcut_core::render::{
-    Generated, Image, Moving, Placed, Ramp, Shape, Smooth, VideoPiece, WHOLE, Wipe,
-};
+use vidcut_core::render::{Image, Moving, Placed, Ramp, Shape, Smooth, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
 
 use super::ahead::Ahead;
@@ -76,6 +75,8 @@ pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
 }
 
 type Drawn = Lru<Option<i64>, (Look, frame::Video), 2>;
+
+const GENERATED_KEPT: usize = 2;
 
 enum Fed {
     Rgb(frame::Video),
@@ -1607,7 +1608,7 @@ fn heaviest(layers: &[Layer]) -> usize {
 #[derive(Clone, Copy, Hash)]
 enum Side {
     File(usize),
-    Color([u8; 3]),
+    Made(Pattern),
 }
 
 struct ColorSides {
@@ -1629,7 +1630,7 @@ impl ColorSides {
 
     fn picture(
         &mut self,
-        color: [u8; 3],
+        pattern: Pattern,
         colors: Option<Hdr>,
         look: &Look,
         frames: bool,
@@ -1639,10 +1640,11 @@ impl ColorSides {
             self.rgb.clear();
             self.framed.clear();
         }
-        let [r, g, b] = color;
-        let key = Some(i64::from(u32::from_be_bytes([0, r, g, b])));
+        let mut hash = std::hash::DefaultHasher::new();
+        pattern.hash(&mut hash);
+        let key = Some(hash.finish() as i64);
         let drawn = &mut self.drawn;
-        let filled = || filled_generator(color, look.size, colors);
+        let filled = || filled_generator(pattern, look.size, colors);
         let path = Path::new("");
         match frames {
             true => drawn_once(&mut self.framed, (key, look), || {
@@ -1667,7 +1669,7 @@ pub struct VideoFrames {
     ahead: Ahead<Source, (Input, u64, i64)>,
     black: Option<frame::Video>,
     colored: Option<([u8; 3], frame::Video)>,
-    generated: Option<([u8; 3], frame::Video)>,
+    generated: Lru<Pattern, frame::Video, GENERATED_KEPT>,
     color_sides: ColorSides,
     decoder: Option<crate::hw::GpuDecoder>,
     maker: Maker,
@@ -1980,7 +1982,7 @@ impl VideoFrames {
             ahead: Ahead::new(),
             black: None,
             colored: None,
-            generated: None,
+            generated: Lru::new(),
             color_sides: ColorSides::new(),
             decoder: None,
             maker: Maker::new(
@@ -2362,15 +2364,21 @@ impl VideoFrames {
                 } = layer
                 else {
                     if take == Take::Picture {
-                        let (frame, color) = match layer {
+                        let (frame, how) = match layer {
                             VideoPiece::Generated { picture, .. } => {
-                                let Generated::SolidColor { color } = *picture;
-                                (self.generated_frame(color)?, color)
+                                let pattern = picture.at(k);
+                                let how = match pattern {
+                                    Pattern::SolidColor(color) => Made::Solid(color),
+                                    _ => Made::Generated,
+                                };
+                                (self.generated_frame(pattern)?, how)
                             }
-                            VideoPiece::Black { color, .. } => (self.solid_frame(*color)?, *color),
+                            VideoPiece::Black { color, .. } => {
+                                (self.solid_frame(*color)?, Made::Solid(*color))
+                            }
                             _ => {
                                 let black = vidcut_core::render::BLACK;
-                                (self.solid_frame(black)?, black)
+                                (self.solid_frame(black)?, Made::Solid(black))
                             }
                         };
                         made.push(Layer {
@@ -2386,7 +2394,7 @@ impl VideoFrames {
                             share: 1.0,
                             woven: None,
                             origin: Some(Origin {
-                                made: Made::Solid(color),
+                                made: how,
                                 upscaled: None,
                                 when: Instant::now(),
                                 took: started.elapsed(),
@@ -2549,16 +2557,17 @@ impl VideoFrames {
         &self.colored.as_ref().expect("just set").1
     }
 
-    fn generated_frame(&mut self, color: [u8; 3]) -> Result<frame::Video> {
+    fn generated_frame(&mut self, pattern: Pattern) -> Result<frame::Video> {
         let colors = self.drawn_in;
-        let mut out = match colors {
-            None => frame_ref(self.colored(color))?,
-            Some(_) => {
-                if self.generated.as_ref().is_none_or(|(c, _)| *c != color) {
+        let mut out = match (pattern, colors) {
+            (Pattern::SolidColor(color), None) => frame_ref(self.colored(color))?,
+            _ => {
+                if !self.generated.contains(&pattern) {
                     let (w, h, _) = self.maker.out();
-                    self.generated = Some((color, filled_generator(color, (w, h), colors)));
+                    let made = filled_generator(pattern, (w, h), colors);
+                    self.generated.insert(pattern, made);
                 }
-                frame_ref(&self.generated.as_ref().expect("just set").1)?
+                frame_ref(self.generated.get(&pattern).expect("just set"))?
             }
         };
         self.black_metadata(&mut out)?;
@@ -3269,8 +3278,7 @@ impl VideoFrames {
         match piece.layers().get(i)?.0 {
             VideoPiece::Source { .. } => self.reading.get(i).copied().flatten().map(Side::File),
             VideoPiece::Generated { picture, .. } => {
-                let Generated::SolidColor { color } = *picture;
-                Some(Side::Color(color))
+                Some(Side::Made(picture.at((self.k - 1).max(0))))
             }
             _ => None,
         }
@@ -3289,7 +3297,7 @@ impl VideoFrames {
         };
         let no_frame = |side: Side| match side {
             Side::File(s) => self.open[s].current.is_none(),
-            Side::Color(_) => false,
+            Side::Made(_) => false,
         };
         if no_frame(sa) || no_frame(sb) {
             return Ok(None);
@@ -3307,8 +3315,8 @@ impl VideoFrames {
         let mut picture = |side: Side| -> Result<(frame::Video, Option<i64>, u64)> {
             let s = match side {
                 Side::File(s) => s,
-                Side::Color(color) => {
-                    let made = self.color_sides.picture(color, colors, &look, frames)?;
+                Side::Made(pattern) => {
+                    let made = self.color_sides.picture(pattern, colors, &look, frames)?;
                     return Ok((made, None, 0));
                 }
             };
@@ -3326,7 +3334,7 @@ impl VideoFrames {
         let (b, pb, lb) = picture(sb)?;
         let path_of = |side: Side| match side {
             Side::File(s) => self.open[s].reader.path(),
-            Side::Color(_) => Path::new(""),
+            Side::Made(_) => Path::new(""),
         };
         let mut pair = std::hash::DefaultHasher::new();
         (path_of(sb), pb, la, lb, size, sa, sb).hash(&mut pair);
@@ -3357,7 +3365,7 @@ impl VideoFrames {
                 src.normalized = None;
                 self.finished_layer(s, made)?
             }
-            Side::Color(_) => {
+            Side::Made(_) => {
                 let mut made = self.maker.make_layer(
                     i,
                     &mut self.color_sides.fitting,
@@ -3548,26 +3556,14 @@ fn filled(color: [u8; 3], (w, h): (u32, u32)) -> frame::Video {
     f
 }
 
-fn filled_generator(color: [u8; 3], size: (u32, u32), colors: Option<Hdr>) -> frame::Video {
-    match colors {
-        None => filled(color, size),
-        Some(_) => {
-            let code = vidcut_core::generators::timeline_code(color, colors);
-            filled_deep(code, size, colors)
-        }
+fn filled_generator(pattern: Pattern, (w, h): (u32, u32), colors: Option<Hdr>) -> frame::Video {
+    if let (Pattern::SolidColor(color), None) = (pattern, colors) {
+        return filled(color, (w, h));
     }
-}
-
-fn filled_deep(code: [f64; 3], (w, h): (u32, u32), hdr: Option<Hdr>) -> frame::Video {
     let mut f = frame::Video::new(format::Pixel::RGB48LE, w, h);
     let stride = f.stride(0);
-    let pixel = code.map(|v| ((v * 65535.0).round() as u16).to_le_bytes());
-    let row = pixel.as_flattened().repeat(w as usize);
-    for line in f.data_mut(0).chunks_mut(stride) {
-        let n = row.len().min(line.len());
-        line[..n].copy_from_slice(&row[..n]);
-    }
-    crate::screen::held::tag(&mut f, hdr);
+    vidcut_core::generators::draw(pattern, (w, h), colors, f.data_mut(0), stride);
+    crate::screen::held::tag(&mut f, colors);
     f
 }
 

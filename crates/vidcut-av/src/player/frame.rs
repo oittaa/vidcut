@@ -118,6 +118,7 @@ pub struct Picture {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Made {
     Solid([u8; 3]),
+    Generated,
     Still,
     Source(Option<i64>),
     Between {

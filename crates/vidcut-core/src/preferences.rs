@@ -154,6 +154,75 @@ pub struct ViewerPrefs {
     /// item with Super Scale, it uses a sharper upscaler. Off by default, as
     /// it costs playback speed.
     pub super_scale: bool,
+    pub scopes: Scopes,
+}
+
+/// The scopes that the viewer shows. Each reads the picture of the viewer,
+/// in the timeline color space. A scope that is off does no work.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct Scopes {
+    /// The luma of each column of the picture.
+    pub waveform: bool,
+    /// The red, green and blue of each column of the picture, side by side.
+    pub parade: bool,
+    /// The hue and the saturation of the picture: Cb across, Cr up.
+    pub vectorscope: bool,
+}
+
+/// One scope of the viewer picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Scope {
+    Waveform,
+    Parade,
+    Vectorscope,
+}
+
+impl Scope {
+    pub const ALL: [Self; 3] = [Self::Waveform, Self::Parade, Self::Vectorscope];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Waveform => "Waveform",
+            Self::Parade => "Parade",
+            Self::Vectorscope => "Vectorscope",
+        }
+    }
+}
+
+impl Scopes {
+    pub fn has(self, scope: Scope) -> bool {
+        match scope {
+            Scope::Waveform => self.waveform,
+            Scope::Parade => self.parade,
+            Scope::Vectorscope => self.vectorscope,
+        }
+    }
+
+    pub fn on(self) -> Vec<Scope> {
+        Scope::ALL.into_iter().filter(|&s| self.has(s)).collect()
+    }
+
+    pub fn patched(self, patch: &ScopesPatch) -> Self {
+        Self {
+            waveform: patch.waveform.unwrap_or(self.waveform),
+            parade: patch.parade.unwrap_or(self.parade),
+            vectorscope: patch.vectorscope.unwrap_or(self.vectorscope),
+        }
+    }
+}
+
+/// Patch for [`Scopes`]: omitted fields stay as they are.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScopesPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parade: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vectorscope: Option<bool>,
 }
 
 /// Framing and safe-area overlay choices for the viewer.
@@ -392,6 +461,8 @@ pub struct ViewerPrefsPatch {
     pub guides: Option<GuidesPatch>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub super_scale: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<ScopesPatch>,
 }
 
 /// The paid speech services, xAI and Google. A key comes from the
@@ -948,6 +1019,9 @@ impl Preferences {
         }
         if let Some(on) = patch.viewer.as_ref().and_then(|v| v.super_scale) {
             p.viewer.super_scale = on;
+        }
+        if let Some(s) = patch.viewer.as_ref().and_then(|v| v.scopes.as_ref()) {
+            p.viewer.scopes = p.viewer.scopes.patched(s);
         }
         p.check()?;
         Ok(p)
