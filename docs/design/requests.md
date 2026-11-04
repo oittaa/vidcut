@@ -109,7 +109,7 @@ sequenceDiagram
 
 ## Requests that only read
 
-- `export.start`, `export.plan`, `frame.render`, `storyboard.render` and the `analyze` methods do not go through the editor. None of them takes the lock.
+- `export.start`, `export.plan`, `frame.render`, `frame.scope`, `storyboard.render` and the `analyze` methods do not go through the editor. None of them takes the lock.
 - Headless, `session::run_with` loads the project, checks `if_rev` and calls `session::render`. A GUI calls `session::render` from `Live::project_task` on a worker thread, with a copy of the project.
 - `session::render` hands exports to `session::export_media` ([export](export.md)). It runs the `analyze` methods as queries on a throwaway `Editor` ([analysis](analysis.md)).
 - The media export of a GUI is a job (`Live::start_export`).
