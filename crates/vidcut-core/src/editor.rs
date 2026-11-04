@@ -3003,6 +3003,7 @@ fn mutate(
             source: src,
             at,
             group,
+            keep_marks,
         } => {
             if src.track.is_some() {
                 return Err(Error::usage(
@@ -3024,7 +3025,9 @@ fn mutate(
                 let marked = src.tape || src.range.is_some() || !marks.is_empty();
                 landed.push(ops::source_overwrite(p, s, marked, at, *group)?);
             }
-            p.marks = Default::default();
+            if !keep_marks {
+                p.marks = Default::default();
+            }
             let placed = landed
                 .pop()
                 .ok_or_else(|| Error::invalid("nothing to edit in"))?;

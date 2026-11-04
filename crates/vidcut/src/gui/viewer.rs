@@ -490,21 +490,25 @@ impl Workspace {
         );
         let active = self.snap.source_media.as_deref();
         let cells: Vec<GridCell> = group
-            .clips()
+            .rows
+            .iter()
             .enumerate()
-            .map(|(i, clip)| {
-                let frames = vidcut_core::multicam::visible(&p, clip);
-                let frame = position - clip.start();
-                GridCell {
+            .filter_map(|(i, row)| {
+                let (clip, frame) = row.clips.iter().find_map(|clip| {
+                    let frames = vidcut_core::multicam::visible(&p, clip);
+                    let frame = position - clip.start();
+                    (clip.head..clip.head + frames)
+                        .contains(&frame)
+                        .then_some((clip, frame))
+                })?;
+                Some(GridCell {
                     number: Some(i + 1),
                     label: None,
                     media: clip.media.clone(),
-                    frame: (clip.head..clip.head + frames)
-                        .contains(&frame)
-                        .then_some(frame),
-                    active: active == Some(clip.media.as_str()),
+                    frame: Some(frame),
+                    active: active.is_some_and(|a| row.clips.iter().any(|c| c.media == a)),
                     outlined: false,
-                }
+                })
             })
             .collect();
         if let Some(media) = self.camera_grid(ui, area, &p, &cells, speed) {

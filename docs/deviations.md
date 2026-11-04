@@ -2409,7 +2409,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The icon keeps the saved work when it opens the saved group.
   - The owner approved this difference.
 
-## X124. Sync by Sound uses time order on a row
+## X125. Sync by Sound uses time order on a row
 
 - **Resolve:**
   - This is a measurement in Resolve Studio 21.1.2. Sync by Sound takes the files of a row in bin order.
@@ -2422,3 +2422,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Nothing is lost for a reason the user cannot see, and the result does not depend on bin order.
   - This is the rule of Timecode, so one rule serves both.
   - The owner approved this difference.
+
+## X126. Source Overwrite keeps sync with a timeline Out alone
+
+- **Resolve:**
+  - This is a measurement in Resolve Studio 21.1.2. With an Out mark and no In on the timeline, the clip starts at the timeline's first frame with the file's first frame.
+  - The clip is not in sync, also when a clip with the same timecode is under it. This looks like a fault.
+- **vidcut:**
+  - The reference is the first clip before Out with shared timecode.
+  - The new clip goes in sync from where the file starts to Out.
+- **Why:**
+  - Source Overwrite makes a synced cutaway. A clip that is out of sync is the fault that this edit is there to prevent.

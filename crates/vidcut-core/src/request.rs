@@ -934,6 +934,9 @@ pub enum Request {
         /// clips of that group count as the reference.
         #[serde(default)]
         group: bool,
+        /// Keep the timeline marks, for the next file of an `apply`.
+        #[serde(default)]
+        keep_marks: bool,
     },
 
     /// Split at one or more frames (Ctrl+\).

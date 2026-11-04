@@ -244,7 +244,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - The other files of the row keep their timecode distance from that file. The order of the request plays no part.
   - **The row rule:** files of one named row do not overlap.
     - Files go in timecode order. With one timecode, they go in the order of the request.
-    - By `sound`, files go by their places from the sound. A tie goes by the order of the request ([deviation X124](deviations.md#x124-sync-by-sound-uses-time-order-on-a-row)).
+    - By `sound`, files go by their places from the sound. A tie goes by the order of the request ([deviation X125](deviations.md#x125-sync-by-sound-uses-time-order-on-a-row)).
     - A file keeps only the part after everything before it. A file with no such part is not on the row, and `dropped` names it.
     - A file does not move. It loses frames at its start, and `head` gives those frames.
     - Example: tags 01:00:05:00 and 01:00:10:00 on one row, 750 frames each. The first stays whole. The second keeps 125 frames from 01:00:35:00.
@@ -265,7 +265,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The whole files line up. An item with marks then uses only the frames between them, at the place of those frames.
     - The empty front stays. Thus marks at 100 to 400 on both files, 250 frames apart, give 650 frames.
   - vidcut compares the first sound stream of each file, with all its channels. No measurement shows which channel the Cut page uses.
-  - Each file is placed by its own sound. The row rule then acts in the order of the places ([deviation X124](deviations.md#x124-sync-by-sound-uses-time-order-on-a-row)).
+  - Each file is placed by its own sound. The row rule then acts in the order of the places ([deviation X125](deviations.md#x125-sync-by-sound-uses-time-order-on-a-row)).
     - Thus files c1 and c2 keep c1 whole, and c2 loses its head. Files c2 and c1 give the same result.
     - Files c3 and c1 keep both files, because c3 starts after c1 ends.
     - Of two files with one place and one length, the first in the order of the request stays whole. The second file is not on the row.
@@ -345,12 +345,13 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - One file is the active angle. It plays its sound, edits use it, and it has a red outline.
   - A click on a cell, or `viewer.set` with `angle`, selects the active angle. The first file is the default, unless the open clip is in the group.
   - A cell has its number at the top left and its camera or file name at the bottom.
-  - A file with no frame at the playhead shows a black cell.
+  - Only a row with a file at the playhead has a cell. The first file of the row with a frame there shows.
+    - The measurements show 24 rows with 15 cells in a grid of 4 by 4, and 3 files on 2 rows with 2 cells.
   - The scroll area stands for the whole group.
   - In and Out are frames of the group, so they hold when the active angle changes (p. 682). The source marks of the files do not change.
   - An edit takes the marks' part of the active angle. Source Overwrite lines up by the group.
   - With no marks on the group, an edit uses the source marks of the active angle.
-  - The grid has no limit of files. 9 files have 3 columns, and 24 files have 5 columns.
+  - The grid has no limit of rows.
   - vidcut needs a group here, also for files with one timecode. [The todo](todo/sync-bin.md) holds the view with no group.
   - An edit with a mark outside the active angle takes the part of the angle between the marks. No measurement shows this case.
     - With no such part, nothing changes and vidcut tells why.
@@ -565,26 +566,31 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Audio clips count. Generators do not count.
   - **With timeline marks,** the source marks play no part.
     - The reference is the first of these: a clip at In, a clip in the marked range, any clip.
+    - With In alone, no marked range counts: the reference is a clip at In, else any clip.
     - In each, the lowest track comes first, then the earliest clip.
     - The new clip goes from In to Out. With no Out, it goes to the file's end.
     - It stops at the file's end. It starts at the file's start ([deviation X113](deviations.md#x113-source-overwrite-starts-where-the-file-starts)).
+    - With Out alone, the reference is the first clip before Out. The new clip goes in sync from the file's start to Out ([deviation X126](deviations.md#x126-source-overwrite-keeps-sync-with-a-timeline-out-alone)).
   - **With source marks and no timeline marks,** the playhead plays no part, except past the timeline's end.
     - The reference is the first clip that overlaps the marked range: lowest track first, then the earliest clip.
-    - The marked range goes in.
+    - The marked range goes in. A source Out with no In goes from the file's start to Out.
     - With no such clip and the playhead at or past the timeline's end, the first clip that overlaps the whole file is the reference ([§7.4](#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
   - **With no marks,** the whole file goes in.
     - Take the lowest track with a clip under the playhead that overlaps the file.
     - T is the source timecode of that clip at the playhead.
     - The reference is the first clip on that track that overlaps the file and starts at or before T.
     - With no such clip under the playhead, the reference is the first clip that overlaps: lowest track first, then the earliest clip.
+    - When a video clip and an audio clip under the playhead disagree, the video clip counts.
   - With source marks or no marks, the clip is cut at the timeline start, and it can pass the timeline end.
   - **Track:** the first video track above the highest track with a clip in the new clip's range.
     - With no clip in the range, the track is V1, even into a gap.
     - It makes the track if necessary. It never fills a free lower track.
-    - An audio-only edit always makes a new top audio track.
+    - A source with no picture is an audio-only edit. An audio-only edit always makes a new top audio track.
+  - **Another frame rate:** timecode lines up in real time, for a file and for a reference clip.
+  - **A still** has timecode 00:00:00:00, so it goes in only with a clip at that timecode.
   - **After the edit,** the timeline marks clear, and the source marks stay.
     - The playhead goes to the clip's end.
-    - When the edit made a new track, the playhead stops at the old timeline end at the latest.
+    - When the edit made a new video track, the playhead stops at the old timeline end at the latest.
   - With no overlap, or on an empty timeline, nothing changes and vidcut tells why ([deviation X114](deviations.md#x114-source-overwrite-tells-when-it-writes-nothing)).
   - **By the synced group:** `group` lines up the file by its synced group, as the Sync Bin does. In the other views, the edit does not use the group.
     - The rules above do not change. The place in the group takes the place of the timecode.
@@ -592,17 +598,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A file in no group is refused.
   - `track` is refused, because Source Overwrite picks its own track.
   - These cases are not measured, and vidcut lets them through:
-    - **A timeline Out with no In:** the reference is the first clip before Out. The new clip goes from the file's start to Out.
-    - **A source Out with no In:** the range goes from the file's start to Out.
-    - **A timeline In with no Out, and no clip at In:** the reference is the first clip after In, then any clip.
     - **A reference clip with a changed speed:** its first frame lines up, and the file goes in at normal speed.
-    - **Another frame rate:** the timecode of a file or of a reference clip counts in frames of the timeline.
-    - **A source with no picture:** it goes on a new top audio track.
-    - **A still:** it lines up at 00:00:00:00.
-    - **A video clip and an audio clip that disagree:** the video clip counts.
     - **A range with left-out frames:** each kept part goes in at its own place.
     - **`tape` across files:** each file lines up by itself, and the edit is one step.
-    - **Several selected pool items:** each file lines up by itself, and the edit is one step.
+    - **Several selected pool items:** each file lines up by itself, the timeline marks hold for all of them (`keep_marks`), and the edit is one step.
 - **Close Up (later).**
 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
@@ -722,7 +721,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Each row that it lines up gets one sync icon, the sync lock.
   - With In or Out, one mark counts for each row ([§3](#3-media-pool-ch-34-pp-653675)). A file stays whole. A file with no mark lines up at its first frame by In, and at its end by Out.
   - By sound, a file that matches no other file stays at the start, with no icon. "Auto Sync Failed" names such files.
-  - By sound, files of a row go by their places, and a tie goes by bin order. Thus the result does not depend on bin order when the places differ ([deviation X124](deviations.md#x124-sync-by-sound-uses-time-order-on-a-row)).
+  - By sound, files of a row go by their places, and a tie goes by bin order. Thus the result does not depend on bin order when the places differ ([deviation X125](deviations.md#x125-sync-by-sound-uses-time-order-on-a-row)).
   - Auto Sync reads the marks at that moment.
   - On a saved group, the result waits for Save Sync ([deviation X119](deviations.md#x119-auto-sync-on-a-saved-group-waits-for-save-sync)).
 - **By hand:**

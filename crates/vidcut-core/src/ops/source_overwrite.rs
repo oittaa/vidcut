@@ -71,9 +71,7 @@ fn by_marks<'a>(
 ) -> Option<&'a Clip> {
     a.and_then(|a| first_where(l, file, |c| c.start <= a && a < c.end()))
         .or_else(|| {
-            first_where(l, file, |c| {
-                a.is_none_or(|a| a < c.end()) && b.is_none_or(|b| c.start < b)
-            })
+            b.and_then(|b| first_where(l, file, |c| a.is_none_or(|a| a < c.end()) && c.start < b))
         })
         .or_else(|| first_where(l, file, |_| true))
 }
@@ -198,7 +196,7 @@ pub fn source_overwrite(
         tracks::nth(p, TrackKind::Audio, audio)
     };
     unlocked(p, ti)?;
-    let new_track = p.tracks.len() > tracks_before;
+    let stops_at_end = clips[0].video && p.tracks.len() > tracks_before;
     let mut ids = Vec::with_capacity(kept.len());
     for (clip, range) in clips.into_iter().zip(&kept) {
         ids.extend(place_block(p, ti, vec![clip], file_start + range.0));
@@ -208,7 +206,7 @@ pub fn source_overwrite(
         clip: ids.swap_remove(0),
         track: p.tracks[ti].id.clone(),
         reference,
-        playhead: if new_track {
+        playhead: if stops_at_end {
             end.min(timeline_end)
         } else {
             end

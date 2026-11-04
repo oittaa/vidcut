@@ -49,6 +49,7 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
 - The CLI, IPC and MCP perform the same action as the GUI.
 - Open Multi Source with no synced group (measured.md, C3e).
 - Measure the Source Overwrite cases that [spec §7.2](../cut-page-spec.md#72-edit-functions) lists as not measured.
-  - Do audio-only files and other frame rates first, because sound recorders make them.
+  - Several selected pool items: one try placed one file of two, while the source viewer held that file (measured.md, T1).
+  - The playhead on a new track with the Timeline viewer on: one try stopped at the clip's end, past the old timeline end (measured.md, T1).
 - Measure how Source Overwrite treats hidden tracks, titles and compound clips.
 - Measure which file tags give the camera name, with files from real cameras. Then `media.add` reads the name.
