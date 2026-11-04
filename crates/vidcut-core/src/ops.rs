@@ -582,6 +582,7 @@ pub fn ripple_overwrite_block(
         &Edit {
             created: &ids,
             kept: &[(a, a + (lead + len).min(b - a))],
+            replaced: (b > a).then_some((a + lead + len, b)),
             ..Edit::default()
         },
     );

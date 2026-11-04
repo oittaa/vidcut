@@ -606,6 +606,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - With no timeline marks, it replaces the whole clip under the playhead.
   - With a timeline In/Out, it replaces exactly that range, possibly across clips.
   - In both cases, everything after it moves by (incoming − replaced) duration. The source duration always wins.
+  - The button, the key and a drop treat the other tracks in the same way (D21).
 - **Overwrite** (F10; p. 701):
   - It writes over the target track at the playhead, at the timeline In, or backtimed to a lone timeline Out.
   - Other clips do not move.
@@ -668,7 +669,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
 - **Onto an empty timeline, or left of the first clip:** the clip becomes the first clip.
 - **Past either end of all clips:** the clip is appended or prepended.
-- **Onto a clip, released immediately** (the whole clip highlights): Ripple Overwrite replaces that clip.
+- **Onto a clip, released immediately** (the whole clip highlights): Ripple Overwrite replaces that clip. It ignores the timeline marks, and they stay (measured in Resolve Studio 21.1.2).
 - **Onto a clip after a short hover** (the highlight narrows to the incoming footprint): a plain Overwrite with no ripple. It can split the target.
 - **Onto an edit point:** insert at that edit.
 - **Into the gray area above the top track:** this makes a new video+audio track.
@@ -1866,10 +1867,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - When that Track 1 clip is deleted, the attached clip goes where Track 1 closed up.
   - A trim of the tail of that Track 1 clip past the attached clip deletes the attached clip (p. 727).
   - A trim of its head moves the attached clip to the new start.
-  - A replacement of that Track 1 clip leaves the attached clip in place.
+  - A Ripple Overwrite has its own rule. The new end is where the new clip ends. The old end is where the replaced part ended. These are measurements in Resolve Studio 21.1.2:
+    - A clip that starts before the new end stays where it is, and it stays whole.
+    - A clip from the old end on moves by the change in length, also past the last Track 1 clip.
+    - A clip on a video track that starts from the new end to the old end goes away.
+    - A clip on an audio track that starts there stays where it is.
+    - The first clip that moves back on a track ends the clips that stayed on that track. The clip under its first frame stops there. Clips that stayed after that frame go away.
   - Over a gap, the clip keeps its distance to the Track 1 clips around it.
   - Clips on locked tracks do not follow.
-  - A clip that would land on another clip moves to the next free track of its kind.
+  - In other edits, a clip that would land on another clip moves to the next free track of its kind.
 - **D22. Rippling other tracks** (p. 721).
   - With Ripple On, a delete or a trim of a clip on another track can ripple that track.
   - It ripples only when Track 1 has no clips from the start of that clip on. Otherwise it leaves a gap.
@@ -2397,6 +2403,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It drops a cue that has no frames left.
     - An insert inside a cue splits it. Both parts keep the text.
     - Overwrite and lift leave cues where they are.
+    - A Ripple Overwrite takes the part of a cue over the frames that it takes out. A longer clip splits a cue across the end of the replaced part.
     - A timeline In–Out delete takes its range out of cues too.
   - A locked subtitle track does not move.
   - Resolve Studio 21.1.1 does the same in a ripple delete of a Track 1 clip (Edit page, through its scripting API).
@@ -2877,7 +2884,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Soft: a lower third at 5.5%, with a soft shadow and no outline
   - Your looks are one TOML file each, in `looks/subtitles` and `looks/titles` in the config folder.
   - The file has the name of the look:
-    - up to 64 characters, without `/ \ : * ? " < > |`
+    - without `/ \ : * ? " < > |`
     - not starting or ending with a dot
     - matched whatever its case
   - A built-in look cannot be replaced or deleted, and its name cannot be taken.

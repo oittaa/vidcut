@@ -378,8 +378,6 @@ pub fn checked(styled: &Styled) -> Result<Styled> {
     }
 }
 
-const NAME_MOST: usize = 64;
-
 fn reserved(name: &str) -> bool {
     let stem = name
         .split('.')
@@ -396,7 +394,6 @@ fn reserved(name: &str) -> bool {
 pub fn checked_name(name: &str) -> Result<String> {
     let n = name.trim();
     let ok = !n.is_empty()
-        && n.chars().count() <= NAME_MOST
         && !n.starts_with('.')
         && !n.ends_with('.')
         && !n.chars().any(|c| {
@@ -407,7 +404,7 @@ pub fn checked_name(name: &str) -> Result<String> {
         Ok(n.to_string())
     } else {
         Err(Error::usage(format!(
-            "look name {name:?}: up to {NAME_MOST} characters, without / \\ : * ? \" < > |, \
+            "look name {name:?}: without / \\ : * ? \" < > |, \
              not starting or ending with a dot"
         )))
     }

@@ -2364,6 +2364,37 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The field and the edit agree.
   - The owner approved this difference.
 
+## X116. The Ripple Overwrite button treats other tracks as a drop does
+
+- **Resolve:**
+  - A drop of a file onto a Track 1 clip follows the rule in [D21](cut-page-spec.md#12-decisions-on-gaps-and-contradictions). These are measurements in Resolve Studio 21.1.2.
+  - The button and Shift+F10 act differently, on the Cut page and the Edit page.
+  - They cut each other track at the start of the replaced part. Everything from there on moves by the change in length.
+  - With a shorter clip, the frames just before that start also go away. The edit does not replace these frames.
+- **vidcut:**
+  - The button, the key, the CLI, IPC and MCP follow the rule of the drop.
+- **Why:**
+  - The button takes out picture that the edit does not replace.
+  - It also cuts clips that start before the replaced part.
+  - One rule for one edit is easier to predict.
+  - The owner approved this difference.
+
+## X117. Cues stay with the picture in a Ripple Overwrite
+
+- **Resolve:**
+  - A cue over the replaced clip stays where it is, also past the new end of the clip. These are measurements in Resolve Studio 21.1.2.
+  - A later cue that moves back cuts the cue that it lands on. It removes the replaced clip's cues from its landing on.
+  - The user then has to re-time the cues.
+- **vidcut:**
+  - Cues keep the frames of Track 1 under them ([D57](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A cue loses its part over the frames that the edit takes out. A cue with no frames left goes away.
+  - A longer clip splits a cue across the end of the replaced part. Both parts keep the text.
+  - Later cues move with their picture.
+- **Why:**
+  - A cue belongs to the picture under it.
+  - The user does not have to re-time the cues.
+  - The owner approved this difference.
+
 ## X118. Source Overwrite at the end of the timeline uses the first clip
 
 - **Resolve:**

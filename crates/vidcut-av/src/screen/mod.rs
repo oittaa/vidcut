@@ -1,6 +1,6 @@
 #[cfg(windows)]
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use crate::color::shader_colors;
@@ -116,17 +116,26 @@ pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
 pub struct Offscreen {
     pub adapter: wgpu::AdapterInfo,
     pub gpu: Gpu,
-    lost: OnceLock<String>,
+    lost: Arc<OnceLock<String>>,
 }
 
 const RETRIES: usize = 3;
 
 const RETRY_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
 
-static LOSSES: std::sync::Mutex<Vec<std::time::Instant>> = std::sync::Mutex::new(Vec::new());
+static LOSSES: AtomicUsize = AtomicUsize::new(0);
+
+static RECENT_LOSSES: std::sync::Mutex<Vec<std::time::Instant>> = std::sync::Mutex::new(Vec::new());
 
 fn lost_at() -> std::sync::MutexGuard<'static, Vec<std::time::Instant>> {
-    LOSSES.lock().unwrap_or_else(|e| e.into_inner())
+    RECENT_LOSSES.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn count_loss() {
+    LOSSES.fetch_add(1, Ordering::Relaxed);
+    let mut lost = lost_at();
+    lost.retain(|t| t.elapsed() < RETRY_WINDOW);
+    lost.push(std::time::Instant::now());
 }
 
 fn recent_losses() -> usize {
@@ -137,28 +146,30 @@ fn recent_losses() -> usize {
 }
 
 pub(crate) fn losses() -> usize {
-    lost_at().len()
+    LOSSES.load(Ordering::Relaxed)
 }
 
 impl Offscreen {
-    fn watch(&'static self) {
+    fn watch(&self) {
+        let (name, lost) = (self.adapter.name.clone(), self.lost.clone());
         self.gpu.device.set_device_lost_callback(move |_, why| {
-            eprintln!("vidcut: {} stopped: {why}", self.adapter.name);
-            lost_at().push(std::time::Instant::now());
-            let _ = self.lost.set(why);
+            eprintln!("vidcut: {name} stopped: {why}");
+            count_loss();
+            let _ = lost.set(why);
         });
+        let (name, lost) = (self.adapter.name.clone(), self.lost.clone());
         self.gpu.device.on_uncaptured_error(Arc::new(move |e| {
-            if self.lost.get().is_none() {
+            if lost.get().is_none() {
                 panic!("wgpu error: {e}");
             }
-            crate::debug!("gpu", "{} after it stopped: {e}", self.adapter.name);
+            crate::debug!("gpu", "{name} after it stopped: {e}");
         }));
     }
 
-    fn usable(&'static self) -> std::result::Result<&'static Self, String> {
-        let name = &self.adapter.name;
-        match self.lost.get() {
-            None => Ok(self),
+    fn usable(on: &Arc<Self>) -> std::result::Result<Arc<Self>, String> {
+        let name = &on.adapter.name;
+        match on.lost.get() {
+            None => Ok(on.clone()),
             Some(why) if recent_losses() < RETRIES => {
                 Err(format!("{name} stopped ({why}); try again"))
             }
@@ -169,10 +180,7 @@ impl Offscreen {
     }
 }
 
-type Made = (
-    Option<String>,
-    std::result::Result<&'static Offscreen, String>,
-);
+type Made = (Option<String>, std::result::Result<Arc<Offscreen>, String>);
 
 static MADE: std::sync::Mutex<Vec<Made>> = std::sync::Mutex::new(Vec::new());
 
@@ -180,19 +188,22 @@ fn made() -> std::sync::MutexGuard<'static, Vec<Made>> {
     MADE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-pub fn offscreen() -> std::result::Result<&'static Offscreen, String> {
+pub fn offscreen() -> std::result::Result<Arc<Offscreen>, String> {
     let wanted = crate::gpus::in_use();
     let key = wanted.as_ref().map(|g| g.id.clone());
     let mut made = made();
     if let Some((_, on)) = made.iter().find(|(k, _)| *k == key) {
-        return on.clone().and_then(Offscreen::usable);
+        return on
+            .as_ref()
+            .map_err(String::clone)
+            .and_then(Offscreen::usable);
     }
     let on = device("vidcut offscreen", wanted.as_ref()).map(|(adapter, device, queue)| {
-        let on: &'static Offscreen = Box::leak(Box::new(Offscreen {
+        let on = Arc::new(Offscreen {
             adapter: adapter.get_info(),
             gpu: Gpu::new(&device, &queue),
-            lost: OnceLock::new(),
-        }));
+            lost: Arc::default(),
+        });
         on.watch();
         on
     });
@@ -210,7 +221,7 @@ pub fn retry_lost() -> bool {
     made.len() < before
 }
 
-pub(crate) type Started<N> = (Option<&'static Offscreen>, std::result::Result<N, String>);
+pub(crate) type Started<N> = (Option<Arc<Offscreen>>, std::result::Result<N, String>);
 
 pub(crate) fn start_on_offscreen<N>(
     engine: &mut Option<Started<N>>,
@@ -219,7 +230,7 @@ pub(crate) fn start_on_offscreen<N>(
     let on = offscreen().ok();
     if engine
         .as_ref()
-        .is_some_and(|(was, _)| was.map(std::ptr::from_ref) != on.map(std::ptr::from_ref))
+        .is_some_and(|(was, _)| was.as_ref().map(Arc::as_ptr) != on.as_ref().map(Arc::as_ptr))
     {
         *engine = None;
     }

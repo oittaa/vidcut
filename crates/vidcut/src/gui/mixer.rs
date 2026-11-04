@@ -3,15 +3,18 @@ use std::time::Instant;
 
 use eframe::egui::{self, Color32, CornerRadius, Rect, RichText, Stroke, StrokeKind, pos2, vec2};
 use serde_json::json;
+use vidcut_core::lru::Lru;
 use vidcut_core::model::{Project, Track};
 use vidcut_core::request::ViewerMode;
 
 use super::theme;
 use super::workspace::{Workspace, dim};
 
+const HOLDS_KEPT: usize = 1024;
+
 #[derive(Default)]
 pub struct Mixer {
-    holds: HashMap<String, (f32, Instant)>,
+    holds: Lru<String, (f32, Instant), HOLDS_KEPT>,
     dragging: HashMap<String, f64>,
 }
 
@@ -370,7 +373,7 @@ impl Workspace {
     fn meters_live(&self, levels: &[f32], playing: bool) -> bool {
         playing
             || levels.iter().any(|l| *l > 0.0)
-            || self.mixer.holds.values().any(|(h, _)| *h > 0.0)
+            || self.mixer.holds.iter().any(|(_, (h, _))| *h > 0.0)
     }
 
     pub(super) fn mixer_panel(&mut self, ui: &mut egui::Ui) {
