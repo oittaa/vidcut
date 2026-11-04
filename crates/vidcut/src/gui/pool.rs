@@ -1330,22 +1330,11 @@ impl Workspace {
         let secs = p.settings.fps.frames_to_secs(p.media_frames(m));
         let origin = m.info.audio.first().map_or(0.0, |a| a.first_pts);
         let per_px = secs / f64::from(rect.width().max(1.0));
-        let (mid, half) = (rect.center().y, rect.height() / 2.0 - 1.0);
         painter.rect_filled(rect, CornerRadius::same(3), theme::colors().audio);
-        let mut x = rect.left().floor();
-        while x < rect.right() {
+        super::timeline::paint::wave_columns(painter, rect, |x| {
             let t = origin + f64::from(x - rect.left()) * per_px;
-            if let Some((lo, hi)) = w.range(t, t + per_px) {
-                painter.line_segment(
-                    [
-                        Pos2::new(x + 0.5, mid - hi * half),
-                        Pos2::new(x + 0.5, mid - lo * half + 0.5),
-                    ],
-                    Stroke::new(1.0, Color32::from_rgb(170, 230, 190)),
-                );
-            }
-            x += 1.0;
-        }
+            w.range(t, t + per_px)
+        });
     }
 
     fn outline(&self, painter: &egui::Painter, rect: Rect, m: &Media) {
