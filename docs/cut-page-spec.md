@@ -1446,7 +1446,6 @@ A generator is a clip that makes its own picture. It has no media and no sound.
 - **Length and dissolves:**
   - Measured: a generator can have any length.
   - Measured: Resolve keeps the source start of a generator at 0. A left trim moves the keyframes, and the picture does not move.
-  - vidcut: a left trim moves the source start, and the keyframes stay on their source frames. The picture does not move.
   - Measured: a dissolve between two generators runs past the ends of both clips. Thus it needs no extra frames.
 - **In OTIO files:**
   - vidcut writes its kinds in the shape of Resolve's own file.
