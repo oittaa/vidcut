@@ -2564,14 +2564,21 @@ pub enum Request {
     /// marks are set, otherwise the whole timeline.
     #[serde(rename = "export.start")]
     ExportStart(ExportParams),
-    /// Render one frame as PNG: the timeline at `at`, or with `media` that
-    /// media's frame at `at` (source time).
+    /// Render one frame as PNG: the timeline at `at`, with `media` that
+    /// media's frame at `at` (source time), or with `generator` the frame of
+    /// that generator as a source of 5 s.
     #[serde(rename = "frame.render")]
     FrameRender {
         at: TimeSpec,
         out: PathBuf,
         #[serde(default)]
         media: Option<String>,
+        /// The generator to draw instead of the timeline. The settings below
+        /// go with it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generator: Option<GeneratorKind>,
+        #[serde(flatten)]
+        settings: GeneratorSettings,
         /// Output width; height follows the picture's aspect. Default: full size.
         #[serde(default)]
         width: Option<u32>,
@@ -2896,9 +2903,11 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         alone: Option<bool>,
     },
-    /// Set the In and/or Out of the Multi Source viewer. They are frames of
-    /// its scroll area and hold for each camera; `out` is exclusive. The
-    /// files' own source marks do not change. A change of bin clears them.
+    /// Set the In and/or Out of the Multi Source viewer, or of a generator
+    /// open as the source. `out` is exclusive. In the Multi Source viewer they
+    /// are frames of its scroll area and hold for each camera. The files' own
+    /// source marks do not change. A change of bin clears them. A generator's
+    /// marks last until another source opens, and they are not in the project.
     #[serde(rename = "viewer.marks.set")]
     ViewerMarksSet {
         #[serde(rename = "in", default)]
@@ -2911,7 +2920,8 @@ pub enum Request {
         #[serde(default)]
         duration: Option<DurationSpec>,
     },
-    /// Clear the In and Out of the Multi Source viewer.
+    /// Clear the In and Out of the Multi Source viewer, or of a generator open
+    /// as the source.
     #[serde(rename = "viewer.marks.clear")]
     ViewerMarksClear {},
     /// Viewer framing and safe-area guides (decision D90). Stored in
@@ -2952,10 +2962,20 @@ pub enum Request {
     /// The choice lasts for this session. It is not in the project.
     #[serde(rename = "viewer.frame")]
     ViewerFrame { mode: ViewerFrame },
-    /// Open a media item in the viewer as Source Clip, optionally at a source time.
+    /// Open a media item in the viewer as Source Clip, optionally at a source
+    /// time. With `generator`, open that generator as a source of 5 s. The
+    /// timeline does not change.
     #[serde(rename = "viewer.load")]
     ViewerLoad {
+        /// Media id (`m1`). Omitted when `generator` is set.
+        #[serde(default)]
         media: String,
+        /// The generator to open instead of a media item. The settings below
+        /// go with it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generator: Option<GeneratorKind>,
+        #[serde(flatten)]
+        settings: GeneratorSettings,
         #[serde(default)]
         at: Option<TimeSpec>,
     },
@@ -4176,31 +4196,31 @@ fn storyboard_width() -> u32 {
 pub struct GeneratorSettings {
     /// A `solid_color`'s color: `#rrggbb`, `#rgb` or a name such as `yellow`.
     /// Default: black.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     /// A `four_color_gradient`'s Center X: -1 is the left edge, 0 the middle
     /// and 1 the right edge. A number past an end takes that end. Default: 0.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center_x: Option<f64>,
     /// A `four_color_gradient`'s Center Y: -1 is the top edge, 0 the middle
     /// and 1 the bottom edge. A number past an end takes that end. Default: 0.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center_y: Option<f64>,
     /// A `four_color_gradient`'s upper left color. Default: `#ff0000`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper_left: Option<String>,
     /// A `four_color_gradient`'s upper right color. Default: `#ffff00`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper_right: Option<String>,
     /// A `four_color_gradient`'s lower left color. Default: `#0000ff`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lower_left: Option<String>,
     /// A `four_color_gradient`'s lower right color. Default: `#00ffff`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lower_right: Option<String>,
     /// An `ebu_color_bar`'s Level: the percent of its colored bars, `75` or
     /// `100`. Default: `75`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<EbuLevel>,
 }
 
@@ -4219,18 +4239,25 @@ impl GeneratorSettings {
     }
 }
 
-/// What to put on the timeline: a media range, and where.
+/// What to put on the timeline: a media range or a generator, and where.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceParams {
-    /// Media id (`m1`). Omitted when `tape` is set.
+    /// Media id (`m1`). Omitted when `tape` or `generator` is set.
     #[serde(default)]
     pub media: String,
     /// Edit the Source Tape In–Out span instead of one media item. Both marks
     /// must be set.
     #[serde(default)]
     pub tape: bool,
-    /// Source range (TimeSpecs relative to the media's start). Default: the
-    /// media's source marks, or all of it.
+    /// Use a generator as the source instead of a media item. The source is
+    /// 5 s long and has no sound. The settings below go with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generator: Option<GeneratorKind>,
+    #[serde(flatten)]
+    pub settings: GeneratorSettings,
+    /// Source range (TimeSpecs relative to the source's start). Default: the
+    /// media's source marks, or all of it. For a generator: its 5 s. A range
+    /// on a generator can be longer than 5 s.
     #[serde(default)]
     pub range: Option<RangeSpec>,
     /// Leave the audio out (Video Only).
@@ -4241,7 +4268,7 @@ pub struct SourceParams {
     pub audio_only: bool,
     /// The target track. Default: V1, or A1 for audio-only clips. The next new
     /// track (`V3` when there are two) is made. On an audio track only the
-    /// audio is used.
+    /// audio is used. A generator goes only on a video track.
     #[serde(default)]
     pub track: Option<String>,
     /// A part of the Multi Source viewer: the frames left empty before the

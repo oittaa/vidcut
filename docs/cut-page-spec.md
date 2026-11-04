@@ -665,6 +665,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - **A range with left-out frames:** each kept part goes in at its own place.
     - **`tape` across files:** each file lines up by itself, and the edit is one step.
     - **Several selected pool items:** each file lines up by itself, the timeline marks hold for all of them (`keep_marks`), and the edit is one step.
+    - **A generator as the source:** it has timecode 00:00:00:00 and 5 s of frames, as a still has one timecode. A timeline Out can make it longer. `group` refuses it.
 - **Close Up (later).**
 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
@@ -1541,7 +1542,14 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Not measured: the track and the frame of a drop in Resolve.
   - Measured: a double-click on a card loads the generator in the viewer as a source of 5 s. The timeline does not change. The Inspector shows nothing to inspect, so it has no Color row.
   - Measured: a drag from the viewer onto a clip on V1 overwrites from the frame under the pointer. The clip then has its Color row.
-  - vidcut: a double-click on a card adds the generator at the playhead. The source viewer takes only media ([todo](todo/effects-library.md)).
+  - vidcut: a double-click on a card opens the generator in the Source Clip viewer (`viewer.load` with `generator`). The source is 5 s long, and the timeline does not change.
+  - vidcut: In and Out work on this source (`viewer.marks.set`). They last until another source opens, and they are not in the project.
+  - vidcut: Append, Smart Insert, Overwrite, Ripple Overwrite, Place On Top and Source Overwrite take `generator` as a source, with the settings of `generators.add`.
+    - The clip is the same as a clip of `generators.add`. Its source start is 0, because a generator keeps its source start at 0 (measured).
+    - Timeline marks can make it longer than 5 s, because a generator can have any length (measured).
+    - It has no sound. Audio Only and an audio track refuse it.
+    - The edits follow [§7.2](#72-edit-functions), with the rules of a media source. Not measured: each of these edits with a generator in Resolve.
+  - vidcut: a drag from the viewer drops as `generators.add`, with the length between the marks. Not measured: a drop on another track, and a drop with marks.
   - `generators.add` without a track uses the track that D66 gives a title.
   - A new generator is 5 s long, and it adds no sound clip (measured).
 - **Inspector:**

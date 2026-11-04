@@ -3013,8 +3013,12 @@ impl Workspace {
 
     pub(crate) fn start_generator_drag(
         &mut self,
-        p: &Project,
-        (kind, label): (vidcut_core::model::GeneratorKind, &'static str),
+        (kind, settings, label): (
+            vidcut_core::model::GeneratorKind,
+            vidcut_core::request::GeneratorSettings,
+            String,
+        ),
+        len: i64,
         press: Pos2,
     ) {
         self.timeline.snap_flipped = false;
@@ -3022,8 +3026,9 @@ impl Workspace {
             drag: Drag::new(
                 Gesture::Generator {
                     kind,
+                    settings,
                     label,
-                    len: vidcut_core::ops::titles::default_length(p),
+                    len,
                 },
                 press,
             ),
@@ -3091,7 +3096,7 @@ impl Workspace {
                 Some((0, cues.iter().map(|c| c.1).max().unwrap_or(0))),
             ),
             Gesture::Title { template, len } => (template.label.clone(), Some((0, *len))),
-            Gesture::Generator { label, len, .. } => ((*label).to_string(), Some((0, *len))),
+            Gesture::Generator { label, len, .. } => (label.clone(), Some((0, *len))),
             Gesture::Transition { label, kind } => (
                 (*label).to_string(),
                 Some((

@@ -2086,15 +2086,21 @@ impl Workspace {
         let text = match sources.len() {
             0 if self.sync_grid_on() => "No source: select a camera".to_string(),
             0 => "No source: open a clip or select pool media".to_string(),
-            1 => {
-                let s = &sources[0];
-                let media = s["media"].as_str().unwrap_or_default();
-                let name = self
-                    .project()
-                    .and_then(|p| p.media(media))
-                    .map_or(media.to_string(), |m| m.name.clone());
-                format!("Source: {} ({})", elide(&name, 30), range_text(self, s))
-            }
+            1 => match self.snap.open_generator() {
+                Some(g) => {
+                    let (a, b) = g.range();
+                    format!("Source: {} ({} long)", g.name(), self.src_tc(b - a))
+                }
+                None => {
+                    let s = &sources[0];
+                    let media = s["media"].as_str().unwrap_or_default();
+                    let name = self
+                        .project()
+                        .and_then(|p| p.media(media))
+                        .map_or(media.to_string(), |m| m.name.clone());
+                    format!("Source: {} ({})", elide(&name, 30), range_text(self, s))
+                }
+            },
             n => format!("Source: {n} selected clips"),
         };
         ui.label(dim(text).small());

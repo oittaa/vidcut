@@ -340,6 +340,10 @@ The bar and the Jobs button:
 - The Generators page of the Effects tab (`EffectsTab`, `generator_browser::CARDS`) draws its cards. A dragged card (`Gesture::Generator`) drops as `generators.add`.
   - Each card shows the picture of its kind with the default values, through `generators::draw`.
   - A card draws at the size of a full frame, and then shows a part of its pixels. Why: the layout of a bar pattern depends on the size, and a small SMPTE Color Bar shows only its left side.
+  - A double-click on a card sends `viewer.load` with `generator`. `Live::load_generator` holds the source in `Live.source_generator`. `SourceContent::Generator` loads `render::generator_tape` in the source player.
+  - `SourceGenerator` holds the kind, its settings, the length and the marks, for this session. Why: a generator is not a file of the project, so it has no `Media.marks`.
+  - `Snapshot::viewer_marks` gives the marks of the grid or of the open generator. The scroll area, the Duration field and the keys of the viewer use it, with `viewer.marks.set`.
+  - `SourceGenerator::params` gives the source of an edit (`Workspace::edit_sources`). A drag from the viewer starts a `Gesture::Generator` with the marked length.
 
 **Pictures.**
 

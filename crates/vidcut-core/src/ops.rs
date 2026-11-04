@@ -27,8 +27,8 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, ColorSpace, Marker, Media, MediaUpscaler, Project, Sharpness, Speed, Subclip,
-    Track, TrackClip, TrackKind, Upscaler,
+    Clip, ClipAudio, ColorSpace, Generator, Marker, Media, MediaUpscaler, Project, Sharpness,
+    Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -42,6 +42,7 @@ pub struct Source {
     pub video_only: bool,
     pub audio_only: bool,
     pub track: Option<String>,
+    pub generator: Option<Generator>,
 }
 
 #[derive(
@@ -223,15 +224,57 @@ fn fix_audio(p: &mut Project, ti: usize) {
     }
 }
 
+pub(crate) fn block_clip(
+    id: String,
+    (start, duration): (i64, i64),
+    title: Option<Title>,
+    generator: Option<Generator>,
+) -> Clip {
+    Clip {
+        id,
+        media: String::new(),
+        start,
+        duration,
+        source_in: 0,
+        video: true,
+        audio: None,
+        enabled: true,
+        name: None,
+        effects: None,
+        generator,
+        title,
+        picture: None,
+        compound: None,
+        speed: None,
+        retime: crate::model::ClipRetime::Project,
+        color: None,
+        render_cache: crate::model::ClipCache::Auto,
+        input_lut: None,
+    }
+}
+
 fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
-    let media = p
-        .media(&src.media)
-        .ok_or_else(|| Error::not_found(format!("no media {}", src.media)))?;
     if src.video_only && src.audio_only {
         return Err(Error::usage(
             "an edit can't be both Video Only and Audio Only",
         ));
     }
+    if let Some(generator) = &src.generator {
+        if src.audio_only {
+            return Err(Error::invalid("a generator has no audio"));
+        }
+        let (a, b) = src.range;
+        if a < 0 || a >= b {
+            return Err(Error::invalid(format!(
+                "source range {a}..{b} of a generator is empty"
+            )));
+        }
+        let id = p.alloc_clip_id();
+        return Ok(block_clip(id, (0, b - a), None, Some(generator.clone())));
+    }
+    let media = p
+        .media(&src.media)
+        .ok_or_else(|| Error::not_found(format!("no media {}", src.media)))?;
     if media.subtitles.is_some() {
         return Err(Error::invalid(format!(
             "{} is a subtitle file: put its cues on a subtitle track (subtitles.import with media)",
@@ -296,6 +339,12 @@ fn home(p: &mut Project, clips: &mut [Clip], src: &Source) -> Result<usize> {
     };
     if p.tracks[ti].kind == TrackKind::Audio {
         for clip in clips.iter_mut().filter(|c| c.video) {
+            if clip.generator.is_some() {
+                return Err(Error::invalid(format!(
+                    "a generator goes on a video track, not {}",
+                    p.tracks[ti].id
+                )));
+            }
             if clip.audio.is_none() {
                 return Err(Error::invalid(format!(
                     "{} has no audio for audio track {}",
