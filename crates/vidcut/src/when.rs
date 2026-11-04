@@ -26,6 +26,10 @@ impl LocalTime {
         )
     }
 
+    pub fn day(&self) -> String {
+        format!("{}-{:02}-{:02}", self.year, self.month, self.day)
+    }
+
     fn clock(&self) -> String {
         format!("{:02}:{:02}", self.hour, self.minute)
     }
