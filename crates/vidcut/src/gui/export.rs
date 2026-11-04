@@ -122,7 +122,7 @@ impl Dialogs for RfdDialogs {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct Picked(Arc<Mutex<Option<Option<PathBuf>>>>);
 
 impl Picked {
@@ -346,7 +346,7 @@ const CONTAINERS: [Container; 9] = [
 
 fn profiles(c: VideoCodec) -> &'static [&'static str] {
     match c {
-        VideoCodec::Prores => &["proxy", "lt", "standard", "hq", "4444"],
+        VideoCodec::Prores => &["proxy", "lt", "standard", "hq", "4444", "xq"],
         VideoCodec::Dnxhr => &["lb", "sq", "hq", "hqx", "444"],
         VideoCodec::H264 => &["baseline", "main", "high"],
         VideoCodec::Hevc => &["main", "main10"],
@@ -2340,7 +2340,7 @@ fn metadata_line(outputs: &[Value]) -> Option<(String, String)> {
     for m in outputs
         .iter()
         .map(|o| &o["metadata"])
-        .filter(|m| m.is_object() && m["mode"].as_str() != Some("none"))
+        .filter(|m| crate::export::metadata_shown(m))
     {
         let words = crate::export::metadata_words(m);
         if !kinds.contains(&words) {
@@ -2989,7 +2989,7 @@ fn settings_form(
                                 None,
                                 format!("project ({})", channels(audio.1)),
                             );
-                            for c in [1, 2, 6] {
+                            for c in 1..=vidcut_core::model::Settings::MOST_CHANNELS {
                                 ui.selectable_value(&mut a.channels, Some(c), channels(c));
                             }
                         });

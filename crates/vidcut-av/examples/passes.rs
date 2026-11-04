@@ -42,6 +42,7 @@ fn main() {
     let start = (start.parse::<f64>().unwrap() * fps.as_f64()).round() as i64;
     let frames = (secs.parse::<f64>().unwrap() * fps.as_f64()).round() as i64;
     let piece = VideoPiece::Source {
+        input_lut: None,
         pace: Default::default(),
         media: "m".into(),
         path: path.clone(),
@@ -59,6 +60,7 @@ fn main() {
         made: None,
     };
     let plan = RenderPlan {
+        output_lut: None,
         fps,
         width: v.width,
         height: v.height,

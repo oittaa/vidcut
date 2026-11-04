@@ -125,6 +125,7 @@ pub struct Picture {
     alpha_mode: AlphaMode,
     alpha_use: AlphaUse,
     matte: Option<Arc<Picture>>,
+    lut: Option<crate::screen::Lut>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -224,6 +225,7 @@ impl Picture {
             alpha_mode: AlphaMode::Straight,
             alpha_use: AlphaUse::Shown,
             matte: None,
+            lut: None,
         }
     }
 
@@ -252,6 +254,15 @@ impl Picture {
 
     pub(crate) fn matte(&self) -> Option<&Arc<Picture>> {
         self.matte.as_ref()
+    }
+
+    pub(crate) fn with_lut(mut self, lut: Option<crate::screen::Lut>) -> Self {
+        self.lut = lut;
+        self
+    }
+
+    pub(crate) fn lut(&self) -> Option<&crate::screen::Lut> {
+        self.lut.as_ref()
     }
 
     pub(crate) fn with_origin(mut self, origin: Option<Origin>) -> Self {
@@ -419,7 +430,8 @@ impl Picture {
             .with_sampling(self.sampling.clone())
             .with_origin(self.origin.clone())
             .with_alpha_mode(self.alpha_mode)
-            .with_alpha_use(self.alpha_use);
+            .with_alpha_use(self.alpha_use)
+            .with_lut(self.lut.clone());
         let alone = Self {
             matte: self.matte.clone(),
             ..alone
@@ -445,7 +457,8 @@ impl Picture {
             .with_sampling(self.sampling.clone())
             .with_origin(self.origin.clone())
             .with_alpha_mode(self.alpha_mode)
-            .with_alpha_use(self.alpha_use);
+            .with_alpha_use(self.alpha_use)
+            .with_lut(self.lut.clone());
         Ok(Self { matte, ..alone })
     }
 
@@ -525,6 +538,7 @@ pub struct Shown {
     pub crosses: Vec<bool>,
     pub scales: Vec<Option<vidcut_core::model::Sharpness>>,
     pub colors: Option<vidcut_core::model::Hdr>,
+    pub output_lut: Option<crate::screen::Lut>,
 }
 
 pub struct TitlePicture {

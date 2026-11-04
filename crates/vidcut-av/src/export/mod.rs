@@ -306,6 +306,9 @@ pub fn choose_metadata(
     mut meta: impl FnMut(&VideoPiece) -> PieceMeta,
 ) -> Option<MetadataChoice> {
     let v = settings.video.as_ref()?;
+    if plan.has_lut() {
+        return Some(metadata::choose_through_lut(v));
+    }
     let sdr = plan.colors.is_none();
     Some(metadata::choose(
         v,
@@ -554,6 +557,7 @@ fn first_run(
     let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr)
         .written_at(written)
         .with_timeline(plan.colors)?
+        .with_output_lut(plan.output_lut.as_deref())?
         .with_dynamic(enc.dynamic)
         .with_burn(burn.0, burn.1, plan.height);
     if let Some(d) = decoder {
@@ -736,7 +740,7 @@ impl AudioOut {
         use format::sample::Type::{Packed, Planar};
         let ch = usize::from(self.spec.channels);
         let n = samples.len() / ch;
-        let layout = ffmpeg::ChannelLayout::default(i32::from(self.spec.channels));
+        let layout = audio::channel_layout(self.spec.channels);
         let mut f = frame::Audio::new(self.spec.sample, n, layout);
         f.set_rate(self.spec.rate);
         match self.spec.sample {
@@ -1040,6 +1044,7 @@ fn encode(
                     .encode_on(handoff)
                     .written_at((w, h))
                     .with_timeline(plan.colors)?
+                    .with_output_lut(plan.output_lut.as_deref())?
                     .with_dynamic(enc.dynamic)
                     .with_light(light)
                     .with_burn(burned.0, burned.1, plan.height)
@@ -1092,7 +1097,7 @@ fn encode(
                 .audio()
                 .ctx(|| format!("creating {}", spec.name))?;
             ctx.set_rate(spec.rate as i32);
-            ctx.set_channel_layout(ffmpeg::ChannelLayout::default(i32::from(spec.channels)));
+            ctx.set_channel_layout(audio::channel_layout(spec.channels));
             ctx.set_format(spec.sample);
             ctx.set_time_base(ffmpeg::Rational(1, spec.rate as i32));
             if let Some(b) = spec.bitrate {
@@ -1112,7 +1117,7 @@ fn encode(
             }
             let encoder = ctx
                 .open_as(codec)
-                .ctx(|| format!("opening {}", spec.name))?;
+                .ctx(|| format!("opening {} with {} channels", spec.name, spec.channels))?;
             let index = usize::from(video.is_some());
             let mut ost = octx
                 .add_stream(codec)

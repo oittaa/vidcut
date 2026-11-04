@@ -267,6 +267,7 @@ The audio device:
     - The rule works at the size of the draw. The size of the viewer is in whole pixels of the screen, so its shape can differ a little from the timeline. Thus a picture that fills the timeline can leave a part of a pixel in the viewer.
     - A thumbnail, a proxy and a picture for an AI upscaler draw into a size that is already rounded (`Sampling::Rounded`, `place::rounded_place`). Why: the picture must fill that size, with no bar.
   - It first converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `shader_colors`). In an SDR timeline, it tone-maps HDR.
+    - A picture with an input LUT takes `fs_convert_lut` (`Picture::with_lut`, [the LUT files](README.md#lut-files)).
     - Then it deinterlaces an interlaced picture (`fs_bwdif`, [gpu](gpu.md#deinterlacing-and-hdr)).
     - The converted picture is 16-bit floats. The scaling below reads it.
     - Why: the spec converts the input before the sizing ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)). A conversion that is not linear gives other edges after a scale.
@@ -299,6 +300,9 @@ The audio device:
     - The motion blur is a box along the move, with one tap for each pixel of its length, up to 512. Taps past the frame repeat its edge pixels.
     - A Push blurs the whole result. A Slide mixes the blur in by the part of the box that the moving side covers.
     - Why: these rules give Resolve's renders within about 1 pixel ([gotchas](../gotchas.md#resolves-otio-files)).
+  - With an output LUT, the draw also uses `Wide`, and `fs_lut` runs on the whole canvas after the last layer and title (`Screen::set_output_lut`, `Shown`).
+    - `Plan::output_lut` loads the file when a plan first needs it.
+    - A gap goes through the output LUT. Before the first picture, the viewer draws no LUT.
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
 - With a scope on, each turn also calls `Screen::scopes` after `Screen::draw` ([gpu](gpu.md#the-scopes)). `Viewer::sync_scopes` shows each scope's target in the same way.
 - A present answers with the frame drawn, if it is exact. A `gui.screenshot` of the viewer reads the target back, to the pixel.
@@ -407,7 +411,7 @@ What it renders:
   - Why the black pieces: the black side of a Push or a dip is a part of the transition of the track.
 - Slow media (`Reason::Media`) are of two kinds:
   - With GPU decoding on, media of a long-GOP codec that the GPU decoder does not take (vidcut-av `render_cache::slow`).
-  - The render thread checks each file once. It keeps the answer by the path of the file, until the GPU preferences change.
+  - The render thread checks each file once. It keeps the answer by the path of the file, until the GPU preferences change or the file leaves the project.
   - The answers come in a message that names its job. The live core drops the answers of a job that it stopped.
   - Media that the proxy rules pick (`Proxies::wants`), while the original plays.
 - `Reason::Drops` is for a marked part (`Cache::marked`). It is a reason of the timeline level, and only Smart keeps it.
@@ -442,6 +446,7 @@ The names of frames:
   - In the piece, the fingerprint of each media takes the place of its path.
   - The piece has no clip ids and no times on the timeline. Thus a part that moves keeps its names.
   - The piece has no `ClipCache`, no `excluded` and no `render_cache` of its effects. Thus a change of these settings keeps the names.
+  - `cube::stamp` takes the place of the path of an input LUT. Thus a changed file gives new names. The file of the cache holds the picture after the input LUT (`from_file`). An input LUT alone is no reason to cache.
   - The player's key of a decoded frame (`source_key`) also leaves out the `render_cache` of effects. Thus a check in Render Cache Effects does not upscale again.
   - The name also holds the `Look` (the size and the codec), the frame rate, the colors of the timeline and the version of vidcut.
 - `Cache::clip_keys` names each frame of the clip level by a SHA-256 of its source frame alone (`alone`). It holds the media, the frame and the colors of the media.
@@ -507,6 +512,7 @@ The index:
   - `Index::read` removes no file.
   - A dry run does not mark the index as scanned (`Background::read_index`). Thus a later scan still removes a cache `.keys` file whose video is gone.
 - The disk cache can remove a video at any time. `Cache::apply` removes from the index each file of the plan that is gone (`Index::remove`). Thus the background render makes its frames again.
+- Each render starts with `Render::drop_deleted`. It removes each other file that is gone. Thus the index does not grow with deleted videos.
 
 The jobs:
 
@@ -558,7 +564,7 @@ The jobs:
   - With a chosen codec: the encoders that make it, with the options of its grade (`grade_options`).
     - ProRes 422: Apple's hardware (VideoToolbox), the GPU through Vulkan, and the CPU.
     - ProRes 4444: Apple's hardware when it takes 4:4:4 (`chroma_444`), and the CPU.
-    - ProRes 4444 XQ: the CPU. Why: no check shows that Apple's encoder takes this grade. The exports do not use it either.
+    - ProRes 4444 XQ: the CPU. Why: no check shows that Apple's encoder takes this grade.
     - Why Vulkan makes no ProRes 4444: the test of the encoders tries it with 4:2:2 only (`probes`).
     - DNxHR: the CPU. HEVC and AV1: the GPU, and the CPU.
     - No encoder of another codec takes its place. With no encoder, `render_cache::write` fails, and the background render stops with the error.

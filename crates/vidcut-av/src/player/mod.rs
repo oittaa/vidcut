@@ -897,8 +897,9 @@ impl Player {
     }
 
     pub fn prepare(&self, next: Option<(RenderPlan, i64)>) {
+        let old = self.shared.control().plan.clone();
         let next = next.filter(|(plan, _)| plan.frames > 0).map(|(plan, at)| {
-            let plan = Plan::new(plan);
+            let plan = Plan::new(plan).keeping_output_lut_of(&old);
             let at = plan.clamp(at);
             (Arc::new(plan), at)
         });
@@ -1064,6 +1065,13 @@ impl Player {
         let crosses = plan.crosses_at(pos);
         let scales = plan.scales_at(pos);
         let colors = plan.plan.colors;
+        let output_lut = match plan.output_lut() {
+            Ok(lut) => lut.clone(),
+            Err(why) => {
+                self.shared.fail(why.clone());
+                None
+            }
+        };
         let (mut titles, titled) = self.shared.titles.shown(&plan, pos, &placing);
         let (cues, cued) = self.shared.subtitles.shown(&plan, pos);
         titles.extend(cues);
@@ -1089,6 +1097,7 @@ impl Player {
                     crosses,
                     scales,
                     colors,
+                    output_lut,
                 };
                 p.shown = Some(shown.clone());
                 p.shown_landing = landed.0;
@@ -1111,6 +1120,7 @@ impl Player {
                         crosses: crosses.clone(),
                         scales: scales.clone(),
                         colors,
+                        output_lut: output_lut.clone(),
                     });
                 }
                 p.shown.clone().map(|s| Shown {
@@ -1121,6 +1131,7 @@ impl Player {
                     crosses,
                     scales,
                     colors,
+                    output_lut,
                     ..s
                 })
             }
@@ -1309,7 +1320,7 @@ impl Player {
 }
 
 fn replace_plan(ctl: &mut Control, plan: RenderPlan) {
-    ctl.plan = Arc::new(Plan::new(plan));
+    ctl.plan = Arc::new(Plan::new(plan).keeping_output_lut_of(&ctl.plan));
     ctl.plan_gen += 1;
     ctl.error = None;
     ctl.trims.clear();
@@ -1417,6 +1428,7 @@ mod tests {
             range: (0, 1),
             name: "copies".into(),
             colors: None,
+            output_lut: None,
         };
         let config = Config {
             audio_scrubbing: false,
@@ -1483,6 +1495,7 @@ mod tests {
             range: (0, 1),
             name: "smooth".into(),
             colors: None,
+            output_lut: None,
         }
     }
 

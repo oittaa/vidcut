@@ -25,15 +25,10 @@ pub(crate) fn target(fps: Rational, origin: f64, pos: i64) -> f64 {
 
 pub(crate) fn input_of(path: &Path, image: Option<&Image>) -> Input {
     match image {
-        Some(Image::Sequence {
-            pattern,
-            first,
-            rate,
-            ..
-        }) => Input::Sequence {
-            pattern: pattern.clone(),
-            first: *first,
-            rate: (rate.num() as i32, rate.den() as i32),
+        Some(Image::Sequence(numbered)) => Input::Sequence {
+            pattern: numbered.pattern.clone(),
+            first: numbered.first,
+            rate: (numbered.rate.num() as i32, numbered.rate.den() as i32),
         },
         Some(Image::Still) | None => Input::File(path.to_path_buf()),
     }
@@ -50,7 +45,9 @@ impl Pictures {
     fn of(image: Option<&Image>) -> Self {
         match image {
             Some(Image::Still) => Self::Still,
-            Some(Image::Sequence { count, .. }) => Self::Sequence { count: *count },
+            Some(Image::Sequence(numbered)) => Self::Sequence {
+                count: numbered.count,
+            },
             None => Self::Video,
         }
     }
@@ -118,6 +115,7 @@ struct Look {
     form: Form,
     rounded: bool,
     alpha: Option<Through>,
+    lut: Option<crate::screen::Lut>,
 }
 
 struct Matte {
@@ -160,6 +158,7 @@ impl Look {
             form,
             rounded: false,
             alpha: None,
+            lut: None,
         }
     }
 
@@ -180,11 +179,16 @@ impl Look {
             form,
             rounded: false,
             alpha: None,
+            lut: None,
         }
     }
 
+    fn with_lut(self, lut: Option<crate::screen::Lut>) -> Self {
+        Self { lut, ..self }
+    }
+
     fn plain(&self, size: (u32, u32)) -> bool {
-        self.placed.is_empty() && self.size == size
+        self.placed.is_empty() && self.size == size && self.lut.is_none()
     }
 
     fn with_alpha(self, mode: AlphaMode, matte: bool) -> Self {
@@ -241,6 +245,8 @@ struct Source {
     upscaled: Option<Upscaled>,
     kept: Option<Arc<[Arc<Cached>]>>,
     skipped: bool,
+    lut: Option<crate::screen::Lut>,
+    lut_in: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -296,6 +302,7 @@ struct Reversed {
     woven: Option<Weave>,
     how: Made,
     upscaled: Option<Upscaled>,
+    lut_in: bool,
 }
 
 impl Source {
@@ -348,6 +355,8 @@ impl Source {
             ai: crate::super_scale::User::of(super_scale),
             told: false,
             upright: false,
+            lut: None,
+            lut_in: false,
             sampling: Sampling::Own,
             looks: (None, 0),
             scaled: Lru::new(),
@@ -419,6 +428,8 @@ impl Source {
             ai: None,
             told: false,
             upright: false,
+            lut: None,
+            lut_in: false,
             sampling: Sampling::Own,
             looks: (None, 0),
             scaled: Lru::new(),
@@ -583,6 +594,25 @@ impl Source {
         }
         if self.retimer.is_none() {
             self.retimer = crate::interpolate::User::of(self.retime);
+        }
+    }
+
+    fn set_lut(&mut self, lut: Option<crate::screen::Lut>) {
+        if self.lut != lut {
+            self.lut = lut;
+            self.normalized = None;
+            self.reversed.clear();
+        }
+    }
+
+    fn lut_on_drawing(
+        &self,
+        upscaled: Option<Upscaler>,
+        timeline: Option<Hdr>,
+    ) -> Option<crate::screen::Lut> {
+        match upscaled {
+            Some(u) if upscale_form(u, timeline).1 == timeline => None,
+            _ => self.lut.clone(),
         }
     }
 
@@ -771,13 +801,13 @@ impl Source {
         self.looks.1
     }
 
-    fn note_upscaled(&mut self, upscaler: Upscaler) {
+    fn note_upscaled(&mut self, super_scale: SuperScale) {
         if self.told {
             return;
         }
         crate::progress::note(super::Note::Upscaled(super::UpscaleNote {
             path: self.reader.path().to_path_buf(),
-            how: crate::super_scale::name(upscaler).into(),
+            how: crate::super_scale::named(super_scale),
         }));
         self.told = true;
     }
@@ -808,6 +838,7 @@ pub(crate) struct Layer {
     pub(crate) alpha_mode: AlphaMode,
     pub(crate) alpha_use: AlphaUse,
     pub(crate) matte: Option<frame::Video>,
+    pub(crate) lut: Option<crate::screen::Lut>,
 }
 
 fn mask_of(ramp: Option<Ramp>, k: i64) -> Option<Wipe> {
@@ -838,6 +869,7 @@ struct PictureId {
     made: (u32, u32),
     key: Key,
     form: Form,
+    lut: Option<crate::screen::Lut>,
 }
 
 type Waiting = std::sync::Arc<std::sync::Mutex<Vec<(Key, frame::Video)>>>;
@@ -1113,13 +1145,7 @@ impl Source {
             false => self.current.as_ref(),
         }
         .expect("have a frame");
-        let sar = frame.aspect_ratio();
-        let shape = Shape {
-            size: (frame.width(), frame.height()),
-            sar: (sar.numerator(), sar.denominator()),
-            rotation,
-        };
-        let Some((size, made)) = enlarged(shape, target, upscaler) else {
+        let Some((size, made)) = enlarged(shape_of(frame, rotation), target, upscaler) else {
             return Ok(None);
         };
         let hdr = crate::color::Source::of(frame).hdr.is_some() && timeline.is_some();
@@ -1142,6 +1168,7 @@ impl Source {
                 None => Key::Still(pts),
             },
             form,
+            lut: self.lut.clone().filter(|_| form.1 == timeline),
         };
         if let Some(p) = self.scaled.get(&id) {
             return frame_ref(p).map(Some);
@@ -1381,7 +1408,9 @@ impl Source {
             return self.end_run();
         }
         let clock = Instant::now();
-        let look = Look::rounded(run.size, 0, run.id.form).with_alpha(AlphaMode::None, false);
+        let look = Look::rounded(run.size, 0, run.id.form)
+            .with_alpha(AlphaMode::None, false)
+            .with_lut(run.id.lut.clone());
         let path = self.reader.path();
         let input = match run.id.upscaler {
             Upscaler::Macos => Fed::Frame(shown_frame(
@@ -1534,6 +1563,7 @@ fn placed_look(
         form,
         rounded: false,
         alpha: None,
+        lut: None,
     })
 }
 
@@ -1585,6 +1615,15 @@ pub(crate) fn display_of(shape: Shape) -> (u32, u32) {
     };
     let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
     (even(dw), even(dh))
+}
+
+fn shape_of(frame: &frame::Video, rotation: u16) -> Shape {
+    let sar = frame.aspect_ratio();
+    Shape {
+        size: (frame.width(), frame.height()),
+        sar: (sar.numerator(), sar.denominator()),
+        rotation,
+    }
 }
 
 fn enlarged(
@@ -1764,7 +1803,11 @@ pub struct VideoFrames {
     alpha: bool,
     written_alpha: Option<AlphaOut>,
     written: Option<(u32, u32)>,
+    output_lut: Option<crate::screen::Lut>,
+    input_luts: vidcut_core::lru::Lru<String, crate::screen::Lut, INPUT_LUTS_KEPT>,
 }
+
+const INPUT_LUTS_KEPT: usize = 4;
 
 pub(crate) enum Handoff {
     Cuda(crate::cuda::CudaDevice, crate::cuda::CudaFrames),
@@ -1935,10 +1978,11 @@ impl Single {
         &mut self,
         (frame, (before, after)): (&frame::Video, Around<'_>),
         rotation: u16,
-        path: &Path,
+        (path, lut): (&Path, Option<&crate::screen::Lut>),
     ) -> Result<crate::player::Picture> {
         let made = self.maker.make(&mut self.fitting, frame, path)?;
-        let picture = crate::player::Picture::new(made, rotation, None, None);
+        let picture =
+            crate::player::Picture::new(made, rotation, None, None).with_lut(lut.cloned());
         let Some(top_first) = crate::decode::FrameProps::of(frame).top_field_first else {
             return Ok(picture);
         };
@@ -1950,7 +1994,8 @@ impl Single {
                     before: None,
                     after: None,
                 };
-                let field = crate::player::Picture::new(made, rotation, None, None);
+                let field =
+                    crate::player::Picture::new(made, rotation, None, None).with_lut(lut.cloned());
                 Ok(std::sync::Arc::new(field.with_woven(alone)))
             })
             .transpose()
@@ -2001,7 +2046,7 @@ impl Single {
         (look, path): (&Look, &Path),
         (pixel, sink): (format::Pixel, crate::screen::Sink<'_>),
     ) -> Result<frame::Video> {
-        let picture = self.woven(frames, rotation, path)?;
+        let picture = self.woven(frames, rotation, (path, look.lut.as_ref()))?;
         let picture = match look.alpha {
             Some(Through { mode, matte }) => {
                 picture.with_alpha_mode(mode).with_alpha_use(match matte {
@@ -2091,6 +2136,8 @@ impl VideoFrames {
             alpha: false,
             written_alpha: None,
             written: None,
+            output_lut: None,
+            input_luts: Default::default(),
         }
     }
 
@@ -2112,6 +2159,11 @@ impl VideoFrames {
     pub fn with_timeline(mut self, timeline: Option<Hdr>) -> Result<Self> {
         self.timeline = timeline;
         self.drawn_in = timeline;
+        Ok(self)
+    }
+
+    pub fn with_output_lut(mut self, path: Option<&Path>) -> Result<Self> {
+        self.output_lut = path.map(crate::screen::load_lut).transpose()?;
         Ok(self)
     }
 
@@ -2249,6 +2301,7 @@ impl VideoFrames {
                 .screen
                 .premultiply(self.written_alpha == Some(AlphaOut::Premultiplied));
             drawer.screen.write_at(self.written);
+            drawer.screen.set_output_lut(self.output_lut.clone());
             let (out, reading) = (self.maker.out(), self.maker.reading());
             self.maker = Maker::new(out, drawer.keeps(), reading).holding().drawing();
             self.drawer = Some(drawer);
@@ -2446,6 +2499,7 @@ impl VideoFrames {
                     pace,
                     retime,
                     alpha_mode,
+                    super_scale,
                     made: shape,
                     ..
                 } = layer
@@ -2480,6 +2534,7 @@ impl VideoFrames {
                             moving,
                             share: 1.0,
                             woven: None,
+                            lut: None,
                             origin: Some(Origin {
                                 made: how,
                                 upscaled: None,
@@ -2536,6 +2591,7 @@ impl VideoFrames {
                 } else {
                     self.source_frame(i, s, layer, k)?
                 };
+                self.note_classic(s, at, *super_scale);
                 let sampling = match (backward, shape) {
                     (true, _) => Sampling::Own,
                     (false, Some(shape)) => Sampling::Placed {
@@ -2570,6 +2626,10 @@ impl VideoFrames {
                     moving,
                     share: self.share_of(s, rotation, placed.get(i)),
                     woven,
+                    lut: match self.open[s].lut_in {
+                        true => None,
+                        false => self.open[s].lut.clone(),
+                    },
                     origin: Some(Origin {
                         made: self.open[s].how,
                         upscaled: self.open[s].upscaled,
@@ -2625,6 +2685,7 @@ impl VideoFrames {
         last.alpha_mode = AlphaMode::Straight;
         last.alpha_use = AlphaUse::Shown;
         last.matte = None;
+        last.lut = None;
         Ok(())
     }
 
@@ -2785,6 +2846,16 @@ impl VideoFrames {
         self.dynamic.hdr10plus && !self.light.contains_key(input.path())
     }
 
+    fn input_lut(&mut self, path: &Path) -> Result<crate::screen::Lut> {
+        let stamp = vidcut_core::cube::stamp(path);
+        if let Some(lut) = self.input_luts.get(&stamp) {
+            return Ok(lut.clone());
+        }
+        let lut = crate::screen::load_lut(path)?;
+        self.input_luts.insert(stamp, lut.clone());
+        Ok(lut)
+    }
+
     fn start_layers(&mut self, piece: &VideoPiece) -> Result<()> {
         let mut taken = vec![false; self.open.len()];
         let mut reading = Vec::new();
@@ -2798,12 +2869,17 @@ impl VideoFrames {
                 color_space,
                 super_scale,
                 retime,
+                input_lut,
                 ..
             } = layer
             else {
                 reading.push(None);
                 continue;
             };
+            let lut = input_lut
+                .as_deref()
+                .map(|path| self.input_lut(path))
+                .transpose()?;
             let pictures = Pictures::of(image.as_ref());
             let still = pictures == Pictures::Still;
             let from = if still { 0 } else { *source_frame };
@@ -2865,6 +2941,7 @@ impl VideoFrames {
             };
             taken[s] = true;
             self.open[s].set_retime(*retime);
+            self.open[s].set_lut(lut);
             if !(pace.speed() < 0.0 && !still) {
                 self.open[s].reversed.clear();
             }
@@ -3105,6 +3182,7 @@ impl VideoFrames {
                     let src = &mut self.open[s];
                     let (how, upscaled) = (src.how, src.upscaled);
                     let matte = src.matte.as_ref().map(Matte::again).transpose()?;
+                    let lut_in = src.lut_in;
                     src.reversed.push(Reversed {
                         input: input.clone(),
                         pos: p,
@@ -3115,6 +3193,7 @@ impl VideoFrames {
                         woven,
                         how,
                         upscaled,
+                        lut_in,
                     });
                 }
             }
@@ -3126,13 +3205,14 @@ impl VideoFrames {
             .expect("just made");
         self.last_dolby_vision = dolby_vision(&r.dolby_vision)?;
         let (frame, woven) = (frame_ref(&r.frame)?, r.woven.as_ref().map(weave_ref));
-        let (how, upscaled) = (r.how, r.upscaled);
+        let (how, upscaled, lut_in) = (r.how, r.upscaled, r.lut_in);
         let matte = r.matte.as_ref().map(Matte::again).transpose()?;
         let src = &mut self.open[s];
         src.matte = matte;
         src.woven = woven.transpose()?;
         src.how = how;
         src.upscaled = upscaled;
+        src.lut_in = lut_in;
         Ok(frame)
     }
 
@@ -3234,10 +3314,12 @@ impl VideoFrames {
             true => look.with_alpha(*alpha_mode, false),
             false => look,
         };
+        let ai = scaled.as_ref().map(|_| super_scale.upscaler);
+        let look = look.with_lut(src.lut_on_drawing(ai, self.timeline));
         let size = look.size;
         let mattes = match has_alpha && *alpha_mode != AlphaMode::None {
             true => {
-                let matte = look.clone().with_alpha(*alpha_mode, true);
+                let matte = look.clone().with_lut(None).with_alpha(*alpha_mode, true);
                 Some((
                     src.rgb_of(true, &matte, reading)?,
                     src.rgb_of(false, &matte, reading)?,
@@ -3342,6 +3424,7 @@ impl VideoFrames {
         src.normalized = None;
         src.woven = None;
         src.upright = true;
+        src.lut_in = true;
         src.how = how;
         src.upscaled = upscaled;
         src.matte = matte.map(|m| Matte::of(m, *alpha_mode, scaled.is_some()));
@@ -3396,6 +3479,8 @@ impl VideoFrames {
             true => src.ai_picture(false, aim, reading, (super_scale.upscaler, timeline))?,
             false => None,
         };
+        let ai = big.as_ref().map(|_| super_scale.upscaler);
+        let look = look.with_lut(src.lut_on_drawing(ai, timeline));
         let rgb = match &big {
             Some(b) => src.rgb_from((b, (None, None)), 0, &look, reading)?,
             None => src.rgb_of(false, &look, reading)?,
@@ -3408,6 +3493,7 @@ impl VideoFrames {
         src.woven = None;
         src.upright = true;
         src.matte = None;
+        src.lut_in = true;
         src.sampling = Sampling::Own;
         src.how = src.shown_as_is();
         src.upscaled = super_scale.ai().then(|| Upscaled {
@@ -3418,7 +3504,7 @@ impl VideoFrames {
                 .map(|(b, c)| [c, (b.width(), b.height())]),
         });
         if big.is_some() {
-            src.note_upscaled(super_scale.upscaler);
+            src.note_upscaled(super_scale);
         }
         self.finished_layer(s, made)
     }
@@ -3473,6 +3559,7 @@ impl VideoFrames {
             let reading = src.pictures.reading(made_reading);
             let rotation = src.reader.rotation();
             let f = frame_ref(&src.current.as_ref().expect("a frame").0)?;
+            let look = look.clone().with_lut(src.lut.clone());
             let made = match frames {
                 true => src.frame_from((&f, (None, None)), rotation, &look, reading)?,
                 false => src.rgb_from((&f, (None, None)), rotation, &look, reading)?,
@@ -3608,6 +3695,10 @@ impl VideoFrames {
             }
             src.normalized = Some(made);
             src.upright = big.is_some();
+            src.lut_in = big.is_some()
+                && src
+                    .lut_on_drawing(Some(super_scale.upscaler), timeline)
+                    .is_none();
             src.sampling = Sampling::Own;
             src.upscaled = super_scale.ai().then(|| Upscaled {
                 upscaler: super_scale.upscaler,
@@ -3616,12 +3707,25 @@ impl VideoFrames {
                     .map(|b| [(frame.width(), frame.height()), (b.width(), b.height())]),
             });
             if big.is_some() {
-                src.note_upscaled(super_scale.upscaler);
+                src.note_upscaled(super_scale);
             }
         }
         src.how = src.shown_as_is();
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
         self.finished_layer(s, picture)
+    }
+
+    fn note_classic(&mut self, s: usize, placed: &[Placed], super_scale: SuperScale) {
+        if !super_scale.on || super_scale.ai() {
+            return;
+        }
+        let aim = self.aim(s, placed, super_scale);
+        let src = &mut self.open[s];
+        let rotation = src.reader.rotation();
+        let shape = src.current.as_ref().map(|(f, _)| shape_of(f, rotation));
+        if shape.is_some_and(|shape| enlarged(shape, aim, super_scale.upscaler).is_some()) {
+            src.note_upscaled(super_scale);
+        }
     }
 
     fn aim(&self, s: usize, placed: &[Placed], super_scale: SuperScale) -> (u32, u32) {
@@ -3667,7 +3771,7 @@ impl VideoFrames {
         let Some(b) = src.ai_picture(false, aim, reading, ai)? else {
             return Ok(None);
         };
-        src.note_upscaled(super_scale.upscaler);
+        src.note_upscaled(*super_scale);
         Ok(Some((a, b, aim)))
     }
 

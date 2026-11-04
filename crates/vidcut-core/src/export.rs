@@ -278,7 +278,7 @@ pub struct VideoSettings {
     /// Encoder speed preset (e.g. `slow`, `p5`, `8`); default per encoder.
     #[serde(default)]
     pub speed: Option<String>,
-    /// ProRes: proxy, lt, standard, hq, 4444. DNxHR: lb, sq, hq, hqx, 444.
+    /// ProRes: proxy, lt, standard, hq, 4444, xq. DNxHR: lb, sq, hq, hqx, 444.
     #[serde(default)]
     pub profile: Option<String>,
     /// 8 or 10. Unset: 10 for HDR, and for SDR when most of the shown
@@ -337,7 +337,7 @@ pub struct VideoSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cll: Option<String>,
     /// Export Alpha: the file holds the alpha of the timeline, and what shows
-    /// nothing is transparent. Only ProRes with profile `4444` has alpha. Off,
+    /// nothing is transparent. Only ProRes with profile `4444` or `xq` has alpha. Off,
     /// the export composites over black and writes opaque frames.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub alpha: bool,
@@ -372,7 +372,7 @@ impl VideoSettings {
     }
 
     pub fn holds_alpha(&self) -> bool {
-        self.codec == VideoCodec::Prores && self.profile.as_deref() == Some("4444")
+        self.codec == VideoCodec::Prores && matches!(self.profile.as_deref(), Some("4444" | "xq"))
     }
 
     fn asked_size(&self, timeline: (u32, u32)) -> (u32, u32) {
@@ -862,7 +862,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
             )));
         }
         let profiles: &[&str] = match v.codec {
-            V::Prores => &["proxy", "lt", "standard", "hq", "4444"],
+            V::Prores => &["proxy", "lt", "standard", "hq", "4444", "xq"],
             V::Dnxhr => &["lb", "sq", "hq", "hqx", "444"],
             V::H264 => &["baseline", "main", "high"],
             V::Hevc => &["main", "main10"],
@@ -884,7 +884,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         }
         if v.alpha && !v.holds_alpha() {
             return Err(Error::usage(
-                "video.alpha needs a format with alpha: ProRes with profile 4444",
+                "video.alpha needs a format with alpha: ProRes with profile 4444 or xq",
             ));
         }
         let fixed = match (v.codec, v.profile.as_deref()) {
@@ -985,8 +985,9 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
                 s.container.extension()
             )));
         }
-        if a.channels.is_some_and(|c| !(1..=8).contains(&c)) {
-            return Err(Error::usage("audio channels must be 1..8"));
+        let most = crate::model::Settings::MOST_CHANNELS;
+        if a.channels.is_some_and(|c| !(1..=most).contains(&c)) {
+            return Err(Error::usage(format!("audio channels must be 1..{most}")));
         }
     } else if s.container.audio_only() {
         return Err(Error::usage(format!(

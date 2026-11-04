@@ -36,6 +36,7 @@ pub(super) struct Format {
     auto: Option<Hdr>,
     retime: ProjectRetime,
     upscaler: ProjectUpscaler,
+    output_lut: Option<PathBuf>,
 }
 
 impl Default for Format {
@@ -50,6 +51,7 @@ impl Default for Format {
             auto: None,
             retime: ProjectRetime::Auto,
             upscaler: ProjectUpscaler::Auto,
+            output_lut: None,
         }
     }
 }
@@ -81,6 +83,7 @@ impl Format {
             auto: vidcut_core::render::auto_colors(p),
             retime: p.settings.retime,
             upscaler: p.settings.upscaler,
+            output_lut: p.settings.output_lut.clone(),
         }
     }
 
@@ -129,7 +132,7 @@ impl Format {
         }
     }
 
-    fn edit_colors(&mut self, ui: &mut egui::Ui) {
+    fn edit_colors(&mut self, ui: &mut egui::Ui, choose: &mut bool) {
         egui::Grid::new(ui.scope_id().with("colors"))
             .num_columns(2)
             .spacing([12.0, 8.0])
@@ -150,6 +153,19 @@ impl Format {
                     })
                     .response
                     .labelled_by(label.id);
+                ui.end_row();
+                let label = ui.label("Output LUT");
+                ui.horizontal(|ui| {
+                    *choose = ui.button("Choose…").labelled_by(label.id).clicked();
+                    let name = self
+                        .output_lut
+                        .as_deref()
+                        .map_or("None".to_string(), file_name);
+                    ui.label(name);
+                    if self.output_lut.is_some() && ui.button("Clear").clicked() {
+                        self.output_lut = None;
+                    }
+                });
                 ui.end_row();
             });
     }
@@ -384,6 +400,7 @@ enum OpenOtio {
 pub(super) struct ProjectUi {
     new: Option<NewProject>,
     settings: Option<(Format, Format)>,
+    lut_pick: Option<Picked>,
     pub(super) found: Found,
     otio: Option<OpenOtio>,
 }
@@ -521,6 +538,7 @@ impl Workspace {
         if let Some(p) = self.project() {
             let now = Format::of(p);
             self.project_ui.settings = Some((now.clone(), now));
+            self.project_ui.lut_pick = None;
         }
     }
 
@@ -618,6 +636,13 @@ impl Workspace {
         let Some((mut format, was)) = self.project_ui.settings.take() else {
             return;
         };
+        if let Some(picked) = self.project_ui.lut_pick.take() {
+            match picked.take() {
+                None => self.project_ui.lut_pick = Some(picked),
+                Some(None) => {}
+                Some(path) => format.output_lut = path,
+            }
+        }
         let Some(p) = self.project() else {
             return;
         };
@@ -625,6 +650,7 @@ impl Workspace {
         let mut open = true;
         let mut cancel = false;
         let mut apply = None;
+        let mut choose = false;
         egui::Window::new("Project Settings")
             .collapsible(false)
             .resizable(false)
@@ -633,7 +659,7 @@ impl Workspace {
             .show(ctx, |ui| {
                 format.edit(ui, empty);
                 format.edit_start(ui);
-                format.edit_colors(ui);
+                format.edit_colors(ui, &mut choose);
                 format.edit_ai(ui);
                 if !empty {
                     ui.label(
@@ -658,6 +684,15 @@ impl Workspace {
                     }
                 });
             });
+        if choose {
+            let (dialogs, folder) = (
+                self.dialogs.clone(),
+                self.lut_folder(format.output_lut.as_deref()),
+            );
+            self.project_ui.lut_pick = Some(Picked::ask(ctx, move || {
+                dialogs.pick_file("Output LUT", &folder, &["cube"])
+            }));
+        }
         if let Some(changes) = apply {
             self.send_asking("project.set", changes);
         } else if open && !cancel {
@@ -689,6 +724,10 @@ fn changes(now: &Format, was: &Format) -> Value {
     }
     if now.upscaler != was.upscaler {
         set.insert("upscaler".into(), json!(now.upscaler));
+    }
+    if now.output_lut != was.output_lut {
+        let path = now.output_lut.clone().unwrap_or_default();
+        set.insert("output_lut".into(), json!(path));
     }
     Value::Object(set)
 }

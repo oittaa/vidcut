@@ -479,6 +479,7 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
             placed,
             cache,
             excluded,
+            input_lut,
             ..
         } => {
             *media = name(media, path);
@@ -486,6 +487,9 @@ fn plain(piece: &mut VideoPiece, name: &dyn Fn(&str, &Path) -> String) {
             *cache = ClipCache::Auto;
             *excluded = false;
             placed.iter_mut().for_each(plain_placed);
+            if let Some(lut) = input_lut {
+                *lut = PathBuf::from(crate::cube::stamp(lut));
+            }
         }
         VideoPiece::Black { excluded, .. } => *excluded = false,
         VideoPiece::Generated {
@@ -971,6 +975,7 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
         cache: ClipCache::Auto,
         excluded: false,
         made: None,
+        input_lut: None,
     };
     match part {
         VideoPiece::Titled { titles, .. } => VideoPiece::Titled {
@@ -998,6 +1003,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         retime,
         placed,
         made,
+        input_lut,
         ..
     } = layer
     {
@@ -1010,6 +1016,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         *color_space = Default::default();
         *alpha_mode = Default::default();
         *retime = Default::default();
+        *input_lut = None;
         match placing {
             false if super_scale.ai() => super_scale.upscaler = Upscaler::Classic,
             false => {}
@@ -1041,6 +1048,7 @@ fn clip_plan(plan: &RenderPlan, layer: VideoPiece, (width, height): (u32, u32)) 
         range: (0, frames),
         name: plan.name.clone(),
         colors: plan.colors,
+        output_lut: None,
     }
 }
 
@@ -1068,6 +1076,7 @@ pub fn segment(plan: &RenderPlan, look: &Look, start: i64, frames: i64) -> Rende
         range: (start, start + frames),
         name: plan.name.clone(),
         colors: plan.colors,
+        output_lut: None,
     }
 }
 
@@ -1379,6 +1388,7 @@ mod tests {
             range: (0, frames),
             name: "title".into(),
             colors: None,
+            output_lut: None,
         }
     }
 
@@ -1443,6 +1453,7 @@ mod tests {
             range: (0, frames),
             name: "blocked".into(),
             colors: None,
+            output_lut: None,
         };
         let project = Project::new(Settings::default());
         let prefs = RenderCachePrefs::default();
