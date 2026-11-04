@@ -740,6 +740,7 @@ mod tests {
 
     fn plan(frames: i64) -> RenderPlan {
         RenderPlan {
+            output_lut: None,
             fps: Rational::new(25, 1).unwrap(),
             width: 16,
             height: 16,

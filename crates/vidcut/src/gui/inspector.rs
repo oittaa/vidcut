@@ -1,4 +1,5 @@
 use std::ops::RangeInclusive;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use eframe::egui::{self, Align, Layout, RichText, vec2};
@@ -19,6 +20,7 @@ use vidcut_core::time::TimeSpec;
 use vidcut_core::validate::GAIN;
 
 use super::dialog;
+use super::export::Picked;
 use super::isolation::{Isolate, heard};
 use super::placing::{changed, ease_label, mode_label, target};
 use super::theme;
@@ -715,6 +717,7 @@ pub struct Inspector {
     moved: bool,
     commit: bool,
     recolored: Option<Recolored>,
+    lut_pick: Option<(Vec<String>, Picked)>,
 }
 
 #[derive(Debug)]
@@ -2234,6 +2237,71 @@ impl Workspace {
         self.inspector.recolored = held;
     }
 
+    pub(super) fn lut_folder(&self, now: Option<&Path>) -> PathBuf {
+        now.and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .or_else(|| self.project_folder())
+            .unwrap_or_default()
+    }
+
+    fn input_lut_picked(&mut self) {
+        let Some((clips, picked)) = self.inspector.lut_pick.take() else {
+            return;
+        };
+        match picked.take() {
+            None => self.inspector.lut_pick = Some((clips, picked)),
+            Some(None) => {}
+            Some(Some(path)) => {
+                self.send("clip.set", json!({ "clips": clips, "input_lut": path }));
+            }
+        }
+    }
+
+    fn input_lut_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
+        let clips: Vec<&Clip> = chosen
+            .iter()
+            .filter_map(|c| p.clip(&c.id))
+            .filter(|c| !c.media.is_empty())
+            .collect();
+        let Some(first) = clips.first() else {
+            return;
+        };
+        let now = first.input_lut.as_deref();
+        let ids: Vec<String> = clips.iter().map(|c| c.id.clone()).collect();
+        let mut choose = false;
+        let header = |ui: &mut egui::Ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_enabled(now.is_some(), egui::Button::new("Reset"))
+                    .clicked()
+            })
+            .inner
+        };
+        let cleared = group(ui, "LUT", header, |ui| {
+            label(ui, "Input LUT", now.is_some());
+            ui.horizontal(|ui| {
+                choose = ui.button("Choose…").clicked();
+                let name = now
+                    .and_then(Path::file_name)
+                    .map_or("None".into(), |n| n.to_string_lossy().into_owned());
+                let shown = ui.add(egui::Label::new(name).truncate());
+                if let Some(path) = now {
+                    shown.on_hover_text(path.display().to_string());
+                }
+            });
+            ui.end_row();
+        });
+        if cleared {
+            self.send("clip.set", json!({ "clips": ids, "input_lut": "" }));
+        }
+        if choose {
+            let (dialogs, folder) = (self.dialogs.clone(), self.lut_folder(now));
+            let picked = Picked::ask(ui.ctx(), move || {
+                dialogs.pick_file("Input LUT", &folder, &["cube"])
+            });
+            self.inspector.lut_pick = Some((ids, picked));
+        }
+    }
+
     fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
         use super::super_scale::{SHARPNESS, UPSCALERS, label_of, unfit, upscaler_text};
         let mut media: Vec<String> = chosen
@@ -2610,6 +2678,7 @@ impl Workspace {
         i.commit = (focus.is_none() || i.moved) && !ui.input(|i| i.pointer.any_down());
         i.moved &= !i.commit;
         self.follow_selection();
+        self.input_lut_picked();
         let chosen = self.chosen();
         let sounds = self.sounds();
         if sounds.iter().all(|s| s.gain == s.stored) {
@@ -2675,6 +2744,7 @@ impl Workspace {
                     crop(ui, i, &p, at, &chosen, &mut acts);
                     dynamic_zoom(ui, i, &p, at, &chosen, boxes, &mut acts);
                     composite(ui, i, &p, at, &chosen, &mut acts);
+                    self.input_lut_section(ui, &p, &chosen);
                     self.super_scale_section(ui, &p, &chosen);
                     effects(ui, &self.inspector, &chosen[0], &mut acts);
                 }

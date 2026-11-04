@@ -265,6 +265,7 @@ The audio device:
     - The rule works at the size of the draw. The size of the viewer is in whole pixels of the screen, so its shape can differ a little from the timeline. Thus a picture that fills the timeline can leave a part of a pixel in the viewer.
     - A thumbnail, a proxy and a picture for an AI upscaler draw into a size that is already rounded (`Sampling::Rounded`, `place::rounded_place`). Why: the picture must fill that size, with no bar.
   - It first converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `shader_colors`). In an SDR timeline, it tone-maps HDR.
+    - A picture with an input LUT takes `fs_convert_lut` (`Picture::with_lut`, [the LUT files](README.md#lut-files)).
     - Then it deinterlaces an interlaced picture (`fs_bwdif`, [gpu](gpu.md#deinterlacing-and-hdr)).
     - The converted picture is 16-bit floats. The scaling below reads it.
     - Why: the spec converts the input before the sizing ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)). A conversion that is not linear gives other edges after a scale.
@@ -295,6 +296,9 @@ The audio device:
     - The motion blur is a box along the move, with one tap for each pixel of its length, up to 512. Taps past the frame repeat its edge pixels.
     - A Push blurs the whole result. A Slide mixes the blur in by the part of the box that the moving side covers.
     - Why: these rules give Resolve's renders within about 1 pixel ([gotchas](../gotchas.md#resolves-otio-files)).
+  - With an output LUT, the draw also uses `Wide`, and `fs_lut` runs on the whole canvas after the last layer and title (`Screen::set_output_lut`, `Shown`).
+    - `Plan::output_lut` loads the file when a plan first needs it.
+    - A gap goes through the output LUT. Before the first picture, the viewer draws no LUT.
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
 - A present answers with the frame drawn, if it is exact. A `gui.screenshot` of the viewer reads the target back, to the pixel.
 - Submissions go through `Gate::pass`. They wait until the UI thread runs `logic` or `ui`, because eframe configures the surface of the window outside these. If the UI is away for long, submissions do not wait.
@@ -430,6 +434,7 @@ The names of frames:
   - In the piece, the fingerprint of each media takes the place of its path.
   - The piece has no clip ids and no times on the timeline. Thus a part that moves keeps its names.
   - The piece has no `ClipCache`, no `excluded` and no `render_cache` of its effects. Thus a change of these settings keeps the names.
+  - `cube::stamp` takes the place of the path of an input LUT. Thus a changed file gives new names. The file of the cache holds the picture after the input LUT (`from_file`). An input LUT alone is no reason to cache.
   - The player's key of a decoded frame (`source_key`) also leaves out the `render_cache` of effects. Thus a check in Render Cache Effects does not upscale again.
   - The name also holds the `Look` (the size and the codec), the frame rate, the colors of the timeline and the version of vidcut.
 - `Cache::clip_keys` names each frame of the clip level by a SHA-256 of its source frame alone (`alone`). It holds the media, the frame and the colors of the media.

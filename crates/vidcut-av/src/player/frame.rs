@@ -113,6 +113,7 @@ pub struct Picture {
     sampling: Sampling,
     woven: Option<Woven>,
     origin: Option<Origin>,
+    lut: Option<crate::screen::Lut>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -208,7 +209,17 @@ impl Picture {
             sampling: Sampling::Own,
             woven: None,
             origin: None,
+            lut: None,
         }
+    }
+
+    pub(crate) fn with_lut(mut self, lut: Option<crate::screen::Lut>) -> Self {
+        self.lut = lut;
+        self
+    }
+
+    pub(crate) fn lut(&self) -> Option<&crate::screen::Lut> {
+        self.lut.as_ref()
     }
 
     pub(crate) fn with_origin(mut self, origin: Option<Origin>) -> Self {
@@ -373,7 +384,8 @@ impl Picture {
         let frame = crate::export::video::frame_ref(&self.frame)?;
         let alone = Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
             .with_sampling(self.sampling.clone())
-            .with_origin(self.origin.clone());
+            .with_origin(self.origin.clone())
+            .with_lut(self.lut.clone());
         Ok(match &self.woven {
             Some(w) => alone.with_woven(w.clone()),
             None => alone,
@@ -389,7 +401,8 @@ impl Picture {
         Ok(
             Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
                 .with_sampling(self.sampling.clone())
-                .with_origin(self.origin.clone()),
+                .with_origin(self.origin.clone())
+                .with_lut(self.lut.clone()),
         )
     }
 
@@ -467,6 +480,7 @@ pub struct Shown {
     pub crosses: Vec<bool>,
     pub scales: Vec<Option<vidcut_core::model::Sharpness>>,
     pub colors: Option<vidcut_core::model::Hdr>,
+    pub output_lut: Option<crate::screen::Lut>,
 }
 
 pub struct TitlePicture {

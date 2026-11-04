@@ -485,7 +485,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
             let beside = vidcut_av::first::Beside::ask();
             let made = job.pieces.iter().find_map(|piece| {
                 reader
-                    .rgba(piece, job.fps, (job.width, job.key.height), None)
+                    .rgba(piece, job.fps, (job.width, job.key.height), (None, None))
                     .ok()
             });
             drop(beside);

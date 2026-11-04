@@ -1520,7 +1520,7 @@ pub enum Request {
         look: Option<String>,
     },
     /// Enable/disable video (D), mute, gain (dB, -100..30), name, Clip Color,
-    /// Voice Isolation, Retime Process and Render Cache.
+    /// Voice Isolation, Retime Process, Render Cache and Input LUT.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -1569,6 +1569,12 @@ pub enum Request {
         /// AI Super Scale out of both.
         #[serde(default)]
         render_cache: Option<crate::model::ClipCache>,
+        /// Input LUT: a `.cube` file that the picture goes through just
+        /// after its conversion into the timeline color space. A file that
+        /// can't be read is refused, with the reason. An empty path clears
+        /// it.
+        #[serde(default)]
+        input_lut: Option<PathBuf>,
         /// Download Voice Isolation's model, or the model of the Retime
         /// Process that the clips then use, if this computer doesn't have it
         /// yet, checked against its SHA-256. Without it, a missing Voice
@@ -4209,6 +4215,12 @@ pub struct ProjectSet {
     /// the parts that are slow to make in the background, for the viewer.
     #[serde(default)]
     pub render_cache: Option<crate::model::RenderCache>,
+    /// Output LUT: a `.cube` file that the whole timeline goes through after
+    /// its subtitles, before each output's colors, in the viewer and in each
+    /// export. A file that can't be read is refused, with the reason. An
+    /// empty path clears it.
+    #[serde(default)]
+    pub output_lut: Option<PathBuf>,
     /// Download the models of the Retime Process and the upscaler that the
     /// timeline then uses, if this computer doesn't have them yet.
     #[serde(default)]
@@ -4716,6 +4728,15 @@ impl Request {
             | Self::StoryboardRender { out, .. }
             | Self::GuiScreenshot { out, .. } => vec![out],
             Self::Apply { commands, .. } => commands.iter_mut().flat_map(Self::paths_mut).collect(),
+            Self::ClipSet { input_lut, .. } => input_lut
+                .iter_mut()
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect(),
+            Self::ProjectSet(set) => set
+                .output_lut
+                .iter_mut()
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect(),
             _ => Vec::new(),
         }
     }

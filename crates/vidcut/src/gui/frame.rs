@@ -39,6 +39,9 @@ pub fn render(
         &info.device_pci_bus_id,
     ));
     let (plan, _) = vidcut_core::render::flatten_lanes(p, t, t + 1)?;
+    if let Some(lut) = &plan.output_lut {
+        vidcut_av::screen::load_lut(lut).map_err(|e| Error::invalid(e.to_string()))?;
+    }
     let config = Config {
         audio_scrubbing: false,
         hardware: crate::preferences::gpu_decoding().on,
@@ -82,6 +85,7 @@ pub fn render(
         false => Vec::new(),
     };
     let mut screen = Screen::new();
+    screen.set_output_lut(shown.output_lut.clone());
     screen.draw(
         gpu,
         Some(&shown.picture),

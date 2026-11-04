@@ -37,7 +37,7 @@ The Cut page color control is Auto Color ([auto-color.md](auto-color.md)). These
 
 **Not this item:**
 
-- An input LUT and an output LUT ([luts.md](luts.md)).
+- The display LUT ([luts.md](luts.md)).
 - A qualifier, after this primary and the scopes.
 - OpenColorIO, after the extra color spaces ([timeline-color-spaces-more.md](timeline-color-spaces-more.md)).
 - A node graph. §13 is the order of the picture.
