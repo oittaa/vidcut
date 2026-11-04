@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use vidcut_core::model::Hdr;
 use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
 
@@ -11,7 +10,7 @@ pub fn png(
     piece: &VideoPiece,
     fps: Rational,
     (width, height): (u32, u32),
-    colors: Option<Hdr>,
+    colors: super::renderer::Finish<'_>,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<Vec<u8>> {
     crate::cancel::stop()?;
@@ -29,7 +28,7 @@ pub fn rgba(
     piece: &VideoPiece,
     fps: Rational,
     size: (u32, u32),
-    colors: Option<Hdr>,
+    colors: super::renderer::Finish<'_>,
 ) -> Result<crate::thumbs::Image> {
     super::renderer::FrameReader::default().rgba(piece, fps, size, colors)
 }
@@ -76,7 +75,7 @@ pub fn write_png(
     piece: &VideoPiece,
     fps: Rational,
     size: (u32, u32),
-    colors: Option<Hdr>,
+    colors: super::renderer::Finish<'_>,
     path: &Path,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<()> {

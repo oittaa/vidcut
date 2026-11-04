@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use vidcut_core::model::{Retime, WipeDirection};
 use vidcut_core::render::{Image, MovingKey, Placed, RenderPlan, Run, ShownTitle, VideoPiece};
@@ -83,9 +83,30 @@ pub(crate) struct Plan {
     starts: Vec<i64>,
     sources: Vec<Vec<Arc<str>>>,
     pub(crate) samples: i64,
+    output_lut: OnceLock<Result<Option<crate::screen::Lut>, String>>,
 }
 
 impl Plan {
+    pub(crate) fn output_lut(&self) -> &Result<Option<crate::screen::Lut>, String> {
+        self.output_lut.get_or_init(|| {
+            let path = self.plan.output_lut.as_deref();
+            let lut = path.map(crate::screen::load_lut).transpose();
+            lut.map_err(|e| e.to_string())
+        })
+    }
+
+    pub(crate) fn keeping_output_lut_of(self, old: &Plan) -> Self {
+        let kept = old.output_lut.get().and_then(|lut| lut.as_ref().ok());
+        let same = kept.and_then(Option::as_ref).filter(|lut| {
+            let path = self.plan.output_lut.as_deref();
+            path.is_some_and(|p| vidcut_core::cube::stamp(p) == lut.stamp())
+        });
+        if let Some(lut) = same {
+            self.output_lut.get_or_init(|| Ok(Some(lut.clone())));
+        }
+        self
+    }
+
     pub(crate) fn new(plan: RenderPlan) -> Self {
         let mut starts = Vec::with_capacity(plan.video.len());
         let mut t = 0;
@@ -108,6 +129,7 @@ impl Plan {
             starts,
             sources,
             samples,
+            output_lut: OnceLock::new(),
         }
     }
 
@@ -321,8 +343,12 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             retime,
             placed,
             made: shape,
+            input_lut,
             ..
         } => {
+            let lut = input_lut.as_deref().map_or(String::new(), |lut| {
+                format!("|{}", vidcut_core::cube::stamp(lut))
+            });
             let pictures = || -> Vec<_> {
                 placed
                     .iter()
@@ -355,7 +381,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
                 String::new()
             };
             format!(
-                "{}|{:x}|{image:?}|{}|{}{made}",
+                "{}|{:x}|{image:?}|{}|{}{made}{lut}",
                 path.display(),
                 origin.to_bits(),
                 plan.fps,
@@ -474,6 +500,7 @@ mod tests {
             range: (0, 10),
             name: "keys".into(),
             colors: None,
+            output_lut: None,
         }
     }
 
@@ -503,6 +530,7 @@ mod tests {
             cache: Default::default(),
             excluded: false,
             made: None,
+            input_lut: None,
         }
     }
 

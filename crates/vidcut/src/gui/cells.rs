@@ -156,6 +156,7 @@ fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
         ),
         _ => (
             RenderPlan {
+                output_lut: None,
                 fps: s.fps,
                 width: s.width,
                 height: s.height,

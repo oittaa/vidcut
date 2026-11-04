@@ -1867,8 +1867,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - An export also refuses an AI upscaler that it needs without its weights, or without a GPU that can run the network.
     - It refuses AI Slow for a size that does not fit in the GPU's memory and main memory.
     - The Inspector and the pool show a warning under Upscaler for media that the AI upscaler cannot take. The warning does not depend on the timeline's size.
-    - The export's report names the files that an AI upscaler enlarged, and the upscaler.
   - Classic has a Sharpness of Low, Medium or High.
+  - The export's report names each file that Super Scale enlarged, and its upscaler.
   - A placed picture is made at most 4 times as large as its source. A picture that fills the frame takes the better upscaler for all of its enlargement.
   - The Inspector of the Cut page has a Super Scale section for the media of the selected clips.
   - With Classic, the viewer and the exports enlarge with the kernels of their shader. This is the same on each GPU.
@@ -2539,3 +2539,32 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Each kind follows its rule at each size, in each column.
 - **Why:**
   - These are faults in Resolve. vidcut has the correct picture.
+
+## X130. A camera opened alone keeps the length of the grid marks
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2.
+  - In the Multi Source grid, an In at 250 and an Out at 350 give 101 frames.
+  - Opening a camera alone gives the file an In at 250 and an Out at 349. An edit then takes 100 frames.
+- **vidcut:**
+  - Opening a camera alone gives the file the marks of the grid as they are.
+  - An edit from the grid and an edit from the camera alone take the same frames.
+- **Why:**
+  - The same marks give the same frames in both views.
+  - The owner approved this difference.
+
+## X131. A broken `.cube` file is refused
+
+- **Resolve:**
+  - These are measurements by script in Resolve Studio 21.1.2. No manual page is known for this.
+  - `SetLUT` returns True on each of these files:
+    - A lower-case size line gives no LUT.
+    - A file with no size line gives no LUT.
+    - Too few rows give a wrong picture.
+    - `LUT_3D_SIZE 1` gives a black picture.
+  - The window of Resolve is not measured.
+- **vidcut:**
+  - `clip.set` and `project.set` refuse the file and give the reason.
+- **Why:**
+  - An error is better than a wrong picture that looks correct.
+  - The owner approved this difference.

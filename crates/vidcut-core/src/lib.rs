@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod catalog;
 pub mod change;
+pub mod cube;
 pub mod describe;
 pub mod dirs;
 pub mod disk_cache;

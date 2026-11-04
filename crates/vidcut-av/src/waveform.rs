@@ -101,7 +101,7 @@ impl Waveform {
 }
 
 pub fn waveform(path: &Path, ordinal: u32, per_second: u32, channels: u16) -> Result<Waveform> {
-    let want = channels.clamp(1, 8);
+    let want = channels.max(1);
     crate::init();
     let mut input = crate::decode::open_file(path)?;
     let stream = input
