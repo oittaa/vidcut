@@ -1723,7 +1723,7 @@ impl Handoff {
 }
 
 pub(crate) struct Drawer {
-    gpu: &'static crate::screen::Gpu,
+    on: std::sync::Arc<crate::screen::Offscreen>,
     screen: crate::screen::Screen,
     encoder: Option<Handoff>,
     through_memory: Option<String>,
@@ -1741,7 +1741,7 @@ pub(crate) struct Drawing {
 impl Drawer {
     pub(crate) fn new(encoder: Option<Handoff>) -> Result<Self> {
         Ok(Self {
-            gpu: &crate::screen::offscreen().map_err(Error::Invalid)?.gpu,
+            on: crate::screen::offscreen().map_err(Error::Invalid)?,
             screen: crate::screen::Screen::for_export(),
             encoder,
             through_memory: None,
@@ -1750,7 +1750,7 @@ impl Drawer {
     }
 
     pub(crate) fn keeps(&self) -> crate::hw::GpuPictures {
-        self.gpu.gpu_pictures()
+        self.on.gpu.gpu_pictures()
     }
 
     pub(crate) fn through_memory(&self) -> Option<&str> {
@@ -1777,7 +1777,7 @@ impl Drawer {
     ) -> Result<frame::Video> {
         let clock = Instant::now();
         self.screen
-            .draw(self.gpu, Some(picture), titles, layers, w, h);
+            .draw(&self.on.gpu, Some(picture), titles, layers, w, h);
         self.spent.0 += clock.elapsed();
         let clock = Instant::now();
         let out = self.planes(pixel, colors);
@@ -1790,7 +1790,7 @@ impl Drawer {
         pixel: format::Pixel,
         colors: (Option<Hdr>, Option<Hdr>),
     ) -> Result<frame::Video> {
-        let (gpu, screen) = (self.gpu, &mut self.screen);
+        let (gpu, screen) = (&self.on.gpu, &mut self.screen);
         let handed =
             match (&self.encoder, &self.through_memory) {
                 (Some(Handoff::Cuda(device, frames)), None) => Some(screen.encoded(
@@ -1858,11 +1858,11 @@ impl Single {
     }
 
     fn on_offscreen(&self) -> bool {
-        crate::screen::offscreen().is_ok_and(|o| std::ptr::eq(self.drawer.gpu, &o.gpu))
+        crate::screen::offscreen().is_ok_and(|o| std::sync::Arc::ptr_eq(&self.drawer.on, &o))
     }
 
     pub(crate) fn small_luma(&self, picture: &frame::Video) -> Result<Vec<u8>> {
-        crate::screen::held::small_luma(self.drawer.gpu, picture, crate::analysis::MEASURE)
+        crate::screen::held::small_luma(&self.drawer.on.gpu, picture, crate::analysis::MEASURE)
     }
 
     fn woven(
@@ -1949,7 +1949,7 @@ impl Single {
             }
         };
         let picture = std::sync::Arc::new(picture);
-        let (gpu, screen) = (self.drawer.gpu, &mut self.drawer.screen);
+        let (gpu, screen) = (&self.drawer.on.gpu, &mut self.drawer.screen);
         let ((w, h), form) = (look.size, look.form);
         screen.draw(
             gpu,

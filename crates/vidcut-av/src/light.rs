@@ -632,7 +632,7 @@ impl Read {
 #[derive(Default)]
 struct OnGpu {
     meter: Option<(
-        &'static crate::screen::Offscreen,
+        std::sync::Arc<crate::screen::Offscreen>,
         crate::screen::light::Meter,
     )>,
     failed: bool,
@@ -666,11 +666,13 @@ impl OnGpu {
         if self
             .meter
             .as_ref()
-            .is_some_and(|(was, _)| !std::ptr::eq(*was, on))
+            .is_some_and(|(was, _)| !std::sync::Arc::ptr_eq(was, &on))
         {
             self.meter = None;
         }
-        let (_, meter) = self.meter.get_or_insert_with(|| (on, Default::default()));
+        let (_, meter) = self
+            .meter
+            .get_or_insert_with(|| (on.clone(), Default::default()));
         let gpu = &on.gpu;
         if !meter.takes(gpu, f) {
             return None;
