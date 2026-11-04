@@ -4487,7 +4487,7 @@ pub struct EffectChange {
     pub framing: Option<GlowFraming>,
     /// How a Glow goes over the picture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub composite: Option<CompositeMode>,
+    pub composite_type: Option<CompositeMode>,
     /// How much of a Glow's composite shows, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,

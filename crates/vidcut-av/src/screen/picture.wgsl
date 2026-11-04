@@ -1369,6 +1369,7 @@ const GLOW_INVERT: i32 = 1;
 const GLOW_SEEN: i32 = 2;
 const GLOW_TWO: i32 = 4;
 const GLOW_NOISE: i32 = 8;
+const GLOW_ALPHA_SOURCE: i32 = 2;
 const GLOW_ROOM: f32 = 0.001;
 const GLOW_RECOVERY: f32 = 12.0 / 7.0;
 const GLOW_EDGE: f32 = 4.0;
@@ -1388,7 +1389,7 @@ fn glow_taken(px: vec2<i32>, picture: texture_2d<f32>) -> vec4<f32> {
     if glow_has(GLOW_INVERT) {
         rgb = 1.0 - rgb;
     }
-    return vec4<f32>(rgb, select(1.0, c.a, use_alpha > 0.5));
+    return vec4<f32>(rgb, c.a);
 }
 
 fn glow_shining(c: vec3<f32>) -> vec3<f32> {
@@ -1400,29 +1401,22 @@ fn glow_shining(c: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_glow_mask(in: Out) -> @location(0) vec4<f32> {
     let c = glow_taken(vec2<i32>(in.position.xy), blur_source);
-    switch glowing.modes.y {
-        case 1: {
-            return vec4<f32>(glow_shining(c.rgb), 1.0);
-        }
-        case 2: {
-            let th = glowing.shine.y;
-            return vec4<f32>(vec3<f32>(max(c.a - th + GLOW_ROOM, 0.0) / (1.0 - th + GLOW_ROOM)), 1.0);
-        }
-        default: {
-            return vec4<f32>(c.a * glow_shining(c.rgb), 1.0);
-        }
+    if glowing.modes.y == GLOW_ALPHA_SOURCE {
+        let th = glowing.shine.y;
+        return vec4<f32>(vec3<f32>(max(c.a - th + GLOW_ROOM, 0.0) / (1.0 - th + GLOW_ROOM)), 1.0);
     }
+    return vec4<f32>(c.a * glow_shining(c.rgb), 1.0);
 }
 
 struct GlowCells {
     step: vec4<i32>,
-    last: vec4<i32>,
+    ends: vec4<i32>,
 };
 
 @group(0) @binding(0) var<uniform> glow_cells: GlowCells;
 
 fn glow_cell_at(x: i32, low: i32, last: i32, n: i32) -> i32 {
-    if glow_cells.step.w == 1 {
+    if glow_cells.step.z == 1 {
         return select(x, -1, x < 0 || x >= n);
     }
     return clamp(mirrored(x - low, last - low + 1) + low, 0, n - 1);
@@ -1433,17 +1427,17 @@ fn fs_glow_cells(in: Out) -> @location(0) vec4<f32> {
     let node = vec2<i32>(in.position.xy);
     let n = vec2<i32>(textureDimensions(blur_source));
     let d = glow_cells.step.xy;
-    let low = glow_cells.step.z;
+    let low = glow_cells.ends.xy;
     let at = low + node * d;
     var sum = vec4<f32>(0.0);
     for (var b = 1 - d.y; b < d.y; b++) {
-        let y = glow_cell_at(at.y + b, low, glow_cells.last.y, n.y);
+        let y = glow_cell_at(at.y + b, low.y, glow_cells.ends.w, n.y);
         if y < 0 {
             continue;
         }
         let wy = f32(d.y - abs(b));
         for (var a = 1 - d.x; a < d.x; a++) {
-            let x = glow_cell_at(at.x + a, low, glow_cells.last.x, n.x);
+            let x = glow_cell_at(at.x + a, low.x, glow_cells.ends.z, n.x);
             if x < 0 {
                 continue;
             }
@@ -1466,7 +1460,7 @@ fn glow_weights(f: f32) -> vec4<f32> {
 
 fn glow_blurred(t: texture_2d<f32>, px: vec2<f32>, grid: vec4<f32>) -> vec3<f32> {
     let n = vec2<i32>(textureDimensions(t));
-    let u = (px - grid.zz) / grid.xy;
+    let u = (px - grid.zw) / grid.xy;
     let base = floor(u);
     let wx = glow_weights(u.x - base.x);
     let wy = glow_weights(u.y - base.y);
@@ -1598,11 +1592,7 @@ fn fs_glow(in: Out) -> @location(0) vec4<f32> {
             made = mixed(u32(glowing.modes.z), g, was.rgb);
         }
     }
-    var alpha = 1.0;
-    if glowing.modes.y == 1 && glowing.modes.x == 2 {
-        alpha = was.a + (1.0 - was.a) * clamp(max(g.r, max(g.g, g.b)), 0.0, 1.0);
-    }
-    var out = mix(was, vec4<f32>(made, alpha), glowing.mixing.y);
+    var out = mix(was, vec4<f32>(made, 1.0), glowing.mixing.y);
     if glow_has(GLOW_INVERT) {
         out = vec4<f32>(1.0 - out.rgb, out.a);
     }

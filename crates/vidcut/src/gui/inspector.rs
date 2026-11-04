@@ -2002,7 +2002,7 @@ fn glow_rows(
         );
         choice_row(
             ui,
-            (n, "Composite Type", "composite"),
+            (n, "Composite Type", "composite_type"),
             (g.over(), CompositeMode::Add),
             (&CompositeMode::ALL, mode_label),
             acts,

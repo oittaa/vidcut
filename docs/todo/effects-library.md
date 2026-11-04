@@ -14,10 +14,10 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 1. **More effects:** Sharpen, Vignette and Film Grain.
    - Measure each one in Resolve first: its values, their ranges and defaults, and its math.
    - **Glow, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
-     - On the Edit page: a smaller picture over a color, with each Input Alpha and each Select Output.
-     - Atmosphere and Secondary Glow on other timeline sizes.
-     - Spread 2.5 and 3 on a dot near the edge. Which sigma moves the mirror to the grid of 16.
-     - The place of Source Recovery and Atmosphere against Saturation and Gamma.
+     - Opacity below 1 on a picture with alpha, on the Edit page.
+     - The size of the Atmosphere noise on other timeline sizes, with Threshold 0.25 and Spread 0 on a gray picture.
+     - The exact sigma between 580.8 and 633.6 pixels that moves the mirror to the grid of 16.
+     - A Zoom with Secondary Glow.
    - **Mosaic Blur, measure these on the Edit page.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - Blur Alpha off and Whole Cells Only.
      - Whole Cells Only with Hexagon, with Triangle, with other Aliasing values and with Antialias Result. The alpha limit of a whole cell.

@@ -264,7 +264,7 @@ struct GlowGrid {
     step: [u32; 2],
     nodes: [u32; 2],
     last: [i32; 2],
-    low: i32,
+    low: [i32; 2],
     across: [f64; 4],
     down: [f64; 4],
     still: [f64; 4],
@@ -293,10 +293,10 @@ fn glow_low(spread: f64, step: u32) -> f64 {
 impl GlowGrid {
     fn of(spread: &GlowSpread, (w, h): (u32, u32), seen: bool) -> Self {
         let step = [glow_step(&spread.across), glow_step(&spread.down)];
-        let grid = spread.grid;
-        let half = grid / 2;
-        let whole = |n: u32| n.div_ceil(grid) * grid;
-        let nodes = |n: u32, d: u32| (whole(n) + if seen { grid } else { 0 }) / d + 1;
+        let [gx, gy] = spread.grid;
+        let whole = |n: u32, grid: u32| n.div_ceil(grid) * grid;
+        let nodes =
+            |n: u32, d: u32, grid: u32| (whole(n, grid) + if seen { grid } else { 0 }) / d + 1;
         let lows =
             |s: &[f64; 3], d: u32| [glow_low(s[0], d), glow_low(s[1], d), glow_low(s[2], d), 0.0];
         let still = std::array::from_fn(|c| {
@@ -304,9 +304,12 @@ impl GlowGrid {
         });
         Self {
             step,
-            nodes: [nodes(w, step[0]), nodes(h, step[1])],
-            last: [whole(w) as i32 - half as i32, whole(h) as i32 - half as i32],
-            low: -(half as i32),
+            nodes: [nodes(w, step[0], gx), nodes(h, step[1], gy)],
+            last: [
+                whole(w, gx) as i32 - (gx / 2) as i32,
+                whole(h, gy) as i32 - (gy / 2) as i32,
+            ],
+            low: [-((gx / 2) as i32), -((gy / 2) as i32)],
             across: lows(&spread.across, step[0]),
             down: lows(&spread.down, step[1]),
             still,
@@ -316,10 +319,10 @@ impl GlowGrid {
     fn cells_bytes(&self, seen: bool) -> Vec<u8> {
         let [dx, dy] = self.step;
         let mut out = Vec::new();
-        for v in [dx as i32, dy as i32, self.low, i32::from(seen)] {
+        for v in [dx as i32, dy as i32, i32::from(seen), 0] {
             out.extend_from_slice(&v.to_le_bytes());
         }
-        for v in [self.last[0], self.last[1], 0, 0] {
+        for v in [self.low[0], self.low[1], self.last[0], self.last[1]] {
             out.extend_from_slice(&v.to_le_bytes());
         }
         out
@@ -329,8 +332,8 @@ impl GlowGrid {
         [
             f64::from(self.step[0]),
             f64::from(self.step[1]),
-            f64::from(self.low),
-            0.0,
+            f64::from(self.low[0]),
+            f64::from(self.low[1]),
         ]
     }
 

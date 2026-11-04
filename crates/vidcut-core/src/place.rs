@@ -112,23 +112,32 @@ pub struct Tiling {
 pub struct GlowSpread {
     pub across: [f64; 3],
     pub down: [f64; 3],
-    pub grid: u32,
+    pub grid: [u32; 2],
 }
 
 impl GlowSpread {
-    const GRIDS: (u32, u32) = (8, 16);
-    const WIDE: f64 = 2.0;
+    const GRID: u32 = 8;
+    const MOST_GRID: u32 = 1 << 16;
+    const WIDE: f64 = 600.0;
+
+    fn grid(spreads: &[f64; 3]) -> u32 {
+        let most = spreads.iter().copied().fold(0.0, f64::max);
+        let (mut grid, mut wide) = (Self::GRID, Self::WIDE);
+        while most >= wide && grid < Self::MOST_GRID {
+            grid *= 2;
+            wide *= 2.0;
+        }
+        grid
+    }
 
     fn of(spread: f64, ratio: f64, relative: [f64; 3], area: f64) -> Self {
         let sigma = Glow::SIGMA * spread * area;
+        let across = relative.map(|r| sigma * r * (1.0 + ratio));
+        let down = relative.map(|r| sigma * r * (1.0 - ratio));
         Self {
-            across: relative.map(|r| sigma * r * (1.0 + ratio)),
-            down: relative.map(|r| sigma * r * (1.0 - ratio)),
-            grid: if spread > Self::WIDE {
-                Self::GRIDS.1
-            } else {
-                Self::GRIDS.0
-            },
+            across,
+            down,
+            grid: [Self::grid(&across), Self::grid(&down)],
         }
     }
 }

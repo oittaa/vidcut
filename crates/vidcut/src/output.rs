@@ -1161,7 +1161,7 @@ fn glow_values(e: &Value) -> String {
         n("saturation"),
         number_list(e, "color_filter"),
         s("framing"),
-        s("composite"),
+        s("composite_type"),
         n("opacity"),
         n("recovery"),
         if e["invert"] == true {

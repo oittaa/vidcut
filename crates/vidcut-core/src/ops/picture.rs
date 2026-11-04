@@ -241,7 +241,7 @@ fn glow_checked(g: &Glow) -> Result<Glow> {
         atmosphere_evolution: off(g.atmosphere_evolution, 0.0),
         atmosphere_seethe: off(g.atmosphere_seethe, Glow::SEETHE),
         framing: g.framing.filter(|v| *v != GlowFraming::default()),
-        composite: g.composite.filter(|v| *v != CompositeMode::Add),
+        composite_type: g.composite_type.filter(|v| *v != CompositeMode::Add),
         opacity: off(g.opacity, 1.0),
         recovery: off(g.recovery, 0.0),
         ..g.clone()
@@ -612,7 +612,7 @@ pub fn effect_shown(e: &Effect) -> Value {
             "atmosphere_seethe": g.noise_seethe(),
             "atmosphere_tracked": g.atmosphere_tracked,
             "framing": g.frames(),
-            "composite": g.over(),
+            "composite_type": g.over(),
             "opacity": g.shown(),
             "invert": g.invert,
             "recovery": g.recovers(),

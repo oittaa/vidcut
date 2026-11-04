@@ -3393,7 +3393,7 @@ pub struct Glow {
     pub framing: Option<GlowFraming>,
     /// How the glow goes over the picture. Usual: `add`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub composite: Option<CompositeMode>,
+    pub composite_type: Option<CompositeMode>,
     /// How much of the composite shows, from 0 to 1. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
@@ -3438,7 +3438,7 @@ pub enum GlowAlpha {
     /// The alpha multiplies what shines, and the result is opaque.
     #[default]
     MasksSources,
-    /// The picture shines by its colors. The glow adds to the alpha.
+    /// The same picture as `masks_sources`.
     Usual,
     /// The alpha itself shines, in gray, and the result is opaque.
     IsSource,
@@ -3725,7 +3725,7 @@ impl Glow {
     }
 
     pub fn over(&self) -> CompositeMode {
-        self.composite.unwrap_or(CompositeMode::Add)
+        self.composite_type.unwrap_or(CompositeMode::Add)
     }
 
     pub fn shown(&self) -> f64 {

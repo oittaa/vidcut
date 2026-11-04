@@ -138,7 +138,7 @@ fn glow_values(c: &mut EffectChange, g: &mut Glow) -> Result<()> {
     given(&mut c.atmosphere_seethe, &mut g.atmosphere_seethe);
     taken(&mut c.atmosphere_tracked, &mut g.atmosphere_tracked);
     given(&mut c.framing, &mut g.framing);
-    given(&mut c.composite, &mut g.composite);
+    given(&mut c.composite_type, &mut g.composite_type);
     given(&mut c.opacity, &mut g.opacity);
     taken(&mut c.invert, &mut g.invert);
     given(&mut c.recovery, &mut g.recovery);
