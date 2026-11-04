@@ -1030,6 +1030,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 let values = match e["kind"].as_str() {
                     Some("mosaic_blur") => mosaic_values(e),
                     Some("vignette") => vignette_values(e),
+                    Some("sharpen") => sharpen_values(e),
                     _ => gaussian_values(e),
                 };
                 println!(
@@ -1169,6 +1170,19 @@ fn vignette_values(e: &Value) -> String {
         at("color", 1),
         at("color", 2),
         e["composite_type"].as_str().unwrap_or_default(),
+    )
+}
+
+fn sharpen_values(e: &Value) -> String {
+    let n = |k: &str| effect_number(e, k);
+    format!(
+        "amount {}  fine detail size {}  details {}, {}, {}  chroma {}",
+        n("sharpen_amount"),
+        n("fine_detail_size"),
+        n("fine_details"),
+        n("medium_details"),
+        n("large_details"),
+        n("sharpen_chroma"),
     )
 }
 

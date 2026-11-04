@@ -12,7 +12,8 @@ use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     Border, CellShape, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel, Effect,
     EffectKind, GaussianBlur, Generator, Gradient, Keyframe, MosaicBlur, Picture, PictureTool,
-    Project, Retime, Speed, TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    Project, Retime, Sharpen, Speed, TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape,
+    ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -75,6 +76,7 @@ enum Knob {
     Gaussian(GaussianKnob),
     Mosaic(MosaicKnob),
     Vignette(VignetteKnob),
+    Sharpen(SharpenKnob),
     Blend,
 }
 
@@ -108,6 +110,16 @@ enum VignetteKnob {
     CenterY,
     Softness,
     Transparency,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum SharpenKnob {
+    Amount,
+    Size,
+    Fine,
+    Medium,
+    Large,
+    Chroma,
 }
 
 struct Dial {
@@ -319,12 +331,70 @@ impl VignetteKnob {
     }
 }
 
+impl SharpenKnob {
+    fn dial(self) -> Dial {
+        let gain = |label, usual| Dial {
+            label,
+            usual,
+            range: pair(Sharpen::GAINS),
+            speed: 0.01,
+        };
+        match self {
+            Self::Amount => gain("Sharpen Amount", Sharpen::AMOUNT),
+            Self::Size => Dial {
+                label: "Fine Detail Size",
+                usual: Sharpen::SIZE,
+                range: pair(Sharpen::SIZES),
+                speed: 0.0005,
+            },
+            Self::Fine => gain("Fine Details", Sharpen::GAIN),
+            Self::Medium => gain("Medium Details", Sharpen::GAIN),
+            Self::Large => gain("Large Details", Sharpen::GAIN),
+            Self::Chroma => gain("Sharpen Chroma", Sharpen::GAIN),
+        }
+    }
+
+    fn read(self, s: &Sharpen) -> f64 {
+        match self {
+            Self::Amount => s.amount(),
+            Self::Size => s.size(),
+            Self::Fine => s.fine(),
+            Self::Medium => s.medium(),
+            Self::Large => s.large(),
+            Self::Chroma => s.chroma(),
+        }
+    }
+
+    fn put(self, s: &mut Sharpen, to: f64) {
+        match self {
+            Self::Amount => s.sharpen_amount = Some(to),
+            Self::Size => s.fine_detail_size = Some(to),
+            Self::Fine => s.fine_details = Some(to),
+            Self::Medium => s.medium_details = Some(to),
+            Self::Large => s.large_details = Some(to),
+            Self::Chroma => s.sharpen_chroma = Some(to),
+        }
+    }
+
+    fn param(self, s: &Sharpen) -> (&'static str, Value) {
+        match self {
+            Self::Amount => ("sharpen_amount", json!(s.amount())),
+            Self::Size => ("fine_detail_size", json!(s.size())),
+            Self::Fine => ("fine_details", json!(s.fine())),
+            Self::Medium => ("medium_details", json!(s.medium())),
+            Self::Large => ("large_details", json!(s.large())),
+            Self::Chroma => ("sharpen_chroma", json!(s.chroma())),
+        }
+    }
+}
+
 impl Knob {
     fn dial(self) -> Dial {
         match self {
             Knob::Gaussian(k) => k.dial(),
             Knob::Mosaic(k) => k.dial(),
             Knob::Vignette(k) => k.dial(),
+            Knob::Sharpen(k) => k.dial(),
             Knob::Blend => Dial {
                 label: "Blend",
                 usual: 1.0,
@@ -339,6 +409,7 @@ impl Knob {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.read(g),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.read(m),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.read(s),
+            (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.read(s),
             (Knob::Blend, _) => e.mixed(),
             _ => self.dial().usual,
         }
@@ -352,6 +423,7 @@ impl Knob {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.put(g, v),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.put(m, v),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.put(s, v),
+            (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.put(s, v),
             (Knob::Blend, _) => out.blend = Some(v),
             _ => {}
         }
@@ -363,6 +435,7 @@ impl Knob {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.param(g),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.param(m),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.param(s),
+            (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.param(s),
             _ => ("blend", json!(e.mixed())),
         }
     }
@@ -1918,6 +1991,24 @@ fn vignette_rows(
     });
 }
 
+fn sharpen_rows(ui: &mut egui::Ui, i: &Inspector, (n, e): (usize, &Effect), acts: &mut Vec<Act>) {
+    let sharpen = |ui: &mut egui::Ui, k: SharpenKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Sharpen(k)), e, acts);
+    };
+    rows(ui, (n, "main"), |ui| {
+        sharpen(ui, SharpenKnob::Amount, acts);
+    });
+    fold(ui, (n, "Detail Levels"), |ui| {
+        sharpen(ui, SharpenKnob::Size, acts);
+        sharpen(ui, SharpenKnob::Fine, acts);
+        sharpen(ui, SharpenKnob::Medium, acts);
+        sharpen(ui, SharpenKnob::Large, acts);
+    });
+    fold(ui, (n, "Chroma"), |ui| {
+        sharpen(ui, SharpenKnob::Chroma, acts);
+    });
+}
+
 fn effect_block(
     ui: &mut egui::Ui,
     i: &Inspector,
@@ -1965,6 +2056,7 @@ fn effect_block(
                     EffectKind::GaussianBlur(g) => gaussian_rows(ui, i, (n, e, g), acts),
                     EffectKind::MosaicBlur(m) => mosaic_rows(ui, i, (n, e, m), acts),
                     EffectKind::Vignette(v) => vignette_rows(ui, i, (n, e, v), acts),
+                    EffectKind::Sharpen(_) => sharpen_rows(ui, i, (n, e), acts),
                 }
                 fold(ui, (n, "Global Blend"), |ui| {
                     knob(ui, i, (n, Knob::Blend), e, acts);

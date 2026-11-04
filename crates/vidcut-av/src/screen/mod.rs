@@ -23,6 +23,7 @@ pub(crate) mod light;
 mod out;
 pub mod scope;
 mod shared;
+mod sharpen;
 mod vignette;
 #[cfg(any(target_os = "linux", windows))]
 mod vulkan;
@@ -76,6 +77,7 @@ pub struct Gpu {
     scope: OnceLock<scope::Pipes>,
     blur: blur::Pipes,
     vignette: OnceLock<vignette::Pipes>,
+    sharpen: OnceLock<sharpen::Pipes>,
 }
 
 struct Drawing {
@@ -679,6 +681,7 @@ impl Gpu {
             scope: OnceLock::new(),
             blur: blur::Pipes::new(device, &shader),
             vignette: OnceLock::new(),
+            sharpen: OnceLock::new(),
         }
     }
 

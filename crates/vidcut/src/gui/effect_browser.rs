@@ -10,7 +10,7 @@ use super::workspace::{Workspace, dim};
 
 type Card = (&'static str, EffectType);
 
-pub const GROUPS: [(&str, &[Card]); 2] = [
+pub const GROUPS: [(&str, &[Card]); 3] = [
     (
         "Blur",
         &[
@@ -19,6 +19,7 @@ pub const GROUPS: [(&str, &[Card]); 2] = [
         ],
     ),
     ("Film Emulation", &[("Vignette", EffectType::Vignette)]),
+    ("Sharpen", &[("Sharpen", EffectType::Sharpen)]),
 ];
 
 const CARD_WIDTH: f32 = 120.0;
@@ -83,6 +84,24 @@ fn paint(painter: &Painter, rect: Rect, kind: EffectType) {
                 let oval = egui::epaint::EllipseShape::filled(c, reach, fill);
                 painter.add(oval);
             }
+        }
+        EffectType::Sharpen => {
+            let middle = rect.center().x;
+            let line = rect.width() / 16.0;
+            for k in 0..8 {
+                let a = (150 - k * 18) as u8;
+                let fill = Color32::from_rgba_unmultiplied(
+                    colors.text.r(),
+                    colors.text.g(),
+                    colors.text.b(),
+                    a,
+                );
+                let at = middle - line * (k + 1) as f32;
+                let band = Rect::from_x_y_ranges(at..=at + line, rect.y_range());
+                painter.rect_filled(band, 0.0, fill);
+            }
+            let edge = Rect::from_x_y_ranges(middle..=middle + line, rect.y_range());
+            painter.rect_filled(edge, 0.0, colors.text);
         }
     }
 }

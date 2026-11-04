@@ -5,14 +5,21 @@
 The Cut page has separate tabs for transitions, titles and effects (p. 636). vidcut follows it.
 
 - The Transitions tab, the Transition Inspector, Dip To Color Dissolve, Smooth Cut, Push and Slide are there ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
-- The Effects tab, the effects of the Inspector, Gaussian Blur, Mosaic Blur and Vignette are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
+- The Effects tab, the effects of the Inspector, Gaussian Blur, Mosaic Blur, Vignette and Sharpen are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - The Generators page and its twelve kinds are there ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
 - If the bar gets too full, one Effects tab with categories can replace the tabs, as the Edit page has (p. 802).
 
 Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
-1. **More effects:** Sharpen, Film Grain and Glow.
+1. **More effects:** Film Grain and Glow.
    - Measure each one in Resolve first: its values, their ranges and defaults, and its math.
+   - **Sharpen, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
+     - The medium band at another Fine Detail Size: `sh_steps`, Sharpen Amount 1, Medium Details 3, Fine Detail Size 0.01 and 0.1.
+     - Chroma with Details at a Sharpen Chroma of 1: a color input, Sharpen Amount 1, Fine Details 3.
+     - Blend on the Edit page, at 0.5.
+     - A picture with alpha on the Edit page, over black and over white.
+     - A source of another size, and Zoom: the order of the scaler and the effect.
+     - A viewer that draws fewer pixels than the frame.
    - **Vignette, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - LIGHTER_COLOR and DARKER_COLOR at an exact tie: a flat (1, 0, 0) input with Color (0, 1, 0).
      - A picture with alpha and a Color that is not black.
