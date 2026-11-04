@@ -1,11 +1,11 @@
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
 
 use vidcut_core::editor::{TimelineFile, Unpacked};
+use vidcut_core::lru::Lru;
 use vidcut_core::model::ImageSequence;
 use vidcut_core::{Error, ErrorCode, Project, Result};
 use zip::write::SimpleFileOptions;
@@ -348,7 +348,9 @@ fn write_folder(
 
 type Seen = (u64, i128, u32);
 
-static CHECKED: LazyLock<Mutex<HashMap<PathBuf, Seen>>> = LazyLock::new(Default::default);
+const CHECKED_KEPT: usize = 4096;
+
+static CHECKED: Mutex<Lru<PathBuf, Seen, CHECKED_KEPT>> = Mutex::new(Lru::new());
 
 fn modified(meta: &std::fs::Metadata) -> i128 {
     meta.modified()
