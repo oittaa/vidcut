@@ -184,7 +184,7 @@ impl Index {
     }
 
     fn forget(&mut self, path: &Path) {
-        if let Some((_, e)) = self.files.remove(&path.to_path_buf()) {
+        if let Some((_, e)) = self.files.remove(path) {
             self.total -= e.len;
         }
     }

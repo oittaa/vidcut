@@ -9,11 +9,12 @@ use egui_phosphor::regular::{
     DOTS_THREE, MAGNIFYING_GLASS_PLUS, WAVE_SINE,
 };
 use serde_json::{Value, json};
+use vidcut_core::generators::{self, CENTER};
 use vidcut_core::keyframes::{
     PictureValue, ease_of, eases, handle_point, value_mapped, value_paired,
 };
 use vidcut_core::model::{
-    Clip, Ease, Handle, Keyframe, LowerThirdLine, Picture, Project, Speed, Title,
+    Clip, Ease, Generator, Handle, Keyframe, LowerThirdLine, Picture, Project, Speed, Title,
 };
 use vidcut_core::ops::picture::has_picture;
 use vidcut_core::request::KeyParam;
@@ -41,7 +42,8 @@ const TICK_GAP: f32 = 96.0;
 const FIELD_W: f32 = 72.0;
 const TRAY_ROWS: usize = 4;
 const SELECT_ONE: &str = "Select a clip or a subtitle.";
-const GROUPS: [Group; 5] = [
+const GROUPS: [Group; 6] = [
+    Group::Generator,
     Group::Transform,
     Group::Crop,
     Group::Composite,
@@ -51,6 +53,7 @@ const GROUPS: [Group; 5] = [
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Group {
+    Generator,
     Transform,
     Crop,
     Composite,
@@ -410,11 +413,13 @@ fn group_of(param: KeyParam) -> Group {
         | KeyParam::CropSoftness => Group::Crop,
         KeyParam::Opacity => Group::Composite,
         KeyParam::Speed => Group::Speed,
+        KeyParam::CenterX | KeyParam::CenterY => Group::Generator,
     }
 }
 
 fn group_name(group: Group) -> &'static str {
     match group {
+        Group::Generator => "Generator",
         Group::Transform => "Transform",
         Group::Crop => "Crop",
         Group::Composite => "Composite",
@@ -445,6 +450,8 @@ fn lane_name(param: KeyParam) -> &'static str {
         KeyParam::CropSoftness => "Crop Softness",
         KeyParam::Opacity => "Opacity",
         KeyParam::Speed => "Speed",
+        KeyParam::CenterX => "Center X",
+        KeyParam::CenterY => "Center Y",
     }
 }
 
@@ -466,6 +473,7 @@ fn limits(param: KeyParam) -> (f64, f64) {
         KeyParam::CropSoftness => (-Picture::SOFT, Picture::SOFT),
         KeyParam::Opacity => (0.0, 1.0),
         KeyParam::Speed => (*Speed::RANGE.start(), *Speed::RANGE.end()),
+        KeyParam::CenterX | KeyParam::CenterY => (*CENTER.start(), *CENTER.end()),
     }
 }
 
@@ -517,7 +525,9 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::LowerRotation
         | KeyParam::Pitch
         | KeyParam::Yaw
-        | KeyParam::CropSoftness => v,
+        | KeyParam::CropSoftness
+        | KeyParam::CenterX
+        | KeyParam::CenterY => v,
     }
 }
 
@@ -541,7 +551,9 @@ fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::LowerRotation
         | KeyParam::Pitch
         | KeyParam::Yaw
-        | KeyParam::CropSoftness => v,
+        | KeyParam::CropSoftness
+        | KeyParam::CenterX
+        | KeyParam::CenterY => v,
     }
 }
 
@@ -570,7 +582,7 @@ fn places(param: KeyParam) -> usize {
         | KeyParam::LowerRotation
         | KeyParam::CropSoftness
         | KeyParam::Speed => 2,
-        KeyParam::Pitch | KeyParam::Yaw => 3,
+        KeyParam::Pitch | KeyParam::Yaw | KeyParam::CenterX | KeyParam::CenterY => 3,
         _ => 0,
     }
 }
@@ -653,7 +665,9 @@ fn nudge_step(param: KeyParam, sign: f64, y: bool) -> f64 {
         | KeyParam::CropLeft
         | KeyParam::CropRight
         | KeyParam::CropTop
-        | KeyParam::CropBottom => 0.001,
+        | KeyParam::CropBottom
+        | KeyParam::CenterX
+        | KeyParam::CenterY => 0.001,
     };
     let down = matches!(
         param,
@@ -983,6 +997,21 @@ fn clip_band(map: TimeMap, clip: &Clip, rect: Rect) -> Rect {
 
 fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
     let mut out = Vec::new();
+    if let Some(Generator::FourColorGradient(g)) = &clip.generator {
+        for (param, axis) in [
+            (KeyParam::CenterX, generators::Axis::X),
+            (KeyParam::CenterY, generators::Axis::Y),
+        ] {
+            let keys = g.keys(axis);
+            if !keyed_only || !keys.is_empty() {
+                out.push(Lane {
+                    param,
+                    keys: keys.to_vec(),
+                    extra: Vec::new(),
+                });
+            }
+        }
+    }
     if has_picture(clip) {
         let picture = clip.picture.clone().unwrap_or_default();
         for v in PictureValue::ALL {
@@ -2742,7 +2771,7 @@ impl Workspace {
             | KeyParam::Rotation
             | KeyParam::UpperRotation
             | KeyParam::LowerRotation => 0.5,
-            KeyParam::Pitch | KeyParam::Yaw => 0.01,
+            KeyParam::Pitch | KeyParam::Yaw | KeyParam::CenterX | KeyParam::CenterY => 0.01,
             _ => 1.0,
         };
         let forward = !fixed(param) || raw > 0.0;

@@ -150,6 +150,12 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 - The answer names the renderer. It gives the layout and the place of each layer of the picture, from the bottom up.
 - If the player cannot make the frame, the error is the error of the player.
 
+**The scopes:** `vidcut frame scope waveform --at TIME --out F.png` renders one scope of that same picture, with no window. The others are `parade` and `vectorscope`.
+
+- It draws the frame at the size of the timeline.
+- The PNG has the lines of the scale, with no text.
+- The answer names `colors`, which is the timeline color space. It gives `marks`, with the label and the place of each line of the scale.
+
 **The refusals of Super Scale:** `scripts/super-scale-check.sh` asks an export and the viewer about three clips, with the upscaler of macOS. In each case, the two answers must agree.
 
 - It builds vidcut and makes its clips with `make_fixture`. It needs no clicks.
