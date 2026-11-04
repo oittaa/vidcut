@@ -452,6 +452,7 @@ impl LayerMade {
         let (source, retime, smooth_cut) = match how {
             Made::Solid(BLACK) => ("Black".into(), None, None),
             Made::Solid(color) => (format!("Color {}", hex(color)), None, None),
+            Made::Generated => ("A generator".into(), None, None),
             Made::Still => ("A still image".into(), None, None),
             Made::Source(f) => (format!("{}, as it is", frame(f)), None, None),
             Made::Between {

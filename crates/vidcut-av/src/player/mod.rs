@@ -420,7 +420,11 @@ impl Kept {
 
 fn decoded(picture: &Picture) -> bool {
     picture.origin().is_some_and(|o| {
-        o.upscaled.is_none() && matches!(o.made, Made::Solid(_) | Made::Still | Made::Source(_))
+        o.upscaled.is_none()
+            && matches!(
+                o.made,
+                Made::Solid(_) | Made::Generated | Made::Still | Made::Source(_)
+            )
     })
 }
 

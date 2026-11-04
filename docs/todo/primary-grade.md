@@ -20,7 +20,7 @@ The Cut page color control is Auto Color ([auto-color.md](auto-color.md)). These
 - An `Effect` runs on the placed picture, before composite mode and opacity (`fs_blur`).
 - The spec puts a clip grade after those effects and before the speed change (§13).
 - The spec puts a timeline grade after the tracks mix.
-- Scopes are a separate item ([scopes.md](scopes.md)).
+- The scopes read the canvas after the mix ([gpu](../design/gpu.md#the-scopes)). Thus they show a grade that runs before the mix ends.
 
 **To do, if this deviation is accepted:**
 
@@ -38,6 +38,6 @@ The Cut page color control is Auto Color ([auto-color.md](auto-color.md)). These
 **Not this item:**
 
 - An input LUT and an output LUT ([luts.md](luts.md)).
-- A qualifier, after this primary and the scopes.
+- A qualifier, after this primary.
 - OpenColorIO, after the extra color spaces ([timeline-color-spaces-more.md](timeline-color-spaces-more.md)).
 - A node graph. §13 is the order of the picture.
