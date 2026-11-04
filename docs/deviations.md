@@ -2552,3 +2552,27 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The same marks give the same frames in both views.
   - The owner approved this difference.
+
+## X132. A Mosaic Blur Triangle keeps its own color in a corner at the side of the frame
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. The manual does not tell this.
+  - A Triangle has corners at the sides of the frame, from triangles with a middle off the frame.
+  - When that middle is 0.691 of a column step or more off the frame, the corners take other colors.
+  - Two renders of Aspect 2 at Pixel Frequency 25 differ in these corners, by up to 9.22/255 on 1211 pixels.
+- **vidcut:**
+  - A corner has the box at the middle of the pixel's own triangle, clamped into the frame, at each distance.
+- **Why:**
+  - The Resolve result does not repeat.
+  - The owner approved this difference.
+
+## X133. A Mosaic Blur cell edge exactly on a pixel gives the pixel to the cell on the right or below
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. The manual does not tell this.
+  - Where a cell edge falls exactly on a pixel, Resolve gives that pixel to either cell. The renders show no rule.
+- **vidcut:**
+  - That pixel goes to the cell on the right or below.
+- **Why:**
+  - vidcut has one fixed rule where the renders show none.
+  - The owner approved this difference.
