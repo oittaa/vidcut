@@ -43,6 +43,8 @@ flowchart TD
 - **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
   - The plan uses the sample rate and channels of the audio encoder (`resolve_audio`). Why: the sample math then agrees with the encoder.
+  - A count with no default layout in FFmpeg uses the first channels of the 22.2 layout (`channel_layout`). Why: the mix needs a layout, and a stereo file then goes to the first two channels.
+  - An encoder can take fewer channels. Then the export fails with the name of the encoder and the channel count.
 - **Models:** `session::export_media` first checks the models of Voice Isolation, Super Scale, Retime Process and the Process of each Smooth Cut. A missing model needs `download`.
 
 GPU preferences:
@@ -521,6 +523,9 @@ The passes:
   2. played on the GPU
   3. made on the GPU, Vulkan too
   4. the rest
+- The name of the file has the codec that made it.
+  - `proxy.generate` runs twice: in the job and in the edit after it.
+  - The edit finds the file of the job in `MADE_WITH`. Thus the edit does not encode again.
 - A proxy is 10-bit from a source of more than 8 bits, where its encoder takes 10 bits.
 - It keeps the PQ or HLG of an HDR source, and the static metadata of a PQ source. An 8-bit proxy is SDR BT.709.
 - A proxy has frequent keyframes (ProRes and DNxHR: each frame), and no reordering. Why: a seek then decodes few frames.
