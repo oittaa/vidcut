@@ -257,6 +257,15 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - Thus text colored transparent still shows.
   - `lay_out` in `burn.rs` draws only the glyphs that are not marked hidden.
   - It draws underlines in their own colors, which keep their alpha.
+- **fontdb keeps only the typographic family name of a font** (0.23).
+  - A font can have a family name (name ID 1) and a typographic family name (name ID 16).
+  - For example, `SitkaVF.ttf` has `Sitka Text` and `Sitka`, and `calibril.ttf` has `Calibri Light` and `Calibri`.
+  - fontdb reads name ID 1 only when the font has no name ID 16. Thus it finds no face for `Sitka Text`.
+  - `add_family_names` in `burn.rs` adds the name ID 1 names to each face.
+- **cosmic-text takes a family's face only at its exact weight** (0.19).
+  - The face must have the weight of the text, or a `wght` axis that includes that weight.
+  - Else cosmic-text uses its fallback fonts. For example, the only face of `Marlett` has weight 500, and text at weight 400 does not use it.
+  - `with_face_weight` in `burn.rs` gives the text the weight of the face that fontdb selects, or the nearest weight on its axis.
 - **cpal's `device_by_id` misses ALSA's devices** (0.18).
   - It adds a device number to the id that it looks for (`sysdefault:CARD=PCH,DEV=0`). The listed ids do not have this number.
   - Thus a device chosen from the list would play on the default, with no message.

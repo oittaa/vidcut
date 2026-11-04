@@ -1718,6 +1718,32 @@ pub fn audio_roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<(
     Ok(())
 }
 
+fn playhead_targets(p: &Project, edge: Edge, at: i64, ids: &[String]) -> Result<Vec<String>> {
+    if !ids.is_empty() {
+        return Ok(ids.to_vec());
+    }
+    let t = &p.tracks[main_index(p)];
+    let ci = t
+        .clip_at(at)
+        .or_else(|| {
+            (edge == Edge::Tail)
+                .then(|| t.clips.iter().position(|c| c.end() == at))
+                .flatten()
+        })
+        .ok_or_else(|| Error::invalid("no clip under the playhead"))?;
+    Ok(vec![t.clips[ci].id.clone()])
+}
+
+fn frames_to_playhead(p: &Project, id: &str, edge: Edge, at: i64) -> Result<i64> {
+    let c = p
+        .clip(id)
+        .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
+    Ok(match edge {
+        Edge::Head => at - c.start,
+        Edge::Tail => at - c.end(),
+    })
+}
+
 pub fn trim_to(
     p: &mut Project,
     edge: Edge,
@@ -1725,31 +1751,20 @@ pub fn trim_to(
     ids: &[String],
     ripple: Option<bool>,
 ) -> Result<()> {
-    let targets: Vec<String> = if ids.is_empty() {
-        let ti = main_index(p);
-        let t = &p.tracks[ti];
-        let ci = t
-            .clip_at(at)
-            .or_else(|| {
-                (edge == Edge::Tail)
-                    .then(|| t.clips.iter().position(|c| c.end() == at))
-                    .flatten()
-            })
-            .ok_or_else(|| Error::invalid("no clip under the playhead"))?;
-        vec![t.clips[ci].id.clone()]
-    } else {
-        ids.to_vec()
-    };
-    for id in targets {
-        let c = p
-            .clip(&id)
-            .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
-        let delta = match edge {
-            Edge::Head => at - c.start,
-            Edge::Tail => at - c.end(),
-        };
+    for id in playhead_targets(p, edge, at, ids)? {
+        let delta = frames_to_playhead(p, &id, edge, at)?;
         if delta != 0 {
             trim(p, &id, edge, delta, ripple)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn roll_to(p: &mut Project, edge: Edge, at: i64, ids: &[String]) -> Result<()> {
+    for id in linked::leads(p, &playhead_targets(p, edge, at, ids)?) {
+        let delta = frames_to_playhead(p, &id, edge, at)?;
+        if delta != 0 {
+            roll(p, &id, edge, delta)?;
         }
     }
     Ok(())
