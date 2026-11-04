@@ -1407,7 +1407,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - From d, it has black for 4.5 U, white for 6 U and black for 4.5 U.
     - Then it has 0.02 for U, black for U, 0.04 for U, and black to d + 7 c.
   - Measured: in an HDR timeline, these kinds keep their SDR code values.
-  - vidcut does not copy two faults in these pictures ([X125](deviations.md#x125-generators-have-the-correct-picture-where-resolve-has-a-fault)).
+  - vidcut does not copy two faults in these pictures ([X129](deviations.md#x129-generators-have-the-correct-picture-where-resolve-has-a-fault)).
 - **Length and dissolves:**
   - Measured: a generator can have any length.
   - Measured: Resolve keeps the source start of a generator at 0. A left trim moves the keyframes, and the picture does not move.
