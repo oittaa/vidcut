@@ -5,10 +5,13 @@ use eframe::egui::{
 };
 use serde_json::{Value, json};
 use vidcut_av::player::{Config, PacedOutput, Player};
-use vidcut_core::model::{AngleSync, Media, Project};
-use vidcut_core::multicam::{close_far_gaps, group_files, ruler_start, sync_clips_files};
+use vidcut_core::model::{AngleSync, GroupClip, GroupRow, Project};
+use vidcut_core::multicam::{
+    SyncOpen, drop_clip, lock_lined_up, row_camera, row_file_at, ruler_start, settle, shift_clip,
+    sync_clips_files, visible,
+};
 use vidcut_core::render::{RenderPlan, places_sound};
-use vidcut_core::time::{Rational, format_timecode};
+use vidcut_core::time::format_timecode;
 
 use super::dialog;
 use super::export::Ask;
@@ -24,35 +27,9 @@ const RULER_LABEL: f32 = 70.0;
 const NUMBER: f32 = 26.0;
 const LOCK: f32 = 24.0;
 const MOST_ROW: f32 = 60.0;
-const LEAST_ROW: f32 = 22.0;
+const LEAST_ROW: f32 = 10.0;
 const FOOTER: f32 = 56.0;
-
-#[derive(Debug, Clone)]
-struct Row {
-    media: String,
-    label: String,
-    frames: i64,
-    at: i64,
-    hidden: i64,
-    locked: bool,
-}
-
-impl Row {
-    fn new(p: &Project, m: &Media, position: usize) -> Self {
-        let label = match &m.camera {
-            Some(camera) => format!("Camera {camera}"),
-            None => format!("Camera {}", position + 1),
-        };
-        Self {
-            media: m.id.clone(),
-            label,
-            frames: p.media_frames(m),
-            at: 0,
-            hidden: 0,
-            locked: false,
-        }
-    }
-}
+const CLIP_EDGE: Color32 = Color32::from_rgb(90, 170, 240);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Waiting {
@@ -62,9 +39,18 @@ enum Waiting {
 }
 
 struct Grab {
-    row: usize,
-    reals: Vec<i64>,
+    media: String,
+    rows: Vec<GroupRow>,
+    real: i64,
     press: f32,
+    per_frame: f32,
+}
+
+struct Lane {
+    strip: Rect,
+    row: usize,
+    locked: bool,
+    left: f32,
     per_frame: f32,
 }
 
@@ -73,15 +59,18 @@ pub(super) struct SyncClips {
     pub(super) open: bool,
     group: Option<String>,
     bin: String,
-    rows: Vec<Row>,
+    files: Vec<String>,
+    rows: Vec<GroupRow>,
     selected: usize,
+    clip: Option<String>,
     viewed: usize,
+    number: usize,
     sync: AngleSync,
     ruler: i64,
     at: i64,
     playing: bool,
     sound: Option<Player>,
-    sounded: Vec<(String, i64)>,
+    sounded: Vec<GroupRow>,
     heard: Option<(bool, usize)>,
     solo: bool,
     grab: Option<Grab>,
@@ -89,70 +78,85 @@ pub(super) struct SyncClips {
     failed: Vec<String>,
 }
 
+fn cell_of(p: &Project, rows: &[GroupRow], i: usize, at: i64) -> GridCell {
+    let row = &rows[i];
+    let under = row_file_at(p, row, at);
+    let shown = under.map(|(c, _)| c).or(row.clips.first());
+    GridCell {
+        number: Some(i + 1),
+        label: Some(format!("Camera {}", row_camera(rows, i))),
+        media: shown.map(|c| c.media.clone()).unwrap_or_default(),
+        frame: under.map(|(_, frame)| frame),
+        active: false,
+        outlined: false,
+    }
+}
+
 impl SyncClips {
-    fn frames(&self) -> i64 {
-        self.rows
-            .iter()
-            .map(|r| r.at + r.frames)
+    fn clips(&self) -> impl Iterator<Item = &GroupClip> {
+        self.rows.iter().flat_map(|r| &r.clips)
+    }
+
+    fn frames(&self, p: &Project) -> i64 {
+        self.clips()
+            .map(|c| c.at + visible(p, c))
             .max()
             .unwrap_or(0)
             .max(1)
     }
 
-    fn reals(&self) -> Vec<i64> {
-        self.rows.iter().map(|r| r.at + r.hidden).collect()
-    }
-
-    fn place(&mut self, fps: Rational, reals: &[i64]) {
-        let spans: Vec<(i64, i64)> = self
+    fn nudge(&mut self, p: &Project, by: i64) {
+        let Some(media) = self.clip.clone() else {
+            return;
+        };
+        let found = self
             .rows
             .iter()
-            .zip(reals)
-            .map(|(r, real)| (*real, r.frames))
-            .collect();
-        for (row, (at, hidden)) in self.rows.iter_mut().zip(close_far_gaps(fps, &spans)) {
-            row.at = at;
-            row.hidden = hidden;
-        }
-        self.at = self.at.min(self.frames());
-    }
-
-    fn nudge(&mut self, fps: Rational, by: i64) {
-        if self.rows.get(self.selected).is_none_or(|r| r.locked) {
+            .find_map(|r| Some((r.locked, r.clips.iter().find(|c| c.media == media)?)));
+        let Some((false, clip)) = found else {
             return;
-        }
-        let mut reals = self.reals();
-        reals[self.selected] = (reals[self.selected] + by).max(0);
-        self.place(fps, &reals);
+        };
+        let real = clip.at + clip.hidden;
+        shift_clip(p, &mut self.rows, &media, real + by);
+        drop_clip(p, &mut self.rows, &media);
+        self.at = self.at.min(self.frames(p));
     }
 
-    fn take_layout(&mut self, fps: Rational, layout: &Value, lock: bool) {
-        let unmatched = layout["unmatched"].as_array();
-        let unmatched: Vec<&str> = unmatched
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .collect();
-        let mut reals = self.reals();
-        for angle in layout["angles"].as_array().into_iter().flatten() {
-            let media = angle["media"].as_str().unwrap_or_default();
-            if let Some(i) = self.rows.iter().position(|r| r.media == media) {
-                reals[i] = angle["at"].as_i64().unwrap_or(reals[i]);
-                self.rows[i].locked = lock && !unmatched.contains(&media);
-            }
+    fn take_layout(&mut self, p: &Project, layout: &Value, lock: bool) -> Result<(), String> {
+        self.rows = serde_json::from_value(layout["rows"].clone()).map_err(|e| e.to_string())?;
+        if lock {
+            let unmatched: Vec<String> = layout["unmatched"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect();
+            lock_lined_up(&mut self.rows, &unmatched);
         }
-        self.place(fps, &reals);
+        settle(p, &mut self.rows);
+        let last = self.rows.len().saturating_sub(1);
+        self.selected = self.selected.min(last);
+        self.viewed = self.viewed.min(last);
+        self.number = self.number.min(last);
+        self.clip = None;
+        self.heard = None;
+        self.at = self.at.min(self.frames(p));
+        Ok(())
     }
 
-    fn places(&self) -> Vec<(String, i64)> {
-        self.rows.iter().map(|r| (r.media.clone(), r.at)).collect()
+    fn pick_row(&mut self, i: usize) {
+        self.selected = i;
+        self.viewed = i;
+        self.number = i;
+        self.clip = None;
     }
 
     fn gaps(&self) -> Vec<(i64, i64)> {
-        let mut rows: Vec<(i64, i64)> = self.rows.iter().map(|r| (r.at, r.hidden)).collect();
-        rows.sort_unstable();
+        let mut clips: Vec<(i64, i64)> = self.clips().map(|c| (c.at, c.hidden)).collect();
+        clips.sort_unstable();
         let mut gaps = vec![(0, 0)];
-        for (at, hidden) in rows {
+        for (at, hidden) in clips {
             if gaps.last().is_some_and(|(_, seen)| hidden > *seen) {
                 gaps.push((at, hidden));
             }
@@ -222,30 +226,24 @@ impl Workspace {
             return;
         };
         let bin = self.snap.pool.bin.clone();
-        let files = match sync_clips_files(&p, &bin, &self.snap.selection.media) {
-            Ok(files) => files,
+        let media: Vec<String> = match sync_clips_files(&p, &bin, &self.snap.selection.media) {
+            Ok(SyncOpen::Files(files)) => files.iter().map(|m| m.id.clone()).collect(),
+            Ok(SyncOpen::Group(g)) => {
+                let id = g.id.clone();
+                self.open_sync_group(&id);
+                return;
+            }
             Err(e) => {
                 self.say(e.message);
                 return;
             }
         };
-        if let Some(g) = files.first().and_then(|m| p.group_of(&m.id)) {
-            let id = g.id.clone();
-            self.open_sync_group(&id);
-            return;
-        }
-        let rows: Vec<Row> = files
-            .iter()
-            .enumerate()
-            .map(|(i, m)| Row::new(&p, m, i))
-            .collect();
-        let media: Vec<String> = rows.iter().map(|r| r.media.clone()).collect();
         let params = json!({ "media": media, "sync": AngleSync::Timecode, "full_extents": true });
         let ask = Ask::send(&self.live, ctx, "multicam.layout", params);
         let ruler = ruler_start(&p, &media);
         self.show_sync_clips(SyncClips {
             bin,
-            rows,
+            files: media,
             ruler,
             waiting: Some((Waiting::Places, ask)),
             ..SyncClips::default()
@@ -259,30 +257,23 @@ impl Workspace {
         let Some(g) = p.group(id) else {
             return;
         };
-        let rows: Vec<Row> = group_files(&p, g)
+        let files: Vec<String> = p
+            .media
             .iter()
-            .enumerate()
-            .map(|(i, m)| {
-                let mut row = Row::new(&p, m, i);
-                if let Some(a) = g.angles.iter().find(|a| a.media == m.id) {
-                    row.at = a.at;
-                    row.hidden = a.hidden;
-                    row.locked = a.locked;
-                }
-                row
-            })
+            .filter(|m| g.at_of(&m.id).is_some())
+            .map(|m| m.id.clone())
             .collect();
-        let media: Vec<String> = rows.iter().map(|r| r.media.clone()).collect();
-        let mut window = SyncClips {
+        let mut rows = g.rows.clone();
+        settle(&p, &mut rows);
+        let ruler = ruler_start(&p, &files);
+        self.show_sync_clips(SyncClips {
             group: Some(g.id.clone()),
             bin: g.bin.clone(),
+            files,
             rows,
-            ruler: ruler_start(&p, &media),
+            ruler,
             ..SyncClips::default()
-        };
-        let reals = window.reals();
-        window.place(p.settings.fps, &reals);
-        self.show_sync_clips(window);
+        });
     }
 
     fn show_sync_clips(&mut self, window: SyncClips) {
@@ -327,9 +318,10 @@ impl Workspace {
             return;
         }
         let nudge: i64 = ctx.input(|i| i.events.iter().map(nudge_of).sum());
-        if nudge != 0 {
-            let fps = self.fps();
-            self.sync_clips.nudge(fps, nudge);
+        if nudge != 0
+            && let Some(p) = self.project_shared()
+        {
+            self.sync_clips.nudge(&p, nudge);
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Space)) {
             if self.sync_clips.playing {
@@ -368,8 +360,7 @@ impl Workspace {
         let Some(p) = self.project_shared() else {
             return;
         };
-        let places = self.sync_clips.places();
-        let plan = match places_sound(&p, &places) {
+        let plan = match places_sound(&p, &self.sync_clips.rows) {
             Ok(plan) => plan,
             Err(e) => {
                 self.say(e.message);
@@ -388,7 +379,7 @@ impl Workspace {
             return;
         }
         let s = &mut self.sync_clips;
-        s.sounded = places;
+        s.sounded = s.rows.clone();
         s.heard = None;
         s.hear();
         if let Some(sound) = &s.sound {
@@ -401,9 +392,8 @@ impl Workspace {
         if !self.sync_clips.playing {
             return;
         }
-        let places = self.sync_clips.places();
-        if places != self.sync_clips.sounded {
-            let moved = places_sound(p, &places)
+        if self.sync_clips.rows != self.sync_clips.sounded {
+            let moved = places_sound(p, &self.sync_clips.rows)
                 .map_err(|e| e.message)
                 .and_then(|plan| {
                     let sound = self.sync_clips.sound.as_ref();
@@ -414,7 +404,7 @@ impl Workspace {
                 self.say(message);
                 return;
             }
-            self.sync_clips.sounded = places;
+            self.sync_clips.sounded = self.sync_clips.rows.clone();
             self.sync_clips.heard = None;
         }
         let s = &mut self.sync_clips;
@@ -446,49 +436,49 @@ impl Workspace {
         let answer = match result {
             Ok(answer) => answer,
             Err(e) => {
+                if what == Waiting::Places {
+                    self.close_sync_clips();
+                }
                 self.say(e.message);
                 return;
             }
         };
-        let fps = self.fps();
-        match what {
-            Waiting::Places => self.sync_clips.take_layout(fps, &answer.result, false),
-            Waiting::AutoSync => {
-                self.sync_clips.take_layout(fps, &answer.result, true);
-                self.sync_clips.failed = answer.result["unmatched"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .map(|m| self.media_name(m))
-                    .collect();
-            }
-            Waiting::Save => self.close_sync_clips(),
+        if what == Waiting::Save {
+            self.close_sync_clips();
+            return;
+        }
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let lock = what == Waiting::AutoSync;
+        if let Err(message) = self.sync_clips.take_layout(&p, &answer.result, lock) {
+            self.say(message);
+            return;
+        }
+        if lock {
+            self.sync_clips.failed = answer.result["unmatched"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(|m| self.media_name(m))
+                .collect();
         }
     }
 
     fn auto_sync(&mut self, ctx: &egui::Context) {
         let s = &self.sync_clips;
-        let media: Vec<&str> = s.rows.iter().map(|r| r.media.as_str()).collect();
-        let params = json!({ "media": media, "sync": s.sync, "full_extents": true });
+        let params = json!({ "media": s.files, "sync": s.sync, "full_extents": true });
         let ask = Ask::send(&self.live, ctx, "multicam.layout", params);
         self.sync_clips.waiting = Some((Waiting::AutoSync, ask));
     }
 
     fn save_sync(&mut self, ctx: &egui::Context) {
         let s = &self.sync_clips;
-        let angles: Vec<Value> = s
-            .rows
-            .iter()
-            .map(
-                |r| json!({ "media": r.media, "at": r.at, "hidden": r.hidden, "locked": r.locked }),
-            )
-            .collect();
         let (method, params) = match &s.group {
-            Some(group) => ("multicam.set", json!({ "group": group, "angles": angles })),
+            Some(group) => ("multicam.set", json!({ "group": group, "rows": s.rows })),
             None => {
-                let media: Vec<&str> = s.rows.iter().map(|r| r.media.as_str()).collect();
-                let mut params = json!({ "media": media, "angles": angles });
+                let mut params = json!({ "media": s.files, "rows": s.rows });
                 if !s.bin.is_empty() {
                     params["bin"] = json!(s.bin);
                 }
@@ -564,54 +554,41 @@ impl Workspace {
             theme::colors().text_dim,
         );
         let s = &self.sync_clips;
-        if let Some(row) = s.rows.get(s.viewed) {
-            painter.text(
-                pos2((middle + rect.right()) / 2.0, title),
-                Align2::CENTER_TOP,
-                elide(&self.media_name(&row.media), 60),
-                FontId::proportional(12.0),
-                theme::colors().text_dim,
-            );
-        }
+        let mut cells: Vec<GridCell> = (0..s.rows.len())
+            .map(|i| GridCell {
+                active: i == s.viewed,
+                ..cell_of(p, &s.rows, i, s.at)
+            })
+            .collect();
         let top = rect.top() + 18.0;
         let left = Rect::from_min_max(pos2(rect.left(), top), pos2(middle, rect.bottom()));
         let right = Rect::from_min_max(pos2(middle, top), rect.max);
         let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
-        let frame_of = |r: &Row| {
-            let frame = s.at - r.at;
-            (0..r.frames).contains(&frame).then_some(frame)
-        };
-        let mut cells: Vec<GridCell> = s
-            .rows
-            .iter()
-            .enumerate()
-            .map(|(i, r)| GridCell {
-                number: Some(i + 1),
-                label: Some(r.label.clone()),
-                media: r.media.clone(),
-                frame: frame_of(r),
-                active: i == s.viewed,
-                outlined: false,
-            })
-            .collect();
         let mut pictures = grid_pictures(left, p, cells.len());
-        if let Some(r) = s.rows.get(s.viewed) {
-            cells.push(GridCell {
+        if s.viewed < s.rows.len() {
+            let big = GridCell {
                 number: None,
-                label: Some(r.label.clone()),
-                media: r.media.clone(),
-                frame: frame_of(r),
-                active: false,
-                outlined: false,
-            });
+                ..cell_of(p, &s.rows, s.viewed, s.at)
+            };
+            painter.text(
+                pos2((middle + rect.right()) / 2.0, title),
+                Align2::CENTER_TOP,
+                elide(&self.media_name(&big.media), 60),
+                FontId::proportional(12.0),
+                theme::colors().text_dim,
+            );
+            cells.push(big);
             pictures.push(fit(right.shrink(6.0), aspect));
         }
         let speed = if s.playing { 1.0 } else { 0.0 };
         let picked = self.camera_cells(ui, &pictures, p, &cells, speed);
         let s = &mut self.sync_clips;
-        if let Some(i) = picked.and_then(|m| s.rows.iter().position(|r| r.media == m)) {
-            s.selected = i;
-            s.viewed = i;
+        if let Some(i) = picked.and_then(|m| {
+            s.rows
+                .iter()
+                .position(|r| r.clips.iter().any(|c| c.media == m))
+        }) {
+            s.pick_row(i);
         }
     }
 
@@ -683,8 +660,7 @@ impl Workspace {
     }
 
     fn sync_clips_rows(&mut self, ui: &mut egui::Ui, rect: Rect, p: &Project) {
-        let fps = p.settings.fps;
-        let total = self.sync_clips.frames();
+        let total = self.sync_clips.frames(p);
         let band = Rect::from_min_max(pos2(rect.left() + NUMBER + LOCK, rect.top()), rect.max);
         let per_frame = band.width() / (total as f32 * 1.1).max(1.0);
         let x = |frame: i64| band.left() + frame as f32 * per_frame;
@@ -707,21 +683,21 @@ impl Workspace {
         let row_height = ((rect.height() - RULER) / count as f32).clamp(LEAST_ROW, MOST_ROW);
         for i in 0..self.sync_clips.rows.len() {
             let row = self.sync_clips.rows[i].clone();
-            let selected = i == self.sync_clips.selected;
             let top = ruler.bottom() + i as f32 * row_height;
             let strip =
-                Rect::from_min_size(pos2(band.left(), top), vec2(band.width(), row_height - 3.0));
+                Rect::from_min_size(pos2(band.left(), top), vec2(band.width(), row_height - 2.0));
             painter.rect_filled(strip, CornerRadius::same(2), theme::colors().track);
-            let color = if i == self.sync_clips.viewed {
+            let color = if i == self.sync_clips.number {
                 ACTIVE_ANGLE
             } else {
                 theme::colors().text
             };
+            let size = strip.height().clamp(8.0, 13.0);
             painter.text(
                 pos2(rect.left() + NUMBER / 2.0, strip.center().y),
                 Align2::CENTER_CENTER,
                 (i + 1).to_string(),
-                FontId::proportional(13.0),
+                FontId::proportional(size),
                 color,
             );
             if row.locked {
@@ -729,70 +705,37 @@ impl Workspace {
                     pos2(rect.left() + NUMBER + LOCK / 2.0, strip.center().y),
                     Align2::CENTER_CENTER,
                     egui_phosphor::regular::ARROWS_CLOCKWISE,
-                    FontId::proportional(13.0),
+                    FontId::proportional(size),
                     theme::colors().text,
                 );
             }
-            let whole = Rect::from_min_max(pos2(rect.left(), strip.top()), strip.max);
-            let picked = ui.interact(
-                whole,
-                ui.scope_id().with(("sync-clips-strip", i)),
-                Sense::click(),
+            let header = Rect::from_min_max(
+                pos2(rect.left(), strip.top()),
+                pos2(band.left(), strip.bottom()),
             );
-            if picked.clicked() {
+            let id = ui.scope_id();
+            if ui
+                .interact(header, id.with(("sync-clips-header", i)), Sense::click())
+                .clicked()
+            {
+                self.sync_clips.number = i;
                 self.sync_clips.selected = i;
             }
-            let film = Film {
-                media: &row.media,
-                frames: row.frames,
-                x: x(row.at),
+            if ui
+                .interact(strip, id.with(("sync-clips-strip", i)), Sense::click())
+                .clicked()
+            {
+                self.sync_clips.pick_row(i);
+            }
+            let lane = Lane {
+                strip,
+                row: i,
+                locked: row.locked,
+                left: band.left(),
                 per_frame,
             };
-            self.sync_film(ui, strip, p, &film);
-            let span = Rect::from_min_max(
-                pos2(film.x, strip.top()),
-                pos2(film.x + row.frames as f32 * per_frame, strip.bottom()),
-            )
-            .intersect(strip);
-            if selected {
-                painter.rect_stroke(
-                    span,
-                    CornerRadius::ZERO,
-                    Stroke::new(1.5, ACTIVE_ANGLE),
-                    egui::StrokeKind::Inside,
-                );
-            }
-            let drag = ui.interact(
-                span,
-                ui.scope_id().with(("sync-clips-row", i)),
-                Sense::click_and_drag(),
-            );
-            let s = &mut self.sync_clips;
-            if drag.clicked() || drag.drag_started() {
-                s.selected = i;
-            }
-            if drag.drag_started()
-                && !row.locked
-                && let Some(pos) = drag.interact_pointer_pos()
-            {
-                s.grab = Some(Grab {
-                    row: i,
-                    reals: s.reals(),
-                    press: pos.x,
-                    per_frame,
-                });
-            }
-            if drag.dragged()
-                && let Some(pos) = drag.interact_pointer_pos()
-                && let Some(grab) = s.grab.as_ref().filter(|grab| grab.row == i)
-            {
-                let moved = ((pos.x - grab.press) / grab.per_frame).round() as i64;
-                let mut reals = grab.reals.clone();
-                reals[i] = (reals[i] + moved).max(0);
-                s.place(fps, &reals);
-            }
-            if drag.drag_stopped() {
-                s.grab = None;
+            for clip in &row.clips {
+                self.sync_clips_clip(ui, &lane, p, clip);
             }
         }
         let bottom = (ruler.bottom() + count as f32 * row_height).min(rect.bottom());
@@ -803,10 +746,77 @@ impl Workspace {
         );
     }
 
+    fn sync_clips_clip(&mut self, ui: &egui::Ui, lane: &Lane, p: &Project, clip: &GroupClip) {
+        let frames = visible(p, clip);
+        let film = Film {
+            media: &clip.media,
+            frames,
+            head: clip.head,
+            x: lane.left + clip.at as f32 * lane.per_frame,
+            per_frame: lane.per_frame,
+        };
+        self.sync_film(ui, lane.strip, p, &film);
+        let span = Rect::from_min_max(
+            pos2(film.x, lane.strip.top()),
+            pos2(film.x + frames as f32 * lane.per_frame, lane.strip.bottom()),
+        )
+        .intersect(lane.strip);
+        let chosen = self.sync_clips.clip.as_deref() == Some(clip.media.as_str());
+        let edge = if chosen {
+            Stroke::new(1.5, ACTIVE_ANGLE)
+        } else {
+            Stroke::new(1.0, CLIP_EDGE)
+        };
+        ui.painter_at(lane.strip).rect_stroke(
+            span,
+            CornerRadius::ZERO,
+            edge,
+            egui::StrokeKind::Inside,
+        );
+        let drag = ui.interact(
+            span,
+            ui.scope_id().with(("sync-clips-clip", clip.media.as_str())),
+            Sense::click_and_drag(),
+        );
+        let s = &mut self.sync_clips;
+        if drag.clicked() || drag.drag_started() {
+            s.selected = lane.row;
+            s.clip = Some(clip.media.clone());
+        }
+        if drag.drag_started()
+            && !lane.locked
+            && let Some(pos) = drag.interact_pointer_pos()
+        {
+            s.grab = Some(Grab {
+                media: clip.media.clone(),
+                rows: s.rows.clone(),
+                real: clip.at + clip.hidden,
+                press: pos.x,
+                per_frame: lane.per_frame,
+            });
+        }
+        if drag.dragged()
+            && let Some(pos) = drag.interact_pointer_pos()
+            && let Some(grab) = s.grab.as_ref().filter(|grab| grab.media == clip.media)
+        {
+            let moved = ((pos.x - grab.press) / grab.per_frame).round() as i64;
+            let mut rows = grab.rows.clone();
+            shift_clip(p, &mut rows, &grab.media, grab.real + moved);
+            s.rows = rows;
+            s.at = s.at.min(s.frames(p));
+        }
+        if drag.drag_stopped()
+            && let Some(grab) = s.grab.take()
+        {
+            drop_clip(p, &mut s.rows, &grab.media);
+            s.at = s.at.min(s.frames(p));
+        }
+    }
+
     fn sync_clips_ruler(&self, painter: &egui::Painter, ruler: Rect, per_frame: f32, p: &Project) {
         let fps = p.settings.fps.as_f64();
         let s = &self.sync_clips;
-        let last = ((ruler.width() / per_frame) as i64).max(s.frames());
+        let last = ((ruler.width() / per_frame) as i64).max(s.frames(p));
         let every = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
             .into_iter()
             .map(|secs| (secs as f64 * fps).round() as i64)

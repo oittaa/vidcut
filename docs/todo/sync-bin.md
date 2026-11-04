@@ -13,41 +13,33 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
 - `Source::advance` shows the frame whose presentation time has reached the target.
 - `VideoInfo.vfr` records a variable frame rate. The reader still follows presentation time.
 - Waveforms draw on clips.
-- `multicam.layout` works out where angles lie, by timecode or marks. It stores nothing.
+- `multicam.layout` works out where files lie, by timecode or marks. It stores nothing.
 - `multicam.create` stores a synced group, a pool item.
 - `edit.source_overwrite` with `group` lines up by a synced group.
 - `multicam.rows` and `multicam.pick` give the rows of the Sync Bin and choose a camera.
-- `multicam.set` stores the places that the Sync Clips window gives.
+- `multicam.set` stores the rows that the Sync Clips window gives.
 - No command switches angles.
 
 **To do:**
 
 - For the Edit page stage, open a multicam clip as a timeline (p. 1040).
 - For the stage `multicam-clip`, a clip of a group on the timeline follows Save Sync ([deviation X122](../deviations.md#x122-a-clip-on-the-timeline-does-not-follow-save-sync)).
-- Put two files with one camera name on one row:
-  - The Sync Clips window and the Sync Bin refuse them now.
-  - One row holds both files, each at its timecode (measured.md, C3c).
-  - With an overlap, the first file stays whole, and the later file loses the overlap (measured.md, S2, through the API).
 - Measure the Sync Clips window parts that are not measured:
   - Sync by Marker;
   - Shift+Comma on a keyboard layout that is not Finnish;
   - the ruler labels of a reopened group with far tags;
   - the Sync Bin for a group whose first tag is not 01:00:00:00;
-  - the rows of a file in two groups.
-- Remove [deviation X124](../deviations.md#x124-the-sync-clips-window-refuses-files-that-resolve-opens) (measured.md, C3e):
-  - more than 12 cameras;
-  - a still or a file with no picture in the bin;
-  - files of two different saved groups in one bin;
-  - files with no name and no overlap share a row;
-  - an unnamed row reads its number among the unnamed rows.
+  - two files with no picture beside files with a picture.
 - Measure the Sync Bin parts that are not measured:
   - the number keys and Escape;
   - the sound of the grid with Video Only off and on (p. 708);
-  - a grid of more than 4 cameras;
   - the Out mark by hand in the view of one camera;
   - a drag on the rows in the view of one camera;
-  - rows for files with no tag and no saved group, with no camera name, and with no picture;
-  - a timeline whose clips disagree on the time of a file.
+  - rows for stills and for files with no picture;
+  - two groups in a bin, when the clip at the playhead is in neither;
+  - a click on a camera at another frame rate;
+  - a timeline whose clips disagree on the time of a file;
+  - an edit in Multi Source with a mark outside the active angle.
 - Show the Sync Bin grid in the Cinema Viewer with P (p. 709).
 - Record how a cut chooses an angle.
 - Measure sync by sound with files from real cameras, each with its own microphone. Then check `SOUND_MATCH_SCORE`.
@@ -55,7 +47,9 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
 - An angle switch replaces the picture and keeps the sound the user chose.
 - The switch is one timeline edit.
 - The CLI, IPC and MCP perform the same action as the GUI.
-- Measure the cases that Source Overwrite refuses ([spec §7.2](../cut-page-spec.md#72-edit-functions)).
-  - Do audio-only files and other frame rates first, because sound recorders make them.
+- Open Multi Source with no synced group (measured.md, C3e).
+- Measure the Source Overwrite cases that [spec §7.2](../cut-page-spec.md#72-edit-functions) lists as not measured.
+  - Several selected pool items: one try placed one file of two, while the source viewer held that file (measured.md, T1).
+  - The playhead on a new track with the Timeline viewer on: one try stopped at the clip's end, past the old timeline end (measured.md, T1).
 - Measure how Source Overwrite treats hidden tracks, titles and compound clips.
 - Measure which file tags give the camera name, with files from real cameras. Then `media.add` reads the name.

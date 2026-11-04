@@ -60,6 +60,11 @@ pub fn describe_at(
         "multicam.marks.clear" => format!("Clear the marks of synced group {}", d.text("group")),
         "multicam.pick" => format!("Choose camera {}", d.text("media")),
         "multicam.set" => format!("Set the places in synced group {}", d.text("group")),
+        "multicam.place" => format!(
+            "Move {} in synced group {}",
+            d.media("media"),
+            d.text("group")
+        ),
         "multicam.move" => format!(
             "Move synced group {} to bin {}",
             d.text("group"),

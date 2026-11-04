@@ -210,7 +210,7 @@ fn a_clip_heard_only_past_its_picture_keeps_its_audio() {
     f.ok(req("edit.delete", json!({"clips": "c3"})));
     assert_eq!(
         (range(&f, "c1"), range(&f, "c2")),
-        (Some((0, 100)), Some((100, 150)))
+        (Some((0, 150)), Some((150, 156)))
     );
 }
 

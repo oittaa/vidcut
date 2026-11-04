@@ -317,7 +317,8 @@ pub fn run_with(
         | Request::AnalyzeSilence { .. }
         | Request::AnalyzeScenes { .. }
         | Request::AnalyzeBlack { .. }
-        | Request::AnalyzeLoudness { .. } => {
+        | Request::AnalyzeLoudness { .. }
+        | Request::AnalyzeDucking { .. } => {
             let store = open(project)?;
             let editor = store.load_project()?;
             envelope.check_rev(editor.project().rev)?;
@@ -672,6 +673,7 @@ fn watches_cancel(request: &Request) -> bool {
             | Request::AnalyzeScenes { .. }
             | Request::AnalyzeBlack { .. }
             | Request::AnalyzeLoudness { .. }
+            | Request::AnalyzeDucking { .. }
     )
 }
 
