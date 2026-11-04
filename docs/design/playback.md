@@ -275,6 +275,8 @@ The audio device:
   - An export, a proxy and a thumbnail scale with the filter of the spec (`resized`, [spec §13](../cut-page-spec.md#the-scaling-filter)).
     - Each pixel reads the same number of samples at any scale.
     - A pixel with no scale and a whole-pixel place reads one sample (`resamples`).
+    - A scale that differs from 1 only by a rounding error counts as no scale.
+      - Why: at some frame sizes, the shader's 32-bit floats give a scale just above 1. Two samples then blur each edge of the picture.
     - Above a shrink of 8:1, the filter reads the level of `halvings` where the shrink is 8:1 or less ([X110](../deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).
   - In an export, the kernels of Super Scale widen when the picture shrinks (`sharp`).
     - They widen up to 4 times. Above a shrink of 4:1, the draw first halves the converted picture into smaller levels (`halvings`, `fs_halve`).
@@ -329,9 +331,10 @@ The audio device:
 Ducking in the preview:
 
 - `Live::hear_ducking` hears the sources of the timeline's plan before the player gets it.
-- It takes only the measurements that this process keeps (`env::kept_measure`). Why: the session thread reads no file.
-- It measures the rest on `vidcut-measure`, at job priority. Until then, those clips dip nothing.
-- `Msg::DuckHeard` then loads the timeline again. A measurement that failed shows as a notice, and is not tried again until the next `track.set` with `duck`.
+- It takes only the measurements that the core holds for the open project (`duck_kept`). The session thread reads no file.
+- Opening a project empties `duck_kept`.
+- It gets the rest on `vidcut-measure`, at job priority (`env::measure_duck`). That job reads the disk cache, or measures. Until then, those clips dip nothing.
+- `Msg::DuckHeard` brings the results to the core, and loads the timeline again. A measurement that failed shows as a notice, and is not tried again until the next `track.set` with `duck`.
 
 Faders:
 

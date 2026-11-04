@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EffectType, GeneratorKind, Handle,
-    LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign, TitleAnchor,
-    TitleKind, TitleStyle, TrackClip, ZoomBox,
+    Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType, GeneratorKind,
+    Handle, LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign,
+    TitleAnchor, TitleKind, TitleStyle, TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2369,6 +2369,12 @@ pub enum Request {
     GeneratorsAdd {
         /// `solid_color`: one color over the whole picture.
         /// `four_color_gradient`: four colors that mix from the corners.
+        /// `10_step`: eleven grey bars. `100mv_steps`: eight grey steps.
+        /// `grey_scale`: a grey ramp. `ycbcr_ramp`: a ramp in each channel.
+        /// `ebu_color_bar`: eight bars. `smpte_color_bar`: bars, a ramp and
+        /// patches. `bt2111_hlg_narrow`, `bt2111_pq_full` and
+        /// `bt2111_pq_narrow`: the BT.2111 bars in those code values.
+        /// `window`: a white box on black.
         kind: GeneratorKind,
         #[serde(flatten)]
         settings: GeneratorSettings,
@@ -4210,10 +4216,14 @@ pub struct GeneratorSettings {
     /// A `four_color_gradient`'s lower right color. Default: `#00ffff`.
     #[serde(default)]
     pub lower_right: Option<String>,
+    /// An `ebu_color_bar`'s Level: the percent of its colored bars, `75` or
+    /// `100`. Default: `75`.
+    #[serde(default)]
+    pub level: Option<EbuLevel>,
 }
 
 impl GeneratorSettings {
-    pub fn named(&self) -> [(&'static str, bool); 7] {
+    pub fn named(&self) -> [(&'static str, bool); 8] {
         [
             ("color", self.color.is_some()),
             ("center_x", self.center_x.is_some()),
@@ -4222,6 +4232,7 @@ impl GeneratorSettings {
             ("upper_right", self.upper_right.is_some()),
             ("lower_left", self.lower_left.is_some()),
             ("lower_right", self.lower_right.is_some()),
+            ("level", self.level.is_some()),
         ]
     }
 }

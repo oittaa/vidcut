@@ -312,6 +312,7 @@ flowchart TD
 | pool filmstrips, timeline tiles | `thumbs` (`thumbcache`) | origin, size, frames, input color space |
 | waveforms | `waveforms` | origin, channels |
 | audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
+| sound matches of two files | `analysis` (`AvEnv`) | both origins |
 | transcripts (`media.transcribe`) | `analysis` (`AvEnv`) | origin, stream |
 | light, for HDR metadata | `analysis` (`light::cache_in`) | origin, input color space |
 | proxies | `proxies` in `playback_files.folder` (`PlaybackFiles::proxies_in`): in the project's folder unless set (in the cache dir without a project); an absolute folder is shared by each project | content (`paths::proxy_origin`), size, codec, input color space |
@@ -324,7 +325,16 @@ flowchart TD
 
 - `reset` with `keep_downloads` keeps `models` and `speech-replies`.
 - `Tiles::evict` drops kept pictures past the memory budget of the tile cache.
-- Levels, voice activity, picture stats and light are also kept in memory. The last results heard (`HEARD`, an `Lru`) are kept only in memory.
+- The disk cache holds the levels, voice activity, picture stats and sound matches. The `cache` setting limits the disk cache.
+- Each `AvEnv` keeps a few results and transcripts in memory (`Memos`). One request can ask for the same file many times.
+  - An `AvEnv` lives for one request or one job. Its results leave the memory when it ends.
+  - The disk cache can refuse a result. The next request then measures that file again.
+- The core holds the measurements of ducking for the open project ([playback](playback.md#sound)).
+- An export keeps the light of its files in memory only while it chooses its metadata (`Lights`). Each piece of the plan asks for the light of its file.
+- A job gives some results to the edit after it. These maps hold those results, and each is an `Lru` of a fixed size:
+  - `HEARD` and `PAID`: the last transcriptions. A new transcription costs minutes or money.
+  - `LOUD`: the loudness of a plan.
+  - `MADE_WITH`: how a proxy was written. When this map is full, the report of the oldest proxy does not have this line.
 
 ### The disk cache limit
 

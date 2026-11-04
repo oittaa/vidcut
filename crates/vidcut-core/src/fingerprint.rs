@@ -1,9 +1,7 @@
-use std::collections::HashMap;
-use std::ffi::OsString;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
@@ -69,31 +67,15 @@ impl Origin {
 }
 
 pub fn origin(path: &Path, size: u64, mtime_ns: i64) -> Origin {
-    type Kept = HashMap<OsString, Vec<(u64, i64, Origin)>>;
-    static KEPT: Mutex<Option<Kept>> = Mutex::new(None);
-    let mut kept = KEPT.lock().unwrap_or_else(PoisonError::into_inner);
-    let kept = kept.get_or_insert_with(HashMap::new);
     let path = path.as_os_str();
-    let known = kept.get(path).and_then(|versions| {
-        versions
-            .iter()
-            .find(|(s, t, _)| (*s, *t) == (size, mtime_ns))
-    });
-    if let Some((.., o)) = known {
-        return o.clone();
-    }
-    let o = Origin {
+    Origin {
         name: format!(
             "{}-{size}-{mtime_ns}",
             short_digest(path.as_encoded_bytes())
         )
         .into(),
         text: format!("{size} {mtime_ns} {}", path.to_string_lossy()).into(),
-    };
-    kept.entry(path.to_os_string())
-        .or_default()
-        .push((size, mtime_ns, o.clone()));
-    o
+    }
 }
 
 fn hex(bytes: &[u8]) -> String {

@@ -337,6 +337,7 @@ The bar and the Jobs button:
 - A hovered card previews with `Handle::preview_free_title`: the core adds the title at the playhead to its copy of the project (`FreeTitle`).
 - The Generators page of the Effects tab (`EffectsTab`, `generator_browser::CARDS`) draws its cards. A dragged card (`Gesture::Generator`) drops as `generators.add`.
   - Each card shows the picture of its kind with the default values, through `generators::draw`.
+  - A card draws at the size of a full frame, and then shows a part of its pixels. Why: the layout of a bar pattern depends on the size, and a small SMPTE Color Bar shows only its left side.
 
 **Pictures.**
 
@@ -365,6 +366,7 @@ The bar and the Jobs button:
 - The Generator section (`Workspace::generator_section`) shows the rows of the first selected clip's generator.
   - A color row sends one `generators.set` when the pointer is up. Then `Recolored` shows the sent color until the project has it (`tools::landing`).
   - The Center rows of a Four Color Gradient act as the other keyed rows. A value goes with `generators.set`, and its keyframes go with `keyframes.add`. Reset removes the keyframes and sets 0.
+  - The Level row of an EBU Color Bar sends one `generators.set` for each choice.
 - The effect sections show the effects of the first selected clip (`effect_block`). Each change is one `effects.set` for that clip.
   - A dragged value previews as a picture with the changed effect (`knob_picture`). `Picture::preview` takes the effects of the dragged picture.
   - On, Move Up, Move Down, Reset and Delete send `effects.set`, `effects.move`, `effects.reset` and `effects.remove`.
@@ -469,7 +471,7 @@ The bar and the Jobs button:
 - `dialog::window`, `dialog::form`, `dialog::row`, `dialog::switch`, `dialog::advanced` and `dialog::footer` build the windows (AGENTS.md, rule 12).
 - `dialog::tall_row` puts the label at the top of a tall row. Why: the content does not cover the next row.
 - `dialog::form_width` gives the width of a window whose fields have one width.
-- The looks of Create Subtitles from Audio are tiles (`look_tiles::Tiles`). `burn::draw` draws a sample in each look.
+- The looks of Create Subtitles from Audio are tiles (`look_tiles::Tiles`). `burn::draw` draws a sample in each look. The window keeps only the textures of the looks that it shows.
 
 **The two-up and Multi Source**: `Cells` owns their players on the UI thread. `Screens` draws them.
 

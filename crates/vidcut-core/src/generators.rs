@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::keyframes::{checked_handle, value_at};
-use crate::model::{Generator, Gradient, Hdr, Keyframe};
+use crate::model::{Chart, EbuLevel, Generator, Gradient, Hdr, Keyframe};
 
 const BT709_TO_BT2020: [[f64; 3]; 3] = [
     [0.62740389, 0.32928304, 0.04331307],
@@ -30,6 +30,92 @@ const HLG_WHITE: f64 = 0.1;
 pub const CENTER: RangeInclusive<f64> = -1.0..=1.0;
 
 const RGB48: usize = 6;
+
+const BAR_COLORS: [Code; 7] = [
+    [1.0, 1.0, 1.0],
+    [1.0, 1.0, 0.0],
+    [0.0, 1.0, 1.0],
+    [0.0, 1.0, 0.0],
+    [1.0, 0.0, 1.0],
+    [1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0],
+];
+
+const YCBCR_SLOPES: [f64; 3] = [2.539648, 0.359182, 2.814179];
+
+type Code = [f64; 3];
+type Band = (u32, Vec<Code>);
+
+struct Bt2111 {
+    range: (f64, f64),
+    grey40: f64,
+    mid: f64,
+    two: f64,
+    four: f64,
+    left: [Code; 3],
+    right: [Code; 3],
+    ramp: (usize, usize),
+}
+
+const NARROW: (f64, f64) = (64.0, 876.0);
+const NARROW_RAMP: (usize, usize) = (858, 876);
+
+const BT2111_HLG_NARROW: Bt2111 = Bt2111 {
+    range: NARROW,
+    grey40: 414.0,
+    mid: 721.0,
+    two: 80.0,
+    four: 99.0,
+    left: [
+        [713.0, 719.0, 316.0],
+        [538.0, 709.0, 718.0],
+        [512.0, 706.0, 296.0],
+    ],
+    right: [
+        [651.0, 286.0, 705.0],
+        [639.0, 269.0, 164.0],
+        [227.0, 147.0, 702.0],
+    ],
+    ramp: NARROW_RAMP,
+};
+
+const BT2111_PQ_NARROW: Bt2111 = Bt2111 {
+    range: NARROW,
+    grey40: 414.0,
+    mid: 572.0,
+    two: 80.0,
+    four: 99.0,
+    left: [
+        [568.0, 571.0, 381.0],
+        [484.0, 566.0, 571.0],
+        [474.0, 564.0, 368.0],
+    ],
+    right: [
+        [536.0, 361.0, 564.0],
+        [530.0, 350.0, 256.0],
+        [317.0, 236.0, 562.0],
+    ],
+    ramp: NARROW_RAMP,
+};
+
+const BT2111_PQ_FULL: Bt2111 = Bt2111 {
+    range: (0.0, 1023.0),
+    grey40: 409.0,
+    mid: 593.0,
+    two: 20.0,
+    four: 41.0,
+    left: [
+        [589.0, 592.0, 370.0],
+        [491.0, 586.0, 592.0],
+        [478.0, 584.0, 355.0],
+    ],
+    right: [
+        [551.0, 347.0, 584.0],
+        [544.0, 334.0, 225.0],
+        [296.0, 201.0, 582.0],
+    ],
+    ramp: (791, 1022),
+};
 
 fn pq_encode(light: f64) -> f64 {
     let p = light.max(0.0).powf(PQ_M1);
@@ -210,6 +296,7 @@ pub enum Pattern {
         center: [u64; 2],
         corners: [[u8; 3]; 4],
     },
+    Chart(Chart),
 }
 
 impl Pattern {
@@ -277,6 +364,219 @@ fn each_row(data: &mut [u8], stride: usize, height: usize, work: impl Fn(usize, 
     });
 }
 
+fn grey(v: f64) -> Code {
+    [v; 3]
+}
+
+fn row_end(k: u16, h: u32) -> u32 {
+    (f32::from(k) / 12.0 * h as f32).floor() as u32
+}
+
+fn columns(w: u32, code: impl Fn(u32) -> Code) -> Vec<Code> {
+    (0..w).map(code).collect()
+}
+
+fn paint(row: &mut [Code], from: usize, to: usize, code: Code) {
+    if let Some(span) = row.get_mut(from..to.min(row.len())) {
+        span.fill(code);
+    }
+}
+
+fn ten_step(w: u32) -> Vec<Code> {
+    let band = w.div_ceil(11);
+    columns(w, |x| grey(f64::from((x / band).min(10)) / 10.0))
+}
+
+fn hundred_mv_steps(w: u32) -> Vec<Code> {
+    let band = w.div_ceil(10);
+    columns(w, |x| {
+        grey(f64::from((x / band).saturating_sub(1).min(7)) / 7.0)
+    })
+}
+
+fn ycbcr_ramp(w: u32) -> Vec<Code> {
+    columns(w, |x| {
+        let t = f64::from(x) / f64::from(w);
+        YCBCR_SLOPES.map(|slope| (0.5 + slope * (t - 0.5)).clamp(0.0, 1.0))
+    })
+}
+
+fn ebu_bars(level: EbuLevel, w: u32) -> Vec<Code> {
+    let at = match level {
+        EbuLevel::Percent75 => 0.75,
+        EbuLevel::Percent100 => 1.0,
+    };
+    let band = w.div_ceil(8);
+    columns(w, |x| match (x / band).min(7) as usize {
+        0 => grey(1.0),
+        bar @ 1..=6 => BAR_COLORS[bar].map(|v| v * at),
+        _ => grey(0.0),
+    })
+}
+
+fn smpte_bars(w: u32, h: u32) -> Vec<Band> {
+    let base = if w < 1920 {
+        1920.0
+    } else {
+        f64::from(2 * (8 * h / 9))
+            .min(f64::from(w) * 4.0 / 3.0)
+            .max(1920.0)
+    };
+    let c = (base * 3.0 / 28.0).ceil() as usize;
+    let u = 2 * c.div_ceil(6);
+    let full = (w as usize).max(1920);
+    let d = full.saturating_sub(7 * c) / 2;
+    let end = d + 7 * c;
+
+    let mut bars = vec![grey(0.4); full];
+    for (n, color) in BAR_COLORS.iter().enumerate() {
+        paint(
+            &mut bars,
+            d + n * c,
+            d + (n + 1) * c,
+            color.map(|v| v * 0.75),
+        );
+    }
+
+    let mut second = vec![grey(0.75); full];
+    paint(&mut second, 0, d, [0.0, 1.0, 1.0]);
+    paint(&mut second, d, d + c, grey(1.0));
+    paint(&mut second, end, full, [0.0, 0.0, 1.0]);
+
+    let ramp_from = (d + c) as f64;
+    let ramp_span = end.min(full) as f64 - ramp_from;
+    let mut third: Vec<Code> = (0..full)
+        .map(|x| grey(((x as f64 - ramp_from) / ramp_span).clamp(0.0, 1.0)))
+        .collect();
+    paint(&mut third, 0, d, [1.0, 1.0, 0.0]);
+    paint(&mut third, end, full, [1.0, 0.0, 0.0]);
+
+    let mut last = vec![grey(0.15); full];
+    paint(&mut last, d, end, grey(0.0));
+    let white = d + 9 * u / 2;
+    paint(&mut last, white, white + 6 * u, grey(1.0));
+    let near_black = white + 6 * u + 9 * u / 2;
+    paint(&mut last, near_black, near_black + u, grey(0.02));
+    paint(
+        &mut last,
+        near_black + 2 * u,
+        near_black + 3 * u,
+        grey(0.04),
+    );
+
+    vec![
+        (row_end(7, h), bars),
+        (row_end(8, h), second),
+        (row_end(9, h), third),
+        (h, last),
+    ]
+}
+
+fn bt2111_bars(codes: &Bt2111, w: u32, h: u32) -> Vec<Band> {
+    let full = w as usize;
+    let of = |code: f64| (code - codes.range.0) / codes.range.1;
+    let mid = of(codes.mid);
+    let d = full / 8;
+    let c = full * 206 / 1920;
+    let bars = [
+        d,
+        d + c,
+        d + 2 * c,
+        d + 3 * c,
+        full - d - 3 * c,
+        full - d - 2 * c,
+        full - d - c,
+        full - d,
+    ];
+    let half = |b: usize| bars[b] + (bars[b + 1] - bars[b]) / 2;
+
+    let mut top = vec![grey(of(codes.grey40)); full];
+    let mut second = top.clone();
+    for (b, color) in BAR_COLORS.iter().enumerate() {
+        paint(&mut top, bars[b], bars[b + 1], *color);
+        paint(&mut second, bars[b], bars[b + 1], color.map(|v| v * mid));
+    }
+
+    let mut stairs = vec![grey(mid); full];
+    paint(&mut stairs, d, half(1), grey(0.0));
+    let edges: Vec<usize> = (1..=5).flat_map(|b| [half(b), bars[b + 1]]).collect();
+    for (step, pair) in edges.windows(2).enumerate() {
+        paint(
+            &mut stairs,
+            pair[0],
+            pair[1],
+            grey((step + 1) as f64 / 10.0),
+        );
+    }
+    paint(&mut stairs, bars[6], bars[7], grey(1.0));
+
+    let ramp_from = (full * codes.ramp.0 / 1920) as f64;
+    let ramp_span = full as f64 * codes.ramp.1 as f64 / 1920.0;
+    let ramp: Vec<Code> = (0..full)
+        .map(|x| grey(((x as f64 - ramp_from) / ramp_span).clamp(0.0, 1.0)))
+        .collect();
+
+    let mut last = vec![grey(0.0); full];
+    for (n, (left, right)) in codes.left.iter().zip(&codes.right).enumerate() {
+        let (from, to) = (d * n / 3, d * (n + 1) / 3);
+        paint(&mut last, from, to, left.map(of));
+        paint(&mut last, full - d + from, full - d + to, right.map(of));
+    }
+    let gap = ((c as f64 - full as f64 * 70.0 / 1920.0) / 2.0).floor() as usize;
+    let patch = c - 2 * gap;
+    let two = bars[1] + gap;
+    paint(&mut last, two, two + patch, grey(of(codes.two)));
+    paint(&mut last, bars[2], bars[2] + patch, grey(of(codes.four)));
+    let middle = full / 2;
+    paint(&mut last, middle, middle + full * 438 / 1920, grey(mid));
+
+    vec![
+        (row_end(1, h), top),
+        (row_end(7, h), second),
+        (row_end(8, h), stairs),
+        (row_end(9, h), ramp),
+        (h, last),
+    ]
+}
+
+fn window(w: u32, h: u32) -> Vec<Band> {
+    let black = vec![grey(0.0)];
+    let box_row = columns(w, |x| {
+        grey(if x > w / 4 && x < 3 * w / 4 { 1.0 } else { 0.0 })
+    });
+    vec![(h / 4 + 1, black.clone()), (3 * h / 4, box_row), (h, black)]
+}
+
+fn bands(chart: Chart, w: u32, h: u32) -> Vec<Band> {
+    let whole = |codes| vec![(h, codes)];
+    match chart {
+        Chart::TenStep => whole(ten_step(w)),
+        Chart::HundredMvSteps => whole(hundred_mv_steps(w)),
+        Chart::GreyScale => whole(columns(w, |x| grey(f64::from(x) / f64::from(w)))),
+        Chart::YcbcrRamp => whole(ycbcr_ramp(w)),
+        Chart::EbuColorBar(level) => whole(ebu_bars(level, w)),
+        Chart::SmpteColorBar => smpte_bars(w, h),
+        Chart::Bt2111HlgNarrow => bt2111_bars(&BT2111_HLG_NARROW, w, h),
+        Chart::Bt2111PqFull => bt2111_bars(&BT2111_PQ_FULL, w, h),
+        Chart::Bt2111PqNarrow => bt2111_bars(&BT2111_PQ_NARROW, w, h),
+        Chart::Window => window(w, h),
+    }
+}
+
+fn draw_bands(all: &[Band], data: &mut [u8], stride: usize, width: usize) {
+    let mut rest = data;
+    let mut done = 0;
+    for (end, codes) in all {
+        let bytes = ((end - done) as usize * stride).min(rest.len());
+        done = *end;
+        let (here, after) = std::mem::take(&mut rest).split_at_mut(bytes);
+        rest = after;
+        if !here.is_empty() {
+            same_rows(here, stride, width, codes);
+        }
+    }
+}
+
 pub fn draw(
     pattern: Pattern,
     (w, h): (u32, u32),
@@ -302,6 +602,7 @@ pub fn draw(
                 put_row(&mut line[..width * RGB48], codes);
             });
         }
+        Pattern::Chart(chart) => draw_bands(&bands(chart, w, h), data, stride, width),
     }
 }
 
@@ -309,6 +610,16 @@ pub fn name(g: &Generator) -> &str {
     match g {
         Generator::SolidColor { .. } => Generator::SOLID_COLOR,
         Generator::FourColorGradient(_) => Generator::FOUR_COLOR_GRADIENT,
+        Generator::TenStep => Generator::TEN_STEP,
+        Generator::HundredMvSteps => Generator::HUNDRED_MV_STEPS,
+        Generator::GreyScale => Generator::GREY_SCALE,
+        Generator::YcbcrRamp => Generator::YCBCR_RAMP,
+        Generator::EbuColorBar { .. } => Generator::EBU_COLOR_BAR,
+        Generator::SmpteColorBar => Generator::SMPTE_COLOR_BAR,
+        Generator::Bt2111HlgNarrow => Generator::BT2111_HLG_NARROW,
+        Generator::Bt2111PqFull => Generator::BT2111_PQ_FULL,
+        Generator::Bt2111PqNarrow => Generator::BT2111_PQ_NARROW,
+        Generator::Window => Generator::WINDOW,
         Generator::Carried { .. } if g.is_offline() => "Media Offline",
         Generator::Carried { reference } => [&reference["generator_kind"], &reference["name"]]
             .into_iter()

@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicBool;
 use serde_json::{Value, json};
 use vidcut_av::export::encode::Availability;
 use vidcut_av::export::{self as engine, Progress, Report};
-use vidcut_av::light::Span;
+use vidcut_av::light::{Lights, Span};
 use vidcut_core::export::color::{self, ColorChoice, PictureKind, PictureShare};
 use vidcut_core::export::metadata::{Measured, PieceMeta};
 use vidcut_core::export::{
@@ -791,12 +791,13 @@ pub fn choose_colors(
     available: &Availability,
     measure: Option<Measuring<'_>>,
 ) -> Result<()> {
-    let todo = choose_once(prepared, p, available, false);
+    let lights = Lights::default();
+    let todo = choose_once(prepared, p, available, &lights, false);
     if let Some(m) = measure
         && !todo.is_empty()
     {
-        measure_spans(&todo, m)?;
-        choose_once(prepared, p, available, true);
+        measure_spans(&todo, &lights, m)?;
+        choose_once(prepared, p, available, &lights, true);
     }
     Ok(())
 }
@@ -827,7 +828,7 @@ fn choose_output(
     asked: &ExportSettings,
     (p, filled): (&Project, &Project),
     available: &Availability,
-    measured: bool,
+    (lights, measured): (&Lights, bool),
     todo: &mut Vec<Span>,
 ) -> Chosen {
     let mut settings = asked.clone();
@@ -841,7 +842,7 @@ fn choose_output(
     let metadata = vidcut_av::export::choose_metadata(plan, &settings, |piece| {
         let mut m = piece_meta(filled, piece);
         if let Some(v) = &colored {
-            m.measured = engine::measured_light(piece, fps, v, &m, false, None, None);
+            m.measured = engine::measured_light(lights, piece, fps, v, &m, false, None, None);
             if m.measured == Measured::Pending {
                 if measured {
                     m.measured = Measured::Failed;
@@ -867,6 +868,7 @@ pub fn auto_picks(prepared: &Prepared, p: &Project, available: &Availability, gp
         return Value::Null;
     }
     let filled = filled_project(prepared, p);
+    let lights = Lights::default();
     let picks = |reset: &dyn Fn(&mut VideoSettings), read: &dyn Fn(&Chosen) -> Option<Value>| {
         let mut asked = prepared.settings.clone();
         if let Some(v) = asked.video.as_mut() {
@@ -880,7 +882,7 @@ pub fn auto_picks(prepared: &Prepared, p: &Project, available: &Availability, gp
                 &asked,
                 (p, &filled),
                 available,
-                false,
+                (&lights, false),
                 &mut Vec::new(),
             );
             if let Some(x) = read(&chosen)
@@ -913,6 +915,7 @@ fn choose_once(
     prepared: &mut Prepared,
     p: &Project,
     available: &Availability,
+    lights: &Lights,
     measured: bool,
 ) -> Vec<Span> {
     let filled = filled_project(prepared, p);
@@ -923,7 +926,7 @@ fn choose_once(
             &prepared.settings,
             (p, &filled),
             available,
-            measured,
+            (lights, measured),
             &mut todo,
         );
         o.settings = chosen.settings;
@@ -939,7 +942,7 @@ fn choose_once(
             }
             if let Some(span) = Span::of(piece, fps)
                 && !matches!(
-                    vidcut_av::light::analysis(&span, false, None, None, &mut |_| {}),
+                    lights.analysis(&span, false, None, None, &mut |_| {}),
                     Ok(Some(_))
                 )
             {
@@ -956,7 +959,7 @@ fn choose_once(
     unique
 }
 
-fn measure_spans(todo: &[Span], m: Measuring<'_>) -> Result<()> {
+fn measure_spans(todo: &[Span], lights: &Lights, m: Measuring<'_>) -> Result<()> {
     let weight = |s: &Span| {
         let d = s.to - s.from;
         if d.is_finite() { d.max(0.04) } else { 0.04 }
@@ -965,10 +968,9 @@ fn measure_spans(todo: &[Span], m: Measuring<'_>) -> Result<()> {
     let mut done = 0.0;
     for s in todo {
         let w = weight(s);
-        let measured =
-            vidcut_av::light::analysis(s, true, m.decoder, Some(m.cancel), &mut |share| {
-                (m.progress)((done + share * w) / total)
-            });
+        let measured = lights.analysis(s, true, m.decoder, Some(m.cancel), &mut |share| {
+            (m.progress)((done + share * w) / total)
+        });
         if let Err(e) = measured
             && engine::is_cancelled(&e)
         {
