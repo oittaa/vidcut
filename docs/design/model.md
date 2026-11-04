@@ -185,8 +185,7 @@ Multicam layout:
 - `head` and `tail` are the frames that the file loses at each end. The file leaves `hidden`, `head` and `tail` out at 0.
 - `GroupClip::start` is the place of the file's own first frame. `SyncGroup::at_of` gives it. It can be below 0 when the earliest clip has a head.
 - `multicam::row_file_at` gives the file of a row at a frame of the group.
-- `start`, `at`, `hidden`, `head`, `tail` and `marks` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
-- `multicam::marked_range` turns the `marks` of a group into a range of one file. Thus one pair of marks holds for each file.
+- `start`, `at`, `hidden`, `head` and `tail` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
 
 Media fields:
 
@@ -434,6 +433,7 @@ Writing:
   - `Generator::FourColorGradient` holds a `Gradient`.
   - `Generator::EbuColorBar` holds an `EbuLevel`.
   - `Generator::TenStep`, `Generator::HundredMvSteps`, `Generator::GreyScale`, `Generator::YcbcrRamp` and `Generator::SmpteColorBar` hold nothing.
+  - `Generator::Bt2111HlgNarrow`, `Generator::Bt2111PqFull`, `Generator::Bt2111PqNarrow` and `Generator::Window` hold nothing.
   - `Generator::Carried` holds the OTIO reference of a kind that vidcut does not model, as `Kept`. It plays as a gap.
 - `Generator::draws` and `Clip::draws` tell whether a generator has a picture.
 - A `Gradient` holds a plain Center X and Center Y and the keyframes of each one.

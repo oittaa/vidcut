@@ -44,9 +44,24 @@ impl Sprite {
     }
 }
 
+const GLYPH_BYTES: usize = 64 << 20;
+
 struct Fonts {
     system: FontSystem,
     cache: SwashCache,
+}
+
+impl Fonts {
+    fn limit_glyphs(&mut self) {
+        let images = self.cache.image_cache.values().flatten();
+        let outlines = self.cache.outline_command_cache.values().flatten();
+        let bytes = images.map(|i| i.data.len()).sum::<usize>()
+            + outlines.map(|o| size_of_val(&**o)).sum::<usize>();
+        if bytes > GLYPH_BYTES {
+            self.cache.image_cache.clear();
+            self.cache.outline_command_cache.clear();
+        }
+    }
 }
 
 fn installed_usual(system: &FontSystem) -> Option<&'static str> {
@@ -1022,6 +1037,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     let wrap = look.wrap;
     let mut held = fonts().lock().unwrap_or_else(|e| e.into_inner());
     let f = &mut *held;
+    f.limit_glyphs();
     let installed_family = look.font.and_then(|name| installed(f, name));
     let family = match installed_family.as_deref() {
         Some(name) => Family::Name(name),

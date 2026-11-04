@@ -186,7 +186,7 @@ pub enum Request {
     /// stretch of more than 10 minutes with no file closes to 1 second: `at`
     /// falls, and `hidden` holds the closed frames. `at` plus `hidden` is the
     /// place in real time, and a request can give both. Returns the group. The
-    /// clips on the timeline, the group's start and its marks do not change.
+    /// clips on the timeline and the group's start do not change.
     #[serde(rename = "multicam.set")]
     MulticamSet {
         group: String,
@@ -218,20 +218,6 @@ pub enum Request {
     MulticamRename { group: String, name: String },
     #[serde(rename = "multicam.move")]
     MulticamMove { group: String, bin: String },
-    /// Set the In and/or Out of a synced group. They are frames of the group
-    /// and hold for each of its files; `out` is exclusive. The files' own
-    /// source marks do not change.
-    #[serde(rename = "multicam.marks.set")]
-    MulticamMarksSet {
-        group: String,
-        #[serde(rename = "in", default)]
-        mark_in: Option<TimeSpec>,
-        #[serde(default)]
-        out: Option<TimeSpec>,
-    },
-    /// Clear the In and Out of a synced group.
-    #[serde(rename = "multicam.marks.clear")]
-    MulticamMarksClear { group: String },
     /// The Sync Bin at a time: the rows of a bin and its subfolders. With a
     /// synced group in the bin, they are its stored rows, and other files of
     /// the bin do not show. With two groups or more, the group of the clip at
@@ -970,6 +956,11 @@ pub enum Request {
         /// Keep the timeline marks, for the next file of an `apply`.
         #[serde(default)]
         keep_marks: bool,
+        /// Line up as the Multi Source viewer does. It needs `range`. The
+        /// reference is the clip at `at` that shows part of `range`, else the
+        /// first clip that does. The playhead goes to the clip's end.
+        #[serde(default)]
+        grid: bool,
     },
 
     /// Split at one or more frames (Ctrl+\).
@@ -2381,7 +2372,9 @@ pub enum Request {
         /// `10_step`: eleven grey bars. `100mv_steps`: eight grey steps.
         /// `grey_scale`: a grey ramp. `ycbcr_ramp`: a ramp in each channel.
         /// `ebu_color_bar`: eight bars. `smpte_color_bar`: bars, a ramp and
-        /// patches.
+        /// patches. `bt2111_hlg_narrow`, `bt2111_pq_full` and
+        /// `bt2111_pq_narrow`: the BT.2111 bars in those code values.
+        /// `window`: a white box on black.
         kind: GeneratorKind,
         #[serde(flatten)]
         settings: GeneratorSettings,
@@ -2900,7 +2893,8 @@ pub enum Request {
     /// `reset_timer1` stores the playhead on screen as Timer 1's zero for that player.
     /// The zero lasts for this session.
     /// `paste` seeks that playhead to a copied count, read in the display this call leaves.
-    /// Give one of `mode`, `display`, `reset_timer1`, `paste`, or `angle`.
+    /// Give one of `mode`, `display`, `reset_timer1`, `paste`, `angle`, or
+    /// `alone`.
     #[serde(rename = "viewer.set")]
     ViewerSet {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2911,15 +2905,33 @@ pub enum Request {
         reset_timer1: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         paste: Option<String>,
-        /// The synced group for `multi_source`. Omitted, the group of the
-        /// open clip or of `angle`.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        group: Option<String>,
-        /// In `multi_source`, the file of the group that plays and that
-        /// edits use. Omitted, the open clip, or else the first file.
+        /// In `multi_source`, the file whose camera plays and that edits use.
+        /// Omitted, the camera stays, or else the first camera.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         angle: Option<String>,
+        /// In `multi_source`, `true` opens the camera alone and `false` shows
+        /// the grid. Opening a camera gives its file the viewer's marks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alone: Option<bool>,
     },
+    /// Set the In and/or Out of the Multi Source viewer. They are frames of
+    /// its scroll area and hold for each camera; `out` is exclusive. The
+    /// files' own source marks do not change. A change of bin clears them.
+    #[serde(rename = "viewer.marks.set")]
+    ViewerMarksSet {
+        #[serde(rename = "in", default)]
+        mark_in: Option<TimeSpec>,
+        #[serde(default)]
+        out: Option<TimeSpec>,
+        /// The marked duration, as the viewer's Duration field takes it: the
+        /// Out moves to the In plus it. With no In, the first frame is marked
+        /// In. Not with `out`.
+        #[serde(default)]
+        duration: Option<DurationSpec>,
+    },
+    /// Clear the In and Out of the Multi Source viewer.
+    #[serde(rename = "viewer.marks.clear")]
+    ViewerMarksClear {},
     /// Viewer framing and safe-area guides (decision D90). Stored in
     /// preferences, not the project. A field that is left out stays as it is.
     /// With no fields, toggles framing guides on or off.
@@ -4250,6 +4262,12 @@ pub struct SourceParams {
     /// audio is used.
     #[serde(default)]
     pub track: Option<String>,
+    /// A part of the Multi Source viewer: the frames left empty before the
+    /// clip. `edit.append`, `edit.smart_insert`, `edit.ripple_overwrite` and
+    /// `edit.place_on_top` read it. With it, `edit.place_on_top` keeps the
+    /// clip's length between timeline marks.
+    #[serde(default)]
+    pub lead: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -4622,6 +4640,8 @@ impl Request {
             self,
             Self::ProjectOpen { .. }
                 | Self::ViewerSet { .. }
+                | Self::ViewerMarksSet { .. }
+                | Self::ViewerMarksClear {}
                 | Self::ViewerFrame { .. }
                 | Self::ViewerLoad { .. }
                 | Self::PlayerPlay { .. }
@@ -5127,8 +5147,8 @@ mod tests {
                 display: Some(TimecodeDisplay::Timer1),
                 reset_timer1: false,
                 paste: None,
-                group: None,
                 angle: None,
+                alone: None,
             }
         );
     }

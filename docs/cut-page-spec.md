@@ -27,7 +27,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
-- generators: Solid Color, Four Color Gradient, the ramps, and the EBU and SMPTE bars (§8.17)
+- generators: the twelve kinds of the Generators section (§8.17)
 - Quick Export, plus our Export dialog
 
 **Later (later):**
@@ -300,7 +300,6 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - `multicam.rename` and `multicam.move` act on the group. `multicam.remove` removes the group, and its files stay.
   - A group can have one file.
   - `media.remove` also takes the file out of its groups. A group with no file left goes too ([deviation X128](deviations.md#x128-removing-a-file-takes-it-out-of-its-groups)).
-  - `multicam.marks.set` and `multicam.marks.clear` act on the In and Out of the group ([§4.1](#41-modes)). `multicam.list` gives them.
   - No command places a group on the timeline.
   - The pool does not show a group as an item. A file in a group has a blue sync badge.
   - `multicam.set` sets the rows and the sync locks of a group ([§7.5](#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). `multicam.create` takes them as `rows`, and the group then starts at 01:00:00:00.
@@ -371,22 +370,52 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Source Tape** (pp. 680–681, 704–706):
   - All pool clips play end to end as one tape, in the pool sort order.
   - The clip under the playhead becomes selected in the pool.
-- **Multi Source** (pp. 679, 682):
-  - The Viewer lays out the files of one synced group in a grid. All of them follow one playhead.
-  - `viewer.set` with `multi_source` opens it. `group` names the group, and the group of the open clip is the default.
-  - One file is the active angle. It plays its sound, edits use it, and it has a red outline.
-  - A click on a cell, or `viewer.set` with `angle`, selects the active angle. The first file is the default, unless the open clip is in the group.
-  - A cell has its number at the top left and its camera or file name at the bottom.
-  - Only a row with a file at the playhead has a cell. The first file of the row with a frame there shows.
-    - The measurements show 24 rows with 15 cells in a grid of 4 by 4, and 3 files on 2 rows with 2 cells.
-  - The scroll area stands for the whole group.
-  - In and Out are frames of the group, so they hold when the active angle changes (p. 682). The source marks of the files do not change.
-  - An edit takes the marks' part of the active angle. Source Overwrite lines up by the group.
-  - With no marks on the group, an edit uses the source marks of the active angle.
-  - The grid has no limit of rows.
-  - vidcut needs a group here, also for files with one timecode. [The todo](todo/sync-bin.md) holds the view with no group.
-  - An edit with a mark outside the active angle takes the part of the angle between the marks. No measurement shows this case.
-    - With no such part, nothing changes and vidcut tells why.
+- **Multi Source** (pp. 679, 682, measured in Resolve Studio 21.1.2):
+  - The Viewer shows the video files and stills of the current bin and its subfolders in a grid. All of them follow one playhead.
+  - `viewer.set` with `multi_source` opens it. It needs no synced group and no timeline.
+  - An audio file gets no cell and is not counted. The title is the count and the bin, for example "3 Clips - S1".
+  - Files line up by file timecode. A saved synced group plays no part.
+  - The scroll area stands for all the material, and it closes the gaps between files.
+  - A grid cell:
+    - Each camera name has one cell. Each file with no camera name has its own cell.
+    - Named cameras come first, by name. The others follow in pool order.
+    - The label is "Camera", then the name. A camera with no name counts from 1 among the unnamed cameras.
+    - The number at the top left stays with the camera.
+    - A camera with no frame at the playhead has no cell, and the grid closes up. The measurements show 24 cameras with 15 cells in a grid of 4 by 4.
+    - Two files of one camera at one time show the first file.
+  - The grid has the round-up of the square root of its cells as columns. It has no limit on cells.
+  - One camera is active. It plays its sound, edits use it, and it has a red outline and a red corner.
+    - The first camera is the default.
+    - When the active camera has no frame at the playhead, the first cell becomes active. It does not come back by itself.
+  - A click on a cell, or a number key, opens that camera alone (`viewer.set` with `angle` and `alone`).
+    - The title is the file name, the pool selects the file, and the position stays.
+    - A number key also changes the camera in that view.
+    - The close button returns to the grid, with that camera active.
+  - In and Out in the grid are marks of the viewer (`viewer.marks.set`, `viewer.marks.clear`). They are not on the files (p. 682).
+    - A change of bin clears them, sets the position to 0 and makes the first camera active.
+    - Opening a camera alone gives its file these marks, cut at the ends of the file. With no marks, the file loses its marks.
+    - In and Out in the view of one camera are on that file only.
+    - The Duration field takes a typed length (`viewer.marks.set` with `duration`). The Out moves to the In plus it. With no In, the In goes to the first frame. The marks hold exactly the typed length.
+  - An edit in the grid takes the marks' part of the active camera. The marks of the files play no part, and the viewer's marks stay:
+    - An In with no Out takes the file to its end.
+    - An Out with no In counts position 0 as the In.
+    - Marks outside the file: nothing happens.
+    - With no marks, Append and Smart Insert do nothing. Ripple Overwrite, Place On Top and Source Overwrite take the whole file, with no empty part.
+    - An In before the file: the part before the file stays empty on the timeline, before the clip (`lead`).
+      - Append: after the last clip.
+      - Smart Insert: at the nearest edit. Later clips move by the empty part plus the clip.
+      - Ripple Overwrite: from the start of the clip at the playhead, or from the timeline In. Later clips move.
+      - Place On Top: from the playhead, or from the timeline In.
+    - Place On Top and Ripple Overwrite keep the clip's length between timeline marks.
+    - Source Overwrite has no empty part, because it lines up by file timecode (`grid`):
+      - The reference is the clip under the playhead if it shows part of the marks, or of the file with no marks. Else it is the first clip that does.
+      - The playhead goes to the clip's end, also on a new track.
+  - An edit in the view of one camera uses the marks of the file. With no marks, it takes the whole file. Then the grid comes back.
+  - Escape leaves the view of one camera, as the close button does.
+  - Multi Source keeps its own active camera and position. A clip open in Source Clip does not change them.
+  - No measurement shows these cases:
+    - F10 Overwrite in the grid places the marks' part at the playhead, with no empty part. With no marks, it places the whole file.
+    - A bin with no video files opens an empty grid.
 - **Timeline** (p. 681):
   - The Viewer shows the timeline at its playhead, with no scroll area.
   - Icons mark the first and the last frame of a clip.
@@ -1432,7 +1461,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - BT.2111 Color Bar HLG Narrow, BT.2111 Color Bar PQ Full and BT.2111 Color Bar PQ Narrow
     - EBU Color Bar, Four Color Gradient, Grey Scale and SMPTE Color Bar
     - Solid Color, Window and YCbCr Ramp
-  - The three BT.2111 Color Bars and Window are open work in vidcut ([todo](todo/effects-library.md)).
+  - vidcut has these kinds, on cards in this order.
   - The tab also has a Fusion Generators section. It is part of Fusion (§1).
   - The pointer on a card previews the generator (p. 766). vidcut does not have this preview yet ([todo](todo/effects-library.md)).
 - **Adding a generator:**
@@ -1449,7 +1478,8 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: the Generator tab of Four Color Gradient has Center X and Center Y, as sliders with keyframes.
   - Measured: this tab also has Upper Left Color, Upper Right Color, Lower Left Color and Lower Right Color. The colors have no keyframes.
   - Measured: the Generator tab of EBU Color Bar has a Level menu, with 75% (SMPTE) and 100%.
-  - Measured: Window has no Generator tab. The OTIO shape of 10 Step, 100mV Steps, Grey Scale, YCbCr Ramp and SMPTE Color Bar is the same as for Window. Their tabs were not opened.
+  - Measured: Window has no Generator tab. 10 Step, 100mV Steps, Grey Scale, YCbCr Ramp, SMPTE Color Bar and the BT.2111 Color Bars have its OTIO shape.
+  - The tabs of those eight kinds were not opened. vidcut shows no Generator section for them.
   - Measured: the Settings tab has Transform, Cropping, Dynamic Zoom, Composite, Speed Change and Stabilization.
   - vidcut: the Inspector shows a Generator section with these rows, over the picture sections (X70).
 - **Picture sections:**
@@ -1511,7 +1541,41 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Row 4 goes to the bottom. The sides are 0.15.
     - From d, it has black for 4.5 U, white for 6 U and black for 4.5 U.
     - Then it has 0.02 for U, black for U, 0.04 for U, and black to d + 7 c.
-  - Measured: in an HDR timeline, these kinds keep their SDR code values.
+  - Window is white where ⌊W / 4⌋ < x < ⌊3 W / 4⌋ and ⌊H / 4⌋ < y < ⌊3 H / 4⌋. Elsewhere it is black and opaque.
+  - The three BT.2111 Color Bars have five rows. W sets the columns, and H sets the rows.
+    - d = ⌊W / 8⌋, and c = ⌊W × 206 / 1920⌋
+    - The bars start at d, d + c, d + 2 c, d + 3 c, W − d − 3 c, W − d − 2 c and W − d − c. The last bar ends at W − d.
+  - A code value is a fraction: (code − 64) / 876 in the Narrow kinds, and code / 1023 in PQ Full.
+
+    | Kind | Grey 40% | Mid | 2% | 4% |
+    |---|---|---|---|---|
+    | HLG Narrow | 414 | 721 | 80 | 99 |
+    | PQ Narrow | 414 | 572 | 80 | 99 |
+    | PQ Full | 409 | 593 | 20 | 41 |
+
+  - Row 1 ends at k = 1. The sides are Grey 40%. The bars are white, yellow, cyan, green, magenta, red and blue at 1.
+  - Row 2 ends at k = 7. The sides are Grey 40%. The bars have the same colors at Mid.
+  - Row 3 ends at k = 8. The sides are Mid.
+    - It is black from d to the middle of the second bar.
+    - Then it has nine steps from 0.1 to 0.9, each half a bar, to the end of the sixth bar.
+    - The last bar is 1.
+  - Row 4 ends at k = 9. It is a grey ramp, held from 0 to 1.
+    - In the Narrow kinds, the ramp is (x − ⌊W × 858 / 1920⌋) / (W × 876 / 1920).
+    - In PQ Full, the ramp is (x − ⌊W × 791 / 1920⌋) / (W × 1022 / 1920).
+    - Measured: at widths that do not divide evenly, this rule has an error of up to 0.001.
+  - Row 5 goes to the bottom, and it is black under these parts:
+    - Three tiles fill the left side, from ⌊d n / 3⌋ to ⌊d (n + 1) / 3⌋. Three tiles fill the right side in the same way, from W − d.
+    - gap = ⌊(c − W × 70 / 1920) / 2⌋, and u = c − 2 gap.
+    - The 2% patch is u wide, from the second bar plus gap. The 4% patch is u wide, from the third bar.
+    - Mid goes from ⌊W / 2⌋, for ⌊W × 438 / 1920⌋.
+
+    | Kind | Left tiles | Right tiles |
+    |---|---|---|
+    | HLG Narrow | 713, 719, 316; 538, 709, 718; 512, 706, 296 | 651, 286, 705; 639, 269, 164; 227, 147, 702 |
+    | PQ Narrow | 568, 571, 381; 484, 566, 571; 474, 564, 368 | 536, 361, 564; 530, 350, 256; 317, 236, 562 |
+    | PQ Full | 589, 592, 370; 491, 586, 592; 478, 584, 355 | 551, 347, 584; 544, 334, 225; 296, 201, 582 |
+
+  - Measured: in an HDR timeline, these kinds keep their SDR code values. The BT.2111 Color Bars are the same in SDR, PQ and HLG.
   - vidcut does not copy two faults in these pictures ([X129](deviations.md#x129-generators-have-the-correct-picture-where-resolve-has-a-fault)).
 - **Length and dissolves:**
   - Measured: a generator can have any length.
@@ -1526,9 +1590,10 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: Four Color Gradient has the `Effect Name` `Four Color Gradient`, `Type` 66 and `Display Type` 0. Its parameters are `centerX`, `centerY`, `upperLeft`, `upperRight`, `lowerLeft` and `lowerRight`.
   - Measured: EBU Color Bar has the `Effect Name` `EBU Color Bar`, `Type` 65 and `Display Type` 0.
     - Its parameter `level` is a `UInt`: 0 is 75% and 1 is 100%. The values 2 to 4 play as 0.
-  - Measured: 10 Step, 100mV Steps, Grey Scale, YCbCr Ramp and SMPTE Color Bar have the `Effect Name` `Generator`, `Type` 42 and `Display Type` 3. They have only the `Display Name` parameter.
+  - Measured: the other kinds have the `Effect Name` `Generator`, `Type` 42 and `Display Type` 3. They have only the `Display Name` parameter.
+  - Measured: the `generator_kind` of a BT.2111 Color Bar has a lower-case word: `BT.2111 Color bar PQ Full`. Its clip name has `Color Bar`.
   - vidcut reads its kinds back from that shape.
-  - vidcut keeps the other kinds as data. They play as gaps, and an import warns about them (X9).
+  - vidcut keeps a generator of any other section as data. It plays as a gap, and an import warns about it (X9).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

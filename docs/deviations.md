@@ -2349,6 +2349,34 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A script needs to know that no clip went in.
   - The owner approved this difference.
 
+## X115. A typed duration gives exactly that length
+
+- **Resolve:**
+  - The Duration field takes a typed length, and it then shows that length.
+  - The edit from these marks has one frame more. These are measurements in Resolve Studio 21.1.2.
+  - `00:00:02:00` gives 51 frames at 25 fps, and 61 frames at 30 fps.
+  - The Multi Source grid and Source Clip act the same.
+- **vidcut:**
+  - The marks hold exactly the typed length.
+  - `00:00:02:00` gives 50 frames at 25 fps, and 60 frames at 30 fps.
+- **Why:**
+  - Two seconds at 25 fps are 50 frames.
+  - The field and the edit agree.
+  - The owner approved this difference.
+
+## X118. Source Overwrite at the end of the timeline uses the first clip
+
+- **Resolve:**
+  - The playhead is at the end of the timeline, after the last clip. The last clip shows part of the marks.
+  - With a last clip of 139 frames or less, the reference is that last clip.
+  - With a last clip of 140 frames or more, the reference is the first clip that shows part of the marks.
+  - These are measurements in Resolve Studio 21.1.2, in the Multi Source viewer, with one layout. The reason for the limit is not known.
+- **vidcut:**
+  - With no clip under the playhead, the reference is the first clip that shows part of the marks. The length of the last clip plays no part.
+- **Why:**
+  - A limit with no known reason looks like a fault, and the user cannot predict it.
+  - The owner approved this difference.
+
 ## X119. Auto Sync on a saved group waits for Save Sync
 
 - **Resolve:**
