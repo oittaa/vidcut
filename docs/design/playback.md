@@ -445,9 +445,9 @@ The names of frames:
     - Thus a change of the Transform or of an effect renders a placed clip again.
     - Without a Retime Process, `alone` keeps the effects up to the last checked effect (`render_cache::baked`). Thus a change of a later effect keeps the names.
     - `alone` takes the opacity and the composite mode out of the placement. Why: they change only the alpha and the mix, not the colors in the file.
-- `PieceKeys` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
-  - It counts the names that it holds. Above `KEYS_KEPT`, the pieces used longest ago go.
-  - Why: a piece has one name for each frame. Thus a limit on the number of pieces does not limit the memory.
+- `PieceKeys` keeps the frame names of each piece in memory. vidcut does not hash a piece again when the piece only moves, for example after a ripple edit.
+  - When it holds more than `KEYS_KEPT` frame names, it removes the least recently used pieces.
+  - The limit counts frame names, not pieces. An hour of video at 60 fps has 216,000 frame names.
 - `Look::of` gives the size and the codec. With proxies on, the size is that of proxies. With proxies off, the size is that of the timeline.
   - The codec is `render_cache.codec` (`CacheCodec`). With Automatic and proxies on, it is that of proxies.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.
