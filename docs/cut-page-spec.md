@@ -1422,7 +1422,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - On the Cut page, a double-click on an effect adds it to the selected clip.
   - Measured in Resolve Studio 21.1.2: with several selected clips, only the first selected clip gets it.
   - The Effects panel of the Inspector has the values of the effects.
-  - vidcut: the Effects tab has the Blur group with Gaussian Blur. The other effects come later ([todo](todo/effects-library.md)).
+  - vidcut: the Effects tab has the Blur group with Gaussian Blur and Mosaic Blur. The other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
   - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
   - Measured in Resolve Studio 21.1.2: a generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API all leave it with none.
@@ -1459,6 +1459,64 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It also blurs the alpha. Over a lower track, the edge of a smaller picture fades into that track.
   - Reflect and Wrap-Around match a blur of one pass. Black and Replicate do not ([X101](deviations.md#x101-black-and-replicate-borders-follow-their-plain-definitions)).
   - A portrait timeline gives a sigma 3% smaller than the rule ([X102](deviations.md#x102-a-portrait-timeline-blurs-by-the-width-rule)).
+- **Mosaic Blur** (p. 3538). Its values and their defaults, measured in Resolve Studio 21.1.2:
+  - Pixel Frequency goes from 0.1 to 4000 and is 100.
+  - Smooth Strength goes from 0 to 1 and is 0.
+  - Cell Shape is Square, Hexagon or Triangle. Square is the default.
+  - Aliasing goes from 0 to 2 and is 1.
+  - Advanced Controls has these values:
+    - X Offset and Y Offset go from −1 to 1. Each is 0.
+    - Aspect goes from 0.001 to 1000 and is 1.
+    - Position goes from −1000000 to 1000000. It is the middle of the picture.
+    - Border Type has Black, Replicate, Reflect and Wrap-Around. Reflect is the default.
+    - Antialias Result is off.
+    - Blur Alpha is on, and Whole Cells Only is off.
+- **How the mosaic works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
+  - The mosaic works after Zoom and Position, on the pixels of the frame. A cell keeps sharp edges at each Zoom.
+  - A cell is S high and S × Aspect wide, with S = 2 × √(width × height) / Pixel Frequency.
+    - The width and the height are those of the picture on the frame, after its fit and its Zoom.
+    - A 1920×1080 picture that fills its frame thus has S = 1.5 × 1920 / Pixel Frequency.
+    - The size of the source does not change S. A 3840×2160 source on a 1920×1080 timeline has the cells of a 1920×1080 source.
+    - Zoom X 2 alone gives square cells, √2 times as large.
+  - The grid lines up on the middle of the picture on the frame. Thus a Pan moves the grid with the picture.
+  - Position sets the place of the grid. Position Y goes up.
+  - X Offset moves the grid right, and Y Offset moves it up. An offset of 1 is half a cell.
+  - Hexagon: the cells have a flat top and bottom. Their columns are √3/2 of a cell width apart, and each odd column is half a cell lower.
+  - Triangle: the columns are 1/√3 of a cell width apart. The triangles point down and up in turn.
+  - A pixel of the frame takes the color of the cell around it.
+  - The color of a cell is the mean of a box around the middle of the cell, with equal weights.
+    - The box has the same form for each Cell Shape.
+    - Aliasing sets its size. At 0 it is one pixel, at 1 it is one cell, and at 2 it is two cells.
+    - Beyond the frame, the box takes the pixels of the edge. At the edge, the edge pixel thus weighs more.
+    - The clear area around a smaller picture counts as clear pixels in the box.
+  - The box takes the mean of the premultiplied colors and of the alpha.
+  - Blur Alpha off keeps these colors, but the output has the alpha that came in.
+    - Color can thus be more than alpha. Over a lower track it adds to that track and stops at 1.
+    - A clear part of the picture thus adds the color of its cell to the lower track.
+  - Whole Cells Only, with Blur Alpha on:
+    - A cell with no clear part in its box stays, with an alpha of 1.
+    - The other cells have an alpha of 0. There the premultiplied colors that came in add to the lower track.
+  - Whole Cells Only, with Blur Alpha off, changes nothing.
+  - Antialias Result makes all of this at twice the size, from a linearly enlarged picture. Then each pixel is the mean of its four samples.
+  - Border Type and Smooth Strength do not change the renders. The manual does not name Smooth Strength for this effect.
+- **Mosaic in vidcut:**
+  - vidcut keeps Smooth Strength and Border Type on the effect. They do not change its picture.
+  - A cell is whole when the alpha of its box is at least 0.999. The renders put that limit above 0.674 and at 1 or below.
+  - Where a cell edge falls exactly on a pixel, Resolve gives that line of pixels to either cell, with no rule that the renders show. vidcut gives it to the cell on the right or below.
+  - A Triangle has corners at the sides of the frame, from triangles with a middle off the frame. The distance of that middle from the frame counts in column steps.
+    - At 0.585 of a step or less, each corner has the box at its own middle, clamped into the frame. At 0.691 or more, Resolve changes the corners. No render falls between these distances.
+    - Most of a corner of a triangle that points up then has the color of the next triangle in its row. Single rows have other colors.
+    - These rows change between renders. Two renders of Aspect 2 at Pixel Frequency 25 differ on 1211 pixels, by up to 9.22/255. Renders at 0.132 and 0.566 of a step repeat exactly.
+    - vidcut takes the box at the middle of the pixel's own triangle, clamped into the frame, at each distance.
+  - Only the Fusion page gave renders of Blur Alpha off and Whole Cells Only. Only the default Pixel Frequency has Edit page renders on other sizes and Zooms ([todo](todo/effects-library.md)).
+  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+    - A Position away from the middle, on a picture with a Zoom or a Pan, counts in fractions of the picture on the frame.
+    - On a rotated clip, the cells keep the directions of the frame, as Gaussian Blur does.
+    - A crop and a Dynamic Zoom box do not change the size or the place of the cells.
+    - The Zoom of each compound clip around the picture multiplies the size on the frame.
+    - With Use Alpha off, Blur Alpha and Whole Cells Only change nothing.
+    - Whole Cells Only tests each sample's cell, with each Cell Shape and each Aliasing.
+    - A made frame of a speed change, and a frame from the render cache, keep no color at an alpha of 0.
 - **Compound clips:** vidcut: the effects of a compound clip work on each picture inside it ([todo](todo/compound-opacity.md)).
 - **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
 

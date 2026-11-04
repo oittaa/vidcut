@@ -9,7 +9,7 @@ use crate::hw::Kind;
 use crate::player::{Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
 use vidcut_core::model::{Hdr, WipeDirection};
-use vidcut_core::place::{Blurring, Level, Placing, chain, lettered};
+use vidcut_core::place::{Level, Placing, Working, chain, lettered};
 use vidcut_core::preferences::Scope;
 use vidcut_core::render::{Moving, Placed, Shift, Wipe};
 
@@ -3503,7 +3503,7 @@ fn halvings(
     }
 }
 
-fn bared(placing: &mut Placing, level: &mut f64) -> (Vec<Blurring>, f64) {
+fn bared(placing: &mut Placing, level: &mut f64) -> (Vec<Working>, f64) {
     let effects = std::mem::take(&mut placing.effects);
     if effects.is_empty() {
         return (effects, 1.0);
