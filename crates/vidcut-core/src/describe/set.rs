@@ -476,7 +476,13 @@ impl Words<'_> {
         let first = s.of.first().copied();
         let align = first.map_or(Value::Null, |t| json!(t.align()));
         s.usual("align", "Align", &word, align, |t| json!(t.align));
-        let anchor = json!(crate::model::TitleAnchor::default());
+        let anchor = first.map_or(Value::Null, |t| {
+            json!(Title::usual_anchor(
+                t.kind,
+                t.align(),
+                crate::model::TitlePart::Lower
+            ))
+        });
         s.usual("anchor", "Anchor", &word, anchor, |t| json!(t.anchor));
         if self.params["style"].is_object() {
             let size = Title::usual_size(first.map_or(TitleKind::Text, |t| t.kind));

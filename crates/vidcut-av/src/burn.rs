@@ -273,6 +273,7 @@ struct Seat {
     middle: f32,
     edge: f32,
     part: TitlePart,
+    anchor: [f64; 2],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -314,7 +315,6 @@ struct Laid {
     sprite: Option<Sprite>,
     lines: f32,
     above: f32,
-    widest: f32,
     popped: Option<(f32, f32)>,
     seated: Option<[f32; 2]>,
 }
@@ -1256,9 +1256,15 @@ fn lay_out(look: &Look) -> Option<Laid> {
         .sum();
     let seated = look.seat.zip(look.title_gap).map(|(s, (t, pixel))| {
         let (middle, wide, wrap) = (s.middle, widest, look.wrap);
-        let left = t.seated_left(f64::from(middle), f64::from(wide), f64::from(wrap), pixel);
+        let left = t.seated_left(
+            s.anchor[0],
+            f64::from(middle),
+            f64::from(wide),
+            f64::from(wrap),
+            pixel,
+        );
         let edge = ((f64::from(s.edge) / pixel).round() * pixel) as f32;
-        let top = block_top(edge, s.part, t.anchor()[1] as f32, lines, above);
+        let top = block_top(edge, s.part, s.anchor[1] as f32, lines, above);
         [left as f32, top.ceil()]
     });
     let exact = seated.map(|at| at.map(|v| v - v.round()));
@@ -1442,7 +1448,6 @@ fn lay_out(look: &Look) -> Option<Laid> {
         sprite,
         lines,
         above,
-        widest,
         popped,
         seated,
     })
@@ -1473,9 +1478,8 @@ fn inside(s: Sprite, (w, h): (f64, f64)) -> Option<Sprite> {
 
 fn block_top(edge: f32, part: TitlePart, down: f32, lines: f32, above: f32) -> f32 {
     edge - match part {
-        TitlePart::Whole | TitlePart::Lower | TitlePart::Shape => down * lines,
-        TitlePart::Upper => lines,
-        TitlePart::Backing => above,
+        TitlePart::Whole | TitlePart::Upper | TitlePart::Lower | TitlePart::Shape => down * lines,
+        TitlePart::Backing => above + down * (lines - above),
     }
 }
 
@@ -1784,6 +1788,7 @@ fn title_block(
             middle: (block.pivot[0] * w) as f32,
             edge: (block.edge * h) as f32,
             part: block.part,
+            anchor: block.anchor,
         }),
         spacing: (
             t.style.line_spacing.unwrap_or(0.0) as f32,
@@ -1822,7 +1827,6 @@ fn title_block(
         sprite: Some(sprite),
         lines,
         above,
-        widest,
         seated,
         ..
     } = lay_out(&look)?
@@ -1830,7 +1834,7 @@ fn title_block(
         return None;
     };
     let [px, py] = block.pivot;
-    let [across, down] = t.anchor();
+    let [across, down] = block.anchor;
     let lined = t.align().fraction() as f32;
     let exact = block_top(
         (block.edge * h) as f32,
@@ -1839,10 +1843,8 @@ fn title_block(
         lines,
         above,
     );
-    let [left, top] = seated.unwrap_or([
-        (px * w) as f32 + (lined - across as f32) * widest - lined * look.wrap,
-        exact,
-    ]);
+    let [left, top] =
+        seated.unwrap_or([((px + 0.5 - across) * w) as f32 - lined * look.wrap, exact]);
     let sprite = placed(sprite, left, top);
     if block.turn == 0.0 {
         return Some(sprite);

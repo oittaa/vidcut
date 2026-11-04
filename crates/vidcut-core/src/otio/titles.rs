@@ -6,8 +6,8 @@ use super::{EDITOR, VIDCUT};
 use crate::model::hex;
 use crate::model::{
     Keyframe, Picture, PositionHandles, SubtitleBackground, SubtitleOutline, TextStroke, Title,
-    TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine, TitleShadow, TitleShape, TitleStyle,
-    size_fits,
+    TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine, TitlePart, TitleShadow, TitleShape,
+    TitleStyle, size_fits,
 };
 use crate::rich::{self, Look, Shift, Span};
 
@@ -240,7 +240,12 @@ fn scrolling(t: &Title, family: &str, points: f64, color: &str, origin: i64) -> 
                     4096.0,
                 ),
                 plain("alignment", json!(alignment), json!(0), "UInt"),
-                plain("anchor", json!(4), json!(4), "UInt"),
+                plain(
+                    "anchor",
+                    json!(anchor_number(t.anchor.unwrap_or_default())),
+                    json!(anchor_number(TitleAnchor::default())),
+                    "UInt",
+                ),
                 plain("color", json!(color), json!("#ffffff"), "Color"),
             ],
         ),
@@ -386,12 +391,9 @@ fn anchor_number(anchor: TitleAnchor) -> u32 {
         .map_or(4, |i| i as u32)
 }
 
-fn anchor_read(g: &Value) -> Option<TitleAnchor> {
+fn anchor_read(g: &Value, usual: TitleAnchor) -> Option<TitleAnchor> {
     let number = usize::try_from(value(g, "anchor").as_u64()?).ok()?;
-    ANCHORS
-        .get(number)
-        .copied()
-        .filter(|a| *a != TitleAnchor::default())
+    ANCHORS.get(number).copied().filter(|a| *a != usual)
 }
 
 fn placed(t: &Title, usual: [f64; 2], origin: i64) -> Value {
@@ -411,7 +413,7 @@ fn rich_text(
     t: &Title,
     lines: &[&[Span]],
     blob: String,
-    anchor: u32,
+    (anchor, usual): (TitleAnchor, TitleAnchor),
     position: Value,
     origin: i64,
 ) -> Value {
@@ -438,7 +440,12 @@ fn rich_text(
                 "String",
             ),
             json!({ "Parameter ID": "title blob", "Title HTML": blob }),
-            plain("anchor", json!(anchor), json!(anchor), "UInt"),
+            plain(
+                "anchor",
+                json!(anchor_number(anchor)),
+                json!(anchor_number(usual)),
+                "UInt",
+            ),
             position,
             zoom("transformationZoomX"),
             zoom("transformationZoomY"),
@@ -501,18 +508,15 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                 t,
                 &lines,
                 html(&lines, align, t.style.line_spacing.unwrap_or(0.0), &base),
-                anchor_number(t.anchor.unwrap_or_default()),
+                (t.anchor.unwrap_or_default(), TitleAnchor::default()),
                 placed(t, [0.5, 0.5], origin),
                 origin,
             )],
             Some(t.in_file([x, y])),
         ),
         TitleKind::LowerThird => {
-            let (column, usual_x) = match t.align() {
-                TitleAlign::Left => (0, 0.1),
-                TitleAlign::Middle => (1, 0.5),
-                TitleAlign::Right => (2, 0.9),
-            };
+            let usual_x = Title::usual_position(t.kind, t.align())[0];
+            let usual = |part| Title::usual_anchor(t.kind, t.align(), part);
             let none: &[Span] = &[];
             let (upper, lower) = match lines.as_slice() {
                 [] => (none, none),
@@ -526,7 +530,10 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                         &high,
                         &[upper],
                         html(&[upper], align, t.style.line_spacing.unwrap_or(1.0), &base),
-                        column,
+                        (
+                            high.anchor.unwrap_or(usual(TitlePart::Upper)),
+                            usual(TitlePart::Upper),
+                        ),
                         placed(&high, [usual_x, 0.2], origin),
                         origin,
                     ),
@@ -534,7 +541,10 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
                         t,
                         &[lower],
                         html(&[lower], align, t.style.line_spacing.unwrap_or(0.0), &base),
-                        6 + column,
+                        (
+                            t.anchor.unwrap_or(usual(TitlePart::Lower)),
+                            usual(TitlePart::Lower),
+                        ),
                         placed(t, [usual_x, 0.22], origin),
                         origin,
                     ),
@@ -628,11 +638,13 @@ pub fn reference(t: &Title, height: u32, drawn: &Drawn, origin: i64) -> Value {
             let [left, top, w, h] = drawn.backing.unwrap_or_else(|| {
                 let rows = lines.len().max(1) as f64;
                 let h = rows * line + 2.0 * Title::PADDING * size;
-                let [across, down] = t.anchor();
+                let [across, down] = t.anchor_of(TitlePart::Lower);
                 let top = match t.kind {
                     TitleKind::Text => y - h * down,
                     TitleKind::Scroll => y - h / 2.0,
-                    TitleKind::LowerThird => y + t.lower_line() + Title::PADDING * size - h,
+                    TitleKind::LowerThird => {
+                        y + (1.0 - down) * t.lower_line() + Title::PADDING * size - h
+                    }
                 };
                 let middle = if t.kind == TitleKind::Text {
                     x + (0.5 - across) * Title::SAFE
@@ -1097,7 +1109,7 @@ fn from_scroll(all: &[&Value], height: u32) -> Option<Title> {
     let title = Title {
         kind: TitleKind::Scroll,
         align: Some(align),
-        anchor: None,
+        anchor: looks.and_then(|g| anchor_read(g, TitleAnchor::default())),
         text,
         style: TitleStyle {
             font,
@@ -1143,17 +1155,12 @@ fn down(v: f64) -> f64 {
     rounded(v).clamp(Title::DOWN.0, Title::DOWN.1)
 }
 
-fn row(g: &Value) -> u64 {
-    (value(g, "anchor").as_u64().unwrap_or(4) / 3).min(2)
-}
-
 fn upper_lower<'a>(texts: &[&'a Value]) -> Option<(Option<&'a Value>, &'a Value)> {
-    let first = *texts.first()?;
-    Some(match texts.get(1).copied() {
-        Some(s) if row(first) == 2 && row(s) != 2 => (Some(s), first),
-        Some(s) => (Some(first), s),
-        None => (None, first),
-    })
+    match texts {
+        [] => None,
+        [only] => Some((None, *only)),
+        [upper, lower, ..] => Some((Some(*upper), *lower)),
+    }
 }
 
 fn read_scroll_keys(t: &mut Title, all: &[&Value], origin: i64) {
@@ -1180,14 +1187,8 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
     } else {
         lower
     };
-    let lift = if t.kind == TitleKind::Text {
-        0.0
-    } else {
-        (row(main) as f64 / 2.0 - 1.0) * t.lower_line()
-    };
-    (t.position_keys, t.position_y) = point_keys(parameter(main, "position"), origin, |[x, y]| {
-        [x, 1.0 - y + lift]
-    });
+    (t.position_keys, t.position_y) =
+        point_keys(parameter(main, "position"), origin, |[x, y]| [x, 1.0 - y]);
     t.position_handles = point_handles(parameter(main, "position"), origin);
     read_turn_keys(t, main, origin);
     if t.kind == TitleKind::LowerThird
@@ -1195,11 +1196,8 @@ fn read_rich_keys(t: &mut Title, all: &[&Value], origin: i64) {
         && let Some((Some(high), _)) = upper_lower(&texts)
     {
         let mut line = t.upper_view();
-        let lift = upper_lift(t, high);
         (line.position_keys, line.position_y) =
-            point_keys(parameter(high, "position"), origin, |[x, y]| {
-                [x, 1.0 - y + lift]
-            });
+            point_keys(parameter(high, "position"), origin, |[x, y]| [x, 1.0 - y]);
         line.position_handles = point_handles(parameter(high, "position"), origin);
         read_turn_keys(&mut line, high, origin);
         t.upper = Some(line.line()).filter(|u| *u != t.upper_with_lower());
@@ -1215,13 +1213,6 @@ fn read_turn_keys(t: &mut Title, g: &Value, origin: i64) {
         -Picture::TURNS,
         Picture::TURNS,
     );
-}
-
-fn upper_lift(t: &Title, high: &Value) -> f64 {
-    let lines = rich::lines(&t.sized_text());
-    let base = t.text_fraction();
-    let size = lines.first().map_or(base, |l| rich::largest(l, base));
-    row(high) as f64 / 2.0 * size * Title::LINE
 }
 
 fn read_zoom(g: &Value) -> Option<f64> {
@@ -1307,7 +1298,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let mut line_spacing = None;
     let tracking;
     let mut case = None;
-    let (lines, style_from, at, lowered, turned_by) = match kind {
+    let (lines, style_from, at, turned_by) = match kind {
         TitleKind::Scroll => return None,
         TitleKind::Text => {
             let r = read_of(first);
@@ -1335,7 +1326,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
                 TitleCase::Mixed
             };
             case = (cased != TitleCase::Mixed).then_some(cased);
-            (marked(&r, &r, usual, tracked, cased), r, at, None, first)
+            (marked(&r, &r, usual, tracked, cased), r, at, first)
         }
         TitleKind::LowerThird => {
             let (upper, lower) = upper_lower(&texts)?;
@@ -1356,7 +1347,7 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
                 .collect();
             let at = point(value(lower, "position")).unwrap_or([0.1, 0.22]);
             tracking = Some(0.0);
-            (lines, style_from, at, Some(row(lower)), lower)
+            (lines, style_from, at, lower)
         }
     };
     let zoom = read_zoom(turned_by);
@@ -1364,10 +1355,11 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
     let (align, anchor) = if kind == TitleKind::Text {
         (
             style_from.align.filter(|a| *a != TitleAlign::Middle),
-            anchor_read(first),
+            anchor_read(first, TitleAnchor::default()),
         )
     } else {
-        (align, None)
+        let usual = Title::usual_anchor(kind, align.unwrap_or_default(), TitlePart::Lower);
+        (align, anchor_read(turned_by, usual))
     };
     let size = style_from
         .points
@@ -1428,21 +1420,16 @@ pub fn from_editor(reference: &Value, height: u32) -> Option<Title> {
         upper: None,
     };
     let [x, from_bottom] = at;
-    let mut y = 1.0 - from_bottom;
-    if let Some(row) = lowered {
-        y += (row as f64 / 2.0 - 1.0) * title.lower_line();
-    }
-    title.position = Some([across(x), down(y)]);
+    title.position = Some([across(x), down(1.0 - from_bottom)]);
     if kind == TitleKind::LowerThird
         && title.text.contains('\n')
         && let Some((Some(high), _)) = upper_lower(&texts)
     {
         let [x, from_bottom] = point(value(high, "position")).unwrap_or([x, 0.2]);
+        let usual = Title::usual_anchor(kind, title.align(), TitlePart::Upper);
         let line = TitleLine {
-            position: Some([
-                across(x),
-                down(1.0 - from_bottom + upper_lift(&title, high)),
-            ]),
+            anchor: anchor_read(high, usual),
+            position: Some([across(x), down(1.0 - from_bottom)]),
             zoom: read_zoom(high),
             rotation: read_rotation(high),
             ..TitleLine::default()

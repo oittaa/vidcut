@@ -135,10 +135,11 @@ impl Titles {
                     .zip(to.shape_pixels(now.pivot, (w, h)));
                 let (dx, dy) = match boxes {
                     Some((a, b)) => ((b[0] - a[0]) as i32, (b[1] - a[1]) as i32),
-                    None if to.moves() => (
-                        ((x - x0) * w).round() as i32,
-                        shown.run.top(0, h, f64::from(p.height)).round() as i32 - p.top,
-                    ),
+                    None if to.moves() => {
+                        let tall = f64::from(p.height);
+                        let top = shown.run.top(0, h, tall) + to.run_lift(tall);
+                        (((x - x0) * w).round() as i32, top.round() as i32 - p.top)
+                    }
                     None => (
                         ((x * w).round() - (x0 * w).round()) as i32,
                         ((y * h).round() - (y0 * h).round()) as i32,

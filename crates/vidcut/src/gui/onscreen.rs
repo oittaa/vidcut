@@ -234,7 +234,7 @@ impl Workspace {
                     of: length,
                     held: false,
                 };
-                run.top(0, h, f64::from(bh)) as f32 - y
+                (run.top(0, h, f64::from(bh)) + title.run_lift(f64::from(bh))) as f32 - y
             } else {
                 0.0
             };
