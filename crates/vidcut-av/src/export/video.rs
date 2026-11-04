@@ -711,13 +711,13 @@ impl Source {
         self.looks.1
     }
 
-    fn note_upscaled(&mut self, upscaler: Upscaler) {
+    fn note_upscaled(&mut self, super_scale: SuperScale) {
         if self.told {
             return;
         }
         crate::progress::note(super::Note::Upscaled(super::UpscaleNote {
             path: self.reader.path().to_path_buf(),
-            how: crate::super_scale::name(upscaler).into(),
+            how: crate::super_scale::named(super_scale),
         }));
         self.told = true;
     }
@@ -1050,13 +1050,7 @@ impl Source {
             false => self.current.as_ref(),
         }
         .expect("have a frame");
-        let sar = frame.aspect_ratio();
-        let shape = Shape {
-            size: (frame.width(), frame.height()),
-            sar: (sar.numerator(), sar.denominator()),
-            rotation,
-        };
-        let Some((size, made)) = enlarged(shape, target, upscaler) else {
+        let Some((size, made)) = enlarged(shape_of(frame, rotation), target, upscaler) else {
             return Ok(None);
         };
         let hdr = crate::color::Source::of(frame).hdr.is_some() && timeline.is_some();
@@ -1521,6 +1515,15 @@ pub(crate) fn display_of(shape: Shape) -> (u32, u32) {
     };
     let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
     (even(dw), even(dh))
+}
+
+fn shape_of(frame: &frame::Video, rotation: u16) -> Shape {
+    let sar = frame.aspect_ratio();
+    Shape {
+        size: (frame.width(), frame.height()),
+        sar: (sar.numerator(), sar.denominator()),
+        rotation,
+    }
 }
 
 fn enlarged(
@@ -2359,6 +2362,7 @@ impl VideoFrames {
                     image,
                     pace,
                     retime,
+                    super_scale,
                     made: shape,
                     ..
                 } = layer
@@ -2446,6 +2450,7 @@ impl VideoFrames {
                 } else {
                     self.source_frame(i, s, layer, k)?
                 };
+                self.note_classic(s, at, *super_scale);
                 let sampling = match (backward, shape) {
                     (true, _) => Sampling::Own,
                     (false, Some(shape)) => Sampling::Placed {
@@ -3269,7 +3274,7 @@ impl VideoFrames {
                 .map(|(b, c)| [c, (b.width(), b.height())]),
         });
         if big.is_some() {
-            src.note_upscaled(super_scale.upscaler);
+            src.note_upscaled(super_scale);
         }
         self.finished_layer(s, made)
     }
@@ -3450,12 +3455,25 @@ impl VideoFrames {
                     .map(|b| [(frame.width(), frame.height()), (b.width(), b.height())]),
             });
             if big.is_some() {
-                src.note_upscaled(super_scale.upscaler);
+                src.note_upscaled(super_scale);
             }
         }
         src.how = src.shown_as_is();
         let picture = frame_ref(src.normalized.as_ref().expect("normalized"))?;
         self.finished_layer(s, picture)
+    }
+
+    fn note_classic(&mut self, s: usize, placed: &[Placed], super_scale: SuperScale) {
+        if !super_scale.on || super_scale.ai() {
+            return;
+        }
+        let aim = self.aim(s, placed, super_scale);
+        let src = &mut self.open[s];
+        let rotation = src.reader.rotation();
+        let shape = src.current.as_ref().map(|(f, _)| shape_of(f, rotation));
+        if shape.is_some_and(|shape| enlarged(shape, aim, super_scale.upscaler).is_some()) {
+            src.note_upscaled(super_scale);
+        }
     }
 
     fn aim(&self, s: usize, placed: &[Placed], super_scale: SuperScale) -> (u32, u32) {
@@ -3501,7 +3519,7 @@ impl VideoFrames {
         let Some(b) = src.ai_picture(false, aim, reading, ai)? else {
             return Ok(None);
         };
-        src.note_upscaled(super_scale.upscaler);
+        src.note_upscaled(*super_scale);
         Ok(Some((a, b, aim)))
     }
 

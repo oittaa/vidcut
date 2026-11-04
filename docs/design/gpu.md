@@ -168,6 +168,10 @@ Super Scale (`SuperScale`) sets the upscaler of a picture that is enlarged.
 - Classic enlarges in the shader of the viewer and the export, with the kernel of the picture's `Sharpness` (`screen::kernel`).
 - `layer_size` lets the picture of an AI upscaler grow past its source size.
 - The result of an AI upscaler is its own. It is not meant to match the CPU.
+- The export's report names each file that Super Scale enlarged (`UpscaleNote`, `super_scale::named`).
+  - An AI upscaler tells this when `ai_picture` gives a picture.
+  - Classic has no such step, because the shader enlarges later. Thus `note_classic` applies the rule of `enlarged` to each frame.
+  - A file on two tracks has two readers, and each reader tells. The report keeps one entry for the file.
 
 The AI upscalers share one path in the reader:
 
