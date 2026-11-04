@@ -1,15 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, SoundMatch, VoiceActivity};
 use vidcut_core::disk_cache::{self, Kind};
+use vidcut_core::duck::Measured;
 use vidcut_core::editor::GeneratedProxy;
 use vidcut_core::fingerprint::Origin;
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{
-    AudioInfo, FieldOrder, Hdr, Media, MediaInfo, StartTimecode, VideoInfo, proxy_size,
+    AudioInfo, DuckDetect, FieldOrder, Hdr, Media, MediaInfo, StartTimecode, VideoInfo, proxy_size,
 };
 use vidcut_core::render::RenderPlan;
 use vidcut_core::time::Rational;
@@ -19,10 +20,22 @@ use vidcut_core::{Env, Error, ProbedMedia, Result};
 
 use crate::paths;
 
+const MEMOS_KEPT: usize = 16;
+type Memo<T> = Mutex<Lru<MeasureKey, Arc<T>, MEMOS_KEPT>>;
+
+#[derive(Debug, Default)]
+struct Memos {
+    levels: Memo<AudioLevels>,
+    pictures: Memo<PictureStats>,
+    voices: Memo<VoiceActivity>,
+    transcripts: Mutex<Lru<(Origin, u32), Vec<Kept>, MEMOS_KEPT>>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct AvEnv {
     project_dir: Option<PathBuf>,
     heard_only: bool,
+    memos: Arc<Memos>,
 }
 
 impl AvEnv {
@@ -33,7 +46,7 @@ impl AvEnv {
     pub fn for_project(project_file: &Path) -> Self {
         Self {
             project_dir: project_file.parent().map(Path::to_path_buf),
-            heard_only: false,
+            ..Self::default()
         }
     }
 
@@ -86,36 +99,33 @@ fn heard_key(plan: &RenderPlan, asked: &Asked) -> String {
 
 const LEVELS_PER_SECOND: u32 = 100;
 
-type Memo<T> = LazyLock<Mutex<HashMap<(PathBuf, Origin), Arc<T>>>>;
-static LEVELS: Memo<AudioLevels> = LazyLock::new(Default::default);
-static PICTURES: Memo<PictureStats> = LazyLock::new(Default::default);
-static VOICES: Memo<VoiceActivity> = LazyLock::new(Default::default);
-type Matches = HashMap<(Origin, Origin), Option<SoundMatch>>;
-static MATCHES: LazyLock<Mutex<Matches>> = LazyLock::new(Default::default);
-type Transcripts = HashMap<(Origin, u32), Vec<Kept>>;
-static TRANSCRIPTS: LazyLock<Mutex<Transcripts>> = LazyLock::new(Default::default);
+const MADE_KEPT: usize = 256;
+static MADE_WITH: Mutex<Lru<PathBuf, (String, vidcut_core::editor::Copied), MADE_KEPT>> =
+    Mutex::new(Lru::new());
 
-static MADE_WITH: LazyLock<Mutex<HashMap<PathBuf, (String, vidcut_core::editor::Copied)>>> =
-    LazyLock::new(Default::default);
+pub type MeasureKey = (PathBuf, Origin);
+
+fn on_disk<T>((file, origin): &MeasureKey, from_bytes: impl Fn(&[u8]) -> Option<T>) -> Option<T> {
+    let read = disk_cache::read(file)?;
+    from_bytes(origin.check(&read)?)
+}
 
 fn measured<T>(
     memo: &Memo<T>,
-    (file, origin): (PathBuf, Origin),
+    key: MeasureKey,
     measure: impl FnOnce() -> vidcut_av::error::Result<T>,
     to_bytes: impl Fn(&T) -> Vec<u8>,
     from_bytes: impl Fn(&[u8]) -> Option<T>,
 ) -> Result<Arc<T>> {
     let lock = || memo.lock().unwrap_or_else(PoisonError::into_inner);
-    let key = (file, origin);
     if let Some(v) = lock().get(&key) {
         return Ok(v.clone());
     }
-    let (file, origin) = &key;
-    let read = disk_cache::read(file);
-    let value = match read.as_deref().and_then(|b| from_bytes(origin.check(b)?)) {
+    let value = match on_disk(&key, from_bytes) {
         Some(v) => v,
         None => {
             let v = measure().map_err(av_error)?;
+            let (file, origin) = &key;
             let _ = disk_cache::write(file, &origin.stamp(&to_bytes(&v)));
             v
         }
@@ -125,28 +135,26 @@ fn measured<T>(
     Ok(value)
 }
 
-fn kept<T>(memo: &Memo<T>, key: (PathBuf, Origin)) -> Option<Arc<T>> {
-    memo.lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get(&key)
-        .cloned()
+pub fn measure_key(media: &Media, stream: u32, detect: DuckDetect) -> MeasureKey {
+    let what = match detect {
+        DuckDetect::Speech => format!("speech{stream}"),
+        DuckDetect::Level => format!("levels{stream}"),
+    };
+    analysis_file(media, &what)
 }
 
-pub fn kept_measure(
+pub fn measure_duck(
     media: &Media,
     stream: u32,
-    detect: vidcut_core::model::DuckDetect,
-) -> Option<vidcut_core::duck::Measured> {
-    use vidcut_core::duck::Measured;
-    use vidcut_core::model::DuckDetect;
-    match detect {
-        DuckDetect::Speech => {
-            kept(&VOICES, analysis_file(media, &format!("speech{stream}"))).map(Measured::Speech)
-        }
-        DuckDetect::Level => {
-            kept(&LEVELS, analysis_file(media, &format!("levels{stream}"))).map(Measured::Levels)
-        }
-    }
+    detect: DuckDetect,
+    download: bool,
+) -> Result<(MeasureKey, Measured)> {
+    let env = AvEnv::new();
+    let value = match detect {
+        DuckDetect::Speech => Measured::Speech(env.voice_activity(media, stream, download)?),
+        DuckDetect::Level => Measured::Levels(env.audio_levels(media, stream)?),
+    };
+    Ok((measure_key(media, stream, detect), value))
 }
 
 fn transcript_file(origin: &Origin, stream: u32, key: &str) -> PathBuf {
@@ -297,8 +305,8 @@ impl Env for AvEnv {
 
     fn audio_levels(&self, media: &Media, stream: u32) -> Result<Arc<AudioLevels>> {
         measured(
-            &LEVELS,
-            analysis_file(media, &format!("levels{stream}")),
+            &self.memos.levels,
+            measure_key(media, stream, DuckDetect::Level),
             || vidcut_av::analysis::audio_levels(&media.path, stream, LEVELS_PER_SECOND),
             AudioLevels::to_bytes,
             AudioLevels::from_bytes,
@@ -309,14 +317,15 @@ impl Env for AvEnv {
         if a.info.audio.is_empty() || b.info.audio.is_empty() {
             return Ok(None);
         }
-        let key = (paths::media_origin(a), paths::media_origin(b));
-        let lock = || MATCHES.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(found) = lock().get(&key) {
-            return Ok(*found);
+        let with = format!("match-{}", paths::media_origin(b).name);
+        let key = analysis_file(a, &with);
+        if let Some(found) = on_disk(&key, SoundMatch::from_bytes) {
+            return Ok(found);
         }
         let (x, y) = (self.audio_levels(a, 0)?, self.audio_levels(b, 0)?);
         let found = vidcut_av::analysis::sound_match(&x, &y);
-        lock().insert(key, found);
+        let (file, origin) = &key;
+        let _ = disk_cache::write(file, &origin.stamp(&SoundMatch::to_bytes(found)));
         Ok(found)
     }
 
@@ -327,7 +336,7 @@ impl Env for AvEnv {
             None => "pictures".to_string(),
         };
         measured(
-            &PICTURES,
+            &self.memos.pictures,
             analysis_file(media, &key),
             || {
                 let decoder = crate::preferences::gpu_decoding().own_decoder();
@@ -358,8 +367,8 @@ impl Env for AvEnv {
         download: bool,
     ) -> Result<Arc<VoiceActivity>> {
         measured(
-            &VOICES,
-            analysis_file(media, &format!("speech{stream}")),
+            &self.memos.voices,
+            measure_key(media, stream, DuckDetect::Speech),
             || vidcut_av::transcribe::voice_activity(media, stream, &paths::models_dir(), download),
             VoiceActivity::to_bytes,
             VoiceActivity::from_bytes,
@@ -404,7 +413,12 @@ impl Env for AvEnv {
     }
 
     fn transcripts(&self, media: &Media, stream: u32) -> Result<Vec<Kept>> {
-        let lock = || TRANSCRIPTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let lock = || {
+            self.memos
+                .transcripts
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+        };
         let key = (paths::media_origin(media), stream);
         if let Some(kept) = lock().get(&key) {
             return Ok(kept.clone());
@@ -422,7 +436,8 @@ impl Env for AvEnv {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(Error::media(format!("{}: {e}", file.display()))),
         }
-        TRANSCRIPTS
+        self.memos
+            .transcripts
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&(origin, stream));
@@ -437,7 +452,7 @@ impl Env for AvEnv {
         asked: &Asked,
     ) -> Result<Arc<Speech>> {
         let speech = self.transcribe(plan, asked)?;
-        keep_transcript(media, stream, speech)
+        keep_transcript(&self.memos, media, stream, speech)
     }
 
     fn transcribe_files(
@@ -469,7 +484,7 @@ impl Env for AvEnv {
         let kept = files
             .iter()
             .zip(speeches)
-            .map(|((m, s, _), speech)| keep_transcript(m, *s, Arc::new(speech)))
+            .map(|((m, s, _), speech)| keep_transcript(&self.memos, m, *s, Arc::new(speech)))
             .collect::<Result<Vec<_>>>()?;
         lock().insert(key, kept.clone());
         Ok(kept)
@@ -537,7 +552,7 @@ impl Env for AvEnv {
             && path.is_file()
             && vidcut_av::proxy::origin(&path).as_deref() == Some(&*origin.text)
         {
-            (made_with, copies) = made().remove(&path).unzip();
+            (made_with, copies) = made().remove(&path).map(|(_, made)| made).unzip();
             disk_cache::used(&path);
         } else if !dry_run {
             if disk_cache::room(&path) == Some(0) {
@@ -838,14 +853,20 @@ fn no_room(dir: &Path) -> Error {
     ))
 }
 
-fn keep_transcript(media: &Media, stream: u32, speech: Arc<Speech>) -> Result<Arc<Speech>> {
+fn keep_transcript(
+    memos: &Memos,
+    media: &Media,
+    stream: u32,
+    speech: Arc<Speech>,
+) -> Result<Arc<Speech>> {
     vidcut_core::transcript::spoken(&speech).map_err(Error::invalid)?;
     let origin = paths::media_origin(media);
     let file = transcript_file(&origin, stream, &vidcut_core::transcripts::key(&speech));
     let bytes = serde_json::to_vec(&*speech).map_err(|e| Error::internal(e.to_string()))?;
     disk_cache::write(&file, &origin.stamp(&bytes))
         .map_err(|e| Error::media(format!("{}: {e}", file.display())))?;
-    TRANSCRIPTS
+    memos
+        .transcripts
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .remove(&(origin, stream));

@@ -10,7 +10,7 @@ use eframe::egui;
 use vidcut_av::export::renderer::FrameReader;
 use vidcut_av::thumbs::Image;
 use vidcut_core::fingerprint::Origin;
-use vidcut_core::lru::Lru;
+use vidcut_core::lru::{Lru, Uncapped};
 use vidcut_core::model::{Media, Project};
 use vidcut_core::preferences::Thumbnails;
 use vidcut_core::render::{Pace, VideoPiece};
@@ -75,7 +75,6 @@ impl Seen {
 
 struct Kept {
     texture: egui::TextureHandle,
-    used: u64,
     bytes: usize,
 }
 
@@ -95,7 +94,8 @@ struct Queue {
 }
 
 pub struct Tiles {
-    kept: HashMap<(String, u32), BTreeMap<i64, Kept>>,
+    kept: HashMap<String, BTreeMap<(u32, i64), Kept>>,
+    used: Uncapped<TileKey, u64>,
     versions: HashMap<String, Seen>,
     epochs: HashMap<String, u64>,
     clock: u64,
@@ -118,6 +118,7 @@ impl Tiles {
         let (sender, results) = channel();
         let mut tiles = Self {
             kept: HashMap::new(),
+            used: Uncapped::new(),
             versions: HashMap::new(),
             epochs: HashMap::new(),
             clock: 0,
@@ -185,20 +186,17 @@ impl Tiles {
                 egui::TextureOptions::LINEAR,
             );
             let bytes = image.rgba.len();
-            let kept = Kept {
-                texture,
-                used: self.clock,
-                bytes,
-            };
+            let kept = Kept { texture, bytes };
             if let Some(old) = self
                 .kept
-                .entry((key.media, key.height))
+                .entry(key.media.clone())
                 .or_default()
-                .insert(key.frame, kept)
+                .insert((key.height, key.frame), kept)
             {
                 self.bytes -= old.bytes;
             }
             self.bytes += bytes;
+            self.used.insert(key, self.clock);
         }
         self.evict();
     }
@@ -210,8 +208,8 @@ impl Tiles {
     ) -> Option<egui::TextureId> {
         let kept = self
             .kept
-            .get(&(key.media.clone(), key.height))
-            .and_then(|m| m.get(&key.frame));
+            .get(&key.media)
+            .and_then(|m| m.get(&(key.height, key.frame)));
         if let Some(k) = kept {
             self.shown.borrow_mut().push(key.clone());
             return Some(k.texture.id());
@@ -229,12 +227,14 @@ impl Tiles {
         frame: i64,
         within: i64,
     ) -> Option<egui::TextureId> {
-        let m = self.kept.get(&(media.to_string(), height))?;
-        let before = m.range(frame - within..=frame).next_back();
-        let after = m.range(frame..=frame + within).next();
+        let m = self.kept.get(media)?;
+        let before = m
+            .range((height, frame - within)..=(height, frame))
+            .next_back();
+        let after = m.range((height, frame)..=(height, frame + within)).next();
         let best = match (before, after) {
             (Some(b), Some(a)) => {
-                if frame - b.0 <= a.0 - frame {
+                if frame - b.0.1 <= a.0.1 - frame {
                     b
                 } else {
                     a
@@ -289,12 +289,8 @@ impl Tiles {
     pub fn end_frame(&mut self) {
         let clock = self.clock;
         for key in self.shown.get_mut().drain(..) {
-            if let Some(k) = self
-                .kept
-                .get_mut(&(key.media, key.height))
-                .and_then(|m| m.get_mut(&key.frame))
-            {
-                k.used = clock;
+            if let Some(used) = self.used.get_mut(&key) {
+                *used = clock;
             }
         }
         let asked = std::mem::take(self.asked.get_mut());
@@ -321,16 +317,15 @@ impl Tiles {
 
     fn forget(&mut self, media: &str) {
         *self.epochs.entry(media.to_string()).or_default() += 1;
-        let gone: Vec<(String, u32)> = self
-            .kept
-            .keys()
-            .filter(|(m, _)| m == media)
-            .cloned()
-            .collect();
-        for key in gone {
-            if let Some(m) = self.kept.remove(&key) {
-                self.bytes -= m.values().map(|k| k.bytes).sum::<usize>();
-            }
+        let mut key = TileKey {
+            media: media.to_string(),
+            frame: 0,
+            height: 0,
+        };
+        for ((height, frame), tile) in self.kept.remove(media).into_iter().flatten() {
+            (key.height, key.frame) = (height, frame);
+            self.used.remove(&key);
+            self.bytes -= tile.bytes;
         }
         let mut w = self.queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
         w.failed.retain(|k| k.media != media);
@@ -340,29 +335,31 @@ impl Tiles {
         if self.bytes <= self.budget {
             return;
         }
-        let mut all: Vec<(u64, (String, u32), i64)> = self
-            .kept
-            .iter()
-            .flat_map(|(k, m)| m.iter().map(move |(f, kept)| (kept.used, k.clone(), *f)))
-            .filter(|(used, ..)| used + 1 < self.clock)
-            .collect();
-        all.sort_by_key(|(used, ..)| *used);
         let target = self.budget / 10 * 9;
-        for (_, key, frame) in all {
-            if self.bytes <= target {
+        while self.bytes > target
+            && self
+                .used
+                .iter()
+                .next()
+                .is_some_and(|(_, used)| used + 1 < self.clock)
+        {
+            let Some((key, _)) = self.used.pop_oldest() else {
                 break;
+            };
+            let Some(tiles) = self.kept.get_mut(&key.media) else {
+                continue;
+            };
+            if let Some(tile) = tiles.remove(&(key.height, key.frame)) {
+                self.bytes -= tile.bytes;
             }
-            if let Some(m) = self.kept.get_mut(&key)
-                && let Some(k) = m.remove(&frame)
-            {
-                self.bytes -= k.bytes;
+            if tiles.is_empty() {
+                self.kept.remove(&key.media);
             }
         }
-        self.kept.retain(|_, m| !m.is_empty());
     }
 
     pub fn usage(&self) -> (usize, usize) {
-        (self.kept.values().map(BTreeMap::len).sum(), self.bytes)
+        (self.used.len(), self.bytes)
     }
 
     pub fn pending(&self) -> usize {

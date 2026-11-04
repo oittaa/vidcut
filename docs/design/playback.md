@@ -329,9 +329,10 @@ The audio device:
 Ducking in the preview:
 
 - `Live::hear_ducking` hears the sources of the timeline's plan before the player gets it.
-- It takes only the measurements that this process keeps (`env::kept_measure`). Why: the session thread reads no file.
-- It measures the rest on `vidcut-measure`, at job priority. Until then, those clips dip nothing.
-- `Msg::DuckHeard` then loads the timeline again. A measurement that failed shows as a notice, and is not tried again until the next `track.set` with `duck`.
+- It takes only the measurements that the core holds for the open project (`duck_kept`). The session thread reads no file.
+- Opening a project empties `duck_kept`.
+- It gets the rest on `vidcut-measure`, at job priority (`env::measure_duck`). That job reads the disk cache, or measures. Until then, those clips dip nothing.
+- `Msg::DuckHeard` brings the results to the core, and loads the timeline again. A measurement that failed shows as a notice, and is not tried again until the next `track.set` with `duck`.
 
 Faders:
 
@@ -448,7 +449,9 @@ The names of frames:
     - Thus a change of the Transform or of an effect renders a placed clip again.
     - Without a Retime Process, `alone` keeps the effects up to the last checked effect (`render_cache::baked`). Thus a change of a later effect keeps the names.
     - `alone` takes the opacity and the composite mode out of the placement. Why: they change only the alpha and the mix, not the colors in the file.
-- An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
+- `PieceKeys` keeps the frame names of each piece in memory. vidcut does not hash a piece again when the piece only moves, for example after a ripple edit.
+  - When it holds more than `KEYS_KEPT` frame names, it removes the least recently used pieces.
+  - The limit counts frame names, not pieces. An hour of video at 60 fps has 216,000 frame names.
 - `Look::of` gives the size and the codec. With proxies on, the size is that of proxies. With proxies off, the size is that of the timeline.
   - The codec is `render_cache.codec` (`CacheCodec`). With Automatic and proxies on, it is that of proxies.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.
