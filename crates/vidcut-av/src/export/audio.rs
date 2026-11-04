@@ -19,6 +19,27 @@ pub(crate) fn sample_format(n: i32) -> Option<ffi::AVSampleFormat> {
     Some(unsafe { std::mem::transmute::<i32, ffi::AVSampleFormat>(n) })
 }
 
+pub(crate) fn channel_layout(channels: u16) -> ffmpeg::ChannelLayout {
+    let standard = ffmpeg::ChannelLayout::default(i32::from(channels));
+    if !standard.is_empty() {
+        return standard;
+    }
+    let mut mask = ffmpeg::ChannelLayout::_22POINT2.bits();
+    while mask.count_ones() > u32::from(channels) {
+        mask &= !(1 << mask.ilog2());
+    }
+    let (left, right) = (ffi::AV_CH_TOP_FRONT_LEFT, ffi::AV_CH_TOP_FRONT_RIGHT);
+    if mask & (left | right) == left {
+        mask ^= left | ffi::AV_CH_TOP_FRONT_CENTER;
+    }
+    // SAFETY: the layout is a plain struct that `av_channel_layout_from_mask` fills.
+    unsafe {
+        let mut layout: ffi::AVChannelLayout = std::mem::zeroed();
+        ffi::av_channel_layout_from_mask(&mut layout, mask);
+        layout.into()
+    }
+}
+
 pub(crate) struct Resampler {
     swr: *mut ffi::SwrContext,
     channels: usize,
@@ -52,8 +73,7 @@ impl Resampler {
             } else {
                 ffi::av_channel_layout_copy(&mut in_layout, &f.ch_layout);
             }
-            let mut out_layout: ffi::AVChannelLayout = std::mem::zeroed();
-            ffi::av_channel_layout_default(&mut out_layout, i32::from(channels));
+            let mut out_layout: ffi::AVChannelLayout = channel_layout(channels).into();
             let mut swr = std::ptr::null_mut();
             let ret = ffi::swr_alloc_set_opts2(
                 &mut swr,
@@ -85,8 +105,7 @@ impl Resampler {
 
     pub(crate) fn between(from: u32, to: u32, channels: u16) -> Result<Self> {
         unsafe {
-            let mut layout: ffi::AVChannelLayout = std::mem::zeroed();
-            ffi::av_channel_layout_default(&mut layout, i32::from(channels));
+            let mut layout: ffi::AVChannelLayout = channel_layout(channels).into();
             let flt = ffi::AVSampleFormat::AV_SAMPLE_FMT_FLT;
             let mut swr = std::ptr::null_mut();
             let ret = ffi::swr_alloc_set_opts2(
