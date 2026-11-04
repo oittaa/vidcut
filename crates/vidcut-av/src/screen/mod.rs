@@ -10,6 +10,7 @@ use crate::player::{Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
 use vidcut_core::model::{Hdr, WipeDirection};
 use vidcut_core::place::{Blurring, Level, Placing, chain, lettered};
+use vidcut_core::preferences::Scope;
 use vidcut_core::render::{Moving, Placed, Shift, Wipe};
 
 #[cfg(any(target_os = "linux", windows))]
@@ -20,6 +21,7 @@ mod gate;
 pub(crate) mod held;
 pub(crate) mod light;
 mod out;
+pub mod scope;
 mod shared;
 #[cfg(any(target_os = "linux", windows))]
 mod vulkan;
@@ -70,6 +72,7 @@ pub struct Gpu {
     encoders: out::Encoders,
     held: held::Pipes,
     light: OnceLock<light::Pipes>,
+    scope: OnceLock<scope::Pipes>,
     blur: blur::Pipes,
 }
 
@@ -671,6 +674,7 @@ impl Gpu {
             encoders: out::Encoders::new(device, &shader),
             held: held::Pipes::new(device),
             light: OnceLock::new(),
+            scope: OnceLock::new(),
             blur: blur::Pipes::new(device, &shader),
         }
     }
@@ -1019,10 +1023,20 @@ pub struct Screen {
     encoded: out::Encoded,
     spent: (std::time::Duration, std::time::Duration),
     blurred: blur::Blurred,
+    scoping: bool,
+    drawn_scoping: bool,
+    draws: u64,
+    plots: scope::Plots,
 }
 
 struct Letters {
     picture: Arc<TitlePicture>,
+    tiles: Vec<LetterTile>,
+}
+
+struct LetterTile {
+    at: (u32, u32),
+    size: (u32, u32),
     params: wgpu::Buffer,
     bind: wgpu::BindGroup,
 }
@@ -1234,21 +1248,85 @@ fn letter(
             continue;
         };
         pass.set_pipeline(lettering);
-        pass.set_bind_group(0, &l.bind, &[]);
-        pass.draw(0..3, 0..1);
+        for tile in &l.tiles {
+            pass.set_bind_group(0, &tile.bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
     }
 }
 
 impl Letters {
     fn new(gpu: &Gpu, picture: &Arc<TitlePicture>) -> Self {
-        let size = wgpu::Extent3d {
-            width: picture.width.max(1),
-            height: picture.height.max(1),
+        let (width, height) = (picture.width.max(1), picture.height.max(1));
+        let most = gpu.device.limits().max_texture_dimension_2d;
+        let mut tiles = Vec::new();
+        for y in (0..height).step_by(most as usize) {
+            for x in (0..width).step_by(most as usize) {
+                let size = (most.min(width - x), most.min(height - y));
+                tiles.push(LetterTile::new(gpu, picture, (x, y), size));
+            }
+        }
+        Self {
+            picture: picture.clone(),
+            tiles,
+        }
+    }
+
+    fn place(&self, gpu: &Gpu, size: (u32, u32), t: &TitleOver, colors: Option<Hdr>) {
+        let p = &self.picture;
+        let (fw, fh) = (f64::from(p.frame.0.max(1)), f64::from(p.frame.1.max(1)));
+        let (sx, sy) = (f64::from(size.0) / fw, f64::from(size.1) / fh);
+        let frame = (f64::from(size.0), f64::from(size.1));
+        let placing = (!t.placed.is_empty()).then(|| Placing::whole(&t.placed, frame));
+        for tile in &self.tiles {
+            let (pw, ph) = (f64::from(tile.size.0), f64::from(tile.size.1));
+            let (left, top) = (
+                f64::from(p.left + t.dx) + f64::from(tile.at.0),
+                f64::from(p.top + t.dy) + f64::from(tile.at.1),
+            );
+            let own = lettered(
+                [f64::from(t.turn[0]) * sx, f64::from(t.turn[1]) * sy],
+                f64::from(t.turn[2]),
+                f64::from(t.turn[3]),
+                [left * sx, top * sy],
+            );
+            let own = chain(
+                &own,
+                &[
+                    1.0 / (pw * sx),
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0 / (ph * sy),
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
+            );
+            let map = placing
+                .as_ref()
+                .map_or(own, |l| chain(&l.inner(frame), &own));
+            let keep = if t.turn[3] == 0.0 {
+                KEEP_ALL
+            } else {
+                [-left / pw, -top / ph, (fw - left) / pw, (fh - top) / ph]
+            };
+            let bytes = lettering_of(map, keep, f64::from(t.alpha), placing.as_ref(), colors);
+            gpu.queue.write_buffer(&tile.params, 0, &bytes);
+        }
+    }
+}
+
+impl LetterTile {
+    fn new(gpu: &Gpu, picture: &TitlePicture, at: (u32, u32), size: (u32, u32)) -> Self {
+        let extent = wgpu::Extent3d {
+            width: size.0,
+            height: size.1,
             depth_or_array_layers: 1,
         };
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("vidcut title"),
-            size,
+            size: extent,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -1262,11 +1340,11 @@ impl Letters {
                 texture.as_image_copy(),
                 &picture.rgba,
                 wgpu::TexelCopyBufferLayout {
-                    offset: 0,
+                    offset: (at.1 as usize * row + at.0 as usize * 4) as u64,
                     bytes_per_row: Some(row as u32),
-                    rows_per_image: Some(picture.height),
+                    rows_per_image: Some(size.1),
                 },
-                size,
+                extent,
             );
         }
         let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -1295,41 +1373,11 @@ impl Letters {
             ],
         });
         Self {
-            picture: picture.clone(),
+            at,
+            size,
             params,
             bind,
         }
-    }
-
-    fn place(&self, gpu: &Gpu, size: (u32, u32), t: &TitleOver, colors: Option<Hdr>) {
-        let p = &self.picture;
-        let (fw, fh) = (f64::from(p.frame.0.max(1)), f64::from(p.frame.1.max(1)));
-        let (sx, sy) = (f64::from(size.0) / fw, f64::from(size.1) / fh);
-        let (w, h) = (
-            f64::from(p.width.max(1)) * sx,
-            f64::from(p.height.max(1)) * sy,
-        );
-        let own = lettered(
-            [f64::from(t.turn[0]) * sx, f64::from(t.turn[1]) * sy],
-            f64::from(t.turn[2]),
-            f64::from(t.turn[3]),
-            [f64::from(p.left + t.dx) * sx, f64::from(p.top + t.dy) * sy],
-        );
-        let own = chain(&own, &[1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0]);
-        let frame = (f64::from(size.0), f64::from(size.1));
-        let placing = (!t.placed.is_empty()).then(|| Placing::whole(&t.placed, frame));
-        let map = placing
-            .as_ref()
-            .map_or(own, |l| chain(&l.inner(frame), &own));
-        let keep = if t.turn[3] == 0.0 {
-            KEEP_ALL
-        } else {
-            let (left, top) = (f64::from(p.left + t.dx), f64::from(p.top + t.dy));
-            let (pw, ph) = (f64::from(p.width.max(1)), f64::from(p.height.max(1)));
-            [-left / pw, -top / ph, (fw - left) / pw, (fh - top) / ph]
-        };
-        let bytes = lettering_of(map, keep, f64::from(t.alpha), placing.as_ref(), colors);
-        gpu.queue.write_buffer(&self.params, 0, &bytes);
     }
 }
 
@@ -1453,7 +1501,8 @@ impl Screen {
                 && self.drawn_placed == placed
                 && self.drawn_crosses == crosses
                 && self.drawn_kernels == kernels
-                && self.drawn_colors == colors;
+                && self.drawn_colors == colors
+                && self.drawn_scoping == self.scoping;
             if same {
                 return Drawn::Same;
             }
@@ -1618,7 +1667,7 @@ impl Screen {
         }
         let mut moves = self.moves.iter();
         let blending = binds.iter().any(|b| b.3 != 0);
-        let floats = self.exported || colors.is_some() || blending || n > 1;
+        let floats = self.exported || self.scoping || colors.is_some() || blending || n > 1;
         if !floats {
             self.wide = None;
         } else if self
@@ -1865,6 +1914,8 @@ impl Screen {
         self.drawn_crosses = crosses.to_vec();
         self.drawn_kernels = kernels.to_vec();
         self.drawn_colors = colors;
+        self.drawn_scoping = self.scoping;
+        self.draws += 1;
         drawn
     }
 }
@@ -2792,65 +2843,97 @@ impl Slot {
 
 impl Screen {
     pub fn read(&self, gpu: &Gpu) -> Option<Image> {
-        let target = self.target.as_ref()?;
-        let (w, h) = target.size;
-        let row = w * 4;
-        let padded =
-            row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("vidcut screenshot"),
-            size: u64::from(padded) * u64::from(h),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = gpu
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("vidcut screenshot"),
-            });
-        encoder.copy_texture_to_buffer(
-            target.texture.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded),
-                    rows_per_image: Some(h),
-                },
-            },
-            wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-        );
-        let submission = gpu.submit([encoder.finish()]);
-        let slice = buffer.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel::<Result<(), wgpu::BufferAsyncError>>();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        gpu.device
-            .poll(wgpu::PollType::Wait {
-                submission_index: Some(submission),
-                timeout: Some(std::time::Duration::from_secs(5)),
-            })
-            .ok()?;
-        rx.recv().ok()?.ok()?;
-        let mapped = slice.get_mapped_range().ok()?;
-        let mut rgba = Vec::with_capacity((row * h) as usize);
-        for y in 0..h as usize {
-            let start = y * padded as usize;
-            rgba.extend_from_slice(&mapped[start..start + row as usize]);
+        read_target(gpu, self.target.as_ref()?)
+    }
+
+    pub fn scoping(&mut self, on: bool) {
+        self.scoping = on;
+    }
+
+    pub fn scopes(&mut self, gpu: &Gpu, wanted: &[(Scope, (u32, u32))]) -> bool {
+        if wanted.is_empty() {
+            self.plots.drop_all();
+            return false;
         }
-        drop(mapped);
-        buffer.unmap();
-        Some(Image {
+        let Some(target) = self.target.as_ref() else {
+            return false;
+        };
+        let canvas = self.wide.as_ref().map_or(&target.view, |w| &w.view);
+        self.plots.paint(
+            gpu,
+            (canvas, target.size),
+            (self.drawn_colors, self.draws),
+            wanted,
+        )
+    }
+
+    pub fn scope_views(&self) -> Vec<(Scope, u64, wgpu::TextureView)> {
+        self.plots.views()
+    }
+
+    pub fn read_scope(&self, gpu: &Gpu, scope: Scope) -> Option<Image> {
+        read_target(gpu, self.plots.target(scope)?)
+    }
+}
+
+fn read_target(gpu: &Gpu, target: &Target) -> Option<Image> {
+    let (w, h) = target.size;
+    let row = w * 4;
+    let padded =
+        row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vidcut screenshot"),
+        size: u64::from(padded) * u64::from(h),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("vidcut screenshot"),
+        });
+    encoder.copy_texture_to_buffer(
+        target.texture.as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded),
+                rows_per_image: Some(h),
+            },
+        },
+        wgpu::Extent3d {
             width: w,
             height: h,
-            rgba,
+            depth_or_array_layers: 1,
+        },
+    );
+    let submission = gpu.submit([encoder.finish()]);
+    let slice = buffer.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), wgpu::BufferAsyncError>>();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    gpu.device
+        .poll(wgpu::PollType::Wait {
+            submission_index: Some(submission),
+            timeout: Some(std::time::Duration::from_secs(5)),
         })
+        .ok()?;
+    rx.recv().ok()?.ok()?;
+    let mapped = slice.get_mapped_range().ok()?;
+    let mut rgba = Vec::with_capacity((row * h) as usize);
+    for y in 0..h as usize {
+        let start = y * padded as usize;
+        rgba.extend_from_slice(&mapped[start..start + row as usize]);
     }
+    drop(mapped);
+    buffer.unmap();
+    Some(Image {
+        width: w,
+        height: h,
+        rgba,
+    })
 }
 
 fn make_target(device: &wgpu::Device, size: (u32, u32)) -> Target {
@@ -2909,14 +2992,15 @@ fn d3d11_shared_for(
             .map(|image| (image, false))
             .ok_or_else(|| "no shared texture came free".into());
     }
-    if pool.len() >= 2 * MAX_SHARED {
+    while pool.len() >= 2 * MAX_SHARED {
         let oldest = pool
             .iter()
             .find(|(_, s)| !s.busy.load(Ordering::Acquire))
             .map(|(image, _)| *image);
-        if let Some(oldest) = oldest {
-            pool.remove(&oldest);
-        }
+        let Some(oldest) = oldest else {
+            break;
+        };
+        pool.remove(&oldest);
     }
     let shared = share_d3d11(gpu, frame, formats)?;
     let image = shared.image;

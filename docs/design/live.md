@@ -104,6 +104,7 @@ Ducking:
 - `Workspace::ducking_controls` puts Ducking, its sources and its Amount on each strip of the Mixer.
 - Each change is one `track.set` with `duck`, thus one undo step. The Amount goes when its drag ends.
 - Advanced opens the Ducking window (`Workspace::ducking_windows`). Apply sends its values in one `track.set`.
+- The graph of that window sends `analyze.ducking` with the values of the window (`Workspace::ask_graph`). It asks again when the values or the project change, or when the playhead leaves the frames that it has.
 - Alt+D turns ducking on or off for the track of the selected clip (`Workspace::toggle_duck`).
 - Before a change that needs the speech detector, the GUI asks to download it (`Workspace::duck`).
 
@@ -273,6 +274,8 @@ The bar and the Jobs button:
 
 - The view state is the selected edit points (`TimelineView::edit`, `TimelineView::edits`) and the selected dissolve (`TimelineView::transition`). It is also the target track, the zoom, the Timeline Options and the open windows.
 - `timeline.json` keeps the target track, the zoom and the Timeline Options. Requests reach the view state through `Renderer::gui`.
+- `LeftTab::Hidden` is the left area with no tab open. Each place that opens a tab sets `Workspace::left`, thus it also shows the area.
+  - The tabs then are a row above the viewer (`Workspace::left_tick`). Thus the tab that hid the pool stays in reach.
 - The Trim Editor shows the selected edit while the player is stopped (`Workspace::trim_editor_edit`). A drag of its handles holds the trim (`TimelineView::strip_drag`), shows it (`Workspace::strip_drawn`), and sends it on release.
 
 **Trims of the selected edits.**
@@ -341,6 +344,9 @@ The bar and the Jobs button:
 - T, Shift+T, Alt+T, the clip menu, the Tools row (`Workspace::picture_tools_row`) and `gui.show` set the viewer's tool (`placing::Grab`).
 - `Guides::overlay` builds the framing and safe-area guides in egui, not `Screen::draw`. Thus an export leaves them out ([deviation X80](../deviations.md#x80-safe-area-guides-skip-the-trim-editor-and-dynamic-trim)).
 - `viewer.guides` changes `ViewerPrefs`. The snapshot carries `guides` and `show_super_scale`.
+- `viewer.scopes` changes `ViewerPrefs` too, and the snapshot carries `scopes`.
+  - `Workspace::scopes_menu` is in the View menu and in the header of the viewer. Each button sends `viewer.scopes`.
+  - `Workspace::scope_column` takes a column at the right of the viewer's area. `Workspace::paint_scopes` paints each scope with its marks in egui ([gpu](gpu.md#the-scopes)).
 - `Workspace::picture_controls` boxes the handles through the `place::Placing` of the picture ([deviation X65](../deviations.md#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).
   - The handles work about the anchor point (`Shown::pivot`, from `place::anchored`).
   - A move snaps the middle of the picture as drawn, not its `position`.
@@ -422,6 +428,20 @@ The bar and the Jobs button:
 - `vidcut-import-drop` queues the files as one pick, and each folder as another (`PickedFolder::read`).
 - A drop goes into the open bin. Why: winit does not report where files drop, and does not report drops on Wayland.
 
+**The pool's box.**
+
+- `Workspace::pool_box` draws the box from a drag on the background of the pool. `paint::marquee` draws it, as on the timeline.
+- `BinsUi::places` holds the place of each media item that the view shows. Why: a view draws only the rows in view, and a box can reach past them.
+- `Boxing` keeps the start of the box from the top of the content. Thus the start stays on its clip when the wheel scrolls the pool.
+- On release, one `selection.set` carries the new selection (`boxed`).
+
+**The pool's cards** ([spec §3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675)).
+
+- `Workspace::cards` draws the Metadata view. `cluster` gives the heading of each card. Each run of one heading is a block of rows, and only the rows in view are drawn.
+- `Workspace::tile_picture` draws the picture of a tile and of a card.
+- `PoolView::media` gives the order. With `PoolMode::Metadata` and `PoolSort::Name`, it goes by `first_letter` and then by timecode.
+  - Why: Source Tape reads the same order. Thus `pool.set` refreshes the tape when the view goes to or from the cards.
+
 **Media details.**
 
 - The metadata strip of the pool (`Workspace::metadata_strip`) shows what the project keeps of the chosen media (`clip_info::glance`). `pool.json` in the config folder keeps it on or off.
@@ -464,19 +484,24 @@ The bar and the Jobs button:
 **The Sync Bin** ([spec §7.4](../cut-page-spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
 
 - `LeftTab::SyncBin` is only a state of the GUI. Live has no Sync Bin mode. Thus the grid runs on `ViewerMode::Timeline`, and the transport and the sound stay the timeline's.
-- `multicam::sync_rows` works out the rows at a time. `ops::file_start_at` gives the place of a file by the rule of Source Overwrite with no marks. Thus the rows and the edit agree.
+- `multicam::sync_rows` works out the rows at a time, from the stored rows of a group or by `ruled_rows` on the timecodes. A `SyncRow` holds its files, and `media` and `frame` name the file at that time.
+- `multicam::group_of_bin` chooses the group. With two groups or more, it takes the group of the clip at the playhead.
+- `ops::file_start_at` gives the place of a file by the clip at the playhead, because the rows follow that clip's source timecode. It takes the group of the rows, because a file of those rows can have a newer group.
 - `multicam::pick` sets the source marks. The GUI then sends `viewer.load`, so the chosen camera is an ordinary source clip: its marks, scroll area and edits need nothing more.
 - The player stops at the end of its plan. Thus `SyncBin` holds a playhead past the timeline's end for the GUI, and the requests take it as `at`.
 - `Workspace::sync_overwrite` waits for the answer of the edit with `Ask`, because only a done edit returns to the grid.
 
 **The Sync Clips window** ([spec §7.5](../cut-page-spec.md#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)).
 
-- `SyncClips` holds the places in the GUI. Only Save Sync writes to the project, so Cancel has nothing to undo and the history has one entry.
-- Auto Sync sends `multicam.layout` with `Ask`, because a sync by sound can take long and must not hold the window.
-- The pictures come from `Workspace::camera_cells`, the code of the grid. They use `Cells`, so the viewer draws no grid while the window is open.
-- `multicam::sync_clips_files` gives the files of the icon. `multicam::cameras` stays the listing of the Sync Bin, because the Sync Bin has its own refusals.
-- `multicam::close_far_gaps` is the one place for the rules of far gaps and of the earliest row. The window calls it at each change, and `multicam.set` and `multicam.create` call it on what they store.
-- A row keeps `hidden` beside `at`. A drag or a nudge works on their sum, the real time, so a closed gap can open again and the ruler keeps its labels.
+- `SyncClips` holds the rows in the GUI, as `GroupRow` values. Only Save Sync writes to the project, so Cancel has nothing to undo and the history has one entry.
+- Auto Sync sends `multicam.layout` with `Ask`, because a sync by sound can take long and must not hold the window. `SyncClips` keeps `files`, all files at open, so a file that a drag dropped comes back.
+- The pictures come from `Workspace::camera_cells`, the code of the grid. They use `Cells`, so the viewer draws no grid while the window is open. `Cells` and `Screens` grow with the number of cells.
+- A file with no picture has no engine. `sync_film` draws its waveform with `wave_columns`, the code of the timeline and the pool. `camera_cells` draws a waveform symbol.
+- `multicam::sync_clips_files` gives what the icon opens, a `SyncOpen`: one saved group, or the files of a new sync. It works out the rows, because fewer than two files left give no window.
+- Save Sync sends all `files` to `multicam.create`. A file that no row holds thus goes on `SyncGroup.dropped`.
+- `multicam::settle` is the one place for the rules of far gaps and of the earliest row. The window calls it at each change, and `multicam.set` and `multicam.create` call it on what they store.
+- A clip keeps `hidden` beside `at`. A drag or a nudge works on their sum, the real time, so a closed gap can open again and the ruler keeps its labels.
+- `multicam::shift_clip` moves a clip and `multicam::drop_clip` cuts the other clips of its row. The window and `multicam.place` call both. A drag works on a copy of the rows from its start, so a clip that it passes does not lose frames.
 - `multicam::ruler_start` gives the base of the ruler. It reads only the timecodes of the files, so it does not change when rows move. The start of the group is a separate value.
 - The sound has its own `Player`, made at the first Play, on the real output. `render::places_sound` gives it a black picture and one sound lane for each row.
 - That `Player` reuses the engine's mix, which adds lanes with no scaling. `Player::set_lane_gain` silences the other lanes under Solo. Each new plan clears the gains, so `SyncClips::hear` sets them again.

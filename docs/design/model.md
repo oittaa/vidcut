@@ -30,6 +30,7 @@ classDiagram
     info: MediaInfo
     color_space, super_scale, left_out
     sequence, subtitles, words
+    subclip, markers
   }
   class Proxy {
     file, codec
@@ -164,19 +165,27 @@ Stills ([D38](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
 
 Multicam layout:
 
-- `multicam::layout` works out where the angles of a multicam clip lie (spec §3).
+- `multicam::layout` works out where the files of a multicam clip lie (spec §3).
 - It works in frames at the project's rate. A start timecode at another rate rounds down (`StartTimecode::frames_at`).
-- `Layout` is the answer to `multicam.layout`.
+- `Layout` is the answer to `multicam.layout`. `ruled_rows` makes its rows: `camera_row` for each camera name by the row rule, then `rows_with_no_name`.
 - `by_sound` joins the files by the best `SoundMatch` first, while the score reaches `SOUND_MATCH_SCORE`.
   - `Env::sound_match` compares two files by the levels that `Env::audio_levels` keeps. Thus a sync decodes a file once.
   - `vidcut_av::analysis::sound_match` correlates the rises of the level, because a rise does not depend on the microphone's level.
   - The score grows with the length that the two files have in common, so a short overlap does not match by chance.
   - A triangle over the lags (`SMEAR`) finds the middle of a broad peak, which is what drift gives.
 - `Project.groups` stores `SyncGroup`, the result of `multicam.create`. It is a list beside `Project.media`, because a group has no file.
-- A `GroupAngle` stores only the media, `at`, `hidden` and `locked`, since each file stays whole. `multicam.list` works out `frames` from the media.
-- `at` is the place in the group, with far gaps closed. `hidden` holds the closed frames before the file, so `at` plus `hidden` is the place in real time. The file leaves `hidden` out at 0.
-- `locked` is the sync lock of the Sync Clips window. The file leaves it out when it is off.
-- `start`, `at`, `hidden` and `marks` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
+- A `SyncGroup` stores `GroupRow` values. The row is stored because a camera name that changes later must not move a file until Auto Sync.
+- `Project::group_of` takes the newest group that holds a file, the last in `Project.groups`. A file can be in more than one group, because the Sync Clips window makes a new group from files of two groups.
+- `SyncGroup.dropped` lists the files that the row rule or a drag took off its rows. The Sync Clips icon needs the list, because such a file is still in the bin and is not a new file. The file leaves out `dropped` when it is empty.
+- A `GroupRow` has its `camera`, `locked` and its `clips`. The file leaves out `camera` for a file with no camera name, and `locked` when it is off.
+- `multicam::row_camera` gives the name of a row. A row with no name takes its number among those rows.
+- `locked` is the sync lock of the Sync Clips window. It is for each row.
+- A `GroupClip` stores the media, `at`, `hidden`, `head` and `tail`. `multicam.list` works out `frames` from the media.
+- `at` is the place of the first visible frame in the group, with far gaps closed. `hidden` holds the closed frames before it, so `at` plus `hidden` is the place in real time.
+- `head` and `tail` are the frames that the file loses at each end. The file leaves `hidden`, `head` and `tail` out at 0.
+- `GroupClip::start` is the place of the file's own first frame. `SyncGroup::at_of` gives it. It can be below 0 when the earliest clip has a head.
+- `multicam::row_file_at` gives the file of a row at a frame of the group.
+- `start`, `at`, `hidden`, `head`, `tail` and `marks` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
 - `multicam::marked_range` turns the `marks` of a group into a range of one file. Thus one pair of marks holds for each file.
 
 Media fields:
@@ -193,6 +202,18 @@ Media fields:
   - Each edit of the media leaves these frames out. `resolve_sources` cuts each source range around them (`model::uncovered`).
   - An edit that fills the timeline In to Out can need more frames than the range. Then the frames after the range also skip them (`fit_to`).
 - `words` holds the words that the project takes from the transcripts of each sound stream (`ChosenWords`, [analysis](analysis.md)).
+- `subclip` (`Subclip`) makes the item one part of its file (`media.subclip`, `ops::create_subclip`).
+  - `info` still tells about the whole file. `Project::file_frames` gives its length, and `Project::media_frames` gives the length of the part.
+  - The source frames of a subclip count from the start of the part. `Media::origin` adds `Media::skipped`, thus the render pieces and the measurements find the right part of the file.
+  - The start is in seconds. Thus a change of the project rate does not change it.
+  - The measurements, transcripts, proxies and waveforms belong to the file. A subclip uses them as they are.
+  - Word times are in seconds of the file. `analysis::words_in` takes the skipped seconds to place them.
+  - `Media::timecode_at` gives the source timecode of its first frame.
+  - `Tiles::job` keeps no blocks on disk for a subclip, because the blocks count the frames of the whole file.
+  - `PoolFiles` and `otio::same_media` never take a subclip for its file.
+  - An OTIO file gives a clip of a subclip as a clip of the whole file, at the right time.
+  - `Speakers::share` gives a new subclip the people of its parent.
+- `markers` holds the markers on the source clip, at its source frames (`ops::add_source_marker`). `Project::marker` finds a marker by id in the timeline or in a source clip.
 
 Folders:
 
@@ -597,6 +618,7 @@ The file:
 - Preferences are not in the project. They are in `preferences.toml` in the config dir (`preferences::path`).
 - The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services and viewer ([the disk cache limit](analysis.md#the-disk-cache-limit)).
 - `ViewerPrefs.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
+- `ViewerPrefs.scopes` (`Scopes`) holds which scopes of the viewer are on.
 - No key of a service is ever in the file.
 
 Requests:
@@ -607,8 +629,9 @@ Requests:
 - `preferences.reset` keeps the old file under the first free backup name (`preferences.toml.bak`, then `.bak.2` and on), then writes the defaults. Why: a second reset never replaces the backup of the first.
 - `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it, and replaces the file atomically.
 - `viewer.guides` changes the same `Guides` (`Guides::applied`). With no fields, it toggles the framing guides.
+- `viewer.scopes` changes the same `Scopes` (`ScopesPatch`). With no fields, it tells which scopes are on.
 - Code reads the file when it needs a value (`preferences::load`).
-- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words, the viewer guides and the render cache.
+- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words and the render cache. It also follows the viewer guides and the viewer scopes.
 
 Reset:
 

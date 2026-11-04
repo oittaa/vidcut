@@ -134,6 +134,14 @@ fn hlg_encode(light: f64) -> f64 {
     }
 }
 
+pub fn pq_code(nits: f64) -> f64 {
+    pq_encode(nits / 10000.0)
+}
+
+pub fn hlg_code(nits: f64) -> f64 {
+    hlg_encode((nits / 1000.0).max(0.0).powf(1.0 / HLG_GAMMA))
+}
+
 fn hlg_decode(code: f64) -> f64 {
     match code.max(0.0) {
         c if c <= 0.5 => c * c / 3.0,

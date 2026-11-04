@@ -3,12 +3,13 @@ use vidcut_core::model::Project;
 use vidcut_core::ops::{self, Edge};
 use vidcut_core::otio::tied;
 
-use super::{EditSel, Side, audio_edit_outgoing, ripples};
+use super::{EditSel, Side, audio_edge, audio_edit_at, ripples};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Cut {
     Roll(String),
     Audio(String),
+    AudioHead(String),
     Tail(String),
     Head(String),
 }
@@ -17,7 +18,10 @@ impl Cut {
     pub fn of(p: &Project, e: &EditSel) -> Option<Self> {
         let t = p.track(&e.track.id())?;
         if e.side == Side::Audio {
-            return audio_edit_outgoing(t, e.at).map(Self::Audio);
+            return audio_edit_at(t, e.at).map(|(id, edge)| match edge {
+                Edge::Tail => Self::Audio(id),
+                Edge::Head => Self::AudioHead(id),
+            });
         }
         let out = t.clips.iter().find(|c| c.end() == e.at);
         let inc = t.clips.iter().find(|c| c.start == e.at);
@@ -31,18 +35,23 @@ impl Cut {
 
     pub fn clip(&self) -> &str {
         match self {
-            Self::Roll(id) | Self::Audio(id) | Self::Tail(id) | Self::Head(id) => id,
+            Self::Roll(id)
+            | Self::Audio(id)
+            | Self::AudioHead(id)
+            | Self::Tail(id)
+            | Self::Head(id) => id,
         }
     }
 
     pub fn rolls(&self) -> bool {
-        matches!(self, Self::Roll(_) | Self::Audio(_))
+        matches!(self, Self::Roll(_) | Self::Audio(_) | Self::AudioHead(_))
     }
 
     pub fn apply(&self, p: &mut Project, by: i64) -> vidcut_core::Result<()> {
         match self {
             Self::Roll(id) => ops::roll(p, id, Edge::Tail, by),
             Self::Audio(id) => ops::audio_roll(p, id, Edge::Tail, by),
+            Self::AudioHead(id) => ops::audio_roll(p, id, Edge::Head, by),
             Self::Tail(id) => ops::trim(p, id, Edge::Tail, by, None),
             Self::Head(id) => ops::trim(p, id, Edge::Head, by, None),
         }
@@ -52,6 +61,7 @@ impl Cut {
         let (method, edge) = match self {
             Self::Roll(_) => ("edit.roll", "tail"),
             Self::Audio(_) => ("edit.audio_roll", "tail"),
+            Self::AudioHead(_) => ("edit.audio_roll", "head"),
             Self::Tail(_) => ("edit.trim", "tail"),
             Self::Head(_) => ("edit.trim", "head"),
         };
@@ -61,7 +71,8 @@ impl Cut {
     pub fn at(&self, p: &Project) -> Option<i64> {
         let c = p.clip(self.clip())?;
         Some(match self {
-            Self::Audio(_) => c.end() + c.audio.as_ref().map_or(0, |a| a.tail),
+            Self::Audio(_) => audio_edge(c, Edge::Tail)?,
+            Self::AudioHead(_) => audio_edge(c, Edge::Head)?,
             Self::Head(_) => c.start,
             Self::Roll(_) | Self::Tail(_) => c.end(),
         })
@@ -153,7 +164,7 @@ impl Plan {
                     });
                     std::iter::once(id.clone()).chain(incoming).collect()
                 }
-                Cut::Audio(_) => Vec::new(),
+                Cut::Audio(_) | Cut::AudioHead(_) => Vec::new(),
             })
             .collect()
     }

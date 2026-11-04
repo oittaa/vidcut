@@ -98,6 +98,7 @@ flowchart TD
 - Apple silicon has one shared budget.
 - While an AI upscaler holds GPU memory, the video budget is smaller (`store::Lent`, [gpu](gpu.md)).
 - The least recently used pictures go first, whichever engine decoded them. The prepared picture of each engine never goes (`Store::hold`).
+- `Store::kept_run` and `Store::touch` make their ids in small batches, outside the lock. They take the lock for one batch at a time. Why: the decoding threads and the presenter wait on this lock, and a long run must not hold them up.
 - An engine can show a picture that another engine decoded, by its `Id`.
 - Each engine plans its decoding with its part of the budget (`Config::part`). When the last engine ends, the cache empties.
 
@@ -182,7 +183,7 @@ flowchart TD
   - A drawing's top is on a whole pixel. A moved block goes by whole pixels between the rounded middles. Thus it lands on the same row as a new drawing at that place.
 - `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan.
 - `Player::present` hands each block of a title of a frame as a `TitleOver`:
-  - the picture, in premultiplied RGBA, and how many layers go under it
+  - the picture, in premultiplied RGBA, and how many layers go under it. A picture larger than the largest texture of the GPU goes in parts (`LetterTile`), for example a long scroll.
   - its move from how it was drawn: its place, zoom and rotation, or the `Run::top` of a scroll. The viewer's shader does the transform.
   - For a turned title, the shader first cuts the picture at the edges of the frame (`Lettering`).
   - its level, from a fade or its opacity (`Lettering`)
@@ -297,6 +298,7 @@ The audio device:
     - A Push blurs the whole result. A Slide mixes the blur in by the part of the box that the moving side covers.
     - Why: these rules give Resolve's renders within about 1 pixel ([gotchas](../gotchas.md#resolves-otio-files)).
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
+- With a scope on, each turn also calls `Screen::scopes` after `Screen::draw` ([gpu](gpu.md#the-scopes)). `Viewer::sync_scopes` shows each scope's target in the same way.
 - A present answers with the frame drawn, if it is exact. A `gui.screenshot` of the viewer reads the target back, to the pixel.
 - Submissions go through `Gate::pass`. They wait until the UI thread runs `logic` or `ui`, because eframe configures the surface of the window outside these. If the UI is away for long, submissions do not wait.
 
@@ -348,7 +350,7 @@ Faders:
 - In each UI frame, `Player::follow` gives each engine its frame and the speed of the trim. The engine decodes ahead as if it plays.
 - The windows behind decode on `vidcut-play-windows`: one at a time across the followed players, and none while a player moves forward.
 - `Screens` draws the cells with `Screen` on the UI thread. This needs no gate.
-- Multi Source, the Sync Bin grid and the Sync Clips window use the same `Cells`, up to `CELLS`. Each engine gets one part of the cache for each cell in use, four parts at the least.
+- Multi Source, the Sync Bin grid and the Sync Clips window use the same `Cells`. It has no limit of cells. Each engine gets one part of the cache for each cell in use, four parts at the least.
 - The Sync Clips window has one more engine for its sound, on the real output. Its plan has a black picture, so it decodes no frames (`render::places_sound`).
 
 The sound of a Dynamic Trim run:

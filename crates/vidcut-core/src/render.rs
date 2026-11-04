@@ -1647,14 +1647,7 @@ fn found<'a>(m: Option<&'a Media>, id: &str) -> Result<&'a Media> {
 }
 
 fn origin_of(m: &Media) -> (PathBuf, f64) {
-    let origin = m
-        .info
-        .video
-        .as_ref()
-        .map(|v| v.first_pts)
-        .or_else(|| m.info.audio.first().map(|a| a.first_pts))
-        .unwrap_or(0.0);
-    (m.path.clone(), origin)
+    (m.path.clone(), m.origin())
 }
 
 pub fn retime_of(c: &Clip, t: i64, m: &Media, s: &Settings) -> Retime {
@@ -2576,11 +2569,11 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
         .media(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
     Ok(match &m.info.video {
-        Some(v) => VideoPiece::Source {
+        Some(_) => VideoPiece::Source {
             pace: Default::default(),
             media: media.into(),
             path: m.path.clone(),
-            origin: v.first_pts,
+            origin: m.origin(),
             source_frame: at,
             frames: 1,
             image: p.media_image(media),
@@ -2606,7 +2599,8 @@ pub struct TapeEntry {
 }
 
 pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>)> {
-    laid_out(p, media, 0, 0)
+    let parts: Vec<(&str, i64, i64)> = media.iter().map(|m| (m.as_str(), 0, 0)).collect();
+    laid_out(p, &parts, 0, 0)
 }
 
 pub fn group_tape(
@@ -2614,23 +2608,47 @@ pub fn group_tape(
     group: &crate::model::SyncGroup,
     media: &str,
 ) -> Result<(RenderPlan, Vec<TapeEntry>)> {
-    let at = group
-        .at_of(media)
+    let c = group
+        .clips()
+        .find(|c| c.media == media)
         .ok_or_else(|| Error::not_found(format!("{media} is not in {}", group.id)))?;
     let end = crate::multicam::frames(p, group);
-    laid_out(p, &[media.to_string()], at, end)
+    laid_out(p, &[(media, c.head, c.tail)], c.at, end)
 }
 
-pub fn places_sound(p: &Project, places: &[(String, i64)]) -> Result<RenderPlan> {
+pub fn places_sound(p: &Project, rows: &[crate::model::GroupRow]) -> Result<RenderPlan> {
     let s = &p.settings;
-    let end = places
+    let sample = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
+    let end = rows
         .iter()
-        .filter_map(|(media, at)| Some(at + p.media_frames(p.media(media)?)))
+        .flat_map(|r| &r.clips)
+        .map(|c| c.at + crate::multicam::visible(p, c))
         .max()
         .unwrap_or(0);
-    let mut audio = Vec::with_capacity(places.len());
-    for (media, at) in places {
-        audio.append(&mut laid_out(p, std::slice::from_ref(media), *at, end)?.0.audio);
+    let mut audio = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut lane = Vec::new();
+        let mut t = 0;
+        for (i, c) in row.clips.iter().enumerate() {
+            let m = found(p.media(&c.media), &c.media)?;
+            push_audio(
+                &mut lane,
+                AudioPiece::Silence {
+                    samples: sample(c.at) - sample(t),
+                },
+            );
+            let next = row.clips.get(i + 1).map_or(i64::MAX, |n| n.at);
+            t = (c.at + crate::multicam::visible(p, c)).min(next);
+            let samples = sample(t) - sample(c.at);
+            push_audio(&mut lane, sound_of(p, m, c.head, samples));
+        }
+        push_audio(
+            &mut lane,
+            AudioPiece::Silence {
+                samples: sample(end) - sample(t),
+            },
+        );
+        audio.push(lane);
     }
     Ok(RenderPlan {
         fps: s.fps,
@@ -2648,9 +2666,31 @@ pub fn places_sound(p: &Project, places: &[(String, i64)]) -> Result<RenderPlan>
     })
 }
 
+fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
+    if m.info.audio.is_empty() {
+        return AudioPiece::Silence { samples };
+    }
+    let (path, origin) = origin_of(m);
+    AudioPiece::Source {
+        speed: 1.0,
+        joined: false,
+        media: m.id.clone(),
+        path,
+        stream: 0,
+        origin,
+        source_sample: p.settings.fps.frame_to_sample(head, p.settings.sample_rate),
+        samples,
+        gain_db: 0.0,
+        silent: false,
+        fade: None,
+        isolation: None,
+        keyed: None,
+    }
+}
+
 fn laid_out(
     p: &Project,
-    media: &[String],
+    parts: &[(&str, i64, i64)],
     first: i64,
     end: i64,
 ) -> Result<(RenderPlan, Vec<TapeEntry>)> {
@@ -2668,9 +2708,9 @@ fn laid_out(
             },
         );
     }
-    for id in media {
-        let m = found(pool.get(id.as_str()).copied(), id)?;
-        let frames = p.media_frames(m);
+    for (id, head, tail) in parts.iter().copied() {
+        let m = found(pool.get(id).copied(), id)?;
+        let frames = p.media_frames(m) - head - tail;
         if frames <= 0 {
             continue;
         }
@@ -2680,10 +2720,10 @@ fn laid_out(
                 &mut video,
                 VideoPiece::Source {
                     pace: Default::default(),
-                    media: id.clone(),
-                    path: path.clone(),
+                    media: id.to_string(),
+                    path,
                     origin,
-                    source_frame: 0,
+                    source_frame: head,
                     frames,
                     image: image_of(m),
                     color_space: m.color_space,
@@ -2699,32 +2739,11 @@ fn laid_out(
             push_video(&mut video, VideoPiece::black(frames));
         }
         let samples = sample(t + frames) - sample(t);
-        if m.info.audio.is_empty() {
-            push_audio(&mut lane, AudioPiece::Silence { samples });
-        } else {
-            push_audio(
-                &mut lane,
-                AudioPiece::Source {
-                    speed: 1.0,
-                    joined: false,
-                    media: id.clone(),
-                    path,
-                    stream: 0,
-                    origin,
-                    source_sample: 0,
-                    samples,
-                    gain_db: 0.0,
-                    silent: false,
-                    fade: None,
-                    isolation: None,
-                    keyed: None,
-                },
-            );
-        }
+        push_audio(&mut lane, sound_of(p, m, head, samples));
         entries.push(TapeEntry {
-            media: id.clone(),
-            start: t,
-            frames,
+            media: id.to_string(),
+            start: t - head,
+            frames: head + frames,
         });
         t += frames;
     }

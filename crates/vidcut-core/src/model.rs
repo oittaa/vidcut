@@ -293,7 +293,7 @@ pub fn proxy_size(width: u32, height: u32, longest: u32) -> (u32, u32) {
     (even(f64::from(w) * scale), even(f64::from(h) * scale))
 }
 
-/// A pool item that holds angles of one moment: whole files, lined up.
+/// A pool item that holds cameras of one moment: rows of files, lined up.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SyncGroup {
     /// `g<N>`, never reused.
@@ -304,33 +304,68 @@ pub struct SyncGroup {
     pub bin: String,
     /// The timecode of its first frame, as a frame count from 00:00:00:00.
     pub start: i64,
-    /// Its files, in angle order. A file is in one group at most.
-    pub angles: Vec<GroupAngle>,
+    /// Its rows, in camera order. A file can be in more than one group. The
+    /// newest group that holds it counts.
+    pub rows: Vec<GroupRow>,
+    /// The files that the row rule or a drag took off its rows. They are not
+    /// in the group, and the Sync Clips icon does not count them as new files.
+    /// Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped: Vec<String>,
     /// In and Out for all its files, in frames of the group.
     #[serde(default, skip_serializing_if = "Marks::is_empty")]
     pub marks: Marks,
 }
 
 impl SyncGroup {
+    pub fn clips(&self) -> impl Iterator<Item = &GroupClip> {
+        self.rows.iter().flat_map(|r| &r.clips)
+    }
+
     pub fn at_of(&self, media: &str) -> Option<i64> {
-        self.angles.iter().find(|a| a.media == media).map(|a| a.at)
+        self.clips()
+            .find(|c| c.media == media)
+            .map(GroupClip::start)
     }
 }
 
-/// A file of a synced group.
+/// A row of a synced group. The row keeps its files when a camera name
+/// changes later, until Auto Sync reads the names again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct GroupAngle {
-    pub media: String,
-    /// The frame of the group at which the file's first frame lies.
-    pub at: i64,
-    /// The frames of far gaps that the group closes before this file. `at`
-    /// plus `hidden` is the file's place in real time. Left out at 0.
-    #[serde(default, skip_serializing_if = "is_zero_frames")]
-    pub hidden: i64,
+pub struct GroupRow {
+    /// The camera name of its files. Left out for a file with no camera name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<String>,
     /// The sync lock: a drag or a nudge in the Sync Clips window does not
-    /// move the file.
+    /// move a file of this row.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,
+    /// Its files, in time order. They do not overlap.
+    pub clips: Vec<GroupClip>,
+}
+
+/// The visible part of a file on a row of a synced group.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GroupClip {
+    pub media: String,
+    /// The frame of the group at which the first visible frame lies.
+    pub at: i64,
+    /// The frames of far gaps that the group closes before this part. `at`
+    /// plus `hidden` is the part's place in real time. Left out at 0.
+    #[serde(default, skip_serializing_if = "is_zero_frames")]
+    pub hidden: i64,
+    /// The frames that the file loses at its start. Left out at 0.
+    #[serde(default, skip_serializing_if = "is_zero_frames")]
+    pub head: i64,
+    /// The frames that the file loses at its end. Left out at 0.
+    #[serde(default, skip_serializing_if = "is_zero_frames")]
+    pub tail: i64,
+}
+
+impl GroupClip {
+    pub fn start(&self) -> i64 {
+        self.at - self.head
+    }
 }
 
 /// A file in the media pool.
@@ -402,6 +437,23 @@ pub struct Media {
     /// `media`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtitles: Option<SubtitleFile>,
+    /// For a subclip (`media.subclip`), the part of the file it is. Its
+    /// source frames count from the start of that part. Left out for a
+    /// whole file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subclip: Option<Subclip>,
+    /// The markers on this source clip, at its source frames (`markers.add`
+    /// with `media`), in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<Marker>,
+}
+
+/// The part of a file that a subclip is, in seconds from the file's first
+/// frame.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Subclip {
+    pub start: f64,
+    pub end: f64,
 }
 
 /// The words a project takes from the transcripts of one sound stream.
@@ -814,6 +866,26 @@ impl Media {
 
     pub fn is_still(&self) -> bool {
         self.info.video.as_ref().is_some_and(|v| v.still)
+    }
+
+    pub fn skipped(&self) -> f64 {
+        self.subclip.map_or(0.0, |s| s.start)
+    }
+
+    pub fn origin(&self) -> f64 {
+        let first = self
+            .info
+            .video
+            .as_ref()
+            .map(|v| v.first_pts)
+            .or_else(|| self.info.audio.first().map(|a| a.first_pts))
+            .unwrap_or(0.0);
+        first + self.skipped()
+    }
+
+    pub fn timecode_at(&self, fps: Rational) -> f64 {
+        let file = self.info.timecode.map_or(0.0, |tc| tc.frames_at(fps));
+        file + self.skipped() * fps.as_f64()
     }
 
     pub fn sequence_file(&self, k: u64) -> Option<PathBuf> {
@@ -4519,7 +4591,8 @@ impl Project {
     pub fn group_of(&self, media: &str) -> Option<&SyncGroup> {
         self.groups
             .iter()
-            .find(|g| g.angles.iter().any(|a| a.media == media))
+            .rev()
+            .find(|g| g.clips().any(|c| c.media == media))
     }
 
     pub fn shown_clip(&self, playhead: i64) -> Option<&Clip> {
@@ -4604,6 +4677,13 @@ impl Project {
     }
 
     pub fn media_frames(&self, media: &Media) -> i64 {
+        match media.subclip {
+            Some(s) => self.frames_in(s.end - s.start),
+            None => self.file_frames(media),
+        }
+    }
+
+    pub fn file_frames(&self, media: &Media) -> i64 {
         let secs = match (&media.info.video, media.info.audio.first()) {
             (Some(v), _) if v.still => self.settings.still_secs,
             (Some(v), _) => v.duration,
@@ -4611,6 +4691,13 @@ impl Project {
             (None, None) => 0.0,
         };
         self.frames_in(secs)
+    }
+
+    pub fn marker(&self, id: &str) -> Option<&Marker> {
+        self.markers
+            .iter()
+            .chain(self.media.iter().flat_map(|m| &m.markers))
+            .find(|k| k.id == id)
     }
 
     pub fn media_limit(&self, media: &Media) -> i64 {

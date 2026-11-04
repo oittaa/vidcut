@@ -207,6 +207,22 @@ pub struct Heard<'a> {
     pub gain: Gain<'a>,
 }
 
+impl Heard<'_> {
+    pub fn peak(&self, frame: f64) -> Option<f64> {
+        let s = self.span;
+        if s.pace.speed() == 0.0 || frame < s.start as f64 || frame >= s.end as f64 {
+            return None;
+        }
+        let rate = f64::from(self.levels.per_second.max(1));
+        let at = s.time(frame);
+        let i = ((at - self.levels.start) * rate).floor() as i64;
+        let peak = usize::try_from(i)
+            .ok()
+            .and_then(|i| self.levels.peaks.get(i))?;
+        Some(f64::from(*peak) * linear(self.gain.at(at)))
+    }
+}
+
 const QUIET_AROUND: f64 = 0.02;
 
 pub fn quietest(heard: &[Heard], at: i64, around: std::ops::RangeInclusive<i64>) -> i64 {
@@ -233,14 +249,19 @@ fn level_at(heard: &[Heard], frame: i64) -> f64 {
         .sum()
 }
 
-pub fn words_in(span: &Span, words: &[crate::transcript::Word]) -> Vec<(usize, i64, i64)> {
-    words_between(span, (span.start, span.end), words)
+pub fn words_in(
+    span: &Span,
+    words: &[crate::transcript::Word],
+    skipped: f64,
+) -> Vec<(usize, i64, i64)> {
+    words_between(span, (span.start, span.end), words, skipped)
 }
 
 pub fn words_between(
     span: &Span,
     (from, to): (i64, i64),
     words: &[crate::transcript::Word],
+    skipped: f64,
 ) -> Vec<(usize, i64, i64)> {
     if span.pace.speed() == 0.0 {
         return Vec::new();
@@ -249,8 +270,8 @@ pub fn words_between(
         .iter()
         .enumerate()
         .filter_map(|(i, w)| {
-            let a = span.frame(span.origin + w.start);
-            let b = span.frame(span.origin + w.end);
+            let a = span.frame(span.origin - skipped + w.start);
+            let b = span.frame(span.origin - skipped + w.end);
             let (a, b) = (a.min(b), a.max(b));
             let middle = (a + b) / 2.0;
             if middle < from as f64 || middle >= to as f64 {

@@ -2,12 +2,14 @@ use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::sync::Arc;
 
-use crate::analysis::{self, AudioLevels, Span, VoiceActivity};
+use crate::analysis::{self, AudioLevels, Heard, Span, VoiceActivity};
 use crate::editor::Env;
 use crate::error::{Error, Result};
+use crate::keyframes::Gain;
 use crate::model::{Duck, DuckDetect, Media, Project};
 use crate::render::{Dip, DuckSource, Ducking, LaneTrack, RenderPlan};
 use crate::request::DuckSet;
+use crate::time::Rational;
 
 pub const AMOUNT_DB: f64 = 2.7;
 pub const LOOKAHEAD_MS: f64 = 15.0;
@@ -250,12 +252,6 @@ pub fn measure(p: &Project, target: &str, d: &Duck, env: &dyn Env, download: boo
 }
 
 pub(crate) fn planned(p: &Project, lanes: &[LaneTrack], a: i64, b: i64) -> Vec<Ducking> {
-    let s = &p.settings;
-    let fps = s.fps.as_f64();
-    let rate = f64::from(s.sample_rate);
-    let samples = |ms: f64| ms * rate / 1000.0;
-    let frames = |ms: f64| (ms * fps / 1000.0).ceil() as i64 + 1;
-    let any_solo = p.any_solo();
     let mut seen: Vec<&str> = Vec::new();
     let mut out = Vec::new();
     for t in &p.tracks {
@@ -275,71 +271,87 @@ pub(crate) fn planned(p: &Project, lanes: &[LaneTrack], a: i64, b: i64) -> Vec<D
         if ducked.is_empty() {
             continue;
         }
-        let from = a - frames(d.hold() + d.recovery());
-        let to = b + frames(d.lookahead() + d.rise());
-        let mut sources = Vec::new();
-        for x in p
-            .tracks
-            .iter()
-            .filter(|x| x.id != t.id && d.sources.contains(&x.id) && x.audible(any_solo))
-        {
-            for c in &x.clips {
-                let Some(au) = c.audio.as_ref().filter(|au| !au.muted) else {
-                    continue;
-                };
-                if c.is_block() || c.is_frozen() {
-                    continue;
-                }
-                let Some((ra, rb)) = c.audio_range() else {
-                    continue;
-                };
-                let (x0, x1) = (ra.max(from), rb.min(to));
-                if x1 <= x0 {
-                    continue;
-                }
-                let Ok((_, origin)) = p.media_origin(&c.media) else {
-                    continue;
-                };
-                for (a, b) in c.runs(x0, x1) {
-                    let pace = c.pace().after(a - c.start);
-                    if pace.speed() == 0.0 {
-                        continue;
-                    }
-                    sources.push(DuckSource {
-                        media: c.media.clone(),
-                        stream: au.stream,
-                        origin,
-                        frames: (a, b),
-                        start: a,
-                        source_in: c.source_at(a),
-                        pace,
-                        gain_db: if au.is_keyed() {
-                            x.volume_db
-                        } else {
-                            au.gain_db + x.volume_db
-                        },
-                        keys: au.gain_keys.clone(),
-                        key: c.content_at(a),
-                    });
-                }
-            }
-        }
-        out.push(Ducking {
-            lanes: ducked,
-            dip: Dip {
-                amount_db: d.amount(),
-                lookahead: samples(d.lookahead()),
-                rise: samples(d.rise()),
-                hold: samples(d.hold()),
-                recovery: samples(d.recovery()),
-                active: Vec::new(),
-            },
-            detect: d.detect(),
-            threshold_db: d.threshold(),
-            sources,
-        });
+        out.push(ducking_of(p, &t.id, d, ducked, (a, b)));
     }
     out
+}
+
+fn ducking_of(
+    p: &Project,
+    target: &str,
+    d: &Duck,
+    lanes: Vec<usize>,
+    (a, b): (i64, i64),
+) -> Ducking {
+    let s = &p.settings;
+    let fps = s.fps.as_f64();
+    let rate = f64::from(s.sample_rate);
+    let samples = |ms: f64| ms * rate / 1000.0;
+    let frames = |ms: f64| (ms * fps / 1000.0).ceil() as i64 + 1;
+    let any_solo = p.any_solo();
+    let from = a - frames(d.hold() + d.recovery());
+    let to = b + frames(d.lookahead() + d.rise());
+    let mut sources = Vec::new();
+    for x in p
+        .tracks
+        .iter()
+        .filter(|x| x.id != target && d.sources.contains(&x.id) && x.audible(any_solo))
+    {
+        for c in &x.clips {
+            let Some(au) = c.audio.as_ref().filter(|au| !au.muted) else {
+                continue;
+            };
+            if c.is_block() || c.is_frozen() {
+                continue;
+            }
+            let Some((ra, rb)) = c.audio_range() else {
+                continue;
+            };
+            let (x0, x1) = (ra.max(from), rb.min(to));
+            if x1 <= x0 {
+                continue;
+            }
+            let Ok((_, origin)) = p.media_origin(&c.media) else {
+                continue;
+            };
+            for (a, b) in c.runs(x0, x1) {
+                let pace = c.pace().after(a - c.start);
+                if pace.speed() == 0.0 {
+                    continue;
+                }
+                sources.push(DuckSource {
+                    media: c.media.clone(),
+                    stream: au.stream,
+                    origin,
+                    frames: (a, b),
+                    start: a,
+                    source_in: c.source_at(a),
+                    pace,
+                    gain_db: if au.is_keyed() {
+                        x.volume_db
+                    } else {
+                        au.gain_db + x.volume_db
+                    },
+                    keys: au.gain_keys.clone(),
+                    key: c.content_at(a),
+                });
+            }
+        }
+    }
+    Ducking {
+        lanes,
+        dip: Dip {
+            amount_db: d.amount(),
+            lookahead: samples(d.lookahead()),
+            rise: samples(d.rise()),
+            hold: samples(d.hold()),
+            recovery: samples(d.recovery()),
+            active: Vec::new(),
+        },
+        detect: d.detect(),
+        threshold_db: d.threshold(),
+        sources,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -358,76 +370,183 @@ pub struct Unmeasured {
 pub type Measure<'a> = dyn FnMut(&Media, u32, DuckDetect) -> Result<Option<Measured>> + 'a;
 
 pub fn hear(plan: &mut RenderPlan, p: &Project, measured: &mut Measure) -> Result<Vec<Unmeasured>> {
-    let fps = plan.fps;
-    let (rate, f) = (f64::from(plan.sample_rate), fps.as_f64());
-    let first = plan.range.0 as f64;
-    let sample = |frame: f64| ((frame - first) * rate / f).round() as i64;
+    let clock = Clock {
+        fps: plan.fps,
+        rate: f64::from(plan.sample_rate),
+        first: plan.range.0,
+    };
     let mut missing: Vec<Unmeasured> = Vec::new();
     for d in &mut plan.ducking {
-        let mut active = Vec::new();
-        for s in &d.sources {
-            let Some(m) = p
-                .media(&s.media)
-                .filter(|m| m.info.audio.iter().any(|x| x.index == s.stream))
-            else {
-                continue;
-            };
-            let span = Span {
-                start: s.start,
-                end: s.frames.1,
-                source_in: s.source_in,
-                origin: s.origin,
-                fps,
-                pace: s.pace.clone(),
-            };
-            let found = match measured(m, s.stream, d.detect)? {
-                Some(Measured::Speech(va)) => analysis::speech_frames(&span, s.frames, &va),
-                Some(Measured::Levels(l)) => {
-                    let gain = crate::keyframes::Gain {
-                        db: s.gain_db,
-                        keys: &s.keys,
-                        origin: s.origin,
-                        fps: f,
-                    }
-                    .retimed(&s.pace, s.source_in, s.key);
-                    analysis::loud_frames(&span, s.frames, &l, d.threshold_db, &gain)
-                }
-                None => {
-                    let u = Unmeasured {
-                        media: s.media.clone(),
-                        stream: s.stream,
-                        detect: d.detect,
-                    };
-                    if !missing.contains(&u) {
-                        missing.push(u);
-                    }
-                    continue;
-                }
-            };
-            active.extend(found.into_iter().map(|(x, y)| (sample(x), sample(y))));
-        }
-        active.sort_unstable();
-        let mut merged: Vec<(i64, i64)> = Vec::new();
-        for (x, y) in active {
-            match merged.last_mut() {
-                Some(last) if x <= last.1 => last.1 = last.1.max(y),
-                _ => merged.push((x, y)),
-            }
-        }
-        d.dip.active = merged;
+        hear_one(d, p, &clock, measured, &mut missing)?;
     }
     Ok(missing)
+}
+
+struct Clock {
+    fps: Rational,
+    rate: f64,
+    first: i64,
+}
+
+fn span_of(s: &DuckSource, fps: Rational) -> Span {
+    Span {
+        start: s.start,
+        end: s.frames.1,
+        source_in: s.source_in,
+        origin: s.origin,
+        fps,
+        pace: s.pace.clone(),
+    }
+}
+
+fn gain_of(s: &DuckSource, fps: f64) -> Gain<'_> {
+    Gain {
+        db: s.gain_db,
+        keys: &s.keys,
+        origin: s.origin,
+        fps,
+    }
+    .retimed(&s.pace, s.source_in, s.key)
+}
+
+fn sounding<'a>(p: &'a Project, s: &DuckSource) -> Option<&'a Media> {
+    p.media(&s.media)
+        .filter(|m| m.info.audio.iter().any(|x| x.index == s.stream))
+}
+
+fn hear_one(
+    d: &mut Ducking,
+    p: &Project,
+    clock: &Clock,
+    measured: &mut Measure,
+    missing: &mut Vec<Unmeasured>,
+) -> Result<()> {
+    let f = clock.fps.as_f64();
+    let sample = |frame: f64| ((frame - clock.first as f64) * clock.rate / f).round() as i64;
+    let mut active = Vec::new();
+    for s in &d.sources {
+        let Some(m) = sounding(p, s) else {
+            continue;
+        };
+        let span = span_of(s, clock.fps);
+        let found = match measured(m, s.stream, d.detect)? {
+            Some(Measured::Speech(va)) => analysis::speech_frames(&span, s.frames, &va),
+            Some(Measured::Levels(l)) => {
+                analysis::loud_frames(&span, s.frames, &l, d.threshold_db, &gain_of(s, f))
+            }
+            None => {
+                let u = Unmeasured {
+                    media: s.media.clone(),
+                    stream: s.stream,
+                    detect: d.detect,
+                };
+                if !missing.contains(&u) {
+                    missing.push(u);
+                }
+                continue;
+            }
+        };
+        active.extend(found.into_iter().map(|(x, y)| (sample(x), sample(y))));
+    }
+    active.sort_unstable();
+    let mut merged: Vec<(i64, i64)> = Vec::new();
+    for (x, y) in active {
+        match merged.last_mut() {
+            Some(last) if x <= last.1 => last.1 = last.1.max(y),
+            _ => merged.push((x, y)),
+        }
+    }
+    d.dip.active = merged;
+    Ok(())
+}
+
+fn measuring(
+    env: &dyn Env,
+    download: bool,
+) -> impl FnMut(&Media, u32, DuckDetect) -> Result<Option<Measured>> + '_ {
+    move |m, stream, detect| {
+        Ok(Some(match detect {
+            DuckDetect::Speech => Measured::Speech(env.voice_activity(m, stream, download)?),
+            DuckDetect::Level => Measured::Levels(env.audio_levels(m, stream)?),
+        }))
+    }
 }
 
 pub fn hear_with(plan: &mut RenderPlan, p: &Project, env: &dyn Env, download: bool) -> Result<()> {
     if plan.ducking.is_empty() {
         return Ok(());
     }
-    let mut measured = |m: &Media, stream: u32, detect: DuckDetect| -> Result<Option<Measured>> {
-        Ok(Some(match detect {
-            DuckDetect::Speech => Measured::Speech(env.voice_activity(m, stream, download)?),
-            DuckDetect::Level => Measured::Levels(env.audio_levels(m, stream)?),
-        }))
+    hear(plan, p, &mut measuring(env, download)).map(drop)
+}
+
+pub const GRAPH_POINTS_PER_SECOND: u32 = 100;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Graph {
+    pub source_db: Vec<Option<f64>>,
+    pub duck_db: Vec<f64>,
+}
+
+fn hundredths(v: f64) -> f64 {
+    (v * 100.0).round() / 100.0 + 0.0
+}
+
+pub fn graph(
+    p: &Project,
+    target: &str,
+    d: &Duck,
+    (a, b): (i64, i64),
+    env: &dyn Env,
+) -> Result<Graph> {
+    let s = &p.settings;
+    let (fps, f, rate) = (s.fps, s.fps.as_f64(), f64::from(s.sample_rate));
+    let mut ducking = ducking_of(p, target, d, Vec::new(), (a, b));
+    ducking
+        .sources
+        .retain(|x| sounding(p, x).is_some_and(|m| env.present(m)));
+    let clock = Clock {
+        fps,
+        rate,
+        first: a,
     };
-    hear(plan, p, &mut measured).map(drop)
+    hear_one(
+        &mut ducking,
+        p,
+        &clock,
+        &mut measuring(env, false),
+        &mut Vec::new(),
+    )?;
+    let mut sounds = Vec::new();
+    for x in &ducking.sources {
+        if let Some(m) = sounding(p, x) {
+            sounds.push((span_of(x, fps), env.audio_levels(m, x.stream)?, x));
+        }
+    }
+    let heard: Vec<Heard> = sounds
+        .iter()
+        .map(|(span, levels, x)| Heard {
+            span,
+            levels,
+            gain: gain_of(x, f),
+        })
+        .collect();
+    let every = f64::from(GRAPH_POINTS_PER_SECOND);
+    let points = ((b - a) as f64 / f * every).ceil() as usize;
+    let mut out = Graph {
+        source_db: Vec::with_capacity(points),
+        duck_db: Vec::with_capacity(points),
+    };
+    for i in 0..points {
+        let secs = i as f64 / every;
+        let peak = heard
+            .iter()
+            .filter_map(|h| h.peak(a as f64 + secs * f))
+            .fold(0.0_f64, f64::max);
+        out.source_db
+            .push((peak > 0.0).then(|| hundredths(20.0 * peak.log10())));
+        out.duck_db.push(hundredths(
+            ducking.dip.gain_db((secs * rate).round() as i64),
+        ));
+    }
+    Ok(out)
 }

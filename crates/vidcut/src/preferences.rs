@@ -237,6 +237,17 @@ pub fn set_guides(patch: vidcut_core::preferences::GuidesPatch, dry_run: bool) -
     Ok(json!({ "guides": p.viewer.guides }))
 }
 
+pub fn set_scopes(patch: vidcut_core::preferences::ScopesPatch, dry_run: bool) -> Result<Value> {
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = load()?;
+    p.viewer.scopes = p.viewer.scopes.patched(&patch);
+    p.check()?;
+    if !dry_run && patch != Default::default() {
+        write(&p)?;
+    }
+    Ok(json!({ "scopes": p.viewer.scopes }))
+}
+
 fn write(p: &Preferences) -> Result<()> {
     let path = path();
     let dir = path.parent().expect("in the config dir");

@@ -27,12 +27,11 @@ struct Cell {
 pub struct Cells {
     ctx: egui::Context,
     gpu_pictures: vidcut_av::hw::GpuPictures,
-    cells: [Option<Cell>; CELLS],
+    cells: Vec<Option<Cell>>,
     part: usize,
     counts: Counts,
 }
 
-pub const CELLS: usize = vidcut_core::multicam::SYNC_CLIPS_CAMERAS + 1;
 const LEAST_PART: usize = 4;
 
 impl Cells {
@@ -40,7 +39,7 @@ impl Cells {
         Self {
             ctx,
             gpu_pictures,
-            cells: std::array::from_fn(|_| None),
+            cells: Vec::new(),
             part: LEAST_PART,
             counts: Counts::default(),
         }
@@ -85,6 +84,9 @@ impl Cells {
     pub fn show(&mut self, i: usize, p: &Project, piece: &VideoPiece, speed: f64) -> Option<Shown> {
         let (plan, frame) = plan(p, piece)?;
         let format = |plan: &RenderPlan| (plan.sample_rate, plan.channels);
+        if self.cells.len() <= i {
+            self.cells.resize_with(i + 1, || None);
+        }
         if self.cells[i]
             .as_ref()
             .is_none_or(|c| format(&c.plan) != format(&plan))
@@ -180,8 +182,8 @@ fn plan(p: &Project, piece: &VideoPiece) -> Option<(RenderPlan, i64)> {
 pub struct Screens {
     render: RenderState,
     gpu: Gpu,
-    screens: [Screen; CELLS],
-    textures: [Option<egui::TextureId>; CELLS],
+    screens: Vec<Screen>,
+    textures: Vec<Option<egui::TextureId>>,
 }
 
 impl Screens {
@@ -189,8 +191,8 @@ impl Screens {
         Self {
             render: render.clone(),
             gpu: Gpu::new(&render.device, &render.queue),
-            screens: std::array::from_fn(|_| Screen::new()),
-            textures: [None; CELLS],
+            screens: Vec::new(),
+            textures: Vec::new(),
         }
     }
 
@@ -204,6 +206,10 @@ impl Screens {
         picture: &Arc<Picture>,
         size: [u32; 2],
     ) -> Option<egui::TextureId> {
+        if self.screens.len() <= i {
+            self.screens.resize_with(i + 1, Screen::new);
+            self.textures.resize(i + 1, None);
+        }
         let drawn = self.screens[i].draw(
             &self.gpu,
             Some(picture),

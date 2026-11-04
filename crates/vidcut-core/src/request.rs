@@ -116,33 +116,51 @@ pub enum Request {
     /// picture.
     #[serde(rename = "media.details")]
     MediaDetails { media: String },
-    /// Where the angles of a multicam clip lie, for media in angle order.
-    /// This changes nothing. The answer is the `start_timecode`, the `start`
-    /// in frames and the `frames` of the whole, and for each angle its `media`,
-    /// the frame `at` which it starts, and the `source` frames it uses. An item
-    /// with marks uses only the frames between them. A file with no timecode
-    /// starts at 00:00:00:00.
+    /// Where the files of a multicam clip lie, for media in bin order. This
+    /// changes nothing. The answer is the `start_timecode`, the `start` in
+    /// frames, the `frames` of the whole, and the `rows`. Rows with a camera
+    /// name come first, and each holds the files of that name. In a row, each
+    /// file has its `media`, the frame `at` of its first visible frame, and
+    /// `head` and `tail`, the frames that it loses at each end. Files of one
+    /// row do not overlap: a file keeps only the part after the files before
+    /// it. `dropped` lists the files with nothing left. Rows
+    /// with no name follow. By timecode, a file with no name goes on the first
+    /// such row where it does not overlap. By sound, In or Out, it has its own
+    /// row. A file with no picture and no name has its own row, after the
+    /// others. An item with marks uses only the frames between them, and one
+    /// mark uses the frames to that end of the file. A file with no timecode
+    /// starts at 00:00:00:00. A still takes the length of a new still. A file
+    /// named twice counts once.
     #[serde(rename = "multicam.layout")]
     MulticamLayout {
         media: OneOrMany<String>,
-        /// `timecode`, `in` or `out` for items that all have that mark, or
-        /// `sound`. By sound the answer also has `unmatched`, the media that
+        /// `timecode`, `in`, `out` or `sound`. By In, a file with no In lines
+        /// up at its first frame. By Out, a file with no Out lines up at its
+        /// end. By timecode, In and Out, files of a row go in timecode
+        /// order; with one timecode, they go in the given order. By In, the
+        /// mark of a row's earliest file lines up the row. By Out, the mark of
+        /// its latest file does. By sound, files of a row go in the order of
+        /// their places; with one place, they go in the given order. By sound
+        /// the answer also has `unmatched`, the media that
         /// match no other file, and `pairs`, how well each two files match.
+        /// The whole files line up by sound, and an empty front stays.
         #[serde(default)]
         sync: crate::model::AngleSync,
         /// Use each whole file. Its marks only line it up.
         #[serde(default)]
         full_extents: bool,
     },
-    /// Store files as a synced group, a pool item that lines them up. Each
-    /// file stays whole and its marks stay. A file is in one group at most.
-    /// Returns the group. By sound, `unmatched` lists the files that match no
-    /// other file. Such a file stays in the group, at the group's start.
+    /// Store files as a synced group, a pool item that lines them up in rows,
+    /// as `multicam.layout` gives them. The rows stay in the group when a
+    /// camera name changes later. A file with nothing left is not in the
+    /// group, and the group's `dropped` lists it. A file's marks stay. A file
+    /// can be in more than one group, and the newest group counts. Returns the
+    /// group. By sound, `unmatched` lists the files that match no other file.
+    /// Such a file stays in the group, at the group's start.
     #[serde(rename = "multicam.create")]
     MulticamCreate {
         media: OneOrMany<String>,
-        /// `timecode`, `in` or `out` for items that all have that mark, or
-        /// `sound`.
+        /// `timecode`, `in`, `out` or `sound`, as in `multicam.layout`.
         #[serde(default)]
         sync: crate::model::AngleSync,
         /// Default: `Media Sync` with the date and the time.
@@ -151,16 +169,20 @@ pub enum Request {
         /// Into this bin (default: the top level).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bin: Option<String>,
-        /// The place of each file by hand, as `multicam.set` takes them. The
+        /// The rows by hand, as `multicam.set` takes them. A file of `media`
+        /// that no row names is not in the group, and `dropped` lists it. The
         /// group then starts at 01:00:00:00, and `sync` plays no part. With
-        /// none, `sync` works out the places, and a file that it lines up is
-        /// `locked`.
+        /// none, `sync` works out the rows, and a row with a file that it lines
+        /// up is `locked`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        angles: Option<Vec<crate::model::GroupAngle>>,
+        rows: Option<Vec<crate::model::GroupRow>>,
     },
-    /// Set the place of each file of a synced group: its `media`, the frame
-    /// `at` which it starts, and `locked`, the sync lock. `angles` names each
-    /// file of the group once. The earliest file goes to the group's start. A
+    /// Set the rows of a synced group. A row has its `camera`, `locked`, the
+    /// sync lock, and its `clips`. A clip has its `media`, the frame `at` of
+    /// its first visible frame, and `head` and `tail`, the frames that it loses
+    /// at each end. Each file is in one row at most, and files of one row do
+    /// not overlap. A file of the group that no row names leaves the group, and
+    /// `dropped` lists it. The earliest file goes to the group's start. A
     /// stretch of more than 10 minutes with no file closes to 1 second: `at`
     /// falls, and `hidden` holds the closed frames. `at` plus `hidden` is the
     /// place in real time, and a request can give both. Returns the group. The
@@ -168,10 +190,25 @@ pub enum Request {
     #[serde(rename = "multicam.set")]
     MulticamSet {
         group: String,
-        angles: Vec<crate::model::GroupAngle>,
+        rows: Vec<crate::model::GroupRow>,
+    },
+    /// Move one file of a synced group, as a drag in the Sync Clips window
+    /// does. The file stays as it is, and other files of its row give way. A
+    /// file that the moved file starts inside ends at the moved file's start,
+    /// and its tail is gone. A file whose start it covers starts at the moved
+    /// file's end. A file that it covers leaves the group, and `dropped` lists
+    /// it. Returns the group. It refuses a file on a row with the sync lock.
+    #[serde(rename = "multicam.place")]
+    MulticamPlace {
+        group: String,
+        media: String,
+        /// The new place of its first visible frame, in real time: `at` plus
+        /// `hidden` as `multicam.list` gives them. A place before the group's
+        /// start is the group's start.
+        at: i64,
     },
     /// The synced groups: for each its `id`, `name`, `bin`,
-    /// `start_timecode`, `frames` and `angles`.
+    /// `start_timecode`, `frames`, `rows` and `dropped`.
     #[serde(rename = "multicam.list")]
     MulticamList {},
     /// Remove a synced group from the pool. Its files stay.
@@ -195,14 +232,20 @@ pub enum Request {
     /// Clear the In and Out of a synced group.
     #[serde(rename = "multicam.marks.clear")]
     MulticamMarksClear { group: String },
-    /// The Sync Bin at a time: the files of a bin and its subfolders, in
-    /// camera order. Each row has its `number`, `media`, `camera` and
-    /// `frames`. `start` is the timeline frame of the file's first frame, by
-    /// its synced group or its timecode; a file with no time in common has
-    /// none. `frame` is the file's frame at `at`, if it has one. `active`
-    /// says that the file is on top at `at`. It refuses a file with no
-    /// picture, no camera name or no time to line up by, two files with one
-    /// camera name, more than nine files, and files of different groups.
+    /// The Sync Bin at a time: the rows of a bin and its subfolders. With a
+    /// synced group in the bin, they are its stored rows, and other files of
+    /// the bin do not show. With two groups or more, the group of the clip at
+    /// `at` counts, and with no such clip the newest group does. With no group,
+    /// the rows are the ones that `multicam.layout` gives by timecode, with no
+    /// stills. Each row has its `number` and
+    /// `camera`, and `clips`: each file's `media`, its visible `frames`, its
+    /// `head`, the frames that it loses at its start, and `start`, the timeline
+    /// frame of its first visible frame. The clip at `at` sets `start`: its
+    /// source timecode lines up the files. A file with no time in common has
+    /// none. `media` and `frame` are the file of the row at `at` and its frame.
+    /// A row with no file at `at` has no `frame`, and `media` is its first file.
+    /// `active` says that a file of the row is on top at `at`. A file with no
+    /// timecode and no synced group lies at 00:00:00:00.
     #[serde(rename = "multicam.rows")]
     MulticamRows {
         /// Default: the top level.
@@ -224,7 +267,8 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<TimeSpec>,
     },
-    /// Remove from the pool; `force` also deletes the clips that use it.
+    /// Remove from the pool and from its synced groups. `force` also deletes
+    /// the clips that use it. A group with no file left goes too.
     #[serde(rename = "media.remove")]
     MediaRemove {
         media: String,
@@ -250,6 +294,22 @@ pub enum Request {
     },
     #[serde(rename = "media.rename")]
     MediaRename { media: String, name: String },
+    /// Create Subclip: a new pool item that is one part of `media`, with
+    /// its own name, marks and markers. Its source frames count from the
+    /// start of that part, and edits cannot reach past its ends. Returns
+    /// its id.
+    #[serde(rename = "media.subclip")]
+    MediaSubclip {
+        media: String,
+        /// The source frames of `media` that it holds. Default: between its
+        /// marks, or the whole item.
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        name: String,
+        /// The bin it goes in. Default: the bin of `media`.
+        #[serde(default)]
+        bin: Option<String>,
+    },
     /// Transcribe Audio: hear each pool item's own sound (`stream`, counted
     /// from 0) and keep its words, with their times, with the media, for
     /// `analyze.words` with `media` or `clips` and the Transcription window.
@@ -698,6 +758,23 @@ pub enum Request {
         #[serde(default)]
         range: Option<RangeSpec>,
     },
+    /// The level of a track's ducking sources against its ducking, over
+    /// `range` (default: In–Out if set, else everything), 100 points a
+    /// second. `source_db` is the peak of the loudest source in dBFS, after
+    /// its clip gain and fader, or null where no source sounds. `duck_db`
+    /// is what the ducking takes from the track, in dB. It tells what the
+    /// ducking does when on, whether it is on or off.
+    #[serde(rename = "analyze.ducking")]
+    AnalyzeDucking {
+        /// The ducked track (`A1`).
+        track: String,
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        /// Values to try in place of the track's, as `track.set` takes
+        /// them. Nothing is saved.
+        #[serde(default)]
+        duck: Option<DuckSet>,
+    },
     /// The words said, each with its frames, for `edit.ripple_delete_words`.
     /// With `media` or `clips`, from their media's transcripts
     /// (`media.transcribe`), heard nothing new: the media's source frames,
@@ -890,6 +967,9 @@ pub enum Request {
         /// clips of that group count as the reference.
         #[serde(default)]
         group: bool,
+        /// Keep the timeline marks, for the next file of an `apply`.
+        #[serde(default)]
+        keep_marks: bool,
     },
 
     /// Split at one or more frames (Ctrl+\).
@@ -1047,7 +1127,9 @@ pub enum Request {
         #[serde(default)]
         ripple: Option<bool>,
     },
-    /// Roll the edit at a clip's edge.
+    /// Roll the edit at a clip's edge. With a gap at that edge, only the
+    /// picture edge moves and the sound stays. It stops one frame short of
+    /// the next clip.
     #[serde(rename = "edit.roll")]
     EditRoll {
         clip: ClipRef,
@@ -1070,7 +1152,9 @@ pub enum Request {
     EditDecompose { clips: OneOrMany<ClipRef> },
     /// Slide a clip (Dynamic Trim's Slide mode): it keeps its media and moves,
     /// the clip before it getting longer and the one after it shorter (or the
-    /// reverse).
+    /// reverse). On a side with a gap, the gap changes in place of a clip. The
+    /// slide stops one frame short of a clip that does not touch it, and at
+    /// the timeline's start.
     #[serde(rename = "edit.slide")]
     EditSlide { clip: ClipRef, by: TimeSpec },
     /// Ripple Delete Silence: cut the silent parts out of `clips` and close the
@@ -1164,7 +1248,10 @@ pub enum Request {
         #[serde(default = "scene_threshold")]
         threshold: f64,
     },
-    /// Audio-only roll at a clip's edge (J/L cut).
+    /// Audio-only roll at a clip's edge (J/L cut). With a gap or a clip with
+    /// no sound on one side, only the sound on the other side moves. It stops
+    /// at the media's ends, at the nearest sound on the track and at the
+    /// timeline's start.
     #[serde(rename = "edit.audio_roll")]
     EditAudioRoll {
         clip: ClipRef,
@@ -1701,11 +1788,19 @@ pub enum Request {
     /// Clear timeline In and Out (Alt+X).
     #[serde(rename = "marks.clear")]
     MarksClear {},
-    /// The timeline's markers.
+    /// The timeline's markers, or with `media` that source clip's.
     #[serde(rename = "markers.list")]
-    MarkersList {},
+    MarkersList {
+        /// A pool item: its markers, at its source frames.
+        #[serde(default)]
+        media: Option<String>,
+    },
     #[serde(rename = "markers.add")]
     MarkersAdd {
+        /// A pool item: the marker goes on this source clip, and `at` is
+        /// its source frame. Default: the timeline.
+        #[serde(default)]
+        media: Option<String>,
         at: TimeSpec,
         #[serde(default)]
         name: String,
@@ -2511,6 +2606,23 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         viewer: bool,
     },
+    /// Render one scope of the viewer picture as PNG: the timeline at `at`,
+    /// drawn as the viewer draws it, with no window. The answer gives the
+    /// timeline color space and the marks of the scale.
+    #[serde(rename = "frame.scope")]
+    FrameScope {
+        at: TimeSpec,
+        out: PathBuf,
+        scope: crate::preferences::Scope,
+        /// Width of the scope, 16 to 4096. Default: 1024, or 512 for the
+        /// vectorscope.
+        #[serde(default)]
+        width: Option<u32>,
+        /// Height of the scope, 16 to 4096. Default: half the width, or the
+        /// width for the vectorscope.
+        #[serde(default)]
+        height: Option<u32>,
+    },
     /// A storyboard: one PNG with a picture of every shot (or every
     /// `every`), labeled with timecode and clip, to look at an edit at a
     /// glance. Over `range` (default: everything).
@@ -2534,13 +2646,13 @@ pub enum Request {
     PresetsList {},
     #[serde(rename = "presets.get")]
     PresetsGet { name: String },
-    /// Save a user preset (`~/.config/vidcut/presets/NAME.toml`, on Windows
-    /// in `%APPDATA%\vidcut`, on macOS in `~/Library/Application
+    /// Save a user preset (a TOML file in `~/.config/vidcut/presets`, on
+    /// Windows in `%APPDATA%\vidcut`, on macOS in `~/Library/Application
     /// Support/vidcut`): `settings`, or preset `from` with `set` overrides.
     /// `quick_export` puts it in Quick Export.
     #[serde(rename = "presets.save")]
     PresetsSave {
-        /// File-name safe: letters, digits, `-`, `_` and `.`.
+        /// Any text but an empty one.
         name: String,
         #[serde(default)]
         title: Option<String>,
@@ -2828,6 +2940,19 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         center: Option<bool>,
     },
+    /// The scopes of the viewer: a waveform, a parade and a vectorscope of
+    /// its picture, in the timeline color space. Stored in preferences, not
+    /// the project. A field that is left out stays as it is. With no fields,
+    /// tells which scopes are on.
+    #[serde(rename = "viewer.scopes")]
+    ViewerScopes {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waveform: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parade: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        vectorscope: Option<bool>,
+    },
     /// Full screen or the enhanced viewer.
     /// `full_screen` fills the display with the viewer (Shift+F).
     /// `enhanced` fills the page with the viewer (Alt+F).
@@ -3038,6 +3163,7 @@ pub enum Request {
     /// Process does), `transcription` (the words of the
     /// source clip or the timeline), `metadata` (the strip at the top of the
     /// Media Pool), `clip_info` (the media selected in the pool),
+    /// `media_pool` (`gui.close` hides the pool, and the viewer takes its room),
     /// `transitions`, `titles`, `inspector` or `keyframes` (tabs in the Media
     /// Pool's place), or the
     /// viewer's `transform`, `crop` or `dynamic_zoom` handles on the selected
@@ -3815,8 +3941,8 @@ pub enum TrimSide {
     /// Both: a roll.
     #[default]
     Both,
-    /// Its audio edit: where the outgoing clip's sound ends, the J/L
-    /// handle (decision D20).
+    /// Its audio edit: where a clip's sound ends or starts, the J/L handle
+    /// (decision D20).
     Audio,
 }
 
@@ -3908,6 +4034,9 @@ pub enum GuiPanel {
     /// Manage Render Cache: the render cache of each project that vidcut
     /// opened on this computer (`cache.list`), to clear (`cache.clear`).
     ManageRenderCache,
+    /// The Media Pool tab. `gui.close` hides the pool, and the viewer takes
+    /// its room.
+    MediaPool,
     /// The Sync Bin tab, in the Media Pool's place: a row for each camera of
     /// the bin, and a grid of the cameras in the viewer.
     SyncBin,
@@ -3975,6 +4104,12 @@ pub enum PoolMode {
     Filmstrip,
     /// A row for each, its details in columns.
     List,
+    /// A card for each: a picture that scrubs, a line that follows the sort,
+    /// its start timecode, its camera and its name. By `name`, the cards go
+    /// by first letter under a heading, and by timecode inside a letter;
+    /// Source Tape takes that order. By `date`, they go under a heading for
+    /// each day.
+    Metadata,
 }
 
 /// What `gui.screenshot` captures.
@@ -4550,6 +4685,7 @@ impl Request {
                 | Self::PreferencesSet(_)
                 | Self::PreferencesReset {}
                 | Self::ViewerGuides { .. }
+                | Self::ViewerScopes { .. }
                 | Self::KeysList {}
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
@@ -4571,7 +4707,7 @@ impl Request {
                     | Self::MarksGet {}
                     | Self::KeyframesList { .. }
                     | Self::KeyframesCopy { .. }
-                    | Self::MarkersList {}
+                    | Self::MarkersList { .. }
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }
                     | Self::GeneratorsList { .. }
@@ -4596,6 +4732,7 @@ impl Request {
                     | Self::AnalyzeScenes { .. }
                     | Self::AnalyzeBlack { .. }
                     | Self::AnalyzeLoudness { .. }
+                    | Self::AnalyzeDucking { .. }
                     | Self::StoryboardRender { .. }
                     | Self::HistoryGet { .. }
                     | Self::Schema { .. }
@@ -4606,6 +4743,7 @@ impl Request {
                     | Self::ExportPlan(_)
                     | Self::ExportStart(_)
                     | Self::FrameRender { .. }
+                    | Self::FrameScope { .. }
                     | Self::PresetsList {}
                     | Self::PresetsGet { .. }
                     | Self::PresetsSave { .. }
@@ -4619,6 +4757,7 @@ impl Request {
                     | Self::PreferencesSet(_)
                     | Self::PreferencesReset {}
                     | Self::ViewerGuides { .. }
+                    | Self::ViewerScopes { .. }
                     | Self::KeysList {}
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }
@@ -4672,6 +4811,7 @@ impl Request {
                 .collect(),
             Self::ExportPlan(p) | Self::ExportStart(p) => vec![&mut p.output],
             Self::FrameRender { out, .. }
+            | Self::FrameScope { out, .. }
             | Self::StoryboardRender { out, .. }
             | Self::GuiScreenshot { out, .. } => vec![out],
             Self::Apply { commands, .. } => commands.iter_mut().flat_map(Self::paths_mut).collect(),

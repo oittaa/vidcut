@@ -784,7 +784,10 @@ fn filmstrip(
                 t.want(&key, || t.job(p, &key, width))
                     .or_else(|| t.nearest(&c.media, height, frame, span))
             })
-            .or_else(|| pool?.nearest(fps.frames_to_secs(frame)));
+            .or_else(|| {
+                let skipped = p.media(&c.media).map_or(0.0, |m| m.skipped());
+                pool?.nearest(fps.frames_to_secs(frame) + skipped)
+            });
         if let Some(texture) = texture {
             let tile = Rect::from_min_size(pos2(x, rect.top()), vec2(tile_w, rect.height()));
             painter.image(
@@ -814,37 +817,33 @@ fn waveform(
         return;
     }
     let source = |at: f64| c.sound_at(at);
-    let origin = p
-        .media(&c.media)
-        .map(|m| {
-            m.info
-                .video
-                .as_ref()
-                .map(|v| v.first_pts)
-                .or_else(|| m.info.audio.first().map(|a| a.first_pts))
-                .unwrap_or(0.0)
-        })
-        .unwrap_or(0.0);
+    let origin = p.media(&c.media).map_or(0.0, |m| m.origin());
+    let f = fps.as_f64();
+    wave_columns(painter, rect, |x| {
+        let (a, b) = (source(scale.frame(x)), source(scale.frame(x + 1.0)));
+        let (t0, t1) = (a.min(b), a.max(b));
+        if c.speed_at(scale.frame(x).floor() as i64) == 0.0 {
+            return None;
+        }
+        w.range(origin + t0 / f, origin + t1 / f)
+    });
+}
+
+pub fn wave_columns(painter: &Painter, rect: Rect, range_at: impl Fn(f32) -> Option<(f32, f32)>) {
     let visible = painter.clip_rect().intersect(rect);
     if visible.width() <= 0.0 {
         return;
     }
     let (mid, half) = (rect.center().y, rect.height() / 2.0 - 1.0);
-    let f = fps.as_f64();
-    let color = Color32::from_rgb(170, 230, 190);
     let mut x = visible.left().floor();
     while x < visible.right() {
-        let (a, b) = (source(scale.frame(x)), source(scale.frame(x + 1.0)));
-        let (t0, t1) = (a.min(b), a.max(b));
-        if c.speed_at(scale.frame(x).floor() as i64) != 0.0
-            && let Some((lo, hi)) = w.range(origin + t0 / f, origin + t1 / f)
-        {
+        if let Some((lo, hi)) = range_at(x) {
             painter.line_segment(
                 [
                     pos2(x + 0.5, mid - hi * half),
                     pos2(x + 0.5, mid - lo * half + 0.5),
                 ],
-                Stroke::new(1.0, color),
+                Stroke::new(1.0, theme::WAVEFORM),
             );
         }
         x += 1.0;
@@ -945,14 +944,18 @@ pub fn preview(painter: &Painter, rows: &Rows, scale: &Scale, p: &Project, pv: &
         );
     }
     if let Some(m) = pv.marquee {
-        painter.rect_filled(m, CornerRadius::ZERO, Color32::from_white_alpha(20));
-        painter.rect_stroke(
-            m,
-            CornerRadius::ZERO,
-            Stroke::new(1.0, Color32::from_white_alpha(120)),
-            StrokeKind::Inside,
-        );
+        marquee(painter, m);
     }
+}
+
+pub fn marquee(painter: &Painter, rect: Rect) {
+    painter.rect_filled(rect, CornerRadius::ZERO, Color32::from_white_alpha(20));
+    painter.rect_stroke(
+        rect,
+        CornerRadius::ZERO,
+        Stroke::new(1.0, Color32::from_white_alpha(120)),
+        StrokeKind::Inside,
+    );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

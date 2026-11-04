@@ -14,7 +14,7 @@ use eframe::egui::{self, Align2, Color32, FontId, Key, Pos2, Rect, RichText, Sen
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use vidcut_core::model::{
-    ClipCache, ClipRetime, Ease, PictureTool, PictureTransition, Project, Speed, Track,
+    Clip, ClipCache, ClipRetime, Ease, PictureTool, PictureTransition, Project, Speed, Track,
 };
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::render_cache::Part;
@@ -64,11 +64,7 @@ fn hit_edit(p: &Project, what: &Hit) -> Option<EditSel> {
         Hit::Edge(id, Edge::Head) => (id, p.clip(id)?.start, Side::In),
         Hit::Edge(id, Edge::Tail) => (id, p.clip(id)?.end(), Side::Out),
         Hit::Roll { outgoing, .. } => (outgoing, p.clip(outgoing)?.end(), Side::Both),
-        Hit::AudioEdit { outgoing, .. } => {
-            let c = p.clip(outgoing)?;
-            let tail = c.audio.as_ref().map_or(0, |a| a.tail);
-            (outgoing, c.end() + tail, Side::Audio)
-        }
+        Hit::AudioEdit { clip, edge } => (clip, audio_edge(p.clip(clip)?, *edge)?, Side::Audio),
         _ => return None,
     };
     let track = TrackRef::of_clip(p, id)?;
@@ -79,11 +75,17 @@ pub(crate) fn repaint_in(ctx: &egui::Context, wait: Duration) {
     ctx.request_repaint_after(wait);
 }
 
-pub(crate) fn audio_edit_outgoing(t: &Track, at: i64) -> Option<String> {
-    t.clips.windows(2).find_map(|w| {
-        let (a, b) = (&w[0], &w[1]);
-        let tail = a.audio.as_ref()?.tail;
-        (a.end() == b.start && b.audio.is_some() && a.end() + tail == at).then(|| a.id.clone())
+pub(crate) fn audio_edge(c: &Clip, edge: Edge) -> Option<i64> {
+    let (a, b) = c.audio_range()?;
+    Some(if edge == Edge::Tail { b } else { a })
+}
+
+pub(crate) fn audio_edit_at(t: &Track, at: i64) -> Option<(String, Edge)> {
+    [Edge::Tail, Edge::Head].into_iter().find_map(|edge| {
+        t.clips
+            .iter()
+            .find(|c| audio_edge(c, edge) == Some(at))
+            .map(|c| (c.id.clone(), edge))
     })
 }
 
@@ -99,27 +101,23 @@ pub(crate) fn edit_exists(p: &Project, e: &EditSel) -> bool {
         return false;
     };
     match e.side {
-        Side::Audio => audio_edit_outgoing(t, e.at).is_some(),
+        Side::Audio => audio_edit_at(t, e.at).is_some(),
         _ => t.clips.iter().any(|c| c.start == e.at || c.end() == e.at),
     }
 }
 
 pub(crate) fn audio_at_cut(t: &Track, picture: i64) -> i64 {
-    t.clips
-        .windows(2)
-        .find_map(|w| {
-            let (a, b) = (&w[0], &w[1]);
-            (a.end() == picture && b.start == picture)
-                .then(|| a.audio.as_ref().map_or(picture, |x| a.end() + x.tail))
-        })
-        .unwrap_or(picture)
+    audio_edits(t)
+        .find(|&(cut, _)| cut == picture)
+        .map_or(picture, |(_, at)| at)
 }
 
 fn audio_edits(t: &Track) -> impl Iterator<Item = (i64, i64)> + '_ {
-    t.clips.windows(2).filter_map(|w| {
-        let (a, b) = (&w[0], &w[1]);
-        let tail = a.audio.as_ref()?.tail;
-        (a.end() == b.start && b.audio.is_some()).then_some((a.end(), a.end() + tail))
+    t.clips.iter().flat_map(|c| {
+        c.audio_range()
+            .map(|(a, b)| [(c.start, a), (c.end(), b)])
+            .into_iter()
+            .flatten()
     })
 }
 
@@ -1133,11 +1131,11 @@ impl Workspace {
                 let on_volume = on_volume.is_some();
                 let on_label = geometry::speed_label_at(&p, rows, scale, pos)
                     .is_some_and(|(_, l)| l.speed > 0.0);
-                if let Hit::AudioEdit { outgoing, .. } = &what
+                if let Hit::AudioEdit { clip, edge } = &what
                     && let Some(row) = track.as_deref().and_then(|t| rows.get(t))
-                    && let Some(c) = p.clip(outgoing)
+                    && let Some(at) = p.clip(clip).and_then(|c| audio_edge(c, *edge))
                 {
-                    let x = scale.xf(c.end() + c.audio.as_ref().map_or(0, |a| a.tail));
+                    let x = scale.xf(at);
                     let band = egui::Rangef::new(row.rect.audio_top, row.rect.rect.bottom());
                     ui.painter().rect_filled(
                         Rect::from_x_y_ranges(x - 3.0..=x + 3.0, band),
@@ -1954,11 +1952,10 @@ impl Workspace {
                         vec![clip]
                     },
                 },
-                Hit::AudioEdit { outgoing, .. } => Gesture::AudioRoll {
-                    from: p
-                        .clip(&outgoing)
-                        .map_or(0, |c| c.end() + c.audio.as_ref().map_or(0, |a| a.tail)),
-                    outgoing,
+                Hit::AudioEdit { clip, edge } => Gesture::AudioRoll {
+                    from: p.clip(&clip).and_then(|c| audio_edge(c, edge)).unwrap_or(0),
+                    clip,
+                    edge,
                 },
                 Hit::Clip(id) => {
                     let mut clips = if self.snap.selection.clips.contains(&id) {
@@ -3267,7 +3264,7 @@ impl Workspace {
     }
 
     pub(crate) fn open_marker(&mut self, id: String, p: &Project) {
-        if let Some(k) = p.markers.iter().find(|k| k.id == id) {
+        if let Some(k) = p.marker(&id) {
             self.timeline.marker_dialog = Some(MarkerDialog {
                 id,
                 name: k.name.clone(),
@@ -3835,7 +3832,7 @@ impl Workspace {
             .track(track)
             .ok_or_else(|| format!("There is no {track}"))?;
         let at = nearest_edit(tr, near, side).ok_or_else(|| match side {
-            Side::Audio => format!("{track} has no cut between two clips with sound"),
+            Side::Audio => format!("{track} has no clip with sound"),
             _ => format!("{track} has no clips"),
         })?;
         let e = EditSel { at, side, track: t };
@@ -3865,7 +3862,7 @@ impl Workspace {
                 (_, Side::Audio) => audio_edits(t)
                     .find(|&(cut, _)| cut == e.at)
                     .map(|(_, at)| at)
-                    .ok_or("No audio edit here: one clip has no sound")?,
+                    .ok_or("No audio edit here: no clip has sound")?,
                 _ => e.at,
             };
             Ok(EditSel { at, side, ..*e })
@@ -4072,7 +4069,7 @@ mod tests {
         let t = Track {
             clips: vec![
                 clip("c1", 0, 60, Some(8)),
-                clip("c2", 60, 60, Some(0)),
+                clip("c2", 60, 60, None),
                 clip("c3", 120, 60, None),
             ],
             ..Track::new("V1", TrackKind::Video)

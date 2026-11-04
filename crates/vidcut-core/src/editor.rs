@@ -14,8 +14,8 @@ use crate::error::{Error, ErrorCode, Result};
 use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
-    Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marks, Media,
-    MediaInfo, Picture, Project, Proxy, Title, Track, TrackKind, Transition, VideoInfo,
+    Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marker, Marks,
+    Media, MediaInfo, Picture, Project, Proxy, Title, Track, TrackKind, Transition, VideoInfo,
     WordsChange,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
@@ -1912,7 +1912,7 @@ fn clip_speech(
         let spans = Span::of_clip(c, origin, fps);
         let words = spans
             .iter()
-            .flat_map(|span| analysis::words_between(span, (from, to), &timed));
+            .flat_map(|span| analysis::words_between(span, (from, to), &timed, m.skipped()));
         for (i, start, end) in words {
             let middle = (start + end) / 2;
             if (a..b).contains(&middle) {
@@ -2050,7 +2050,7 @@ fn quiet_edges(p: &Project, env: &dyn Env, spans: &[(i64, i64)]) -> Result<Vec<(
                 known.extend(
                     spans
                         .iter()
-                        .flat_map(|span| analysis::words_in(span, &timed))
+                        .flat_map(|span| analysis::words_in(span, &timed, m.skipped()))
                         .map(|(_, a, b)| (a, b)),
                 );
             }
@@ -2621,27 +2621,32 @@ fn mutate(
             sync,
             name,
             bin,
-            angles,
+            rows,
         } => {
             let new = crate::multicam::NewGroup {
                 sync: *sync,
-                angles: angles.as_deref(),
+                rows: rows.as_deref(),
                 name: name
                     .clone()
                     .unwrap_or_else(|| format!("Media Sync {}", env.local_stamp())),
                 bin: bin.as_deref().unwrap_or_default(),
             };
-            let (id, unmatched) = crate::multicam::create(p, env, &media.to_vec(), new)?;
-            let g = p.group(&id).expect("just made");
+            let made = crate::multicam::create(p, env, &media.to_vec(), new)?;
+            let g = p.group(&made.id).expect("just made");
             let mut v = crate::multicam::group_json(p, g);
-            if !unmatched.is_empty() {
-                v["unmatched"] = json!(unmatched);
+            if !made.unmatched.is_empty() {
+                v["unmatched"] = json!(made.unmatched);
             }
             v
         }
-        Request::MulticamSet { group, angles } => {
-            crate::multicam::set_angles(p, group, angles)?;
+        Request::MulticamSet { group, rows } => {
+            crate::multicam::set_rows(p, group, rows)?;
             let g = p.group(group).expect("just set");
+            crate::multicam::group_json(p, g)
+        }
+        Request::MulticamPlace { group, media, at } => {
+            crate::multicam::place(p, group, media, *at)?;
+            let g = p.group(group).expect("just placed");
             crate::multicam::group_json(p, g)
         }
         Request::MulticamRemove { group } => {
@@ -2680,12 +2685,6 @@ fn mutate(
         Request::MediaRemove { media, force } => {
             p.media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-            if let Some(g) = p.group_of(media) {
-                return Err(Error::invalid(format!(
-                    "{media} is in the synced group {}; remove the group first",
-                    g.name
-                )));
-            }
             let users: Vec<String> = p
                 .tracks
                 .iter()
@@ -2703,6 +2702,14 @@ fn mutate(
                 ops::delete(p, &users, false)?;
             }
             p.media.retain(|m| &m.id != media);
+            for g in &mut p.groups {
+                g.dropped.retain(|m| m != media);
+                for row in &mut g.rows {
+                    row.clips.retain(|c| &c.media != media);
+                }
+                g.rows.retain(|row| !row.clips.is_empty());
+            }
+            p.groups.retain(|g| !g.rows.is_empty());
             forget_tape_marks(p, media);
             Value::Null
         }
@@ -2789,6 +2796,26 @@ fn mutate(
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             m.name = name.clone();
             Value::Null
+        }
+        Request::MediaSubclip {
+            media,
+            range,
+            name,
+            bin,
+        } => {
+            let m = p
+                .media(media)
+                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+            let c = media_context(p, m, None);
+            let span = match range {
+                Some(r) => c.range(r)?,
+                None => (
+                    m.marks.mark_in.unwrap_or(0),
+                    m.marks.mark_out.unwrap_or(c.end),
+                ),
+            };
+            let id = ops::create_subclip(p, media, span, name, bin.as_deref())?;
+            json!({ "media": id })
         }
         Request::MediaSet {
             media,
@@ -2996,31 +3023,34 @@ fn mutate(
             source: src,
             at,
             group,
+            keep_marks,
         } => {
             if src.track.is_some() {
                 return Err(Error::usage(
                     "Source Overwrite picks its own track; leave out `track`",
                 ));
             }
-            if src.tape {
-                return Err(Error::usage("Source Overwrite takes one media item"));
-            }
             let at = match at {
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            let source = source(p, src)?;
-            let marks = &p
-                .media(&source.media)
-                .expect("source checked the media")
-                .marks;
-            if src.range.is_none() && marks.mark_in.is_none() && marks.mark_out.is_some() {
-                return Err(Error::invalid(
-                    "Source Overwrite can't use a source Out mark with no In",
-                ));
+            let sources = if src.tape {
+                tape_sources(p, src)?
+            } else {
+                vec![source(p, src)?]
+            };
+            let mut landed = Vec::with_capacity(sources.len());
+            for s in &sources {
+                let marks = &p.media(&s.media).expect("source checked the media").marks;
+                let marked = src.tape || src.range.is_some() || !marks.is_empty();
+                landed.push(ops::source_overwrite(p, s, marked, at, *group)?);
             }
-            let marked = src.range.is_some() || marks.mark_in.is_some() || marks.mark_out.is_some();
-            let placed = ops::source_overwrite(p, &source, marked, at, *group)?;
+            if !keep_marks {
+                p.marks = Default::default();
+            }
+            let placed = landed
+                .pop()
+                .ok_or_else(|| Error::invalid("nothing to edit in"))?;
             json!({
                 "clip": placed.clip,
                 "track": placed.track,
@@ -3667,6 +3697,30 @@ fn mutate(
             Value::Null
         }
         Request::MarkersAdd {
+            media: Some(media),
+            at,
+            name,
+            color,
+            note,
+            duration,
+        } => {
+            let m = p
+                .media(media)
+                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+            let at = media_context(p, m, None).resolve(at)?;
+            let duration = duration.as_ref().map(|d| length(p, d)).transpose()?;
+            let k = ops::NewMarker {
+                kept: None,
+                at,
+                duration: duration.unwrap_or(1),
+                name: name.clone(),
+                color: color.clone(),
+                note: note.clone(),
+            };
+            json!({ "marker": ops::add_source_marker(p, media, k)? })
+        }
+        Request::MarkersAdd {
+            media: None,
             at,
             name,
             color,
@@ -3686,7 +3740,14 @@ fn mutate(
             json!({ "marker": id })
         }
         Request::MarkersMove { marker, to } => {
-            let to = resolve(p, to, playhead)?;
+            let on_source = p
+                .media
+                .iter()
+                .find(|m| m.markers.iter().any(|k| &k.id == marker));
+            let to = match on_source {
+                Some(m) => media_context(p, m, None).resolve(to)?,
+                None => resolve(p, to, playhead)?,
+            };
             ops::move_marker(p, marker, to)?;
             Value::Null
         }
@@ -4728,7 +4789,9 @@ impl PoolFiles {
     }
 
     fn note(&mut self, p: &Project, i: usize) {
-        self.0.entry(p.media[i].path.clone()).or_default().push(i);
+        if p.media[i].subclip.is_none() {
+            self.0.entry(p.media[i].path.clone()).or_default().push(i);
+        }
     }
 }
 
@@ -4765,6 +4828,8 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         camera: None,
         fingerprint: probed.fingerprint,
         subtitles: probed.subtitles,
+        subclip: None,
+        markers: Vec::new(),
     });
     files.note(p, p.media.len() - 1);
     id
@@ -5170,9 +5235,11 @@ fn groups_to_rate(p: &mut Project, from: Rational) {
     let to = p.settings.fps;
     for g in &mut p.groups {
         g.start = rescale(g.start, from, to);
-        for a in &mut g.angles {
-            a.at = rescale(a.at, from, to);
-            a.hidden = rescale(a.hidden, from, to);
+        for c in g.rows.iter_mut().flat_map(|r| &mut r.clips) {
+            c.at = rescale(c.at, from, to);
+            c.hidden = rescale(c.hidden, from, to);
+            c.head = rescale(c.head, from, to);
+            c.tail = rescale(c.tail, from, to);
         }
         g.marks.mark_in = g.marks.mark_in.map(|f| rescale(f, from, to));
         g.marks.mark_out = g.marks.mark_out.map(|f| rescale(f, from, to));
@@ -5200,8 +5267,7 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
             (false, true) => pool
                 .get(ids[&media_key(&c.media)].as_str())
                 .filter(|m| m.sequence.is_none())
-                .and_then(|m| m.info.timecode)
-                .map_or(0, |tc| tc.frames_at(from).round() as i64),
+                .map_or(0, |m| m.timecode_at(from).round() as i64),
             _ => 0,
         };
         c.timecoded = false;
@@ -6170,7 +6236,14 @@ fn join_pool(
     let mut ids = HashMap::new();
     let mut files = PoolFiles::of(p);
     for m in meta.media.iter().filter(|m| wanted.contains(&m.id)) {
-        let id = match files.find(p, &m.path, &m.sequence) {
+        let same = match m.subclip {
+            Some(_) => p
+                .media
+                .iter()
+                .find(|x| x.path == m.path && x.subclip == m.subclip),
+            None => files.find(p, &m.path, &m.sequence),
+        };
+        let id = match same {
             Some(x) => x.id.clone(),
             None => {
                 let bin = match m.bin.as_str() {
@@ -6180,8 +6253,15 @@ fn join_pool(
                 ops::add_bin(p, &bin)?;
                 first_video_sets_format(p, &m.info);
                 let id = p.alloc_media_id();
+                let markers = (m.markers.iter())
+                    .map(|k| Marker {
+                        id: p.alloc_marker_id(),
+                        ..k.clone()
+                    })
+                    .collect();
                 p.media.push(Media {
                     id: id.clone(),
+                    markers,
                     bin,
                     proxy: None,
                     ..m.clone()
@@ -7125,7 +7205,7 @@ pub fn query(
                     let tongue = filler_language(language, speech);
                     let (fillers, fillers_from) = filler_words(p, env, tongue.as_deref());
                     let placed: Vec<_> = (target.spans(p)?.iter())
-                        .flat_map(|span| analysis::words_in(span, &timed))
+                        .flat_map(|span| analysis::words_in(span, &timed, m.skipped()))
                         .collect();
                     let words: Vec<Value> = placed
                         .iter()
@@ -7282,7 +7362,7 @@ pub fn query(
             }
             answer
         }
-        Request::MarkersList {} => json!(
+        Request::MarkersList { media: None } => json!(
             p.markers
                 .iter()
                 .map(|k| {
@@ -7292,6 +7372,21 @@ pub fn query(
                 })
                 .collect::<Vec<_>>()
         ),
+        Request::MarkersList { media: Some(media) } => {
+            let m = p
+                .media(media)
+                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+            json!(
+                m.markers
+                    .iter()
+                    .map(|k| {
+                        let mut v = serde_json::to_value(k).unwrap_or_default();
+                        v["at_tc"] = json!(p.settings.length_timecode(k.at));
+                        v
+                    })
+                    .collect::<Vec<_>>()
+            )
+        }
         Request::MarksGet {} => {
             let mark = |f: Option<i64>| f.map(|f| json!({ "frame": f, "tc": tc(f) }));
             json!({ "in": mark(p.marks.mark_in), "out": mark(p.marks.mark_out) })
@@ -7396,16 +7491,7 @@ pub fn query(
             json!(out)
         }
         Request::AnalyzeLoudness { range } => {
-            let (a, b) = match range {
-                Some(r) => ctx(p, playhead).range(r)?,
-                None => match (p.marks.mark_in, p.marks.mark_out) {
-                    (Some(a), Some(b)) => (a, b),
-                    _ => (0, p.end()),
-                },
-            };
-            if b <= a {
-                return Err(Error::invalid("nothing to measure: the range is empty"));
-            }
+            let (a, b) = measured_range(p, playhead, range.as_ref())?;
             let mut plan = crate::render::flatten(p, a, b)?;
             crate::duck::hear_with(&mut plan, p, env, false)?;
             let l = env.loudness(&plan)?;
@@ -7415,11 +7501,22 @@ pub fn query(
                 "from": a, "to": b, "from_tc": tc(a), "to_tc": tc(b),
             })
         }
+        Request::AnalyzeDucking { track, range, duck } => {
+            let (a, b) = measured_range(p, playhead, range.as_ref())?;
+            let d = crate::duck::patched(p, track, &duck.clone().unwrap_or_default())?;
+            let g = crate::duck::graph(p, track, &d, (a, b), env)?;
+            json!({
+                "track": track, "from": a, "to": b, "from_tc": tc(a), "to_tc": tc(b),
+                "per_second": crate::duck::GRAPH_POINTS_PER_SECOND,
+                "duck": d.shown(), "source_db": g.source_db, "duck_db": g.duck_db,
+            })
+        }
         Request::Schema { .. }
         | Request::Doctor {}
         | Request::ExportPlan(_)
         | Request::ExportStart(_)
         | Request::FrameRender { .. }
+        | Request::FrameScope { .. }
         | Request::StoryboardRender { .. }
         | Request::PresetsList {}
         | Request::PresetsGet { .. }
@@ -7430,7 +7527,8 @@ pub fn query(
         | Request::LooksDelete { .. }
         | Request::EncodersList { .. }
         | Request::DecodersList {}
-        | Request::ViewerGuides { .. } => {
+        | Request::ViewerGuides { .. }
+        | Request::ViewerScopes { .. } => {
             return Err(Error::internal(format!(
                 "{} is answered by the session, not the editor",
                 request.method()
@@ -7525,6 +7623,24 @@ pub fn query(
             )));
         }
     })
+}
+
+fn measured_range(
+    p: &Project,
+    playhead: Option<i64>,
+    range: Option<&crate::time::RangeSpec>,
+) -> Result<(i64, i64)> {
+    let (a, b) = match range {
+        Some(r) => ctx(p, playhead).range(r)?,
+        None => match (p.marks.mark_in, p.marks.mark_out) {
+            (Some(a), Some(b)) => (a, b),
+            _ => (0, p.end()),
+        },
+    };
+    if b <= a {
+        return Err(Error::invalid("nothing to measure: the range is empty"));
+    }
+    Ok((a, b))
 }
 
 fn finite(db: f64) -> Value {
@@ -8304,8 +8420,14 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
             Some(v) if v.fps == tc.rate => v.fps,
             _ => p.settings.fps,
         };
-        let frames = tc.frames_at(fps).round() as i64;
+        let frames = m.timecode_at(fps).round() as i64;
         v["timecode"] = json!(format_timecode(frames, fps, 0, tc.drop_frame));
+    }
+    if let Some(s) = m.subclip {
+        v["subclip"] = json!(s);
+    }
+    if !m.markers.is_empty() {
+        v["markers"] = json!(m.markers);
     }
     let kept: Vec<Value> = (0..m.info.audio.len() as u32)
         .flat_map(|s| {

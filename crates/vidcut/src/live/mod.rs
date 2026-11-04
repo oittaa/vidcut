@@ -24,7 +24,7 @@ use vidcut_core::model::{Clip, Format, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    Client, ClientKind, Detect, DynamicTrimMode, GuiPanel, OneOrMany, ScreenshotTarget,
+    Client, ClientKind, Detect, DynamicTrimMode, GuiPanel, OneOrMany, PoolMode, ScreenshotTarget,
     TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
 };
 use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
@@ -547,6 +547,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         guides: crate::preferences::load()
             .map(|p| p.viewer.guides)
             .unwrap_or_default(),
+        scopes: crate::preferences::load()
+            .map(|p| p.viewer.scopes)
+            .unwrap_or_default(),
         show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
@@ -636,6 +639,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         timer1_origin: Timer1Origin::default(),
         guides: crate::preferences::load()
             .map(|p| p.viewer.guides)
+            .unwrap_or_default(),
+        scopes: crate::preferences::load()
+            .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
         audio_noticed: None,
@@ -913,6 +919,7 @@ struct Live {
     timecode_display: TimecodeDisplay,
     timer1_origin: Timer1Origin,
     guides: vidcut_core::preferences::Guides,
+    scopes: vidcut_core::preferences::Scopes,
     show_super_scale: bool,
     audio_noticed: Option<String>,
     playing: bool,
@@ -1148,6 +1155,13 @@ impl Live {
                     .unwrap_or_default();
                 if self.guides != guides {
                     self.guides = guides;
+                    changed = true;
+                }
+                let scopes = crate::preferences::load()
+                    .map(|p| p.viewer.scopes)
+                    .unwrap_or_default();
+                if self.scopes != scopes {
+                    self.scopes = scopes;
                     changed = true;
                 }
                 let show_super_scale =
@@ -1503,6 +1517,7 @@ impl Live {
             timecode_display: self.timecode_display,
             timer1_origin: self.timer1_origin,
             guides: self.guides,
+            scopes: self.scopes,
             show_super_scale: self.show_super_scale,
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
@@ -2564,6 +2579,30 @@ impl Live {
                     Err(e) => Step::Now(Err(e)),
                 }
             }
+            Request::ViewerScopes {
+                waveform,
+                parade,
+                vectorscope,
+            } => {
+                let patch = vidcut_core::preferences::ScopesPatch {
+                    waveform,
+                    parade,
+                    vectorscope,
+                };
+                match crate::preferences::set_scopes(patch, envelope.dry_run) {
+                    Ok(v) => {
+                        if !envelope.dry_run
+                            && let Ok(scopes) = serde_json::from_value::<
+                                vidcut_core::preferences::Scopes,
+                            >(v["scopes"].clone())
+                        {
+                            self.scopes = scopes;
+                        }
+                        Step::Now(Ok(answer(v)))
+                    }
+                    Err(e) => Step::Now(Err(e)),
+                }
+            }
             Request::CacheClear { projects } => {
                 Step::Now(self.cache_clear(&projects.to_vec(), envelope.dry_run))
             }
@@ -2788,7 +2827,11 @@ impl Live {
                 view,
                 search,
             } => {
-                let tape = bin.is_some() || sort.is_some() || descending.is_some();
+                let cards = |mode: PoolMode| mode == PoolMode::Metadata;
+                let tape = bin.is_some()
+                    || sort.is_some()
+                    || descending.is_some()
+                    || view.is_some_and(|v| cards(v) != cards(self.pool.view));
                 if let Some(b) = bin {
                     let known = b.is_empty()
                         || self
@@ -3078,11 +3121,13 @@ impl Live {
             Request::ExportStart(_)
             | Request::ExportPlan(_)
             | Request::FrameRender { .. }
+            | Request::FrameScope { .. }
             | Request::StoryboardRender { .. }
             | Request::AnalyzeSilence { .. }
             | Request::AnalyzeScenes { .. }
             | Request::AnalyzeBlack { .. }
             | Request::AnalyzeLoudness { .. }
+            | Request::AnalyzeDucking { .. }
             | Request::AnalyzeWords { media: Some(_), .. }
             | Request::AnalyzeWords { clips: Some(_), .. } => self.project_task(envelope, job),
             Request::TrackSet {
@@ -3239,7 +3284,7 @@ impl Live {
             }
             Request::MulticamCreate {
                 sync: vidcut_core::model::AngleSync::Sound,
-                angles: None,
+                rows: None,
                 ..
             }
             | Request::MulticamLayout {
@@ -3314,6 +3359,7 @@ impl Live {
             | Request::AnalyzeScenes { .. }
             | Request::AnalyzeBlack { .. }
             | Request::AnalyzeLoudness { .. }
+            | Request::AnalyzeDucking { .. }
             | Request::StoryboardRender { .. } => Work::Job,
             _ => Work::Interactive,
         };
@@ -4127,12 +4173,6 @@ impl Live {
             .or_else(|| p.group_of(angle?))
             .or_else(|| p.group_of(self.source_media.as_deref()?))
             .ok_or_else(|| Error::invalid("Open a clip of a synced group first"))?;
-        if g.angles.len() > vidcut_core::multicam::MULTI_SOURCE_ANGLES {
-            return Err(Error::invalid(format!(
-                "Multi Source shows {} angles at most",
-                vidcut_core::multicam::MULTI_SOURCE_ANGLES
-            )));
-        }
         if let Some(a) = angle.filter(|a| g.at_of(a).is_none()) {
             return Err(Error::invalid(format!("{a} is not in {}", g.name)));
         }
@@ -4141,7 +4181,7 @@ impl Live {
                 .source_media
                 .as_deref()
                 .filter(|m| g.at_of(m).is_some()))
-            .or(g.angles.first().map(|a| a.media.as_str()))
+            .or(g.clips().next().map(|c| c.media.as_str()))
             .map(str::to_string);
         self.source_group = Some(g.id.clone());
         self.source_media = shown;
@@ -4548,6 +4588,7 @@ impl Live {
             }),
             "stats_shown": self.stats,
             "guides": self.guides,
+            "scopes": self.scopes,
             "two_up": self.renderer.two_up(),
             "clipboard": self.clipboard.len(),
             "keyframe_clipboard": self.key_clipboard.len(),
@@ -4744,7 +4785,8 @@ fn is_edit_function(r: &Request) -> bool {
 fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
     if let Request::FrameRender {
         at, media: None, ..
-    } = &mut envelope.request
+    }
+    | Request::FrameScope { at, .. } = &mut envelope.request
         && let Some(playhead) = context.playhead
         && matches!(
             at,
@@ -4758,6 +4800,9 @@ fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
         range: Some(range), ..
     }
     | Request::AnalyzeWords {
+        range: Some(range), ..
+    }
+    | Request::AnalyzeDucking {
         range: Some(range), ..
     } = &mut envelope.request
         && let Ok((a, b)) = context.range(range)
