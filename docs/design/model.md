@@ -214,6 +214,13 @@ Media fields:
   - `PoolFiles` and `otio::same_media` never take a subclip for its file.
   - An OTIO file gives a clip of a subclip as a clip of the whole file, at the right time.
   - `Speakers::share` gives a new subclip the people of its parent.
+  - `ops::set_subclip_limits` changes the part (`media.subclip_set`). `Project::subclip_span` gives the part in frames of the file.
+    - The source frames count from the start of the part. Thus a new start moves each frame that counts from it by the same amount.
+    - `ops::shift_source` moves `source_in`, the keyframes and the `from` of the effects of each clip. A clip with a `Speed` keeps its keyframes, because they count on the retimed source.
+    - The `head` and `tail` of a `GroupClip` take the change, so that its visible part stays.
+    - `validate` refuses a clip outside its media, so `ops::set_subclip_limits` refuses the change first and names the clip.
+    - A `Marker` can be outside the part for this reason. Nothing shows it there, and a later change can bring it back.
+    - `Tiles` forgets the pictures of the item, because their frames count from the start of the part.
 - `markers` holds the markers on the source clip, at its source frames (`ops::add_source_marker`). `Project::marker` finds a marker by id in the timeline or in a source clip.
 
 Folders:
@@ -259,6 +266,7 @@ Ranges and resolution:
 `ops::source_overwrite` holds `edit.source_overwrite`. The behavior is in [spec §7.2](../cut-page-spec.md#72-edit-functions).
 
 - `origin` turns `MediaInfo.timecode` into project frames with `StartTimecode::frames_at`. A file with no tag counts as 0.
+- A generator as the source has `origin` 0 and the length of `ops::titles::default_length`.
 - `shown` gives the timecode range that a clip shows, from `Clip::source_at`.
   - A clip with no media or with a still has no such range. Thus generators, titles and compound clips do not count.
 - `first_where` takes clips by the order of the tracks: video from the lowest, then audio.
@@ -266,7 +274,8 @@ Ranges and resolution:
   - A video clip and an audio clip that give different positions under one rule make the edit fail (`disagree`). No measurement tells which of them wins.
 - `track_above` gives the track. `place_on_top` uses it too.
 - The result names the clip, its track, the `reference` and the `playhead`. `playhead_after_edit` seeks to this `playhead`.
-- The GUI sends no `range` (`edit_from`). The core then reads `Media.marks`, and it can tell source marks from no marks.
+- The GUI sends no `range` for media (`edit_from`). The core then reads `Media.marks`, and it can tell source marks from no marks.
+- The GUI sends `range` for a generator with marks. Why: its marks are in the live session, not in the project.
 
 ## Ids
 
@@ -447,8 +456,10 @@ Writing:
   - `generators::timeline_code` gives the code values of a color in the colors of the timeline.
   - `Generator::chart` gives the `Chart` of a kind that has no value over time. A `Chart` draws as rows of columns, from the size of the timeline. Its code values do not change with the colors of the timeline.
 - `generators::name` gives the name of a generator. `generators::shown` gives its JSON form, for `generators.list` and `clip_json`.
-- `ops::generators` holds the edits. `generators.add` and `titles.add` share `ops::titles::add_block`.
+- `ops::generators` holds the edits. `generators.add` and `titles.add` share `ops::titles::add_block`. `ops::block_clip` makes the clip of a title or a generator, for `add_block` and `make_clip`.
 - `GeneratorKind` is the kind that `generators.add` takes. `GeneratorSettings` holds the values of `generators.add` and `generators.set`. A kind refuses a value that it does not have.
+- `SourceParams`, `viewer.load` and `frame.render` also take a generator. `ops::generators::source_of` reads it.
+- `render::generator_tape` plans a generator alone on V1. Why: the source viewer and `frame.render` then draw it by the path of a clip on the timeline.
 - `ops::keyframes` keeps the keyframes of a volume and of a center on one path (`Number`).
 
 ## Pictures

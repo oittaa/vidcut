@@ -4850,6 +4850,11 @@ impl Project {
         }
     }
 
+    pub fn subclip_span(&self, media: &Media) -> Option<(i64, i64)> {
+        let first = self.frames_in(media.subclip?.start);
+        Some((first, first + self.media_frames(media)))
+    }
+
     pub fn file_frames(&self, media: &Media) -> i64 {
         let secs = match (&media.info.video, media.info.audio.first()) {
             (Some(v), _) if v.still => self.settings.still_secs,

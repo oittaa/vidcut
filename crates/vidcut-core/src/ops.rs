@@ -27,8 +27,8 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, ColorSpace, Marker, Media, MediaUpscaler, Project, Sharpness, Speed, Subclip,
-    Track, TrackClip, TrackKind, Upscaler,
+    Clip, ClipAudio, ColorSpace, Generator, Marker, Media, MediaUpscaler, Project, Sharpness,
+    Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -42,6 +42,7 @@ pub struct Source {
     pub video_only: bool,
     pub audio_only: bool,
     pub track: Option<String>,
+    pub generator: Option<Generator>,
 }
 
 #[derive(
@@ -223,15 +224,56 @@ fn fix_audio(p: &mut Project, ti: usize) {
     }
 }
 
+pub(crate) fn block_clip(
+    id: String,
+    (start, duration): (i64, i64),
+    title: Option<Title>,
+    generator: Option<Generator>,
+) -> Clip {
+    Clip {
+        id,
+        media: String::new(),
+        start,
+        duration,
+        source_in: 0,
+        video: true,
+        audio: None,
+        enabled: true,
+        name: None,
+        effects: None,
+        generator,
+        title,
+        picture: None,
+        compound: None,
+        speed: None,
+        retime: crate::model::ClipRetime::Project,
+        color: None,
+        render_cache: crate::model::ClipCache::Auto,
+    }
+}
+
 fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
-    let media = p
-        .media(&src.media)
-        .ok_or_else(|| Error::not_found(format!("no media {}", src.media)))?;
     if src.video_only && src.audio_only {
         return Err(Error::usage(
             "an edit can't be both Video Only and Audio Only",
         ));
     }
+    if let Some(generator) = &src.generator {
+        if src.audio_only {
+            return Err(Error::invalid("a generator has no audio"));
+        }
+        let (a, b) = src.range;
+        if a < 0 || a >= b {
+            return Err(Error::invalid(format!(
+                "source range {a}..{b} of a generator is empty"
+            )));
+        }
+        let id = p.alloc_clip_id();
+        return Ok(block_clip(id, (0, b - a), None, Some(generator.clone())));
+    }
+    let media = p
+        .media(&src.media)
+        .ok_or_else(|| Error::not_found(format!("no media {}", src.media)))?;
     if media.subtitles.is_some() {
         return Err(Error::invalid(format!(
             "{} is a subtitle file: put its cues on a subtitle track (subtitles.import with media)",
@@ -295,6 +337,12 @@ fn home(p: &mut Project, clips: &mut [Clip], src: &Source) -> Result<usize> {
     };
     if p.tracks[ti].kind == TrackKind::Audio {
         for clip in clips.iter_mut().filter(|c| c.video) {
+            if clip.generator.is_some() {
+                return Err(Error::invalid(format!(
+                    "a generator goes on a video track, not {}",
+                    p.tracks[ti].id
+                )));
+            }
             if clip.audio.is_none() {
                 return Err(Error::invalid(format!(
                     "{} has no audio for audio track {}",
@@ -2541,6 +2589,130 @@ pub fn create_subclip(
     p.media.push(sub);
     p.speakers.share(media, &id);
     Ok(id)
+}
+
+fn clip_outside(tracks: &[Track], media: &str, part: std::ops::Range<i64>) -> Option<String> {
+    for c in tracks.iter().flat_map(|t| &t.clips) {
+        if let Some(k) = &c.compound
+            && let Some(id) = clip_outside(&k.tracks, media, part.clone())
+        {
+            return Some(id);
+        }
+        if c.media == media {
+            let (lo, hi) = c.shown();
+            if lo < part.start || hi > part.end {
+                return Some(c.id.clone());
+            }
+        }
+    }
+    None
+}
+
+fn shift_source(c: &mut Clip, by: i64) {
+    c.source_in += by;
+    if c.speed.is_some() {
+        return;
+    }
+    if let Some(picture) = c.picture.as_mut() {
+        picture.retarget(|f| f + by);
+    }
+    if let Some(e) = c.effects.as_mut() {
+        e.from += by;
+    }
+    if let Some(a) = c.audio.as_mut() {
+        for k in &mut a.gain_keys {
+            k.frame += by;
+        }
+        if let Some(e) = a.effects.as_mut() {
+            e.from += by;
+        }
+    }
+}
+
+fn shift_clips(tracks: &mut [Track], media: &str, by: i64) {
+    for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
+        if let Some(k) = c.compound.as_mut() {
+            shift_clips(&mut k.tracks, media, by);
+        }
+        if c.media == media {
+            shift_source(c, by);
+        }
+    }
+}
+
+pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> Result<()> {
+    let m = p
+        .media(media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+    let Some((first, end)) = p.subclip_span(m) else {
+        return Err(Error::invalid(format!("{media} is not a subclip")));
+    };
+    let frames = p.file_frames(m);
+    if a < 0 || b > frames || b <= a {
+        return Err(Error::invalid(format!(
+            "subclip {a}..{b} is outside the file of {media} ({frames} frames)"
+        )));
+    }
+    let (by, len, more) = (first - a, b - a, b - end);
+    if !m.is_still()
+        && let Some(c) = clip_outside(&p.tracks, media, -by..len - by)
+    {
+        return Err(Error::invalid(format!(
+            "{c} uses frames of {media} outside {a}..{b}"
+        )));
+    }
+    for g in &mut p.groups {
+        let id = g.id.clone();
+        for c in g.rows.iter_mut().flat_map(|r| &mut r.clips) {
+            if c.media == media {
+                c.head += by;
+                c.tail += more;
+                if c.head < 0 || c.tail < 0 {
+                    return Err(Error::invalid(format!(
+                        "sync group {id} uses frames of {media} outside {a}..{b}"
+                    )));
+                }
+            }
+        }
+    }
+    shift_clips(&mut p.tracks, media, by);
+    let fps = p.settings.fps;
+    let m = p
+        .media
+        .iter_mut()
+        .find(|m| m.id == media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+    m.marks.mark_in = m
+        .marks
+        .mark_in
+        .map(|f| f + by)
+        .filter(|f| (0..len).contains(f));
+    m.marks.mark_out = m
+        .marks
+        .mark_out
+        .map(|f| f + by)
+        .filter(|f| (1..=len).contains(f));
+    for k in &mut m.markers {
+        k.at += by;
+    }
+    for (x, y) in &mut m.left_out {
+        *x += by;
+        *y += by;
+    }
+    let start = fps.frames_to_secs(a);
+    m.subclip = Some(Subclip {
+        start,
+        end: start + fps.frames_to_secs(len),
+    });
+    Ok(())
+}
+
+pub fn use_full_extents(p: &mut Project, media: &str) -> Result<()> {
+    let m = p
+        .media(media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+    let frames = p.file_frames(m);
+    set_subclip_limits(p, media, (0, frames))
 }
 
 pub fn set_media_marks(
