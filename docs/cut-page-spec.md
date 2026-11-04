@@ -200,11 +200,24 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Remove** (p. 654):
   - Delete or Backspace removes the pool entry, after a confirmation.
   - Only the pool entry goes. The files on disk stay.
-- **Views** (pp. 638, 664–665):
+- **Views** (pp. 638, 661–665):
   - **Thumbnail:** a hover scrubs the clip, and I/O mark its source In/Out. A click on the lower-right corner of a thumbnail shows its metadata (deviation X60).
   - **Filmstrip:** each clip is a row of its pictures, as wide as the pool, under its name. Hover and I/O work as on a thumbnail.
   - **List:** a column for each field. A click on a header sorts by that field.
-  - **Metadata:** a card for each clip, with a thumbnail that scrubs and basic metadata.
+  - **Metadata** (pp. 661–663): a card for each clip, in as many columns as fit the pool.
+    - A thumbnail is at the left of the card. A hover on it scrubs the clip, and I/O mark its source In/Out.
+    - Beside the thumbnail, from the top:
+      - The main description, which follows the sort (p. 662). Timecode gives the start timecode. Each other sort gives the clip name.
+      - The start timecode and the camera name. A file with no timecode shows 00:00:00:00. A clip with no camera name shows `---`.
+      - A subtitle file shows its cue count and its length on that line, and no camera name.
+      - The clip name.
+    - Sorted by Clip Name, the clips are in clusters by the first letter of the name, each under a heading (pp. 662–663).
+      - Inside a cluster, the order is by timecode. The Source Tape takes this order.
+    - Sorted by Date Modified, the clusters are the days of the file's modification time (p. 662).
+    - Sorted by Timecode, Date Imported or Duration, there are no clusters. vidcut keeps no creation date and no date of import.
+    - Descending reverses the whole order (p. 663).
+    - vidcut keeps no Date Created, scene, shot, take or comment ([todo](todo/cut-page-gaps.md)). Thus the card and the main description leave them out.
+    - `pool.set` with `view` `metadata` opens this view.
   - A sound file shows its waveform.
   - **Metadata Display** (p. 665): a tag icon beside the search field shows metadata of the selected clip at the top of the pool (deviation X60). The metadata is the camera name, scene, shot and take, frame rate and resolution.
 - **Sort and search** (pp. 666–667):
@@ -346,6 +359,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Source Clip** (p. 680):
   - The Viewer shows the selected pool clip.
   - A scroll area under the picture stands for the whole clip. It has the playhead, a zoomed-in waveform and In/Out handles that you can drag.
+  - vidcut draws the waveform of the whole clip across the scroll area, from the bottom edge up.
+    - With marks, the waveform is green between In and Out, and gray outside them.
+    - Without marks, the waveform is green.
+    - The waveform does not zoom ([gaps](todo/cut-page-gaps.md)).
   - Jog In and Jog Out controls at its ends move the marks frame by frame (p. 692).
     - Jog In is at the left of the scroll area. Jog Out is at the right.
     - A drag moves that mark. 8 pixels is one frame (D97).
@@ -1184,12 +1201,22 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Transcription window has:
     - a click on a word, a drag over words, X, Delete and Undelete
     - Remove Silent Portions and Delete Filler Words
-    - Place on Top, Insert and Append on a source clip
+    - Place on Top, Insert, Append, Create Subclip and Add Marker on a source clip
     - Cut, Paste and Add Marker on the timeline
     - search: First, Previous, Next, Last and a count of the matches
     - Edit, Copy and Follow
     - the Transcript menu and the differences between transcripts (X50)
   - On a source clip, Delete leaves the words out of every edit of the media (`media.leave_out`). This includes the edits of the viewer, of the pool and of scripts.
+  - On a source clip, Create Subclip opens a window with a Name and Create (p. 1005).
+    - The subclip holds the selected words (p. 998). It goes in the bin that the pool shows (p. 864).
+    - `media.subclip` does this. It takes a `range`, a `name` and a `bin`.
+    - A subclip works like any other pool item (pp. 460–461, 885–886).
+    - The words of the subclip come from the transcript of its file.
+  - Add Marker puts a marker at one selected word, or a marker with a duration over more words (p. 998).
+    - On a source clip, the marker is on that clip, at its source frame (`markers.add` with `media`).
+    - The scroll area of the Source Clip viewer shows it. A marker with a duration also shows as a bar (p. 1018).
+    - A double-click on it there opens the marker dialog.
+    - `markers.list` with `media` lists them. `markers.move`, `markers.set` and `markers.remove` take their ids.
   - On the timeline, Delete takes the words out of every unlocked track (`edit.ripple_delete_words`, D63).
     - With Ripple On, the gap closes. With it off, a gap is left (`lift`).
     - The edges move to the quiet points around the words (`quiet`, X92).

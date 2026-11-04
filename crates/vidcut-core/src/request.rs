@@ -294,6 +294,22 @@ pub enum Request {
     },
     #[serde(rename = "media.rename")]
     MediaRename { media: String, name: String },
+    /// Create Subclip: a new pool item that is one part of `media`, with
+    /// its own name, marks and markers. Its source frames count from the
+    /// start of that part, and edits cannot reach past its ends. Returns
+    /// its id.
+    #[serde(rename = "media.subclip")]
+    MediaSubclip {
+        media: String,
+        /// The source frames of `media` that it holds. Default: between its
+        /// marks, or the whole item.
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        name: String,
+        /// The bin it goes in. Default: the bin of `media`.
+        #[serde(default)]
+        bin: Option<String>,
+    },
     /// Transcribe Audio: hear each pool item's own sound (`stream`, counted
     /// from 0) and keep its words, with their times, with the media, for
     /// `analyze.words` with `media` or `clips` and the Transcription window.
@@ -1770,11 +1786,19 @@ pub enum Request {
     /// Clear timeline In and Out (Alt+X).
     #[serde(rename = "marks.clear")]
     MarksClear {},
-    /// The timeline's markers.
+    /// The timeline's markers, or with `media` that source clip's.
     #[serde(rename = "markers.list")]
-    MarkersList {},
+    MarkersList {
+        /// A pool item: its markers, at its source frames.
+        #[serde(default)]
+        media: Option<String>,
+    },
     #[serde(rename = "markers.add")]
     MarkersAdd {
+        /// A pool item: the marker goes on this source clip, and `at` is
+        /// its source frame. Default: the timeline.
+        #[serde(default)]
+        media: Option<String>,
         at: TimeSpec,
         #[serde(default)]
         name: String,
@@ -4033,6 +4057,12 @@ pub enum PoolMode {
     Filmstrip,
     /// A row for each, its details in columns.
     List,
+    /// A card for each: a picture that scrubs, a line that follows the sort,
+    /// its start timecode, its camera and its name. By `name`, the cards go
+    /// by first letter under a heading, and by timecode inside a letter;
+    /// Source Tape takes that order. By `date`, they go under a heading for
+    /// each day.
+    Metadata,
 }
 
 /// What `gui.screenshot` captures.
@@ -4581,7 +4611,7 @@ impl Request {
                     | Self::MarksGet {}
                     | Self::KeyframesList { .. }
                     | Self::KeyframesCopy { .. }
-                    | Self::MarkersList {}
+                    | Self::MarkersList { .. }
                     | Self::SubtitlesList { .. }
                     | Self::TitlesList { .. }
                     | Self::GeneratorsList { .. }

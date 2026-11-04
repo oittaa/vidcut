@@ -42,6 +42,25 @@ impl Speakers {
             .map(|a| a.person.clone())
     }
 
+    pub fn share(&mut self, media: &str, with: &str) {
+        let start = format!("{media}/");
+        let links: Vec<(String, String)> = (self.links.iter())
+            .filter_map(|(voice, person)| {
+                let rest = voice.strip_prefix(&start)?;
+                Some((format!("{with}/{rest}"), person.clone()))
+            })
+            .collect();
+        self.links.extend(links);
+        let assigned: Vec<Assigned> = (self.assigned.iter())
+            .filter(|a| a.media == media)
+            .map(|a| Assigned {
+                media: with.to_string(),
+                ..a.clone()
+            })
+            .collect();
+        self.assigned.extend(assigned);
+    }
+
     pub fn word(&self, media: &str, stream: u32, run: Option<&str>, w: &Word) -> Option<String> {
         let at = (w.start + w.end) / 2.0;
         match (w.speaker, run) {

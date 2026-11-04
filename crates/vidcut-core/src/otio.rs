@@ -155,7 +155,7 @@ fn start_tc(m: &Media, fps: Rational) -> f64 {
 
 fn media_reference(p: &Project, m: &Media, locations: Locations, rate: f64) -> Value {
     let fps = p.settings.fps;
-    let frames = p.media_frames(m) as f64;
+    let frames = p.file_frames(m) as f64;
     let bundled = match locations {
         Locations::Bundle(names) => names.get(&m.id).cloned(),
         Locations::Absolute => None,
@@ -332,7 +332,7 @@ pub fn same_media<'a>(r: &MediaRef, among: &[&'a Media]) -> Option<&'a Media> {
         among
             .iter()
             .copied()
-            .filter(|m| m.sequence.is_some() == r.sequence.is_some())
+            .filter(|m| m.subclip.is_none() && m.sequence.is_some() == r.sequence.is_some())
     };
     if let Some(m) = kind().find(|m| r.paths.contains(&m.path)) {
         return Some(m);
@@ -679,9 +679,12 @@ pub fn export_drawn(
                 effects: Vec<Value>| {
         let (start, reference) = match m {
             Some(m) if m.is_still() => (0.0, media_reference(p, m, locations, rate)),
-            Some(m) if m.sequence.is_some() => (source, media_reference(p, m, locations, rate)),
+            Some(m) if m.sequence.is_some() => (
+                (m.skipped() * fps.as_f64()).round() + source,
+                media_reference(p, m, locations, rate),
+            ),
             Some(m) => (
-                start_tc(m, fps) + source,
+                m.timecode_at(fps).round() + source,
                 media_reference(p, m, locations, rate),
             ),
             None => (

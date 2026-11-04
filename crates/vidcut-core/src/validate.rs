@@ -208,7 +208,18 @@ pub fn violations(p: &Project) -> Vec<String> {
             v.push(format!("{} is in unknown bin {:?}", m.id, m.bin));
         }
     }
-    for k in &p.markers {
+    for m in &p.media {
+        if let Some(s) = m.subclip
+            && (s.start < 0.0 || s.end <= s.start)
+        {
+            v.push(format!("{} is an empty subclip", m.id));
+        }
+    }
+    for k in p
+        .markers
+        .iter()
+        .chain(p.media.iter().flat_map(|m| &m.markers))
+    {
         if !ids.insert(k.id.as_str()) {
             v.push(format!("duplicate id {}", k.id));
         }

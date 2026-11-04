@@ -5,7 +5,7 @@ use eframe::egui::{
     pos2, vec2,
 };
 use serde_json::json;
-use vidcut_core::model::{Project, TrackKind};
+use vidcut_core::model::{Media, Project, TrackKind};
 use vidcut_core::request::{
     TimecodeDisplay, ViewerFrame, ViewerFrameKey, ViewerMode, viewer_frame_after,
 };
@@ -14,6 +14,7 @@ use vidcut_core::time::parse_frame_number;
 use super::pool::elide;
 use super::row::Row;
 use super::theme;
+use super::timeline::paint::marker_color;
 use super::workspace::{Drag, PasteWatch, TimecodeEntry, Workspace, dim, fit};
 use crate::live::{PlayerId, seek_frame};
 
@@ -565,7 +566,7 @@ impl Workspace {
                     Align2::CENTER_CENTER,
                     egui_phosphor::regular::WAVEFORM,
                     FontId::proportional((picture.height() * 0.4).clamp(12.0, 64.0)),
-                    super::timeline::paint::WAVE,
+                    theme::WAVEFORM,
                 );
                 None
             } else {
@@ -889,6 +890,40 @@ impl Workspace {
         }
     }
 
+    fn clip_waveform(
+        &self,
+        painter: &egui::Painter,
+        rect: Rect,
+        m: &Media,
+        frames: i64,
+        marks: Option<(i64, i64)>,
+    ) {
+        let (Some(w), Some(p)) = (self.snap.waveforms.get(&m.id), self.project()) else {
+            return;
+        };
+        let fps = p.settings.fps.as_f64();
+        let origin = m.origin();
+        let per_px = frames as f64 / f64::from(rect.width().max(1.0));
+        let mut x = rect.left().floor();
+        while x < rect.right() {
+            let f0 = f64::from(x - rect.left()) * per_px;
+            let f1 = f0 + per_px;
+            if let Some((lo, hi)) = w.range(origin + f0 / fps, origin + f1 / fps) {
+                let top = rect.bottom() - lo.abs().max(hi.abs()).min(1.0) * rect.height();
+                let inside = marks.is_none_or(|(a, b)| f1 > a as f64 && f0 < b as f64);
+                let color = match inside {
+                    true => theme::WAVEFORM,
+                    false => theme::colors().text_dim,
+                };
+                painter.line_segment(
+                    [Pos2::new(x + 0.5, rect.bottom()), Pos2::new(x + 0.5, top)],
+                    Stroke::new(1.0, color),
+                );
+            }
+            x += 1.0;
+        }
+    }
+
     fn scroll_bar(&mut self, ui: &mut egui::Ui) {
         let (rect, resp) =
             ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click_and_drag());
@@ -931,6 +966,7 @@ impl Workspace {
         };
         let shown = self.snap.source_at().map(|(m, _)| m.to_string());
         let mut handles = None;
+        let mut opened = None;
         if let Some((mut a, mut b)) = span {
             if let Some(Drag::TapeMark { is_in, frame }) = &self.drag {
                 if *is_in {
@@ -985,7 +1021,8 @@ impl Workspace {
                     b = *frame;
                 }
             }
-            if !m.marks.is_empty() || matches!(self.drag, Some(Drag::SourceMark { .. })) {
+            let marked = !m.marks.is_empty() || matches!(self.drag, Some(Drag::SourceMark { .. }));
+            if marked {
                 painter.rect_filled(
                     Rect::from_min_max(
                         Pos2::new(x(base + a), rect.top()),
@@ -995,7 +1032,41 @@ impl Workspace {
                     theme::colors().marked,
                 );
             }
+            if self.snap.viewer == ViewerMode::SourceClip {
+                self.clip_waveform(&painter, rect, m, frames, marked.then_some((a, b)));
+            }
             self.mark_handles(&painter, rect, x(base + a), x(base + b));
+            for k in &m.markers {
+                let color = marker_color(&k.color);
+                let at = x(base + k.at);
+                if k.duration > 1 {
+                    let end = x(base + k.at + k.duration);
+                    painter.rect_filled(
+                        Rect::from_min_max(
+                            Pos2::new(at, rect.top()),
+                            Pos2::new(end, rect.top() + 3.0),
+                        ),
+                        CornerRadius::ZERO,
+                        color,
+                    );
+                }
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        Pos2::new(at - 4.0, rect.top()),
+                        Pos2::new(at + 4.0, rect.top()),
+                        Pos2::new(at, rect.top() + 7.0),
+                    ],
+                    color,
+                    Stroke::NONE,
+                ));
+                if resp.double_clicked()
+                    && resp
+                        .interact_pointer_pos()
+                        .is_some_and(|p| (p.x - at).abs() <= 5.0)
+                {
+                    opened = Some(k.id.clone());
+                }
+            }
             handles = Some(MarkHandles::Clip {
                 media: media.clone(),
                 base,
@@ -1011,6 +1082,9 @@ impl Workspace {
             [Pos2::new(px, rect.top()), Pos2::new(px, rect.bottom())],
             Stroke::new(2.0, theme::colors().playhead),
         );
+        if let (Some(id), Some(p)) = (opened, self.project_shared()) {
+            self.open_marker(id, &p);
+        }
 
         if resp.drag_started()
             && let Some(pos) = resp.interact_pointer_pos()
