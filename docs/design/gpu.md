@@ -76,6 +76,8 @@ In the viewer, exports, proxies and thumbnails:
 - The draw takes NVDEC pictures only when its wgpu device is on CUDA's GPU, as it does for Vulkan pictures. On another GPU, the pictures come down.
   - Why: the buffer that Vulkan shares with CUDA is on one GPU.
 - vidcut keeps facts of each VA-API device. `NO_COPY` and `WAYS` are kept by the address of the display. `SIZES` is kept by the device, the layout and the size.
+  - Each job opens a new display (`own_decoder`). Thus each list is an `Lru` with a limit.
+  - vidcut finds a fact again after it leaves its list.
 
 - ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
 - A Vulkan picture with an alpha channel has a fourth image. The draw takes it as the alpha plane (`Import::alpha`).
@@ -107,6 +109,7 @@ The draw:
       - After the loss, `screen::offscreen` gives an error for that device. Thus no new work goes to it.
       - The AI frames fail with that error, and the viewer shows it. The frames without AI play on.
       - Play, seek, step, an export and a frame render make a new device (`screen::retry_lost`).
+      - The lost device goes from memory when its last user stops (`Offscreen`, in an `Arc`).
       - After a loss, the next play, seek or step of a player clears its error. It also drops the pictures that a GPU held (`Store::forget_held`). The lost device cannot give them back.
       - Why: the cause can be gone, for example another program that used much of the GPU.
       - After `RETRIES` losses in one minute, vidcut makes no new device until that minute ends. Why: Windows stops the computer after more than five resets in one minute ([gotchas](../gotchas.md#wgpu-and-egui)).

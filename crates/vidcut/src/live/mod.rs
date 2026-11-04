@@ -3586,6 +3586,7 @@ impl Live {
         self.waveforms = Arc::new(HashMap::new());
         self.waveforms_wanted.clear();
         self.duck_kept.clear();
+        self.duck_failed.clear();
         self.remember_recent(path);
         self.register();
         self.project_changed(None);

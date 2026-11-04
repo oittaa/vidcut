@@ -331,15 +331,17 @@ pub struct Speed {
 }
 
 fn allocated() -> Option<u64> {
-    let gpu = &crate::screen::offscreen().ok()?.gpu;
-    gpu.device
+    let on = crate::screen::offscreen().ok()?;
+    on.gpu
+        .device
         .generate_allocator_report()
         .map(|r| r.total_allocated_bytes)
 }
 
 fn idle() -> Result<()> {
-    let gpu = &crate::screen::offscreen().map_err(Error::Invalid)?.gpu;
-    gpu.device
+    let on = crate::screen::offscreen().map_err(Error::Invalid)?;
+    on.gpu
+        .device
         .poll(wgpu::PollType::Wait {
             submission_index: None,
             timeout: None,

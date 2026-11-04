@@ -401,7 +401,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - An In with no Out takes the file to its end.
     - An Out with no In counts position 0 as the In.
     - Marks outside the file: nothing happens.
-    - With no marks, Append and Smart Insert do nothing. Ripple Overwrite, Place On Top and Source Overwrite take the whole file, with no empty part.
+    - With no marks, Append does nothing. Smart Insert adds nothing, and the playhead moves to the nearest edit. Ripple Overwrite, Place On Top and Source Overwrite take the whole file, with no empty part.
     - An In before the file: the part before the file stays empty on the timeline, before the clip (`lead`).
       - Append: after the last clip.
       - Smart Insert: at the nearest edit. Later clips move by the empty part plus the clip.
@@ -879,7 +879,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - On Track 1 with Ripple On, it ripples. On other tracks, only that clip changes.
   - **Edit center: roll.**
     - Trim > Roll > Start to Playhead next to a gap moves only the picture edge. The sound stays.
-    - `edit.roll` does this. vidcut has no menu command for it ([gaps](todo/cut-page-gaps.md)).
+    - `edit.roll` and `edit.roll_to_playhead` do this.
+    - The Trim menu has Roll > Start to Playhead and End to Playhead (p. 1087). These commands choose clips as D4 does.
     - The total duration stays the same.
     - A white overlay shows the available handle media.
   - **Slip handle at the clip center: slip.** Several selected clips slip together.
@@ -962,6 +963,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - Shift+Up/Down jumps between markers.
 - You can drag markers.
 - Alt+M deletes the marker at the playhead. Delete removes the selected markers.
+- In the Source Clip viewer, M, Alt+M and Shift+Up/Down act on the markers of the clip in the viewer (p. 1013).
+  - A second M on the same frame opens the marker dialog.
+  - `markers.add`, `markers.list` and `markers.remove` with `media` do this. `player.seek` moves the playhead.
 
 ### 8.10 Undo (pp. 651–652)
 - Ctrl+Z undoes, and Ctrl+Shift+Z redoes. The number of steps has no limit.
@@ -1874,6 +1878,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A clip on a video track that starts from the new end to the old end goes away.
     - A clip on an audio track that starts there stays where it is.
     - The first clip that moves back on a track ends the clips that stayed on that track. The clip under its first frame stops there. Clips that stayed after that frame go away.
+    - A timeline marker in the replaced part stays where it is, also past the new end.
+    - A timeline marker from the old end on moves by the change in length. It replaces a marker on the frame where it lands.
   - Over a gap, the clip keeps its distance to the Track 1 clips around it.
   - Clips on locked tracks do not follow.
   - In other edits, a clip that would land on another clip moves to the next free track of its kind.
@@ -2885,7 +2891,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Soft: a lower third at 5.5%, with a soft shadow and no outline
   - Your looks are one TOML file each, in `looks/subtitles` and `looks/titles` in the config folder.
   - The file has the name of the look:
-    - up to 64 characters, without `/ \ : * ? " < > |`
+    - without `/ \ : * ? " < > |`
     - not starting or ending with a dot
     - matched whatever its case
   - A built-in look cannot be replaced or deleted, and its name cannot be taken.

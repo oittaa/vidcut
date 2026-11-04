@@ -1259,6 +1259,16 @@ pub enum Request {
         #[serde(default)]
         ripple: Option<bool>,
     },
+    /// Roll clips' head or tail to `at` (Trim > Roll > Start or End to
+    /// Playhead), as `edit.roll` does. Without `clips`, the clip of Track 1
+    /// under `at`.
+    #[serde(rename = "edit.roll_to_playhead")]
+    EditRollToPlayhead {
+        edge: Edge,
+        at: TimeSpec,
+        #[serde(default)]
+        clips: Vec<ClipRef>,
+    },
     /// Change Clip Duration (Ctrl+D). `end` runs each clip to the end of its
     /// media, and a longer duration stops there. It ripples as a trim with
     /// Ripple On does, whatever Ripple On is, unless `ripple` is false.
@@ -2689,8 +2699,7 @@ pub enum Request {
     /// `titles.add` takes them. Built-in looks can't be replaced.
     #[serde(rename = "looks.save")]
     LooksSave {
-        /// Up to 64 characters, without `/ \ : * ? " < > |`; names match
-        /// whatever their case.
+        /// Without `/ \ : * ? " < > |`; names match whatever their case.
         name: String,
         #[serde(default)]
         subtitles: Option<SubtitleLook>,

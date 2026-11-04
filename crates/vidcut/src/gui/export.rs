@@ -2966,7 +2966,7 @@ fn settings_form(
                                 None,
                                 format!("project ({})", channels(audio.1)),
                             );
-                            for c in [1, 2, 6] {
+                            for c in 1..=vidcut_core::model::Settings::MOST_CHANNELS {
                                 ui.selectable_value(&mut a.channels, Some(c), channels(c));
                             }
                         });

@@ -194,6 +194,8 @@ impl Format {
 }
 
 impl Settings {
+    pub const MOST_CHANNELS: u16 = 24;
+
     pub fn with_format(fps: Option<&str>, size: Option<(u32, u32)>) -> crate::error::Result<Self> {
         let mut s = Self::default();
         if let Some(f) = fps {

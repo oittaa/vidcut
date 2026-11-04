@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -18,7 +19,7 @@ fn failed(what: &str) -> Error {
 
 struct Frame {
     at: i64,
-    offscreen: &'static Offscreen,
+    offscreen: Arc<Offscreen>,
     shown: Shown,
     _player: Player,
 }
