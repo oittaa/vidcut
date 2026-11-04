@@ -691,10 +691,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **The ruler** shows the timecodes of the files.
   - It starts at the earliest timecode of the files. Where all files read 00:00:00:00, it starts at 01:00:00:00.
   - Its start does not change when rows move.
-- **Far gaps:** the rule is for an empty stretch where no row has a picture. It is measured at 25 fps.
-  - A stretch of up to 10:00 minutes stays. A stretch of 10:01 or more becomes 1 second, which is 25 frames at 25 fps.
+- **Far gaps:** the rule is for an empty stretch where no row has a picture. It is measured at 25 fps and 30 fps.
+  - A stretch of exactly 10:00 minutes stays. One frame more makes it 1 second: 25 frames at 25 fps, 30 frames at 30 fps.
   - The length of the clips plays no part.
-  - The rule acts at open, at Auto Sync by timecode and during a drag.
+  - The rule acts at open, at Auto Sync and during a drag.
+  - A shift of more than 10:00 by Sound or In stays, because the rows overlap and no stretch is empty.
   - The saved group has the short places. The ruler shows a dark bar at each short gap, and it jumps to the real timecode after the bar.
 - **Earliest row:** when no row stays at the start after a drag or a nudge, the earliest row goes to the start.
   - The empty front goes away. The frames of the group fall, and its start stays.

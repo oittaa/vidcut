@@ -28,11 +28,9 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
   - Sync by Marker;
   - Sync by Out on a row of many files;
   - Shift+Comma on a keyboard layout that is not Finnish;
-  - the rule of far gaps at other frame rates, and the exact limit between 10:00 and 10:01;
   - the ruler labels of a reopened group with far tags;
   - the Sync Bin for a group whose first tag is not 01:00:00:00;
-  - the rows of a file in two groups;
-  - files of two different saved groups in one bin: vidcut refuses them now.
+  - the rows of a file in two groups.
 - Measure the Sync Bin parts that are not measured:
   - the number keys and Escape;
   - the sound of the grid with Video Only off and on (p. 708);
