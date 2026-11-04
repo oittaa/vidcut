@@ -325,6 +325,9 @@ flowchart TD
 - `reset` with `keep_downloads` keeps `models` and `speech-replies`.
 - `Tiles::evict` drops kept pictures past the memory budget of the tile cache.
 - Levels, voice activity, picture stats and light are also kept in memory. The last results heard (`HEARD`, an `Lru`) are kept only in memory.
+- `LEVELS`, `PICTURES`, `VOICES`, `TRANSCRIPTS` and `MATCHES` are each an `Lru`. A value that leaves is read from the disk or made again.
+- `kept_measure` reads only the memory. A measure that left comes back from the disk, by the job that `hear_ducking` starts.
+- `MADE_WITH` has no cap. It tells the next open how a proxy was written, and that open removes it. Nothing on the disk has this record.
 
 ### The disk cache limit
 

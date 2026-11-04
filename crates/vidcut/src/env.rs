@@ -86,14 +86,16 @@ fn heard_key(plan: &RenderPlan, asked: &Asked) -> String {
 
 const LEVELS_PER_SECOND: u32 = 100;
 
-type Memo<T> = LazyLock<Mutex<HashMap<(PathBuf, Origin), Arc<T>>>>;
-static LEVELS: Memo<AudioLevels> = LazyLock::new(Default::default);
-static PICTURES: Memo<PictureStats> = LazyLock::new(Default::default);
-static VOICES: Memo<VoiceActivity> = LazyLock::new(Default::default);
-type Matches = HashMap<(Origin, Origin), Option<SoundMatch>>;
-static MATCHES: LazyLock<Mutex<Matches>> = LazyLock::new(Default::default);
-type Transcripts = HashMap<(Origin, u32), Vec<Kept>>;
-static TRANSCRIPTS: LazyLock<Mutex<Transcripts>> = LazyLock::new(Default::default);
+const MEASURES_KEPT: usize = 1024;
+type Memo<T> = Mutex<Lru<(PathBuf, Origin), Arc<T>, MEASURES_KEPT>>;
+static LEVELS: Memo<AudioLevels> = Mutex::new(Lru::new());
+static PICTURES: Memo<PictureStats> = Mutex::new(Lru::new());
+static VOICES: Memo<VoiceActivity> = Mutex::new(Lru::new());
+const MATCHES_KEPT: usize = 4096;
+type Matches = Lru<(Origin, Origin), Option<SoundMatch>, MATCHES_KEPT>;
+static MATCHES: Mutex<Matches> = Mutex::new(Lru::new());
+type Transcripts = Lru<(Origin, u32), Vec<Kept>, MEASURES_KEPT>;
+static TRANSCRIPTS: Mutex<Transcripts> = Mutex::new(Lru::new());
 
 static MADE_WITH: LazyLock<Mutex<HashMap<PathBuf, (String, vidcut_core::editor::Copied)>>> =
     LazyLock::new(Default::default);
