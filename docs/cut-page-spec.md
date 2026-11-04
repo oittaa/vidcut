@@ -400,7 +400,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - An In with no Out takes the file to its end.
     - An Out with no In counts position 0 as the In.
     - Marks outside the file: nothing happens.
-    - With no marks, Append and Smart Insert do nothing. Ripple Overwrite, Place On Top and Source Overwrite take the whole file, with no empty part.
+    - With no marks, Append does nothing. Smart Insert adds nothing, and the playhead moves to the nearest edit. Ripple Overwrite, Place On Top and Source Overwrite take the whole file, with no empty part.
     - An In before the file: the part before the file stays empty on the timeline, before the clip (`lead`).
       - Append: after the last clip.
       - Smart Insert: at the nearest edit. Later clips move by the empty part plus the clip.
@@ -1873,6 +1873,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A clip on a video track that starts from the new end to the old end goes away.
     - A clip on an audio track that starts there stays where it is.
     - The first clip that moves back on a track ends the clips that stayed on that track. The clip under its first frame stops there. Clips that stayed after that frame go away.
+    - A timeline marker in the replaced part stays where it is, also past the new end.
+    - A timeline marker from the old end on moves by the change in length. It replaces a marker on the frame where it lands.
   - Over a gap, the clip keeps its distance to the Track 1 clips around it.
   - Clips on locked tracks do not follow.
   - In other edits, a clip that would land on another clip moves to the next free track of its kind.
