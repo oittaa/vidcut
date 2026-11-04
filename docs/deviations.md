@@ -2552,3 +2552,19 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The same marks give the same frames in both views.
   - The owner approved this difference.
+
+## X131. A broken `.cube` file is refused
+
+- **Resolve:**
+  - These are measurements by script in Resolve Studio 21.1.2. No manual page is known for this.
+  - `SetLUT` returns True on each of these files:
+    - A lower-case size line gives no LUT.
+    - A file with no size line gives no LUT.
+    - Too few rows give a wrong picture.
+    - `LUT_3D_SIZE 1` gives a black picture.
+  - The window of Resolve is not measured.
+- **vidcut:**
+  - `clip.set` and `project.set` refuse the file and give the reason.
+- **Why:**
+  - An error is better than a wrong picture that looks correct.
+  - The owner approved this difference.
