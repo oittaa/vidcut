@@ -3709,6 +3709,10 @@ These facts are measured in Resolve Studio 21.1.2, with no color management, wit
   - `LUT_1D_SIZE`: 2, 5, 17 and 65536.
 - `TITLE`, comments, blank lines and tabs are read.
 - With no LUT, the input comes out unchanged, also below 0 and above 1.
+- A LUT on a picture with alpha leaves the alpha unchanged. T is the table, C the color and A the alpha, on a render with alpha:
+  - Straight gives `T(C) * A`.
+  - Premultiplied gives `T(clamp(C / A)) * A`, and 0 where A is 0.
+  - Premultiplied with no LUT keeps C where A is 0.
 
 A script gets no error for a broken file:
 

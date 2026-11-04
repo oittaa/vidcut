@@ -83,7 +83,10 @@ fn opacity(u: vec2<f32>) -> f32 {
     if p.site.z > 0.5 && p.site.z < 1.5 {
         return 1.0;
     }
-    let s = stored(u) * p.upright.zw;
+    return stored_opacity(stored(u) * p.upright.zw);
+}
+
+fn stored_opacity(s: vec2<f32>) -> f32 {
     if p.flags.z == 2u {
         return read_as(textureSampleLevel(luma, bilinear, s, 0.0).r);
     }
@@ -498,7 +501,16 @@ fn looked_up(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_convert_lut(in: Out) -> @location(0) vec4<f32> {
-    return vec4<f32>(looked_up(rgb(yuv_woven(floor(in.position.xy)))), 1.0);
+    let px = floor(in.position.xy);
+    let c = rgb(yuv_woven(px));
+    if !premultiplied() {
+        return vec4<f32>(looked_up(c), 1.0);
+    }
+    let a = stored_opacity((px + 0.5) / stored_size() * p.upright.zw);
+    if a <= 0.0 {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    return vec4<f32>(looked_up(c / a) * a, 1.0);
 }
 
 @fragment

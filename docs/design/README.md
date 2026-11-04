@@ -161,6 +161,10 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
 - A request refuses an input LUT on a clip with no media picture: a generator, a title, a compound clip or a sound clip. `ops::set_clips` tells this.
 - A file that goes away later stops an export or a `frame.render` with the reason. The viewer shows the picture with no output LUT, and the player's status holds the reason.
 - `fs_lut` works on colors that are not premultiplied. It leaves a pixel with no alpha as it is.
+- The input LUT follows the Alpha Mode of the clip ([spec §13](../cut-page-spec.md#the-lut-tables)). A LUT does not change alpha.
+  - In Premultiplied, `fs_convert_lut` takes the alpha out of the color, looks up the color, and multiplies by the alpha again. It gives 0 where the alpha is 0.
+  - In the other modes, it looks up the color as it is. Straight and Invert then multiply by their alpha when the picture is placed.
+  - Before an AI upscaler, `Source::push` reads a Premultiplied picture in the same way (`PictureId`).
 - `fs_lut` reads the canvas, and the canvas holds 16-bit floats. `fs_convert_lut` reads the picture before it goes to 16-bit floats. Thus a table with steep steps gives a larger error as an output LUT than as an input LUT.
 
 ## Rules the code follows
