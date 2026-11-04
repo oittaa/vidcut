@@ -32,6 +32,7 @@ pub(crate) struct Edit<'a> {
     pub placed: &'a [String],
     pub kept: &'a [(i64, i64)],
     pub trimmed: Option<&'a str>,
+    pub replaced: Option<(i64, i64)>,
 }
 
 struct Mapper<'a> {
@@ -82,6 +83,11 @@ impl Mapper<'_> {
     fn map(&self, x: i64, own: &str) -> Option<i64> {
         if self.edit.kept.iter().any(|&(a, b)| a <= x && x < b) {
             return Some(x);
+        }
+        if let Some((new_end, old_end)) = self.edit.replaced
+            && x >= old_end
+        {
+            return Some(x + new_end - old_end);
         }
         let main = &self.before.main;
         let i = main.partition_point(|c| c.start <= x);
@@ -149,13 +155,26 @@ pub(crate) fn follow(p: &mut Project, before: &Before, edit: &Edit<'_>) {
         edit,
     };
     let mut moved = HashSet::new();
+    let mut landings = Vec::new();
     for (ti, track) in p.tracks.iter_mut().enumerate() {
         if ti == main_index || track.locked {
             continue;
         }
         let mut gone = HashSet::new();
+        let (new_end, old_end) = edit.replaced.unwrap_or_default();
+        if new_end < old_end
+            && let Some(first) = track.clips.iter().find(|c| c.start >= old_end)
+        {
+            landings.push((ti, first.start + new_end - old_end));
+        }
         for c in &mut track.clips {
             if edit.placed.contains(&c.id) {
+                continue;
+            }
+            if (new_end..old_end).contains(&c.start) {
+                if track.kind == TrackKind::Video {
+                    gone.insert(c.id.clone());
+                }
                 continue;
             }
             match mapper.map(c.start, &c.id) {
@@ -170,6 +189,12 @@ pub(crate) fn follow(p: &mut Project, before: &Before, edit: &Edit<'_>) {
             }
         }
         track.clips.retain(|c| !gone.contains(&c.id));
+    }
+    for (ti, at) in landings {
+        super::split_at(p, ti, at);
+        p.tracks[ti]
+            .clips
+            .retain(|c| c.start < at || moved.contains(&c.id));
     }
     super::subtitles::remap(p, |x| mapper.map(x, ""));
     settle(p, &moved);
