@@ -2569,7 +2569,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - An error is better than a wrong picture that looks correct.
   - The owner approved this difference.
 
-## X135. DNxHR 444 exports without alpha
+## X136. DNxHR 444 exports without alpha
 
 - **Resolve:**
   - Export Alpha works with DNxHR 444 (p. 4093).

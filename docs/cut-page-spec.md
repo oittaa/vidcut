@@ -1745,7 +1745,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - **In vidcut:**
     - `video.alpha` is Export Alpha. `video.alpha_mode` is `premultiplied` or `straight`. The Export dialog shows both only for ProRes 4444 and 4444 XQ.
     - An export refuses `video.alpha` in another format. It does not change a setting without a word.
-    - DNxHR 444 has no alpha ([X135](deviations.md#x135-dnxhr-444-exports-without-alpha)).
+    - DNxHR 444 has no alpha ([X136](deviations.md#x136-dnxhr-444-exports-without-alpha)).
     - With it off, the export composites over black, and the file has no alpha channel.
     - With it on, what shows nothing is transparent: a gap, a bar beside a picture, and a dip to black.
 
