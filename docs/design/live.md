@@ -421,6 +421,7 @@ The bar and the Jobs button:
 - A tile that is not decoded yet shows the nearest kept tile (`Tiles::nearest`), else the nearest pool thumbnail. Why: the filmstrip stays full while a zoom or a scroll decodes new tiles.
 - The filmstrips of the Trim Editor use the same tiles (`vidcut_core::ops::filmstrip`, `TrimAnchor`).
 - An `Lru` keeps the order in which the tiles were used. `Tiles::evict` removes the oldest tile until the cache is under its budget, and stops at a tile that the last paint showed. Why: each step of an eviction is one operation, with no scan of the kept tiles.
+- Another `Lru` keeps the tiles that did not decode (`FAILED_KEPT`). A tile that leaves it is tried once more when it shows again.
 
 **Imports** ([deviation X66](../deviations.md#x66-files-and-folders-dropped-on-the-window-go-into-the-open-bin)).
 
