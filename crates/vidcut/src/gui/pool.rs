@@ -35,6 +35,12 @@ const HEADER: f32 = 20.0;
 const EDIT_ICONS: f32 = 8.0;
 const EDIT_ICON: f32 = 16.0;
 const EDIT_ICON_GAP: f32 = 4.0;
+const CARD_HEIGHT: f32 = 84.0;
+const CARD_LEAST_WIDTH: f32 = 300.0;
+const CARD_MARGIN: f32 = 6.0;
+const CARD_PICTURE: egui::Vec2 = egui::Vec2::new(128.0, 72.0);
+const CARD_LINES: [f32; 2] = [28.0, 53.0];
+const CLUSTER_HEADING: f32 = 26.0;
 
 #[derive(Default)]
 pub(super) struct BinsUi {
@@ -42,6 +48,14 @@ pub(super) struct BinsUi {
     order: Vec<String>,
     rename: Option<Rename>,
     list: Option<ListLayout>,
+    places: Vec<Rect>,
+    boxing: Option<Boxing>,
+}
+
+#[derive(Clone, Copy)]
+struct Boxing {
+    from: Vec2,
+    toggle: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -107,6 +121,38 @@ fn per_row(width: f32) -> usize {
     } else {
         ((width - TILE_FULL.x) / (TILE_FULL.x + TILE_GAP)) as usize + 1
     }
+}
+
+fn cards_per_row(width: f32) -> usize {
+    (((width + TILE_GAP) / (CARD_LEAST_WIDTH + TILE_GAP)) as usize).max(1)
+}
+
+fn file_time(m: &Media) -> Option<crate::when::LocalTime> {
+    u64::try_from(m.mtime_ns / 1_000_000)
+        .ok()
+        .filter(|&ms| ms > 0)
+        .and_then(crate::when::local_time)
+}
+
+fn cluster(sort: PoolSort, m: &Media) -> Option<String> {
+    match sort {
+        PoolSort::Name => Some(crate::live::first_letter(&m.name)),
+        PoolSort::Date => Some(file_time(m).map_or_else(|| "-".to_string(), |d| d.day())),
+        PoolSort::Added | PoolSort::Duration | PoolSort::Timecode => None,
+    }
+}
+
+fn one_line(
+    painter: &egui::Painter,
+    text: String,
+    size: f32,
+    color: Color32,
+    width: f32,
+) -> Arc<egui::Galley> {
+    let font = egui::FontId::proportional(size);
+    let mut job = egui::text::LayoutJob::simple_singleline(text, font, color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(width);
+    painter.layout_job(job)
 }
 
 fn shown(view: Rangef, top: f32, step: f32, n: usize) -> Range<usize> {
@@ -187,6 +233,16 @@ fn chosen(clicked: Option<&str>, selected: &[String]) -> Option<String> {
         .filter(|id| selected.iter().any(|s| s == id))
         .map(String::from)
         .or_else(|| selected.last().cloned())
+}
+
+fn boxed(selected: &[String], inside: Vec<String>, toggle: bool) -> Vec<String> {
+    if !toggle {
+        return inside;
+    }
+    let kept = selected.iter().filter(|id| !inside.contains(id)).cloned();
+    let mut out: Vec<String> = kept.collect();
+    out.extend(inside.into_iter().filter(|id| !selected.contains(id)));
+    out
 }
 
 fn strip_path() -> std::path::PathBuf {
@@ -395,6 +451,16 @@ impl Workspace {
             {
                 self.relink_missing(ui.ctx());
             }
+            let on = snap.pool.view == PoolMode::Metadata;
+            let cards = egui::Button::selectable(
+                on,
+                RichText::new(egui_phosphor::regular::IDENTIFICATION_CARD).size(14.0),
+            );
+            let cards = ui.add(cards).on_hover_text("Metadata");
+            cards.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Metadata"));
+            if cards.clicked() && !on {
+                self.send("pool.set", json!({ "view": PoolMode::Metadata }));
+            }
             for (mode, name) in [
                 (PoolMode::Thumbnail, "Grid"),
                 (PoolMode::Filmstrip, "Filmstrip"),
@@ -459,9 +525,9 @@ impl Workspace {
             .auto_shrink([false, false])
             .show_viewport(ui, |ui, viewport| {
                 let background = ui.interact(
-                    ui.max_rect(),
+                    viewport.translate(ui.max_rect().min.to_vec2()),
                     ui.scope_id().with("background"),
-                    Sense::click(),
+                    Sense::click_and_drag(),
                 );
                 if let Some(p) = project {
                     background.context_menu(|ui| {
@@ -502,7 +568,9 @@ impl Workspace {
                     PoolMode::Thumbnail => self.grid(ui, viewport, p, &folders, &media),
                     PoolMode::Filmstrip => self.strips(ui, viewport, p, &folders, &media),
                     PoolMode::List => self.list(ui, viewport, p, &folders, &media),
+                    PoolMode::Metadata => self.cards(ui, viewport, p, &folders, &media),
                 }
+                self.pool_box(ui, &background, &media);
             });
         if let Some(pos) = press {
             self.pool_focus = shown.inner_rect.contains(pos);
@@ -516,6 +584,40 @@ impl Workspace {
             ui.ctx().request_repaint();
         }
         self.rename_bin_window(ui.ctx());
+    }
+
+    fn pool_box(&mut self, ui: &egui::Ui, background: &egui::Response, media: &[&Media]) {
+        let content = ui.max_rect().min;
+        if background.drag_started_by(egui::PointerButton::Primary)
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            self.bins.boxing = Some(Boxing {
+                from: press - content,
+                toggle: ui.input(|i| i.modifiers.command),
+            });
+        }
+        let Some(Boxing { from, toggle }) = self.bins.boxing else {
+            return;
+        };
+        let Some(pos) = ui.input(|i| i.pointer.latest_pos()) else {
+            return;
+        };
+        let rect = Rect::from_two_pos(content + from, pos);
+        if background.dragged() {
+            super::timeline::paint::marquee(ui.painter(), rect);
+            return;
+        }
+        self.bins.boxing = None;
+        if background.drag_stopped() {
+            let inside = media
+                .iter()
+                .zip(&self.bins.places)
+                .filter(|(_, place)| place.intersects(rect))
+                .map(|(m, _)| m.id.clone())
+                .collect();
+            let selection = boxed(&self.snap.selection.media, inside, toggle);
+            self.send("selection.set", json!({ "media": selection }));
+        }
     }
 
     pub(super) fn show_metadata_strip(&mut self, on: bool) {
@@ -720,16 +822,20 @@ impl Workspace {
         let rows = count.div_ceil(per_row);
         let step = TILE_FULL + Vec2::splat(TILE_GAP);
         let top = origin.y - ui.max_rect().top();
+        let place = |k: usize| {
+            let at = vec2((k % per_row) as f32 * step.x, (k / per_row) as f32 * step.y);
+            Rect::from_min_size(origin + at, TILE_FULL)
+        };
         for row in shown(viewport.y_range(), top, step.y, rows) {
             for k in row * per_row..((row + 1) * per_row).min(count) {
-                let at = origin + vec2((k % per_row) as f32 * step.x, row as f32 * step.y);
-                let rect = Rect::from_min_size(at, TILE_FULL);
+                let rect = place(k);
                 match k.checked_sub(folders.len()) {
                     None => self.folder_tile(ui, rect, p, &folders[k]),
                     Some(i) => self.tile(ui, rect, media[i]),
                 }
             }
         }
+        self.bins.places = (folders.len()..count).map(place).collect();
         let size = vec2(per_row.min(count) as f32, rows as f32) * step - Vec2::splat(TILE_GAP);
         ui.expand_to_include_rect(Rect::from_min_size(origin, size));
     }
@@ -749,10 +855,12 @@ impl Workspace {
         let size = vec2(ui.available_width(), STRIP_HEIGHT + HEADER);
         let gap = ui.spacing().item_spacing.y;
         let top = origin.y - ui.max_rect().top();
+        let place =
+            |i: usize| Rect::from_min_size(origin + vec2(0.0, i as f32 * (size.y + gap)), size);
         for i in shown(viewport.y_range(), top, size.y + gap, media.len()) {
-            let rect = Rect::from_min_size(origin + vec2(0.0, i as f32 * (size.y + gap)), size);
-            self.filmstrip(ui, rect, media[i]);
+            self.filmstrip(ui, place(i), media[i]);
         }
+        self.bins.places = (0..media.len()).map(place).collect();
         if !media.is_empty() {
             let height = media.len() as f32 * (size.y + gap) - gap;
             ui.expand_to_include_rect(Rect::from_min_size(origin, vec2(size.x, height)));
@@ -902,17 +1010,16 @@ impl Workspace {
         }
     }
 
-    fn tile(&mut self, ui: &mut egui::Ui, rect: Rect, m: &Media) {
-        let resp = ui.interact(
-            rect,
-            ui.scope_id().with(("media", &m.id)),
-            Sense::click_and_drag(),
-        );
-        let picture = Rect::from_min_size(rect.min, TILE);
-        let painter = ui.painter_at(rect);
+    fn tile_picture(
+        &mut self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        picture: Rect,
+        m: &Media,
+        frames: i64,
+        hovered_frame: Option<i64>,
+    ) {
         painter.rect_filled(picture, CornerRadius::same(3), theme::colors().track);
-        let frames = self.project().map_or(0, |p| p.media_frames(m));
-        let hovered_frame = resp.hover_pos().map(|pos| frame_at(picture, pos.x, frames));
         if let Some(f) = hovered_frame {
             self.hover = Some((m.id.clone(), f));
         }
@@ -928,16 +1035,156 @@ impl Workspace {
                     .unwrap_or_else(|| t.textures[0].id());
                 painter.image(shown, r, FULL, Color32::WHITE);
             }
-            _ if m.subtitles.is_some() => subtitle_card(&painter, picture, m),
-            _ if m.info.video.is_none() && ui.is_rect_visible(rect) => {
-                self.sound(&painter, picture, m);
+            _ if m.subtitles.is_some() => subtitle_card(painter, picture, m),
+            _ if m.info.video.is_none() && ui.is_rect_visible(picture) => {
+                self.sound(painter, picture, m);
             }
-            _ => no_pictures(&painter, picture, m),
+            _ => no_pictures(painter, picture, m),
         }
-        marks(&painter, picture, m, frames, hovered_frame);
+        marks(painter, picture, m, frames, hovered_frame);
         if let Some(color) = m.color.as_deref().and_then(theme::clip_color) {
             painter.circle_filled(picture.right_bottom() + vec2(-9.0, -11.0), 4.5, color);
         }
+    }
+
+    fn cues_text(&self, m: &Media) -> Option<String> {
+        let (s, p) = (m.subtitles.as_ref()?, self.project()?);
+        let length = self.src_tc(subtitle_frames(p, m));
+        Some(format!("{} cues · {length}", s.cues))
+    }
+
+    fn cards(
+        &mut self,
+        ui: &mut egui::Ui,
+        viewport: Rect,
+        p: &Project,
+        folders: &[String],
+        media: &[&Media],
+    ) {
+        for b in folders {
+            self.folder_row(ui, p, b);
+        }
+        let origin = ui.cursor().min;
+        let top = origin.y - ui.max_rect().top();
+        let width = ui.available_width();
+        let per_row = cards_per_row(width);
+        let size = vec2(
+            (width - (per_row - 1) as f32 * TILE_GAP) / per_row as f32,
+            CARD_HEIGHT,
+        );
+        let step = size + Vec2::splat(TILE_GAP);
+        let sort = self.snap.pool.sort;
+        let clusters: Vec<Option<String>> = media.iter().map(|m| cluster(sort, m)).collect();
+        self.bins.places.clear();
+        let mut y = 0.0;
+        let mut first = 0;
+        for run in clusters.chunk_by(|a, b| a == b) {
+            if let Some(name) = &run[0] {
+                ui.painter().text(
+                    origin + vec2(0.0, y + 4.0),
+                    egui::Align2::LEFT_TOP,
+                    name,
+                    egui::FontId::proportional(14.0),
+                    theme::colors().text,
+                );
+                y += CLUSTER_HEADING;
+            }
+            let rows = run.len().div_ceil(per_row);
+            let place = |i: usize| {
+                let at = vec2(
+                    (i % per_row) as f32 * step.x,
+                    y + (i / per_row) as f32 * step.y,
+                );
+                Rect::from_min_size(origin + at, size)
+            };
+            for row in shown(viewport.y_range(), top + y, step.y, rows) {
+                for i in row * per_row..((row + 1) * per_row).min(run.len()) {
+                    self.card(ui, place(i), media[first + i]);
+                }
+            }
+            self.bins.places.extend((0..run.len()).map(place));
+            first += run.len();
+            y += rows as f32 * step.y;
+        }
+        if y > 0.0 {
+            ui.expand_to_include_rect(Rect::from_min_size(origin, vec2(width, y - TILE_GAP)));
+        }
+    }
+
+    fn card(&mut self, ui: &mut egui::Ui, rect: Rect, m: &Media) {
+        let resp = ui.interact(
+            rect,
+            ui.scope_id().with(("media", &m.id)),
+            Sense::click_and_drag(),
+        );
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, CornerRadius::same(3), ui.visuals().faint_bg_color);
+        let picture = Rect::from_min_size(rect.min + Vec2::splat(CARD_MARGIN), CARD_PICTURE);
+        let frames = self.project().map_or(0, |p| p.media_frames(m));
+        let hovered_frame = resp
+            .hover_pos()
+            .filter(|pos| picture.contains(*pos))
+            .map(|pos| frame_at(picture, pos.x, frames));
+        self.tile_picture(ui, &painter, picture, m, frames, hovered_frame);
+        self.outline(&painter, rect, m);
+        self.badges(&painter, picture, m);
+        let start = m
+            .info
+            .timecode
+            .as_ref()
+            .map_or_else(|| self.src_tc(0), super::clip_info::start_label);
+        let title = match self.snap.pool.sort {
+            PoolSort::Timecode => start.clone(),
+            PoolSort::Added | PoolSort::Name | PoolSort::Duration | PoolSort::Date => {
+                m.name.clone()
+            }
+        };
+        let left = picture.right() + CARD_MARGIN;
+        let room = rect.right() - CARD_MARGIN - left;
+        let at = |y: f32| rect.top() + y;
+        let (text, dim) = (theme::colors().text, theme::colors().text_dim);
+        let line = Stroke::new(1.0, theme::colors().panel_dark);
+        painter.galley(
+            Pos2::new(left, at(CARD_MARGIN)),
+            one_line(&painter, title, 14.0, text, room),
+            text,
+        );
+        painter.hline(left..=left + room, at(CARD_LINES[0]), line);
+        let details = self.cues_text(m).unwrap_or(start);
+        painter.galley(
+            Pos2::new(left, at(CARD_LINES[0] + 5.0)),
+            one_line(&painter, details, 12.0, dim, room * 0.6),
+            dim,
+        );
+        if m.subtitles.is_none() {
+            let camera = m
+                .camera
+                .as_deref()
+                .map_or_else(|| "---".to_string(), super::clip_info::camera_label);
+            let camera = one_line(&painter, camera, 12.0, dim, room * 0.4);
+            let x = left + room - camera.size().x;
+            painter.galley(Pos2::new(x, at(CARD_LINES[0] + 5.0)), camera, dim);
+        }
+        painter.hline(left..=left + room, at(CARD_LINES[1]), line);
+        painter.galley(
+            Pos2::new(left, at(CARD_LINES[1] + 5.0)),
+            one_line(&painter, m.name.clone(), 12.0, dim, room),
+            dim,
+        );
+        self.media_interaction(&resp, m);
+    }
+
+    fn tile(&mut self, ui: &mut egui::Ui, rect: Rect, m: &Media) {
+        let resp = ui.interact(
+            rect,
+            ui.scope_id().with(("media", &m.id)),
+            Sense::click_and_drag(),
+        );
+        let picture = Rect::from_min_size(rect.min, TILE);
+        let painter = ui.painter_at(rect);
+        let frames = self.project().map_or(0, |p| p.media_frames(m));
+        let hovered_frame = resp.hover_pos().map(|pos| frame_at(picture, pos.x, frames));
+        self.tile_picture(ui, &painter, picture, m, frames, hovered_frame);
         self.outline(&painter, picture, m);
         self.badges(&painter, picture, m);
         let label = |pos: Pos2, text: String, color: Color32| {
@@ -954,12 +1201,9 @@ impl Workspace {
             elide(&m.name, 28),
             theme::colors().text,
         );
-        let second = match (&m.subtitles, self.project()) {
-            (Some(s), Some(p)) => {
-                format!("{} cues · {}", s.cues, self.src_tc(subtitle_frames(p, m)))
-            }
-            _ => self.src_tc(hovered_frame.unwrap_or(frames)),
-        };
+        let second = self
+            .cues_text(m)
+            .unwrap_or_else(|| self.src_tc(hovered_frame.unwrap_or(frames)));
         label(
             Pos2::new(picture.left(), picture.bottom() + 16.0),
             second,
@@ -999,12 +1243,9 @@ impl Workspace {
             painter.rect_filled(header, CornerRadius::same(2), color.gamma_multiply(0.6));
         }
         let font = egui::FontId::proportional(12.0);
-        let time = match (&m.subtitles, self.project()) {
-            (Some(s), Some(p)) => {
-                format!("{} cues · {}", s.cues, self.src_tc(subtitle_frames(p, m)))
-            }
-            _ => self.src_tc(hovered_frame.unwrap_or(frames)),
-        };
+        let time = self
+            .cues_text(m)
+            .unwrap_or_else(|| self.src_tc(hovered_frame.unwrap_or(frames)));
         let time = painter.layout_no_wrap(time, font.clone(), theme::colors().text_dim);
         let room = ((width - time.size().x - 16.0) / 6.5).max(3.0) as usize;
         let name = painter.layout_no_wrap(elide(&m.name, room), font, theme::colors().text);
@@ -1089,22 +1330,11 @@ impl Workspace {
         let secs = p.settings.fps.frames_to_secs(p.media_frames(m));
         let origin = m.info.audio.first().map_or(0.0, |a| a.first_pts);
         let per_px = secs / f64::from(rect.width().max(1.0));
-        let (mid, half) = (rect.center().y, rect.height() / 2.0 - 1.0);
         painter.rect_filled(rect, CornerRadius::same(3), theme::colors().audio);
-        let mut x = rect.left().floor();
-        while x < rect.right() {
+        super::timeline::paint::wave_columns(painter, rect, |x| {
             let t = origin + f64::from(x - rect.left()) * per_px;
-            if let Some((lo, hi)) = w.range(t, t + per_px) {
-                painter.line_segment(
-                    [
-                        Pos2::new(x + 0.5, mid - hi * half),
-                        Pos2::new(x + 0.5, mid - lo * half + 0.5),
-                    ],
-                    Stroke::new(1.0, Color32::from_rgb(170, 230, 190)),
-                );
-            }
-            x += 1.0;
-        }
+            w.range(t, t + per_px)
+        });
     }
 
     fn outline(&self, painter: &egui::Painter, rect: Rect, m: &Media) {
@@ -1280,6 +1510,12 @@ impl Workspace {
                 sizes: measured,
             });
         }
+        self.bins.places = (0..media.len())
+            .map(|i| {
+                let y = media_top + i as f32 * (media_height + LIST_GAP.y);
+                Rect::from_min_size(origin + vec2(0.0, y), vec2(width, media_height))
+            })
+            .collect();
         let height = match media.len() {
             0 => media_top - LIST_GAP.y,
             n => media_top + n as f32 * (media_height + LIST_GAP.y) - LIST_GAP.y,
@@ -1355,11 +1591,7 @@ impl Workspace {
                 ui.label(self.src_tc(frames));
             }
             2 => {
-                let date = u64::try_from(m.mtime_ns / 1_000_000)
-                    .ok()
-                    .filter(|&ms| ms > 0)
-                    .and_then(crate::when::local_time);
-                ui.label(date.map_or_else(|| "-".to_string(), |d| d.minutes()));
+                ui.label(file_time(m).map_or_else(|| "-".to_string(), |d| d.minutes()));
             }
             3 => {
                 ui.label(video.map_or_else(

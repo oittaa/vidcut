@@ -408,6 +408,28 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 v["to_tc"].as_str().unwrap_or_default()
             );
         }
+        "analyze.ducking" => {
+            let v = &r.result;
+            let numbers = |k: &str| -> Vec<f64> {
+                v[k].as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_f64)
+                    .collect()
+            };
+            let (sound, dips) = (numbers("source_db"), numbers("duck_db"));
+            let every = v["per_second"].as_f64().unwrap_or(1.0);
+            let loudest = sound.iter().copied().reduce(f64::max);
+            let deepest = dips.iter().copied().fold(0.0, f64::min);
+            println!(
+                "{}: source peak {}, deepest dip {deepest:.2} dB, ducked {:.2} s ({} -> {})",
+                v["track"].as_str().unwrap_or_default(),
+                loudest.map_or("none".into(), |x| format!("{x:.1} dBFS")),
+                dips.iter().filter(|d| **d < 0.0).count() as f64 / every,
+                v["from_tc"].as_str().unwrap_or_default(),
+                v["to_tc"].as_str().unwrap_or_default()
+            );
+        }
         "timeline.boring" => {
             for (title, key) in [("boring", "boring"), ("jump cuts", "jump")] {
                 let clips = r.result[key].as_array().cloned().unwrap_or_default();

@@ -175,6 +175,9 @@ fn fix_audio(p: &mut Project, ti: usize) {
     while changed {
         changed = false;
         for i in 0..clips.len() {
+            if clips[i].audio.is_none() {
+                continue;
+            }
             let adjacent_next = i + 1 < clips.len()
                 && clips[i + 1].start == clips[i].end()
                 && clips[i + 1].audio.is_some();
@@ -192,14 +195,22 @@ fn fix_audio(p: &mut Project, ti: usize) {
                     None
                 },
             );
-            let duration = clips[i].duration;
+            let before = clips[..i].iter().rev().find_map(Clip::audio_range);
+            let after = clips[i + 1..].iter().find_map(Clip::audio_range);
+            let (start, end, duration) = (clips[i].start, clips[i].end(), clips[i].duration);
             if let Some(a) = clips[i].audio.as_mut() {
-                if prev_tail != Some(a.head) && a.head != 0 {
-                    a.head = 0;
-                    changed = true;
-                }
-                if next_head != Some(a.tail) && a.tail != 0 {
-                    a.tail = 0;
+                let head = match prev_tail {
+                    Some(tail) if tail != a.head => 0,
+                    Some(_) => a.head,
+                    None => a.head.max(before.map_or(0, |r| r.1) - start),
+                };
+                let tail = match next_head {
+                    Some(head) if head != a.tail => 0,
+                    Some(_) => a.tail,
+                    None => after.map_or(a.tail, |r| a.tail.min((r.0 - end).max(0))),
+                };
+                if (head, tail) != (a.head, a.tail) {
+                    (a.head, a.tail) = (head, tail);
                     changed = true;
                 }
                 if a.head >= duration + a.tail && (a.head, a.tail) != (0, 0) {
@@ -891,41 +902,61 @@ pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
     let lead = linked::leads(p, &[id.to_string()]);
     let id = lead.first().map_or(id, String::as_str);
     let (ti, ci) = locate(p, id)?;
+    let t = &p.tracks[ti];
+    let mut moved = t.clips[ci].clone();
+    let earlier = ci.checked_sub(1);
+    let later = Some(ci + 1).filter(|&i| i < t.clips.len());
+    let left = earlier.filter(|&i| t.clips[i].end() == moved.start);
+    let right = later.filter(|&i| t.clips[i].start == moved.end());
+    let least = match (left, earlier) {
+        (Some(_), _) => i64::MIN,
+        (None, Some(i)) => t.clips[i].end() + 1 - moved.start,
+        (None, None) => -moved.start,
+    };
+    let most = match (right, later) {
+        (Some(_), _) => i64::MAX,
+        (None, Some(i)) => t.clips[i].start - 1 - moved.end(),
+        (None, None) => i64::MAX,
+    };
+    let by = by.clamp(least, most);
     if by == 0 {
         return Ok(());
     }
-    let t = &p.tracks[ti];
-    let c = t.clips[ci].clone();
-    let left = ci.checked_sub(1).filter(|&i| t.clips[i].end() == c.start);
-    let right = Some(ci + 1).filter(|&i| i < t.clips.len() && t.clips[i].start == c.end());
-    let (Some(l), Some(r)) = (left, right) else {
-        return Err(Error::invalid(format!(
-            "{id} slides only between two clips that touch it"
-        )));
-    };
-    let (mut before_c, mut moved, mut after_c) = (t.clips[l].clone(), c, t.clips[r].clone());
-    let parts: Vec<_> = [&before_c, &moved, &after_c]
-        .into_iter()
+    let mut before_c = left.map(|i| t.clips[i].clone());
+    let mut after_c = right.map(|i| t.clips[i].clone());
+    let parts: Vec<_> = before_c
+        .iter()
+        .chain([&moved])
+        .chain(&after_c)
         .flat_map(|x| linked::tied_to(p, &x.id))
         .collect();
-    let (left_id, moved_id) = (before_c.id.clone(), moved.id.clone());
+    let left_id = before_c.as_ref().map(|c| c.id.clone());
+    let moved_id = moved.id.clone();
     let taken = linked::take(p, &parts)?;
-    before_c.duration += by;
     moved.start += by;
-    after_c.move_head(by);
-    check_source(p, &before_c)?;
-    check_source(p, &after_c)?;
+    if let Some(c) = &mut before_c {
+        c.duration += by;
+        check_source(p, c)?;
+    }
+    if let Some(c) = &mut after_c {
+        c.move_head(by);
+        check_source(p, c)?;
+    }
     let before = (ti == main_index(p)).then(|| Before::of(p));
     let track = &mut p.tracks[ti];
-    track.clips[l] = before_c;
+    if let (Some(l), Some(c)) = (left, before_c) {
+        track.clips[l] = c;
+    }
     track.clips[ci] = moved;
-    track.clips[r] = after_c;
+    if let (Some(r), Some(c)) = (right, after_c) {
+        track.clips[r] = c;
+    }
     fix_audio(p, ti);
     if let Some(before) = before {
         follow::follow(p, &before, &Edit::default());
     }
     for mut part in taken {
-        if part.lead == left_id {
+        if left_id.as_ref() == Some(&part.lead) {
             part.clip.duration += by;
         } else if part.lead == moved_id {
             part.clip.start += by;
@@ -1498,26 +1529,50 @@ fn trim_one(p: &mut Project, id: &str, edge: Edge, delta: i64, ripple: Option<bo
     Ok(())
 }
 
-fn edit_pair(p: &Project, ti: usize, id: &str, edge: Edge) -> Result<(usize, usize)> {
-    let t = &p.tracks[ti];
-    let ci = clip_index(t, id);
+fn edit_pair(t: &Track, ci: usize, edge: Edge) -> Option<(usize, usize)> {
     let (a, b) = match edge {
         Edge::Tail => (ci, ci + 1),
         Edge::Head => (ci.wrapping_sub(1), ci),
     };
-    if a >= t.clips.len() || b >= t.clips.len() || t.clips[a].end() != t.clips[b].start {
-        return Err(Error::invalid(format!(
-            "{id} has no adjacent clip at its {edge:?} edge"
-        )));
+    (a < t.clips.len() && b < t.clips.len() && t.clips[a].end() == t.clips[b].start)
+        .then_some((a, b))
+}
+
+fn roll_next_to_gap(p: &mut Project, ti: usize, ci: usize, edge: Edge, delta: i64) -> Result<()> {
+    let t = &p.tracks[ti];
+    let mut c = t.clips[ci].clone();
+    let video = c.video;
+    match edge {
+        Edge::Head => {
+            let first = ci.checked_sub(1).map_or(0, |i| t.clips[i].end() + 1);
+            let by = delta.max((first - c.start).min(0));
+            c.move_head(by);
+            if let Some(a) = c.audio.as_mut().filter(|_| video) {
+                a.head -= by;
+            }
+        }
+        Edge::Tail => {
+            let last = t.clips.get(ci + 1).map_or(i64::MAX, |n| n.start - 1);
+            let by = delta.min((last - c.end()).max(0));
+            c.duration += by;
+            if let Some(a) = c.audio.as_mut().filter(|_| video) {
+                a.tail -= by;
+            }
+        }
     }
-    Ok((a, b))
+    check_source(p, &c)?;
+    p.tracks[ti].clips[ci] = c;
+    fix_audio(p, ti);
+    Ok(())
 }
 
 pub fn roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
     let lead = linked::leads(p, &[id.to_string()]);
     let id = lead.first().map_or(id, String::as_str);
-    let (ti, _) = locate(p, id)?;
-    let (a, b) = edit_pair(p, ti, id, edge)?;
+    let (ti, ci) = locate(p, id)?;
+    let Some((a, b)) = edit_pair(&p.tracks[ti], ci, edge) else {
+        return roll_next_to_gap(p, ti, ci, edge, delta);
+    };
     let mut out = p.tracks[ti].clips[a].clone();
     let mut inc = p.tracks[ti].clips[b].clone();
     let outgoing = out.id.clone();
@@ -1553,22 +1608,93 @@ pub fn slip(p: &mut Project, id: &str, delta: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn audio_roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
-    let (ti, _) = locate(p, id)?;
-    let (a, b) = edit_pair(p, ti, id, edge)?;
-    let mut out = p.tracks[ti].clips[a].clone();
-    let mut inc = p.tracks[ti].clips[b].clone();
-    let (Some(oa), Some(ia)) = (out.audio.as_mut(), inc.audio.as_mut()) else {
-        return Err(Error::invalid(
-            "both clips at the edit need audio for a J/L cut",
-        ));
+struct AudioEdit {
+    ti: usize,
+    out: Option<usize>,
+    inc: Option<usize>,
+    least: i64,
+    most: i64,
+}
+
+fn audio_edit(p: &Project, id: &str, edge: Edge) -> Result<AudioEdit> {
+    let (ti, ci) = locate(p, id)?;
+    let t = &p.tracks[ti];
+    let (out, inc) = match (edit_pair(t, ci, edge), edge) {
+        (Some((a, b)), _) => (Some(a), Some(b)),
+        (None, Edge::Tail) => (Some(ci), None),
+        (None, Edge::Head) => (None, Some(ci)),
     };
-    oa.tail += delta;
-    ia.head += delta;
-    check_source(p, &out)?;
-    check_source(p, &inc)?;
-    p.tracks[ti].clips[a] = out;
-    p.tracks[ti].clips[b] = inc;
+    let sound = |i: Option<usize>| i.and_then(|i| Some((i, t.clips[i].audio_range()?)));
+    let (least, most) = match (sound(out), sound(inc)) {
+        (None, None) => return Err(Error::invalid("no clip at this edit has sound")),
+        (Some((_, (a, b))), Some((_, (c, d)))) => (1 - (b - a), d - c - 1),
+        (Some((i, (a, b))), None) => {
+            let next = t.clips[i + 1..].iter().find_map(Clip::audio_range);
+            (1 - (b - a), next.map_or(i64::MAX, |r| r.0 - b))
+        }
+        (None, Some((i, (a, b)))) => {
+            let before = t.clips[..i].iter().rev().find_map(Clip::audio_range);
+            (before.map_or(0, |r| r.1) - a, b - a - 1)
+        }
+    };
+    Ok(AudioEdit {
+        ti,
+        out: sound(out).map(|s| s.0),
+        inc: sound(inc).map(|s| s.0),
+        least: least.min(0),
+        most: most.max(0),
+    })
+}
+
+fn audio_moved(p: &Project, e: &AudioEdit, by: i64) -> Result<Vec<(usize, Clip)>> {
+    let mut moved = Vec::new();
+    for (i, tail) in [(e.out, true), (e.inc, false)] {
+        let Some(i) = i else {
+            continue;
+        };
+        let mut c = p.tracks[e.ti].clips[i].clone();
+        let a = c.audio.as_mut().expect("has audio");
+        if tail {
+            a.tail += by;
+        } else {
+            a.head += by;
+        }
+        check_source(p, &c)?;
+        moved.push((i, c));
+    }
+    Ok(moved)
+}
+
+pub fn furthest(from: i64, dir: i64, fits: impl Fn(i64) -> bool) -> i64 {
+    let (mut ok, mut step) = (from, 1i64);
+    while step < 1 << 40 && fits(from + dir * step) {
+        ok = from + dir * step;
+        step *= 2;
+    }
+    let mut bad = from + dir * step;
+    while (bad - ok).abs() > 1 {
+        let mid = ok + (bad - ok) / 2;
+        if fits(mid) {
+            ok = mid;
+        } else {
+            bad = mid;
+        }
+    }
+    ok
+}
+
+pub fn audio_roll_room(p: &Project, id: &str, edge: Edge) -> Result<(i64, i64)> {
+    let e = audio_edit(p, id, edge)?;
+    let fits = |by: i64| (e.least..=e.most).contains(&by) && audio_moved(p, &e, by).is_ok();
+    Ok((furthest(0, -1, fits), furthest(0, 1, fits)))
+}
+
+pub fn audio_roll(p: &mut Project, id: &str, edge: Edge, delta: i64) -> Result<()> {
+    let e = audio_edit(p, id, edge)?;
+    let (least, most) = audio_roll_room(p, id, edge)?;
+    for (i, c) in audio_moved(p, &e, delta.clamp(least, most))? {
+        p.tracks[e.ti].clips[i] = c;
+    }
     Ok(())
 }
 
@@ -2605,11 +2731,7 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
 }
 
 fn check_bin(path: &str) -> Result<()> {
-    if path.is_empty()
-        || path
-            .split('/')
-            .any(|n| n.trim().is_empty() || n != n.trim())
-    {
+    if path.split('/').any(str::is_empty) {
         return Err(Error::usage(format!(
             "bin {path:?}: use names separated by '/', like \"Interviews/Day 1\""
         )));

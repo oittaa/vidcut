@@ -279,7 +279,7 @@ pub enum Hit {
     Edge(String, Edge),
     Roll { outgoing: String, incoming: String },
     Slip(String),
-    AudioEdit { outgoing: String, incoming: String },
+    AudioEdit { clip: String, edge: Edge },
     Empty,
 }
 
@@ -340,17 +340,18 @@ pub fn hit(track: &Track, scale: &Scale, tr: &TrackRect, pos: Pos2) -> Hit {
     let audio = banded && tr.in_audio(pos.y);
 
     if audio {
-        for w in clips.windows(2) {
-            let (a, b) = (&w[0], &w[1]);
-            if adjacent(a, b) && a.audio.is_some() && b.audio.is_some() {
-                let at = a.end() + a.audio.as_ref().map_or(0, |x| x.tail);
-                if (pos.x - scale.xf(at)).abs() <= AUDIO_EDIT {
-                    return Hit::AudioEdit {
-                        outgoing: a.id.clone(),
-                        incoming: b.id.clone(),
-                    };
-                }
-            }
+        let near = clips
+            .iter()
+            .filter_map(|c| c.audio_range().map(|r| (c, r)))
+            .flat_map(|(c, (a, b))| [(c, Edge::Tail, b), (c, Edge::Head, a)])
+            .map(|(c, edge, at)| (c, edge, (pos.x - scale.xf(at)).abs()))
+            .filter(|&(.., away)| away <= AUDIO_EDIT)
+            .min_by(|x, y| x.2.total_cmp(&y.2));
+        if let Some((c, edge, _)) = near {
+            return Hit::AudioEdit {
+                clip: c.id.clone(),
+                edge,
+            };
         }
     }
     for w in clips.windows(2) {

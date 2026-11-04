@@ -12,6 +12,8 @@ use vidcut_core::export::{
     Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Preset, VideoSettings,
     apply_overrides, builtin_presets, validate,
 };
+use vidcut_core::fingerprint::short_digest;
+use vidcut_core::looks::checked_name;
 use vidcut_core::otio::{self, Locations};
 use vidcut_core::render::{self, RenderPlan};
 use vidcut_core::request::{ExportParams, SubtitlesAs};
@@ -33,6 +35,7 @@ pub fn presets() -> Result<Vec<Preset>> {
         .filter(|p| p.extension().is_some_and(|e| e == "toml"))
         .collect();
     files.sort();
+    let mut users = Vec::with_capacity(files.len());
     for path in files {
         let text = std::fs::read_to_string(&path)
             .map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
@@ -53,6 +56,10 @@ pub fn presets() -> Result<Vec<Preset>> {
             .map_err(|e| Error::usage(format!("{}: {e}", path.display())))?;
         validate(&preset.settings)
             .map_err(|e| Error::usage(format!("{}: {}", path.display(), e.message)))?;
+        users.push(preset);
+    }
+    users.sort_by(|a, b| a.name.cmp(&b.name));
+    for preset in users {
         all.retain(|p| p.name != preset.name);
         all.push(preset);
     }
@@ -60,27 +67,19 @@ pub fn presets() -> Result<Vec<Preset>> {
 }
 
 fn user_preset_path(name: &str) -> PathBuf {
-    config_dir().join("presets").join(format!("{name}.toml"))
+    let plain = name.is_ascii()
+        && name == name.to_ascii_lowercase()
+        && checked_name(name).is_ok_and(|n| n == name);
+    let stem = if plain {
+        name.to_string()
+    } else {
+        short_digest(name.as_bytes())
+    };
+    config_dir().join("presets").join(format!("{stem}.toml"))
 }
 
 pub fn is_user_preset(name: &str) -> bool {
-    check_preset_name(name).is_ok() && user_preset_path(name).exists()
-}
-
-fn check_preset_name(name: &str) -> Result<()> {
-    let ok = !name.is_empty()
-        && name.len() <= 64
-        && !name.starts_with('.')
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    if ok {
-        Ok(())
-    } else {
-        Err(Error::usage(format!(
-            "preset name {name:?}: use letters, digits, '-', '_' and '.'"
-        )))
-    }
+    user_preset_path(name).exists()
 }
 
 pub struct PresetSave<'a> {
@@ -96,7 +95,9 @@ pub struct PresetSave<'a> {
 }
 
 pub fn save_preset(s: &PresetSave<'_>) -> Result<Value> {
-    check_preset_name(s.name)?;
+    if s.name.is_empty() {
+        return Err(Error::usage("a preset needs a name"));
+    }
     let mut settings = match (s.settings, s.from) {
         (Some(settings), None) => settings.clone(),
         (None, Some(from)) => preset(from)?.settings,
@@ -136,7 +137,6 @@ pub fn save_preset(s: &PresetSave<'_>) -> Result<Value> {
 }
 
 pub fn delete_preset(name: &str, dry_run: bool) -> Result<Value> {
-    check_preset_name(name)?;
     let path = user_preset_path(name);
     if !path.exists() {
         return Err(if builtin_presets().iter().any(|p| p.name == name) {

@@ -1031,6 +1031,12 @@ pub struct Screen {
 
 struct Letters {
     picture: Arc<TitlePicture>,
+    tiles: Vec<LetterTile>,
+}
+
+struct LetterTile {
+    at: (u32, u32),
+    size: (u32, u32),
     params: wgpu::Buffer,
     bind: wgpu::BindGroup,
 }
@@ -1242,21 +1248,85 @@ fn letter(
             continue;
         };
         pass.set_pipeline(lettering);
-        pass.set_bind_group(0, &l.bind, &[]);
-        pass.draw(0..3, 0..1);
+        for tile in &l.tiles {
+            pass.set_bind_group(0, &tile.bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
     }
 }
 
 impl Letters {
     fn new(gpu: &Gpu, picture: &Arc<TitlePicture>) -> Self {
-        let size = wgpu::Extent3d {
-            width: picture.width.max(1),
-            height: picture.height.max(1),
+        let (width, height) = (picture.width.max(1), picture.height.max(1));
+        let most = gpu.device.limits().max_texture_dimension_2d;
+        let mut tiles = Vec::new();
+        for y in (0..height).step_by(most as usize) {
+            for x in (0..width).step_by(most as usize) {
+                let size = (most.min(width - x), most.min(height - y));
+                tiles.push(LetterTile::new(gpu, picture, (x, y), size));
+            }
+        }
+        Self {
+            picture: picture.clone(),
+            tiles,
+        }
+    }
+
+    fn place(&self, gpu: &Gpu, size: (u32, u32), t: &TitleOver, colors: Option<Hdr>) {
+        let p = &self.picture;
+        let (fw, fh) = (f64::from(p.frame.0.max(1)), f64::from(p.frame.1.max(1)));
+        let (sx, sy) = (f64::from(size.0) / fw, f64::from(size.1) / fh);
+        let frame = (f64::from(size.0), f64::from(size.1));
+        let placing = (!t.placed.is_empty()).then(|| Placing::whole(&t.placed, frame));
+        for tile in &self.tiles {
+            let (pw, ph) = (f64::from(tile.size.0), f64::from(tile.size.1));
+            let (left, top) = (
+                f64::from(p.left + t.dx) + f64::from(tile.at.0),
+                f64::from(p.top + t.dy) + f64::from(tile.at.1),
+            );
+            let own = lettered(
+                [f64::from(t.turn[0]) * sx, f64::from(t.turn[1]) * sy],
+                f64::from(t.turn[2]),
+                f64::from(t.turn[3]),
+                [left * sx, top * sy],
+            );
+            let own = chain(
+                &own,
+                &[
+                    1.0 / (pw * sx),
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0 / (ph * sy),
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
+            );
+            let map = placing
+                .as_ref()
+                .map_or(own, |l| chain(&l.inner(frame), &own));
+            let keep = if t.turn[3] == 0.0 {
+                KEEP_ALL
+            } else {
+                [-left / pw, -top / ph, (fw - left) / pw, (fh - top) / ph]
+            };
+            let bytes = lettering_of(map, keep, f64::from(t.alpha), placing.as_ref(), colors);
+            gpu.queue.write_buffer(&tile.params, 0, &bytes);
+        }
+    }
+}
+
+impl LetterTile {
+    fn new(gpu: &Gpu, picture: &TitlePicture, at: (u32, u32), size: (u32, u32)) -> Self {
+        let extent = wgpu::Extent3d {
+            width: size.0,
+            height: size.1,
             depth_or_array_layers: 1,
         };
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("vidcut title"),
-            size,
+            size: extent,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -1270,11 +1340,11 @@ impl Letters {
                 texture.as_image_copy(),
                 &picture.rgba,
                 wgpu::TexelCopyBufferLayout {
-                    offset: 0,
+                    offset: (at.1 as usize * row + at.0 as usize * 4) as u64,
                     bytes_per_row: Some(row as u32),
-                    rows_per_image: Some(picture.height),
+                    rows_per_image: Some(size.1),
                 },
-                size,
+                extent,
             );
         }
         let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -1303,41 +1373,11 @@ impl Letters {
             ],
         });
         Self {
-            picture: picture.clone(),
+            at,
+            size,
             params,
             bind,
         }
-    }
-
-    fn place(&self, gpu: &Gpu, size: (u32, u32), t: &TitleOver, colors: Option<Hdr>) {
-        let p = &self.picture;
-        let (fw, fh) = (f64::from(p.frame.0.max(1)), f64::from(p.frame.1.max(1)));
-        let (sx, sy) = (f64::from(size.0) / fw, f64::from(size.1) / fh);
-        let (w, h) = (
-            f64::from(p.width.max(1)) * sx,
-            f64::from(p.height.max(1)) * sy,
-        );
-        let own = lettered(
-            [f64::from(t.turn[0]) * sx, f64::from(t.turn[1]) * sy],
-            f64::from(t.turn[2]),
-            f64::from(t.turn[3]),
-            [f64::from(p.left + t.dx) * sx, f64::from(p.top + t.dy) * sy],
-        );
-        let own = chain(&own, &[1.0 / w, 0.0, 0.0, 0.0, 1.0 / h, 0.0, 0.0, 0.0]);
-        let frame = (f64::from(size.0), f64::from(size.1));
-        let placing = (!t.placed.is_empty()).then(|| Placing::whole(&t.placed, frame));
-        let map = placing
-            .as_ref()
-            .map_or(own, |l| chain(&l.inner(frame), &own));
-        let keep = if t.turn[3] == 0.0 {
-            KEEP_ALL
-        } else {
-            let (left, top) = (f64::from(p.left + t.dx), f64::from(p.top + t.dy));
-            let (pw, ph) = (f64::from(p.width.max(1)), f64::from(p.height.max(1)));
-            [-left / pw, -top / ph, (fw - left) / pw, (fh - top) / ph]
-        };
-        let bytes = lettering_of(map, keep, f64::from(t.alpha), placing.as_ref(), colors);
-        gpu.queue.write_buffer(&self.params, 0, &bytes);
     }
 }
 
