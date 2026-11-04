@@ -139,6 +139,9 @@ pub(super) fn glance(m: &Media) -> Vec<String> {
     }
     let mut out = Vec::new();
     out.extend(m.camera.as_deref().map(camera_label));
+    for (word, value) in [("Scene", &m.scene), ("Shot", &m.shot), ("Take", &m.take)] {
+        out.extend(value.as_ref().map(|v| format!("{word} {v}")));
+    }
     if let Some(v) = &m.info.video {
         let (w, h) = v.display_size();
         out.push(format!("{w}×{h}"));

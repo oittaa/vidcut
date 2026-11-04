@@ -260,7 +260,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Date Created, Scene, Shot and Take** (pp. 661–663, 750):
   - A media item can have `created`, `scene`, `shot` and `take`. Each is text, and `created` has the form `YYYY-MM-DD`.
   - The rows of Clip Info edit them. `media.set` sets them on one or more items. An empty value clears the field.
-  - `media.get` shows them.
+  - `media.get` shows them. The metadata strip shows the scene, the shot and the take.
   - vidcut does not read Date Created from a file. No measurement shows which time or tag gives it.
 - **Multicam layout** (p. 1037):
   - `multicam.layout` tells where the files of a multicam clip lie. It changes nothing, and the project does not store the result.
