@@ -1867,8 +1867,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - An export also refuses an AI upscaler that it needs without its weights, or without a GPU that can run the network.
     - It refuses AI Slow for a size that does not fit in the GPU's memory and main memory.
     - The Inspector and the pool show a warning under Upscaler for media that the AI upscaler cannot take. The warning does not depend on the timeline's size.
-    - The export's report names the files that an AI upscaler enlarged, and the upscaler.
   - Classic has a Sharpness of Low, Medium or High.
+  - The export's report names each file that Super Scale enlarged, and its upscaler.
   - A placed picture is made at most 4 times as large as its source. A picture that fills the frame takes the better upscaler for all of its enlargement.
   - The Inspector of the Cut page has a Super Scale section for the media of the selected clips.
   - With Classic, the viewer and the exports enlarge with the kernels of their shader. This is the same on each GPU.
