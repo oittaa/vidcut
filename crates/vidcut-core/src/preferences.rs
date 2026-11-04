@@ -524,8 +524,8 @@ impl Default for Appearance {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Player {
-    /// Memory for pictures in MB. `0` (the default): the larger of 1 GB and
-    /// half the computer's memory.
+    /// Memory for pictures, titles and subtitles in MB. `0` (the default):
+    /// the larger of 1 GB and half the computer's memory.
     pub memory_mb: u64,
     /// Video memory for pictures the GPU decoded and keeps there, in MB.
     /// `0` (the default): half the memory the system reports for the GPU

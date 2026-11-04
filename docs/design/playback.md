@@ -98,6 +98,7 @@ flowchart TD
 - Apple silicon has one shared budget.
 - While an AI upscaler holds GPU memory, the video budget is smaller (`store::Lent`, [gpu](gpu.md)).
 - The least recently used pictures go first, whichever engine decoded them. The prepared picture of each engine never goes (`Store::hold`).
+- The drawings of titles and subtitles count in the memory budget. They take room from the kept pictures (`Store::keep_titles`).
 - `Store::kept_run` and `Store::touch` make their ids in small batches, outside the lock. They take the lock for one batch at a time. Why: the decoding threads and the presenter wait on this lock, and a long run must not hold them up.
 - An engine can show a picture that another engine decoded, by its `Id`.
 - Each engine plans its decoding with its part of the budget (`Config::part`). When the last engine ends, the cache empties.
@@ -175,7 +176,11 @@ flowchart TD
 - Titles and subtitles are not in the kept pictures. Thus an edit of a title or a cue keeps the frames decoded.
 - `player::titles` draws each `TitleBlock` of each title of the plan at the size of the plan, with `burn::title_blocks`, on the decoding thread. Then it wakes the viewer.
   - It draws before it keeps a frame under the title, for the prepared frame, and for the frame at the playhead.
-  - It keeps the drawings used last (an `Lru`).
+  - One store keeps the drawings for all engines and exports (`Store::keep_titles`, a `ByBytes`).
+  - The drawings take at most a part of the memory budget (`TITLES_PART`). Past that part, the least recently used drawings go.
+  - When the budget falls, for example for an AI upscaler, the drawings go at once. A frame that needs one draws it again. The render cache does not hold them.
+  - Each engine and export holds the drawings of its frame (`HeldTitles`). The frame at the playhead and the frame of an export keep them over the budget.
+  - Why: with no hold, a small budget makes the engine draw them again without end, and an export can lose a title.
   - Each drawing is where its kind puts it, without its own place, opacity or rotation. Thus a moved or turned title is not drawn again.
   - A title whose box goes past the picture's edge keeps its place in the drawing, because that edge cuts the box before it turns (`Title::shape_past_edge`).
   - A lower third with a level under 1 is one drawing of all its blocks (`burn::title`), with their places. Thus text over the box does not show the box. A new place of a line draws it again.
@@ -190,7 +195,7 @@ flowchart TD
   - the pictures of the compound clips around it (`ShownTitle::placed`)
 - Until a title is drawn, the newest drawing of its clip shows, moved to its place. Thus a drag, a new color or new text does not blink. The frame is not exact until then.
 - `Player::set_subtitles` takes the shown track (`SubtitleView`), each cue with its color set (`Speakers::color_of`).
-- `player::subtitles` draws what shows at a frame with `burn::draw`, at the times when titles draw. It keeps the drawings by what they show (`subtitles::shown`, an `Lru`).
+- `player::subtitles` draws what shows at a frame with `burn::draw`, at the times when titles draw. It keeps the drawings by what they show (`subtitles::shown`), in the store of the titles.
 - `Player::present` hands the subtitles with the titles, above each layer. A subtitle that is not drawn yet shows the newest drawing.
 - A cue with a `picture` is drawn alone, because the shader places it apart from the other cues. Its `TitleOver` holds one `Placed`, and the shader does the transform as for a title in a compound clip. Thus a keyframe does not draw it again.
 
