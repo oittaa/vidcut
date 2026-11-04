@@ -1029,6 +1029,7 @@ pub struct Screen {
     imports_before: u64,
     exported: bool,
     alpha: bool,
+    premultiplied: bool,
     written: Option<(u32, u32)>,
     whole: Option<Wide>,
     encoded: out::Encoded,

@@ -1042,7 +1042,8 @@ fn encode(
                     .with_timeline(plan.colors)?
                     .with_dynamic(enc.dynamic)
                     .with_light(light)
-                    .with_burn(burned.0, burned.1, plan.height);
+                    .with_burn(burned.0, burned.1, plan.height)
+                    .writing_alpha(v.alpha.then_some(v.alpha_mode));
             if let Some(d) = decoder {
                 frames = frames.decode_on(d.clone());
             }

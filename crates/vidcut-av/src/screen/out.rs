@@ -26,6 +26,7 @@ fn unorm(format: wgpu::TextureFormat) -> wgpu::TextureFormat {
         T::R16Uint => T::R16Unorm,
         T::Rg16Uint => T::Rg16Unorm,
         T::Rgba8Uint => T::Rgba8Unorm,
+        T::Rgba16Uint => T::Rgba16Unorm,
         other => other,
     }
 }
@@ -33,7 +34,7 @@ fn unorm(format: wgpu::TextureFormat) -> wgpu::TextureFormat {
 fn top_of(format: wgpu::TextureFormat) -> u32 {
     use wgpu::TextureFormat as T;
     match format {
-        T::R16Uint | T::Rg16Uint => 65535,
+        T::R16Uint | T::Rg16Uint | T::Rgba16Uint => 65535,
         _ => 255,
     }
 }
@@ -44,6 +45,9 @@ const BLUE: u32 = 2;
 const RED: u32 = 3;
 const ALPHA: u32 = 4;
 const RGBA: u32 = 5;
+const AYUV: u32 = 6;
+const KEEPS_STRAIGHT: u32 = 1;
+const KEEPS_PREMULTIPLIED: u32 = 2;
 
 pub(super) struct Encoders {
     layout: wgpu::BindGroupLayout,
@@ -151,7 +155,7 @@ struct Layout {
     depth: u32,
     shift: u32,
     planes: Vec<Plane>,
-    alpha: bool,
+    alpha: u32,
 }
 
 fn layout_of(pixel: format::Pixel) -> Option<Layout> {
@@ -182,7 +186,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
             depth,
             shift: 0,
             planes,
-            alpha: false,
+            alpha: 0,
         }
     };
     let paired = |depth: u32, shift: u32, sub: (u32, u32)| {
@@ -198,7 +202,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
                 plane(LUMA, luma, texel, (0, 0)),
                 plane(PAIR, pair, texel * 2, sub),
             ],
-            alpha: false,
+            alpha: 0,
         }
     };
     Some(match pixel {
@@ -226,7 +230,13 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
             depth: 8,
             shift: 0,
             planes: vec![plane(RGBA, T::Rgba8Uint, 4, (0, 0))],
-            alpha: false,
+            alpha: 0,
+        },
+        P::AYUV64LE => Layout {
+            depth: 16,
+            shift: 0,
+            planes: vec![plane(AYUV, T::Rgba16Uint, 8, (0, 0))],
+            alpha: 0,
         },
         P::RGB24 => Layout {
             depth: 8,
@@ -235,7 +245,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
                 packed: true,
                 ..plane(RGBA, T::Rgba8Uint, 4, (0, 0))
             }],
-            alpha: false,
+            alpha: 0,
         },
         P::RGB48LE => Layout {
             depth: 16,
@@ -244,7 +254,7 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
                 packed: true,
                 ..plane(RGBA, T::Rgba16Uint, 8, (0, 0))
             }],
-            alpha: false,
+            alpha: 0,
         },
         _ => return None,
     })
@@ -289,11 +299,7 @@ fn params(layout: &Layout, plane: &Plane, (from, to): (Option<Hdr>, Option<Hdr>)
         .flat_map(|v| (*v as f32).to_le_bytes())
         .chain(words.iter().flatten().flat_map(|v| v.to_le_bytes()))
         .chain(site.iter().flat_map(|v| (*v as f32).to_le_bytes()))
-        .chain(
-            [u32::from(layout.alpha), 0, 0, 0]
-                .iter()
-                .flat_map(|v| v.to_le_bytes()),
-        )
+        .chain([layout.alpha, 0, 0, 0].iter().flat_map(|v| v.to_le_bytes()))
         .collect()
 }
 
@@ -338,7 +344,7 @@ type Key = (
     Option<Hdr>,
     Option<Hdr>,
     Target,
-    bool,
+    u32,
 );
 
 const SLOTS: usize = 2;
@@ -437,6 +443,10 @@ impl Screen {
         self.alpha = alpha;
     }
 
+    pub(crate) fn premultiply(&mut self, premultiplied: bool) {
+        self.premultiplied = premultiplied;
+    }
+
     pub(crate) fn write_at(&mut self, size: Option<(u32, u32)>) {
         self.written = size;
     }
@@ -477,7 +487,12 @@ impl Screen {
         let size = wide.size;
         let mut layout = layout_of(pixel)
             .ok_or_else(|| Error::Invalid(format!("the GPU can't make frames in {pixel:?}")))?;
-        layout.alpha = self.alpha && layout.planes.iter().any(|p| p.kind == ALPHA);
+        if self.alpha && layout.planes.iter().any(|p| matches!(p.kind, ALPHA | AYUV)) {
+            layout.alpha = match self.premultiplied {
+                true => KEEPS_PREMULTIPLIED,
+                false => KEEPS_STRAIGHT,
+            };
+        }
         let target = sink.target();
         let deep = pixel == format::Pixel::RGB48LE;
         if target == Target::Held && pixel != format::Pixel::RGB24 && !deep {
@@ -764,6 +779,7 @@ fn surface_textures(gpu: &Gpu, f: &frame::Video, planes: &[Plane]) -> Result<Vec
             F::Rg8Unorm => MTLPixelFormat::RG8Unorm,
             F::R16Unorm => MTLPixelFormat::R16Unorm,
             F::Rg16Unorm => MTLPixelFormat::RG16Unorm,
+            F::Rgba16Unorm => MTLPixelFormat::RGBA16Unorm,
             _ => return Err(Error::Invalid(format!("an IOSurface plane in {format:?}"))),
         };
         crate::metal::imported(
@@ -778,7 +794,7 @@ fn surface_textures(gpu: &Gpu, f: &frame::Video, planes: &[Plane]) -> Result<Vec
             WHAT,
         )
     };
-    if surface.plane_count() != planes.len() {
+    if surface.plane_count().max(1) != planes.len() {
         return Err(Error::Invalid(format!(
             "an IOSurface of {} planes",
             surface.plane_count()

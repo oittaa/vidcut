@@ -336,6 +336,14 @@ pub struct VideoSettings {
     /// say none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cll: Option<String>,
+    /// Export Alpha: the file holds the alpha of the timeline, and what shows
+    /// nothing is transparent. Only ProRes with profile `4444` has alpha. Off,
+    /// the export composites over black and writes opaque frames.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub alpha: bool,
+    /// How a file with `alpha` holds its colors.
+    #[serde(default, skip_serializing_if = "AlphaOut::is_default")]
+    pub alpha_mode: AlphaOut,
 }
 
 impl VideoSettings {
@@ -358,7 +366,13 @@ impl VideoSettings {
             hdr_metadata: HdrMetadata::default(),
             mastering_display: None,
             max_cll: None,
+            alpha: false,
+            alpha_mode: AlphaOut::default(),
         }
+    }
+
+    pub fn holds_alpha(&self) -> bool {
+        self.codec == VideoCodec::Prores && self.profile.as_deref() == Some("4444")
     }
 
     fn asked_size(&self, timeline: (u32, u32)) -> (u32, u32) {
@@ -426,6 +440,32 @@ fn size_words((w, h): (u32, u32)) -> String {
 pub const MAX_LOOKAHEAD: u32 = 32;
 
 pub const DEFAULT_LOOKAHEAD: u32 = 32;
+
+/// How a file with alpha holds its colors (`video.alpha_mode`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AlphaOut {
+    /// Each color is multiplied by its alpha.
+    #[default]
+    Premultiplied,
+    /// Each color is as it is, apart from its alpha.
+    Straight,
+}
+
+impl AlphaOut {
+    pub const ALL: [Self; 2] = [Self::Premultiplied, Self::Straight];
+
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Premultiplied => "Premultiplied",
+            Self::Straight => "Straight",
+        }
+    }
+}
 
 /// The first of two passes (`video.first_pass`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -529,6 +569,8 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
         hdr_metadata: Default::default(),
         mastering_display: None,
         max_cll: None,
+        alpha: false,
+        alpha_mode: AlphaOut::default(),
     }
 }
 
@@ -839,6 +881,11 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
             && d != 10
         {
             return Err(Error::usage("bit_depth must be 8 or 10"));
+        }
+        if v.alpha && !v.holds_alpha() {
+            return Err(Error::usage(
+                "video.alpha needs a format with alpha: ProRes with profile 4444",
+            ));
         }
         let fixed = match (v.codec, v.profile.as_deref()) {
             (V::Prores, _) | (V::Dnxhr, Some("hqx" | "444")) | (V::Hevc, Some("main10")) => {
