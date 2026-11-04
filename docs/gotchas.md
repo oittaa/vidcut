@@ -87,6 +87,9 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 
 ## FFmpeg: filters and colors
 
+- **FFmpeg's resampler refuses a layout with top front left and no top front right.**
+  - The first 13 channels of the 22.2 layout have this form. The export then fails with `cannot convert audio`.
+  - Thus `channel_layout` uses top front center in place of top front left at 13 channels.
 - **FFmpeg's `buffer` source takes the frame it is given** (`av_buffersrc_add_frame`, which ffmpeg-next's `Source::add` calls).
   - It moves the buffers out of the frame, and leaves the frame empty.
   - Thus `hw::run_graph` gives the graph of a turn a reference of its own (`av_frame_ref`).
