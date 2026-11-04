@@ -13,6 +13,7 @@ use vidcut_core::request::ViewerMode;
 
 use super::export::Ask;
 use super::fillers::{FillerEditor, Lists, Scope};
+use super::subclip::NewSubclip;
 use super::theme;
 use super::window::{Separate, Tool};
 use super::workspace::{Workspace, dim};
@@ -228,14 +229,6 @@ impl Searches {
         self.recent.insert(needle, hits.clone());
         hits
     }
-}
-
-#[derive(Debug)]
-struct NewSubclip {
-    media: String,
-    range: (i64, i64),
-    name: String,
-    focus: bool,
 }
 
 #[derive(Debug, Default)]
@@ -1511,7 +1504,7 @@ impl Workspace {
             t.footer = (ui.cursor().top() - footer_top).ceil();
             over = ui.ui_contains_pointer() && !separate;
             self.filler_words_window(ctx, t, &p.settings.fillers, &preferred);
-            self.new_subclip_window(ctx, t);
+            self.subclip_window(ctx, "Create Subclip", &mut t.subclip);
         });
         t.window = window;
         if let (Some(to), Some(items)) = (go, &items)
@@ -1551,46 +1544,6 @@ impl Workspace {
                     self.open_transcribe(ids);
                 }
             }
-        }
-    }
-
-    fn new_subclip_window(&mut self, ctx: &egui::Context, t: &mut TranscriptionUi) {
-        let Some(mut d) = t.subclip.take() else {
-            return;
-        };
-        let mut open = true;
-        let (mut create, mut cancel) = (false, false);
-        super::dialog::window(ctx, "Create Subclip", &mut open, |ui| {
-            let mut enter = false;
-            super::dialog::form(ui, "subclip-form", |ui| {
-                super::dialog::row(ui, "Name", |ui| {
-                    let field = ui.text_edit_singleline(&mut d.name);
-                    if d.focus {
-                        field.request_focus();
-                        d.focus = false;
-                    }
-                    enter = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                });
-            });
-            let ready = !d.name.trim().is_empty();
-            super::dialog::footer(ui, |ui| {
-                create = super::dialog::main_button(ui, "Create", ready) || (enter && ready);
-                cancel = ui.button("Cancel").clicked();
-            });
-        });
-        if create {
-            let (a, b) = d.range;
-            self.send(
-                "media.subclip",
-                json!({
-                    "media": d.media,
-                    "range": format!("{a}f..{b}f"),
-                    "name": d.name.trim(),
-                    "bin": self.snap.pool.bin,
-                }),
-            );
-        } else if open && !cancel {
-            t.subclip = Some(d);
         }
     }
 
@@ -1847,12 +1800,7 @@ impl Workspace {
                 let (Some(m), Some((_, _, a, b))) = (media, selected) else {
                     return;
                 };
-                t.subclip = Some(NewSubclip {
-                    media: m.to_string(),
-                    range: (a, b),
-                    name: String::new(),
-                    focus: true,
-                });
+                t.subclip = Some(NewSubclip::new(m, (a, b)));
             }
             Act::Edit(method) => {
                 let (Some(m), Some((_, _, a, b))) = (media, selected) else {

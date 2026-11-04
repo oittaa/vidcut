@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use vidcut_av::color::Matrix;
 use vidcut_av::player::{self as engine, Layout, Made, PlaysOn, Upscaled};
 use vidcut_av::{interpolate, super_scale};
-use vidcut_core::model::{Hdr, RenderCache, Retime, Sharpness, SuperScale, Upscaler, hex};
+use vidcut_core::model::{Hdr, RenderCache, Retime, SuperScale, Upscaler, hex};
 use vidcut_core::render::BLACK;
 use vidcut_core::render_cache::{Part, Reason};
 
@@ -183,6 +183,7 @@ impl PlayerStats {
                 Layout::Ayuv64 => "AYUV64",
                 Layout::Rgb => "RGB24",
                 Layout::Rgb48 => "RGB48",
+                Layout::Gbrp16 => "GBRP16",
             };
             let matrix = match c.matrix {
                 Matrix::Bt601 => "BT.601",
@@ -568,24 +569,10 @@ pub fn reason_names(reasons: &[Reason]) -> Vec<String> {
         .collect()
 }
 
-fn named(s: SuperScale) -> String {
-    match s.upscaler {
-        Upscaler::Classic => format!(
-            "Classic, sharpness {}",
-            match s.sharpness {
-                Sharpness::Low => "low",
-                Sharpness::Medium => "medium",
-                Sharpness::High => "high",
-            }
-        ),
-        u => super_scale::name(u).to_string(),
-    }
-}
-
 impl SuperScaleStats {
     fn cached(s: SuperScale) -> Self {
         Self {
-            upscaler: Some(format!("{}, from the render cache", named(s))),
+            upscaler: Some(format!("{}, from the render cache", super_scale::named(s))),
             runs_on: None,
             sizes: None,
             state: None,
@@ -598,7 +585,7 @@ impl SuperScaleStats {
         if s.is_none() && report.making.is_none() {
             return None;
         }
-        let upscaler = s.map(named);
+        let upscaler = s.map(super_scale::named);
         let mine = |w: &Option<super_scale::Work>| {
             w.clone()
                 .filter(|w| s.map(|s| s.upscaler) == Some(w.upscaler))

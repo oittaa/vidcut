@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType, GeneratorKind,
-    Handle, LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign,
-    TitleAnchor, TitleKind, TitleStyle, TrackClip, ZoomBox,
+    Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType,
+    GeneratorKind, Handle, LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle,
+    TitleAlign, TitleAnchor, TitleKind, TitleStyle, TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -1521,7 +1521,7 @@ pub enum Request {
         look: Option<String>,
     },
     /// Enable/disable video (D), mute, gain (dB, -100..30), name, Clip Color,
-    /// Voice Isolation, Retime Process and Render Cache.
+    /// Voice Isolation, Retime Process, Render Cache and Input LUT.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -1570,6 +1570,12 @@ pub enum Request {
         /// AI Super Scale out of both.
         #[serde(default)]
         render_cache: Option<crate::model::ClipCache>,
+        /// Input LUT: a `.cube` file that the picture goes through just
+        /// after its conversion into the timeline color space. A file that
+        /// can't be read is refused, with the reason. An empty path clears
+        /// it.
+        #[serde(default)]
+        input_lut: Option<PathBuf>,
         /// Download Voice Isolation's model, or the model of the Retime
         /// Process that the clips then use, if this computer doesn't have it
         /// yet, checked against its SHA-256. Without it, a missing Voice
@@ -2531,41 +2537,8 @@ pub enum Request {
     EffectsSet {
         clip: ClipRef,
         effect: usize,
-        /// Off, the effect stays on the clip and does nothing.
-        #[serde(default)]
-        on: Option<bool>,
-        /// How much of the effect shows, from 0 (the picture as it comes
-        /// in) to 1 (all of the effect).
-        #[serde(default)]
-        blend: Option<f64>,
-        /// Off, the picture keeps its own shape, and the clear area around
-        /// it counts as black.
-        #[serde(default)]
-        use_alpha: Option<bool>,
-        /// On, the render cache renders the frames of the effect, in its
-        /// Smart mode and in its User mode.
-        #[serde(default)]
-        render_cache: Option<bool>,
-        /// A blur's strength, from 0 (none) to 1; with `split`, across.
-        #[serde(default)]
-        strength: Option<f64>,
-        /// A blur across and down at strengths of their own.
-        #[serde(default)]
-        split: Option<bool>,
-        /// With `split`, a blur's strength down, from 0 to 1.
-        #[serde(default)]
-        vertical_strength: Option<f64>,
-        /// A blur across on red, green, blue and alpha, `[r, g, b, a]`, each
-        /// a multiple of its spread from 0 to 2.
-        #[serde(default)]
-        horizontal_channels: Option<Vec<f64>>,
-        /// A blur down on red, green, blue and alpha, `[r, g, b, a]`, each
-        /// a multiple of its spread from 0 to 2.
-        #[serde(default)]
-        vertical_channels: Option<Vec<f64>>,
-        /// What a blur takes from beyond the frame's edges.
-        #[serde(default)]
-        border: Option<Border>,
+        #[serde(flatten)]
+        change: EffectChange,
     },
     /// Put one effect of a clip back at its usual values. It stays on, and
     /// keeps its `render_cache`. An effect that is off does not change.
@@ -4329,6 +4302,12 @@ pub struct ProjectSet {
     /// the parts that are slow to make in the background, for the viewer.
     #[serde(default)]
     pub render_cache: Option<crate::model::RenderCache>,
+    /// Output LUT: a `.cube` file that the whole timeline goes through after
+    /// its subtitles, before each output's colors, in the viewer and in each
+    /// export. A file that can't be read is refused, with the reason. An
+    /// empty path clears it.
+    #[serde(default)]
+    pub output_lut: Option<PathBuf>,
     /// Download the models of the Retime Process and the upscaler that the
     /// timeline then uses, if this computer doesn't have them yet.
     #[serde(default)]
@@ -4338,6 +4317,94 @@ pub struct ProjectSet {
     /// language, `null` goes back to them.
     #[serde(default)]
     pub fillers: Option<std::collections::BTreeMap<String, Option<Vec<String>>>>,
+}
+
+/// A change to an effect: each value given replaces its own. Every value of
+/// every kind of effect is here, and each kind takes its own
+/// (`ops::effect::set`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct EffectChange {
+    /// Off, the effect stays on the clip and does nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// How much of the effect shows, from 0 (the picture as it comes in) to
+    /// 1 (all of the effect).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend: Option<f64>,
+    /// Off, the picture keeps its own shape, and the clear area around it
+    /// counts as black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_alpha: Option<bool>,
+    /// On, the render cache renders the frames of the effect, in its Smart
+    /// mode and in its User mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_cache: Option<bool>,
+    /// A Gaussian Blur's strength, from 0 (none) to 1; with `split`, across.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strength: Option<f64>,
+    /// A Gaussian Blur across and down at strengths of their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split: Option<bool>,
+    /// With `split`, a Gaussian Blur's strength down, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_strength: Option<f64>,
+    /// A Gaussian Blur across on red, green, blue and alpha, `[r, g, b, a]`,
+    /// each a multiple of its spread from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizontal_channels: Option<Vec<f64>>,
+    /// A Gaussian Blur down on red, green, blue and alpha, `[r, g, b, a]`,
+    /// each a multiple of its spread from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_channels: Option<Vec<f64>>,
+    /// What a blur takes from beyond the frame's edges. On a Mosaic Blur it
+    /// does not change the picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border: Option<Border>,
+    /// How many cells a Mosaic Blur has, from 0.1 (few, large) to 4000. A
+    /// cell is 2 × √(the picture's width × its height, on the frame) / this
+    /// high.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pixel_frequency: Option<f64>,
+    /// A Mosaic Blur's Smooth Strength, from 0 to 1. It does not change the
+    /// picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smooth_strength: Option<f64>,
+    /// The shape of a Mosaic Blur's cells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_shape: Option<CellShape>,
+    /// The size of the box that makes the color of a Mosaic Blur's cell, in
+    /// cells, from 0 (the one pixel at its middle) to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aliasing: Option<f64>,
+    /// Moves a Mosaic Blur's cells to the right by this many half cells,
+    /// from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_offset: Option<f64>,
+    /// Moves a Mosaic Blur's cells up by this many half cells, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_offset: Option<f64>,
+    /// The width of a Mosaic Blur's cell over its height, from 0.001 to 1000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aspect: Option<f64>,
+    /// The point a Mosaic Blur's cells line up on, `[x, y]` as fractions of
+    /// the picture on the frame from its bottom left, each from -1000000 to
+    /// 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<Vec<f64>>,
+    /// A Mosaic Blur at twice the size, then the mean of each 2 × 2, for
+    /// clean lines between the cells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub antialias: Option<bool>,
+    /// On, a Mosaic Blur's cell also takes the mean of the alpha. Off, the
+    /// picture keeps its own alpha and the cells keep their colors, so a
+    /// clear part adds its cell's color to the tracks below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur_alpha: Option<bool>,
+    /// With `blur_alpha` on, only a Mosaic Blur's cell with no clear part in
+    /// its box stays, with an alpha of 1. Elsewhere the alpha is 0, and the
+    /// picture's own colors add to the tracks below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub whole_cells: Option<bool>,
 }
 
 /// A change to a clip's Dynamic Zoom: each field given replaces its own,
@@ -4842,6 +4909,15 @@ impl Request {
             | Self::StoryboardRender { out, .. }
             | Self::GuiScreenshot { out, .. } => vec![out],
             Self::Apply { commands, .. } => commands.iter_mut().flat_map(Self::paths_mut).collect(),
+            Self::ClipSet { input_lut, .. } => input_lut
+                .iter_mut()
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect(),
+            Self::ProjectSet(set) => set
+                .output_lut
+                .iter_mut()
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect(),
             _ => Vec::new(),
         }
     }

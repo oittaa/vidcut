@@ -24,6 +24,10 @@ const WORKERS: usize = 4;
 
 const MEMORY: usize = 256 << 20;
 
+const FAILED_KEPT: usize = 4096;
+
+const BLOCKS_KEPT: usize = 8;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TileKey {
     pub media: String,
@@ -82,7 +86,7 @@ struct Kept {
 struct Waiting {
     jobs: Vec<Job>,
     busy: HashSet<TileKey>,
-    failed: HashSet<TileKey>,
+    failed: Lru<TileKey, (), FAILED_KEPT>,
     at: HashMap<usize, (String, i64)>,
     stop: bool,
 }
@@ -91,6 +95,7 @@ struct Queue {
     waiting: Mutex<Waiting>,
     ready: Condvar,
     cancel: Arc<AtomicBool>,
+    blocks: Mutex<Blocks>,
 }
 
 pub struct Tiles {
@@ -133,6 +138,7 @@ impl Tiles {
                 waiting: Mutex::default(),
                 ready: Condvar::new(),
                 cancel: Arc::new(AtomicBool::new(false)),
+                blocks: Mutex::default(),
             }),
             results,
             sender,
@@ -328,7 +334,15 @@ impl Tiles {
             self.bytes -= tile.bytes;
         }
         let mut w = self.queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
-        w.failed.retain(|k| k.media != media);
+        let gone: Vec<TileKey> = w
+            .failed
+            .iter()
+            .filter(|(k, _)| k.media == media)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in &gone {
+            w.failed.remove(k);
+        }
     }
 
     fn evict(&mut self) {
@@ -422,7 +436,7 @@ fn reader_waits(idle: Duration) -> Option<Duration> {
 
 type Block = Vec<(i64, Image)>;
 
-type Blocks = Lru<BlockFile, Block, 8>;
+type Blocks = Lru<BlockFile, Arc<Block>, BLOCKS_KEPT>;
 
 fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egui::Context) {
     let _cancel = vidcut_av::cancel::Guard::set(queue.cancel.clone());
@@ -433,7 +447,6 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
     let mut decoding = crate::preferences::gpu_decoding();
     let mut reader: Option<FrameReader> = None;
     let mut used = Instant::now();
-    let mut blocks = Blocks::new();
     let mut unwritten: HashMap<BlockFile, Block> = HashMap::new();
     loop {
         let job = {
@@ -449,7 +462,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
                 }
                 if !unwritten.is_empty() {
                     drop(w);
-                    write(&mut unwritten, &mut blocks);
+                    write(&mut unwritten, &queue.blocks);
                     w = queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
                     continue;
                 }
@@ -472,7 +485,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
                 }
             }
         };
-        let picture = from_disk(&job, &mut blocks, &unwritten).or_else(|| {
+        let picture = from_disk(&job, &queue.blocks, &unwritten).or_else(|| {
             let now = crate::preferences::gpu_decoding();
             if now != decoding {
                 reader = None;
@@ -482,7 +495,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
             let beside = vidcut_av::first::Beside::ask();
             let made = job.pieces.iter().find_map(|piece| {
                 reader
-                    .rgba(piece, job.fps, (job.width, job.key.height), None)
+                    .rgba(piece, job.fps, (job.width, job.key.height), (None, None))
                     .ok()
             });
             drop(beside);
@@ -507,11 +520,11 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
                 ctx.request_repaint();
             }
             None => {
-                w.failed.insert(job.key);
+                w.failed.insert(job.key, ());
             }
         }
         if unwritten.values().map(Vec::len).sum::<usize>() >= 32 {
-            write(&mut unwritten, &mut blocks);
+            write(&mut unwritten, &queue.blocks);
         }
     }
 }
@@ -544,7 +557,7 @@ fn next(w: &mut Waiting, n: usize) -> Option<Job> {
 
 fn from_disk(
     job: &Job,
-    blocks: &mut Blocks,
+    blocks: &Mutex<Blocks>,
     unwritten: &HashMap<BlockFile, Block>,
 ) -> Option<Image> {
     let file = job.disk.as_ref()?;
@@ -557,19 +570,30 @@ fn from_disk(
     if let Some(found) = unwritten.get(file).and_then(pick) {
         return Some(found);
     }
-    if let Some(tiles) = blocks.get(file) {
-        return pick(tiles);
+    let kept = blocks
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(file)
+        .cloned();
+    if let Some(tiles) = kept {
+        return pick(tiles.as_ref());
     }
     let tiles = thumbcache::load_tiles(&file.path, &file.origin).unwrap_or_default();
     let found = pick(&tiles);
-    blocks.insert(file.clone(), tiles);
+    blocks
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(file.clone(), Arc::new(tiles));
     found
 }
 
-fn write(unwritten: &mut HashMap<BlockFile, Block>, blocks: &mut Blocks) {
+fn write(unwritten: &mut HashMap<BlockFile, Block>, blocks: &Mutex<Blocks>) {
     for (file, tiles) in unwritten.drain() {
         thumbcache::store_tiles(&file.path, &file.origin, &tiles);
-        blocks.remove(&file);
+        blocks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&file);
     }
 }
 
