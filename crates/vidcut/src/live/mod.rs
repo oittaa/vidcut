@@ -3681,11 +3681,31 @@ impl Live {
         }
     }
 
+    fn forget_removed(&mut self, media: &[vidcut_core::model::Media]) {
+        let ids: HashSet<&str> = media.iter().map(|m| m.id.as_str()).collect();
+        let stays = |id: &String| ids.contains(id.as_str());
+        if !self.thumbs.keys().all(stays) {
+            Arc::make_mut(&mut self.thumbs).retain(|id, _| stays(id));
+        }
+        if !self.waveforms.keys().all(stays) {
+            Arc::make_mut(&mut self.waveforms).retain(|id, _| stays(id));
+        }
+        self.thumbs_wanted.retain(|id, _| stays(id));
+        self.waveforms_wanted.retain(|id, _| stays(id));
+        self.duck_failed.retain(|u| stays(&u.media));
+        if !self.duck_kept.is_empty() {
+            let origins: HashSet<_> = media.iter().map(paths::media_origin).collect();
+            self.duck_kept
+                .retain(|(_, origin), _| origins.contains(origin));
+        }
+    }
+
     fn check_media(&mut self) {
         self.refresh_transcribed(false);
         let Some(open) = &self.project else { return };
         let media: Vec<_> = open.project().media.clone();
         let channels = open.project().settings.channels;
+        self.forget_removed(&media);
         for m in media {
             let version = media_version(&m);
             let pictures = format!("{version}|{}", m.color_space.key());

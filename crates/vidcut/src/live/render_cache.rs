@@ -85,7 +85,10 @@ fn find_slow(
     gpu: Option<&vidcut_av::hw::GpuDecoder>,
     decodes: &mut HashMap<PathBuf, bool>,
 ) -> bool {
-    let mut found = false;
+    let held = decodes.len();
+    let paths: HashSet<&Path> = project.media.iter().map(|m| m.path.as_path()).collect();
+    decodes.retain(|path, _| paths.contains(path.as_path()));
+    let mut found = decodes.len() != held;
     for m in &project.media {
         let Some(v) = m.info.video.as_ref().filter(|v| !v.still) else {
             continue;
@@ -625,7 +628,22 @@ impl Render {
         });
     }
 
+    fn drop_deleted(&self) {
+        let held: Vec<Arc<Path>> = self
+            .lock()
+            .index()
+            .files()
+            .map(|(file, _)| file.clone())
+            .collect();
+        let gone: Vec<Arc<Path>> = held.into_iter().filter(|f| !f.is_file()).collect();
+        let mut cache = self.lock();
+        for file in &gone {
+            cache.index_mut().remove(file);
+        }
+    }
+
     fn render(&self) -> Result<bool, String> {
+        self.drop_deleted();
         let gpu = crate::preferences::gpu_decoding().own_decoder();
         let mut decodes = (*self.decodes).clone();
         if find_slow(&self.project, gpu.as_ref(), &mut decodes) {
@@ -740,6 +758,7 @@ mod tests {
 
     fn plan(frames: i64) -> RenderPlan {
         RenderPlan {
+            output_lut: None,
             fps: Rational::new(25, 1).unwrap(),
             width: 16,
             height: 16,
