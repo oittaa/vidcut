@@ -504,6 +504,11 @@ pub enum Request {
         /// follow it.
         #[serde(default)]
         color_space: Option<crate::model::ColorSpace>,
+        /// How the alpha channel of its pictures is read: `none`,
+        /// `premultiplied`, `straight` or `invert`. Media with no alpha
+        /// channel refuse it.
+        #[serde(default)]
+        alpha_mode: Option<crate::model::AlphaMode>,
         /// Super Scale on or off. Where its pictures are enlarged, they get
         /// the upscaler that `upscaler` names, as much as they need, up to 4
         /// times their source.

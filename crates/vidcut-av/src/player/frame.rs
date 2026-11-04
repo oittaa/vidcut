@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use vidcut_core::model::{Retime, Upscaler};
+use vidcut_core::model::{AlphaMode, Retime, Upscaler};
 
 use crate::color::{Colors, colors_of};
 use crate::decode::Decoding;
@@ -113,6 +113,7 @@ pub struct Picture {
     sampling: Sampling,
     woven: Option<Woven>,
     origin: Option<Origin>,
+    alpha_mode: AlphaMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -209,7 +210,17 @@ impl Picture {
             sampling: Sampling::Own,
             woven: None,
             origin: None,
+            alpha_mode: AlphaMode::Straight,
         }
+    }
+
+    pub(crate) fn with_alpha_mode(mut self, mode: AlphaMode) -> Self {
+        self.alpha_mode = mode;
+        self
+    }
+
+    pub fn alpha_mode(&self) -> AlphaMode {
+        self.alpha_mode
     }
 
     pub(crate) fn with_origin(mut self, origin: Option<Origin>) -> Self {
@@ -374,7 +385,8 @@ impl Picture {
         let frame = crate::export::video::frame_ref(&self.frame)?;
         let alone = Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
             .with_sampling(self.sampling.clone())
-            .with_origin(self.origin.clone());
+            .with_origin(self.origin.clone())
+            .with_alpha_mode(self.alpha_mode);
         Ok(match &self.woven {
             Some(w) => alone.with_woven(w.clone()),
             None => alone,
@@ -390,7 +402,8 @@ impl Picture {
         Ok(
             Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
                 .with_sampling(self.sampling.clone())
-                .with_origin(self.origin.clone()),
+                .with_origin(self.origin.clone())
+                .with_alpha_mode(self.alpha_mode),
         )
     }
 

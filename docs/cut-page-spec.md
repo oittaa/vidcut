@@ -312,6 +312,19 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.
   - As Tagged uses the tags again.
   - The viewer, the thumbnails and the exports follow this setting (D35).
+- **Alpha Mode** (pp. 451, 1205):
+  - Alpha Mode tells how to read the alpha channel of a clip: None, Premultiplied, Straight or Invert. Invert is the fourth choice of the list.
+  - Alpha channels are on by default (p. 473). A clip with no alpha channel does not show these choices (p. 451).
+  - Right-click the media in the pool, or a clip on the timeline (p. 1205).
+  - It is a setting of the media item. Thus it applies to every clip of that item.
+  - `media.set` sets `alpha_mode`. It refuses a media item with no alpha channel.
+  - Measured in Resolve Studio 21.1.2, with 16-bit renders. A PNG of color c and alpha α is over a picture b.
+    - None: c. The PNG is opaque.
+    - Straight: b + (c − b) × α.
+    - Premultiplied: c + b × (1 − α), at most 1.
+    - Invert: b + (c − b) × (1 − α).
+  - Measured in Resolve Studio 21.1.1: a ProRes 4444 with alpha and no tags is Straight.
+  - vidcut reads the alpha channel of each file as Straight until `media.set` changes it.
 - **Super Scale** (pp. 288, 432–433; deviation [X91](deviations.md#x91-super-scale-uses-the-upscaler-of-the-gpu)):
   - Super Scale enlarges the pictures of a media item with a better upscaler before they are fitted.
   - It is a setting of the media item. Thus it applies to every clip of that item (p. 433).
@@ -1361,7 +1374,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The composite modes mix the clip with the tracks below in other ways (pp. 1199–1203).
   - vidcut: Foreground and the mask modes come later ([todo](todo/composite-masks.md)).
   - A clip with an alpha channel composites over the tracks below it (p. 769).
-  - vidcut: a clip's alpha channel is straight alpha. Alpha Mode comes later ([todo](todo/clip-alpha.md)).
+  - Its Alpha Mode (§3) tells how to read that channel.
+  - Measured in Resolve Studio 21.1.2, with a Straight PNG of color c and alpha α over a picture b:
+    - The opacity and the Softness of the crop multiply α.
+    - A composite mode mixes first. Then α fades the mix M: b + (M − b) × α.
+  - vidcut: a Premultiplied clip at an opacity or Softness of k gives c × k + b × (1 − α × k). Its colors fade with it.
   - Details: D75.
 - **How they play:** a clip covers the tracks below it only where its picture covers the frame. Its composite mode mixes it with them. Its opacity and its soft edges let them show through. Details: D75.
 - **Keyframes** (D75):
@@ -3533,6 +3550,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Without a Retime Process or a checked effect, it holds the picture at the size of the media, or of its proxy with proxies on. Effects and Transform come after it.
     - With AI Super Scale, it holds the enlarged picture, at the size that the upscaler makes. A change of the zoom or of the timeline size can change that size. Then the clip renders again.
     - Media with an alpha channel is at the clip level only with ProRes 4444 or 4444 XQ (p. 201, X106). Its file then keeps the alpha channel.
+      - With an Alpha Mode of None, it counts as media with no alpha channel.
+      - With an Alpha Mode of Premultiplied, it stays at the timeline level. Why: a file keeps straight alpha, which cannot hold a color above its alpha.
       - With a checked effect, or with a Retime Process while it plays forward, it stays at the timeline level. Why: its file holds only the colors of the placed clip.
       - With another codec, it stays at the timeline level.
   - The timeline level keeps the frame after the tracks mix. It holds the other reasons.

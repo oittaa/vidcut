@@ -8,7 +8,7 @@ use crate::cuda::{CudaDevice, PlaneCopy};
 use crate::hw::Kind;
 use crate::player::{Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
-use vidcut_core::model::{Hdr, WipeDirection};
+use vidcut_core::model::{AlphaMode, Hdr, WipeDirection};
 use vidcut_core::place::{Blurring, Level, Placing, chain, lettered};
 use vidcut_core::preferences::Scope;
 use vidcut_core::render::{Moving, Placed, Shift, Wipe};
@@ -3715,7 +3715,13 @@ fn params_of(
     floats.extend(made);
     floats.extend(part);
     let site = chroma_site(picture.frame(), layout);
-    floats.extend([site[0], site[1], 0.0, 0.0]);
+    let alpha_mode = match picture.alpha_mode() {
+        AlphaMode::Straight => 0.0,
+        AlphaMode::None => 1.0,
+        AlphaMode::Premultiplied => 2.0,
+        AlphaMode::Invert => 3.0,
+    };
+    floats.extend([site[0], site[1], alpha_mode, 0.0]);
     let woven = picture.woven().map_or([0.0, 0.0], |w| {
         [
             if w.top_first { 1.0 } else { 2.0 },

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use vidcut_core::generators::Pattern;
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
+use vidcut_core::model::{AlphaMode, ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
 use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Moving, Placed, Ramp, Shape, Smooth, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
@@ -745,6 +745,7 @@ pub(crate) struct Layer {
     pub(crate) share: f64,
     pub(crate) woven: Option<Weave>,
     pub(crate) origin: Option<Origin>,
+    pub(crate) alpha_mode: AlphaMode,
 }
 
 fn mask_of(ramp: Option<Ramp>, k: i64) -> Option<Wipe> {
@@ -2359,6 +2360,7 @@ impl VideoFrames {
                     image,
                     pace,
                     retime,
+                    alpha_mode,
                     made: shape,
                     ..
                 } = layer
@@ -2400,6 +2402,7 @@ impl VideoFrames {
                                 took: started.elapsed(),
                                 cached: None,
                             }),
+                            alpha_mode: AlphaMode::Straight,
                         });
                         if let Some(smooth) = smooth {
                             self.smoothed(&mut made, &piece, i, smooth, started)?;
@@ -2483,6 +2486,7 @@ impl VideoFrames {
                         took: started.elapsed(),
                         cached: self.open[s].cached(),
                     }),
+                    alpha_mode: *alpha_mode,
                 });
                 if let Some(smooth) = smooth
                     && !backward
@@ -2525,6 +2529,7 @@ impl VideoFrames {
         last.moving = None;
         last.share = 1.0;
         last.woven = None;
+        last.alpha_mode = AlphaMode::Straight;
         Ok(())
     }
 

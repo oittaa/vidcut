@@ -6,7 +6,9 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::lru::Uncapped;
-use crate::model::{ClipCache, CompositeMode, Project, RenderCache, Retime, SuperScale, Upscaler};
+use crate::model::{
+    AlphaMode, ClipCache, CompositeMode, Media, Project, RenderCache, Retime, SuperScale, Upscaler,
+};
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
 use crate::render::{Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
 
@@ -168,10 +170,7 @@ impl Setup<'_> {
         let VideoPiece::Source { media, .. } = layer else {
             return false;
         };
-        self.project
-            .media(media)
-            .and_then(|m| m.info.video.as_ref())
-            .is_some_and(|v| !v.alpha)
+        self.project.media(media).is_some_and(Media::opaque)
     }
 
     fn keeps_alpha(&self, layer: &VideoPiece) -> bool {
@@ -179,7 +178,14 @@ impl Setup<'_> {
             self.prefs.codec,
             CacheCodec::Prores4444 | CacheCodec::Prores4444Xq
         );
-        alpha && !placing(layer)
+        let holds = !matches!(
+            layer,
+            VideoPiece::Source {
+                alpha_mode: AlphaMode::Premultiplied,
+                ..
+            }
+        );
+        alpha && holds && !placing(layer)
     }
 
     fn sized(&self, layer: &VideoPiece) -> Option<(u32, u32)> {
@@ -958,6 +964,7 @@ fn cached(part: &VideoPiece, file: &Path, at: u32, frames: i64) -> VideoPiece {
         image: None,
         pace: Default::default(),
         color_space: Default::default(),
+        alpha_mode: Default::default(),
         super_scale: Default::default(),
         retime: Default::default(),
         placed: Vec::new(),
@@ -986,6 +993,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         image,
         pace,
         color_space,
+        alpha_mode,
         super_scale,
         retime,
         placed,
@@ -1000,6 +1008,7 @@ fn from_file(layer: &mut VideoPiece, file: &Path, at: u32, shape: Option<Shape>)
         *image = None;
         *pace = Default::default();
         *color_space = Default::default();
+        *alpha_mode = Default::default();
         *retime = Default::default();
         match placing {
             false if super_scale.ai() => super_scale.upscaler = Upscaler::Classic,

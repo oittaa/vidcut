@@ -315,7 +315,10 @@ The audio device:
 - With `gpu.decoding` on, the reader decodes on `hw::GpuDecoder::best` where it can.
 - The viewer shows the pictures of some decoders from GPU memory (`Gpu::gpu_pictures`). These pictures stay there, in the video budget. The pictures of the other decoders come down.
 - [gpu](gpu.md) has the path of each decoder to the screen.
-- The shader lays a picture by its straight alpha. AYUV64 holds the alpha in its one texture. A picture in memory with alpha is `yuva444p12le`, with the alpha in a fourth texture (`Picture::alpha_plane`).
+- The shader lays a picture by its Alpha Mode (`Picture::alpha_mode`, `site` in `picture.wgsl`). AYUV64 holds the alpha in its one texture. A picture in memory with alpha is `yuva444p12le`, with the alpha in a fourth texture (`Picture::alpha_plane`).
+  - `opacity` gives the alpha that the mode reads: 1 with None, and 1 − alpha with Invert. A picture with no alpha channel gives 1 in each mode.
+  - A Premultiplied picture keeps its colors at each alpha. Only the placement multiplies them (`placed_share`). Why: spec §3 has c + b × (1 − α), so an alpha of 0 still adds the color. Thus the shader does not divide by alpha.
+  - Above 1 the sum stays in the wide canvas, and the output clamps it. Why: the canvas holds values above 1 for every mix.
 - A picture in memory in RGB or 4:4:4 is `yuv444p12le`, and a 4:2:2 picture stays 4:2:2 (`Relayout`). Why: 4:2:0 loses color detail.
 
 ## Sound
@@ -413,9 +416,11 @@ The two levels (spec D98):
 - `Setup::levels` puts each reason of a layer at a level. `Reason::On`, `Reason::Effect`, `Reason::Media`, `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime` and `Reason::SuperScale` go to the clip level. The other reasons go to the timeline level.
 - A reason of a layer goes to the clip level only when all these are true. Otherwise it goes to the timeline level.
   - It is a video file or a still (`lone`).
-  - Its media has no alpha channel (`Setup::opaque`). Or the codec is ProRes 4444 or 4444 XQ, and the layer keeps no placement in its job (`Setup::keeps_alpha`).
+  - Its media has no alpha channel, or its Alpha Mode is None (`Setup::opaque`). Or the codec is ProRes 4444 or 4444 XQ, and the layer keeps no placement in its job (`Setup::keeps_alpha`).
     - Why: only the files of these codecs keep the alpha channel. Without it, the tracks below would not show through the clip.
     - A placed layer keeps no alpha in its file. Its file holds only the colors (`Look::whole`).
+    - A Premultiplied layer stays out too. Why: the file keeps straight alpha, which cannot hold a color above its alpha.
+    - The file holds the alpha that the mode reads. Thus `from_file` reads it back as Straight.
   - Its clip is not set to `ClipCache::Off`. This rule does not apply to `Reason::Effect` (spec D98).
 - A Retime Process works only on a video file that plays forward (`retimed`), as in the export ([export](export.md#which-source-frame)). Thus a still or a clip that plays backward keeps its placement in a job of the clip level only with a checked effect.
 - `Cache::apply` puts the timeline level first. Where a frame of the timeline level is not there, it puts each found frame of the clip level in place of the layer (`from_file`).

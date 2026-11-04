@@ -317,6 +317,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
             origin,
             image,
             color_space,
+            alpha_mode,
             super_scale,
             retime,
             placed,
@@ -355,7 +356,7 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
                 String::new()
             };
             format!(
-                "{}|{:x}|{image:?}|{}|{}{made}",
+                "{}|{:x}|{image:?}|{}|{}|{alpha_mode:?}{made}",
                 path.display(),
                 origin.to_bits(),
                 plan.fps,
@@ -487,6 +488,7 @@ mod tests {
             image: None,
             pace: Default::default(),
             color_space: Default::default(),
+            alpha_mode: Default::default(),
             super_scale,
             retime,
             placed: vec![Placed {

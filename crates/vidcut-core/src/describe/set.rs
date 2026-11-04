@@ -754,6 +754,7 @@ impl Words<'_> {
         s.put("color_space", "Color Space", &color_space, |m| {
             json!(m.color_space)
         });
+        s.put("alpha_mode", "Alpha Mode", &word, |m| json!(m.alpha_mode));
         s.put("super_scale", "Super Scale", &on_off, |m| {
             json!(m.super_scale.on)
         });
