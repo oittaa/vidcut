@@ -45,6 +45,8 @@ const D65: [f64; 2] = [0.3127, 0.3290];
 
 const SDR_WHITE: u32 = 203;
 
+pub const THROUGH_LUT: &str = "Nothing from the sources: a LUT changes the light of the picture";
+
 fn volume(m: &PieceMeta) -> (MasteringDisplay, bool) {
     let assumed = |primaries, min_nits, max_nits| MasteringDisplay {
         primaries,
@@ -466,6 +468,40 @@ pub fn choose(
     choice
 }
 
+pub fn choose_through_lut(v: &VideoSettings) -> MetadataChoice {
+    let asked = v.hdr_metadata;
+    let mut choice = MetadataChoice {
+        mode: HdrMetadata::None,
+        mastering: None,
+        light: None,
+        asked,
+        why: Vec::new(),
+    };
+    if asked == HdrMetadata::None {
+        choice.why.push("None: asked for".into());
+        return choice;
+    }
+    let Some(out) = v.hdr.transfer() else {
+        choice.why.push("None: SDR carries no HDR metadata".into());
+        return choice;
+    };
+    choice.why.push(THROUGH_LUT.into());
+    if out == Hdr::Pq {
+        if let Some(s) = &v.mastering_display {
+            choice.why.push("Mastering display: given".into());
+            choice.mastering = parse_mastering(s).ok();
+        }
+        if let Some(s) = v.max_cll.as_deref().filter(|s| *s != MEASURE) {
+            choice.why.push("Light levels: given".into());
+            choice.light = parse_light(s).ok();
+        }
+    }
+    if choice.mastering.is_some() || choice.light.is_some() {
+        choice.mode = HdrMetadata::Static;
+    }
+    choice
+}
+
 impl MetadataChoice {
     pub fn apply(&self, v: &mut VideoSettings) {
         v.hdr_metadata = self.mode;
@@ -497,6 +533,7 @@ mod tests {
             cache: Default::default(),
             excluded: false,
             made: None,
+            input_lut: None,
         }
     }
 
