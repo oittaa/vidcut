@@ -2788,20 +2788,56 @@ fn mutate(
             range,
             name,
             bin,
+            full_extents,
         } => {
+            if range.is_some() && *full_extents {
+                return Err(Error::usage("give range or full_extents, not both"));
+            }
             let m = p
                 .media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             let c = media_context(p, m, None);
-            let span = match range {
-                Some(r) => c.range(r)?,
-                None => (
+            let span = match (range, *full_extents) {
+                (Some(r), _) => c.range(r)?,
+                (None, true) => (0, c.end),
+                (None, false) => (
                     m.marks.mark_in.unwrap_or(0),
                     m.marks.mark_out.unwrap_or(c.end),
                 ),
             };
             let id = ops::create_subclip(p, media, span, name, bin.as_deref())?;
+            if *full_extents {
+                ops::use_full_extents(p, &id)?;
+            }
             json!({ "media": id })
+        }
+        Request::MediaSubclipSet {
+            media,
+            range,
+            full_extents,
+        } => {
+            match (range, *full_extents) {
+                (Some(_), true) => {
+                    return Err(Error::usage("give range or full_extents, not both"));
+                }
+                (None, false) => return Err(Error::usage("give range or full_extents")),
+                (None, true) => ops::use_full_extents(p, media)?,
+                (Some(r), false) => {
+                    let m = p
+                        .media(media)
+                        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+                    let whole = TimeContext {
+                        end: p.file_frames(m),
+                        mark_in: None,
+                        mark_out: None,
+                        ..media_context(p, m, None)
+                    };
+                    let span = whole.range(r)?;
+                    ops::set_subclip_limits(p, media, span)?;
+                }
+            }
+            forget_tape_marks(p, media);
+            Value::Null
         }
         Request::MediaSet {
             media,

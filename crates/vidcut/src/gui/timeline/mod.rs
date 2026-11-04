@@ -1261,7 +1261,7 @@ impl Workspace {
             self.keyframe_tray(ui, rect, HEADER, span);
         }
         self.marker_window(ui.ctx());
-        self.new_subclip_tick(ui.ctx());
+        self.subclip_windows_tick(ui.ctx());
         self.duration_window(ui.ctx());
         self.fade_window(ui.ctx());
         self.speed_window(ui.ctx());
@@ -2667,6 +2667,14 @@ impl Workspace {
             .unwrap_or_default();
         if c.title.is_some() && ui.button("Edit Title…").clicked() {
             self.open_title(&c.id);
+            ui.close();
+        }
+        let subclip = self
+            .project()
+            .and_then(|p| p.media(&c.media))
+            .is_some_and(|m| m.subclip.is_some());
+        if subclip && ui.button("Edit Subclip…").clicked() {
+            self.open_edit_subclip(&c.media);
             ui.close();
         }
         let item = |ui: &mut egui::Ui, label: &str, method: &str, params: Value| {

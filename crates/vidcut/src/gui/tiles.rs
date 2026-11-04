@@ -52,6 +52,7 @@ struct Seen {
     mtime_ns: i64,
     origin: Origin,
     color_space: vidcut_core::model::ColorSpace,
+    subclip: Option<vidcut_core::model::Subclip>,
 }
 
 impl Seen {
@@ -62,6 +63,7 @@ impl Seen {
             mtime_ns: m.mtime_ns,
             origin: paths::media_origin(m),
             color_space: m.color_space,
+            subclip: m.subclip,
         }
     }
 
@@ -70,6 +72,7 @@ impl Seen {
             && self.size == m.size
             && self.mtime_ns == m.mtime_ns
             && self.color_space == m.color_space
+            && self.subclip == m.subclip
     }
 }
 

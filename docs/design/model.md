@@ -212,6 +212,13 @@ Media fields:
   - `PoolFiles` and `otio::same_media` never take a subclip for its file.
   - An OTIO file gives a clip of a subclip as a clip of the whole file, at the right time.
   - `Speakers::share` gives a new subclip the people of its parent.
+  - `ops::set_subclip_limits` changes the part (`media.subclip_set`). `Project::subclip_span` gives the part in frames of the file.
+    - The source frames count from the start of the part. Thus a new start moves each frame that counts from it by the same amount.
+    - `ops::shift_source` moves `source_in`, the keyframes and the `from` of the effects of each clip. A clip with a `Speed` keeps its keyframes, because they count on the retimed source.
+    - The `head` and `tail` of a `GroupClip` take the change, so that its visible part stays.
+    - `validate` refuses a clip outside its media, so `ops::set_subclip_limits` refuses the change first and names the clip.
+    - A `Marker` can be outside the part for this reason. Nothing shows it there, and a later change can bring it back.
+    - `Tiles` forgets the pictures of the item, because their frames count from the start of the part.
 - `markers` holds the markers on the source clip, at its source frames (`ops::add_source_marker`). `Project::marker` finds a marker by id in the timeline or in a source clip.
 
 Folders:
