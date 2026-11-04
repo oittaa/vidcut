@@ -403,7 +403,7 @@ What it renders:
   - Why the black pieces: the black side of a Push or a dip is a part of the transition of the track.
 - Slow media (`Reason::Media`) are of two kinds:
   - With GPU decoding on, media of a long-GOP codec that the GPU decoder does not take (vidcut-av `render_cache::slow`).
-  - The render thread checks each file once. It keeps the answer by the path of the file, until the GPU preferences change.
+  - The render thread checks each file once. It keeps the answer by the path of the file, until the GPU preferences change or the file leaves the project.
   - The answers come in a message that names its job. The live core drops the answers of a job that it stopped.
   - Media that the proxy rules pick (`Proxies::wants`), while the original plays.
 - `Reason::Drops` is for a marked part (`Cache::marked`). It is a reason of the timeline level, and only Smart keeps it.

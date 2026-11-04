@@ -85,7 +85,10 @@ fn find_slow(
     gpu: Option<&vidcut_av::hw::GpuDecoder>,
     decodes: &mut HashMap<PathBuf, bool>,
 ) -> bool {
-    let mut found = false;
+    let held = decodes.len();
+    let paths: HashSet<&Path> = project.media.iter().map(|m| m.path.as_path()).collect();
+    decodes.retain(|path, _| paths.contains(path.as_path()));
+    let mut found = decodes.len() != held;
     for m in &project.media {
         let Some(v) = m.info.video.as_ref().filter(|v| !v.still) else {
             continue;
