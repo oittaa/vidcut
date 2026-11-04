@@ -761,6 +761,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A tooltip shows the frame delta and the new duration.
     - On Track 1 with Ripple On, it ripples. On other tracks, only that clip changes.
   - **Edit center: roll.**
+    - Trim > Roll > Start to Playhead next to a gap moves only the picture edge. The sound stays.
+    - `edit.roll` does this. vidcut has no menu command for it ([gaps](todo/cut-page-gaps.md)).
     - The total duration stays the same.
     - A white overlay shows the available handle media.
   - **Slip handle at the clip center: slip.** Several selected clips slip together.
@@ -822,6 +824,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - Hover over the lower audio part of a clip at an edit until the cursor shows a note. Then drag.
 - Only the audio edit moves, as an audio roll.
 - A click selects that audio edit, and `,` / `.` move it (D20).
+- The edit needs sound on one side only.
+  - With sound on the outgoing side only, the sound goes on past the picture. It goes into a gap, or under a clip with no sound.
+  - With sound on the incoming side only, the sound starts before the picture.
+  - vidcut stops the edit at the nearest sound on the track, at the timeline's start and where the media runs out.
 
 ### 8.8 Snapping (pp. 716–717)
 - N toggles snapping.
@@ -1605,11 +1611,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D13. Keys.**
   - Keys that the Cut chapters do not give come from the Edit page.
   - §11 marks them with †.
-- **D14. J/L cuts belong to an edit point.**
-  - A J/L cut (§8.7) is the `tail` of the outgoing clip that matches the `head` of the incoming clip.
-  - An edit that gives a clip another neighbor there resets the J/L cut to a straight cut.
+- **D14. J/L cuts at an edit point.**
+  - Between two touching clips with sound, a J/L cut (§8.7) is the `tail` of the outgoing clip that matches the `head` of the incoming clip.
+  - An edit that gives such a clip another neighbor with sound there resets the J/L cut to a straight cut.
   - The edit also resets the other cut of the clip, if the clip would have no sound of its own.
-  - Reason: otherwise audio could overlap on a track, or run into gaps.
+  - With a gap or a clip with no sound there, the `head` or `tail` stays. It gets shorter when it would overlap other sound.
+  - Reason: sound does not overlap on a track.
 - **D15. Playhead after an edit function.**
   - After Smart Insert, Append, Overwrite, Ripple Overwrite or Paste, the playhead moves to the frame after the new clips.
   - The Viewer keeps its mode, so Q reviews the result (p. 696).

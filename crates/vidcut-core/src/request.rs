@@ -1047,7 +1047,9 @@ pub enum Request {
         #[serde(default)]
         ripple: Option<bool>,
     },
-    /// Roll the edit at a clip's edge.
+    /// Roll the edit at a clip's edge. With a gap at that edge, only the
+    /// picture edge moves and the sound stays. It stops one frame short of
+    /// the next clip.
     #[serde(rename = "edit.roll")]
     EditRoll {
         clip: ClipRef,
@@ -1164,7 +1166,10 @@ pub enum Request {
         #[serde(default = "scene_threshold")]
         threshold: f64,
     },
-    /// Audio-only roll at a clip's edge (J/L cut).
+    /// Audio-only roll at a clip's edge (J/L cut). With a gap or a clip with
+    /// no sound on one side, only the sound on the other side moves. It stops
+    /// at the media's ends, at the nearest sound on the track and at the
+    /// timeline's start.
     #[serde(rename = "edit.audio_roll")]
     EditAudioRoll {
         clip: ClipRef,
@@ -3798,8 +3803,8 @@ pub enum TrimSide {
     /// Both: a roll.
     #[default]
     Both,
-    /// Its audio edit: where the outgoing clip's sound ends, the J/L
-    /// handle (decision D20).
+    /// Its audio edit: where a clip's sound ends or starts, the J/L handle
+    /// (decision D20).
     Audio,
 }
 
