@@ -1548,8 +1548,9 @@ pub enum Request {
     /// position and opacity. A title's zoom is one number. The handles of
     /// its position keys bend its path. `clips` also takes cues, as `q3` or
     /// `S1@10s`. A cue takes every value of a picture except its anchor. Its
-    /// frames count from its start. Returns the `clips` with the source
-    /// `frame` of each new keyframe.
+    /// frames count from its start. A Four Color Gradient takes `center_x`
+    /// and `center_y`. Returns the `clips` with the source `frame` of each
+    /// new keyframe.
     #[serde(rename = "keyframes.add")]
     KeyframesAdd {
         clips: OneOrMany<ClipRef>,
@@ -1559,9 +1560,10 @@ pub enum Request {
         at: Option<TimeSpec>,
         /// The value at the keyframe. A number for volume (dB, from -100
         /// to 30), rotation (degrees), pitch and yaw (from -1.5 to 1.5), a
-        /// crop side (a fraction), crop softness (from -100 to 100) and
-        /// opacity (from 0 to 1). For position, zoom and the anchor point,
-        /// two numbers, x then y, or one number for both axes of zoom.
+        /// crop side (a fraction), crop softness (from -100 to 100), opacity
+        /// (from 0 to 1) and a gradient's center (from -1 to 1). For
+        /// position, zoom and the anchor point, two numbers, x then y, or one
+        /// number for both axes of zoom.
         #[serde(default)]
         value: Option<KeyValue>,
         #[serde(default)]
@@ -2280,11 +2282,10 @@ pub enum Request {
     #[serde(rename = "generators.add")]
     GeneratorsAdd {
         /// `solid_color`: one color over the whole picture.
+        /// `four_color_gradient`: four colors that mix from the corners.
         kind: GeneratorKind,
-        /// A `solid_color`'s color: `#rrggbb`, `#rgb` or a name such as
-        /// `yellow`. Default: black.
-        #[serde(default)]
-        color: Option<String>,
+        #[serde(flatten)]
+        settings: GeneratorSettings,
         #[serde(default)]
         at: Option<TimeSpec>,
         #[serde(default)]
@@ -2297,10 +2298,12 @@ pub enum Request {
     #[serde(rename = "generators.set")]
     GeneratorsSet {
         clip: ClipRef,
-        /// A `solid_color`'s color: `#rrggbb`, `#rgb` or a name such as
-        /// `yellow`.
+        #[serde(flatten)]
+        settings: GeneratorSettings,
+        /// The frame for a center that has keyframes: its value goes on a
+        /// keyframe there. Default: the playhead.
         #[serde(default)]
-        color: Option<String>,
+        at: Option<TimeSpec>,
     },
 
     /// Where a clip's picture goes over the frame (`c3`, or `V2@15s`): the
@@ -3550,10 +3553,16 @@ pub enum KeyParam {
     LowerZoom,
     /// The rotation of the lower line of a lower third. The lines go apart.
     LowerRotation,
+    /// The Center X of a Four Color Gradient, from -1 to 1. A number past an
+    /// end takes that end.
+    CenterX,
+    /// The Center Y of a Four Color Gradient, from -1 to 1. A number past an
+    /// end takes that end.
+    CenterY,
 }
 
 impl KeyParam {
-    pub const ALL: [KeyParam; 20] = [
+    pub const ALL: [KeyParam; 22] = [
         KeyParam::Volume,
         KeyParam::Position,
         KeyParam::Zoom,
@@ -3574,6 +3583,8 @@ impl KeyParam {
         KeyParam::LowerPosition,
         KeyParam::LowerZoom,
         KeyParam::LowerRotation,
+        KeyParam::CenterX,
+        KeyParam::CenterY,
     ];
 
     pub fn on_line(self) -> (KeyParam, Option<LowerThirdLine>) {
@@ -4025,6 +4036,49 @@ fn storyboard_columns() -> u32 {
 
 fn storyboard_width() -> u32 {
     320
+}
+
+/// The settings of a generator. A kind refuses a setting that it doesn't have.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GeneratorSettings {
+    /// A `solid_color`'s color: `#rrggbb`, `#rgb` or a name such as `yellow`.
+    /// Default: black.
+    #[serde(default)]
+    pub color: Option<String>,
+    /// A `four_color_gradient`'s Center X: -1 is the left edge, 0 the middle
+    /// and 1 the right edge. A number past an end takes that end. Default: 0.
+    #[serde(default)]
+    pub center_x: Option<f64>,
+    /// A `four_color_gradient`'s Center Y: -1 is the top edge, 0 the middle
+    /// and 1 the bottom edge. A number past an end takes that end. Default: 0.
+    #[serde(default)]
+    pub center_y: Option<f64>,
+    /// A `four_color_gradient`'s upper left color. Default: `#ff0000`.
+    #[serde(default)]
+    pub upper_left: Option<String>,
+    /// A `four_color_gradient`'s upper right color. Default: `#ffff00`.
+    #[serde(default)]
+    pub upper_right: Option<String>,
+    /// A `four_color_gradient`'s lower left color. Default: `#0000ff`.
+    #[serde(default)]
+    pub lower_left: Option<String>,
+    /// A `four_color_gradient`'s lower right color. Default: `#00ffff`.
+    #[serde(default)]
+    pub lower_right: Option<String>,
+}
+
+impl GeneratorSettings {
+    pub fn named(&self) -> [(&'static str, bool); 7] {
+        [
+            ("color", self.color.is_some()),
+            ("center_x", self.center_x.is_some()),
+            ("center_y", self.center_y.is_some()),
+            ("upper_left", self.upper_left.is_some()),
+            ("upper_right", self.upper_right.is_some()),
+            ("lower_left", self.lower_left.is_some()),
+            ("lower_right", self.lower_right.is_some()),
+        ]
+    }
 }
 
 /// What to put on the timeline: a media range, and where.

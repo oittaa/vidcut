@@ -147,7 +147,7 @@ pub(super) fn drop_gain_keys(list: &mut Vec<Value>) {
     list.retain(|e| !is_volume(e) || in_use(e));
 }
 
-fn key_frames(keys: &[Keyframe], origin: i64) -> Value {
+pub(super) fn key_frames(keys: &[Keyframe], origin: i64) -> Value {
     let [before, after] = ["InBez", "OutBez"];
     let mut out = serde_json::Map::new();
     for k in keys {

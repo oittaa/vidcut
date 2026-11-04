@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::model::{Project, TrackKind};
+use crate::model::{Generator, Project, TrackKind};
 
 pub const GAIN: std::ops::RangeInclusive<f64> = -100.0..=30.0;
 pub const FADER: std::ops::RangeInclusive<f64> = -100.0..=10.0;
@@ -85,6 +85,11 @@ pub fn violations(p: &Project) -> Vec<String> {
                     if let Err(e) = crate::ops::titles::checked(title) {
                         v.push(format!("{}: {}", c.id, e.message));
                     }
+                }
+                if let Some(Generator::FourColorGradient(g)) = &c.generator
+                    && let Some(why) = g.problem()
+                {
+                    v.push(format!("{}: {why}", c.id));
                 }
                 let (lo, hi) = c.shown();
                 if let Some(k) = &c.compound
