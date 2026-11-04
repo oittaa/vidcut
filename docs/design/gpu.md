@@ -303,7 +303,7 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
 - An HDR export measures the light of its pictures for HDR10+ and MaxCLL ([export](export.md)).
 - The GPU measures HDR pictures that stay on the GPU (`screen::light::Meter`). It uses the shared off-screen device (`screen::offscreen`).
   - It takes NV12 and P010 pictures of the kinds that the draw imports (`Gpu::gpu_pictures`).
-  - The measurement before an export uses it (`light::analysis`).
+  - The measurement before an export uses it (`Lights::analysis`).
   - The meter in the export uses it too, for a file with no measured light (`light::Meter`).
 - The GPU gives the values of the CPU, bit for bit. Thus the GPU does no color math.
   - Why: f32 on the GPU does not round as f64 on the CPU. Some codes then give a different light.

@@ -330,7 +330,7 @@ flowchart TD
   - An `AvEnv` lives for one request or one job. Its memory goes with it.
   - A result that the disk cache refuses also goes with it. The next request measures again.
 - The core holds the measurements of ducking for the open project ([playback](playback.md#sound)).
-- Light is also kept in memory.
+- An export keeps the light of its files in memory only while it chooses its metadata (`Lights`). Why: each piece asks for the light of its file.
 - A job makes some results on a copy of the project, and the edit after it finds them. Each of these is in an `Lru` of a fixed size:
   - `HEARD` and `PAID`: the last results heard. Why: a transcription costs minutes or money.
   - `LOUD`: the loudness of a plan.
