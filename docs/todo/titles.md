@@ -7,12 +7,6 @@
 - Position, zoom, rotation and opacity take keyframes ([keyframes](keyframes.md#titles)).
 - vidcut reads and writes them in OTIO in Resolve's shape ([D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
-## Title Caps in the Inspector
-
-- Resolve draws no change from `text-transform:capitalize` in a file. Thus the measurements have no Title Caps.
-- Set Title Caps in Resolve's Inspector on small and capital letters, on `ab-cd` and on `e'f`.
-- Measure which letters change, and read the form that Resolve writes in its file.
-
 ## Line Spacing and Tracking in the Inspector
 
 - Measure the range of the two controls in Resolve's Inspector, and the unit of Line Spacing.

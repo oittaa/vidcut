@@ -2646,8 +2646,15 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - In these renders, some blocks with a negative value are up to 1 pixel from this rule, as "Ab" in Arial 96. The reason is not known.
     - A scroll has no line spacing, tracking or case, as in Resolve's own Scroll.
     - Font case is `mixed`, `upper`, `lower`, `small` or `title`: Mixed, All Caps, All Lowercase, Small Caps and Title Caps (p. 1184).
-    - `small` draws small letters as capitals at 0.7 of the size (measured in Resolve Studio 21.1.2).
-    - `title` makes the first letter of each word a capital, and it keeps the other letters.
+    - `small` draws small letters as capitals at 0.7 of the size in whole pixels at zoom 1, rounded to a whole pixel. The zoom scales it (measured in Resolve Studio 21.1.2).
+    - Digits, punctuation and capitals stay at the full size.
+    - `title` makes the first letter of each word a capital, and it keeps the other letters. `mcDONALD` becomes `McDONALD`.
+    - A word starts as in Unicode word boundaries (UAX 29), and also after `.` and `:` (measured in Resolve Studio 21.1.2).
+      - A letter becomes a capital after a space, a hyphen, a comma, a bracket, or an apostrophe that is not between two letters.
+      - A letter stays after a letter, a digit, `_`, a combining mark, or an apostrophe between two letters. `rock'n'roll` becomes `Rock'n'roll`.
+    - `upper`, `lower`, `small` and `title` change each letter alone (measured in Resolve Studio 21.1.2).
+      - A letter stays when its other form has more than one letter: `ß`, `ﬁ` and `ŉ` in capitals, and `İ` in small letters. With `small`, these letters draw at the small size.
+      - `Σ` becomes `σ` also at the end of a word.
     - `<o>` draws a line over the words and `<s>` a line through them (p. 1184).
     - The height of these lines and `<u>` is `underlineThickness` in the font's `post` table.
     - The left end is the start of the words, rounded up to a whole pixel.
@@ -2758,6 +2765,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A shifted span has `super` or `sub` in `vertical-align`.
     - A span has its case in `text-transform` (`uppercase`, `lowercase`) or in `font-variant` (`small-caps`).
     - Resolve does not draw `text-transform:capitalize` from a file. Thus for `title` vidcut writes it and the capital letters.
+    - Title Caps in Resolve's Inspector writes nothing in the file, and the text stays as typed.
     - Each paragraph has its line spacing in `line-height`. A Text title has 0, and the upper and lower line of a lower third have 1 and 0, unless a title sets another value.
     - The group has the alignment of the lines.
     - Its `anchor` is on a 3×3 grid, counted from the bottom left: 0 bottom left, 4 middle, 8 top right.
