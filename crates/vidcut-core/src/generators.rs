@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::keyframes::{checked_handle, value_at};
-use crate::model::{Generator, Gradient, Hdr, Keyframe};
+use crate::model::{Chart, EbuLevel, Generator, Gradient, Hdr, Keyframe};
 
 const BT709_TO_BT2020: [[f64; 3]; 3] = [
     [0.62740389, 0.32928304, 0.04331307],
@@ -30,6 +30,21 @@ const HLG_WHITE: f64 = 0.1;
 pub const CENTER: RangeInclusive<f64> = -1.0..=1.0;
 
 const RGB48: usize = 6;
+
+const BAR_COLORS: [Code; 7] = [
+    [1.0, 1.0, 1.0],
+    [1.0, 1.0, 0.0],
+    [0.0, 1.0, 1.0],
+    [0.0, 1.0, 0.0],
+    [1.0, 0.0, 1.0],
+    [1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0],
+];
+
+const YCBCR_SLOPES: [f64; 3] = [2.539648, 0.359182, 2.814179];
+
+type Code = [f64; 3];
+type Band = (u32, Vec<Code>);
 
 fn pq_encode(light: f64) -> f64 {
     let p = light.max(0.0).powf(PQ_M1);
@@ -210,6 +225,7 @@ pub enum Pattern {
         center: [u64; 2],
         corners: [[u8; 3]; 4],
     },
+    Chart(Chart),
 }
 
 impl Pattern {
@@ -277,6 +293,140 @@ fn each_row(data: &mut [u8], stride: usize, height: usize, work: impl Fn(usize, 
     });
 }
 
+fn grey(v: f64) -> Code {
+    [v; 3]
+}
+
+fn row_end(k: u16, h: u32) -> u32 {
+    (f32::from(k) / 12.0 * h as f32).floor() as u32
+}
+
+fn columns(w: u32, code: impl Fn(u32) -> Code) -> Vec<Code> {
+    (0..w).map(code).collect()
+}
+
+fn paint(row: &mut [Code], from: usize, to: usize, code: Code) {
+    if let Some(span) = row.get_mut(from..to.min(row.len())) {
+        span.fill(code);
+    }
+}
+
+fn ten_step(w: u32) -> Vec<Code> {
+    let band = w.div_ceil(11);
+    columns(w, |x| grey(f64::from((x / band).min(10)) / 10.0))
+}
+
+fn hundred_mv_steps(w: u32) -> Vec<Code> {
+    let band = w.div_ceil(10);
+    columns(w, |x| {
+        grey(f64::from((x / band).saturating_sub(1).min(7)) / 7.0)
+    })
+}
+
+fn ycbcr_ramp(w: u32) -> Vec<Code> {
+    columns(w, |x| {
+        let t = f64::from(x) / f64::from(w);
+        YCBCR_SLOPES.map(|slope| (0.5 + slope * (t - 0.5)).clamp(0.0, 1.0))
+    })
+}
+
+fn ebu_bars(level: EbuLevel, w: u32) -> Vec<Code> {
+    let at = match level {
+        EbuLevel::Percent75 => 0.75,
+        EbuLevel::Percent100 => 1.0,
+    };
+    let band = w.div_ceil(8);
+    columns(w, |x| match (x / band).min(7) as usize {
+        0 => grey(1.0),
+        bar @ 1..=6 => BAR_COLORS[bar].map(|v| v * at),
+        _ => grey(0.0),
+    })
+}
+
+fn smpte_bars(w: u32, h: u32) -> Vec<Band> {
+    let base = if w < 1920 {
+        1920.0
+    } else {
+        f64::from(2 * (8 * h / 9))
+            .min(f64::from(w) * 4.0 / 3.0)
+            .max(1920.0)
+    };
+    let c = (base * 3.0 / 28.0).ceil() as usize;
+    let u = 2 * c.div_ceil(6);
+    let full = (w as usize).max(1920);
+    let d = full.saturating_sub(7 * c) / 2;
+    let end = d + 7 * c;
+
+    let mut bars = vec![grey(0.4); full];
+    for (n, color) in BAR_COLORS.iter().enumerate() {
+        paint(
+            &mut bars,
+            d + n * c,
+            d + (n + 1) * c,
+            color.map(|v| v * 0.75),
+        );
+    }
+
+    let mut second = vec![grey(0.75); full];
+    paint(&mut second, 0, d, [0.0, 1.0, 1.0]);
+    paint(&mut second, d, d + c, grey(1.0));
+    paint(&mut second, end, full, [0.0, 0.0, 1.0]);
+
+    let ramp_from = (d + c) as f64;
+    let ramp_span = end.min(full) as f64 - ramp_from;
+    let mut third: Vec<Code> = (0..full)
+        .map(|x| grey(((x as f64 - ramp_from) / ramp_span).clamp(0.0, 1.0)))
+        .collect();
+    paint(&mut third, 0, d, [1.0, 1.0, 0.0]);
+    paint(&mut third, end, full, [1.0, 0.0, 0.0]);
+
+    let mut last = vec![grey(0.15); full];
+    paint(&mut last, d, end, grey(0.0));
+    let white = d + 9 * u / 2;
+    paint(&mut last, white, white + 6 * u, grey(1.0));
+    let near_black = white + 6 * u + 9 * u / 2;
+    paint(&mut last, near_black, near_black + u, grey(0.02));
+    paint(
+        &mut last,
+        near_black + 2 * u,
+        near_black + 3 * u,
+        grey(0.04),
+    );
+
+    vec![
+        (row_end(7, h), bars),
+        (row_end(8, h), second),
+        (row_end(9, h), third),
+        (h, last),
+    ]
+}
+
+fn bands(chart: Chart, w: u32, h: u32) -> Vec<Band> {
+    let whole = |codes| vec![(h, codes)];
+    match chart {
+        Chart::TenStep => whole(ten_step(w)),
+        Chart::HundredMvSteps => whole(hundred_mv_steps(w)),
+        Chart::GreyScale => whole(columns(w, |x| grey(f64::from(x) / f64::from(w)))),
+        Chart::YcbcrRamp => whole(ycbcr_ramp(w)),
+        Chart::EbuColorBar(level) => whole(ebu_bars(level, w)),
+        Chart::SmpteColorBar => smpte_bars(w, h),
+    }
+}
+
+fn draw_bands(all: &[Band], data: &mut [u8], stride: usize, width: usize) {
+    let mut rest = data;
+    let mut done = 0;
+    for (end, codes) in all {
+        let bytes = ((end - done) as usize * stride).min(rest.len());
+        done = *end;
+        let (here, after) = std::mem::take(&mut rest).split_at_mut(bytes);
+        rest = after;
+        if !here.is_empty() {
+            same_rows(here, stride, width, codes);
+        }
+    }
+}
+
 pub fn draw(
     pattern: Pattern,
     (w, h): (u32, u32),
@@ -302,6 +452,7 @@ pub fn draw(
                 put_row(&mut line[..width * RGB48], codes);
             });
         }
+        Pattern::Chart(chart) => draw_bands(&bands(chart, w, h), data, stride, width),
     }
 }
 
@@ -309,6 +460,12 @@ pub fn name(g: &Generator) -> &str {
     match g {
         Generator::SolidColor { .. } => Generator::SOLID_COLOR,
         Generator::FourColorGradient(_) => Generator::FOUR_COLOR_GRADIENT,
+        Generator::TenStep => Generator::TEN_STEP,
+        Generator::HundredMvSteps => Generator::HUNDRED_MV_STEPS,
+        Generator::GreyScale => Generator::GREY_SCALE,
+        Generator::YcbcrRamp => Generator::YCBCR_RAMP,
+        Generator::EbuColorBar { .. } => Generator::EBU_COLOR_BAR,
+        Generator::SmpteColorBar => Generator::SMPTE_COLOR_BAR,
         Generator::Carried { .. } if g.is_offline() => "Media Offline",
         Generator::Carried { reference } => [&reference["generator_kind"], &reference["name"]]
             .into_iter()

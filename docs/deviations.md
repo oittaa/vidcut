@@ -2468,3 +2468,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - A group in vidcut holds only files that are in the project.
   - The owner approved this difference.
+
+## X129. Generators have the correct picture where Resolve has a fault
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. Both faults repeat.
+  - In an HLG timeline, the YCbCr Ramp has green × 1.0634 for x 0 to 204 at 1920 wide. This gives a step at x 205.
+  - At an odd size (1001 × 777), column 0 has noise in red on the BT.2111 Color Bars and SMPTE Color Bar. The other kinds have extra colors there.
+- **vidcut:**
+  - The YCbCr Ramp has no step. Its code values are the same in each timeline.
+  - Each kind follows its rule at each size, in each column.
+- **Why:**
+  - These are faults in Resolve. vidcut has the correct picture.

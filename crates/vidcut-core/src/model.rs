@@ -2059,6 +2059,43 @@ impl Speed {
 pub enum GeneratorKind {
     SolidColor,
     FourColorGradient,
+    #[serde(rename = "10_step")]
+    TenStep,
+    #[serde(rename = "100mv_steps")]
+    HundredMvSteps,
+    GreyScale,
+    YcbcrRamp,
+    EbuColorBar,
+    SmpteColorBar,
+}
+
+/// The Level of an EBU Color Bar: the percent of its colored bars, `75` or
+/// `100`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, JsonSchema)]
+pub enum EbuLevel {
+    #[default]
+    #[serde(rename = "75")]
+    Percent75,
+    #[serde(rename = "100")]
+    Percent100,
+}
+
+impl EbuLevel {
+    pub const ALL: [Self; 2] = [Self::Percent75, Self::Percent100];
+}
+
+/// A picture that a rule draws from the size of the timeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Chart {
+    #[serde(rename = "10_step")]
+    TenStep,
+    #[serde(rename = "100mv_steps")]
+    HundredMvSteps,
+    GreyScale,
+    YcbcrRamp,
+    EbuColorBar(EbuLevel),
+    SmpteColorBar,
 }
 
 /// A Four Color Gradient: the colors of its corners and the center where they
@@ -2108,6 +2145,21 @@ pub enum Generator {
     },
     /// Four colors that mix from the corners of the picture.
     FourColorGradient(Gradient),
+    /// Eleven grey bars, from black to white.
+    #[serde(rename = "10_step")]
+    TenStep,
+    /// Eight grey steps, from black to white.
+    #[serde(rename = "100mv_steps")]
+    HundredMvSteps,
+    /// A grey ramp, from black at the left to white at the right.
+    GreyScale,
+    /// A ramp in each color channel, across the picture.
+    YcbcrRamp,
+    /// Eight bars: white, six colors at the `level`, and black.
+    EbuColorBar { level: EbuLevel },
+    /// Seven bars at 75%, with a row of reversed bars, a ramp and a row with
+    /// white and near-black patches under them.
+    SmpteColorBar,
     /// A generator, a title or a clip with no media from another editor's
     /// file that vidcut doesn't draw (deviation X9): a block that plays as a
     /// gap. On an audio track, a clip with no media stands for its sound
@@ -2124,9 +2176,27 @@ pub enum Generator {
 impl Generator {
     pub const SOLID_COLOR: &str = "Solid Color";
     pub const FOUR_COLOR_GRADIENT: &str = "Four Color Gradient";
+    pub const TEN_STEP: &str = "10 Step";
+    pub const HUNDRED_MV_STEPS: &str = "100mV Steps";
+    pub const GREY_SCALE: &str = "Grey Scale";
+    pub const YCBCR_RAMP: &str = "YCbCr Ramp";
+    pub const EBU_COLOR_BAR: &str = "EBU Color Bar";
+    pub const SMPTE_COLOR_BAR: &str = "SMPTE Color Bar";
 
     pub fn draws(&self) -> bool {
         !matches!(self, Self::Carried { .. })
+    }
+
+    pub fn chart(&self) -> Option<Chart> {
+        match self {
+            Self::TenStep => Some(Chart::TenStep),
+            Self::HundredMvSteps => Some(Chart::HundredMvSteps),
+            Self::GreyScale => Some(Chart::GreyScale),
+            Self::YcbcrRamp => Some(Chart::YcbcrRamp),
+            Self::EbuColorBar { level } => Some(Chart::EbuColorBar(*level)),
+            Self::SmpteColorBar => Some(Chart::SmpteColorBar),
+            Self::SolidColor { .. } | Self::FourColorGradient(_) | Self::Carried { .. } => None,
+        }
     }
 
     pub fn is_offline(&self) -> bool {

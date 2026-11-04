@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::generators::{Axis, checked_center};
+use crate::generators::{Axis, checked_center, name};
 use crate::model::{Generator, GeneratorKind, Gradient, Project};
 use crate::request::GeneratorSettings;
 
@@ -25,7 +25,7 @@ fn rgb_of(color: &str) -> Result<[u8; 3]> {
 fn refuse(given: &GeneratorSettings, kind: &str, takes: &[&str]) -> Result<()> {
     for (name, there) in given.named() {
         if there && !takes.contains(&name) {
-            return Err(Error::invalid(format!("a {kind} has no `{name}`")));
+            return Err(Error::invalid(format!("{kind} has no `{name}`")));
         }
     }
     Ok(())
@@ -65,6 +65,10 @@ fn put_gradient(g: &mut Gradient, s: &GeneratorSettings, frame: Option<i64>) -> 
 }
 
 pub fn made(kind: GeneratorKind, s: &GeneratorSettings) -> Result<Generator> {
+    let plain = |g: Generator| {
+        refuse(s, name(&g), &[])?;
+        Ok(g)
+    };
     match kind {
         GeneratorKind::SolidColor => {
             refuse(s, Generator::SOLID_COLOR, &["color"])?;
@@ -77,6 +81,17 @@ pub fn made(kind: GeneratorKind, s: &GeneratorSettings) -> Result<Generator> {
             put_gradient(&mut g, s, None)?;
             Ok(Generator::FourColorGradient(g))
         }
+        GeneratorKind::TenStep => plain(Generator::TenStep),
+        GeneratorKind::HundredMvSteps => plain(Generator::HundredMvSteps),
+        GeneratorKind::GreyScale => plain(Generator::GreyScale),
+        GeneratorKind::YcbcrRamp => plain(Generator::YcbcrRamp),
+        GeneratorKind::EbuColorBar => {
+            refuse(s, Generator::EBU_COLOR_BAR, &["level"])?;
+            Ok(Generator::EbuColorBar {
+                level: s.level.unwrap_or_default(),
+            })
+        }
+        GeneratorKind::SmpteColorBar => plain(Generator::SmpteColorBar),
     }
 }
 
@@ -113,9 +128,17 @@ pub fn set(p: &mut Project, id: &str, s: &GeneratorSettings, at: Option<i64>) ->
             *g = next;
             Ok(())
         }
+        Some(Generator::EbuColorBar { level }) => {
+            refuse(s, Generator::EBU_COLOR_BAR, &["level"])?;
+            if let Some(given) = s.level {
+                *level = given;
+            }
+            Ok(())
+        }
         Some(Generator::Carried { .. }) => Err(Error::invalid(format!(
             "{id} is a block from another editor's file, which plays as a gap"
         ))),
+        Some(other) => refuse(s, name(other), &[]),
         None => Err(Error::invalid(format!("{id} is not a generator"))),
     }
 }

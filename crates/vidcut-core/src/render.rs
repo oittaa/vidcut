@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
-    Clip, ClipCache, ClipRetime, ColorSpace, DuckDetect, Generator, Gradient, Hdr, Keyframe, Media,
-    MediaSuperScale, Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings,
-    SlidePreset, SmoothMode, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
+    Chart, Clip, ClipCache, ClipRetime, ColorSpace, DuckDetect, Generator, Gradient, Hdr, Keyframe,
+    Media, MediaSuperScale, Picture, PictureTransition, Project, PushPreset, Retime, Section,
+    Settings, SlidePreset, SmoothMode, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -254,6 +254,8 @@ pub enum Generated {
     /// Four colors from the corners. `frame` is the source frame of the
     /// piece's first frame when the gradient has keyframes, and 0 when not.
     FourColorGradient { gradient: Gradient, frame: i64 },
+    /// A picture that a rule draws from the size of the timeline.
+    Chart { chart: Chart },
 }
 
 impl Generated {
@@ -264,7 +266,7 @@ impl Generated {
                 gradient: gradient.clone(),
                 frame: if gradient.is_keyed() { frame } else { 0 },
             }),
-            Generator::Carried { .. } => None,
+            other => other.chart().map(|chart| Self::Chart { chart }),
         }
     }
 
@@ -309,6 +311,7 @@ impl Generated {
             Self::FourColorGradient { gradient, frame } => {
                 Pattern::of_gradient(gradient, (frame + k) as f64)
             }
+            Self::Chart { chart } => Pattern::Chart(*chart),
         }
     }
 }
