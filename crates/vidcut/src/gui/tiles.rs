@@ -24,6 +24,8 @@ const WORKERS: usize = 4;
 
 const MEMORY: usize = 256 << 20;
 
+const FAILED_KEPT: usize = 4096;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TileKey {
     pub media: String,
@@ -82,7 +84,7 @@ struct Kept {
 struct Waiting {
     jobs: Vec<Job>,
     busy: HashSet<TileKey>,
-    failed: HashSet<TileKey>,
+    failed: Lru<TileKey, (), FAILED_KEPT>,
     at: HashMap<usize, (String, i64)>,
     stop: bool,
 }
@@ -328,7 +330,15 @@ impl Tiles {
             self.bytes -= tile.bytes;
         }
         let mut w = self.queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
-        w.failed.retain(|k| k.media != media);
+        let gone: Vec<TileKey> = w
+            .failed
+            .iter()
+            .filter(|(k, _)| k.media == media)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in &gone {
+            w.failed.remove(k);
+        }
     }
 
     fn evict(&mut self) {
@@ -507,7 +517,7 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
                 ctx.request_repaint();
             }
             None => {
-                w.failed.insert(job.key);
+                w.failed.insert(job.key, ());
             }
         }
         if unwritten.values().map(Vec::len).sum::<usize>() >= 32 {
