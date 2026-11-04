@@ -962,6 +962,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - Shift+Up/Down jumps between markers.
 - You can drag markers.
 - Alt+M deletes the marker at the playhead. Delete removes the selected markers.
+- In the Source Clip viewer, M, Alt+M and Shift+Up/Down act on the markers of the clip in the viewer (p. 1013).
+  - A second M on the same frame opens the marker dialog.
+  - `markers.add`, `markers.list` and `markers.remove` with `media` do this. `player.seek` moves the playhead.
 
 ### 8.10 Undo (pp. 651–652)
 - Ctrl+Z undoes, and Ctrl+Shift+Z redoes. The number of steps has no limit.
