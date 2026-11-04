@@ -693,7 +693,7 @@ pub fn export_drawn(
                     (Some(t), _) => {
                         titles::reference(t, p.settings.height, &drawn(t), source.round() as i64)
                     }
-                    (None, Some(g)) => generators::reference(g),
+                    (None, Some(g)) => generators::reference(g, source.round() as i64),
                     (None, None) => Value::Null,
                 },
             ),
@@ -1410,7 +1410,7 @@ impl ImportedClip {
             && self
                 .generator
                 .as_ref()
-                .is_none_or(|r| generators::read(r).is_some())
+                .is_none_or(|r| generators::read(r, 0).is_some())
     }
 
     fn has_no_media(&self) -> bool {
@@ -2145,7 +2145,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                     }
                     c.title = Some(t);
                 } else {
-                    if generators::read(reference).is_some() {
+                    if generators::read(reference, 0).is_some() {
                         c.picture = our_picture(item);
                         c.speed = None;
                         if c.name == reference["name"].as_str().unwrap_or_default() {

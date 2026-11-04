@@ -126,8 +126,10 @@ Sources:
 - While the current piece encodes, `Ahead` opens the next file on `vidcut-open`, seeks, and decodes the first frame.
 - Each layer of a dissolve reads its own file.
 - A `VideoPiece::Generated` has no file. `VideoFrames::generated_frame` makes its frame at the size of the plan.
-  - In an SDR timeline, the frame is RGB24.
-  - In an HDR timeline, the frame is RGB48LE. It holds the code values of `generators::timeline_code`, with the tag of the timeline colors (`screen::held::tag`).
+  - `Generated::at` gives the `generators::Pattern` of a frame. A gradient with keyframes gives a new pattern on each frame.
+  - A Solid Color in an SDR timeline is RGB24.
+  - Each other frame is RGB48LE. It holds the code values from `generators::draw`, with the tag of the timeline colors (`screen::held::tag`).
+  - `VideoFrames` keeps the last patterns. Why: two generators under a dissolve need two frames.
 
 Notes:
 
@@ -207,8 +209,9 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 - `render::flatten` puts the incoming side over the outgoing side. Its `Over` holds a `render::Smooth`: the `Retime` of the Process and the keys of the curve.
 - Each side takes Nearest. With Faster, each side stays on one source frame (`Pace::of` at the speed 0).
 - Two sides with no placed picture morph. Other sides play as a cross dissolve. Why: the models take whole RGB frames, with no alpha.
-- A side is a file or a Solid Color (`Side`). Why: a Solid Color acts as a still in a Smooth Cut ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
-- `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`). `ColorSides` draws a Solid Color the same way.
+- A side is a file or a generator's picture (`Side`). Why: a Solid Color acts as a still in a Smooth Cut ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
+- With Faster, a gradient with keyframes stays on one source frame (`Generated::held`).
+- `VideoFrames::smooth_frame` draws the current frame of each side into 16-bit RGB at the size of the timeline (`Look::fitted`, `Source::rgb_from`). `ColorSides` draws a generator's picture the same way.
 - `interpolate::between` makes the frame at `Smooth::at`. On macOS, `interpolate::between_frames` makes it from two VideoToolbox frames (`Source::frame_from`).
 - The made frame replaces the incoming layer, at full weight. Thus it covers the outgoing layer.
 - The key of the pair holds both files, both frames, both looks and both sides. The time of the outgoing frame orders the pairs. Why: the session of macOS takes times that go up.

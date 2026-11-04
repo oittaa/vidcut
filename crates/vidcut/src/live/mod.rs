@@ -548,6 +548,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         guides: crate::preferences::load()
             .map(|p| p.viewer.guides)
             .unwrap_or_default(),
+        scopes: crate::preferences::load()
+            .map(|p| p.viewer.scopes)
+            .unwrap_or_default(),
         show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
@@ -637,6 +640,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         timer1_origin: Timer1Origin::default(),
         guides: crate::preferences::load()
             .map(|p| p.viewer.guides)
+            .unwrap_or_default(),
+        scopes: crate::preferences::load()
+            .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
         audio_noticed: None,
@@ -915,6 +921,7 @@ struct Live {
     timecode_display: TimecodeDisplay,
     timer1_origin: Timer1Origin,
     guides: vidcut_core::preferences::Guides,
+    scopes: vidcut_core::preferences::Scopes,
     show_super_scale: bool,
     audio_noticed: Option<String>,
     playing: bool,
@@ -1158,6 +1165,13 @@ impl Live {
                     .unwrap_or_default();
                 if self.guides != guides {
                     self.guides = guides;
+                    changed = true;
+                }
+                let scopes = crate::preferences::load()
+                    .map(|p| p.viewer.scopes)
+                    .unwrap_or_default();
+                if self.scopes != scopes {
+                    self.scopes = scopes;
                     changed = true;
                 }
                 let show_super_scale =
@@ -1513,6 +1527,7 @@ impl Live {
             timecode_display: self.timecode_display,
             timer1_origin: self.timer1_origin,
             guides: self.guides,
+            scopes: self.scopes,
             show_super_scale: self.show_super_scale,
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
@@ -2580,6 +2595,30 @@ impl Live {
                     Err(e) => Step::Now(Err(e)),
                 }
             }
+            Request::ViewerScopes {
+                waveform,
+                parade,
+                vectorscope,
+            } => {
+                let patch = vidcut_core::preferences::ScopesPatch {
+                    waveform,
+                    parade,
+                    vectorscope,
+                };
+                match crate::preferences::set_scopes(patch, envelope.dry_run) {
+                    Ok(v) => {
+                        if !envelope.dry_run
+                            && let Ok(scopes) = serde_json::from_value::<
+                                vidcut_core::preferences::Scopes,
+                            >(v["scopes"].clone())
+                        {
+                            self.scopes = scopes;
+                        }
+                        Step::Now(Ok(answer(v)))
+                    }
+                    Err(e) => Step::Now(Err(e)),
+                }
+            }
             Request::CacheClear { projects } => {
                 Step::Now(self.cache_clear(&projects.to_vec(), envelope.dry_run))
             }
@@ -3098,6 +3137,7 @@ impl Live {
             Request::ExportStart(_)
             | Request::ExportPlan(_)
             | Request::FrameRender { .. }
+            | Request::FrameScope { .. }
             | Request::StoryboardRender { .. }
             | Request::AnalyzeSilence { .. }
             | Request::AnalyzeScenes { .. }
@@ -4566,6 +4606,7 @@ impl Live {
             }),
             "stats_shown": self.stats,
             "guides": self.guides,
+            "scopes": self.scopes,
             "two_up": self.renderer.two_up(),
             "clipboard": self.clipboard.len(),
             "keyframe_clipboard": self.key_clipboard.len(),
@@ -4762,7 +4803,8 @@ fn is_edit_function(r: &Request) -> bool {
 fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
     if let Request::FrameRender {
         at, media: None, ..
-    } = &mut envelope.request
+    }
+    | Request::FrameScope { at, .. } = &mut envelope.request
         && let Some(playhead) = context.playhead
         && matches!(
             at,

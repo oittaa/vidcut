@@ -2054,10 +2054,45 @@ impl Speed {
 }
 
 /// A kind of generator that vidcut draws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GeneratorKind {
     SolidColor,
+    FourColorGradient,
+}
+
+/// A Four Color Gradient: the colors of its corners and the center where they
+/// meet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Gradient {
+    /// Center X: -1 is the left edge, 0 the middle and 1 the right edge.
+    /// `center_x_keys` replace it while they are there.
+    pub center_x: f64,
+    /// The keyframes of Center X, on the source frames of the clip.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub center_x_keys: Vec<Keyframe>,
+    /// Center Y: -1 is the top edge, 0 the middle and 1 the bottom edge.
+    /// `center_y_keys` replace it while they are there.
+    pub center_y: f64,
+    /// The keyframes of Center Y, on the source frames of the clip.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub center_y_keys: Vec<Keyframe>,
+    /// The upper left color: `#rrggbb`.
+    #[serde(with = "hex_rgb")]
+    #[schemars(with = "String")]
+    pub upper_left: [u8; 3],
+    /// The upper right color: `#rrggbb`.
+    #[serde(with = "hex_rgb")]
+    #[schemars(with = "String")]
+    pub upper_right: [u8; 3],
+    /// The lower left color: `#rrggbb`.
+    #[serde(with = "hex_rgb")]
+    #[schemars(with = "String")]
+    pub lower_left: [u8; 3],
+    /// The lower right color: `#rrggbb`.
+    #[serde(with = "hex_rgb")]
+    #[schemars(with = "String")]
+    pub lower_right: [u8; 3],
 }
 
 /// What a generator makes.
@@ -2071,6 +2106,8 @@ pub enum Generator {
         #[schemars(with = "String")]
         color: [u8; 3],
     },
+    /// Four colors that mix from the corners of the picture.
+    FourColorGradient(Gradient),
     /// A generator, a title or a clip with no media from another editor's
     /// file that vidcut doesn't draw (deviation X9): a block that plays as a
     /// gap. On an audio track, a clip with no media stands for its sound
@@ -2086,6 +2123,7 @@ pub enum Generator {
 
 impl Generator {
     pub const SOLID_COLOR: &str = "Solid Color";
+    pub const FOUR_COLOR_GRADIENT: &str = "Four Color Gradient";
 
     pub fn draws(&self) -> bool {
         !matches!(self, Self::Carried { .. })

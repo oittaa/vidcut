@@ -426,14 +426,24 @@ Writing:
 
 - A clip with a `generator` makes its own picture ([spec §8.17](../cut-page-spec.md#817-generators-p-766)): no media, no audio, no speed, no effects, any length, on a video track.
 - `Clip::is_generator` and `Clip::is_block` count it.
-- A `Generator` is one of two kinds:
+- A left trim of a generator changes `source_in`, as on any clip. Its keyframes stay on their source frames.
+  - Thus they stay on the same timeline frames, and the picture does not move.
+  - An OTIO file counts them from the first frame of the clip, with a source start of 0.
+- A `Generator` is one of these kinds:
   - `Generator::SolidColor` holds a `color`.
+  - `Generator::FourColorGradient` holds a `Gradient`.
   - `Generator::Carried` holds the OTIO reference of a kind that vidcut does not model, as `Kept`. It plays as a gap.
 - `Generator::draws` and `Clip::draws` tell whether a generator has a picture.
-- `generators::timeline_code` gives the code values of a color in the colors of the timeline.
+- A `Gradient` holds a plain Center X and Center Y and the keyframes of each one.
+  - Keyframes stay on source frames, as other keyframes do. Thus a trim or a split does not move the picture.
+  - `Gradient::center_at` gives the value on a source frame.
+- `generators::Pattern` is one frame of a generator's picture, with nothing that changes over time. `generators::draw` writes it as RGB48LE.
+  - The render plan and the GUI cards share this rule. Why: each picture has one rule.
+  - `generators::timeline_code` gives the code values of a color in the colors of the timeline.
 - `generators::name` gives the name of a generator. `generators::shown` gives its JSON form, for `generators.list` and `clip_json`.
 - `ops::generators` holds the edits. `generators.add` and `titles.add` share `ops::titles::add_block`.
-- `GeneratorKind` is the kind that `generators.add` takes.
+- `GeneratorKind` is the kind that `generators.add` takes. `GeneratorSettings` holds the values of `generators.add` and `generators.set`. A kind refuses a value that it does not have.
+- `ops::keyframes` keeps the keyframes of a volume and of a center on one path (`Number`).
 
 ## Pictures
 
@@ -527,7 +537,7 @@ flowchart LR
 | media | `ExternalReference` by plain path, relative in a bundle; a still one frame long, its clips from source 0; an image sequence an `ImageSequenceReference` at its rate |
 | Clip Color | the item's `color` |
 | title | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::titles::reference`, [spec D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
-| Solid Color | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::generators::reference`, [spec §8.17](../cut-page-spec.md#817-generators-p-766)) |
+| generator | a `Clip.2` of a `GeneratorReference` in Resolve's shape (`otio::generators::reference`, [spec §8.17](../cut-page-spec.md#817-generators-p-766)) |
 | clip with no media | a `Clip.2` of a `MissingReference` on its track, with the kept `Channels`. Clips with the same kept link, start and length stay in one link group (`no_media_ties`). A sound transition is written as on other audio clips (`transitions::head`, `transitions::tail`) |
 | markers | the top-level stack's, with their lengths |
 
@@ -584,7 +594,7 @@ Kept data:
 | clip effects in use (`effects::read`) | `Effects` on the picture or `ClipAudio`. Keyframes stay on their source frames (the `from` field of `Effects`, set by `carry`), and fades stay at the clip's ends through splits; the clip volume's level is the gain |
 | the `Key Frames` of the clip volume (`effects::gain_keys`) | `ClipAudio::gain_keys`, taken out of the kept effect (`effects::drop_gain_keys`) |
 | `Transition` (`in_offset`, `out_offset`) | `Transition` (`before`, `after`), dropped by `transitions::prune` when it does not fit; dissolves, wipes and cross fades play ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
-| `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`). `Generator::SolidColor` when it is Solid Color (`otio::generators::read`). Else `Generator::Carried`, a block that plays as a gap |
+| `GeneratorReference` | a title when it is vidcut's or Resolve's Text, lower third or Scroll (`otio::titles::read`). A `Generator` when it is a kind that vidcut draws (`otio::generators::read`). Else `Generator::Carried`, a block that plays as a gap |
 | nested `Stack` | `Compound`, a block that plays its clips; `edit.decompose` breaks it up |
 | multicam `Stack`, or a `MissingReference` with no `Media Url` | `Generator::Carried` with a `MissingReference`: a block with no media that plays as a gap (`Clip::is_offline`). Its `channels` and `link` stay in the reference (`keep_ties`). On an audio track, `Clip::is_sound_block` is true |
 | `LinearTimeWarp`, `FreezeFrame` | `Speed`, written first among the clip's effects ([spec D48](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) |
@@ -604,6 +614,7 @@ The file:
 - Preferences are not in the project. They are in `preferences.toml` in the config dir (`preferences::path`).
 - The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services and viewer ([the disk cache limit](analysis.md#the-disk-cache-limit)).
 - `ViewerPrefs.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
+- `ViewerPrefs.scopes` (`Scopes`) holds which scopes of the viewer are on.
 - No key of a service is ever in the file.
 
 Requests:
@@ -614,8 +625,9 @@ Requests:
 - `preferences.reset` keeps the old file under the first free backup name (`preferences.toml.bak`, then `.bak.2` and on), then writes the defaults. Why: a second reset never replaces the backup of the first.
 - `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it, and replaces the file atomically.
 - `viewer.guides` changes the same `Guides` (`Guides::applied`). With no fields, it toggles the framing guides.
+- `viewer.scopes` changes the same `Scopes` (`ScopesPatch`). With no fields, it tells which scopes are on.
 - Code reads the file when it needs a value (`preferences::load`).
-- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words, the viewer guides and the render cache.
+- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words and the render cache. It also follows the viewer guides and the viewer scopes.
 
 Reset:
 
