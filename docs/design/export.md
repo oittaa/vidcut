@@ -503,6 +503,9 @@ The passes:
   2. played on the GPU
   3. made on the GPU, Vulkan too
   4. the rest
+- The name of the file has the codec that made it.
+  - `proxy.generate` runs twice: in the job and in the edit after it.
+  - The edit finds the file of the job in `MADE_WITH`. Thus the edit does not encode again.
 - A proxy is 10-bit from a source of more than 8 bits, where its encoder takes 10 bits.
 - It keeps the PQ or HLG of an HDR source, and the static metadata of a PQ source. An 8-bit proxy is SDR BT.709.
 - A proxy has frequent keyframes (ProRes and DNxHR: each frame), and no reordering. Why: a seek then decodes few frames.
