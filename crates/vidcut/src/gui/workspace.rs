@@ -96,6 +96,7 @@ pub struct Workspace {
     pub(super) timecode: Option<TimecodeEntry>,
     pub(super) paste_timecode: PasteWatch,
     pub(super) duration_text: Option<String>,
+    pub(super) new_subclip: Option<super::subclip::NewSubclip>,
     pub(super) hover: Option<(String, i64)>,
     pub(super) pool_clicked: Option<String>,
     pub(super) left: LeftTab,
@@ -192,6 +193,7 @@ impl Workspace {
             timecode: None,
             paste_timecode: PasteWatch::Off,
             duration_text: None,
+            new_subclip: None,
             hover: None,
             pool_clicked: None,
             left: Default::default(),
@@ -1126,6 +1128,8 @@ impl Workspace {
                         ui.close();
                     }
                 }
+                ui.separator();
+                self.create_subclip_button(ui);
             });
             ui.menu_button("View", |ui| {
                 ui.menu_button("Safe Area", |ui| self.safe_area_menu(ui));
@@ -1630,6 +1634,9 @@ impl Workspace {
         }
         if (pressed(Key::Backslash) || pressed(Key::B)) && m.command {
             self.split_at_playhead();
+        }
+        if pressed(Key::B) && m.alt && !m.command && !m.shift {
+            self.open_new_subclip();
         }
         if pressed(Key::Enter)
             && !m.any()
@@ -2142,6 +2149,7 @@ impl Workspace {
     }
 
     fn left_content(&mut self, ui: &mut egui::Ui) {
+        self.bins.area = None;
         match self.left {
             LeftTab::Pool => self.pool_panel(ui),
             LeftTab::SyncBin => self.sync_bin_panel(ui),
@@ -2172,6 +2180,7 @@ impl Workspace {
     fn pool_gone(&mut self) {
         self.hover = None;
         self.bins.targets.clear();
+        self.bins.area = None;
         self.pool_focus = false;
     }
 }
