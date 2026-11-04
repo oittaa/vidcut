@@ -2603,3 +2603,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - FFmpeg 8 reads the file as a still of 2×2 pixels, and its picture never renders ([gotchas](gotchas.md#ffmpeg-reading-and-decoding)).
   - A refusal gives the reason. A still that shows nothing does not.
   - The owner approved this difference.
+
+## X137. A Scroll line wider than the picture wraps
+
+- **Resolve:**
+  - A line of a Scroll that is wider than its text box stays on one line. The box is as wide as the picture.
+  - The picture cuts the line at its edges, and those letters are lost (measured in Resolve Studio 21.1.2).
+- **vidcut:**
+  - The line wraps at 90% of the picture width, as the lines of other titles do.
+- **Why:**
+  - A wrapped line loses no letters.
+  - The owner approved this difference.
