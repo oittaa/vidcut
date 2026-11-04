@@ -30,6 +30,7 @@ classDiagram
     info: MediaInfo
     color_space, super_scale, left_out
     sequence, subtitles, words
+    subclip, markers
   }
   class Proxy {
     file, codec
@@ -201,6 +202,18 @@ Media fields:
   - Each edit of the media leaves these frames out. `resolve_sources` cuts each source range around them (`model::uncovered`).
   - An edit that fills the timeline In to Out can need more frames than the range. Then the frames after the range also skip them (`fit_to`).
 - `words` holds the words that the project takes from the transcripts of each sound stream (`ChosenWords`, [analysis](analysis.md)).
+- `subclip` (`Subclip`) makes the item one part of its file (`media.subclip`, `ops::create_subclip`).
+  - `info` still tells about the whole file. `Project::file_frames` gives its length, and `Project::media_frames` gives the length of the part.
+  - The source frames of a subclip count from the start of the part. `Media::origin` adds `Media::skipped`, thus the render pieces and the measurements find the right part of the file.
+  - The start is in seconds. Thus a change of the project rate does not change it.
+  - The measurements, transcripts, proxies and waveforms belong to the file. A subclip uses them as they are.
+  - Word times are in seconds of the file. `analysis::words_in` takes the skipped seconds to place them.
+  - `Media::timecode_at` gives the source timecode of its first frame.
+  - `Tiles::job` keeps no blocks on disk for a subclip, because the blocks count the frames of the whole file.
+  - `PoolFiles` and `otio::same_media` never take a subclip for its file.
+  - An OTIO file gives a clip of a subclip as a clip of the whole file, at the right time.
+  - `Speakers::share` gives a new subclip the people of its parent.
+- `markers` holds the markers on the source clip, at its source frames (`ops::add_source_marker`). `Project::marker` finds a marker by id in the timeline or in a source clip.
 
 Folders:
 

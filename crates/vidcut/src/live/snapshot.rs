@@ -109,8 +109,9 @@ impl PoolView {
         let mut media: Vec<&vidcut_core::model::Media> =
             p.media.iter().filter(|m| inside(&m.bin)).collect();
         use vidcut_core::request::{PoolMode, PoolSort};
-        let start =
-            |m: &vidcut_core::model::Media| m.info.timecode.map_or(0.0, |t| t.label_seconds());
+        let start = |m: &vidcut_core::model::Media| {
+            m.info.timecode.map_or(0.0, |t| t.label_seconds()) + m.skipped()
+        };
         match self.sort {
             PoolSort::Added => {}
             PoolSort::Name if self.view == PoolMode::Metadata => media.sort_by(|a, b| {
@@ -372,8 +373,7 @@ pub fn timecode_view<'a>(
     let source_tc = project
         .zip(media)
         .and_then(|(p, m)| p.media(m))
-        .and_then(|m| m.info.timecode)
-        .map_or(0, |tc| tc.frames_at(fps).round() as i64);
+        .map_or(0, |m| m.timecode_at(fps).round() as i64);
     TimecodeView {
         display,
         viewer,

@@ -14,6 +14,7 @@ use vidcut_core::time::parse_frame_number;
 use super::pool::elide;
 use super::row::Row;
 use super::theme;
+use super::timeline::paint::marker_color;
 use super::workspace::{Drag, PasteWatch, TimecodeEntry, Workspace, dim, fit};
 use crate::live::{PlayerId, seek_frame};
 
@@ -965,6 +966,7 @@ impl Workspace {
         };
         let shown = self.snap.source_at().map(|(m, _)| m.to_string());
         let mut handles = None;
+        let mut opened = None;
         if let Some((mut a, mut b)) = span {
             if let Some(Drag::TapeMark { is_in, frame }) = &self.drag {
                 if *is_in {
@@ -1034,6 +1036,37 @@ impl Workspace {
                 self.clip_waveform(&painter, rect, m, frames, marked.then_some((a, b)));
             }
             self.mark_handles(&painter, rect, x(base + a), x(base + b));
+            for k in &m.markers {
+                let color = marker_color(&k.color);
+                let at = x(base + k.at);
+                if k.duration > 1 {
+                    let end = x(base + k.at + k.duration);
+                    painter.rect_filled(
+                        Rect::from_min_max(
+                            Pos2::new(at, rect.top()),
+                            Pos2::new(end, rect.top() + 3.0),
+                        ),
+                        CornerRadius::ZERO,
+                        color,
+                    );
+                }
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        Pos2::new(at - 4.0, rect.top()),
+                        Pos2::new(at + 4.0, rect.top()),
+                        Pos2::new(at, rect.top() + 7.0),
+                    ],
+                    color,
+                    Stroke::NONE,
+                ));
+                if resp.double_clicked()
+                    && resp
+                        .interact_pointer_pos()
+                        .is_some_and(|p| (p.x - at).abs() <= 5.0)
+                {
+                    opened = Some(k.id.clone());
+                }
+            }
             handles = Some(MarkHandles::Clip {
                 media: media.clone(),
                 base,
@@ -1049,6 +1082,9 @@ impl Workspace {
             [Pos2::new(px, rect.top()), Pos2::new(px, rect.bottom())],
             Stroke::new(2.0, theme::colors().playhead),
         );
+        if let (Some(id), Some(p)) = (opened, self.project_shared()) {
+            self.open_marker(id, &p);
+        }
 
         if resp.drag_started()
             && let Some(pos) = resp.interact_pointer_pos()

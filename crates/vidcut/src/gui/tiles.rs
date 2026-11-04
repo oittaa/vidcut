@@ -274,7 +274,7 @@ impl Tiles {
             width,
             fps: p.settings.fps,
             pieces,
-            disk: self.disk.then(|| {
+            disk: (self.disk && m.subclip.is_none()).then(|| {
                 let block = key.frame.div_euclid(TILE_BLOCK);
                 let origin = match self.versions.get(&key.media) {
                     Some(seen) if seen.is(m) => seen.origin.clone(),
