@@ -25,6 +25,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("multicam.marks.clear", &["group"]),
     ("multicam.pick", &["media"]),
     ("multicam.set", &["group"]),
+    ("multicam.place", &["group", "media"]),
     ("media.move", &["media"]),
     ("media.remove", &["media"]),
     ("media.relink", &["media", "path"]),

@@ -751,15 +751,23 @@ impl Workspace {
                 method,
                 with_position(sources.into_iter().next().expect("one")),
             ),
-            _ if method == "edit.append" => {
+            _ if method == "edit.append" || method == "edit.source_overwrite" => {
+                let last = sources.len() - 1;
                 let commands: Vec<Value> = sources
                     .into_iter()
-                    .map(|s| json!({ "method": "edit.append", "params": s }))
+                    .enumerate()
+                    .map(|(i, s)| {
+                        let mut params = with_position(s);
+                        if method == "edit.source_overwrite" && i < last {
+                            params["keep_marks"] = json!(true);
+                        }
+                        json!({ "method": method, "params": params })
+                    })
                     .collect();
-                let label = format!("append {} clips", commands.len());
+                let action = method.trim_start_matches("edit.").replace('_', " ");
+                let label = format!("{action} {} clips", commands.len());
                 self.send("apply", json!({ "commands": commands, "label": label }));
             }
-            _ if method == "edit.source_overwrite" => self.say("Select one clip first"),
             _ => self.send(
                 method,
                 with_position(sources.into_iter().next().expect("one")),

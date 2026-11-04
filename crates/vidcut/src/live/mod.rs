@@ -3239,7 +3239,7 @@ impl Live {
             }
             Request::MulticamCreate {
                 sync: vidcut_core::model::AngleSync::Sound,
-                angles: None,
+                rows: None,
                 ..
             }
             | Request::MulticamLayout {
@@ -4127,12 +4127,6 @@ impl Live {
             .or_else(|| p.group_of(angle?))
             .or_else(|| p.group_of(self.source_media.as_deref()?))
             .ok_or_else(|| Error::invalid("Open a clip of a synced group first"))?;
-        if g.angles.len() > vidcut_core::multicam::MULTI_SOURCE_ANGLES {
-            return Err(Error::invalid(format!(
-                "Multi Source shows {} angles at most",
-                vidcut_core::multicam::MULTI_SOURCE_ANGLES
-            )));
-        }
         if let Some(a) = angle.filter(|a| g.at_of(a).is_none()) {
             return Err(Error::invalid(format!("{a} is not in {}", g.name)));
         }
@@ -4141,7 +4135,7 @@ impl Live {
                 .source_media
                 .as_deref()
                 .filter(|m| g.at_of(m).is_some()))
-            .or(g.angles.first().map(|a| a.media.as_str()))
+            .or(g.clips().next().map(|c| c.media.as_str()))
             .map(str::to_string);
         self.source_group = Some(g.id.clone());
         self.source_media = shown;

@@ -347,7 +347,7 @@ Faders:
 - In each UI frame, `Player::follow` gives each engine its frame and the speed of the trim. The engine decodes ahead as if it plays.
 - The windows behind decode on `vidcut-play-windows`: one at a time across the followed players, and none while a player moves forward.
 - `Screens` draws the cells with `Screen` on the UI thread. This needs no gate.
-- Multi Source, the Sync Bin grid and the Sync Clips window use the same `Cells`, up to `CELLS`. Each engine gets one part of the cache for each cell in use, four parts at the least.
+- Multi Source, the Sync Bin grid and the Sync Clips window use the same `Cells`. It has no limit of cells. Each engine gets one part of the cache for each cell in use, four parts at the least.
 - The Sync Clips window has one more engine for its sound, on the real output. Its plan has a black picture, so it decodes no frames (`render::places_sound`).
 
 The sound of a Dynamic Trim run:
