@@ -3074,10 +3074,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
-    - Its soft edges and its opacity fade each picture and title inside it ([todo](todo/compound-opacity.md)).
-    - A picture inside it at the Normal mode takes the composite mode of the compound clip.
+    - Its tracks mix first, as the tracks of the timeline do. Its opacity then fades that mix, or its composite mode mixes that mix with the tracks below.
+      - Measured in Resolve Studio 21.1.2, with 16-bit renders. Inside the compound clip, a picture cropped to its left half is over a full picture.
+      - At an opacity of 50% over white, the frame is 0.5 × the mix + 0.5.
+      - At Multiply over 50% gray, the frame is 0.5 × the mix.
+    - Its soft edges fade each picture and title inside it ([todo](todo/compound-opacity.md)).
     - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
-    - Its tracks play over each other as the tracks of the timeline do.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.
     - `edit.decompose` gives the picture of the compound clip to each of its clips that has no picture of its own and fills the frame.
