@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard};
 use std::time::Instant;
 
-use vidcut_core::lru::Lru;
+use vidcut_core::lru::Uncapped;
 
 use super::frame::Picture;
 use super::plan::Id;
@@ -53,10 +53,10 @@ pub(crate) struct Store {
     down: fn(&Picture) -> Result<Picture>,
 }
 
-type Order = Lru<Id, (), { usize::MAX }>;
+type Order = Uncapped<Id, ()>;
 
 struct Inner {
-    pictures: Lru<Id, Arc<Picture>, { usize::MAX }>,
+    pictures: Uncapped<Id, Arc<Picture>>,
     kinds: [Order; 2],
     pools: HashMap<usize, HashSet<Id>>,
     bytes: [usize; 2],
@@ -210,8 +210,8 @@ impl Store {
     pub(crate) fn new(memory: usize, video: usize) -> Self {
         Self {
             inner: Mutex::new(Inner {
-                pictures: Lru::new(),
-                kinds: [Lru::new(), Lru::new()],
+                pictures: Uncapped::new(),
+                kinds: [Order::new(), Order::new()],
                 pools: HashMap::new(),
                 bytes: [0; 2],
                 budget: [memory, video],
@@ -422,7 +422,7 @@ impl Inner {
     }
 
     fn empty(&mut self) -> Vec<Arc<Picture>> {
-        self.kinds = [Lru::new(), Lru::new()];
+        self.kinds = [Order::new(), Order::new()];
         self.pools.clear();
         self.bytes = [0; 2];
         let all = std::mem::take(&mut self.pictures);
