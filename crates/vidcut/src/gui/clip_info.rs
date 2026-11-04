@@ -118,6 +118,10 @@ fn audio_line(a: &vidcut_core::model::AudioInfo) -> String {
     )
 }
 
+pub(super) fn camera_label(name: &str) -> String {
+    format!("Camera {name}")
+}
+
 pub(super) fn glance(m: &Media) -> Vec<String> {
     if let Some(s) = &m.subtitles {
         return vec![
@@ -128,7 +132,7 @@ pub(super) fn glance(m: &Media) -> Vec<String> {
         ];
     }
     let mut out = Vec::new();
-    out.extend(m.camera.as_ref().map(|c| format!("Camera {c}")));
+    out.extend(m.camera.as_deref().map(camera_label));
     if let Some(v) = &m.info.video {
         let (w, h) = v.display_size();
         out.push(format!("{w}×{h}"));
