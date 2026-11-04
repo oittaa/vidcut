@@ -28,13 +28,14 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
 - generators: the twelve kinds of the Generators section (§8.17)
+- the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
 **Later (later):**
 - other effects, other transitions, other titles, other generators
 - keyframes other than Transform, Crop, the clip volume and the Position, Zoom, Rotation and Opacity of a title
 - color ([todo](todo/auto-color.md)), Fusion
-- LUTs ([todo](todo/luts.md))
+- the display LUT, and LUT files other than `.cube` ([todo](todo/luts.md))
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
@@ -413,7 +414,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - An In with no Out takes the file to its end.
     - An Out with no In counts position 0 as the In.
     - Marks outside the file: nothing happens.
-    - With no marks, Append and Smart Insert do nothing. Ripple Overwrite, Place On Top and Source Overwrite take the whole file, with no empty part.
+    - With no marks, Append does nothing. Smart Insert adds nothing, and the playhead moves to the nearest edit. Ripple Overwrite, Place On Top and Source Overwrite take the whole file, with no empty part.
     - An In before the file: the part before the file stays empty on the timeline, before the clip (`lead`).
       - Append: after the last clip.
       - Smart Insert: at the nearest edit. Later clips move by the empty part plus the clip.
@@ -891,7 +892,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - On Track 1 with Ripple On, it ripples. On other tracks, only that clip changes.
   - **Edit center: roll.**
     - Trim > Roll > Start to Playhead next to a gap moves only the picture edge. The sound stays.
-    - `edit.roll` does this. vidcut has no menu command for it ([gaps](todo/cut-page-gaps.md)).
+    - `edit.roll` and `edit.roll_to_playhead` do this.
+    - The Trim menu has Roll > Start to Playhead and End to Playhead (p. 1087). These commands choose clips as D4 does.
     - The total duration stays the same.
     - A white overlay shows the available handle media.
   - **Slip handle at the clip center: slip.** Several selected clips slip together.
@@ -974,6 +976,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - Shift+Up/Down jumps between markers.
 - You can drag markers.
 - Alt+M deletes the marker at the playhead. Delete removes the selected markers.
+- In the Source Clip viewer, M, Alt+M and Shift+Up/Down act on the markers of the clip in the viewer (p. 1013).
+  - A second M on the same frame opens the marker dialog.
+  - `markers.add`, `markers.list` and `markers.remove` with `media` do this. `player.seek` moves the playhead.
 
 ### 8.10 Undo (pp. 651–652)
 - Ctrl+Z undoes, and Ctrl+Shift+Z redoes. The number of steps has no limit.
@@ -1890,6 +1895,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A clip on a video track that starts from the new end to the old end goes away.
     - A clip on an audio track that starts there stays where it is.
     - The first clip that moves back on a track ends the clips that stayed on that track. The clip under its first frame stops there. Clips that stayed after that frame go away.
+    - A timeline marker in the replaced part stays where it is, also past the new end.
+    - A timeline marker from the old end on moves by the change in length. It replaces a marker on the frame where it lands.
   - Over a gap, the clip keeps its distance to the Track 1 clips around it.
   - Clips on locked tracks do not follow.
   - In other edits, a clip that would land on another clip moves to the next free track of its kind.
@@ -3674,6 +3681,29 @@ The display LUT of the Color page is on a branch after Data Burn-In. The output 
 - Output Sizing does not go back to the source. It enlarges the picture that the earlier stages give (p. 296).
 
 The chart does not show titles, generators or transitions.
+
+### The LUT tables
+
+These facts are measured in Resolve Studio 21.1.2, with no color management, with a LUT on the node of a clip.
+
+- A 3D table is trilinear. Red changes fastest, then green, then blue.
+- A 1D table is linear on each channel.
+- The input is clamped to 0..1 before the lookup. The values of the table and the output are not clamped.
+- `DOMAIN_MIN` and `DOMAIN_MAX` have no effect.
+- `LUT_1D_INPUT_RANGE lo hi` and `LUT_3D_INPUT_RANGE lo hi` apply: the place in the table is `(x - lo) / (hi - lo)`, clamped to 0..1.
+- A file with both tables runs the 1D table, then the 3D table. Each table uses its own range. The 1D rows come first in the file.
+- These sizes work:
+  - `LUT_3D_SIZE`: 2, 3, 5, 17, 33, 65, 129 and 256.
+  - `LUT_1D_SIZE`: 2, 5, 17 and 65536.
+- `TITLE`, comments, blank lines and tabs are read.
+- With no LUT, the input comes out unchanged, also below 0 and above 1.
+
+A script gets no error for a broken file:
+
+- A lower-case `lut_3d_size` line, or no size line, gives no LUT.
+- 100 rows where 125 are due give a changed picture, which the rule above does not fit.
+- 130 rows where 125 are due use the first 125 rows.
+- `LUT_3D_SIZE 1` gives a black picture.
 
 ### The scaling filter
 

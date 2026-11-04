@@ -654,6 +654,7 @@ pub fn export_media(
         let _noting = vidcut_av::progress::Noting::set(Arc::new(move |note| {
             if let vidcut_av::export::Note::Upscaled(u) = &note
                 && let Ok(mut kept) = kept.lock()
+                && !kept.contains(u)
             {
                 kept.push(u.clone());
             }

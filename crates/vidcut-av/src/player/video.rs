@@ -869,10 +869,12 @@ pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
             .is_some()
             .then(|| l.decoder.map_or(Decoding::Cpu, Decoding::Gpu));
         let frame = l.frame.expect("frames as decoded, black too");
+        let lut = l.lut;
         let picture = Picture::new(frame, l.rotation, decoder, l.decoding)
             .with_sampling(l.sampling)
             .with_origin(l.origin)
-            .with_alpha_mode(l.alpha_mode);
+            .with_alpha_mode(l.alpha_mode)
+            .with_lut(lut.clone());
         match l.woven {
             Some((top_first, before, after)) => {
                 let field = |f: Option<crate::ffmpeg::frame::Video>| {
@@ -882,7 +884,8 @@ pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
                             before: None,
                             after: None,
                         };
-                        Arc::new(Picture::new(f, l.rotation, None, None).with_woven(alone))
+                        let field = Picture::new(f, l.rotation, None, None).with_lut(lut.clone());
+                        Arc::new(field.with_woven(alone))
                     })
                 };
                 picture.with_woven(Woven {

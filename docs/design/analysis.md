@@ -334,7 +334,7 @@ flowchart TD
 - A job gives some results to the edit after it. These maps hold those results, and each is an `Lru` of a fixed size:
   - `HEARD` and `PAID`: the last transcriptions. A new transcription costs minutes or money.
   - `LOUD`: the loudness of a plan.
-  - `MADE_WITH`: how a proxy was written. When this map is full, the report of the oldest proxy does not have this line.
+  - `MADE_WITH`: which proxy a job wrote, and how. When this map is full, the report of the oldest proxy does not have this line. If a later codec of Automatic made that proxy, its edit encodes it again.
 
 ### The disk cache limit
 

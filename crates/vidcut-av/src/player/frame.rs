@@ -114,6 +114,7 @@ pub struct Picture {
     woven: Option<Woven>,
     origin: Option<Origin>,
     alpha_mode: AlphaMode,
+    lut: Option<crate::screen::Lut>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -211,6 +212,7 @@ impl Picture {
             woven: None,
             origin: None,
             alpha_mode: AlphaMode::Straight,
+            lut: None,
         }
     }
 
@@ -221,6 +223,15 @@ impl Picture {
 
     pub fn alpha_mode(&self) -> AlphaMode {
         self.alpha_mode
+    }
+
+    pub(crate) fn with_lut(mut self, lut: Option<crate::screen::Lut>) -> Self {
+        self.lut = lut;
+        self
+    }
+
+    pub(crate) fn lut(&self) -> Option<&crate::screen::Lut> {
+        self.lut.as_ref()
     }
 
     pub(crate) fn with_origin(mut self, origin: Option<Origin>) -> Self {
@@ -386,7 +397,8 @@ impl Picture {
         let alone = Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
             .with_sampling(self.sampling.clone())
             .with_origin(self.origin.clone())
-            .with_alpha_mode(self.alpha_mode);
+            .with_alpha_mode(self.alpha_mode)
+            .with_lut(self.lut.clone());
         Ok(match &self.woven {
             Some(w) => alone.with_woven(w.clone()),
             None => alone,
@@ -403,7 +415,8 @@ impl Picture {
             Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
                 .with_sampling(self.sampling.clone())
                 .with_origin(self.origin.clone())
-                .with_alpha_mode(self.alpha_mode),
+                .with_alpha_mode(self.alpha_mode)
+                .with_lut(self.lut.clone()),
         )
     }
 
@@ -481,6 +494,7 @@ pub struct Shown {
     pub crosses: Vec<bool>,
     pub scales: Vec<Option<vidcut_core::model::Sharpness>>,
     pub colors: Option<vidcut_core::model::Hdr>,
+    pub output_lut: Option<crate::screen::Lut>,
 }
 
 pub struct TitlePicture {
