@@ -275,6 +275,8 @@ The audio device:
   - An export, a proxy and a thumbnail scale with the filter of the spec (`resized`, [spec §13](../cut-page-spec.md#the-scaling-filter)).
     - Each pixel reads the same number of samples at any scale.
     - A pixel with no scale and a whole-pixel place reads one sample (`resamples`).
+    - A scale that differs from 1 only by a rounding error counts as no scale.
+      - Why: at some frame sizes, the shader's 32-bit floats give a scale just above 1. Two samples then blur each edge of the picture.
     - Above a shrink of 8:1, the filter reads the level of `halvings` where the shrink is 8:1 or less ([X110](../deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).
   - In an export, the kernels of Super Scale widen when the picture shrinks (`sharp`).
     - They widen up to 4 times. Above a shrink of 4:1, the draw first halves the converted picture into smaller levels (`halvings`, `fs_halve`).

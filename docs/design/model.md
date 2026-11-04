@@ -185,8 +185,7 @@ Multicam layout:
 - `head` and `tail` are the frames that the file loses at each end. The file leaves `hidden`, `head` and `tail` out at 0.
 - `GroupClip::start` is the place of the file's own first frame. `SyncGroup::at_of` gives it. It can be below 0 when the earliest clip has a head.
 - `multicam::row_file_at` gives the file of a row at a frame of the group.
-- `start`, `at`, `hidden`, `head`, `tail` and `marks` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
-- `multicam::marked_range` turns the `marks` of a group into a range of one file. Thus one pair of marks holds for each file.
+- `start`, `at`, `hidden`, `head` and `tail` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
 
 Media fields:
 
@@ -428,10 +427,13 @@ Writing:
 - `Clip::is_generator` and `Clip::is_block` count it.
 - A left trim of a generator changes `source_in`, as on any clip. Its keyframes stay on their source frames.
   - Thus they stay on the same timeline frames, and the picture does not move.
-  - An OTIO file counts them from the first frame of the clip, with a source start of 0.
+  - An OTIO file counts them from the first frame of the clip (`generators::reference`).
 - A `Generator` is one of these kinds:
   - `Generator::SolidColor` holds a `color`.
   - `Generator::FourColorGradient` holds a `Gradient`.
+  - `Generator::EbuColorBar` holds an `EbuLevel`.
+  - `Generator::TenStep`, `Generator::HundredMvSteps`, `Generator::GreyScale`, `Generator::YcbcrRamp` and `Generator::SmpteColorBar` hold nothing.
+  - `Generator::Bt2111HlgNarrow`, `Generator::Bt2111PqFull`, `Generator::Bt2111PqNarrow` and `Generator::Window` hold nothing.
   - `Generator::Carried` holds the OTIO reference of a kind that vidcut does not model, as `Kept`. It plays as a gap.
 - `Generator::draws` and `Clip::draws` tell whether a generator has a picture.
 - A `Gradient` holds a plain Center X and Center Y and the keyframes of each one.
@@ -440,6 +442,7 @@ Writing:
 - `generators::Pattern` is one frame of a generator's picture, with nothing that changes over time. `generators::draw` writes it as RGB48LE.
   - The render plan and the GUI cards share this rule. Why: each picture has one rule.
   - `generators::timeline_code` gives the code values of a color in the colors of the timeline.
+  - `Generator::chart` gives the `Chart` of a kind that has no value over time. A `Chart` draws as rows of columns, from the size of the timeline. Its code values do not change with the colors of the timeline.
 - `generators::name` gives the name of a generator. `generators::shown` gives its JSON form, for `generators.list` and `clip_json`.
 - `ops::generators` holds the edits. `generators.add` and `titles.add` share `ops::titles::add_block`.
 - `GeneratorKind` is the kind that `generators.add` takes. `GeneratorSettings` holds the values of `generators.add` and `generators.set`. A kind refuses a value that it does not have.

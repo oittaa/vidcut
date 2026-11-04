@@ -38,16 +38,19 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
   - rows for stills and for files with no picture;
   - two groups in a bin, when the clip at the playhead is in neither;
   - a click on a camera at another frame rate;
-  - a timeline whose clips disagree on the time of a file;
-  - an edit in Multi Source with a mark outside the active angle.
+  - a timeline whose clips disagree on the time of a file.
 - Show the Sync Bin grid in the Cinema Viewer with P (p. 709).
+- Multi Source:
+  - Find in Multi Source in the timeline's menu (p. 667). Measure when the item is on.
+  - Live Overwrite by a drag in a cell (p. 712).
+  - The red and white outlines of the pool's files.
+  - The Cinema Viewer with P.
 - Record how a cut chooses an angle.
 - Measure sync by sound with files from real cameras, each with its own microphone. Then check `SOUND_MATCH_SCORE`.
 - A marker is the sync point when the user sets one.
 - An angle switch replaces the picture and keeps the sound the user chose.
 - The switch is one timeline edit.
 - The CLI, IPC and MCP perform the same action as the GUI.
-- Open Multi Source with no synced group (measured.md, C3e).
 - Measure the Source Overwrite cases that [spec §7.2](../cut-page-spec.md#72-edit-functions) lists as not measured.
   - Several selected pool items: one try placed one file of two, while the source viewer held that file (measured.md, T1).
   - The playhead on a new track with the Timeline viewer on: one try stopped at the clip's end, past the old timeline end (measured.md, T1).

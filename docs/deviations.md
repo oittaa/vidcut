@@ -2349,6 +2349,65 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A script needs to know that no clip went in.
   - The owner approved this difference.
 
+## X115. A typed duration gives exactly that length
+
+- **Resolve:**
+  - The Duration field takes a typed length, and it then shows that length.
+  - The edit from these marks has one frame more. These are measurements in Resolve Studio 21.1.2.
+  - `00:00:02:00` gives 51 frames at 25 fps, and 61 frames at 30 fps.
+  - The Multi Source grid and Source Clip act the same.
+- **vidcut:**
+  - The marks hold exactly the typed length.
+  - `00:00:02:00` gives 50 frames at 25 fps, and 60 frames at 30 fps.
+- **Why:**
+  - Two seconds at 25 fps are 50 frames.
+  - The field and the edit agree.
+  - The owner approved this difference.
+
+## X116. The Ripple Overwrite button treats other tracks as a drop does
+
+- **Resolve:**
+  - A drop of a file onto a Track 1 clip follows the rule in [D21](cut-page-spec.md#12-decisions-on-gaps-and-contradictions). These are measurements in Resolve Studio 21.1.2.
+  - The button and Shift+F10 act differently, on the Cut page and the Edit page.
+  - They cut each other track at the start of the replaced part. Everything from there on moves by the change in length.
+  - With a shorter clip, the frames just before that start also go away. The edit does not replace these frames.
+- **vidcut:**
+  - The button, the key, the CLI, IPC and MCP follow the rule of the drop.
+- **Why:**
+  - The button takes out picture that the edit does not replace.
+  - It also cuts clips that start before the replaced part.
+  - One rule for one edit is easier to predict.
+  - The owner approved this difference.
+
+## X117. Cues stay with the picture in a Ripple Overwrite
+
+- **Resolve:**
+  - A cue over the replaced clip stays where it is, also past the new end of the clip. These are measurements in Resolve Studio 21.1.2.
+  - A later cue that moves back cuts the cue that it lands on. It removes the replaced clip's cues from its landing on.
+  - The user then has to re-time the cues.
+- **vidcut:**
+  - Cues keep the frames of Track 1 under them ([D57](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+  - A cue loses its part over the frames that the edit takes out. A cue with no frames left goes away.
+  - A longer clip splits a cue across the end of the replaced part. Both parts keep the text.
+  - Later cues move with their picture.
+- **Why:**
+  - A cue belongs to the picture under it.
+  - The user does not have to re-time the cues.
+  - The owner approved this difference.
+
+## X118. Source Overwrite at the end of the timeline uses the first clip
+
+- **Resolve:**
+  - The playhead is at the end of the timeline, after the last clip. The last clip shows part of the marks.
+  - With a last clip of 139 frames or less, the reference is that last clip.
+  - With a last clip of 140 frames or more, the reference is the first clip that shows part of the marks.
+  - These are measurements in Resolve Studio 21.1.2, in the Multi Source viewer, with one layout. The reason for the limit is not known.
+- **vidcut:**
+  - With no clip under the playhead, the reference is the first clip that shows part of the marks. The length of the last clip plays no part.
+- **Why:**
+  - A limit with no known reason looks like a fault, and the user cannot predict it.
+  - The owner approved this difference.
+
 ## X119. Auto Sync on a saved group waits for Save Sync
 
 - **Resolve:**
@@ -2468,3 +2527,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - A group in vidcut holds only files that are in the project.
   - The owner approved this difference.
+
+## X129. Generators have the correct picture where Resolve has a fault
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. Both faults repeat.
+  - In an HLG timeline, the YCbCr Ramp has green × 1.0634 for x 0 to 204 at 1920 wide. This gives a step at x 205.
+  - At an odd size (1001 × 777), column 0 has noise in red on the BT.2111 Color Bars and SMPTE Color Bar. The other kinds have extra colors there.
+- **vidcut:**
+  - The YCbCr Ramp has no step. Its code values are the same in each timeline.
+  - Each kind follows its rule at each size, in each column.
+- **Why:**
+  - These are faults in Resolve. vidcut has the correct picture.

@@ -119,10 +119,17 @@ fn at_playhead<'a>(l: Lining<'a>, file: &Range<i64>, at: i64) -> Option<&'a Clip
         .or_else(|| first_where(l, file, |_| true))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceLining {
+    Playhead,
+    Marked,
+    Grid,
+}
+
 pub fn source_overwrite(
     p: &mut Project,
     src: &Source,
-    source_marked: bool,
+    lining: SourceLining,
     playhead: Option<i64>,
     by_group: bool,
 ) -> Result<Placed> {
@@ -145,14 +152,20 @@ pub fn source_overwrite(
     let part = o + src.range.0..o + src.range.1;
     let marks = (p.marks.mark_in, p.marks.mark_out);
     let reference = match marks {
-        (None, None) if source_marked => match first_where(l, &part, |_| true) {
-            None if playhead.is_some_and(|at| at >= p.end()) => first_where(l, &whole, |_| true),
-            found => found,
+        (None, None) => match lining {
+            SourceLining::Grid => {
+                let at = needs_playhead(playhead)?;
+                first_where(l, &part, |c| c.start <= at && at < c.end())
+                    .or_else(|| first_where(l, &part, |_| true))
+            }
+            SourceLining::Marked => match first_where(l, &part, |_| true) {
+                None if playhead.is_some_and(|at| at >= p.end()) => {
+                    first_where(l, &whole, |_| true)
+                }
+                found => found,
+            },
+            SourceLining::Playhead => by_playhead(l, &whole, needs_playhead(playhead)?),
         },
-        (None, None) => {
-            let at = playhead.ok_or_else(|| Error::usage("at is required (no live playhead)"))?;
-            by_playhead(l, &whole, at)
-        }
         (a, b) => by_marks(l, &whole, a, b),
     }
     .ok_or_else(no_common_time)?;
@@ -204,10 +217,14 @@ pub fn source_overwrite(
         clip: ids.swap_remove(0),
         track: p.tracks[ti].id.clone(),
         reference,
-        playhead: if stops_at_end {
+        playhead: if stops_at_end && lining != SourceLining::Grid {
             end.min(timeline_end)
         } else {
             end
         },
     })
+}
+
+fn needs_playhead(playhead: Option<i64>) -> Result<i64> {
+    playhead.ok_or_else(|| Error::usage("at is required (no live playhead)"))
 }

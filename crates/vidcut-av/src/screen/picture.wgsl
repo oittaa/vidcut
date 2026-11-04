@@ -161,6 +161,10 @@ fn resized(u: vec2<f32>, spans: vec2<f32>) -> vec3<f32> {
     return sum / (total_across * total_down);
 }
 
+fn box_taps(spans: vec2<f32>) -> vec2<u32> {
+    return vec2<u32>(clamp(ceil(spans - vec2<f32>(1e-4)), vec2<f32>(1.0), vec2<f32>(8.0)));
+}
+
 fn resamples(u: vec2<f32>, spans: vec2<f32>) -> bool {
     let kind = p.flags.w & 7u;
     if kind == 0u {
@@ -355,7 +359,7 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     if resamples(uv, spans) {
         return vec4<f32>(sharp(uv, spans), a);
     }
-    let taps = vec2<u32>(clamp(ceil(spans), vec2<f32>(1.0), vec2<f32>(8.0)));
+    let taps = box_taps(spans);
     let half = vec2<f32>(0.5) / size;
     var sum = vec3<f32>(0.0);
     for (var j = 0u; j < taps.y; j++) {
@@ -610,7 +614,7 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     if resamples(rel, cover) {
         return vec4<f32>(sharp(rel, cover) * a, solid);
     }
-    let taps = vec2<u32>(clamp(ceil(cover), vec2<f32>(1.0), vec2<f32>(8.0)));
+    let taps = box_taps(cover);
     let step = vec2<f32>(1.0) / (p.place.zw * vec2<f32>(taps));
     let first = (px - vec2<f32>(0.5) - p.place.xy) / p.place.zw + step * 0.5;
     var sum = vec3<f32>(0.0);
@@ -660,7 +664,7 @@ fn fs_title(in: Out) -> @location(0) vec4<f32> {
         discard;
     }
     let spans = vec2<f32>(length(across * size), length(down * size));
-    let taps = vec2<u32>(clamp(ceil(spans), vec2<f32>(1.0), vec2<f32>(8.0)));
+    let taps = box_taps(spans);
     var sum = vec4<f32>(0.0);
     for (var j = 0u; j < taps.y; j++) {
         for (var i = 0u; i < taps.x; i++) {
