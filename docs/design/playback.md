@@ -287,6 +287,7 @@ The audio device:
   - The layers of a dissolve are more draws in the pass.
   - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
   - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).
+  - The tracks of a compound clip with an opacity or a mode mix first, in a picture of their own ([export](export.md#placed-pictures)).
   - The two sides of a dissolve with a placed picture add into a picture of their own (`Mixing`). `fs_paired` lays it over the copy of the canvas. Thus a mix below 0 is not clipped before it goes over.
   - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips.
   - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
@@ -319,8 +320,13 @@ The audio device:
 - With `gpu.decoding` on, the reader decodes on `hw::GpuDecoder::best` where it can.
 - The viewer shows the pictures of some decoders from GPU memory (`Gpu::gpu_pictures`). These pictures stay there, in the video budget. The pictures of the other decoders come down.
 - [gpu](gpu.md) has the path of each decoder to the screen.
-- The shader lays a picture by its straight alpha. AYUV64 holds the alpha in its one texture. A picture in memory with alpha is `yuva444p12le`, with the alpha in a fourth texture (`Picture::alpha_plane`).
-- A picture in memory in RGB or 4:4:4 is `yuv444p12le`, and a 4:2:2 picture stays 4:2:2 (`Relayout`). Why: 4:2:0 loses color detail.
+- The shader lays a picture by its straight alpha. AYUV64 holds the alpha in its one texture. Another picture in memory with alpha has it in a fourth texture (`Picture::alpha_plane`).
+- A picture in memory in RGB or gray of more than 8 bits is `gbrp16le`, or `gbrap16le` with alpha (`Relayout`). The shader reads its three planes as RGB, with no matrix (`Layout::Gbrp16`).
+  - Why: the conversion to YUV makes these pictures too bright ([gotchas](../gotchas.md#ffmpeg-filters-and-colors)).
+  - Float gray is the exception. It goes to YUV. Why: the conversion to RGB does not correct it.
+  - Why planes: a 3-sample RGB picture goes through a storage buffer. The window's device limits the size of that buffer (`Slot::write_rgb`).
+  - A picture of this kind with no tag has the BT.709 primaries, at each size (`Source`).
+- Another picture in memory with alpha is `yuva444p12le`. Another picture in memory in RGB or 4:4:4 is `yuv444p12le`, and a 4:2:2 picture stays 4:2:2 (`Relayout`). Why: 4:2:0 loses color detail.
 
 ## Sound
 

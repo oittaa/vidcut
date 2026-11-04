@@ -71,6 +71,8 @@ pub(crate) fn displayable(p: format::Pixel) -> bool {
             | P::P416LE
             | P::AYUV64LE
             | P::RGB24
+            | P::GBRP16LE
+            | P::GBRAP16LE
     )
 }
 
@@ -127,22 +129,18 @@ impl Relayout {
             .format()
             .descriptor()
             .ok_or_else(|| Error::Invalid("unknown pixel format".into()))?;
-        let (depth, rgb, chroma) = unsafe {
+        let (depth, rgb, gray, chroma) = unsafe {
             let d = &*desc.as_ptr();
             (
                 d.comp[0].depth,
                 d.flags & (ffmpeg::ffi::AV_PIX_FMT_FLAG_RGB as u64) != 0,
+                d.nb_components <= 2 && d.flags & (ffmpeg::ffi::AV_PIX_FMT_FLAG_FLOAT as u64) == 0,
                 (d.log2_chroma_w, d.log2_chroma_h),
             )
         };
+        let alpha = has_alpha(src.format());
         let full = rgb || chroma == (0, 0) || depth > 10;
-        let target = match (
-            has_alpha(src.format()),
-            keeps_chroma,
-            full,
-            chroma,
-            depth > 8,
-        ) {
+        let target = match (alpha, keeps_chroma, full, chroma, depth > 8) {
             (true, ..) => "yuva444p12le",
             (false, true, true, ..) => "yuv444p12le",
             (false, true, false, (1, 0), true) => "yuv422p10le",
@@ -150,11 +148,21 @@ impl Relayout {
             (false, _, _, _, true) => "p010le",
             (false, _, _, _, false) => "yuv420p",
         };
-        let spec = if rgb {
-            let flags = crate::color::CONVERT;
-            format!("scale=out_color_matrix=bt709:out_range=limited:flags={flags},format={target}")
-        } else {
-            format!("scale={},format={target}", crate::color::keep(src))
+        let flags = crate::color::CONVERT;
+        let (wide, planar) = match (alpha, gray) {
+            (true, _) => ("rgba64le", "gbrap16le"),
+            (false, true) => ("gray16le", "gbrp16le"),
+            (false, false) => ("rgb48le", "gbrp16le"),
+        };
+        let spec = match (rgb || gray, depth) {
+            (true, 16..) => format!("scale=flags={flags},format={planar}"),
+            (true, 9..16) => {
+                format!("scale=flags={flags},format={wide},scale=flags={flags},format={planar}")
+            }
+            _ if rgb => format!(
+                "scale=out_color_matrix=bt709:out_range=limited:flags={flags},format={target}"
+            ),
+            _ => format!("scale={},format={target}", crate::color::keep(src)),
         };
         let sar = src.aspect_ratio();
         let args = format!(

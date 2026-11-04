@@ -193,6 +193,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     key(Mark, &["Alt", "M"], "Delete the marker", None),
     key(
+        Mark,
+        &["Alt", "B"],
+        "Create a subclip",
+        Some("In the Source Clip viewer, from the In and Out of the clip."),
+    ),
+    key(
         Edit,
         &["F9"],
         "Smart Insert",

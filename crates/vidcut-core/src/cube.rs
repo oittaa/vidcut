@@ -40,9 +40,6 @@ fn range_of(key: &str, a: Option<&str>, b: Option<&str>, line: usize) -> Result<
     let (Some(low), Some(high)) = (number(a), number(b)) else {
         return Err(format!("line {line}: {key} needs two numbers"));
     };
-    if low == high {
-        return Err(format!("line {line}: {key} {low} {high} has no width"));
-    }
     Ok([low, high])
 }
 
