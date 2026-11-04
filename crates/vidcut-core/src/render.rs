@@ -2599,21 +2599,93 @@ pub struct TapeEntry {
 }
 
 pub fn tape(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>)> {
-    let parts: Vec<(&str, i64, i64)> = media.iter().map(|m| (m.as_str(), 0, 0)).collect();
-    laid_out(p, &parts, 0, 0)
+    laid_out(p, media)
 }
 
-pub fn group_tape(
+pub fn camera_tape(
     p: &Project,
-    group: &crate::model::SyncGroup,
-    media: &str,
+    camera: &crate::multicam::GridCamera,
+    end: i64,
 ) -> Result<(RenderPlan, Vec<TapeEntry>)> {
-    let c = group
-        .clips()
-        .find(|c| c.media == media)
-        .ok_or_else(|| Error::not_found(format!("{media} is not in {}", group.id)))?;
-    let end = crate::multicam::frames(p, group);
-    laid_out(p, &[(media, c.head, c.tail)], c.at, end)
+    let s = &p.settings;
+    let sample = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
+    let entries: Vec<TapeEntry> = camera
+        .files
+        .iter()
+        .map(|f| TapeEntry {
+            media: f.media.clone(),
+            start: f.at,
+            frames: f.frames,
+        })
+        .collect();
+    if entries.is_empty() {
+        return Err(Error::invalid("no media to show"));
+    }
+    let mut cuts = vec![0, end];
+    cuts.extend(entries.iter().flat_map(|e| [e.start, e.start + e.frames]));
+    cuts.sort_unstable();
+    cuts.dedup();
+    let pool = p.pool();
+    let (mut video, mut lane) = (Vec::new(), Vec::new());
+    for cut in cuts.windows(2) {
+        let (a, b) = (cut[0], cut[1]);
+        let samples = sample(b) - sample(a);
+        let Some(e) = entries
+            .iter()
+            .find(|e| (e.start..e.start + e.frames).contains(&a))
+        else {
+            push_video(&mut video, VideoPiece::black(b - a));
+            push_audio(&mut lane, AudioPiece::Silence { samples });
+            continue;
+        };
+        let m = found(pool.get(e.media.as_str()).copied(), &e.media)?;
+        let from = a - e.start;
+        let (path, origin) = origin_of(m);
+        push_video(
+            &mut video,
+            VideoPiece::Source {
+                pace: Default::default(),
+                media: e.media.clone(),
+                path,
+                origin,
+                source_frame: from,
+                frames: b - a,
+                image: image_of(m),
+                color_space: m.color_space,
+                super_scale: super_scale_of(m.super_scale, &p.settings),
+                retime: Retime::Nearest,
+                placed: Vec::new(),
+                cache: Default::default(),
+                excluded: false,
+                made: None,
+            },
+        );
+        push_audio(&mut lane, sound_of(p, m, from, samples));
+    }
+    Ok((tape_plan(p, end, video, lane), entries))
+}
+
+fn tape_plan(
+    p: &Project,
+    frames: i64,
+    video: Vec<VideoPiece>,
+    lane: Vec<AudioPiece>,
+) -> RenderPlan {
+    let s = &p.settings;
+    RenderPlan {
+        fps: s.fps,
+        width: s.width,
+        height: s.height,
+        sample_rate: s.sample_rate,
+        channels: s.channels,
+        frames,
+        video,
+        audio: vec![lane],
+        ducking: Vec::new(),
+        range: (0, frames),
+        name: "tape".into(),
+        colors: None,
+    }
 }
 
 pub fn places_sound(p: &Project, rows: &[crate::model::GroupRow]) -> Result<RenderPlan> {
@@ -2688,29 +2760,15 @@ fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
     }
 }
 
-fn laid_out(
-    p: &Project,
-    parts: &[(&str, i64, i64)],
-    first: i64,
-    end: i64,
-) -> Result<(RenderPlan, Vec<TapeEntry>)> {
+fn laid_out(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>)> {
     let s = &p.settings;
     let sample = |t: i64| s.fps.frame_to_sample(t, s.sample_rate);
     let (mut video, mut lane, mut entries) = (Vec::new(), Vec::new(), Vec::new());
     let pool = p.pool();
-    let mut t = first;
-    if first > 0 {
-        push_video(&mut video, VideoPiece::black(first));
-        push_audio(
-            &mut lane,
-            AudioPiece::Silence {
-                samples: sample(first),
-            },
-        );
-    }
-    for (id, head, tail) in parts.iter().copied() {
-        let m = found(pool.get(id).copied(), id)?;
-        let frames = p.media_frames(m) - head - tail;
+    let mut t = 0;
+    for id in media {
+        let m = found(pool.get(id.as_str()).copied(), id)?;
+        let frames = p.media_frames(m);
         if frames <= 0 {
             continue;
         }
@@ -2723,7 +2781,7 @@ fn laid_out(
                     media: id.to_string(),
                     path,
                     origin,
-                    source_frame: head,
+                    source_frame: 0,
                     frames,
                     image: image_of(m),
                     color_space: m.color_space,
@@ -2739,42 +2797,18 @@ fn laid_out(
             push_video(&mut video, VideoPiece::black(frames));
         }
         let samples = sample(t + frames) - sample(t);
-        push_audio(&mut lane, sound_of(p, m, head, samples));
+        push_audio(&mut lane, sound_of(p, m, 0, samples));
         entries.push(TapeEntry {
             media: id.to_string(),
-            start: t - head,
-            frames: head + frames,
+            start: t,
+            frames,
         });
         t += frames;
     }
     if entries.is_empty() {
         return Err(Error::invalid("no media to show"));
     }
-    if end > t {
-        push_video(&mut video, VideoPiece::black(end - t));
-        push_audio(
-            &mut lane,
-            AudioPiece::Silence {
-                samples: sample(end) - sample(t),
-            },
-        );
-        t = end;
-    }
-    let plan = RenderPlan {
-        fps: s.fps,
-        width: s.width,
-        height: s.height,
-        sample_rate: s.sample_rate,
-        channels: s.channels,
-        frames: t,
-        video,
-        audio: vec![lane],
-        ducking: Vec::new(),
-        range: (0, t),
-        name: "tape".into(),
-        colors: None,
-    };
-    Ok((plan, entries))
+    Ok((tape_plan(p, t, video, lane), entries))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

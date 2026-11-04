@@ -54,10 +54,8 @@ pub fn describe_at(
             d.text("group"),
             d.text("name")
         ),
-        "multicam.marks.set" => {
-            format!("Synced group {} marks: {}", d.text("group"), d.in_out())
-        }
-        "multicam.marks.clear" => format!("Clear the marks of synced group {}", d.text("group")),
+        "viewer.marks.set" => format!("Multi Source marks: {}", d.in_out()),
+        "viewer.marks.clear" => "Clear the Multi Source marks".to_string(),
         "multicam.pick" => format!("Choose camera {}", d.text("media")),
         "multicam.set" => format!("Set the places in synced group {}", d.text("group")),
         "multicam.place" => format!(
@@ -1026,6 +1024,14 @@ impl Words<'_> {
         }
         if let Some(text) = self.params["paste"].as_str() {
             parts.push(format!("Paste {text}"));
+        }
+        if let Some(angle) = self.params["angle"].as_str() {
+            parts.push(format!("Camera of {angle}"));
+        }
+        match self.params["alone"].as_bool() {
+            Some(true) => parts.push("One Camera".into()),
+            Some(false) => parts.push("Grid".into()),
+            None => {}
         }
         match parts.as_slice() {
             [] => "?".into(),

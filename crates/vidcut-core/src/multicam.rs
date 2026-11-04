@@ -8,7 +8,7 @@ use crate::editor::Env;
 use crate::error::{Error, Result};
 use crate::model::{AngleSync, GroupClip, GroupRow, Marks, Media, Project, SyncGroup};
 use crate::ops::{self, has_bin};
-use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, timecode_frames};
+use crate::time::{Rational, format_timecode, timecode_frames};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SoundPair {
@@ -559,7 +559,6 @@ pub fn create(
         start,
         rows,
         dropped,
-        marks: Marks::default(),
     });
     Ok(Created { id, unmatched })
 }
@@ -628,72 +627,6 @@ pub fn move_to_bin(p: &mut Project, id: &str, bin: &str) -> Result<()> {
 
 pub fn frames(p: &Project, g: &SyncGroup) -> i64 {
     g.clips().map(|c| c.at + visible(p, c)).max().unwrap_or(0)
-}
-
-pub fn set_marks(
-    p: &mut Project,
-    id: &str,
-    mark_in: Option<&TimeSpec>,
-    out: Option<&TimeSpec>,
-) -> Result<Marks> {
-    if mark_in.is_none() && out.is_none() {
-        return Err(Error::usage("multicam.marks.set needs `in` and/or `out`"));
-    }
-    let g = group_mut(p, id)?.clone();
-    let end = frames(p, &g);
-    let ctx = TimeContext {
-        fps: p.settings.fps,
-        start_tc: g.start,
-        drop_frame: p.settings.counts_drop_frame(),
-        end,
-        mark_in: g.marks.mark_in,
-        mark_out: g.marks.mark_out,
-        playhead: None,
-    };
-    let mut marks = g.marks;
-    if let Some(t) = mark_in {
-        marks.mark_in = Some(ctx.resolve(t)?);
-    }
-    if let Some(t) = out {
-        marks.mark_out = Some(ctx.resolve(t)?);
-    }
-    if let (Some(i), Some(o)) = (marks.mark_in, marks.mark_out)
-        && i >= o
-    {
-        return Err(Error::invalid(format!("In ({i}) must be before Out ({o})")));
-    }
-    if marks.mark_in.is_some_and(|i| i < 0 || i >= end)
-        || marks.mark_out.is_some_and(|o| o < 1 || o > end)
-    {
-        return Err(Error::invalid(format!(
-            "marks must be inside {id} (0..{end} frames)"
-        )));
-    }
-    group_mut(p, id)?.marks = marks.clone();
-    Ok(marks)
-}
-
-pub fn marked_range(p: &Project, g: &SyncGroup, media: &str) -> Result<(i64, i64)> {
-    let m = p
-        .media(media)
-        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    let c = g
-        .clips()
-        .find(|c| c.media == media)
-        .ok_or_else(|| Error::invalid(format!("{} is not in {}", m.name, g.name)))?;
-    let (least, most) = (c.head, c.head + visible(p, c));
-    let a = g
-        .marks
-        .mark_in
-        .map_or(least, |i| (i - c.start()).max(least));
-    let b = g.marks.mark_out.map_or(most, |o| (o - c.start()).min(most));
-    if a >= b {
-        return Err(Error::invalid(format!(
-            "The marks of {} are outside {}",
-            g.name, m.name
-        )));
-    }
-    Ok((a, b))
 }
 
 pub fn camera_order(a: &str, b: &str) -> Ordering {
@@ -875,6 +808,169 @@ pub fn pick(p: &mut Project, media: &str, at: i64) -> Result<Marks> {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GridFile {
+    pub media: String,
+    pub at: i64,
+    pub frames: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GridCamera {
+    pub label: String,
+    pub files: Vec<GridFile>,
+}
+
+impl GridCamera {
+    pub fn file_at(&self, at: i64) -> Option<&GridFile> {
+        self.files
+            .iter()
+            .find(|f| (f.at..f.at + f.frames).contains(&at))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridPart {
+    pub media: String,
+    pub range: (i64, i64),
+    pub lead: i64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct SourceGrid {
+    pub start: i64,
+    pub frames: i64,
+    pub count: usize,
+    pub cameras: Vec<GridCamera>,
+}
+
+impl SourceGrid {
+    pub fn camera_of(&self, media: &str) -> Option<&GridCamera> {
+        self.cameras
+            .iter()
+            .find(|c| c.files.iter().any(|f| f.media == media))
+    }
+
+    pub fn shown(&self, at: i64) -> impl Iterator<Item = (usize, &GridCamera, &GridFile)> {
+        self.cameras
+            .iter()
+            .enumerate()
+            .filter_map(move |(i, c)| Some((i, c, c.file_at(at)?)))
+    }
+
+    pub fn part(&self, media: &str, marks: &Marks) -> Option<GridPart> {
+        let file = self
+            .cameras
+            .iter()
+            .flat_map(|c| &c.files)
+            .find(|f| f.media == media)?;
+        if marks.is_empty() {
+            return Some(GridPart {
+                media: media.to_string(),
+                range: (0, file.frames),
+                lead: 0,
+            });
+        }
+        let a = marks.mark_in.unwrap_or(0) - file.at;
+        let b = marks.mark_out.map_or(file.frames, |o| o - file.at);
+        let range = (a.max(0), b.min(file.frames));
+        (range.0 < range.1).then(|| GridPart {
+            media: media.to_string(),
+            range,
+            lead: (-a).max(0),
+        })
+    }
+
+    pub fn file_marks(&self, media: &str, marks: &Marks) -> Marks {
+        let Some(file) = self
+            .cameras
+            .iter()
+            .flat_map(|c| &c.files)
+            .find(|f| f.media == media)
+        else {
+            return Marks::default();
+        };
+        Marks {
+            mark_in: marks
+                .mark_in
+                .map(|i| (i - file.at).max(0))
+                .filter(|i| *i < file.frames),
+            mark_out: marks
+                .mark_out
+                .map(|o| o - file.at)
+                .filter(|o| *o > 0)
+                .map(|o| o.min(file.frames)),
+        }
+    }
+}
+
+pub fn source_grid(p: &Project, media: &[String]) -> SourceGrid {
+    let files: Vec<(&Media, i64, i64)> = media
+        .iter()
+        .filter_map(|id| p.media(id))
+        .filter(|m| m.info.video.is_some())
+        .map(|m| (m, origin(p, m), p.media_frames(m)))
+        .filter(|(.., frames)| *frames > 0)
+        .collect();
+    let mut spans: Vec<(i64, i64)> = files.iter().map(|(_, s, n)| (*s, s + n)).collect();
+    spans.sort_unstable();
+    let mut closed: Vec<(i64, i64, i64)> = Vec::new();
+    let mut frames = 0;
+    for (a, b) in spans {
+        match closed.last_mut() {
+            Some((_, end, _)) if a <= *end => {
+                let grown = b.max(*end);
+                frames += grown - *end;
+                *end = grown;
+            }
+            _ => {
+                closed.push((a, b, frames));
+                frames += b - a;
+            }
+        }
+    }
+    let place = |start: i64| {
+        closed
+            .iter()
+            .find(|(a, b, _)| (*a..*b).contains(&start))
+            .map_or(0, |(a, _, at)| at + start - a)
+    };
+    let mut named: Vec<(&str, Vec<GridFile>)> = Vec::new();
+    let mut unnamed: Vec<GridFile> = Vec::new();
+    for (m, start, n) in &files {
+        let file = GridFile {
+            media: m.id.clone(),
+            at: place(*start),
+            frames: *n,
+        };
+        match m.camera.as_deref() {
+            Some(name) => match named.iter_mut().find(|(c, _)| *c == name) {
+                Some((_, list)) => list.push(file),
+                None => named.push((name, vec![file])),
+            },
+            None => unnamed.push(file),
+        }
+    }
+    named.sort_by(|a, b| camera_order(a.0, b.0));
+    let cameras = named
+        .into_iter()
+        .map(|(name, files)| GridCamera {
+            label: format!("Camera {name}"),
+            files,
+        })
+        .chain(unnamed.into_iter().enumerate().map(|(i, file)| GridCamera {
+            label: format!("Camera {}", i + 1),
+            files: vec![file],
+        }))
+        .collect();
+    SourceGrid {
+        start: closed.first().map_or(0, |(a, ..)| *a),
+        frames,
+        count: files.len(),
+        cameras,
+    }
+}
+
 pub fn group_json(p: &Project, g: &SyncGroup) -> Value {
     let mut v = json!({
         "id": g.id,
@@ -888,9 +984,6 @@ pub fn group_json(p: &Project, g: &SyncGroup) -> Value {
     }
     if !g.dropped.is_empty() {
         v["dropped"] = json!(g.dropped);
-    }
-    if !g.marks.is_empty() {
-        v["marks"] = json!(g.marks);
     }
     v
 }
