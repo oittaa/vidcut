@@ -2949,14 +2949,15 @@ fn d3d11_shared_for(
             .map(|image| (image, false))
             .ok_or_else(|| "no shared texture came free".into());
     }
-    if pool.len() >= 2 * MAX_SHARED {
+    while pool.len() >= 2 * MAX_SHARED {
         let oldest = pool
             .iter()
             .find(|(_, s)| !s.busy.load(Ordering::Acquire))
             .map(|(image, _)| *image);
-        if let Some(oldest) = oldest {
-            pool.remove(&oldest);
-        }
+        let Some(oldest) = oldest else {
+            break;
+        };
+        pool.remove(&oldest);
     }
     let shared = share_d3d11(gpu, frame, formats)?;
     let image = shared.image;
