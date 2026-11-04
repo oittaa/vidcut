@@ -43,6 +43,8 @@ flowchart TD
 - **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
   - The plan uses the sample rate and channels of the audio encoder (`resolve_audio`). Why: the sample math then agrees with the encoder.
+  - A count with no default layout in FFmpeg uses the first channels of the 22.2 layout (`channel_layout`). Why: the mix needs a layout, and a stereo file then goes to the first two channels.
+  - An encoder can take fewer channels. Then the export fails with the name of the encoder and the channel count.
 - **Models:** `session::export_media` first checks the models of Voice Isolation, Super Scale, Retime Process and the Process of each Smooth Cut. A missing model needs `download`.
 
 GPU preferences:
@@ -67,6 +69,9 @@ Colors:
   - SDR takes 10 bits only from the encoder that an 8-bit export starts with. Why: vidcut does not move to a slower encoder for 10 bits.
   - DNxHR HQ in 10 bits becomes HQX (`ColorChoice::apply`).
 - `export::choose_metadata` picks the HDR metadata, by the rules of `vidcut_core::export` (spec D46). With an SDR timeline, each picture counts as SDR.
+- With a LUT in the plan (`RenderPlan::has_lut`), `metadata::choose_through_lut` takes nothing from the sources. Why: a LUT changes the light of the picture.
+  - It keeps the mastering display and the light that the user gives. The report says this.
+  - It does not measure the light. The [todo](../todo/luts.md) holds that work.
 - An export first measures the light that the files do not state (`Lights::analysis`), and caches it.
   - The GPU measures the HDR pictures that stay on the GPU ([gpu](gpu.md#the-light-meter)).
   - A generator has no file. Thus it adds no light (`light::sampled`).
@@ -227,6 +232,7 @@ Each mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-d
 - `Screen::for_export` draws each frame into `Wide`: 16-bit floats in the code values of the timeline (`VideoFrames::with_timeline`).
   - Each layer, title and subtitle goes there as in the viewer.
   - Why: a color above 1 or below 0 stays between the layers ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `fs_lut` then runs the output LUT on `Wide` (`VideoFrames::with_output_lut`, [the LUT files](README.md#lut-files)). A black piece of the plan goes through it too. The render cache holds no output LUT.
 - Then `fs_encode` writes each plane of the encoder's pixel format from `Wide` (`Screen::encoded`).
   - It converts the timeline colors to the colors of the output. An SDR output is BT.709 and an HDR output is BT.2020.
   - A YUV output is in limited range. An RGB output is in full range, and its tags say so (`color::tag_frame`).
@@ -535,6 +541,9 @@ The passes:
   2. played on the GPU
   3. made on the GPU, Vulkan too
   4. the rest
+- The name of the file has the codec that made it.
+  - `proxy.generate` runs twice: in the job and in the edit after it.
+  - The edit finds the file of the job in `MADE_WITH`. Thus the edit does not encode again.
 - A proxy is 10-bit from a source of more than 8 bits, where its encoder takes 10 bits.
 - It keeps the PQ or HLG of an HDR source, and the static metadata of a PQ source. An 8-bit proxy is SDR BT.709.
 - A proxy has frequent keyframes (ProRes and DNxHR: each frame), and no reordering. Why: a seek then decodes few frames.

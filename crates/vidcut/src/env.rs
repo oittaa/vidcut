@@ -542,10 +542,15 @@ impl Env for AvEnv {
             .map(|c| proxy_encoders(c, gpu, decoding))
             .filter(|e| !e.is_empty())
             .unwrap_or_else(|| proxy_encoders(prefs.proxies.codec, gpu, decoding));
-        let planned = encoders.first().map_or("h264", |e| e.codec);
+        let first = encoders.first().map_or("h264", |e| e.codec);
+        let made = || MADE_WITH.lock().unwrap_or_else(PoisonError::into_inner);
+        let planned = encoders
+            .iter()
+            .map(|e| e.codec)
+            .find(|&c| made().contains(&name(c)))
+            .unwrap_or(first);
         let mut path = name(planned);
         let mut codec = planned;
-        let made = || MADE_WITH.lock().unwrap_or_else(PoisonError::into_inner);
         let mut made_with = None;
         let mut copies = None;
         if !dry_run

@@ -810,6 +810,7 @@ mod tests {
 
     fn clip(id: &str, start: i64, duration: i64, audio: Option<(i64, i64)>) -> Clip {
         Clip {
+            input_lut: None,
             id: id.into(),
             media: "m1".into(),
             start,

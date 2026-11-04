@@ -76,6 +76,8 @@ In the viewer, exports, proxies and thumbnails:
 - The draw takes NVDEC pictures only when its wgpu device is on CUDA's GPU, as it does for Vulkan pictures. On another GPU, the pictures come down.
   - Why: the buffer that Vulkan shares with CUDA is on one GPU.
 - vidcut keeps facts of each VA-API device. `NO_COPY` and `WAYS` are kept by the address of the display. `SIZES` is kept by the device, the layout and the size.
+  - Each job opens a new display (`own_decoder`). Thus each list is an `Lru` with a limit.
+  - vidcut finds a fact again after it leaves its list.
 
 - ProRes 4444 on VideoToolbox takes P416, which has no alpha plane ([todo](../todo/clip-alpha.md)).
 - A Vulkan picture with an alpha channel has a fourth image. The draw takes it as the alpha plane (`Import::alpha`).
@@ -107,6 +109,7 @@ The draw:
       - After the loss, `screen::offscreen` gives an error for that device. Thus no new work goes to it.
       - The AI frames fail with that error, and the viewer shows it. The frames without AI play on.
       - Play, seek, step, an export and a frame render make a new device (`screen::retry_lost`).
+      - The lost device goes from memory when its last user stops (`Offscreen`, in an `Arc`).
       - After a loss, the next play, seek or step of a player clears its error. It also drops the pictures that a GPU held (`Store::forget_held`). The lost device cannot give them back.
       - Why: the cause can be gone, for example another program that used much of the GPU.
       - After `RETRIES` losses in one minute, vidcut makes no new device until that minute ends. Why: Windows stops the computer after more than five resets in one minute ([gotchas](../gotchas.md#wgpu-and-egui)).
@@ -165,6 +168,10 @@ Super Scale (`SuperScale`) sets the upscaler of a picture that is enlarged.
 - Classic enlarges in the shader of the viewer and the export, with the kernel of the picture's `Sharpness` (`screen::kernel`).
 - `layer_size` lets the picture of an AI upscaler grow past its source size.
 - The result of an AI upscaler is its own. It is not meant to match the CPU.
+- The export's report names each file that Super Scale enlarged (`UpscaleNote`, `super_scale::named`).
+  - An AI upscaler tells this when `ai_picture` gives a picture.
+  - Classic has no such step, because the shader enlarges later. Thus `note_classic` applies the rule of `enlarged` to each frame.
+  - A file on two tracks has two readers, and each reader tells. The report keeps one entry for the file.
 
 The AI upscalers share one path in the reader:
 
@@ -326,11 +333,11 @@ The Waveform, the Parade and the Vectorscope show the picture that the viewer dr
 
 What they read:
 
-- `Screen::scopes` reads the canvas of the last `Screen::draw`. That is the mix, in the timeline color space, before `fs_screen`.
+- `Screen::scopes` reads the canvas of the last `Screen::draw`. That is the mix after the output LUT, in the timeline color space, before `fs_screen`.
 - While a scope is on, `Screen::scoping` makes the canvas `Wide`, also for one SDR layer.
   - Why: an 8-bit canvas loses the values above 1 and below 0, and the steps between the 10-bit levels.
   - `fs_screen` only clips an SDR canvas. Thus the picture on the screen stays the same, but for rounding.
-- vidcut has no grade and no LUT. They are items in the todo files ([primary-grade](../todo/primary-grade.md), [luts](../todo/luts.md)).
+- vidcut has no grade. It is an item in the todo files ([primary-grade](../todo/primary-grade.md)).
 - The source viewer has no timeline color space. There, the scopes read SDR values.
 
 How the GPU makes one scope (`scope.wgsl`, `Plots::paint`):

@@ -96,13 +96,11 @@ pub(crate) fn checked_font(font: Option<&str>, what: &str) -> Result<Option<Stri
     let t = s.trim();
     if t.is_empty() {
         Ok(None)
-    } else if t.chars().count() > 200
-        || t.chars()
-            .any(|c| c.is_control() || matches!(c, '<' | '>' | '&' | '"' | '\'' | ','))
+    } else if t
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '<' | '>' | '&' | '"' | '\'' | ','))
     {
-        Err(Error::invalid(format!(
-            "a {what} font is a family name, at most 200 characters"
-        )))
+        Err(Error::invalid(format!("a {what} font is a family name")))
     } else {
         Ok(Some(t.to_string()))
     }
