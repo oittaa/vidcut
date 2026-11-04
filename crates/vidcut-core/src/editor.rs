@@ -7387,16 +7387,7 @@ pub fn query(
             json!(out)
         }
         Request::AnalyzeLoudness { range } => {
-            let (a, b) = match range {
-                Some(r) => ctx(p, playhead).range(r)?,
-                None => match (p.marks.mark_in, p.marks.mark_out) {
-                    (Some(a), Some(b)) => (a, b),
-                    _ => (0, p.end()),
-                },
-            };
-            if b <= a {
-                return Err(Error::invalid("nothing to measure: the range is empty"));
-            }
+            let (a, b) = measured_range(p, playhead, range.as_ref())?;
             let mut plan = crate::render::flatten(p, a, b)?;
             crate::duck::hear_with(&mut plan, p, env, false)?;
             let l = env.loudness(&plan)?;
@@ -7404,6 +7395,16 @@ pub fn query(
                 "integrated": finite(l.integrated), "range": l.range,
                 "true_peak": finite(l.true_peak), "sample_peak": finite(l.sample_peak),
                 "from": a, "to": b, "from_tc": tc(a), "to_tc": tc(b),
+            })
+        }
+        Request::AnalyzeDucking { track, range, duck } => {
+            let (a, b) = measured_range(p, playhead, range.as_ref())?;
+            let d = crate::duck::patched(p, track, &duck.clone().unwrap_or_default())?;
+            let g = crate::duck::graph(p, track, &d, (a, b), env)?;
+            json!({
+                "track": track, "from": a, "to": b, "from_tc": tc(a), "to_tc": tc(b),
+                "per_second": crate::duck::GRAPH_POINTS_PER_SECOND,
+                "duck": d.shown(), "source_db": g.source_db, "duck_db": g.duck_db,
             })
         }
         Request::Schema { .. }
@@ -7516,6 +7517,24 @@ pub fn query(
             )));
         }
     })
+}
+
+fn measured_range(
+    p: &Project,
+    playhead: Option<i64>,
+    range: Option<&crate::time::RangeSpec>,
+) -> Result<(i64, i64)> {
+    let (a, b) = match range {
+        Some(r) => ctx(p, playhead).range(r)?,
+        None => match (p.marks.mark_in, p.marks.mark_out) {
+            (Some(a), Some(b)) => (a, b),
+            _ => (0, p.end()),
+        },
+    };
+    if b <= a {
+        return Err(Error::invalid("nothing to measure: the range is empty"));
+    }
+    Ok((a, b))
 }
 
 fn finite(db: f64) -> Value {

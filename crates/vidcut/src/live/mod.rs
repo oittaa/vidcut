@@ -3083,6 +3083,7 @@ impl Live {
             | Request::AnalyzeScenes { .. }
             | Request::AnalyzeBlack { .. }
             | Request::AnalyzeLoudness { .. }
+            | Request::AnalyzeDucking { .. }
             | Request::AnalyzeWords { media: Some(_), .. }
             | Request::AnalyzeWords { clips: Some(_), .. } => self.project_task(envelope, job),
             Request::TrackSet {
@@ -3314,6 +3315,7 @@ impl Live {
             | Request::AnalyzeScenes { .. }
             | Request::AnalyzeBlack { .. }
             | Request::AnalyzeLoudness { .. }
+            | Request::AnalyzeDucking { .. }
             | Request::StoryboardRender { .. } => Work::Job,
             _ => Work::Interactive,
         };
@@ -4758,6 +4760,9 @@ fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
         range: Some(range), ..
     }
     | Request::AnalyzeWords {
+        range: Some(range), ..
+    }
+    | Request::AnalyzeDucking {
         range: Some(range), ..
     } = &mut envelope.request
         && let Ok((a, b)) = context.range(range)
