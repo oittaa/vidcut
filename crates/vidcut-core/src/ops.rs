@@ -2037,7 +2037,9 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
                 a.muted = m;
             }
             match (props.gain_db, at) {
-                (Some(g), Some(frame)) if a.is_keyed() => keyframes::put_value(a, frame, g),
+                (Some(g), Some(frame)) if a.is_keyed() => {
+                    keyframes::put_value(&mut a.gain_keys, frame, g);
+                }
                 (Some(_), None) if a.is_keyed() => {}
                 (Some(g), _) => a.gain_db = g,
                 (None, _) => {}

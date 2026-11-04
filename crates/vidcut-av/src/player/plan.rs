@@ -178,6 +178,7 @@ impl Plan {
                 VideoPiece::Source { image, .. } if !matches!(image, Some(Image::Still)) => {
                     l.position(k)
                 }
+                VideoPiece::Generated { picture, .. } if picture.is_keyed() => k,
                 _ => 0,
             };
             (at, placed_now(l, k))

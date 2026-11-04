@@ -18,7 +18,12 @@ const VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const HIDDEN: &[&str] = &["schema"];
 
-const PICTURES: &[&str] = &["frame.render", "gui.screenshot", "storyboard.render"];
+const PICTURES: &[&str] = &[
+    "frame.render",
+    "frame.scope",
+    "gui.screenshot",
+    "storyboard.render",
+];
 
 const MAX_PICTURE: u64 = 8 << 20;
 

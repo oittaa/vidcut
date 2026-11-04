@@ -55,6 +55,31 @@ impl Bytes<'_> {
     }
 }
 
+impl SoundMatch {
+    const TAG: &'static [u8; 4] = b"vcm1";
+
+    pub fn to_bytes(found: Option<Self>) -> Vec<u8> {
+        let mut out = Self::TAG.to_vec();
+        if let Some(m) = found {
+            out.extend_from_slice(&m.shift.to_le_bytes());
+            out.extend_from_slice(&m.score.to_le_bytes());
+        }
+        out
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Option<Option<Self>> {
+        let b = b.strip_prefix(Self::TAG)?;
+        if b.is_empty() {
+            return Some(None);
+        }
+        let mut r = Bytes(b);
+        Some(Some(Self {
+            shift: r.f64()?,
+            score: r.f32()?,
+        }))
+    }
+}
+
 impl AudioLevels {
     const TAG: &'static [u8; 4] = b"vcl1";
 

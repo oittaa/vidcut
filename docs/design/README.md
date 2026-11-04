@@ -74,6 +74,7 @@ flowchart TD
   show["The viewer shows this frame"]
   mapped["Fitted to the display<br>fs_screen"]
   file["The file has this frame<br>Screen::encoded"]
+  scopes["The scopes read this canvas<br>Screen::scopes"]
   due --> read
   due --> solid
   read --> weave
@@ -98,9 +99,11 @@ flowchart TD
   mix --> show
   mix --> mapped
   mix --> file
+  mix --> scopes
   looked --> show
   looked --> mapped
   looked --> file
+  looked --> scopes
   mapped --> show
 ```
 
@@ -124,6 +127,7 @@ A clip skips each step that it does not use. The steps run in this order:
   - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, [export](export.md#effects)).
 - `fs_lut` runs the output LUT of the project on the whole canvas, after the titles and subtitles.
 - The viewer shows the canvas. A wide canvas goes through `fs_screen` first ([playback](playback.md#the-viewer-thread)).
+- The scopes read the canvas after `fs_lut` and before `fs_screen` ([gpu](gpu.md#the-scopes)).
 - An export encodes that canvas (`Screen::encoded`) and skips `fs_screen` ([export](export.md#timeline-colors)).
 
 The AI stages get the picture in the timeline color space (`Single`).
@@ -186,7 +190,7 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
 | snapshot | what the GUI draws, published by the live core | `Snapshot` |
 | origin | a cache stamp of the path, size and time of a file | `Origin` |
 | kept | data of another editor that vidcut carries without a model of it | `Kept` |
-| lru | a cache of a set number of entries that lets the least recently used go | `Lru` |
+| lru | a cache of a set number of entries that lets the least recently used go; an `Uncapped` one has no set number, and its owner decides what goes | `Lru`, `Uncapped` |
 
 ## Pages
 

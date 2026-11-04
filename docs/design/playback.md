@@ -70,6 +70,7 @@ flowchart TD
 - `player::plan::Plan` gives each frame an `Id`. The `Id` names what the picture shows (file, color reading, source position, layers over it), not where it shows. Thus kept pictures survive edits that move them.
   - Each layer over it adds its level, the edge of its wipe and the frame of its move (`Moving::key`). Why: a change of a wipe's edge or of a Border keeps the level, and the picture is a new one.
   - The incoming layer of a Smooth Cut also adds the point and the process of its morph (`Smooth::at`). Why: a change of the Ease or the Process keeps the level.
+  - A generator with keyframes adds its frame in the piece. Why: its picture changes on each frame, and it has no source position.
 
 **Decoding**
 
@@ -97,6 +98,7 @@ flowchart TD
 - Apple silicon has one shared budget.
 - While an AI upscaler holds GPU memory, the video budget is smaller (`store::Lent`, [gpu](gpu.md)).
 - The least recently used pictures go first, whichever engine decoded them. The prepared picture of each engine never goes (`Store::hold`).
+- `Store::kept_run` and `Store::touch` make their ids in small batches, outside the lock. They take the lock for one batch at a time. Why: the decoding threads and the presenter wait on this lock, and a long run must not hold them up.
 - An engine can show a picture that another engine decoded, by its `Id`.
 - Each engine plans its decoding with its part of the budget (`Config::part`). When the last engine ends, the cache empties.
 
@@ -274,6 +276,8 @@ The audio device:
   - An export, a proxy and a thumbnail scale with the filter of the spec (`resized`, [spec §13](../cut-page-spec.md#the-scaling-filter)).
     - Each pixel reads the same number of samples at any scale.
     - A pixel with no scale and a whole-pixel place reads one sample (`resamples`).
+    - A scale that differs from 1 only by a rounding error counts as no scale.
+      - Why: at some frame sizes, the shader's 32-bit floats give a scale just above 1. Two samples then blur each edge of the picture.
     - Above a shrink of 8:1, the filter reads the level of `halvings` where the shrink is 8:1 or less ([X110](../deviations.md#x110-a-shrink-above-81-reads-each-source-pixel)).
   - In an export, the kernels of Super Scale widen when the picture shrinks (`sharp`).
     - They widen up to 4 times. Above a shrink of 4:1, the draw first halves the converted picture into smaller levels (`halvings`, `fs_halve`).
@@ -300,6 +304,7 @@ The audio device:
     - `Plan::output_lut` loads the file when a plan first needs it.
     - A gap goes through the output LUT. Before the first picture, the viewer draws no LUT.
 - On the UI thread, `Viewer::sync` shows the target as an egui native texture.
+- With a scope on, each turn also calls `Screen::scopes` after `Screen::draw` ([gpu](gpu.md#the-scopes)). `Viewer::sync_scopes` shows each scope's target in the same way.
 - A present answers with the frame drawn, if it is exact. A `gui.screenshot` of the viewer reads the target back, to the pixel.
 - Submissions go through `Gate::pass`. They wait until the UI thread runs `logic` or `ui`, because eframe configures the surface of the window outside these. If the UI is away for long, submissions do not wait.
 
@@ -330,9 +335,10 @@ The audio device:
 Ducking in the preview:
 
 - `Live::hear_ducking` hears the sources of the timeline's plan before the player gets it.
-- It takes only the measurements that this process keeps (`env::kept_measure`). Why: the session thread reads no file.
-- It measures the rest on `vidcut-measure`, at job priority. Until then, those clips dip nothing.
-- `Msg::DuckHeard` then loads the timeline again. A measurement that failed shows as a notice, and is not tried again until the next `track.set` with `duck`.
+- It takes only the measurements that the core holds for the open project (`duck_kept`). The session thread reads no file.
+- Opening a project empties `duck_kept`.
+- It gets the rest on `vidcut-measure`, at job priority (`env::measure_duck`). That job reads the disk cache, or measures. Until then, those clips dip nothing.
+- `Msg::DuckHeard` brings the results to the core, and loads the timeline again. A measurement that failed shows as a notice, and is not tried again until the next `track.set` with `duck`.
 
 Faders:
 
@@ -450,7 +456,9 @@ The names of frames:
     - Thus a change of the Transform or of an effect renders a placed clip again.
     - Without a Retime Process, `alone` keeps the effects up to the last checked effect (`render_cache::baked`). Thus a change of a later effect keeps the names.
     - `alone` takes the opacity and the composite mode out of the placement. Why: they change only the alpha and the mix, not the colors in the file.
-- An `Lru` keeps the names of each piece, by a hash of the piece after the same cleaning. Thus a piece that only moves, for example after a ripple edit, is not hashed again.
+- `PieceKeys` keeps the frame names of each piece in memory. vidcut does not hash a piece again when the piece only moves, for example after a ripple edit.
+  - When it holds more than `KEYS_KEPT` frame names, it removes the least recently used pieces.
+  - The limit counts frame names, not pieces. An hour of video at 60 fps has 216,000 frame names.
 - `Look::of` gives the size and the codec. With proxies on, the size is that of proxies. With proxies off, the size is that of the timeline.
   - The codec is `render_cache.codec` (`CacheCodec`). With Automatic and proxies on, it is that of proxies.
 - The live core takes the names from the plan before the proxies. Thus a switch of proxies finds the cache of the other `Look`.

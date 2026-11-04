@@ -6,7 +6,7 @@ The Cut page has separate tabs for transitions, titles and effects (p. 636). vid
 
 - The Transitions tab, the Transition Inspector, Dip To Color Dissolve, Smooth Cut, Push and Slide are there ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
 - The Effects tab, the effects of the Inspector and Gaussian Blur are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
-- The Generators page and Solid Color are there ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
+- The Generators page and its twelve kinds are there ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
 - If the bar gets too full, one Effects tab with categories can replace the tabs, as the Edit page has (p. 802).
 
 Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
@@ -14,9 +14,6 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 1. **More effects:** Mosaic, Sharpen, Vignette, Film Grain and Glow.
    - Measure each one in Resolve first: its values, their ranges and defaults, and its math.
 2. **Generators** (p. 766), one pull request for each line:
-   - Four Color Gradient.
-   - The ramps and the SDR bars: 10 Step, 100mV Steps, Grey Scale, YCbCr Ramp, EBU Color Bar and SMPTE Color Bar.
-   - The HDR bars and Window: the three BT.2111 Color Bars and Window.
    - A double-click on a card loads the generator in the source viewer, as a source of 5 s. The source viewer and the edits from it take only media now ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
    - Measure on a generator: Dynamic Zoom, Stabilization, keyframes in a render, Push, Slide, Wipe and Dip To Color. vidcut plays them as on a still.
 3. **Later:**

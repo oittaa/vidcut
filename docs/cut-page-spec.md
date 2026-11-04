@@ -27,7 +27,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - subtitle tracks: cues, subtitle files in and out, Create Subtitles from Audio (§8.12)
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
-- generators: Solid Color (§8.17)
+- generators: the twelve kinds of the Generators section (§8.17)
 - the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
@@ -1433,7 +1433,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - BT.2111 Color Bar HLG Narrow, BT.2111 Color Bar PQ Full and BT.2111 Color Bar PQ Narrow
     - EBU Color Bar, Four Color Gradient, Grey Scale and SMPTE Color Bar
     - Solid Color, Window and YCbCr Ramp
-  - vidcut has Solid Color. The other kinds are open work ([todo](todo/effects-library.md)).
+  - vidcut has these kinds, on cards in this order.
   - The tab also has a Fusion Generators section. It is part of Fusion (§1).
   - The pointer on a card previews the generator (p. 766). vidcut does not have this preview yet ([todo](todo/effects-library.md)).
 - **Adding a generator:**
@@ -1447,8 +1447,13 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - A new generator is 5 s long, and it adds no sound clip (measured).
 - **Inspector:**
   - Measured: the Generator tab of Solid Color has one row, Color. Color has no keyframes.
+  - Measured: the Generator tab of Four Color Gradient has Center X and Center Y, as sliders with keyframes.
+  - Measured: this tab also has Upper Left Color, Upper Right Color, Lower Left Color and Lower Right Color. The colors have no keyframes.
+  - Measured: the Generator tab of EBU Color Bar has a Level menu, with 75% (SMPTE) and 100%.
+  - Measured: Window has no Generator tab. 10 Step, 100mV Steps, Grey Scale, YCbCr Ramp, SMPTE Color Bar and the BT.2111 Color Bars have its OTIO shape.
+  - The tabs of those eight kinds were not opened. vidcut shows no Generator section for them.
   - Measured: the Settings tab has Transform, Cropping, Dynamic Zoom, Composite, Speed Change and Stabilization.
-  - vidcut: the Inspector shows a Generator section with the Color row, over the picture sections (X70).
+  - vidcut: the Inspector shows a Generator section with these rows, over the picture sections (X70).
 - **Picture sections:**
   - Measured in Resolve Studio 21.1.2: a Solid Color gives the same picture as a still of its color. The largest difference is 0.1 of 255. The renders have Rotation, Pitch, Yaw, Flip Vertical, Crop, Zoom, Overlay and Hue.
   - Measured: vidcut's frames and renders of vidcut's OTIO file differ by at most 0.6 of 255. The cases are Rotation, Anchor, Flip Vertical, Flip Horizontal with Crop Left, Zoom, Opacity and the 26 composite modes.
@@ -1474,19 +1479,93 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - M is the matrix from BT.709 to BT.2020.
     - D changes HLG scene light to display light, with a system gamma of 1.2. S is its inverse. Both use the BT.2020 luma weights.
   - Thus white is 100 nits in a PQ timeline. In an HLG timeline, the code value of white is 0.6296.
+- **Four Color Gradient:**
+  - The defaults are Center X 0, Center Y 0, Upper Left `#ff0000`, Upper Right `#ffff00`, Lower Left `#0000ff` and Lower Right `#00ffff` (measured).
+  - `generators.set` and the rows change them. A typed number past an end takes that end (measured: 5 in Center Y becomes 1).
+  - Measured: this is the picture, at a timeline of W × H. All values are fractions.
+    - u = x / (W − 1), and v = y / (H − 1).
+    - bend(t, p) = 0.5 t / p for t ≤ p, else 0.5 + 0.5 (t − p) / (1 − p).
+    - The mix of each channel is (1 − V) ((1 − U) UL + U UR) + V ((1 − U) LL + U LR).
+    - U = bend(u, (Center X + 1) / 2), and V = bend(v, (Center Y + 1) / 2).
+  - Thus a positive Center Y moves the center down.
+  - Measured: in an HDR timeline, the corners mix in code values first. Then each pixel has the conversion of a Solid Color.
+  - Measured: the keyframes of a center count on clip frames, and they are linear. At frame 10 of −1 at frame 0 and 1 at frame 29, Center X is −0.310.
+  - `keyframes.add` with `center_x` or `center_y` adds a keyframe. With keyframes, `generators.set` puts the value on a keyframe at `at`.
+- **Ramps and bars:**
+  - Measured: these are the pictures, at a timeline of W × H. All values are fractions, and x and y count from 0.
+  - 10 Step: a band is ⌈W / 11⌉ wide. The grey is min(⌊x / band⌋, 10) / 10.
+  - 100mV Steps: a band is ⌈W / 10⌉ wide. The grey is clamp(⌊x / band⌋ − 1, 0, 7) / 7.
+  - Grey Scale: the grey is x / W.
+  - YCbCr Ramp: t = x / W, and each channel is clamp(0.5 + s (t − 0.5), 0, 1).
+    - s is 2.539648 for red, 0.359182 for green and 2.814179 for blue.
+  - EBU Color Bar has eight bars. A bar is ⌈W / 8⌉ wide.
+    - The bars are white at 1, then yellow, cyan, green, magenta, red and blue at the Level, and then black.
+    - The Level is 75% or 100%. 75% is the default (measured).
+  - The rows of the bars end at ⌊k / 12 × H⌋, with 32-bit floats.
+  - SMPTE Color Bar has four rows, with these sizes:
+    - B = 1920 when W is less than 1920. Else B = max(1920, min(2 ⌊8 H / 9⌋, W × 4 / 3)).
+    - c = ⌈B × 3 / 28⌉, and U = 2 ⌈c / 6⌉
+    - F = max(W, 1920), and d = max(0, ⌊(F − 7 c) / 2⌋)
+  - The picture is F wide. It is cut off at the right when W is less than F.
+  - Row 1 ends at k = 7. The sides are 0.4. From d, seven bars of c are white, yellow, cyan, green, magenta, red and blue at 0.75.
+  - Row 2 ends at k = 8. The left side is cyan at 1. The first bar is white at 1, and the other bars are 0.75. The right side is blue at 1.
+  - Row 3 ends at k = 9. The left side is yellow at 1, and the right side is red at 1. Between them is the grey (x − (d + c)) / (min(d + 7 c, F) − (d + c)), held from 0 to 1.
+  - Row 4 goes to the bottom. The sides are 0.15.
+    - From d, it has black for 4.5 U, white for 6 U and black for 4.5 U.
+    - Then it has 0.02 for U, black for U, 0.04 for U, and black to d + 7 c.
+  - Window is white where ⌊W / 4⌋ < x < ⌊3 W / 4⌋ and ⌊H / 4⌋ < y < ⌊3 H / 4⌋. Elsewhere it is black and opaque.
+  - The three BT.2111 Color Bars have five rows. W sets the columns, and H sets the rows.
+    - d = ⌊W / 8⌋, and c = ⌊W × 206 / 1920⌋
+    - The bars start at d, d + c, d + 2 c, d + 3 c, W − d − 3 c, W − d − 2 c and W − d − c. The last bar ends at W − d.
+  - A code value is a fraction: (code − 64) / 876 in the Narrow kinds, and code / 1023 in PQ Full.
+
+    | Kind | Grey 40% | Mid | 2% | 4% |
+    |---|---|---|---|---|
+    | HLG Narrow | 414 | 721 | 80 | 99 |
+    | PQ Narrow | 414 | 572 | 80 | 99 |
+    | PQ Full | 409 | 593 | 20 | 41 |
+
+  - Row 1 ends at k = 1. The sides are Grey 40%. The bars are white, yellow, cyan, green, magenta, red and blue at 1.
+  - Row 2 ends at k = 7. The sides are Grey 40%. The bars have the same colors at Mid.
+  - Row 3 ends at k = 8. The sides are Mid.
+    - It is black from d to the middle of the second bar.
+    - Then it has nine steps from 0.1 to 0.9, each half a bar, to the end of the sixth bar.
+    - The last bar is 1.
+  - Row 4 ends at k = 9. It is a grey ramp, held from 0 to 1.
+    - In the Narrow kinds, the ramp is (x − ⌊W × 858 / 1920⌋) / (W × 876 / 1920).
+    - In PQ Full, the ramp is (x − ⌊W × 791 / 1920⌋) / (W × 1022 / 1920).
+    - Measured: at widths that do not divide evenly, this rule has an error of up to 0.001.
+  - Row 5 goes to the bottom, and it is black under these parts:
+    - Three tiles fill the left side, from ⌊d n / 3⌋ to ⌊d (n + 1) / 3⌋. Three tiles fill the right side in the same way, from W − d.
+    - gap = ⌊(c − W × 70 / 1920) / 2⌋, and u = c − 2 gap.
+    - The 2% patch is u wide, from the second bar plus gap. The 4% patch is u wide, from the third bar.
+    - Mid goes from ⌊W / 2⌋, for ⌊W × 438 / 1920⌋.
+
+    | Kind | Left tiles | Right tiles |
+    |---|---|---|
+    | HLG Narrow | 713, 719, 316; 538, 709, 718; 512, 706, 296 | 651, 286, 705; 639, 269, 164; 227, 147, 702 |
+    | PQ Narrow | 568, 571, 381; 484, 566, 571; 474, 564, 368 | 536, 361, 564; 530, 350, 256; 317, 236, 562 |
+    | PQ Full | 589, 592, 370; 491, 586, 592; 478, 584, 355 | 551, 347, 584; 544, 334, 225; 296, 201, 582 |
+
+  - Measured: in an HDR timeline, these kinds keep their SDR code values. The BT.2111 Color Bars are the same in SDR, PQ and HLG.
+  - vidcut does not copy two faults in these pictures ([X129](deviations.md#x129-generators-have-the-correct-picture-where-resolve-has-a-fault)).
 - **Length and dissolves:**
   - Measured: a generator can have any length.
   - Measured: Resolve keeps the source start of a generator at 0. A left trim moves the keyframes, and the picture does not move.
-  - vidcut: a left trim moves the source start, and the keyframes stay on their source frames. The picture does not move.
   - Measured: a dissolve between two generators runs past the ends of both clips. Thus it needs no extra frames.
 - **In OTIO files:**
-  - vidcut writes Solid Color in the shape of Resolve's own file.
-    - It is a `Clip.2`. Its media is a `GeneratorReference` with the `generator_kind` `Solid Color`.
-    - The color is in the group named `Generator`, in the `Resolve_OTIO` parameters.
+  - vidcut writes its kinds in the shape of Resolve's own file.
+    - Each one is a `Clip.2`. Its media is a `GeneratorReference` with the `generator_kind` of the kind.
+    - The values are in the group named `Generator`, in the `Resolve_OTIO` parameters.
     - A placed generator also has the effects of D75.
     - Its keyframes count from the first frame of the clip. Measured: Resolve reads them so, and its import sets the source start to 0.
-  - vidcut reads Solid Color back from that shape.
-  - vidcut keeps the other kinds as data. They play as gaps, and an import warns about them (X9).
+  - Measured: Four Color Gradient has the `Effect Name` `Four Color Gradient`, `Type` 66 and `Display Type` 0. Its parameters are `centerX`, `centerY`, `upperLeft`, `upperRight`, `lowerLeft` and `lowerRight`.
+  - Measured: EBU Color Bar has the `Effect Name` `EBU Color Bar`, `Type` 65 and `Display Type` 0.
+    - Its parameter `level` is a `UInt`: 0 is 75% and 1 is 100%. The values 2 to 4 play as 0.
+  - Measured: the other kinds have the `Effect Name` `Generator`, `Type` 42 and `Display Type` 3. They have only the `Display Name` parameter.
+  - Measured: the `generator_kind` of a BT.2111 Color Bar has a lower-case word: `BT.2111 Color bar PQ Full`. Its clip name has `Color Bar`.
+  - vidcut reads its kinds back from that shape.
+  - vidcut keeps a generator of any other section as data. It plays as a gap, and an import warns about it (X9).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 
@@ -2694,7 +2773,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - then `Drop Shadow` and `Background`, with no `Stroke`
   - vidcut writes the left edge, middle or right edge of its lines there, in plain text, because Resolve's Scroll has no rich text.
   - vidcut reads a Scroll back with no outline.
-  - vidcut reads Solid Color (§8.17). It carries the other generators.
+  - vidcut reads the generators that it draws (§8.17). It carries the other generators.
   - Resolve writes Text+ as a `MissingReference`, and loses it itself.
   - vidcut reads Text+ as a clip with no media (D40).
   - Resolve Studio 21.1.1 draws a file that vidcut writes as vidcut does, within a few pixels at 3840×2160, except for the outline.

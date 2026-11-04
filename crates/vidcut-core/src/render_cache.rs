@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::lru::Lru;
+use crate::lru::Uncapped;
 use crate::model::{ClipCache, CompositeMode, Project, RenderCache, Retime, SuperScale, Upscaler};
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
 use crate::render::{Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
@@ -561,9 +561,34 @@ impl Part {
     }
 }
 
+const KEYS_KEPT: usize = 1 << 22;
+
+#[derive(Default)]
+struct PieceKeys {
+    pieces: Uncapped<Key, Arc<[Key]>>,
+    kept: usize,
+}
+
+impl PieceKeys {
+    fn get(&mut self, memo: &Key) -> Option<Arc<[Key]>> {
+        self.pieces.get(memo).cloned()
+    }
+
+    fn insert(&mut self, memo: Key, keys: Arc<[Key]>) {
+        self.kept += keys.len() + 1;
+        self.pieces.insert(memo, keys);
+        while self.kept > KEYS_KEPT && self.pieces.len() > 1 {
+            let Some((_, old)) = self.pieces.pop_oldest() else {
+                break;
+            };
+            self.kept -= old.len() + 1;
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Cache {
-    keys: Lru<Key, Arc<[Key]>, 4096>,
+    keys: PieceKeys,
     index: Index,
     blocked: HashSet<Key>,
 }
@@ -595,7 +620,7 @@ impl Cache {
         let name = |m: &str, p: &Path| setup.name(m, p);
         let memo = setup.piece_name(piece, plan);
         if let Some(keys) = self.keys.get(&memo) {
-            return keys.clone();
+            return keys;
         }
         let keys: Arc<[Key]> = (0..bare.frames())
             .map(|k| {
@@ -624,7 +649,7 @@ impl Cache {
         let whole = serde_json::to_vec(&whole).unwrap_or_default();
         let memo = digest(&[stem.as_bytes(), &whole]);
         if let Some(keys) = self.keys.get(&memo) {
-            return Some(keys.clone());
+            return Some(keys);
         }
         let retimed = retimed(&alone);
         let keys: Arc<[Key]> = (0..alone.frames())

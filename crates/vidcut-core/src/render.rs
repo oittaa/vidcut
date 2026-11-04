@@ -5,10 +5,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::generators::{Axis, Pattern};
 use crate::model::{
-    Clip, ClipCache, ClipRetime, ColorSpace, DuckDetect, Generator, Hdr, Keyframe, Media,
-    MediaSuperScale, Picture, PictureTransition, Project, PushPreset, Retime, Section, Settings,
-    SlidePreset, SmoothMode, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
+    Chart, Clip, ClipCache, ClipRetime, ColorSpace, DuckDetect, Generator, Gradient, Hdr, Keyframe,
+    Media, MediaSuperScale, Picture, PictureTransition, Project, PushPreset, Retime, Section,
+    Settings, SlidePreset, SmoothMode, SuperScale, TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -253,18 +254,72 @@ pub enum VideoPiece {
 }
 
 /// What a [`VideoPiece::Generated`] shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Generated {
     /// One color: `[r, g, b]`, each from 0 to 255.
     SolidColor { color: [u8; 3] },
+    /// Four colors from the corners. `frame` is the source frame of the
+    /// piece's first frame when the gradient has keyframes, and 0 when not.
+    FourColorGradient { gradient: Gradient, frame: i64 },
+    /// A picture that a rule draws from the size of the timeline.
+    Chart { chart: Chart },
 }
 
 impl Generated {
-    pub fn of(g: &Generator) -> Option<Self> {
+    pub fn of(g: &Generator, frame: i64) -> Option<Self> {
         match g {
             Generator::SolidColor { color } => Some(Self::SolidColor { color: *color }),
-            Generator::Carried { .. } => None,
+            Generator::FourColorGradient(gradient) => Some(Self::FourColorGradient {
+                gradient: gradient.clone(),
+                frame: if gradient.is_keyed() { frame } else { 0 },
+            }),
+            other => other.chart().map(|chart| Self::Chart { chart }),
+        }
+    }
+
+    pub fn is_keyed(&self) -> bool {
+        matches!(self, Self::FourColorGradient { gradient, .. } if gradient.is_keyed())
+    }
+
+    pub fn after(&self, k: i64) -> Self {
+        match self {
+            Self::FourColorGradient { gradient, frame } if gradient.is_keyed() => {
+                Self::FourColorGradient {
+                    gradient: gradient.clone(),
+                    frame: frame + k,
+                }
+            }
+            other => other.clone(),
+        }
+    }
+
+    pub fn held(&self) -> Self {
+        match self {
+            Self::FourColorGradient { gradient, frame } if gradient.is_keyed() => {
+                let at = |axis| gradient.center_at(axis, *frame as f64);
+                Self::FourColorGradient {
+                    gradient: Gradient {
+                        center_x: at(Axis::X),
+                        center_x_keys: Vec::new(),
+                        center_y: at(Axis::Y),
+                        center_y_keys: Vec::new(),
+                        ..gradient.clone()
+                    },
+                    frame: 0,
+                }
+            }
+            other => other.clone(),
+        }
+    }
+
+    pub fn at(&self, k: i64) -> Pattern {
+        match self {
+            Self::SolidColor { color } => Pattern::SolidColor(*color),
+            Self::FourColorGradient { gradient, frame } => {
+                Pattern::of_gradient(gradient, (frame + k) as f64)
+            }
+            Self::Chart { chart } => Pattern::Chart(*chart),
         }
     }
 }
@@ -1131,7 +1186,7 @@ impl VideoPiece {
                 ..
             } => Self::Generated {
                 frames,
-                picture: *picture,
+                picture: picture.after(k),
                 placed: placed.iter().map(|p| p.after(k)).collect(),
                 excluded: *excluded,
             },
@@ -1183,7 +1238,7 @@ impl VideoPiece {
                     ..
                 },
             ) => {
-                picture == p2
+                picture.after(*frames) == *p2
                     && excluded == e2
                     && placed.len() == l2.len()
                     && placed.iter().zip(l2).all(|(a, b)| a.after(*frames) == *b)
@@ -2020,7 +2075,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     };
     let picture =
         |c: &Clip, nest: Option<&Nest>, over: bool, x: i64, y: i64| -> Result<VideoPiece> {
-            if let Some(picture) = c.generator.as_ref().and_then(Generated::of) {
+            let drawn = c.generator.as_ref();
+            if let Some(picture) = drawn.and_then(|g| Generated::of(g, c.content_at(x))) {
                 return Ok(VideoPiece::Generated {
                     frames: y - x,
                     picture,
@@ -2100,7 +2156,11 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                                 *pace = Pace::of(0.0, 0);
                             }
                         }
-                        VideoPiece::Generated { .. } => {}
+                        VideoPiece::Generated { picture, .. } => {
+                            if mode == SmoothMode::Faster {
+                                *picture = picture.after(at - x).held();
+                            }
+                        }
                         _ => return Ok(None),
                     }
                     Ok(Some(piece))

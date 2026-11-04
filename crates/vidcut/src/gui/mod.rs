@@ -31,6 +31,7 @@ mod relink;
 mod retime;
 mod retime_process;
 mod row;
+mod scopes;
 mod shuttle;
 mod speech;
 mod subtitles;

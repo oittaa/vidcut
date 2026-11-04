@@ -8,10 +8,13 @@ use eframe::wgpu;
 use vidcut_av::player::Player;
 use vidcut_core::Error;
 
+use super::workspace::ScopePictures;
 use crate::live::stats::{PlayerStats, ViewerStats};
 use crate::live::{Capture, Presented};
 use vidcut_av::screen::Gate;
 use vidcut_av::screen::{Drawn, Gpu, Screen};
+use vidcut_core::model::Hdr;
+use vidcut_core::preferences::Scope;
 
 type Engine = Arc<Player>;
 
@@ -32,7 +35,10 @@ struct State {
     engine: Option<Engine>,
     want: [i32; 2],
     super_scale: bool,
+    scopes: Vec<(Scope, [i32; 2])>,
     target: Option<Target>,
+    scope_targets: Vec<(Scope, Target)>,
+    colors: Option<Hdr>,
     has_frame: bool,
     stats: ViewerStats,
     woken: bool,
@@ -63,6 +69,7 @@ pub struct Viewer {
     gpu_pictures: vidcut_av::hw::GpuPictures,
     thread: Option<JoinHandle<()>>,
     texture: Option<(u64, egui::TextureId)>,
+    scope_textures: Vec<(Scope, (u64, egui::TextureId))>,
 }
 
 #[derive(Clone)]
@@ -122,6 +129,7 @@ impl Viewer {
             gpu_pictures,
             thread,
             texture: None,
+            scope_textures: Vec::new(),
         }
     }
 
@@ -192,32 +200,79 @@ impl Viewer {
             (s.target.clone(), s.has_frame)
         };
         if let Some(t) = &target {
-            let filter = wgpu::FilterMode::Nearest;
-            match self.texture {
-                Some((g, _)) if g == t.generation => {}
-                Some((_, tex)) => {
-                    render
-                        .renderer
-                        .write()
-                        .update_egui_texture_from_wgpu_texture(
-                            &render.device,
-                            &t.view,
-                            filter,
-                            tex,
-                        );
-                    self.texture = Some((t.generation, tex));
-                }
-                None => {
-                    let tex = render.renderer.write().register_native_texture(
-                        &render.device,
-                        &t.view,
-                        filter,
-                    );
-                    self.texture = Some((t.generation, tex));
-                }
-            }
+            self.texture = Some(native_texture(render, t, self.texture));
         }
         (self.texture.map(|(_, t)| t), has_frame)
+    }
+
+    pub fn sync_scopes(
+        &mut self,
+        render: &RenderState,
+        wanted: &[(Scope, [i32; 2])],
+    ) -> ScopePictures {
+        let (targets, colors) = {
+            let mut s = self.shared.lock();
+            if s.scopes != wanted {
+                s.scopes = wanted.to_vec();
+                s.woken = true;
+                self.shared.wake.notify_all();
+            }
+            (s.scope_targets.clone(), s.colors)
+        };
+        self.scope_textures.retain(|(scope, (_, tex))| {
+            let kept = targets.iter().any(|(s, _)| s == scope);
+            if !kept {
+                render.renderer.write().free_texture(tex);
+            }
+            kept
+        });
+        let mut textures = Vec::with_capacity(targets.len());
+        for (scope, target) in &targets {
+            let held = self
+                .scope_textures
+                .iter_mut()
+                .find(|(s, _)| s == scope)
+                .map(|(_, h)| h);
+            let made = match held {
+                Some(h) => {
+                    *h = native_texture(render, target, Some(*h));
+                    h.1
+                }
+                None => {
+                    let h = native_texture(render, target, None);
+                    self.scope_textures.push((*scope, h));
+                    h.1
+                }
+            };
+            textures.push((*scope, made));
+        }
+        ScopePictures { textures, colors }
+    }
+}
+
+fn native_texture(
+    render: &RenderState,
+    target: &Target,
+    held: Option<(u64, egui::TextureId)>,
+) -> (u64, egui::TextureId) {
+    let filter = wgpu::FilterMode::Nearest;
+    match held {
+        Some((g, tex)) if g == target.generation => (g, tex),
+        Some((_, tex)) => {
+            render
+                .renderer
+                .write()
+                .update_egui_texture_from_wgpu_texture(&render.device, &target.view, filter, tex);
+            (target.generation, tex)
+        }
+        None => {
+            let tex = render.renderer.write().register_native_texture(
+                &render.device,
+                &target.view,
+                filter,
+            );
+            (target.generation, tex)
+        }
     }
 }
 
@@ -260,7 +315,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
     let mut generation = 0u64;
     let mut next: Option<Instant> = None;
     loop {
-        let (tasks, engine, want, super_scale) = {
+        let (tasks, engine, want, super_scale, scopes) = {
             let mut s = shared.lock();
             while !s.woken && !s.stop {
                 let wait = next.map_or(IDLE, |n| n.saturating_duration_since(Instant::now()));
@@ -282,6 +337,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
                 s.engine.clone(),
                 s.want,
                 s.super_scale,
+                s.scopes.clone(),
             )
         };
         let now = Instant::now();
@@ -301,6 +357,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             })
             .unwrap_or_default();
         screen.set_output_lut(shown.as_ref().and_then(|s| s.output_lut.clone()));
+        screen.scoping(!scopes.is_empty());
         let drawn = screen.draw(
             gpu,
             shown.as_ref().map(|s| &s.picture),
@@ -315,6 +372,11 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             h.max(2) as u32,
         );
         drop(counting);
+        let wanted: Vec<(Scope, (u32, u32))> = scopes
+            .iter()
+            .map(|&(scope, [w, h])| (scope, (w.max(2) as u32, h.max(2) as u32)))
+            .collect();
+        let plotted = screen.scopes(gpu, &wanted);
         let changed = drawn != Drawn::Same;
         if changed && vidcut_av::debug() {
             eprintln!("[viewer] drew {} at {w}x{h}", drew(shown.as_ref(), &screen));
@@ -326,6 +388,12 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             generation,
             view: view.clone(),
         });
+        let scope_targets: Vec<(Scope, Target)> = screen
+            .scope_views()
+            .into_iter()
+            .map(|(scope, generation, view)| (scope, Target { generation, view }))
+            .collect();
+        let colors = shown.as_ref().and_then(|s| s.colors);
         let has_frame = shown.is_some();
         let shown_how = shown.as_ref().map(|s| how(s, &screen));
         let presented = shown.filter(|s| s.exact).map(|s| s.frame);
@@ -336,6 +404,8 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
         {
             let mut s = shared.lock();
             s.target = target;
+            s.scope_targets = scope_targets;
+            s.colors = colors;
             s.has_frame = has_frame;
             s.stats.size = [w.max(2) as u32, h.max(2) as u32];
             s.stats.shown = shown_how.map(String::from);
@@ -354,7 +424,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
                 }
             }
         }
-        if changed {
+        if changed || plotted {
             repaint();
         }
     }

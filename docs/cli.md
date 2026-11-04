@@ -134,7 +134,7 @@ Other clients: `{"command": "vidcut", "args": ["mcp", "-p", "/abs/talk.vidcut"]}
 - `use_project` selects a project. With `create: true`, it makes one.
 - Calls route like the calls of the CLI. Arguments can carry `dry_run` and `if_rev`.
 - Results are the response JSON. Failures are tool errors that give the error code.
-- `frame_render`, `gui_screenshot` and `storyboard_render` also return the PNG as an image.
+- `frame_render`, `frame_scope`, `gui_screenshot` and `storyboard_render` also return the PNG as an image.
 
 ## Result fields
 
@@ -186,8 +186,9 @@ The schema describes the parameters, not the results. This list gives the result
 - `looks delete`: `deleted`, `kind` and `path`.
 - `titles list`: for each title, `clip`, `track`, `start`, `end` (frames), `start_tc`, `end_tc`, `enabled` and `title`.
 - `generators list`: for each generator, `clip`, `track`, `start`, `end` (frames), `start_tc`, `end_tc`, `enabled` and `generator`.
-  - `generator` has `kind` (`solid_color` or `carried`) and `name`.
+  - `generator` has `kind` (a kind of `generators add`, or `carried`) and `name`.
   - A `solid_color` also has `color`.
+  - A `four_color_gradient` also has `center_x`, `center_y`, `upper_left`, `upper_right`, `lower_left` and `lower_right`. It has `center_x_keys` and `center_y_keys` when they are not empty.
 - `subtitles export`:
   - `path`, `track`, `format` and `cues` (how many).
   - `warnings`: the cues of an IMSC1 file that have more lines than their region holds, and an outline wider than the file holds.

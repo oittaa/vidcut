@@ -320,6 +320,42 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
   - A picture that the meter's import or copy brings down is such an error. Why: the GPU meter then copies it down, up and back. The CPU meter only copies it down.
 - `VIDCUT_DEBUG` tells whether the GPU or the CPU measures.
 
+## The scopes
+
+The Waveform, the Parade and the Vectorscope show the picture that the viewer draws ([deviation X127](../deviations.md#x127-the-viewer-has-scopes)).
+
+What they read:
+
+- `Screen::scopes` reads the canvas of the last `Screen::draw`. That is the mix after the output LUT, in the timeline color space, before `fs_screen`.
+- While a scope is on, `Screen::scoping` makes the canvas `Wide`, also for one SDR layer.
+  - Why: an 8-bit canvas loses the values above 1 and below 0, and the steps between the 10-bit levels.
+  - `fs_screen` only clips an SDR canvas. Thus the picture on the screen stays the same, but for rounding.
+- vidcut has no grade. It is an item in the todo files ([primary-grade](../todo/primary-grade.md)).
+- The source viewer has no timeline color space. There, the scopes read SDR values.
+
+How the GPU makes one scope (`scope.wgsl`, `Plots::paint`):
+
+- A compute pass adds one to a counter for each pixel of the canvas (`hits`). There is one entry point for each `Scope`: `waveform`, `parade` and `vectorscope`.
+- A render pass then paints the counters into a `Target` of the scope's own size (`fs`).
+  - The brightness is the square root of the count, so that a thin trace still shows.
+  - One column of a scope can take more columns of the canvas than the next one. `evened` scales each count for that. Thus the trace has no stripes.
+  - The pass adds the lines of the scale.
+- Each size is clamped from `SMALLEST` to `LARGEST`.
+- One draw of the canvas gives one run of each scope. A scope that has the current draw does no work (`Plot`).
+
+The scales (`marks`):
+
+- `luma_of` takes the weights of the luma from `shader_colors`. They are BT.709 in SDR, and BT.2020 in HDR PQ and HDR HLG.
+- The Waveform and the Parade have the same room above and below the full range (`LOW`, `HIGH`). Thus a value out of range still shows.
+- SDR marks are 10-bit codes. HDR marks are nits, through `pq_code` and `hlg_code`.
+- The Vectorscope has Cb across and Cr up, with a circle, crossing lines and a box at each 75 percent color bar.
+
+A scope that is off:
+
+- `Screen::scopes` with an empty list drops each `Plot` and returns at once. There is no pass and no readback.
+- The pipelines (`Pipes`) are made at the first use. A viewer with no scope never makes them.
+- `Screen::scoping` turned off lets the next draw drop `Wide`, as before the scope was on.
+
 ## Why
 
 - The GPU goes first wherever it gives correct results (AGENTS.md rule 9).
