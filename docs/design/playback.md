@@ -506,6 +506,7 @@ The index:
   - `Index::read` removes no file.
   - A dry run does not mark the index as scanned (`Background::read_index`). Thus a later scan still removes a cache `.keys` file whose video is gone.
 - The disk cache can remove a video at any time. `Cache::apply` removes from the index each file of the plan that is gone (`Index::remove`). Thus the background render makes its frames again.
+- Each render starts with `Render::drop_deleted`. It removes each other file that is gone. Thus the index does not grow with deleted videos.
 
 The jobs:
 

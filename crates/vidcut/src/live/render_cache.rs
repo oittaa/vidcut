@@ -625,7 +625,22 @@ impl Render {
         });
     }
 
+    fn drop_deleted(&self) {
+        let held: Vec<Arc<Path>> = self
+            .lock()
+            .index()
+            .files()
+            .map(|(file, _)| file.clone())
+            .collect();
+        let gone: Vec<Arc<Path>> = held.into_iter().filter(|f| !f.is_file()).collect();
+        let mut cache = self.lock();
+        for file in &gone {
+            cache.index_mut().remove(file);
+        }
+    }
+
     fn render(&self) -> Result<bool, String> {
+        self.drop_deleted();
         let gpu = crate::preferences::gpu_decoding().own_decoder();
         let mut decodes = (*self.decodes).clone();
         if find_slow(&self.project, gpu.as_ref(), &mut decodes) {
