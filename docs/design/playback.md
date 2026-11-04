@@ -98,6 +98,7 @@ flowchart TD
 - Apple silicon has one shared budget.
 - While an AI upscaler holds GPU memory, the video budget is smaller (`store::Lent`, [gpu](gpu.md)).
 - The least recently used pictures go first, whichever engine decoded them. The prepared picture of each engine never goes (`Store::hold`).
+- `Store::kept_run` and `Store::touch` make their ids in small batches, outside the lock. They take the lock for one batch at a time. Why: the decoding threads and the presenter wait on this lock, and a long run must not hold them up.
 - An engine can show a picture that another engine decoded, by its `Id`.
 - Each engine plans its decoding with its part of the budget (`Config::part`). When the last engine ends, the cache empties.
 
