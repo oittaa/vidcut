@@ -485,9 +485,9 @@ pub enum Request {
         #[serde(default)]
         back: bool,
     },
-    /// Set the Clip Color, the camera name, the Input Color Space and the
-    /// Super Scale of media items. Their clips show the Clip Color unless
-    /// they have their own.
+    /// Set the Clip Color, the camera name, Date Created, the scene, shot and
+    /// take, the Input Color Space and the Super Scale of media items. Their
+    /// clips show the Clip Color unless they have their own.
     #[serde(rename = "media.set")]
     MediaSet {
         media: OneOrMany<String>,
@@ -498,6 +498,18 @@ pub enum Request {
         /// number. Empty string clears it.
         #[serde(default)]
         camera: Option<String>,
+        /// Date Created, as `YYYY-MM-DD`. Empty string clears it.
+        #[serde(default)]
+        created: Option<String>,
+        /// The scene, such as a number. Empty string clears it.
+        #[serde(default)]
+        scene: Option<String>,
+        /// The shot, such as a letter or a number. Empty string clears it.
+        #[serde(default)]
+        shot: Option<String>,
+        /// The take, such as a number. Empty string clears it.
+        #[serde(default)]
+        take: Option<String>,
         /// How its pictures' colors are read: `tagged`, as the file says, or
         /// `bt709`, `bt601`, `pq` or `hlg` in place of the file's tags, for a
         /// file whose tags are wrong. The viewer, thumbnails and exports
@@ -4110,6 +4122,21 @@ pub enum PoolSort {
     /// The label of the file's start timecode; media without one count
     /// as 00:00:00:00 (decision D59).
     Timecode,
+    /// The camera name, then the start timecode. Media without a name come
+    /// first.
+    Camera,
+    /// The day of Date Created, then the start timecode. Media without a
+    /// date come first.
+    DateTime,
+    /// The bin, then the start timecode.
+    Bin,
+    /// The scene, the shot, then the take. Media without one come first.
+    SceneShot,
+    /// The Clip Color, then the start timecode. Media without a color come
+    /// first.
+    ClipColor,
+    /// The media with no fresh proxy, then those with one.
+    OnlineStatus,
 }
 
 /// How the Media Pool shows its items (spec §3).
@@ -4127,7 +4154,8 @@ pub enum PoolMode {
     /// its start timecode, its camera and its name. By `name`, the cards go
     /// by first letter under a heading, and by timecode inside a letter;
     /// Source Tape takes that order. By `date`, they go under a heading for
-    /// each day.
+    /// each day. By `camera`, `date_time`, `bin`, `scene_shot`, `clip_color`
+    /// and `online_status`, they go under a heading for each value.
     Metadata,
 }
 

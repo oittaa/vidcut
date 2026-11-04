@@ -751,6 +751,10 @@ impl Words<'_> {
         );
         s.put("color", "Color", &raw, |m| json!(m.color));
         s.put("camera", "Camera", &text, |m| json!(m.camera));
+        s.put("created", "Date Created", &text, |m| json!(m.created));
+        s.put("scene", "Scene", &text, |m| json!(m.scene));
+        s.put("shot", "Shot", &text, |m| json!(m.shot));
+        s.put("take", "Take", &text, |m| json!(m.take));
         s.put("color_space", "Color Space", &color_space, |m| {
             json!(m.color_space)
         });
