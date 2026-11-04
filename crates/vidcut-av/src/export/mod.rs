@@ -1107,7 +1107,7 @@ fn encode(
             }
             let encoder = ctx
                 .open_as(codec)
-                .ctx(|| format!("opening {}", spec.name))?;
+                .ctx(|| format!("opening {} with {} channels", spec.name, spec.channels))?;
             let index = usize::from(video.is_some());
             let mut ost = octx
                 .add_stream(codec)

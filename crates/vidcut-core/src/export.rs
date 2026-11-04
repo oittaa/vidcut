@@ -938,8 +938,12 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
                 s.container.extension()
             )));
         }
-        if a.channels.is_some_and(|c| !(1..=8).contains(&c)) {
-            return Err(Error::usage("audio channels must be 1..8"));
+        use crate::model::Settings;
+        if a.channels.is_some_and(|c| !Settings::channels_fit(c)) {
+            return Err(Error::usage(format!(
+                "audio channels must be {}",
+                Settings::CHANNELS
+            )));
         }
     } else if s.container.audio_only() {
         return Err(Error::usage(format!(

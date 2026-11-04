@@ -189,6 +189,12 @@ impl Format {
 }
 
 impl Settings {
+    pub const CHANNELS: &str = "1..8, 10, 12, 14, 16 or 24";
+
+    pub fn channels_fit(channels: u16) -> bool {
+        matches!(channels, 1..=8 | 10 | 12 | 14 | 16 | 24)
+    }
+
     pub fn with_format(fps: Option<&str>, size: Option<(u32, u32)>) -> crate::error::Result<Self> {
         let mut s = Self::default();
         if let Some(f) = fps {

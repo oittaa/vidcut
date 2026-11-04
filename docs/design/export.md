@@ -43,6 +43,8 @@ flowchart TD
 - **Range:** the range given, else In to Out when both marks are set, else the whole timeline ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
 - **Plans:** `render::flatten` over the range. With `per_clip`, one `render::flatten_clip` for each clip.
   - The plan uses the sample rate and channels of the audio encoder (`resolve_audio`). Why: the sample math then agrees with the encoder.
+  - A project and an export take the channel counts that `channels_fit` names. Why: FFmpeg has a default channel layout only for these counts. The mix needs that layout.
+  - An encoder can take fewer channels. Then the export fails with the name of the encoder and the channel count.
 - **Models:** `session::export_media` first checks the models of Voice Isolation, Super Scale, Retime Process and the Process of each Smooth Cut. A missing model needs `download`.
 
 GPU preferences:

@@ -6538,8 +6538,12 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
         p.settings.sample_rate = sr;
     }
     if let Some(ch) = set.channels {
-        if !(1..=8).contains(&ch) {
-            return Err(Error::invalid("channels must be 1..8"));
+        use crate::model::Settings;
+        if !Settings::channels_fit(ch) {
+            return Err(Error::invalid(format!(
+                "channels must be {}",
+                Settings::CHANNELS
+            )));
         }
         p.settings.channels = ch;
     }
