@@ -31,6 +31,7 @@ pub struct Sprite {
     pub y: i32,
     pub width: u32,
     pub height: u32,
+    pub lift: f32,
     pub rgba: Vec<[f32; 4]>,
 }
 
@@ -312,6 +313,7 @@ enum Markup<'a> {
 
 #[derive(Clone)]
 struct Laid {
+    tall: f32,
     sprite: Option<Sprite>,
     lines: f32,
     above: f32,
@@ -935,6 +937,16 @@ fn line_gap(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) ->
         .unwrap_or(px * look.line)
 }
 
+fn line_tall(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) -> f32 {
+    look.title_gap
+        .and_then(|_| {
+            let id = face_of(system, attrs)?;
+            let [ascent, descent, _] = font_heights(system, id, attrs.weight)?;
+            Some(((ascent + descent) * f64::from(px)) as f32)
+        })
+        .unwrap_or(px * look.line)
+}
+
 fn shifts(system: &mut FontSystem, run: &LayoutRun<'_>, seat: bool) -> Vec<f32> {
     let shifted = |g: &LayoutGlyph| g.metadata & (RAISED | LOWERED) != 0;
     let whole = run.glyphs.iter().all(shifted);
@@ -1098,6 +1110,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     };
     let base = with_face_weight(&f.system, Attrs::new().family(family));
     let gap = line_gap(&mut f.system, look, &base, size);
+    let tall = line_tall(&mut f.system, look, &base, size);
     let mut buffer = Buffer::new(&mut f.system, Metrics::new(size, gap));
     buffer.set_wrap(Wrap::WordOrGlyph);
     buffer.set_size(Some(wrap), None);
@@ -1440,6 +1453,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
         y: y0 as i32 - pad,
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
+        lift: 0.0,
         rgba: (y0..y1)
             .flat_map(|y| rgba[y * w + x0..y * w + x1].iter().copied())
             .collect(),
@@ -1448,6 +1462,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
         sprite,
         lines,
         above,
+        tall,
         popped,
         seated,
     })
@@ -1472,6 +1487,7 @@ fn inside(s: Sprite, (w, h): (f64, f64)) -> Option<Sprite> {
         y: y0,
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
+        lift: s.lift,
         rgba,
     })
 }
@@ -1687,6 +1703,7 @@ fn merged(mut sprites: Vec<Sprite>) -> Option<Sprite> {
         y: y0,
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
+        lift: 0.0,
         rgba,
     })
 }
@@ -1746,6 +1763,7 @@ fn shaped_box(t: &Title, block: &TitleBlock, (w, h): (f64, f64), pixel: f64) -> 
         y: y0,
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
+        lift: 0.0,
         rgba,
     };
     let [px, py] = block.pivot;
@@ -1828,6 +1846,7 @@ fn title_block(
         lines,
         above,
         seated,
+        tall,
         ..
     } = lay_out(&look)?
     else {
@@ -1845,7 +1864,14 @@ fn title_block(
     );
     let [left, top] =
         seated.unwrap_or([((px + 0.5 - across) * w) as f32 - lined * look.wrap, exact]);
-    let sprite = placed(sprite, left, top);
+    let sprite = Sprite {
+        lift: if t.moves() {
+            (0.5 - down as f32) * tall
+        } else {
+            0.0
+        },
+        ..placed(sprite, left, top)
+    };
     if block.turn == 0.0 {
         return Some(sprite);
     }
@@ -1920,6 +1946,7 @@ fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
         y: lo_y,
         width: ow as u32,
         height: oh as u32,
+        lift: s.lift,
         rgba,
     }
 }

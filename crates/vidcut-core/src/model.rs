@@ -2707,10 +2707,6 @@ impl Title {
             .fractions()
     }
 
-    pub fn run_lift(&self, tall: f64) -> f64 {
-        (0.5 - self.anchor_of(TitlePart::Whole)[1]) * tall
-    }
-
     pub fn usual_size(kind: TitleKind) -> f64 {
         match kind {
             TitleKind::Text => 96.0 / 1080.0,

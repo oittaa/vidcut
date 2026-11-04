@@ -136,10 +136,10 @@ pub(super) fn picture<'a>(
     ColorImage::from_rgba_unmultiplied([w, h], &rgba)
 }
 
-fn scrolled(t: &Title, sprite: Option<&Sprite>, h: u32, fraction: f64) -> i32 {
+fn scrolled(sprite: Option<&Sprite>, h: u32, fraction: f64) -> i32 {
     sprite.map_or(0, |s| {
         let tall = f64::from(s.height);
-        let top = f64::from(h) - fraction * (f64::from(h) + tall) + t.run_lift(tall);
+        let top = f64::from(h) - fraction * (f64::from(h) + tall) + f64::from(s.lift);
         top.round() as i32 - s.y
     })
 }
@@ -212,7 +212,7 @@ impl Browser {
                 .into_iter()
                 .next();
             let dy = if moves {
-                scrolled(&template.title, sprite.as_ref(), size.1, fraction)
+                scrolled(sprite.as_ref(), size.1, fraction)
             } else {
                 0
             };
@@ -233,7 +233,7 @@ impl Browser {
         }
         let card = self.cards.get_mut(&key).expect("made above");
         if moves && card.fraction != fraction {
-            let dy = scrolled(&template.title, card.sprite.as_ref(), size.1, fraction);
+            let dy = scrolled(card.sprite.as_ref(), size.1, fraction);
             card.texture.set(
                 picture(card.sprite.as_ref(), size, dy),
                 TextureOptions::LINEAR,
@@ -274,7 +274,7 @@ impl Thumbs {
                         .into_iter()
                         .next();
                     let dy = if t.moves() {
-                        scrolled(t, sprite.as_ref(), h, 0.5)
+                        scrolled(sprite.as_ref(), h, 0.5)
                     } else {
                         0
                     };

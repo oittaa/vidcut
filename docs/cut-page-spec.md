@@ -2744,6 +2744,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - Each line of a lower third has its own `anchor`. It acts on that line as on the block of a Text title (measured in Resolve Studio 21.1.2).
     - The upper line's usual anchor is the end of its bottom edge by `align`. The lower line's usual anchor is the end of its top edge by `align`.
     - `titles.set` with `anchor` changes the lower line. With `line`, it changes the named line.
+  - The `anchor` of a Scroll acts on a text box as wide as the picture (measured in Resolve Studio 21.1.2).
+    - The x of the position in the file goes to the column of the anchor. The columns are the left edge, the middle and the right edge of the box.
+    - A left column thus moves the lines half a picture right. A right column moves them half a picture left.
+    - A top row moves the lines down by half of one line's height. A bottom row moves them up by that much.
+    - That height is the font's ascent plus its descent. The number of lines does not change the move.
   - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>`, `<o>`, `<s>`, `<sup>`, `<sub>` and `<font>`.
   - `<font>` takes a `color`, a `face`, a `size`, a `spacing`, a `tracking` and a `case`.
   - A line takes the height of its largest size.

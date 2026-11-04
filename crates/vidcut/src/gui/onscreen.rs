@@ -36,7 +36,7 @@ pub struct Grab {
     held: Option<Held>,
     landing: Option<(String, Title, std::time::Instant, Title)>,
     sent: Option<(String, Title)>,
-    boxes: Lru<(Title, (u32, u32)), [f32; 4], KEPT>,
+    boxes: Lru<(Title, (u32, u32)), [f32; 5], KEPT>,
 }
 
 struct Shown {
@@ -123,7 +123,7 @@ fn angle_of(v: Vec2) -> f32 {
 }
 
 impl Grab {
-    fn upright_box(&mut self, t: &Title, size: (u32, u32)) -> Option<[f32; 4]> {
+    fn upright_box(&mut self, t: &Title, size: (u32, u32)) -> Option<[f32; 5]> {
         let key = (t.clone(), size);
         if let Some(b) = self.boxes.get(&key) {
             return Some(*b);
@@ -139,7 +139,13 @@ impl Grab {
         let s = vidcut_av::burn::title(&upright, size.0, size.1, size.1)
             .into_iter()
             .next()?;
-        let b = [s.x as f32, s.y as f32, s.width as f32, s.height as f32];
+        let b = [
+            s.x as f32,
+            s.y as f32,
+            s.width as f32,
+            s.height as f32,
+            s.lift,
+        ];
         self.boxes.insert(key, b);
         Some(b)
     }
@@ -214,7 +220,8 @@ impl Workspace {
                 upper: None,
                 ..title.clone()
             };
-            let Some([bx, by, bw, bh]) = self.timeline.title_grab.upright_box(&base, size) else {
+            let Some([bx, by, bw, bh, lift]) = self.timeline.title_grab.upright_box(&base, size)
+            else {
                 continue;
             };
             let z = title.scale() as f32;
@@ -234,7 +241,7 @@ impl Workspace {
                     of: length,
                     held: false,
                 };
-                (run.top(0, h, f64::from(bh)) + title.run_lift(f64::from(bh))) as f32 - y
+                run.top(0, h, f64::from(bh)) as f32 + lift - y
             } else {
                 0.0
             };
