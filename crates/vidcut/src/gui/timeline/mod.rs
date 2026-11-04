@@ -20,6 +20,7 @@ use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::render_cache::Part;
 use vidcut_core::request::ViewerMode;
 
+use crate::gui::subclip::NewSubclip;
 use crate::gui::workspace::{Workspace, dim};
 use crate::gui::{keys, theme};
 use crate::live::PlayerId;
@@ -1260,6 +1261,7 @@ impl Workspace {
             self.keyframe_tray(ui, rect, HEADER, span);
         }
         self.marker_window(ui.ctx());
+        self.new_subclip_tick(ui.ctx());
         self.duration_window(ui.ctx());
         self.fade_window(ui.ctx());
         self.speed_window(ui.ctx());
@@ -2127,6 +2129,15 @@ impl Workspace {
                 vec![media.clone()]
             };
             self.send("media.move", json!({ "media": ids, "bin": bin }));
+            self.timeline.snap_flipped = false;
+            return;
+        }
+        if released
+            && d.drag.from_source_clip
+            && self.bins.area.is_some_and(|area| area.contains(pos))
+            && let Gesture::Media { media, range, .. } = &d.drag.gesture
+        {
+            self.new_subclip = Some(NewSubclip::new(media, *range));
             self.timeline.snap_flipped = false;
             return;
         }
@@ -4034,6 +4045,7 @@ mod tests {
 
     fn clip(id: &str, start: i64, duration: i64, tail: Option<i64>) -> Clip {
         Clip {
+            input_lut: None,
             id: id.into(),
             media: "m1".into(),
             start,

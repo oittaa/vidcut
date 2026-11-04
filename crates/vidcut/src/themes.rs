@@ -222,7 +222,6 @@ fn user_path(name: &str) -> PathBuf {
 
 fn check_name(name: &str) -> Result<()> {
     let ok = !name.is_empty()
-        && name.len() <= 64
         && !name.starts_with('.')
         && name
             .chars()

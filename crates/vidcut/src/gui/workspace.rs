@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
-use vidcut_core::model::{PictureTool, Project, RenderCache};
+use vidcut_core::model::{Marker, PictureTool, Project, RenderCache};
 use vidcut_core::preferences::Scope;
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{Rational, format_timecode};
@@ -96,6 +96,7 @@ pub struct Workspace {
     pub(super) timecode: Option<TimecodeEntry>,
     pub(super) paste_timecode: PasteWatch,
     pub(super) duration_text: Option<String>,
+    pub(super) new_subclip: Option<super::subclip::NewSubclip>,
     pub(super) hover: Option<(String, i64)>,
     pub(super) pool_clicked: Option<String>,
     pub(super) left: LeftTab,
@@ -192,6 +193,7 @@ impl Workspace {
             timecode: None,
             paste_timecode: PasteWatch::Off,
             duration_text: None,
+            new_subclip: None,
             hover: None,
             pool_clicked: None,
             left: Default::default(),
@@ -706,6 +708,13 @@ impl Workspace {
         if self.multi_on()
             && let Some(refusal) = self.multi_refusal(method)
         {
+            if method == "edit.smart_insert"
+                && self.snap.multi_marks.is_empty()
+                && let Some(p) = self.project()
+            {
+                let at = vidcut_core::ops::nearest_edit(p, self.snap.timeline.position);
+                self.seek(PlayerId::Timeline, at, false);
+            }
             self.say(refusal);
             return;
         }
@@ -1082,6 +1091,11 @@ impl Workspace {
                     None => super::dialog::why(ui, "open a project for the rest"),
                 }
             });
+            ui.add_enabled_ui(self.snap.project.is_some(), |ui| {
+                ui.menu_button("Trim", |ui| {
+                    ui.menu_button("Roll", |ui| self.roll_menu(ui));
+                });
+            });
             ui.menu_button("Mark", |ui| {
                 let shared = self.key_menu_why();
                 for cmd in super::keyframe_editor::KeyCmd::ALL {
@@ -1114,6 +1128,8 @@ impl Workspace {
                         ui.close();
                     }
                 }
+                ui.separator();
+                self.create_subclip_button(ui);
             });
             ui.menu_button("View", |ui| {
                 ui.menu_button("Safe Area", |ui| self.safe_area_menu(ui));
@@ -1131,6 +1147,22 @@ impl Workspace {
             ui.separator();
             self.bar_buttons(ui);
         });
+    }
+
+    fn roll_menu(&mut self, ui: &mut egui::Ui) {
+        for (label, edge) in [("Start to Playhead", "head"), ("End to Playhead", "tail")] {
+            if ui.button(label).clicked() {
+                self.send(
+                    "edit.roll_to_playhead",
+                    json!({
+                        "edge": edge,
+                        "at": self.snap.timeline.position,
+                        "clips": self.snap.selection.clips,
+                    }),
+                );
+                ui.close();
+            }
+        }
     }
 
     fn playback_menu(&mut self, ui: &mut egui::Ui) {
@@ -1515,7 +1547,7 @@ impl Workspace {
                 None => (id, player.clone()),
             };
             let points = match (m.shift, dynamic_track) {
-                (true, _) => self.marker_points(),
+                (true, _) => self.marker_points(id),
                 (false, Some(t)) => self.track_edit_points(&t.id()),
                 (false, None) => self.edit_points(id),
             };
@@ -1603,6 +1635,9 @@ impl Workspace {
         if (pressed(Key::Backslash) || pressed(Key::B)) && m.command {
             self.split_at_playhead();
         }
+        if pressed(Key::B) && m.alt && !m.command && !m.shift {
+            self.open_new_subclip();
+        }
         if pressed(Key::Enter)
             && !m.any()
             && let [cue] = self.snap.selection.cues.as_slice()
@@ -1632,25 +1667,20 @@ impl Workspace {
         if pressed(Key::N) && m.command && m.shift {
             self.new_bin();
         }
-        if pressed(Key::M) && !m.command {
-            if m.alt {
-                let at = self.snap.timeline.position;
-                if let Some(k) = self
-                    .project()
-                    .and_then(|p| p.markers.iter().find(|k| k.at == at))
-                {
-                    self.send("markers.remove", json!({ "marker": k.id }));
-                }
-            } else {
-                let at = self.snap.timeline.position;
-                let existing = self
-                    .project()
-                    .and_then(|p| p.markers.iter().find(|k| k.at == at))
-                    .map(|k| k.id.clone());
-                match (existing, self.project_shared()) {
-                    (Some(id), Some(p)) => self.open_marker(id, &p),
-                    _ => self.send("markers.add", json!({ "at": at })),
-                }
+        if pressed(Key::M)
+            && !m.command
+            && let Some((markers, at, media)) = self.viewer_markers()
+        {
+            let existing = markers.iter().find(|k| k.at == at).map(|k| k.id.clone());
+            let mut add = json!({ "at": at });
+            if let Some(media) = media {
+                add["media"] = json!(media);
+            }
+            match (m.alt, existing, self.project_shared()) {
+                (true, Some(id), _) => self.send("markers.remove", json!({ "marker": id })),
+                (true, None, _) => {}
+                (false, Some(id), Some(p)) => self.open_marker(id, &p),
+                (false, _, _) => self.send("markers.add", add),
             }
         }
         if pressed(Key::D)
@@ -1792,10 +1822,23 @@ impl Workspace {
         }
     }
 
-    fn marker_points(&self) -> Vec<i64> {
-        self.project()
-            .map(|p| p.markers.iter().map(|k| k.at).collect())
-            .unwrap_or_default()
+    fn viewer_markers(&self) -> Option<(&[Marker], i64, Option<&str>)> {
+        let p = self.project()?;
+        if self.snap.viewer == ViewerMode::SourceClip
+            && let Some((media, at)) = self.snap.source_at()
+        {
+            let m = p.media(media)?;
+            return Some((&m.markers, at, Some(&m.id)));
+        }
+        Some((&p.markers, self.snap.timeline.position, None))
+    }
+
+    fn marker_points(&self, player: PlayerId) -> Vec<i64> {
+        let markers = match player {
+            PlayerId::Source => self.viewer_markers().map(|v| v.0),
+            PlayerId::Timeline => self.project().map(|p| p.markers.as_slice()),
+        };
+        markers.into_iter().flatten().map(|k| k.at).collect()
     }
 
     pub(super) fn mark(&self, is_in: bool) {
@@ -2106,6 +2149,7 @@ impl Workspace {
     }
 
     fn left_content(&mut self, ui: &mut egui::Ui) {
+        self.bins.area = None;
         match self.left {
             LeftTab::Pool => self.pool_panel(ui),
             LeftTab::SyncBin => self.sync_bin_panel(ui),
@@ -2136,6 +2180,7 @@ impl Workspace {
     fn pool_gone(&mut self) {
         self.hover = None;
         self.bins.targets.clear();
+        self.bins.area = None;
         self.pool_focus = false;
     }
 }

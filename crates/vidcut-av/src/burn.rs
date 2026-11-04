@@ -73,10 +73,42 @@ fn installed_usual(system: &FontSystem) -> Option<&'static str> {
     })
 }
 
+fn family_names(data: &[u8], index: u32) -> Vec<String> {
+    use skrifa::MetadataProvider;
+    use skrifa::string::StringId;
+    skrifa::FontRef::from_index(data, index).map_or(Vec::new(), |font| {
+        font.localized_strings(StringId::FAMILY_NAME)
+            .map(|name| name.to_string())
+            .filter(|name| !name.is_empty())
+            .collect()
+    })
+}
+
+fn add_family_names(db: &mut fontdb::Database) {
+    let named: Vec<fontdb::FaceInfo> = db
+        .faces()
+        .filter_map(|face| {
+            let mut named = face.clone();
+            for name in db.with_face_data(face.id, family_names)? {
+                if !named.families.iter().any(|(n, _)| *n == name) {
+                    named.families.push((name, fontdb::Language::Unknown));
+                }
+            }
+            (named.families.len() > face.families.len()).then_some(named)
+        })
+        .collect();
+    for face in named {
+        db.remove_face(face.id);
+        db.push_face_info(face);
+    }
+}
+
 fn fonts() -> &'static Mutex<Fonts> {
     static FONTS: OnceLock<Mutex<Fonts>> = OnceLock::new();
     FONTS.get_or_init(|| {
-        let mut system = FontSystem::new();
+        let (locale, mut db) = FontSystem::new().into_locale_and_db();
+        add_family_names(&mut db);
+        let mut system = FontSystem::new_with_locale_and_db(locale, db);
         if let Some(name) = installed_usual(&system) {
             system.db_mut().set_sans_serif_family(name);
         }
@@ -126,6 +158,7 @@ const FULL_SIZE_BIT: u32 = 4;
 const LTSH_HEAD: usize = 4;
 
 fn spans<'a>(
+    system: &FontSystem,
     pieces: &[Piece],
     family: Family<'a>,
     faces: &'a [Option<String>],
@@ -163,7 +196,7 @@ fn spans<'a>(
                     .color(Color::rgba(0, 0, 0, 0))
                     .metadata(HIDDEN | if p.popped { POPPED } else { 0 });
             }
-            (p.text.clone(), a)
+            (p.text.clone(), with_face_weight(system, a))
         })
         .collect()
 }
@@ -809,6 +842,26 @@ fn face_of(system: &FontSystem, attrs: &Attrs<'_>) -> Option<fontdb::ID> {
     })
 }
 
+fn with_face_weight<'a>(system: &FontSystem, attrs: Attrs<'a>) -> Attrs<'a> {
+    use skrifa::MetadataProvider;
+    let Some(face) = face_of(system, &attrs).and_then(|id| system.db().face(id)) else {
+        return attrs;
+    };
+    if face.weight == attrs.weight {
+        return attrs;
+    }
+    let axis = system.db().with_face_data(face.id, |data, index| {
+        let font = skrifa::FontRef::from_index(data, index).ok()?;
+        let axis = font.axes().get_by_tag(skrifa::Tag::new(b"wght"))?;
+        Some((axis.min_value(), axis.max_value()))
+    });
+    let weight = match axis.flatten() {
+        Some((low, high)) => Weight(f32::from(attrs.weight.0).max(low).min(high) as u16),
+        None => face.weight,
+    };
+    attrs.weight(weight)
+}
+
 fn font_heights(system: &mut FontSystem, id: fontdb::ID, weight: Weight) -> Option<[f64; 3]> {
     use skrifa::raw::TableProvider;
     use skrifa::raw::tables::os2::SelectionFlags;
@@ -1043,7 +1096,8 @@ fn lay_out(look: &Look) -> Option<Laid> {
         Some(name) => Family::Name(name),
         None => Family::SansSerif,
     };
-    let gap = line_gap(&mut f.system, look, &Attrs::new().family(family), size);
+    let base = with_face_weight(&f.system, Attrs::new().family(family));
+    let gap = line_gap(&mut f.system, look, &base, size);
     let mut buffer = Buffer::new(&mut f.system, Metrics::new(size, gap));
     buffer.set_wrap(Wrap::WordOrGlyph);
     buffer.set_size(Some(wrap), None);
@@ -1070,7 +1124,15 @@ fn lay_out(look: &Look) -> Option<Laid> {
     };
     let mut word_start = true;
     let spans = match look.markup {
-        Markup::Pieces(pieces) => spans(pieces, family, &word_faces, color(look.ink), size, line),
+        Markup::Pieces(pieces) => spans(
+            &f.system,
+            pieces,
+            family,
+            &word_faces,
+            color(look.ink),
+            size,
+            line,
+        ),
         Markup::Title(_, per) => runs
             .iter()
             .zip(&faces)
@@ -1086,6 +1148,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
                 if r.look.italic {
                     a = a.style(Style::Italic);
                 }
+                a = with_face_weight(&f.system, a);
                 if r.look.underline {
                     a = a.underline(UnderlineStyle::Single);
                 }
@@ -1147,7 +1210,6 @@ fn lay_out(look: &Look) -> Option<Laid> {
             })
             .collect(),
     };
-    let base = Attrs::new().family(family);
     buffer.set_rich_text(
         spans.iter().map(|(s, a)| (s.as_str(), a.clone())),
         &base,

@@ -1260,6 +1260,16 @@ pub enum Request {
         #[serde(default)]
         ripple: Option<bool>,
     },
+    /// Roll clips' head or tail to `at` (Trim > Roll > Start or End to
+    /// Playhead), as `edit.roll` does. Without `clips`, the clip of Track 1
+    /// under `at`.
+    #[serde(rename = "edit.roll_to_playhead")]
+    EditRollToPlayhead {
+        edge: Edge,
+        at: TimeSpec,
+        #[serde(default)]
+        clips: Vec<ClipRef>,
+    },
     /// Change Clip Duration (Ctrl+D). `end` runs each clip to the end of its
     /// media, and a longer duration stops there. It ripples as a trim with
     /// Ripple On does, whatever Ripple On is, unless `ripple` is false.
@@ -1512,7 +1522,7 @@ pub enum Request {
         look: Option<String>,
     },
     /// Enable/disable video (D), mute, gain (dB, -100..30), name, Clip Color,
-    /// Voice Isolation, Retime Process and Render Cache.
+    /// Voice Isolation, Retime Process, Render Cache and Input LUT.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -1561,6 +1571,12 @@ pub enum Request {
         /// AI Super Scale out of both.
         #[serde(default)]
         render_cache: Option<crate::model::ClipCache>,
+        /// Input LUT: a `.cube` file that the picture goes through just
+        /// after its conversion into the timeline color space. A file that
+        /// can't be read is refused, with the reason. An empty path clears
+        /// it.
+        #[serde(default)]
+        input_lut: Option<PathBuf>,
         /// Download Voice Isolation's model, or the model of the Retime
         /// Process that the clips then use, if this computer doesn't have it
         /// yet, checked against its SHA-256. Without it, a missing Voice
@@ -2651,8 +2667,7 @@ pub enum Request {
     /// `titles.add` takes them. Built-in looks can't be replaced.
     #[serde(rename = "looks.save")]
     LooksSave {
-        /// Up to 64 characters, without `/ \ : * ? " < > |`; names match
-        /// whatever their case.
+        /// Without `/ \ : * ? " < > |`; names match whatever their case.
         name: String,
         #[serde(default)]
         subtitles: Option<SubtitleLook>,
@@ -4288,6 +4303,12 @@ pub struct ProjectSet {
     /// the parts that are slow to make in the background, for the viewer.
     #[serde(default)]
     pub render_cache: Option<crate::model::RenderCache>,
+    /// Output LUT: a `.cube` file that the whole timeline goes through after
+    /// its subtitles, before each output's colors, in the viewer and in each
+    /// export. A file that can't be read is refused, with the reason. An
+    /// empty path clears it.
+    #[serde(default)]
+    pub output_lut: Option<PathBuf>,
     /// Download the models of the Retime Process and the upscaler that the
     /// timeline then uses, if this computer doesn't have them yet.
     #[serde(default)]
@@ -4923,6 +4944,15 @@ impl Request {
             | Self::StoryboardRender { out, .. }
             | Self::GuiScreenshot { out, .. } => vec![out],
             Self::Apply { commands, .. } => commands.iter_mut().flat_map(Self::paths_mut).collect(),
+            Self::ClipSet { input_lut, .. } => input_lut
+                .iter_mut()
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect(),
+            Self::ProjectSet(set) => set
+                .output_lut
+                .iter_mut()
+                .filter(|p| !p.as_os_str().is_empty())
+                .collect(),
             _ => Vec::new(),
         }
     }

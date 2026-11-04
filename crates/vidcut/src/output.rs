@@ -1709,7 +1709,7 @@ fn print_color(c: &Value) {
 }
 
 fn print_metadata(m: &Value) {
-    if !m.is_object() || m["mode"].as_str() == Some("none") {
+    if !crate::export::metadata_shown(m) {
         return;
     }
     println!("    HDR metadata: {}", crate::export::metadata_words(m));
