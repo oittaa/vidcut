@@ -10,7 +10,7 @@ use eframe::egui;
 use vidcut_av::export::renderer::FrameReader;
 use vidcut_av::thumbs::Image;
 use vidcut_core::fingerprint::Origin;
-use vidcut_core::lru::Lru;
+use vidcut_core::lru::{Lru, Uncapped};
 use vidcut_core::model::{Media, Project};
 use vidcut_core::preferences::Thumbnails;
 use vidcut_core::render::{Pace, VideoPiece};
@@ -95,7 +95,7 @@ struct Queue {
 
 pub struct Tiles {
     kept: HashMap<String, BTreeMap<(u32, i64), Kept>>,
-    used: Lru<TileKey, u64, { usize::MAX }>,
+    used: Uncapped<TileKey, u64>,
     versions: HashMap<String, Seen>,
     epochs: HashMap<String, u64>,
     clock: u64,
@@ -118,7 +118,7 @@ impl Tiles {
         let (sender, results) = channel();
         let mut tiles = Self {
             kept: HashMap::new(),
-            used: Lru::new(),
+            used: Uncapped::new(),
             versions: HashMap::new(),
             epochs: HashMap::new(),
             clock: 0,
