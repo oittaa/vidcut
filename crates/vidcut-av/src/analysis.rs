@@ -491,6 +491,11 @@ pub fn mix_loudness(
     let mut mix = AudioMix::new(lanes, rate, channels, declick_ms).ducked(ducking);
     let mut graph = crate::pool::graph(crate::decode::Reading::Stream);
     let layout = ffmpeg::ChannelLayout::default(i32::from(channels)).bits();
+    if layout == 0 {
+        return Err(Error::Invalid(format!(
+            "{channels} channels: can't measure"
+        )));
+    }
     let args =
         format!("sample_rate={rate}:sample_fmt=flt:channel_layout=0x{layout:x}:time_base=1/{rate}");
     graph
