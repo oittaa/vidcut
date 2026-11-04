@@ -171,6 +171,11 @@ pub fn describe_at(
             d.edge(),
             d.clips("clips")
         ),
+        "edit.roll_to_playhead" => format!(
+            "Roll the {} of {} to the playhead",
+            d.edge(),
+            d.clips("clips")
+        ),
         "edit.change_duration" => format!(
             "Change the duration of {} to {}",
             d.clips("clips"),
