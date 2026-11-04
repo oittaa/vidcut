@@ -945,14 +945,18 @@ pub fn preview(painter: &Painter, rows: &Rows, scale: &Scale, p: &Project, pv: &
         );
     }
     if let Some(m) = pv.marquee {
-        painter.rect_filled(m, CornerRadius::ZERO, Color32::from_white_alpha(20));
-        painter.rect_stroke(
-            m,
-            CornerRadius::ZERO,
-            Stroke::new(1.0, Color32::from_white_alpha(120)),
-            StrokeKind::Inside,
-        );
+        marquee(painter, m);
     }
+}
+
+pub fn marquee(painter: &Painter, rect: Rect) {
+    painter.rect_filled(rect, CornerRadius::ZERO, Color32::from_white_alpha(20));
+    painter.rect_stroke(
+        rect,
+        CornerRadius::ZERO,
+        Stroke::new(1.0, Color32::from_white_alpha(120)),
+        StrokeKind::Inside,
+    );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

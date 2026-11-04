@@ -42,6 +42,14 @@ pub(super) struct BinsUi {
     order: Vec<String>,
     rename: Option<Rename>,
     list: Option<ListLayout>,
+    places: Vec<Rect>,
+    boxing: Option<Boxing>,
+}
+
+#[derive(Clone, Copy)]
+struct Boxing {
+    from: Vec2,
+    toggle: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -187,6 +195,16 @@ fn chosen(clicked: Option<&str>, selected: &[String]) -> Option<String> {
         .filter(|id| selected.iter().any(|s| s == id))
         .map(String::from)
         .or_else(|| selected.last().cloned())
+}
+
+fn boxed(selected: &[String], inside: Vec<String>, toggle: bool) -> Vec<String> {
+    if !toggle {
+        return inside;
+    }
+    let kept = selected.iter().filter(|id| !inside.contains(id)).cloned();
+    let mut out: Vec<String> = kept.collect();
+    out.extend(inside.into_iter().filter(|id| !selected.contains(id)));
+    out
 }
 
 fn strip_path() -> std::path::PathBuf {
@@ -459,9 +477,9 @@ impl Workspace {
             .auto_shrink([false, false])
             .show_viewport(ui, |ui, viewport| {
                 let background = ui.interact(
-                    ui.max_rect(),
+                    viewport.translate(ui.max_rect().min.to_vec2()),
                     ui.scope_id().with("background"),
-                    Sense::click(),
+                    Sense::click_and_drag(),
                 );
                 if let Some(p) = project {
                     background.context_menu(|ui| {
@@ -503,6 +521,7 @@ impl Workspace {
                     PoolMode::Filmstrip => self.strips(ui, viewport, p, &folders, &media),
                     PoolMode::List => self.list(ui, viewport, p, &folders, &media),
                 }
+                self.pool_box(ui, &background, &media);
             });
         if let Some(pos) = press {
             self.pool_focus = shown.inner_rect.contains(pos);
@@ -516,6 +535,40 @@ impl Workspace {
             ui.ctx().request_repaint();
         }
         self.rename_bin_window(ui.ctx());
+    }
+
+    fn pool_box(&mut self, ui: &egui::Ui, background: &egui::Response, media: &[&Media]) {
+        let content = ui.max_rect().min;
+        if background.drag_started_by(egui::PointerButton::Primary)
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            self.bins.boxing = Some(Boxing {
+                from: press - content,
+                toggle: ui.input(|i| i.modifiers.command),
+            });
+        }
+        let Some(Boxing { from, toggle }) = self.bins.boxing else {
+            return;
+        };
+        let Some(pos) = ui.input(|i| i.pointer.latest_pos()) else {
+            return;
+        };
+        let rect = Rect::from_two_pos(content + from, pos);
+        if background.dragged() {
+            super::timeline::paint::marquee(ui.painter(), rect);
+            return;
+        }
+        self.bins.boxing = None;
+        if background.drag_stopped() {
+            let inside = media
+                .iter()
+                .zip(&self.bins.places)
+                .filter(|(_, place)| place.intersects(rect))
+                .map(|(m, _)| m.id.clone())
+                .collect();
+            let selection = boxed(&self.snap.selection.media, inside, toggle);
+            self.send("selection.set", json!({ "media": selection }));
+        }
     }
 
     pub(super) fn show_metadata_strip(&mut self, on: bool) {
@@ -720,16 +773,20 @@ impl Workspace {
         let rows = count.div_ceil(per_row);
         let step = TILE_FULL + Vec2::splat(TILE_GAP);
         let top = origin.y - ui.max_rect().top();
+        let place = |k: usize| {
+            let at = vec2((k % per_row) as f32 * step.x, (k / per_row) as f32 * step.y);
+            Rect::from_min_size(origin + at, TILE_FULL)
+        };
         for row in shown(viewport.y_range(), top, step.y, rows) {
             for k in row * per_row..((row + 1) * per_row).min(count) {
-                let at = origin + vec2((k % per_row) as f32 * step.x, row as f32 * step.y);
-                let rect = Rect::from_min_size(at, TILE_FULL);
+                let rect = place(k);
                 match k.checked_sub(folders.len()) {
                     None => self.folder_tile(ui, rect, p, &folders[k]),
                     Some(i) => self.tile(ui, rect, media[i]),
                 }
             }
         }
+        self.bins.places = (folders.len()..count).map(place).collect();
         let size = vec2(per_row.min(count) as f32, rows as f32) * step - Vec2::splat(TILE_GAP);
         ui.expand_to_include_rect(Rect::from_min_size(origin, size));
     }
@@ -749,10 +806,12 @@ impl Workspace {
         let size = vec2(ui.available_width(), STRIP_HEIGHT + HEADER);
         let gap = ui.spacing().item_spacing.y;
         let top = origin.y - ui.max_rect().top();
+        let place =
+            |i: usize| Rect::from_min_size(origin + vec2(0.0, i as f32 * (size.y + gap)), size);
         for i in shown(viewport.y_range(), top, size.y + gap, media.len()) {
-            let rect = Rect::from_min_size(origin + vec2(0.0, i as f32 * (size.y + gap)), size);
-            self.filmstrip(ui, rect, media[i]);
+            self.filmstrip(ui, place(i), media[i]);
         }
+        self.bins.places = (0..media.len()).map(place).collect();
         if !media.is_empty() {
             let height = media.len() as f32 * (size.y + gap) - gap;
             ui.expand_to_include_rect(Rect::from_min_size(origin, vec2(size.x, height)));
@@ -1280,6 +1339,12 @@ impl Workspace {
                 sizes: measured,
             });
         }
+        self.bins.places = (0..media.len())
+            .map(|i| {
+                let y = media_top + i as f32 * (media_height + LIST_GAP.y);
+                Rect::from_min_size(origin + vec2(0.0, y), vec2(width, media_height))
+            })
+            .collect();
         let height = match media.len() {
             0 => media_top - LIST_GAP.y,
             n => media_top + n as f32 * (media_height + LIST_GAP.y) - LIST_GAP.y,

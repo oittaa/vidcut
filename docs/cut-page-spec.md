@@ -302,7 +302,18 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - A click selects a clip.
   - In Source Clip mode, the Viewer shows the clip. In Source Tape mode, the playhead jumps to it (pp. 680, 704).
   - A double-click opens it as Source Clip (p. 680).
-- **Selection** (p. 719): click, Shift-click range, Ctrl-click toggle, marquee, Ctrl+A.
+- **Selection** (p. 719):
+  - Click, Shift-click range, Ctrl-click toggle, Ctrl+A.
+  - A drag from an empty part of the pool draws a box. The box replaces the selection with the clips that it touches.
+  - With Ctrl held, the box adds each clip that is not selected, and removes each clip that is selected.
+  - vidcut: the choices below have no page and no measurement.
+    - A drag on a clip stays a drag of that clip (§7.3). A drag on a bin stays a drag of that bin.
+    - The selection changes on release. A box that touches nothing clears the selection.
+    - The box takes clips, not bins.
+    - Shift has no effect on the box.
+    - The box does not move the Viewer, as Ctrl-click and Shift-click do not.
+    - The wheel scrolls the pool during a drag, and the box keeps its start. The pool does not scroll by itself at its edge.
+  - `selection.set` with `media` sets the same selection by request.
 
 ## 4. Viewer (pp. 639–640, 679–693, 713)
 
