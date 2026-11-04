@@ -53,6 +53,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - You can move the seam between them, and change the timeline height.
 - **Top bar:**
   - On the left: the Media Pool and Mixer tabs (p. 649).
+    - A click on the Media Pool tab while the pool shows hides the pool. The Viewer takes its room (p. 636).
+    - With the pool hidden, the tabs are in a row above the Viewer. A click on a tab shows what that tab holds.
+    - The edit-function buttons go with the pool, as they do for the other tabs. vidcut: no measurement tells where they go in Resolve.
+    - `gui.close media_pool` hides the pool. `gui.show media_pool` shows it.
   - On the right: Quick Export and the Full Screen viewer.
     - vidcut's Full Screen button is on the viewer (deviation X86).
   - A Transitions tab shows the transitions in the place of the Media Pool (p. 759, §8.11).
@@ -196,11 +200,24 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Remove** (p. 654):
   - Delete or Backspace removes the pool entry, after a confirmation.
   - Only the pool entry goes. The files on disk stay.
-- **Views** (pp. 638, 664–665):
+- **Views** (pp. 638, 661–665):
   - **Thumbnail:** a hover scrubs the clip, and I/O mark its source In/Out. A click on the lower-right corner of a thumbnail shows its metadata (deviation X60).
   - **Filmstrip:** each clip is a row of its pictures, as wide as the pool, under its name. Hover and I/O work as on a thumbnail.
   - **List:** a column for each field. A click on a header sorts by that field.
-  - **Metadata:** a card for each clip, with a thumbnail that scrubs and basic metadata.
+  - **Metadata** (pp. 661–663): a card for each clip, in as many columns as fit the pool.
+    - A thumbnail is at the left of the card. A hover on it scrubs the clip, and I/O mark its source In/Out.
+    - Beside the thumbnail, from the top:
+      - The main description, which follows the sort (p. 662). Timecode gives the start timecode. Each other sort gives the clip name.
+      - The start timecode and the camera name. A file with no timecode shows 00:00:00:00. A clip with no camera name shows `---`.
+      - A subtitle file shows its cue count and its length on that line, and no camera name.
+      - The clip name.
+    - Sorted by Clip Name, the clips are in clusters by the first letter of the name, each under a heading (pp. 662–663).
+      - Inside a cluster, the order is by timecode. The Source Tape takes this order.
+    - Sorted by Date Modified, the clusters are the days of the file's modification time (p. 662).
+    - Sorted by Timecode, Date Imported or Duration, there are no clusters. vidcut keeps no creation date and no date of import.
+    - Descending reverses the whole order (p. 663).
+    - vidcut keeps no Date Created, scene, shot, take or comment ([todo](todo/cut-page-gaps.md)). Thus the card and the main description leave them out.
+    - `pool.set` with `view` `metadata` opens this view.
   - A sound file shows its waveform.
   - **Metadata Display** (p. 665): a tag icon beside the search field shows metadata of the selected clip at the top of the pool (deviation X60). The metadata is the camera name, scene, shot and take, frame rate and resolution.
 - **Sort and search** (pp. 666–667):
@@ -227,21 +244,33 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - `media.get` and the metadata strip show it.
   - vidcut does not read the name from a file. No measurement shows which file tags give it.
 - **Multicam layout** (p. 1037):
-  - `multicam.layout` tells where the angles of a multicam clip lie. It changes nothing, and the project does not store the result.
-  - The angles are in the order of the request.
+  - `multicam.layout` tells where the files of a multicam clip lie. It changes nothing, and the project does not store the result.
+  - The answer has rows. A named row holds all files of one camera name. Named rows come first, in camera order.
+  - Rows with no name follow. A file with no name never joins a named row.
+    - By `timecode`, files with no name go in timecode order. With one timecode, they go in the order of the request.
+    - By `timecode`, each of these files goes on the first row with no name where it does not overlap. Touching is no overlap.
+    - Example: tags 01:00:00:00, 01:00:05:00, 01:00:10:00 and 01:01:00:00 give three rows. Row 1 holds the first and the last file.
+    - By `in`, `out` or `sound`, each file with no name has its own row, although two of them may not overlap.
+    - A file with no name and no picture has its own row, after the other rows. It has sound only.
   - `sync` is `timecode`, `in`, `out` or `sound`.
   - By `timecode`, each file starts at its start timecode. A file with no timecode starts at 00:00:00:00.
-    - The length is the union of the angles, with any gaps. A gap of hours is not an error.
-    - The start timecode of the whole is the earliest angle.
+    - The length is the union of the files, with any gaps. A gap of hours is not an error.
+    - The start timecode of the whole is the earliest file.
   - By `in` or `out`, the marks of the items line up. The start timecode of the whole is 01:00:00:00.
-  - An item with marks uses only the frames between them. The shift stays.
+    - One mark counts for each row. By `in`, it is the In of the file with the earliest timecode. By `out`, it is the Out of the file with the latest timecode.
+    - The other files of the row keep their timecode distance from that file. The order of the request plays no part.
+  - **The row rule:** files of one named row do not overlap.
+    - Files go in timecode order. With one timecode, they go in the order of the request.
+    - By `sound`, files go by their places from the sound. A tie goes by the order of the request ([deviation X125](deviations.md#x125-sync-by-sound-uses-time-order-on-a-row)).
+    - A file keeps only the part after everything before it. A file with no such part is not on the row, and `dropped` names it.
+    - A file does not move. It loses frames at its start, and `head` gives those frames.
+    - Example: tags 01:00:05:00 and 01:00:10:00 on one row, 750 frames each. The first stays whole. The second keeps 125 frames from 01:00:35:00.
+  - An item with marks uses only the frames between them. The shift stays. `head` and `tail` give the frames that it does not use.
   - `full_extents` uses each whole file. By `in` or `out`, its marks only line it up.
-  - No measurement settles these cases, so `multicam.layout` refuses them:
-    - a still, or an item with no picture
-    - an item that the request names twice
-    - without `full_extents`, an item with one mark only
-    - by `in` or `out`, an item without that mark
-    - by `sound` without `full_extents`, an item with marks
+  - A request that names a file twice counts it once.
+  - A still takes part. It starts at 00:00:00:00 and has the length of a new still.
+  - An item with one mark uses the frames from In to its end, or from its start to Out.
+  - By `in`, an item with no In lines up at its first frame. By `out`, an item with no Out lines up at its end.
 - **Sync by sound** (pp. 706–707):
   - `sync` `sound` lines up files by their sound. `multicam.layout` and `multicam.create` take it.
   - A shift is in whole frames. Half a frame rounds up.
@@ -250,26 +279,35 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - A file that matches no other file stays at the start of the whole. `unmatched` names it. A file with no sound is such a file.
     - Thus with two files and no match, both are at the start and `unmatched` names both.
   - Two sets of files that do not match each other do not overlap. The later set starts one frame after the earlier one ends.
+  - The whole files line up. An item with marks then uses only the frames between them, at the place of those frames.
+    - The empty front stays. Thus marks at 100 to 400 on both files, 250 frames apart, give 650 frames.
   - vidcut compares the first sound stream of each file, with all its channels. No measurement shows which channel the Cut page uses.
-  - The angles stay in the order of the request. The measurements show another order, but no rule for it.
+  - Each file is placed by its own sound. The row rule then acts in the order of the places ([deviation X125](deviations.md#x125-sync-by-sound-uses-time-order-on-a-row)).
+    - Thus files c1 and c2 keep c1 whole, and c2 loses its head. Files c2 and c1 give the same result.
+    - Files c3 and c1 keep both files, because c3 starts after c1 ends.
+    - Of two files with one place and one length, the first in the order of the request stays whole. The second file is not on the row.
   - `multicam.layout` also gives `pairs`: for each two files the shift, the score and whether they match.
   - While the GUI runs, `multicam.create` by sound is a job.
 - **Synced group** (p. 708):
   - `multicam.create` stores files as a synced group, a pool item with the name "Media Sync", the date and the time. `name` gives another name.
-  - Each file stays whole, as in `multicam.layout` with `full_extents`. Its marks and its start timecode do not change.
+  - It keeps the rows of `multicam.layout` with `full_extents`. A file's marks and its start timecode do not change.
+  - The group stores its rows. A camera name that changes later does not move a file until Auto Sync reads the names again.
+  - A stored file has its visible part: the frames lost at its head and at its tail. A file with no visible part is not in the group.
+  - The group keeps `dropped`: the files that the row rule or a drag took off its rows.
   - The files stay in their bins. `bin` tells where the group goes, and the top level is the default.
+  - A file can be in more than one group. The newest group that holds the file counts.
   - `multicam.list` gives each group with its layout. `media.get` and `media.list` give `group` for a file in a group.
   - `multicam.rename` and `multicam.move` act on the group. `multicam.remove` removes the group, and its files stay.
-  - No measurement settles these cases, so vidcut refuses them:
-    - a group of one file
-    - a file in two groups
-    - `media.remove` of a file in a group
+  - A group can have one file.
+  - `media.remove` also takes the file out of its groups. A group with no file left goes too ([deviation X128](deviations.md#x128-removing-a-file-takes-it-out-of-its-groups)).
   - `multicam.marks.set` and `multicam.marks.clear` act on the In and Out of the group ([§4.1](#41-modes)). `multicam.list` gives them.
   - No command places a group on the timeline.
   - The pool does not show a group as an item. A file in a group has a blue sync badge.
-  - `multicam.set` sets the places and the sync locks of a group ([§7.5](#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). `multicam.create` takes them as `angles`, and the group then starts at 01:00:00:00.
-  - `multicam.set` and `multicam.create` with `angles` apply the rules of far gaps and of the earliest row. `at` plus `hidden` is the place of a file in real time.
-  - `multicam.create` without `angles` keeps each gap. Its start is the first timecode, or 01:00:00:00 by sound, In or Out.
+  - `multicam.set` sets the rows and the sync locks of a group ([§7.5](#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). `multicam.create` takes them as `rows`, and the group then starts at 01:00:00:00.
+    - They refuse files of one row that overlap, and a file with no visible part. A file that no row names is not in the group.
+  - `multicam.set` and `multicam.create` with `rows` apply the rules of far gaps and of the earliest row. `at` plus `hidden` is the place of the first visible frame in real time.
+  - `multicam.create` without `rows` keeps each gap. Its start is the first timecode, or 01:00:00:00 by sound, In or Out.
+  - `multicam.place` moves one file as a drag does, by the rules of overlap in [§7.5](#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112). It refuses a file on a row with the sync lock.
 - **Input Color Space** (pp. 228, 230):
   - The color tags of a file tell how to read the colors of its pictures.
   - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.
@@ -302,7 +340,18 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - A click selects a clip.
   - In Source Clip mode, the Viewer shows the clip. In Source Tape mode, the playhead jumps to it (pp. 680, 704).
   - A double-click opens it as Source Clip (p. 680).
-- **Selection** (p. 719): click, Shift-click range, Ctrl-click toggle, marquee, Ctrl+A.
+- **Selection** (p. 719):
+  - Click, Shift-click range, Ctrl-click toggle, Ctrl+A.
+  - A drag from an empty part of the pool draws a box. The box replaces the selection with the clips that it touches.
+  - With Ctrl held, the box adds each clip that is not selected, and removes each clip that is selected.
+  - vidcut: the choices below have no page and no measurement.
+    - A drag on a clip stays a drag of that clip (§7.3). A drag on a bin stays a drag of that bin.
+    - The selection changes on release. A box that touches nothing clears the selection.
+    - The box takes clips, not bins.
+    - Shift has no effect on the box.
+    - The box does not move the Viewer, as Ctrl-click and Shift-click do not.
+    - The wheel scrolls the pool during a drag, and the box keeps its start. The pool does not scroll by itself at its edge.
+  - `selection.set` with `media` sets the same selection by request.
 
 ## 4. Viewer (pp. 639–640, 679–693, 713)
 
@@ -310,6 +359,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Source Clip** (p. 680):
   - The Viewer shows the selected pool clip.
   - A scroll area under the picture stands for the whole clip. It has the playhead, a zoomed-in waveform and In/Out handles that you can drag.
+  - vidcut draws the waveform of the whole clip across the scroll area, from the bottom edge up.
+    - With marks, the waveform is green between In and Out, and gray outside them.
+    - Without marks, the waveform is green.
+    - The waveform does not zoom ([gaps](todo/cut-page-gaps.md)).
   - Jog In and Jog Out controls at its ends move the marks frame by frame (p. 692).
     - Jog In is at the left of the scroll area. Jog Out is at the right.
     - A drag moves that mark. 8 pixels is one frame (D97).
@@ -324,16 +377,16 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - One file is the active angle. It plays its sound, edits use it, and it has a red outline.
   - A click on a cell, or `viewer.set` with `angle`, selects the active angle. The first file is the default, unless the open clip is in the group.
   - A cell has its number at the top left and its camera or file name at the bottom.
-  - A file with no frame at the playhead shows a black cell.
+  - Only a row with a file at the playhead has a cell. The first file of the row with a frame there shows.
+    - The measurements show 24 rows with 15 cells in a grid of 4 by 4, and 3 files on 2 rows with 2 cells.
   - The scroll area stands for the whole group.
   - In and Out are frames of the group, so they hold when the active angle changes (p. 682). The source marks of the files do not change.
   - An edit takes the marks' part of the active angle. Source Overwrite lines up by the group.
   - With no marks on the group, an edit uses the source marks of the active angle.
-  - A grid has 1, 2 or 3 columns, up to 9 files.
-  - These cases are not measured, so vidcut refuses them:
-    - a group of more than 9 files
-    - no group at all, also for files with one timecode
-    - an edit when a mark is outside the active angle
+  - The grid has no limit of rows.
+  - vidcut needs a group here, also for files with one timecode. [The todo](todo/sync-bin.md) holds the view with no group.
+  - An edit with a mark outside the active angle takes the part of the angle between the marks. No measurement shows this case.
+    - With no such part, nothing changes and vidcut tells why.
 - **Timeline** (p. 681):
   - The Viewer shows the timeline at its playhead, with no scroll area.
   - Icons mark the first and the last frame of a clip.
@@ -545,40 +598,42 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Audio clips count. Generators do not count.
   - **With timeline marks,** the source marks play no part.
     - The reference is the first of these: a clip at In, a clip in the marked range, any clip.
+    - With In alone, no marked range counts: the reference is a clip at In, else any clip.
     - In each, the lowest track comes first, then the earliest clip.
     - The new clip goes from In to Out. With no Out, it goes to the file's end.
     - It stops at the file's end. It starts at the file's start ([deviation X113](deviations.md#x113-source-overwrite-starts-where-the-file-starts)).
+    - With Out alone, the reference is the first clip before Out. The new clip goes in sync from the file's start to Out ([deviation X126](deviations.md#x126-source-overwrite-keeps-sync-with-a-timeline-out-alone)).
   - **With source marks and no timeline marks,** the playhead plays no part, except past the timeline's end.
     - The reference is the first clip that overlaps the marked range: lowest track first, then the earliest clip.
-    - The marked range goes in.
+    - The marked range goes in. A source Out with no In goes from the file's start to Out.
     - With no such clip and the playhead at or past the timeline's end, the first clip that overlaps the whole file is the reference ([§7.4](#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)).
   - **With no marks,** the whole file goes in.
     - Take the lowest track with a clip under the playhead that overlaps the file.
     - T is the source timecode of that clip at the playhead.
     - The reference is the first clip on that track that overlaps the file and starts at or before T.
     - With no such clip under the playhead, the reference is the first clip that overlaps: lowest track first, then the earliest clip.
+    - When a video clip and an audio clip under the playhead disagree, the video clip counts.
   - With source marks or no marks, the clip is cut at the timeline start, and it can pass the timeline end.
   - **Track:** the first video track above the highest track with a clip in the new clip's range.
     - With no clip in the range, the track is V1, even into a gap.
     - It makes the track if necessary. It never fills a free lower track.
-    - An audio-only edit always makes a new top audio track.
+    - A source with no picture is an audio-only edit. An audio-only edit always makes a new top audio track.
+  - **Another frame rate:** timecode lines up in real time, for a file and for a reference clip.
+  - **A still** has timecode 00:00:00:00, so it goes in only with a clip at that timecode.
   - **After the edit,** the timeline marks clear, and the source marks stay.
     - The playhead goes to the clip's end.
-    - When the edit made a new track, the playhead stops at the old timeline end at the latest.
+    - When the edit made a new video track, the playhead stops at the old timeline end at the latest.
   - With no overlap, or on an empty timeline, nothing changes and vidcut tells why ([deviation X114](deviations.md#x114-source-overwrite-tells-when-it-writes-nothing)).
   - **By the synced group:** `group` lines up the file by its synced group, as the Sync Bin does. In the other views, the edit does not use the group.
     - The rules above do not change. The place in the group takes the place of the timecode.
     - Only clips of that group count as the reference.
     - A file in no group is refused.
-  - vidcut refuses these cases with an error, because they are not measured:
-    - an Out mark with no In, on the timeline or on the source;
-    - an In mark with no Out, when no clip that overlaps is at In;
-    - a reference clip with a changed speed;
-    - a file or a reference clip at another frame rate than the timeline;
-    - a source with no picture, or a still;
-    - a video clip and an audio clip that give different positions under the same rule;
-    - a range with left-out frames, `tape` and `track`;
-    - several selected pool items in the window.
+  - `track` is refused, because Source Overwrite picks its own track.
+  - These cases are not measured, and vidcut lets them through:
+    - **A reference clip with a changed speed:** its first frame lines up, and the file goes in at normal speed.
+    - **A range with left-out frames:** each kept part goes in at its own place.
+    - **`tape` across files:** each file lines up by itself, and the edit is one step.
+    - **Several selected pool items:** each file lines up by itself, the timeline marks hold for all of them (`keep_marks`), and the edit is one step.
 - **Close Up (later).**
 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
@@ -593,21 +648,32 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 
 ### 7.4 Sync Bin (pp. 708–710; measured in Resolve Studio 21.1.2)
 - The Sync Bin tab takes the Media Pool's place. `gui.show sync_bin` opens it. The viewer goes to the timeline.
-- **The rows:** one row for each file of the current bin and its subfolders.
-  - The rows are in camera order and have the numbers 1, 2, 3 up to 9.
-  - Each row shows its file on the timeline's time. All rows move with the playhead.
+- **The rows:** one row and one cell for each row of the group of the current bin and its subfolders, or of its files.
+  - The rows have the numbers 1, 2, 3 and so on. The measurements show 24 rows, in a grid of 5 by 5. The number keys reach row 9.
+  - Each row shows its files on the timeline's time. All rows move with the playhead.
   - A drag to the right moves the playhead earlier. A click on the rows or the ruler does not move it.
   - `multicam.rows` gives the rows at a time.
+- **The group:** a saved group gives its stored rows. Other files of the bin do not show.
+  - With two groups or more in the bin, the group of the clip at the playhead counts.
+  - Example: a group with 2 rows and a group with 1 row of 2 files. The rows change when the playhead moves to a clip of the other group.
+  - A file in more than one group counts for its newest group. Thus a newer group of all files gives its rows at each playhead.
+- **No saved group:** the rows are the rows of [§3](#3-media-pool-ch-34-pp-653675) by timecode, so the rows are those of the Sync Clips window. A row with no name has the label Camera and its number among those rows.
+- **The file of a row** at a time is the file whose visible part holds that time.
+  - Example: tags 01:00:05:00 and 01:00:10:00 on one camera. At source 01:00:15:00 the row shows the first file. At source 01:00:38:00 it shows the second file, 5 seconds long.
 - **The time of a file:** by its synced group when it is in one, and by its timecode otherwise.
-  - The reference is the reference of Source Overwrite with no marks ([§7.2](#72-edit-functions)).
+  - A file with no tag, or with the tag 00:00:00:00, and no saved group has a row at 00:00:00:00.
+  - The rows follow the source timecode of the clip at the playhead, not the record time.
+  - Example: a timeline of three files in a row, with the second file at the playhead. The rows read that file's source timecode.
+  - With several clips at the playhead, the clip on the lowest track that overlaps the file counts. A video clip counts before an audio clip.
+  - With no clip at the playhead, the first clip that overlaps the whole file counts.
   - A file with no time in common with the timeline has an empty row.
-- **The grid:** the viewer shows the files at the playhead, with the title "Sync Bin". The sound is the timeline's sound.
+- **The grid:** the viewer shows the cameras at the playhead, with the title "Sync Bin". The sound is the timeline's sound.
   - A cell has its number at the top left and "Camera" with its name at the bottom.
-  - The file on top at the playhead is the active camera. Its cell has a red outline and a red corner, and its row number is red.
-  - A file with no frame at the playhead shows a black cell.
+  - The camera with the file on top at the playhead is the active camera. Its cell has a red outline and a red corner, and its row number is red.
+  - A camera with no file at the playhead shows a black cell with its number and label.
 - **Choosing a camera:** a click on its cell, a click on its row number, or its number key (p. 709).
-  - The viewer shows that file alone, with its name as the title and a close button at the top left.
-  - `multicam.pick` sets the source marks: In at the playhead, five seconds long, stopping at the file's end.
+  - The viewer shows the camera's file at the playhead alone. Its name is the title, and a close button is at the top left.
+  - `multicam.pick` sets the source marks of that file only: In at the playhead, five seconds long, stopping at the file's end. Marks on other files stay.
   - A click on a black cell only shows a white outline. It sets no marks and opens no view.
   - The close button or Escape returns to the grid and writes nothing (p. 709).
 - **Source Overwrite** writes the marked range by the rules of [§7.2](#72-edit-functions), with `group` for a file in a group.
@@ -617,36 +683,45 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - In is the file's frame at the timeline's end. Out is its frame at the playhead (p. 710).
   - The edit fills the timeline from its end to the playhead, and the playhead stays.
   - The reference is then the first clip that overlaps the whole file, as the marked range overlaps no clip.
-- vidcut refuses these cases with an error, because they are not measured:
-  - a file with no picture, or a still;
-  - a file with no camera name, or two files with one camera name;
-  - more than 9 files;
-  - files of different groups, or files in a group with files in none;
-  - a file with no timecode tag and no group.
+- These cases are not measured, and vidcut lets them through:
+  - **A still:** it has no row, as in the Sync Clips window.
+  - **A file with no picture:** it has its own row and cell, as in the Sync Clips window.
+  - **Two groups in the bin, and the clip at the playhead in neither:** the newest group counts.
+  - **A camera at another frame rate:** a click chooses it like any other camera.
 
 ### 7.5 Sync Clips window (pp. 706–708; measured in Resolve Studio 21.1.2)
 - **Opening:** the Sync Clips icon in the Media Pool acts on the files of the current bin. `gui.show sync_clips` does the same.
   - With no file selected, it opens all files of the bin and its subfolders.
   - With two files or more selected, it opens only those files.
   - With one file selected, no window opens.
-  - With fewer than two files, no window opens.
-  - vidcut also refuses two files with one camera name and no other file ([deviation X124](deviations.md#x124-the-sync-clips-window-refuses-files-that-resolve-opens)).
-  - Files that are one saved group open that group. A group plus a new file refuses ([deviation X123](deviations.md#x123-the-sync-clips-icon-opens-a-saved-group)).
-  - "Open Sync Group…" in the menu of a file in a group opens that group.
+  - With fewer than two files, no window opens. The row rule counts too: two files of one camera with one start and one length open no window.
+  - Two files of one camera open one row and one cell when they do not overlap or overlap only in part. Two files with no name and no overlap do the same.
+  - Files that are one saved group open that group ([deviation X123](deviations.md#x123-the-sync-clips-icon-opens-a-saved-group)).
+  - A file that the group's `dropped` lists is not a new file, so the icon opens the group ([deviation X123](deviations.md#x123-the-sync-clips-icon-opens-a-saved-group)).
+  - A saved group plus a new file opens as a new sync, by the rows of [§3](#3-media-pool-ch-34-pp-653675). Files of two saved groups or more do the same.
+    - Cancel adds nothing. Save Sync makes a new group, and the earlier groups stay.
+  - "Open Sync Group…" in the menu of a file in a group opens its newest group.
   - The window is inside vidcut's main window ([deviation X121](deviations.md#x121-the-sync-clips-window-is-inside-the-main-window)).
 - **Which files it takes:**
   - A file with no camera name opens the window. Its camera name stays empty after Save Sync.
-  - vidcut refuses more than 12 cameras, a still, a file with no picture, and files of different groups (X124).
-  - Two files with one camera name in a bin with other cameras refuse (X124).
+  - The window has no limit of cameras. The measurements open 24 cameras.
+  - A still is left out.
+  - A file with no picture has a row with a waveform, and its cell shows a waveform symbol.
+  - Two files with one camera name share one row.
 - **The window:**
-  - Left: "Sync View", a grid of all files. Right: the viewer of the chosen cell, with the name of its file.
+  - Left: "Sync View", a grid of all cameras. Right: the viewer of the chosen cell, with the name of its file.
   - The measured grids: 2 cameras side by side, 3 or 4 in 2 by 2, 6 in 3 by 2, 12 in 4 by 3.
-  - One row for each file. Named files come first, in camera order, with 10 after 9. Files with no name follow in bin order.
+  - More measured grids: 13 cameras in 4 by 4, 24 in 5 by 5.
+  - One row and one cell for each row of [§3](#3-media-pool-ch-34-pp-653675). A named row holds all files of that camera. Named rows come first, in camera order, with 10 after 9. Rows with no name follow.
   - The numbers of the rows and the cells are positions. The label of a cell is the camera name, for example cells 1 to 6 with Camera 7 to Camera 12.
-  - A file with no name has the label Camera and its row position.
+  - A row with no name has the label Camera and its number among those rows. Example: Camera A, Camera B, then Camera 1.
+  - A cell whose camera has no file at the playhead is black, with its number and label.
 - **Selection:**
-  - A click on a row selects the row. The row gets a red outline, and a nudge, a drag and the sync icon act on it. The viewer and the red number do not change.
-  - A click on a cell selects its row. The viewer shows that file, and the red number follows the cell.
+  - A click on a clip selects that clip only, with a red outline. The viewer and the red cell number do not change.
+  - A click on the empty part of a row selects the row. Its cell turns red, the viewer shows that camera, and no clip is selected. The other clips have blue outlines.
+  - A click on the row header selects the row number, which turns red.
+  - A click on a cell selects its row. The viewer shows that camera, the red number follows the cell, and no clip is selected.
+  - The sync icon acts on the row of the last click.
 - **Play:**
   - A click or a drag on the ruler moves the playhead of the window.
   - Play and Space play the pictures and the sound. Space also stops.
@@ -659,11 +734,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Places at open:** each file lies at its timecode, and no row has a sync icon.
   - Tags 01:00:00:00, 01:00:05:00 and 01:00:10:00 give rows at 0, 125 and 250.
   - A file with no tag reads 00:00:00:00. Thus with no tags, all files start at one point.
+  - The rows of [§3](#3-media-pool-ch-34-pp-653675) by timecode act on all files.
 - **The ruler** shows the timecodes of the files.
   - It starts at the earliest timecode of the files. Where all files read 00:00:00:00, it starts at 01:00:00:00.
   - Its start does not change when rows move.
 - **Far gaps:** the rule is for an empty stretch where no row has a picture. It is measured at 25 fps and 30 fps.
-  - A stretch of up to 10:00 minutes stays. One frame more makes it 1 second: 25 frames at 25 fps, 30 frames at 30 fps.
+  - A stretch of exactly 10:00 minutes stays. One frame more makes it 1 second: 25 frames at 25 fps, 30 frames at 30 fps.
   - The length of the clips plays no part.
   - The rule acts at open, at Auto Sync and during a drag.
   - A shift of more than 10:00 by Sound or In stays, because the rows overlap and no stretch is empty.
@@ -672,21 +748,31 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The empty front goes away. The frames of the group fall, and its start stays.
   - One measurement gave 936 frames from 1005.
 - **Auto Sync:** it runs the method under "Sync By" and replaces the places: Timecode, Sound, In or Out.
-  - Each row that it lines up gets a sync icon, the sync lock.
-  - With In or Out, each file needs that mark. A file stays whole.
+  - It reads the camera names again, so the rows can change. It gives whole files at their places, and the rows of [§3](#3-media-pool-ch-34-pp-653675) act again.
+  - On an opened group it uses only the group's files, so a file in `dropped` does not come back.
+  - Each row that it lines up gets one sync icon, the sync lock.
+  - With In or Out, one mark counts for each row ([§3](#3-media-pool-ch-34-pp-653675)). A file stays whole. A file with no mark lines up at its first frame by In, and at its end by Out.
   - By sound, a file that matches no other file stays at the start, with no icon. "Auto Sync Failed" names such files.
+  - By sound, files of a row go by their places, and a tie goes by bin order. Thus the result does not depend on bin order when the places differ ([deviation X125](deviations.md#x125-sync-by-sound-uses-time-order-on-a-row)).
   - Auto Sync reads the marks at that moment.
   - On a saved group, the result waits for Save Sync ([deviation X119](deviations.md#x119-auto-sync-on-a-saved-group-waits-for-save-sync)).
 - **By hand:**
-  - A drag moves a row with no sync icon. A row with one does not move.
+  - Keys and drags act on the selected or dragged clip only. The other clips of the row stay.
+  - A drag moves a clip on a row with no sync icon. On a row with one, nothing moves.
   - The sync icon in the bar turns the sync lock of the selected row on and off.
-  - Period moves the selected row 1 frame later, and Shift+Period 5 frames later. Comma moves it 1 frame earlier.
+  - Period moves the selected clip 1 frame later, and Shift+Period 5 frames later. Comma moves it 1 frame earlier. With no clip selected, these keys move nothing.
   - Shift+Comma moves it 5 frames earlier, by the manual (p. 707). No measurement on a Finnish keyboard shows that move.
   - These keys work by the key's place too, so Shift+Comma and Shift+Period work on a layout that makes them other signs.
-  - Comma on a row at the start changes nothing. A drag before the start stops the row at the start, and the other rows stay.
+  - Comma on a clip at the start changes nothing. A drag before the start stops the clip at the start, and the other clips stay.
   - A drag on an opened group changes the group at Save Sync ([deviation X120](deviations.md#x120-a-drag-in-an-opened-group-changes-the-group-at-save-sync)).
-- **Save Sync** stores the places and the sync locks, and closes the window.
-  - The first Save Sync makes a group. It is `multicam.create` with `angles`.
+- **Overlap by a drag:** the moved clip stays as it is. The other clip of the row gives way when the drag ends.
+  - The moved clip's start is inside the other: the other ends at the moved clip's start. Its tail is gone, also past the moved clip's end.
+  - The moved clip covers the other's start and ends inside it: the other starts at the moved clip's end. Its tail stays in place.
+  - The moved clip covers all of the other: the other leaves the row and the group, and `dropped` lists it.
+  - A cut stays when the clip is dragged away again. A part keeps its length when dragged.
+  - `multicam.place` and a nudge follow these rules too.
+- **Save Sync** stores the places, the rows and the sync locks, and closes the window.
+  - The first Save Sync makes a group. It is `multicam.create` with `rows`. A file that no row holds goes on the group's `dropped`.
   - The start of that group is always 01:00:00:00: tags from 01:00:00:00, tags from 01:02:00:00, no tags, mixed, and after Auto Sync.
   - After the rule of far gaps, the frames of a group run from the first row's start to the last row's end.
   - A Save Sync on an opened group keeps the group, its name and its start. It is `multicam.set`.
@@ -761,6 +847,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A tooltip shows the frame delta and the new duration.
     - On Track 1 with Ripple On, it ripples. On other tracks, only that clip changes.
   - **Edit center: roll.**
+    - Trim > Roll > Start to Playhead next to a gap moves only the picture edge. The sound stays.
+    - `edit.roll` does this. vidcut has no menu command for it ([gaps](todo/cut-page-gaps.md)).
     - The total duration stays the same.
     - A white overlay shows the available handle media.
   - **Slip handle at the clip center: slip.** Several selected clips slip together.
@@ -814,6 +902,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Right-click the button to select slip or slide.
   - With nothing selected, J/K/L play.
   - A slide keeps the media of a clip. It makes the clip before it longer as it makes the clip after it shorter (p. 731).
+    - On a side with a gap, the gap changes in place of a clip. These are measurements in Resolve Studio 21.1.2.
+    - The slide stops one frame short of an earlier clip that does not touch it. It stops at the timeline's start.
+    - A slide right stops in the same way at a later clip. The measurements show this only with a gap of one frame.
+    - A clip with a gap on both sides also slides. No measurement shows this case.
   - L slides the clip right. It also slips its content right, to earlier frames, as a drag does.
   - Space plays around the playhead, and Up/Down go to another edit (D32, deviations X11, X28, X29).
   - W again deselects the edit.
@@ -822,6 +914,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - Hover over the lower audio part of a clip at an edit until the cursor shows a note. Then drag.
 - Only the audio edit moves, as an audio roll.
 - A click selects that audio edit, and `,` / `.` move it (D20).
+- The edit needs sound on one side only.
+  - With sound on the outgoing side only, the sound goes on past the picture. It goes into a gap, or under a clip with no sound.
+  - With sound on the incoming side only, the sound starts before the picture.
+  - vidcut stops the edit at the nearest sound on the track, at the timeline's start and where the media runs out.
 
 ### 8.8 Snapping (pp. 716–717)
 - N toggles snapping.
@@ -1105,12 +1201,22 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Transcription window has:
     - a click on a word, a drag over words, X, Delete and Undelete
     - Remove Silent Portions and Delete Filler Words
-    - Place on Top, Insert and Append on a source clip
+    - Place on Top, Insert, Append, Create Subclip and Add Marker on a source clip
     - Cut, Paste and Add Marker on the timeline
     - search: First, Previous, Next, Last and a count of the matches
     - Edit, Copy and Follow
     - the Transcript menu and the differences between transcripts (X50)
   - On a source clip, Delete leaves the words out of every edit of the media (`media.leave_out`). This includes the edits of the viewer, of the pool and of scripts.
+  - On a source clip, Create Subclip opens a window with a Name and Create (p. 1005).
+    - The subclip holds the selected words (p. 998). It goes in the bin that the pool shows (p. 864).
+    - `media.subclip` does this. It takes a `range`, a `name` and a `bin`.
+    - A subclip works like any other pool item (pp. 460–461, 885–886).
+    - The words of the subclip come from the transcript of its file.
+  - Add Marker puts a marker at one selected word, or a marker with a duration over more words (p. 998).
+    - On a source clip, the marker is on that clip, at its source frame (`markers.add` with `media`).
+    - The scroll area of the Source Clip viewer shows it. A marker with a duration also shows as a bar (p. 1018).
+    - A double-click on it there opens the marker dialog.
+    - `markers.list` with `media` lists them. `markers.move`, `markers.set` and `markers.remove` take their ids.
   - On the timeline, Delete takes the words out of every unlocked track (`edit.ripple_delete_words`, D63).
     - With Ripple On, the gap closes. With it off, a gap is left (`lift`).
     - The edges move to the quiet points around the words (`quiet`, X92).
@@ -1455,7 +1561,13 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - vidcut gives every track the timing of a mono track (X68).
   - vidcut adds Detect: Speech, the default, or Sound level (X69).
   - The curve, the timing and the limits are in D76.
-  - vidcut has no graph yet ([gaps](todo/cut-page-gaps.md)).
+  - vidcut: the Ducking window draws the graph above its controls. `analyze.ducking` gives its numbers.
+    - The graph shows the seconds around the playhead, with the playhead at the center. It needs no playback.
+    - The graph follows the values in the window before Apply.
+    - The filled shape is the level of the loudest source, after its clip gain and its fader.
+    - The line is what the ducking takes from the track.
+    - Both use one dB scale, from 0 dB at the top.
+    - With Detect at Sound level, a second line shows the threshold.
 - **Viewer meter** (p. 642):
   - It shows what the viewer plays.
   - Its speaker button mutes only the playback, not the export.
@@ -1648,11 +1760,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
 - **D13. Keys.**
   - Keys that the Cut chapters do not give come from the Edit page.
   - §11 marks them with †.
-- **D14. J/L cuts belong to an edit point.**
-  - A J/L cut (§8.7) is the `tail` of the outgoing clip that matches the `head` of the incoming clip.
-  - An edit that gives a clip another neighbor there resets the J/L cut to a straight cut.
+- **D14. J/L cuts at an edit point.**
+  - Between two touching clips with sound, a J/L cut (§8.7) is the `tail` of the outgoing clip that matches the `head` of the incoming clip.
+  - An edit that gives such a clip another neighbor with sound there resets the J/L cut to a straight cut.
   - The edit also resets the other cut of the clip, if the clip would have no sound of its own.
-  - Reason: otherwise audio could overlap on a track, or run into gaps.
+  - With a gap or a clip with no sound there, the `head` or `tail` stays. It gets shorter when it would overlap other sound.
+  - Reason: sound does not overlap on a track.
 - **D15. Playhead after an edit function.**
   - After Smart Insert, Append, Overwrite, Ripple Overwrite or Paste, the playhead moves to the frame after the new clips.
   - The Viewer keeps its mode, so Q reviews the result (p. 696).

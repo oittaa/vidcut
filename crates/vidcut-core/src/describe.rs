@@ -36,6 +36,7 @@ pub fn describe_at(
             d.files("search")
         ),
         "media.rename" => format!("Rename {} to {}", d.media("media"), d.text("name")),
+        "media.subclip" => format!("Create subclip {} of {}", d.text("name"), d.media("media")),
         "media.set" => d.media_set(),
         "media.marks.set" => d.marks_set(
             format!("Source marks of {}", d.media("media")),
@@ -59,6 +60,11 @@ pub fn describe_at(
         "multicam.marks.clear" => format!("Clear the marks of synced group {}", d.text("group")),
         "multicam.pick" => format!("Choose camera {}", d.text("media")),
         "multicam.set" => format!("Set the places in synced group {}", d.text("group")),
+        "multicam.place" => format!(
+            "Move {} in synced group {}",
+            d.media("media"),
+            d.text("group")
+        ),
         "multicam.move" => format!(
             "Move synced group {} to bin {}",
             d.text("group"),
@@ -256,6 +262,12 @@ pub fn describe_at(
         ),
         "marks.set" => d.marks_set("Timeline marks".into(), project.map(|p| &p.marks)),
         "marks.clear" => "Clear the timeline marks".into(),
+        "markers.add" if d.params["media"].is_string() => format!(
+            "Marker on {} at {}{}",
+            d.media("media"),
+            d.time("at"),
+            d.named()
+        ),
         "markers.add" => format!("Marker at {}{}", d.time("at"), d.named()),
         "markers.move" => format!("Move marker {} to {}", d.text("marker"), d.time("to")),
         "markers.set" => d.marker_set(),
@@ -351,6 +363,11 @@ pub fn describe_at(
         "export.start" => format!("Export {}", d.file("output")),
         "export.plan" => format!("Plan an export to {}", d.file("output")),
         "frame.render" => format!("Render the frame at {}", d.time("at")),
+        "frame.scope" => format!(
+            "Render the {} of the frame at {}",
+            params["scope"].as_str().unwrap_or("scope"),
+            d.time("at")
+        ),
         "storyboard.render" => format!("Storyboard {}", d.file("out")),
         "presets.save" => format!("Save preset {}", d.text("name")),
         "presets.delete" => format!("Delete preset {}", d.text("name")),
@@ -388,6 +405,7 @@ pub fn describe_at(
             }
             None => format!("Viewer guides: {}", compact(params)),
         },
+        "viewer.scopes" => format!("Viewer scopes: {}", compact(params)),
         "viewer.load" => format!("Show {} in the viewer", d.media("media")),
         "player.play" => "Play".into(),
         "player.pause" => "Pause".into(),

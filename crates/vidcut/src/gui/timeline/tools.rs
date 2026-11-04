@@ -4,7 +4,7 @@ use eframe::egui::{self, Color32, CornerRadius, Painter, Pos2, Rect, Stroke, pos
 use serde_json::{Value, json};
 use vidcut_core::analysis;
 use vidcut_core::model::Project;
-use vidcut_core::ops::{self, Edge};
+use vidcut_core::ops::{self, Edge, furthest};
 use vidcut_core::request::Detect;
 
 use super::{EditSel, Side, TrackRef};
@@ -410,24 +410,6 @@ pub fn first_clip<'a>(p: &'a Project, ids: &[String]) -> Option<&'a vidcut_core:
 
 pub fn nearer_end(at: i64, start: i64, end: i64) -> bool {
     (end - at).abs() <= (at - start).abs()
-}
-
-pub fn furthest(from: i64, dir: i64, fits: impl Fn(i64) -> bool) -> i64 {
-    let (mut ok, mut step) = (from, 1i64);
-    while step < 1 << 40 && fits(from + dir * step) {
-        ok = from + dir * step;
-        step *= 2;
-    }
-    let mut bad = from + dir * step;
-    while (bad - ok).abs() > 1 {
-        let mid = ok + (bad - ok) / 2;
-        if fits(mid) {
-            ok = mid;
-        } else {
-            bad = mid;
-        }
-    }
-    ok
 }
 
 pub fn heard(

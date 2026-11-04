@@ -177,7 +177,6 @@ pub fn violations(p: &Project) -> Vec<String> {
     if p.track("V1").is_none() {
         v.push("no track V1".into());
     }
-    let mut grouped = HashSet::new();
     for g in &p.groups {
         if !ids.insert(g.id.as_str()) {
             v.push(format!("duplicate id {}", g.id));
@@ -185,12 +184,27 @@ pub fn violations(p: &Project) -> Vec<String> {
         if !g.bin.is_empty() && !p.bins.contains(&g.bin) {
             v.push(format!("group {} is in unknown bin {:?}", g.id, g.bin));
         }
-        for a in &g.angles {
-            if !pool.contains_key(a.media.as_str()) {
-                v.push(format!("group {} uses unknown media {}", g.id, a.media));
+        let mut held = HashSet::new();
+        for c in g.clips() {
+            if !pool.contains_key(c.media.as_str()) {
+                v.push(format!("group {} uses unknown media {}", g.id, c.media));
             }
-            if !grouped.insert(a.media.as_str()) {
-                v.push(format!("media {} is in two groups", a.media));
+            if !held.insert(c.media.as_str()) {
+                v.push(format!("group {} holds {} twice", g.id, c.media));
+            }
+            if c.head < 0 || c.tail < 0 {
+                v.push(format!(
+                    "group {} gives {} a negative head or tail",
+                    g.id, c.media
+                ));
+            }
+        }
+        for media in &g.dropped {
+            if !pool.contains_key(media.as_str()) {
+                v.push(format!("group {} drops unknown media {media}", g.id));
+            }
+            if held.contains(media.as_str()) {
+                v.push(format!("group {} holds and drops {media}", g.id));
             }
         }
     }
@@ -199,7 +213,18 @@ pub fn violations(p: &Project) -> Vec<String> {
             v.push(format!("{} is in unknown bin {:?}", m.id, m.bin));
         }
     }
-    for k in &p.markers {
+    for m in &p.media {
+        if let Some(s) = m.subclip
+            && (s.start < 0.0 || s.end <= s.start)
+        {
+            v.push(format!("{} is an empty subclip", m.id));
+        }
+    }
+    for k in p
+        .markers
+        .iter()
+        .chain(p.media.iter().flat_map(|m| &m.markers))
+    {
         if !ids.insert(k.id.as_str()) {
             v.push(format!("duplicate id {}", k.id));
         }

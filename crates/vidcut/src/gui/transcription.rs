@@ -182,6 +182,7 @@ enum Act {
     Cut,
     Paste,
     Marker,
+    Subclip,
     RemoveSilences,
     Fillers,
     Transcribe(Vec<String>),
@@ -229,6 +230,14 @@ impl Searches {
     }
 }
 
+#[derive(Debug)]
+struct NewSubclip {
+    media: String,
+    range: (i64, i64),
+    name: String,
+    focus: bool,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct TranscriptionUi {
     pub(super) open: bool,
@@ -259,6 +268,7 @@ pub(super) struct TranscriptionUi {
     difference: Option<usize>,
     picking: Option<usize>,
     typing: Option<Typing>,
+    subclip: Option<NewSubclip>,
 }
 
 fn digit(key: Key) -> Option<usize> {
@@ -1422,6 +1432,13 @@ impl Workspace {
                                 acts.push(Act::Edit(method));
                             }
                         }
+                        ui.separator();
+                        if button(ui, "Create Subclip") {
+                            acts.push(Act::Subclip);
+                        }
+                        if button(ui, "Add Marker") {
+                            acts.push(Act::Marker);
+                        }
                     }
                     None => {}
                 }
@@ -1494,6 +1511,7 @@ impl Workspace {
             t.footer = (ui.cursor().top() - footer_top).ceil();
             over = ui.ui_contains_pointer() && !separate;
             self.filler_words_window(ctx, t, &p.settings.fillers, &preferred);
+            self.new_subclip_window(ctx, t);
         });
         t.window = window;
         if let (Some(to), Some(items)) = (go, &items)
@@ -1533,6 +1551,46 @@ impl Workspace {
                     self.open_transcribe(ids);
                 }
             }
+        }
+    }
+
+    fn new_subclip_window(&mut self, ctx: &egui::Context, t: &mut TranscriptionUi) {
+        let Some(mut d) = t.subclip.take() else {
+            return;
+        };
+        let mut open = true;
+        let (mut create, mut cancel) = (false, false);
+        super::dialog::window(ctx, "Create Subclip", &mut open, |ui| {
+            let mut enter = false;
+            super::dialog::form(ui, "subclip-form", |ui| {
+                super::dialog::row(ui, "Name", |ui| {
+                    let field = ui.text_edit_singleline(&mut d.name);
+                    if d.focus {
+                        field.request_focus();
+                        d.focus = false;
+                    }
+                    enter = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                });
+            });
+            let ready = !d.name.trim().is_empty();
+            super::dialog::footer(ui, |ui| {
+                create = super::dialog::main_button(ui, "Create", ready) || (enter && ready);
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+        if create {
+            let (a, b) = d.range;
+            self.send(
+                "media.subclip",
+                json!({
+                    "media": d.media,
+                    "range": format!("{a}f..{b}f"),
+                    "name": d.name.trim(),
+                    "bin": self.snap.pool.bin,
+                }),
+            );
+        } else if open && !cancel {
+            t.subclip = Some(d);
         }
     }
 
@@ -1777,10 +1835,24 @@ impl Workspace {
                 };
                 let name: String = text_of(&items[a..=b]).chars().take(60).collect();
                 let mut params = json!({ "at": format!("{start}f"), "name": name });
-                if end - start > 1 {
+                if a != b && end - start > 1 {
                     params["duration"] = json!(format!("{}f", end - start));
                 }
+                if let Some(m) = media {
+                    params["media"] = json!(m);
+                }
                 self.send("markers.add", params);
+            }
+            Act::Subclip => {
+                let (Some(m), Some((_, _, a, b))) = (media, selected) else {
+                    return;
+                };
+                t.subclip = Some(NewSubclip {
+                    media: m.to_string(),
+                    range: (a, b),
+                    name: String::new(),
+                    focus: true,
+                });
             }
             Act::Edit(method) => {
                 let (Some(m), Some((_, _, a, b))) = (media, selected) else {

@@ -10,6 +10,7 @@ use vidcut_core::request::ViewerMode;
 use super::export::Ask;
 use super::pool::FULL;
 use super::theme;
+use super::timeline::paint::wave_columns;
 use super::title_browser::LeftTab;
 use super::viewer::{ACTIVE_ANGLE, GridCell};
 use super::workspace::{Workspace, dim};
@@ -19,7 +20,7 @@ const PX_PER_SECOND: f32 = 90.0;
 const RULER: f32 = 20.0;
 const NUMBER: f32 = 26.0;
 const MOST_ROW: f32 = 60.0;
-const LEAST_ROW: f32 = 20.0;
+const LEAST_ROW: f32 = 10.0;
 const NUMBER_KEYS: [Key; 9] = [
     Key::Num1,
     Key::Num2,
@@ -35,6 +36,7 @@ const NUMBER_KEYS: [Key; 9] = [
 pub(super) struct Film<'a> {
     pub media: &'a str,
     pub frames: i64,
+    pub head: i64,
     pub x: f32,
     pub per_frame: f32,
 }
@@ -183,7 +185,7 @@ impl Workspace {
                     .iter()
                     .map(|row| GridCell {
                         number: Some(row.number),
-                        label: None,
+                        label: Some(format!("Camera {}", row.camera)),
                         media: row.media.clone(),
                         frame: row.frame,
                         active: row.active,
@@ -286,7 +288,7 @@ impl Workspace {
                 number.center(),
                 Align2::CENTER_CENTER,
                 row.number.to_string(),
-                FontId::proportional(13.0),
+                FontId::proportional(strip.height().clamp(8.0, 13.0)),
                 color,
             );
             let clicked = ui
@@ -299,10 +301,14 @@ impl Workspace {
             if clicked {
                 picked = Some(row.clone());
             }
-            if let Some(start) = row.start {
+            for clip in &row.clips {
+                let Some(start) = clip.start else {
+                    continue;
+                };
                 let film = Film {
-                    media: &row.media,
-                    frames: row.frames,
+                    media: &clip.media,
+                    frames: clip.frames,
+                    head: clip.head,
                     x: x(start),
                     per_frame,
                 };
@@ -341,7 +347,8 @@ impl Workspace {
         let last = (self.snap.timeline.frames - 1).max(0);
         let media_end = rows
             .iter()
-            .filter_map(|r| r.start.map(|s| s + r.frames))
+            .flat_map(|r| &r.clips)
+            .filter_map(|c| c.start.map(|s| s + c.frames))
             .max()
             .unwrap_or(0);
         let to = to.clamp(0, media_end.max(last));
@@ -411,6 +418,20 @@ impl Workspace {
             return;
         }
         let clipped = ui.painter_at(span);
+        if m.info.video.is_none() {
+            clipped.rect_filled(span, CornerRadius::ZERO, theme::colors().audio);
+            if let Some(w) = self.snap.waveforms.get(&m.id) {
+                let origin = m.info.audio.first().map_or(0.0, |a| a.first_pts);
+                let secs = p.settings.fps.frames_to_secs(1);
+                let whole = Rect::from_min_max(pos2(film.x, strip.top()), span.max);
+                wave_columns(&clipped, whole, |x| {
+                    let frames = f64::from((x - film.x) / film.per_frame);
+                    let t = origin + (film.head as f64 + frames) * secs;
+                    w.range(t, t + secs / f64::from(film.per_frame))
+                });
+            }
+            return;
+        }
         clipped.rect_filled(span, CornerRadius::ZERO, theme::colors().panel_dark);
         let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
         let wide = strip.height() * aspect;
@@ -423,7 +444,8 @@ impl Workspace {
                 break;
             }
             let tile = Rect::from_min_size(pos2(left, strip.top()), vec2(wide, strip.height()));
-            if let Some(shown) = self.pool_picture(ui.ctx(), m, frame, tile.height(), step) {
+            let source = film.head + frame;
+            if let Some(shown) = self.pool_picture(ui.ctx(), m, source, tile.height(), step) {
                 clipped.image(shown, tile, FULL, Color32::WHITE);
             }
             frame += step;

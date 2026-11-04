@@ -95,6 +95,12 @@ pub struct PoolView {
     pub search: String,
 }
 
+pub fn first_letter(name: &str) -> String {
+    name.chars()
+        .next()
+        .map_or_else(String::new, |c| c.to_uppercase().collect())
+}
+
 impl PoolView {
     pub fn media(&self, p: &Project) -> Vec<String> {
         let inside = |b: &str| {
@@ -102,18 +108,21 @@ impl PoolView {
         };
         let mut media: Vec<&vidcut_core::model::Media> =
             p.media.iter().filter(|m| inside(&m.bin)).collect();
-        use vidcut_core::request::PoolSort;
+        use vidcut_core::request::{PoolMode, PoolSort};
+        let start = |m: &vidcut_core::model::Media| {
+            m.info.timecode.map_or(0.0, |t| t.label_seconds()) + m.skipped()
+        };
         match self.sort {
             PoolSort::Added => {}
+            PoolSort::Name if self.view == PoolMode::Metadata => media.sort_by(|a, b| {
+                first_letter(&a.name)
+                    .cmp(&first_letter(&b.name))
+                    .then(start(a).total_cmp(&start(b)))
+            }),
             PoolSort::Name => media.sort_by_key(|m| m.name.to_lowercase()),
             PoolSort::Duration => media.sort_by_key(|m| p.media_frames(m)),
             PoolSort::Date => media.sort_by_key(|m| m.mtime_ns),
-            PoolSort::Timecode => {
-                let start = |m: &vidcut_core::model::Media| {
-                    m.info.timecode.map_or(0.0, |t| t.label_seconds())
-                };
-                media.sort_by(|a, b| start(a).total_cmp(&start(b)));
-            }
+            PoolSort::Timecode => media.sort_by(|a, b| start(a).total_cmp(&start(b))),
         }
         if self.descending {
             media.reverse();
@@ -211,6 +220,7 @@ pub struct Snapshot {
     pub timecode_display: TimecodeDisplay,
     pub timer1_origin: Timer1Origin,
     pub guides: vidcut_core::preferences::Guides,
+    pub scopes: vidcut_core::preferences::Scopes,
     pub show_super_scale: bool,
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,
@@ -364,8 +374,7 @@ pub fn timecode_view<'a>(
     let source_tc = project
         .zip(media)
         .and_then(|(p, m)| p.media(m))
-        .and_then(|m| m.info.timecode)
-        .map_or(0, |tc| tc.frames_at(fps).round() as i64);
+        .map_or(0, |m| m.timecode_at(fps).round() as i64);
     TimecodeView {
         display,
         viewer,

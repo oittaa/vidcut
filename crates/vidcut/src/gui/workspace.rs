@@ -5,6 +5,7 @@ use std::sync::Arc;
 use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
 use vidcut_core::model::{PictureTool, Project, RenderCache};
+use vidcut_core::preferences::Scope;
 use vidcut_core::request::ViewerMode;
 use vidcut_core::time::{Rational, format_timecode};
 
@@ -72,12 +73,20 @@ pub struct Picture {
     pub has_frame: bool,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ScopePictures {
+    pub textures: Vec<(Scope, egui::TextureId)>,
+    pub colors: Option<vidcut_core::model::Hdr>,
+}
+
 pub struct Workspace {
     pub(super) live: live::Handle,
     pub(super) snap: Arc<Snapshot>,
     pub(super) thumbs: HashMap<String, Thumbs>,
     pub picture: Picture,
     pub want: [i32; 2],
+    pub scope_pictures: ScopePictures,
+    pub scope_want: Vec<(Scope, [i32; 2])>,
     pub stats: Option<live::stats::PlayerStats>,
     pub display: Option<String>,
     pub levels: Option<vidcut_av::player::Levels>,
@@ -173,6 +182,8 @@ impl Workspace {
             picture: Picture::default(),
             stats: None,
             want: [640, 360],
+            scope_pictures: ScopePictures::default(),
+            scope_want: Vec::new(),
             display: None,
             levels: None,
             main_window: None,
@@ -269,6 +280,7 @@ impl Workspace {
             GuiPanel::Help => self.help.open = true,
             GuiPanel::History => self.history.show(),
             GuiPanel::Transcription => self.transcription.open = true,
+            GuiPanel::MediaPool => self.left = LeftTab::Pool,
             GuiPanel::SyncBin => {
                 self.left = LeftTab::SyncBin;
                 self.show_timeline();
@@ -341,6 +353,11 @@ impl Workspace {
             GuiPanel::History => self.history.close(),
             GuiPanel::Transcription => self.transcription.open = false,
             GuiPanel::SyncClips => self.close_sync_clips(),
+            GuiPanel::MediaPool => {
+                if self.left == LeftTab::Pool {
+                    self.left = LeftTab::Hidden;
+                }
+            }
             GuiPanel::SyncBin
             | GuiPanel::Transitions
             | GuiPanel::Titles
@@ -396,6 +413,7 @@ impl Workspace {
             (GuiPanel::Help, self.help.open),
             (GuiPanel::History, self.history.open),
             (GuiPanel::Transcription, self.transcription.open),
+            (GuiPanel::MediaPool, self.left == LeftTab::Pool),
             (GuiPanel::SyncBin, self.left == LeftTab::SyncBin),
             (GuiPanel::SyncClips, self.sync_clips.open),
             (GuiPanel::Transitions, self.left == LeftTab::Transitions),
@@ -751,15 +769,23 @@ impl Workspace {
                 method,
                 with_position(sources.into_iter().next().expect("one")),
             ),
-            _ if method == "edit.append" => {
+            _ if method == "edit.append" || method == "edit.source_overwrite" => {
+                let last = sources.len() - 1;
                 let commands: Vec<Value> = sources
                     .into_iter()
-                    .map(|s| json!({ "method": "edit.append", "params": s }))
+                    .enumerate()
+                    .map(|(i, s)| {
+                        let mut params = with_position(s);
+                        if method == "edit.source_overwrite" && i < last {
+                            params["keep_marks"] = json!(true);
+                        }
+                        json!({ "method": method, "params": params })
+                    })
                     .collect();
-                let label = format!("append {} clips", commands.len());
+                let action = method.trim_start_matches("edit.").replace('_', " ");
+                let label = format!("{action} {} clips", commands.len());
                 self.send("apply", json!({ "commands": commands, "label": label }));
             }
-            _ if method == "edit.source_overwrite" => self.say("Select one clip first"),
             _ => self.send(
                 method,
                 with_position(sources.into_iter().next().expect("one")),
@@ -1089,6 +1115,7 @@ impl Workspace {
             });
             ui.menu_button("View", |ui| {
                 ui.menu_button("Safe Area", |ui| self.safe_area_menu(ui));
+                ui.menu_button("Scopes", |ui| self.scopes_menu(ui));
                 let mut on = self.snap.show_super_scale;
                 if ui.checkbox(&mut on, "Show Super Scale").clicked() {
                     self.send(
@@ -2023,64 +2050,94 @@ impl Workspace {
                     theme::decorated(ui, Deco::Card, |ui| self.mixer_panel(ui))
                 });
         }
-        let pool = egui::Panel::left("pool")
-            .resizable(true)
-            .default_size(430.0)
-            .min_size(260.0)
-            .frame(theme::card(panel))
-            .show(ui, |ui| {
-                theme::decorated(ui, Deco::Card, |ui| {
-                    self.left_tabs(ui);
-                    if self.left != LeftTab::Titles {
-                        self.end_title_hover();
-                    }
-                    if self.left != LeftTab::Inspector {
-                        self.leave_inspector();
-                        self.settle_transition_drafts(None, ui.ctx());
-                    }
-                    if self.left != LeftTab::Keyframes && !self.key_tray {
-                        self.key_editor.leave();
-                    }
-                    self.sync_tick();
-                    match self.left {
-                        LeftTab::Pool => self.pool_panel(ui),
-                        LeftTab::SyncBin => self.sync_bin_panel(ui),
-                        LeftTab::Transitions => {
-                            self.pool_focus = false;
-                            self.transitions_panel(ui);
-                        }
-                        LeftTab::Titles => {
-                            self.pool_focus = false;
-                            self.titles_panel(ui);
-                        }
-                        LeftTab::Effects => {
-                            self.pool_focus = false;
-                            self.effects_panel(ui);
-                        }
-                        LeftTab::Inspector => {
-                            self.pool_focus = false;
-                            self.inspector_panel(ui);
-                        }
-                        LeftTab::Keyframes => {
-                            self.pool_focus = false;
-                            self.keyframe_panel(ui);
-                        }
-                    }
+        let left = (self.left != LeftTab::Hidden).then(|| {
+            egui::Panel::left("pool")
+                .resizable(true)
+                .default_size(430.0)
+                .min_size(260.0)
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| {
+                        self.left_tick(ui);
+                        self.left_content(ui);
+                    })
                 })
-            })
-            .response
-            .rect;
-        egui::CentralPanel::default()
+                .response
+                .rect
+        });
+        if left.is_none() {
+            egui::Panel::top("left-tabs")
+                .resizable(false)
+                .frame(theme::card(panel))
+                .show(ui, |ui| {
+                    theme::decorated(ui, Deco::Card, |ui| {
+                        self.left_tick(ui);
+                        self.pool_gone();
+                    })
+                });
+        }
+        let viewer = egui::CentralPanel::default()
             .frame(theme::card(theme::colors().panel_dark))
             .show(ui, |ui| {
                 theme::decorated(ui, Deco::Viewer, |ui| self.viewer_panel(ui))
-            });
+            })
+            .response
+            .rect;
         self.settle_picture_wheel(&ctx);
         if let Some(tiles) = &mut self.tiles {
             tiles.end_frame();
         }
         self.media_drag_overlay(&ctx);
-        self.drop_hint(&ctx, pool);
+        self.drop_hint(&ctx, left.unwrap_or(viewer));
+    }
+
+    fn left_tick(&mut self, ui: &mut egui::Ui) {
+        self.left_tabs(ui);
+        if self.left != LeftTab::Titles {
+            self.end_title_hover();
+        }
+        if self.left != LeftTab::Inspector {
+            self.leave_inspector();
+            self.settle_transition_drafts(None, ui.ctx());
+        }
+        if self.left != LeftTab::Keyframes && !self.key_tray {
+            self.key_editor.leave();
+        }
+        self.sync_tick();
+    }
+
+    fn left_content(&mut self, ui: &mut egui::Ui) {
+        match self.left {
+            LeftTab::Pool => self.pool_panel(ui),
+            LeftTab::SyncBin => self.sync_bin_panel(ui),
+            LeftTab::Transitions => {
+                self.pool_focus = false;
+                self.transitions_panel(ui);
+            }
+            LeftTab::Titles => {
+                self.pool_focus = false;
+                self.titles_panel(ui);
+            }
+            LeftTab::Effects => {
+                self.pool_focus = false;
+                self.effects_panel(ui);
+            }
+            LeftTab::Inspector => {
+                self.pool_focus = false;
+                self.inspector_panel(ui);
+            }
+            LeftTab::Keyframes => {
+                self.pool_focus = false;
+                self.keyframe_panel(ui);
+            }
+            LeftTab::Hidden => self.pool_gone(),
+        }
+    }
+
+    fn pool_gone(&mut self) {
+        self.hover = None;
+        self.bins.targets.clear();
+        self.pool_focus = false;
     }
 }
 
