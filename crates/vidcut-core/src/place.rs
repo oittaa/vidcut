@@ -509,20 +509,25 @@ impl Placing {
                 l.edge = [-1.0, -1.0, 2.0, 2.0];
             }
         }
-        let mode = placed
-            .iter()
-            .map(|p| p.picture.mode())
-            .find(|m| *m != CompositeMode::Normal)
-            .unwrap_or_default();
         Self {
             levels,
-            mode,
+            mode: first_mode(placed),
             effects,
         }
     }
 
     pub fn whole(placed: &[Placed], frame: (f64, f64)) -> Self {
         Self::new(placed, frame, [0.0, 0.0, frame.0, frame.1], frame)
+    }
+
+    pub fn inside(mut self, placed: &[Placed], around: usize) -> Self {
+        if around > 0 {
+            for l in self.levels.iter_mut().take(around) {
+                l.opacity = 1.0;
+            }
+            self.mode = first_mode(&placed[..placed.len().saturating_sub(around)]);
+        }
+        self
     }
 
     pub fn inner(&self, frame: (f64, f64)) -> [f64; 8] {
@@ -610,6 +615,206 @@ impl Placing {
         let (x0, y0) = (x0.floor() as u32, y0.floor() as u32);
         let (x1, y1) = (x1.ceil().min(w) as u32, y1.ceil().min(h) as u32);
         (x1 > x0 && y1 > y0).then_some([x0, y0, x1, y1])
+    }
+}
+
+fn first_mode(placed: &[Placed]) -> CompositeMode {
+    placed
+        .iter()
+        .map(|p| p.picture.mode())
+        .find(|m| *m != CompositeMode::Normal)
+        .unwrap_or_default()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MixPart {
+    Layer(usize),
+    Title(usize),
+    Mix(Mix),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mix {
+    pub parts: Vec<MixPart>,
+    pub opacity: f64,
+    pub mode: CompositeMode,
+    around: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OuterMix {
+    pub mix: Mix,
+    pub layers: (usize, usize),
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Mixes {
+    pub outer: Vec<OuterMix>,
+    pub follows: Vec<Option<usize>>,
+    pub deepest: usize,
+    pub moded: bool,
+    layers: Vec<usize>,
+    titles: Vec<usize>,
+}
+
+struct Member<'a> {
+    index: usize,
+    title: bool,
+    placed: &'a [Placed],
+}
+
+impl Member<'_> {
+    fn around(&self, depth: usize) -> Option<&Placed> {
+        let chain = match self.title {
+            true => self.placed,
+            false => self.placed.get(1..).unwrap_or_default(),
+        };
+        chain.iter().rev().nth(depth)
+    }
+
+    fn part(&self) -> MixPart {
+        match self.title {
+            true => MixPart::Title(self.index),
+            false => MixPart::Layer(self.index),
+        }
+    }
+
+    fn mixes_by_itself(&self, depth: usize) -> bool {
+        let inner = self.placed.len().saturating_sub(depth + 1);
+        !self.title && first_mode(&self.placed[..inner]) == CompositeMode::Normal
+    }
+}
+
+fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixPart> {
+    let whole = [0.0, 0.0, frame.0, frame.1];
+    let mut parts = Vec::new();
+    let mut rest = members;
+    while let Some(first) = rest.first() {
+        let Some(outer) = first.around(depth) else {
+            parts.push(first.part());
+            rest = &rest[1..];
+            continue;
+        };
+        let n = rest
+            .iter()
+            .take_while(|m| m.around(depth) == Some(outer))
+            .count();
+        let (run, after) = rest.split_at(n);
+        let inner = parts_of(run, depth + 1, frame);
+        let opacity = level(outer, frame, whole, frame).opacity;
+        let mode = outer.picture.mode();
+        let normal = mode == CompositeMode::Normal;
+        let mixes = n > 1
+            || inner.iter().any(|p| matches!(p, MixPart::Mix(_)))
+            || !(normal || first.mixes_by_itself(depth));
+        if mixes && (opacity != 1.0 || !normal) {
+            parts.push(MixPart::Mix(Mix {
+                parts: inner,
+                opacity,
+                mode,
+                around: depth + 1,
+            }));
+        } else {
+            parts.extend(inner);
+        }
+        rest = after;
+    }
+    parts
+}
+
+fn layers_in(parts: &[MixPart]) -> usize {
+    parts
+        .iter()
+        .map(|p| match p {
+            MixPart::Layer(_) => 1,
+            MixPart::Title(_) => 0,
+            MixPart::Mix(m) => layers_in(&m.parts),
+        })
+        .sum()
+}
+
+impl Mixes {
+    pub fn of(layers: &[&[Placed]], titles: &[(usize, &[Placed])], frame: (f64, f64)) -> Self {
+        let n = layers.len();
+        let plain = layers.iter().all(|p| p.len() < 2);
+        if n == 0 || plain && titles.iter().all(|(a, p)| *a > n || p.is_empty()) {
+            return Self::default();
+        }
+        let titled = |k: usize| {
+            titles
+                .iter()
+                .enumerate()
+                .filter(move |(_, (above, _))| (*above).min(n) == k)
+                .map(move |(index, (above, placed))| Member {
+                    index,
+                    title: true,
+                    placed: if *above > n { &[] } else { placed },
+                })
+        };
+        let mut members: Vec<Member<'_>> = titled(0).collect();
+        for (index, placed) in layers.iter().enumerate() {
+            members.push(Member {
+                index,
+                title: false,
+                placed,
+            });
+            members.extend(titled(index + 1));
+        }
+        let parts = parts_of(&members, 0, frame);
+        if !parts.iter().any(|p| matches!(p, MixPart::Mix(_))) {
+            return Self::default();
+        }
+        let mut out = Self {
+            follows: vec![None; titles.len()],
+            layers: vec![0; n],
+            titles: vec![0; titles.len()],
+            ..Self::default()
+        };
+        let (mut next, mut last) = (0, None);
+        for part in parts {
+            match part {
+                MixPart::Layer(i) => {
+                    next = i + 1;
+                    last = None;
+                }
+                MixPart::Title(j) => out.follows[j] = last,
+                MixPart::Mix(mix) => {
+                    out.mark(&mix, 1);
+                    let to = next + layers_in(&mix.parts);
+                    out.outer.push(OuterMix {
+                        mix,
+                        layers: (next, to),
+                    });
+                    next = to;
+                    last = Some(out.outer.len() - 1);
+                }
+            }
+        }
+        out
+    }
+
+    fn mark(&mut self, mix: &Mix, depth: usize) {
+        self.deepest = self.deepest.max(depth);
+        self.moded |= mix.mode != CompositeMode::Normal;
+        for part in &mix.parts {
+            match part {
+                MixPart::Layer(i) => self.layers[*i] = mix.around,
+                MixPart::Title(j) => self.titles[*j] = mix.around,
+                MixPart::Mix(m) => self.mark(m, depth + 1),
+            }
+        }
+    }
+
+    pub fn around_layer(&self, i: usize) -> usize {
+        self.layers.get(i).copied().unwrap_or(0)
+    }
+
+    pub fn around_title(&self, j: usize) -> usize {
+        self.titles.get(j).copied().unwrap_or(0)
+    }
+
+    pub fn starts_at(&self, i: usize) -> bool {
+        self.outer.iter().any(|m| m.layers.0 == i)
     }
 }
 

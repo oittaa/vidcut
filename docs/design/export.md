@@ -422,9 +422,20 @@ The pictures:
 - A level of a clip in a compound clip is left out where the clip fills the frame at its usual values. Thus the edges of the compound clip are covered once.
 - A composite mode (`Placing::mode`) mixes in R'G'B' (D75). The shader mixes it with the layers below (`mixed`).
   - `place::Placing` takes the first mode other than Normal, from the picture out through its compound clips.
+  - It stops at the first compound clip that mixes first (`Placing::inside`).
 - A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once.
 - A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
 - A Push or a Slide draws each side into its own picture. `fs_motion` moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
+
+A compound clip with an opacity or a composite mode ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+
+- `place::Mixes` finds, for each frame, the compound clips that mix first. Each one is a `place::Mix`.
+- `MixDraw` draws the layers and titles of a `place::Mix` over transparent, in a picture of its own. `blur::shown_bind` then shows that picture as one layer, with the opacity and the mode.
+- A compound clip with one picture and no mode conflict needs no such picture. That picture takes the opacity and the mode of the compound clip.
+- A compound clip at opacity 100% and Normal needs no such picture.
+- A layer with a composite mode in a `place::Mix` reads `Below`. It holds the canvas with the open pictures over it.
+- `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
+- The soft edges and the effects of the compound clip stay on each picture in it ([todo](../todo/compound-opacity.md)).
 
 Dynamic Zoom and keyframes (D75):
 

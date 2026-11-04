@@ -255,7 +255,9 @@ fn tone_mapped(c_in: vec3<f32>, tone: vec4<f32>) -> vec3<f32> {
 
 fn rgb(s: vec3<f32>) -> vec3<f32> {
     var c = s;
-    if p.flags.z != 3u {
+    if p.flags.z == 4u {
+        c = s.zxy;
+    } else if p.flags.z != 3u {
         let y = (s.x - p.range.x) * p.range.y;
         let cb = (s.y - p.range.z) * p.range.w;
         let cr = (s.z - p.range.z) * p.range.w;
@@ -421,6 +423,9 @@ struct Table {
 @group(1) @binding(3) var table_cube: texture_3d<f32>;
 
 fn table_place(c: vec3<f32>, low: f32, high: f32, size: u32) -> vec3<f32> {
+    if low == high {
+        return vec3<f32>(0.0);
+    }
     return clamp((c - vec3<f32>(low)) / (high - low), vec3<f32>(0.0), vec3<f32>(1.0)) * f32(size - 1u);
 }
 
