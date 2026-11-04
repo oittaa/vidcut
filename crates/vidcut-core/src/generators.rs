@@ -534,13 +534,9 @@ fn bt2111_bars(codes: &Bt2111, w: u32, h: u32) -> Vec<Band> {
 fn window(w: u32, h: u32) -> Vec<Band> {
     let black = vec![grey(0.0)];
     let box_row = columns(w, |x| {
-        grey(if 4 * x > w && 4 * x < 3 * w { 1.0 } else { 0.0 })
+        grey(if x > w / 4 && x < 3 * w / 4 { 1.0 } else { 0.0 })
     });
-    vec![
-        (h / 4 + 1, black.clone()),
-        ((3 * h).div_ceil(4), box_row),
-        (h, black),
-    ]
+    vec![(h / 4 + 1, black.clone()), (3 * h / 4, box_row), (h, black)]
 }
 
 fn bands(chart: Chart, w: u32, h: u32) -> Vec<Band> {

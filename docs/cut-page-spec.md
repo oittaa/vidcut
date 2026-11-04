@@ -1406,7 +1406,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Row 4 goes to the bottom. The sides are 0.15.
     - From d, it has black for 4.5 U, white for 6 U and black for 4.5 U.
     - Then it has 0.02 for U, black for U, 0.04 for U, and black to d + 7 c.
-  - Window is white where 0.25 < x / W < 0.75 and 0.25 < y / H < 0.75. Elsewhere it is black and opaque.
+  - Window is white where ⌊W / 4⌋ < x < ⌊3 W / 4⌋ and ⌊H / 4⌋ < y < ⌊3 H / 4⌋. Elsewhere it is black and opaque.
   - The three BT.2111 Color Bars have five rows. W sets the columns, and H sets the rows.
     - d = ⌊W / 8⌋, and c = ⌊W × 206 / 1920⌋
     - The bars start at d, d + c, d + 2 c, d + 3 c, W − d − 3 c, W − d − 2 c and W − d − c. The last bar ends at W − d.
