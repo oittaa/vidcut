@@ -609,9 +609,8 @@ impl Workspace {
         self.snap.viewer == ViewerMode::MultiSource && !self.snap.multi_alone
     }
 
-    pub(super) fn multi_span(&self) -> Option<(i64, i64)> {
-        self.multi_on().then(|| {
-            let marks = &self.snap.multi_marks;
+    pub(super) fn viewer_span(&self) -> Option<(i64, i64)> {
+        self.snap.viewer_marks().map(|marks| {
             (
                 marks.mark_in.unwrap_or(0),
                 marks.mark_out.unwrap_or(self.snap.source.frames),
@@ -631,6 +630,9 @@ impl Workspace {
         }
         if self.snap.viewer == ViewerMode::SourceTape && self.crossing_span().is_some() {
             return vec![json!({ "tape": true })];
+        }
+        if let Some(g) = self.snap.open_generator() {
+            return vec![g.params()];
         }
         let Some(p) = self.project() else {
             return Vec::new();
@@ -736,7 +738,9 @@ impl Workspace {
                     s["at"] = json!(playhead);
                     if multi {
                         s["grid"] = json!(true);
-                    } else if let Some(params) = s.as_object_mut() {
+                    } else if s.get("generator").is_none()
+                        && let Some(params) = s.as_object_mut()
+                    {
                         params.remove("range");
                     }
                 }
@@ -1779,6 +1783,10 @@ impl Workspace {
                 }
                 _ => {
                     let mut v = vec![0, self.snap.source.frames];
+                    if let Some(marks) = self.snap.viewer_marks() {
+                        v.extend(marks.mark_in);
+                        v.extend(marks.mark_out);
+                    }
                     if let Some((m, _)) = self.snap.source_at()
                         && let Some(media) = self.project().and_then(|p| p.media(m))
                     {
@@ -1810,7 +1818,7 @@ impl Workspace {
             self.send("tape.marks.set", json!({ key: value, "order": order }));
             return;
         }
-        if self.hover.is_none() && self.multi_on() {
+        if self.hover.is_none() && self.snap.viewer_marks().is_some() {
             let frame = self.snap.source.position;
             let (key, value) = if is_in {
                 ("in", frame)
@@ -1846,8 +1854,7 @@ impl Workspace {
             self.seek(PlayerId::Source, if is_in { a } else { b - 1 }, false);
             return;
         }
-        if self.multi_on() {
-            let marks = &self.snap.multi_marks;
+        if let Some(marks) = self.snap.viewer_marks() {
             let mark = if is_in {
                 marks.mark_in
             } else {
@@ -1901,7 +1908,7 @@ impl Workspace {
             self.send("tape.marks.clear", json!({ "media": media }));
             return;
         }
-        if self.multi_on() {
+        if self.snap.viewer_marks().is_some() {
             self.send("viewer.marks.clear", json!({}));
             return;
         }

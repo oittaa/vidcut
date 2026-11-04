@@ -8,6 +8,7 @@ use vidcut_core::model::{
     TrackKind,
 };
 use vidcut_core::ops::{Edge, MAIN};
+use vidcut_core::request::GeneratorSettings;
 use vidcut_core::validate::GAIN;
 
 use super::EditSel;
@@ -107,7 +108,8 @@ pub enum Gesture {
     },
     Generator {
         kind: GeneratorKind,
-        label: &'static str,
+        settings: GeneratorSettings,
+        label: String,
         len: i64,
     },
     Transition {
@@ -388,8 +390,15 @@ impl Drag {
             Gesture::Title { template, len } => {
                 block_preview(ctx, pos, *len, "titles.add", template.params())
             }
-            Gesture::Generator { kind, len, .. } => {
-                block_preview(ctx, pos, *len, "generators.add", json!({ "kind": kind }))
+            Gesture::Generator {
+                kind,
+                settings,
+                len,
+                ..
+            } => {
+                let mut params = json!(settings);
+                params["kind"] = json!(kind);
+                block_preview(ctx, pos, *len, "generators.add", params)
             }
             Gesture::Transition { kind, .. } => transition_preview(ctx, pos, kind),
             Gesture::Effect { kind, .. } => effect_preview(ctx, pos, *kind),

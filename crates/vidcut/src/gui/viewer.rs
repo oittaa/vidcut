@@ -5,7 +5,7 @@ use eframe::egui::{
     pos2, vec2,
 };
 use serde_json::json;
-use vidcut_core::model::{Media, Project, TrackKind};
+use vidcut_core::model::{Marks, Media, Project, TrackKind};
 use vidcut_core::request::{
     TimecodeDisplay, ViewerFrame, ViewerFrameKey, ViewerMode, viewer_frame_after,
 };
@@ -381,6 +381,15 @@ impl Workspace {
                 .unwrap_or_default();
             let range = (marks.mark_in.unwrap_or(0), marks.mark_out.unwrap_or(frames));
             self.start_media_drag(&media, range, press);
+        }
+        if mode.is_source()
+            && area_resp.drag_started()
+            && let Some(g) = self.snap.open_generator().cloned()
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            let (a, b) = g.range();
+            let label = g.name().to_string();
+            self.start_generator_drag((g.kind, g.settings, label), b - a, press);
         }
         let painter = ui.painter_at(area);
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
@@ -929,9 +938,10 @@ impl Workspace {
                     60,
                 )
             }
-            _ => match self.snap.source_at() {
-                Some((m, _)) => elide(&name(m), 60),
-                None => String::new(),
+            _ => match (self.snap.source_at(), self.snap.open_generator()) {
+                (Some((m, _)), _) => elide(&name(m), 60),
+                (None, Some(g)) => g.name().to_string(),
+                (None, None) => String::new(),
             },
         }
     }
@@ -1007,8 +1017,7 @@ impl Workspace {
         }
         let span = match self.snap.viewer {
             ViewerMode::SourceTape => self.crossing_span(),
-            ViewerMode::MultiSource => self.multi_span(),
-            _ => None,
+            _ => self.viewer_span(),
         };
         let shown = self.snap.source_at().map(|(m, _)| m.to_string());
         let mut handles = None;
@@ -1021,8 +1030,7 @@ impl Workspace {
                     b = *frame;
                 }
             }
-            let unmarked = self.multi_on()
-                && self.snap.multi_marks.is_empty()
+            let unmarked = self.snap.viewer_marks().is_some_and(Marks::is_empty)
                 && !matches!(self.drag, Some(Drag::TapeMark { .. }));
             if !unmarked {
                 painter.rect_filled(
@@ -1200,7 +1208,7 @@ impl Workspace {
                 }
                 Some(Drag::TapeMark { is_in, frame }) => {
                     let key = if is_in { "in" } else { "out" };
-                    if self.multi_on() {
+                    if self.snap.viewer_marks().is_some() {
                         self.send("viewer.marks.set", json!({ key: frame }));
                     } else {
                         let order = self.tape_order();
@@ -1316,7 +1324,7 @@ impl Workspace {
             }
             return;
         }
-        if let Some((inn, out)) = self.multi_span() {
+        if let Some((inn, out)) = self.viewer_span() {
             let (inn, out) = jogged_mark(is_in, inn, out, by, self.snap.source.frames);
             let (key, value) = if is_in { ("in", inn) } else { ("out", out) };
             self.send("viewer.marks.set", json!({ key: value }));
@@ -1793,15 +1801,16 @@ impl Workspace {
 
     fn duration_field(&mut self, ui: &mut egui::Ui) {
         let Some(p) = self.project() else { return };
-        let multi = self.multi_on();
-        let (marks, end, media) = match self.snap.source_at() {
-            _ if multi => (self.snap.multi_marks.clone(), self.snap.source.frames, None),
-            Some((media, _)) => (
+        let held = self.snap.viewer_marks().cloned();
+        let multi = held.is_some();
+        let (marks, end, media) = match (held, self.snap.source_at()) {
+            (Some(marks), _) => (marks, self.snap.source.frames, None),
+            (None, Some((media, _))) => (
                 p.media(media).map(|m| m.marks.clone()).unwrap_or_default(),
                 self.media_frames(media),
                 Some(media.to_string()),
             ),
-            None => (p.marks.clone(), p.end(), None),
+            (None, None) => (p.marks.clone(), p.end(), None),
         };
         let current = self.src_tc(marks.mark_out.unwrap_or(end) - marks.mark_in.unwrap_or(0));
         if let Some(text) = &mut self.duration_text {

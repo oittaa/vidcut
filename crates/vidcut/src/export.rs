@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use vidcut_av::export::encode::Availability;
 use vidcut_av::export::{self as engine, Progress, Report};
 use vidcut_av::light::{Lights, Span};
+use vidcut_core::editor::source_context;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind, PictureShare};
 use vidcut_core::export::metadata::{Measured, PieceMeta};
 use vidcut_core::export::{
@@ -14,6 +15,8 @@ use vidcut_core::export::{
 };
 use vidcut_core::fingerprint::short_digest;
 use vidcut_core::looks::checked_name;
+use vidcut_core::model::Generator;
+use vidcut_core::ops::titles::default_length;
 use vidcut_core::otio::{self, Locations};
 use vidcut_core::render::{self, RenderPlan};
 use vidcut_core::request::{ExportParams, SubtitlesAs};
@@ -1375,12 +1378,32 @@ pub fn frame(
     at: &TimeSpec,
     out: &Path,
     media: Option<&str>,
+    generator: Option<&Generator>,
     width: Option<u32>,
     playhead: Option<i64>,
 ) -> Result<Value> {
     let fps = p.settings.fps;
-    let (piece, (w, h), frame, colors) = match media {
-        None => {
+    let (piece, (w, h), frame, colors) = match (media, generator) {
+        (Some(_), Some(_)) => {
+            return Err(Error::usage("give media or generator, not both"));
+        }
+        (None, Some(generator)) => {
+            let frames = default_length(p);
+            let t = source_context(p, frames, &Default::default(), None).resolve(at)?;
+            if t < 0 || t >= frames {
+                return Err(Error::invalid(format!(
+                    "frame {t} is outside the generator (0..{frames})"
+                )));
+            }
+            let plan = render::generator_tape(p, generator, t, t + 1)?;
+            (
+                plan.video[0].clone(),
+                (p.settings.width, p.settings.height),
+                t,
+                plan.colors,
+            )
+        }
+        (None, None) => {
             let t = p.time_context(playhead).resolve(at)?;
             if t < 0 || t >= p.end().max(1) {
                 return Err(Error::invalid(format!(
@@ -1396,7 +1419,7 @@ pub fn frame(
                 plan.colors,
             )
         }
-        Some(id) => {
+        (Some(id), None) => {
             let m = p
                 .media(id)
                 .ok_or_else(|| Error::not_found(format!("no media {id}")))?;

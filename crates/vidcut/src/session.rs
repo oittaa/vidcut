@@ -469,30 +469,43 @@ pub fn render(
             at,
             out,
             media,
+            generator,
+            settings,
             width,
             viewer: true,
-        } => match media {
-            Some(_) => {
+        } => {
+            if media.is_some() {
                 return Err(Error::invalid(
                     "the viewer draws the timeline: leave out media",
                 ));
             }
-            None => answer(crate::gui::frame::render(project, at, out, *width, None)?),
-        },
+            if vidcut_core::ops::generators::source_of(*generator, settings)?.is_some() {
+                return Err(Error::invalid(
+                    "the viewer draws the timeline: leave out generator",
+                ));
+            }
+            answer(crate::gui::frame::render(project, at, out, *width, None)?)
+        }
         Request::FrameRender {
             at,
             out,
             media,
+            generator,
+            settings,
             width,
             viewer: false,
-        } => answer(export::frame(
-            project,
-            at,
-            out,
-            media.as_deref(),
-            *width,
-            None,
-        )?),
+        } => {
+            let generator = vidcut_core::ops::generators::source_of(*generator, settings)?;
+            answer(export::frame(
+                project,
+                at,
+                out,
+                media.as_deref(),
+                generator.as_ref(),
+                *width,
+                None,
+            )?)
+        }
         Request::FrameScope {
             at,
             out,
