@@ -35,11 +35,10 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
   - the sound of the grid with Video Only off and on (p. 708);
   - the Out mark by hand in the view of one camera;
   - a drag on the rows in the view of one camera;
-  - rows for files with no tag and no saved group, and with no picture;
+  - rows for files with no picture;
   - two groups in a bin, when the clip at the playhead is in neither;
   - a click on a camera at another frame rate;
   - a timeline whose clips disagree on the time of a file.
-- Ask the owner about `SyncGroup.dropped`: the icon opens a group although a file of the bin is not in it. The measurement has no such list.
 - Show the Sync Bin grid in the Cinema Viewer with P (p. 709).
 - Record how a cut chooses an angle.
 - Measure sync by sound with files from real cameras, each with its own microphone. Then check `SOUND_MATCH_SCORE`.

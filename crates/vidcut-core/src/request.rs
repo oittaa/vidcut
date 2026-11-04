@@ -123,7 +123,7 @@ pub enum Request {
     /// file has its `media`, the frame `at` of its first visible frame, and
     /// `head` and `tail`, the frames that it loses at each end. Files of one
     /// row do not overlap: a file keeps only the part after the files before
-    /// it that it overlaps. `dropped` lists the files with nothing left. Rows
+    /// it. `dropped` lists the files with nothing left. Rows
     /// with no name follow. By timecode, a file with no name goes on the first
     /// such row where it does not overlap. By sound, In or Out, it has its own
     /// row. A file with no picture and no name has its own row, after the
@@ -136,8 +136,9 @@ pub enum Request {
         /// `sound`. By timecode, In and Out, files of a row go in timecode
         /// order; with one timecode, they go in the given order. By In, the
         /// mark of a row's earliest file lines up the row. By Out, the mark of
-        /// its latest file does. By sound, files of a row go in the given
-        /// order. By sound the answer also has `unmatched`, the media that
+        /// its latest file does. By sound, files of a row go in the order of
+        /// their places; with one place, they go in the given order. By sound
+        /// the answer also has `unmatched`, the media that
         /// match no other file, and `pairs`, how well each two files match.
         #[serde(default)]
         sync: crate::model::AngleSync,
@@ -239,9 +240,10 @@ pub enum Request {
     /// source timecode lines up the files. A file with no time in common has
     /// none. `media` and `frame` are the file of the row at `at` and its frame.
     /// A row with no file at `at` has no `frame`, and `media` is its first file.
-    /// `active` says that a file of the row is on top at `at`. It refuses a
-    /// file on a row with no picture or no time to line up by, and two groups
-    /// when the clip at `at` is in neither of them.
+    /// `active` says that a file of the row is on top at `at`. A file with no
+    /// timecode and no synced group lies at 00:00:00:00. It refuses a file on
+    /// a row with no picture, and two groups when the clip at `at` is in
+    /// neither of them.
     #[serde(rename = "multicam.rows")]
     MulticamRows {
         /// Default: the top level.

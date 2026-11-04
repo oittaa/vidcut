@@ -244,8 +244,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - The other files of the row keep their timecode distance from that file. The order of the request plays no part.
   - **The row rule:** files of one named row do not overlap.
     - Files go in timecode order. With one timecode, they go in the order of the request.
-    - A file keeps only the part after the earlier files that it overlaps. A file with no such part is not on the row, and `dropped` names it.
-    - A file that overlaps no earlier file stays whole.
+    - By `sound`, files go by their places from the sound. A tie goes by the order of the request ([deviation X124](deviations.md#x124-sync-by-sound-uses-time-order-on-a-row)).
+    - A file keeps only the part after everything before it. A file with no such part is not on the row, and `dropped` names it.
     - A file does not move. It loses frames at its start, and `head` gives those frames.
     - Example: tags 01:00:05:00 and 01:00:10:00 on one row, 750 frames each. The first stays whole. The second keeps 125 frames from 01:00:35:00.
   - An item with marks uses only the frames between them. The shift stays. `head` and `tail` give the frames that it does not use.
@@ -265,9 +265,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Thus with two files and no match, both are at the start and `unmatched` names both.
   - Two sets of files that do not match each other do not overlap. The later set starts one frame after the earlier one ends.
   - vidcut compares the first sound stream of each file, with all its channels. No measurement shows which channel the Cut page uses.
-  - Each file is placed by its own sound. The row rule then acts in the order of the request, not in time order.
-    - Thus files c1 and c2 keep c1 whole, and c2 loses its head. Files c2 and c1 keep c2 whole, and c1 is not on the row, although its first frames have nothing over them.
-    - A later file with no overlap stays whole, also when it lies before the earlier file. Thus files c3 and c1 keep both files.
+  - Each file is placed by its own sound. The row rule then acts in the order of the places ([deviation X124](deviations.md#x124-sync-by-sound-uses-time-order-on-a-row)).
+    - Thus files c1 and c2 keep c1 whole, and c2 loses its head. Files c2 and c1 give the same result.
+    - Files c3 and c1 keep both files, because c3 starts after c1 ends.
+    - Of two files with one place and one length, the first in the order of the request stays whole. The second file is not on the row.
   - `multicam.layout` also gives `pairs`: for each two files the shift, the score and whether they match.
   - While the GUI runs, `multicam.create` by sound is a job.
 - **Synced group** (p. 708):
@@ -626,6 +627,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **The file of a row** at a time is the file whose visible part holds that time.
   - Example: tags 01:00:05:00 and 01:00:10:00 on one camera. At source 01:00:15:00 the row shows the first file. At source 01:00:38:00 it shows the second file, 5 seconds long.
 - **The time of a file:** by its synced group when it is in one, and by its timecode otherwise.
+  - A file with no tag, or with the tag 00:00:00:00, and no saved group has a row at 00:00:00:00.
   - The rows follow the source timecode of the clip at the playhead, not the record time.
   - Example: a timeline of three files in a row, with the second file at the playhead. The rows read that file's source timecode.
   - With several clips at the playhead, the clip on the lowest track that overlaps the file counts. A video clip and an audio clip that disagree refuse.
@@ -649,7 +651,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The reference is then the first clip that overlaps the whole file, as the marked range overlaps no clip.
 - vidcut refuses these cases with an error, because they are not measured:
   - a file with no picture, or a still, on a row;
-  - a file with no timecode tag and no group;
   - two groups in the bin, when the clip at the playhead is in neither;
   - a click on a camera at another frame rate.
 
@@ -661,7 +662,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - With fewer than two files, no window opens. The row rule counts too: two files of one camera with one start and one length open no window.
   - Two files of one camera open one row and one cell when they do not overlap or overlap only in part. Two files with no name and no overlap do the same.
   - Files that are one saved group open that group. A group plus a new file refuses ([deviation X123](deviations.md#x123-the-sync-clips-icon-opens-a-saved-group)).
-  - A file that the group's `dropped` lists is not a new file, so the icon opens the group.
+  - A file that the group's `dropped` lists is not a new file, so the icon opens the group ([deviation X123](deviations.md#x123-the-sync-clips-icon-opens-a-saved-group)).
   - Files of two saved groups or more open as a new sync, by the rows of [§3](#3-media-pool-ch-34-pp-653675). Cancel adds nothing. Save Sync makes a new group, and the earlier groups stay.
   - "Open Sync Group…" in the menu of a file in a group opens its newest group.
   - The window is inside vidcut's main window ([deviation X121](deviations.md#x121-the-sync-clips-window-is-inside-the-main-window)).
@@ -716,6 +717,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Each row that it lines up gets one sync icon, the sync lock.
   - With In or Out, each file needs that mark. One mark counts for each row ([§3](#3-media-pool-ch-34-pp-653675)). A file stays whole.
   - By sound, a file that matches no other file stays at the start, with no icon. "Auto Sync Failed" names such files.
+  - By sound, files of a row go by their places, and a tie goes by bin order. Thus the result does not depend on bin order when the places differ ([deviation X124](deviations.md#x124-sync-by-sound-uses-time-order-on-a-row)).
   - Auto Sync reads the marks at that moment.
   - On a saved group, the result waits for Save Sync ([deviation X119](deviations.md#x119-auto-sync-on-a-saved-group-waits-for-save-sync)).
 - **By hand:**

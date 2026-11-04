@@ -146,37 +146,30 @@ fn camera_row(
     sync: AngleSync,
     dropped: &mut Vec<String>,
 ) -> GroupRow {
-    let tape = |i: usize| origin(p, placed[i].0) + placed[i].2.start;
-    if sync != AngleSync::Sound {
-        members.sort_by_key(|i| (tape(*i), *i));
-    }
+    let time = |i: usize| match sync {
+        AngleSync::Sound => placed[i].1,
+        _ => origin(p, placed[i].0) + placed[i].2.start,
+    };
+    members.sort_by_key(|i| (time(*i), *i));
     let marked = match sync {
         AngleSync::Out => members.last(),
         _ => members.first(),
     };
-    let by_mark = marked.map_or(0, |i| placed[*i].1 - tape(*i));
+    let by_mark = marked.map_or(0, |i| placed[*i].1 - time(*i));
     let camera = members.first().and_then(|i| placed[*i].0.camera.clone());
-    let mut parts: Vec<Range<i64>> = Vec::with_capacity(members.len());
+    let mut reach = i64::MIN;
     let mut clips = Vec::with_capacity(members.len());
     for i in members {
-        let place = match sync {
-            AngleSync::Sound => placed[i].1,
-            _ => tape(i) + by_mark,
-        };
+        let place = time(i) + by_mark;
         let end = place + placed[i].2.end - placed[i].2.start;
-        let start = parts
-            .iter()
-            .filter(|part| part.start < end && place < part.end)
-            .map(|part| part.end)
-            .fold(place, i64::max);
+        let start = place.max(reach);
         if start >= end {
             dropped.push(placed[i].0.id.clone());
             continue;
         }
-        parts.push(start..end);
+        reach = end;
         clips.push(kept_clip(p, &placed[i], place, start));
     }
-    clips.sort_by_key(|c| c.at);
     GroupRow {
         camera,
         locked: false,
@@ -733,16 +726,6 @@ pub fn marked_range(p: &Project, g: &SyncGroup, media: &str) -> Result<(i64, i64
     Ok((a, b))
 }
 
-fn sync_start(p: &Project, m: &Media, at: i64, group: Option<&SyncGroup>) -> Result<Option<i64>> {
-    if group.is_none() && m.info.timecode.is_none() {
-        return Err(Error::invalid(format!(
-            "{} has no timecode and no synced group",
-            m.name
-        )));
-    }
-    ops::file_start_at(p, m, at, group)
-}
-
 pub fn camera_order(a: &str, b: &str) -> Ordering {
     match (a.parse::<u64>(), b.parse::<u64>()) {
         (Ok(x), Ok(y)) => x.cmp(&y),
@@ -817,7 +800,7 @@ fn sync_row(
         let Some(m) = p.media(&c.media) else {
             continue;
         };
-        let start = sync_start(p, m, at, group)?;
+        let start = ops::file_start_at(p, m, at, group)?;
         let frames = visible(p, c);
         if under.is_none()
             && let Some(frame) = start
@@ -914,7 +897,7 @@ pub fn pick(p: &mut Project, media: &str, at: i64) -> Result<Marks> {
     let group = group_at_playhead(p, at)
         .filter(|g| g.at_of(media).is_some())
         .or_else(|| p.group_of(media));
-    let start = sync_start(p, m, at, group)?
+    let start = ops::file_start_at(p, m, at, group)?
         .filter(|s| (0..frames).contains(&(at - s)))
         .ok_or_else(|| Error::invalid(format!("{} has no frame at the playhead", m.name)))?;
     let end = p.end();

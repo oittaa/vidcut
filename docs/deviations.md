@@ -2398,10 +2398,27 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - These are measurements in Resolve Studio 21.1.2. The icon always starts a new group from the timecodes, and the old group stays in the pool.
   - A saved group plus one new file gives a new group of all the files, at their timecodes.
+  - Thus the icon opens all the files as a new sync. This brings a file dropped by a drag back and loses the saved places.
 - **vidcut:**
   - The icon on files that are already one saved group opens that group.
+  - A file that the group dropped does not count as new, so the icon opens the saved group.
   - A group plus a new file refuses.
 - **Why:**
   - Two groups on one file leave the older one hard to reach.
   - In the one case measured, "Open Sync Group..." opened only the newer group.
+  - The icon keeps the saved work when it opens the saved group.
+  - The owner approved this difference.
+
+## X124. Sync by Sound uses time order on a row
+
+- **Resolve:**
+  - This is a measurement in Resolve Studio 21.1.2. Sync by Sound takes the files of a row in bin order.
+  - With c2 first in the bin and c1 second, it drops c1 silently, although c1's frames 0 to 375 have nothing over them.
+- **vidcut:**
+  - Files on a row go by their place from the sound. A tie goes by bin order.
+  - A file keeps only the part after everything before it. A file with no such part is not on the row.
+  - Thus c2 and c1 give the same result as c1 and c2: c1 at 0 whole, c2 at 500 with head 125.
+- **Why:**
+  - Nothing is lost for a reason the user cannot see, and the result does not depend on bin order.
+  - This is the rule of Timecode, so one rule serves both.
   - The owner approved this difference.
