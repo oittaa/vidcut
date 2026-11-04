@@ -419,6 +419,11 @@ pub struct Media {
     /// says in their place, for a file whose tags are wrong.
     #[serde(default, skip_serializing_if = "ColorSpace::is_tagged")]
     pub color_space: ColorSpace,
+    /// The `.cube` file that its pictures go through just after their
+    /// conversion into the timeline color space. Each of its clips on the
+    /// timeline gets it. Left out when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_lut: Option<PathBuf>,
     /// Super Scale: its pictures are enlarged with an AI upscaler or the
     /// classic one, as much as they need, before they are fitted. Absent
     /// while it is off.
@@ -1742,11 +1747,6 @@ pub struct Clip {
     /// slow media and AI Super Scale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
-    /// The `.cube` file that its picture goes through just after its
-    /// conversion into the timeline color space. Left out when there is
-    /// none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_lut: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -4516,7 +4516,6 @@ impl Cue {
             retime: ClipRetime::Project,
             color: None,
             render_cache: ClipCache::Auto,
-            input_lut: None,
         }
     }
 

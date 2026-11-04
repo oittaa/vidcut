@@ -2101,7 +2101,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 cache: c.render_cache,
                 excluded: false,
                 made: None,
-                input_lut: c.input_lut.clone(),
+                input_lut: m.input_lut.clone(),
             })
         };
     let mut video = Vec::new();

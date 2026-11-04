@@ -2808,6 +2808,7 @@ fn mutate(
             color,
             camera,
             color_space,
+            input_lut,
             super_scale,
             sharpness,
             upscaler,
@@ -2818,11 +2819,20 @@ fn mutate(
                 sharpness: *sharpness,
                 upscaler: *upscaler,
             };
-            if color.is_none() && camera.is_none() && color_space.is_none() && set.is_empty() {
+            if color.is_none()
+                && camera.is_none()
+                && color_space.is_none()
+                && input_lut.is_none()
+                && set.is_empty()
+            {
                 return Err(Error::usage(
-                    "give color, camera, color_space, or a Super Scale field: super_scale, \
-                     sharpness or upscaler",
+                    "give color, camera, color_space, input_lut, or a Super Scale field: \
+                     super_scale, sharpness or upscaler",
                 ));
+            }
+            if let Some(path) = input_lut {
+                let lut = checked_lut(env, path)?;
+                ops::set_media_input_lut(p, &media.to_vec(), lut)?;
             }
             if let Some(color) = color {
                 let color = (!color.is_empty()).then(|| color.clone());
@@ -3456,7 +3466,6 @@ fn mutate(
             voice_isolation_on,
             retime,
             render_cache,
-            input_lut,
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -3464,10 +3473,6 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
-            let input_lut = input_lut
-                .as_deref()
-                .map(|path| checked_lut(env, path))
-                .transpose()?;
             let or_none =
                 |v: &Option<String>| v.as_ref().map(|v| (!v.is_empty()).then(|| v.clone()));
             let voice_isolation = voice_isolation.map(ops::checked_isolation).transpose()?;
@@ -3485,7 +3490,6 @@ fn mutate(
                 voice_isolation_on: *voice_isolation_on,
                 retime: *retime,
                 render_cache: *render_cache,
-                input_lut,
             };
             ops::set_clips(p, &ids, &props)?;
             if retime.is_some() && *download && !dry_run {
@@ -4829,6 +4833,7 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         marks: Default::default(),
         bin: String::new(),
         color_space: Default::default(),
+        input_lut: None,
         super_scale: Default::default(),
         left_out: Vec::new(),
         words: Vec::new(),
@@ -5462,7 +5467,6 @@ fn place_imported(
                 retime: crate::model::ClipRetime::Project,
                 color: color(c),
                 render_cache: crate::model::ClipCache::Auto,
-                input_lut: None,
             });
             placed.insert(track_of(&c.track));
             continue;
@@ -5600,7 +5604,6 @@ fn place_imported(
             retime: crate::model::ClipRetime::Project,
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
-            input_lut: c.input_lut.clone(),
         });
         placed.insert(track_of(&c.track));
     }
@@ -8411,6 +8414,9 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
     }
     if !m.color_space.is_tagged() {
         v["color_space"] = json!(m.color_space);
+    }
+    if let Some(l) = &m.input_lut {
+        v["input_lut"] = json!(l);
     }
     if !m.super_scale.is_off() {
         v["super_scale"] = json!(m.super_scale);

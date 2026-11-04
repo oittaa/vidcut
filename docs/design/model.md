@@ -194,6 +194,7 @@ Media fields:
   - `Media::video_as_read` is the `VideoInfo` of the file, read in that space. Render pieces carry it.
   - `VideoReader` retags each decoded frame with it (`color::retag`). This drops the HDR side data.
   - A proxy is made from the pictures as read in that space. Thus its own tags are right.
+- `input_lut` is the `.cube` file that the pictures of each clip of the media go through (spec §3, [the LUT files](README.md#lut-files)).
 - `super_scale` (`SuperScale`, spec §3) enlarges the pictures with a better upscaler before they are fitted.
   - `upscaler` (`Upscaler`) is AI Fast, AI Slow or Classic. [gpu](gpu.md#super-scale) tells which upscaler each path uses.
   - Proxies do not use it. The viewer uses it only with `viewer.super_scale` ([playback](playback.md)).
@@ -286,7 +287,7 @@ Ranges and resolution:
 
 - `Store` reads and writes the `Project` as pretty JSON (serde).
 - A media path in or under the folder of the project is stored relative to it. Other paths are stored absolute. In memory, media paths are absolute.
-  - The same rule holds for the `input_lut` of a clip and the `output_lut` of the settings.
+  - The same rule holds for the `input_lut` of a media item and the `output_lut` of the settings.
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-projects-are-always-saved-standalone-json-files)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
 - A save writes a temporary file and renames it over the project (`temp::write`). Thus readers see the old file or the new one, never part of one.
@@ -550,7 +551,7 @@ The metadata:
 
 | Metadata | Holds |
 |---|---|
-| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `gain_keys` from the item's first source frame; `source_in`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects; `input_lut` |
+| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `gain_keys` from the item's first source frame; `source_in`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`, a clip volume effect with the volume keyframes in its `Key Frames` (`effects::sound`), and `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Retime and Scaling, and Dynamic Zoom (`otio::picture`), fitted, in place of carried ones |

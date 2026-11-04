@@ -340,7 +340,6 @@ pub(super) fn add_block(
             retime: crate::model::ClipRetime::Project,
             color: None,
             render_cache: crate::model::ClipCache::Auto,
-            input_lut: None,
         },
     );
     fix_audio(p, ti);

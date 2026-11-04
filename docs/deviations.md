@@ -2564,7 +2564,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - `LUT_3D_SIZE 1` gives a black picture.
   - The window of Resolve is not measured.
 - **vidcut:**
-  - `clip.set` and `project.set` refuse the file and give the reason.
+  - `media.set` and `project.set` refuse the file and give the reason.
 - **Why:**
   - An error is better than a wrong picture that looks correct.
   - The owner approved this difference.

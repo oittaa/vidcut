@@ -410,6 +410,7 @@ fn proxy_state(m: &Media, lost: bool) -> Option<ProxyState> {
 
 impl Workspace {
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
+        self.input_lut_picked();
         self.hover = None;
         self.bins.targets.clear();
         let press = ui.input(|i| i.pointer.press_origin().filter(|_| i.pointer.any_pressed()));
@@ -1847,6 +1848,17 @@ impl Workspace {
                         self.send("media.set", json!({ "media": ids, "color_space": space }));
                         ui.close();
                     }
+                }
+            });
+            ui.menu_button("Input LUT", |ui| {
+                if ui.button("Choose…").clicked() {
+                    self.ask_input_lut(ui.ctx(), ids.clone(), m.input_lut.as_deref());
+                    ui.close();
+                }
+                let reset = egui::Button::new("Reset");
+                if ui.add_enabled(m.input_lut.is_some(), reset).clicked() {
+                    self.send("media.set", json!({ "media": ids, "input_lut": "" }));
+                    ui.close();
                 }
             });
             let mut put = None;

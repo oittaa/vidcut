@@ -244,6 +244,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The Camera row of Clip Info edits it. `media.set` sets it on one or more items. An empty name clears it.
   - `media.get` and the metadata strip show it.
   - vidcut does not read the name from a file. No measurement shows which file tags give it.
+- **Input LUT** (p. 3480, and [§13](#the-lut-tables)):
+  - A media item with pictures has an Input LUT (`input_lut`). Each of its clips on the timeline gets it.
+  - The Input LUT submenu of the pool's right-click menu and the LUT section of the Inspector set it.
+  - `media.set` sets it on one or more items. An empty path clears it. `media.get` shows it.
+  - A generator, a title and a compound clip have no media item. Thus they have no Input LUT.
 - **Multicam layout** (p. 1037):
   - `multicam.layout` tells where the files of a multicam clip lie. It changes nothing, and the project does not store the result.
   - The answer has rows. A named row holds all files of one camera name. Named rows come first, in camera order.

@@ -485,9 +485,9 @@ pub enum Request {
         #[serde(default)]
         back: bool,
     },
-    /// Set the Clip Color, the camera name, the Input Color Space and the
-    /// Super Scale of media items. Their clips show the Clip Color unless
-    /// they have their own.
+    /// Set the Clip Color, the camera name, the Input Color Space, the Input
+    /// LUT and the Super Scale of media items. Their clips show the Clip
+    /// Color unless they have their own.
     #[serde(rename = "media.set")]
     MediaSet {
         media: OneOrMany<String>,
@@ -504,6 +504,12 @@ pub enum Request {
         /// follow it.
         #[serde(default)]
         color_space: Option<crate::model::ColorSpace>,
+        /// Input LUT: a `.cube` file that their pictures go through just
+        /// after their conversion into the timeline color space. Each of
+        /// their clips on the timeline gets it. A file that can't be read is
+        /// refused, with the reason. An empty path clears it.
+        #[serde(default)]
+        input_lut: Option<PathBuf>,
         /// Super Scale on or off. Where its pictures are enlarged, they get
         /// the upscaler that `upscaler` names, as much as they need, up to 4
         /// times their source.
@@ -1521,7 +1527,7 @@ pub enum Request {
         look: Option<String>,
     },
     /// Enable/disable video (D), mute, gain (dB, -100..30), name, Clip Color,
-    /// Voice Isolation, Retime Process, Render Cache and Input LUT.
+    /// Voice Isolation, Retime Process and Render Cache.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -1570,12 +1576,6 @@ pub enum Request {
         /// AI Super Scale out of both.
         #[serde(default)]
         render_cache: Option<crate::model::ClipCache>,
-        /// Input LUT: a `.cube` file that the picture goes through just
-        /// after its conversion into the timeline color space. A file that
-        /// can't be read is refused, with the reason. An empty path clears
-        /// it.
-        #[serde(default)]
-        input_lut: Option<PathBuf>,
         /// Download Voice Isolation's model, or the model of the Retime
         /// Process that the clips then use, if this computer doesn't have it
         /// yet, checked against its SHA-256. Without it, a missing Voice
@@ -4854,7 +4854,7 @@ impl Request {
             | Self::StoryboardRender { out, .. }
             | Self::GuiScreenshot { out, .. } => vec![out],
             Self::Apply { commands, .. } => commands.iter_mut().flat_map(Self::paths_mut).collect(),
-            Self::ClipSet { input_lut, .. } => input_lut
+            Self::MediaSet { input_lut, .. } => input_lut
                 .iter_mut()
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect(),

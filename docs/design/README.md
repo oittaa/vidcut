@@ -111,7 +111,7 @@ A clip skips each step that it does not use. The steps run in this order:
 
 - `VideoFrames` reads the clip and keeps its fields (`VideoReader::keep_fields`). It decodes on the GPU or the CPU (`route::plan`). A solid color skips the file.
 - `fs_convert` puts the picture into the timeline color space, at the size of the picture (`color::shader_colors`). In an SDR timeline, it tone-maps HDR.
-- `fs_convert_lut` is `fs_convert` with the clip's input LUT after the conversion ([the LUT files](#lut-files)).
+- `fs_convert_lut` is `fs_convert` with the input LUT of the clip's media after the conversion ([the LUT files](#lut-files)).
 - `fs_bwdif` weaves an interlaced frame after that conversion ([gpu](gpu.md#deinterlacing-and-hdr)). It uses the frames before it, at it and after it (`Woven`).
 - `Source::ai_picture` enlarges the converted picture when Super Scale uses an AI upscaler ([gpu](gpu.md#super-scale)). An interlaced source is woven first.
 - `VideoFrames::retimed_frame` makes a frame from two pictures that are already converted, woven and enlarged ([export](export.md#which-source-frame)).
@@ -145,7 +145,8 @@ vidcut has none of the other stages of the spec:
 
 The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut reads a `.cube` file with `cube::read` and draws it on the GPU.
 
-- A clip holds its `input_lut`, and the project settings hold the `output_lut`. The project file stores each path as it stores a media path ([model](model.md)).
+- A media item holds its `input_lut`, and the project settings hold the `output_lut`. The project file stores each path as it stores a media path ([model](model.md)).
+- Each clip of a media item gets its `input_lut` in the render plan (`VideoPiece::Source`).
 - Each table gets the code values of the timeline. vidcut converts nothing for a LUT.
 - A table is a texture of 32-bit floats, and the shader interpolates its rows (`table_rows`, `table_cube`). Why: that format has no texture filter without an extra device feature.
 - With no LUT, the draw does not change: the pipelines of the LUTs do not exist (`Gpu::luts`).
@@ -158,7 +159,9 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
   - too few rows, or a row that is not three finite numbers;
   - a range with no width.
 - `Editor` reads the file when a request sets the path (`checked_lut`). Thus a request cannot put a broken file into the project.
-- A request refuses an input LUT on a clip with no media picture: a generator, a title, a compound clip or a sound clip. `ops::set_clips` tells this.
+- `media.set` refuses an input LUT on a media item with no pictures (`ops::set_media_input_lut`).
+- A generator, a title and a compound clip have no media item. Thus they have no input LUT.
+- The source viewer shows a picture with no input LUT. No measurement tells what it shows in the Cut page ([todo](../todo/luts.md)).
 - A file that goes away later stops an export or a `frame.render` with the reason. The viewer shows the picture with no output LUT, and the player's status holds the reason.
 - `fs_lut` works on colors that are not premultiplied. It leaves a pixel with no alpha as it is.
 - `fs_lut` reads the canvas, and the canvas holds 16-bit floats. `fs_convert_lut` reads the picture before it goes to 16-bit floats. Thus a table with steep steps gives a larger error as an output LUT than as an input LUT.
