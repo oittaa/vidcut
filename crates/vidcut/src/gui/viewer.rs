@@ -206,6 +206,7 @@ impl Workspace {
             return;
         }
         self.sync_keys(ctx);
+        self.multi_keys(ctx);
         let key = ctx.input_mut(|i| {
             if i.consume_key(egui::Modifiers::SHIFT, Key::F) {
                 Some(ViewerFrameKey::FullScreen)
@@ -326,7 +327,7 @@ impl Workspace {
         }
         if !dynamic
             && trim.is_none()
-            && mode != ViewerMode::MultiSource
+            && (mode != ViewerMode::MultiSource || self.snap.multi_alone)
             && !sync_grid
             && !self.sync_clips.open
             && let Some(cells) = &mut self.cells
@@ -345,7 +346,7 @@ impl Workspace {
             self.trim_editor_view(ui, area, e);
             return;
         }
-        if mode == ViewerMode::MultiSource {
+        if mode == ViewerMode::MultiSource && !self.snap.multi_alone {
             self.multi_view(ui, area);
             return;
         }
@@ -406,6 +407,15 @@ impl Workspace {
         }
         paint_guides(&painter, picture, &self.snap.guides);
         self.sync_close_button(ui, picture);
+        if mode == ViewerMode::MultiSource {
+            let at = Rect::from_min_size(picture.left_top() + vec2(8.0, 8.0), vec2(24.0, 24.0));
+            let close = ui
+                .put(at, egui::Button::new(egui_phosphor::regular::X_CIRCLE))
+                .on_hover_text("Close Camera");
+            if close.clicked() {
+                self.send("viewer.set", json!({ "alone": false }));
+            }
+        }
         let offline = self.project().and_then(|p| {
             let source = self.snap.source_at().map(|(m, _)| m);
             offline_name(p, &self.snap.missing, mode, player.position, source)
@@ -479,44 +489,59 @@ impl Workspace {
         let Some(p) = self.shown_project() else {
             return;
         };
-        let group = self.snap.source_group.as_deref().and_then(|g| p.group(g));
-        let Some(group) = group else {
-            return;
-        };
+        let grid = self.snap.source_grid.clone();
         let source = &self.snap.source;
         let (position, speed) = (
             source.position,
             if source.playing { source.speed } else { 0.0 },
         );
-        let active = self.snap.source_media.as_deref();
-        let cells: Vec<GridCell> = group
-            .rows
-            .iter()
-            .enumerate()
-            .filter_map(|(i, row)| {
-                let (clip, frame) = row.clips.iter().find_map(|clip| {
-                    let frames = vidcut_core::multicam::visible(&p, clip);
-                    let frame = position - clip.start();
-                    (clip.head..clip.head + frames)
-                        .contains(&frame)
-                        .then_some((clip, frame))
-                })?;
-                Some(GridCell {
-                    number: Some(i + 1),
-                    label: None,
-                    media: clip.media.clone(),
-                    frame: Some(frame),
-                    active: active.is_some_and(|a| row.clips.iter().any(|c| c.media == a)),
-                    outlined: false,
-                })
+        let active = self
+            .snap
+            .source_media
+            .as_deref()
+            .and_then(|m| grid.camera_of(m));
+        let cells: Vec<GridCell> = grid
+            .shown(position)
+            .map(|(i, camera, file)| GridCell {
+                number: Some(i + 1),
+                label: Some(camera.label.clone()),
+                media: file.media.clone(),
+                frame: Some(position - file.at),
+                active: active.is_some_and(|a| std::ptr::eq(a, camera)),
+                outlined: false,
             })
             .collect();
         if let Some(media) = self.camera_grid(ui, area, &p, &cells, speed) {
-            self.send("viewer.set", json!({ "angle": media }));
+            self.send("viewer.set", json!({ "angle": media, "alone": true }));
         }
         ui.add_space(4.0);
         self.source_scroll_row(ui);
         self.transport(ui, PlayerId::Source, None);
+    }
+
+    fn multi_keys(&mut self, ctx: &egui::Context) {
+        if self.snap.viewer != ViewerMode::MultiSource {
+            return;
+        }
+        if self.snap.multi_alone
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape))
+        {
+            self.send("viewer.set", json!({ "alone": false }));
+            return;
+        }
+        let number = ctx.input_mut(|i| {
+            super::sync_bin::NUMBER_KEYS
+                .iter()
+                .position(|k| i.consume_key(egui::Modifiers::NONE, *k))
+        });
+        let at = self.snap.source.position;
+        let file = number
+            .and_then(|n| self.snap.source_grid.cameras.get(n))
+            .and_then(|c| c.file_at(at))
+            .map(|f| f.media.clone());
+        if let Some(media) = file {
+            self.send("viewer.set", json!({ "angle": media, "alone": true }));
+        }
     }
 
     pub(super) fn camera_grid(
@@ -609,13 +634,17 @@ impl Workspace {
                     .as_ref()
                     .map_or_else(|| m.name.clone(), |c| format!("Camera {c}"))
             });
-            painter.text(
-                picture.center_bottom() - vec2(0.0, 6.0),
-                Align2::CENTER_BOTTOM,
+            let label = painter.layout_no_wrap(
                 elide(&label, 28),
                 FontId::proportional(12.0),
                 Color32::WHITE,
             );
+            let pill = Rect::from_center_size(
+                picture.center_bottom() - vec2(0.0, 6.0 + label.size().y / 2.0),
+                label.size() + vec2(12.0, 2.0),
+            );
+            painter.rect_filled(pill, CornerRadius::same(4), Color32::from_black_alpha(190));
+            painter.galley(pill.center() - label.size() / 2.0, label, Color32::WHITE);
             let outline = match (shown.active, shown.outlined) {
                 (true, _) => Some(ACTIVE_ANGLE),
                 (false, true) => Some(Color32::WHITE),
@@ -879,9 +908,14 @@ impl Workspace {
         match self.snap.viewer {
             ViewerMode::Timeline if self.sync_grid_on() => "Sync Bin".into(),
             ViewerMode::Timeline => "Timeline".into(),
-            ViewerMode::MultiSource => self
-                .multi_group()
-                .map_or_else(String::new, |g| elide(&g.name, 60)),
+            ViewerMode::MultiSource if !self.snap.multi_alone => {
+                let bin = self.snap.pool.bin.rsplit('/').next().unwrap_or_default();
+                let bin = if bin.is_empty() { "Master" } else { bin };
+                elide(
+                    &format!("{} Clips - {bin}", self.snap.source_grid.count),
+                    60,
+                )
+            }
             _ => match self.snap.source_at() {
                 Some((m, _)) => elide(&name(m), 60),
                 None => String::new(),
@@ -973,7 +1007,8 @@ impl Workspace {
                     b = *frame;
                 }
             }
-            let unmarked = self.multi_group().is_some_and(|g| g.marks.is_empty())
+            let unmarked = self.multi_on()
+                && self.snap.multi_marks.is_empty()
                 && !matches!(self.drag, Some(Drag::TapeMark { .. }));
             if !unmarked {
                 painter.rect_filled(
@@ -992,7 +1027,7 @@ impl Workspace {
         } else if let Some(media) = &shown
             && let Some(m) = self.project().and_then(|p| p.media(media))
         {
-            let base = if tape {
+            let base = if tape || self.snap.viewer == ViewerMode::MultiSource {
                 self.snap
                     .tape
                     .iter()
@@ -1117,8 +1152,8 @@ impl Workspace {
                 }
                 Some(Drag::TapeMark { is_in, frame }) => {
                     let key = if is_in { "in" } else { "out" };
-                    if let Some(g) = self.multi_group() {
-                        self.send("multicam.marks.set", json!({ "group": g.id, key: frame }));
+                    if self.multi_on() {
+                        self.send("viewer.marks.set", json!({ key: frame }));
                     } else {
                         let order = self.tape_order();
                         self.send("tape.marks.set", json!({ key: frame, "order": order }));
@@ -1233,10 +1268,10 @@ impl Workspace {
             }
             return;
         }
-        if let (Some(g), Some((inn, out))) = (self.multi_group(), self.multi_span()) {
+        if let Some((inn, out)) = self.multi_span() {
             let (inn, out) = jogged_mark(is_in, inn, out, by, self.snap.source.frames);
             let (key, value) = if is_in { ("in", inn) } else { ("out", out) };
-            self.send("multicam.marks.set", json!({ "group": g.id, key: value }));
+            self.send("viewer.marks.set", json!({ key: value }));
             return;
         }
         let Some(media) = self.snap.source_at().map(|(m, _)| m.to_string()) else {
@@ -1709,14 +1744,10 @@ impl Workspace {
     }
 
     fn duration_field(&mut self, ui: &mut egui::Ui) {
-        if let Some((a, b)) = self.multi_span() {
-            let text = self.src_tc(b - a);
-            ui.label(RichText::new(text).font(FontId::monospace(13.0)));
-            ui.label(dim("Duration"));
-            return;
-        }
         let Some(p) = self.project() else { return };
+        let multi = self.multi_on();
         let (marks, end, media) = match self.snap.source_at() {
+            _ if multi => (self.snap.multi_marks.clone(), self.snap.source.frames, None),
             Some((media, _)) => (
                 p.media(media).map(|m| m.marks.clone()).unwrap_or_default(),
                 self.media_frames(media),
@@ -1738,6 +1769,7 @@ impl Workspace {
                 let text = text.trim();
                 if submit && !text.is_empty() {
                     match media {
+                        _ if multi => self.send("viewer.marks.set", json!({ "duration": text })),
                         Some(m) => {
                             self.send("media.marks.set", json!({ "media": m, "duration": text }))
                         }

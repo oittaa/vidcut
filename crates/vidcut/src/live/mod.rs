@@ -27,7 +27,7 @@ use vidcut_core::request::{
     Client, ClientKind, Detect, DynamicTrimMode, GuiPanel, OneOrMany, PoolMode, ScreenshotTarget,
     TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
 };
-use vidcut_core::time::{Keyword, Rational, TimeContext, TimeSpec, format_timecode};
+use vidcut_core::time::{DurationSpec, Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
 
 pub use jobs::{JobInfo, JobOutput, JobState};
@@ -519,7 +519,9 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         source: PlayerSnap::default(),
         timeline: PlayerSnap::default(),
         source_media: None,
-        source_group: None,
+        source_grid: Default::default(),
+        multi_marks: Default::default(),
+        multi_alone: false,
         tape: Arc::new(Vec::new()),
         selection: Selection::default(),
         pool: PoolView::default(),
@@ -583,7 +585,12 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         viewer_frame: ViewerFrame::Page,
         last_source: ViewerMode::SourceClip,
         source_media: None,
-        source_group: None,
+        source_grid: Default::default(),
+        multi_marks: Default::default(),
+        multi_alone: false,
+        multi_bin: None,
+        multi_position: 0,
+        multi_media: None,
         source_content: None,
         source_positions: HashMap::new(),
         tape_position: 0,
@@ -722,7 +729,7 @@ fn start_previews(
 enum SourceContent {
     Clip(String),
     Tape,
-    Group(String),
+    Multi(String),
 }
 
 enum Until {
@@ -866,7 +873,12 @@ struct Live {
     viewer_frame: ViewerFrame,
     last_source: ViewerMode,
     source_media: Option<String>,
-    source_group: Option<String>,
+    source_grid: Arc<vidcut_core::multicam::SourceGrid>,
+    multi_marks: vidcut_core::model::Marks,
+    multi_alone: bool,
+    multi_bin: Option<String>,
+    multi_position: i64,
+    multi_media: Option<String>,
     source_content: Option<SourceContent>,
     source_positions: HashMap<String, i64>,
     tape_position: i64,
@@ -1358,6 +1370,7 @@ impl Live {
             self.audio_noticed = audio;
         }
         self.sync_tape_selection();
+        self.sync_camera();
         self.sync_loop();
         self.follow_review();
         let mark = render_cache::Mark {
@@ -1477,7 +1490,9 @@ impl Live {
             source: self.player.snap(SOURCE),
             timeline: self.player.snap(TIMELINE),
             source_media: self.source_media.clone(),
-            source_group: self.source_group.clone(),
+            source_grid: self.source_grid.clone(),
+            multi_marks: self.multi_marks.clone(),
+            multi_alone: self.multi_alone,
             tape: self.tape.clone(),
             selection: self.selection.clone(),
             pool: self.pool.clone(),
@@ -2632,9 +2647,21 @@ impl Live {
                 display,
                 reset_timer1,
                 paste,
-                group,
                 angle,
-            } => self.viewer_set(mode, display, reset_timer1, paste, group, angle),
+                alone,
+            } => self.viewer_set(mode, display, reset_timer1, paste, angle, alone),
+            Request::ViewerMarksSet {
+                mark_in,
+                out,
+                duration,
+            } => {
+                Step::Now(self.viewer_marks_set(mark_in.as_ref(), out.as_ref(), duration.as_ref()))
+            }
+            Request::ViewerMarksClear {} => {
+                self.multi_marks = Default::default();
+                self.sync_loop();
+                Step::Now(Ok(answer(json!(self.multi_marks))))
+            }
             Request::ViewerLoad { media, at } => match self.load_source(&media, at.as_ref()) {
                 Ok(motion) => self.shown(motion),
                 Err(e) => Step::Now(Err(e)),
@@ -3411,6 +3438,20 @@ impl Live {
         };
         let request = envelope.request.clone();
         let (mut result, changed) = open.apply(envelope, &env, Some(playhead));
+        if changed
+            && matches!(
+                request,
+                Request::EditAppend(..)
+                    | Request::EditSmartInsert { .. }
+                    | Request::EditInsert { .. }
+                    | Request::EditOverwrite { .. }
+                    | Request::EditRippleOverwrite { .. }
+                    | Request::EditPlaceOnTop { .. }
+                    | Request::EditSourceOverwrite { .. }
+            )
+        {
+            self.multi_alone = false;
+        }
         if let Some(e) = open.history_error.take() {
             let warning = crate::session::history_unsaved(&e);
             self.notice(warning.clone(), true);
@@ -3474,7 +3515,11 @@ impl Live {
         self.project = Some(open);
         self.selection = Selection::default();
         self.source_media = None;
-        self.source_group = None;
+        self.multi_marks = Default::default();
+        self.multi_alone = false;
+        self.multi_bin = None;
+        self.multi_position = 0;
+        self.multi_media = None;
         self.source_content = None;
         self.source_positions.clear();
         self.tape_position = 0;
@@ -3697,7 +3742,7 @@ impl Live {
                 .unwrap_or(0),
             ViewerMode::SourceTape | ViewerMode::MultiSource => {
                 let at = self.player.position(SOURCE);
-                tape_at(&self.tape, at)
+                snapshot::source_entry(self.viewer, &self.tape, at)
                     .map(|e| e.frames.max(0))
                     .unwrap_or(0)
             }
@@ -3956,18 +4001,21 @@ impl Live {
         let all: Vec<String> = self.pool.media(&p);
         let tape = render::tape(&p, &all).map(|(_, e)| e).unwrap_or_default();
         self.tape = Arc::new(tape);
-        let group = self.source_group.as_deref().and_then(|g| p.group(g));
-        if self.last_source == ViewerMode::MultiSource && group.is_none() {
-            self.last_source = ViewerMode::SourceClip;
-            if self.viewer == ViewerMode::MultiSource {
-                self.viewer = ViewerMode::SourceClip;
+        let grid = Arc::new(vidcut_core::multicam::source_grid(&p, &all));
+        self.source_grid = grid.clone();
+        if self.multi_bin.as_ref() != Some(&self.pool.bin) {
+            self.multi_bin = Some(self.pool.bin.clone());
+            self.multi_marks = Default::default();
+            self.multi_alone = false;
+            self.multi_position = 0;
+            self.multi_media = None;
+            if self.last_source == ViewerMode::MultiSource {
+                self.source_media = None;
             }
         }
         let want = match self.last_source {
             ViewerMode::SourceTape => SourceContent::Tape,
-            ViewerMode::MultiSource => {
-                SourceContent::Group(self.source_group.clone().unwrap_or_default())
-            }
+            ViewerMode::MultiSource => SourceContent::Multi(self.pool.bin.clone()),
             _ => match &self.source_media {
                 Some(m) => SourceContent::Clip(m.clone()),
                 None => {
@@ -3978,20 +4026,34 @@ impl Live {
                 }
             },
         };
+        if matches!(want, SourceContent::Multi(_))
+            && self
+                .source_media
+                .as_deref()
+                .is_none_or(|m| grid.camera_of(m).is_none())
+        {
+            self.source_media = grid
+                .cameras
+                .first()
+                .and_then(|c| c.files.first())
+                .map(|f| f.media.clone());
+        }
         let made = match &want {
             SourceContent::Tape => render::tape(&p, &all),
             SourceContent::Clip(m) => render::tape(&p, std::slice::from_ref(m)),
-            SourceContent::Group(_) => group
-                .zip(self.source_media.as_deref())
-                .ok_or_else(|| Error::usage("no synced group is open"))
-                .and_then(|(g, m)| render::group_tape(&p, g, m)),
+            SourceContent::Multi(_) => self
+                .source_media
+                .as_deref()
+                .and_then(|m| grid.camera_of(m))
+                .ok_or_else(|| Error::invalid("This bin has no video files"))
+                .and_then(|c| render::camera_tape(&p, c, grid.frames)),
         };
         let Ok((plan, entries)) = made else {
             self.source_content = None;
             self.player.unload(SOURCE);
             return None;
         };
-        if matches!(want, SourceContent::Group(_)) {
+        if matches!(want, SourceContent::Multi(_)) {
             self.tape = Arc::new(entries);
         }
         let at = if self.source_content.as_ref() == Some(&want) {
@@ -4000,9 +4062,8 @@ impl Live {
             self.stash_source_position();
             Some(match &want {
                 SourceContent::Tape => self.tape_position,
-                SourceContent::Clip(m) | SourceContent::Group(m) => {
-                    self.source_positions.get(m).copied().unwrap_or(0)
-                }
+                SourceContent::Multi(_) => self.multi_position,
+                SourceContent::Clip(m) => self.source_positions.get(m).copied().unwrap_or(0),
             })
         };
         let plan = self.preview_plan(plan);
@@ -4013,11 +4074,12 @@ impl Live {
     fn stash_source_position(&mut self) {
         let pos = self.player.position(SOURCE);
         match &self.source_content {
-            Some(SourceContent::Clip(m) | SourceContent::Group(m)) => {
+            Some(SourceContent::Clip(m)) => {
                 self.source_positions.insert(m.clone(), pos);
             }
             Some(SourceContent::Tape) => self.tape_position = pos,
-            None => {}
+            Some(SourceContent::Multi(bin)) if *bin == self.pool.bin => self.multi_position = pos,
+            Some(SourceContent::Multi(_)) | None => {}
         }
     }
 
@@ -4037,37 +4099,157 @@ impl Live {
         }
     }
 
+    fn sync_camera(&mut self) {
+        if self.viewer != ViewerMode::MultiSource
+            || !matches!(self.source_content, Some(SourceContent::Multi(_)))
+        {
+            return;
+        }
+        let at = self.player.position(SOURCE);
+        let grid = self.source_grid.clone();
+        let camera = self.source_media.as_deref().and_then(|m| grid.camera_of(m));
+        let same = camera.and_then(|c| c.file_at(at));
+        if same.is_none() && self.multi_alone {
+            return;
+        }
+        let Some(file) = same.or_else(|| grid.shown(at).next().map(|(.., f)| f)) else {
+            return;
+        };
+        if self.source_media.as_deref() == Some(file.media.as_str()) {
+            return;
+        }
+        self.source_media = Some(file.media.clone());
+        self.selection.media = vec![file.media.clone()];
+        self.dirty = true;
+        if same.is_none() {
+            self.refresh_source();
+        }
+    }
+
+    fn open_camera(&mut self) -> Result<()> {
+        let Some(media) = self.source_media.clone() else {
+            return Ok(());
+        };
+        let want = self.source_grid.file_marks(&media, &self.multi_marks);
+        let have = self
+            .project
+            .as_ref()
+            .and_then(|o| o.project().media(&media))
+            .map(|m| m.marks.clone())
+            .unwrap_or_default();
+        if want == have {
+            return Ok(());
+        }
+        let dropped = (want.mark_in.is_none() && have.mark_in.is_some())
+            || (want.mark_out.is_none() && have.mark_out.is_some());
+        if dropped {
+            let clear = Request::MediaMarksClear {
+                media: media.clone(),
+            };
+            self.edit(Envelope::new(clear), Origin::Session)?;
+        }
+        if !want.is_empty() {
+            let set = Request::MediaMarksSet {
+                media,
+                mark_in: want.mark_in.map(TimeSpec::Frames),
+                out: want.mark_out.map(TimeSpec::Frames),
+                duration: None,
+            };
+            self.edit(Envelope::new(set), Origin::Session)?;
+        }
+        Ok(())
+    }
+
+    fn viewer_marks_set(
+        &mut self,
+        mark_in: Option<&TimeSpec>,
+        out: Option<&TimeSpec>,
+        duration: Option<&DurationSpec>,
+    ) -> Result<Response> {
+        if self.viewer != ViewerMode::MultiSource {
+            return Err(Error::usage(
+                "viewer.marks.set goes with the Multi Source viewer",
+            ));
+        }
+        let ctx = self.viewer_context()?;
+        let mut i = mark_in.map(|t| ctx.resolve(t)).transpose()?;
+        let mut o = out.map(|t| ctx.resolve(t)).transpose()?;
+        if let Some(d) = duration {
+            (i, o) = vidcut_core::editor::mark_duration(
+                d,
+                &ctx,
+                i.or(self.multi_marks.mark_in),
+                o,
+                &self.multi_marks,
+            )?;
+        }
+        if i.is_none() && o.is_none() {
+            return Err(Error::usage(
+                "viewer.marks.set needs `in`, `out` or `duration`",
+            ));
+        }
+        let mut marks = self.multi_marks.clone();
+        marks.mark_in = i.or(marks.mark_in);
+        marks.mark_out = o.or(marks.mark_out);
+        if let (Some(i), Some(o)) = (marks.mark_in, marks.mark_out)
+            && i >= o
+        {
+            return Err(Error::invalid(format!("In ({i}) must be before Out ({o})")));
+        }
+        let end = ctx.end;
+        if marks.mark_in.is_some_and(|i| i < 0 || i >= end)
+            || marks.mark_out.is_some_and(|o| o < 1 || o > end)
+        {
+            return Err(Error::invalid(format!(
+                "marks must be inside the viewer (0..{end} frames)"
+            )));
+        }
+        self.multi_marks = marks;
+        self.sync_loop();
+        self.dirty = true;
+        Ok(answer(json!(self.multi_marks)))
+    }
+
     fn viewer_set(
         &mut self,
         mode: Option<ViewerMode>,
         display: Option<TimecodeDisplay>,
         reset_timer1: bool,
         paste: Option<String>,
-        group: Option<String>,
         angle: Option<String>,
+        alone: Option<bool>,
     ) -> Step {
         if mode.is_none()
             && display.is_none()
             && !reset_timer1
             && paste.is_none()
             && angle.is_none()
+            && alone.is_none()
         {
             return Step::Now(Err(Error::usage(
-                "viewer.set needs mode, display, reset_timer1, paste, or angle",
+                "viewer.set needs mode, display, reset_timer1, paste, angle, or alone",
             )));
         }
         let viewer = mode.unwrap_or(self.viewer);
-        let picks = group.is_some() || angle.is_some();
+        let picks = angle.is_some() || alone.is_some();
         if picks && viewer != ViewerMode::MultiSource {
             return Step::Now(Err(Error::usage(
-                "group and angle go with the Multi Source viewer",
+                "angle and alone go with the Multi Source viewer",
             )));
         }
         if viewer == ViewerMode::MultiSource
             && (picks || mode.is_some())
-            && let Err(e) = self.pick_angle(group.as_deref(), angle.as_deref())
+            && let Err(e) = self.pick_angle(angle.as_deref())
         {
             return Step::Now(Err(e));
+        }
+        if viewer == ViewerMode::MultiSource {
+            self.multi_alone = alone.unwrap_or(self.multi_alone && mode.is_none());
+            if alone == Some(true)
+                && let Err(e) = self.open_camera()
+            {
+                return Step::Now(Err(e));
+            }
         }
         let shown = display.unwrap_or(self.timecode_display);
         let id = PlayerId::of(viewer);
@@ -4120,31 +4302,18 @@ impl Live {
         self.shown(motion)
     }
 
-    fn pick_angle(&mut self, group: Option<&str>, angle: Option<&str>) -> Result<()> {
+    fn pick_angle(&mut self, angle: Option<&str>) -> Result<()> {
         let open = self.project.as_ref().ok_or_else(no_project)?;
         let p = open.project();
-        let named = group
-            .map(|g| {
-                p.group(g)
-                    .ok_or_else(|| Error::not_found(format!("no synced group {g}")))
-            })
-            .transpose()?;
-        let g = named
-            .or_else(|| p.group_of(angle?))
-            .or_else(|| p.group_of(self.source_media.as_deref()?))
-            .ok_or_else(|| Error::invalid("Open a clip of a synced group first"))?;
-        if let Some(a) = angle.filter(|a| g.at_of(a).is_none()) {
-            return Err(Error::invalid(format!("{a} is not in {}", g.name)));
+        let grid = vidcut_core::multicam::source_grid(p, &self.pool.media(p));
+        if let Some(a) = angle {
+            if grid.camera_of(a).is_none() {
+                return Err(Error::invalid(format!("{a} is not in this bin")));
+            }
+            self.source_media = Some(a.to_string());
+            self.multi_media = Some(a.to_string());
+            self.selection.media = vec![a.to_string()];
         }
-        let shown = angle
-            .or(self
-                .source_media
-                .as_deref()
-                .filter(|m| g.at_of(m).is_some()))
-            .or(g.clips().next().map(|c| c.media.as_str()))
-            .map(str::to_string);
-        self.source_group = Some(g.id.clone());
-        self.source_media = shown;
         Ok(())
     }
 
@@ -4153,7 +4322,7 @@ impl Live {
             return Ok(());
         };
         if v == ViewerMode::MultiSource {
-            self.pick_angle(None, None)?;
+            self.pick_angle(None)?;
         }
         self.set_viewer(v);
         Ok(())
@@ -4163,10 +4332,21 @@ impl Live {
         if mode == self.viewer && (!mode.is_source() || mode == self.last_source) {
             return None;
         }
+        let opens_grid = mode == ViewerMode::MultiSource && self.last_source != mode;
+        if self.last_source == ViewerMode::MultiSource && mode.is_source() {
+            self.multi_media = self.source_media.clone();
+        }
+        if opens_grid {
+            self.source_media = self.multi_media.clone();
+        }
         self.viewer = mode;
         if mode.is_source() {
             self.last_source = mode;
             let loaded = self.refresh_source();
+            if opens_grid && let Some(active) = self.source_media.clone() {
+                self.selection.media = vec![active];
+                self.dirty = true;
+            }
             return self.player.show(SOURCE).or(loaded);
         }
         self.player.show(TIMELINE)
@@ -4224,19 +4404,26 @@ impl Live {
                 }
             }
             ViewerMode::MultiSource => {
-                let g = self
-                    .source_group
-                    .as_ref()
-                    .and_then(|g| p.group(g))
-                    .ok_or_else(|| Error::usage("no synced group is open"))?;
+                let position = self.player.position(SOURCE);
+                let marks = if self.multi_alone {
+                    snapshot::source_entry(self.viewer, &self.tape, position)
+                        .and_then(|e| Some((e, p.media(&e.media)?)))
+                        .map(|(e, m)| vidcut_core::model::Marks {
+                            mark_in: m.marks.mark_in.map(|i| e.start + i),
+                            mark_out: m.marks.mark_out.map(|o| e.start + o),
+                        })
+                        .unwrap_or_default()
+                } else {
+                    self.multi_marks.clone()
+                };
                 TimeContext {
                     fps: p.settings.fps,
-                    start_tc: g.start,
+                    start_tc: self.source_grid.start,
                     drop_frame: p.settings.counts_drop_frame(),
-                    end: vidcut_core::multicam::frames(p, g),
-                    mark_in: g.marks.mark_in,
-                    mark_out: g.marks.mark_out,
-                    playhead: Some(self.player.position(SOURCE)),
+                    end: self.source_grid.frames,
+                    mark_in: marks.mark_in,
+                    mark_out: marks.mark_out,
+                    playhead: Some(position),
                 }
             }
             ViewerMode::SourceTape => {
@@ -4291,8 +4478,8 @@ impl Live {
         match (&self.source_content, self.viewer) {
             (Some(SourceContent::Clip(m)), ViewerMode::SourceClip) if m == media => Some(position),
             (Some(SourceContent::Tape), ViewerMode::SourceTape)
-            | (Some(SourceContent::Group(_)), ViewerMode::MultiSource) => {
-                tape_at(&self.tape, position)
+            | (Some(SourceContent::Multi(_)), ViewerMode::MultiSource) => {
+                snapshot::source_entry(self.viewer, &self.tape, position)
                     .filter(|e| e.media == media)
                     .map(|e| position - e.start)
             }
@@ -4496,11 +4683,11 @@ impl Live {
             Some(SourceContent::Tape) => {
                 tape_at(&self.tape, position).map(|e| (e.media.clone(), position - e.start))
             }
-            Some(SourceContent::Group(g)) => {
-                source["group"] = json!(g);
-                self.tape
-                    .first()
-                    .filter(|e| e.start <= position && position < e.start + e.frames)
+            Some(SourceContent::Multi(bin)) => {
+                source["bin"] = json!(bin);
+                source["cameras"] = json!(self.source_grid.cameras);
+                source["marks"] = json!(self.multi_marks);
+                snapshot::source_entry(ViewerMode::MultiSource, &self.tape, position)
                     .map(|e| (e.media.clone(), position - e.start))
             }
             None => None,
@@ -4512,7 +4699,7 @@ impl Live {
         source["content"] = json!(match &self.source_content {
             Some(SourceContent::Clip(_)) => "source_clip",
             Some(SourceContent::Tape) => "source_tape",
-            Some(SourceContent::Group(_)) => "multi_source",
+            Some(SourceContent::Multi(_)) => "multi_source",
             None => "none",
         });
         json!({

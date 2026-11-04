@@ -184,8 +184,7 @@ Multicam layout:
 - `head` and `tail` are the frames that the file loses at each end. The file leaves `hidden`, `head` and `tail` out at 0.
 - `GroupClip::start` is the place of the file's own first frame. `SyncGroup::at_of` gives it. It can be below 0 when the earliest clip has a head.
 - `multicam::row_file_at` gives the file of a row at a frame of the group.
-- `start`, `at`, `hidden`, `head`, `tail` and `marks` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
-- `multicam::marked_range` turns the `marks` of a group into a range of one file. Thus one pair of marks holds for each file.
+- `start`, `at`, `hidden`, `head` and `tail` are in frames at the project's rate. `groups_to_rate` converts them when the rate changes.
 
 Media fields:
 
