@@ -4133,36 +4133,10 @@ fn mutate(
         Request::EffectsSet {
             clip,
             effect,
-            on,
-            blend,
-            use_alpha,
-            render_cache,
-            strength,
-            split,
-            vertical_strength,
-            horizontal_channels,
-            vertical_channels,
-            border,
+            change,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
-            let channels = |what: &str, raw: &Option<Vec<f64>>| {
-                raw.as_deref()
-                    .map(|k| ops::effect::channels(what, k))
-                    .transpose()
-            };
-            let change = ops::effect::EffectChange {
-                on: *on,
-                blend: *blend,
-                use_alpha: *use_alpha,
-                render_cache: *render_cache,
-                strength: *strength,
-                split: *split,
-                vertical_strength: *vertical_strength,
-                horizontal_channels: channels("horizontal_channels", horizontal_channels)?,
-                vertical_channels: channels("vertical_channels", vertical_channels)?,
-                border: *border,
-            };
-            ops::effect::set(p, &id, *effect, &change)?;
+            ops::effect::set(p, &id, *effect, change)?;
             Value::Null
         }
         Request::EffectsReset { clip, effect } => {

@@ -1252,6 +1252,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - `media.subclip` does this. It takes a `range`, a `name` and a `bin`.
     - A subclip works like any other pool item (pp. 460–461, 885–886).
     - The words of the subclip come from the transcript of its file.
+  - The Source Clip viewer also makes a subclip, from the In and Out of its clip (pp. 460–461, 885–886).
+    - Mark > Create Subclip and Alt+B open the New Subclip window.
+    - Create Subclip in the menu of the scroll area also opens it. A drag from the viewer to the pool also opens it.
+    - A drop on a bin of the pool moves the clip to that bin. The window does not open.
+    - The window has a Name and Create. The subclip goes in the bin that the pool shows (p. 864).
+    - Without an In, the subclip starts at the first frame of the clip. Without an Out, it ends at the last frame.
+    - `media.subclip` does this.
   - Add Marker puts a marker at one selected word, or a marker with a duration over more words (p. 998).
     - On a source clip, the marker is on that clip, at its source frame (`markers.add` with `media`).
     - The scroll area of the Source Clip viewer shows it. A marker with a duration also shows as a bar (p. 1018).
@@ -1420,7 +1427,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - On the Cut page, a double-click on an effect adds it to the selected clip.
   - Measured in Resolve Studio 21.1.2: with several selected clips, only the first selected clip gets it.
   - The Effects panel of the Inspector has the values of the effects.
-  - vidcut: the Effects tab has the Blur group with Gaussian Blur. The other effects come later ([todo](todo/effects-library.md)).
+  - vidcut: the Effects tab has the Blur group with Gaussian Blur and Mosaic Blur. The other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
   - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
   - Measured in Resolve Studio 21.1.2: a generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API all leave it with none.
@@ -1457,6 +1464,64 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It also blurs the alpha. Over a lower track, the edge of a smaller picture fades into that track.
   - Reflect and Wrap-Around match a blur of one pass. Black and Replicate do not ([X101](deviations.md#x101-black-and-replicate-borders-follow-their-plain-definitions)).
   - A portrait timeline gives a sigma 3% smaller than the rule ([X102](deviations.md#x102-a-portrait-timeline-blurs-by-the-width-rule)).
+- **Mosaic Blur** (p. 3538). Its values and their defaults, measured in Resolve Studio 21.1.2:
+  - Pixel Frequency goes from 0.1 to 4000 and is 100.
+  - Smooth Strength goes from 0 to 1 and is 0.
+  - Cell Shape is Square, Hexagon or Triangle. Square is the default.
+  - Aliasing goes from 0 to 2 and is 1.
+  - Advanced Controls has these values:
+    - X Offset and Y Offset go from −1 to 1. Each is 0.
+    - Aspect goes from 0.001 to 1000 and is 1.
+    - Position goes from −1000000 to 1000000. It is the middle of the picture.
+    - Border Type has Black, Replicate, Reflect and Wrap-Around. Reflect is the default.
+    - Antialias Result is off.
+    - Blur Alpha is on, and Whole Cells Only is off.
+- **How the mosaic works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
+  - The mosaic works after Zoom and Position, on the pixels of the frame. A cell keeps sharp edges at each Zoom.
+  - A cell is S high and S × Aspect wide, with S = 2 × √(width × height) / Pixel Frequency.
+    - The width and the height are those of the picture on the frame, after its fit and its Zoom.
+    - A 1920×1080 picture that fills its frame thus has S = 1.5 × 1920 / Pixel Frequency.
+    - The size of the source does not change S. A 3840×2160 source on a 1920×1080 timeline has the cells of a 1920×1080 source.
+    - Zoom X 2 alone gives square cells, √2 times as large.
+  - The grid lines up on the middle of the picture on the frame. Thus a Pan moves the grid with the picture.
+  - Position sets the place of the grid. Position Y goes up.
+  - X Offset moves the grid right, and Y Offset moves it up. An offset of 1 is half a cell.
+  - Hexagon: the cells have a flat top and bottom. Their columns are √3/2 of a cell width apart, and each odd column is half a cell lower.
+  - Triangle: the columns are 1/√3 of a cell width apart. The triangles point down and up in turn.
+  - A pixel of the frame takes the color of the cell around it.
+  - The color of a cell is the mean of a box around the middle of the cell, with equal weights.
+    - The box has the same form for each Cell Shape.
+    - Aliasing sets its size. At 0 it is one pixel, at 1 it is one cell, and at 2 it is two cells.
+    - Beyond the frame, the box takes the pixels of the edge. At the edge, the edge pixel thus weighs more.
+    - The clear area around a smaller picture counts as clear pixels in the box.
+  - The box takes the mean of the premultiplied colors and of the alpha.
+  - Blur Alpha off keeps these colors, but the output has the alpha that came in.
+    - Color can thus be more than alpha. Over a lower track it adds to that track and stops at 1.
+    - A clear part of the picture thus adds the color of its cell to the lower track.
+  - Whole Cells Only, with Blur Alpha on:
+    - A cell with no clear part in its box stays, with an alpha of 1.
+    - The other cells have an alpha of 0. There the premultiplied colors that came in add to the lower track.
+  - Whole Cells Only, with Blur Alpha off, changes nothing.
+  - Antialias Result makes all of this at twice the size, from a linearly enlarged picture. Then each pixel is the mean of its four samples.
+  - Border Type and Smooth Strength do not change the renders. The manual does not name Smooth Strength for this effect.
+- **Mosaic in vidcut:**
+  - vidcut keeps Smooth Strength and Border Type on the effect. They do not change its picture.
+  - A cell is whole when the alpha of its box is at least 0.999. The renders put that limit above 0.674 and at 1 or below.
+  - Where a cell edge falls exactly on a pixel, Resolve gives that line of pixels to either cell, with no rule that the renders show. vidcut gives it to the cell on the right or below.
+  - A Triangle has corners at the sides of the frame, from triangles with a middle off the frame. The distance of that middle from the frame counts in column steps.
+    - At 0.585 of a step or less, each corner has the box at its own middle, clamped into the frame. At 0.691 or more, Resolve changes the corners. No render falls between these distances.
+    - Most of a corner of a triangle that points up then has the color of the next triangle in its row. Single rows have other colors.
+    - These rows change between renders. Two renders of Aspect 2 at Pixel Frequency 25 differ on 1211 pixels, by up to 9.22/255. Renders at 0.132 and 0.566 of a step repeat exactly.
+    - vidcut takes the box at the middle of the pixel's own triangle, clamped into the frame, at each distance.
+  - Only the Fusion page gave renders of Blur Alpha off and Whole Cells Only. Only the default Pixel Frequency has Edit page renders on other sizes and Zooms ([todo](todo/effects-library.md)).
+  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+    - A Position away from the middle, on a picture with a Zoom or a Pan, counts in fractions of the picture on the frame.
+    - On a rotated clip, the cells keep the directions of the frame, as Gaussian Blur does.
+    - A crop and a Dynamic Zoom box do not change the size or the place of the cells.
+    - The Zoom of each compound clip around the picture multiplies the size on the frame.
+    - With Use Alpha off, Blur Alpha and Whole Cells Only change nothing.
+    - Whole Cells Only tests each sample's cell, with each Cell Shape and each Aliasing.
+    - A made frame of a speed change, and a frame from the render cache, keep no color at an alpha of 0.
 - **Compound clips:** vidcut: the effects of a compound clip work on each picture inside it ([todo](todo/compound-opacity.md)).
 - **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
 
@@ -1775,6 +1840,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
 | Enter | Edit the selected subtitle (X43) |
 | N | Snapping on/off |
 | M / Alt+M | Add or edit / delete marker |
+| Alt+B | Create a subclip of the clip in the Source Clip viewer |
 | Click an edit | Trim Editor (D52) |
 | W | Dynamic Trim on/off |
 | Shift+S | Audio scrubbing on/off |
@@ -2064,7 +2130,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A GIF or WebP of one frame is a still too. A GIF or WebP of more frames is a clip.
   - Resolve Studio 21.1.1 imports a WebP of one frame as a still.
   - It imports a GIF of one frame as a still only when its frame has no delay (deviation X39).
-  - FFmpeg 8 cannot decode an animated WebP. With FFmpeg 8, an animated WebP comes in as a still that shows nothing ([to-do](todo/animated-webp-ffmpeg-8.md)).
+  - FFmpeg 8 cannot decode an animated WebP. With FFmpeg 8, vidcut refuses such a file on import. The message says that it needs FFmpeg 9.0 ([gotchas](gotchas.md#ffmpeg-reading-and-decoding)).
 - **D39. Image sequences** (§3; p. 366).
   - `media.add` with `sequence` brings numbered files (`frame_000001.png`, …) in as one clip.
   - The clip is the unbroken run around each file given.
@@ -2652,8 +2718,16 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - In these renders, some blocks with a negative value are up to 1 pixel from this rule, as "Ab" in Arial 96. The reason is not known.
     - A scroll has no line spacing, tracking or case, as in Resolve's own Scroll.
     - Font case is `mixed`, `upper`, `lower`, `small` or `title`: Mixed, All Caps, All Lowercase, Small Caps and Title Caps (p. 1184).
-    - `small` draws small letters as capitals at 0.7 of the size (measured in Resolve Studio 21.1.2).
-    - `title` makes the first letter of each word a capital, and it keeps the other letters.
+    - `small` draws small letters as capitals at 0.7 of the size in whole pixels at zoom 1, rounded to a whole pixel. The zoom scales it (measured in Resolve Studio 21.1.2).
+    - Digits, punctuation and capitals stay at the full size.
+    - A small letter is a letter of the Unicode category `Ll`. `ª`, `º`, `ʰ`, `ⅷ` and `ⓐ` are in other categories, so they stay as they are, at the full size (measured in Resolve Studio 21.1.2).
+    - `title` makes the first letter of each word a capital, and it keeps the other letters. `mcDONALD` becomes `McDONALD`.
+    - A word starts as in Unicode word boundaries (UAX 29), and also after `.` and `:` (measured in Resolve Studio 21.1.2).
+      - A letter becomes a capital after a space, a hyphen, a comma, a bracket, or an apostrophe that is not between two letters.
+      - A letter stays after a letter, a digit, `_`, a combining mark, or an apostrophe between two letters. `rock'n'roll` becomes `Rock'n'roll`.
+    - `upper`, `lower`, `small` and `title` change each letter alone (measured in Resolve Studio 21.1.2).
+      - A letter stays when its other form has more than one letter: `ß`, `ﬁ` and `ŉ` in capitals, and `İ` in small letters. With `small`, `ß`, `ﬁ` and `ŉ` draw at the small size, and `İ` at the full size.
+      - `Σ` becomes `σ` also at the end of a word.
     - `<o>` draws a line over the words and `<s>` a line through them (p. 1184).
     - The height of these lines and `<u>` is `underlineThickness` in the font's `post` table.
     - The left end is the start of the words, rounded up to a whole pixel.
@@ -2764,6 +2838,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A shifted span has `super` or `sub` in `vertical-align`.
     - A span has its case in `text-transform` (`uppercase`, `lowercase`) or in `font-variant` (`small-caps`).
     - Resolve does not draw `text-transform:capitalize` from a file. Thus for `title` vidcut writes it and the capital letters.
+    - Title Caps in Resolve's Inspector writes nothing in the file, and the text stays as typed.
     - Each paragraph has its line spacing in `line-height`. A Text title has 0, and the upper and lower line of a lower third have 1 and 0, unless a title sets another value.
     - The group has the alignment of the lines.
     - Its `anchor` is on a 3×3 grid, counted from the bottom left: 0 bottom left, 4 middle, 8 top right.
@@ -3086,10 +3161,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
-    - Its soft edges and its opacity fade each picture and title inside it ([todo](todo/compound-opacity.md)).
-    - A picture inside it at the Normal mode takes the composite mode of the compound clip.
+    - Its tracks mix first, as the tracks of the timeline do. Its opacity then fades that mix, or its composite mode mixes that mix with the tracks below.
+      - Measured in Resolve Studio 21.1.2, with 16-bit renders. Inside the compound clip, a picture cropped to its left half is over a full picture.
+      - At an opacity of 50% over white, the frame is 0.5 × the mix + 0.5.
+      - At Multiply over 50% gray, the frame is 0.5 × the mix.
+    - Its soft edges fade each picture and title inside it ([todo](todo/compound-opacity.md)).
     - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
-    - Its tracks play over each other as the tracks of the timeline do.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.
     - `edit.decompose` gives the picture of the compound clip to each of its clips that has no picture of its own and fills the frame.
@@ -3670,19 +3747,32 @@ The chart does not show titles, generators or transitions.
 
 ### The LUT tables
 
-These facts are measured in Resolve Studio 21.1.2, with no color management, with a LUT on the node of a clip.
+These facts are measured in Resolve Studio 21.1.2, with no color management. The LUT is on the node of a clip, or it is the `Input LUT` property of a Media Pool clip.
 
 - A 3D table is trilinear. Red changes fastest, then green, then blue.
 - A 1D table is linear on each channel.
 - The input is clamped to 0..1 before the lookup. The values of the table and the output are not clamped.
 - `DOMAIN_MIN` and `DOMAIN_MAX` have no effect.
 - `LUT_1D_INPUT_RANGE lo hi` and `LUT_3D_INPUT_RANGE lo hi` apply: the place in the table is `(x - lo) / (hi - lo)`, clamped to 0..1.
+  - The same rule applies when `lo` is above `hi`. A range of `1 0` reads the table backward.
+  - When `lo` equals `hi`, each pixel gets the first row of the table.
 - A file with both tables runs the 1D table, then the 3D table. Each table uses its own range. The 1D rows come first in the file.
 - These sizes work:
   - `LUT_3D_SIZE`: 2, 3, 5, 17, 33, 65, 129 and 256.
   - `LUT_1D_SIZE`: 2, 5, 17 and 65536.
 - `TITLE`, comments, blank lines and tabs are read.
 - With no LUT, the input comes out unchanged, also below 0 and above 1.
+- A LUT does not change the alpha of a picture. In these results, `T` is the table, `C` is the color in the file and `A` is the alpha:
+  - With the Alpha Mode Straight, the result is `T(C) * A`.
+  - With the Alpha Mode Premultiplied, the result is `T(C / A) * A`. With `A` at 0, the result is 0.
+
+**Where a LUT goes:**
+
+- The `Input LUT` of a clip and a LUT on its node use the same math. On 15 tables, a few pixels differ, by 0.014 at most.
+- The `Input LUT` is a property of the Media Pool clip (p. 3480). Each use of the file in a timeline gets it.
+- A script cannot set the `Input LUT` of a compound clip or of a timeline.
+- A LUT on the node of a compound clip gives the same picture as a LUT on the node of a plain clip.
+- A generator and a title have no Media Pool clip. A script gets no node graph for them, so it cannot give them a LUT.
 
 A script gets no error for a broken file:
 
