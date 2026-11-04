@@ -413,6 +413,7 @@ The bar and the Jobs button:
 - `SilenceDialog` keeps the dry run of Ripple Delete Silence as `Stripe`s, and the user's edits to them (`stripe_press`, `stripe_drag`, `silence_keys`).
 - A changed setting runs the dry run again, and replaces the stripes and their edits.
 - Each change keeps the state before it (`Shot`). Ctrl+Z and Ctrl+Shift+Z step through these states (`SilenceDialog::undo`). The project's history stays as it is until Remove.
+- The dialog keeps the newest states (`SHOTS_KEPT`). Why: each state holds a copy of the stripes.
 - While the dialog is open, `Handle::skip` hands the stripes to the session. The session plays the timeline as Remove would leave it.
 
 **Timeline tiles.**
