@@ -22,6 +22,8 @@ pub struct Stripe {
     pub keep: bool,
 }
 
+const SHOTS_KEPT: usize = 100;
+
 #[derive(Debug, Clone, PartialEq)]
 struct Shot {
     detect: Detect,
@@ -164,6 +166,9 @@ impl SilenceDialog {
 
     fn keep(&mut self, before: Shot) {
         if self.undone.last() != Some(&before) {
+            if self.undone.len() >= SHOTS_KEPT {
+                self.undone.remove(0);
+            }
             self.undone.push(before);
             self.redone.clear();
         }

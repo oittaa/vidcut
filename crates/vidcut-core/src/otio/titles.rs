@@ -268,7 +268,7 @@ struct Base<'a> {
     case: TitleCase,
 }
 
-fn span_html(text: &str, look: &Look, word_start: bool, base: &Base) -> String {
+fn span_html(text: &str, look: &Look, before: &str, base: &Base) -> String {
     let family = look.face.as_deref().unwrap_or(base.family);
     let points = look.size.unwrap_or(base.size) * base.height;
     let color = look
@@ -309,7 +309,7 @@ fn span_html(text: &str, look: &Look, word_start: bool, base: &Base) -> String {
     };
     let letters: String = match case {
         TitleCase::Title => case
-            .pieces(text, word_start)
+            .pieces(text, before)
             .into_iter()
             .map(|(t, _)| t)
             .collect(),
@@ -333,17 +333,13 @@ fn html(lines: &[&[Span]], align: Option<&str>, spacing: f64, base: &Base) -> St
         .iter()
         .map(|line| {
             let spans: String = if line.is_empty() {
-                span_html("", &Look::default(), true, base)
+                span_html("", &Look::default(), "", base)
             } else {
-                let mut word_start = true;
+                let mut before = String::new();
                 line.iter()
                     .map(|s| {
-                        let span = span_html(&s.text, &s.look, word_start, base);
-                        word_start = s
-                            .text
-                            .chars()
-                            .last()
-                            .map_or(word_start, char::is_whitespace);
+                        let span = span_html(&s.text, &s.look, &before, base);
+                        before.push_str(&s.text);
                         span
                     })
                     .collect()

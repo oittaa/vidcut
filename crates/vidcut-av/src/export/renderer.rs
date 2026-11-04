@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use vidcut_core::model::Hdr;
 use vidcut_core::render::VideoPiece;
 use vidcut_core::time::Rational;
@@ -8,7 +10,16 @@ use crate::thumbs::Image;
 
 use super::video::VideoFrames;
 
-type Opened = (Rational, u32, u32, Option<Hdr>, VideoFrames);
+pub type Finish<'a> = (Option<Hdr>, Option<&'a Path>);
+
+type Opened = (
+    Rational,
+    u32,
+    u32,
+    Option<Hdr>,
+    Option<PathBuf>,
+    VideoFrames,
+);
 
 #[derive(Default)]
 pub struct FrameReader {
@@ -33,15 +44,23 @@ impl FrameReader {
         piece: &VideoPiece,
         fps: Rational,
         (width, height): (u32, u32),
-        colors: Option<Hdr>,
+        (colors, lut): Finish<'_>,
     ) -> Result<Image> {
         crate::cancel::stop()?;
         crate::init();
-        let same = matches!(&self.frames, Some((f, w, h, c, _))
-            if (*f, *w, *h, *c) == (fps, width, height, colors));
+        let same = matches!(&self.frames, Some((f, w, h, c, l, _))
+            if (*f, *w, *h, *c) == (fps, width, height, colors) && l.as_deref() == lut);
         if !same {
-            let frames = frames(fps, (width, height), RGBA, colors, self.decoder.as_ref())?;
-            self.frames = Some((fps, width, height, colors, frames));
+            let finish = (colors, lut);
+            let frames = frames(fps, (width, height), RGBA, finish, self.decoder.as_ref())?;
+            self.frames = Some((
+                fps,
+                width,
+                height,
+                colors,
+                lut.map(Path::to_path_buf),
+                frames,
+            ));
         }
         let (.., frames) = self.frames.as_mut().expect("set above");
         frames.read_piece(&piece.part(0, 1));
@@ -58,12 +77,13 @@ pub(crate) fn frames(
     fps: Rational,
     (width, height): (u32, u32),
     pixel: format::Pixel,
-    colors: Option<Hdr>,
+    (colors, lut): Finish<'_>,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<VideoFrames> {
     let frames = VideoFrames::new(&[], fps, width, height, pixel, None)
         .single_frames()
-        .with_timeline(colors)?;
+        .with_timeline(colors)?
+        .with_output_lut(lut)?;
     Ok(match decoder {
         Some(d) => frames.decode_on(d.clone()),
         None => frames,

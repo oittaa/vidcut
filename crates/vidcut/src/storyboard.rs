@@ -39,7 +39,7 @@ pub fn render(
         return Err(Error::invalid("the storyboard's range is empty"));
     }
     let plan = render::flatten(p, a, b)?;
-    let colors = plan.colors;
+    let colors = (plan.colors, plan.output_lut.as_deref());
     let at = |piece: &VideoPiece, k: i64| piece.part(k, 1);
     let mut cells = Vec::new();
     match every {
@@ -139,7 +139,7 @@ fn pictures(
     cells: &[Cell],
     p: &Project,
     (w, h): (usize, usize),
-    colors: Option<vidcut_core::model::Hdr>,
+    colors: vidcut_av::export::renderer::Finish<'_>,
 ) -> Result<Vec<Vec<u8>>> {
     let fps = p.settings.fps;
     let decoding = crate::preferences::gpu_decoding();

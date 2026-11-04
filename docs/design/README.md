@@ -68,8 +68,9 @@ flowchart TD
   between["A frame between two pictures<br>VideoFrames::retimed_frame"]
   earlier["An earlier source frame<br>VideoFrames::reversed_frame"]
   place["The picture is placed<br>Screen::draw"]
-  fx["The effects work on it<br>fs_blur"]
+  fx["The effects work on it<br>fs_blur, fs_mosaic"]
   mix["The layers are on the canvas<br>Screen::draw"]
+  looked["The output LUT<br>fs_lut"]
   show["The viewer shows this frame"]
   mapped["Fitted to the display<br>fs_screen"]
   file["The file has this frame<br>Screen::encoded"]
@@ -94,17 +95,23 @@ flowchart TD
   place --> fx
   place --> mix
   fx --> mix
+  mix --> looked
   mix --> show
   mix --> mapped
-  mapped --> show
   mix --> file
   mix --> scopes
+  looked --> show
+  looked --> mapped
+  looked --> file
+  looked --> scopes
+  mapped --> show
 ```
 
 A clip skips each step that it does not use. The steps run in this order:
 
 - `VideoFrames` reads the clip and keeps its fields (`VideoReader::keep_fields`). It decodes on the GPU or the CPU (`route::plan`). A solid color skips the file.
 - `fs_convert` puts the picture into the timeline color space, at the size of the picture (`color::shader_colors`). In an SDR timeline, it tone-maps HDR.
+- `fs_convert_lut` is `fs_convert` with the clip's input LUT after the conversion ([the LUT files](#lut-files)).
 - `fs_bwdif` weaves an interlaced frame after that conversion ([gpu](gpu.md#deinterlacing-and-hdr)). It uses the frames before it, at it and after it (`Woven`).
 - `Source::ai_picture` enlarges the converted picture when Super Scale uses an AI upscaler ([gpu](gpu.md#super-scale)). An interlaced source is woven first.
 - `VideoFrames::retimed_frame` makes a frame from two pictures that are already converted, woven and enlarged ([export](export.md#which-source-frame)).
@@ -117,21 +124,45 @@ A clip skips each step that it does not use. The steps run in this order:
 - `Screen::draw` places the picture and mixes the layers (`place::Placing`, `screen::kernel`, [export](export.md#placed-pictures)).
   - A transition's two sides, and each clip placed over another, are layers of the same draw.
   - Titles and burned subtitles are draws in that same pass (`fs_title`, [export](export.md#subtitles)).
-  - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, [export](export.md#effects)).
+  - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, [export](export.md#effects)).
+- `fs_lut` runs the output LUT of the project on the whole canvas, after the titles and subtitles.
 - The viewer shows the canvas. A wide canvas goes through `fs_screen` first ([playback](playback.md#the-viewer-thread)).
-- The scopes read the canvas before `fs_screen` ([gpu](gpu.md#the-scopes)).
+- The scopes read the canvas after `fs_lut` and before `fs_screen` ([gpu](gpu.md#the-scopes)).
 - An export encodes that canvas (`Screen::encoded`) and skips `fs_screen` ([export](export.md#timeline-colors)).
 
 The AI stages get the picture in the timeline color space (`Single`).
 
 - Each stage gets 16-bit pictures (`Form`). The models of vidcut get RGB. The AI of macOS gets P416.
-- In an HDR timeline, AI Slow gets SDR media only. The draw then converts its result into the timeline color space (X98).
+- In an HDR timeline, AI Slow gets SDR media only. The draw then converts its result into the timeline color space (X98). There the input LUT comes after AI Slow, because the LUT follows the conversion.
 
 vidcut has none of the other stages of the spec:
 
-- Camera Raw, Lens Correction, the LUTs and Fusion;
+- Camera Raw, Lens Correction, the display LUT and Fusion;
 - Input Sizing, Image Stabilization and the grades;
-- Open FX, the Resolve FX other than Gaussian Blur, Output Sizing and Data Burn-In.
+- Open FX, the Resolve FX other than Gaussian Blur and Mosaic Blur, Output Sizing and Data Burn-In.
+
+### LUT files
+
+The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut reads a `.cube` file with `cube::read` and draws it on the GPU.
+
+- A clip holds its `input_lut`, and the project settings hold the `output_lut`. The project file stores each path as it stores a media path ([model](model.md)).
+- Each table gets the code values of the timeline. vidcut converts nothing for a LUT.
+- A table is a texture of 32-bit floats, and the shader interpolates its rows (`table_rows`, `table_cube`). Why: that format has no texture filter without an extra device feature.
+- With no LUT, the draw does not change: the pipelines of the LUTs do not exist (`Gpu::luts`).
+- A `Lut` holds the rows of its file and its table on the GPU. Each picture, `Screen`, `VideoFrames` and player plan that uses it holds it. The memory goes with the last holder. No global map keeps a table.
+- `VideoFrames` keeps its last input LUTs (`VideoFrames::input_lut`), and a new player plan takes the output LUT of the plan before it (`Plan::keeping_output_lut_of`). Why: a cut or an edit does not read the file again.
+  - The key holds the path, the size and the time of the file (`cube::stamp`). Thus a changed file gives a new table on the next piece or plan.
+- `cube::parse` refuses a file that does not give a whole table, and names the reason:
+  - no size line, or a size below 2;
+  - a keyword in lower case;
+  - too few rows, or a row that is not three finite numbers.
+- `Editor` reads the file when a request sets the path (`checked_lut`). Thus a request cannot put a broken file into the project.
+- A request refuses an input LUT on a clip with no media picture: a generator, a title, a compound clip or a sound clip. `ops::set_clips` tells this.
+- A file that goes away later stops an export or a `frame.render` with the reason. The viewer shows the picture with no output LUT, and the player's status holds the reason.
+- `fs_lut` works on colors that are not premultiplied. It leaves a pixel with no alpha as it is.
+- The canvas of a frame with no alpha starts as opaque black. Thus the output LUT also changes a gap, and the part of a clip that its alpha lets through.
+- `fs_convert_lut` gives the color of a clip before its alpha. Thus a clip with alpha gets the table first, and the draw applies the alpha after that.
+- `fs_lut` reads the canvas, and the canvas holds 16-bit floats. `fs_convert_lut` reads the picture before it goes to 16-bit floats. Thus a table with steep steps gives a larger error as an output LUT than as an input LUT.
 
 ## Rules the code follows
 
@@ -160,7 +191,7 @@ vidcut has none of the other stages of the spec:
 | snapshot | what the GUI draws, published by the live core | `Snapshot` |
 | origin | a cache stamp of the path, size and time of a file | `Origin` |
 | kept | data of another editor that vidcut carries without a model of it | `Kept` |
-| lru | a cache of a set number of entries that lets the least recently used go; an `Uncapped` one has no set number, and its owner decides what goes | `Lru`, `Uncapped` |
+| lru | a cache of a set number of entries that lets the least recently used go; a `ByBytes` one has a limit in bytes; an `Uncapped` one has no set number, and its owner decides what goes | `Lru`, `ByBytes`, `Uncapped` |
 
 ## Pages
 

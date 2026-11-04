@@ -154,7 +154,7 @@ The schema describes the parameters, not the results. This list gives the result
     - `sources`: each file, and how it was decoded.
       - `went`: how the decoded frames of the file went to the draw: `frames stayed there` or `frames came down whole`.
       - `went` is not there when the frames of the file come to the draw in memory.
-  - `upscaled[]`: each file that an AI upscaler of Super Scale enlarged (`path`), and `how`: the upscaler and its model.
+  - `upscaled[]`: each file that Super Scale enlarged (`path`), and `how`: the upscaler, with its model or its Sharpness. Examples: `AI Fast (NanoVSR 5.4M)`, `Classic, sharpness high`.
   - `notes[]`: `code`, `message`.
 - `export plan`:
   - `settings`, `video_encoder` and `notes`.

@@ -292,6 +292,7 @@ mod tests {
             cache: Default::default(),
             excluded: false,
             made: None,
+            input_lut: None,
         }
     }
 

@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
-use serde_json::Value;
-use vidcut_core::model::Clip;
+use serde_json::{Value, json};
+use vidcut_core::model::{Clip, Generator, GeneratorKind, Marks};
 use vidcut_core::multicam::camera_order;
 use vidcut_core::render::TapeEntry;
-use vidcut_core::request::{TimecodeDisplay, ViewerFrame, ViewerMode};
+use vidcut_core::request::{GeneratorSettings, TimecodeDisplay, ViewerFrame, ViewerMode};
 use vidcut_core::steps::{Span, Steps};
 use vidcut_core::time::{Rational, format_timecode, parse_counter, parse_frame_number};
 use vidcut_core::{Error, Project};
@@ -214,6 +214,38 @@ pub struct Filmstrip {
     pub times: Vec<f64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SourceGenerator {
+    pub kind: GeneratorKind,
+    pub settings: GeneratorSettings,
+    pub generator: Generator,
+    pub frames: i64,
+    pub marks: Marks,
+}
+
+impl SourceGenerator {
+    pub fn name(&self) -> &str {
+        vidcut_core::generators::name(&self.generator)
+    }
+
+    pub fn range(&self) -> (i64, i64) {
+        (
+            self.marks.mark_in.unwrap_or(0),
+            self.marks.mark_out.unwrap_or(self.frames),
+        )
+    }
+
+    pub fn params(&self) -> Value {
+        let mut params = json!(self.settings);
+        params["generator"] = json!(self.kind);
+        if !self.marks.is_empty() {
+            let (a, b) = self.range();
+            params["range"] = json!(format!("{a}f..{b}f"));
+        }
+        params
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub seq: u64,
@@ -226,8 +258,9 @@ pub struct Snapshot {
     pub source: PlayerSnap,
     pub timeline: PlayerSnap,
     pub source_media: Option<String>,
+    pub source_generator: Option<SourceGenerator>,
     pub source_grid: Arc<vidcut_core::multicam::SourceGrid>,
-    pub multi_marks: vidcut_core::model::Marks,
+    pub multi_marks: Marks,
     pub multi_alone: bool,
     pub tape: Arc<Vec<TapeEntry>>,
     pub selection: Selection,
@@ -276,6 +309,19 @@ impl Snapshot {
 
     pub fn project(&self) -> Option<&Project> {
         self.project.as_ref().map(|p| &*p.project)
+    }
+
+    pub fn open_generator(&self) -> Option<&SourceGenerator> {
+        self.source_generator
+            .as_ref()
+            .filter(|_| self.viewer == ViewerMode::SourceClip)
+    }
+
+    pub fn viewer_marks(&self) -> Option<&Marks> {
+        match self.viewer {
+            ViewerMode::MultiSource if !self.multi_alone => Some(&self.multi_marks),
+            _ => self.open_generator().map(|g| &g.marks),
+        }
     }
 
     pub fn source_at(&self) -> Option<(&str, i64)> {
@@ -545,6 +591,7 @@ mod tests {
 
     fn placed(start: i64, source_in: i64) -> Clip {
         Clip {
+            input_lut: None,
             id: "c1".into(),
             media: "m".into(),
             start,

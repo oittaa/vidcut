@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::model::Project;
+use crate::model::{GeneratorKind, Project};
 use crate::time::{DurationSpec, Keyword, RangeSpec, TimeSpec};
 
 mod set;
@@ -37,6 +37,7 @@ pub fn describe_at(
         ),
         "media.rename" => format!("Rename {} to {}", d.media("media"), d.text("name")),
         "media.subclip" => format!("Create subclip {} of {}", d.text("name"), d.media("media")),
+        "media.subclip_set" => format!("Change the limits of subclip {}", d.media("media")),
         "media.set" => d.media_set(),
         "media.marks.set" => d.marks_set(
             format!("Source marks of {}", d.media("media")),
@@ -409,7 +410,7 @@ pub fn describe_at(
             None => format!("Viewer guides: {}", compact(params)),
         },
         "viewer.scopes" => format!("Viewer scopes: {}", compact(params)),
-        "viewer.load" => format!("Show {} in the viewer", d.media("media")),
+        "viewer.load" => format!("Show {} in the viewer", d.source_name()),
         "player.play" => "Play".into(),
         "player.pause" => "Pause".into(),
         "player.toggle" => "Play or pause".into(),
@@ -826,6 +827,16 @@ impl Words<'_> {
         }
     }
 
+    fn source_name(&self) -> String {
+        let made = serde_json::from_value::<GeneratorKind>(self.params["generator"].clone())
+            .ok()
+            .and_then(|kind| crate::ops::generators::made(kind, &Default::default()).ok());
+        match made {
+            Some(g) => crate::generators::name(&g).to_string(),
+            None => self.media("media"),
+        }
+    }
+
     fn source(&self) -> String {
         let what = if self.flag("tape") {
             "the Source Tape span".to_string()
@@ -835,7 +846,7 @@ impl Words<'_> {
                 (None, Some(r)) => format!(" {r}"),
                 (None, None) => String::new(),
             };
-            format!("{}{range}", self.media("media"))
+            format!("{}{range}", self.source_name())
         };
         let only = if self.flag("audio_only") {
             " (audio only)"

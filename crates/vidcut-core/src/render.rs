@@ -37,6 +37,10 @@ pub struct RenderPlan {
     /// SDR. Every mix happens in it (decision D50).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colors: Option<Hdr>,
+    /// The `.cube` file that the whole frame goes through after its
+    /// subtitles, before the output's colors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_lut: Option<PathBuf>,
 }
 
 pub fn timeline_colors(p: &Project) -> Option<Hdr> {
@@ -204,6 +208,10 @@ pub enum VideoPiece {
         /// gives their edges and alpha.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         made: Option<Shape>,
+        /// The `.cube` file that its pictures go through just after their
+        /// conversion into the timeline color space.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input_lut: Option<PathBuf>,
     },
     /// A frame of one color: black, or the color that a dip to color
     /// goes through.
@@ -838,15 +846,19 @@ impl Moving {
 pub enum Image {
     /// One picture (the piece's `path`), for every frame.
     Still,
-    /// Numbered pictures, one a frame at `rate`: picture `k` is the file
-    /// `pattern` (a full path, FFmpeg's image2 form) names with the number
-    /// `first + k`. The piece's `path` is the first.
-    Sequence {
-        pattern: PathBuf,
-        first: u64,
-        count: u64,
-        rate: Rational,
-    },
+    /// Numbered pictures.
+    Sequence(Box<Numbered>),
+}
+
+/// Numbered pictures, one a frame at `rate`: picture `k` is the file
+/// `pattern` (a full path, FFmpeg's image2 form) names with the number
+/// `first + k`. The piece's `path` is the first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Numbered {
+    pub pattern: PathBuf,
+    pub first: u64,
+    pub count: u64,
+    pub rate: Rational,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1138,6 +1150,7 @@ impl VideoPiece {
                 cache,
                 excluded,
                 made,
+                input_lut,
                 ..
             } => {
                 let still = matches!(image, Some(Image::Still));
@@ -1156,6 +1169,7 @@ impl VideoPiece {
                     cache: *cache,
                     excluded: *excluded,
                     made: *made,
+                    input_lut: input_lut.clone(),
                 }
             }
             Self::Black {
@@ -1239,6 +1253,7 @@ impl VideoPiece {
                     retime,
                     placed,
                     excluded,
+                    input_lut,
                     ..
                 },
                 Self::Source {
@@ -1249,12 +1264,14 @@ impl VideoPiece {
                     retime: r2,
                     placed: l2,
                     excluded: e2,
+                    input_lut: i2,
                     ..
                 },
             ) => {
                 media == m2
                     && excluded == e2
                     && retime == r2
+                    && input_lut == i2
                     && pace.is_normal()
                     && p2.is_normal()
                     && cache == c2
@@ -1327,6 +1344,23 @@ impl AudioPiece {
 }
 
 impl RenderPlan {
+    pub fn has_lut(&self) -> bool {
+        self.output_lut.is_some()
+            || self
+                .video
+                .iter()
+                .flat_map(VideoPiece::layers)
+                .any(|(p, _)| {
+                    matches!(
+                        p,
+                        VideoPiece::Source {
+                            input_lut: Some(_),
+                            ..
+                        }
+                    )
+                })
+    }
+
     pub fn samples(&self) -> i64 {
         self.fps.frame_to_sample(self.frames, self.sample_rate)
     }
@@ -1684,12 +1718,12 @@ pub fn super_scale_of(m: MediaSuperScale, s: &Settings) -> SuperScale {
 fn image_of(m: &Media) -> Option<Image> {
     let v = m.info.video.as_ref()?;
     match &m.sequence {
-        Some(s) => Some(Image::Sequence {
+        Some(s) => Some(Image::Sequence(Box::new(Numbered {
             pattern: m.path.parent().unwrap_or(Path::new("")).join(&s.pattern),
             first: s.first,
             count: s.count,
             rate: v.fps,
-        }),
+        }))),
         None if v.still => Some(Image::Still),
         None => None,
     }
@@ -2067,6 +2101,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 cache: c.render_cache,
                 excluded: false,
                 made: None,
+                input_lut: c.input_lut.clone(),
             })
         };
     let mut video = Vec::new();
@@ -2445,6 +2480,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         range: (a, b),
         name: "timeline".into(),
         colors: None,
+        output_lut: s.output_lut.clone(),
     };
     Ok((plan, lanes))
 }
@@ -2516,6 +2552,30 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
     Ok(plan)
 }
 
+pub fn generator_tape(p: &Project, generator: &Generator, a: i64, b: i64) -> Result<RenderPlan> {
+    let mut alone = p.clone();
+    for t in &mut alone.tracks {
+        t.clips.clear();
+        t.transitions.clear();
+        t.video_enabled = true;
+    }
+    let clip = crate::ops::block_clip(
+        String::from("generator"),
+        (0, b),
+        None,
+        Some(generator.clone()),
+    );
+    alone
+        .track_mut(crate::ops::MAIN)
+        .expect("every project has V1")
+        .clips
+        .push(clip);
+    let mut plan = flatten(&alone, a, b)?;
+    plan.colors = timeline_colors(p);
+    plan.name = crate::generators::name(generator).to_string();
+    Ok(plan)
+}
+
 pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
     let c = p
         .clip(clip)
@@ -2584,6 +2644,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
             cache: Default::default(),
             excluded: false,
             made: None,
+            input_lut: None,
         },
         None => VideoPiece::black(1),
     })
@@ -2658,6 +2719,7 @@ pub fn camera_tape(
                 cache: Default::default(),
                 excluded: false,
                 made: None,
+                input_lut: None,
             },
         );
         push_audio(&mut lane, sound_of(p, m, from, samples));
@@ -2685,6 +2747,7 @@ fn tape_plan(
         range: (0, frames),
         name: "tape".into(),
         colors: None,
+        output_lut: None,
     }
 }
 
@@ -2735,6 +2798,7 @@ pub fn places_sound(p: &Project, rows: &[crate::model::GroupRow]) -> Result<Rend
         range: (0, end),
         name: "places".into(),
         colors: None,
+        output_lut: None,
     })
 }
 
@@ -2791,6 +2855,7 @@ fn laid_out(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     cache: Default::default(),
                     excluded: false,
                     made: None,
+                    input_lut: None,
                 },
             );
         } else {
