@@ -1082,6 +1082,11 @@ impl Workspace {
                     None => super::dialog::why(ui, "open a project for the rest"),
                 }
             });
+            ui.add_enabled_ui(self.snap.project.is_some(), |ui| {
+                ui.menu_button("Trim", |ui| {
+                    ui.menu_button("Roll", |ui| self.roll_menu(ui));
+                });
+            });
             ui.menu_button("Mark", |ui| {
                 let shared = self.key_menu_why();
                 for cmd in super::keyframe_editor::KeyCmd::ALL {
@@ -1131,6 +1136,22 @@ impl Workspace {
             ui.separator();
             self.bar_buttons(ui);
         });
+    }
+
+    fn roll_menu(&mut self, ui: &mut egui::Ui) {
+        for (label, edge) in [("Start to Playhead", "head"), ("End to Playhead", "tail")] {
+            if ui.button(label).clicked() {
+                self.send(
+                    "edit.roll_to_playhead",
+                    json!({
+                        "edge": edge,
+                        "at": self.snap.timeline.position,
+                        "clips": self.snap.selection.clips,
+                    }),
+                );
+                ui.close();
+            }
+        }
     }
 
     fn playback_menu(&mut self, ui: &mut egui::Ui) {

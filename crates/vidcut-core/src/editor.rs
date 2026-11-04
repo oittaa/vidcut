@@ -3367,6 +3367,12 @@ fn mutate(
             ops::trim_to(p, *edge, at, &ids, *ripple)?;
             Value::Null
         }
+        Request::EditRollToPlayhead { edge, at, clips } => {
+            let at = resolve(p, at, playhead)?;
+            let ids = resolve_clips(p, clips, playhead)?;
+            ops::roll_to(p, *edge, at, &ids)?;
+            Value::Null
+        }
         Request::EditChangeDuration {
             clips,
             duration,

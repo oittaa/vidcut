@@ -878,7 +878,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - On Track 1 with Ripple On, it ripples. On other tracks, only that clip changes.
   - **Edit center: roll.**
     - Trim > Roll > Start to Playhead next to a gap moves only the picture edge. The sound stays.
-    - `edit.roll` does this. vidcut has no menu command for it ([gaps](todo/cut-page-gaps.md)).
+    - `edit.roll` and `edit.roll_to_playhead` do this.
+    - The Trim menu has Roll > Start to Playhead and End to Playhead (p. 1087). These commands choose clips as D4 does.
     - The total duration stays the same.
     - A white overlay shows the available handle media.
   - **Slip handle at the clip center: slip.** Several selected clips slip together.
