@@ -272,11 +272,6 @@ pub(crate) enum Msg {
         rev: u64,
         result: Result<Arc<Project>>,
     },
-    Thumbs {
-        media: String,
-        wanted: String,
-        result: std::result::Result<Filmstrip, String>,
-    },
     Waveform {
         media: String,
         wanted: String,
@@ -529,7 +524,6 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         clipboard: 0,
         key_clipboard: 0,
         notices: Arc::new(VecDeque::new()),
-        thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
         transcribed: Arc::new(HashSet::new()),
         fillers: Arc::default(),
@@ -612,14 +606,12 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         log_seq: 0,
         notices: Arc::new(VecDeque::new()),
         notice_seq: 0,
-        thumbs: Arc::new(HashMap::new()),
         missing: Arc::new(HashSet::new()),
         transcribed: Arc::new(HashSet::new()),
         fillers: Arc::new(crate::preferences::filler_lists()),
         lost_proxies: Arc::new(HashMap::new()),
         proxy_dir: Arc::from(Path::new("")),
         missing_watch: missing::MissingWatch::start(tx.clone()),
-        thumbs_wanted: HashMap::new(),
         waveforms: Arc::new(HashMap::new()),
         waveforms_wanted: HashMap::new(),
         workers: Workers::new(2),
@@ -775,9 +767,6 @@ const NOTICE_CAP: usize = 20;
 
 const WAVEFORM_RATE: u32 = 100;
 
-const THUMBS: usize = 24;
-const THUMB_SIZE: (u32, u32) = (192, 108);
-
 fn media_version(m: &vidcut_core::model::Media) -> String {
     format!(
         "{}|{}|{}|{}",
@@ -786,52 +775,6 @@ fn media_version(m: &vidcut_core::model::Media) -> String {
         m.mtime_ns,
         m.sequence.as_ref().map_or(0, |s| s.count)
     )
-}
-
-fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip, String> {
-    let prefs = crate::preferences::load().unwrap_or_default().thumbnails;
-    let cached = prefs
-        .disk_cache
-        .then(|| crate::thumbcache::load(media, THUMBS, THUMB_SIZE))
-        .flatten();
-    let (images, times) = match cached {
-        Some(strip) => strip,
-        None => {
-            let input = crate::env::input_of(media);
-            let decoder = crate::preferences::gpu_decoding().own_decoder();
-            let decoder = decoder.as_ref();
-            let strip = match media.sequence.as_ref().map(|s| s.count) {
-                Some(pictures) => vidcut_av::thumbs::filmstrip_pictures(
-                    &input,
-                    pictures,
-                    THUMBS,
-                    THUMB_SIZE.0,
-                    THUMB_SIZE.1,
-                    decoder,
-                    media.color_space,
-                ),
-                None => vidcut_av::thumbs::filmstrip(
-                    &input,
-                    THUMBS,
-                    THUMB_SIZE.0,
-                    THUMB_SIZE.1,
-                    decoder,
-                    media.color_space,
-                ),
-            }
-            .map_err(|e| e.to_string())?;
-            if prefs.disk_cache && !strip.0.is_empty() {
-                crate::thumbcache::store(media, THUMBS, THUMB_SIZE, (&strip.0, &strip.1));
-            }
-            strip
-        }
-    };
-    Ok(Filmstrip {
-        width: images.first().map_or(0, |i| i.width),
-        height: images.first().map_or(0, |i| i.height),
-        frames: images.into_iter().map(|i| i.rgba).collect(),
-        times,
-    })
 }
 
 fn chosen_name() -> String {
@@ -904,14 +847,12 @@ struct Live {
     log_seq: u64,
     notices: Arc<VecDeque<Notice>>,
     notice_seq: u64,
-    thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     missing: Arc<HashSet<String>>,
     transcribed: Arc<HashSet<String>>,
     fillers: Arc<std::collections::BTreeMap<String, Vec<String>>>,
     lost_proxies: Arc<HashMap<String, PathBuf>>,
     proxy_dir: Arc<Path>,
     missing_watch: missing::MissingWatch,
-    thumbs_wanted: HashMap<String, String>,
     waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     waveforms_wanted: HashMap<String, String>,
     workers: Workers,
@@ -1263,19 +1204,6 @@ impl Live {
                     self.make_proxies(Some(&lost));
                 }
             }
-            Msg::Thumbs { media, wanted, .. }
-                if self.thumbs_wanted.get(&media) != Some(&wanted) =>
-            {
-                changed = false;
-            }
-            Msg::Thumbs { media, result, .. } => match result {
-                Ok(strip) => {
-                    let mut map = (*self.thumbs).clone();
-                    map.insert(media, Arc::new(strip));
-                    self.thumbs = Arc::new(map);
-                }
-                Err(e) => self.notice(format!("thumbnails for {media}: {e}"), true),
-            },
             Msg::JobPlanned { id, outputs } => self.job_planned(id, outputs),
             Msg::JobProgress {
                 id,
@@ -1523,7 +1451,6 @@ impl Live {
             clipboard: self.clipboard.len(),
             key_clipboard: self.key_clipboard.len(),
             notices: self.notices.clone(),
-            thumbs: self.thumbs.clone(),
             missing: self.missing.clone(),
             transcribed: self.transcribed.clone(),
             fillers: self.fillers.clone(),
@@ -3581,8 +3508,6 @@ impl Live {
         self.tape_position = 0;
         self.player.unload(SOURCE);
         self.player.unload(TIMELINE);
-        self.thumbs = Arc::new(HashMap::new());
-        self.thumbs_wanted.clear();
         self.waveforms = Arc::new(HashMap::new());
         self.waveforms_wanted.clear();
         self.duck_kept.clear();
@@ -3684,13 +3609,9 @@ impl Live {
     fn forget_removed(&mut self, media: &[vidcut_core::model::Media]) {
         let ids: HashSet<&str> = media.iter().map(|m| m.id.as_str()).collect();
         let stays = |id: &String| ids.contains(id.as_str());
-        if !self.thumbs.keys().all(stays) {
-            Arc::make_mut(&mut self.thumbs).retain(|id, _| stays(id));
-        }
         if !self.waveforms.keys().all(stays) {
             Arc::make_mut(&mut self.waveforms).retain(|id, _| stays(id));
         }
-        self.thumbs_wanted.retain(|id, _| stays(id));
         self.waveforms_wanted.retain(|id, _| stays(id));
         self.duck_failed.retain(|u| stays(&u.media));
         if !self.duck_kept.is_empty() {
@@ -3708,24 +3629,6 @@ impl Live {
         self.forget_removed(&media);
         for m in media {
             let version = media_version(&m);
-            let pictures = format!("{version}|{}", m.color_space.key());
-            if m.info.video.is_some() && self.thumbs_wanted.get(&m.id) != Some(&pictures) {
-                self.thumbs_wanted.insert(m.id.clone(), pictures.clone());
-                if self.thumbs.contains_key(&m.id) {
-                    let mut map = (*self.thumbs).clone();
-                    map.remove(&m.id);
-                    self.thumbs = Arc::new(map);
-                }
-                let (tx, id, media) = (self.tx.clone(), m.id.clone(), m.clone());
-                let wanted = pictures;
-                self.workers.run(move || {
-                    let _ = tx.send(Msg::Thumbs {
-                        media: id,
-                        wanted,
-                        result: filmstrip(&media),
-                    });
-                });
-            }
             let sound = format!("{version}|{channels}ch");
             if !m.info.audio.is_empty() && self.waveforms_wanted.get(&m.id) != Some(&sound) {
                 self.waveforms_wanted.insert(m.id.clone(), sound.clone());

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -18,7 +17,7 @@ use super::shuttle::Jkl;
 use super::theme::{self, Deco};
 use super::timeline::TimelineView;
 use super::title_browser::LeftTab;
-use crate::live::{self, Filmstrip, PlayerId, Snapshot};
+use crate::live::{self, PlayerId, Snapshot};
 use crate::when::{LocalTime, local_time};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,24 +32,6 @@ pub(super) enum PasteWatch {
     Off,
     Wait,
     Miss,
-}
-
-pub(super) struct Thumbs {
-    pub strip: Arc<Filmstrip>,
-    pub textures: Vec<egui::TextureHandle>,
-}
-
-impl Thumbs {
-    pub(super) fn nearest(&self, secs: f64) -> Option<egui::TextureId> {
-        let i = self
-            .strip
-            .times
-            .iter()
-            .enumerate()
-            .min_by(|a, b| (a.1 - secs).abs().total_cmp(&(b.1 - secs).abs()))?
-            .0;
-        self.textures.get(i).map(egui::TextureHandle::id)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,7 +63,6 @@ pub struct ScopePictures {
 pub struct Workspace {
     pub(super) live: live::Handle,
     pub(super) snap: Arc<Snapshot>,
-    pub(super) thumbs: HashMap<String, Thumbs>,
     pub picture: Picture,
     pub want: [i32; 2],
     pub scope_pictures: ScopePictures,
@@ -178,7 +158,6 @@ impl Workspace {
         Self {
             snap: live.snapshot(),
             live,
-            thumbs: HashMap::new(),
             picture: Picture::default(),
             stats: None,
             want: [640, 360],
@@ -811,40 +790,6 @@ impl Workspace {
             "player.seek",
             json!({ "at": frame.max(0), "viewer": viewer, "fast": fast }),
         );
-    }
-
-    fn sync_textures(&mut self, ctx: &egui::Context) {
-        let thumbs = self.snap.thumbs.clone();
-        self.thumbs.retain(|m, _| thumbs.contains_key(m));
-        for (media, strip) in thumbs.iter() {
-            if self
-                .thumbs
-                .get(media)
-                .is_some_and(|t| Arc::ptr_eq(&t.strip, strip))
-            {
-                continue;
-            }
-            let size = [strip.width as usize, strip.height as usize];
-            let textures = strip
-                .frames
-                .iter()
-                .enumerate()
-                .map(|(i, rgba)| {
-                    ctx.load_texture(
-                        format!("thumb-{media}-{i}"),
-                        egui::ColorImage::from_rgba_unmultiplied(size, rgba),
-                        egui::TextureOptions::LINEAR,
-                    )
-                })
-                .collect();
-            self.thumbs.insert(
-                media.clone(),
-                Thumbs {
-                    strip: strip.clone(),
-                    textures,
-                },
-            );
-        }
     }
 
     fn notices(&mut self, ui: &mut egui::Ui) {
@@ -2017,7 +1962,6 @@ impl Workspace {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             self.title = title;
         }
-        self.sync_textures(&ctx);
         if let Some(tiles) = &mut self.tiles {
             tiles.begin_frame(&ctx, self.snap.project());
         }

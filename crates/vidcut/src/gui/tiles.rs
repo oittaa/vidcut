@@ -251,6 +251,21 @@ impl Tiles {
         Some(best.1.texture.id())
     }
 
+    pub fn nearest_any_height(&self, media: &str, frame: i64) -> Option<egui::TextureId> {
+        let m = self.kept.get(media)?;
+        let heights = std::iter::successors(m.keys().next().map(|k| k.0), |h| {
+            m.range((h + 1, i64::MIN)..).next().map(|(k, _)| k.0)
+        });
+        heights
+            .flat_map(|h| {
+                let before = m.range((h, i64::MIN)..=(h, frame)).next_back();
+                let after = m.range((h, frame)..=(h, i64::MAX)).next();
+                before.into_iter().chain(after)
+            })
+            .min_by_key(|(k, _)| (k.1 - frame).abs())
+            .map(|(_, kept)| kept.texture.id())
+    }
+
     pub fn job(&self, p: &Project, key: &TileKey, width: u32) -> Option<Job> {
         let m = p.media(&key.media)?;
         let piece = vidcut_core::render::media_frame(p, &key.media, key.frame).ok()?;
@@ -421,7 +436,8 @@ pub fn media_aspect(m: &vidcut_core::model::Media) -> Option<f32> {
         1.0
     };
     let (w, h) = (v.width as f32 * sar, v.height.max(1) as f32);
-    Some(if v.rotation % 180 == 90 { h / w } else { w / h })
+    let aspect = if v.rotation % 180 == 90 { h / w } else { w / h };
+    Some(aspect.clamp(0.1, 10.0))
 }
 
 pub fn tile_height(px: f32) -> u32 {
