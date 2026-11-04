@@ -205,6 +205,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Beside the thumbnail, from the top:
       - The main description, which follows the sort (p. 662). Timecode gives the start timecode. Each other sort gives the clip name.
       - The start timecode and the camera name. A file with no timecode shows 00:00:00:00. A clip with no camera name shows `---`.
+      - A subtitle file shows its cue count and its length on that line, and no camera name.
       - The clip name.
     - Sorted by Clip Name, the clips are in clusters by the first letter of the name, each under a heading (pp. 662–663).
       - Inside a cluster, the order is by timecode. The Source Tape takes this order.
