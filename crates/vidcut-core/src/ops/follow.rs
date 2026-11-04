@@ -197,12 +197,29 @@ pub(crate) fn follow(p: &mut Project, before: &Before, edit: &Edit<'_>) {
             .retain(|c| c.start < at || moved.contains(&c.id));
     }
     super::subtitles::remap(p, |x| mapper.map(x, ""));
+    if let Some((new_end, old_end)) = edit.replaced {
+        move_later_markers(p, new_end, old_end);
+    }
     settle(p, &moved);
     for ti in 0..p.tracks.len() {
         if ti != main_index {
             fix_audio(p, ti);
         }
     }
+}
+
+fn move_later_markers(p: &mut Project, new_end: i64, old_end: i64) {
+    let (mut later, mut stayed): (Vec<_>, Vec<_>) = std::mem::take(&mut p.markers)
+        .into_iter()
+        .partition(|m| m.at >= old_end);
+    for m in &mut later {
+        m.at += new_end - old_end;
+    }
+    let landed: HashSet<i64> = later.iter().map(|m| m.at).collect();
+    stayed.retain(|m| !landed.contains(&m.at));
+    stayed.append(&mut later);
+    stayed.sort_by_key(|m| m.at);
+    p.markers = stayed;
 }
 
 pub(crate) fn settle(p: &mut Project, moved: &HashSet<String>) {

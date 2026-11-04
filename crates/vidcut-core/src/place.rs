@@ -203,7 +203,11 @@ impl Shading {
     fn boxes(sigma: f64) -> [u32; 3] {
         let wide = 12.0 * sigma * sigma;
         let floor = (wide / 3.0 + 1.0).sqrt().floor() as u32;
-        let low = if floor % 2 == 0 { floor - 1 } else { floor };
+        let low = if floor.is_multiple_of(2) {
+            floor - 1
+        } else {
+            floor
+        };
         let l = f64::from(low);
         let narrow = ((wide - 3.0 * l * l - 12.0 * l - 9.0) / (-4.0 * l - 4.0))
             .round_ties_even()

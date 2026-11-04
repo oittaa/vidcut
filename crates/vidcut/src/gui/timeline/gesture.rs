@@ -280,6 +280,7 @@ pub struct Drag {
     pub gesture: Gesture,
     pub press: Pos2,
     pub fine: bool,
+    pub from_source_clip: bool,
     hover: Option<(String, Instant)>,
     blocked_since: Option<Instant>,
 }
@@ -290,6 +291,7 @@ impl Drag {
             gesture,
             press,
             fine: false,
+            from_source_clip: false,
             hover: None,
             blocked_since: None,
         }
@@ -1548,6 +1550,7 @@ mod tests {
 
     fn clip(id: &str, start: i64, duration: i64, source_in: i64) -> Clip {
         Clip {
+            input_lut: None,
             id: id.into(),
             media: "m1".into(),
             start,

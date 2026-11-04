@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -18,7 +19,7 @@ fn failed(what: &str) -> Error {
 
 struct Frame {
     at: i64,
-    offscreen: &'static Offscreen,
+    offscreen: Arc<Offscreen>,
     shown: Shown,
     _player: Player,
 }
@@ -41,6 +42,9 @@ impl Frame {
             &info.device_pci_bus_id,
         ));
         let (plan, _) = vidcut_core::render::flatten_lanes(p, t, t + 1)?;
+        if let Some(lut) = &plan.output_lut {
+            vidcut_av::screen::load_lut(lut).map_err(|e| Error::invalid(e.to_string()))?;
+        }
         let config = Config {
             audio_scrubbing: false,
             hardware: crate::preferences::gpu_decoding().on,
@@ -93,6 +97,7 @@ impl Frame {
                 .collect(),
             false => Vec::new(),
         };
+        screen.set_output_lut(shown.output_lut.clone());
         screen.draw(
             &self.offscreen.gpu,
             Some(&shown.picture),

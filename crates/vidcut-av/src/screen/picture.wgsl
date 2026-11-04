@@ -411,6 +411,83 @@ fn fs_convert(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(rgb(yuv_woven(floor(in.position.xy))), 1.0);
 }
 
+struct Table {
+    ranges: vec4<f32>,
+    sizes: vec4<u32>,
+};
+
+@group(1) @binding(1) var<uniform> table: Table;
+@group(1) @binding(2) var table_rows: texture_2d<f32>;
+@group(1) @binding(3) var table_cube: texture_3d<f32>;
+
+fn table_place(c: vec3<f32>, low: f32, high: f32, size: u32) -> vec3<f32> {
+    return clamp((c - vec3<f32>(low)) / (high - low), vec3<f32>(0.0), vec3<f32>(1.0)) * f32(size - 1u);
+}
+
+fn table_row(i: u32) -> vec3<f32> {
+    let width = table.sizes.z;
+    return textureLoad(table_rows, vec2<u32>(i % width, i / width), 0).rgb;
+}
+
+fn table_cell(i: vec3<u32>) -> vec3<f32> {
+    return textureLoad(table_cube, i, 0).rgb;
+}
+
+fn through_rows(c: vec3<f32>) -> vec3<f32> {
+    let n = table.sizes.x;
+    let t = table_place(c, table.ranges.x, table.ranges.y, n);
+    let i = min(vec3<u32>(t), vec3<u32>(n - 2u));
+    let f = t - vec3<f32>(i);
+    return vec3<f32>(
+        mix(table_row(i.x).x, table_row(i.x + 1u).x, f.x),
+        mix(table_row(i.y).y, table_row(i.y + 1u).y, f.y),
+        mix(table_row(i.z).z, table_row(i.z + 1u).z, f.z),
+    );
+}
+
+fn through_cube(c: vec3<f32>) -> vec3<f32> {
+    let n = table.sizes.y;
+    let t = table_place(c, table.ranges.z, table.ranges.w, n);
+    let i = min(vec3<u32>(t), vec3<u32>(n - 2u));
+    let f = t - vec3<f32>(i);
+    let near = mix(
+        mix(table_cell(i), table_cell(i + vec3<u32>(1u, 0u, 0u)), f.x),
+        mix(table_cell(i + vec3<u32>(0u, 1u, 0u)), table_cell(i + vec3<u32>(1u, 1u, 0u)), f.x),
+        f.y,
+    );
+    let far = mix(
+        mix(table_cell(i + vec3<u32>(0u, 0u, 1u)), table_cell(i + vec3<u32>(1u, 0u, 1u)), f.x),
+        mix(table_cell(i + vec3<u32>(0u, 1u, 1u)), table_cell(i + vec3<u32>(1u, 1u, 1u)), f.x),
+        f.y,
+    );
+    return mix(near, far, f.z);
+}
+
+fn looked_up(c: vec3<f32>) -> vec3<f32> {
+    var out = c;
+    if table.sizes.x > 0u {
+        out = through_rows(out);
+    }
+    if table.sizes.y > 0u {
+        out = through_cube(out);
+    }
+    return out;
+}
+
+@fragment
+fn fs_convert_lut(in: Out) -> @location(0) vec4<f32> {
+    return vec4<f32>(looked_up(rgb(yuv_woven(floor(in.position.xy)))), 1.0);
+}
+
+@fragment
+fn fs_lut(in: Out) -> @location(0) vec4<f32> {
+    let c = textureLoad(timeline, vec2<i32>(in.position.xy), 0);
+    if c.a <= 0.0 {
+        return c;
+    }
+    return vec4<f32>(looked_up(c.rgb / c.a) * c.a, c.a);
+}
+
 @group(0) @binding(1) var before: texture_2d<f32>;
 @group(0) @binding(2) var middle: texture_2d<f32>;
 @group(0) @binding(3) var after: texture_2d<f32>;

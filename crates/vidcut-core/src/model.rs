@@ -130,6 +130,10 @@ pub struct Settings {
     /// What the render cache makes for the viewer; left out when `off`.
     #[serde(default, skip_serializing_if = "RenderCache::is_off")]
     pub render_cache: RenderCache,
+    /// The `.cube` file that the whole timeline goes through after its
+    /// subtitles, before each output's colors. Left out when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_lut: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -151,6 +155,7 @@ impl Default for Settings {
             retime: ProjectRetime::Auto,
             upscaler: ProjectUpscaler::Auto,
             render_cache: RenderCache::Off,
+            output_lut: None,
         }
     }
 }
@@ -189,6 +194,8 @@ impl Format {
 }
 
 impl Settings {
+    pub const MOST_CHANNELS: u16 = 24;
+
     pub fn with_format(fps: Option<&str>, size: Option<(u32, u32)>) -> crate::error::Result<Self> {
         let mut s = Self::default();
         if let Some(f) = fps {
@@ -1735,6 +1742,11 @@ pub struct Clip {
     /// slow media and AI Super Scale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
+    /// The `.cube` file that its picture goes through just after its
+    /// conversion into the timeline color space. Left out when there is
+    /// none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_lut: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -4871,6 +4883,7 @@ impl Cue {
             retime: ClipRetime::Project,
             color: None,
             render_cache: ClipCache::Auto,
+            input_lut: None,
         }
     }
 
