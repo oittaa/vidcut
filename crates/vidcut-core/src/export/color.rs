@@ -363,6 +363,8 @@ mod tests {
             max_cll: None,
             alpha: false,
             alpha_mode: Default::default(),
+            filename_digits: None,
+            first_frame: None,
         }
     }
 

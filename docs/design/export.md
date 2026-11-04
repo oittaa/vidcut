@@ -147,7 +147,7 @@ The plan:
 - `Container::image_sequence` is true for TIFF and OpenEXR. Each packet of the encoder is one whole file.
 - `FrameFiles` writes the packets to a temporary folder beside the output, and `Writer::end` moves them to their names. Thus a cancelled export leaves no frames and keeps the old ones.
 - The muxer is `null`. Why: FFmpeg's image muxer takes a pattern, and a percent sign in a folder name would break the pattern.
-- `Container::frame_file` makes each name. `Output::first_number` is the start timecode plus the first frame of the output, as a frame count.
+- `ExportSettings::frame_file` makes each name. `Output::first_number` comes from `ExportSettings::first_number`.
 - `VideoSettings::image_bits` gives the depth from the profile. `ColorChoice` reports it.
 - `carries_hdr` is true for both, because their files hold the code values of the timeline. The FFmpeg encoders write no HDR tags and no HDR metadata.
 - OpenEXR planes are `R32Float` and use `fs_encode_float`. `encoded_rgb` does not clamp them when the transfer does not change. Thus a value above 1 stays in the file.

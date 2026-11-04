@@ -395,6 +395,8 @@ fn fit_codecs(s: &mut ExportSettings) {
         if !ok.contains(&v.codec) {
             v.codec = ok[0];
             v.profile = None;
+            v.filename_digits = None;
+            v.first_frame = None;
             if fixed_format(v.codec) {
                 v.bit_depth = None;
             }
@@ -2673,6 +2675,8 @@ fn settings_form(
                                 max_cll: None,
                                 alpha: false,
                                 alpha_mode: Default::default(),
+                                filename_digits: None,
+                                first_frame: None,
                             }),
                         );
                         fit_codecs(&mut d.settings);
@@ -2856,6 +2860,29 @@ fn settings_form(
                     ui.end_row();
                 } else {
                     v.alpha = false;
+                }
+
+                if v.image_bits().is_some() {
+                    ui.label("");
+                    ui.horizontal(|ui| {
+                        use vidcut_core::export::FILENAME_DIGITS;
+                        ui.label(dim("filename digits"));
+                        let mut digits = v.filename_digits.unwrap_or(FILENAME_DIGITS);
+                        if ui
+                            .add(egui::DragValue::new(&mut digits).range(1..=18))
+                            .changed()
+                        {
+                            v.filename_digits = Some(digits);
+                        }
+                        let mut own = v.first_frame.is_some();
+                        if ui.checkbox(&mut own, "First Frame").changed() {
+                            v.first_frame = own.then_some(0);
+                        }
+                        if let Some(first) = &mut v.first_frame {
+                            ui.add(egui::DragValue::new(first));
+                        }
+                    });
+                    ui.end_row();
                 }
 
                 ui.label("");

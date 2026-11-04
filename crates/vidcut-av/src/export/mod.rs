@@ -17,8 +17,7 @@ use serde::Serialize;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind};
 use vidcut_core::export::metadata::{self, Measured, MetadataChoice, PieceMeta};
 use vidcut_core::export::{
-    Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Rounded, VideoSettings,
-    validate,
+    EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Rounded, VideoSettings, validate,
 };
 use vidcut_core::model::{Hdr, SubtitleStyle};
 use vidcut_core::render::{RenderPlan, VideoPiece};
@@ -514,17 +513,17 @@ pub fn run_decoding_on(
 
 struct FrameFiles {
     dir: vidcut_core::temp::Temp,
-    container: Container,
+    settings: ExportSettings,
     output: PathBuf,
     first_number: i64,
     written: i64,
 }
 
 impl FrameFiles {
-    fn new(container: Container, output: &Path, first_number: i64) -> Result<Self> {
+    fn new(settings: &ExportSettings, output: &Path, first_number: i64) -> Result<Self> {
         Ok(Self {
             dir: vidcut_core::temp::dir(output)?,
-            container,
+            settings: settings.clone(),
             output: output.to_path_buf(),
             first_number,
             written: 0,
@@ -541,7 +540,7 @@ impl FrameFiles {
     fn keep(&self) -> Result<()> {
         for i in 0..self.written {
             let file = self
-                .container
+                .settings
                 .frame_file(&self.output, self.first_number + i);
             std::fs::rename(self.dir.path().join(i.to_string()), file)?;
         }
@@ -1138,7 +1137,7 @@ fn encode(
                 codec: id,
                 kind: enc.kind,
                 files: match settings.container.image_sequence() {
-                    true => Some(FrameFiles::new(settings.container, output, first_number)?),
+                    true => Some(FrameFiles::new(settings, output, first_number)?),
                     false => None,
                 },
             };
@@ -1380,7 +1379,7 @@ fn encode(
         })
     });
     Ok(Report {
-        output: settings.container.first_file(output, first_number),
+        output: settings.first_file(output, first_number),
         frames: plan.frames,
         samples: if audio_encoder.is_some() {
             plan.samples()

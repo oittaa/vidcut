@@ -558,16 +558,13 @@ fn add_subtitles(
 
 impl Output {
     pub fn written(&self) -> PathBuf {
-        self.settings
-            .container
-            .first_file(&self.path, self.first_number)
+        self.settings.first_file(&self.path, self.first_number)
     }
 
     fn taken(&self) -> Option<PathBuf> {
-        let container = self.settings.container;
-        match container.image_sequence() {
+        match self.settings.container.image_sequence() {
             true => (0..self.plan.frames)
-                .map(|i| container.frame_file(&self.path, self.first_number + i))
+                .map(|i| self.settings.frame_file(&self.path, self.first_number + i))
                 .find(|file| file.exists()),
             false => Some(self.path.clone()).filter(|file| file.exists()),
         }
@@ -708,7 +705,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             let name = file_name(template, i + 1, &plan.name, id, media);
             outputs.push(Output {
                 path: params.output.join(format!("{name}.{ext}")),
-                first_number: p.settings.start_tc + start,
+                first_number: settings.first_number(p.settings.start_tc + start),
                 plan,
                 settings: settings.clone(),
                 color: None,
@@ -723,7 +720,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         outputs.push(Output {
             plan: render::flatten(&proj, a, b)?,
             path: params.output.clone(),
-            first_number: p.settings.start_tc + a,
+            first_number: settings.first_number(p.settings.start_tc + a),
             settings: settings.clone(),
             color: None,
             metadata: None,

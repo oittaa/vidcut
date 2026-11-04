@@ -24,7 +24,7 @@ pub enum Container {
     Ogg,
     /// Image sequences: one file for each frame, without sound. The output
     /// `out.tif` gives `out_00000000.tif` and so on. The number is the frame
-    /// count of the record timecode.
+    /// count of the record timecode, unless `video.first_frame` is set.
     Tiff,
     Exr,
 }
@@ -79,23 +79,6 @@ impl Container {
 
     pub fn image_sequence(self) -> bool {
         matches!(self, Self::Tiff | Self::Exr)
-    }
-
-    pub fn frame_file(self, output: &Path, number: i64) -> PathBuf {
-        let mut name = output.file_stem().unwrap_or_default().to_os_string();
-        name.push(format!("_{number:08}."));
-        match output.extension() {
-            Some(ext) => name.push(ext),
-            None => name.push(self.extension()),
-        }
-        output.with_file_name(name)
-    }
-
-    pub fn first_file(self, output: &Path, number: i64) -> PathBuf {
-        match self.image_sequence() {
-            true => self.frame_file(output, number),
-            false => output.to_path_buf(),
-        }
     }
 
     pub fn from_extension(ext: &str) -> Option<Self> {
@@ -412,6 +395,14 @@ pub struct VideoSettings {
     /// How a file with `alpha` holds its colors.
     #[serde(default, skip_serializing_if = "AlphaOut::is_default")]
     pub alpha_mode: AlphaOut,
+    /// The digits of the frame number in the name of a TIFF or OpenEXR file.
+    /// Unset: 8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename_digits: Option<u8>,
+    /// The number of the first TIFF or OpenEXR file. With `per_clip`, each
+    /// clip starts at it. Unset: the frame count of the record timecode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_frame: Option<u32>,
 }
 
 impl VideoSettings {
@@ -436,6 +427,8 @@ impl VideoSettings {
             max_cll: None,
             alpha: false,
             alpha_mode: AlphaOut::default(),
+            filename_digits: None,
+            first_frame: None,
         }
     }
 
@@ -620,6 +613,34 @@ fn yes() -> bool {
     true
 }
 
+pub const FILENAME_DIGITS: u8 = 8;
+
+impl ExportSettings {
+    pub fn frame_file(&self, output: &Path, number: i64) -> PathBuf {
+        let digits = self.video.as_ref().and_then(|v| v.filename_digits);
+        let digits = usize::from(digits.unwrap_or(FILENAME_DIGITS));
+        let mut name = output.file_stem().unwrap_or_default().to_os_string();
+        name.push(format!("_{number:0digits$}."));
+        match output.extension() {
+            Some(ext) => name.push(ext),
+            None => name.push(self.container.extension()),
+        }
+        output.with_file_name(name)
+    }
+
+    pub fn first_file(&self, output: &Path, number: i64) -> PathBuf {
+        match self.container.image_sequence() {
+            true => self.frame_file(output, number),
+            false => output.to_path_buf(),
+        }
+    }
+
+    pub fn first_number(&self, record_frame: i64) -> i64 {
+        let first = self.video.as_ref().and_then(|v| v.first_frame);
+        first.map_or(record_frame, i64::from)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Preset {
     pub name: String,
@@ -653,6 +674,8 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
         max_cll: None,
         alpha: false,
         alpha_mode: AlphaOut::default(),
+        filename_digits: None,
+        first_frame: None,
     }
 }
 
@@ -1053,6 +1076,12 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         }
         if v.hdr_metadata.dolby_vision() && !matches!(v.codec, V::Hevc | V::Av1) {
             return Err(Error::usage("Dolby Vision needs HEVC or AV1"));
+        }
+        if !s.container.image_sequence() && (v.filename_digits.is_some() || v.first_frame.is_some())
+        {
+            return Err(Error::usage(
+                "video.filename_digits and video.first_frame are for TIFF and OpenEXR",
+            ));
         }
         if v.image_bits().is_some()
             && (!matches!(v.hdr_metadata, HdrMetadata::Auto | HdrMetadata::None)

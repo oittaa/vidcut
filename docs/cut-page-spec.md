@@ -1753,10 +1753,13 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - OpenEXR has RGB Half and RGB Float settings, and RGB Half with DWAA or DWAB and a Compression level (p. 4115).
   - A single clip render makes one image sequence (p. 4114).
   - Each frame has timecode in its header and in its file name, as a frame count (p. 4114).
-  - The file name has eight digits by default (p. 4126).
+  - Use filename digits sets the digits in the file name. The default is eight (p. 4126).
+  - Each clips starts at frame sets the first frame count of Individual Clips (p. 4126).
+  - Start timeline timecode at sets the first timecode of a Single Clip (p. 4126).
   - **In vidcut:**
-    - `out.tif` gives `out_00000000.tif`, `out_00000001.tif` and so on. Eight digits are the only choice.
+    - `out.tif` gives `out_00000000.tif`, `out_00000001.tif` and so on. `video.filename_digits` sets the digits.
     - The first number is the start timecode plus the first frame of the export, as a frame count.
+    - `video.first_frame` sets the first number. With `per_clip`, each clip starts at it.
     - `video.profile` of a TIFF is `rgb8` or `rgb16` (the default), each also with `_packbits`, `_lzw` or `_deflate`.
     - `video.profile` of an OpenEXR is `half` (the default) or `float`, each also with `_rle`, `_zip1` or `_zip16`.
     - With no suffix, the file has no compression.
