@@ -423,6 +423,9 @@ struct Table {
 @group(1) @binding(3) var table_cube: texture_3d<f32>;
 
 fn table_place(c: vec3<f32>, low: f32, high: f32, size: u32) -> vec3<f32> {
+    if low == high {
+        return vec3<f32>(0.0);
+    }
     return clamp((c - vec3<f32>(low)) / (high - low), vec3<f32>(0.0), vec3<f32>(1.0)) * f32(size - 1u);
 }
 
