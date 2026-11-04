@@ -322,7 +322,7 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
 
 ## The scopes
 
-The Waveform, the Parade and the Vectorscope show the picture that the viewer draws ([deviation X125](../deviations.md#x125-the-viewer-has-scopes)).
+The Waveform, the Parade and the Vectorscope show the picture that the viewer draws ([deviation X127](../deviations.md#x127-the-viewer-has-scopes)).
 
 What they read:
 

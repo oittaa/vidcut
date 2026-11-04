@@ -2421,7 +2421,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - One row for each file comes first. The rows that hold many files are the next change ([todo/sync-bin.md](todo/sync-bin.md)).
   - The owner approved this order of work, and this difference stays only until that change.
 
-## X125. The viewer has scopes
+## X127. The viewer has scopes
 
 - **Resolve:**
   - The Cut page has no scope. The video scopes open on the Color, Media and Deliver pages (pp. 3092–3093).
