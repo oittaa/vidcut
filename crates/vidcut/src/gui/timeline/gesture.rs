@@ -1543,6 +1543,8 @@ mod tests {
             color_space: Default::default(),
             super_scale: Default::default(),
             left_out: Vec::new(),
+            subclip: None,
+            markers: Vec::new(),
             words: Vec::new(),
             fingerprint: None,
             subtitles: None,

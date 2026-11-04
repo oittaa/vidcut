@@ -17,9 +17,7 @@ fn no_common_time() -> Error {
 }
 
 fn origin(p: &Project, m: &Media) -> i64 {
-    m.info
-        .timecode
-        .map_or(0, |tc| tc.frames_at(p.settings.fps).round() as i64)
+    m.timecode_at(p.settings.fps).round() as i64
 }
 
 fn lines_up(p: &Project, m: &Media) -> Result<()> {

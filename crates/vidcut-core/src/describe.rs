@@ -36,6 +36,7 @@ pub fn describe_at(
             d.files("search")
         ),
         "media.rename" => format!("Rename {} to {}", d.media("media"), d.text("name")),
+        "media.subclip" => format!("Create subclip {} of {}", d.text("name"), d.media("media")),
         "media.set" => d.media_set(),
         "media.marks.set" => d.marks_set(
             format!("Source marks of {}", d.media("media")),
@@ -256,6 +257,12 @@ pub fn describe_at(
         ),
         "marks.set" => d.marks_set("Timeline marks".into(), project.map(|p| &p.marks)),
         "marks.clear" => "Clear the timeline marks".into(),
+        "markers.add" if d.params["media"].is_string() => format!(
+            "Marker on {} at {}{}",
+            d.media("media"),
+            d.time("at"),
+            d.named()
+        ),
         "markers.add" => format!("Marker at {}{}", d.time("at"), d.named()),
         "markers.move" => format!("Move marker {} to {}", d.text("marker"), d.time("to")),
         "markers.set" => d.marker_set(),

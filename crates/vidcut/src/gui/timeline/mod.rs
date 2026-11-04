@@ -3267,7 +3267,7 @@ impl Workspace {
     }
 
     pub(crate) fn open_marker(&mut self, id: String, p: &Project) {
-        if let Some(k) = p.markers.iter().find(|k| k.id == id) {
+        if let Some(k) = p.marker(&id) {
             self.timeline.marker_dialog = Some(MarkerDialog {
                 id,
                 name: k.name.clone(),

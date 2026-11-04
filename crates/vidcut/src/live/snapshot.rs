@@ -110,7 +110,7 @@ impl PoolView {
             PoolSort::Date => media.sort_by_key(|m| m.mtime_ns),
             PoolSort::Timecode => {
                 let start = |m: &vidcut_core::model::Media| {
-                    m.info.timecode.map_or(0.0, |t| t.label_seconds())
+                    m.info.timecode.map_or(0.0, |t| t.label_seconds()) + m.skipped()
                 };
                 media.sort_by(|a, b| start(a).total_cmp(&start(b)));
             }
@@ -364,8 +364,7 @@ pub fn timecode_view<'a>(
     let source_tc = project
         .zip(media)
         .and_then(|(p, m)| p.media(m))
-        .and_then(|m| m.info.timecode)
-        .map_or(0, |tc| tc.frames_at(fps).round() as i64);
+        .map_or(0, |m| m.timecode_at(fps).round() as i64);
     TimecodeView {
         display,
         viewer,

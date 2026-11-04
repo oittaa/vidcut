@@ -402,6 +402,23 @@ pub struct Media {
     /// `media`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtitles: Option<SubtitleFile>,
+    /// For a subclip (`media.subclip`), the part of the file it is. Its
+    /// source frames count from the start of that part. Left out for a
+    /// whole file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subclip: Option<Subclip>,
+    /// The markers on this source clip, at its source frames (`markers.add`
+    /// with `media`), in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<Marker>,
+}
+
+/// The part of a file that a subclip is, in seconds from the file's first
+/// frame.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Subclip {
+    pub start: f64,
+    pub end: f64,
 }
 
 /// The words a project takes from the transcripts of one sound stream.
@@ -816,13 +833,24 @@ impl Media {
         self.info.video.as_ref().is_some_and(|v| v.still)
     }
 
+    pub fn skipped(&self) -> f64 {
+        self.subclip.map_or(0.0, |s| s.start)
+    }
+
     pub fn origin(&self) -> f64 {
-        self.info
+        let first = self
+            .info
             .video
             .as_ref()
             .map(|v| v.first_pts)
             .or_else(|| self.info.audio.first().map(|a| a.first_pts))
-            .unwrap_or(0.0)
+            .unwrap_or(0.0);
+        first + self.skipped()
+    }
+
+    pub fn timecode_at(&self, fps: Rational) -> f64 {
+        let file = self.info.timecode.map_or(0.0, |tc| tc.frames_at(fps));
+        file + self.skipped() * fps.as_f64()
     }
 
     pub fn sequence_file(&self, k: u64) -> Option<PathBuf> {
@@ -4481,6 +4509,13 @@ impl Project {
     }
 
     pub fn media_frames(&self, media: &Media) -> i64 {
+        match media.subclip {
+            Some(s) => self.frames_in(s.end - s.start),
+            None => self.file_frames(media),
+        }
+    }
+
+    pub fn file_frames(&self, media: &Media) -> i64 {
         let secs = match (&media.info.video, media.info.audio.first()) {
             (Some(v), _) if v.still => self.settings.still_secs,
             (Some(v), _) => v.duration,
@@ -4488,6 +4523,13 @@ impl Project {
             (None, None) => 0.0,
         };
         self.frames_in(secs)
+    }
+
+    pub fn marker(&self, id: &str) -> Option<&Marker> {
+        self.markers
+            .iter()
+            .chain(self.media.iter().flat_map(|m| &m.markers))
+            .find(|k| k.id == id)
     }
 
     pub fn media_limit(&self, media: &Media) -> i64 {

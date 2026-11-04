@@ -1079,7 +1079,7 @@ impl Workspace {
                 t.want(&key, || t.job(p, &key, width))
                     .or_else(|| t.nearest(&m.id, height, frame, within))
             })
-            .or_else(|| thumbs.nearest(p.settings.fps.frames_to_secs(frame)))
+            .or_else(|| thumbs.nearest(p.settings.fps.frames_to_secs(frame) + m.skipped()))
     }
 
     fn sound(&self, painter: &egui::Painter, rect: Rect, m: &Media) {

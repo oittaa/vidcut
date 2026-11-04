@@ -1108,12 +1108,22 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Transcription window has:
     - a click on a word, a drag over words, X, Delete and Undelete
     - Remove Silent Portions and Delete Filler Words
-    - Place on Top, Insert and Append on a source clip
+    - Place on Top, Insert, Append, Create Subclip and Add Marker on a source clip
     - Cut, Paste and Add Marker on the timeline
     - search: First, Previous, Next, Last and a count of the matches
     - Edit, Copy and Follow
     - the Transcript menu and the differences between transcripts (X50)
   - On a source clip, Delete leaves the words out of every edit of the media (`media.leave_out`). This includes the edits of the viewer, of the pool and of scripts.
+  - On a source clip, Create Subclip opens a window with a Name and Create (p. 1005).
+    - The subclip holds the selected words (p. 998). It goes in the bin that the pool shows (p. 864).
+    - `media.subclip` does this. It takes a `range`, a `name` and a `bin`.
+    - A subclip works like any other pool item (pp. 460–461, 885–886).
+    - The words of the subclip come from the transcript of its file.
+  - Add Marker puts a marker at one selected word, or a marker with a duration over more words (p. 998).
+    - On a source clip, the marker is on that clip, at its source frame (`markers.add` with `media`).
+    - The scroll area of the Source Clip viewer shows it. A marker with a duration also shows as a bar (p. 1018).
+    - A double-click on it there opens the marker dialog.
+    - `markers.list` with `media` lists them. `markers.move`, `markers.set` and `markers.remove` take their ids.
   - On the timeline, Delete takes the words out of every unlocked track (`edit.ripple_delete_words`, D63).
     - With Ripple On, the gap closes. With it off, a gap is left (`lift`).
     - The edges move to the quiet points around the words (`quiet`, X92).
