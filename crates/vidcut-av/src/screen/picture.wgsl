@@ -479,6 +479,9 @@ fn fs_halve(in: Out) -> @location(0) vec4<f32> {
 }
 
 fn placed(px: vec2<f32>) -> vec4<f32> {
+    if p.made.x > 2.5 && p.made.x < 3.5 {
+        return textureLoad(halved, vec2<i32>(px), 0) * p.placed.y;
+    }
     let s = shown(px);
     return vec4<f32>(s.rgb * s.a, s.a);
 }
@@ -1070,11 +1073,14 @@ struct Mosaic {
     grid: vec4<f32>,
     way: vec4<i32>,
     more: vec4<f32>,
+    alpha: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> mosaicking: Mosaic;
 
 const MOSAIC_NEAR: f32 = 0.00390625;
+
+const MOSAIC_WHOLE: f32 = 0.999;
 
 fn mosaic_odd(v: f32) -> bool {
     return v - 2.0 * floor(v / 2.0) > 0.5;
@@ -1207,6 +1213,19 @@ fn mosaic_cell(p: vec2<f32>, n: vec2<i32>) -> vec4<f32> {
     return textureLoad(blur_source, vec2<i32>(x, y) / mosaicking.way.w, 0);
 }
 
+fn mosaic_alpha(cell: vec4<f32>, was: vec4<f32>) -> vec4<f32> {
+    if mosaicking.alpha.x > 0.5 {
+        return vec4<f32>(cell.rgb, was.a);
+    }
+    if mosaicking.alpha.y < 0.5 {
+        return cell;
+    }
+    if cell.a >= MOSAIC_WHOLE {
+        return vec4<f32>(cell.rgb, 1.0);
+    }
+    return vec4<f32>(was.rgb, 0.0);
+}
+
 @fragment
 fn fs_mosaic(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
@@ -1223,10 +1242,11 @@ fn fs_mosaic(in: Out) -> @location(0) vec4<f32> {
         let row = mosaic_row(column.y, px.y, n.y);
         return mosaic_box(row, mosaicking.way.y, n.y, px.x, true);
     }
+    let was = textureLoad(blur_start, px, 0);
     var sum = vec4<f32>(0.0);
     for (var b = 0; b < samples; b++) {
         for (var a = 0; a < samples; a++) {
-            sum += mosaic_cell(vec2<f32>(px * samples + vec2<i32>(a, b)), n);
+            sum += mosaic_alpha(mosaic_cell(vec2<f32>(px * samples + vec2<i32>(a, b)), n), was);
         }
     }
     let out = sum / f32(samples * samples);

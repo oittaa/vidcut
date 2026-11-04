@@ -106,10 +106,12 @@ fn mosaic_checked(m: &MosaicBlur) -> Result<MosaicBlur> {
         MosaicBlur::STRETCHES,
         "a Mosaic Blur's aspect is from 0.001 to 1000",
     )?;
-    if !m.position.is_none_or(|at| at.iter().all(|v| v.is_finite())) {
-        return Err(Error::invalid(
-            "a Mosaic Blur's position is two fractions of the frame",
-        ));
+    for v in m.position.into_iter().flatten() {
+        within(
+            Some(v),
+            MosaicBlur::PLACES,
+            "a Mosaic Blur's position is from -1000000 to 1000000",
+        )?;
     }
     Ok(MosaicBlur {
         pixel_frequency: m.pixel_frequency.filter(|v| *v != MosaicBlur::FREQUENCY),
@@ -121,6 +123,7 @@ fn mosaic_checked(m: &MosaicBlur) -> Result<MosaicBlur> {
         aspect: m.aspect.filter(|v| *v != MosaicBlur::STRETCH),
         position: m.position.filter(|v| *v != MosaicBlur::MIDDLE),
         border: m.border.filter(|v| *v != Border::default()),
+        blur_alpha: m.blur_alpha.filter(|on| !*on),
         ..m.clone()
     })
 }
@@ -460,6 +463,8 @@ pub fn effect_shown(e: &Effect) -> Value {
             "position": m.place(),
             "border": m.edge(),
             "antialias": m.antialias,
+            "blur_alpha": m.blurs_alpha(),
+            "whole_cells": m.whole_cells,
         }),
     };
     if let (Some(out), Some(more)) = (out.as_object_mut(), more.as_object()) {

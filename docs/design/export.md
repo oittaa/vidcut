@@ -443,12 +443,18 @@ The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3
 - `place::Placing` holds the effects of the picture and of the compound clips around it, the inner ones first (`Placing.effects`).
 - Each `place::Working` holds the blend, Use Alpha and the `place::Work` of its kind.
   - An effect that is off, or at a blend of 0, is left out (`Working::of`).
-  - The width of the canvas is multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it, at the frame. Each kind uses that width.
+- `place::OnFrame` holds what an effect takes from the placement at the frame:
+  - The width of the canvas, multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it.
+  - The size of the picture on the frame: its fitted size, multiplied by each Zoom X and each Zoom Y.
+  - The middle of the picture on the frame, through the levels. A Dynamic Zoom box does not move it.
 - `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas, and the border.
   - The sigma is that of `GaussianBlur::spreads` at that width.
   - A blur with no sigma and Use Alpha on is left out.
 - `place::Tiling` holds the grid of a Mosaic Blur.
   - That is the cell shape, the size of a cell, the step between columns, the origin and the size of the box.
+  - It also holds Blur Alpha and Whole Cells Only.
+  - The size of a cell comes from the area of the picture on the frame (`MosaicBlur::CELL`).
+  - The origin is the middle of the picture on the frame, moved by Position and the offsets.
   - Its sizes are in samples. Antialias Result gives two samples for each pixel.
   - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
 
@@ -463,10 +469,12 @@ The draw:
   - Only the columns and the rows that hold a middle of a cell get a mean. Thus the cost does not grow with the size of a cell.
   - The third pass finds the cell of each pixel and reads its color from the table (`mosaic_nearest`).
   - With Antialias Result, the third pass finds the cell of each of the four samples of a pixel, and takes their mean.
+  - The third pass applies Blur Alpha and Whole Cells Only to each sample (`mosaic_alpha`). With Use Alpha off, it does not.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
+  - A layer in the normal mode draws its premultiplied colors as they are (`placed`). Why: `mosaic_alpha` can give more color than alpha, or color with no alpha. That color adds to the layers below.
 
 A made frame of a speed change ([which source frame](#which-source-frame)):
 
@@ -475,7 +483,7 @@ A made frame of a speed change ([which source frame](#which-source-frame)):
 - The made frame holds colors only. The later draw thus takes its alpha from the placement at that frame (`Sampling::Placed`, `Blurred::made`):
   - It draws the colors of the made frame with no edges (`blur::opened`).
   - It draws the coverage of the picture, and blurs it by the same effects (`blur::mask_bind`).
-  - The layer takes its colors from the first and its alpha from the second.
+  - The layer takes its colors from the first and its alpha from the second. It thus has no color at an alpha of 0.
 - A frame from a file of the render cache holds the effects up to the last checked effect ([playback](playback.md#the-render-cache)).
   - `VideoFrames` gives it a placement with only these effects (`Sampling::Placed`, `render_cache::baked`). The coverage takes only these effects.
   - The draw takes the later effects from the placement of the frame. It joins the colors and the coverage into one picture, then blurs it by these effects (`Blurred::made`).

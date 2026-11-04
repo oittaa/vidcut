@@ -3089,10 +3089,11 @@ pub struct GaussianBlur {
     pub border: Option<Border>,
 }
 
-/// A mosaic: the frame in cells, each of one color. A cell is 1.5 × the
-/// frame's width / `pixel_frequency` high, times the zoom of the picture and
-/// of the compound clips around it, and `aspect` times that wide. Its color
-/// is the mean of a box around its middle, `aliasing` cells across and down,
+/// A mosaic: the frame in cells, each of one color. A cell is 2 × √(the
+/// picture's width × its height) / `pixel_frequency` high, and `aspect` times
+/// that wide. The picture's size is its size on the frame: its fit, times the
+/// zoom of the picture and of the compound clips around it. A cell's color is
+/// the mean of a box around its middle, `aliasing` cells across and down,
 /// which repeats the frame's edge pixels beyond the frame. It works on the
 /// code values, after the transform and the crop.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -3120,8 +3121,9 @@ pub struct MosaicBlur {
     /// A cell's width over its height, from 0.001 to 1000. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aspect: Option<f64>,
-    /// The point the cells line up on, `[x, y]` as fractions of the frame
-    /// from its bottom left. Usual: `[0.5, 0.5]`.
+    /// The point the cells line up on, `[x, y]` as fractions of the picture
+    /// on the frame from its bottom left, each from -1000000 to 1000000.
+    /// Usual: `[0.5, 0.5]`, the picture's middle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
     /// It does not change the picture: the box always repeats the edge
@@ -3132,6 +3134,16 @@ pub struct MosaicBlur {
     /// clean lines between the cells. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub antialias: bool,
+    /// On, a cell also takes the mean of the alpha. Off, the picture keeps
+    /// its own alpha and the cells keep their colors, so a clear part adds
+    /// its cell's color to the tracks below. Usual: on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur_alpha: Option<bool>,
+    /// With `blur_alpha` on, only a cell with no clear part in its box stays,
+    /// with an alpha of 1. Elsewhere the alpha is 0, and the picture's own
+    /// colors add to the tracks below. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub whole_cells: bool,
 }
 
 /// The shape of a mosaic's cells.
@@ -3262,7 +3274,7 @@ impl GaussianBlur {
 }
 
 impl MosaicBlur {
-    pub const CELL: f64 = 1.5;
+    pub const CELL: f64 = 2.0;
     pub const FREQUENCY: f64 = 100.0;
     pub const FREQUENCIES: (f64, f64) = (0.1, 4000.0);
     pub const ALIASING: f64 = 1.0;
@@ -3272,9 +3284,14 @@ impl MosaicBlur {
     pub const OFFSETS: (f64, f64) = (-1.0, 1.0);
     pub const SMOOTHS: (f64, f64) = (0.0, 1.0);
     pub const MIDDLE: [f64; 2] = [0.5, 0.5];
+    pub const PLACES: (f64, f64) = (-1e6, 1e6);
 
     pub fn frequency(&self) -> f64 {
         self.pixel_frequency.unwrap_or(Self::FREQUENCY)
+    }
+
+    pub fn blurs_alpha(&self) -> bool {
+        self.blur_alpha.unwrap_or(true)
     }
 
     pub fn smooth(&self) -> f64 {

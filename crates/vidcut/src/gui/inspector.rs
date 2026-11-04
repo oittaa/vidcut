@@ -178,7 +178,7 @@ impl MosaicKnob {
             speed,
         };
         let offsets = pair(MosaicBlur::OFFSETS);
-        let anywhere = f64::MIN..=f64::MAX;
+        let anywhere = pair(MosaicBlur::PLACES);
         match self {
             Self::Frequency => dial(
                 "Pixel Frequency",
@@ -1681,6 +1681,18 @@ fn mosaic_rows(
             ui,
             (n, "Antialias Result", m.antialias, false),
             "antialias",
+            acts,
+        );
+        check(
+            ui,
+            (n, "Blur Alpha", m.blurs_alpha(), true),
+            "blur_alpha",
+            acts,
+        );
+        check(
+            ui,
+            (n, "Whole Cells Only", m.whole_cells, false),
+            "whole_cells",
             acts,
         );
     });

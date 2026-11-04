@@ -13,14 +13,13 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
 1. **More effects:** Sharpen, Vignette, Film Grain and Glow.
    - Measure each one in Resolve first: its values, their ranges and defaults, and its math.
-   - **Mosaic Blur, the controls that are not there:** Blur Alpha and Whole Cells Only. Measure them on a clip with alpha, for example at Zoom 0.5 over a lower track. All renders that exist are opaque.
-   - **Mosaic Blur, measure these on the Edit page:**
-     - Pixel Frequency 25 on 3840×2160 and 1080×1920 timelines, and with a 3840×2160 source on a 1920×1080 timeline.
-     - Zoom 2 and Zoom X 2 on the clip: the size and the place of the cells.
-     - Smooth Strength with Hexagon, with Triangle and with other Aliasing values.
-     - The default of Border Type, and if Border Type changes the picture.
-     - Aspect and the offsets with Hexagon and Triangle, Antialias Result with Triangle, and a picture with fine lines with Hexagon and Triangle.
-     - The range of Position.
+   - **Mosaic Blur, measure these on the Edit page.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
+     - Blur Alpha off and Whole Cells Only.
+     - Whole Cells Only with Hexagon, with Triangle, with other Aliasing values and with Antialias Result. The alpha limit of a whole cell.
+     - Pixel Frequency 25 and 10 with Zoom, with a Pan and on other timeline sizes.
+     - Position away from the middle with a Zoom or a Pan. A rotated clip, a crop, a Dynamic Zoom box and a compound clip.
+     - A speed change or a render cache frame with Blur Alpha off or Whole Cells Only. vidcut keeps no color at an alpha of 0 there.
+     - Triangle at Aspect 2: the color of the corners at the sides of the frame.
 2. **Generators** (p. 766), one pull request for each line:
    - The ramps and the SDR bars: 10 Step, 100mV Steps, Grey Scale, YCbCr Ramp, EBU Color Bar and SMPTE Color Bar.
    - The HDR bars and Window: the three BT.2111 Color Bars and Window.

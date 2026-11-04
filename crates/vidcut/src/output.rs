@@ -1121,7 +1121,7 @@ fn mosaic_values(e: &Value) -> String {
     let n = |k: &str| effect_number(e, k);
     let at = |i: usize| e["position"][i].as_f64().unwrap_or_default();
     format!(
-        "pixel frequency {}  smooth strength {}  {} cells  aliasing {}  offset {}, {}  aspect {}  position {}, {}{}",
+        "pixel frequency {}  smooth strength {}  {} cells  aliasing {}  offset {}, {}  aspect {}  position {}, {}{}{}{}",
         n("pixel_frequency"),
         n("smooth_strength"),
         e["cell_shape"].as_str().unwrap_or_default(),
@@ -1133,6 +1133,16 @@ fn mosaic_values(e: &Value) -> String {
         at(1),
         if e["antialias"] == true {
             "  antialias"
+        } else {
+            ""
+        },
+        if e["blur_alpha"] == true {
+            ""
+        } else {
+            "  alpha not blurred"
+        },
+        if e["whole_cells"] == true {
+            "  whole cells only"
         } else {
             ""
         },

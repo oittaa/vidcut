@@ -91,6 +91,8 @@ fn mosaic_values(c: &mut EffectChange, m: &mut MosaicBlur) -> Result<()> {
     }
     given(&mut c.border, &mut m.border);
     taken(&mut c.antialias, &mut m.antialias);
+    given(&mut c.blur_alpha, &mut m.blur_alpha);
+    taken(&mut c.whole_cells, &mut m.whole_cells);
     Ok(())
 }
 

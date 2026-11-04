@@ -12,7 +12,7 @@ const REACH: f64 = 4.0;
 
 const LEFT: f64 = 1e-3;
 
-const PARAMS: usize = 48;
+const PARAMS: usize = 64;
 
 const MOSAIC_STAGES: u32 = 3;
 
@@ -213,6 +213,9 @@ fn mosaic_bytes(tiling: &Tiling, effect: &Working, stage: u32) -> Vec<u8> {
         f64::from(stage),
     ];
     out.extend(float_bytes(&more));
+    let keeps_alpha = effect.use_alpha && !tiling.blur_alpha;
+    let whole = effect.use_alpha && tiling.blur_alpha && tiling.whole;
+    out.extend(float_bytes(&[flag(keeps_alpha), flag(whole), 0.0, 0.0]));
     out
 }
 

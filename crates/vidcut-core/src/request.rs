@@ -4313,7 +4313,8 @@ pub struct EffectChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub border: Option<Border>,
     /// How many cells a Mosaic Blur has, from 0.1 (few, large) to 4000. A
-    /// cell is 1.5 × the frame's width / this high.
+    /// cell is 2 × √(the picture's width × its height, on the frame) / this
+    /// high.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pixel_frequency: Option<f64>,
     /// A Mosaic Blur's Smooth Strength, from 0 to 1. It does not change the
@@ -4338,13 +4339,24 @@ pub struct EffectChange {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aspect: Option<f64>,
     /// The point a Mosaic Blur's cells line up on, `[x, y]` as fractions of
-    /// the frame from its bottom left.
+    /// the picture on the frame from its bottom left, each from -1000000 to
+    /// 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<Vec<f64>>,
     /// A Mosaic Blur at twice the size, then the mean of each 2 × 2, for
     /// clean lines between the cells.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub antialias: Option<bool>,
+    /// On, a Mosaic Blur's cell also takes the mean of the alpha. Off, the
+    /// picture keeps its own alpha and the cells keep their colors, so a
+    /// clear part adds its cell's color to the tracks below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur_alpha: Option<bool>,
+    /// With `blur_alpha` on, only a Mosaic Blur's cell with no clear part in
+    /// its box stays, with an alpha of 1. Elsewhere the alpha is 0, and the
+    /// picture's own colors add to the tracks below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub whole_cells: Option<bool>,
 }
 
 /// A change to a clip's Dynamic Zoom: each field given replaces its own,
