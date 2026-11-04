@@ -21,7 +21,7 @@ pub use dissolve::{
     to_cut,
 };
 use serde_json::json;
-pub use source_overwrite::{Placed, file_start_at, source_overwrite};
+pub use source_overwrite::{Placed, file_start_at, lines_up, source_overwrite};
 pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};

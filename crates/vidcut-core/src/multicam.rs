@@ -35,8 +35,6 @@ pub struct Layout {
 
 pub const SOUND_MATCH_SCORE: f32 = 25.0;
 
-pub const MULTI_SOURCE_ANGLES: usize = 9;
-
 const PICK_SECONDS: f64 = 5.0;
 
 const LONGEST_GAP_SECONDS: f64 = 600.0;
@@ -59,6 +57,13 @@ pub struct SyncRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<i64>,
     pub active: bool,
+}
+
+type Placed<'a> = (&'a Media, i64, Range<i64>);
+
+pub enum SyncOpen<'a> {
+    Group(&'a SyncGroup),
+    Files(Vec<&'a Media>),
 }
 
 fn has_picture(m: &Media) -> Result<()> {
@@ -113,68 +118,136 @@ pub fn row_file_at<'a>(p: &Project, row: &'a GroupRow, at: i64) -> Option<(&'a G
         .map(|c| (c, at - c.at + c.head))
 }
 
-fn camera_rows(files: &[&Media]) -> Vec<Vec<usize>> {
-    let mut rows: Vec<Vec<usize>> = Vec::new();
-    for (i, m) in files.iter().enumerate() {
-        let same = rows
-            .iter_mut()
-            .find(|r| m.camera.is_some() && files[r[0]].camera == m.camera);
-        match same {
-            Some(row) => row.push(i),
-            None => rows.push(vec![i]),
+pub fn row_camera(rows: &[GroupRow], i: usize) -> String {
+    match &rows[i].camera {
+        Some(name) => name.clone(),
+        None => rows[..=i]
+            .iter()
+            .filter(|r| r.camera.is_none())
+            .count()
+            .to_string(),
+    }
+}
+
+fn kept_clip(p: &Project, (m, _, part): &Placed<'_>, place: i64, start: i64) -> GroupClip {
+    GroupClip {
+        media: m.id.clone(),
+        at: start,
+        hidden: 0,
+        head: part.start + start - place,
+        tail: p.media_limit(m) - part.end,
+    }
+}
+
+fn camera_row(
+    p: &Project,
+    placed: &[Placed<'_>],
+    mut members: Vec<usize>,
+    sync: AngleSync,
+    dropped: &mut Vec<String>,
+) -> GroupRow {
+    let tape = |i: usize| origin(p, placed[i].0) + placed[i].2.start;
+    if sync != AngleSync::Sound {
+        members.sort_by_key(|i| (tape(*i), *i));
+    }
+    let marked = match sync {
+        AngleSync::Out => members.last(),
+        _ => members.first(),
+    };
+    let by_mark = marked.map_or(0, |i| placed[*i].1 - tape(*i));
+    let camera = members.first().and_then(|i| placed[*i].0.camera.clone());
+    let mut parts: Vec<Range<i64>> = Vec::with_capacity(members.len());
+    let mut clips = Vec::with_capacity(members.len());
+    for i in members {
+        let place = match sync {
+            AngleSync::Sound => placed[i].1,
+            _ => tape(i) + by_mark,
+        };
+        let end = place + placed[i].2.end - placed[i].2.start;
+        let start = parts
+            .iter()
+            .filter(|part| part.start < end && place < part.end)
+            .map(|part| part.end)
+            .fold(place, i64::max);
+        if start >= end {
+            dropped.push(placed[i].0.id.clone());
+            continue;
+        }
+        parts.push(start..end);
+        clips.push(kept_clip(p, &placed[i], place, start));
+    }
+    clips.sort_by_key(|c| c.at);
+    GroupRow {
+        camera,
+        locked: false,
+        clips,
+    }
+}
+
+fn rows_with_no_name(
+    p: &Project,
+    placed: &[Placed<'_>],
+    mut members: Vec<usize>,
+    sync: AngleSync,
+) -> Vec<GroupRow> {
+    if sync == AngleSync::Timecode {
+        members.sort_by_key(|i| (placed[*i].1, *i));
+    }
+    let alone = |clip: GroupClip| GroupRow {
+        camera: None,
+        locked: false,
+        clips: vec![clip],
+    };
+    let (pictures, sounds): (Vec<usize>, Vec<usize>) = members
+        .into_iter()
+        .partition(|i| placed[*i].0.info.video.is_some());
+    let mut rows: Vec<GroupRow> = Vec::with_capacity(pictures.len() + sounds.len());
+    for i in pictures {
+        let place = placed[i].1;
+        let clip = kept_clip(p, &placed[i], place, place);
+        let free = rows.iter_mut().find(|row| {
+            sync == AngleSync::Timecode && row.clips.iter().all(|c| c.at + visible(p, c) <= place)
+        });
+        match free {
+            Some(row) => row.clips.push(clip),
+            None => rows.push(alone(clip)),
         }
     }
-    rows.sort_by(|a, b| by_camera(files[a[0]], files[b[0]]));
+    for i in sounds {
+        let place = placed[i].1;
+        rows.push(alone(kept_clip(p, &placed[i], place, place)));
+    }
     rows
 }
 
-fn ruled_rows(
-    p: &Project,
-    placed: &[(&Media, i64, Range<i64>)],
-    sync: AngleSync,
-) -> (Vec<GroupRow>, Vec<String>) {
-    let files: Vec<&Media> = placed.iter().map(|(m, ..)| *m).collect();
-    let tape = |i: usize| origin(p, placed[i].0) + placed[i].2.start;
+fn ruled_rows(p: &Project, placed: &[Placed<'_>], sync: AngleSync) -> (Vec<GroupRow>, Vec<String>) {
+    let mut named: Vec<(&str, Vec<usize>)> = Vec::new();
+    let mut unnamed = Vec::new();
+    for (i, (m, ..)) in placed.iter().enumerate() {
+        match m.camera.as_deref() {
+            None => unnamed.push(i),
+            Some(camera) => match named.iter_mut().find(|(name, _)| *name == camera) {
+                Some((_, members)) => members.push(i),
+                None => named.push((camera, vec![i])),
+            },
+        }
+    }
+    named.sort_by(|a, b| camera_order(a.0, b.0));
     let mut dropped = Vec::new();
-    let rows = camera_rows(&files)
+    let mut rows: Vec<GroupRow> = named
         .into_iter()
-        .map(|mut members| {
-            let camera = files[members[0]].camera.clone();
-            if sync != AngleSync::Sound {
-                members.sort_by_key(|i| (tape(*i), *i));
-            }
-            let marked = matches!(sync, AngleSync::In | AngleSync::Out);
-            let by_mark = placed[members[0]].1 - tape(members[0]);
-            let mut reach = i64::MIN;
-            let mut clips = Vec::with_capacity(members.len());
-            for i in members {
-                let (m, own, part) = &placed[i];
-                let place = if marked { tape(i) + by_mark } else { *own };
-                let end = place + part.end - part.start;
-                let start = place.max(reach);
-                if start >= end {
-                    dropped.push(m.id.clone());
-                    continue;
-                }
-                clips.push(GroupClip {
-                    media: m.id.clone(),
-                    at: start,
-                    hidden: 0,
-                    head: part.start + start - place,
-                    tail: p.media_limit(m) - part.end,
-                });
-                reach = end;
-            }
-            clips.sort_by_key(|c| c.at);
-            GroupRow {
-                camera,
-                locked: false,
-                clips,
-            }
-        })
+        .map(|(_, members)| camera_row(p, placed, members, sync, &mut dropped))
         .filter(|row| !row.clips.is_empty())
         .collect();
+    rows.extend(rows_with_no_name(p, placed, unnamed, sync));
     (rows, dropped)
+}
+
+fn whole_files<'a>(p: &Project, files: &[&'a Media]) -> Vec<Placed<'a>> {
+    files
+        .iter()
+        .map(|m| (*m, origin(p, m), 0..p.media_limit(m)))
+        .collect()
 }
 
 pub fn layout(
@@ -187,7 +260,7 @@ pub fn layout(
     if ids.is_empty() {
         return Err(Error::usage("name the media of the angles"));
     }
-    let mut placed: Vec<(&Media, i64, Range<i64>)> = Vec::with_capacity(ids.len());
+    let mut placed: Vec<Placed<'_>> = Vec::with_capacity(ids.len());
     for id in ids {
         let m = p
             .media(id)
@@ -341,7 +414,7 @@ pub fn lock_lined_up(rows: &mut [GroupRow], unmatched: &[String]) {
 fn by_sound(
     p: &Project,
     env: &dyn Env,
-    placed: &mut [(&Media, i64, Range<i64>)],
+    placed: &mut [Placed<'_>],
 ) -> Result<(Vec<String>, Vec<SoundPair>)> {
     let n = placed.len();
     let mut found = Vec::new();
@@ -477,7 +550,6 @@ pub struct NewGroup<'a> {
 pub struct Created {
     pub id: String,
     pub unmatched: Vec<String>,
-    pub dropped: Vec<String>,
 }
 
 pub fn create(
@@ -500,16 +572,10 @@ pub fn create(
             "no bin {bin:?}; add it with bins.add"
         )));
     }
-    if let Some((id, g)) = ids.iter().find_map(|id| Some((id, p.group_of(id)?))) {
-        return Err(Error::invalid(format!(
-            "{id} is in the synced group {}",
-            g.name
-        )));
-    }
-    let (start, rows, unmatched, dropped) = match rows {
+    let (start, rows, unmatched) = match rows {
         Some(rows) => {
             layout(p, env, ids, AngleSync::Timecode, true)?;
-            (one_hour(p), by_hand(p, ids, rows)?, Vec::new(), Vec::new())
+            (one_hour(p), by_hand(p, ids, rows)?, Vec::new())
         }
         None => {
             let lined_up = layout(p, env, ids, sync, true)?;
@@ -518,9 +584,10 @@ pub fn create(
                 return Err(needs_two());
             }
             lock_lined_up(&mut rows, &lined_up.unmatched);
-            (lined_up.start, rows, lined_up.unmatched, lined_up.dropped)
+            (lined_up.start, rows, lined_up.unmatched)
         }
     };
+    let dropped = ids.iter().filter(|id| !holds(&rows, id)).cloned().collect();
     let id = p.new_group_id();
     p.groups.push(SyncGroup {
         id: id.clone(),
@@ -528,20 +595,31 @@ pub fn create(
         bin: bin.to_string(),
         start,
         rows,
+        dropped,
         marks: Marks::default(),
     });
-    Ok(Created {
-        id,
-        unmatched,
-        dropped,
-    })
+    Ok(Created { id, unmatched })
+}
+
+fn holds(rows: &[GroupRow], media: &str) -> bool {
+    rows.iter().flat_map(|r| &r.clips).any(|c| c.media == media)
+}
+
+fn store_rows(g: &mut SyncGroup, rows: Vec<GroupRow>) {
+    let gone: Vec<String> = g
+        .clips()
+        .filter(|c| !holds(&rows, &c.media))
+        .map(|c| c.media.clone())
+        .collect();
+    g.dropped.extend(gone);
+    g.rows = rows;
 }
 
 pub fn set_rows(p: &mut Project, id: &str, rows: &[GroupRow]) -> Result<()> {
     let g = group_mut(p, id)?;
     let ids: Vec<String> = g.clips().map(|c| c.media.clone()).collect();
     let placed = by_hand(p, &ids, rows)?;
-    group_mut(p, id)?.rows = placed;
+    store_rows(group_mut(p, id)?, placed);
     Ok(())
 }
 
@@ -561,7 +639,7 @@ pub fn place(p: &mut Project, id: &str, media: &str, at: i64) -> Result<()> {
     if rows.iter().flat_map(|r| &r.clips).count() < 2 {
         return Err(needs_two());
     }
-    group_mut(p, id)?.rows = rows;
+    store_rows(group_mut(p, id)?, rows);
     Ok(())
 }
 
@@ -655,15 +733,14 @@ pub fn marked_range(p: &Project, g: &SyncGroup, media: &str) -> Result<(i64, i64
     Ok((a, b))
 }
 
-fn sync_start(p: &Project, m: &Media, at: i64) -> Result<Option<i64>> {
-    let by_group = p.group_of(&m.id).is_some();
-    if !by_group && m.info.timecode.is_none() {
+fn sync_start(p: &Project, m: &Media, at: i64, group: Option<&SyncGroup>) -> Result<Option<i64>> {
+    if group.is_none() && m.info.timecode.is_none() {
         return Err(Error::invalid(format!(
             "{} has no timecode and no synced group",
             m.name
         )));
     }
-    ops::file_start_at(p, m, at, by_group)
+    ops::file_start_at(p, m, at, group)
 }
 
 pub fn camera_order(a: &str, b: &str) -> Ordering {
@@ -675,53 +752,21 @@ pub fn camera_order(a: &str, b: &str) -> Ordering {
     }
 }
 
-fn by_camera(a: &Media, b: &Media) -> Ordering {
-    match (&a.camera, &b.camera) {
-        (Some(x), Some(y)) => camera_order(x, y),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-}
-
-pub fn cameras<'a>(p: &'a Project, bin: &str) -> Result<Vec<&'a Media>> {
-    let mut files: Vec<&Media> = Vec::new();
-    for m in p
-        .media
-        .iter()
-        .filter(|m| bin.is_empty() || ops::within(&m.bin, bin))
-    {
-        has_picture(m)?;
-        if m.camera.is_none() {
-            return Err(Error::invalid(format!("{} has no camera name", m.name)));
+fn groups_of<'a>(p: &'a Project, files: &[&Media]) -> Vec<&'a SyncGroup> {
+    let mut groups: Vec<&SyncGroup> = Vec::new();
+    for g in files.iter().filter_map(|m| p.group_of(&m.id)) {
+        if !groups.iter().any(|seen| seen.id == g.id) {
+            groups.push(g);
         }
-        files.push(m);
     }
-    if camera_rows(&files).len() > MULTI_SOURCE_ANGLES {
-        return Err(Error::invalid(format!(
-            "A bin to sync holds {MULTI_SOURCE_ANGLES} cameras at most"
-        )));
-    }
-    let group_of = |m: &Media| p.group_of(&m.id).map(|g| g.id.as_str());
-    if let Some((first, other)) = files.first().zip(
-        files
-            .iter()
-            .find(|m| group_of(m) != files.first().and_then(|f| group_of(f))),
-    ) {
-        return Err(Error::invalid(format!(
-            "{} and {} are not in one synced group",
-            first.name, other.name
-        )));
-    }
-    files.sort_by(|a, b| by_camera(a, b));
-    Ok(files)
+    groups
 }
 
 pub fn sync_clips_files<'a>(
     p: &'a Project,
     bin: &str,
     selected: &[String],
-) -> Result<Vec<&'a Media>> {
+) -> Result<SyncOpen<'a>> {
     let shown = || {
         p.media
             .iter()
@@ -733,41 +778,46 @@ pub fn sync_clips_files<'a>(
         1 => return Err(Error::invalid("Select two files or more, or none")),
         _ => picked,
     };
-    let mut files: Vec<&Media> = files.into_iter().filter(|m| !m.is_still()).collect();
+    let files: Vec<&Media> = files.into_iter().filter(|m| !m.is_still()).collect();
+    let two_or_more = || Error::invalid("A sync needs two files or more");
     if files.len() < 2 {
-        return Err(Error::invalid("A sync needs two files or more"));
+        return Err(two_or_more());
     }
-    if camera_rows(&files).len() < 2 {
-        return Err(Error::invalid(format!(
-            "{} and {} have one camera name",
-            files[0].name, files[1].name
-        )));
+    if let [g] = groups_of(p, &files)[..] {
+        let new = files
+            .iter()
+            .find(|m| p.group_of(&m.id).is_none() && !g.dropped.contains(&m.id));
+        return match new {
+            Some(m) => Err(Error::invalid(format!(
+                "{} is not in the synced group {}",
+                m.name, g.name
+            ))),
+            None => Ok(SyncOpen::Group(g)),
+        };
     }
-    let group_of = |m: &Media| p.group_of(&m.id).map(|g| g.id.as_str());
-    if let Some(other) = files.iter().find(|m| group_of(m) != group_of(files[0])) {
-        return Err(Error::invalid(format!(
-            "{} and {} are not in one synced group",
-            files[0].name, other.name
-        )));
+    let (rows, _) = ruled_rows(p, &whole_files(p, &files), AngleSync::Timecode);
+    if rows.iter().flat_map(|r| &r.clips).count() < 2 {
+        return Err(two_or_more());
     }
-    files.sort_by(|a, b| by_camera(a, b));
-    Ok(files)
+    Ok(SyncOpen::Files(files))
 }
 
 fn sync_row(
     p: &Project,
-    number: usize,
-    row: &GroupRow,
+    rows: &[GroupRow],
+    i: usize,
     at: i64,
     shown: Option<&str>,
+    group: Option<&SyncGroup>,
 ) -> Result<SyncRow> {
+    let row = &rows[i];
     let mut clips = Vec::with_capacity(row.clips.len());
     let mut under = None;
     for c in &row.clips {
         let Some(m) = p.media(&c.media) else {
             continue;
         };
-        let start = sync_start(p, m, at)?;
+        let start = sync_start(p, m, at, group)?;
         let frames = visible(p, c);
         if under.is_none()
             && let Some(frame) = start
@@ -791,8 +841,8 @@ fn sync_row(
         ),
     };
     Ok(SyncRow {
-        number,
-        camera: row.camera.clone().unwrap_or_else(|| number.to_string()),
+        number: i + 1,
+        camera: row_camera(rows, i),
         media,
         active: clips.iter().any(|c| shown == Some(c.media.as_str())),
         clips,
@@ -800,13 +850,33 @@ fn sync_row(
     })
 }
 
+fn group_at_playhead(p: &Project, at: i64) -> Option<&SyncGroup> {
+    p.shown_clip(at).and_then(|c| p.group_of(&c.media))
+}
+
+fn group_of_bin<'a>(p: &'a Project, files: &[&Media], at: i64) -> Result<Option<&'a SyncGroup>> {
+    let groups = groups_of(p, files);
+    if groups.len() < 2 {
+        return Ok(groups.first().copied());
+    }
+    group_at_playhead(p, at)
+        .filter(|g| groups.iter().any(|seen| seen.id == g.id))
+        .map(Some)
+        .ok_or_else(|| Error::invalid("The clip at the playhead is in no synced group of this bin"))
+}
+
 pub fn sync_rows(p: &Project, bin: &str, at: i64) -> Result<Vec<SyncRow>> {
     if !bin.is_empty() && !has_bin(p, bin) {
         return Err(Error::not_found(format!("no bin {bin:?}")));
     }
     let shown = p.shown_clip(at).map(|c| c.media.as_str());
-    let files = cameras(p, bin)?;
-    let rows: Vec<GroupRow> = match files.first().and_then(|m| p.group_of(&m.id)) {
+    let files: Vec<&Media> = p
+        .media
+        .iter()
+        .filter(|m| bin.is_empty() || ops::within(&m.bin, bin))
+        .collect();
+    let group = group_of_bin(p, &files, at)?;
+    let rows: Vec<GroupRow> = match group {
         Some(g) => g
             .rows
             .iter()
@@ -821,17 +891,17 @@ pub fn sync_rows(p: &Project, bin: &str, at: i64) -> Result<Vec<SyncRow>> {
             })
             .filter(|r| !r.clips.is_empty())
             .collect(),
-        None => {
-            let placed: Vec<(&Media, i64, Range<i64>)> = files
-                .iter()
-                .map(|m| (*m, origin(p, m), 0..p.media_limit(m)))
-                .collect();
-            ruled_rows(p, &placed, AngleSync::Timecode).0
-        }
+        None => ruled_rows(p, &whole_files(p, &files), AngleSync::Timecode).0,
     };
-    rows.iter()
-        .enumerate()
-        .map(|(i, row)| sync_row(p, i + 1, row, at, shown))
+    for m in rows
+        .iter()
+        .flat_map(|r| &r.clips)
+        .filter_map(|c| p.media(&c.media))
+    {
+        has_picture(m)?;
+    }
+    (0..rows.len())
+        .map(|i| sync_row(p, &rows, i, at, shown, group))
         .collect()
 }
 
@@ -839,9 +909,12 @@ pub fn pick(p: &mut Project, media: &str, at: i64) -> Result<Marks> {
     let m = p
         .media(media)
         .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    has_picture(m)?;
+    ops::lines_up(p, m)?;
     let frames = p.media_frames(m);
-    let start = sync_start(p, m, at)?
+    let group = group_at_playhead(p, at)
+        .filter(|g| g.at_of(media).is_some())
+        .or_else(|| p.group_of(media));
+    let start = sync_start(p, m, at, group)?
         .filter(|s| (0..frames).contains(&(at - s)))
         .ok_or_else(|| Error::invalid(format!("{} has no frame at the playhead", m.name)))?;
     let end = p.end();
@@ -875,6 +948,9 @@ pub fn group_json(p: &Project, g: &SyncGroup) -> Value {
     });
     if !g.bin.is_empty() {
         v["bin"] = json!(g.bin);
+    }
+    if !g.dropped.is_empty() {
+        v["dropped"] = json!(g.dropped);
     }
     if !g.marks.is_empty() {
         v["marks"] = json!(g.marks);

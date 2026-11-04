@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use vidcut_av::player::{Config, PacedOutput, Player};
 use vidcut_core::model::{AngleSync, GroupClip, GroupRow, Project};
 use vidcut_core::multicam::{
-    drop_clip, lock_lined_up, row_file_at, ruler_start, settle, shift_clip, sync_clips_files,
-    visible,
+    SyncOpen, drop_clip, lock_lined_up, row_camera, row_file_at, ruler_start, settle, shift_clip,
+    sync_clips_files, visible,
 };
 use vidcut_core::render::{RenderPlan, places_sound};
 use vidcut_core::time::format_timecode;
@@ -78,19 +78,13 @@ pub(super) struct SyncClips {
     failed: Vec<String>,
 }
 
-fn label(row: &GroupRow, i: usize) -> String {
-    match &row.camera {
-        Some(camera) => format!("Camera {camera}"),
-        None => format!("Camera {}", i + 1),
-    }
-}
-
-fn cell_of(p: &Project, row: &GroupRow, i: usize, at: i64) -> GridCell {
+fn cell_of(p: &Project, rows: &[GroupRow], i: usize, at: i64) -> GridCell {
+    let row = &rows[i];
     let under = row_file_at(p, row, at);
     let shown = under.map(|(c, _)| c).or(row.clips.first());
     GridCell {
         number: Some(i + 1),
-        label: Some(label(row, i)),
+        label: Some(format!("Camera {}", row_camera(rows, i))),
         media: shown.map(|c| c.media.clone()).unwrap_or_default(),
         frame: under.map(|(_, frame)| frame),
         active: false,
@@ -232,19 +226,18 @@ impl Workspace {
             return;
         };
         let bin = self.snap.pool.bin.clone();
-        let files = match sync_clips_files(&p, &bin, &self.snap.selection.media) {
-            Ok(files) => files,
+        let media: Vec<String> = match sync_clips_files(&p, &bin, &self.snap.selection.media) {
+            Ok(SyncOpen::Files(files)) => files.iter().map(|m| m.id.clone()).collect(),
+            Ok(SyncOpen::Group(g)) => {
+                let id = g.id.clone();
+                self.open_sync_group(&id);
+                return;
+            }
             Err(e) => {
                 self.say(e.message);
                 return;
             }
         };
-        if let Some(g) = files.first().and_then(|m| p.group_of(&m.id)) {
-            let id = g.id.clone();
-            self.open_sync_group(&id);
-            return;
-        }
-        let media: Vec<String> = files.iter().map(|m| m.id.clone()).collect();
         let params = json!({ "media": media, "sync": AngleSync::Timecode, "full_extents": true });
         let ask = Ask::send(&self.live, ctx, "multicam.layout", params);
         let ruler = ruler_start(&p, &media);
@@ -485,8 +478,7 @@ impl Workspace {
         let (method, params) = match &s.group {
             Some(group) => ("multicam.set", json!({ "group": group, "rows": s.rows })),
             None => {
-                let media: Vec<&str> = s.clips().map(|c| c.media.as_str()).collect();
-                let mut params = json!({ "media": media, "rows": s.rows });
+                let mut params = json!({ "media": s.files, "rows": s.rows });
                 if !s.bin.is_empty() {
                     params["bin"] = json!(s.bin);
                 }
@@ -562,13 +554,10 @@ impl Workspace {
             theme::colors().text_dim,
         );
         let s = &self.sync_clips;
-        let mut cells: Vec<GridCell> = s
-            .rows
-            .iter()
-            .enumerate()
-            .map(|(i, row)| GridCell {
+        let mut cells: Vec<GridCell> = (0..s.rows.len())
+            .map(|i| GridCell {
                 active: i == s.viewed,
-                ..cell_of(p, row, i, s.at)
+                ..cell_of(p, &s.rows, i, s.at)
             })
             .collect();
         let top = rect.top() + 18.0;
@@ -576,10 +565,10 @@ impl Workspace {
         let right = Rect::from_min_max(pos2(middle, top), rect.max);
         let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
         let mut pictures = grid_pictures(left, p, cells.len());
-        if let Some(row) = s.rows.get(s.viewed) {
+        if s.viewed < s.rows.len() {
             let big = GridCell {
                 number: None,
-                ..cell_of(p, row, s.viewed, s.at)
+                ..cell_of(p, &s.rows, s.viewed, s.at)
             };
             painter.text(
                 pos2((middle + rect.right()) / 2.0, title),

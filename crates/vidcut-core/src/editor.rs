@@ -2637,9 +2637,6 @@ fn mutate(
             if !made.unmatched.is_empty() {
                 v["unmatched"] = json!(made.unmatched);
             }
-            if !made.dropped.is_empty() {
-                v["dropped"] = json!(made.dropped);
-            }
             v
         }
         Request::MulticamSet { group, rows } => {
@@ -2711,6 +2708,9 @@ fn mutate(
                 ops::delete(p, &users, false)?;
             }
             p.media.retain(|m| &m.id != media);
+            for g in &mut p.groups {
+                g.dropped.retain(|m| m != media);
+            }
             forget_tape_marks(p, media);
             Value::Null
         }

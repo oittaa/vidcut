@@ -26,19 +26,20 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
 - For the stage `multicam-clip`, a clip of a group on the timeline follows Save Sync ([deviation X122](../deviations.md#x122-a-clip-on-the-timeline-does-not-follow-save-sync)).
 - Measure the Sync Clips window parts that are not measured:
   - Sync by Marker;
-  - Sync by Out on a row of many files;
   - Shift+Comma on a keyboard layout that is not Finnish;
   - the ruler labels of a reopened group with far tags;
   - the Sync Bin for a group whose first tag is not 01:00:00:00;
-  - the rows of a file in two groups.
+  - two files with no picture beside files with a picture.
 - Measure the Sync Bin parts that are not measured:
   - the number keys and Escape;
   - the sound of the grid with Video Only off and on (p. 708);
-  - a grid of more than 4 cameras;
   - the Out mark by hand in the view of one camera;
   - a drag on the rows in the view of one camera;
-  - rows for files with no tag and no saved group, with no camera name, and with no picture;
+  - rows for files with no tag and no saved group, and with no picture;
+  - two groups in a bin, when the clip at the playhead is in neither;
+  - a click on a camera at another frame rate;
   - a timeline whose clips disagree on the time of a file.
+- Ask the owner about `SyncGroup.dropped`: the icon opens a group although a file of the bin is not in it. The measurement has no such list.
 - Show the Sync Bin grid in the Cinema Viewer with P (p. 709).
 - Record how a cut chooses an angle.
 - Measure sync by sound with files from real cameras, each with its own microphone. Then check `SOUND_MATCH_SCORE`.

@@ -22,7 +22,7 @@ fn origin(p: &Project, m: &Media) -> i64 {
         .map_or(0, |tc| tc.frames_at(p.settings.fps).round() as i64)
 }
 
-fn lines_up(p: &Project, m: &Media) -> Result<()> {
+pub fn lines_up(p: &Project, m: &Media) -> Result<()> {
     match &m.info.video {
         Some(v) if v.still => Err(Error::invalid(format!(
             "{} is a still: it has no timecode",
@@ -152,9 +152,12 @@ fn unchanged_speed(c: &Clip) -> Result<()> {
     Ok(())
 }
 
-pub fn file_start_at(p: &Project, m: &Media, at: i64, by_group: bool) -> Result<Option<i64>> {
-    lines_up(p, m)?;
-    let group = if by_group { p.group_of(&m.id) } else { None };
+pub fn file_start_at(
+    p: &Project,
+    m: &Media,
+    at: i64,
+    group: Option<&SyncGroup>,
+) -> Result<Option<i64>> {
     let l = Lining { p, group };
     let o = l.origin(m).unwrap_or_default();
     let whole = o..o + p.media_frames(m);

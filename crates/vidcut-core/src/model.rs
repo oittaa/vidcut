@@ -304,8 +304,14 @@ pub struct SyncGroup {
     pub bin: String,
     /// The timecode of its first frame, as a frame count from 00:00:00:00.
     pub start: i64,
-    /// Its rows, in camera order. A file is in one group at most.
+    /// Its rows, in camera order. A file can be in more than one group. The
+    /// newest group that holds it counts.
     pub rows: Vec<GroupRow>,
+    /// The files that the row rule or a drag took off its rows. They are not
+    /// in the group, and the Sync Clips icon does not count them as new files.
+    /// Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dropped: Vec<String>,
     /// In and Out for all its files, in frames of the group.
     #[serde(default, skip_serializing_if = "Marks::is_empty")]
     pub marks: Marks,
@@ -4416,6 +4422,7 @@ impl Project {
     pub fn group_of(&self, media: &str) -> Option<&SyncGroup> {
         self.groups
             .iter()
+            .rev()
             .find(|g| g.clips().any(|c| c.media == media))
     }
 

@@ -166,7 +166,7 @@ Multicam layout:
 
 - `multicam::layout` works out where the files of a multicam clip lie (spec §3).
 - It works in frames at the project's rate. A start timecode at another rate rounds down (`StartTimecode::frames_at`).
-- `Layout` is the answer to `multicam.layout`. `ruled_rows` makes its rows by the row rule.
+- `Layout` is the answer to `multicam.layout`. `ruled_rows` makes its rows: `camera_row` for each camera name by the row rule, then `rows_with_no_name`.
 - `by_sound` joins the files by the best `SoundMatch` first, while the score reaches `SOUND_MATCH_SCORE`.
   - `Env::sound_match` compares two files by the levels that `Env::audio_levels` keeps. Thus a sync decodes a file once.
   - `vidcut_av::analysis::sound_match` correlates the rises of the level, because a rise does not depend on the microphone's level.
@@ -174,7 +174,10 @@ Multicam layout:
   - A triangle over the lags (`SMEAR`) finds the middle of a broad peak, which is what drift gives.
 - `Project.groups` stores `SyncGroup`, the result of `multicam.create`. It is a list beside `Project.media`, because a group has no file.
 - A `SyncGroup` stores `GroupRow` values. The row is stored because a camera name that changes later must not move a file until Auto Sync.
+- `Project::group_of` takes the newest group that holds a file, the last in `Project.groups`. A file can be in more than one group, because the Sync Clips window makes a new group from files of two groups.
+- `SyncGroup.dropped` lists the files that the row rule or a drag took off its rows. The Sync Clips icon needs the list, because such a file is still in the bin and is not a new file. The file leaves out `dropped` when it is empty.
 - A `GroupRow` has its `camera`, `locked` and its `clips`. The file leaves out `camera` for a file with no camera name, and `locked` when it is off.
+- `multicam::row_camera` gives the name of a row. A row with no name takes its number among those rows.
 - `locked` is the sync lock of the Sync Clips window. It is for each row.
 - A `GroupClip` stores the media, `at`, `hidden`, `head` and `tail`. `multicam.list` works out `frames` from the media.
 - `at` is the place of the first visible frame in the group, with far gaps closed. `hidden` holds the closed frames before it, so `at` plus `hidden` is the place in real time.

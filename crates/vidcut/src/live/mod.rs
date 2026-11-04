@@ -4127,12 +4127,6 @@ impl Live {
             .or_else(|| p.group_of(angle?))
             .or_else(|| p.group_of(self.source_media.as_deref()?))
             .ok_or_else(|| Error::invalid("Open a clip of a synced group first"))?;
-        if g.clips().count() > vidcut_core::multicam::MULTI_SOURCE_ANGLES {
-            return Err(Error::invalid(format!(
-                "Multi Source shows {} angles at most",
-                vidcut_core::multicam::MULTI_SOURCE_ANGLES
-            )));
-        }
         if let Some(a) = angle.filter(|a| g.at_of(a).is_none()) {
             return Err(Error::invalid(format!("{a} is not in {}", g.name)));
         }

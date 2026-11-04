@@ -20,7 +20,7 @@ const PX_PER_SECOND: f32 = 90.0;
 const RULER: f32 = 20.0;
 const NUMBER: f32 = 26.0;
 const MOST_ROW: f32 = 60.0;
-const LEAST_ROW: f32 = 20.0;
+const LEAST_ROW: f32 = 10.0;
 const NUMBER_KEYS: [Key; 9] = [
     Key::Num1,
     Key::Num2,
@@ -288,7 +288,7 @@ impl Workspace {
                 number.center(),
                 Align2::CENTER_CENTER,
                 row.number.to_string(),
-                FontId::proportional(13.0),
+                FontId::proportional(strip.height().clamp(8.0, 13.0)),
                 color,
             );
             let clicked = ui

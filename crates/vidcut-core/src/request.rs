@@ -118,24 +118,27 @@ pub enum Request {
     MediaDetails { media: String },
     /// Where the files of a multicam clip lie, for media in bin order. This
     /// changes nothing. The answer is the `start_timecode`, the `start` in
-    /// frames, the `frames` of the whole, and the `rows`. A row holds the files
-    /// of one camera name, and a file with no camera name has its own row. In
-    /// a row, each file has its `media`, the frame `at` of its first visible
-    /// frame, and `head` and `tail`, the frames that it loses at each end.
-    /// Files of one row do not overlap: a file keeps only the part after the
-    /// files before it. `dropped` lists the files with nothing left. An item
-    /// with marks uses only the frames between them. A file with no timecode
-    /// starts at 00:00:00:00. It refuses a still.
+    /// frames, the `frames` of the whole, and the `rows`. Rows with a camera
+    /// name come first, and each holds the files of that name. In a row, each
+    /// file has its `media`, the frame `at` of its first visible frame, and
+    /// `head` and `tail`, the frames that it loses at each end. Files of one
+    /// row do not overlap: a file keeps only the part after the files before
+    /// it that it overlaps. `dropped` lists the files with nothing left. Rows
+    /// with no name follow. By timecode, a file with no name goes on the first
+    /// such row where it does not overlap. By sound, In or Out, it has its own
+    /// row. A file with no picture and no name has its own row, after the
+    /// others. An item with marks uses only the frames between them. A file
+    /// with no timecode starts at 00:00:00:00. It refuses a still.
     #[serde(rename = "multicam.layout")]
     MulticamLayout {
         media: OneOrMany<String>,
         /// `timecode`, `in` or `out` for items that all have that mark, or
         /// `sound`. By timecode, In and Out, files of a row go in timecode
-        /// order; with one timecode, they go in the given order. By In or Out,
-        /// the mark of a row's earliest file lines up the row. By sound, files
-        /// of a row go in the given order. By sound the answer also has
-        /// `unmatched`, the media that match no other file, and `pairs`, how
-        /// well each two files match.
+        /// order; with one timecode, they go in the given order. By In, the
+        /// mark of a row's earliest file lines up the row. By Out, the mark of
+        /// its latest file does. By sound, files of a row go in the given
+        /// order. By sound the answer also has `unmatched`, the media that
+        /// match no other file, and `pairs`, how well each two files match.
         #[serde(default)]
         sync: crate::model::AngleSync,
         /// Use each whole file. Its marks only line it up.
@@ -145,10 +148,10 @@ pub enum Request {
     /// Store files as a synced group, a pool item that lines them up in rows,
     /// as `multicam.layout` gives them. The rows stay in the group when a
     /// camera name changes later. A file with nothing left is not in the
-    /// group, and `dropped` lists it. A file's marks stay. A file is in one
-    /// group at most. Returns the group. By sound, `unmatched` lists the files
-    /// that match no other file. Such a file stays in the group, at the group's
-    /// start.
+    /// group, and the group's `dropped` lists it. A file's marks stay. A file
+    /// can be in more than one group, and the newest group counts. Returns the
+    /// group. By sound, `unmatched` lists the files that match no other file.
+    /// Such a file stays in the group, at the group's start.
     #[serde(rename = "multicam.create")]
     MulticamCreate {
         media: OneOrMany<String>,
@@ -163,9 +166,10 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bin: Option<String>,
         /// The rows by hand, as `multicam.set` takes them. A file of `media`
-        /// that no row names is not in the group. The group then starts at
-        /// 01:00:00:00, and `sync` plays no part. With none, `sync` works out
-        /// the rows, and a row with a file that it lines up is `locked`.
+        /// that no row names is not in the group, and `dropped` lists it. The
+        /// group then starts at 01:00:00:00, and `sync` plays no part. With
+        /// none, `sync` works out the rows, and a row with a file that it lines
+        /// up is `locked`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rows: Option<Vec<crate::model::GroupRow>>,
     },
@@ -173,12 +177,12 @@ pub enum Request {
     /// sync lock, and its `clips`. A clip has its `media`, the frame `at` of
     /// its first visible frame, and `head` and `tail`, the frames that it loses
     /// at each end. Each file is in one row at most, and files of one row do
-    /// not overlap. A file of the group that no row names leaves the group. The
-    /// earliest file goes to the group's start. A stretch of more than 10
-    /// minutes with no file closes to 1 second: `at` falls, and `hidden` holds
-    /// the closed frames. `at` plus `hidden` is the place in real time, and a
-    /// request can give both. Returns the group. The clips on the timeline,
-    /// the group's start and its marks do not change.
+    /// not overlap. A file of the group that no row names leaves the group, and
+    /// `dropped` lists it. The earliest file goes to the group's start. A
+    /// stretch of more than 10 minutes with no file closes to 1 second: `at`
+    /// falls, and `hidden` holds the closed frames. `at` plus `hidden` is the
+    /// place in real time, and a request can give both. Returns the group. The
+    /// clips on the timeline, the group's start and its marks do not change.
     #[serde(rename = "multicam.set")]
     MulticamSet {
         group: String,
@@ -188,8 +192,8 @@ pub enum Request {
     /// does. The file stays as it is, and other files of its row give way. A
     /// file that the moved file starts inside ends at the moved file's start,
     /// and its tail is gone. A file whose start it covers starts at the moved
-    /// file's end. A file that it covers leaves the group. Returns the group.
-    /// It refuses a file on a row with the sync lock.
+    /// file's end. A file that it covers leaves the group, and `dropped` lists
+    /// it. Returns the group. It refuses a file on a row with the sync lock.
     #[serde(rename = "multicam.place")]
     MulticamPlace {
         group: String,
@@ -200,7 +204,7 @@ pub enum Request {
         at: i64,
     },
     /// The synced groups: for each its `id`, `name`, `bin`,
-    /// `start_timecode`, `frames` and `rows`.
+    /// `start_timecode`, `frames`, `rows` and `dropped`.
     #[serde(rename = "multicam.list")]
     MulticamList {},
     /// Remove a synced group from the pool. Its files stay.
@@ -224,19 +228,20 @@ pub enum Request {
     /// Clear the In and Out of a synced group.
     #[serde(rename = "multicam.marks.clear")]
     MulticamMarksClear { group: String },
-    /// The Sync Bin at a time: one row for each camera of a bin and its
-    /// subfolders, in camera order. The rows of a synced group are its stored
-    /// rows. With no group, files of one camera name go in timecode order, and
-    /// a file keeps only the part after the files before it. Each row has its
-    /// `number` and `camera`, and `clips`: each file's `media`, its visible
-    /// `frames`, its `head`, the frames that it loses at its start, and `start`,
-    /// the timeline frame of its first visible frame. The clip at `at` sets
-    /// `start`: its source timecode lines up the files. A file with no time in
-    /// common has none. `media` and `frame` are the file of the row at `at` and
-    /// its frame. A row with no file at `at` has no `frame`, and `media` is its
-    /// first file. `active` says that a file of the row is on top at `at`. It
-    /// refuses a file with no picture, no camera name or no time to line up by,
-    /// more than nine cameras, and files of different groups.
+    /// The Sync Bin at a time: the rows of a bin and its subfolders. With a
+    /// synced group in the bin, they are its stored rows, and other files of
+    /// the bin do not show. With two groups or more, the newest group of the
+    /// clip at `at` counts. With no group, the rows are the ones that
+    /// `multicam.layout` gives by timecode. Each row has its `number` and
+    /// `camera`, and `clips`: each file's `media`, its visible `frames`, its
+    /// `head`, the frames that it loses at its start, and `start`, the timeline
+    /// frame of its first visible frame. The clip at `at` sets `start`: its
+    /// source timecode lines up the files. A file with no time in common has
+    /// none. `media` and `frame` are the file of the row at `at` and its frame.
+    /// A row with no file at `at` has no `frame`, and `media` is its first file.
+    /// `active` says that a file of the row is on top at `at`. It refuses a
+    /// file on a row with no picture or no time to line up by, and two groups
+    /// when the clip at `at` is in neither of them.
     #[serde(rename = "multicam.rows")]
     MulticamRows {
         /// Default: the top level.
@@ -250,7 +255,7 @@ pub enum Request {
     /// In is the file's frame at `at`. The marks are five seconds long and
     /// stop at the file's end. Past the timeline's end, In is the file's
     /// frame at that end and Out is its frame at `at`. Returns the marks. It
-    /// refuses a file with no frame at `at`.
+    /// refuses a file with no frame at `at`, and a file at another frame rate.
     #[serde(rename = "multicam.pick")]
     MulticamPick {
         media: String,
