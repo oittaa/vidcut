@@ -1442,7 +1442,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     | PQ Full | 589, 592, 370; 491, 586, 592; 478, 584, 355 | 551, 347, 584; 544, 334, 225; 296, 201, 582 |
 
   - Measured: in an HDR timeline, these kinds keep their SDR code values. The BT.2111 Color Bars are the same in SDR, PQ and HLG.
-  - vidcut does not copy two faults in these pictures ([X125](deviations.md#x125-generators-have-the-correct-picture-where-resolve-has-a-fault)).
+  - vidcut does not copy two faults in these pictures ([X129](deviations.md#x129-generators-have-the-correct-picture-where-resolve-has-a-fault)).
 - **Length and dissolves:**
   - Measured: a generator can have any length.
   - Measured: Resolve keeps the source start of a generator at 0. A left trim moves the keyframes, and the picture does not move.

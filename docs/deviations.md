@@ -2421,7 +2421,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - One row for each file comes first. The rows that hold many files are the next change ([todo/sync-bin.md](todo/sync-bin.md)).
   - The owner approved this order of work, and this difference stays only until that change.
 
-## X125. Generators have the correct picture where Resolve has a fault
+## X129. Generators have the correct picture where Resolve has a fault
 
 - **Resolve:**
   - These are measurements in Resolve Studio 21.1.2. Both faults repeat.
