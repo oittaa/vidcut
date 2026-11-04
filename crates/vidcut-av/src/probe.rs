@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::decode::Input;
@@ -85,6 +86,18 @@ fn image_format(format: &str) -> bool {
 
 fn animation_format(format: &str) -> bool {
     matches!(format, "gif" | "webp_anim")
+}
+
+const VP8X_ANIMATION: u8 = 0x02;
+
+fn animated_webp(path: &Path) -> bool {
+    let mut head = [0; 21];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut head))
+        .is_ok()
+        && head.starts_with(b"RIFF")
+        && head[8..16] == *b"WEBPVP8X"
+        && head[20] & VP8X_ANIMATION != 0
 }
 
 fn pictures(input: &mut ffmpeg::format::context::Input, all: bool) -> (usize, Option<f64>) {
@@ -318,12 +331,18 @@ fn probe_input(source: &Input, decoder: Option<&crate::hw::GpuDecoder>) -> Resul
     let mut input = source.open()?;
     let skips = start_skips(&mut input);
     let format = input.format().name().to_string();
+    let file = matches!(source, Input::File(_));
+    if file && format == "webp_pipe" && animated_webp(path) {
+        return Err(Error::Invalid(format!(
+            "{}: an animated WebP needs FFmpeg 9.0",
+            path.display()
+        )));
+    }
     let (mut duration, start_time) = unsafe {
         let ctx = input.as_ptr();
         let to_secs = |v: i64| opt_ts(v).map(|v| v as f64 / f64::from(ffmpeg::ffi::AV_TIME_BASE));
         (to_secs((*ctx).duration), to_secs((*ctx).start_time))
     };
-    let file = matches!(source, Input::File(_));
     let (count, end) = match file && animation_format(&format) {
         true => pictures(&mut input, duration.is_none()),
         false => (0, None),
