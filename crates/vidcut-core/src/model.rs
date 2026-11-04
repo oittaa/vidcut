@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, label_frames};
@@ -4118,7 +4119,7 @@ impl TitleCase {
             Self::Small => {
                 let mut out: Vec<(String, bool)> = Vec::new();
                 for c in text.chars() {
-                    let small = c.is_lowercase();
+                    let small = get_general_category(c) == GeneralCategory::LowercaseLetter;
                     if out.last().is_none_or(|(_, s)| *s != small) {
                         out.push((String::new(), small));
                     }

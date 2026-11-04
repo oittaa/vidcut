@@ -2648,12 +2648,13 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Font case is `mixed`, `upper`, `lower`, `small` or `title`: Mixed, All Caps, All Lowercase, Small Caps and Title Caps (p. 1184).
     - `small` draws small letters as capitals at 0.7 of the size in whole pixels at zoom 1, rounded to a whole pixel. The zoom scales it (measured in Resolve Studio 21.1.2).
     - Digits, punctuation and capitals stay at the full size.
+    - A small letter is a letter of the Unicode category `Ll`. `ª`, `º`, `ʰ`, `ⅷ` and `ⓐ` are in other categories, so they stay as they are, at the full size (measured in Resolve Studio 21.1.2).
     - `title` makes the first letter of each word a capital, and it keeps the other letters. `mcDONALD` becomes `McDONALD`.
     - A word starts as in Unicode word boundaries (UAX 29), and also after `.` and `:` (measured in Resolve Studio 21.1.2).
       - A letter becomes a capital after a space, a hyphen, a comma, a bracket, or an apostrophe that is not between two letters.
       - A letter stays after a letter, a digit, `_`, a combining mark, or an apostrophe between two letters. `rock'n'roll` becomes `Rock'n'roll`.
     - `upper`, `lower`, `small` and `title` change each letter alone (measured in Resolve Studio 21.1.2).
-      - A letter stays when its other form has more than one letter: `ß`, `ﬁ` and `ŉ` in capitals, and `İ` in small letters. With `small`, these letters draw at the small size.
+      - A letter stays when its other form has more than one letter: `ß`, `ﬁ` and `ŉ` in capitals, and `İ` in small letters. With `small`, `ß`, `ﬁ` and `ŉ` draw at the small size, and `İ` at the full size.
       - `Σ` becomes `σ` also at the end of a word.
     - `<o>` draws a line over the words and `<s>` a line through them (p. 1184).
     - The height of these lines and `<u>` is `underlineThickness` in the font's `post` table.
