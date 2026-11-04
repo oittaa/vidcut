@@ -1491,7 +1491,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut keeps Smooth Strength and Border Type on the effect. They do not change its picture.
   - A cell is whole when the alpha of its box is at least 0.999. The renders put that limit above 0.674 and at 1 or below.
   - Where a cell edge falls exactly on a pixel, Resolve gives that line of pixels to either cell, with no rule that the renders show. vidcut gives it to the cell on the right or below.
-  - A Triangle at Aspect 2 has corners at the sides of the frame, from triangles with a middle far off the frame. Resolve fills them with a color that no rule explains. vidcut takes the box at the middle, clamped into the frame.
+  - A Triangle has corners at the sides of the frame, from triangles with a middle off the frame. The distance of that middle from the frame counts in column steps.
+    - At 0.585 of a step or less, each corner has the box at its own middle, clamped into the frame. At 0.691 or more, Resolve changes the corners. No render falls between these distances.
+    - Most of a corner of a triangle that points up then has the color of the next triangle in its row. Single rows have other colors.
+    - These rows change between renders. Two renders of Aspect 2 at Pixel Frequency 25 differ on 1211 pixels, by up to 9.22/255. Renders at 0.132 and 0.566 of a step repeat exactly.
+    - vidcut takes the box at the middle of the pixel's own triangle, clamped into the frame, at each distance.
   - Only the Fusion page gave renders of Blur Alpha off and Whole Cells Only. Only the default Pixel Frequency has Edit page renders on other sizes and Zooms ([todo](todo/effects-library.md)).
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - A Position away from the middle, on a picture with a Zoom or a Pan, counts in fractions of the picture on the frame.
