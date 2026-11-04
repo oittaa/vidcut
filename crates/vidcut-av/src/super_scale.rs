@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use vidcut_core::model::{Hdr, Media, Project, SuperScale, Upscaler, VideoInfo};
+use vidcut_core::model::{Hdr, Media, Project, Sharpness, SuperScale, Upscaler, VideoInfo};
 use vidcut_core::render::{RenderPlan, Shape, VideoPiece};
 
 use vidcut_core::catalog::{self, Measure};
@@ -401,6 +401,20 @@ pub fn name(upscaler: Upscaler) -> &'static str {
         Upscaler::AiSlow => "AI Slow (FlashVSR+ Turbo)",
         Upscaler::Macos => "AI (macOS super resolution)",
         Upscaler::Classic => "Classic",
+    }
+}
+
+pub fn named(s: SuperScale) -> String {
+    match s.upscaler {
+        Upscaler::Classic => format!(
+            "Classic, sharpness {}",
+            match s.sharpness {
+                Sharpness::Low => "low",
+                Sharpness::Medium => "medium",
+                Sharpness::High => "high",
+            }
+        ),
+        u => name(u).to_string(),
     }
 }
 

@@ -306,6 +306,9 @@ pub fn choose_metadata(
     mut meta: impl FnMut(&VideoPiece) -> PieceMeta,
 ) -> Option<MetadataChoice> {
     let v = settings.video.as_ref()?;
+    if plan.has_lut() {
+        return Some(metadata::choose_through_lut(v));
+    }
     let sdr = plan.colors.is_none();
     Some(metadata::choose(
         v,
@@ -554,6 +557,7 @@ fn first_run(
     let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr)
         .written_at(written)
         .with_timeline(plan.colors)?
+        .with_output_lut(plan.output_lut.as_deref())?
         .with_dynamic(enc.dynamic)
         .with_burn(burn.0, burn.1, plan.height);
     if let Some(d) = decoder {
@@ -1040,6 +1044,7 @@ fn encode(
                     .encode_on(handoff)
                     .written_at((w, h))
                     .with_timeline(plan.colors)?
+                    .with_output_lut(plan.output_lut.as_deref())?
                     .with_dynamic(enc.dynamic)
                     .with_light(light)
                     .with_burn(burned.0, burned.1, plan.height);
