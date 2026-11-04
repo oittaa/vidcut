@@ -623,12 +623,12 @@ pub fn export_media(
         prepared
             .outputs
             .iter()
-            .map(|o| (o.path.clone(), o.plan.frames))
+            .map(|o| (o.written(), o.plan.frames))
             .collect(),
     )?;
     let count = prepared.outputs.len();
     let clock = std::time::Instant::now();
-    let first = prepared.outputs[0].path.clone();
+    let first = prepared.outputs[0].written();
     let progress = &mut *hooks.progress;
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     export::choose_colors(

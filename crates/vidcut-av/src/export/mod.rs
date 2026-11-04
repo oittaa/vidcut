@@ -17,7 +17,8 @@ use serde::Serialize;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind};
 use vidcut_core::export::metadata::{self, Measured, MetadataChoice, PieceMeta};
 use vidcut_core::export::{
-    EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Rounded, VideoSettings, validate,
+    Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Rounded, VideoSettings,
+    validate,
 };
 use vidcut_core::model::{Hdr, SubtitleStyle};
 use vidcut_core::render::{RenderPlan, VideoPiece};
@@ -232,7 +233,10 @@ pub fn probed_metadata<'a>(
 }
 
 pub fn needs_light(v: &VideoSettings, m: &PieceMeta) -> bool {
-    if v.hdr.transfer() != Some(Hdr::Pq) || v.hdr_metadata == HdrMetadata::None {
+    if v.hdr.transfer() != Some(Hdr::Pq)
+        || v.hdr_metadata == HdrMetadata::None
+        || v.image_bits().is_some()
+    {
         return false;
     }
     match v.max_cll.as_deref() {
@@ -422,7 +426,15 @@ pub fn run(
 ) -> Result<Report> {
     let none = Subtitles::default();
     run_decoding_on(
-        plan, settings, output, available, None, &none, cancel, progress,
+        plan,
+        settings,
+        output,
+        plan.range.0,
+        available,
+        None,
+        &none,
+        cancel,
+        progress,
     )
 }
 
@@ -431,6 +443,7 @@ pub fn run_decoding_on(
     plan: &RenderPlan,
     settings: &ExportSettings,
     output: &Path,
+    first_number: i64,
     available: &Availability,
     decoder: Option<&crate::hw::GpuDecoder>,
     subtitles: &Subtitles,
@@ -481,19 +494,59 @@ pub fn run_decoding_on(
         settings,
         part.path(),
         output,
+        first_number,
         available,
         decoder,
         subtitles,
         cancel,
         progress,
     )?;
-    part.keep(output)?;
+    if !settings.container.image_sequence() {
+        part.keep(output)?;
+    }
     Ok(Report {
         color: chosen,
         metadata: metadata_chosen,
         copies: copies.counted(),
         ..report
     })
+}
+
+struct FrameFiles {
+    dir: vidcut_core::temp::Temp,
+    container: Container,
+    output: PathBuf,
+    first_number: i64,
+    written: i64,
+}
+
+impl FrameFiles {
+    fn new(container: Container, output: &Path, first_number: i64) -> Result<Self> {
+        Ok(Self {
+            dir: vidcut_core::temp::dir(output)?,
+            container,
+            output: output.to_path_buf(),
+            first_number,
+            written: 0,
+        })
+    }
+
+    fn write(&mut self, packet: &ffmpeg::Packet) -> Result<()> {
+        let path = self.dir.path().join(self.written.to_string());
+        std::fs::write(path, packet.data().unwrap_or_default())?;
+        self.written += 1;
+        Ok(())
+    }
+
+    fn keep(&self) -> Result<()> {
+        for i in 0..self.written {
+            let file = self
+                .container
+                .frame_file(&self.output, self.first_number + i);
+            std::fs::rename(self.dir.path().join(i.to_string()), file)?;
+        }
+        Ok(())
+    }
 }
 
 struct PassFiles {
@@ -676,6 +729,7 @@ struct VideoOut {
     hdr10plus: Option<(ffmpeg::codec::Id, std::collections::HashMap<i64, Vec<u8>>)>,
     codec: ffmpeg::codec::Id,
     kind: EncoderChoice,
+    files: Option<FrameFiles>,
 }
 
 impl VideoOut {
@@ -709,6 +763,10 @@ impl VideoOut {
     fn drain(&mut self, octx: &mut format::context::Output) -> Result<()> {
         let mut p = ffmpeg::Packet::empty();
         while self.encoder.receive_packet(&mut p).is_ok() {
+            if let Some(files) = &mut self.files {
+                files.write(&p)?;
+                continue;
+            }
             if let Some((id, waiting)) = self.hdr10plus.as_mut()
                 && let Some(t35) = p.pts().and_then(|pts| waiting.remove(&pts))
             {
@@ -888,7 +946,11 @@ impl Writer {
                 .ctx(|| "flushing video encoder".into())?;
             v.drain(&mut self.octx)?;
         }
-        self.octx.write_trailer().ctx(|| "writing trailer".into())
+        self.octx.write_trailer().ctx(|| "writing trailer".into())?;
+        match self.video.as_ref().and_then(|v| v.files.as_ref()) {
+            Some(files) => files.keep(),
+            None => Ok(()),
+        }
     }
 }
 
@@ -898,6 +960,7 @@ fn encode(
     settings: &ExportSettings,
     part: &Path,
     output: &Path,
+    first_number: i64,
     available: &Availability,
     decoder: Option<&crate::hw::GpuDecoder>,
     subs: &Subtitles,
@@ -1074,6 +1137,10 @@ fn encode(
                 hdr10plus,
                 codec: id,
                 kind: enc.kind,
+                files: match settings.container.image_sequence() {
+                    true => Some(FrameFiles::new(settings.container, output, first_number)?),
+                    false => None,
+                },
             };
             (Some(made), Some(encoding))
         }
@@ -1313,7 +1380,7 @@ fn encode(
         })
     });
     Ok(Report {
-        output: output.to_path_buf(),
+        output: settings.container.first_file(output, first_number),
         frames: plan.frames,
         samples: if audio_encoder.is_some() {
             plan.samples()

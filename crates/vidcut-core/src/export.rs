@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -20,6 +22,11 @@ pub enum Container {
     Flac,
     Wav,
     Ogg,
+    /// Image sequences: one file for each frame, without sound. The output
+    /// `out.tif` gives `out_00000000.tif` and so on. The number is the frame
+    /// count of the record timecode.
+    Tiff,
+    Exr,
 }
 
 impl Container {
@@ -34,6 +41,8 @@ impl Container {
             Self::Flac => "flac",
             Self::Wav => "wav",
             Self::Ogg => "ogg",
+            Self::Tiff => "tif",
+            Self::Exr => "exr",
         }
     }
 
@@ -48,6 +57,7 @@ impl Container {
             Self::Flac => "flac",
             Self::Wav => "wav",
             Self::Ogg => "ogg",
+            Self::Tiff | Self::Exr => "null",
         }
     }
 
@@ -56,7 +66,7 @@ impl Container {
             Self::Mp4 | Self::Mov | Self::M4a => Some("mov_text"),
             Self::Mkv => Some("subrip"),
             Self::Webm => Some("webvtt"),
-            Self::Mp3 | Self::Flac | Self::Wav | Self::Ogg => None,
+            Self::Mp3 | Self::Flac | Self::Wav | Self::Ogg | Self::Tiff | Self::Exr => None,
         }
     }
 
@@ -65,6 +75,27 @@ impl Container {
             self,
             Self::M4a | Self::Mp3 | Self::Flac | Self::Wav | Self::Ogg
         )
+    }
+
+    pub fn image_sequence(self) -> bool {
+        matches!(self, Self::Tiff | Self::Exr)
+    }
+
+    pub fn frame_file(self, output: &Path, number: i64) -> PathBuf {
+        let mut name = output.file_stem().unwrap_or_default().to_os_string();
+        name.push(format!("_{number:08}."));
+        match output.extension() {
+            Some(ext) => name.push(ext),
+            None => name.push(self.extension()),
+        }
+        output.with_file_name(name)
+    }
+
+    pub fn first_file(self, output: &Path, number: i64) -> PathBuf {
+        match self.image_sequence() {
+            true => self.frame_file(output, number),
+            false => output.to_path_buf(),
+        }
     }
 
     pub fn from_extension(ext: &str) -> Option<Self> {
@@ -78,6 +109,8 @@ impl Container {
             "flac" => Self::Flac,
             "wav" => Self::Wav,
             "ogg" | "opus" => Self::Ogg,
+            "tif" | "tiff" => Self::Tiff,
+            "exr" => Self::Exr,
             _ => return None,
         })
     }
@@ -92,16 +125,42 @@ pub enum VideoCodec {
     Vp9,
     Prores,
     Dnxhr,
+    Tiff,
+    Exr,
 }
 
+pub const TIFF_PROFILES: [&str; 8] = [
+    "rgb8",
+    "rgb16",
+    "rgb8_packbits",
+    "rgb16_packbits",
+    "rgb8_lzw",
+    "rgb16_lzw",
+    "rgb8_deflate",
+    "rgb16_deflate",
+];
+
+pub const EXR_PROFILES: [&str; 8] = [
+    "half",
+    "float",
+    "half_rle",
+    "float_rle",
+    "half_zip1",
+    "float_zip1",
+    "half_zip16",
+    "float_zip16",
+];
+
 impl VideoCodec {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::H264,
         Self::Hevc,
         Self::Av1,
         Self::Vp9,
         Self::Prores,
         Self::Dnxhr,
+        Self::Tiff,
+        Self::Exr,
     ];
 
     pub fn title(self) -> &'static str {
@@ -112,6 +171,8 @@ impl VideoCodec {
             VideoCodec::Vp9 => "VP9",
             VideoCodec::Prores => "ProRes",
             VideoCodec::Dnxhr => "DNxHR",
+            VideoCodec::Tiff => "TIFF",
+            VideoCodec::Exr => "OpenEXR",
         }
     }
 
@@ -279,11 +340,16 @@ pub struct VideoSettings {
     #[serde(default)]
     pub speed: Option<String>,
     /// ProRes: proxy, lt, standard, hq, 4444, xq. DNxHR: lb, sq, hq, hqx, 444.
+    /// TIFF: rgb8, rgb16 (the default), each also with `_packbits`, `_lzw` or
+    /// `_deflate`; without one it has no compression. OpenEXR: half (the
+    /// default), float, each also with `_rle`, `_zip1` or `_zip16`; without
+    /// one it has no compression.
     #[serde(default)]
     pub profile: Option<String>,
     /// 8 or 10. Unset: 10 for HDR, and for SDR when most of the shown
     /// picture has 10 bits or more and the codec's 10 bits play widely
-    /// (not H.264), else 8 (decision D44).
+    /// (not H.264), else 8 (decision D44). The profile sets it for TIFF
+    /// (8 or 16) and OpenEXR (16 or 32).
     #[serde(default)]
     pub bit_depth: Option<u8>,
     /// Output frame size, each side from 256 to 32768; the picture is fit
@@ -296,8 +362,9 @@ pub struct VideoSettings {
     pub height: Option<u32>,
     /// Dynamic range: `auto` (HDR when most of the shown picture is HDR and
     /// the codec carries it), `sdr` (BT.709, HDR sources tone-mapped), or
-    /// HDR with `pq` or `hlg` (BT.2100: BT.2020 colors, 10 bits, HEVC, AV1
-    /// or VP9; SDR sources show their white at 203 nits). Decision D44.
+    /// HDR with `pq` or `hlg` (BT.2100: BT.2020 colors, 10 bits or more, HEVC,
+    /// AV1, VP9, TIFF or OpenEXR; SDR sources show their white at 203 nits).
+    /// Decision D44.
     #[serde(default)]
     pub hdr: HdrMode,
     /// 1 or 2. Two passes reach a target bitrate more closely: x264, x265
@@ -337,8 +404,9 @@ pub struct VideoSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cll: Option<String>,
     /// Export Alpha: the file holds the alpha of the timeline, and what shows
-    /// nothing is transparent. Only ProRes with profile `4444` or `xq` has alpha. Off,
-    /// the export composites over black and writes opaque frames.
+    /// nothing is transparent. Only ProRes with profile `4444` or `xq`, TIFF and
+    /// OpenEXR have alpha. Off, the export composites over black and writes
+    /// opaque frames.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub alpha: bool,
     /// How a file with `alpha` holds its colors.
@@ -372,7 +440,21 @@ impl VideoSettings {
     }
 
     pub fn holds_alpha(&self) -> bool {
-        self.codec == VideoCodec::Prores && matches!(self.profile.as_deref(), Some("4444" | "xq"))
+        match self.codec {
+            VideoCodec::Prores => matches!(self.profile.as_deref(), Some("4444" | "xq")),
+            VideoCodec::Tiff | VideoCodec::Exr => true,
+            _ => false,
+        }
+    }
+
+    pub fn image_bits(&self) -> Option<u8> {
+        let profile = self.profile.as_deref().unwrap_or_default();
+        match self.codec {
+            VideoCodec::Tiff if profile.starts_with("rgb8") => Some(8),
+            VideoCodec::Exr if profile.starts_with("float") => Some(32),
+            VideoCodec::Tiff | VideoCodec::Exr => Some(16),
+            _ => None,
+        }
     }
 
     fn asked_size(&self, timeline: (u32, u32)) -> (u32, u32) {
@@ -613,6 +695,15 @@ fn av(container: Container, v: VideoSettings, a: AudioSettings) -> ExportSetting
     }
 }
 
+fn frames(container: Container, v: VideoSettings) -> ExportSettings {
+    ExportSettings {
+        container,
+        video: Some(v),
+        audio: None,
+        declick: true,
+    }
+}
+
 fn audio_only(container: Container, a: AudioSettings) -> ExportSettings {
     ExportSettings {
         container,
@@ -745,6 +836,20 @@ pub fn builtin_presets() -> Vec<Preset> {
             ),
         ),
         preset(
+            "tiff",
+            "TIFF",
+            "One TIFF file for each frame, RGB 16-bit, no sound",
+            false,
+            frames(C::Tiff, video(V::Tiff, None)),
+        ),
+        preset(
+            "openexr",
+            "OpenEXR",
+            "One OpenEXR file for each frame, RGB half, no sound",
+            false,
+            frames(C::Exr, video(V::Exr, None)),
+        ),
+        preset(
             "audio-wav",
             "Audio: WAV",
             "24-bit PCM WAV",
@@ -844,8 +949,10 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         let ok = match s.container {
             C::Mp4 => matches!(v.codec, V::H264 | V::Hevc | V::Av1 | V::Vp9),
             C::Mov => matches!(v.codec, V::H264 | V::Hevc | V::Prores | V::Dnxhr),
-            C::Mkv => true,
+            C::Mkv => !matches!(v.codec, V::Tiff | V::Exr),
             C::Webm => matches!(v.codec, V::Vp9 | V::Av1),
+            C::Tiff => v.codec == V::Tiff,
+            C::Exr => v.codec == V::Exr,
             _ => false,
         };
         if !ok {
@@ -855,7 +962,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
                 s.container.extension()
             )));
         }
-        if v.encoder.gpu() && matches!(v.codec, V::Prores | V::Dnxhr) {
+        if v.encoder.gpu() && matches!(v.codec, V::Prores | V::Dnxhr | V::Tiff | V::Exr) {
             return Err(Error::usage(format!(
                 "{:?} has no GPU encoder; use encoder cpu or auto",
                 v.codec
@@ -867,6 +974,8 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
             V::H264 => &["baseline", "main", "high"],
             V::Hevc => &["main", "main10"],
             V::Av1 | V::Vp9 => &[],
+            V::Tiff => &TIFF_PROFILES,
+            V::Exr => &EXR_PROFILES,
         };
         if let Some(p) = &v.profile
             && !profiles.contains(&p.as_str())
@@ -879,12 +988,14 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         if let Some(d) = v.bit_depth
             && d != 8
             && d != 10
+            && v.image_bits().is_none()
         {
             return Err(Error::usage("bit_depth must be 8 or 10"));
         }
         if v.alpha && !v.holds_alpha() {
             return Err(Error::usage(
-                "video.alpha needs a format with alpha: ProRes with profile 4444 or xq",
+                "video.alpha needs a format with alpha: ProRes with profile 4444 or xq, TIFF \
+                 or OpenEXR",
             ));
         }
         let fixed = match (v.codec, v.profile.as_deref()) {
@@ -892,7 +1003,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
                 Some(10)
             }
             (V::Dnxhr, Some("lb" | "sq")) | (V::Hevc, Some("main")) => Some(8),
-            _ => None,
+            _ => v.image_bits(),
         };
         if let (Some(d), Some(f)) = (v.bit_depth, fixed)
             && d != f
@@ -909,7 +1020,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         if v.hdr.transfer().is_some() {
             if !color::carries_hdr(v.codec) {
                 return Err(Error::usage(format!(
-                    "HDR needs HEVC, AV1 or VP9, not {:?}",
+                    "HDR needs HEVC, AV1, VP9, TIFF or OpenEXR, not {:?}",
                     v.codec
                 )));
             }
@@ -919,7 +1030,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         }
         match v.passes {
             None | Some(1) => {}
-            Some(2) if matches!(v.codec, V::Prores | V::Dnxhr) => {
+            Some(2) if matches!(v.codec, V::Prores | V::Dnxhr | V::Tiff | V::Exr) => {
                 return Err(Error::usage(format!(
                     "{:?} has no rate control to make two passes for",
                     v.codec
@@ -942,6 +1053,13 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         }
         if v.hdr_metadata.dolby_vision() && !matches!(v.codec, V::Hevc | V::Av1) {
             return Err(Error::usage("Dolby Vision needs HEVC or AV1"));
+        }
+        if v.image_bits().is_some()
+            && (!matches!(v.hdr_metadata, HdrMetadata::Auto | HdrMetadata::None)
+                || v.mastering_display.is_some()
+                || v.max_cll.is_some())
+        {
+            return Err(Error::usage("TIFF and OpenEXR hold no HDR metadata"));
         }
         if v.lookahead.is_some_and(|n| n > MAX_LOOKAHEAD) {
             return Err(Error::usage(format!(
@@ -977,6 +1095,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
             C::Mp3 => matches!(a.codec, A::Mp3),
             C::Flac => matches!(a.codec, A::Flac),
             C::Wav => matches!(a.codec, A::PcmS16 | A::PcmS24),
+            C::Tiff | C::Exr => false,
         };
         if !ok {
             return Err(Error::usage(format!(

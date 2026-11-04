@@ -982,6 +982,9 @@ struct Encoding {
 fn encoded_rgb(code: vec3<f32>) -> vec3<f32> {
     let coded = encoding.how.x;
     let wanted = encoding.how.y;
+    if coded == wanted && encoding.how.z == 32u {
+        return code;
+    }
     if coded == wanted {
         return clamp(code, vec3<f32>(0.0), vec3<f32>(1.0));
     }
@@ -1050,10 +1053,13 @@ fn chroma_at(px: vec2<i32>) -> vec2<f32> {
     return sum / total;
 }
 
+fn kept_alpha(px: vec2<i32>) -> f32 {
+    return select(1.0, clamp(drawn_at(px.x, px.y).a, 0.0, 1.0), encoding.alpha.x != 0u);
+}
+
 fn alpha_code(px: vec2<i32>) -> u32 {
     let top = (1u << encoding.how.z) - 1u;
-    let a = select(1.0, clamp(drawn_at(px.x, px.y).a, 0.0, 1.0), encoding.alpha.x != 0u);
-    return u32(round(a * f32(top))) << encoding.how.w;
+    return u32(round(kept_alpha(px) * f32(top))) << encoding.how.w;
 }
 
 fn encoded_at(px: vec2<i32>) -> vec4<u32> {
@@ -1073,7 +1079,7 @@ fn encoded_at(px: vec2<i32>) -> vec4<u32> {
         out = vec4<u32>(alpha_code(px), code_of(c.x, 16.0, 219.0), code_of(c.y, 128.0, 224.0), code_of(c.z, 128.0, 224.0));
     } else {
         let top = (1u << encoding.how.z) - 1u;
-        out = vec4<u32>(vec3<u32>(round(pixel_at(px.x, px.y) * f32(top))), top);
+        out = vec4<u32>(vec3<u32>(round(pixel_at(px.x, px.y) * f32(top))), alpha_code(px));
     }
     return out;
 }
@@ -1086,6 +1092,17 @@ fn fs_encode(in: Out) -> @location(0) vec4<u32> {
 @fragment
 fn fs_encode_unorm(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(encoded_at(vec2<i32>(in.position.xy))) / f32(encoding.plane.w);
+}
+
+@fragment
+fn fs_encode_float(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let kind = encoding.plane.x;
+    if kind == 10u {
+        return vec4<f32>(kept_alpha(px), 0.0, 0.0, 1.0);
+    }
+    let c = pixel_at(px.x, px.y);
+    return vec4<f32>(c[kind - 7u], 0.0, 0.0, 1.0);
 }
 
 struct Blur {

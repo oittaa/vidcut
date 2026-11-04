@@ -106,7 +106,10 @@ pub struct Asked {
 }
 
 pub fn carries_hdr(codec: VideoCodec) -> bool {
-    matches!(codec, VideoCodec::Hevc | VideoCodec::Av1 | VideoCodec::Vp9)
+    matches!(
+        codec,
+        VideoCodec::Hevc | VideoCodec::Av1 | VideoCodec::Vp9 | VideoCodec::Tiff | VideoCodec::Exr
+    )
 }
 
 fn codec_name(codec: VideoCodec) -> &'static str {
@@ -129,7 +132,7 @@ fn fixed_depth(v: &VideoSettings) -> Option<(u8, &'static str)> {
         (VideoCodec::Dnxhr, Some("sq")) => Some((8, "DNxHR SQ is 8-bit")),
         (VideoCodec::Hevc, Some("main10")) => Some((10, "the main10 profile is 10-bit")),
         (VideoCodec::Hevc, Some("main")) => Some((8, "the main profile is 8-bit")),
-        _ => None,
+        _ => v.image_bits().map(|bits| (bits, "the profile sets it")),
     }
 }
 
@@ -180,7 +183,9 @@ pub fn choose(
             share.percent(share.deep)
         )
     };
-    let (bit_depth, depth_why) = if hdr.is_some() {
+    let (bit_depth, depth_why) = if let Some((d, why)) = asked_depth.filter(|(d, _)| *d > 10) {
+        (d, format!("{d} bits: {why}"))
+    } else if hdr.is_some() {
         (10, "10 bits: HDR".to_string())
     } else if let Some((d, why)) = asked_depth {
         (d, format!("{d} bits: {why}"))
@@ -252,7 +257,9 @@ pub fn keep_hdr_settings(v: &VideoSettings, transfer: Hdr) -> (Vec<String>, Vide
             set.push("video.profile=null".into());
             out.profile = None;
         }
-    } else if v.codec == VideoCodec::Hevc && v.profile.as_deref() == Some("main") {
+    } else if (v.codec == VideoCodec::Hevc && v.profile.as_deref() == Some("main"))
+        || v.image_bits() == Some(8)
+    {
         set.push("video.profile=null".into());
         out.profile = None;
     }

@@ -128,13 +128,30 @@ The plan:
 **Export Alpha** ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
 
 - `VideoSettings::holds_alpha` tells which settings have alpha. `validate` refuses `video.alpha` for the others.
-- With it off, the canvas starts black, and each frame is opaque. ProRes 4444 and 4444 XQ are `YUV444P10LE` on the CPU and `P416LE` on VideoToolbox. Thus the file has no alpha channel.
-- With it on, `VideoFrames::writing_alpha` starts the canvas transparent. ProRes 4444 and 4444 XQ are `YUVA444P10LE` on the CPU and `AYUV64LE` on VideoToolbox.
+- With it off, the canvas starts black, and each frame is opaque. Thus the file has no alpha channel. The pixel formats are:
+  - ProRes 4444 and 4444 XQ: `YUV444P10LE` on the CPU and `P416LE` on VideoToolbox.
+  - TIFF: `RGB24` or `RGB48LE`.
+  - OpenEXR: `GBRPF32LE`.
+- With it on, `VideoFrames::writing_alpha` starts the canvas transparent. The pixel formats are:
+  - ProRes 4444 and 4444 XQ: `YUVA444P10LE` on the CPU and `AYUV64LE` on VideoToolbox.
+  - TIFF: `RGBA` or `RGBA64LE`.
+  - OpenEXR: `GBRAPF32LE`.
 - A black piece is then a picture with an alpha of 0 (`VideoFrames::clear`). Thus a gap and a dip to black are transparent.
 - The canvas holds premultiplied colors. `pixel_at` in `picture.wgsl` takes the alpha out before it converts the colors of the output. Why: a transfer curve gives another color for a premultiplied color.
   - `AlphaOut::Straight` writes that color.
   - `AlphaOut::Premultiplied` multiplies it by the alpha again.
 - A composite mode over a part with alpha (`mode_mixed`) mixes with the color below as far as that part shows. Over nothing, the color stays as it is.
+
+**Image sequences** ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
+
+- `Container::image_sequence` is true for TIFF and OpenEXR. Each packet of the encoder is one whole file.
+- `FrameFiles` writes the packets to a temporary folder beside the output, and `Writer::end` moves them to their names. Thus a cancelled export leaves no frames and keeps the old ones.
+- The muxer is `null`. Why: FFmpeg's image muxer takes a pattern, and a percent sign in a folder name would break the pattern.
+- `Container::frame_file` makes each name. `Output::first_number` is the start timecode plus the first frame of the output, as a frame count.
+- `VideoSettings::image_bits` gives the depth from the profile. `ColorChoice` reports it.
+- `carries_hdr` is true for both, because their files hold the code values of the timeline. The FFmpeg encoders write no HDR tags and no HDR metadata.
+- OpenEXR planes are `R32Float` and use `fs_encode_float`. `encoded_rgb` does not clamp them when the transfer does not change. Thus a value above 1 stays in the file.
+- A TIFF is 8 or 16 bits, so its values stop at 1.
 
 Sources:
 

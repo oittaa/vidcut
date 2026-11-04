@@ -1743,11 +1743,26 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - The Alpha Mode of the file is Premultiplied or Straight (p. 4117). Premultiplied is the default (p. 4093).
   - When a program renders as one file, its layers composite into one picture (p. 473).
   - **In vidcut:**
-    - `video.alpha` is Export Alpha. `video.alpha_mode` is `premultiplied` or `straight`. The Export dialog shows both only for ProRes 4444 and 4444 XQ.
+    - `video.alpha` is Export Alpha. `video.alpha_mode` is `premultiplied` or `straight`. The Export dialog shows both only for ProRes 4444, 4444 XQ, TIFF and OpenEXR.
     - An export refuses `video.alpha` in another format. It does not change a setting without a word.
     - DNxHR 444 has no alpha ([X136](deviations.md#x136-dnxhr-444-exports-without-alpha)).
     - With it off, the export composites over black, and the file has no alpha channel.
     - With it on, what shows nothing is transparent: a gap, a bar beside a picture, and a dip to black.
+- **TIFF and OpenEXR** (Deliver page):
+  - Both are image sequence formats (pp. 4115-4116).
+  - OpenEXR has RGB Half and RGB Float settings, and RGB Half with DWAA or DWAB and a Compression level (p. 4115).
+  - A single clip render makes one image sequence (p. 4114).
+  - Each frame has timecode in its header and in its file name, as a frame count (p. 4114).
+  - The file name has eight digits by default (p. 4126).
+  - **In vidcut:**
+    - `out.tif` gives `out_00000000.tif`, `out_00000001.tif` and so on. Eight digits are the only choice.
+    - The first number is the start timecode plus the first frame of the export, as a frame count.
+    - `video.profile` of a TIFF is `rgb8` or `rgb16` (the default), each also with `_packbits`, `_lzw` or `_deflate`.
+    - `video.profile` of an OpenEXR is `half` (the default) or `float`, each also with `_rle`, `_zip1` or `_zip16`.
+    - With no suffix, the file has no compression.
+    - FFmpeg's encoders have no DWAA, no DWAB and no Compression level. They write no timecode.
+    - The files hold the code values of the timeline. An OpenEXR keeps a value above 1 (measured for a render with no color management).
+    - The files hold no sound. An export with sound settings is refused.
 
 ## 11. Keyboard shortcuts
 
