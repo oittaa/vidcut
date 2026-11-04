@@ -629,15 +629,15 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - With no file selected, it opens all files of the bin and its subfolders.
   - With two files or more selected, it opens only those files.
   - With one file selected, no window opens.
-  - With fewer than two files, no window opens. Two files with one camera name and no other file open no window.
+  - With fewer than two files, no window opens.
+  - vidcut also refuses two files with one camera name and no other file ([deviation X124](deviations.md#x124-the-sync-clips-window-refuses-files-that-resolve-opens)).
   - Files that are one saved group open that group. A group plus a new file refuses ([deviation X123](deviations.md#x123-the-sync-clips-icon-opens-a-saved-group)).
   - "Open Sync Group…" in the menu of a file in a group opens that group.
   - The window is inside vidcut's main window ([deviation X121](deviations.md#x121-the-sync-clips-window-is-inside-the-main-window)).
 - **Which files it takes:**
   - A file with no camera name opens the window. Its camera name stays empty after Save Sync.
-  - The window takes 12 cameras. The measurements stop at 12, so vidcut refuses more.
-  - vidcut refuses a still, a file with no picture, and files of different groups.
-  - Two files with one camera name in a bin with other cameras refuse.
+  - vidcut refuses more than 12 cameras, a still, a file with no picture, and files of different groups (X124).
+  - Two files with one camera name in a bin with other cameras refuse (X124).
 - **The window:**
   - Left: "Sync View", a grid of all files. Right: the viewer of the chosen cell, with the name of its file.
   - The measured grids: 2 cameras side by side, 3 or 4 in 2 by 2, 6 in 3 by 2, 12 in 4 by 3.
@@ -663,7 +663,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It starts at the earliest timecode of the files. Where all files read 00:00:00:00, it starts at 01:00:00:00.
   - Its start does not change when rows move.
 - **Far gaps:** the rule is for an empty stretch where no row has a picture. It is measured at 25 fps and 30 fps.
-  - A stretch of exactly 10:00 minutes stays. One frame more makes it 1 second: 25 frames at 25 fps, 30 frames at 30 fps.
+  - A stretch of up to 10:00 minutes stays. One frame more makes it 1 second: 25 frames at 25 fps, 30 frames at 30 fps.
   - The length of the clips plays no part.
   - The rule acts at open, at Auto Sync and during a drag.
   - A shift of more than 10:00 by Sound or In stays, because the rows overlap and no stretch is empty.

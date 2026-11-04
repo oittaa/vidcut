@@ -2405,3 +2405,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Two groups on one file leave the older one hard to reach.
   - In the one case measured, "Open Sync Group..." opened only the newer group.
   - The owner approved this difference.
+
+## X124. The Sync Clips window refuses files that Resolve opens
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. 24 cameras open. A still is left out. A file with no picture gets a sound-only row.
+  - Files of two saved groups open as a new group.
+  - Two files with one camera name share a row. Only two files with one start and one length give no window.
+  - Files with no name and no overlap share a row. An unnamed row beside named rows reads its number among the unnamed rows.
+- **vidcut:**
+  - The window refuses more than 12 cameras, a still, a file with no picture and files of different groups.
+  - It refuses two files with one camera name.
+  - Each file has its own row. An unnamed row beside named rows reads its row position.
+- **Why:**
+  - One row for each file comes first. The rows that hold many files are the next change ([todo/sync-bin.md](todo/sync-bin.md)).
+  - The owner approved this order of work, and this difference stays only until that change.

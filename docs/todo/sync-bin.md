@@ -34,10 +34,12 @@ The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are i
   - the ruler labels of a reopened group with far tags;
   - the Sync Bin for a group whose first tag is not 01:00:00:00;
   - the rows of a file in two groups.
-- Take out the refusals of the window that DaVinci Resolve does not have (measured.md, C3e):
+- Remove [deviation X124](../deviations.md#x124-the-sync-clips-window-refuses-files-that-resolve-opens) (measured.md, C3e):
   - more than 12 cameras;
   - a still or a file with no picture in the bin;
-  - files of two different saved groups in one bin.
+  - files of two different saved groups in one bin;
+  - files with no name and no overlap share a row;
+  - an unnamed row reads its number among the unnamed rows.
 - Measure the Sync Bin parts that are not measured:
   - the number keys and Escape;
   - the sound of the grid with Video Only off and on (p. 708);
