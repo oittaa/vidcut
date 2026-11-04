@@ -8,4 +8,3 @@ What [the spec](../cut-page-spec.md) describes and vidcut does not do.
 - Menu commands Trim > Roll > Start to Playhead and End to Playhead ([§8.6](../cut-page-spec.md#86-trimming-pp-693-716-718-726732))
 - Use Full Clip Extents and the Edit Subclip dialog ([§8.13](../cut-page-spec.md#813-text-based-editing-pp-714-9941009))
 - New Subclip outside the Transcription window ([§8.13](../cut-page-spec.md#813-text-based-editing-pp-714-9941009))
-- M and Shift+Up/Down for markers on a source clip in the viewer ([§8.13](../cut-page-spec.md#813-text-based-editing-pp-714-9941009))
