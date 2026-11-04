@@ -371,7 +371,7 @@ Cancel:
 - `subtitles::shown` gives what each cue draws at the frame ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It gives the pieces, the spoken word in its color, the words not yet spoken, and the size of a pop.
 - `burn::draw` lays out the cues with cosmic-text: shaping, right-to-left text, and system fonts for the scripts that the first font does not have.
 - `burn::paint` draws one picture for each run of cues that share a place and a style. A popping word is a picture of its own over it.
-- The last lines laid out stay in an `Lru` (`laid_line`).
+- The last lines laid out stay in a `ByBytes` with a fixed limit (`laid_line`, `LINES_BYTES`). Why: exports use them, also with no viewer.
 - The player's `Subtitles` keeps the pictures while the same pieces show (`Subtitles::burned`). Thus a pop draws only its word again.
 - The pictures go onto the frame in the draw of the viewer ([todo](../todo/burn-in-ahead.md)).
 
