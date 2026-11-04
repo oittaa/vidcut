@@ -2052,7 +2052,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A GIF or WebP of one frame is a still too. A GIF or WebP of more frames is a clip.
   - Resolve Studio 21.1.1 imports a WebP of one frame as a still.
   - It imports a GIF of one frame as a still only when its frame has no delay (deviation X39).
-  - FFmpeg 8 cannot decode an animated WebP. With FFmpeg 8, an animated WebP comes in as a still that shows nothing ([to-do](todo/animated-webp-ffmpeg-8.md)).
+  - FFmpeg 8 cannot decode an animated WebP. With FFmpeg 8, vidcut refuses such a file on import. The message says that it needs FFmpeg 9.0 ([gotchas](gotchas.md#ffmpeg-reading-and-decoding)).
 - **D39. Image sequences** (§3; p. 366).
   - `media.add` with `sequence` brings numbered files (`frame_000001.png`, …) in as one clip.
   - The clip is the unbroken run around each file given.
