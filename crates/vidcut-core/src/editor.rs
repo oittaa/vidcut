@@ -2515,7 +2515,7 @@ fn mutate(
 ) -> Result<Value> {
     Ok(match request {
         Request::ProjectSet(set) => {
-            project_set(p, set)?;
+            project_set(p, set, env)?;
             if set.download && !dry_run {
                 let ids: Vec<String> = p
                     .tracks
@@ -3492,6 +3492,7 @@ fn mutate(
             voice_isolation_on,
             retime,
             render_cache,
+            input_lut,
             download,
         } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
@@ -3499,6 +3500,10 @@ fn mutate(
                 Some(t) => Some(resolve(p, t, playhead)?),
                 None => playhead,
             };
+            let input_lut = input_lut
+                .as_deref()
+                .map(|path| checked_lut(env, path))
+                .transpose()?;
             let or_none =
                 |v: &Option<String>| v.as_ref().map(|v| (!v.is_empty()).then(|| v.clone()));
             let voice_isolation = voice_isolation.map(ops::checked_isolation).transpose()?;
@@ -3516,6 +3521,7 @@ fn mutate(
                 voice_isolation_on: *voice_isolation_on,
                 retime: *retime,
                 render_cache: *render_cache,
+                input_lut,
             };
             ops::set_clips(p, &ids, &props)?;
             if retime.is_some() && *download && !dry_run {
@@ -4159,36 +4165,10 @@ fn mutate(
         Request::EffectsSet {
             clip,
             effect,
-            on,
-            blend,
-            use_alpha,
-            render_cache,
-            strength,
-            split,
-            vertical_strength,
-            horizontal_channels,
-            vertical_channels,
-            border,
+            change,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
-            let channels = |what: &str, raw: &Option<Vec<f64>>| {
-                raw.as_deref()
-                    .map(|k| ops::effect::channels(what, k))
-                    .transpose()
-            };
-            let change = ops::effect::EffectChange {
-                on: *on,
-                blend: *blend,
-                use_alpha: *use_alpha,
-                render_cache: *render_cache,
-                strength: *strength,
-                split: *split,
-                vertical_strength: *vertical_strength,
-                horizontal_channels: channels("horizontal_channels", horizontal_channels)?,
-                vertical_channels: channels("vertical_channels", vertical_channels)?,
-                border: *border,
-            };
-            ops::effect::set(p, &id, *effect, &change)?;
+            ops::effect::set(p, &id, *effect, change)?;
             Value::Null
         }
         Request::EffectsReset { clip, effect } => {
@@ -5492,6 +5472,7 @@ fn place_imported(
                 retime: crate::model::ClipRetime::Project,
                 color: color(c),
                 render_cache: crate::model::ClipCache::Auto,
+                input_lut: None,
             });
             placed.insert(track_of(&c.track));
             continue;
@@ -5629,6 +5610,7 @@ fn place_imported(
             retime: crate::model::ClipRetime::Project,
             color: color(c),
             render_cache: crate::model::ClipCache::Auto,
+            input_lut: c.input_lut.clone(),
         });
         placed.insert(track_of(&c.track));
     }
@@ -6549,7 +6531,16 @@ fn ready_smooth(env: &dyn Env, kind: &crate::model::PictureTransition) -> Result
     Ok(())
 }
 
-fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
+fn checked_lut(env: &dyn Env, path: &Path) -> Result<Option<PathBuf>> {
+    if path.as_os_str().is_empty() {
+        return Ok(None);
+    }
+    let bytes = env.read_file(path)?;
+    crate::cube::read(path, &bytes).map_err(Error::invalid)?;
+    Ok(Some(path.to_path_buf()))
+}
+
+fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     if let Some(fps) = set.fps {
         let has_clips = p.tracks.iter().any(|t| !t.clips.is_empty());
         if has_clips && fps != p.settings.fps {
@@ -6618,6 +6609,9 @@ fn project_set(p: &mut Project, set: &ProjectSet) -> Result<()> {
     }
     if let Some(mode) = set.render_cache {
         p.settings.render_cache = mode;
+    }
+    if let Some(path) = &set.output_lut {
+        p.settings.output_lut = checked_lut(env, path)?;
     }
     if let Some(fillers) = &set.fillers {
         crate::preferences::set_fillers(&mut p.settings.fillers, fillers)?;

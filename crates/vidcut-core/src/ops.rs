@@ -14,6 +14,7 @@ pub mod titles;
 mod tracks;
 
 use std::collections::{BTreeMap, HashSet};
+use std::path::PathBuf;
 
 pub use dissolve::{
     Align, Made, Shape, cross_fade_joins, dissolve, dissolve_clips, length as dissolve_length,
@@ -283,6 +284,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         retime: crate::model::ClipRetime::Project,
         color: None,
         render_cache: crate::model::ClipCache::Auto,
+        input_lut: None,
     })
 }
 
@@ -1975,6 +1977,7 @@ pub struct ClipProps {
     pub voice_isolation_on: Option<bool>,
     pub retime: Option<crate::model::ClipRetime>,
     pub render_cache: Option<crate::model::ClipCache>,
+    pub input_lut: Option<Option<PathBuf>>,
 }
 
 pub const ISOLATION: std::ops::RangeInclusive<f64> = 0.0..=100.0;
@@ -2049,6 +2052,12 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
                 return Err(Error::invalid(format!("{id} has no picture of its media")));
             }
             c.render_cache = r;
+        }
+        if let Some(lut) = &props.input_lut {
+            if !c.video || c.media.is_empty() {
+                return Err(Error::invalid(format!("{id} has no picture of its media")));
+            }
+            c.input_lut = lut.clone();
         }
         if props.muted.is_some()
             || props.gain_db.is_some()

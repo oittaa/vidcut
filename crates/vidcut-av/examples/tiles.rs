@@ -49,6 +49,7 @@ fn main() {
                 break;
             }
             let piece = VideoPiece::Source {
+                input_lut: None,
                 pace: Default::default(),
                 media: "m".into(),
                 path: path.clone(),
@@ -66,7 +67,7 @@ fn main() {
             };
             let t = Instant::now();
             reader
-                .rgba(&piece, fps, (width, height), None)
+                .rgba(&piece, fps, (width, height), (None, None))
                 .expect("tile");
             first.get_or_insert(t.elapsed());
             n += 1;

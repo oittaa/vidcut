@@ -4053,6 +4053,7 @@ mod tests {
 
     fn clip(id: &str, start: i64, duration: i64, tail: Option<i64>) -> Clip {
         Clip {
+            input_lut: None,
             id: id.into(),
             media: "m1".into(),
             start,

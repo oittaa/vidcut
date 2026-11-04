@@ -162,6 +162,7 @@ Stills ([D38](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
 - A file is a still when an image demuxer reads it (`image2`, the `_pipe` demuxers).
 - A GIF or animated WebP (`gif`, `webp_anim`) of one frame is also a still.
 - An animated WebP of more frames lasts as long as its frames do. Why: `webp_anim` reports no duration.
+- `probe` refuses an animated WebP that `webp_pipe` reads ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)).
 
 Multicam layout:
 
@@ -293,6 +294,7 @@ Ranges and resolution:
 
 - `Store` reads and writes the `Project` as pretty JSON (serde).
 - A media path in or under the folder of the project is stored relative to it. Other paths are stored absolute. In memory, media paths are absolute.
+  - The same rule holds for the `input_lut` of a clip and the `output_lut` of the settings.
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-projects-are-always-saved-standalone-json-files)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
 - A save writes a temporary file and renames it over the project (`temp::write`). Thus readers see the old file or the new one, never part of one.
@@ -466,7 +468,7 @@ Writing:
   - a `Crop` of each side, and the softness of its edges (`crop_softness`)
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
   - its `composite_mode` (`CompositeMode`, `Picture::mode`) and its `opacity` (`Picture::opaque`)
-  - its `effects`, in their order: each an `Effect` with an `EffectKind`, such as a `GaussianBlur` ([export](export.md#effects))
+  - its `effects`, in their order: each an `Effect` with an `EffectKind`, a `GaussianBlur` or a `MosaicBlur` ([export](export.md#effects))
 - Each value is left out at its usual value. A picture that `Picture::is_usual` accepts is only fitted into the frame.
 - Each value of `keyframes::PictureValue` can hold `Keyframe`s beside the plain value. `Picture::is_usual` is false while a value has keyframes.
   - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.
@@ -532,6 +534,7 @@ flowchart LR
 
 - A bundle holds `content.otio`, `version.txt` in a zip, and the media used under `media`, as the adapters of OpenTimelineIO lay them out.
 - The media used include the media that compound clips play (`otio::used_media`). They are whole and uncompressed.
+- A bundle holds no LUT file. The `input_lut` and the `output_lut` keep their paths.
 - In a file name under `media`, `_` replaces each character that some file systems refuse. An image sequence keeps one name pattern, in its files and in the timeline text.
 - In the kept `Stack` of a compound clip, a reference to a file that the compound clips play also points into `media` (`otio::same_media`). Other references keep their URLs.
 - `bundle::open` unpacks an `.otioz` into a folder named after it, or into `unpack`. It keeps files whose CRC-32 matches.
@@ -555,7 +558,7 @@ The metadata:
 
 | Metadata | Holds |
 |---|---|
-| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `gain_keys` from the item's first source frame; `source_in`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects |
+| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `gain_keys` from the item's first source frame; `source_in`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects; `input_lut` |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`, a clip volume effect with the volume keyframes in its `Key Frames` (`effects::sound`), and `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Retime and Scaling, and Dynamic Zoom (`otio::picture`), fitted, in place of carried ones |

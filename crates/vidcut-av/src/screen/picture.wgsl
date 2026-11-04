@@ -411,6 +411,83 @@ fn fs_convert(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(rgb(yuv_woven(floor(in.position.xy))), 1.0);
 }
 
+struct Table {
+    ranges: vec4<f32>,
+    sizes: vec4<u32>,
+};
+
+@group(1) @binding(1) var<uniform> table: Table;
+@group(1) @binding(2) var table_rows: texture_2d<f32>;
+@group(1) @binding(3) var table_cube: texture_3d<f32>;
+
+fn table_place(c: vec3<f32>, low: f32, high: f32, size: u32) -> vec3<f32> {
+    return clamp((c - vec3<f32>(low)) / (high - low), vec3<f32>(0.0), vec3<f32>(1.0)) * f32(size - 1u);
+}
+
+fn table_row(i: u32) -> vec3<f32> {
+    let width = table.sizes.z;
+    return textureLoad(table_rows, vec2<u32>(i % width, i / width), 0).rgb;
+}
+
+fn table_cell(i: vec3<u32>) -> vec3<f32> {
+    return textureLoad(table_cube, i, 0).rgb;
+}
+
+fn through_rows(c: vec3<f32>) -> vec3<f32> {
+    let n = table.sizes.x;
+    let t = table_place(c, table.ranges.x, table.ranges.y, n);
+    let i = min(vec3<u32>(t), vec3<u32>(n - 2u));
+    let f = t - vec3<f32>(i);
+    return vec3<f32>(
+        mix(table_row(i.x).x, table_row(i.x + 1u).x, f.x),
+        mix(table_row(i.y).y, table_row(i.y + 1u).y, f.y),
+        mix(table_row(i.z).z, table_row(i.z + 1u).z, f.z),
+    );
+}
+
+fn through_cube(c: vec3<f32>) -> vec3<f32> {
+    let n = table.sizes.y;
+    let t = table_place(c, table.ranges.z, table.ranges.w, n);
+    let i = min(vec3<u32>(t), vec3<u32>(n - 2u));
+    let f = t - vec3<f32>(i);
+    let near = mix(
+        mix(table_cell(i), table_cell(i + vec3<u32>(1u, 0u, 0u)), f.x),
+        mix(table_cell(i + vec3<u32>(0u, 1u, 0u)), table_cell(i + vec3<u32>(1u, 1u, 0u)), f.x),
+        f.y,
+    );
+    let far = mix(
+        mix(table_cell(i + vec3<u32>(0u, 0u, 1u)), table_cell(i + vec3<u32>(1u, 0u, 1u)), f.x),
+        mix(table_cell(i + vec3<u32>(0u, 1u, 1u)), table_cell(i + vec3<u32>(1u, 1u, 1u)), f.x),
+        f.y,
+    );
+    return mix(near, far, f.z);
+}
+
+fn looked_up(c: vec3<f32>) -> vec3<f32> {
+    var out = c;
+    if table.sizes.x > 0u {
+        out = through_rows(out);
+    }
+    if table.sizes.y > 0u {
+        out = through_cube(out);
+    }
+    return out;
+}
+
+@fragment
+fn fs_convert_lut(in: Out) -> @location(0) vec4<f32> {
+    return vec4<f32>(looked_up(rgb(yuv_woven(floor(in.position.xy)))), 1.0);
+}
+
+@fragment
+fn fs_lut(in: Out) -> @location(0) vec4<f32> {
+    let c = textureLoad(timeline, vec2<i32>(in.position.xy), 0);
+    if c.a <= 0.0 {
+        return c;
+    }
+    return vec4<f32>(looked_up(c.rgb / c.a) * c.a, c.a);
+}
+
 @group(0) @binding(1) var before: texture_2d<f32>;
 @group(0) @binding(2) var middle: texture_2d<f32>;
 @group(0) @binding(3) var after: texture_2d<f32>;
@@ -483,6 +560,9 @@ fn fs_halve(in: Out) -> @location(0) vec4<f32> {
 }
 
 fn placed(px: vec2<f32>) -> vec4<f32> {
+    if p.made.x > 2.5 && p.made.x < 3.5 {
+        return textureLoad(halved, vec2<i32>(px), 0) * p.placed.y;
+    }
     let s = shown(px);
     return vec4<f32>(s.rgb * s.a, s.a);
 }
@@ -1029,10 +1109,23 @@ fn blur_tap(px: vec2<i32>, k: i32, size: vec2<i32>) -> vec4<f32> {
     }
     let at = blur_folded(i, n);
     let c = textureLoad(blur_source, select(vec2<i32>(at, px.y), vec2<i32>(px.x, at), down), 0);
-    if blurring.blend.w > 0.5 && blurring.blend.y < 0.5 && c.a > 0.0 {
+    if blurring.blend.w > 0.5 {
+        return effect_taken(c, blurring.blend.y);
+    }
+    return c;
+}
+
+fn effect_taken(c: vec4<f32>, use_alpha: f32) -> vec4<f32> {
+    if use_alpha < 0.5 && c.a > 0.0 {
         return vec4<f32>(c.rgb / c.a, c.a);
     }
     return c;
+}
+
+fn effect_mixed(px: vec2<i32>, made: vec4<f32>, blend: f32, use_alpha: f32) -> vec4<f32> {
+    let was = textureLoad(blur_start, px, 0);
+    let out = select(vec4<f32>(made.rgb * was.a, was.a), made, use_alpha > 0.5);
+    return mix(was, out, blend);
 }
 
 @fragment
@@ -1050,13 +1143,193 @@ fn fs_blur(in: Out) -> @location(0) vec4<f32> {
         sum += (blur_tap(px, j * step, size) + blur_tap(px, -j * step, size)) * w;
         total += 2.0 * w;
     }
-    var out = sum / total;
+    let out = sum / total;
     if blurring.blend.z > 0.5 {
-        let was = textureLoad(blur_start, px, 0);
-        if blurring.blend.y < 0.5 {
-            out = vec4<f32>(out.rgb * was.a, was.a);
-        }
-        out = mix(was, out, blurring.blend.x);
+        return effect_mixed(px, out, blurring.blend.x, blurring.blend.y);
     }
     return out;
+}
+
+struct Mosaic {
+    grid: vec4<f32>,
+    way: vec4<i32>,
+    more: vec4<f32>,
+    alpha: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> mosaicking: Mosaic;
+
+const MOSAIC_NEAR: f32 = 0.00390625;
+
+const MOSAIC_WHOLE: f32 = 0.999;
+
+fn mosaic_odd(v: f32) -> bool {
+    return v - 2.0 * floor(v / 2.0) > 0.5;
+}
+
+fn mosaic_x(c: f32) -> f32 {
+    let half = select(0.0, 0.5, mosaicking.way.z == 0);
+    return mosaicking.grid.z + (c + half) * mosaicking.more.x;
+}
+
+fn mosaic_y(c: f32, r: f32) -> f32 {
+    var part = 0.5;
+    if mosaicking.way.z == 1 {
+        part = select(0.0, 0.5, mosaic_odd(c));
+    } else if mosaicking.way.z == 2 {
+        part = select(1.0 / 3.0, 2.0 / 3.0, mosaic_odd(c + r));
+    }
+    return mosaicking.grid.w + (r + part) * mosaicking.grid.y;
+}
+
+fn mosaic_nearest(p: vec2<f32>) -> vec2<f32> {
+    let exact = p - mosaicking.grid.zw;
+    let at = exact + vec2<f32>(MOSAIC_NEAR);
+    let step = mosaicking.more.x;
+    let high = mosaicking.grid.y;
+    let first = floor(at.x / step);
+    if mosaicking.way.z == 1 {
+        let wide = high / mosaicking.grid.x;
+        var best = vec2<f32>(0.0);
+        var least = -1.0;
+        for (var d = 0.0; d <= 1.0; d += 1.0) {
+            let c = first + d;
+            let shift = select(0.0, 0.5, mosaic_odd(c));
+            let r = floor(at.y / high - shift + 0.5);
+            let off = vec2<f32>((exact.x - c * step) * wide, exact.y - (r + shift) * high);
+            let far = dot(off, off);
+            if least < 0.0 || far < least {
+                least = far;
+                best = vec2<f32>(c, r);
+            }
+        }
+        return best;
+    }
+    let r = floor(at.y / high);
+    if mosaicking.way.z == 2 {
+        let across = exact.x / step - first;
+        let down = exact.y / high - r;
+        let inside = select(across < down, across < 1.0 - down, !mosaic_odd(first + r));
+        return vec2<f32>(select(first + 1.0, first, inside), r);
+    }
+    return vec2<f32>(first, r);
+}
+
+fn mosaic_column(slot: i32, n: i32) -> vec2<f32> {
+    let samples = mosaicking.way.w;
+    let low = slot * samples;
+    let step = mosaicking.more.x;
+    let gap = f32(low) - mosaicking.grid.z;
+    if step < f32(samples) {
+        return vec2<f32>(f32(low), floor(gap / step));
+    }
+    let c = floor(gap / step);
+    for (var d = -1.0; d <= 1.0; d += 1.0) {
+        let x = i32(floor(mosaic_x(c + d) + MOSAIC_NEAR));
+        if x >= low && x < low + samples {
+            return vec2<f32>(f32(x), c + d);
+        }
+    }
+    if low == 0 {
+        return vec2<f32>(0.0, c);
+    }
+    if low + samples >= n {
+        return vec2<f32>(f32(n - 1), c + 1.0);
+    }
+    return vec2<f32>(-1.0, 0.0);
+}
+
+fn mosaic_row(c: f32, slot: i32, n: i32) -> i32 {
+    let samples = mosaicking.way.w;
+    if samples == 1 {
+        return slot;
+    }
+    let low = slot * samples;
+    let r = floor((f32(low) - mosaicking.grid.w) / mosaicking.grid.y);
+    for (var d = -1.0; d <= 1.0; d += 1.0) {
+        let y = i32(floor(mosaic_y(c, r + d) + MOSAIC_NEAR));
+        if y >= low && y < low + samples {
+            return y;
+        }
+    }
+    return select(low, n - 1, low + samples >= n);
+}
+
+fn mosaic_load(i: i32, at: i32, down: bool) -> vec4<f32> {
+    let size = vec2<i32>(textureDimensions(blur_source));
+    if down {
+        return textureLoad(blur_source, vec2<i32>(at, clamp(i, 0, size.y - 1)), 0);
+    }
+    let c = textureLoad(blur_source, vec2<i32>(clamp(i, 0, size.x - 1), at), 0);
+    return effect_taken(c, mosaicking.more.z);
+}
+
+fn mosaic_tap(s: i32, at: i32, down: bool) -> vec4<f32> {
+    if mosaicking.way.w == 1 {
+        return mosaic_load(s, at, down);
+    }
+    if s % 2 == 1 {
+        let m = (s - 1) / 2;
+        return mix(mosaic_load(m, at, down), mosaic_load(m + 1, at, down), 0.25);
+    }
+    let m = s / 2 - 1;
+    return mix(mosaic_load(m, at, down), mosaic_load(m + 1, at, down), 0.75);
+}
+
+fn mosaic_box(middle: i32, reach: i32, n: i32, at: i32, down: bool) -> vec4<f32> {
+    let first = max(middle - reach, 0);
+    let last = min(middle + reach, n - 1);
+    var sum = mosaic_tap(0, at, down) * f32(first - (middle - reach));
+    sum += mosaic_tap(n - 1, at, down) * f32(middle + reach - last);
+    for (var s = first; s <= last; s++) {
+        sum += mosaic_tap(s, at, down);
+    }
+    return sum / f32(2 * reach + 1);
+}
+
+fn mosaic_cell(p: vec2<f32>, n: vec2<i32>) -> vec4<f32> {
+    let cell = mosaic_nearest(p);
+    let x = clamp(i32(floor(mosaic_x(cell.x) + MOSAIC_NEAR)), 0, n.x - 1);
+    let y = clamp(i32(floor(mosaic_y(cell.x, cell.y) + MOSAIC_NEAR)), 0, n.y - 1);
+    return textureLoad(blur_source, vec2<i32>(x, y) / mosaicking.way.w, 0);
+}
+
+fn mosaic_alpha(cell: vec4<f32>, was: vec4<f32>) -> vec4<f32> {
+    if mosaicking.alpha.x > 0.5 {
+        return vec4<f32>(cell.rgb, was.a);
+    }
+    if mosaicking.alpha.y < 0.5 {
+        return cell;
+    }
+    if cell.a >= MOSAIC_WHOLE {
+        return vec4<f32>(cell.rgb, 1.0);
+    }
+    return vec4<f32>(was.rgb, 0.0);
+}
+
+@fragment
+fn fs_mosaic(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let samples = mosaicking.way.w;
+    let n = vec2<i32>(textureDimensions(blur_source)) * samples;
+    if mosaicking.more.w < 1.5 {
+        let column = mosaic_column(px.x, n.x);
+        if column.x < 0.0 {
+            return vec4<f32>(0.0);
+        }
+        if mosaicking.more.w < 0.5 {
+            return mosaic_box(i32(column.x), mosaicking.way.x, n.x, px.y, false);
+        }
+        let row = mosaic_row(column.y, px.y, n.y);
+        return mosaic_box(row, mosaicking.way.y, n.y, px.x, true);
+    }
+    let was = textureLoad(blur_start, px, 0);
+    var sum = vec4<f32>(0.0);
+    for (var b = 0; b < samples; b++) {
+        for (var a = 0; a < samples; a++) {
+            sum += mosaic_alpha(mosaic_cell(vec2<f32>(px * samples + vec2<i32>(a, b)), n), was);
+        }
+    }
+    let out = sum / f32(samples * samples);
+    return effect_mixed(px, out, mosaicking.more.y, mosaicking.more.z);
 }
