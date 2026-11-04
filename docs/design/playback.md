@@ -326,9 +326,10 @@ The audio device:
 Ducking in the preview:
 
 - `Live::hear_ducking` hears the sources of the timeline's plan before the player gets it.
-- It takes only the measurements that this process keeps (`env::kept_measure`). Why: the session thread reads no file.
-- It measures the rest on `vidcut-measure`, at job priority. Until then, those clips dip nothing.
-- `Msg::DuckHeard` then loads the timeline again. A measurement that failed shows as a notice, and is not tried again until the next `track.set` with `duck`.
+- It takes only the measurements that the core holds for the open project (`duck_kept`). Why: the session thread reads no file.
+- A new project empties `duck_kept`. Thus it holds only sounds of the open project.
+- It gets the rest on `vidcut-measure`, at job priority (`env::measure_duck`). That job reads the disk cache, or measures. Until then, those clips dip nothing.
+- `Msg::DuckHeard` brings the results to the core, and loads the timeline again. A measurement that failed shows as a notice, and is not tried again until the next `track.set` with `duck`.
 
 Faders:
 

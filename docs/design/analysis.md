@@ -312,6 +312,7 @@ flowchart TD
 | pool filmstrips, timeline tiles | `thumbs` (`thumbcache`) | origin, size, frames, input color space |
 | waveforms | `waveforms` | origin, channels |
 | audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
+| sound matches of two files | `analysis` (`AvEnv`) | both origins |
 | transcripts (`media.transcribe`) | `analysis` (`AvEnv`) | origin, stream |
 | light, for HDR metadata | `analysis` (`light::cache_in`) | origin, input color space |
 | proxies | `proxies` in `playback_files.folder` (`PlaybackFiles::proxies_in`): in the project's folder unless set (in the cache dir without a project); an absolute folder is shared by each project | content (`paths::proxy_origin`), size, codec, input color space |
@@ -324,10 +325,16 @@ flowchart TD
 
 - `reset` with `keep_downloads` keeps `models` and `speech-replies`.
 - `Tiles::evict` drops kept pictures past the memory budget of the tile cache.
-- Levels, voice activity, picture stats and light are also kept in memory. The last results heard (`HEARD`, an `Lru`) are kept only in memory.
-- `LEVELS`, `PICTURES`, `VOICES`, `TRANSCRIPTS` and `MATCHES` are each an `Lru`. A value that leaves is read from the disk or made again.
-- `kept_measure` reads only the memory. A measure that left comes back from the disk, by the job that `hear_ducking` starts.
-- `MADE_WITH` has no cap. It tells the next open how a proxy was written, and that open removes it. Nothing on the disk has this record.
+- The disk cache holds the levels, voice activity, picture stats and sound matches. Thus `cache` limits them.
+- Each `AvEnv` also keeps a few results and transcripts in memory (`Memos`). Why: one request can ask for the same file many times.
+  - An `AvEnv` lives for one request or one job. Its memory goes with it.
+  - A result that the disk cache refuses also goes with it. The next request measures again.
+- The core holds the measurements of ducking for the open project ([playback](playback.md#sound)).
+- Light is also kept in memory.
+- A job makes some results on a copy of the project, and the edit after it finds them. Each of these is in an `Lru` of a fixed size:
+  - `HEARD` and `PAID`: the last results heard. Why: a transcription costs minutes or money.
+  - `LOUD`: the loudness of a plan.
+  - `MADE_WITH`: how a proxy was written. Past its size, the report of the oldest proxy lacks that line.
 
 ### The disk cache limit
 
