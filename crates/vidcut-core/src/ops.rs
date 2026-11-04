@@ -891,41 +891,61 @@ pub fn slide(p: &mut Project, id: &str, by: i64) -> Result<()> {
     let lead = linked::leads(p, &[id.to_string()]);
     let id = lead.first().map_or(id, String::as_str);
     let (ti, ci) = locate(p, id)?;
+    let t = &p.tracks[ti];
+    let mut moved = t.clips[ci].clone();
+    let earlier = ci.checked_sub(1);
+    let later = Some(ci + 1).filter(|&i| i < t.clips.len());
+    let left = earlier.filter(|&i| t.clips[i].end() == moved.start);
+    let right = later.filter(|&i| t.clips[i].start == moved.end());
+    let least = match (left, earlier) {
+        (Some(_), _) => i64::MIN,
+        (None, Some(i)) => t.clips[i].end() + 1 - moved.start,
+        (None, None) => -moved.start,
+    };
+    let most = match (right, later) {
+        (Some(_), _) => i64::MAX,
+        (None, Some(i)) => t.clips[i].start - 1 - moved.end(),
+        (None, None) => i64::MAX,
+    };
+    let by = by.clamp(least, most);
     if by == 0 {
         return Ok(());
     }
-    let t = &p.tracks[ti];
-    let c = t.clips[ci].clone();
-    let left = ci.checked_sub(1).filter(|&i| t.clips[i].end() == c.start);
-    let right = Some(ci + 1).filter(|&i| i < t.clips.len() && t.clips[i].start == c.end());
-    let (Some(l), Some(r)) = (left, right) else {
-        return Err(Error::invalid(format!(
-            "{id} slides only between two clips that touch it"
-        )));
-    };
-    let (mut before_c, mut moved, mut after_c) = (t.clips[l].clone(), c, t.clips[r].clone());
-    let parts: Vec<_> = [&before_c, &moved, &after_c]
-        .into_iter()
+    let mut before_c = left.map(|i| t.clips[i].clone());
+    let mut after_c = right.map(|i| t.clips[i].clone());
+    let parts: Vec<_> = before_c
+        .iter()
+        .chain([&moved])
+        .chain(&after_c)
         .flat_map(|x| linked::tied_to(p, &x.id))
         .collect();
-    let (left_id, moved_id) = (before_c.id.clone(), moved.id.clone());
+    let left_id = before_c.as_ref().map(|c| c.id.clone());
+    let moved_id = moved.id.clone();
     let taken = linked::take(p, &parts)?;
-    before_c.duration += by;
     moved.start += by;
-    after_c.move_head(by);
-    check_source(p, &before_c)?;
-    check_source(p, &after_c)?;
+    if let Some(c) = &mut before_c {
+        c.duration += by;
+        check_source(p, c)?;
+    }
+    if let Some(c) = &mut after_c {
+        c.move_head(by);
+        check_source(p, c)?;
+    }
     let before = (ti == main_index(p)).then(|| Before::of(p));
     let track = &mut p.tracks[ti];
-    track.clips[l] = before_c;
+    if let (Some(l), Some(c)) = (left, before_c) {
+        track.clips[l] = c;
+    }
     track.clips[ci] = moved;
-    track.clips[r] = after_c;
+    if let (Some(r), Some(c)) = (right, after_c) {
+        track.clips[r] = c;
+    }
     fix_audio(p, ti);
     if let Some(before) = before {
         follow::follow(p, &before, &Edit::default());
     }
     for mut part in taken {
-        if part.lead == left_id {
+        if left_id.as_ref() == Some(&part.lead) {
             part.clip.duration += by;
         } else if part.lead == moved_id {
             part.clip.start += by;
@@ -2605,11 +2625,7 @@ pub fn paste(p: &mut Project, clips: &[TrackClip], at: i64) -> Result<Vec<String
 }
 
 fn check_bin(path: &str) -> Result<()> {
-    if path.is_empty()
-        || path
-            .split('/')
-            .any(|n| n.trim().is_empty() || n != n.trim())
-    {
+    if path.split('/').any(str::is_empty) {
         return Err(Error::usage(format!(
             "bin {path:?}: use names separated by '/', like \"Interviews/Day 1\""
         )));

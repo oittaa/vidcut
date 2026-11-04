@@ -3083,6 +3083,7 @@ impl Live {
             | Request::AnalyzeScenes { .. }
             | Request::AnalyzeBlack { .. }
             | Request::AnalyzeLoudness { .. }
+            | Request::AnalyzeDucking { .. }
             | Request::AnalyzeWords { media: Some(_), .. }
             | Request::AnalyzeWords { clips: Some(_), .. } => self.project_task(envelope, job),
             Request::TrackSet {
@@ -3239,7 +3240,7 @@ impl Live {
             }
             Request::MulticamCreate {
                 sync: vidcut_core::model::AngleSync::Sound,
-                angles: None,
+                rows: None,
                 ..
             }
             | Request::MulticamLayout {
@@ -3314,6 +3315,7 @@ impl Live {
             | Request::AnalyzeScenes { .. }
             | Request::AnalyzeBlack { .. }
             | Request::AnalyzeLoudness { .. }
+            | Request::AnalyzeDucking { .. }
             | Request::StoryboardRender { .. } => Work::Job,
             _ => Work::Interactive,
         };
@@ -4127,12 +4129,6 @@ impl Live {
             .or_else(|| p.group_of(angle?))
             .or_else(|| p.group_of(self.source_media.as_deref()?))
             .ok_or_else(|| Error::invalid("Open a clip of a synced group first"))?;
-        if g.angles.len() > vidcut_core::multicam::MULTI_SOURCE_ANGLES {
-            return Err(Error::invalid(format!(
-                "Multi Source shows {} angles at most",
-                vidcut_core::multicam::MULTI_SOURCE_ANGLES
-            )));
-        }
         if let Some(a) = angle.filter(|a| g.at_of(a).is_none()) {
             return Err(Error::invalid(format!("{a} is not in {}", g.name)));
         }
@@ -4141,7 +4137,7 @@ impl Live {
                 .source_media
                 .as_deref()
                 .filter(|m| g.at_of(m).is_some()))
-            .or(g.angles.first().map(|a| a.media.as_str()))
+            .or(g.clips().next().map(|c| c.media.as_str()))
             .map(str::to_string);
         self.source_group = Some(g.id.clone());
         self.source_media = shown;
@@ -4758,6 +4754,9 @@ fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
         range: Some(range), ..
     }
     | Request::AnalyzeWords {
+        range: Some(range), ..
+    }
+    | Request::AnalyzeDucking {
         range: Some(range), ..
     } = &mut envelope.request
         && let Ok((a, b)) = context.range(range)

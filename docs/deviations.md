@@ -2398,25 +2398,48 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:**
   - These are measurements in Resolve Studio 21.1.2. The icon always starts a new group from the timecodes, and the old group stays in the pool.
   - A saved group plus one new file gives a new group of all the files, at their timecodes.
+  - Thus the icon opens all the files as a new sync. This brings a file dropped by a drag back and loses the saved places.
 - **vidcut:**
   - The icon on files that are already one saved group opens that group.
-  - A group plus a new file refuses.
+  - A file that the group dropped does not count as new, so the icon opens the saved group.
+  - A group plus a new file opens all the files as a new group, as in Resolve.
 - **Why:**
   - Two groups on one file leave the older one hard to reach.
   - In the one case measured, "Open Sync Group..." opened only the newer group.
+  - The icon keeps the saved work when it opens the saved group.
   - The owner approved this difference.
 
-## X124. The Sync Clips window refuses files that Resolve opens
+## X125. Sync by Sound uses time order on a row
 
 - **Resolve:**
-  - These are measurements in Resolve Studio 21.1.2. 24 cameras open. A still is left out. A file with no picture gets a sound-only row.
-  - Files of two saved groups open as a new group.
-  - Two files with one camera name share a row. Only two files with one start and one length give no window.
-  - Files with no name and no overlap share a row. An unnamed row beside named rows reads its number among the unnamed rows.
+  - This is a measurement in Resolve Studio 21.1.2. Sync by Sound takes the files of a row in bin order.
+  - With c2 first in the bin and c1 second, it drops c1 silently, although c1's frames 0 to 375 have nothing over them.
 - **vidcut:**
-  - The window refuses more than 12 cameras, a still, a file with no picture and files of different groups.
-  - It refuses two files with one camera name.
-  - Each file has its own row. An unnamed row beside named rows reads its row position.
+  - Files on a row go by their place from the sound. A tie goes by bin order.
+  - A file keeps only the part after everything before it. A file with no such part is not on the row.
+  - Thus c2 and c1 give the same result as c1 and c2: c1 at 0 whole, c2 at 500 with head 125.
 - **Why:**
-  - One row for each file comes first. The rows that hold many files are the next change ([todo/sync-bin.md](todo/sync-bin.md)).
-  - The owner approved this order of work, and this difference stays only until that change.
+  - Nothing is lost for a reason the user cannot see, and the result does not depend on bin order.
+  - This is the rule of Timecode, so one rule serves both.
+  - The owner approved this difference.
+
+## X126. Source Overwrite keeps sync with a timeline Out alone
+
+- **Resolve:**
+  - This is a measurement in Resolve Studio 21.1.2. With an Out mark and no In on the timeline, the clip starts at the timeline's first frame with the file's first frame.
+  - The clip is not in sync, also when a clip with the same timecode is under it. This looks like a fault.
+- **vidcut:**
+  - The reference is the first clip before Out with shared timecode.
+  - The new clip goes in sync from where the file starts to Out.
+- **Why:**
+  - Source Overwrite makes a synced cutaway. A clip that is out of sync is the fault that this edit is there to prevent.
+
+## X128. Removing a file takes it out of its groups
+
+- **Resolve:**
+  - This is a measurement in Resolve Studio 21.1.2. A file deleted from the Media Pool stays in its group. The group keeps its 3 angles.
+- **vidcut:**
+  - `media.remove` also takes the file out of its groups. A group with no file left goes too.
+- **Why:**
+  - A group in vidcut holds only files that are in the project.
+  - The owner approved this difference.

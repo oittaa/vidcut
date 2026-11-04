@@ -490,20 +490,25 @@ impl Workspace {
         );
         let active = self.snap.source_media.as_deref();
         let cells: Vec<GridCell> = group
-            .angles
+            .rows
             .iter()
             .enumerate()
-            .map(|(i, angle)| {
-                let frames = p.media(&angle.media).map_or(0, |m| p.media_frames(m));
-                let frame = position - angle.at;
-                GridCell {
+            .filter_map(|(i, row)| {
+                let (clip, frame) = row.clips.iter().find_map(|clip| {
+                    let frames = vidcut_core::multicam::visible(&p, clip);
+                    let frame = position - clip.start();
+                    (clip.head..clip.head + frames)
+                        .contains(&frame)
+                        .then_some((clip, frame))
+                })?;
+                Some(GridCell {
                     number: Some(i + 1),
                     label: None,
-                    media: angle.media.clone(),
-                    frame: (0..frames).contains(&frame).then_some(frame),
-                    active: active == Some(angle.media.as_str()),
+                    media: clip.media.clone(),
+                    frame: Some(frame),
+                    active: active.is_some_and(|a| row.clips.iter().any(|c| c.media == a)),
                     outlined: false,
-                }
+                })
             })
             .collect();
         if let Some(media) = self.camera_grid(ui, area, &p, &cells, speed) {
@@ -553,6 +558,15 @@ impl Workspace {
             };
             let piece = if self.snap.missing.contains(&m.id) {
                 painter.rect_filled(picture, CornerRadius::ZERO, theme::colors().offline);
+                None
+            } else if m.info.video.is_none() {
+                painter.text(
+                    picture.center(),
+                    Align2::CENTER_CENTER,
+                    egui_phosphor::regular::WAVEFORM,
+                    FontId::proportional((picture.height() * 0.4).clamp(12.0, 64.0)),
+                    theme::WAVEFORM,
+                );
                 None
             } else {
                 match shown.frame {
