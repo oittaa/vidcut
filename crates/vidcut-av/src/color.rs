@@ -171,6 +171,14 @@ pub(crate) fn is_rgb(p: format::Pixel) -> bool {
         .is_some_and(|d| unsafe { (*d.as_ptr()).flags } & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0)
 }
 
+fn is_deep_rgb(p: format::Pixel) -> bool {
+    p.descriptor().is_some_and(|d| {
+        // SAFETY: FFmpeg's static descriptor of the format.
+        let d = unsafe { &*d.as_ptr() };
+        d.flags & ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0 && d.comp[0].depth > 8
+    })
+}
+
 fn untagged_matrix(width: u32, height: u32) -> Matrix {
     if width >= 1280 || height > 576 {
         Matrix::Bt709
@@ -361,6 +369,7 @@ impl Source {
             S::AVCOL_SPC_BT470BG | S::AVCOL_SPC_SMPTE170M | S::AVCOL_SPC_FCC => Matrix::Bt601,
             S::AVCOL_SPC_BT2020_NCL | S::AVCOL_SPC_BT2020_CL => Matrix::Bt2020,
             _ if hdr.is_some() => Matrix::Bt2020,
+            _ if is_deep_rgb(f.format()) => Matrix::Bt709,
             _ => untagged_matrix(f.width(), f.height()),
         };
         Self {
