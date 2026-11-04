@@ -2568,3 +2568,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - An error is better than a wrong picture that looks correct.
   - The owner approved this difference.
+
+## X135. DNxHR 444 exports without alpha
+
+- **Resolve:**
+  - Export Alpha works with DNxHR 444 (p. 4093).
+- **vidcut:**
+  - `video.alpha` refuses DNxHR 444. The Export dialog does not show Export Alpha for it.
+- **Why:**
+  - The FFmpeg encoder `dnxhd` cannot write alpha.
+  - In FFmpeg 9.0.1 it lists four pixel formats: `yuv422p`, `yuv422p10le`, `yuv444p10le` and `gbrp10le`. None of them has alpha.
+  - The owner approved this difference.

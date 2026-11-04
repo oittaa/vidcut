@@ -346,7 +346,7 @@ const CONTAINERS: [Container; 9] = [
 
 fn profiles(c: VideoCodec) -> &'static [&'static str] {
     match c {
-        VideoCodec::Prores => &["proxy", "lt", "standard", "hq", "4444"],
+        VideoCodec::Prores => &["proxy", "lt", "standard", "hq", "4444", "xq"],
         VideoCodec::Dnxhr => &["lb", "sq", "hq", "hqx", "444"],
         VideoCodec::H264 => &["baseline", "main", "high"],
         VideoCodec::Hevc => &["main", "main10"],

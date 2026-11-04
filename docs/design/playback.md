@@ -563,7 +563,7 @@ The jobs:
   - With a chosen codec: the encoders that make it, with the options of its grade (`grade_options`).
     - ProRes 422: Apple's hardware (VideoToolbox), the GPU through Vulkan, and the CPU.
     - ProRes 4444: Apple's hardware when it takes 4:4:4 (`chroma_444`), and the CPU.
-    - ProRes 4444 XQ: the CPU. Why: no check shows that Apple's encoder takes this grade. The exports do not use it either.
+    - ProRes 4444 XQ: the CPU. Why: no check shows that Apple's encoder takes this grade.
     - Why Vulkan makes no ProRes 4444: the test of the encoders tries it with 4:2:2 only (`probes`).
     - DNxHR: the CPU. HEVC and AV1: the GPU, and the CPU.
     - No encoder of another codec takes its place. With no encoder, `render_cache::write` fails, and the background render stops with the error.
