@@ -418,6 +418,13 @@ The bar and the Jobs button:
 - `vidcut-import-drop` queues the files as one pick, and each folder as another (`PickedFolder::read`).
 - A drop goes into the open bin. Why: winit does not report where files drop, and does not report drops on Wayland.
 
+**The pool's box.**
+
+- `Workspace::pool_box` draws the box from a drag on the background of the pool. `paint::marquee` draws it, as on the timeline.
+- `BinsUi::places` holds the place of each media item that the view shows. Why: a view draws only the rows in view, and a box can reach past them.
+- `Boxing` keeps the start of the box from the top of the content. Thus the start stays on its clip when the wheel scrolls the pool.
+- On release, one `selection.set` carries the new selection (`boxed`).
+
 **Media details.**
 
 - The metadata strip of the pool (`Workspace::metadata_strip`) shows what the project keeps of the chosen media (`clip_info::glance`). `pool.json` in the config folder keeps it on or off.
