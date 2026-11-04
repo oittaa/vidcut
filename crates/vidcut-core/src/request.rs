@@ -117,10 +117,11 @@ pub enum Request {
     #[serde(rename = "media.details")]
     MediaDetails { media: String },
     /// Where the angles of a multicam clip lie, for media in angle order.
-    /// This changes nothing. The answer is the `start_timecode` and `frames`
-    /// of the whole, and for each angle its `media`, the frame `at` which it
-    /// starts, and the `source` frames it uses. An item with marks uses only
-    /// the frames between them. A file with no timecode starts at 00:00:00:00.
+    /// This changes nothing. The answer is the `start_timecode`, the `start`
+    /// in frames and the `frames` of the whole, and for each angle its `media`,
+    /// the frame `at` which it starts, and the `source` frames it uses. An item
+    /// with marks uses only the frames between them. A file with no timecode
+    /// starts at 00:00:00:00.
     #[serde(rename = "multicam.layout")]
     MulticamLayout {
         media: OneOrMany<String>,
@@ -150,6 +151,24 @@ pub enum Request {
         /// Into this bin (default: the top level).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bin: Option<String>,
+        /// The place of each file by hand, as `multicam.set` takes them. The
+        /// group then starts at 01:00:00:00, and `sync` plays no part. With
+        /// none, `sync` works out the places, and a file that it lines up is
+        /// `locked`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        angles: Option<Vec<crate::model::GroupAngle>>,
+    },
+    /// Set the place of each file of a synced group: its `media`, the frame
+    /// `at` which it starts, and `locked`, the sync lock. `angles` names each
+    /// file of the group once. The earliest file goes to the group's start. A
+    /// stretch of more than 10 minutes with no file closes to 1 second: `at`
+    /// falls, and `hidden` holds the closed frames. `at` plus `hidden` is the
+    /// place in real time, and a request can give both. Returns the group. The
+    /// clips on the timeline, the group's start and its marks do not change.
+    #[serde(rename = "multicam.set")]
+    MulticamSet {
+        group: String,
+        angles: Vec<crate::model::GroupAngle>,
     },
     /// The synced groups: for each its `id`, `name`, `bin`,
     /// `start_timecode`, `frames` and `angles`.
@@ -3875,6 +3894,9 @@ pub enum GuiPanel {
     /// The Sync Bin tab, in the Media Pool's place: a row for each camera of
     /// the bin, and a grid of the cameras in the viewer.
     SyncBin,
+    /// The Sync Clips window: lines up the files of the current bin by hand
+    /// or by Auto Sync, and saves them as a synced group.
+    SyncClips,
     /// The Transitions tab, in the Media Pool's place: the transitions to
     /// drag onto an edit.
     Transitions,

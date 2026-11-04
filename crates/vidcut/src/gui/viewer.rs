@@ -20,10 +20,30 @@ use crate::live::{PlayerId, seek_frame};
 pub(super) const ACTIVE_ANGLE: Color32 = Color32::from_rgb(230, 50, 50);
 
 pub(super) struct GridCell {
+    pub number: Option<usize>,
+    pub label: Option<String>,
     pub media: String,
     pub frame: Option<i64>,
     pub active: bool,
     pub outlined: bool,
+}
+
+pub(super) fn grid_pictures(area: Rect, p: &Project, count: usize) -> Vec<Rect> {
+    let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
+    let cols = (1..=count).find(|c| c * c >= count).unwrap_or(1);
+    let size = vec2(
+        area.width() / cols as f32,
+        area.height() / count.div_ceil(cols).max(1) as f32,
+    );
+    (0..count)
+        .map(|i| {
+            let cell = Rect::from_min_size(
+                area.min + vec2(size.x * (i % cols) as f32, size.y * (i / cols) as f32),
+                size,
+            );
+            fit(cell.shrink(6.0), aspect)
+        })
+        .collect()
 }
 
 #[derive(Clone)]
@@ -264,7 +284,7 @@ impl Workspace {
             .is_some_and(crate::gui::timeline::tools::Dynamic::running)
             && self.dynamic_target().is_some();
         let trim = self.trim_editor_edit();
-        let sync_grid = self.sync_grid_on();
+        let sync_grid = self.sync_grid_on() && !self.sync_clips.open;
         let tools = mode == ViewerMode::Timeline
             && self.timeline.picture_grab.row
             && !dynamic
@@ -308,9 +328,14 @@ impl Workspace {
             && trim.is_none()
             && mode != ViewerMode::MultiSource
             && !sync_grid
+            && !self.sync_clips.open
             && let Some(cells) = &mut self.cells
         {
             cells.close();
+        }
+        if self.sync_clips.open && (dynamic || trim.is_some() || mode == ViewerMode::MultiSource) {
+            ui.allocate_rect(area, Sense::hover());
+            return;
         }
         if dynamic {
             self.dynamic_view(ui, area);
@@ -467,10 +492,13 @@ impl Workspace {
         let cells: Vec<GridCell> = group
             .angles
             .iter()
-            .map(|angle| {
+            .enumerate()
+            .map(|(i, angle)| {
                 let frames = p.media(&angle.media).map_or(0, |m| p.media_frames(m));
                 let frame = position - angle.at;
                 GridCell {
+                    number: Some(i + 1),
+                    label: None,
                     media: angle.media.clone(),
                     frame: (0..frames).contains(&frame).then_some(frame),
                     active: active == Some(angle.media.as_str()),
@@ -494,30 +522,31 @@ impl Workspace {
         cells: &[GridCell],
         speed: f64,
     ) -> Option<String> {
-        let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
         ui.allocate_rect(area, Sense::hover());
-        let painter = ui.painter_at(area);
-        painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
-        let count = cells.len();
-        let cols = (1..3).find(|c| c * c >= count).unwrap_or(3);
-        let size = vec2(
-            area.width() / cols as f32,
-            area.height() / count.div_ceil(cols).max(1) as f32,
-        );
+        ui.painter_at(area)
+            .rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
+        let pictures = grid_pictures(area, p, cells.len());
+        self.camera_cells(ui, &pictures, p, cells, speed)
+    }
+
+    pub(super) fn camera_cells(
+        &mut self,
+        ui: &mut egui::Ui,
+        pictures: &[Rect],
+        p: &Project,
+        cells: &[GridCell],
+        speed: f64,
+    ) -> Option<String> {
         let ppp = ui.ctx().pixels_per_point();
         let gpu_pictures = self.screens.as_ref().map(|s| s.gpu_pictures());
         let ctx = ui.ctx().clone();
         let players = self
             .cells
             .get_or_insert_with(|| super::cells::Cells::new(ctx, gpu_pictures.unwrap_or_default()));
-        players.keep(count);
+        players.keep(cells.len());
         let mut picked = None;
-        for (i, shown) in cells.iter().enumerate() {
-            let cell = Rect::from_min_size(
-                area.min + vec2(size.x * (i % cols) as f32, size.y * (i / cols) as f32),
-                size,
-            );
-            let picture = fit(cell.shrink(6.0), aspect);
+        for (i, (shown, picture)) in cells.iter().zip(pictures.iter().copied()).enumerate() {
+            let painter = ui.painter_at(picture);
             painter.rect_filled(picture, CornerRadius::ZERO, Color32::BLACK);
             let Some(m) = p.media(&shown.media) else {
                 continue;
@@ -552,17 +581,20 @@ impl Workspace {
                     Stroke::NONE,
                 ));
             }
-            painter.text(
-                picture.left_top() + vec2(5.0, 3.0),
-                Align2::LEFT_TOP,
-                (i + 1).to_string(),
-                FontId::proportional(14.0),
-                Color32::WHITE,
-            );
-            let label = m
-                .camera
-                .as_ref()
-                .map_or_else(|| m.name.clone(), |c| format!("Camera {c}"));
+            if let Some(number) = shown.number {
+                painter.text(
+                    picture.left_top() + vec2(5.0, 3.0),
+                    Align2::LEFT_TOP,
+                    number.to_string(),
+                    FontId::proportional(14.0),
+                    Color32::WHITE,
+                );
+            }
+            let label = shown.label.clone().unwrap_or_else(|| {
+                m.camera
+                    .as_ref()
+                    .map_or_else(|| m.name.clone(), |c| format!("Camera {c}"))
+            });
             painter.text(
                 picture.center_bottom() - vec2(0.0, 6.0),
                 Align2::CENTER_BOTTOM,

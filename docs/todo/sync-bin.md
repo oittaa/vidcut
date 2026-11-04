@@ -2,12 +2,9 @@
 
 **When:** not decided.
 
-The Sync Bin tab, the synced group and Multi Source are in vidcut ([spec §7.4](../cut-page-spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112)). This file lists what is still open.
+The Sync Bin tab, the Sync Clips window, the synced group and Multi Source are in vidcut ([spec §7.4](../cut-page-spec.md#74-sync-bin-pp-708710-measured-in-resolve-studio-2112), [§7.5](../cut-page-spec.md#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). This file lists what is still open.
 
-**Why:**
-
-- The Cut page reopens a group in the Sync Clips window.
-- The Edit page opens a multicam clip as a timeline, and a cut chooses an angle.
+**Why:** the Edit page opens a multicam clip as a timeline, and a cut chooses an angle.
 
 **In the code:**
 
@@ -20,12 +17,29 @@ The Sync Bin tab, the synced group and Multi Source are in vidcut ([spec §7.4](
 - `multicam.create` stores a synced group, a pool item.
 - `edit.source_overwrite` with `group` lines up by a synced group.
 - `multicam.rows` and `multicam.pick` give the rows of the Sync Bin and choose a camera.
+- `multicam.set` stores the places that the Sync Clips window gives.
 - No command switches angles.
 
 **To do:**
 
-- Open a group in the Sync Clips window (p. 708).
 - For the Edit page stage, open a multicam clip as a timeline (p. 1040).
+- For the stage `multicam-clip`, a clip of a group on the timeline follows Save Sync ([deviation X122](../deviations.md#x122-a-clip-on-the-timeline-does-not-follow-save-sync)).
+- Put two files with one camera name on one row:
+  - The Sync Clips window and the Sync Bin refuse them now.
+  - One row holds both files, each at its timecode (measured.md, C3c).
+  - With an overlap, the first file stays whole, and the later file loses the overlap (measured.md, S2, through the API).
+- Measure the Sync Clips window parts that are not measured:
+  - Sync by Marker;
+  - Shift+Comma on a keyboard layout that is not Finnish;
+  - the ruler labels of a reopened group with far tags;
+  - the Sync Bin for a group whose first tag is not 01:00:00:00;
+  - the rows of a file in two groups.
+- Remove [deviation X124](../deviations.md#x124-the-sync-clips-window-refuses-files-that-resolve-opens) (measured.md, C3e):
+  - more than 12 cameras;
+  - a still or a file with no picture in the bin;
+  - files of two different saved groups in one bin;
+  - files with no name and no overlap share a row;
+  - an unnamed row reads its number among the unnamed rows.
 - Measure the Sync Bin parts that are not measured:
   - the number keys and Escape;
   - the sound of the grid with Video Only off and on (p. 708);

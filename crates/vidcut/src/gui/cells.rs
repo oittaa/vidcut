@@ -32,7 +32,7 @@ pub struct Cells {
     counts: Counts,
 }
 
-pub const CELLS: usize = 9;
+pub const CELLS: usize = vidcut_core::multicam::SYNC_CLIPS_CAMERAS + 1;
 const LEAST_PART: usize = 4;
 
 impl Cells {

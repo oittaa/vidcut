@@ -2348,3 +2348,75 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A button that does nothing looks broken.
   - A script needs to know that no clip went in.
   - The owner approved this difference.
+
+## X119. Auto Sync on a saved group waits for Save Sync
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. Auto Sync in an opened group replaces the pool item at once.
+  - The clip on the timeline goes offline, and it stays offline after Save Sync.
+- **vidcut:**
+  - Auto Sync changes only the places in the window.
+  - Save Sync writes them to the same group. Cancel loses nothing.
+- **Why:**
+  - The offline clip is a fault. A sync must not break a timeline.
+  - The owner approved this difference.
+
+## X120. A drag in an opened group changes the group at Save Sync
+
+- **Resolve:**
+  - This is a measurement in Resolve Studio 21.1.2. A drag in an opened group changes the pool item at once, before Save Sync.
+- **vidcut:**
+  - A drag changes only the places in the window. Save Sync writes them to the group.
+- **Why:**
+  - The end result is the same.
+  - The history gets one entry, and Cancel has nothing to undo.
+  - The owner approved this difference.
+
+## X121. The Sync Clips window is inside the main window
+
+- **Resolve:**
+  - This is a measurement in Resolve Studio 21.1.2. The icon opens a separate window with the title "Sync Clips".
+- **vidcut:**
+  - The window is inside vidcut's main window.
+- **Why:**
+  - The window is for one short task, so it needs no place of its own on the screen.
+  - The owner approved this difference.
+
+## X122. A clip on the timeline does not follow Save Sync
+
+- **Resolve:**
+  - This is a measurement in Resolve Studio 21.1.2. After a drag and Save Sync, the multicam clip on the timeline follows the group.
+- **vidcut:**
+  - A clip already on the timeline stays as it is.
+  - This stays until the stage `multicam-clip`.
+- **Why:**
+  - vidcut has no clip of a group on the timeline until that stage. Source Overwrite makes clips of one file.
+  - The owner approved this difference.
+
+## X123. The Sync Clips icon opens a saved group
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. The icon always starts a new group from the timecodes, and the old group stays in the pool.
+  - A saved group plus one new file gives a new group of all the files, at their timecodes.
+- **vidcut:**
+  - The icon on files that are already one saved group opens that group.
+  - A group plus a new file refuses.
+- **Why:**
+  - Two groups on one file leave the older one hard to reach.
+  - In the one case measured, "Open Sync Group..." opened only the newer group.
+  - The owner approved this difference.
+
+## X124. The Sync Clips window refuses files that Resolve opens
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. 24 cameras open. A still is left out. A file with no picture gets a sound-only row.
+  - Files of two saved groups open as a new group.
+  - Two files with one camera name share a row. Only two files with one start and one length give no window.
+  - Files with no name and no overlap share a row. An unnamed row beside named rows reads its number among the unnamed rows.
+- **vidcut:**
+  - The window refuses more than 12 cameras, a still, a file with no picture and files of different groups.
+  - It refuses two files with one camera name.
+  - Each file has its own row. An unnamed row beside named rows reads its row position.
+- **Why:**
+  - One row for each file comes first. The rows that hold many files are the next change ([todo/sync-bin.md](todo/sync-bin.md)).
+  - The owner approved this order of work, and this difference stays only until that change.

@@ -2561,6 +2561,33 @@ pub fn group_tape(
     laid_out(p, &[media.to_string()], at, end)
 }
 
+pub fn places_sound(p: &Project, places: &[(String, i64)]) -> Result<RenderPlan> {
+    let s = &p.settings;
+    let end = places
+        .iter()
+        .filter_map(|(media, at)| Some(at + p.media_frames(p.media(media)?)))
+        .max()
+        .unwrap_or(0);
+    let mut audio = Vec::with_capacity(places.len());
+    for (media, at) in places {
+        audio.append(&mut laid_out(p, std::slice::from_ref(media), *at, end)?.0.audio);
+    }
+    Ok(RenderPlan {
+        fps: s.fps,
+        width: s.width,
+        height: s.height,
+        sample_rate: s.sample_rate,
+        channels: s.channels,
+        frames: end,
+        video: vec![VideoPiece::black(end)],
+        audio,
+        ducking: Vec::new(),
+        range: (0, end),
+        name: "places".into(),
+        colors: None,
+    })
+}
+
 fn laid_out(
     p: &Project,
     media: &[String],

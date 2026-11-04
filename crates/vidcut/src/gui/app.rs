@@ -132,7 +132,7 @@ const QUIT_PATIENCE: Duration = Duration::from_secs(5);
 
 const EXIT_PATIENCE: Duration = Duration::from_secs(10);
 
-fn audio_device() -> Box<dyn vidcut_av::player::AudioOutput> {
+pub(super) fn audio_device() -> Box<dyn vidcut_av::player::AudioOutput> {
     Box::new(vidcut_av::player::CpalOutput::on(
         crate::preferences::audio_device(),
     ))

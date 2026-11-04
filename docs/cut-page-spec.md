@@ -38,7 +38,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Stabilization ([todo](todo/stabilization.md))
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
-- the Sync Clips window and angle switches ([todo](todo/sync-bin.md)), Live Overwrite
+- angle switches ([todo](todo/sync-bin.md)), Live Overwrite
 - making a compound clip from timeline clips ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
@@ -265,7 +265,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - a file in two groups
     - `media.remove` of a file in a group
   - `multicam.marks.set` and `multicam.marks.clear` act on the In and Out of the group ([§4.1](#41-modes)). `multicam.list` gives them.
-  - No command places a group on the timeline. The pool does not show a group yet.
+  - No command places a group on the timeline.
+  - The pool does not show a group as an item. A file in a group has a blue sync badge.
+  - `multicam.set` sets the places and the sync locks of a group ([§7.5](#75-sync-clips-window-pp-706708-measured-in-resolve-studio-2112)). `multicam.create` takes them as `angles`, and the group then starts at 01:00:00:00.
+  - `multicam.set` and `multicam.create` with `angles` apply the rules of far gaps and of the earliest row. `at` plus `hidden` is the place of a file in real time.
+  - `multicam.create` without `angles` keeps each gap. Its start is the first timecode, or 01:00:00:00 by sound, In or Out.
 - **Input Color Space** (pp. 228, 230):
   - The color tags of a file tell how to read the colors of its pictures.
   - For a file with wrong tags, right-click the media in the pool. Select BT.709, BT.601, BT.2100 PQ or BT.2100 HLG to read it that way.
@@ -619,6 +623,75 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - more than 9 files;
   - files of different groups, or files in a group with files in none;
   - a file with no timecode tag and no group.
+
+### 7.5 Sync Clips window (pp. 706–708; measured in Resolve Studio 21.1.2)
+- **Opening:** the Sync Clips icon in the Media Pool acts on the files of the current bin. `gui.show sync_clips` does the same.
+  - With no file selected, it opens all files of the bin and its subfolders.
+  - With two files or more selected, it opens only those files.
+  - With one file selected, no window opens.
+  - With fewer than two files, no window opens.
+  - vidcut also refuses two files with one camera name and no other file ([deviation X124](deviations.md#x124-the-sync-clips-window-refuses-files-that-resolve-opens)).
+  - Files that are one saved group open that group. A group plus a new file refuses ([deviation X123](deviations.md#x123-the-sync-clips-icon-opens-a-saved-group)).
+  - "Open Sync Group…" in the menu of a file in a group opens that group.
+  - The window is inside vidcut's main window ([deviation X121](deviations.md#x121-the-sync-clips-window-is-inside-the-main-window)).
+- **Which files it takes:**
+  - A file with no camera name opens the window. Its camera name stays empty after Save Sync.
+  - vidcut refuses more than 12 cameras, a still, a file with no picture, and files of different groups (X124).
+  - Two files with one camera name in a bin with other cameras refuse (X124).
+- **The window:**
+  - Left: "Sync View", a grid of all files. Right: the viewer of the chosen cell, with the name of its file.
+  - The measured grids: 2 cameras side by side, 3 or 4 in 2 by 2, 6 in 3 by 2, 12 in 4 by 3.
+  - One row for each file. Named files come first, in camera order, with 10 after 9. Files with no name follow in bin order.
+  - The numbers of the rows and the cells are positions. The label of a cell is the camera name, for example cells 1 to 6 with Camera 7 to Camera 12.
+  - A file with no name has the label Camera and its row position.
+- **Selection:**
+  - A click on a row selects the row. The row gets a red outline, and a nudge, a drag and the sync icon act on it. The viewer and the red number do not change.
+  - A click on a cell selects its row. The viewer shows that file, and the red number follows the cell.
+- **Play:**
+  - A click or a drag on the ruler moves the playhead of the window.
+  - Play and Space play the pictures and the sound. Space also stops.
+  - Cancel and Save Sync are dim during play. Escape closes the window like Cancel.
+- **Sound:**
+  - The headphones icon at the right end of the bar is "Solo Audio". It is green when on. It stays on at the next open.
+  - With Solo off, all rows sound. They add up with no scaling: two equal rows measure peak 0.687 alone and 1.000 together.
+  - With Solo on, only the row of the chosen cell sounds. A new cell during play changes what is heard.
+  - A file with no sound stays silent.
+- **Places at open:** each file lies at its timecode, and no row has a sync icon.
+  - Tags 01:00:00:00, 01:00:05:00 and 01:00:10:00 give rows at 0, 125 and 250.
+  - A file with no tag reads 00:00:00:00. Thus with no tags, all files start at one point.
+- **The ruler** shows the timecodes of the files.
+  - It starts at the earliest timecode of the files. Where all files read 00:00:00:00, it starts at 01:00:00:00.
+  - Its start does not change when rows move.
+- **Far gaps:** the rule is for an empty stretch where no row has a picture. It is measured at 25 fps and 30 fps.
+  - A stretch of up to 10:00 minutes stays. One frame more makes it 1 second: 25 frames at 25 fps, 30 frames at 30 fps.
+  - The length of the clips plays no part.
+  - The rule acts at open, at Auto Sync and during a drag.
+  - A shift of more than 10:00 by Sound or In stays, because the rows overlap and no stretch is empty.
+  - The saved group has the short places. The ruler shows a dark bar at each short gap, and it jumps to the real timecode after the bar.
+- **Earliest row:** when no row stays at the start after a drag or a nudge, the earliest row goes to the start.
+  - The empty front goes away. The frames of the group fall, and its start stays.
+  - One measurement gave 936 frames from 1005.
+- **Auto Sync:** it runs the method under "Sync By" and replaces the places: Timecode, Sound, In or Out.
+  - Each row that it lines up gets a sync icon, the sync lock.
+  - With In or Out, each file needs that mark. A file stays whole.
+  - By sound, a file that matches no other file stays at the start, with no icon. "Auto Sync Failed" names such files.
+  - Auto Sync reads the marks at that moment.
+  - On a saved group, the result waits for Save Sync ([deviation X119](deviations.md#x119-auto-sync-on-a-saved-group-waits-for-save-sync)).
+- **By hand:**
+  - A drag moves a row with no sync icon. A row with one does not move.
+  - The sync icon in the bar turns the sync lock of the selected row on and off.
+  - Period moves the selected row 1 frame later, and Shift+Period 5 frames later. Comma moves it 1 frame earlier.
+  - Shift+Comma moves it 5 frames earlier, by the manual (p. 707). No measurement on a Finnish keyboard shows that move.
+  - These keys work by the key's place too, so Shift+Comma and Shift+Period work on a layout that makes them other signs.
+  - Comma on a row at the start changes nothing. A drag before the start stops the row at the start, and the other rows stay.
+  - A drag on an opened group changes the group at Save Sync ([deviation X120](deviations.md#x120-a-drag-in-an-opened-group-changes-the-group-at-save-sync)).
+- **Save Sync** stores the places and the sync locks, and closes the window.
+  - The first Save Sync makes a group. It is `multicam.create` with `angles`.
+  - The start of that group is always 01:00:00:00: tags from 01:00:00:00, tags from 01:02:00:00, no tags, mixed, and after Auto Sync.
+  - After the rule of far gaps, the frames of a group run from the first row's start to the last row's end.
+  - A Save Sync on an opened group keeps the group, its name and its start. It is `multicam.set`.
+  - A clip on the timeline does not follow ([deviation X122](deviations.md#x122-a-clip-on-the-timeline-does-not-follow-save-sync)).
+- **Cancel,** Escape or the close button changes nothing.
 
 ## 8. Timeline editing (Ch. 36, pp. 715–732)
 

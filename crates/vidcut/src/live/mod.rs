@@ -3239,6 +3239,7 @@ impl Live {
             }
             Request::MulticamCreate {
                 sync: vidcut_core::model::AngleSync::Sound,
+                angles: None,
                 ..
             }
             | Request::MulticamLayout {

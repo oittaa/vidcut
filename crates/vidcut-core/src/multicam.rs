@@ -8,13 +8,21 @@ use crate::editor::Env;
 use crate::error::{Error, Result};
 use crate::model::{AngleSync, GroupAngle, Marks, Media, Project, SyncGroup};
 use crate::ops::{self, has_bin};
-use crate::time::{TimeContext, TimeSpec, format_timecode, timecode_frames};
+use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, timecode_frames};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Angle {
     pub media: String,
     pub at: i64,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub hidden: i64,
     pub source: Marks,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
+}
+
+fn is_zero(frames: &i64) -> bool {
+    *frames == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -29,7 +37,6 @@ pub struct SoundPair {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Layout {
     pub start_timecode: String,
-    #[serde(skip)]
     pub start: i64,
     pub frames: i64,
     pub angles: Vec<Angle>,
@@ -43,7 +50,11 @@ pub const SOUND_MATCH_SCORE: f32 = 25.0;
 
 pub const MULTI_SOURCE_ANGLES: usize = 9;
 
+pub const SYNC_CLIPS_CAMERAS: usize = 12;
+
 const PICK_SECONDS: f64 = 5.0;
+
+const LONGEST_GAP_SECONDS: f64 = 600.0;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SyncRow {
@@ -137,13 +148,7 @@ pub fn layout(
         .map(|(_, at, part)| at + part.end - part.start)
         .max()
         .unwrap_or(0);
-    let (fps, drop) = (p.settings.fps, p.settings.counts_drop_frame());
-    let start = match sync {
-        AngleSync::Timecode => first,
-        AngleSync::In | AngleSync::Out | AngleSync::Sound => {
-            timecode_frames(1, 0, 0, 0, fps, drop).unwrap_or(0)
-        }
-    };
+    let start = group_start(p, sync, first);
     Ok(Layout {
         start_timecode: start_timecode(p, start),
         start,
@@ -153,15 +158,60 @@ pub fn layout(
             .map(|(m, at, part)| Angle {
                 media: m.id.clone(),
                 at: at - first,
+                hidden: 0,
                 source: Marks {
                     mark_in: Some(part.start),
                     mark_out: Some(part.end),
                 },
+                locked: false,
             })
             .collect(),
         unmatched,
         pairs,
     })
+}
+
+fn one_hour(p: &Project) -> i64 {
+    let (fps, drop) = (p.settings.fps, p.settings.counts_drop_frame());
+    timecode_frames(1, 0, 0, 0, fps, drop).unwrap_or(0)
+}
+
+fn group_start(p: &Project, sync: AngleSync, first: i64) -> i64 {
+    match sync {
+        AngleSync::Timecode => first,
+        AngleSync::In | AngleSync::Out | AngleSync::Sound => one_hour(p),
+    }
+}
+
+pub fn ruler_start(p: &Project, ids: &[String]) -> i64 {
+    let starts = || {
+        ids.iter()
+            .filter_map(move |id| p.media(id))
+            .map(move |m| origin(p, m))
+    };
+    if starts().all(|start| start == 0) {
+        return one_hour(p);
+    }
+    starts().min().unwrap_or_default()
+}
+
+pub fn close_far_gaps(fps: Rational, spans: &[(i64, i64)]) -> Vec<(i64, i64)> {
+    let longest = (LONGEST_GAP_SECONDS * fps.as_f64()).round() as i64;
+    let short = fps.as_f64().round() as i64;
+    let mut order: Vec<usize> = (0..spans.len()).collect();
+    order.sort_by_key(|i| spans[*i].0);
+    let first = order.first().map_or(0, |i| spans[*i].0);
+    let (mut hidden, mut reach) = (0, first);
+    let mut shown = vec![(0, 0); spans.len()];
+    for i in order {
+        let (real, frames) = spans[i];
+        if real - reach > longest {
+            hidden += real - reach - short;
+        }
+        shown[i] = (real - first - hidden, hidden);
+        reach = reach.max(real + frames);
+    }
+    shown
 }
 
 fn by_sound(
@@ -230,14 +280,59 @@ fn by_sound(
     Ok((unmatched, pairs))
 }
 
+fn by_hand(p: &Project, ids: &[String], angles: &[GroupAngle]) -> Result<Vec<GroupAngle>> {
+    if let Some(a) = angles.iter().find(|a| !ids.contains(&a.media)) {
+        return Err(Error::invalid(format!(
+            "{} is not one of the files",
+            a.media
+        )));
+    }
+    let wanted = ids
+        .iter()
+        .map(|id| {
+            let a = angles
+                .iter()
+                .find(|a| a.media == *id)
+                .ok_or_else(|| Error::invalid(format!("`angles` leaves out {id}")))?;
+            if a.at < 0 || a.hidden < 0 {
+                return Err(Error::invalid(format!("{id} can't start before the group")));
+            }
+            let frames = p.media(id).map_or(0, |m| p.media_frames(m));
+            Ok((a, (a.at + a.hidden, frames)))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let spans: Vec<(i64, i64)> = wanted.iter().map(|(_, span)| *span).collect();
+    Ok(wanted
+        .iter()
+        .zip(close_far_gaps(p.settings.fps, &spans))
+        .map(|((a, _), (at, hidden))| GroupAngle {
+            media: a.media.clone(),
+            at,
+            hidden,
+            locked: a.locked,
+        })
+        .collect())
+}
+
+pub struct NewGroup<'a> {
+    pub sync: AngleSync,
+    pub angles: Option<&'a [GroupAngle]>,
+    pub name: String,
+    pub bin: &'a str,
+}
+
 pub fn create(
     p: &mut Project,
     env: &dyn Env,
     ids: &[String],
-    sync: AngleSync,
-    name: String,
-    bin: &str,
+    new: NewGroup<'_>,
 ) -> Result<(String, Vec<String>)> {
+    let NewGroup {
+        sync,
+        angles,
+        name,
+        bin,
+    } = new;
     if ids.len() < 2 {
         return Err(Error::invalid("a synced group needs two files or more"));
     }
@@ -252,24 +347,45 @@ pub fn create(
             g.name
         )));
     }
-    let lined_up = layout(p, env, ids, sync, true)?;
+    let (start, angles, unmatched) = match angles {
+        Some(angles) => {
+            layout(p, env, ids, AngleSync::Timecode, true)?;
+            (one_hour(p), by_hand(p, ids, angles)?, Vec::new())
+        }
+        None => {
+            let lined_up = layout(p, env, ids, sync, true)?;
+            let unmatched = lined_up.unmatched;
+            let angles = lined_up
+                .angles
+                .into_iter()
+                .map(|a| GroupAngle {
+                    locked: !unmatched.contains(&a.media),
+                    media: a.media,
+                    at: a.at,
+                    hidden: 0,
+                })
+                .collect();
+            (lined_up.start, angles, unmatched)
+        }
+    };
     let id = p.new_group_id();
     p.groups.push(SyncGroup {
         id: id.clone(),
         name,
         bin: bin.to_string(),
-        start: lined_up.start,
-        angles: lined_up
-            .angles
-            .into_iter()
-            .map(|a| GroupAngle {
-                media: a.media,
-                at: a.at,
-            })
-            .collect(),
+        start,
+        angles,
         marks: Marks::default(),
     });
-    Ok((id, lined_up.unmatched))
+    Ok((id, unmatched))
+}
+
+pub fn set_angles(p: &mut Project, id: &str, angles: &[GroupAngle]) -> Result<()> {
+    let g = group_mut(p, id)?;
+    let ids: Vec<String> = g.angles.iter().map(|a| a.media.clone()).collect();
+    let placed = by_hand(p, &ids, angles)?;
+    group_mut(p, id)?.angles = placed;
+    Ok(())
 }
 
 pub fn group_mut<'a>(p: &'a mut Project, id: &str) -> Result<&'a mut SyncGroup> {
@@ -304,10 +420,12 @@ fn layout_of(p: &Project, g: &SyncGroup) -> Layout {
             Some(Angle {
                 media: a.media.clone(),
                 at: a.at,
+                hidden: a.hidden,
                 source: Marks {
                     mark_in: Some(0),
                     mark_out: Some(p.media_limit(m)),
                 },
+                locked: a.locked,
             })
         })
         .collect();
@@ -402,7 +520,7 @@ fn sync_start(p: &Project, m: &Media, at: i64) -> Result<Option<i64>> {
     ops::file_start_at(p, m, at, by_group)
 }
 
-fn camera_order(a: &str, b: &str) -> Ordering {
+pub fn camera_order(a: &str, b: &str) -> Ordering {
     match (a.parse::<u64>(), b.parse::<u64>()) {
         (Ok(x), Ok(y)) => x.cmp(&y),
         (Ok(_), Err(_)) => Ordering::Less,
@@ -411,7 +529,7 @@ fn camera_order(a: &str, b: &str) -> Ordering {
     }
 }
 
-fn cameras<'a>(p: &'a Project, bin: &str) -> Result<Vec<(&'a Media, &'a str)>> {
+pub fn cameras<'a>(p: &'a Project, bin: &str) -> Result<Vec<(&'a Media, &'a str)>> {
     let mut files: Vec<(&Media, &str)> = Vec::new();
     for m in p
         .media
@@ -433,7 +551,7 @@ fn cameras<'a>(p: &'a Project, bin: &str) -> Result<Vec<(&'a Media, &'a str)>> {
     }
     if files.len() > MULTI_SOURCE_ANGLES {
         return Err(Error::invalid(format!(
-            "The Sync Bin holds {MULTI_SOURCE_ANGLES} cameras at most"
+            "A bin to sync holds {MULTI_SOURCE_ANGLES} cameras at most"
         )));
     }
     let group_of = |m: &Media| p.group_of(&m.id).map(|g| g.id.as_str());
@@ -449,6 +567,71 @@ fn cameras<'a>(p: &'a Project, bin: &str) -> Result<Vec<(&'a Media, &'a str)>> {
     }
     files.sort_by(|a, b| camera_order(a.1, b.1));
     Ok(files)
+}
+
+fn window_order(mut files: Vec<&Media>) -> Vec<&Media> {
+    files.sort_by(|a, b| match (&a.camera, &b.camera) {
+        (Some(x), Some(y)) => camera_order(x, y),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    });
+    files
+}
+
+pub fn group_files<'a>(p: &'a Project, g: &SyncGroup) -> Vec<&'a Media> {
+    window_order(
+        p.media
+            .iter()
+            .filter(|m| g.at_of(&m.id).is_some())
+            .collect(),
+    )
+}
+
+pub fn sync_clips_files<'a>(
+    p: &'a Project,
+    bin: &str,
+    selected: &[String],
+) -> Result<Vec<&'a Media>> {
+    let shown = || {
+        p.media
+            .iter()
+            .filter(move |m| bin.is_empty() || ops::within(&m.bin, bin))
+    };
+    let picked: Vec<&Media> = shown().filter(|m| selected.contains(&m.id)).collect();
+    let files: Vec<&Media> = match picked.len() {
+        0 => shown().collect(),
+        1 => return Err(Error::invalid("Select two files or more, or none")),
+        _ => picked,
+    };
+    for (i, m) in files.iter().enumerate() {
+        has_picture(m)?;
+        if let Some(other) = files[..i]
+            .iter()
+            .find(|o| m.camera.is_some() && o.camera == m.camera)
+        {
+            return Err(Error::invalid(format!(
+                "{} and {} have one camera name",
+                other.name, m.name
+            )));
+        }
+    }
+    if files.len() < 2 {
+        return Err(Error::invalid("A sync needs two files or more"));
+    }
+    if files.len() > SYNC_CLIPS_CAMERAS {
+        return Err(Error::invalid(format!(
+            "The window holds {SYNC_CLIPS_CAMERAS} cameras at most"
+        )));
+    }
+    let group_of = |m: &Media| p.group_of(&m.id).map(|g| g.id.as_str());
+    if let Some(other) = files.iter().find(|m| group_of(m) != group_of(files[0])) {
+        return Err(Error::invalid(format!(
+            "{} and {} are not in one synced group",
+            files[0].name, other.name
+        )));
+    }
+    Ok(window_order(files))
 }
 
 pub fn sync_rows(p: &Project, bin: &str, at: i64) -> Result<Vec<SyncRow>> {

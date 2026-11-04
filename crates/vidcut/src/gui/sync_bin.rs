@@ -32,6 +32,13 @@ const NUMBER_KEYS: [Key; 9] = [
     Key::Num9,
 ];
 
+pub(super) struct Film<'a> {
+    pub media: &'a str,
+    pub frames: i64,
+    pub x: f32,
+    pub per_frame: f32,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct SyncBin {
     past: Option<i64>,
@@ -175,6 +182,8 @@ impl Workspace {
                 let cells: Vec<GridCell> = rows
                     .iter()
                     .map(|row| GridCell {
+                        number: Some(row.number),
+                        label: None,
                         media: row.media.clone(),
                         frame: row.frame,
                         active: row.active,
@@ -291,7 +300,13 @@ impl Workspace {
                 picked = Some(row.clone());
             }
             if let Some(start) = row.start {
-                self.sync_film(ui, strip, p, row, x(start), per_frame);
+                let film = Film {
+                    media: &row.media,
+                    frames: row.frames,
+                    x: x(start),
+                    per_frame,
+                };
+                self.sync_film(ui, strip, p, &film);
             }
         }
         let bottom = (ruler.bottom() + rows.len() as f32 * row_height).min(rect.bottom());
@@ -381,22 +396,14 @@ impl Workspace {
         }
     }
 
-    fn sync_film(
-        &self,
-        ui: &egui::Ui,
-        strip: Rect,
-        p: &Project,
-        row: &SyncRow,
-        file_x: f32,
-        per_frame: f32,
-    ) {
-        let Some(m) = p.media(&row.media) else {
+    pub(super) fn sync_film(&self, ui: &egui::Ui, strip: Rect, p: &Project, film: &Film<'_>) {
+        let Some(m) = p.media(film.media) else {
             return;
         };
         let span = Rect::from_min_max(
-            pos2(file_x.max(strip.left()), strip.top()),
+            pos2(film.x.max(strip.left()), strip.top()),
             pos2(
-                (file_x + row.frames as f32 * per_frame).min(strip.right()),
+                (film.x + film.frames as f32 * film.per_frame).min(strip.right()),
                 strip.bottom(),
             ),
         );
@@ -407,11 +414,11 @@ impl Workspace {
         clipped.rect_filled(span, CornerRadius::ZERO, theme::colors().panel_dark);
         let aspect = p.settings.width as f32 / p.settings.height.max(1) as f32;
         let wide = strip.height() * aspect;
-        let step = ((wide / per_frame).ceil() as i64).max(1);
-        let hidden = ((span.left() - file_x) / per_frame) as i64;
+        let step = ((wide / film.per_frame).ceil() as i64).max(1);
+        let hidden = ((span.left() - film.x) / film.per_frame) as i64;
         let mut frame = hidden.max(0) / step * step;
-        while frame < row.frames {
-            let left = file_x + frame as f32 * per_frame;
+        while frame < film.frames {
+            let left = film.x + frame as f32 * film.per_frame;
             if left >= span.right() {
                 break;
             }
