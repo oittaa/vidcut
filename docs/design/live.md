@@ -416,6 +416,7 @@ The bar and the Jobs button:
 - `SilenceDialog` keeps the dry run of Ripple Delete Silence as `Stripe`s, and the user's edits to them (`stripe_press`, `stripe_drag`, `silence_keys`).
 - A changed setting runs the dry run again, and replaces the stripes and their edits.
 - Each change keeps the state before it (`Shot`). Ctrl+Z and Ctrl+Shift+Z step through these states (`SilenceDialog::undo`). The project's history stays as it is until Remove.
+- The dialog keeps the newest states (`SHOTS_KEPT`). Why: each state holds a copy of the stripes.
 - While the dialog is open, `Handle::skip` hands the stripes to the session. The session plays the timeline as Remove would leave it.
 
 **Timeline tiles.**
@@ -425,6 +426,7 @@ The bar and the Jobs button:
 - The filmstrips of the Trim Editor use the same tiles (`vidcut_core::ops::filmstrip`, `TrimAnchor`).
 - An `Lru` keeps the order in which the tiles were used. `Tiles::evict` removes the oldest tile until the cache is under its budget, and stops at a tile that the last paint showed. Why: each step of an eviction is one operation, with no scan of the kept tiles.
 - Another `Lru` keeps the tiles that did not decode (`FAILED_KEPT`). A tile that leaves it is tried once more when it shows again.
+- All workers share one `Lru` of the blocks that they read from disk (`Blocks`, `BLOCKS_KEPT`). A worker that writes a block removes it from this `Lru`.
 
 **Imports** ([deviation X66](../deviations.md#x66-files-and-folders-dropped-on-the-window-go-into-the-open-bin)).
 
