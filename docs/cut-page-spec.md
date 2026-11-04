@@ -1247,6 +1247,13 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - `media.subclip` does this. It takes a `range`, a `name` and a `bin`.
     - A subclip works like any other pool item (pp. 460–461, 885–886).
     - The words of the subclip come from the transcript of its file.
+  - The Source Clip viewer also makes a subclip, from the In and Out of its clip (pp. 460–461, 885–886).
+    - Mark > Create Subclip and Alt+B open the New Subclip window.
+    - Create Subclip in the menu of the scroll area also opens it. A drag from the viewer to the pool also opens it.
+    - A drop on a bin of the pool moves the clip to that bin. The window does not open.
+    - The window has a Name and Create. The subclip goes in the bin that the pool shows (p. 864).
+    - Without an In, the subclip starts at the first frame of the clip. Without an Out, it ends at the last frame.
+    - `media.subclip` does this.
   - Add Marker puts a marker at one selected word, or a marker with a duration over more words (p. 998).
     - On a source clip, the marker is on that clip, at its source frame (`markers.add` with `media`).
     - The scroll area of the Source Clip viewer shows it. A marker with a duration also shows as a bar (p. 1018).
@@ -1770,6 +1777,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
 | Enter | Edit the selected subtitle (X43) |
 | N | Snapping on/off |
 | M / Alt+M | Add or edit / delete marker |
+| Alt+B | Create a subclip of the clip in the Source Clip viewer |
 | Click an edit | Trim Editor (D52) |
 | W | Dynamic Trim on/off |
 | Shift+S | Audio scrubbing on/off |
