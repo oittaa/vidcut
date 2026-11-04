@@ -26,8 +26,8 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, ColorSpace, Marker, MediaUpscaler, Project, Sharpness, Speed, Track,
-    TrackClip, TrackKind, Upscaler,
+    Clip, ClipAudio, ColorSpace, Marker, Media, MediaUpscaler, Project, Sharpness, Speed, Subclip,
+    Track, TrackClip, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -2047,7 +2047,9 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
                 a.muted = m;
             }
             match (props.gain_db, at) {
-                (Some(g), Some(frame)) if a.is_keyed() => keyframes::put_value(a, frame, g),
+                (Some(g), Some(frame)) if a.is_keyed() => {
+                    keyframes::put_value(&mut a.gain_keys, frame, g);
+                }
                 (Some(_), None) if a.is_keyed() => {}
                 (Some(g), _) => a.gain_db = g,
                 (None, _) => {}
@@ -2339,47 +2341,89 @@ pub struct NewMarker {
     pub note: String,
 }
 
+fn new_marker(p: &mut Project, k: NewMarker, taken: &HashSet<String>) -> Result<Marker> {
+    if k.at < 0 {
+        return Err(Error::invalid("marker before 0"));
+    }
+    check_duration(k.duration)?;
+    if let Some(c) = &k.color {
+        check_color(c)?;
+    }
+    let id = match k.kept.filter(|id| !taken.contains(id)) {
+        Some(id) => id,
+        None => p.alloc_marker_id(),
+    };
+    Ok(Marker {
+        id,
+        at: k.at,
+        duration: k.duration,
+        name: k.name,
+        color: k.color.unwrap_or_else(|| "blue".into()),
+        note: k.note,
+    })
+}
+
 pub fn add_markers(p: &mut Project, markers: Vec<NewMarker>) -> Result<Vec<String>> {
-    let mut taken: HashSet<String> = p.markers.iter().map(|m| m.id.clone()).collect();
+    let mut taken: HashSet<String> = p
+        .markers
+        .iter()
+        .chain(p.media.iter().flat_map(|m| &m.markers))
+        .map(|m| m.id.clone())
+        .collect();
     let mut ids = Vec::with_capacity(markers.len());
     for k in markers {
-        if k.at < 0 {
-            return Err(Error::invalid("marker before 0"));
-        }
-        check_duration(k.duration)?;
-        if let Some(c) = &k.color {
-            check_color(c)?;
-        }
-        let id = match k.kept.filter(|id| !taken.contains(id)) {
-            Some(id) => id,
-            None => p.alloc_marker_id(),
-        };
-        taken.insert(id.clone());
-        p.markers.push(Marker {
-            id: id.clone(),
-            at: k.at,
-            duration: k.duration,
-            name: k.name,
-            color: k.color.unwrap_or_else(|| "blue".into()),
-            note: k.note,
-        });
-        ids.push(id);
+        let marker = new_marker(p, k, &taken)?;
+        taken.insert(marker.id.clone());
+        ids.push(marker.id.clone());
+        p.markers.push(marker);
     }
     p.markers.sort_by_key(|k| k.at);
     Ok(ids)
+}
+
+pub fn add_source_marker(p: &mut Project, media: &str, k: NewMarker) -> Result<String> {
+    let m = p
+        .media(media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+    let frames = p.media_limit(m);
+    if k.at >= frames {
+        return Err(Error::invalid(format!(
+            "marker at frame {} is past the end of {media} ({frames} frames)",
+            k.at
+        )));
+    }
+    let marker = new_marker(p, k, &HashSet::new())?;
+    let id = marker.id.clone();
+    let m = p
+        .media
+        .iter_mut()
+        .find(|m| m.id == media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+    m.markers.push(marker);
+    m.markers.sort_by_key(|k| k.at);
+    Ok(id)
+}
+
+fn markers_with<'a>(p: &'a mut Project, id: &str) -> Result<&'a mut Vec<Marker>> {
+    if p.markers.iter().any(|k| k.id == id) {
+        return Ok(&mut p.markers);
+    }
+    p.media
+        .iter_mut()
+        .map(|m| &mut m.markers)
+        .find(|list| list.iter().any(|k| k.id == id))
+        .ok_or_else(|| Error::not_found(format!("no marker {id}")))
 }
 
 pub fn move_marker(p: &mut Project, id: &str, to: i64) -> Result<()> {
     if to < 0 {
         return Err(Error::invalid("marker before 0"));
     }
-    let k = p
-        .markers
-        .iter_mut()
-        .find(|k| k.id == id)
-        .ok_or_else(|| Error::not_found(format!("no marker {id}")))?;
-    k.at = to;
-    p.markers.sort_by_key(|k| k.at);
+    let list = markers_with(p, id)?;
+    if let Some(k) = list.iter_mut().find(|k| k.id == id) {
+        k.at = to;
+    }
+    list.sort_by_key(|k| k.at);
     Ok(())
 }
 
@@ -2397,8 +2441,7 @@ pub fn set_marker(
     if let Some(d) = duration {
         check_duration(d)?;
     }
-    let k = p
-        .markers
+    let k = markers_with(p, id)?
         .iter_mut()
         .find(|k| k.id == id)
         .ok_or_else(|| Error::not_found(format!("no marker {id}")))?;
@@ -2418,12 +2461,54 @@ pub fn set_marker(
 }
 
 pub fn remove_marker(p: &mut Project, id: &str) -> Result<()> {
-    let before = p.markers.len();
-    p.markers.retain(|k| k.id != id);
-    if p.markers.len() == before {
-        return Err(Error::not_found(format!("no marker {id}")));
-    }
+    markers_with(p, id)?.retain(|k| k.id != id);
     Ok(())
+}
+
+pub fn create_subclip(
+    p: &mut Project,
+    media: &str,
+    (a, b): (i64, i64),
+    name: &str,
+    bin: Option<&str>,
+) -> Result<String> {
+    let m = p
+        .media(media)
+        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+    if m.subtitles.is_some() {
+        return Err(Error::invalid(format!("{media} is a subtitle file")));
+    }
+    let frames = p.media_limit(m);
+    if a < 0 || b > frames || b <= a {
+        return Err(Error::invalid(format!(
+            "subclip {a}..{b} is outside {media} ({frames} frames)"
+        )));
+    }
+    if let Some(bin) = bin.filter(|b| !has_bin(p, b)) {
+        return Err(Error::not_found(format!(
+            "no bin {bin:?}; add it with bins.add"
+        )));
+    }
+    let fps = p.settings.fps;
+    let start = m.skipped() + fps.frames_to_secs(a);
+    let mut sub = Media {
+        id: String::new(),
+        name: name.to_string(),
+        bin: bin.map_or_else(|| m.bin.clone(), str::to_string),
+        marks: Default::default(),
+        left_out: Vec::new(),
+        markers: Vec::new(),
+        subclip: Some(Subclip {
+            start,
+            end: start + fps.frames_to_secs(b - a),
+        }),
+        ..m.clone()
+    };
+    sub.id = p.alloc_media_id();
+    let id = sub.id.clone();
+    p.media.push(sub);
+    p.speakers.share(media, &id);
+    Ok(id)
 }
 
 pub fn set_media_marks(

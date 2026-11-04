@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard};
 use std::time::Instant;
 
-use vidcut_core::lru::Lru;
+use vidcut_core::lru::Uncapped;
 
 use super::frame::Picture;
 use super::plan::Id;
@@ -47,16 +47,26 @@ fn charges(picture: &Picture) -> [usize; 2] {
     bytes
 }
 
+const IDS_AT_ONCE: usize = 64;
+
+fn at_once(ids: impl IntoIterator<Item = Id>) -> impl Iterator<Item = Vec<Id>> {
+    let mut ids = ids.into_iter();
+    std::iter::from_fn(move || {
+        let some: Vec<Id> = ids.by_ref().take(IDS_AT_ONCE).collect();
+        (!some.is_empty()).then_some(some)
+    })
+}
+
 pub(crate) struct Store {
     inner: Mutex<Inner>,
     landed: Condvar,
     down: fn(&Picture) -> Result<Picture>,
 }
 
-type Order = Lru<Id, (), { usize::MAX }>;
+type Order = Uncapped<Id, ()>;
 
 struct Inner {
-    pictures: Lru<Id, Arc<Picture>, { usize::MAX }>,
+    pictures: Uncapped<Id, Arc<Picture>>,
     kinds: [Order; 2],
     pools: HashMap<usize, HashSet<Id>>,
     bytes: [usize; 2],
@@ -210,8 +220,8 @@ impl Store {
     pub(crate) fn new(memory: usize, video: usize) -> Self {
         Self {
             inner: Mutex::new(Inner {
-                pictures: Lru::new(),
-                kinds: [Lru::new(), Lru::new()],
+                pictures: Uncapped::new(),
+                kinds: [Order::new(), Order::new()],
                 pools: HashMap::new(),
                 bytes: [0; 2],
                 budget: [memory, video],
@@ -273,16 +283,27 @@ impl Store {
     }
 
     pub(crate) fn kept_run(&self, ids: impl IntoIterator<Item = Id>) -> usize {
-        let inner = self.lock();
-        ids.into_iter()
-            .take_while(|id| inner.pictures.contains(id))
-            .count()
+        let mut run = 0;
+        for some in at_once(ids) {
+            let inner = self.lock();
+            let kept = some
+                .iter()
+                .take_while(|&id| inner.pictures.contains(id))
+                .count();
+            run += kept;
+            if kept < some.len() {
+                break;
+            }
+        }
+        run
     }
 
     pub(crate) fn touch(&self, ids: impl IntoIterator<Item = Id>) {
-        let mut inner = self.lock();
-        for id in ids {
-            inner.touch(&id);
+        for some in at_once(ids) {
+            let mut inner = self.lock();
+            for id in &some {
+                inner.touch(id);
+            }
         }
     }
 
@@ -422,7 +443,7 @@ impl Inner {
     }
 
     fn empty(&mut self) -> Vec<Arc<Picture>> {
-        self.kinds = [Lru::new(), Lru::new()];
+        self.kinds = [Order::new(), Order::new()];
         self.pools.clear();
         self.bytes = [0; 2];
         let all = std::mem::take(&mut self.pictures);

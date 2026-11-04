@@ -29,6 +29,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("media.remove", &["media"]),
     ("media.relink", &["media", "path"]),
     ("media.rename", &["media", "name"]),
+    ("media.subclip", &["media"]),
     ("media.set", &["media"]),
     ("media.marks.set", &["media"]),
     ("media.marks.clear", &["media"]),
@@ -132,6 +133,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("history.revert", &["step"]),
     ("viewer.set", &["mode"]),
     ("viewer.load", &["media"]),
+    ("frame.scope", &["scope"]),
     ("player.seek", &["at"]),
     ("player.step", &["frames"]),
     ("player.mute", &["mute"]),
@@ -168,7 +170,7 @@ const GROUPS: &[(&str, &str)] = &[
         "Export the timeline: a video, audio, frames per clip, or OpenTimelineIO",
     ),
     ("frame", "Single frames as PNG"),
-    ("generators", "Pictures made with no file: Solid Color"),
+    ("generators", "Pictures made with no file"),
     (
         "gui",
         "The running GUI: its window, command log, screenshots, panels, target track and timeline view",
@@ -247,7 +249,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("track", "Tracks: their header and mixer settings"),
     (
         "viewer",
-        "What the viewer shows. Framing guides are a preference; the mode needs a running GUI",
+        "What the viewer shows. Framing guides and scopes are preferences; the mode needs a running GUI",
     ),
 ];
 
@@ -293,6 +295,12 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut viewer guides --enabled true --framing social_9_16\n  \
          vidcut viewer guides --center true\n  \
          vidcut preferences set viewer.guides.action=false",
+    ),
+    (
+        "viewer.scopes",
+        "vidcut viewer scopes\n  \
+         vidcut viewer scopes --waveform true --vectorscope true\n  \
+         vidcut preferences set viewer.scopes.parade=false",
     ),
     ("media.set", "vidcut media set m1 m2 --color teal"),
     (
@@ -423,6 +431,11 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "frame.render",
         "vidcut frame render --at 1m --out f.png --width 640",
+    ),
+    (
+        "frame.scope",
+        "vidcut frame scope waveform --at 1m --out w.png\n  \
+         vidcut frame scope vectorscope --at 1m --out v.png --width 400",
     ),
     (
         "presets.save",

@@ -67,9 +67,7 @@ pub enum SyncOpen<'a> {
 }
 
 fn origin(p: &Project, m: &Media) -> i64 {
-    m.info
-        .timecode
-        .map_or(0, |tc| tc.frames_at(p.settings.fps).floor() as i64)
+    m.timecode_at(p.settings.fps).floor() as i64
 }
 
 fn used(p: &Project, m: &Media, whole: bool) -> Range<i64> {
@@ -407,7 +405,8 @@ fn by_sound(
         if keep == join {
             continue;
         }
-        let by = secs[*i] + s.shift - secs[*j];
+        let shift = s.shift + placed[*j].0.skipped() - placed[*i].0.skipped();
+        let by = secs[*i] + shift - secs[*j];
         for k in 0..n {
             if party[k] == join {
                 secs[k] += by;

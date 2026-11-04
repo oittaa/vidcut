@@ -136,9 +136,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Marks, faders and the rest of the project go in the metadata of vidcut. Resolve does not keep this metadata.
   - A project holds one timeline (X2). Thus File > Import Timeline (`timeline import`) appends, replaces the timeline, adds one compound clip, or brings in only the media.
   - An OTIO file also opens as a new project.
-  - Clip effects, transitions, generators other than Solid Color, compound clips and speed changes come in as data. vidcut writes them back while they fit.
+  - Clip effects, transitions, generators that vidcut does not draw, compound clips and speed changes come in as data. vidcut writes them back while they fit.
   - Dissolves, cross fades ([D50](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)), wipes ([X89](#x89-a-wipe-reveals-from-one-edge)) and speeds ([D48](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)) play.
-  - Solid Color plays ([spec §8.17](cut-page-spec.md#817-generators-p-766)).
+  - The generators of [spec §8.17](cut-page-spec.md#817-generators-p-766) play.
   - Other transitions play as cuts, and other generators play as gaps. Other effects do not play.
   - The keyframes of the clip volume effect play as volume keyframes ([D81](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
   - The Text and lower-third titles of Resolve come in as titles of vidcut. The titles of vidcut go out in the shape that Resolve uses ([D67](cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
@@ -2349,6 +2349,34 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A script needs to know that no clip went in.
   - The owner approved this difference.
 
+## X115. A typed duration gives exactly that length
+
+- **Resolve:**
+  - The Duration field takes a typed length, and it then shows that length.
+  - The edit from these marks has one frame more. These are measurements in Resolve Studio 21.1.2.
+  - `00:00:02:00` gives 51 frames at 25 fps, and 61 frames at 30 fps.
+  - The Multi Source grid and Source Clip act the same.
+- **vidcut:**
+  - The marks hold exactly the typed length.
+  - `00:00:02:00` gives 50 frames at 25 fps, and 60 frames at 30 fps.
+- **Why:**
+  - Two seconds at 25 fps are 50 frames.
+  - The field and the edit agree.
+  - The owner approved this difference.
+
+## X118. Source Overwrite at the end of the timeline uses the first clip
+
+- **Resolve:**
+  - The playhead is at the end of the timeline, after the last clip. The last clip shows part of the marks.
+  - With a last clip of 139 frames or less, the reference is that last clip.
+  - With a last clip of 140 frames or more, the reference is the first clip that shows part of the marks.
+  - These are measurements in Resolve Studio 21.1.2, in the Multi Source viewer, with one layout. The reason for the limit is not known.
+- **vidcut:**
+  - With no clip under the playhead, the reference is the first clip that shows part of the marks. The length of the last clip plays no part.
+- **Why:**
+  - A limit with no known reason looks like a fault, and the user cannot predict it.
+  - The owner approved this difference.
+
 ## X119. Auto Sync on a saved group waits for Save Sync
 
 - **Resolve:**
@@ -2433,6 +2461,31 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The new clip goes in sync from where the file starts to Out.
 - **Why:**
   - Source Overwrite makes a synced cutaway. A clip that is out of sync is the fault that this edit is there to prevent.
+
+## X127. The viewer has scopes
+
+- **Resolve:**
+  - The Cut page has no scope. The video scopes open on the Color, Media and Deliver pages (pp. 3092–3093).
+  - They are docked on the Color page, in a floating window or on a second display (pp. 3092–3093).
+  - By default, the Waveform and the Parade have a 10-bit scale from 0 to 1023, whatever the data levels of the project are (p. 3093).
+  - A menu changes that scale to 12-bit, percent, millivolts or nits (p. 3093).
+  - The Vectorscope has targets for 75 percent color bars, and a skin tone line that the user can turn on (p. 3098).
+  - The Waveform overlays Y, CbCr or RGB (p. 3097).
+  - The Parade shows RGB, YRGB or YCbCr. It has options for color, extents, brightness and reference levels (p. 3102).
+  - There are five scopes (p. 3097). The Histogram is one of the others (p. 3093).
+- **vidcut:**
+  - The View menu and the header of the viewer turn on the Waveform, the Parade and the Vectorscope, each one by itself.
+  - The scopes are in a column at the right of the viewer picture, one above the other.
+  - The Trim Editor, Dynamic Trim, Multi Source and the grid of a synced group show no scopes.
+  - `viewer.scopes` turns them on and off. `frame.scope` renders one scope to a PNG with no window.
+  - The Waveform shows luma. The Parade shows red, green and blue, each in its color.
+  - The scale follows the timeline color space: 10-bit in SDR, and nits in HDR PQ and HDR HLG. There is no menu for the scale.
+  - The Vectorscope has the 75 percent targets. It has no skin tone line.
+  - vidcut has only these three scopes, and none of the options of a scope.
+- **Why:**
+  - vidcut has no Color, Media or Deliver page. Thus the viewer is the place for the scopes.
+  - A cut that vidcut delivers does not go through another page. The scopes let the user see the levels of that cut.
+  - The scale follows the timeline, because the same color space then gives the same scale with no setting to change.
 
 ## X128. Removing a file takes it out of its groups
 
