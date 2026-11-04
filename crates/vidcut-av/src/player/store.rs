@@ -47,6 +47,16 @@ fn charges(picture: &Picture) -> [usize; 2] {
     bytes
 }
 
+const IDS_AT_ONCE: usize = 64;
+
+fn at_once(ids: impl IntoIterator<Item = Id>) -> impl Iterator<Item = Vec<Id>> {
+    let mut ids = ids.into_iter();
+    std::iter::from_fn(move || {
+        let some: Vec<Id> = ids.by_ref().take(IDS_AT_ONCE).collect();
+        (!some.is_empty()).then_some(some)
+    })
+}
+
 pub(crate) struct Store {
     inner: Mutex<Inner>,
     landed: Condvar,
@@ -273,16 +283,27 @@ impl Store {
     }
 
     pub(crate) fn kept_run(&self, ids: impl IntoIterator<Item = Id>) -> usize {
-        let inner = self.lock();
-        ids.into_iter()
-            .take_while(|id| inner.pictures.contains(id))
-            .count()
+        let mut run = 0;
+        for some in at_once(ids) {
+            let inner = self.lock();
+            let kept = some
+                .iter()
+                .take_while(|&id| inner.pictures.contains(id))
+                .count();
+            run += kept;
+            if kept < some.len() {
+                break;
+            }
+        }
+        run
     }
 
     pub(crate) fn touch(&self, ids: impl IntoIterator<Item = Id>) {
-        let mut inner = self.lock();
-        for id in ids {
-            inner.touch(&id);
+        for some in at_once(ids) {
+            let mut inner = self.lock();
+            for id in &some {
+                inner.touch(id);
+            }
         }
     }
 
