@@ -465,6 +465,15 @@ pub fn print(method: &str, r: &Response, json: bool) {
             r.result["width"],
             r.result["height"]
         ),
+        "frame.scope" => println!(
+            "wrote {} ({} of frame {}, {}, {}x{})",
+            r.result["path"].as_str().unwrap_or_default(),
+            r.result["scope"].as_str().unwrap_or_default(),
+            r.result["frame"],
+            r.result["colors"].as_str().unwrap_or_default(),
+            r.result["width"],
+            r.result["height"]
+        ),
         "presets.list" => {
             for p in r.result.as_array().into_iter().flatten() {
                 println!(
@@ -1145,11 +1154,17 @@ fn live(method: &str, r: &Response) -> Option<()> {
         | "viewer.set"
         | "viewer.load"
         | "viewer.guides"
+        | "viewer.scopes"
         | "project.open" => {
             if method == "viewer.guides" {
                 println!(
                     "guides: {}",
                     serde_json::to_string(&v["guides"]).unwrap_or_default()
+                );
+            } else if method == "viewer.scopes" {
+                println!(
+                    "scopes: {}",
+                    serde_json::to_string(&v["scopes"]).unwrap_or_default()
                 );
             } else {
                 println!("{}", state_line(v));

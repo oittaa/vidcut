@@ -437,6 +437,23 @@ pub struct Media {
     /// `media`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtitles: Option<SubtitleFile>,
+    /// For a subclip (`media.subclip`), the part of the file it is. Its
+    /// source frames count from the start of that part. Left out for a
+    /// whole file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subclip: Option<Subclip>,
+    /// The markers on this source clip, at its source frames (`markers.add`
+    /// with `media`), in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<Marker>,
+}
+
+/// The part of a file that a subclip is, in seconds from the file's first
+/// frame.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Subclip {
+    pub start: f64,
+    pub end: f64,
 }
 
 /// The words a project takes from the transcripts of one sound stream.
@@ -851,13 +868,24 @@ impl Media {
         self.info.video.as_ref().is_some_and(|v| v.still)
     }
 
+    pub fn skipped(&self) -> f64 {
+        self.subclip.map_or(0.0, |s| s.start)
+    }
+
     pub fn origin(&self) -> f64 {
-        self.info
+        let first = self
+            .info
             .video
             .as_ref()
             .map(|v| v.first_pts)
             .or_else(|| self.info.audio.first().map(|a| a.first_pts))
-            .unwrap_or(0.0)
+            .unwrap_or(0.0);
+        first + self.skipped()
+    }
+
+    pub fn timecode_at(&self, fps: Rational) -> f64 {
+        let file = self.info.timecode.map_or(0.0, |tc| tc.frames_at(fps));
+        file + self.skipped() * fps.as_f64()
     }
 
     pub fn sequence_file(&self, k: u64) -> Option<PathBuf> {
@@ -2026,10 +2054,45 @@ impl Speed {
 }
 
 /// A kind of generator that vidcut draws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GeneratorKind {
     SolidColor,
+    FourColorGradient,
+}
+
+/// A Four Color Gradient: the colors of its corners and the center where they
+/// meet.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Gradient {
+    /// Center X: -1 is the left edge, 0 the middle and 1 the right edge.
+    /// `center_x_keys` replace it while they are there.
+    pub center_x: f64,
+    /// The keyframes of Center X, on the source frames of the clip.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub center_x_keys: Vec<Keyframe>,
+    /// Center Y: -1 is the top edge, 0 the middle and 1 the bottom edge.
+    /// `center_y_keys` replace it while they are there.
+    pub center_y: f64,
+    /// The keyframes of Center Y, on the source frames of the clip.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub center_y_keys: Vec<Keyframe>,
+    /// The upper left color: `#rrggbb`.
+    #[serde(with = "hex_rgb")]
+    #[schemars(with = "String")]
+    pub upper_left: [u8; 3],
+    /// The upper right color: `#rrggbb`.
+    #[serde(with = "hex_rgb")]
+    #[schemars(with = "String")]
+    pub upper_right: [u8; 3],
+    /// The lower left color: `#rrggbb`.
+    #[serde(with = "hex_rgb")]
+    #[schemars(with = "String")]
+    pub lower_left: [u8; 3],
+    /// The lower right color: `#rrggbb`.
+    #[serde(with = "hex_rgb")]
+    #[schemars(with = "String")]
+    pub lower_right: [u8; 3],
 }
 
 /// What a generator makes.
@@ -2043,6 +2106,8 @@ pub enum Generator {
         #[schemars(with = "String")]
         color: [u8; 3],
     },
+    /// Four colors that mix from the corners of the picture.
+    FourColorGradient(Gradient),
     /// A generator, a title or a clip with no media from another editor's
     /// file that vidcut doesn't draw (deviation X9): a block that plays as a
     /// gap. On an audio track, a clip with no media stands for its sound
@@ -2058,6 +2123,7 @@ pub enum Generator {
 
 impl Generator {
     pub const SOLID_COLOR: &str = "Solid Color";
+    pub const FOUR_COLOR_GRADIENT: &str = "Four Color Gradient";
 
     pub fn draws(&self) -> bool {
         !matches!(self, Self::Carried { .. })
@@ -4636,6 +4702,13 @@ impl Project {
     }
 
     pub fn media_frames(&self, media: &Media) -> i64 {
+        match media.subclip {
+            Some(s) => self.frames_in(s.end - s.start),
+            None => self.file_frames(media),
+        }
+    }
+
+    pub fn file_frames(&self, media: &Media) -> i64 {
         let secs = match (&media.info.video, media.info.audio.first()) {
             (Some(v), _) if v.still => self.settings.still_secs,
             (Some(v), _) => v.duration,
@@ -4643,6 +4716,13 @@ impl Project {
             (None, None) => 0.0,
         };
         self.frames_in(secs)
+    }
+
+    pub fn marker(&self, id: &str) -> Option<&Marker> {
+        self.markers
+            .iter()
+            .chain(self.media.iter().flat_map(|m| &m.markers))
+            .find(|k| k.id == id)
     }
 
     pub fn media_limit(&self, media: &Media) -> i64 {

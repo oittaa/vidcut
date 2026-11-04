@@ -55,6 +55,31 @@ impl Bytes<'_> {
     }
 }
 
+impl SoundMatch {
+    const TAG: &'static [u8; 4] = b"vcm1";
+
+    pub fn to_bytes(found: Option<Self>) -> Vec<u8> {
+        let mut out = Self::TAG.to_vec();
+        if let Some(m) = found {
+            out.extend_from_slice(&m.shift.to_le_bytes());
+            out.extend_from_slice(&m.score.to_le_bytes());
+        }
+        out
+    }
+
+    pub fn from_bytes(b: &[u8]) -> Option<Option<Self>> {
+        let b = b.strip_prefix(Self::TAG)?;
+        if b.is_empty() {
+            return Some(None);
+        }
+        let mut r = Bytes(b);
+        Some(Some(Self {
+            shift: r.f64()?,
+            score: r.f32()?,
+        }))
+    }
+}
+
 impl AudioLevels {
     const TAG: &'static [u8; 4] = b"vcl1";
 
@@ -249,14 +274,19 @@ fn level_at(heard: &[Heard], frame: i64) -> f64 {
         .sum()
 }
 
-pub fn words_in(span: &Span, words: &[crate::transcript::Word]) -> Vec<(usize, i64, i64)> {
-    words_between(span, (span.start, span.end), words)
+pub fn words_in(
+    span: &Span,
+    words: &[crate::transcript::Word],
+    skipped: f64,
+) -> Vec<(usize, i64, i64)> {
+    words_between(span, (span.start, span.end), words, skipped)
 }
 
 pub fn words_between(
     span: &Span,
     (from, to): (i64, i64),
     words: &[crate::transcript::Word],
+    skipped: f64,
 ) -> Vec<(usize, i64, i64)> {
     if span.pace.speed() == 0.0 {
         return Vec::new();
@@ -265,8 +295,8 @@ pub fn words_between(
         .iter()
         .enumerate()
         .filter_map(|(i, w)| {
-            let a = span.frame(span.origin + w.start);
-            let b = span.frame(span.origin + w.end);
+            let a = span.frame(span.origin - skipped + w.start);
+            let b = span.frame(span.origin - skipped + w.end);
             let (a, b) = (a.min(b), a.max(b));
             let middle = (a + b) / 2.0;
             if middle < from as f64 || middle >= to as f64 {

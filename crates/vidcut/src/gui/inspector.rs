@@ -7,11 +7,12 @@ use egui_phosphor::regular::{
     FLIP_HORIZONTAL, FLIP_VERTICAL, LINK_SIMPLE, LINK_SIMPLE_BREAK, TRASH,
 };
 use serde_json::{Value, json};
+use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     Border, CellShape, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, Effect, EffectKind,
-    GaussianBlur, Generator, Keyframe, MosaicBlur, Picture, PictureTool, Project, Retime, Speed,
-    TrackKind, Upscaler, ZoomBox,
+    GaussianBlur, Generator, Gradient, Keyframe, MosaicBlur, Picture, PictureTool, Project, Retime,
+    Speed, TrackKind, Upscaler, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -62,6 +63,7 @@ enum Field {
 enum Key {
     Picture(Field),
     Effect(usize, Knob),
+    Center(Axis),
     Volume,
     Speed,
     Rate,
@@ -626,6 +628,8 @@ impl Key {
         match self {
             Key::Picture(f) => f.label(),
             Key::Effect(_, k) => k.dial().label,
+            Key::Center(Axis::X) => "Center X",
+            Key::Center(Axis::Y) => "Center Y",
             Key::Volume => "Volume",
             Key::Speed => "Speed",
             Key::Rate => "Frames per Second",
@@ -647,7 +651,7 @@ impl Key {
             Key::Volume => " dB",
             Key::Speed => "%",
             Key::Rate => " fps",
-            Key::Effect(..) | Key::Length => "",
+            Key::Effect(..) | Key::Center(_) | Key::Length => "",
         }
     }
 
@@ -655,6 +659,7 @@ impl Key {
         match self {
             Key::Picture(f) => f.speed(),
             Key::Effect(_, k) => k.dial().speed,
+            Key::Center(_) => 0.005,
             Key::Volume => 0.1,
             Key::Speed | Key::Length => 1.0,
             Key::Rate => 0.1,
@@ -665,7 +670,7 @@ impl Key {
         match self {
             Key::Picture(Field::Pitch | Field::Yaw) => (0, 3),
             Key::Picture(_) => (0, 2),
-            Key::Effect(..) => (3, 3),
+            Key::Effect(..) | Key::Center(_) => (3, 3),
             Key::Volume => (1, 1),
             Key::Speed => (0, 2),
             Key::Rate => (0, 3),
@@ -677,7 +682,7 @@ impl Key {
         match self {
             Key::Picture(f) => f.usual(),
             Key::Effect(_, k) => k.dial().usual,
-            Key::Volume => 0.0,
+            Key::Center(_) | Key::Volume => 0.0,
             Key::Speed => 100.0,
             Key::Rate | Key::Length => 0.0,
         }
@@ -854,9 +859,47 @@ pub struct Inspector {
 #[derive(Debug)]
 struct Recolored {
     clip: String,
+    param: &'static str,
     from: [u8; 3],
     to: [u8; 3],
     since: Option<Instant>,
+}
+
+struct ColorRow {
+    label: &'static str,
+    param: &'static str,
+    stored: [u8; 3],
+    usual: [u8; 3],
+}
+
+fn color_rows(c: &Clip) -> Vec<ColorRow> {
+    let row = |label, param, stored, usual| ColorRow {
+        label,
+        param,
+        stored,
+        usual,
+    };
+    let u = Gradient::default();
+    match &c.generator {
+        Some(Generator::SolidColor { color }) => vec![row("Color", "color", *color, [0, 0, 0])],
+        Some(Generator::FourColorGradient(g)) => vec![
+            row("Upper Left Color", "upper_left", g.upper_left, u.upper_left),
+            row(
+                "Upper Right Color",
+                "upper_right",
+                g.upper_right,
+                u.upper_right,
+            ),
+            row("Lower Left Color", "lower_left", g.lower_left, u.lower_left),
+            row(
+                "Lower Right Color",
+                "lower_right",
+                g.lower_right,
+                u.lower_right,
+            ),
+        ],
+        _ => Vec::new(),
+    }
 }
 
 enum Act {
@@ -885,6 +928,7 @@ enum Act {
     Toggle(Key),
     KeyEase(Key, Ease),
     ResetChannel(Field),
+    ResetCenter(Axis),
     EffectSet(usize, Value),
     EffectReset(usize),
     EffectRemove(usize),
@@ -896,6 +940,8 @@ fn param_name(key: Key) -> Option<&'static str> {
         Key::Volume => Some("volume"),
         Key::Picture(f) => f.channel().map(PictureValue::name),
         Key::Speed => Some("speed"),
+        Key::Center(Axis::X) => Some("center_x"),
+        Key::Center(Axis::Y) => Some("center_y"),
         _ => None,
     }
 }
@@ -904,8 +950,16 @@ fn key_clips(key: Key, (chosen, sounds, paced): Lists<'_>) -> Vec<String> {
     match key {
         Key::Volume => sounds.iter().map(|s| s.id.clone()).collect(),
         Key::Picture(_) => chosen.iter().map(|c| c.id.clone()).collect(),
+        Key::Center(_) => chosen.iter().take(1).map(|c| c.id.clone()).collect(),
         Key::Speed => paced.iter().map(|c| c.id.clone()).collect(),
         _ => Vec::new(),
+    }
+}
+
+fn gradient_of(c: &Clip) -> Option<&Gradient> {
+    match &c.generator {
+        Some(Generator::FourColorGradient(g)) => Some(g),
+        _ => None,
     }
 }
 
@@ -915,6 +969,7 @@ fn key_times(c: &Clip, key: Key) -> Vec<i64> {
         Key::Picture(f) => f
             .channel()
             .and_then(|v| c.picture.as_ref().map(|pic| pic.keys_of(v).to_vec())),
+        Key::Center(axis) => gradient_of(c).map(|g| g.keys(axis).to_vec()),
         Key::Speed => c.speed.as_ref().map(Speed::keyframes),
         _ => None,
     };
@@ -1208,6 +1263,7 @@ fn field(
         acts.push(match f {
             Key::Volume => Act::Unkey,
             Key::Picture(field) if field.channel().is_some() => Act::ResetChannel(field),
+            Key::Center(axis) => Act::ResetCenter(axis),
             f => Act::Put(f, f.usual()),
         });
     }
@@ -2305,27 +2361,12 @@ impl Workspace {
         let ids: Vec<&str> = match key {
             Key::Volume => sounds.iter().map(|s| s.id.as_str()).collect(),
             Key::Picture(_) => chosen.iter().map(|c| c.id.as_str()).collect(),
+            Key::Center(_) => chosen.iter().take(1).map(|c| c.id.as_str()).collect(),
             _ => return,
         };
         let ids: Vec<&str> = ids
             .into_iter()
-            .filter(|id| {
-                p.clip(id).is_some_and(|c| match key {
-                    Key::Volume => c.audio.as_ref().is_some_and(|a| {
-                        a.gain_keys
-                            .iter()
-                            .any(|k| c.key_time(k.frame).round() as i64 == at)
-                    }),
-                    Key::Picture(f) => f.channel().is_some_and(|v| {
-                        c.picture.as_ref().is_some_and(|pic| {
-                            pic.keys_of(v)
-                                .iter()
-                                .any(|k| c.key_time(k.frame).round() as i64 == at)
-                        })
-                    }),
-                    _ => false,
-                })
-            })
+            .filter(|id| p.clip(id).is_some_and(|c| key_times(c, key).contains(&at)))
             .collect();
         if !ids.is_empty() {
             self.send(
@@ -2396,6 +2437,7 @@ impl Workspace {
                 });
             }
             Key::Effect(n, k) => self.send_knob(chosen, (n, k), value),
+            Key::Center(axis) => self.send_center(axis, value, chosen),
             Key::Volume => self.send_volume(sounds, value),
             Key::Speed if Speed::freezes(value / 100.0) && !paced.iter().any(|c| c.ramped) => {
                 self.send_freeze(paced, value / 100.0);
@@ -2411,38 +2453,93 @@ impl Workspace {
         }
     }
 
-    fn generator_section(&mut self, ui: &mut egui::Ui, id: &str, stored: [u8; 3]) {
-        let held = self.inspector.recolored.take().filter(|r| {
-            r.clip == id
-                && r.since
-                    .is_none_or(|s| landing(r.to, s.elapsed(), r.from, stored).is_some())
+    fn send_center(&mut self, axis: Axis, value: f64, chosen: &[Chosen]) {
+        let (Some(c), Some(param)) = (chosen.first(), param_name(Key::Center(axis))) else {
+            return;
+        };
+        let at = self.snap.timeline.position;
+        let mut params = json!({ "clip": c.id, "at": at });
+        params[param] = json!(value);
+        self.send("generators.set", params);
+    }
+
+    fn reset_center(&mut self, axis: Axis, chosen: &[Chosen]) {
+        let key = Key::Center(axis);
+        let (Some(c), Some(param)) = (chosen.first(), param_name(key)) else {
+            return;
+        };
+        let mut plain = json!({ "clip": c.id });
+        plain[param] = json!(key.usual());
+        let keyed = self
+            .project_shared()
+            .and_then(|p| p.clip(&c.id).map(|clip| !key_times(clip, key).is_empty()));
+        if keyed == Some(true) {
+            let commands = json!([
+                { "method": "keyframes.remove", "params": { "clips": [c.id], "param": param } },
+                { "method": "generators.set", "params": plain },
+            ]);
+            self.send("apply", json!({ "commands": commands }));
+        } else {
+            self.send("generators.set", plain);
+        }
+    }
+
+    fn generator_section(&mut self, ui: &mut egui::Ui, c: &Clip, acts: &mut Vec<Act>) {
+        let rows = color_rows(c);
+        let gradient = gradient_of(c);
+        if rows.is_empty() && gradient.is_none() {
+            return;
+        }
+        let stored_of = |param: &str| rows.iter().find(|r| r.param == param).map(|r| r.stored);
+        let mut held = self.inspector.recolored.take().filter(|r| {
+            r.clip == c.id
+                && stored_of(r.param).is_some_and(|stored| {
+                    r.since
+                        .is_none_or(|s| landing(r.to, s.elapsed(), r.from, stored).is_some())
+                })
         });
-        let mut rgb = held.as_ref().map_or(stored, |r| r.to);
-        let mut changed = false;
+        let at = self.snap.timeline.position;
+        let inspector = &self.inspector;
         group(
             ui,
             "Generator",
             |_| (),
             |ui| {
-                label(ui, "Color", rgb != [0, 0, 0]);
-                changed = ui.color_edit_button_srgb(&mut rgb).changed();
-                ui.end_row();
+                for axis in [Axis::X, Axis::Y] {
+                    let Some(g) = gradient else {
+                        break;
+                    };
+                    let key = Key::Center(axis);
+                    let shown = g.center_at(axis, c.content_at(at) as f64);
+                    let keys = g.keys(axis);
+                    let set = !keys.is_empty() || shown != key.usual();
+                    let value = (set, shown, *CENTER.start()..=*CENTER.end());
+                    let marks = Some(mark(c, keys, at));
+                    field(ui, key, inspector, value, keyed_look(false), marks, acts);
+                }
+                for row in &rows {
+                    let mine = held.as_ref().filter(|r| r.param == row.param);
+                    let mut rgb = mine.map_or(row.stored, |r| r.to);
+                    label(ui, row.label, rgb != row.usual);
+                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                        held = Some(Recolored {
+                            clip: c.id.clone(),
+                            param: row.param,
+                            from: row.stored,
+                            to: rgb,
+                            since: None,
+                        });
+                    }
+                    ui.end_row();
+                }
             },
         );
-        let mut held = match changed {
-            true => Some(Recolored {
-                clip: id.to_string(),
-                from: stored,
-                to: rgb,
-                since: None,
-            }),
-            false => held,
-        };
         if let Some(r) = held.as_mut().filter(|r| r.since.is_none())
             && !ui.input(|i| i.pointer.any_down())
         {
-            let color = vidcut_core::model::hex(r.to);
-            self.send("generators.set", json!({ "clip": id, "color": color }));
+            let mut params = json!({ "clip": c.id });
+            params[r.param] = json!(vidcut_core::model::hex(r.to));
+            self.send("generators.set", params);
             r.since = Some(Instant::now());
         }
         self.inspector.recolored = held;
@@ -2756,6 +2853,7 @@ impl Workspace {
             Act::Toggle(key) => self.toggle_key(key, (chosen, sounds, paced)),
             Act::KeyEase(key, ease) => self.ease_key(key, ease, chosen, sounds),
             Act::ResetChannel(field) => self.reset_channel(field, chosen),
+            Act::ResetCenter(axis) => self.reset_center(axis, chosen),
             Act::EffectSet(n, params) => self.send_effect("effects.set", chosen, n, params),
             Act::EffectReset(n) => self.send_effect("effects.reset", chosen, n, json!({})),
             Act::EffectRemove(n) => self.send_effect("effects.remove", chosen, n, json!({})),
@@ -2836,7 +2934,7 @@ impl Workspace {
         let ripple = self.ripple();
         let dropped = self.dropped();
         let gone = |k: Key| match k {
-            Key::Picture(_) => chosen.is_empty(),
+            Key::Picture(_) | Key::Center(_) => chosen.is_empty(),
             Key::Effect(n, _) => chosen.first().is_none_or(|c| c.shown.effects.len() <= n),
             Key::Volume => sounds.is_empty(),
             Key::Speed | Key::Rate | Key::Length => paced.is_empty(),
@@ -2878,9 +2976,7 @@ impl Workspace {
                         });
                     });
                 });
-                if let Some(Generator::SolidColor { color }) = &first.generator {
-                    self.generator_section(ui, &first.id, *color);
-                }
+                self.generator_section(ui, first, &mut acts);
                 if !chosen.is_empty() {
                     let boxes = self.timeline.picture_grab.tool == Some(PictureTool::DynamicZoom);
                     let i = &self.inspector;

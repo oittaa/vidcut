@@ -14,8 +14,8 @@ use crate::error::{Error, ErrorCode, Result};
 use crate::folder::Folder;
 use crate::history::HistoryFile;
 use crate::model::{
-    Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marks, Media,
-    MediaInfo, Picture, Project, Proxy, Title, Track, TrackKind, Transition, VideoInfo,
+    Clip, ClipAudio, Compound, Effects, Format, Generator, ImageSequence, Kept, Marker, Marks,
+    Media, MediaInfo, Picture, Project, Proxy, Title, Track, TrackKind, Transition, VideoInfo,
     WordsChange,
 };
 use crate::ops::{self, ClipProps, Edge, Source};
@@ -1912,7 +1912,7 @@ fn clip_speech(
         let spans = Span::of_clip(c, origin, fps);
         let words = spans
             .iter()
-            .flat_map(|span| analysis::words_between(span, (from, to), &timed));
+            .flat_map(|span| analysis::words_between(span, (from, to), &timed, m.skipped()));
         for (i, start, end) in words {
             let middle = (start + end) / 2;
             if (a..b).contains(&middle) {
@@ -2050,7 +2050,7 @@ fn quiet_edges(p: &Project, env: &dyn Env, spans: &[(i64, i64)]) -> Result<Vec<(
                 known.extend(
                     spans
                         .iter()
-                        .flat_map(|span| analysis::words_in(span, &timed))
+                        .flat_map(|span| analysis::words_in(span, &timed, m.skipped()))
                         .map(|(_, a, b)| (a, b)),
                 );
             }
@@ -2796,6 +2796,26 @@ fn mutate(
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             m.name = name.clone();
             Value::Null
+        }
+        Request::MediaSubclip {
+            media,
+            range,
+            name,
+            bin,
+        } => {
+            let m = p
+                .media(media)
+                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+            let c = media_context(p, m, None);
+            let span = match range {
+                Some(r) => c.range(r)?,
+                None => (
+                    m.marks.mark_in.unwrap_or(0),
+                    m.marks.mark_out.unwrap_or(c.end),
+                ),
+            };
+            let id = ops::create_subclip(p, media, span, name, bin.as_deref())?;
+            json!({ "media": id })
         }
         Request::MediaSet {
             media,
@@ -3677,6 +3697,30 @@ fn mutate(
             Value::Null
         }
         Request::MarkersAdd {
+            media: Some(media),
+            at,
+            name,
+            color,
+            note,
+            duration,
+        } => {
+            let m = p
+                .media(media)
+                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+            let at = media_context(p, m, None).resolve(at)?;
+            let duration = duration.as_ref().map(|d| length(p, d)).transpose()?;
+            let k = ops::NewMarker {
+                kept: None,
+                at,
+                duration: duration.unwrap_or(1),
+                name: name.clone(),
+                color: color.clone(),
+                note: note.clone(),
+            };
+            json!({ "marker": ops::add_source_marker(p, media, k)? })
+        }
+        Request::MarkersAdd {
+            media: None,
             at,
             name,
             color,
@@ -3696,7 +3740,14 @@ fn mutate(
             json!({ "marker": id })
         }
         Request::MarkersMove { marker, to } => {
-            let to = resolve(p, to, playhead)?;
+            let on_source = p
+                .media
+                .iter()
+                .find(|m| m.markers.iter().any(|k| &k.id == marker));
+            let to = match on_source {
+                Some(m) => media_context(p, m, None).resolve(to)?,
+                None => resolve(p, to, playhead)?,
+            };
             ops::move_marker(p, marker, to)?;
             Value::Null
         }
@@ -3978,7 +4029,7 @@ fn mutate(
         }
         Request::GeneratorsAdd {
             kind,
-            color,
+            settings,
             at,
             duration,
             track,
@@ -3991,13 +4042,17 @@ fn mutate(
                 Some(d) => length(p, d)?,
                 None => ops::titles::default_length(p),
             };
-            let made = ops::generators::made(*kind, color.as_deref())?;
+            let made = ops::generators::made(*kind, settings)?;
             let (id, track) = ops::generators::add(p, track.as_deref(), start, frames, made)?;
             json!({ "clip": id, "track": track })
         }
-        Request::GeneratorsSet { clip, color } => {
+        Request::GeneratorsSet { clip, settings, at } => {
             let id = resolve_clip(p, clip, playhead)?;
-            ops::generators::set(p, &id, color.as_deref())?;
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            ops::generators::set(p, &id, settings, at)?;
             Value::Null
         }
         Request::PictureSet {
@@ -4708,7 +4763,9 @@ impl PoolFiles {
     }
 
     fn note(&mut self, p: &Project, i: usize) {
-        self.0.entry(p.media[i].path.clone()).or_default().push(i);
+        if p.media[i].subclip.is_none() {
+            self.0.entry(p.media[i].path.clone()).or_default().push(i);
+        }
     }
 }
 
@@ -4745,6 +4802,8 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         camera: None,
         fingerprint: probed.fingerprint,
         subtitles: probed.subtitles,
+        subclip: None,
+        markers: Vec::new(),
     });
     files.note(p, p.media.len() - 1);
     id
@@ -5182,8 +5241,7 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
             (false, true) => pool
                 .get(ids[&media_key(&c.media)].as_str())
                 .filter(|m| m.sequence.is_none())
-                .and_then(|m| m.info.timecode)
-                .map_or(0, |tc| tc.frames_at(from).round() as i64),
+                .map_or(0, |m| m.timecode_at(from).round() as i64),
             _ => 0,
         };
         c.timecoded = false;
@@ -5209,6 +5267,9 @@ fn at_project_rate(p: &Project, t: &mut otio::Imported, ids: &MediaIds) {
                     line.move_handles(conv);
                     line.take_picture(&picture);
                 });
+            }
+            if let Some(reference) = c.generator.as_mut() {
+                otio::generators::scale_keys(reference, conv, ratio);
             }
         }
         (c.start, c.duration) = (start, end - start);
@@ -5354,8 +5415,10 @@ fn place_imported(
                 name: (!c.name.is_empty()).then(|| c.name.clone()),
                 effects: carry(&effects, source_in),
                 generator: c.generator.as_ref().map(|reference| {
-                    otio::generators::read(reference).unwrap_or_else(|| Generator::Carried {
-                        reference: reference.clone().into(),
+                    otio::generators::read(reference, source_in).unwrap_or_else(|| {
+                        Generator::Carried {
+                            reference: reference.clone().into(),
+                        }
                     })
                 }),
                 title,
@@ -6147,7 +6210,14 @@ fn join_pool(
     let mut ids = HashMap::new();
     let mut files = PoolFiles::of(p);
     for m in meta.media.iter().filter(|m| wanted.contains(&m.id)) {
-        let id = match files.find(p, &m.path, &m.sequence) {
+        let same = match m.subclip {
+            Some(_) => p
+                .media
+                .iter()
+                .find(|x| x.path == m.path && x.subclip == m.subclip),
+            None => files.find(p, &m.path, &m.sequence),
+        };
+        let id = match same {
             Some(x) => x.id.clone(),
             None => {
                 let bin = match m.bin.as_str() {
@@ -6157,8 +6227,15 @@ fn join_pool(
                 ops::add_bin(p, &bin)?;
                 first_video_sets_format(p, &m.info);
                 let id = p.alloc_media_id();
+                let markers = (m.markers.iter())
+                    .map(|k| Marker {
+                        id: p.alloc_marker_id(),
+                        ..k.clone()
+                    })
+                    .collect();
                 p.media.push(Media {
                     id: id.clone(),
+                    markers,
                     bin,
                     proxy: None,
                     ..m.clone()
@@ -7102,7 +7179,7 @@ pub fn query(
                     let tongue = filler_language(language, speech);
                     let (fillers, fillers_from) = filler_words(p, env, tongue.as_deref());
                     let placed: Vec<_> = (target.spans(p)?.iter())
-                        .flat_map(|span| analysis::words_in(span, &timed))
+                        .flat_map(|span| analysis::words_in(span, &timed, m.skipped()))
                         .collect();
                     let words: Vec<Value> = placed
                         .iter()
@@ -7259,7 +7336,7 @@ pub fn query(
             }
             answer
         }
-        Request::MarkersList {} => json!(
+        Request::MarkersList { media: None } => json!(
             p.markers
                 .iter()
                 .map(|k| {
@@ -7269,6 +7346,21 @@ pub fn query(
                 })
                 .collect::<Vec<_>>()
         ),
+        Request::MarkersList { media: Some(media) } => {
+            let m = p
+                .media(media)
+                .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+            json!(
+                m.markers
+                    .iter()
+                    .map(|k| {
+                        let mut v = serde_json::to_value(k).unwrap_or_default();
+                        v["at_tc"] = json!(p.settings.length_timecode(k.at));
+                        v
+                    })
+                    .collect::<Vec<_>>()
+            )
+        }
         Request::MarksGet {} => {
             let mark = |f: Option<i64>| f.map(|f| json!({ "frame": f, "tc": tc(f) }));
             json!({ "in": mark(p.marks.mark_in), "out": mark(p.marks.mark_out) })
@@ -7398,6 +7490,7 @@ pub fn query(
         | Request::ExportPlan(_)
         | Request::ExportStart(_)
         | Request::FrameRender { .. }
+        | Request::FrameScope { .. }
         | Request::StoryboardRender { .. }
         | Request::PresetsList {}
         | Request::PresetsGet { .. }
@@ -7408,7 +7501,8 @@ pub fn query(
         | Request::LooksDelete { .. }
         | Request::EncodersList { .. }
         | Request::DecodersList {}
-        | Request::ViewerGuides { .. } => {
+        | Request::ViewerGuides { .. }
+        | Request::ViewerScopes { .. } => {
             return Err(Error::internal(format!(
                 "{} is answered by the session, not the editor",
                 request.method()
@@ -8300,8 +8394,14 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
             Some(v) if v.fps == tc.rate => v.fps,
             _ => p.settings.fps,
         };
-        let frames = tc.frames_at(fps).round() as i64;
+        let frames = m.timecode_at(fps).round() as i64;
         v["timecode"] = json!(format_timecode(frames, fps, 0, tc.drop_frame));
+    }
+    if let Some(s) = m.subclip {
+        v["subclip"] = json!(s);
+    }
+    if !m.markers.is_empty() {
+        v["markers"] = json!(m.markers);
     }
     let kept: Vec<Value> = (0..m.info.audio.len() as u32)
         .flat_map(|s| {

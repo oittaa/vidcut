@@ -3,7 +3,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use crate::fingerprint::Origin;
-use crate::lru::Lru;
+use crate::lru::Uncapped;
 use crate::preferences::{Cache, CacheLimit};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,7 +152,7 @@ struct Entry {
 }
 
 struct Index {
-    files: Lru<PathBuf, Entry, { usize::MAX }>,
+    files: Uncapped<PathBuf, Entry>,
     total: u64,
     writes: u64,
 }
@@ -160,7 +160,7 @@ struct Index {
 impl Index {
     fn of(found: Vec<(PathBuf, u64, SystemTime)>) -> Self {
         let mut index = Index {
-            files: Lru::new(),
+            files: Uncapped::new(),
             total: 0,
             writes: 0,
         };
@@ -184,7 +184,7 @@ impl Index {
     }
 
     fn forget(&mut self, path: &Path) {
-        if let Some((_, e)) = self.files.remove(&path.to_path_buf()) {
+        if let Some((_, e)) = self.files.remove(path) {
             self.total -= e.len;
         }
     }
@@ -276,7 +276,7 @@ pub fn rebuild() {
         };
         let old = &live.index;
         let mut fresh = Index {
-            files: Lru::new(),
+            files: Uncapped::new(),
             total: 0,
             writes: old.writes,
         };
