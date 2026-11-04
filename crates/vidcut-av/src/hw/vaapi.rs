@@ -1,4 +1,5 @@
 use super::*;
+use vidcut_core::lru::Lru;
 
 pub(super) fn intel_download(src: &frame::Video) -> Option<Result<frame::Video>> {
     // SAFETY: a valid frame.
@@ -31,19 +32,20 @@ enum Way {
 
 #[derive(Clone, Copy)]
 struct Ways {
-    display: usize,
     mapped: (f64, u32),
     fetched: (f64, u32),
 }
 
 const WAY_TRIALS: u32 = 4;
 
-static WAYS: Mutex<Vec<Ways>> = Mutex::new(Vec::new());
+const DISPLAYS_KEPT: usize = 16;
+
+static WAYS: Mutex<Lru<usize, Ways, DISPLAYS_KEPT>> = Mutex::new(Lru::new());
 
 impl Ways {
     fn maps(display: usize) -> bool {
-        let ways = WAYS.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(w) = ways.iter().find(|w| w.display == display) else {
+        let mut ways = WAYS.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(w) = ways.get(&display) else {
             return true;
         };
         if w.mapped.1 < WAY_TRIALS || w.fetched.1 < WAY_TRIALS {
@@ -53,19 +55,17 @@ impl Ways {
         }
     }
 
-    fn of(ways: &mut Vec<Ways>, display: usize) -> &mut Ways {
-        let i = match ways.iter().position(|w| w.display == display) {
-            Some(i) => i,
-            None => {
-                ways.push(Ways {
-                    display,
+    fn of(ways: &mut Lru<usize, Ways, DISPLAYS_KEPT>, display: usize) -> &mut Ways {
+        if !ways.contains(&display) {
+            ways.insert(
+                display,
+                Ways {
                     mapped: (f64::INFINITY, 0),
                     fetched: (f64::INFINITY, 0),
-                });
-                ways.len() - 1
-            }
-        };
-        &mut ways[i]
+                },
+            );
+        }
+        ways.get_mut(&display).expect("just put in")
     }
 
     fn took(display: usize, way: Way, took: std::time::Duration, f: &frame::Video) {
@@ -307,7 +307,7 @@ const COPY_ASYNC: u32 = 1;
 const UNIMPLEMENTED: i32 = 0x14;
 
 #[cfg(target_os = "linux")]
-static NO_COPY: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+static NO_COPY: Mutex<Lru<usize, (), DISPLAYS_KEPT>> = Mutex::new(Lru::new());
 
 #[cfg(target_os = "linux")]
 impl Va {
@@ -437,7 +437,7 @@ impl Keeper {
             NO_COPY
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .push(self.display as usize);
+                .insert(self.display as usize, ());
             return Ok(None);
         }
         if status != 0 {
@@ -462,7 +462,8 @@ fn handed_back<T, E>(settled: std::result::Result<(), E>, frame: T) -> std::resu
 #[cfg(target_os = "linux")]
 pub(super) fn surface_bytes(f: &frame::Video) -> Option<usize> {
     type Kind = (usize, ffi::AVPixelFormat, i32, i32);
-    static SIZES: Mutex<Vec<(Kind, usize)>> = Mutex::new(Vec::new());
+    const KINDS_KEPT: usize = 64;
+    static SIZES: Mutex<Lru<Kind, usize, KINDS_KEPT>> = Mutex::new(Lru::new());
     let (frames, _) = frames_of(f).ok()?;
     // SAFETY: a live VA-API frames context.
     let kind = unsafe {
@@ -475,7 +476,7 @@ pub(super) fn surface_bytes(f: &frame::Video) -> Option<usize> {
         )
     };
     let mut sizes = SIZES.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, bytes)) = sizes.iter().find(|(k, _)| *k == kind) {
+    if let Some(bytes) = sizes.get(&kind) {
         return Some(*bytes);
     }
     let exported = DrmFrame::export(f).ok()?;
@@ -486,7 +487,7 @@ pub(super) fn surface_bytes(f: &frame::Video) -> Option<usize> {
         d.objects[..objects].iter().map(|o| o.size).sum::<usize>()
     };
     (bytes > 0).then(|| {
-        sizes.push((kind, bytes));
+        sizes.insert(kind, bytes);
         bytes
     })
 }
