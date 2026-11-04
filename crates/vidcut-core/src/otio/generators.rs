@@ -19,12 +19,16 @@ const LOWER_LEFT: &str = "lowerLeft";
 const LOWER_RIGHT: &str = "lowerRight";
 const LEVEL: &str = "level";
 const NO_VALUES: (&str, u32, u32) = ("Generator", 3, 42);
-const WITH_NO_VALUES: [Generator; 5] = [
+const WITH_NO_VALUES: [Generator; 9] = [
     Generator::TenStep,
     Generator::HundredMvSteps,
     Generator::GreyScale,
     Generator::YcbcrRamp,
     Generator::SmpteColorBar,
+    Generator::Bt2111HlgNarrow,
+    Generator::Bt2111PqFull,
+    Generator::Bt2111PqNarrow,
+    Generator::Window,
 ];
 
 pub fn no_media() -> Value {
@@ -146,7 +150,16 @@ pub fn reference(g: &Generator, origin: i64) -> Value {
             }
             written
         }
-        other => made(name(other), name(other), NO_VALUES, Vec::new()),
+        other => made(kind_of(other), name(other), NO_VALUES, Vec::new()),
+    }
+}
+
+fn kind_of(g: &Generator) -> &str {
+    match g {
+        Generator::Bt2111HlgNarrow => "BT.2111 Color bar HLG Narrow",
+        Generator::Bt2111PqFull => "BT.2111 Color bar PQ Full",
+        Generator::Bt2111PqNarrow => "BT.2111 Color bar PQ Narrow",
+        other => name(other),
     }
 }
 
@@ -213,7 +226,7 @@ pub fn read(reference: &Value, origin: i64) -> Option<Generator> {
                 },
             })
         }
-        _ => WITH_NO_VALUES.into_iter().find(|g| name(g) == kind),
+        _ => WITH_NO_VALUES.into_iter().find(|g| kind_of(g) == kind),
     }
 }
 

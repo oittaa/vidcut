@@ -434,6 +434,7 @@ Writing:
   - `Generator::FourColorGradient` holds a `Gradient`.
   - `Generator::EbuColorBar` holds an `EbuLevel`.
   - `Generator::TenStep`, `Generator::HundredMvSteps`, `Generator::GreyScale`, `Generator::YcbcrRamp` and `Generator::SmpteColorBar` hold nothing.
+  - `Generator::Bt2111HlgNarrow`, `Generator::Bt2111PqFull`, `Generator::Bt2111PqNarrow` and `Generator::Window` hold nothing.
   - `Generator::Carried` holds the OTIO reference of a kind that vidcut does not model, as `Kept`. It plays as a gap.
 - `Generator::draws` and `Clip::draws` tell whether a generator has a picture.
 - A `Gradient` holds a plain Center X and Center Y and the keyframes of each one.

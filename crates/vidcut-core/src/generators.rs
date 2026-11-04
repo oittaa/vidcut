@@ -46,6 +46,77 @@ const YCBCR_SLOPES: [f64; 3] = [2.539648, 0.359182, 2.814179];
 type Code = [f64; 3];
 type Band = (u32, Vec<Code>);
 
+struct Bt2111 {
+    range: (f64, f64),
+    grey40: f64,
+    mid: f64,
+    two: f64,
+    four: f64,
+    left: [Code; 3],
+    right: [Code; 3],
+    ramp: (usize, usize),
+}
+
+const NARROW: (f64, f64) = (64.0, 876.0);
+const NARROW_RAMP: (usize, usize) = (858, 876);
+
+const BT2111_HLG_NARROW: Bt2111 = Bt2111 {
+    range: NARROW,
+    grey40: 414.0,
+    mid: 721.0,
+    two: 80.0,
+    four: 99.0,
+    left: [
+        [713.0, 719.0, 316.0],
+        [538.0, 709.0, 718.0],
+        [512.0, 706.0, 296.0],
+    ],
+    right: [
+        [651.0, 286.0, 705.0],
+        [639.0, 269.0, 164.0],
+        [227.0, 147.0, 702.0],
+    ],
+    ramp: NARROW_RAMP,
+};
+
+const BT2111_PQ_NARROW: Bt2111 = Bt2111 {
+    range: NARROW,
+    grey40: 414.0,
+    mid: 572.0,
+    two: 80.0,
+    four: 99.0,
+    left: [
+        [568.0, 571.0, 381.0],
+        [484.0, 566.0, 571.0],
+        [474.0, 564.0, 368.0],
+    ],
+    right: [
+        [536.0, 361.0, 564.0],
+        [530.0, 350.0, 256.0],
+        [317.0, 236.0, 562.0],
+    ],
+    ramp: NARROW_RAMP,
+};
+
+const BT2111_PQ_FULL: Bt2111 = Bt2111 {
+    range: (0.0, 1023.0),
+    grey40: 409.0,
+    mid: 593.0,
+    two: 20.0,
+    four: 41.0,
+    left: [
+        [589.0, 592.0, 370.0],
+        [491.0, 586.0, 592.0],
+        [478.0, 584.0, 355.0],
+    ],
+    right: [
+        [551.0, 347.0, 584.0],
+        [544.0, 334.0, 225.0],
+        [296.0, 201.0, 582.0],
+    ],
+    ramp: (791, 1022),
+};
+
 fn pq_encode(light: f64) -> f64 {
     let p = light.max(0.0).powf(PQ_M1);
     ((PQ_C1 + PQ_C2 * p) / (1.0 + PQ_C3 * p)).powf(PQ_M2)
@@ -401,6 +472,81 @@ fn smpte_bars(w: u32, h: u32) -> Vec<Band> {
     ]
 }
 
+fn bt2111_bars(codes: &Bt2111, w: u32, h: u32) -> Vec<Band> {
+    let full = w as usize;
+    let of = |code: f64| (code - codes.range.0) / codes.range.1;
+    let mid = of(codes.mid);
+    let d = full / 8;
+    let c = full * 206 / 1920;
+    let bars = [
+        d,
+        d + c,
+        d + 2 * c,
+        d + 3 * c,
+        full - d - 3 * c,
+        full - d - 2 * c,
+        full - d - c,
+        full - d,
+    ];
+    let half = |b: usize| bars[b] + (bars[b + 1] - bars[b]) / 2;
+
+    let mut top = vec![grey(of(codes.grey40)); full];
+    let mut second = top.clone();
+    for (b, color) in BAR_COLORS.iter().enumerate() {
+        paint(&mut top, bars[b], bars[b + 1], *color);
+        paint(&mut second, bars[b], bars[b + 1], color.map(|v| v * mid));
+    }
+
+    let mut stairs = vec![grey(mid); full];
+    paint(&mut stairs, d, half(1), grey(0.0));
+    let edges: Vec<usize> = (1..=5).flat_map(|b| [half(b), bars[b + 1]]).collect();
+    for (step, pair) in edges.windows(2).enumerate() {
+        paint(
+            &mut stairs,
+            pair[0],
+            pair[1],
+            grey((step + 1) as f64 / 10.0),
+        );
+    }
+    paint(&mut stairs, bars[6], bars[7], grey(1.0));
+
+    let ramp_from = (full * codes.ramp.0 / 1920) as f64;
+    let ramp_span = full as f64 * codes.ramp.1 as f64 / 1920.0;
+    let ramp: Vec<Code> = (0..full)
+        .map(|x| grey(((x as f64 - ramp_from) / ramp_span).clamp(0.0, 1.0)))
+        .collect();
+
+    let mut last = vec![grey(0.0); full];
+    for (n, (left, right)) in codes.left.iter().zip(&codes.right).enumerate() {
+        let (from, to) = (d * n / 3, d * (n + 1) / 3);
+        paint(&mut last, from, to, left.map(of));
+        paint(&mut last, full - d + from, full - d + to, right.map(of));
+    }
+    let gap = ((c as f64 - full as f64 * 70.0 / 1920.0) / 2.0).floor() as usize;
+    let patch = c - 2 * gap;
+    let two = bars[1] + gap;
+    paint(&mut last, two, two + patch, grey(of(codes.two)));
+    paint(&mut last, bars[2], bars[2] + patch, grey(of(codes.four)));
+    let middle = full / 2;
+    paint(&mut last, middle, middle + full * 438 / 1920, grey(mid));
+
+    vec![
+        (row_end(1, h), top),
+        (row_end(7, h), second),
+        (row_end(8, h), stairs),
+        (row_end(9, h), ramp),
+        (h, last),
+    ]
+}
+
+fn window(w: u32, h: u32) -> Vec<Band> {
+    let black = vec![grey(0.0)];
+    let box_row = columns(w, |x| {
+        grey(if x > w / 4 && x < 3 * w / 4 { 1.0 } else { 0.0 })
+    });
+    vec![(h / 4 + 1, black.clone()), (3 * h / 4, box_row), (h, black)]
+}
+
 fn bands(chart: Chart, w: u32, h: u32) -> Vec<Band> {
     let whole = |codes| vec![(h, codes)];
     match chart {
@@ -410,6 +556,10 @@ fn bands(chart: Chart, w: u32, h: u32) -> Vec<Band> {
         Chart::YcbcrRamp => whole(ycbcr_ramp(w)),
         Chart::EbuColorBar(level) => whole(ebu_bars(level, w)),
         Chart::SmpteColorBar => smpte_bars(w, h),
+        Chart::Bt2111HlgNarrow => bt2111_bars(&BT2111_HLG_NARROW, w, h),
+        Chart::Bt2111PqFull => bt2111_bars(&BT2111_PQ_FULL, w, h),
+        Chart::Bt2111PqNarrow => bt2111_bars(&BT2111_PQ_NARROW, w, h),
+        Chart::Window => window(w, h),
     }
 }
 
@@ -466,6 +616,10 @@ pub fn name(g: &Generator) -> &str {
         Generator::YcbcrRamp => Generator::YCBCR_RAMP,
         Generator::EbuColorBar { .. } => Generator::EBU_COLOR_BAR,
         Generator::SmpteColorBar => Generator::SMPTE_COLOR_BAR,
+        Generator::Bt2111HlgNarrow => Generator::BT2111_HLG_NARROW,
+        Generator::Bt2111PqFull => Generator::BT2111_PQ_FULL,
+        Generator::Bt2111PqNarrow => Generator::BT2111_PQ_NARROW,
+        Generator::Window => Generator::WINDOW,
         Generator::Carried { .. } if g.is_offline() => "Media Offline",
         Generator::Carried { reference } => [&reference["generator_kind"], &reference["name"]]
             .into_iter()
