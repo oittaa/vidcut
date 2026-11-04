@@ -23,10 +23,11 @@ pub enum Layout {
     Ayuv64,
     Rgb,
     Rgb48,
+    Gbrp16,
 }
 
 impl Layout {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Yuv420p,
         Self::Nv12,
         Self::P010,
@@ -39,6 +40,7 @@ impl Layout {
         Self::Ayuv64,
         Self::Rgb,
         Self::Rgb48,
+        Self::Gbrp16,
     ];
 
     pub(crate) fn of(p: format::Pixel) -> Self {
@@ -55,6 +57,7 @@ impl Layout {
             P::AYUV64LE => Self::Ayuv64,
             P::RGB24 => Self::Rgb,
             P::RGB48LE => Self::Rgb48,
+            P::GBRP16LE | P::GBRAP16LE => Self::Gbrp16,
             _ => Self::Yuv420p,
         }
     }
@@ -113,6 +116,7 @@ pub struct Picture {
     sampling: Sampling,
     woven: Option<Woven>,
     origin: Option<Origin>,
+    lut: Option<crate::screen::Lut>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -209,7 +213,17 @@ impl Picture {
             sampling: Sampling::Own,
             woven: None,
             origin: None,
+            lut: None,
         }
+    }
+
+    pub(crate) fn with_lut(mut self, lut: Option<crate::screen::Lut>) -> Self {
+        self.lut = lut;
+        self
+    }
+
+    pub(crate) fn lut(&self) -> Option<&crate::screen::Lut> {
+        self.lut.as_ref()
     }
 
     pub(crate) fn with_origin(mut self, origin: Option<Origin>) -> Self {
@@ -284,7 +298,10 @@ impl Picture {
     }
 
     pub fn alpha_plane(&self) -> bool {
-        crate::hw::sw_format(&self.frame) == format::Pixel::YUVA444P12LE
+        matches!(
+            crate::hw::sw_format(&self.frame),
+            format::Pixel::YUVA444P12LE | format::Pixel::GBRAP16LE
+        )
     }
 
     pub(crate) fn in_video_memory(&self) -> Option<crate::hw::Kind> {
@@ -374,7 +391,8 @@ impl Picture {
         let frame = crate::export::video::frame_ref(&self.frame)?;
         let alone = Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
             .with_sampling(self.sampling.clone())
-            .with_origin(self.origin.clone());
+            .with_origin(self.origin.clone())
+            .with_lut(self.lut.clone());
         Ok(match &self.woven {
             Some(w) => alone.with_woven(w.clone()),
             None => alone,
@@ -390,7 +408,8 @@ impl Picture {
         Ok(
             Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
                 .with_sampling(self.sampling.clone())
-                .with_origin(self.origin.clone()),
+                .with_origin(self.origin.clone())
+                .with_lut(self.lut.clone()),
         )
     }
 
@@ -468,6 +487,7 @@ pub struct Shown {
     pub crosses: Vec<bool>,
     pub scales: Vec<Option<vidcut_core::model::Sharpness>>,
     pub colors: Option<vidcut_core::model::Hdr>,
+    pub output_lut: Option<crate::screen::Lut>,
 }
 
 pub struct TitlePicture {

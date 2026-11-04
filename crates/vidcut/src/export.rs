@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use vidcut_av::export::encode::Availability;
 use vidcut_av::export::{self as engine, Progress, Report};
 use vidcut_av::light::{Lights, Span};
+use vidcut_core::editor::source_context;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind, PictureShare};
 use vidcut_core::export::metadata::{Measured, PieceMeta};
 use vidcut_core::export::{
@@ -14,6 +15,8 @@ use vidcut_core::export::{
 };
 use vidcut_core::fingerprint::short_digest;
 use vidcut_core::looks::checked_name;
+use vidcut_core::model::Generator;
+use vidcut_core::ops::titles::default_length;
 use vidcut_core::otio::{self, Locations};
 use vidcut_core::render::{self, RenderPlan};
 use vidcut_core::request::{ExportParams, SubtitlesAs};
@@ -1067,7 +1070,21 @@ pub fn metadata_words(m: &Value) -> String {
             words += name;
         }
     }
+    if words.is_empty() && through_lut(m) {
+        return "None: a LUT changes the light of the picture".into();
+    }
     words
+}
+
+fn through_lut(m: &Value) -> bool {
+    m["why"].as_array().is_some_and(|why| {
+        why.iter()
+            .any(|w| w == vidcut_core::export::metadata::THROUGH_LUT)
+    })
+}
+
+pub fn metadata_shown(m: &Value) -> bool {
+    m.is_object() && (m["mode"].as_str() != Some("none") || through_lut(m))
 }
 
 pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
@@ -1375,12 +1392,33 @@ pub fn frame(
     at: &TimeSpec,
     out: &Path,
     media: Option<&str>,
+    generator: Option<&Generator>,
     width: Option<u32>,
     playhead: Option<i64>,
 ) -> Result<Value> {
     let fps = p.settings.fps;
-    let (piece, (w, h), frame, colors) = match media {
-        None => {
+    let (piece, (w, h), frame, colors, lut) = match (media, generator) {
+        (Some(_), Some(_)) => {
+            return Err(Error::usage("give media or generator, not both"));
+        }
+        (None, Some(generator)) => {
+            let frames = default_length(p);
+            let t = source_context(p, frames, &Default::default(), None).resolve(at)?;
+            if t < 0 || t >= frames {
+                return Err(Error::invalid(format!(
+                    "frame {t} is outside the generator (0..{frames})"
+                )));
+            }
+            let plan = render::generator_tape(p, generator, t, t + 1)?;
+            (
+                plan.video[0].clone(),
+                (p.settings.width, p.settings.height),
+                t,
+                plan.colors,
+                plan.output_lut,
+            )
+        }
+        (None, None) => {
             let t = p.time_context(playhead).resolve(at)?;
             if t < 0 || t >= p.end().max(1) {
                 return Err(Error::invalid(format!(
@@ -1394,9 +1432,10 @@ pub fn frame(
                 (p.settings.width, p.settings.height),
                 t,
                 plan.colors,
+                plan.output_lut,
             )
         }
-        Some(id) => {
+        (Some(id), None) => {
             let m = p
                 .media(id)
                 .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
@@ -1421,7 +1460,13 @@ pub fn frame(
                     "frame {t} is outside {id} (0..{frames})"
                 )));
             }
-            (render::media_frame(p, id, t)?, v.display_size(), t, None)
+            (
+                render::media_frame(p, id, t)?,
+                v.display_size(),
+                t,
+                None,
+                None,
+            )
         }
     };
     let (w, h) = match width {
@@ -1433,6 +1478,7 @@ pub fn frame(
     };
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     let size = (w.max(2), h.max(2));
+    let colors = (colors, lut.as_deref());
     vidcut_av::export::still::write_png(&piece, fps, size, colors, out, decoder.as_ref())
         .map_err(from_av)?;
     Ok(json!({ "path": out, "frame": frame, "width": w, "height": h }))

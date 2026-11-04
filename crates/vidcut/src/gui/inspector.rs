@@ -1,4 +1,5 @@
 use std::ops::RangeInclusive;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use eframe::egui::{self, Align, Layout, RichText, vec2};
@@ -10,9 +11,9 @@ use serde_json::{Value, json};
 use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
-    Border, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel, Effect, EffectKind,
-    GaussianBlur, Generator, Gradient, Keyframe, Picture, PictureTool, Project, Retime, Speed,
-    TrackKind, Upscaler, ZoomBox,
+    Border, CellShape, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel, Effect,
+    EffectKind, GaussianBlur, Generator, Gradient, Keyframe, MosaicBlur, Picture, PictureTool,
+    Project, Retime, Speed, TrackKind, Upscaler, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -20,6 +21,7 @@ use vidcut_core::time::TimeSpec;
 use vidcut_core::validate::GAIN;
 
 use super::dialog;
+use super::export::Picked;
 use super::isolation::{Isolate, heard};
 use super::placing::{changed, ease_label, mode_label, target};
 use super::theme;
@@ -72,85 +74,220 @@ enum Key {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Knob {
+    Gaussian(GaussianKnob),
+    Mosaic(MosaicKnob),
+    Blend,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum GaussianKnob {
     Strength,
     HorizontalStrength,
     VerticalStrength,
     Horizontal(usize),
     Vertical(usize),
-    Blend,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum MosaicKnob {
+    Frequency,
+    Smooth,
+    Aliasing,
+    XOffset,
+    YOffset,
+    Aspect,
+    PositionX,
+    PositionY,
+}
+
+struct Dial {
+    label: &'static str,
+    usual: f64,
+    range: RangeInclusive<f64>,
+    speed: f64,
 }
 
 const CHANNELS: [&str; 4] = ["Red", "Green", "Blue", "Alpha"];
 
-impl Knob {
-    fn label(self) -> &'static str {
+const fn pair((low, high): (f64, f64)) -> RangeInclusive<f64> {
+    low..=high
+}
+
+impl GaussianKnob {
+    fn dial(self) -> Dial {
+        let channel = |c: usize| Dial {
+            label: CHANNELS[c],
+            usual: 1.0,
+            range: 0.0..=2.0,
+            speed: 0.01,
+        };
+        let strength = |label| Dial {
+            label,
+            usual: GaussianBlur::STRENGTH,
+            range: 0.0..=1.0,
+            speed: 0.005,
+        };
         match self {
-            Knob::Strength => "Strength",
-            Knob::HorizontalStrength => "Horizontal Strength",
-            Knob::VerticalStrength => "Vertical Strength",
-            Knob::Horizontal(c) | Knob::Vertical(c) => CHANNELS[c],
-            Knob::Blend => "Blend",
+            Self::Strength => strength("Strength"),
+            Self::HorizontalStrength => strength("Horizontal Strength"),
+            Self::VerticalStrength => strength("Vertical Strength"),
+            Self::Horizontal(c) | Self::Vertical(c) => channel(c),
         }
     }
 
-    fn usual(self) -> f64 {
+    fn read(self, g: &GaussianBlur) -> f64 {
         match self {
-            Knob::Strength | Knob::HorizontalStrength | Knob::VerticalStrength => {
-                GaussianBlur::STRENGTH
-            }
-            Knob::Horizontal(_) | Knob::Vertical(_) | Knob::Blend => 1.0,
+            Self::Strength | Self::HorizontalStrength => g.across(),
+            Self::VerticalStrength => g.vertical_strength.unwrap_or(GaussianBlur::STRENGTH),
+            Self::Horizontal(c) => g.across_channels()[c],
+            Self::Vertical(c) => g.down_channels()[c],
         }
     }
 
-    fn range(self) -> RangeInclusive<f64> {
+    fn put(self, g: &mut GaussianBlur, v: f64) {
         match self {
-            Knob::Horizontal(_) | Knob::Vertical(_) => 0.0..=2.0,
-            _ => 0.0..=1.0,
-        }
-    }
-
-    fn read(self, e: &Effect) -> f64 {
-        let EffectKind::GaussianBlur(g) = &e.kind;
-        match self {
-            Knob::Strength | Knob::HorizontalStrength => g.across(),
-            Knob::VerticalStrength => g.vertical_strength.unwrap_or(GaussianBlur::STRENGTH),
-            Knob::Horizontal(c) => g.across_channels()[c],
-            Knob::Vertical(c) => g.down_channels()[c],
-            Knob::Blend => e.mixed(),
-        }
-    }
-
-    fn put(self, e: &Effect, v: f64) -> Effect {
-        let r = self.range();
-        let v = v.clamp(*r.start(), *r.end());
-        let mut out = e.clone();
-        let EffectKind::GaussianBlur(g) = &mut out.kind;
-        match self {
-            Knob::Strength | Knob::HorizontalStrength => g.strength = Some(v),
-            Knob::VerticalStrength => g.vertical_strength = Some(v),
-            Knob::Horizontal(c) => {
+            Self::Strength | Self::HorizontalStrength => g.strength = Some(v),
+            Self::VerticalStrength => g.vertical_strength = Some(v),
+            Self::Horizontal(c) => {
                 let mut a = g.across_channels();
                 a[c] = v;
                 g.horizontal_channels = Some(a);
             }
-            Knob::Vertical(c) => {
+            Self::Vertical(c) => {
                 let mut a = g.down_channels();
                 a[c] = v;
                 g.vertical_channels = Some(a);
             }
-            Knob::Blend => out.blend = Some(v),
+        }
+    }
+
+    fn param(self, g: &GaussianBlur) -> (&'static str, Value) {
+        match self {
+            Self::Strength | Self::HorizontalStrength => ("strength", json!(g.across())),
+            Self::VerticalStrength => ("vertical_strength", json!(self.read(g))),
+            Self::Horizontal(_) => ("horizontal_channels", json!(g.across_channels())),
+            Self::Vertical(_) => ("vertical_channels", json!(g.down_channels())),
+        }
+    }
+}
+
+impl MosaicKnob {
+    fn dial(self) -> Dial {
+        let dial = |label, usual, range, speed| Dial {
+            label,
+            usual,
+            range,
+            speed,
+        };
+        let offsets = pair(MosaicBlur::OFFSETS);
+        let anywhere = pair(MosaicBlur::PLACES);
+        match self {
+            Self::Frequency => dial(
+                "Pixel Frequency",
+                MosaicBlur::FREQUENCY,
+                pair(MosaicBlur::FREQUENCIES),
+                0.5,
+            ),
+            Self::Smooth => dial("Smooth Strength", 0.0, pair(MosaicBlur::SMOOTHS), 0.005),
+            Self::Aliasing => dial(
+                "Aliasing",
+                MosaicBlur::ALIASING,
+                pair(MosaicBlur::ALIASINGS),
+                0.005,
+            ),
+            Self::XOffset => dial("X Offset", 0.0, offsets, 0.005),
+            Self::YOffset => dial("Y Offset", 0.0, offsets, 0.005),
+            Self::Aspect => dial(
+                "Aspect",
+                MosaicBlur::STRETCH,
+                pair(MosaicBlur::STRETCHES),
+                0.005,
+            ),
+            Self::PositionX => dial("Position X", MosaicBlur::MIDDLE[0], anywhere, 0.001),
+            Self::PositionY => dial("Position Y", MosaicBlur::MIDDLE[1], anywhere, 0.001),
+        }
+    }
+
+    fn read(self, m: &MosaicBlur) -> f64 {
+        match self {
+            Self::Frequency => m.frequency(),
+            Self::Smooth => m.smooth(),
+            Self::Aliasing => m.box_size(),
+            Self::XOffset => m.offsets()[0],
+            Self::YOffset => m.offsets()[1],
+            Self::Aspect => m.stretch(),
+            Self::PositionX => m.place()[0],
+            Self::PositionY => m.place()[1],
+        }
+    }
+
+    fn put(self, m: &mut MosaicBlur, v: f64) {
+        match self {
+            Self::Frequency => m.pixel_frequency = Some(v),
+            Self::Smooth => m.smooth_strength = Some(v),
+            Self::Aliasing => m.aliasing = Some(v),
+            Self::XOffset => m.x_offset = Some(v),
+            Self::YOffset => m.y_offset = Some(v),
+            Self::Aspect => m.aspect = Some(v),
+            Self::PositionX => m.position = Some([v, m.place()[1]]),
+            Self::PositionY => m.position = Some([m.place()[0], v]),
+        }
+    }
+
+    fn param(self, m: &MosaicBlur) -> (&'static str, Value) {
+        match self {
+            Self::Frequency => ("pixel_frequency", json!(m.frequency())),
+            Self::Smooth => ("smooth_strength", json!(m.smooth())),
+            Self::Aliasing => ("aliasing", json!(m.box_size())),
+            Self::XOffset => ("x_offset", json!(m.offsets()[0])),
+            Self::YOffset => ("y_offset", json!(m.offsets()[1])),
+            Self::Aspect => ("aspect", json!(m.stretch())),
+            Self::PositionX | Self::PositionY => ("position", json!(m.place())),
+        }
+    }
+}
+
+impl Knob {
+    fn dial(self) -> Dial {
+        match self {
+            Knob::Gaussian(k) => k.dial(),
+            Knob::Mosaic(k) => k.dial(),
+            Knob::Blend => Dial {
+                label: "Blend",
+                usual: 1.0,
+                range: 0.0..=1.0,
+                speed: 0.005,
+            },
+        }
+    }
+
+    fn read(self, e: &Effect) -> f64 {
+        match (self, &e.kind) {
+            (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.read(g),
+            (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.read(m),
+            (Knob::Blend, _) => e.mixed(),
+            _ => self.dial().usual,
+        }
+    }
+
+    fn put(self, e: &Effect, v: f64) -> Effect {
+        let r = self.dial().range;
+        let v = v.clamp(*r.start(), *r.end());
+        let mut out = e.clone();
+        match (self, &mut out.kind) {
+            (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.put(g, v),
+            (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.put(m, v),
+            (Knob::Blend, _) => out.blend = Some(v),
+            _ => {}
         }
         effect_checked(&out).unwrap_or_else(|_| e.clone())
     }
 
     fn param(self, e: &Effect) -> (&'static str, Value) {
-        let EffectKind::GaussianBlur(g) = &e.kind;
-        match self {
-            Knob::Strength | Knob::HorizontalStrength => ("strength", json!(g.across())),
-            Knob::VerticalStrength => ("vertical_strength", json!(self.read(e))),
-            Knob::Horizontal(_) => ("horizontal_channels", json!(g.across_channels())),
-            Knob::Vertical(_) => ("vertical_channels", json!(g.down_channels())),
-            Knob::Blend => ("blend", json!(e.mixed())),
+        match (self, &e.kind) {
+            (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.param(g),
+            (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.param(m),
+            _ => ("blend", json!(e.mixed())),
         }
     }
 }
@@ -492,7 +629,7 @@ impl Key {
     fn label(self) -> &'static str {
         match self {
             Key::Picture(f) => f.label(),
-            Key::Effect(_, k) => k.label(),
+            Key::Effect(_, k) => k.dial().label,
             Key::Center(Axis::X) => "Center X",
             Key::Center(Axis::Y) => "Center Y",
             Key::Volume => "Volume",
@@ -523,8 +660,8 @@ impl Key {
     fn speed(self) -> f64 {
         match self {
             Key::Picture(f) => f.speed(),
-            Key::Effect(_, Knob::Horizontal(_) | Knob::Vertical(_)) => 0.01,
-            Key::Effect(..) | Key::Center(_) => 0.005,
+            Key::Effect(_, k) => k.dial().speed,
+            Key::Center(_) => 0.005,
             Key::Volume => 0.1,
             Key::Speed | Key::Length => 1.0,
             Key::Rate => 0.1,
@@ -546,7 +683,7 @@ impl Key {
     fn usual(self) -> f64 {
         match self {
             Key::Picture(f) => f.usual(),
-            Key::Effect(_, k) => k.usual(),
+            Key::Effect(_, k) => k.dial().usual,
             Key::Center(_) | Key::Volume => 0.0,
             Key::Speed => 100.0,
             Key::Rate | Key::Length => 0.0,
@@ -719,6 +856,7 @@ pub struct Inspector {
     moved: bool,
     commit: bool,
     recolored: Option<Recolored>,
+    lut_pick: Option<(Vec<String>, Picked)>,
 }
 
 #[derive(Debug)]
@@ -1410,7 +1548,8 @@ fn icon(ui: &mut egui::Ui, text: &str, name: &str, on: bool) -> bool {
 
 fn knob(ui: &mut egui::Ui, i: &Inspector, (n, k): (usize, Knob), e: &Effect, acts: &mut Vec<Act>) {
     let shown = k.read(e);
-    let values = (shown != k.usual(), shown, k.range());
+    let dial = k.dial();
+    let values = (shown != dial.usual, shown, dial.range);
     field(
         ui,
         Key::Effect(n, k),
@@ -1422,21 +1561,158 @@ fn knob(ui: &mut egui::Ui, i: &Inspector, (n, k): (usize, Knob), e: &Effect, act
     );
 }
 
-fn check(ui: &mut egui::Ui, (n, name, now): (usize, &str, bool), put: &str, acts: &mut Vec<Act>) {
+fn check(
+    ui: &mut egui::Ui,
+    (n, name, now, usual): (usize, &str, bool, bool),
+    put: &str,
+    acts: &mut Vec<Act>,
+) {
     let set = |on: bool| {
         let mut params = json!({});
         params[put] = json!(on);
         Act::EffectSet(n, params)
     };
-    label(ui, name, !now);
+    label(ui, name, now != usual);
     let mut on = now;
     if ui.checkbox(&mut on, "").clicked() {
         acts.push(set(on));
     }
-    if reset(ui, !now) {
-        acts.push(set(true));
+    if reset(ui, now != usual) {
+        acts.push(set(usual));
     }
     ui.end_row();
+}
+
+fn border_row(ui: &mut egui::Ui, n: usize, now: Border, acts: &mut Vec<Act>) {
+    label(ui, "Border Type", now != Border::default());
+    egui::ComboBox::from_id_salt(("inspector-border", n))
+        .selected_text(border_label(now))
+        .show_ui(ui, |ui| {
+            for b in Border::ALL {
+                if ui.selectable_label(b == now, border_label(b)).clicked() && b != now {
+                    acts.push(Act::EffectSet(n, json!({ "border": b })));
+                }
+            }
+        });
+    if reset(ui, now != Border::default()) {
+        let b = Border::default();
+        acts.push(Act::EffectSet(n, json!({ "border": b })));
+    }
+    ui.end_row();
+}
+
+fn gaussian_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, g): (usize, &Effect, &GaussianBlur),
+    acts: &mut Vec<Act>,
+) {
+    let gaussian = |ui: &mut egui::Ui, k: GaussianKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Gaussian(k)), e, acts);
+    };
+    rows(ui, (n, "main"), |ui| {
+        label(ui, "Split Horizontal and Vertical", g.split);
+        let mut split = g.split;
+        if ui.checkbox(&mut split, "").clicked() {
+            acts.push(Act::EffectSet(n, json!({ "split": split })));
+        }
+        if reset(ui, g.split) {
+            acts.push(Act::EffectSet(n, json!({ "split": false })));
+        }
+        ui.end_row();
+        let strengths: &[GaussianKnob] = if g.split {
+            &[
+                GaussianKnob::HorizontalStrength,
+                GaussianKnob::VerticalStrength,
+            ]
+        } else {
+            &[GaussianKnob::Strength]
+        };
+        for &k in strengths {
+            gaussian(ui, k, acts);
+        }
+    });
+    fold(ui, (n, "Horizontal Channel Adjustment"), |ui| {
+        for c in 0..CHANNELS.len() {
+            gaussian(ui, GaussianKnob::Horizontal(c), acts);
+        }
+    });
+    fold(ui, (n, "Vertical Channel Adjustment"), |ui| {
+        for c in 0..CHANNELS.len() {
+            gaussian(ui, GaussianKnob::Vertical(c), acts);
+        }
+    });
+    fold(ui, (n, "Advanced Controls"), |ui| {
+        border_row(ui, n, g.edge(), acts);
+    });
+}
+
+fn cell_label(s: CellShape) -> &'static str {
+    match s {
+        CellShape::Square => "Square",
+        CellShape::Hexagon => "Hexagon",
+        CellShape::Triangle => "Triangle",
+    }
+}
+
+fn mosaic_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, m): (usize, &Effect, &MosaicBlur),
+    acts: &mut Vec<Act>,
+) {
+    let mosaic = |ui: &mut egui::Ui, k: MosaicKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Mosaic(k)), e, acts);
+    };
+    rows(ui, (n, "main"), |ui| {
+        mosaic(ui, MosaicKnob::Frequency, acts);
+        mosaic(ui, MosaicKnob::Smooth, acts);
+        let now = m.shape();
+        label(ui, "Cell Shape", now != CellShape::default());
+        dialog::switch(ui, |ui| {
+            for s in CellShape::ALL {
+                if ui.selectable_label(s == now, cell_label(s)).clicked() && s != now {
+                    acts.push(Act::EffectSet(n, json!({ "cell_shape": s })));
+                }
+            }
+        });
+        if reset(ui, now != CellShape::default()) {
+            let s = CellShape::default();
+            acts.push(Act::EffectSet(n, json!({ "cell_shape": s })));
+        }
+        ui.end_row();
+        mosaic(ui, MosaicKnob::Aliasing, acts);
+    });
+    fold(ui, (n, "Advanced Controls"), |ui| {
+        for k in [
+            MosaicKnob::XOffset,
+            MosaicKnob::YOffset,
+            MosaicKnob::Aspect,
+            MosaicKnob::PositionX,
+            MosaicKnob::PositionY,
+        ] {
+            mosaic(ui, k, acts);
+        }
+        border_row(ui, n, m.edge(), acts);
+        check(
+            ui,
+            (n, "Antialias Result", m.antialias, false),
+            "antialias",
+            acts,
+        );
+        check(
+            ui,
+            (n, "Blur Alpha", m.blurs_alpha(), true),
+            "blur_alpha",
+            acts,
+        );
+        check(
+            ui,
+            (n, "Whole Cells Only", m.whole_cells, false),
+            "whole_cells",
+            acts,
+        );
+    });
 }
 
 fn effect_block(
@@ -1477,64 +1753,18 @@ fn effect_block(
         });
         act
     };
-    let EffectKind::GaussianBlur(g) = &e.kind;
     let id = ui.make_persistent_id(("inspector-effect", n));
     let (_, header, _) =
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true)
             .show_header(ui, header)
             .body(|ui| {
-                rows(ui, (n, "main"), |ui| {
-                    label(ui, "Split Horizontal and Vertical", g.split);
-                    let mut split = g.split;
-                    if ui.checkbox(&mut split, "").clicked() {
-                        acts.push(Act::EffectSet(n, json!({ "split": split })));
-                    }
-                    if reset(ui, g.split) {
-                        acts.push(Act::EffectSet(n, json!({ "split": false })));
-                    }
-                    ui.end_row();
-                    let strengths: &[Knob] = if g.split {
-                        &[Knob::HorizontalStrength, Knob::VerticalStrength]
-                    } else {
-                        &[Knob::Strength]
-                    };
-                    for &k in strengths {
-                        knob(ui, i, (n, k), e, acts);
-                    }
-                });
-                fold(ui, (n, "Horizontal Channel Adjustment"), |ui| {
-                    for c in 0..CHANNELS.len() {
-                        knob(ui, i, (n, Knob::Horizontal(c)), e, acts);
-                    }
-                });
-                fold(ui, (n, "Vertical Channel Adjustment"), |ui| {
-                    for c in 0..CHANNELS.len() {
-                        knob(ui, i, (n, Knob::Vertical(c)), e, acts);
-                    }
-                });
-                fold(ui, (n, "Advanced Controls"), |ui| {
-                    let now = g.edge();
-                    label(ui, "Border Type", now != Border::default());
-                    egui::ComboBox::from_id_salt(("inspector-border", n))
-                        .selected_text(border_label(now))
-                        .show_ui(ui, |ui| {
-                            for b in Border::ALL {
-                                if ui.selectable_label(b == now, border_label(b)).clicked()
-                                    && b != now
-                                {
-                                    acts.push(Act::EffectSet(n, json!({ "border": b })));
-                                }
-                            }
-                        });
-                    if reset(ui, now != Border::default()) {
-                        let b = Border::default();
-                        acts.push(Act::EffectSet(n, json!({ "border": b })));
-                    }
-                    ui.end_row();
-                });
+                match &e.kind {
+                    EffectKind::GaussianBlur(g) => gaussian_rows(ui, i, (n, e, g), acts),
+                    EffectKind::MosaicBlur(m) => mosaic_rows(ui, i, (n, e, m), acts),
+                }
                 fold(ui, (n, "Global Blend"), |ui| {
                     knob(ui, i, (n, Knob::Blend), e, acts);
-                    check(ui, (n, "Use Alpha", e.use_alpha), "use_alpha", acts);
+                    check(ui, (n, "Use Alpha", e.use_alpha, true), "use_alpha", acts);
                 });
             });
     acts.extend(header.inner);
@@ -2364,6 +2594,71 @@ impl Workspace {
         }
     }
 
+    pub(super) fn lut_folder(&self, now: Option<&Path>) -> PathBuf {
+        now.and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .or_else(|| self.project_folder())
+            .unwrap_or_default()
+    }
+
+    fn input_lut_picked(&mut self) {
+        let Some((clips, picked)) = self.inspector.lut_pick.take() else {
+            return;
+        };
+        match picked.take() {
+            None => self.inspector.lut_pick = Some((clips, picked)),
+            Some(None) => {}
+            Some(Some(path)) => {
+                self.send("clip.set", json!({ "clips": clips, "input_lut": path }));
+            }
+        }
+    }
+
+    fn input_lut_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
+        let clips: Vec<&Clip> = chosen
+            .iter()
+            .filter_map(|c| p.clip(&c.id))
+            .filter(|c| !c.media.is_empty())
+            .collect();
+        let Some(first) = clips.first() else {
+            return;
+        };
+        let now = first.input_lut.as_deref();
+        let ids: Vec<String> = clips.iter().map(|c| c.id.clone()).collect();
+        let mut choose = false;
+        let header = |ui: &mut egui::Ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_enabled(now.is_some(), egui::Button::new("Reset"))
+                    .clicked()
+            })
+            .inner
+        };
+        let cleared = group(ui, "LUT", header, |ui| {
+            label(ui, "Input LUT", now.is_some());
+            ui.horizontal(|ui| {
+                choose = ui.button("Choose…").clicked();
+                let name = now
+                    .and_then(Path::file_name)
+                    .map_or("None".into(), |n| n.to_string_lossy().into_owned());
+                let shown = ui.add(egui::Label::new(name).truncate());
+                if let Some(path) = now {
+                    shown.on_hover_text(path.display().to_string());
+                }
+            });
+            ui.end_row();
+        });
+        if cleared {
+            self.send("clip.set", json!({ "clips": ids, "input_lut": "" }));
+        }
+        if choose {
+            let (dialogs, folder) = (self.dialogs.clone(), self.lut_folder(now));
+            let picked = Picked::ask(ui.ctx(), move || {
+                dialogs.pick_file("Input LUT", &folder, &["cube"])
+            });
+            self.inspector.lut_pick = Some((ids, picked));
+        }
+    }
+
     fn super_scale_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
         use super::super_scale::{SHARPNESS, UPSCALERS, label_of, unfit, upscaler_text};
         let mut media: Vec<String> = chosen
@@ -2741,6 +3036,7 @@ impl Workspace {
         i.commit = (focus.is_none() || i.moved) && !ui.input(|i| i.pointer.any_down());
         i.moved &= !i.commit;
         self.follow_selection();
+        self.input_lut_picked();
         let chosen = self.chosen();
         let sounds = self.sounds();
         if sounds.iter().all(|s| s.gain == s.stored) {
@@ -2804,6 +3100,7 @@ impl Workspace {
                     crop(ui, i, &p, at, &chosen, &mut acts);
                     dynamic_zoom(ui, i, &p, at, &chosen, boxes, &mut acts);
                     composite(ui, i, &p, at, &chosen, &mut acts);
+                    self.input_lut_section(ui, &p, &chosen);
                     self.super_scale_section(ui, &p, &chosen);
                     effects(ui, &self.inspector, &chosen[0], &mut acts);
                 }

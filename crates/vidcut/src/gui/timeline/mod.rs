@@ -20,6 +20,7 @@ use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::render_cache::Part;
 use vidcut_core::request::ViewerMode;
 
+use crate::gui::subclip::NewSubclip;
 use crate::gui::workspace::{Workspace, dim};
 use crate::gui::{keys, theme};
 use crate::live::PlayerId;
@@ -1260,6 +1261,7 @@ impl Workspace {
             self.keyframe_tray(ui, rect, HEADER, span);
         }
         self.marker_window(ui.ctx());
+        self.subclip_windows_tick(ui.ctx());
         self.duration_window(ui.ctx());
         self.fade_window(ui.ctx());
         self.speed_window(ui.ctx());
@@ -2130,6 +2132,15 @@ impl Workspace {
             self.timeline.snap_flipped = false;
             return;
         }
+        if released
+            && d.drag.from_source_clip
+            && self.bins.area.is_some_and(|area| area.contains(pos))
+            && let Gesture::Media { media, range, .. } = &d.drag.gesture
+        {
+            self.new_subclip = Some(NewSubclip::new(media, *range));
+            self.timeline.snap_flipped = false;
+            return;
+        }
         if matches!(
             d.drag.gesture,
             Gesture::Media { .. }
@@ -2658,6 +2669,14 @@ impl Workspace {
             self.open_title(&c.id);
             ui.close();
         }
+        let subclip = self
+            .project()
+            .and_then(|p| p.media(&c.media))
+            .is_some_and(|m| m.subclip.is_some());
+        if subclip && ui.button("Edit Subclip…").clicked() {
+            self.open_edit_subclip(&c.media);
+            ui.close();
+        }
         let item = |ui: &mut egui::Ui, label: &str, method: &str, params: Value| {
             if ui.button(label).clicked() {
                 self.send(method, params);
@@ -3002,8 +3021,12 @@ impl Workspace {
 
     pub(crate) fn start_generator_drag(
         &mut self,
-        p: &Project,
-        (kind, label): (vidcut_core::model::GeneratorKind, &'static str),
+        (kind, settings, label): (
+            vidcut_core::model::GeneratorKind,
+            vidcut_core::request::GeneratorSettings,
+            String,
+        ),
+        len: i64,
         press: Pos2,
     ) {
         self.timeline.snap_flipped = false;
@@ -3011,8 +3034,9 @@ impl Workspace {
             drag: Drag::new(
                 Gesture::Generator {
                     kind,
+                    settings,
                     label,
-                    len: vidcut_core::ops::titles::default_length(p),
+                    len,
                 },
                 press,
             ),
@@ -3080,7 +3104,7 @@ impl Workspace {
                 Some((0, cues.iter().map(|c| c.1).max().unwrap_or(0))),
             ),
             Gesture::Title { template, len } => (template.label.clone(), Some((0, *len))),
-            Gesture::Generator { label, len, .. } => ((*label).to_string(), Some((0, *len))),
+            Gesture::Generator { label, len, .. } => (label.clone(), Some((0, *len))),
             Gesture::Transition { label, kind } => (
                 (*label).to_string(),
                 Some((
@@ -4034,6 +4058,7 @@ mod tests {
 
     fn clip(id: &str, start: i64, duration: i64, tail: Option<i64>) -> Clip {
         Clip {
+            input_lut: None,
             id: id.into(),
             media: "m1".into(),
             start,

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use crate::editor::{Editor, History};
 use crate::error::{Error, Result};
 use crate::history::{self, HistoryFile, Tail, text_hash};
-use crate::model::Project;
+use crate::model::{Project, Track};
 
 const LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -290,7 +290,7 @@ impl Store {
     }
 }
 
-fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+pub(crate) fn stamp_of(path: &Path) -> Option<(u64, std::time::SystemTime)> {
     let meta = std::fs::metadata(path).ok()?;
     Some((meta.len(), meta.modified().ok()?))
 }
@@ -320,19 +320,38 @@ fn io(path: &Path, e: std::io::Error) -> Error {
     Error::internal(format!("{}: {e}", path.display()))
 }
 
-fn files(project: &mut Project) -> impl Iterator<Item = &mut PathBuf> {
-    project.media.iter_mut().map(|m| &mut m.path)
+fn clip_files<'a>(tracks: &'a mut [Track], out: &mut Vec<&'a mut PathBuf>) {
+    for clip in tracks.iter_mut().flat_map(|t| &mut t.clips) {
+        out.extend(clip.input_lut.as_mut());
+        if let Some(compound) = &mut clip.compound {
+            clip_files(&mut compound.tracks, out);
+        }
+    }
+}
+
+fn files(project: &mut Project) -> Vec<&mut PathBuf> {
+    let Project {
+        media,
+        tracks,
+        settings,
+        ..
+    } = project;
+    let mut out: Vec<&mut PathBuf> = media.iter_mut().map(|m| &mut m.path).collect();
+    clip_files(tracks, &mut out);
+    out.extend(settings.output_lut.as_mut());
+    out
 }
 
 fn to_json(project: &mut Project, dir: &Path) -> Result<String> {
     let absolute: Vec<Option<PathBuf>> = files(project)
+        .into_iter()
         .map(|path| {
             let relative = path.strip_prefix(dir).ok().map(portable);
             relative.map(|r| std::mem::replace(path, r))
         })
         .collect();
     let text = serde_json::to_string_pretty(project);
-    for (path, was) in files(project).zip(absolute) {
+    for (path, was) in files(project).into_iter().zip(absolute) {
         if let Some(was) = was {
             *path = was;
         }

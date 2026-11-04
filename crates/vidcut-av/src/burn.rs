@@ -1122,7 +1122,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     } else {
         CacheKeyFlags::empty()
     };
-    let mut word_start = true;
+    let mut before = String::new();
     let spans = match look.markup {
         Markup::Pieces(pieces) => spans(
             &f.system,
@@ -1189,15 +1189,12 @@ fn lay_out(look: &Look) -> Option<Laid> {
                     Title::tracking_pixels(f64::from(tracking), f64::from(letter)) as f32
                         * look.spacing.1
                 };
-                let pieces = r.look.case.unwrap_or(look.case).pieces(&r.text, word_start);
-                word_start = r
-                    .text
-                    .chars()
-                    .last()
-                    .map_or(word_start, char::is_whitespace);
+                let pieces = r.look.case.unwrap_or(look.case).pieces(&r.text, &before);
+                before.push_str(&r.text);
+                let scale = f64::from(look.spacing.1);
                 pieces.into_iter().map(move |(text, small)| {
                     let px = if small {
-                        px * TitleCase::SMALL_CAPS as f32
+                        Title::small_size(f64::from(px), scale) as f32
                     } else {
                         px
                     };

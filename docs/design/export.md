@@ -69,6 +69,9 @@ Colors:
   - SDR takes 10 bits only from the encoder that an 8-bit export starts with. Why: vidcut does not move to a slower encoder for 10 bits.
   - DNxHR HQ in 10 bits becomes HQX (`ColorChoice::apply`).
 - `export::choose_metadata` picks the HDR metadata, by the rules of `vidcut_core::export` (spec D46). With an SDR timeline, each picture counts as SDR.
+- With a LUT in the plan (`RenderPlan::has_lut`), `metadata::choose_through_lut` takes nothing from the sources. Why: a LUT changes the light of the picture.
+  - It keeps the mastering display and the light that the user gives. The report says this.
+  - It does not measure the light. The [todo](../todo/luts.md) holds that work.
 - An export first measures the light that the files do not state (`Lights::analysis`), and caches it.
   - The GPU measures the HDR pictures that stay on the GPU ([gpu](gpu.md#the-light-meter)).
   - A generator has no file. Thus it adds no light (`light::sampled`).
@@ -229,6 +232,7 @@ Each mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-d
 - `Screen::for_export` draws each frame into `Wide`: 16-bit floats in the code values of the timeline (`VideoFrames::with_timeline`).
   - Each layer, title and subtitle goes there as in the viewer.
   - Why: a color above 1 or below 0 stays between the layers ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+- `fs_lut` then runs the output LUT on `Wide` (`VideoFrames::with_output_lut`, [the LUT files](README.md#lut-files)). A black piece of the plan goes through it too. The render cache holds no output LUT.
 - Then `fs_encode` writes each plane of the encoder's pixel format from `Wide` (`Screen::encoded`).
   - It converts the timeline colors to the colors of the output. An SDR output is BT.709 and an HDR output is BT.2020.
   - A YUV output is in limited range. An RGB output is in full range, and its tags say so (`color::tag_frame`).
@@ -418,9 +422,20 @@ The pictures:
 - A level of a clip in a compound clip is left out where the clip fills the frame at its usual values. Thus the edges of the compound clip are covered once.
 - A composite mode (`Placing::mode`) mixes in R'G'B' (D75). The shader mixes it with the layers below (`mixed`).
   - `place::Placing` takes the first mode other than Normal, from the picture out through its compound clips.
+  - It stops at the first compound clip that mixes first (`Placing::inside`).
 - A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once.
 - A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
 - A Push or a Slide draws each side into its own picture. `fs_motion` moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
+
+A compound clip with an opacity or a composite mode ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+
+- `place::Mixes` finds, for each frame, the compound clips that mix first. Each one is a `place::Mix`.
+- `MixDraw` draws the layers and titles of a `place::Mix` over transparent, in a picture of its own. `blur::shown_bind` then shows that picture as one layer, with the opacity and the mode.
+- A compound clip with one picture and no mode conflict needs no such picture. That picture takes the opacity and the mode of the compound clip.
+- A compound clip at opacity 100% and Normal needs no such picture.
+- A layer with a composite mode in a `place::Mix` reads `Below`. It holds the canvas with the open pictures over it.
+- `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
+- The soft edges and the effects of the compound clip stay on each picture in it ([todo](../todo/compound-opacity.md)).
 
 Dynamic Zoom and keyframes (D75):
 
@@ -443,20 +458,40 @@ Soft crop edges:
 The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)):
 
 - `place::Placing` holds the effects of the picture and of the compound clips around it, the inner ones first (`Placing.effects`).
-- Each `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas. It also holds the border, the blend and Use Alpha.
-  - The sigma is that of `GaussianBlur::spreads` at the width of the canvas.
-  - It is multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it, at the frame.
-  - An effect that is off, or at a blend of 0, is left out. So is a blur with no sigma and Use Alpha on.
+- Each `place::Working` holds the blend, Use Alpha and the `place::Work` of its kind.
+  - An effect that is off, or at a blend of 0, is left out (`Working::of`).
+- `place::OnFrame` holds what an effect takes from the placement at the frame:
+  - The width of the canvas, multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it.
+  - The size of the picture on the frame: its fitted size, multiplied by each Zoom X and each Zoom Y.
+  - The middle of the picture on the frame, through the levels. A Dynamic Zoom box does not move it.
+- `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas, and the border.
+  - The sigma is that of `GaussianBlur::spreads` at that width.
+  - A blur with no sigma and Use Alpha on is left out.
+- `place::Tiling` holds the grid of a Mosaic Blur.
+  - That is the cell shape, the size of a cell, the step between columns, the origin and the size of the box.
+  - It also holds Blur Alpha and Whole Cells Only.
+  - The size of a cell comes from the area of the picture on the frame (`MosaicBlur::CELL`).
+  - The origin is the middle of the picture on the frame, moved by Position and the offsets.
+  - Its sizes are in samples. Antialias Result gives two samples for each pixel.
+  - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
 
 The draw:
 
 - `Screen::draw` draws a layer with effects into a picture of its own, with no opacity (`bared`).
 - `blur::Blurred` keeps that picture for each such layer. It also keeps two pictures for the passes.
+- `blur::steps` gives the passes of one effect: a pipeline and its parameters for each pass. `blur::effects_into` runs them.
 - `fs_blur` blurs across and then down, in passes (`blur::passes`).
-- The last pass of an effect mixes the blur with the picture that came in, by the blend.
-- With Use Alpha off, the first pass takes the colors without their alpha. Thus a clear part of the picture does not make it darker.
+- `fs_mosaic` makes the mosaic in three passes (`blur::mosaic_bytes`):
+  - The color of a cell is the mean of a box. The first two passes make a table of these means, across and then down.
+  - Only the columns and the rows that hold a middle of a cell get a mean. Thus the cost does not grow with the size of a cell.
+  - The third pass finds the cell of each pixel and reads its color from the table (`mosaic_nearest`).
+  - With Antialias Result, the third pass finds the cell of each of the four samples of a pixel, and takes their mean.
+  - The third pass applies Blur Alpha and Whole Cells Only to each sample (`mosaic_alpha`). With Use Alpha off, it does not.
+- The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
+- With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
+  - A layer in the normal mode draws its premultiplied colors as they are (`placed`). Why: `mosaic_alpha` can give more color than alpha, or color with no alpha. That color adds to the layers below.
 
 A made frame of a speed change ([which source frame](#which-source-frame)):
 
@@ -465,7 +500,7 @@ A made frame of a speed change ([which source frame](#which-source-frame)):
 - The made frame holds colors only. The later draw thus takes its alpha from the placement at that frame (`Sampling::Placed`, `Blurred::made`):
   - It draws the colors of the made frame with no edges (`blur::opened`).
   - It draws the coverage of the picture, and blurs it by the same effects (`blur::mask_bind`).
-  - The layer takes its colors from the first and its alpha from the second.
+  - The layer takes its colors from the first and its alpha from the second. It thus has no color at an alpha of 0.
 - A frame from a file of the render cache holds the effects up to the last checked effect ([playback](playback.md#the-render-cache)).
   - `VideoFrames` gives it a placement with only these effects (`Sampling::Placed`, `render_cache::baked`). The coverage takes only these effects.
   - The draw takes the later effects from the placement of the frame. It joins the colors and the coverage into one picture, then blurs it by these effects (`Blurred::made`).

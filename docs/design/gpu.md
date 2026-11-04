@@ -168,6 +168,10 @@ Super Scale (`SuperScale`) sets the upscaler of a picture that is enlarged.
 - Classic enlarges in the shader of the viewer and the export, with the kernel of the picture's `Sharpness` (`screen::kernel`).
 - `layer_size` lets the picture of an AI upscaler grow past its source size.
 - The result of an AI upscaler is its own. It is not meant to match the CPU.
+- The export's report names each file that Super Scale enlarged (`UpscaleNote`, `super_scale::named`).
+  - An AI upscaler tells this when `ai_picture` gives a picture.
+  - Classic has no such step, because the shader enlarges later. Thus `note_classic` applies the rule of `enlarged` to each frame.
+  - A file on two tracks has two readers, and each reader tells. The report keeps one entry for the file.
 
 The AI upscalers share one path in the reader:
 
@@ -319,6 +323,7 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
 - Then the CPU computes the light of these codes, with the code that measures frames in memory (`Spread`).
 - The CPU measures SDR pictures, other layouts and pictures in memory.
   - Why: the matrix of an SDR picture to BT.2020 mixes the three channels. Thus the highest code of each channel does not give the peak.
+  - It measures RGB and gray of more than 8 bits as RGB (`measure_rgb`). Why: the conversion to YUV makes these pictures too bright ([gotchas](../gotchas.md#ffmpeg-filters-and-colors)).
 - After an error on the GPU, the CPU measures the rest of the file. vidcut prints the error.
   - A picture that the meter's import or copy brings down is such an error. Why: the GPU meter then copies it down, up and back. The CPU meter only copies it down.
 - `VIDCUT_DEBUG` tells whether the GPU or the CPU measures.
@@ -329,11 +334,11 @@ The Waveform, the Parade and the Vectorscope show the picture that the viewer dr
 
 What they read:
 
-- `Screen::scopes` reads the canvas of the last `Screen::draw`. That is the mix, in the timeline color space, before `fs_screen`.
+- `Screen::scopes` reads the canvas of the last `Screen::draw`. That is the mix after the output LUT, in the timeline color space, before `fs_screen`.
 - While a scope is on, `Screen::scoping` makes the canvas `Wide`, also for one SDR layer.
   - Why: an 8-bit canvas loses the values above 1 and below 0, and the steps between the 10-bit levels.
   - `fs_screen` only clips an SDR canvas. Thus the picture on the screen stays the same, but for rounding.
-- vidcut has no grade and no LUT. They are items in the todo files ([primary-grade](../todo/primary-grade.md), [luts](../todo/luts.md)).
+- vidcut has no grade. It is an item in the todo files ([primary-grade](../todo/primary-grade.md)).
 - The source viewer has no timeline color space. There, the scopes read SDR values.
 
 How the GPU makes one scope (`scope.wgsl`, `Plots::paint`):

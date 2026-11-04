@@ -96,6 +96,8 @@ pub struct Workspace {
     pub(super) timecode: Option<TimecodeEntry>,
     pub(super) paste_timecode: PasteWatch,
     pub(super) duration_text: Option<String>,
+    pub(super) new_subclip: Option<super::subclip::NewSubclip>,
+    pub(super) edit_subclip: Option<super::subclip::EditSubclip>,
     pub(super) hover: Option<(String, i64)>,
     pub(super) pool_clicked: Option<String>,
     pub(super) left: LeftTab,
@@ -192,6 +194,8 @@ impl Workspace {
             timecode: None,
             paste_timecode: PasteWatch::Off,
             duration_text: None,
+            new_subclip: None,
+            edit_subclip: None,
             hover: None,
             pool_clicked: None,
             left: Default::default(),
@@ -609,9 +613,8 @@ impl Workspace {
         self.snap.viewer == ViewerMode::MultiSource && !self.snap.multi_alone
     }
 
-    pub(super) fn multi_span(&self) -> Option<(i64, i64)> {
-        self.multi_on().then(|| {
-            let marks = &self.snap.multi_marks;
+    pub(super) fn viewer_span(&self) -> Option<(i64, i64)> {
+        self.snap.viewer_marks().map(|marks| {
             (
                 marks.mark_in.unwrap_or(0),
                 marks.mark_out.unwrap_or(self.snap.source.frames),
@@ -631,6 +634,9 @@ impl Workspace {
         }
         if self.snap.viewer == ViewerMode::SourceTape && self.crossing_span().is_some() {
             return vec![json!({ "tape": true })];
+        }
+        if let Some(g) = self.snap.open_generator() {
+            return vec![g.params()];
         }
         let Some(p) = self.project() else {
             return Vec::new();
@@ -743,7 +749,9 @@ impl Workspace {
                     s["at"] = json!(playhead);
                     if multi {
                         s["grid"] = json!(true);
-                    } else if let Some(params) = s.as_object_mut() {
+                    } else if s.get("generator").is_none()
+                        && let Some(params) = s.as_object_mut()
+                    {
                         params.remove("range");
                     }
                 }
@@ -1126,6 +1134,8 @@ impl Workspace {
                         ui.close();
                     }
                 }
+                ui.separator();
+                self.create_subclip_button(ui);
             });
             ui.menu_button("View", |ui| {
                 ui.menu_button("Safe Area", |ui| self.safe_area_menu(ui));
@@ -1631,6 +1641,9 @@ impl Workspace {
         if (pressed(Key::Backslash) || pressed(Key::B)) && m.command {
             self.split_at_playhead();
         }
+        if pressed(Key::B) && m.alt && !m.command && !m.shift {
+            self.open_new_subclip();
+        }
         if pressed(Key::Enter)
             && !m.any()
             && let [cue] = self.snap.selection.cues.as_slice()
@@ -1802,6 +1815,10 @@ impl Workspace {
                 }
                 _ => {
                     let mut v = vec![0, self.snap.source.frames];
+                    if let Some(marks) = self.snap.viewer_marks() {
+                        v.extend(marks.mark_in);
+                        v.extend(marks.mark_out);
+                    }
                     if let Some((m, _)) = self.snap.source_at()
                         && let Some(media) = self.project().and_then(|p| p.media(m))
                     {
@@ -1846,7 +1863,7 @@ impl Workspace {
             self.send("tape.marks.set", json!({ key: value, "order": order }));
             return;
         }
-        if self.hover.is_none() && self.multi_on() {
+        if self.hover.is_none() && self.snap.viewer_marks().is_some() {
             let frame = self.snap.source.position;
             let (key, value) = if is_in {
                 ("in", frame)
@@ -1882,8 +1899,7 @@ impl Workspace {
             self.seek(PlayerId::Source, if is_in { a } else { b - 1 }, false);
             return;
         }
-        if self.multi_on() {
-            let marks = &self.snap.multi_marks;
+        if let Some(marks) = self.snap.viewer_marks() {
             let mark = if is_in {
                 marks.mark_in
             } else {
@@ -1937,7 +1953,7 @@ impl Workspace {
             self.send("tape.marks.clear", json!({ "media": media }));
             return;
         }
-        if self.multi_on() {
+        if self.snap.viewer_marks().is_some() {
             self.send("viewer.marks.clear", json!({}));
             return;
         }
@@ -2142,6 +2158,7 @@ impl Workspace {
     }
 
     fn left_content(&mut self, ui: &mut egui::Ui) {
+        self.bins.area = None;
         match self.left {
             LeftTab::Pool => self.pool_panel(ui),
             LeftTab::SyncBin => self.sync_bin_panel(ui),
@@ -2172,6 +2189,7 @@ impl Workspace {
     fn pool_gone(&mut self) {
         self.hover = None;
         self.bins.targets.clear();
+        self.bins.area = None;
         self.pool_focus = false;
     }
 }

@@ -137,6 +137,8 @@ The snapshot:
 
 - The `Snapshot` carries the project, players, selection, notices, filmstrips, waveforms, missing media and jobs.
 - It also carries the timecode count (`TimecodeDisplay`) and the Timer 1 zeros (`Timer1Origin`) of this session.
+- Each change of the project calls `Live::forget_removed`. The filmstrips, waveforms and ducking measurements of removed media leave memory.
+- An undo that brings the media back makes them again.
 - `Port` passes `Renderer::attach`, `Renderer::present` and `Renderer::capture_viewer` to the viewer thread, and the rest to the UI.
 
 ## Steps and waits
@@ -338,6 +340,10 @@ The bar and the Jobs button:
 - The Generators page of the Effects tab (`EffectsTab`, `generator_browser::CARDS`) draws its cards. A dragged card (`Gesture::Generator`) drops as `generators.add`.
   - Each card shows the picture of its kind with the default values, through `generators::draw`.
   - A card draws at the size of a full frame, and then shows a part of its pixels. Why: the layout of a bar pattern depends on the size, and a small SMPTE Color Bar shows only its left side.
+  - A double-click on a card sends `viewer.load` with `generator`. `Live::load_generator` holds the source in `Live.source_generator`. `SourceContent::Generator` loads `render::generator_tape` in the source player.
+  - `SourceGenerator` holds the kind, its settings, the length and the marks, for this session. Why: a generator is not a file of the project, so it has no `Media.marks`.
+  - `Snapshot::viewer_marks` gives the marks of the grid or of the open generator. The scroll area, the Duration field and the keys of the viewer use it, with `viewer.marks.set`.
+  - `SourceGenerator::params` gives the source of an edit (`Workspace::edit_sources`). A drag from the viewer starts a `Gesture::Generator` with the marked length.
 
 **Pictures.**
 
@@ -370,6 +376,7 @@ The bar and the Jobs button:
 - The effect sections show the effects of the first selected clip (`effect_block`). Each change is one `effects.set` for that clip.
   - A dragged value previews as a picture with the changed effect (`knob_picture`). `Picture::preview` takes the effects of the dragged picture.
   - On, Move Up, Move Down, Reset and Delete send `effects.set`, `effects.move`, `effects.reset` and `effects.remove`.
+- `Workspace::input_lut_section` shows the Input LUT row, with a file pick and Reset. Each change is one `clip.set`.
 - `speed_section` sends what the Change Clip Speed window sends (`SpeedDialog::params`). `Workspace::audio_section` sends `clip.set`.
   - On a clip with speed keyframes, it shows the section under the playhead (`Paced`). `section_speed` sends `speed.set`, `speed.freeze` or `speed.reverse` there.
   - A Speed value under `Speed::RANGE` on clips with no speed keyframes goes to `Workspace::send_freeze`, which sends `speed.set` at the playhead.
@@ -413,6 +420,7 @@ The bar and the Jobs button:
 - `SilenceDialog` keeps the dry run of Ripple Delete Silence as `Stripe`s, and the user's edits to them (`stripe_press`, `stripe_drag`, `silence_keys`).
 - A changed setting runs the dry run again, and replaces the stripes and their edits.
 - Each change keeps the state before it (`Shot`). Ctrl+Z and Ctrl+Shift+Z step through these states (`SilenceDialog::undo`). The project's history stays as it is until Remove.
+- The dialog keeps the newest states (`SHOTS_KEPT`). Why: each state holds a copy of the stripes.
 - While the dialog is open, `Handle::skip` hands the stripes to the session. The session plays the timeline as Remove would leave it.
 
 **Timeline tiles.**
@@ -421,6 +429,8 @@ The bar and the Jobs button:
 - A tile that is not decoded yet shows the nearest kept tile (`Tiles::nearest`), else the nearest pool thumbnail. Why: the filmstrip stays full while a zoom or a scroll decodes new tiles.
 - The filmstrips of the Trim Editor use the same tiles (`vidcut_core::ops::filmstrip`, `TrimAnchor`).
 - An `Lru` keeps the order in which the tiles were used. `Tiles::evict` removes the oldest tile until the cache is under its budget, and stops at a tile that the last paint showed. Why: each step of an eviction is one operation, with no scan of the kept tiles.
+- Another `Lru` keeps the tiles that did not decode (`FAILED_KEPT`). A tile that leaves it is tried once more when it shows again.
+- All workers share one `Lru` of the blocks that they read from disk (`Blocks`, `BLOCKS_KEPT`). A worker that writes a block removes it from this `Lru`.
 
 **Imports** ([deviation X66](../deviations.md#x66-files-and-folders-dropped-on-the-window-go-into-the-open-bin)).
 

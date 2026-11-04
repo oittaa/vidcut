@@ -16,7 +16,7 @@ vidcut plays a compound clip from another editor. `edit.decompose` opens one. No
 - `Compound` stores the nested stack and the tracks that play (`tracks`).
 - `render::flatten` plays those tracks inside the host clip.
 - `edit.decompose` puts the inner clips back on the timeline.
-- Opacity and effects of a compound clip are a separate item ([compound-opacity.md](compound-opacity.md)).
+- Soft edges and effects of a compound clip are a separate item ([compound-opacity.md](compound-opacity.md)).
 
 **To do:**
 

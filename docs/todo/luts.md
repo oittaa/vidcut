@@ -2,37 +2,33 @@
 
 **When:** not decided.
 
-vidcut applies no LUT. The spec has an input LUT, an output LUT and a display LUT ([§13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../design/README.md#picture-order)). It has no display LUT.
 
 **Why:**
 
-- A camera LUT makes a log picture look right. The primary knobs cannot replace that table.
-- An output LUT is a look for the whole timeline, shared as a file.
-- A `.cube` file is the table those looks use.
+- A display LUT corrects the viewer for one monitor. The export does not get it.
+- With a LUT, a source's light is not the light of the frames. An export then has only the HDR metadata that the user gives.
+- Each fact below decides the picture, and no measurement gives it yet.
 
 **In the code:**
 
-- The design lists the LUTs among the stages vidcut does not have.
-- `fs_convert` puts the picture into the timeline color space, before the deinterlace and Super Scale.
-- The spec puts the input LUT at that point, on each clip.
-- The spec puts the output LUT after subtitles, and before the output color space.
-- The display LUT is a viewer branch. The export does not get it.
-- The primary grade is a separate item ([primary-grade.md](primary-grade.md)).
+- `fs_lut` runs the output LUT on the canvas. The display LUT is a separate branch after that ([§13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+- `choose_through_lut` gives the HDR metadata of an export with a LUT.
+- `Lights::analysis` measures the source files only.
 
 **To do:**
 
-- Measure a `.cube` in Resolve: its 1D table, its 3D table, its domain and its interpolation.
-- An input LUT on a clip, just after `fs_convert`, in the viewer and in the export.
-- An output LUT on the timeline, after subtitles, in the viewer and in the export.
-- This item's LUTs are in the viewer and in the export.
-- The display LUT is the viewer's own branch in §13, and it is separate work.
-- The scopes show the picture after the output LUT. They read the canvas ([gpu](../design/gpu.md#the-scopes)).
-- The project stores the path as it stores a media path.
-- The LUT runs in the timeline color space.
-- A conversion for the LUT is shown where the user sets it, and in the export report.
-- With no LUT, the picture and the HDR metadata stay as they are ([X19](../deviations.md#x19-hdr-metadata-comes-from-the-sources)).
+- The display LUT, as the viewer's own branch.
 - With a LUT, the export measures light on the resulting frames.
-- The CLI, IPC and MCP perform the same action as the GUI.
+- The Input Lookup Table of the project (manual p. 152). vidcut has an input LUT on a clip only.
+- Compare the LUT frames directly with the renders of Resolve. This waits for the brightness fix of 16-bit stills. With no LUT, a 16-bit still also differs from the render.
+- Measure in Resolve. No script reaches these, so each needs the window of Resolve:
+  - The Output LUT of the project: does it use the math of the node LUT?
+  - A gap through the Output LUT.
+  - A picture with an alpha channel through the Output LUT.
+  - A LUT on a generator and on a title, in the Color page.
+  - The messages of the GUI for a broken file.
+  - The source viewer: does it show the input LUT?
 
 **Later:**
 
