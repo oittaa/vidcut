@@ -241,6 +241,14 @@ fn with_key(
     keys_set(action, &keys)
 }
 
+fn without_key(bindings: &Bindings, action: Action, slot: usize) -> Option<(&'static str, Value)> {
+    let mut keys = bindings.keys(action).to_vec();
+    (slot < keys.len()).then(|| {
+        keys.remove(slot);
+        keys_set(action, &keys)
+    })
+}
+
 fn keys_page(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings) {
     page(ui, "Keys", "", |ui| {
         ui.add(
@@ -308,9 +316,9 @@ fn key_row(ui: &mut egui::Ui, state: &mut PreferencesUi, bindings: &Bindings, ac
                 if let Some(slot) = c.slot
                     && ui.button("Remove").clicked()
                 {
-                    let mut rest = keys.to_vec();
-                    rest.remove(slot);
-                    state.keyed = Some(keys_set(action, &rest));
+                    if let Some(keyed) = without_key(bindings, action, slot) {
+                        state.keyed = Some(keyed);
+                    }
                     state.capture = None;
                 }
                 if ui.button("Cancel").clicked() {
@@ -1667,7 +1675,26 @@ fn codec(ui: &mut egui::Ui, state: &Value, busy: bool, patch: &mut Option<Value>
 
 #[cfg(test)]
 mod tests {
-    use super::{about_gb, gb, mb_of};
+    use serde_json::json;
+    use vidcut_core::shortcuts::{Action, Bindings};
+
+    use super::{about_gb, gb, mb_of, without_key};
+
+    #[test]
+    fn remove_takes_the_key_out_of_its_slot() {
+        assert_eq!(
+            without_key(&Bindings::default(), Action::PlayOrStop, 0),
+            Some(("keys.set", json!({ "action": "play_or_stop", "keys": [] })))
+        );
+    }
+
+    #[test]
+    fn remove_sends_nothing_when_the_key_is_already_gone() {
+        assert_eq!(
+            without_key(&Bindings::default(), Action::PlayOrStop, 1),
+            None
+        );
+    }
 
     #[test]
     fn whole_gigabytes_show_without_decimals() {

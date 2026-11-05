@@ -190,9 +190,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - File > Preferences (Ctrl+,) holds the settings of `preferences.toml` ([design/model.md](design/model.md#preferences)).
   - These are the theme, GPU use, and the memory and the audio device of the player.
-  - They also include the limit of the disk cache, the thumbnails, the proxy rules and folder, and the filler words.
+  - They also include the limit of the disk cache, the thumbnails, the proxy rules and folder, the filler words and the keys.
   - The viewer guides are in the same file. The Safe Area control sets them, not a page of this window.
-  - `preferences get|set|reset` give scripts access to them.
+  - `preferences get|set|reset` give scripts access to them. `keys.list`, `keys.set` and `keys.reset` give access to the keys.
   - A sidebar selects one page at a time:
     - General: the theme, the preferences file and Reset vidcut…
     - GPU
@@ -202,6 +202,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Proxies
     - Services: the keys of the paid services, and whether to ask before vidcut sends audio
     - Filler Words
+    - Keys ([X138](#x138-the-keys-are-a-page-of-preferences))
   - When vidcut cannot read the file, the window shows why, with Show in Folder and Reset Preferences.
   - Reset Preferences restores the defaults. It keeps the old file as `preferences.toml.bak`, or `.bak.2` and higher. It never replaces a backup.
   - Reset vidcut… on the General page, and `vidcut reset`, restore the state of a fresh install.
