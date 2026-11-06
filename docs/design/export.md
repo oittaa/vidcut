@@ -37,6 +37,7 @@ flowchart TD
 
 - **Settings:** `settings`, a `preset`, or the default preset of the extension.
   - `set` changes fields (`apply_overrides`). `encoder` sets the video encoder. The extension sets the container.
+  - A `null` in `set` takes the field out, and the field gets its default. Why: the Export dialog sends `null` for a field that its preset has and the dialog does not.
   - The presets are `builtin_presets` and the user's TOML files (`export::presets`).
   - A preset's name is any text that is not empty. The file holds the name.
   - The file name is the preset's name when that name is short, lowercase ASCII and safe on each system (`user_preset_path`). Otherwise it is a digest of the name. Why: two names that differ only in case stay two files.

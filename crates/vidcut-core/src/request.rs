@@ -3380,6 +3380,7 @@ pub struct ExportParams {
     #[serde(default)]
     pub settings: Option<ExportSettings>,
     /// Overrides like `video.quality=20` or `audio.bitrate=192000`.
+    /// `null` gives a field its default.
     #[serde(default)]
     pub set: Vec<String>,
     /// Timeline range. Default: In–Out if both marks are set, else everything.

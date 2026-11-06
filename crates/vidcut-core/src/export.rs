@@ -801,7 +801,13 @@ pub fn apply_overrides(settings: &mut ExportSettings, sets: &[String]) -> Result
             }
             node = node.get_mut(*key).expect("just ensured");
         }
-        node[*keys.last().expect("non-empty")] = value;
+        let last = *keys.last().expect("non-empty");
+        match (value, node.as_object_mut()) {
+            (Value::Null, Some(fields)) => {
+                fields.remove(last);
+            }
+            (value, _) => node[last] = value,
+        }
     }
     *settings =
         serde_json::from_value(v).map_err(|e| Error::usage(format!("invalid --set: {e}")))?;
