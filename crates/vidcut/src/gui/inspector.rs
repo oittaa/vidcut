@@ -1943,6 +1943,8 @@ fn glow_rows(
     fold(ui, (n, "Shape And Spread"), |ui| {
         glow(ui, GlowKnob::Spread, acts);
         glow(ui, GlowKnob::Ratio, acts);
+        label(ui, "Relative Spread", false);
+        ui.end_row();
         for c in 0..3 {
             glow(ui, GlowKnob::Relative(c), acts);
         }
@@ -1951,6 +1953,8 @@ fn glow_rows(
         glow(ui, GlowKnob::Gain, acts);
         glow(ui, GlowKnob::Gamma, acts);
         glow(ui, GlowKnob::Saturation, acts);
+        label(ui, "Color Filter", false);
+        ui.end_row();
         for c in 0..3 {
             glow(ui, GlowKnob::Filter(c), acts);
         }

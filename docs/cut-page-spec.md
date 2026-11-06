@@ -1604,6 +1604,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Advanced Controls:
     - Glow Framing is Only As Seen or Reflect In Camera. Reflect In Camera is the default.
     - Composite Type has the 27 modes of Composite ([§8.15](#815-transform-and-crop-pp-766768)). Add is the default.
+    - The manual (p. 3590) gives Screen as the default. The readback and the renders of a new Glow give Add, and vidcut uses Add.
     - Opacity goes from 0 to 1 and is 1.
     - Invert Effect is off.
     - Source Recovery goes from 0 to 5 and is 0.
@@ -1629,6 +1630,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Atmosphere multiplies the glow by `max(0, 1 + Strength × N)`. `N` is one noise for all three colors, in the directions of the frame.
   - Source Recovery and Atmosphere work before Gamma. Each multiplies the three colors alike, so Saturation does not change them.
   - The glow does not stop at 1. Composite Type mixes it with the picture, and the mix stops at 0..1 after Opacity and Blend.
+  - Two modes have their own rules at the ends of the range of the glow:
+    - Color Dodge with a glow of 1 or more gives 1 where the picture is above 0, and 0 where it is 0.
+    - Color Burn with a glow of 0 or less gives 1 where the picture is 1, and 0 elsewhere.
   - Opacity and Blend give the same result.
   - Invert Effect is `1 − effect(1 − picture)`.
   - Glow Alone is the glow, and Reflect In Camera is a mirror on a grid `g` of 8 pixels:

@@ -1591,6 +1591,16 @@ fn glow_saturated(c: vec3<f32>, k: f32) -> vec3<f32> {
     return d * glow_light(c) / max(glow_light(d), 1e-12);
 }
 
+fn glow_mixed(mode: u32, g: vec3<f32>, c: vec3<f32>) -> vec3<f32> {
+    let m = mixed(mode, g, c);
+    let ends = vec3<f32>(1.0);
+    switch mode {
+        case 11u: { return select(m, select(vec3<f32>(0.0), ends, c > vec3<f32>(0.0)), g >= ends); }
+        case 12u: { return select(m, select(vec3<f32>(0.0), ends, c >= ends), g <= vec3<f32>(0.0)); }
+        default: { return m; }
+    }
+}
+
 @fragment
 fn fs_glow(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
@@ -1624,7 +1634,7 @@ fn fs_glow(in: Out) -> @location(0) vec4<f32> {
         }
         made = g;
         if glowing.modes.x == 2 {
-            made = mixed(u32(glowing.modes.z), g, was.rgb);
+            made = glow_mixed(u32(glowing.modes.z), g, was.rgb);
         }
     }
     var out = mix(was, vec4<f32>(made, 1.0), glowing.mixing.y);
