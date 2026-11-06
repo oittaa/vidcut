@@ -354,6 +354,23 @@ fn scrub_frame(frame: i64, frames: i64, px: f32) -> i64 {
     frame - frame.rem_euclid(step)
 }
 
+fn tile_key(
+    ctx: &egui::Context,
+    m: &Media,
+    frame: i64,
+    px: f32,
+) -> Option<(super::tiles::TileKey, u32)> {
+    let aspect = super::tiles::media_aspect(m)?;
+    let height = super::tiles::tile_height(px * ctx.pixels_per_point());
+    let width = (height as f32 * aspect).round().max(1.0) as u32;
+    let key = super::tiles::TileKey {
+        media: m.id.clone(),
+        frame,
+        height,
+    };
+    Some((key, width))
+}
+
 fn poster_frame(frames: i64) -> i64 {
     frames / POSTER_PART
 }
@@ -1426,19 +1443,20 @@ impl Workspace {
         px: f32,
         within: i64,
     ) -> Option<egui::TextureId> {
-        let p = self.project()?;
-        let aspect = super::tiles::media_aspect(m)?;
-        let height = super::tiles::tile_height(px * ctx.pixels_per_point());
-        let width = (height as f32 * aspect).round().max(1.0) as u32;
-        let key = super::tiles::TileKey {
-            media: m.id.clone(),
-            frame,
-            height,
-        };
-        let t = self.tiles.as_ref()?;
+        let (p, t) = (self.project()?, self.tiles.as_ref()?);
+        let (key, width) = tile_key(ctx, m, frame, px)?;
         t.want(&key, || t.job(p, &key, width))
-            .or_else(|| t.nearest(&m.id, height, frame, within))
+            .or_else(|| t.nearest(&m.id, key.height, frame, within))
             .or_else(|| t.nearest_any_height(&m.id, frame))
+    }
+
+    fn pool_ahead(&self, ctx: &egui::Context, m: &Media, frame: i64, px: f32) {
+        let (Some(p), Some(t)) = (self.project(), self.tiles.as_ref()) else {
+            return;
+        };
+        if let Some((key, width)) = tile_key(ctx, m, frame, px) {
+            t.prefetch(&key, || t.job(p, &key, width));
+        }
     }
 
     fn preload(&self, ctx: &egui::Context, seen: &[&Media], near: &[&Media], cell: Vec2) {
@@ -1450,12 +1468,12 @@ impl Workspace {
             let frames = p.media_frames(m);
             for f in strip_frames(HOVER_PICTURES, frames) {
                 let f = scrub_frame(f, frames, cell.x);
-                self.pool_picture(ctx, m, f, px(m), 0);
+                self.pool_ahead(ctx, m, f, px(m));
             }
         }
         for m in near {
             let poster = poster_frame(p.media_frames(m));
-            self.pool_picture(ctx, m, poster, px(m), 0);
+            self.pool_ahead(ctx, m, poster, px(m));
         }
     }
 
@@ -1465,7 +1483,7 @@ impl Workspace {
         };
         let slots = strip_slots(width, STRIP_HEIGHT * aspect);
         for f in strip_frames(slots, p.media_frames(m)) {
-            self.pool_picture(ctx, m, f, STRIP_HEIGHT, 0);
+            self.pool_ahead(ctx, m, f, STRIP_HEIGHT);
         }
     }
 
