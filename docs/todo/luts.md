@@ -20,8 +20,7 @@ vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../desi
 
 - The display LUT, as the viewer's own branch.
 - With a LUT, the export measures light on the resulting frames.
-- The Input Lookup Table of the project (manual p. 152). vidcut has an input LUT on a clip only.
-- Compare the LUT frames directly with the renders of Resolve. This waits for the brightness fix of 16-bit stills. With no LUT, a 16-bit still also differs from the render.
+- The Input Lookup Table of the project (manual p. 152). vidcut has an input LUT on a media item only.
 - Measure in Resolve. No script reaches these, so each needs the window of Resolve:
   - The Output LUT of the project: does it use the math of the node LUT?
   - A gap through the Output LUT.
@@ -29,6 +28,8 @@ vidcut has an input LUT and an output LUT, from a `.cube` file ([design](../desi
   - A LUT on a generator and on a title, in the Color page.
   - The messages of the GUI for a broken file.
   - The source viewer: does it show the input LUT?
+  - The right-click menu of the Media Pool on a compound clip: does it give an input LUT?
+- Measure in Resolve: does a subclip share the input LUT of its parent?
 
 **Later:**
 

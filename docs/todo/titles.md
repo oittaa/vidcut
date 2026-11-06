@@ -14,9 +14,9 @@
 
 ## Font heights
 
-- **Scroll:** in Resolve, the line distance of a Scroll does not follow the sum of the three heights.
-  - Arial and Times New Roman have the same sum, and the distances differ by 3 pixels at the same size.
-  - The distance follows ascent plus descent, with no gap, in these two fonts and in Calibri. Measure it at more sizes, then replace the rule with 4/3.
+- **Scroll:**
+  - In Times New Roman at 108, the line distance is 174 pixels in Resolve and 169.5 in vidcut. The other measured fonts fit within 1.5 pixels. Find the reason.
+  - Only Gabriola sets `USE_TYPO_METRICS` among the measured fonts. Measure one more such font, for the line distance and for the rows.
   - vidcut keeps the exact size of a Scroll, because its rounding is not measured. Measure a Scroll at a size with a fraction.
 - **Variable fonts:** a stored title with only the family name draws Bahnschrift narrower in Resolve than in vidcut. Choose the font and its face in the Inspector, and measure which face Resolve takes.
 - **Gabriola:** the letters are 0.3 pixels left of Resolve, and the rows match. Find the reason.
@@ -28,13 +28,3 @@
 
 - The measurements of `shape` read files. Measure the range and the units of these controls in Resolve's Inspector.
 - vidcut uses the numbers of the file until then.
-
-## Anchor of a lower third and a scroll
-
-- In vidcut, only a Text title has `anchor`.
-- In Resolve, each line of a lower third and a Scroll have an anchor too.
-- A Scroll's anchor works on a text box as wide as the picture (measured in Resolve Studio 21.1.2):
-  - The left column puts the left edge of the lines at the middle of the picture.
-  - The right column puts the lines off the picture.
-  - The row moves the lines by half of a text height, up or down.
-- **Why it is open:** the shape of this control in Resolve's Inspector is not checked.
