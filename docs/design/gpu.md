@@ -79,7 +79,7 @@ In the viewer, exports, proxies and thumbnails:
   - Each job opens a new display (`own_decoder`). Thus each list is an `Lru` with a limit.
   - vidcut finds a fact again after it leaves its list.
 
-- ProRes 4444 on VideoToolbox takes P416, which has no alpha plane. With Export Alpha, it takes `AYUV64LE` ([export](export.md#encoding-one-output)).
+- A ProRes 4444 or 4444 XQ export on VideoToolbox takes P416. With Export Alpha on, it takes AYUV64, which has the alpha (`gpu_pixel`, [export](export.md#encoding-one-output)).
 - A Vulkan picture with an alpha channel has a fourth image. The draw takes it as the alpha plane (`Import::alpha`).
   - The image holds 12-bit values in 16-bit samples. Thus the shader scales them (`ALPHA_OF_16`).
   - A picture with alpha that comes without its fourth image comes down from the GPU.
@@ -209,7 +209,7 @@ GPU memory:
   - Why: two AI upscalers do not hold memory at the same time.
 - An AI upscaler borrows the GPU memory of the viewer's kept pictures (`player::lend_on`, `player::room_on`, `store::Lent`).
   - Why: if they do not fit together, the driver moves GPU memory to main memory, and a picture can take minutes.
-- AI Slow also borrows main memory for its caches (`player::lend_memory`, `store::LentMemory`).
+- AI Slow also borrows main memory for its caches (`player::lend_memory`, `store::LentMemory`). The kept pictures and the drawings of titles and subtitles give it room.
 
 AI Fast (`nanovsr`):
 
@@ -323,6 +323,7 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
 - Then the CPU computes the light of these codes, with the code that measures frames in memory (`Spread`).
 - The CPU measures SDR pictures, other layouts and pictures in memory.
   - Why: the matrix of an SDR picture to BT.2020 mixes the three channels. Thus the highest code of each channel does not give the peak.
+  - It measures RGB and gray of more than 8 bits as RGB (`measure_rgb`). Why: the conversion to YUV makes these pictures too bright ([gotchas](../gotchas.md#ffmpeg-filters-and-colors)).
 - After an error on the GPU, the CPU measures the rest of the file. vidcut prints the error.
   - A picture that the meter's import or copy brings down is such an error. Why: the GPU meter then copies it down, up and back. The CPU meter only copies it down.
 - `VIDCUT_DEBUG` tells whether the GPU or the CPU measures.

@@ -1,12 +1,14 @@
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
-use serde_json::Value;
-use vidcut_core::model::Clip;
+use serde_json::{Value, json};
+use vidcut_core::model::{Clip, Generator, GeneratorKind, Marks};
+use vidcut_core::multicam::camera_order;
 use vidcut_core::render::TapeEntry;
-use vidcut_core::request::{TimecodeDisplay, ViewerFrame, ViewerMode};
+use vidcut_core::request::{GeneratorSettings, TimecodeDisplay, ViewerFrame, ViewerMode};
 use vidcut_core::steps::{Span, Steps};
 use vidcut_core::time::{Rational, format_timecode, parse_counter, parse_frame_number};
 use vidcut_core::{Error, Project};
@@ -101,6 +103,15 @@ pub fn first_letter(name: &str) -> String {
         .map_or_else(String::new, |c| c.to_uppercase().collect())
 }
 
+fn named_order(a: Option<&str>, b: Option<&str>) -> Ordering {
+    match (a, b) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
+        (Some(a), Some(b)) => camera_order(a, b),
+    }
+}
+
 impl PoolView {
     pub fn media(&self, p: &Project) -> Vec<String> {
         let inside = |b: &str| {
@@ -112,7 +123,28 @@ impl PoolView {
         let start = |m: &vidcut_core::model::Media| {
             m.info.timecode.map_or(0.0, |t| t.label_seconds()) + m.skipped()
         };
+        let by_start = |a: &vidcut_core::model::Media, b: &vidcut_core::model::Media| {
+            start(a).total_cmp(&start(b))
+        };
         match self.sort {
+            PoolSort::Camera => media.sort_by(|a, b| {
+                named_order(a.camera.as_deref(), b.camera.as_deref()).then(by_start(a, b))
+            }),
+            PoolSort::DateTime => {
+                media.sort_by(|a, b| a.created.cmp(&b.created).then(by_start(a, b)));
+            }
+            PoolSort::Bin => {
+                media.sort_by(|a, b| camera_order(&a.bin, &b.bin).then(by_start(a, b)));
+            }
+            PoolSort::SceneShot => media.sort_by(|a, b| {
+                named_order(a.scene.as_deref(), b.scene.as_deref())
+                    .then(named_order(a.shot.as_deref(), b.shot.as_deref()))
+                    .then(named_order(a.take.as_deref(), b.take.as_deref()))
+            }),
+            PoolSort::ClipColor => media.sort_by(|a, b| {
+                named_order(a.color.as_deref(), b.color.as_deref()).then(by_start(a, b))
+            }),
+            PoolSort::OnlineStatus => media.sort_by_key(|m| m.fresh_proxy().is_some()),
             PoolSort::Added => {}
             PoolSort::Name if self.view == PoolMode::Metadata => media.sort_by(|a, b| {
                 first_letter(&a.name)
@@ -122,6 +154,9 @@ impl PoolView {
             PoolSort::Name => media.sort_by_key(|m| m.name.to_lowercase()),
             PoolSort::Duration => media.sort_by_key(|m| p.media_frames(m)),
             PoolSort::Date => media.sort_by_key(|m| m.mtime_ns),
+            PoolSort::Timecode if self.view == PoolMode::Metadata => {
+                media.sort_by(|a, b| a.created.cmp(&b.created).then(by_start(a, b)));
+            }
             PoolSort::Timecode => media.sort_by(|a, b| start(a).total_cmp(&start(b))),
         }
         if self.descending {
@@ -182,6 +217,38 @@ pub struct Filmstrip {
     pub times: Vec<f64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SourceGenerator {
+    pub kind: GeneratorKind,
+    pub settings: GeneratorSettings,
+    pub generator: Generator,
+    pub frames: i64,
+    pub marks: Marks,
+}
+
+impl SourceGenerator {
+    pub fn name(&self) -> &str {
+        vidcut_core::generators::name(&self.generator)
+    }
+
+    pub fn range(&self) -> (i64, i64) {
+        (
+            self.marks.mark_in.unwrap_or(0),
+            self.marks.mark_out.unwrap_or(self.frames),
+        )
+    }
+
+    pub fn params(&self) -> Value {
+        let mut params = json!(self.settings);
+        params["generator"] = json!(self.kind);
+        if !self.marks.is_empty() {
+            let (a, b) = self.range();
+            params["range"] = json!(format!("{a}f..{b}f"));
+        }
+        params
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub seq: u64,
@@ -194,8 +261,9 @@ pub struct Snapshot {
     pub source: PlayerSnap,
     pub timeline: PlayerSnap,
     pub source_media: Option<String>,
+    pub source_generator: Option<SourceGenerator>,
     pub source_grid: Arc<vidcut_core::multicam::SourceGrid>,
-    pub multi_marks: vidcut_core::model::Marks,
+    pub multi_marks: Marks,
     pub multi_alone: bool,
     pub tape: Arc<Vec<TapeEntry>>,
     pub selection: Selection,
@@ -224,6 +292,7 @@ pub struct Snapshot {
     pub guides: vidcut_core::preferences::Guides,
     pub scopes: vidcut_core::preferences::Scopes,
     pub show_super_scale: bool,
+    pub bindings: Arc<vidcut_core::shortcuts::Bindings>,
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,
     pub history_preview: Option<Arc<HistoryPreview>>,
@@ -244,6 +313,19 @@ impl Snapshot {
 
     pub fn project(&self) -> Option<&Project> {
         self.project.as_ref().map(|p| &*p.project)
+    }
+
+    pub fn open_generator(&self) -> Option<&SourceGenerator> {
+        self.source_generator
+            .as_ref()
+            .filter(|_| self.viewer == ViewerMode::SourceClip)
+    }
+
+    pub fn viewer_marks(&self) -> Option<&Marks> {
+        match self.viewer {
+            ViewerMode::MultiSource if !self.multi_alone => Some(&self.multi_marks),
+            _ => self.open_generator().map(|g| &g.marks),
+        }
     }
 
     pub fn source_at(&self) -> Option<(&str, i64)> {

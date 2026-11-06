@@ -1155,6 +1155,7 @@ impl Player {
             (p.shown.clone(), p.frames, p.late, p.skipped)
         };
         let (rate, channels) = self.shared.format;
+        let titles = store.title_bytes();
         Stats {
             position,
             shown,
@@ -1167,8 +1168,8 @@ impl Player {
             behind: store.kept_run(behind),
             kept: store.usage().0,
             memory: (
-                store.bytes(store::Kind::Memory),
-                store.budget(store::Kind::Memory),
+                store.bytes(store::Kind::Memory) + titles,
+                store.budget(store::Kind::Memory) + titles,
             ),
             video: (
                 store.bytes(store::Kind::Video),

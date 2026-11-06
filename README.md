@@ -55,7 +55,7 @@ make run        # build and start the GUI
 make install    # copy vidcut into ~/.local/bin
 ```
 
-- vidcut works with FFmpeg 8.0 to 9.0.
+- vidcut works with FFmpeg 8.0 to 9.0. An animated WebP needs FFmpeg 9.0.
 - On Windows, `cargo build --release` builds `target\release\vidcut.exe`.
 
 ## CLI

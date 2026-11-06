@@ -2322,16 +2322,25 @@ fn resolve_cues(p: &Project, refs: &[String], playhead: Option<i64>) -> Result<V
     refs.iter().map(|r| resolve_cue(p, r, playhead)).collect()
 }
 
-pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeContext {
+pub fn source_context(
+    p: &Project,
+    frames: i64,
+    marks: &Marks,
+    playhead: Option<i64>,
+) -> TimeContext {
     TimeContext {
         fps: p.settings.fps,
         start_tc: 0,
         drop_frame: p.settings.counts_drop_frame(),
-        end: p.media_frames(media),
-        mark_in: media.marks.mark_in,
-        mark_out: media.marks.mark_out,
+        end: frames,
+        mark_in: marks.mark_in,
+        mark_out: marks.mark_out,
         playhead,
     }
+}
+
+pub fn media_context(p: &Project, media: &Media, playhead: Option<i64>) -> TimeContext {
+    source_context(p, p.media_frames(media), &media.marks, playhead)
 }
 
 fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
@@ -2343,9 +2352,9 @@ fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
         }
         tape_sources(p, params)?
     } else {
-        if params.media.is_empty() {
+        if params.media.is_empty() && params.generator.is_none() {
             return Err(Error::usage(
-                "media is required (or pass tape: true to edit the Source Tape span)",
+                "media or generator is required (or pass tape: true to edit the Source Tape span)",
             ));
         }
         vec![source(p, params)?]
@@ -2368,6 +2377,11 @@ fn resolve_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
 }
 
 fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
+    if ops::generators::source_of(params.generator, &params.settings)?.is_some() {
+        return Err(Error::usage(
+            "a tape-span edit takes the marked range; leave out generator",
+        ));
+    }
     let tm = &p.tape_marks;
     let (Some(mark_in), Some(mark_out)) = (tm.mark_in, tm.mark_out) else {
         return Err(Error::invalid("a Source Tape edit needs both In and Out"));
@@ -2388,6 +2402,7 @@ fn tape_sources(p: &Project, params: &SourceParams) -> Result<Vec<Source>> {
             video_only: params.video_only,
             audio_only: params.audio_only,
             track: params.track.clone(),
+            generator: None,
         })
         .collect())
 }
@@ -2422,7 +2437,35 @@ fn tape_marks_json(p: &Project, entries: &[crate::render::TapeEntry]) -> Value {
     })
 }
 
+fn generator_source(p: &Project, params: &SourceParams, generator: Generator) -> Result<Source> {
+    if !params.media.is_empty() {
+        return Err(Error::usage("give media or generator, not both"));
+    }
+    let frames = ops::titles::default_length(p);
+    let range = match &params.range {
+        None => (0, frames),
+        Some(r) => source_context(p, frames, &Marks::default(), None).range(r)?,
+    };
+    if range.0 < 0 || range.0 >= range.1 {
+        return Err(Error::invalid(format!(
+            "source range {}..{} of a generator is empty",
+            range.0, range.1
+        )));
+    }
+    Ok(Source {
+        media: String::new(),
+        range,
+        video_only: params.video_only,
+        audio_only: params.audio_only,
+        track: params.track.clone(),
+        generator: Some(generator),
+    })
+}
+
 fn source(p: &Project, params: &SourceParams) -> Result<Source> {
+    if let Some(generator) = ops::generators::source_of(params.generator, &params.settings)? {
+        return generator_source(p, params, generator);
+    }
     let media = p
         .media(&params.media)
         .ok_or_else(|| Error::not_found(format!("no media {}", params.media)))?;
@@ -2440,6 +2483,7 @@ fn source(p: &Project, params: &SourceParams) -> Result<Source> {
         video_only: params.video_only,
         audio_only: params.audio_only,
         track: params.track.clone(),
+        generator: None,
     })
 }
 
@@ -2788,25 +2832,66 @@ fn mutate(
             range,
             name,
             bin,
+            full_extents,
         } => {
+            if range.is_some() && *full_extents {
+                return Err(Error::usage("give range or full_extents, not both"));
+            }
             let m = p
                 .media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             let c = media_context(p, m, None);
-            let span = match range {
-                Some(r) => c.range(r)?,
-                None => (
+            let span = match (range, *full_extents) {
+                (Some(r), _) => c.range(r)?,
+                (None, true) => (0, c.end),
+                (None, false) => (
                     m.marks.mark_in.unwrap_or(0),
                     m.marks.mark_out.unwrap_or(c.end),
                 ),
             };
             let id = ops::create_subclip(p, media, span, name, bin.as_deref())?;
+            if *full_extents {
+                ops::use_full_extents(p, &id)?;
+            }
             json!({ "media": id })
+        }
+        Request::MediaSubclipSet {
+            media,
+            range,
+            full_extents,
+        } => {
+            match (range, *full_extents) {
+                (Some(_), true) => {
+                    return Err(Error::usage("give range or full_extents, not both"));
+                }
+                (None, false) => return Err(Error::usage("give range or full_extents")),
+                (None, true) => ops::use_full_extents(p, media)?,
+                (Some(r), false) => {
+                    let m = p
+                        .media(media)
+                        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
+                    let whole = TimeContext {
+                        end: p.file_frames(m),
+                        mark_in: None,
+                        mark_out: None,
+                        ..media_context(p, m, None)
+                    };
+                    let span = whole.range(r)?;
+                    ops::set_subclip_limits(p, media, span)?;
+                }
+            }
+            forget_tape_marks(p, media);
+            Value::Null
         }
         Request::MediaSet {
             media,
             color,
             camera,
+            created,
+            scene,
+            shot,
+            take,
+            comment,
             color_space,
             alpha_mode,
             super_scale,
@@ -2819,25 +2904,43 @@ fn mutate(
                 sharpness: *sharpness,
                 upscaler: *upscaler,
             };
+            let notes = [camera, created, scene, shot, take, comment];
             if color.is_none()
-                && camera.is_none()
+                && notes.iter().all(|note| note.is_none())
                 && color_space.is_none()
                 && alpha_mode.is_none()
                 && set.is_empty()
             {
                 return Err(Error::usage(
-                    "give color, camera, color_space, alpha_mode, or a Super Scale field: \
-                     super_scale, sharpness or upscaler",
+                    "give color, camera, created, scene, shot, take, comment, color_space, \
+                     alpha_mode, or a Super Scale field: super_scale, sharpness or upscaler",
                 ));
             }
             if let Some(color) = color {
                 let color = (!color.is_empty()).then(|| color.clone());
                 ops::set_media_color(p, &media.to_vec(), color)?;
             }
-            if let Some(camera) = camera {
-                let camera = (!camera.is_empty()).then(|| camera.clone());
-                for id in media.to_vec() {
-                    pool_item_mut(p, &id)?.camera.clone_from(&camera);
+            if let Some(date) = created.as_deref().filter(|date| !date.is_empty())
+                && !ops::is_date(date)
+            {
+                return Err(Error::invalid(format!(
+                    "{date} is not a date; give YYYY-MM-DD"
+                )));
+            }
+            let fields: [fn(&mut Media) -> &mut Option<String>; 6] = [
+                |m| &mut m.camera,
+                |m| &mut m.created,
+                |m| &mut m.scene,
+                |m| &mut m.shot,
+                |m| &mut m.take,
+                |m| &mut m.comment,
+            ];
+            for (note, field) in notes.into_iter().zip(fields) {
+                if let Some(note) = note {
+                    let note = (!note.is_empty()).then(|| note.clone());
+                    for id in media.to_vec() {
+                        field(pool_item_mut(p, &id)?).clone_from(&note);
+                    }
                 }
             }
             if let Some(space) = color_space {
@@ -3042,8 +3145,9 @@ fn mutate(
             };
             let mut landed = Vec::with_capacity(sources.len());
             for s in &sources {
-                let marks = &p.media(&s.media).expect("source checked the media").marks;
-                let marked = src.tape || src.range.is_some() || !marks.is_empty();
+                let marks = p.media(&s.media).map(|m| &m.marks);
+                let marked =
+                    src.tape || src.range.is_some() || marks.is_some_and(|m| !m.is_empty());
                 let lining = match (*grid, marked) {
                     (true, _) => ops::SourceLining::Grid,
                     (false, true) => ops::SourceLining::Marked,
@@ -4138,36 +4242,10 @@ fn mutate(
         Request::EffectsSet {
             clip,
             effect,
-            on,
-            blend,
-            use_alpha,
-            render_cache,
-            strength,
-            split,
-            vertical_strength,
-            horizontal_channels,
-            vertical_channels,
-            border,
+            change,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
-            let channels = |what: &str, raw: &Option<Vec<f64>>| {
-                raw.as_deref()
-                    .map(|k| ops::effect::channels(what, k))
-                    .transpose()
-            };
-            let change = ops::effect::EffectChange {
-                on: *on,
-                blend: *blend,
-                use_alpha: *use_alpha,
-                render_cache: *render_cache,
-                strength: *strength,
-                split: *split,
-                vertical_strength: *vertical_strength,
-                horizontal_channels: channels("horizontal_channels", horizontal_channels)?,
-                vertical_channels: channels("vertical_channels", vertical_channels)?,
-                border: *border,
-            };
-            ops::effect::set(p, &id, *effect, &change)?;
+            ops::effect::set(p, &id, *effect, change)?;
             Value::Null
         }
         Request::EffectsReset { clip, effect } => {
@@ -4846,6 +4924,11 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         proxy: None,
         color: None,
         camera: None,
+        created: None,
+        scene: None,
+        shot: None,
+        take: None,
+        comment: None,
         fingerprint: probed.fingerprint,
         subtitles: probed.subtitles,
         subclip: None,
@@ -8414,6 +8497,17 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
     }
     if let Some(c) = &m.camera {
         v["camera"] = json!(c);
+    }
+    for (key, value) in [
+        ("created", &m.created),
+        ("scene", &m.scene),
+        ("shot", &m.shot),
+        ("take", &m.take),
+        ("comment", &m.comment),
+    ] {
+        if let Some(value) = value {
+            v[key] = json!(value);
+        }
     }
     if let Some(g) = p.group_of(&m.id) {
         v["group"] = json!(g.id);

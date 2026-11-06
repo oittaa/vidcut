@@ -11,11 +11,13 @@ use vidcut_core::multicam::{
     sync_clips_files, visible,
 };
 use vidcut_core::render::{RenderPlan, places_sound};
+use vidcut_core::shortcuts::{Action, Bindings, Panel};
 use vidcut_core::time::format_timecode;
 
 use super::dialog;
 use super::export::Ask;
 use super::pool::elide;
+use super::shortcuts::{owner, take};
 use super::sync_bin::Film;
 use super::theme;
 use super::viewer::{ACTIVE_ANGLE, GridCell, grid_pictures};
@@ -195,28 +197,13 @@ impl SyncClips {
     }
 }
 
-fn nudge_of(event: &egui::Event) -> i64 {
-    let egui::Event::Key {
-        key,
-        physical_key,
-        pressed: true,
-        modifiers,
-        ..
-    } = event
-    else {
-        return 0;
-    };
-    if modifiers.alt || modifiers.command {
-        return 0;
-    }
-    let is = |wanted: Key| *key == wanted || *physical_key == Some(wanted);
-    let step = if modifiers.shift { FAST_NUDGE } else { 1 };
-    if is(Key::Comma) {
-        -step
-    } else if is(Key::Period) {
-        step
-    } else {
-        0
+fn nudge_of(b: &Bindings, event: &egui::Event) -> i64 {
+    match owner(b, Panel::App, event) {
+        Some((Action::TrimLeft, _)) => -1,
+        Some((Action::TrimRight, _)) => 1,
+        Some((Action::TrimSecondLeft, _)) => -FAST_NUDGE,
+        Some((Action::TrimSecondRight, _)) => FAST_NUDGE,
+        _ => 0,
     }
 }
 
@@ -317,13 +304,14 @@ impl Workspace {
             }
             return;
         }
-        let nudge: i64 = ctx.input(|i| i.events.iter().map(nudge_of).sum());
+        let bindings = self.snap.bindings.clone();
+        let nudge: i64 = ctx.input(|i| i.events.iter().map(|e| nudge_of(&bindings, e)).sum());
         if nudge != 0
             && let Some(p) = self.project_shared()
         {
             self.sync_clips.nudge(&p, nudge);
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Space)) {
+        if ctx.input_mut(|i| take(&bindings, i, Action::PlayOrStop)) {
             if self.sync_clips.playing {
                 self.sync_clips.stop();
             } else {
