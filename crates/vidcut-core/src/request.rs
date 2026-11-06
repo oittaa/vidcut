@@ -505,8 +505,8 @@ pub enum Request {
         back: bool,
     },
     /// Set the Clip Color, the camera name, Date Created, the scene, shot and
-    /// take, the Input Color Space and the Super Scale of media items. Their
-    /// clips show the Clip Color unless they have their own.
+    /// take, the comment, the Input Color Space and the Super Scale of media
+    /// items. Their clips show the Clip Color unless they have their own.
     #[serde(rename = "media.set")]
     MediaSet {
         media: OneOrMany<String>,
@@ -529,6 +529,9 @@ pub enum Request {
         /// The take, such as a number. Empty string clears it.
         #[serde(default)]
         take: Option<String>,
+        /// A note on the clip. Empty string clears it.
+        #[serde(default)]
+        comment: Option<String>,
         /// How its pictures' colors are read: `tagged`, as the file says, or
         /// `bt709`, `bt601`, `pq` or `hlg` in place of the file's tags, for a
         /// file whose tags are wrong. The viewer, thumbnails and exports
@@ -4191,11 +4194,14 @@ pub enum PoolMode {
     /// A row for each, its details in columns.
     List,
     /// A card for each: a picture that scrubs, a line that follows the sort,
-    /// its start timecode, its camera and its name. By `name`, the cards go
-    /// by first letter under a heading, and by timecode inside a letter;
-    /// Source Tape takes that order. By `date`, they go under a heading for
-    /// each day. By `camera`, `date_time`, `bin`, `scene_shot`, `clip_color`
-    /// and `online_status`, they go under a heading for each value.
+    /// its start timecode, Date Created and camera, its scene, shot and take,
+    /// and its name and comment. By `name`, the cards go by first letter
+    /// under a heading, and by timecode inside a letter; Source Tape takes
+    /// that order. By `date`, they go under a heading for each day. By
+    /// `timecode`, they go under a heading for each Date Created, and by
+    /// timecode inside a date. By `camera`, `date_time`, `bin`, `scene_shot`,
+    /// `clip_color` and `online_status`, they go under a heading for each
+    /// value.
     Metadata,
 }
 

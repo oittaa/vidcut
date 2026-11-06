@@ -425,6 +425,9 @@ pub struct Media {
     /// one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub take: Option<String>,
+    /// A note on the clip. Left out until `media.set` gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
     /// SHA-256 of the file when it was added or relinked
     /// ([`fingerprint`](crate::fingerprint)): of the whole file up to
     /// 10 MiB (its `sha256sum`), else of 1 MiB from its start, middle and
