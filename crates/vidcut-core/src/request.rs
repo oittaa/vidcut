@@ -2764,11 +2764,33 @@ pub enum Request {
     /// replaced.
     #[serde(rename = "preferences.reset")]
     PreferencesReset {},
-    /// The keyboard shortcuts, one action each, with a few plain words
-    /// where the action's name doesn't say what it does (spec §11). Ctrl
-    /// and Alt are Cmd and Option on macOS.
+    /// The keyboard shortcuts in force, one action each, with a few plain
+    /// words where the action's name doesn't say what it does (spec §11).
+    /// Ctrl and Alt are Cmd and Option on macOS.
     #[serde(rename = "keys.list")]
     KeysList {},
+    /// Give an action other keys in place of the ones it has (spec §11). A
+    /// key belongs to one action: a key that another action has is refused,
+    /// and the refusal names that action. A running GUI follows at once.
+    #[serde(rename = "keys.set")]
+    KeysSet {
+        /// The action, as `keys.list` names it.
+        action: crate::shortcuts::Action,
+        /// Its keys, like `Ctrl+Shift+Z`, `F5` or `+`. Cmd and Option are
+        /// other names for Ctrl and Alt. On macOS, Control is the Control
+        /// key. With no keys, the action has no key.
+        #[serde(default)]
+        #[schemars(with = "Vec<String>")]
+        keys: Vec<crate::shortcuts::Combo>,
+    },
+    /// Put default keys back. A default key that another action has now is
+    /// refused, and the refusal names that action.
+    #[serde(rename = "keys.reset")]
+    KeysReset {
+        /// The action, as `keys.list` names it. Without it, every action.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action: Option<crate::shortcuts::Action>,
+    },
     /// Keep a paid speech service's key in the system's keychain (macOS
     /// Keychain, Windows Credential Manager, the Secret Service on Linux).
     /// Without `key`, the CLI reads it from standard input. The key never
@@ -4861,6 +4883,8 @@ impl Request {
                 | Self::ViewerGuides { .. }
                 | Self::ViewerScopes { .. }
                 | Self::KeysList {}
+                | Self::KeysSet { .. }
+                | Self::KeysReset { .. }
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
                 | Self::CacheList {}
@@ -4933,6 +4957,8 @@ impl Request {
                     | Self::ViewerGuides { .. }
                     | Self::ViewerScopes { .. }
                     | Self::KeysList {}
+                    | Self::KeysSet { .. }
+                    | Self::KeysReset { .. }
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }
                     | Self::EditCopy { .. }

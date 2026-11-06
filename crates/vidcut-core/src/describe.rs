@@ -376,6 +376,11 @@ pub fn describe_at(
         "presets.save" => format!("Save preset {}", d.text("name")),
         "presets.delete" => format!("Delete preset {}", d.text("name")),
         "preferences.set" => format!("Preferences: {}", compact(params)),
+        "keys.set" => format!("Keys: {}", compact(params)),
+        "keys.reset" => match params["action"].as_str() {
+            Some(action) => format!("Default keys of {action}"),
+            None => "Default keys".into(),
+        },
         "history.undo" => "Undo".into(),
         "history.redo" => "Redo".into(),
         "history.mark" => match params["step"].as_u64() {

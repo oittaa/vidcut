@@ -8,6 +8,7 @@ use eframe::egui::{
 use serde_json::json;
 use vidcut_core::model::{Media, Project};
 use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
+use vidcut_core::shortcuts::Action;
 
 use super::clip_info::scene_shot_take;
 use super::theme;
@@ -618,9 +619,12 @@ impl Workspace {
                         } else if !view.bin.is_empty() {
                             ui.label(dim("Empty bin. Drag clips here, or use Move to Bin."));
                         } else {
-                            ui.label(dim(super::keys(
-                                "No media yet. Import with Ctrl+I, or `vidcut media add FILE…`",
-                            )));
+                            ui.label(dim(match snap.bindings.first(Action::Import) {
+                                Some(key) => format!(
+                                    "No media yet. Import with {key}, or `vidcut media add FILE…`"
+                                ),
+                                None => "No media yet. Use `vidcut media add FILE…`".to_string(),
+                            }));
                             if ui.button("Import Media…").clicked() {
                                 self.import_media();
                             }

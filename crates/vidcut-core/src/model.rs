@@ -2789,8 +2789,8 @@ impl Title {
         (thickness / 3.0 + 0.5).ceil() + 0.5
     }
 
-    pub fn line_width(width: f64, scale: f64) -> f64 {
-        ((width / scale + Self::WIDTH_SLACK).floor() * scale).floor()
+    pub fn line_end(from_block: f64, scale: f64) -> f64 {
+        (from_block / scale + Self::WIDTH_SLACK).floor() * scale
     }
 
     pub fn seated_left(&self, middle: f64, widest: f64, wrap: f64, pixel: f64) -> f64 {

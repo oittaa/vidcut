@@ -209,7 +209,7 @@ GPU memory:
   - Why: two AI upscalers do not hold memory at the same time.
 - An AI upscaler borrows the GPU memory of the viewer's kept pictures (`player::lend_on`, `player::room_on`, `store::Lent`).
   - Why: if they do not fit together, the driver moves GPU memory to main memory, and a picture can take minutes.
-- AI Slow also borrows main memory for its caches (`player::lend_memory`, `store::LentMemory`).
+- AI Slow also borrows main memory for its caches (`player::lend_memory`, `store::LentMemory`). The kept pictures and the drawings of titles and subtitles give it room.
 
 AI Fast (`nanovsr`):
 
