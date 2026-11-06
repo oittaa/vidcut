@@ -24,6 +24,8 @@ const WORKERS: usize = 4;
 
 const MEMORY: usize = 256 << 20;
 
+const AHEAD_MEMORY: usize = MEMORY / 4 * 3;
+
 const FAILED_KEPT: usize = 4096;
 
 const BLOCKS_KEPT: usize = 8;
@@ -227,6 +229,19 @@ impl Tiles {
             self.asked.borrow_mut().push(j);
         }
         None
+    }
+
+    pub fn prefetch(&self, key: &TileKey, job: impl FnOnce() -> Option<Job>) {
+        let kept = self
+            .kept
+            .get(&key.media)
+            .is_some_and(|m| m.contains_key(&(key.height, key.frame)));
+        if kept || self.bytes > AHEAD_MEMORY {
+            return;
+        }
+        if let Some(j) = job() {
+            self.asked.borrow_mut().push(j);
+        }
     }
 
     pub fn nearest(

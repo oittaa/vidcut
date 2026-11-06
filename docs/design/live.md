@@ -435,6 +435,10 @@ The bar and the Jobs button:
   - A thumbnail within one screen of the visible ones asks for its poster only.
   - A row of the Filmstrip view within one screen asks for all pictures of that row.
   - Why: the number of pictures follows the screen, not the number of media.
+- The pool asks for these pictures with `Tiles::prefetch`, and for the pictures that it shows with `Tiles::want`.
+  - `Tiles::prefetch` does not mark a tile as shown. Thus a tile that is only ahead can leave first.
+  - `Tiles::prefetch` asks for nothing while the tiles use more than `AHEAD_MEMORY`.
+  - Why: the pictures ahead never push the tiles over their limit, and a tile that left is not asked for again at once.
 - An `Lru` keeps the order in which the tiles were used. `Tiles::evict` removes the oldest tile until the cache is under its budget, and stops at a tile that the last paint showed. Why: each step of an eviction is one operation, with no scan of the kept tiles.
 - Another `Lru` keeps the tiles that did not decode (`FAILED_KEPT`). A tile that leaves it is tried once more when it shows again.
 - All workers share one `Lru` of the blocks that they read from disk (`Blocks`, `BLOCKS_KEPT`). A worker that writes a block removes it from this `Lru`.
