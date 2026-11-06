@@ -280,7 +280,7 @@ fn retimed(layer: &VideoPiece) -> bool {
 }
 
 fn placing(layer: &VideoPiece) -> bool {
-    retimed(layer) || matches!(layer, VideoPiece::Source { placed, .. } if checked(placed))
+    retimed(layer) || matches!(layer, VideoPiece::Source { placed, .. } if checked_on_own(placed))
 }
 
 fn lone(layer: &VideoPiece) -> bool {
@@ -318,6 +318,7 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
                     p.picture.opacity_keys.clear();
                     p.picture.composite_mode = None;
                 }
+                own_effects(placed);
                 if !retimed {
                     baked(placed);
                 }
@@ -329,28 +330,22 @@ fn alone(layer: &VideoPiece) -> VideoPiece {
     out
 }
 
+pub fn own_effects(placed: &mut [Placed]) {
+    for p in placed.iter_mut().skip(1) {
+        p.picture.effects.clear();
+    }
+}
+
 pub fn baked(placed: &mut [Placed]) {
-    let last = placed
-        .iter()
-        .enumerate()
-        .flat_map(|(i, p)| {
-            p.picture
-                .effects
-                .iter()
-                .enumerate()
-                .filter(|(_, e)| e.on && e.render_cache)
-                .map(move |(j, _)| (i, j))
-        })
-        .last();
-    let Some((i, j)) = last else {
-        return;
-    };
-    for (k, p) in placed.iter_mut().enumerate() {
-        match k.cmp(&i) {
-            std::cmp::Ordering::Less => {}
-            std::cmp::Ordering::Equal => p.picture.effects.truncate(j + 1),
-            std::cmp::Ordering::Greater => p.picture.effects.clear(),
-        }
+    own_effects(placed);
+    if let Some(own) = placed.first_mut()
+        && let Some(j) = own
+            .picture
+            .effects
+            .iter()
+            .rposition(|e| e.on && e.render_cache)
+    {
+        own.picture.effects.truncate(j + 1);
     }
 }
 
@@ -358,6 +353,10 @@ fn checked(placed: &[Placed]) -> bool {
     placed
         .iter()
         .any(|p| p.picture.effects.iter().any(|e| e.on && e.render_cache))
+}
+
+fn checked_on_own(placed: &[Placed]) -> bool {
+    checked(placed.get(..1).unwrap_or_default())
 }
 
 fn titled(piece: &VideoPiece) -> bool {
@@ -414,7 +413,7 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
             let placed = layer.placed();
             out.push(
                 [
-                    (checked(placed), Reason::Effect),
+                    (checked_on_own(placed), Reason::Effect),
                     (mixed && moved, Reason::Transition),
                     (mixed && faded(placed), Reason::Opacity),
                     (mixed && composited(placed), Reason::Composite),
@@ -431,7 +430,7 @@ fn layered(piece: &VideoPiece, slow: &dyn Fn(&str) -> bool, user: bool) -> Vec<V
         let still = matches!(image, Some(crate::render::Image::Still));
         let found = [
             (*cache == ClipCache::On, Reason::On),
-            (checked(placed), Reason::Effect),
+            (checked_on_own(placed), Reason::Effect),
             (own && image.is_none() && slow(media), Reason::Media),
             (mixed && !still && !pace.is_normal(), Reason::Speed),
             (
