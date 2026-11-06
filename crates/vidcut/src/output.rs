@@ -510,17 +510,18 @@ pub fn print(method: &str, r: &Response, json: bool) {
                     println!("{title}");
                     group = title;
                 }
-                let keys: Vec<&str> = s["keys"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .collect();
-                println!(
-                    "  {:<18} {}",
-                    keys.join("+"),
-                    s["action"].as_str().unwrap_or_default()
-                );
+                println!("  {}", key_line(s));
+            }
+        }
+        "keys.set" | "keys.reset" => {
+            let changed = r.result["changed"]
+                .as_array()
+                .map_or(&[][..], Vec::as_slice);
+            if changed.is_empty() {
+                println!("no key changed");
+            }
+            for s in changed {
+                println!("{}", key_line(s));
             }
         }
         "preferences.get" | "preferences.set" | "preferences.reset" => {
@@ -1670,6 +1671,24 @@ fn summary(s: &Value) {
                 .join(" "))
             .unwrap_or_default()
     );
+}
+
+fn key_line(s: &Value) -> String {
+    let keys: Vec<&str> = s["keys"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let keys = match keys.is_empty() {
+        true => "(no key)".to_string(),
+        false => keys.join(", "),
+    };
+    let title = s["title"].as_str().unwrap_or_default();
+    match s["action"].as_str() {
+        Some(action) => format!("{keys:<18} {title} ({action})"),
+        None => format!("{keys:<18} {title}"),
+    }
 }
 
 fn flatten(prefix: &str, v: &Value, out: &mut Vec<String>) {

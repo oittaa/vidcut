@@ -14,20 +14,15 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 1. **More effects:** Film Grain and Glow.
    - Measure each one in Resolve first: its values, their ranges and defaults, and its math.
    - **Sharpen, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
-     - The medium band at another Fine Detail Size: `sh_steps`, Sharpen Amount 1, Medium Details 3, Fine Detail Size 0.01 and 0.1.
-     - Chroma with Details at a Sharpen Chroma of 1: a color input, Sharpen Amount 1, Fine Details 3.
      - Blend on the Edit page, at 0.5.
      - A picture with alpha on the Edit page, over black and over white.
-     - A source of another size, and Zoom: the order of the scaler and the effect.
      - A viewer that draws fewer pixels than the frame.
+     - A Sharpen Chroma between 1 and 2, for example 1.01 and 1.5, with Fine Details 3.
    - **Vignette, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
-     - LIGHTER_COLOR and DARKER_COLOR at an exact tie: a flat (1, 0, 0) input with Color (0, 1, 0).
-     - A picture with alpha and a Color that is not black.
      - Blend on the Edit page, at 0.5.
-     - The smallest value of the blur: a Triangle at Softness 1 and Anamorphism 1.
-     - Center outside the frame: (-0.25, 0.5) and (1.5, 0.5) at Softness 0.5.
-     - Hue at another gray: Color (0.2, 0.2, 0.2).
      - A Pan in another frame shape: a 1920×1080 source in a 1080×1920 timeline, Pan Y 800.
+     - Hue at grays other than 0, 0.2, 0.4, 0.6, 0.8 and 1, for example 0.3 and 0.5.
+     - An odd width or height of the picture.
    - **Mosaic Blur, measure these on the Edit page.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - Blur Alpha off and Whole Cells Only.
      - Whole Cells Only with Hexagon, with Triangle, with other Aliasing values and with Antialias Result. The alpha limit of a whole cell.
@@ -35,12 +30,11 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
      - Position away from the middle with a Zoom or a Pan. A rotated clip, a crop, a Dynamic Zoom box and a compound clip.
      - A speed change or a render cache frame with Blur Alpha off or Whole Cells Only. vidcut keeps no color at an alpha of 0 there.
 2. **Generators** (p. 766), one pull request for each line:
-   - A double-click on a card loads the generator in the source viewer, as a source of 5 s. The source viewer and the edits from it take only media now ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
    - Measure on a generator: Dynamic Zoom, Stabilization, keyframes in a render, Push, Slide, Wipe and Dip To Color. vidcut plays them as on a still.
 3. **Later:**
    - Measure Smooth Cut in Resolve with a side that is a gap, a moved or resized side, and a side played backward. vidcut plays these as a Cross Dissolve now ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
    - Measure the Gaussian Blur with Dynamic Zoom. vidcut does not change the sigma by the Dynamic Zoom box.
-   - Measure where Resolve applies the effects of a compound clip ([todo](compound-opacity.md)).
+   - Measure effects other than Gaussian Blur on a compound clip ([todo](compound-opacity.md)).
    - Measure the Gaussian Blur with Use Alpha off on a clip that is partly clear, for example with Crop Softness. vidcut blurs its colors without their alpha.
    - Audio effects: equalizer, compressor, reverb and broadband noise reduction.
    - Voice Isolation separates a voice. Broadband noise reduction is the room and the hiss.

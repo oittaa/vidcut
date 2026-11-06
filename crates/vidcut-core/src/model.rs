@@ -410,6 +410,21 @@ pub struct Media {
     /// number. Left out until `media.set` gives one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<String>,
+    /// Date Created, as `YYYY-MM-DD`. Left out until `media.set` gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<String>,
+    /// Its scene: text, such as a number. Left out until `media.set` gives
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene: Option<String>,
+    /// Its shot: text, such as a letter or a number. Left out until
+    /// `media.set` gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shot: Option<String>,
+    /// Its take: text, such as a number. Left out until `media.set` gives
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub take: Option<String>,
     /// SHA-256 of the file when it was added or relinked
     /// ([`fingerprint`](crate::fingerprint)): of the whole file up to
     /// 10 MiB (its `sha256sum`), else of 1 MiB from its start, middle and
@@ -2771,8 +2786,8 @@ impl Title {
         (thickness / 3.0 + 0.5).ceil() + 0.5
     }
 
-    pub fn line_width(width: f64, scale: f64) -> f64 {
-        ((width / scale + Self::WIDTH_SLACK).floor() * scale).floor()
+    pub fn line_end(from_block: f64, scale: f64) -> f64 {
+        (from_block / scale + Self::WIDTH_SLACK).floor() * scale
     }
 
     pub fn seated_left(&self, middle: f64, widest: f64, wrap: f64, pixel: f64) -> f64 {
@@ -3308,8 +3323,10 @@ pub struct Vignette {
     /// How the color mixes with the picture, in `advanced`. The formulas are
     /// those of a clip's composite mode, with these differences: nothing
     /// stops the result of `color_dodge`, `color_burn`, `divide` and
-    /// `vivid_light` at 0 or 1 before the mix, `linear_burn` stops at 0, and
-    /// `hue` with a gray color gives one fixed hue. Usual: `multiply`.
+    /// `vivid_light` at 0 or 1 before the mix, `divide` adds 0.000001 to the
+    /// color, `linear_burn` stops at 0, `lighter_color` and `darker_color`
+    /// take the color on a tie, and `hue` with black or white takes the hue
+    /// of red and with another gray one fixed hue. Usual: `multiply`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composite_type: Option<CompositeMode>,
 }
@@ -3337,8 +3354,9 @@ pub struct Sharpen {
     /// Multiplies the strength of the large band, from 1 to 5. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub large_details: Option<f64>,
-    /// How strong the detail of the colors is, from 1 to 5. It multiplies the
-    /// three Details values, and `sharpen_amount` does not change it. Usual: 1.
+    /// How strong the detail of the colors is, from 1 to 5. Above 1 it
+    /// multiplies the three Details values, and `sharpen_amount` does not
+    /// change it. At 1 the colors keep their detail. Usual: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sharpen_chroma: Option<f64>,
 }
@@ -5080,6 +5098,11 @@ impl Project {
             Some(s) => self.frames_in(s.end - s.start),
             None => self.file_frames(media),
         }
+    }
+
+    pub fn subclip_span(&self, media: &Media) -> Option<(i64, i64)> {
+        let first = self.frames_in(media.subclip?.start);
+        Some((first, first + self.media_frames(media)))
     }
 
     pub fn file_frames(&self, media: &Media) -> i64 {

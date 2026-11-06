@@ -5,14 +5,16 @@ use eframe::egui::{
     pos2, vec2,
 };
 use serde_json::json;
-use vidcut_core::model::{Media, Project, TrackKind};
+use vidcut_core::model::{Marks, Media, Project, TrackKind};
 use vidcut_core::request::{
     TimecodeDisplay, ViewerFrame, ViewerFrameKey, ViewerMode, viewer_frame_after,
 };
+use vidcut_core::shortcuts::Action;
 use vidcut_core::time::parse_frame_number;
 
 use super::pool::elide;
 use super::row::Row;
+use super::shortcuts::take;
 use super::theme;
 use super::timeline::paint::marker_color;
 use super::workspace::{Drag, PasteWatch, TimecodeEntry, Workspace, dim, fit};
@@ -200,8 +202,9 @@ impl Workspace {
             return;
         }
         let frame = self.snap.viewer_frame;
+        let bindings = self.snap.bindings.clone();
         if frame != ViewerFrame::Page
-            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape))
+            && ctx.input_mut(|i| take(&bindings, i, Action::LeaveFullScreen))
         {
             self.send_frame(ViewerFrame::Page);
             return;
@@ -209,9 +212,9 @@ impl Workspace {
         self.sync_keys(ctx);
         self.multi_keys(ctx);
         let key = ctx.input_mut(|i| {
-            if i.consume_key(egui::Modifiers::SHIFT, Key::F) {
+            if take(&bindings, i, Action::FullScreen) {
                 Some(ViewerFrameKey::FullScreen)
-            } else if i.consume_key(egui::Modifiers::ALT, Key::F) {
+            } else if take(&bindings, i, Action::EnhancedViewer) {
                 Some(ViewerFrameKey::Enhanced)
             } else {
                 None
@@ -382,6 +385,15 @@ impl Workspace {
                 d.drag.from_source_clip = true;
             }
         }
+        if mode.is_source()
+            && area_resp.drag_started()
+            && let Some(g) = self.snap.open_generator().cloned()
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            let (a, b) = g.range();
+            let label = g.name().to_string();
+            self.start_generator_drag((g.kind, g.settings, label), b - a, press);
+        }
         let painter = ui.painter_at(area);
         painter.rect_filled(area, CornerRadius::ZERO, Color32::from_rgb(12, 12, 13));
         let player = self.snap.player(id).clone();
@@ -540,6 +552,11 @@ impl Workspace {
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape))
         {
             self.send("viewer.set", json!({ "alone": false }));
+        }
+    }
+
+    pub(super) fn multi_numbers(&mut self, ctx: &egui::Context) {
+        if self.snap.viewer != ViewerMode::MultiSource {
             return;
         }
         let number = ctx.input_mut(|i| {
@@ -723,9 +740,14 @@ impl Workspace {
             _ => "a roll",
         };
         let text = if self.timeline.dynamic.is_some() {
+            let b = &self.snap.bindings;
             format!(
-                "Dynamic Trim: {side} at {}. L/J trim, K stops, W leaves",
-                self.tc(e.at)
+                "Dynamic Trim: {side} at {}. {}/{} trim, {} stops, {} leaves",
+                self.tc(e.at),
+                b.first_or_none(Action::PlayForward),
+                b.first_or_none(Action::PlayBackward),
+                b.first_or_none(Action::Stop),
+                b.first_or_none(Action::DynamicTrim),
             )
         } else {
             format!("Trim Editor: {side} at {}", self.tc(e.at))
@@ -819,7 +841,15 @@ impl Workspace {
                     .monospace()
                     .color(Color32::from_rgb(240, 200, 40)),
             );
-            ui.label(dim("K or Space stops, L/J again for speed, W leaves"));
+            let b = &self.snap.bindings;
+            ui.label(dim(format!(
+                "{} or {} stops, {}/{} again for speed, {} leaves",
+                b.first_or_none(Action::Stop),
+                b.first_or_none(Action::PlayOrStop),
+                b.first_or_none(Action::PlayForward),
+                b.first_or_none(Action::PlayBackward),
+                b.first_or_none(Action::DynamicTrim),
+            )));
         });
     }
 
@@ -929,9 +959,10 @@ impl Workspace {
                     60,
                 )
             }
-            _ => match self.snap.source_at() {
-                Some((m, _)) => elide(&name(m), 60),
-                None => String::new(),
+            _ => match (self.snap.source_at(), self.snap.open_generator()) {
+                (Some((m, _)), _) => elide(&name(m), 60),
+                (None, Some(g)) => g.name().to_string(),
+                (None, None) => String::new(),
             },
         }
     }
@@ -1007,8 +1038,7 @@ impl Workspace {
         }
         let span = match self.snap.viewer {
             ViewerMode::SourceTape => self.crossing_span(),
-            ViewerMode::MultiSource => self.multi_span(),
-            _ => None,
+            _ => self.viewer_span(),
         };
         let shown = self.snap.source_at().map(|(m, _)| m.to_string());
         let mut handles = None;
@@ -1021,8 +1051,7 @@ impl Workspace {
                     b = *frame;
                 }
             }
-            let unmarked = self.multi_on()
-                && self.snap.multi_marks.is_empty()
+            let unmarked = self.snap.viewer_marks().is_some_and(Marks::is_empty)
                 && !matches!(self.drag, Some(Drag::TapeMark { .. }));
             if !unmarked {
                 painter.rect_filled(
@@ -1200,7 +1229,7 @@ impl Workspace {
                 }
                 Some(Drag::TapeMark { is_in, frame }) => {
                     let key = if is_in { "in" } else { "out" };
-                    if self.multi_on() {
+                    if self.snap.viewer_marks().is_some() {
                         self.send("viewer.marks.set", json!({ key: frame }));
                     } else {
                         let order = self.tape_order();
@@ -1319,7 +1348,7 @@ impl Workspace {
             }
             return;
         }
-        if let Some((inn, out)) = self.multi_span() {
+        if let Some((inn, out)) = self.viewer_span() {
             let (inn, out) = jogged_mark(is_in, inn, out, by, self.snap.source.frames);
             let (key, value) = if is_in { ("in", inn) } else { ("out", out) };
             self.send("viewer.marks.set", json!({ key: value }));
@@ -1351,9 +1380,12 @@ impl Workspace {
         if ui.ctx().egui_wants_keyboard_input() || self.asking() {
             return;
         }
+        let bindings = self.snap.bindings.clone();
         let (held, pos) = ui.input(|i| {
-            let held = i.key_down(Key::C) && !i.modifiers.command && !i.modifiers.alt;
-            (held, i.pointer.hover_pos())
+            (
+                super::shortcuts::held(&bindings, i, Action::Skim),
+                i.pointer.hover_pos(),
+            )
         });
         let key = egui::Id::unique("skim-frame");
         if !held {
@@ -1796,15 +1828,16 @@ impl Workspace {
 
     fn duration_field(&mut self, ui: &mut egui::Ui) {
         let Some(p) = self.project() else { return };
-        let multi = self.multi_on();
-        let (marks, end, media) = match self.snap.source_at() {
-            _ if multi => (self.snap.multi_marks.clone(), self.snap.source.frames, None),
-            Some((media, _)) => (
+        let held = self.snap.viewer_marks().cloned();
+        let multi = held.is_some();
+        let (marks, end, media) = match (held, self.snap.source_at()) {
+            (Some(marks), _) => (marks, self.snap.source.frames, None),
+            (None, Some((media, _))) => (
                 p.media(media).map(|m| m.marks.clone()).unwrap_or_default(),
                 self.media_frames(media),
                 Some(media.to_string()),
             ),
-            None => (p.marks.clone(), p.end(), None),
+            (None, None) => (p.marks.clone(), p.end(), None),
         };
         let current = self.src_tc(marks.mark_out.unwrap_or(end) - marks.mark_in.unwrap_or(0));
         if let Some(text) = &mut self.duration_text {
