@@ -30,6 +30,10 @@ const FAILED_KEPT: usize = 4096;
 
 const BLOCKS_KEPT: usize = 8;
 
+const STAND_INS: u32 = 0;
+
+const STAND_INS_JOB: i64 = -1;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TileKey {
     pub media: String,
@@ -44,12 +48,20 @@ pub struct Job {
     fps: Rational,
     pieces: Vec<VideoPiece>,
     disk: Option<BlockFile>,
+    thumbs: Option<ThumbsFile>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct BlockFile {
     path: PathBuf,
     origin: Origin,
+}
+
+struct ThumbsFile {
+    path: PathBuf,
+    origin: Origin,
+    skipped: f64,
+    frames: i64,
 }
 
 struct Seen {
@@ -266,7 +278,7 @@ impl Tiles {
             }
             (b, a) => b.or(a)?,
         };
-        Some(best.1.texture.id())
+        Some(self.stand_in(media, best))
     }
 
     pub fn nearest_any_height(&self, media: &str, frame: i64) -> Option<egui::TextureId> {
@@ -274,14 +286,66 @@ impl Tiles {
         let heights = std::iter::successors(m.keys().next().map(|k| k.0), |h| {
             m.range((h + 1, i64::MIN)..).next().map(|(k, _)| k.0)
         });
-        heights
+        let best = heights
             .flat_map(|h| {
                 let before = m.range((h, i64::MIN)..=(h, frame)).next_back();
                 let after = m.range((h, frame)..=(h, i64::MAX)).next();
                 before.into_iter().chain(after)
             })
-            .min_by_key(|(k, _)| (k.1 - frame).abs())
-            .map(|(_, kept)| kept.texture.id())
+            .min_by_key(|(k, _)| (k.1 - frame).abs())?;
+        Some(self.stand_in(media, best))
+    }
+
+    fn stand_in(
+        &self,
+        media: &str,
+        (&(height, frame), kept): (&(u32, i64), &Kept),
+    ) -> egui::TextureId {
+        self.shown.borrow_mut().push(TileKey {
+            media: media.to_string(),
+            frame,
+            height,
+        });
+        kept.texture.id()
+    }
+
+    pub fn thumbs(&self, p: &Project, m: &Media, shows: bool) {
+        let tiles = self.kept.get(&m.id);
+        let stand_ins = tiles.is_some_and(|k| {
+            k.range((STAND_INS, i64::MIN)..=(STAND_INS, i64::MAX))
+                .next()
+                .is_some()
+        });
+        let first_look = shows && tiles.is_none_or(BTreeMap::is_empty);
+        if !self.disk || stand_ins || (self.bytes > AHEAD_MEMORY && !first_look) {
+            return;
+        }
+        let origin = self.origin_of(m);
+        self.asked.borrow_mut().push(Job {
+            key: TileKey {
+                media: m.id.clone(),
+                frame: STAND_INS_JOB,
+                height: STAND_INS,
+            },
+            epoch: self.epochs.get(&m.id).copied().unwrap_or(0),
+            width: 0,
+            fps: p.settings.fps,
+            pieces: Vec::new(),
+            disk: None,
+            thumbs: Some(ThumbsFile {
+                path: thumbcache::thumbs_file(m, &origin),
+                origin,
+                skipped: m.skipped(),
+                frames: p.media_frames(m),
+            }),
+        });
+    }
+
+    fn origin_of(&self, m: &Media) -> Origin {
+        match self.versions.get(&m.id) {
+            Some(seen) if seen.is(m) => seen.origin.clone(),
+            _ => paths::media_origin(m),
+        }
     }
 
     pub fn job(&self, p: &Project, m: &Media, key: &TileKey, width: u32) -> Option<Job> {
@@ -314,13 +378,11 @@ impl Tiles {
             pieces,
             disk: (self.disk && m.subclip.is_none()).then(|| {
                 let block = key.frame.div_euclid(TILE_BLOCK);
-                let origin = match self.versions.get(&key.media) {
-                    Some(seen) if seen.is(m) => seen.origin.clone(),
-                    _ => paths::media_origin(m),
-                };
+                let origin = self.origin_of(m);
                 let path = thumbcache::tile_block(&origin, key.height, block, m.color_space);
                 BlockFile { path, origin }
             }),
+            thumbs: None,
         })
     }
 
@@ -339,12 +401,13 @@ impl Tiles {
             .filter(|k| !w.failed.contains(k))
             .collect();
         let mut seen = HashSet::new();
-        let jobs = asked
+        let mut jobs: Vec<Job> = asked
             .into_iter()
             .filter(|j| {
                 !w.busy.contains(&j.key) && !w.failed.contains(&j.key) && seen.insert(j.key.clone())
             })
             .collect();
+        jobs.sort_by_key(|j| j.thumbs.is_none());
         w.jobs = jobs;
         if !w.jobs.is_empty() {
             self.queue.ready.notify_all();
@@ -518,6 +581,24 @@ fn work(n: usize, queue: &Queue, done: &Sender<(TileKey, u64, Image)>, ctx: &egu
                 }
             }
         };
+        if let Some(file) = &job.thumbs {
+            let made = stand_ins(&job.key.media, job.fps, file);
+            let read = !made.is_empty();
+            for (key, image) in made {
+                if done.send((key, job.epoch, image)).is_err() {
+                    return;
+                }
+            }
+            let mut w = queue.waiting.lock().unwrap_or_else(|e| e.into_inner());
+            w.busy.remove(&job.key);
+            if read {
+                drop(w);
+                ctx.request_repaint();
+            } else {
+                w.failed.insert(job.key, ());
+            }
+            continue;
+        }
         let picture = from_disk(&job, &queue.blocks, &unwritten).or_else(|| {
             let now = crate::preferences::gpu_decoding();
             if now != decoding {
@@ -618,6 +699,26 @@ fn from_disk(
         .unwrap_or_else(|e| e.into_inner())
         .insert(file.clone(), Arc::new(tiles));
     found
+}
+
+fn stand_ins(media: &str, fps: Rational, file: &ThumbsFile) -> Vec<(TileKey, Image)> {
+    let Some((images, times)) = thumbcache::load_thumbs(&file.path, &file.origin) else {
+        return Vec::new();
+    };
+    let fps = fps.as_f64();
+    times
+        .into_iter()
+        .zip(images)
+        .filter_map(|(t, image)| {
+            let frame = ((t - file.skipped) * fps).round() as i64;
+            let key = TileKey {
+                media: media.to_string(),
+                frame,
+                height: STAND_INS,
+            };
+            (0..file.frames).contains(&frame).then_some((key, image))
+        })
+        .collect()
 }
 
 fn write(unwritten: &mut HashMap<BlockFile, Block>, blocks: &Mutex<Blocks>) {

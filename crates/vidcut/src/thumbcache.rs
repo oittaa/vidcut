@@ -4,10 +4,45 @@ use std::sync::Mutex;
 use vidcut_av::thumbs::Image;
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::fingerprint::Origin;
-use vidcut_core::model::ColorSpace;
+use vidcut_core::model::{ColorSpace, Media};
+
+pub const THUMBS: usize = 24;
+
+pub const THUMB_SIZE: (u32, u32) = (192, 108);
 
 pub fn dir() -> PathBuf {
     Kind::Thumbs.dir()
+}
+
+pub fn thumbs_file(media: &Media, origin: &Origin) -> PathBuf {
+    let pictures = media
+        .sequence
+        .as_ref()
+        .map(|s| format!("-{}", s.count))
+        .unwrap_or_default();
+    let space = read_as(media.color_space);
+    let (w, h) = THUMB_SIZE;
+    Kind::Thumbs.file(
+        origin,
+        &format!("s{THUMBS}-{w}x{h}{pictures}{space}.thumbs"),
+    )
+}
+
+pub fn load_thumbs(path: &Path, origin: &Origin) -> Option<(Vec<Image>, Vec<f64>)> {
+    vidcut_av::thumbs::from_bytes(origin.check(&disk_cache::read(path)?)?)
+}
+
+pub fn has_thumbs(path: &Path) -> bool {
+    let there = path.is_file();
+    if there {
+        disk_cache::used(path);
+    }
+    there
+}
+
+pub fn store_thumbs(path: &Path, origin: &Origin, images: &[Image], times: &[f64]) -> bool {
+    vidcut_av::thumbs::to_bytes(images, times)
+        .is_ok_and(|bytes| disk_cache::write(path, &origin.stamp(&bytes)).is_ok())
 }
 
 pub const TILE_BLOCK: i64 = 64;
