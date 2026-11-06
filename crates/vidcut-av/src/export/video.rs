@@ -2008,7 +2008,7 @@ impl Single {
         &mut self,
         (frame, (before, after)): (&frame::Video, Around<'_>),
         rotation: u16,
-        (path, lut): (&Path, Option<&crate::screen::Lut>),
+        (path, lut, mode): (&Path, Option<&crate::screen::Lut>, Option<AlphaMode>),
     ) -> Result<crate::player::Picture> {
         let made = self.maker.make(&mut self.fitting, frame, path)?;
         let picture =
@@ -2026,6 +2026,10 @@ impl Single {
                 };
                 let field =
                     crate::player::Picture::new(made, rotation, None, None).with_lut(lut.cloned());
+                let field = match mode {
+                    Some(mode) => field.with_alpha_mode(mode),
+                    None => field,
+                };
                 Ok(std::sync::Arc::new(field.with_woven(alone)))
             })
             .transpose()
@@ -2076,7 +2080,8 @@ impl Single {
         (look, path): (&Look, &Path),
         (pixel, sink): (format::Pixel, crate::screen::Sink<'_>),
     ) -> Result<frame::Video> {
-        let picture = self.woven(frames, rotation, (path, look.lut.as_ref()))?;
+        let mode = look.alpha.map(|t| t.mode);
+        let picture = self.woven(frames, rotation, (path, look.lut.as_ref(), mode))?;
         let picture = match look.alpha {
             Some(Through { mode, matte }) => {
                 picture.with_alpha_mode(mode).with_alpha_use(match matte {

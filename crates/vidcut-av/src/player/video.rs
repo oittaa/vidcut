@@ -886,7 +886,9 @@ pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
                             before: None,
                             after: None,
                         };
-                        let field = Picture::new(f, l.rotation, None, None).with_lut(lut.clone());
+                        let field = Picture::new(f, l.rotation, None, None)
+                            .with_alpha_mode(l.alpha_mode)
+                            .with_lut(lut.clone());
                         Arc::new(field.with_woven(alone))
                     })
                 };
