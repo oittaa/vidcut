@@ -1,4 +1,7 @@
-use eframe::egui::{self, Key};
+use eframe::egui;
+use vidcut_core::shortcuts::{Action, Bindings, Panel};
+
+use super::shortcuts::{held, owner};
 
 pub const HOLD: f64 = 0.25;
 pub const SLOW: f64 = 0.5;
@@ -51,31 +54,21 @@ impl Shuttle {
         out
     }
 
-    pub fn input(&mut self, input: &egui::InputState) -> Vec<Jkl> {
+    pub fn input(&mut self, b: &Bindings, input: &egui::InputState) -> Vec<Jkl> {
         let pressed: Vec<f64> = input
             .events
             .iter()
-            .filter_map(|e| match e {
-                egui::Event::Key {
-                    key: Key::L,
-                    pressed: true,
-                    repeat: false,
-                    ..
-                } => Some(1.0),
-                egui::Event::Key {
-                    key: Key::J,
-                    pressed: true,
-                    repeat: false,
-                    ..
-                } => Some(-1.0),
+            .filter_map(|e| match owner(b, Panel::App, e) {
+                Some((Action::PlayForward, false)) => Some(1.0),
+                Some((Action::PlayBackward, false)) => Some(-1.0),
                 _ => None,
             })
             .collect();
         self.keys(
             &pressed,
-            input.key_down(Key::K),
-            input.key_down(Key::J),
-            input.key_down(Key::L),
+            held(b, input, Action::Stop),
+            held(b, input, Action::PlayBackward),
+            held(b, input, Action::PlayForward),
             input.time,
         )
     }
@@ -94,18 +87,10 @@ impl Shuttle {
     }
 }
 
-pub fn first_press(input: &egui::InputState, key: Key) -> bool {
-    input.events.iter().any(|e| {
-        matches!(
-            e,
-            egui::Event::Key { key: k, pressed: true, repeat: false, .. } if *k == key
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eframe::egui::Key;
 
     fn input(events: Vec<egui::Event>, down: &[Key]) -> egui::InputState {
         let mut input = egui::InputState::default();
@@ -127,7 +112,7 @@ mod tests {
     #[test]
     fn a_repeat_of_l_held_alone_is_not_a_press() {
         let input = input(vec![key(Key::L, true, true)], &[Key::L]);
-        assert_eq!(Shuttle::default().input(&input), []);
+        assert_eq!(Shuttle::default().input(&Bindings::default(), &input), []);
     }
 
     #[test]
@@ -136,7 +121,10 @@ mod tests {
             vec![key(Key::J, true, false), key(Key::J, false, false)],
             &[Key::K],
         );
-        assert_eq!(Shuttle::default().input(&input), [Jkl::Step(-1.0)]);
+        assert_eq!(
+            Shuttle::default().input(&Bindings::default(), &input),
+            [Jkl::Step(-1.0)]
+        );
     }
 
     #[test]

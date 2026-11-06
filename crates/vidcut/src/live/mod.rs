@@ -19,13 +19,14 @@ use notify::Watcher;
 use serde_json::{Value, json};
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::duck::Unmeasured;
-use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue};
-use vidcut_core::model::{Clip, Format, Title};
+use vidcut_core::editor::{Env, media_context, resolve_clip, resolve_cue, source_context};
+use vidcut_core::lru::Lru;
+use vidcut_core::model::{Clip, Format, Generator, GeneratorKind, Marks, Title};
 use vidcut_core::ops::ClipSpans;
 use vidcut_core::render::{self, RenderPlan, TapeEntry};
 use vidcut_core::request::{
-    Client, ClientKind, Detect, DynamicTrimMode, GuiPanel, OneOrMany, PoolMode, ScreenshotTarget,
-    TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
+    Client, ClientKind, Detect, DynamicTrimMode, GeneratorSettings, GuiPanel, OneOrMany, PoolMode,
+    ScreenshotTarget, TimecodeDisplay, TimelineOptions, TrimSide, ViewerFrame, ViewerMode,
 };
 use vidcut_core::time::{DurationSpec, Keyword, Rational, TimeContext, TimeSpec, format_timecode};
 use vidcut_core::{Envelope, Error, Project, Request, Response, Result};
@@ -515,6 +516,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         source: PlayerSnap::default(),
         timeline: PlayerSnap::default(),
         source_media: None,
+        source_generator: None,
         source_grid: Default::default(),
         multi_marks: Default::default(),
         multi_alone: false,
@@ -548,6 +550,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
+        bindings: Arc::new(crate::preferences::bindings()),
         preview_error: config.preview_error.clone(),
         theme: theme.clone(),
         history_preview: None,
@@ -583,14 +586,16 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         viewer_frame: ViewerFrame::Page,
         last_source: ViewerMode::SourceClip,
         source_media: None,
+        source_generator: None,
         source_grid: Default::default(),
         multi_marks: Default::default(),
         multi_alone: false,
         multi_bin: None,
         multi_position: 0,
         multi_media: None,
+        generator_position: 0,
         source_content: None,
-        source_positions: HashMap::new(),
+        source_positions: Lru::new(),
         tape_position: 0,
         tape: Arc::new(Vec::new()),
         tape_media: None,
@@ -644,6 +649,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
             .map(|p| p.viewer.scopes)
             .unwrap_or_default(),
         show_super_scale: crate::preferences::load().is_ok_and(|p| p.viewer.super_scale),
+        bindings: Arc::new(crate::preferences::bindings()),
         audio_noticed: None,
         playing: false,
         waits: Vec::new(),
@@ -730,6 +736,7 @@ enum SourceContent {
     Clip(String),
     Tape,
     Multi(String),
+    Generator,
 }
 
 enum Until {
@@ -761,6 +768,8 @@ const WAIT_LIMIT: Duration = Duration::from_secs(10);
 const CLIENT_POLL: Duration = Duration::from_millis(50);
 
 const JOBS_KEPT: usize = 50;
+
+const POSITIONS_KEPT: usize = 4096;
 
 const LOG_CAP: usize = 500;
 const NOTICE_CAP: usize = 20;
@@ -824,6 +833,8 @@ struct Live {
     viewer_frame: ViewerFrame,
     last_source: ViewerMode,
     source_media: Option<String>,
+    source_generator: Option<snapshot::SourceGenerator>,
+    generator_position: i64,
     source_grid: Arc<vidcut_core::multicam::SourceGrid>,
     multi_marks: vidcut_core::model::Marks,
     multi_alone: bool,
@@ -831,7 +842,7 @@ struct Live {
     multi_position: i64,
     multi_media: Option<String>,
     source_content: Option<SourceContent>,
-    source_positions: HashMap<String, i64>,
+    source_positions: Lru<String, i64, POSITIONS_KEPT>,
     tape_position: i64,
     tape: Arc<Vec<TapeEntry>>,
     tape_media: Option<String>,
@@ -876,6 +887,7 @@ struct Live {
     guides: vidcut_core::preferences::Guides,
     scopes: vidcut_core::preferences::Scopes,
     show_super_scale: bool,
+    bindings: Arc<vidcut_core::shortcuts::Bindings>,
     audio_noticed: Option<String>,
     playing: bool,
     waits: Vec<Wait>,
@@ -1133,6 +1145,11 @@ impl Live {
                     self.show_super_scale = show_super_scale;
                     self.schedule_timeline();
                     self.refresh_source();
+                    changed = true;
+                }
+                let bindings = crate::preferences::bindings();
+                if *self.bindings != bindings {
+                    self.bindings = Arc::new(bindings);
                     changed = true;
                 }
                 self.follow_budget();
@@ -1442,6 +1459,7 @@ impl Live {
             source: self.player.snap(SOURCE),
             timeline: self.player.snap(TIMELINE),
             source_media: self.source_media.clone(),
+            source_generator: self.source_generator.clone(),
             source_grid: self.source_grid.clone(),
             multi_marks: self.multi_marks.clone(),
             multi_alone: self.multi_alone,
@@ -1471,6 +1489,7 @@ impl Live {
             guides: self.guides,
             scopes: self.scopes,
             show_super_scale: self.show_super_scale,
+            bindings: self.bindings.clone(),
             preview_error: self.preview_error.clone(),
             theme: self.theme.clone(),
             history_preview: self.history_preview.clone(),
@@ -2640,11 +2659,17 @@ impl Live {
                 Step::Now(self.viewer_marks_set(mark_in.as_ref(), out.as_ref(), duration.as_ref()))
             }
             Request::ViewerMarksClear {} => {
-                self.multi_marks = Default::default();
+                *self.viewer_marks_mut() = Marks::default();
                 self.sync_loop();
-                Step::Now(Ok(answer(json!(self.multi_marks))))
+                self.dirty = true;
+                Step::Now(Ok(answer(json!(Marks::default()))))
             }
-            Request::ViewerLoad { media, at } => match self.load_source(&media, at.as_ref()) {
+            Request::ViewerLoad {
+                media,
+                generator,
+                settings,
+                at,
+            } => match self.viewer_load(&media, generator, &settings, at.as_ref()) {
                 Ok(motion) => self.shown(motion),
                 Err(e) => Step::Now(Err(e)),
             },
@@ -3498,6 +3523,8 @@ impl Live {
         self.project = Some(open);
         self.selection = Selection::default();
         self.source_media = None;
+        self.source_generator = None;
+        self.generator_position = 0;
         self.multi_marks = Default::default();
         self.multi_alone = false;
         self.multi_bin = None;
@@ -3720,6 +3747,7 @@ impl Live {
                 .source_media
                 .as_ref()
                 .and_then(|id| p.media(id).map(|m| p.media_frames(m)))
+                .or(self.source_generator.as_ref().map(|g| g.frames))
                 .unwrap_or(0),
             ViewerMode::SourceTape | ViewerMode::MultiSource => {
                 let at = self.player.position(SOURCE);
@@ -3995,12 +4023,18 @@ impl Live {
                 self.source_media = None;
             }
         }
+        if let Some(g) = &mut self.source_generator {
+            g.frames = vidcut_core::ops::titles::default_length(&p);
+            g.marks.mark_in = g.marks.mark_in.filter(|&i| i < g.frames);
+            g.marks.mark_out = g.marks.mark_out.filter(|&o| o <= g.frames);
+        }
         let want = match self.last_source {
             ViewerMode::SourceTape => SourceContent::Tape,
             ViewerMode::MultiSource => SourceContent::Multi(self.pool.bin.clone()),
-            _ => match &self.source_media {
-                Some(m) => SourceContent::Clip(m.clone()),
-                None => {
+            _ => match (&self.source_media, &self.source_generator) {
+                (Some(m), _) => SourceContent::Clip(m.clone()),
+                (None, Some(_)) => SourceContent::Generator,
+                (None, None) => {
                     self.stash_source_position();
                     self.source_content = None;
                     self.player.unload(SOURCE);
@@ -4029,6 +4063,12 @@ impl Live {
                 .and_then(|m| grid.camera_of(m))
                 .ok_or_else(|| Error::invalid("This bin has no video files"))
                 .and_then(|c| render::camera_tape(&p, c, grid.frames)),
+            SourceContent::Generator => self
+                .source_generator
+                .as_ref()
+                .ok_or_else(|| Error::invalid("no generator is open"))
+                .and_then(|g| render::generator_tape(&p, &g.generator, 0, g.frames))
+                .map(|plan| (plan, Vec::new())),
         };
         let Ok((plan, entries)) = made else {
             self.source_content = None;
@@ -4045,7 +4085,8 @@ impl Live {
             Some(match &want {
                 SourceContent::Tape => self.tape_position,
                 SourceContent::Multi(_) => self.multi_position,
-                SourceContent::Clip(m) => self.source_positions.get(m).copied().unwrap_or(0),
+                SourceContent::Clip(m) => self.source_positions.peek(m).copied().unwrap_or(0),
+                SourceContent::Generator => self.generator_position,
             })
         };
         let plan = self.preview_plan(plan);
@@ -4061,6 +4102,7 @@ impl Live {
             }
             Some(SourceContent::Tape) => self.tape_position = pos,
             Some(SourceContent::Multi(bin)) if *bin == self.pool.bin => self.multi_position = pos,
+            Some(SourceContent::Generator) => self.generator_position = pos,
             Some(SourceContent::Multi(_)) | None => {}
         }
     }
@@ -4148,29 +4190,24 @@ impl Live {
         out: Option<&TimeSpec>,
         duration: Option<&DurationSpec>,
     ) -> Result<Response> {
-        if self.viewer != ViewerMode::MultiSource {
+        if !self.has_viewer_marks() {
             return Err(Error::usage(
-                "viewer.marks.set goes with the Multi Source viewer",
+                "viewer.marks.set goes with the Multi Source viewer or an open generator",
             ));
         }
         let ctx = self.viewer_context()?;
+        let held = self.viewer_marks_mut().clone();
         let mut i = mark_in.map(|t| ctx.resolve(t)).transpose()?;
         let mut o = out.map(|t| ctx.resolve(t)).transpose()?;
         if let Some(d) = duration {
-            (i, o) = vidcut_core::editor::mark_duration(
-                d,
-                &ctx,
-                i.or(self.multi_marks.mark_in),
-                o,
-                &self.multi_marks,
-            )?;
+            (i, o) = vidcut_core::editor::mark_duration(d, &ctx, i.or(held.mark_in), o, &held)?;
         }
         if i.is_none() && o.is_none() {
             return Err(Error::usage(
                 "viewer.marks.set needs `in`, `out` or `duration`",
             ));
         }
-        let mut marks = self.multi_marks.clone();
+        let mut marks = held;
         marks.mark_in = i.or(marks.mark_in);
         marks.mark_out = o.or(marks.mark_out);
         if let (Some(i), Some(o)) = (marks.mark_in, marks.mark_out)
@@ -4186,10 +4223,22 @@ impl Live {
                 "marks must be inside the viewer (0..{end} frames)"
             )));
         }
-        self.multi_marks = marks;
+        *self.viewer_marks_mut() = marks.clone();
         self.sync_loop();
         self.dirty = true;
-        Ok(answer(json!(self.multi_marks)))
+        Ok(answer(json!(marks)))
+    }
+
+    fn has_viewer_marks(&self) -> bool {
+        self.viewer == ViewerMode::MultiSource
+            || (self.viewer == ViewerMode::SourceClip && self.source_generator.is_some())
+    }
+
+    fn viewer_marks_mut(&mut self) -> &mut Marks {
+        match &mut self.source_generator {
+            Some(g) if self.viewer == ViewerMode::SourceClip => &mut g.marks,
+            _ => &mut self.multi_marks,
+        }
     }
 
     fn viewer_set(
@@ -4293,6 +4342,7 @@ impl Live {
                 return Err(Error::invalid(format!("{a} is not in this bin")));
             }
             self.source_media = Some(a.to_string());
+            self.source_generator = None;
             self.multi_media = Some(a.to_string());
             self.selection.media = vec![a.to_string()];
         }
@@ -4320,6 +4370,7 @@ impl Live {
         }
         if opens_grid {
             self.source_media = self.multi_media.clone();
+            self.source_generator = None;
         }
         self.viewer = mode;
         if mode.is_source() {
@@ -4342,7 +4393,7 @@ impl Live {
             .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
         let position = match at {
             Some(t) => {
-                let current = self.source_positions.get(media).copied().unwrap_or(0);
+                let current = self.source_positions.peek(media).copied().unwrap_or(0);
                 Some(media_context(p, m, Some(current)).resolve_from(t, current)?)
             }
             None => None,
@@ -4352,6 +4403,7 @@ impl Live {
             self.source_positions.insert(media.to_string(), pos);
         }
         self.source_media = Some(media.to_string());
+        self.source_generator = None;
         self.viewer = ViewerMode::SourceClip;
         self.last_source = ViewerMode::SourceClip;
         let loaded = self.refresh_source();
@@ -4361,6 +4413,55 @@ impl Live {
             (None, Some(pos)) => self.seek(SOURCE, pos, true),
             (None, None) => None,
         })
+    }
+
+    fn viewer_load(
+        &mut self,
+        media: &str,
+        generator: Option<GeneratorKind>,
+        settings: &GeneratorSettings,
+        at: Option<&TimeSpec>,
+    ) -> Result<Option<u64>> {
+        let made = vidcut_core::ops::generators::source_of(generator, settings)?;
+        match (generator.zip(made), media.is_empty()) {
+            (Some(_), false) => Err(Error::usage("give media or generator, not both")),
+            (Some((kind, made)), true) => self.load_generator(kind, made, settings, at),
+            (None, true) => Err(Error::usage("viewer.load needs media or generator")),
+            (None, false) => self.load_source(media, at),
+        }
+    }
+
+    fn load_generator(
+        &mut self,
+        kind: GeneratorKind,
+        generator: Generator,
+        settings: &GeneratorSettings,
+        at: Option<&TimeSpec>,
+    ) -> Result<Option<u64>> {
+        let open = self.project.as_ref().ok_or_else(no_project)?;
+        let p = open.project();
+        let frames = vidcut_core::ops::titles::default_length(p);
+        let marks = Marks::default();
+        let position = match at {
+            Some(t) => Some(source_context(p, frames, &marks, Some(0)).resolve_from(t, 0)?),
+            None => None,
+        };
+        self.stash_source_position();
+        self.source_media = None;
+        self.source_generator = Some(snapshot::SourceGenerator {
+            kind,
+            settings: settings.clone(),
+            generator,
+            frames,
+            marks,
+        });
+        self.generator_position = position.unwrap_or(0).clamp(0, frames - 1);
+        self.source_content = None;
+        self.viewer = ViewerMode::SourceClip;
+        self.last_source = ViewerMode::SourceClip;
+        self.dirty = true;
+        let loaded = self.refresh_source();
+        Ok(self.player.show(SOURCE).or(loaded))
     }
 
     fn seek(&mut self, id: PlayerId, frame: i64, sound: bool) -> Option<u64> {
@@ -4380,9 +4481,13 @@ impl Live {
             ViewerMode::Timeline => p.time_context(Some(self.player.position(TIMELINE))),
             ViewerMode::SourceClip => {
                 let position = self.player.position(SOURCE);
-                match self.source_media.as_ref().and_then(|m| p.media(m)) {
-                    Some(m) => media_context(p, m, Some(position)),
-                    None => return Err(Error::usage("no source clip is open")),
+                match (
+                    self.source_media.as_ref().and_then(|m| p.media(m)),
+                    &self.source_generator,
+                ) {
+                    (Some(m), _) => media_context(p, m, Some(position)),
+                    (None, Some(g)) => source_context(p, g.frames, &g.marks, Some(position)),
+                    (None, None) => return Err(Error::usage("no source clip is open")),
                 }
             }
             ViewerMode::MultiSource => {
@@ -4672,6 +4777,14 @@ impl Live {
                 snapshot::source_entry(ViewerMode::MultiSource, &self.tape, position)
                     .map(|e| (e.media.clone(), position - e.start))
             }
+            Some(SourceContent::Generator) => {
+                if let Some(g) = &self.source_generator {
+                    source["generator"] = g.params();
+                    source["marks"] = json!(g.marks);
+                    source["source_frame"] = json!(position);
+                }
+                None
+            }
             None => None,
         };
         if let Some((m, f)) = under {
@@ -4682,6 +4795,7 @@ impl Live {
             Some(SourceContent::Clip(_)) => "source_clip",
             Some(SourceContent::Tape) => "source_tape",
             Some(SourceContent::Multi(_)) => "multi_source",
+            Some(SourceContent::Generator) => "generator",
             None => "none",
         });
         json!({
@@ -4913,7 +5027,10 @@ fn is_edit_function(r: &Request) -> bool {
 
 fn bind_playhead(mut envelope: Envelope, context: &TimeContext) -> Envelope {
     if let Request::FrameRender {
-        at, media: None, ..
+        at,
+        media: None,
+        generator: None,
+        ..
     }
     | Request::FrameScope { at, .. } = &mut envelope.request
         && let Some(playhead) = context.playhead

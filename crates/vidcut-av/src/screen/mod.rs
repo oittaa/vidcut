@@ -9,7 +9,7 @@ use crate::hw::Kind;
 use crate::player::{Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
 use vidcut_core::model::{Hdr, WipeDirection};
-use vidcut_core::place::{Blurring, Level, Placing, chain, lettered};
+use vidcut_core::place::{Level, Mix, MixPart, Mixes, Placing, Working, chain, lettered};
 use vidcut_core::preferences::Scope;
 use vidcut_core::render::{Moving, Placed, Shift, Wipe};
 
@@ -43,6 +43,7 @@ pub struct Gpu {
     adding: wgpu::RenderPipeline,
     adding_scaled: wgpu::RenderPipeline,
     adding_mode: wgpu::RenderPipeline,
+    placed_mode: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     below_layout: wgpu::BindGroupLayout,
     lettering: wgpu::RenderPipeline,
@@ -459,6 +460,15 @@ impl Gpu {
             }),
             MIXING,
         );
+        let placed_mode = made(
+            &mode_layout,
+            "fs_mode",
+            Some(wgpu::BlendState {
+                color: premultiplied,
+                alpha: premultiplied,
+            }),
+            MIXING,
+        );
         let lettering_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut title"),
             entries: &[
@@ -649,6 +659,7 @@ impl Gpu {
             adding,
             adding_scaled,
             adding_mode,
+            placed_mode,
             layout,
             below_layout,
             lettering,
@@ -961,6 +972,7 @@ impl Below {
             dimension: wgpu::TextureDimension::D2,
             format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
@@ -1027,6 +1039,7 @@ pub struct Screen {
     mixing: Option<Mixing>,
     moves: Vec<Moves>,
     below: Option<Below>,
+    canvases: Vec<blur::Texture>,
     drawn_crosses: Vec<bool>,
     drawn_kernels: Vec<u32>,
     drawn: Option<Option<Arc<Picture>>>,
@@ -1266,14 +1279,117 @@ fn letter(
         .iter()
         .filter(|t| t.above == after || (after == layers && t.above > after))
     {
-        let Some(l) = letters.iter().find(|l| Arc::ptr_eq(&l.picture, &t.picture)) else {
-            continue;
-        };
-        pass.set_pipeline(lettering);
-        for tile in &l.tiles {
-            pass.set_bind_group(0, &tile.bind, &[]);
-            pass.draw(0..3, 0..1);
+        lettered_over(pass, lettering, letters, t);
+    }
+}
+
+fn lettered_over(
+    pass: &mut wgpu::RenderPass<'_>,
+    lettering: &wgpu::RenderPipeline,
+    letters: &[Letters],
+    t: &TitleOver,
+) {
+    let Some(l) = letters.iter().find(|l| Arc::ptr_eq(&l.picture, &t.picture)) else {
+        return;
+    };
+    pass.set_pipeline(lettering);
+    for tile in &l.tiles {
+        pass.set_bind_group(0, &tile.bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
+}
+
+type Bound = (wgpu::BindGroup, Option<f64>, bool, u32);
+
+const OVER_ALL: f64 = 0.0;
+const ADDED: f64 = 1.0;
+const IN_MIX: f64 = 2.0;
+
+struct MixDraw<'a> {
+    gpu: &'a Gpu,
+    binds: &'a [Bound],
+    canvases: &'a [blur::Texture],
+    scratch: Option<&'a [blur::Texture; 2]>,
+    below: Option<&'a Below>,
+    letters: &'a [Letters],
+    titles: &'a [TitleOver],
+}
+
+impl MixDraw<'_> {
+    fn mix(&self, encoder: &mut wgpu::CommandEncoder, mix: &Mix, depth: usize) {
+        let canvas = &self.canvases[depth].view;
+        drop(begin(encoder, canvas, Some(wgpu::Color::TRANSPARENT)));
+        for part in &mix.parts {
+            match part {
+                MixPart::Layer(i) => {
+                    let (bind, _, _, mode) = &self.binds[*i];
+                    self.lay(encoder, depth, bind, *mode);
+                }
+                MixPart::Title(j) => {
+                    let mut pass = begin(encoder, canvas, None);
+                    let lettering = &self.gpu.lettering_wide;
+                    lettered_over(&mut pass, lettering, self.letters, &self.titles[*j]);
+                }
+                MixPart::Mix(inner) => {
+                    self.mix(encoder, inner, depth + 1);
+                    let bind = self.finished(encoder, inner, depth + 1, IN_MIX);
+                    self.lay(encoder, depth, &bind, inner.placing.mode.code());
+                }
+            }
         }
+    }
+
+    fn finished(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        mix: &Mix,
+        depth: usize,
+        adds: f64,
+    ) -> wgpu::BindGroup {
+        let canvas = &self.canvases[depth];
+        let mut placing = mix.placing.clone();
+        let (effects, factor) = bared(&mut placing, &mut 1.0);
+        let mode = f64::from(placing.mode.code());
+        if effects.is_empty() {
+            return blur::canvas_bind(self.gpu, &canvas.view, &placing, (mode, adds));
+        }
+        let scratch = self.scratch.expect("made for the effects of a mix");
+        let how = (&placing, &effects[..]);
+        blur::canvas_effects(self.gpu, canvas, scratch, how, encoder);
+        blur::shown_bind(
+            self.gpu,
+            (&canvas.view, &canvas.view),
+            [1.0, factor, mode, adds],
+            [3.0, 0.0, 0.0, 0.0],
+        )
+    }
+
+    fn lay(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        depth: usize,
+        bind: &wgpu::BindGroup,
+        mode: u32,
+    ) {
+        let canvas = &self.canvases[depth];
+        if mode != 0 {
+            let below = self.below.expect("made for a composite mode");
+            encoder.copy_texture_to_texture(
+                canvas.texture.as_image_copy(),
+                below.texture.as_image_copy(),
+                canvas.texture.size(),
+            );
+        }
+        let mut pass = begin(encoder, &canvas.view, None);
+        match self.below.filter(|_| mode != 0) {
+            Some(below) => {
+                pass.set_pipeline(&self.gpu.placed_mode);
+                pass.set_bind_group(1, &below.bind, &[]);
+            }
+            None => pass.set_pipeline(&self.gpu.wide_drawing.placed),
+        }
+        pass.set_bind_group(0, bind, &[]);
+        pass.draw(0..3, 0..1);
     }
 }
 
@@ -1294,12 +1410,19 @@ impl Letters {
         }
     }
 
-    fn place(&self, gpu: &Gpu, size: (u32, u32), t: &TitleOver, colors: Option<Hdr>) {
+    fn place(
+        &self,
+        gpu: &Gpu,
+        size: (u32, u32),
+        (t, around): (&TitleOver, usize),
+        colors: Option<Hdr>,
+    ) {
         let p = &self.picture;
         let (fw, fh) = (f64::from(p.frame.0.max(1)), f64::from(p.frame.1.max(1)));
         let (sx, sy) = (f64::from(size.0) / fw, f64::from(size.1) / fh);
         let frame = (f64::from(size.0), f64::from(size.1));
-        let placing = (!t.placed.is_empty()).then(|| Placing::whole(&t.placed, frame));
+        let placing =
+            (!t.placed.is_empty()).then(|| Placing::whole_inside(&t.placed, frame, around));
         for tile in &self.tiles {
             let (pw, ph) = (f64::from(tile.size.0), f64::from(tile.size.1));
             let (left, top) = (
@@ -1573,6 +1696,23 @@ impl Screen {
                 label: Some("vidcut picture"),
             });
         let n = layers.len();
+        let nests = match layers
+            .iter()
+            .any(|(p, ..)| matches!(p.sampling(), Sampling::Colors { .. }))
+        {
+            true => Mixes::default(),
+            false => {
+                let chains: Vec<&[Placed]> = (0..n)
+                    .map(|i| placed.get(i).map_or(&[][..], Vec::as_slice))
+                    .collect();
+                let over: Vec<(usize, &[Placed])> = titles
+                    .iter()
+                    .map(|t| (t.above, t.placed.as_slice()))
+                    .collect();
+                let frame = (f64::from(size.0), f64::from(size.1));
+                Mixes::of(&chains, &over, frame)
+            }
+        };
         let wipe_of = |i: usize| layers.get(i).and_then(|l| l.2);
         let moving_of = |i: usize| layers.get(i).and_then(|l| l.3);
         let crossed = |i: usize| crosses.get(i).copied().unwrap_or(false);
@@ -1600,7 +1740,7 @@ impl Screen {
         let clock = std::time::Instant::now();
         self.blurred.sized(size, n);
         let blurred = &mut self.blurred;
-        let binds: Vec<(wgpu::BindGroup, Option<f64>, bool, u32)> = layers
+        let binds: Vec<Bound> = layers
             .iter()
             .zip(&mut self.slots)
             .enumerate()
@@ -1610,9 +1750,11 @@ impl Screen {
                     _ => None,
                 };
                 let full = placed.get(i).map(Vec::as_slice);
+                let around = nests.around_layer(i);
                 let mut placing = made_with.or(full).filter(|p| !p.is_empty()).map(|p| {
                     let (frame, fitted, pixels) = picture.placed_in(size);
-                    (Placing::new(p, frame, fitted, pixels), level.unwrap_or(1.0))
+                    let placing = Placing::inside(p, frame, (fitted, pixels), around);
+                    (placing, level.unwrap_or(1.0))
                 });
                 let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
                 let (effects, factor) = placing
@@ -1621,7 +1763,7 @@ impl Screen {
                 let live = match (made_with, full) {
                     (Some(_), Some(full)) if placing.is_some() => {
                         let (frame, fitted, pixels) = picture.placed_in(size);
-                        let all = Placing::new(full, frame, fitted, pixels).effects;
+                        let all = Placing::inside(full, frame, (fitted, pixels), around).effects;
                         all.get(effects.len()..)
                             .map(<[_]>::to_vec)
                             .unwrap_or_default()
@@ -1640,14 +1782,14 @@ impl Screen {
                 } | if alpha { ALPHA } else { 0 };
                 let made = made_with.filter(|_| blurs).and(placing.as_ref());
                 let open = made.map(|(p, l)| (blur::opened(p), *l));
-                let how = (
-                    open.as_ref().or(placing.as_ref()),
-                    kernel,
-                    colors,
-                    paired[i],
-                );
+                let adds = match (around > 0, paired[i]) {
+                    (true, _) => IN_MIX,
+                    (false, true) => ADDED,
+                    (false, false) => OVER_ALL,
+                };
+                let how = (open.as_ref().or(placing.as_ref()), kernel, colors, adds);
                 let bind = slot.prepare(gpu, picture, size, how, &mut encoder);
-                let shown = [1.0, factor, f64::from(mode), f64::from(u8::from(paired[i]))];
+                let shown = [1.0, factor, f64::from(mode), adds];
                 let bind = match (blurs, made) {
                     (false, _) => {
                         blurred.drop_layer(i);
@@ -1680,10 +1822,24 @@ impl Screen {
             }
         }
         for l in &self.letters {
-            if let Some(t) = titles.iter().find(|t| Arc::ptr_eq(&t.picture, &l.picture)) {
-                l.place(gpu, size, t, colors);
+            let found = titles
+                .iter()
+                .enumerate()
+                .find(|(_, t)| Arc::ptr_eq(&t.picture, &l.picture));
+            if let Some((j, t)) = found {
+                l.place(gpu, size, (t, nests.around_title(j)), colors);
             }
         }
+        let free: std::borrow::Cow<'_, [TitleOver]> = match nests.outer.is_empty() {
+            true => titles.into(),
+            false => titles
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| nests.around_title(*j) == 0 && nests.follows[*j].is_none())
+                .map(|(_, t)| t.clone())
+                .collect::<Vec<_>>()
+                .into(),
+        };
         let mixes = |i: usize| pair_at(i) && moving_of(i + 1).is_none();
         if (0..n).any(mixes) && self.mixing.as_ref().is_none_or(|m| m.size != size) {
             self.mixing = Some(Mixing::new(gpu, size));
@@ -1693,12 +1849,13 @@ impl Screen {
             self.moves.push(Moves::new(gpu, size));
         }
         let mut moves = self.moves.iter();
-        let blending = binds.iter().any(|b| b.3 != 0);
+        let blending = nests.moded || binds.iter().any(|b| b.3 != 0);
         let floats = self.exported
             || self.scoping
             || colors.is_some()
             || blending
             || n > 1
+            || !nests.outer.is_empty()
             || self.output_lut.is_some();
         if !floats {
             self.wide = None;
@@ -1717,6 +1874,15 @@ impl Screen {
                 .is_none_or(|b| b.size != size || b.format != format)
         {
             self.below = Some(Below::new(gpu, size, format));
+        }
+        self.canvases
+            .retain(|c| (c.texture.width(), c.texture.height()) == size);
+        self.canvases.truncate(nests.deepest);
+        while self.canvases.len() < nests.deepest {
+            self.canvases.push(blur::Texture::new(gpu, size));
+        }
+        if nests.blurs {
+            self.blurred.make_scratch(gpu);
         }
         if self.output_lut.is_none() {
             self.looked_up = None;
@@ -1751,9 +1917,57 @@ impl Screen {
             height: size.1,
             depth_or_array_layers: 1,
         };
-        let starts = |i: usize| blends(i) || crossed_wipe(i) || holds(i);
+        let starts = |i: usize| blends(i) || crossed_wipe(i) || holds(i) || nests.starts_at(i);
         let mut i = 0;
-        while i < n {
+        let mut next_mix = 0;
+        loop {
+            while let Some(outer) = nests.outer.get(next_mix).filter(|m| m.layers.0 <= i) {
+                if clear.is_some() {
+                    drop(begin(&mut encoder, canvas, clear.take()));
+                }
+                let below = self.below.as_ref();
+                let mixing = MixDraw {
+                    gpu,
+                    binds: &binds,
+                    canvases: &self.canvases,
+                    scratch: self.blurred.scratch(),
+                    below,
+                    letters: &self.letters,
+                    titles,
+                };
+                mixing.mix(&mut encoder, &outer.mix, 0);
+                let bind = mixing.finished(&mut encoder, &outer.mix, 0, OVER_ALL);
+                let moded = below.filter(|_| outer.mix.placing.mode.code() != 0);
+                if let Some(below) = moded {
+                    encoder.copy_texture_to_texture(
+                        canvas_texture.as_image_copy(),
+                        below.texture.as_image_copy(),
+                        whole,
+                    );
+                }
+                let mut pass = begin(&mut encoder, canvas, None);
+                match moded {
+                    Some(below) => {
+                        pass.set_pipeline(&drawing.mode);
+                        pass.set_bind_group(1, &below.bind, &[]);
+                    }
+                    None => pass.set_pipeline(&drawing.placed),
+                }
+                pass.set_bind_group(0, &bind, &[]);
+                pass.draw(0..3, 0..1);
+                for (t, _) in titles
+                    .iter()
+                    .zip(&nests.follows)
+                    .filter(|(_, follows)| **follows == Some(next_mix))
+                {
+                    lettered_over(&mut pass, lettering, &self.letters, t);
+                }
+                i = i.max(outer.layers.1);
+                next_mix += 1;
+            }
+            if i >= n {
+                break;
+            }
             if crossed_wipe(i) || holds(i) {
                 if clear.is_some() {
                     drop(begin(&mut encoder, canvas, clear.take()));
@@ -1839,8 +2053,8 @@ impl Screen {
                 }
                 pass.set_bind_group(0, &moves.bind, &[]);
                 pass.draw(0..3, 0..1);
-                letter(&mut pass, lettering, &self.letters, titles, i + 1, n);
-                letter(&mut pass, lettering, &self.letters, titles, i + 2, n);
+                letter(&mut pass, lettering, &self.letters, &free, i + 1, n);
+                letter(&mut pass, lettering, &self.letters, &free, i + 2, n);
                 i += 2;
                 continue;
             }
@@ -1874,8 +2088,8 @@ impl Screen {
                 }
                 pass.set_bind_group(0, &mixing.bind, &[]);
                 pass.draw(0..3, 0..1);
-                letter(&mut pass, lettering, &self.letters, titles, i + 1, n);
-                letter(&mut pass, lettering, &self.letters, titles, i + 2, n);
+                letter(&mut pass, lettering, &self.letters, &free, i + 1, n);
+                letter(&mut pass, lettering, &self.letters, &free, i + 2, n);
                 i += 2;
                 continue;
             }
@@ -1907,7 +2121,7 @@ impl Screen {
                         pass.set_scissor_rect(0, 0, size.0, size.1);
                     }
                 }
-                letter(&mut pass, lettering, &self.letters, titles, i + 1, n);
+                letter(&mut pass, lettering, &self.letters, &free, i + 1, n);
                 i += 1;
             }
         }
@@ -1981,7 +2195,7 @@ impl Slot {
         gpu: &Gpu,
         picture: &Arc<Picture>,
         size: (u32, u32),
-        how: (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+        how: (Option<&(Placing, f64)>, u32, Option<Hdr>, f64),
         encoder: &mut wgpu::CommandEncoder,
     ) -> wgpu::BindGroup {
         self.prepare_with(gpu, picture, size, how, encoder, true)
@@ -1995,7 +2209,7 @@ impl Slot {
         encoder: &mut wgpu::CommandEncoder,
     ) -> wgpu::TextureView {
         let size = (picture.width(), picture.height());
-        let how = (None, 0, timeline, false);
+        let how = (None, 0, timeline, OVER_ALL);
         self.prepare_with(gpu, picture, size, how, encoder, false);
         let converted = &self.converted.as_ref().expect("prepared").0;
         converted.create_view(&Default::default())
@@ -2006,7 +2220,7 @@ impl Slot {
         gpu: &Gpu,
         picture: &Arc<Picture>,
         size: (u32, u32),
-        how: (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+        how: (Option<&(Placing, f64)>, u32, Option<Hdr>, f64),
         encoder: &mut wgpu::CommandEncoder,
         weave: bool,
     ) -> wgpu::BindGroup {
@@ -2725,14 +2939,18 @@ impl Slot {
                 | Layout::Yuv420p10
                 | Layout::Yuv422p
                 | Layout::Yuv422p10
-                | Layout::Yuv444p12 => Planes {
+                | Layout::Yuv444p12
+                | Layout::Gbrp16 => Planes {
                     key,
                     y: make((w, h), one),
                     u: make((cw, ch), one),
                     v: make((cw, ch), one),
                     a: make(
                         if alpha { (w, h) } else { (1, 1) },
-                        wgpu::TextureFormat::R8Unorm,
+                        match layout {
+                            Layout::Gbrp16 => one,
+                            _ => wgpu::TextureFormat::R8Unorm,
+                        },
                     ),
                 },
                 Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => Planes {
@@ -2789,16 +3007,22 @@ impl Slot {
                 put(&planes.u, 1, (cw, ch), 1);
                 put(&planes.v, 2, (cw, ch), 1);
             }
-            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12, true) => {
+            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 | Layout::Gbrp16, true) => {
                 put(&planes.y, 0, (w, h), 2);
                 put(&planes.u, 1, (cw, ch), 2);
                 put(&planes.v, 2, (cw, ch), 2);
-                if picture.alpha_plane() {
-                    write_alpha(gpu, &planes.a, frame, (w, h));
+                match (picture.alpha_plane(), layout) {
+                    (true, Layout::Gbrp16) => put(&planes.a, 3, (w, h), 2),
+                    (true, _) => write_alpha(gpu, &planes.a, frame, (w, h)),
+                    (false, _) => {}
                 }
             }
-            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12, false) => {
-                let shift = if layout == Layout::Yuv444p12 { 4 } else { 2 };
+            (Layout::Yuv420p10 | Layout::Yuv422p10 | Layout::Yuv444p12 | Layout::Gbrp16, false) => {
+                let shift = match layout {
+                    Layout::Gbrp16 => 8,
+                    Layout::Yuv444p12 => 4,
+                    _ => 2,
+                };
                 if picture.alpha_plane() {
                     write_alpha(gpu, &planes.a, frame, (w, h));
                 }
@@ -3214,7 +3438,8 @@ fn nvdec_bytes(gpu: &Gpu, layout: Layout) -> Result<u64, String> {
         | Layout::Yuv420p10
         | Layout::Yuv422p
         | Layout::Yuv422p10
-        | Layout::Yuv444p12 => Err("planar pictures aren't NVDEC's".into()),
+        | Layout::Yuv444p12
+        | Layout::Gbrp16 => Err("planar pictures aren't NVDEC's".into()),
     }
 }
 
@@ -3237,7 +3462,8 @@ fn vaapi_formats(
         | Layout::Yuv420p10
         | Layout::Yuv422p
         | Layout::Yuv422p10
-        | Layout::Yuv444p12 => Err("planar pictures aren't VA-API's".into()),
+        | Layout::Yuv444p12
+        | Layout::Gbrp16 => Err("planar pictures aren't VA-API's".into()),
     }
 }
 
@@ -3272,7 +3498,8 @@ fn d3d11_formats(
         | Layout::Yuv420p10
         | Layout::Yuv422p
         | Layout::Yuv422p10
-        | Layout::Yuv444p12 => Err("planar pictures aren't Direct3D 11's".into()),
+        | Layout::Yuv444p12
+        | Layout::Gbrp16 => Err("planar pictures aren't Direct3D 11's".into()),
     }
 }
 
@@ -3301,7 +3528,8 @@ fn videotoolbox_formats(
         | Layout::Yuv420p10
         | Layout::Yuv422p
         | Layout::Yuv422p10
-        | Layout::Yuv444p12 => Err("planar pictures aren't VideoToolbox's".into()),
+        | Layout::Yuv444p12
+        | Layout::Gbrp16 => Err("planar pictures aren't VideoToolbox's".into()),
     }
 }
 
@@ -3318,6 +3546,7 @@ fn vulkan_layout(gpu: &Gpu, layout: Layout) -> Result<(), String> {
         | Layout::Ayuv64
         | Layout::Rgb
         | Layout::Rgb48
+        | Layout::Gbrp16
         | Layout::Yuv420p
         | Layout::Yuv422p => Err(format!("{layout:?} pictures aren't Vulkan's")),
     }
@@ -3450,7 +3679,7 @@ const KEEP_ALL: [f64; 4] = [-1e6, -1e6, 1e6, 1e6];
 fn halvings(
     picture: &Picture,
     size: (u32, u32),
-    (placing, kernel, ..): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+    (placing, kernel, ..): (Option<&(Placing, f64)>, u32, Option<Hdr>, f64),
 ) -> u32 {
     if kernel & WIDENS == 0 || kernel & 7 == 0 {
         return 0;
@@ -3503,7 +3732,7 @@ fn halvings(
     }
 }
 
-fn bared(placing: &mut Placing, level: &mut f64) -> (Vec<Blurring>, f64) {
+fn bared(placing: &mut Placing, level: &mut f64) -> (Vec<Working>, f64) {
     let effects = std::mem::take(&mut placing.effects);
     if effects.is_empty() {
         return (effects, 1.0);
@@ -3574,6 +3803,10 @@ fn write_alpha(
     frame: &crate::ffmpeg::frame::Video,
     (w, h): (u32, u32),
 ) {
+    let shift = match Layout::of(frame.format()) {
+        Layout::Gbrp16 => 8,
+        _ => 4,
+    };
     let (stride, data) = (frame.stride(3), frame.data(3));
     let row = w as usize;
     let mut top = Vec::with_capacity(row * h as usize);
@@ -3583,7 +3816,7 @@ fn write_alpha(
             line.as_chunks::<2>()
                 .0
                 .iter()
-                .map(|s| (u16::from_le_bytes(*s) >> 4) as u8),
+                .map(|s| (u16::from_le_bytes(*s) >> shift) as u8),
         );
     }
     write_plane(&gpu.queue, texture, &top, row, (w, h), 1);
@@ -3598,7 +3831,8 @@ fn sixteen(layout: Layout) -> bool {
         | Layout::P210
         | Layout::Yuv444p12
         | Layout::P416
-        | Layout::Ayuv64 => true,
+        | Layout::Ayuv64
+        | Layout::Gbrp16 => true,
     }
 }
 
@@ -3625,6 +3859,7 @@ fn packing(layout: Layout) -> u32 {
         Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => 1,
         Layout::Ayuv64 => 2,
         Layout::Rgb | Layout::Rgb48 => 3,
+        Layout::Gbrp16 => 4,
     }
 }
 
@@ -3632,7 +3867,12 @@ fn per_chroma(layout: Layout) -> (u32, u32) {
     match layout {
         Layout::Yuv420p | Layout::Nv12 | Layout::P010 | Layout::Yuv420p10 => (2, 2),
         Layout::Yuv422p | Layout::Yuv422p10 | Layout::P210 => (2, 1),
-        Layout::Yuv444p12 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 => (1, 1),
+        Layout::Yuv444p12
+        | Layout::P416
+        | Layout::Ayuv64
+        | Layout::Rgb
+        | Layout::Rgb48
+        | Layout::Gbrp16 => (1, 1),
     }
 }
 
@@ -3699,7 +3939,7 @@ fn params_of(
     size: (u32, u32),
     wide: bool,
     cover: (f64, f64),
-    (placing, kernel, timeline, paired): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+    (placing, kernel, timeline, adds): (Option<&(Placing, f64)>, u32, Option<Hdr>, f64),
     (halvings, alpha): (u32, u32),
 ) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
@@ -3758,7 +3998,7 @@ fn params_of(
         levels.len() as f64,
         placing.map_or(0.0, |(_, l)| *l),
         placing.map_or(0.0, |(p, _)| f64::from(p.mode.code())),
-        f64::from(u8::from(paired)),
+        adds,
     ];
     let (made, part) = match picture.sampling() {
         Sampling::Own | Sampling::Rounded => ([0.0; 4], [0.0; 4]),

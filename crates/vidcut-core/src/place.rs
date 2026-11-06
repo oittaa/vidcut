@@ -1,4 +1,6 @@
-use crate::model::{Border, CompositeMode, Effect, EffectKind, Picture, VideoInfo};
+use crate::model::{
+    Border, CellShape, CompositeMode, Effect, EffectKind, MosaicBlur, Picture, VideoInfo,
+};
 use crate::render::Placed;
 
 const LEAST_ZOOM: f64 = 1e-9;
@@ -69,7 +71,20 @@ impl Soft {
 pub struct Placing {
     pub levels: Vec<Level>,
     pub mode: CompositeMode,
-    pub effects: Vec<Blurring>,
+    pub effects: Vec<Working>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Working {
+    pub work: Work,
+    pub blend: f64,
+    pub use_alpha: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Work {
+    Blur(Blurring),
+    Mosaic(Tiling),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -77,28 +92,87 @@ pub struct Blurring {
     pub across: [f64; 4],
     pub down: [f64; 4],
     pub border: Border,
-    pub blend: f64,
-    pub use_alpha: bool,
 }
 
-impl Blurring {
-    fn of(e: &Effect, width: f64) -> Option<Self> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Tiling {
+    pub shape: CellShape,
+    pub cell: [f64; 2],
+    pub step: f64,
+    pub origin: [f64; 2],
+    pub reach: [u32; 2],
+    pub samples: u32,
+    pub blur_alpha: bool,
+    pub whole: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct OnFrame {
+    width: f64,
+    size: [f64; 2],
+    middle: [f64; 2],
+}
+
+impl Tiling {
+    const LEAST: f64 = 1e-3;
+    const MOST_REACH: f64 = 1e9;
+
+    fn of(m: &MosaicBlur, on: &OnFrame) -> Self {
+        let samples = if m.antialias { 2.0 } else { 1.0 };
+        let [w, h] = on.size;
+        let [mx, my] = on.middle;
+        let high = (samples * MosaicBlur::CELL * (w * h).sqrt() / m.frequency()).max(Self::LEAST);
+        let cell = [(high * m.stretch()).max(Self::LEAST), high];
+        let step = match m.shape() {
+            CellShape::Square => cell[0],
+            CellShape::Hexagon => (cell[0] * 3.0_f64.sqrt() / 2.0).max(Self::LEAST),
+            CellShape::Triangle => (cell[0] / 3.0_f64.sqrt()).max(Self::LEAST),
+        };
+        let [px, py] = m.place();
+        let [dx, dy] = m.offsets();
+        let origin = [
+            (samples * (mx + (px - 0.5) * w) + dx * 0.5 * cell[0]).rem_euclid(2.0 * step),
+            (samples * (my + (0.5 - py) * h) - dy * 0.5 * cell[1]).rem_euclid(2.0 * cell[1]),
+        ];
+        let reach = cell.map(|c| (m.box_size() * c / 2.0 + 1e-9).min(Self::MOST_REACH) as u32);
+        Self {
+            shape: m.shape(),
+            cell,
+            step,
+            origin,
+            reach,
+            samples: samples as u32,
+            blur_alpha: m.blurs_alpha(),
+            whole: m.whole_cells,
+        }
+    }
+}
+
+impl Working {
+    fn of(e: &Effect, on: &OnFrame) -> Option<Self> {
         if !e.on || e.mixed() <= 0.0 {
             return None;
         }
-        match &e.kind {
+        let work = match &e.kind {
             EffectKind::GaussianBlur(b) => {
-                let (across, down) = b.spreads(width);
+                let (across, down) = b.spreads(on.width);
                 let still = across.iter().chain(&down).all(|s| *s <= 0.0);
-                (!(still && e.use_alpha)).then_some(Self {
+                if still && e.use_alpha {
+                    return None;
+                }
+                Work::Blur(Blurring {
                     across,
                     down,
                     border: b.edge(),
-                    blend: e.mixed(),
-                    use_alpha: e.use_alpha,
                 })
             }
-        }
+            EffectKind::MosaicBlur(m) => Work::Mosaic(Tiling::of(m, on)),
+        };
+        Some(Self {
+            work,
+            blend: e.mixed(),
+            use_alpha: e.use_alpha,
+        })
     }
 }
 
@@ -254,8 +328,15 @@ pub fn lettered([px, py]: [f64; 2], zoom: f64, radians: f64, [ox, oy]: [f64; 2])
 }
 
 impl Level {
+    const OPEN: f64 = 1e6;
+
     pub fn forward(&self, uv: [f64; 2]) -> [f64; 2] {
         ahead(&self.back, uv)
+    }
+
+    pub fn open(&mut self) {
+        self.edge = [-Self::OPEN, -Self::OPEN, Self::OPEN, Self::OPEN];
+        self.soft = Soft::default();
     }
 
     pub fn centered(from: (u32, u32), to: (u32, u32)) -> Self {
@@ -276,34 +357,54 @@ impl Level {
 
 impl Placing {
     pub fn new(placed: &[Placed], frame: (f64, f64), fitted: [f64; 4], pixels: (f64, f64)) -> Self {
+        Self::inside(placed, frame, (fitted, pixels), 0)
+    }
+
+    pub fn inside(
+        placed: &[Placed],
+        frame: (f64, f64),
+        (fitted, pixels): ([f64; 4], (f64, f64)),
+        around: usize,
+    ) -> Self {
         let whole = [0.0, 0.0, frame.0, frame.1];
+        let kept = placed.len().saturating_sub(around);
         let mut levels: Vec<Level> = Vec::with_capacity(placed.len());
         let mut effects = Vec::new();
-        let mut zoom = 1.0;
+        let mut stretch = [1.0, 1.0];
         for (i, p) in placed.iter().enumerate().rev() {
             let [zx, zy] = p.picture.scale_at(p.source as f64);
-            zoom *= (zx * zy).abs().sqrt();
-            let mut own: Vec<Blurring> = p
-                .picture
-                .effects
-                .iter()
-                .filter_map(|e| Blurring::of(e, frame.0 * zoom))
-                .collect();
-            own.append(&mut effects);
-            effects = own;
+            stretch = [stretch[0] * zx.abs(), stretch[1] * zy.abs()];
             let (at, size) = if i == 0 {
                 (fitted, pixels)
             } else {
                 (whole, frame)
             };
-            if i == 0 && !levels.is_empty() && at == whole && p.picture.is_usual() {
-                continue;
-            }
             let own = level(p, frame, at, size);
             let back = match levels.last() {
                 Some(outer) => then(&outer.back, &own.back, frame),
                 None => own.back,
             };
+            let unzoomed = p
+                .zoomed()
+                .map_or(Picture::MIDDLE, |b| flipped(&p.picture, b.center));
+            let on = OnFrame {
+                width: frame.0 * (stretch[0] * stretch[1]).sqrt(),
+                size: [at[2] * stretch[0], at[3] * stretch[1]],
+                middle: ahead(&back, unzoomed),
+            };
+            if i < kept {
+                let mut made: Vec<Working> = p
+                    .picture
+                    .effects
+                    .iter()
+                    .filter_map(|e| Working::of(e, &on))
+                    .collect();
+                made.append(&mut effects);
+                effects = made;
+            }
+            if i == 0 && !levels.is_empty() && at == whole && p.picture.is_usual() {
+                continue;
+            }
             levels.push(Level { back, ..own });
         }
         for l in &mut levels {
@@ -313,20 +414,23 @@ impl Placing {
                 l.edge = [-1.0, -1.0, 2.0, 2.0];
             }
         }
-        let mode = placed
-            .iter()
-            .map(|p| p.picture.mode())
-            .find(|m| *m != CompositeMode::Normal)
-            .unwrap_or_default();
+        for l in levels.iter_mut().take(around) {
+            l.open();
+            l.opacity = 1.0;
+        }
         Self {
             levels,
-            mode,
+            mode: outermost_mode(&placed[..kept]),
             effects,
         }
     }
 
     pub fn whole(placed: &[Placed], frame: (f64, f64)) -> Self {
-        Self::new(placed, frame, [0.0, 0.0, frame.0, frame.1], frame)
+        Self::whole_inside(placed, frame, 0)
+    }
+
+    pub fn whole_inside(placed: &[Placed], frame: (f64, f64), around: usize) -> Self {
+        Self::inside(placed, frame, ([0.0, 0.0, frame.0, frame.1], frame), around)
     }
 
     pub fn inner(&self, frame: (f64, f64)) -> [f64; 8] {
@@ -414,6 +518,218 @@ impl Placing {
         let (x0, y0) = (x0.floor() as u32, y0.floor() as u32);
         let (x1, y1) = (x1.ceil().min(w) as u32, y1.ceil().min(h) as u32);
         (x1 > x0 && y1 > y0).then_some([x0, y0, x1, y1])
+    }
+}
+
+fn outermost_mode(placed: &[Placed]) -> CompositeMode {
+    placed
+        .iter()
+        .rev()
+        .map(|p| p.picture.mode())
+        .find(|m| *m != CompositeMode::Normal)
+        .unwrap_or_default()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MixPart {
+    Layer(usize),
+    Title(usize),
+    Mix(Mix),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mix {
+    pub parts: Vec<MixPart>,
+    pub placing: Placing,
+    around: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OuterMix {
+    pub mix: Mix,
+    pub layers: (usize, usize),
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Mixes {
+    pub outer: Vec<OuterMix>,
+    pub follows: Vec<Option<usize>>,
+    pub deepest: usize,
+    pub moded: bool,
+    pub blurs: bool,
+    layers: Vec<usize>,
+    titles: Vec<usize>,
+}
+
+struct Member<'a> {
+    index: usize,
+    title: bool,
+    placed: &'a [Placed],
+}
+
+impl Member<'_> {
+    fn chain(&self) -> &[Placed] {
+        match self.title {
+            true => self.placed,
+            false => self.placed.get(1..).unwrap_or_default(),
+        }
+    }
+
+    fn around(&self, depth: usize) -> Option<&Placed> {
+        self.chain().iter().rev().nth(depth)
+    }
+
+    fn part(&self) -> MixPart {
+        match self.title {
+            true => MixPart::Title(self.index),
+            false => MixPart::Layer(self.index),
+        }
+    }
+
+    fn holds_mode(&self, depth: usize) -> bool {
+        let inner = self.placed.len().saturating_sub(depth + 1);
+        outermost_mode(&self.placed[..inner]) != CompositeMode::Normal
+    }
+}
+
+fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixPart> {
+    let mut parts = Vec::new();
+    let mut rest = members;
+    while let Some(first) = rest.first() {
+        let Some(outer) = first.around(depth) else {
+            parts.push(first.part());
+            rest = &rest[1..];
+            continue;
+        };
+        let n = rest
+            .iter()
+            .take_while(|m| m.around(depth) == Some(outer))
+            .count();
+        let (run, after) = rest.split_at(n);
+        let inner = parts_of(run, depth + 1, frame);
+        let (held, around, grows) = match <[MixPart; 1]>::try_from(inner) {
+            Ok([MixPart::Mix(one)]) => (one.parts, one.around, true),
+            Ok([lone]) => (vec![lone], depth + 1, false),
+            Err(many) => (many, depth + 1, false),
+        };
+        let chain = first.chain();
+        let placing = Placing::whole_inside(&chain[chain.len() - around..], frame, depth);
+        let mixes = grows
+            || match held.as_slice() {
+                [MixPart::Layer(_)] => false,
+                [MixPart::Title(_)] => {
+                    placing.mode != CompositeMode::Normal || !placing.effects.is_empty()
+                }
+                _ => !outer.picture.is_usual() || run.iter().any(|m| m.holds_mode(depth)),
+            };
+        if mixes {
+            parts.push(MixPart::Mix(Mix {
+                parts: held,
+                placing,
+                around,
+            }));
+        } else {
+            parts.extend(held);
+        }
+        rest = after;
+    }
+    parts
+}
+
+fn layers_in(parts: &[MixPart]) -> usize {
+    parts
+        .iter()
+        .map(|p| match p {
+            MixPart::Layer(_) => 1,
+            MixPart::Title(_) => 0,
+            MixPart::Mix(m) => layers_in(&m.parts),
+        })
+        .sum()
+}
+
+impl Mixes {
+    pub fn of(layers: &[&[Placed]], titles: &[(usize, &[Placed])], frame: (f64, f64)) -> Self {
+        let n = layers.len();
+        let plain = layers.iter().all(|p| p.len() < 2);
+        if n == 0 || plain && titles.iter().all(|(a, p)| *a > n || p.is_empty()) {
+            return Self::default();
+        }
+        let titled = |k: usize| {
+            titles
+                .iter()
+                .enumerate()
+                .filter(move |(_, (above, _))| (*above).min(n) == k)
+                .map(move |(index, (above, placed))| Member {
+                    index,
+                    title: true,
+                    placed: if *above > n { &[] } else { placed },
+                })
+        };
+        let mut members: Vec<Member<'_>> = titled(0).collect();
+        for (index, placed) in layers.iter().enumerate() {
+            members.push(Member {
+                index,
+                title: false,
+                placed,
+            });
+            members.extend(titled(index + 1));
+        }
+        let parts = parts_of(&members, 0, frame);
+        if !parts.iter().any(|p| matches!(p, MixPart::Mix(_))) {
+            return Self::default();
+        }
+        let mut out = Self {
+            follows: vec![None; titles.len()],
+            layers: vec![0; n],
+            titles: vec![0; titles.len()],
+            ..Self::default()
+        };
+        let (mut next, mut last) = (0, None);
+        for part in parts {
+            match part {
+                MixPart::Layer(i) => {
+                    next = i + 1;
+                    last = None;
+                }
+                MixPart::Title(j) => out.follows[j] = last,
+                MixPart::Mix(mix) => {
+                    out.mark(&mix, 1);
+                    let to = next + layers_in(&mix.parts);
+                    out.outer.push(OuterMix {
+                        mix,
+                        layers: (next, to),
+                    });
+                    next = to;
+                    last = Some(out.outer.len() - 1);
+                }
+            }
+        }
+        out
+    }
+
+    fn mark(&mut self, mix: &Mix, depth: usize) {
+        self.deepest = self.deepest.max(depth);
+        self.moded |= mix.placing.mode != CompositeMode::Normal;
+        self.blurs |= !mix.placing.effects.is_empty();
+        for part in &mix.parts {
+            match part {
+                MixPart::Layer(i) => self.layers[*i] = mix.around,
+                MixPart::Title(j) => self.titles[*j] = mix.around,
+                MixPart::Mix(m) => self.mark(m, depth + 1),
+            }
+        }
+    }
+
+    pub fn around_layer(&self, i: usize) -> usize {
+        self.layers.get(i).copied().unwrap_or(0)
+    }
+
+    pub fn around_title(&self, j: usize) -> usize {
+        self.titles.get(j).copied().unwrap_or(0)
+    }
+
+    pub fn starts_at(&self, i: usize) -> bool {
+        self.outer.iter().any(|m| m.layers.0 == i)
     }
 }
 

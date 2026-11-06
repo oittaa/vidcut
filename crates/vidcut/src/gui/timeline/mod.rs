@@ -19,9 +19,12 @@ use vidcut_core::model::{
 use vidcut_core::ops::{self, Edge, MAIN};
 use vidcut_core::render_cache::Part;
 use vidcut_core::request::ViewerMode;
+use vidcut_core::shortcuts::Action;
 
+use crate::gui::shortcuts::Fired;
+use crate::gui::subclip::NewSubclip;
+use crate::gui::theme;
 use crate::gui::workspace::{Workspace, dim};
-use crate::gui::{keys, theme};
 use crate::live::PlayerId;
 use geometry::{Hit, MARK_BAND, NEW_TRACK_STRIP, Rows, Scale, Snap, hit_rows};
 use gesture::{Ctx, Drag, Gesture, HELD_FRAME, Preview, swipe};
@@ -1257,6 +1260,7 @@ impl Workspace {
             self.keyframe_tray(ui, rect, HEADER, span);
         }
         self.marker_window(ui.ctx());
+        self.subclip_windows_tick(ui.ctx());
         self.duration_window(ui.ctx());
         self.fade_window(ui.ctx());
         self.speed_window(ui.ctx());
@@ -1480,9 +1484,10 @@ impl Workspace {
         if ui.checkbox(&mut ripple, "Ripple On").changed() {
             self.send("project.set", json!({ "ripple_on": ripple }));
         }
+        let snap = self.snap.bindings.named("Snap", Action::Snapping);
         let o = &mut self.timeline.options;
         let before = *o;
-        ui.checkbox(&mut o.snapping, "Snap (N)");
+        ui.checkbox(&mut o.snapping, snap);
         ui.checkbox(&mut o.fixed_playhead, "Fixed Playhead");
         ui.checkbox(&mut o.trim_to_audio, "Trim to Audio");
         ui.checkbox(&mut o.safe_edit, "Trim with Safe Edit");
@@ -1523,7 +1528,11 @@ impl Workspace {
         }
         ui.separator();
         let at = self.snap.timeline.position;
-        if ui.button(keys("Split Clips  (Ctrl+B)")).clicked() {
+        let bindings = self.snap.bindings.clone();
+        if ui
+            .button(bindings.named("Split Clips", Action::Split))
+            .clicked()
+        {
             self.split_at_playhead();
             ui.close();
         }
@@ -1534,7 +1543,10 @@ impl Workspace {
             );
             ui.close();
         }
-        if ui.button("Add Marker  (M)").clicked() {
+        if ui
+            .button(bindings.named("Add Marker", Action::AddMarker))
+            .clicked()
+        {
             self.send("markers.add", json!({ "at": at }));
             ui.close();
         }
@@ -1623,7 +1635,11 @@ impl Workspace {
         if ui
             .add_enabled(
                 !self.snap.selection.clips.is_empty(),
-                egui::Button::new(keys("Change Clip Duration…  (Ctrl+D)")),
+                egui::Button::new(
+                    self.snap
+                        .bindings
+                        .named("Change Clip Duration…", Action::ChangeDuration),
+                ),
             )
             .clicked()
         {
@@ -1633,7 +1649,11 @@ impl Workspace {
         if ui
             .add_enabled(
                 !self.snap.selection.clips.is_empty(),
-                egui::Button::new(keys("Change Clip Speed…  (R)")),
+                egui::Button::new(
+                    self.snap
+                        .bindings
+                        .named("Change Clip Speed…", Action::ChangeSpeed),
+                ),
             )
             .clicked()
         {
@@ -2079,11 +2099,12 @@ impl Workspace {
         let Some(mut d) = self.timeline.drag.take() else {
             return;
         };
+        let bindings = self.snap.bindings.clone();
         let (pos, released, n, escape) = ui.input(|i| {
             (
                 i.pointer.latest_pos(),
                 i.pointer.any_released(),
-                i.key_pressed(Key::N),
+                Fired::of(&bindings, i).pressed(Action::Snapping),
                 i.key_pressed(Key::Escape),
             )
         });
@@ -2124,6 +2145,15 @@ impl Workspace {
                 vec![media.clone()]
             };
             self.send("media.move", json!({ "media": ids, "bin": bin }));
+            self.timeline.snap_flipped = false;
+            return;
+        }
+        if released
+            && d.drag.from_source_clip
+            && self.bins.area.is_some_and(|area| area.contains(pos))
+            && let Gesture::Media { media, range, .. } = &d.drag.gesture
+        {
+            self.new_subclip = Some(NewSubclip::new(media, *range));
             self.timeline.snap_flipped = false;
             return;
         }
@@ -2655,6 +2685,15 @@ impl Workspace {
             self.open_title(&c.id);
             ui.close();
         }
+        let subclip = self
+            .project()
+            .and_then(|p| p.media(&c.media))
+            .is_some_and(|m| m.subclip.is_some());
+        if subclip && ui.button("Edit Subclip…").clicked() {
+            self.open_edit_subclip(&c.media);
+            ui.close();
+        }
+        let bindings = self.snap.bindings.clone();
         let item = |ui: &mut egui::Ui, label: &str, method: &str, params: Value| {
             if ui.button(label).clicked() {
                 self.send(method, params);
@@ -2663,11 +2702,10 @@ impl Workspace {
         };
         item(
             ui,
-            if c.enabled {
-                "Disable  (D)"
-            } else {
-                "Enable  (D)"
-            },
+            &bindings.named(
+                if c.enabled { "Disable" } else { "Enable" },
+                Action::PictureOff,
+            ),
             "clip.set",
             json!({ "clips": clips, "enabled": !c.enabled }),
         );
@@ -2694,25 +2732,25 @@ impl Workspace {
         ui.separator();
         item(
             ui,
-            &keys("Copy  (Ctrl+C)"),
+            &bindings.named("Copy", Action::Copy),
             "edit.copy",
             json!({ "clips": clips }),
         );
         item(
             ui,
-            &keys("Cut  (Ctrl+X)"),
+            &bindings.named("Cut", Action::Cut),
             "edit.cut",
             json!({ "clips": clips }),
         );
         item(
             ui,
-            "Delete  (Delete)",
+            &bindings.named("Delete", Action::Delete),
             "edit.delete",
             json!({ "clips": clips }),
         );
         item(
             ui,
-            &keys("Lift  (Alt+Delete)"),
+            &bindings.named("Lift", Action::Lift),
             "edit.delete",
             json!({ "clips": clips, "lift": true }),
         );
@@ -2728,12 +2766,16 @@ impl Workspace {
         if vidcut_core::ops::picture::has_picture(c) {
             ui.separator();
             let at = self.snap.player(crate::live::PlayerId::Timeline).position;
-            for (label, tool) in [
-                ("Transform  (T)", PictureTool::Transform),
-                ("Crop  (Shift+T)", PictureTool::Crop),
-                ("Dynamic Zoom  (Alt+T)", PictureTool::DynamicZoom),
+            for (label, action, tool) in [
+                ("Transform", Action::Transform, PictureTool::Transform),
+                ("Crop", Action::Crop, PictureTool::Crop),
+                (
+                    "Dynamic Zoom",
+                    Action::DynamicZoom,
+                    PictureTool::DynamicZoom,
+                ),
             ] {
-                if ui.button(keys(label)).clicked() {
+                if ui.button(bindings.named(label, action)).clicked() {
                     self.send("selection.set", json!({ "clips": [c.id] }));
                     if !(c.start..c.end()).contains(&at) {
                         self.send("player.seek", json!({ "at": c.start }));
@@ -2754,14 +2796,18 @@ impl Workspace {
             }
         }
         ui.separator();
-        if ui.button(keys("Change Duration…  (Ctrl+D)")).clicked() {
+        if ui
+            .button(bindings.named("Change Duration…", Action::ChangeDuration))
+            .clicked()
+        {
             self.timeline.duration_dialog = Some(String::new());
             ui.close();
         }
+        let change_speed = bindings.named("Change Speed…", Action::ChangeSpeed);
         if c.generator.is_some() {
-            ui.add_enabled(false, egui::Button::new(keys("Change Speed…  (R)")));
+            ui.add_enabled(false, egui::Button::new(change_speed));
             ui.add_enabled(false, egui::Button::new("Add Speed Keyframe"));
-        } else if !c.is_generator() && ui.button(keys("Change Speed…  (R)")).clicked() {
+        } else if !c.is_generator() && ui.button(change_speed).clicked() {
             self.open_speed_dialog();
             ui.close();
         }
@@ -2787,7 +2833,7 @@ impl Workspace {
                 .and_then(|p| super::isolation::heard(p, &c.id))
                 .flatten();
             let on = super::isolation::Isolate::Clips(sounding.clone());
-            let label = keys("Voice Isolation  (Alt+V)");
+            let label = bindings.named("Voice Isolation", Action::VoiceIsolation);
             if self.isolation_controls(ui, on, heard, &label) {
                 ui.close();
             }
@@ -2999,8 +3045,12 @@ impl Workspace {
 
     pub(crate) fn start_generator_drag(
         &mut self,
-        p: &Project,
-        (kind, label): (vidcut_core::model::GeneratorKind, &'static str),
+        (kind, settings, label): (
+            vidcut_core::model::GeneratorKind,
+            vidcut_core::request::GeneratorSettings,
+            String,
+        ),
+        len: i64,
         press: Pos2,
     ) {
         self.timeline.snap_flipped = false;
@@ -3008,8 +3058,9 @@ impl Workspace {
             drag: Drag::new(
                 Gesture::Generator {
                     kind,
+                    settings,
                     label,
-                    len: vidcut_core::ops::titles::default_length(p),
+                    len,
                 },
                 press,
             ),
@@ -3077,7 +3128,7 @@ impl Workspace {
                 Some((0, cues.iter().map(|c| c.1).max().unwrap_or(0))),
             ),
             Gesture::Title { template, len } => (template.label.clone(), Some((0, *len))),
-            Gesture::Generator { label, len, .. } => ((*label).to_string(), Some((0, *len))),
+            Gesture::Generator { label, len, .. } => (label.clone(), Some((0, *len))),
             Gesture::Transition { label, kind } => (
                 (*label).to_string(),
                 Some((
@@ -3124,16 +3175,15 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn timeline_keys(&mut self, input: &egui::InputState) {
+    pub(crate) fn timeline_keys(&mut self, fired: &Fired) {
         let Some(p) = self.project_shared() else {
             return;
         };
-        let pressed = |k: Key| input.key_pressed(k);
-        if pressed(Key::N) && self.timeline.drag.is_none() && !input.modifiers.command {
+        if fired.pressed(Action::Snapping) && self.timeline.drag.is_none() {
             self.timeline.options.snapping = !self.timeline.options.snapping;
             self.timeline.options.save();
         }
-        if pressed(Key::V) && !input.modifiers.command && !input.modifiers.alt {
+        if fired.pressed(Action::NearestCut) {
             let at = ops::nearest_edit(&p, self.snap.timeline.position);
             self.timeline.set_edit(Some(EditSel {
                 at,
@@ -3142,7 +3192,7 @@ impl Workspace {
             }));
             self.timeline.transition = None;
         }
-        if pressed(Key::U) {
+        if fired.pressed(Action::CutSide) {
             for e in self
                 .timeline
                 .edits
@@ -3157,21 +3207,19 @@ impl Workspace {
                 };
             }
         }
-        if input.modifiers.command && input.modifiers.shift && pressed(Key::A) {
+        if fired.pressed(Action::SelectNothing) {
             self.timeline.set_edit(None);
         }
-        let step = if input.modifiers.shift {
-            p.settings.fps.as_f64().round() as i64
-        } else {
-            1
-        };
-        let nudge = if pressed(Key::Comma) {
-            -step
-        } else if pressed(Key::Period) {
-            step
-        } else {
-            0
-        };
+        let second = p.settings.fps.as_f64().round() as i64;
+        let nudge = [
+            (Action::TrimLeft, -1),
+            (Action::TrimRight, 1),
+            (Action::TrimSecondLeft, -second),
+            (Action::TrimSecondRight, second),
+        ]
+        .into_iter()
+        .find_map(|(action, by)| fired.pressed(action).then_some(by))
+        .unwrap_or(0);
         if nudge != 0 && self.timeline.lead_edit().is_some() {
             if self
                 .timeline
@@ -3183,34 +3231,28 @@ impl Workspace {
             }
             self.nudge_edits(nudge);
         }
-        if pressed(Key::D) && input.modifiers.command {
+        if fired.pressed(Action::ChangeDuration) {
             if !self.snap.selection.clips.is_empty() {
                 self.timeline.duration_dialog = Some(String::new());
             } else if self.selected_transition().is_some() {
                 self.open_fade_dialog();
             }
         }
-        if pressed(Key::R) && !input.modifiers.command && !self.snap.selection.clips.is_empty() {
+        if fired.pressed(Action::ChangeSpeed) && !self.snap.selection.clips.is_empty() {
             self.open_speed_dialog();
         }
-        if pressed(Key::W) && !input.modifiers.command {
+        if fired.pressed(Action::DynamicTrim) {
             self.toggle_dynamic();
         }
         if self.timeline.silence.is_none() {
-            let struck = |k: Key| {
-                input.events.iter().any(|e| {
-                    matches!(e, egui::Event::Key { key, physical_key, pressed: true, .. }
-                        if *key == k || *physical_key == Some(k))
-                })
-            };
-            if struck(Key::OpenBracket) && !input.modifiers.any() {
+            if fired.pressed(Action::PreviousKeyframe) {
                 self.step_keys(-1);
             }
-            if struck(Key::CloseBracket) && !input.modifiers.any() {
+            if fired.pressed(Action::NextKeyframe) {
                 self.step_keys(1);
             }
         }
-        self.silence_keys(input);
+        self.silence_keys(fired);
     }
 
     pub(crate) fn nudge_edit(&mut self, side: Side, by: i64) {

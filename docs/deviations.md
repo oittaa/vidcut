@@ -190,9 +190,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - File > Preferences (Ctrl+,) holds the settings of `preferences.toml` ([design/model.md](design/model.md#preferences)).
   - These are the theme, GPU use, and the memory and the audio device of the player.
-  - They also include the limit of the disk cache, the thumbnails, the proxy rules and folder, and the filler words.
+  - They also include the limit of the disk cache, the thumbnails, the proxy rules and folder, the filler words and the keys.
   - The viewer guides are in the same file. The Safe Area control sets them, not a page of this window.
-  - `preferences get|set|reset` give scripts access to them.
+  - `preferences get|set|reset` give scripts access to them. `keys.list`, `keys.set` and `keys.reset` give access to the keys.
   - A sidebar selects one page at a time:
     - General: the theme, the preferences file and Reset vidcut…
     - GPU
@@ -202,6 +202,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Proxies
     - Services: the keys of the paid services, and whether to ask before vidcut sends audio
     - Filler Words
+    - Keys ([X138](#x138-the-keys-are-a-page-of-preferences))
   - When vidcut cannot read the file, the window shows why, with Show in Folder and Reset Preferences.
   - Reset Preferences restores the defaults. It keeps the old file as `preferences.toml.bak`, or `.bak.2` and higher. It never replaces a backup.
   - Reset vidcut… on the General page, and `vidcut reset`, restore the state of a fresh install.
@@ -371,7 +372,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - F1, or Help in the top bar, opens the Help window. It lists every shortcut, with one action in each row.
   - A ? beside a less obvious action explains it in a few plain words.
-  - The user cannot change keys.
   - Under the shortcuts, Help tells in a few words what each upscaler of Super Scale does ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
   - It also tells what each Retime Process does ([X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
   - It lists only the choices that this computer has.
@@ -1241,7 +1241,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The File tab of the Inspector shows the clip details and edits the logging fields (p. 412).
 - **vidcut:**
   - The tag icon shows a strip at the top of the pool. The strip stays on until the user turns it off.
-  - The strip shows the camera name, when the clip has one.
+  - The strip shows the camera name, scene, shot and take, when the clip has them.
   - It shows the size, frame rate, codec, bits and chroma subsampling, SDR or HDR, and length of the selected clip.
   - It also shows the start timecode, the sound and the file size.
   - Clip Info shows all that vidcut knows of the file.
@@ -1249,7 +1249,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It reads the file again for its container and streams: codecs and profiles, bit rates, color tags, channel layouts, languages and tags (`media.details`).
   - Copy puts all of it on the clipboard as text.
 - **Why:**
-  - vidcut keeps no scene, shot or take. Thus the strip shows the format, which every file has.
+  - Every file has a format. Thus the strip tells something also when the camera name, scene, shot and take are empty.
   - One window with all the information, read fresh from the file, tells the format without a separate tool.
 
 ## X61. Speakers are numbered per file or per run, and joined by hand
@@ -2567,4 +2567,65 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - `clip.set` and `project.set` refuse the file and give the reason.
 - **Why:**
   - An error is better than a wrong picture that looks correct.
+  - The owner approved this difference.
+
+## X132. A Mosaic Blur Triangle keeps its own color in a corner at the side of the frame
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. The manual does not tell this.
+  - A Triangle has corners at the sides of the frame, from triangles with a middle off the frame.
+  - When that middle is 0.691 of a column step or more off the frame, the corners take other colors.
+  - Two renders of Aspect 2 at Pixel Frequency 25 differ in these corners, by up to 9.22/255 on 1211 pixels.
+- **vidcut:**
+  - A corner has the box at the middle of the pixel's own triangle, clamped into the frame, at each distance.
+- **Why:**
+  - The Resolve result does not repeat.
+  - The owner approved this difference.
+
+## X133. A Mosaic Blur cell edge exactly on a pixel gives the pixel to the cell on the right or below
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. The manual does not tell this.
+  - Where a cell edge falls exactly on a pixel, Resolve gives that pixel to either cell. The renders show no rule.
+- **vidcut:**
+  - That pixel goes to the cell on the right or below.
+- **Why:**
+  - vidcut has one fixed rule where the renders show none.
+  - The owner approved this difference.
+
+## X134. With FFmpeg 8, vidcut refuses an animated WebP
+
+- **Resolve:**
+  - Resolve imports an animated WebP.
+- **vidcut:**
+  - With FFmpeg 8, vidcut refuses an animated WebP on import. The message says that the file needs FFmpeg 9.0.
+  - FFmpeg 9 reads the file with `webp_anim`. Thus the check does not run there.
+- **Why:**
+  - FFmpeg 8 reads the file as a still of 2×2 pixels, and its picture never renders ([gotchas](gotchas.md#ffmpeg-reading-and-decoding)).
+  - A refusal gives the reason. A still that shows nothing does not.
+  - The owner approved this difference.
+
+## X135. One key has one action
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. The manual tells the warning and the badge (p. 125).
+  - A warning names each command that has the key.
+  - Assign keeps the key on all these commands, with a warning mark on each row.
+  - At most one command runs on a press.
+- **vidcut:**
+  - vidcut refuses a key that another action uses. The refusal names that action.
+  - The user gives that action another key first.
+- **Why:**
+  - One key on two actions is confusing.
+  - The rule that selects the action in Resolve is not known.
+  - The owner approved this difference.
+
+## X138. The keys are a page of Preferences
+
+- **Resolve:**
+  - Keyboard Customization is a separate window (p. 121).
+- **vidcut:**
+  - The keys are the Keys page of the Preferences window.
+- **Why:**
+  - vidcut stores the keys in the preferences, with the other settings of the user.
   - The owner approved this difference.

@@ -6,6 +6,7 @@ use serde_json::json;
 use vidcut_core::generators::{Pattern, draw};
 use vidcut_core::model::{Generator, GeneratorKind};
 use vidcut_core::ops::generators::made;
+use vidcut_core::ops::titles::default_length;
 use vidcut_core::render::Generated;
 use vidcut_core::request::GeneratorSettings;
 
@@ -129,14 +130,14 @@ impl Workspace {
                     }
                 });
             });
-        if let Some((card, press)) = grabbed
+        if let Some(((kind, label), press)) = grabbed
             && let Some(p) = self.project_shared()
         {
-            self.start_generator_drag(&p, card, press);
+            let card = (kind, GeneratorSettings::default(), label.to_string());
+            self.start_generator_drag(card, default_length(&p), press);
         }
         if let Some(kind) = doubled {
-            let at = self.snap.timeline.position;
-            self.send("generators.add", json!({ "kind": kind, "at": at }));
+            self.send("viewer.load", json!({ "generator": kind }));
         }
     }
 }

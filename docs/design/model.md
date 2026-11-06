@@ -162,6 +162,7 @@ Stills ([D38](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
 - A file is a still when an image demuxer reads it (`image2`, the `_pipe` demuxers).
 - A GIF or animated WebP (`gif`, `webp_anim`) of one frame is also a still.
 - An animated WebP of more frames lasts as long as its frames do. Why: `webp_anim` reports no duration.
+- `probe` refuses an animated WebP that `webp_pipe` reads ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)).
 
 Multicam layout:
 
@@ -190,6 +191,7 @@ Multicam layout:
 Media fields:
 
 - `camera` is the name of the camera, as text (spec §3). The file does not give it, and `media.set` sets it.
+- `created`, `scene`, `shot` and `take` are text (spec §3). The file does not give them, and `media.set` sets them. The project leaves out an empty one.
 - `color_space` (`ColorSpace`, spec §3) reads a file whose color tags are wrong as another space.
   - `Media::video_as_read` is the `VideoInfo` of the file, read in that space. Render pieces carry it.
   - `VideoReader` retags each decoded frame with it (`color::retag`). This drops the HDR side data.
@@ -212,6 +214,13 @@ Media fields:
   - `PoolFiles` and `otio::same_media` never take a subclip for its file.
   - An OTIO file gives a clip of a subclip as a clip of the whole file, at the right time.
   - `Speakers::share` gives a new subclip the people of its parent.
+  - `ops::set_subclip_limits` changes the part (`media.subclip_set`). `Project::subclip_span` gives the part in frames of the file.
+    - The source frames count from the start of the part. Thus a new start moves each frame that counts from it by the same amount.
+    - `ops::shift_source` moves `source_in`, the keyframes and the `from` of the effects of each clip. A clip with a `Speed` keeps its keyframes, because they count on the retimed source.
+    - The `head` and `tail` of a `GroupClip` take the change, so that its visible part stays.
+    - `validate` refuses a clip outside its media, so `ops::set_subclip_limits` refuses the change first and names the clip.
+    - A `Marker` can be outside the part for this reason. Nothing shows it there, and a later change can bring it back.
+    - `Tiles` forgets the pictures of the item, because their frames count from the start of the part.
 - `markers` holds the markers on the source clip, at its source frames (`ops::add_source_marker`). `Project::marker` finds a marker by id in the timeline or in a source clip.
 
 Folders:
@@ -257,6 +266,7 @@ Ranges and resolution:
 `ops::source_overwrite` holds `edit.source_overwrite`. The behavior is in [spec §7.2](../cut-page-spec.md#72-edit-functions).
 
 - `origin` turns `MediaInfo.timecode` into project frames with `StartTimecode::frames_at`. A file with no tag counts as 0.
+- A generator as the source has `origin` 0 and the length of `ops::titles::default_length`.
 - `shown` gives the timecode range that a clip shows, from `Clip::source_at`.
   - A clip with no media or with a still has no such range. Thus generators, titles and compound clips do not count.
 - `first_where` takes clips by the order of the tracks: video from the lowest, then audio.
@@ -264,7 +274,8 @@ Ranges and resolution:
   - A video clip and an audio clip that give different positions under one rule make the edit fail (`disagree`). No measurement tells which of them wins.
 - `track_above` gives the track. `place_on_top` uses it too.
 - The result names the clip, its track, the `reference` and the `playhead`. `playhead_after_edit` seeks to this `playhead`.
-- The GUI sends no `range` (`edit_from`). The core then reads `Media.marks`, and it can tell source marks from no marks.
+- The GUI sends no `range` for media (`edit_from`). The core then reads `Media.marks`, and it can tell source marks from no marks.
+- The GUI sends `range` for a generator with marks. Why: its marks are in the live session, not in the project.
 
 ## Ids
 
@@ -445,8 +456,10 @@ Writing:
   - `generators::timeline_code` gives the code values of a color in the colors of the timeline.
   - `Generator::chart` gives the `Chart` of a kind that has no value over time. A `Chart` draws as rows of columns, from the size of the timeline. Its code values do not change with the colors of the timeline.
 - `generators::name` gives the name of a generator. `generators::shown` gives its JSON form, for `generators.list` and `clip_json`.
-- `ops::generators` holds the edits. `generators.add` and `titles.add` share `ops::titles::add_block`.
+- `ops::generators` holds the edits. `generators.add` and `titles.add` share `ops::titles::add_block`. `ops::block_clip` makes the clip of a title or a generator, for `add_block` and `make_clip`.
 - `GeneratorKind` is the kind that `generators.add` takes. `GeneratorSettings` holds the values of `generators.add` and `generators.set`. A kind refuses a value that it does not have.
+- `SourceParams`, `viewer.load` and `frame.render` also take a generator. `ops::generators::source_of` reads it.
+- `render::generator_tape` plans a generator alone on V1. Why: the source viewer and `frame.render` then draw it by the path of a clip on the timeline.
 - `ops::keyframes` keeps the keyframes of a volume and of a center on one path (`Number`).
 
 ## Pictures
@@ -460,7 +473,7 @@ Writing:
   - a `Crop` of each side, and the softness of its edges (`crop_softness`)
   - a `DynamicZoom`: a start and an end `ZoomBox`, and an `Ease`
   - its `composite_mode` (`CompositeMode`, `Picture::mode`) and its `opacity` (`Picture::opaque`)
-  - its `effects`, in their order: each an `Effect` with an `EffectKind`, such as a `GaussianBlur` ([export](export.md#effects))
+  - its `effects`, in their order: each an `Effect` with an `EffectKind`, a `GaussianBlur` or a `MosaicBlur` ([export](export.md#effects))
 - Each value is left out at its usual value. A picture that `Picture::is_usual` accepts is only fitted into the frame.
 - Each value of `keyframes::PictureValue` can hold `Keyframe`s beside the plain value. `Picture::is_usual` is false while a value has keyframes.
   - These values are position, zoom, rotation, the anchor point, pitch, yaw, each crop side, the crop softness and the opacity.
@@ -617,9 +630,13 @@ Which kept transitions play (`otio::transitions`):
 The file:
 
 - Preferences are not in the project. They are in `preferences.toml` in the config dir (`preferences::path`).
-- The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services and viewer ([the disk cache limit](analysis.md#the-disk-cache-limit)).
+- The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services, viewer and keys ([the disk cache limit](analysis.md#the-disk-cache-limit)).
 - `ViewerPrefs.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
 - `ViewerPrefs.scopes` (`Scopes`) holds which scopes of the viewer are on.
+- `Preferences.keys` holds the keys of each `Action` that the user changed.
+  - An action that is not in the section has its default keys.
+  - An action with an empty list has no key.
+  - A file that gives one key to two actions fails to load.
 - No key of a service is ever in the file.
 
 Requests:
@@ -629,10 +646,11 @@ Requests:
   - The entries of a map, such as the languages of `transcripts.fillers`, are data, not keys. They stay.
 - `preferences.reset` keeps the old file under the first free backup name (`preferences.toml.bak`, then `.bak.2` and on), then writes the defaults. Why: a second reset never replaces the backup of the first.
 - `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it, and replaces the file atomically.
+- `keys.set` and `keys.reset` are projectless too. They change `Preferences.keys` through `Bindings`, which refuses a key that another action uses.
 - `viewer.guides` changes the same `Guides` (`Guides::applied`). With no fields, it toggles the framing guides.
 - `viewer.scopes` changes the same `Scopes` (`ScopesPatch`). With no fields, it tells which scopes are on.
 - Code reads the file when it needs a value (`preferences::load`).
-- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words and the render cache. It also follows the viewer guides and the viewer scopes.
+- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words and the render cache. It also follows the viewer guides, the viewer scopes and the keys.
 
 Reset:
 
