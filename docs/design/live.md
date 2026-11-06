@@ -340,6 +340,10 @@ The bar and the Jobs button:
 - The Generators page of the Effects tab (`EffectsTab`, `generator_browser::CARDS`) draws its cards. A dragged card (`Gesture::Generator`) drops as `generators.add`.
   - Each card shows the picture of its kind with the default values, through `generators::draw`.
   - A card draws at the size of a full frame, and then shows a part of its pixels. Why: the layout of a bar pattern depends on the size, and a small SMPTE Color Bar shows only its left side.
+  - A double-click on a card sends `viewer.load` with `generator`. `Live::load_generator` holds the source in `Live.source_generator`. `SourceContent::Generator` loads `render::generator_tape` in the source player.
+  - `SourceGenerator` holds the kind, its settings, the length and the marks, for this session. Why: a generator is not a file of the project, so it has no `Media.marks`.
+  - `Snapshot::viewer_marks` gives the marks of the grid or of the open generator. The scroll area, the Duration field and the keys of the viewer use it, with `viewer.marks.set`.
+  - `SourceGenerator::params` gives the source of an edit (`Workspace::edit_sources`). A drag from the viewer starts a `Gesture::Generator` with the marked length.
 
 **Pictures.**
 
@@ -426,6 +430,7 @@ The bar and the Jobs button:
 - The filmstrips of the Trim Editor use the same tiles (`vidcut_core::ops::filmstrip`, `TrimAnchor`).
 - An `Lru` keeps the order in which the tiles were used. `Tiles::evict` removes the oldest tile until the cache is under its budget, and stops at a tile that the last paint showed. Why: each step of an eviction is one operation, with no scan of the kept tiles.
 - Another `Lru` keeps the tiles that did not decode (`FAILED_KEPT`). A tile that leaves it is tried once more when it shows again.
+- All workers share one `Lru` of the blocks that they read from disk (`Blocks`, `BLOCKS_KEPT`). A worker that writes a block removes it from this `Lru`.
 
 **Imports** ([deviation X66](../deviations.md#x66-files-and-folders-dropped-on-the-window-go-into-the-open-bin)).
 
@@ -443,16 +448,16 @@ The bar and the Jobs button:
 
 **The pool's cards** ([spec §3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675)).
 
-- `Workspace::cards` draws the Metadata view. `cluster` gives the heading of each card. Each run of one heading is a block of rows, and only the rows in view are drawn.
+- `Workspace::cards` draws the Metadata view. `cluster` gives the heading of each card, and `main_description` gives its first line. Each run of one heading is a block of rows, and only the rows in view are drawn.
 - `Workspace::tile_picture` draws the picture of a tile and of a card.
-- `PoolView::media` gives the order. With `PoolMode::Metadata` and `PoolSort::Name`, it goes by `first_letter` and then by timecode.
+- `PoolView::media` gives the order. With `PoolMode::Metadata` and `PoolSort::Name`, it goes by `first_letter` and then by timecode. `named_order` puts a clip with no value first.
   - Why: Source Tape reads the same order. Thus `pool.set` refreshes the tape when the view goes to or from the cards.
 
 **Media details.**
 
 - The metadata strip of the pool (`Workspace::metadata_strip`) shows what the project keeps of the chosen media (`clip_info::glance`). `pool.json` in the config folder keeps it on or off.
 - Clip Info (`Workspace::clip_info_window`) adds what `media.details` reads from the file (`probe::details`).
-- Its Camera row is a text field (`Workspace::camera_field`). Enter or a click elsewhere sends `media.set`, and Escape cancels.
+- Its Date Created, Camera, Scene, Shot and Take rows are text fields (`Workspace::note_field`). Enter or a click elsewhere sends `media.set`, and Escape cancels.
 
 **The Transcription window** (`TranscriptionUi`, `Workspace::transcription_window`).
 
@@ -518,7 +523,7 @@ The bar and the Jobs button:
 - The sound has its own `Player`, made at the first Play, on the real output. `render::places_sound` gives it a black picture and one sound lane for each row.
 - That `Player` reuses the engine's mix, which adds lanes with no scaling. `Player::set_lane_gain` silences the other lanes under Solo. Each new plan clears the gains, so `SyncClips::hear` sets them again.
 - The clock of that `Player` is the window's playhead. Live does not know it, so the transport and the timeline's playhead do not move.
-- `nudge_of` reads the key events and also takes the key's place, as the other shortcuts do. The key check of egui compares only the sign of the key, and on a Nordic layout Shift+Comma makes another sign.
+- `nudge_of` finds the action of each key event with `owner`, as the other shortcuts do.
 
 **J and L with K held** ([spec D54](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). `Shuttle` tells a tap from a hold by the time between the press and the release of a key. It gives a frame step, slow play or its stop, for the player or for Dynamic Trim.
 
@@ -552,7 +557,32 @@ Fonts:
 
 Keys:
 
-- The keys are one table, `vidcut_core::shortcuts`. The Help window (`crates/vidcut/src/gui/help.rs`) and `keys.list` both read it.
+- The default keys are one table, `SHORTCUTS` in `vidcut_core::shortcuts`. Each `Keys::Own` row names an `Action` and its default keys.
+- `Bindings` joins the table and `Preferences.keys`. It gives the keys of an action and the owner of a key (`Combo`).
+- `Snapshot.bindings` holds the `Bindings`. `Live` reads them again at `Msg::PreferencesChanged`. Thus a change from the CLI reaches a running GUI.
+- Help (`crates/vidcut/src/gui/help.rs`), the menus and `keys.list` show the keys in force.
+
+From an event to an action (`crates/vidcut/src/gui/shortcuts.rs`):
+
+- `owner` gives the action of one event. `Fired` holds the actions of the events of one frame, and `Workspace::keys` reads it.
+- The modifiers must be equal to the modifiers of the `Combo`.
+- A modifier that a sign needs on the layout does not count. Why: Shift+0 makes the equals sign on a Nordic layout, and the binding is that sign.
+- The two brackets, the comma, the period and the backslash also match by the place of the key. Why: on a Nordic layout these places make other signs, and the keys stay at the same place.
+- The other signs fire from `Event::Text`. Why: a dead key on a Nordic layout reports `Equals` and types nothing.
+- Ctrl+C, Ctrl+X and Ctrl+V reach egui as `Event::Copy`, `Event::Cut` and `Event::Paste`. `owner` reads them as those three keys. On Windows, Ctrl+Insert, Shift+Delete and Shift+Insert make the same events.
+
+Order:
+
+- The windows and panels take their keys first: `TranscriptionUi::take_keys`, `Workspace::sync_clips_keys`, `Workspace::history_keys`, `Workspace::sync_numbers` and `Workspace::multi_numbers`.
+- `TranscriptionUi::take_keys` also reads `Panel::Transcription`. Thus a key can have one action in that window and another action in the main window.
+- `Workspace::viewer_keys` takes the viewer frame keys with `take`, after the windows that ask for an answer. Why: Esc closes the question first.
+- `Shuttle` and the skim use `held`, because they need a key that stays down.
+
+The Keys page of Preferences:
+
+- `Workspace::capture_key` runs at the start of `Workspace::keys`. While the page waits for a key, it removes every key event of the frame. Thus the key fires no action.
+- `caught` gives the `Combo` of the event and its owner. A key that another action uses stays unset, and the page names that action.
+- The page sends `keys.set` and `keys.reset`, as the CLI does.
 
 ## From a key press to a frame
 

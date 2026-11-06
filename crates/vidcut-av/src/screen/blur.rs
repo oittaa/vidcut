@@ -1,16 +1,12 @@
 use vidcut_core::lru::Lru;
 use vidcut_core::model::GlowOutput;
-use vidcut_core::place::{
-    Blurring, GlowSpread, Glowing, Level, Placing, Soft, Tiling, Work, Working,
-};
+use vidcut_core::place::{Blurring, GlowSpread, Glowing, Level, Placing, Tiling, Work, Working};
 
 use super::{Gpu, MIXING, begin};
 
 const KERNEL: usize = 35;
 
 const MOST: f64 = 128.0;
-
-const OPEN: f64 = 1e6;
 
 const REACH: f64 = 4.0;
 
@@ -400,15 +396,15 @@ fn glow_bytes(
     out
 }
 
-struct Texture {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
+pub(super) struct Texture {
+    pub(super) texture: wgpu::Texture,
+    pub(super) view: wgpu::TextureView,
 }
 
 impl Texture {
-    fn new(gpu: &Gpu, size: (u32, u32)) -> Self {
+    pub(super) fn new(gpu: &Gpu, size: (u32, u32)) -> Self {
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("vidcut blur"),
+            label: Some("vidcut layer"),
             size: wgpu::Extent3d {
                 width: size.0,
                 height: size.1,
@@ -460,6 +456,33 @@ impl Blurred {
         }
         self.layers.resize_with(n, || None);
         self.masks.resize_with(n, || None);
+    }
+
+    pub(super) fn make_scratch(&mut self, gpu: &Gpu) {
+        let size = self.size;
+        self.scratch
+            .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
+    }
+
+    pub(super) fn canvas_effects(
+        &mut self,
+        gpu: &Gpu,
+        canvas: &Texture,
+        (placing, effects): (&Placing, &[Working]),
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        let scratch = self
+            .scratch
+            .as_ref()
+            .expect("made for the effects of a mix");
+        let cut = canvas_bind(gpu, &canvas.view, placing, (0.0, 0.0));
+        add(gpu, &scratch[0].view, &cut, encoder);
+        encoder.copy_texture_to_texture(
+            scratch[0].texture.as_image_copy(),
+            canvas.texture.as_image_copy(),
+            canvas.texture.size(),
+        );
+        effects_into(gpu, canvas, (scratch, &mut self.spare), effects, encoder);
     }
 
     pub(super) fn drop_layer(&mut self, i: usize) {
@@ -720,19 +743,36 @@ fn effects_into(
 pub(super) fn opened(placing: &Placing) -> Placing {
     let mut out = placing.clone();
     for l in &mut out.levels {
-        l.edge = [-OPEN, -OPEN, OPEN, OPEN];
-        l.soft = Soft::default();
+        l.open();
     }
     out
 }
 
-fn mask_bind(gpu: &Gpu, view: &wgpu::TextureView, placing: &Placing) -> wgpu::BindGroup {
+fn levels_bind(
+    gpu: &Gpu,
+    view: &wgpu::TextureView,
+    placing: &Placing,
+    [opacity, mode, adds, made]: [f64; 4],
+) -> wgpu::BindGroup {
     let inner = super::innermost(Some(placing));
     let levels = super::level_floats(inner);
     let mut floats = vec![0.0_f64; super::PARAMS / 4 - levels.len()];
-    floats[40..45].copy_from_slice(&[inner.len() as f64, 1.0, 0.0, 0.0, 4.0]);
+    floats[40..45].copy_from_slice(&[inner.len() as f64, opacity, mode, adds, made]);
     floats.extend(levels);
     picture_bind(gpu, &floats, (view, view))
+}
+
+fn mask_bind(gpu: &Gpu, view: &wgpu::TextureView, placing: &Placing) -> wgpu::BindGroup {
+    levels_bind(gpu, view, placing, [1.0, 0.0, 0.0, 4.0])
+}
+
+pub(super) fn canvas_bind(
+    gpu: &Gpu,
+    view: &wgpu::TextureView,
+    placing: &Placing,
+    (mode, adds): (f64, f64),
+) -> wgpu::BindGroup {
+    levels_bind(gpu, view, placing, [1.0, mode, adds, 6.0])
 }
 
 pub(super) fn shown_bind(

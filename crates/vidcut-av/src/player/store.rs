@@ -2,11 +2,40 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard};
 use std::time::Instant;
 
-use vidcut_core::lru::Uncapped;
+use vidcut_core::lru::{ByBytes, Uncapped};
 
-use super::frame::Picture;
+use super::frame::{Picture, TitlePicture};
 use super::plan::Id;
+use super::{subtitles, titles};
 use crate::error::Result;
+
+const TITLES_PART: usize = 2;
+
+const TITLE_ENTRY_BYTES: usize = 4 << 10;
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) enum TitleKey {
+    Title(Box<titles::Key>),
+    Cues(subtitles::Key),
+}
+
+pub(crate) type TitlePictures = Arc<[Option<Arc<TitlePicture>>]>;
+
+#[derive(Default)]
+pub(crate) struct HeldTitles(Vec<(TitleKey, TitlePictures)>);
+
+impl HeldTitles {
+    pub(crate) fn new(held: Vec<(TitleKey, TitlePictures)>) -> Self {
+        Self(held)
+    }
+
+    pub(crate) fn get(&self, key: &TitleKey) -> Option<TitlePictures> {
+        GLOBAL.title_pictures(key).or_else(|| {
+            let (_, pictures) = self.0.iter().find(|(k, _)| k == key)?;
+            Some(pictures.clone())
+        })
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -80,6 +109,7 @@ struct Inner {
     cap: Option<usize>,
     lent_need: usize,
     memory_lent: usize,
+    titles: ByBytes<TitleKey, TitlePictures>,
 }
 
 struct Loan {
@@ -150,7 +180,7 @@ pub(crate) fn lend_memory(bytes: usize) -> LentMemory {
 
 pub(crate) fn memory_cap() -> Option<usize> {
     let inner = GLOBAL.lock();
-    (inner.memory_lent > 0).then(|| inner.limit(Kind::Memory))
+    (inner.memory_lent > 0).then(|| inner.whole(Kind::Memory))
 }
 
 static GLOBAL: LazyLock<Store> = LazyLock::new(|| Store::new(super::GB, super::GB));
@@ -234,6 +264,7 @@ impl Store {
                 cap: None,
                 lent_need: 0,
                 memory_lent: 0,
+                titles: ByBytes::new(),
             }),
             landed: Condvar::new(),
             down: Picture::copied_down,
@@ -319,7 +350,7 @@ impl Store {
         let mut inner = self.lock();
         inner.held.remove(&owner);
         inner.owners = inner.owners.saturating_sub(1);
-        let gone = (inner.owners == 0).then(|| inner.empty());
+        let gone = (inner.owners == 0).then(|| (inner.empty(), std::mem::take(&mut inner.titles)));
         drop(inner);
         drop(gone);
     }
@@ -400,6 +431,24 @@ impl Store {
     pub(crate) fn wake(&self) {
         self.landed.notify_all();
     }
+
+    pub(crate) fn title_pictures(&self, key: &TitleKey) -> Option<TitlePictures> {
+        self.lock().titles.get(key).cloned()
+    }
+
+    pub(crate) fn keep_titles(&self, key: TitleKey, pictures: TitlePictures) {
+        let drawn: usize = pictures.iter().flatten().map(|p| p.rgba.len()).sum();
+        let bytes = drawn + TITLE_ENTRY_BYTES;
+        let mut inner = self.lock();
+        inner.titles.insert(key, pictures, bytes);
+        let down = inner.evict(Kind::Memory, None);
+        drop(inner);
+        self.bring_down(down, None);
+    }
+
+    pub(crate) fn title_bytes(&self) -> usize {
+        self.lock().titles.bytes()
+    }
 }
 
 impl Inner {
@@ -471,7 +520,7 @@ impl Inner {
         if self.shared { Kind::Memory } else { kind }
     }
 
-    fn limit(&self, pool: Kind) -> usize {
+    fn whole(&self, pool: Kind) -> usize {
         let mut budget = self.budget[pool.index()];
         if pool == Kind::Memory {
             budget = budget.saturating_sub(self.memory_lent);
@@ -480,6 +529,14 @@ impl Inner {
             return budget;
         }
         self.cap.map_or(budget, |c| budget.min(c))
+    }
+
+    fn limit(&self, pool: Kind) -> usize {
+        let whole = self.whole(pool);
+        match pool {
+            Kind::Memory => whole.saturating_sub(self.titles.bytes()),
+            Kind::Video => whole,
+        }
     }
 
     fn counted(&self, pool: Kind) -> usize {
@@ -521,6 +578,10 @@ impl Inner {
 
     fn evict(&mut self, kind: Kind, keep: Option<&Id>) -> Vec<(Id, Arc<Picture>)> {
         let pool = self.pool(kind);
+        if pool == Kind::Memory {
+            let room = self.whole(pool) / TITLES_PART;
+            self.titles.fit(room);
+        }
         let room_for = keep
             .and_then(|k| self.pictures.peek(k))
             .map_or_else(Vec::new, |p| p.pools());

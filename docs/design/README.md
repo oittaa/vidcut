@@ -155,12 +155,13 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
 - `cube::parse` refuses a file that does not give a whole table, and names the reason:
   - no size line, or a size below 2;
   - a keyword in lower case;
-  - too few rows, or a row that is not three finite numbers;
-  - a range with no width.
+  - too few rows, or a row that is not three finite numbers.
 - `Editor` reads the file when a request sets the path (`checked_lut`). Thus a request cannot put a broken file into the project.
 - A request refuses an input LUT on a clip with no media picture: a generator, a title, a compound clip or a sound clip. `ops::set_clips` tells this.
 - A file that goes away later stops an export or a `frame.render` with the reason. The viewer shows the picture with no output LUT, and the player's status holds the reason.
 - `fs_lut` works on colors that are not premultiplied. It leaves a pixel with no alpha as it is.
+- The canvas of a frame with no alpha starts as opaque black. Thus the output LUT also changes a gap, and the part of a clip that its alpha lets through.
+- `fs_convert_lut` gives the color of a clip before its alpha. Thus a clip with alpha gets the table first, and the draw applies the alpha after that.
 - `fs_lut` reads the canvas, and the canvas holds 16-bit floats. `fs_convert_lut` reads the picture before it goes to 16-bit floats. Thus a table with steep steps gives a larger error as an output LUT than as an input LUT.
 
 ## Rules the code follows
@@ -190,7 +191,7 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
 | snapshot | what the GUI draws, published by the live core | `Snapshot` |
 | origin | a cache stamp of the path, size and time of a file | `Origin` |
 | kept | data of another editor that vidcut carries without a model of it | `Kept` |
-| lru | a cache of a set number of entries that lets the least recently used go; an `Uncapped` one has no set number, and its owner decides what goes | `Lru`, `Uncapped` |
+| lru | a cache of a set number of entries that lets the least recently used go; a `ByBytes` one has a limit in bytes; an `Uncapped` one has no set number, and its owner decides what goes | `Lru`, `ByBytes`, `Uncapped` |
 
 ## Pages
 

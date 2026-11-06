@@ -1,6 +1,5 @@
 use std::sync::{Arc, Mutex};
 
-use vidcut_core::lru::Lru;
 use vidcut_core::model::{Cue, Picture, Place, SubtitleStyle};
 use vidcut_core::render::Placed;
 use vidcut_core::subtitles::Shown as Words;
@@ -8,8 +7,7 @@ use vidcut_core::subtitles::Shown as Words;
 use super::frame::{TitleOver, TitlePicture};
 use super::lock;
 use super::plan::Plan;
-
-const KEPT: usize = 64;
+use super::store::{self, HeldTitles, TitleKey, TitlePictures};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SubtitleView {
@@ -18,8 +16,9 @@ pub struct SubtitleView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct Key {
+pub(crate) struct Key {
     size: (u32, u32),
+    timeline: u32,
     cues: Vec<(Words, Place, SubtitleStyle)>,
 }
 
@@ -27,16 +26,17 @@ type Drawn = Vec<(Key, Vec<Placed>)>;
 
 #[derive(Default)]
 struct Kept {
-    pictures: Lru<Key, Vec<Arc<TitlePicture>>, KEPT>,
+    held: HeldTitles,
     last: Option<Drawn>,
 }
 
 impl Kept {
-    fn overs(&mut self, drawn: &Drawn) -> Option<Vec<TitleOver>> {
+    fn overs(&self, drawn: &Drawn) -> Option<Vec<TitleOver>> {
         let mut out = Vec::new();
         for (key, placed) in drawn {
-            let pictures = self.pictures.get(key)?.clone();
-            out.extend(pictures.into_iter().map(|p| over(p, placed.clone())));
+            let pictures = self.held.get(&TitleKey::Cues(key.clone()))?;
+            let overs = pictures.iter().flatten();
+            out.extend(overs.map(|p| over(p.clone(), placed.clone())));
         }
         Some(out)
     }
@@ -61,7 +61,7 @@ pub(crate) struct Subtitles {
     kept: Mutex<Kept>,
 }
 
-fn drawn_at(timed: &[Timed], fps: f64, size: (u32, u32), t: i64) -> Drawn {
+fn drawn_at(timed: &[Timed], fps: f64, size: (u32, u32), timeline: u32, t: i64) -> Drawn {
     let mut plain = Vec::new();
     let mut alone = Vec::new();
     for c in timed.iter().filter(|c| c.start <= t && t < c.end) {
@@ -83,6 +83,7 @@ fn drawn_at(timed: &[Timed], fps: f64, size: (u32, u32), t: i64) -> Drawn {
             Some(picture) => alone.push((
                 Key {
                     size,
+                    timeline,
                     cues: vec![cue],
                 },
                 vec![Placed {
@@ -98,7 +99,12 @@ fn drawn_at(timed: &[Timed], fps: f64, size: (u32, u32), t: i64) -> Drawn {
         }
     }
     if !plain.is_empty() {
-        alone.insert(0, (Key { size, cues: plain }, Vec::new()));
+        let key = Key {
+            size,
+            timeline,
+            cues: plain,
+        };
+        alone.insert(0, (key, Vec::new()));
     }
     alone
 }
@@ -161,12 +167,19 @@ impl Subtitles {
     }
 
     pub(crate) fn shown(&self, plan: &Plan, t: i64) -> (Vec<TitleOver>, bool) {
-        self.shown_at(plan.fps().as_f64(), plan.size(), t)
+        let size = plan.size();
+        self.shown_at(plan.fps().as_f64(), size, size.1, t)
     }
 
-    pub(crate) fn shown_at(&self, fps: f64, size: (u32, u32), t: i64) -> (Vec<TitleOver>, bool) {
+    pub(crate) fn shown_at(
+        &self,
+        fps: f64,
+        size: (u32, u32),
+        timeline: u32,
+        t: i64,
+    ) -> (Vec<TitleOver>, bool) {
         let timed = lock(&self.timed).clone();
-        let drawn = drawn_at(&timed, fps, size, t);
+        let drawn = drawn_at(&timed, fps, size, timeline, t);
         if drawn.is_empty() {
             return (Vec::new(), true);
         }
@@ -175,50 +188,74 @@ impl Subtitles {
             kept.last = Some(drawn);
             return (out, true);
         }
-        let last = kept.last.clone();
-        let stand_in = last.and_then(|l| kept.overs(&l));
+        let stand_in = kept.last.as_ref().and_then(|l| kept.overs(l));
         (stand_in.unwrap_or_default(), false)
     }
 
     pub(crate) fn draw(&self, plan: &Plan, t: i64) -> bool {
         let size = plan.size();
-        self.draw_at(plan.fps().as_f64(), size, size.1, t)
+        self.pictures_at(plan.fps().as_f64(), size, size.1, t).0
     }
 
-    pub(crate) fn draw_at(&self, fps: f64, size: (u32, u32), timeline: u32, t: i64) -> bool {
-        let timed = lock(&self.timed).clone();
-        let mut painted = false;
-        for (key, _) in drawn_at(&timed, fps, size, t) {
-            if lock(&self.kept).pictures.contains(&key) {
-                continue;
-            }
-            let (w, h) = key.size;
-            let cues: Vec<crate::burn::Painted<'_>> = key
-                .cues
-                .iter()
-                .map(|(shown, place, style)| crate::burn::Painted {
-                    shown,
-                    place: *place,
-                    style,
-                })
-                .collect();
-            let pictures: Vec<Arc<TitlePicture>> = crate::burn::paint(&cues, w, h, timeline)
-                .all()
-                .into_iter()
-                .map(|s| {
-                    Arc::new(TitlePicture {
-                        left: s.x,
-                        top: s.y,
-                        width: s.width,
-                        height: s.height,
-                        frame: (w, h),
-                        rgba: s.premultiplied(),
-                    })
-                })
-                .collect();
-            lock(&self.kept).pictures.insert(key, pictures);
-            painted = true;
-        }
+    pub(crate) fn hold(&self, plan: &Plan, t: i64) -> bool {
+        let size = plan.size();
+        self.hold_at(plan.fps().as_f64(), size, size.1, t)
+    }
+
+    pub(crate) fn hold_at(&self, fps: f64, size: (u32, u32), timeline: u32, t: i64) -> bool {
+        let (painted, held) = self.pictures_at(fps, size, timeline, t);
+        lock(&self.kept).held = HeldTitles::new(held);
         painted
     }
+
+    fn pictures_at(
+        &self,
+        fps: f64,
+        size: (u32, u32),
+        timeline: u32,
+        t: i64,
+    ) -> (bool, Vec<(TitleKey, TitlePictures)>) {
+        let timed = lock(&self.timed).clone();
+        let mut painted = false;
+        let mut out = Vec::new();
+        for (key, _) in drawn_at(&timed, fps, size, timeline, t) {
+            let whole = TitleKey::Cues(key.clone());
+            let found = lock(&self.kept).held.get(&whole);
+            let pictures = found.unwrap_or_else(|| {
+                let pictures = painted_of(&key);
+                store::global().keep_titles(whole.clone(), pictures.clone());
+                painted = true;
+                pictures
+            });
+            out.push((whole, pictures));
+        }
+        (painted, out)
+    }
+}
+
+fn painted_of(key: &Key) -> TitlePictures {
+    let (w, h) = key.size;
+    let cues: Vec<crate::burn::Painted<'_>> = key
+        .cues
+        .iter()
+        .map(|(shown, place, style)| crate::burn::Painted {
+            shown,
+            place: *place,
+            style,
+        })
+        .collect();
+    crate::burn::paint(&cues, w, h, key.timeline)
+        .all()
+        .into_iter()
+        .map(|s| {
+            Some(Arc::new(TitlePicture {
+                left: s.x,
+                top: s.y,
+                width: s.width,
+                height: s.height,
+                frame: (w, h),
+                rgba: s.premultiplied(),
+            }))
+        })
+        .collect()
 }
