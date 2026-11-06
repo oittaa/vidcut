@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 use vidcut_core::disk_cache::{self, Policy};
 use vidcut_core::preferences::{Preferences, PreferencesPatch};
+use vidcut_core::shortcuts::{Action, Bindings, Combo, Keys, SHORTCUTS, Shortcut, key_name};
 use vidcut_core::{Error, Result};
 
 use crate::{paths, themes, thumbcache};
@@ -68,6 +69,7 @@ fn read_noting() -> Result<(Preferences, Vec<String>)> {
 fn known() -> toml::Table {
     let mut every = Preferences::default();
     every.cache.gb = Some(1);
+    every.keys = Action::ALL.iter().map(|a| (*a, Vec::new())).collect();
     match toml::Value::try_from(every) {
         Ok(toml::Value::Table(t)) => t,
         _ => toml::Table::new(),
@@ -246,6 +248,80 @@ pub fn set_scopes(patch: vidcut_core::preferences::ScopesPatch, dry_run: bool) -
         write(&p)?;
     }
     Ok(json!({ "scopes": p.viewer.scopes }))
+}
+
+pub fn bindings() -> Bindings {
+    read()
+        .ok()
+        .and_then(|p| Bindings::of(&p.keys).ok())
+        .unwrap_or_default()
+}
+
+fn key_row(b: &Bindings, s: &Shortcut) -> Value {
+    let shown = |parts: Vec<&str>| {
+        parts
+            .into_iter()
+            .map(key_name)
+            .collect::<Vec<_>>()
+            .join("+")
+    };
+    let (action, default_keys, custom, follows) = match s.keys {
+        Keys::Own(a, _) => {
+            let defaults: Vec<String> = a.default_keys().iter().map(Combo::shown).collect();
+            (Some(a), defaults, b.is_custom(a), Vec::new())
+        }
+        Keys::Same(a) => (None, Vec::new(), false, vec![a]),
+        Keys::Hold(first, then) => (None, Vec::new(), false, vec![first, then]),
+        Keys::Pointer(_) => (None, Vec::new(), false, Vec::new()),
+    };
+    json!({
+        "group": s.group,
+        "group_title": s.group.title(),
+        "title": s.title,
+        "action": action,
+        "keys": b.row(s).into_iter().map(shown).collect::<Vec<_>>(),
+        "default_keys": default_keys,
+        "custom": custom,
+        "follows": follows,
+        "explanation": s.explanation.map(|e| b.explain(e)),
+    })
+}
+
+pub fn keys_list() -> Result<Value> {
+    let b = Bindings::of(&read()?.keys)?;
+    let rows: Vec<Value> = SHORTCUTS.iter().map(|s| key_row(&b, s)).collect();
+    Ok(json!({ "shortcuts": rows }))
+}
+
+fn keys_changed(p: &Preferences, before: &Bindings, dry_run: bool) -> Result<Value> {
+    p.check()?;
+    let after = Bindings::of(&p.keys)?;
+    if !dry_run {
+        write(p)?;
+    }
+    let changed: Vec<Value> = SHORTCUTS
+        .iter()
+        .filter(|s| matches!(s.keys, Keys::Own(a, _) if before.keys(a) != after.keys(a)))
+        .map(|s| key_row(&after, s))
+        .collect();
+    let rows: Vec<Value> = SHORTCUTS.iter().map(|s| key_row(&after, s)).collect();
+    Ok(json!({ "changed": changed, "shortcuts": rows }))
+}
+
+pub fn keys_set(action: Action, keys: &[Combo], dry_run: bool) -> Result<Value> {
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = load()?;
+    let before = Bindings::of(&p.keys)?;
+    p.keys = before.set(action, keys)?;
+    keys_changed(&p, &before, dry_run)
+}
+
+pub fn keys_reset(action: Option<Action>, dry_run: bool) -> Result<Value> {
+    let _one = SETTING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = load()?;
+    let before = Bindings::of(&p.keys)?;
+    p.keys = before.reset(action)?;
+    keys_changed(&p, &before, dry_run)
 }
 
 fn write(p: &Preferences) -> Result<()> {

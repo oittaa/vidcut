@@ -629,9 +629,13 @@ Which kept transitions play (`otio::transitions`):
 The file:
 
 - Preferences are not in the project. They are in `preferences.toml` in the config dir (`preferences::path`).
-- The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services and viewer ([the disk cache limit](analysis.md#the-disk-cache-limit)).
+- The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services, viewer and keys ([the disk cache limit](analysis.md#the-disk-cache-limit)).
 - `ViewerPrefs.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
 - `ViewerPrefs.scopes` (`Scopes`) holds which scopes of the viewer are on.
+- `Preferences.keys` holds the keys of each `Action` that the user changed.
+  - An action that is not in the section has its default keys.
+  - An action with an empty list has no key.
+  - A file that gives one key to two actions fails to load.
 - No key of a service is ever in the file.
 
 Requests:
@@ -641,10 +645,11 @@ Requests:
   - The entries of a map, such as the languages of `transcripts.fillers`, are data, not keys. They stay.
 - `preferences.reset` keeps the old file under the first free backup name (`preferences.toml.bak`, then `.bak.2` and on), then writes the defaults. Why: a second reset never replaces the backup of the first.
 - `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it, and replaces the file atomically.
+- `keys.set` and `keys.reset` are projectless too. They change `Preferences.keys` through `Bindings`, which refuses a key that another action uses.
 - `viewer.guides` changes the same `Guides` (`Guides::applied`). With no fields, it toggles the framing guides.
 - `viewer.scopes` changes the same `Scopes` (`ScopesPatch`). With no fields, it tells which scopes are on.
 - Code reads the file when it needs a value (`preferences::load`).
-- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words and the render cache. It also follows the viewer guides and the viewer scopes.
+- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words and the render cache. It also follows the viewer guides, the viewer scopes and the keys.
 
 Reset:
 

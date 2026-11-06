@@ -819,6 +819,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A marquee from empty space selects what it touches.
   - A click on empty space, or Ctrl+Shift+A, deselects.
   - Alt+Shift+V selects all clips under the playhead.
+  - Shift+V selects one clip under the playhead (pp. 889, 900, 942).
+    - It takes the lowest track that has a clip there.
+    - The manual ties this key to the Source Track Selector of the Edit page. vidcut has no such control.
 - **Edit points:**
   - The pointer at the center of an edit selects both sides (a roll).
   - The pointer just left or right of the edit selects one side (a resize).
@@ -1811,6 +1814,17 @@ A generator is a clip that makes its own picture. It has no media and no sound.
 - macOS keeps the keys of the manual.
 - Shortcuts do nothing while a text field has focus, or while a modal question shows.
 - Esc dismisses the question and does nothing (Cancel, or Keep Running when quitting).
+- The table gives the default keys. The Keys page of Preferences (X138), `keys.set` and `keys.reset` change them.
+  - An action can have several keys, or no key.
+  - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
+  - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
+- These keys and gestures do not change:
+  - The wheel, click and drag gestures. They have no key.
+  - The number keys of the Sync Bin, Multi Source and the Transcription window. The number is on the screen.
+  - Esc, other than the key that leaves the full screen. It closes or cancels the thing that is open.
+  - Enter and Esc in a text field or a dialog.
+  - Up, Down, Enter and Esc in the History window. They move in its list.
+  - The editing keys of a text field.
 
 | Key | Action |
 |---|---|
@@ -1843,6 +1857,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
+| Shift+V† | Select one clip under the playhead (§8.1) |
 | V / U | Select nearest edit / cycle edit side |
 | , / . (Shift: 1 s)† | Trim the selected edits a frame |
 | D | Disable / enable clip video |
