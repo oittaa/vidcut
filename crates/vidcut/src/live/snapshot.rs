@@ -154,6 +154,9 @@ impl PoolView {
             PoolSort::Name => media.sort_by_key(|m| m.name.to_lowercase()),
             PoolSort::Duration => media.sort_by_key(|m| p.media_frames(m)),
             PoolSort::Date => media.sort_by_key(|m| m.mtime_ns),
+            PoolSort::Timecode if self.view == PoolMode::Metadata => {
+                media.sort_by(|a, b| a.created.cmp(&b.created).then(by_start(a, b)));
+            }
             PoolSort::Timecode => media.sort_by(|a, b| start(a).total_cmp(&start(b))),
         }
         if self.descending {
@@ -204,14 +207,6 @@ pub struct Notice {
     pub seq: u64,
     pub text: String,
     pub error: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Filmstrip {
-    pub width: u32,
-    pub height: u32,
-    pub frames: Vec<Vec<u8>>,
-    pub times: Vec<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -268,7 +263,6 @@ pub struct Snapshot {
     pub clipboard: usize,
     pub key_clipboard: usize,
     pub notices: Arc<VecDeque<Notice>>,
-    pub thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     pub missing: Arc<HashSet<String>>,
     pub transcribed: Arc<HashSet<String>>,
     pub fillers: Arc<std::collections::BTreeMap<String, Vec<String>>>,
@@ -592,7 +586,6 @@ mod tests {
 
     fn placed(start: i64, source_in: i64) -> Clip {
         Clip {
-            input_lut: None,
             id: "c1".into(),
             media: "m".into(),
             start,

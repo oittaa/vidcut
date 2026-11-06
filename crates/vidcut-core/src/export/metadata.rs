@@ -527,6 +527,7 @@ mod tests {
             frames,
             image: None,
             color_space: Default::default(),
+            alpha_mode: Default::default(),
             super_scale: Default::default(),
             retime: crate::model::Retime::Nearest,
             placed: Vec::new(),

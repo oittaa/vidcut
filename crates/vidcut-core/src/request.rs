@@ -505,8 +505,9 @@ pub enum Request {
         back: bool,
     },
     /// Set the Clip Color, the camera name, Date Created, the scene, shot and
-    /// take, the Input Color Space and the Super Scale of media items. Their
-    /// clips show the Clip Color unless they have their own.
+    /// take, the comment, the Input Color Space, the Input LUT and the Super
+    /// Scale of media items. Their clips show the Clip Color unless they have
+    /// their own.
     #[serde(rename = "media.set")]
     MediaSet {
         media: OneOrMany<String>,
@@ -529,12 +530,26 @@ pub enum Request {
         /// The take, such as a number. Empty string clears it.
         #[serde(default)]
         take: Option<String>,
+        /// A note on the clip. Empty string clears it.
+        #[serde(default)]
+        comment: Option<String>,
         /// How its pictures' colors are read: `tagged`, as the file says, or
         /// `bt709`, `bt601`, `pq` or `hlg` in place of the file's tags, for a
         /// file whose tags are wrong. The viewer, thumbnails and exports
         /// follow it.
         #[serde(default)]
         color_space: Option<crate::model::ColorSpace>,
+        /// Input LUT: a `.cube` file that their pictures go through just
+        /// after their conversion into the timeline color space. Each of
+        /// their clips on the timeline gets it. A file that can't be read is
+        /// refused, with the reason. An empty path clears it.
+        #[serde(default)]
+        input_lut: Option<PathBuf>,
+        /// How the alpha channel of its pictures is read: `none`,
+        /// `premultiplied`, `straight` or `invert`. Media with no alpha
+        /// channel refuse it.
+        #[serde(default)]
+        alpha_mode: Option<crate::model::AlphaMode>,
         /// Super Scale on or off. Where its pictures are enlarged, they get
         /// the upscaler that `upscaler` names, as much as they need, up to 4
         /// times their source.
@@ -1552,7 +1567,7 @@ pub enum Request {
         look: Option<String>,
     },
     /// Enable/disable video (D), mute, gain (dB, -100..30), name, Clip Color,
-    /// Voice Isolation, Retime Process, Render Cache and Input LUT.
+    /// Voice Isolation, Retime Process and Render Cache.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -1601,12 +1616,6 @@ pub enum Request {
         /// AI Super Scale out of both.
         #[serde(default)]
         render_cache: Option<crate::model::ClipCache>,
-        /// Input LUT: a `.cube` file that the picture goes through just
-        /// after its conversion into the timeline color space. A file that
-        /// can't be read is refused, with the reason. An empty path clears
-        /// it.
-        #[serde(default)]
-        input_lut: Option<PathBuf>,
         /// Download Voice Isolation's model, or the model of the Retime
         /// Process that the clips then use, if this computer doesn't have it
         /// yet, checked against its SHA-256. Without it, a missing Voice
@@ -4191,11 +4200,14 @@ pub enum PoolMode {
     /// A row for each, its details in columns.
     List,
     /// A card for each: a picture that scrubs, a line that follows the sort,
-    /// its start timecode, its camera and its name. By `name`, the cards go
-    /// by first letter under a heading, and by timecode inside a letter;
-    /// Source Tape takes that order. By `date`, they go under a heading for
-    /// each day. By `camera`, `date_time`, `bin`, `scene_shot`, `clip_color`
-    /// and `online_status`, they go under a heading for each value.
+    /// its start timecode, Date Created and camera, its scene, shot and take,
+    /// and its name and comment. By `name`, the cards go by first letter
+    /// under a heading, and by timecode inside a letter; Source Tape takes
+    /// that order. By `date`, they go under a heading for each day. By
+    /// `timecode`, they go under a heading for each Date Created, and by
+    /// timecode inside a date. By `camera`, `date_time`, `bin`, `scene_shot`,
+    /// `clip_color` and `online_status`, they go under a heading for each
+    /// value.
     Metadata,
 }
 
@@ -5015,7 +5027,7 @@ impl Request {
             | Self::StoryboardRender { out, .. }
             | Self::GuiScreenshot { out, .. } => vec![out],
             Self::Apply { commands, .. } => commands.iter_mut().flat_map(Self::paths_mut).collect(),
-            Self::ClipSet { input_lut, .. } => input_lut
+            Self::MediaSet { input_lut, .. } => input_lut
                 .iter_mut()
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect(),

@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
-    Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, DuckDetect, Generator, Gradient,
-    Hdr, Keyframe, Media, MediaSuperScale, Picture, PictureTransition, Project, PushPreset, Retime,
-    Section, Settings, SlidePreset, SmoothMode, SuperScale, TimelineColors, Title, TrackKind,
-    WipeDirection,
+    AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, DuckDetect,
+    Generator, Gradient, Hdr, Keyframe, Media, MediaSuperScale, Picture, PictureTransition,
+    Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode, SuperScale,
+    TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -184,6 +184,9 @@ pub enum VideoPiece {
         /// How its pictures' colors are read: the media's `color_space`.
         #[serde(default, skip_serializing_if = "ColorSpace::is_tagged")]
         color_space: ColorSpace,
+        /// How its pictures' alpha channel is read: the media's `alpha_mode`.
+        #[serde(default, skip_serializing_if = "AlphaMode::is_straight")]
+        alpha_mode: AlphaMode,
         /// How its pictures are enlarged: the media's `super_scale`, with
         /// the upscaler that its setting gives on this computer.
         #[serde(default, skip_serializing_if = "SuperScale::is_off")]
@@ -1145,6 +1148,7 @@ impl VideoPiece {
                 image,
                 pace,
                 color_space,
+                alpha_mode,
                 super_scale,
                 retime,
                 placed,
@@ -1164,6 +1168,7 @@ impl VideoPiece {
                     image: image.clone(),
                     pace: if still { pace.clone() } else { pace.after(k) },
                     color_space: *color_space,
+                    alpha_mode: *alpha_mode,
                     super_scale: *super_scale,
                     retime: *retime,
                     placed: placed.iter().map(|p| p.after(k)).collect(),
@@ -2081,8 +2086,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
             && (c.draws()
                 || pool
                     .get(c.media.as_str())
-                    .and_then(|m| m.info.video.as_ref())
-                    .is_some_and(|v| crate::place::fills(v, (s.width, s.height))))
+                    .is_some_and(|m| crate::place::fills(m, (s.width, s.height))))
     };
     let picture =
         |c: &Clip, nest: Option<&Nest>, over: bool, x: i64, y: i64| -> Result<VideoPiece> {
@@ -2106,13 +2110,14 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 image: image_of(m),
                 pace: c.pace().after(x - c.start),
                 color_space: m.color_space,
+                alpha_mode: m.alpha_mode,
                 super_scale: super_scale_of(m.super_scale, s),
                 retime: retime_of(c, x, m, s),
                 placed: placed_of(c, nest, over, x),
                 cache: c.render_cache,
                 excluded: false,
                 made: None,
-                input_lut: c.input_lut.clone(),
+                input_lut: m.input_lut.clone(),
             })
         };
     let mut video = Vec::new();
@@ -2635,20 +2640,18 @@ pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
         .ok_or_else(|| Error::not_found(format!("no frame {at} of {clip}")))
 }
 
-pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
-    let m = p
-        .media(media)
-        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    Ok(match &m.info.video {
+pub fn media_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
+    match &m.info.video {
         Some(_) => VideoPiece::Source {
             pace: Default::default(),
-            media: media.into(),
+            media: m.id.clone(),
             path: m.path.clone(),
             origin: m.origin(),
             source_frame: at,
             frames: 1,
-            image: p.media_image(media),
+            image: image_of(m),
             color_space: m.color_space,
+            alpha_mode: m.alpha_mode,
             super_scale: super_scale_of(m.super_scale, &p.settings),
             retime: Retime::Nearest,
             placed: Vec::new(),
@@ -2658,7 +2661,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
             input_lut: None,
         },
         None => VideoPiece::black(1),
-    })
+    }
 }
 
 /// A media item's place on a source tape.
@@ -2724,6 +2727,7 @@ pub fn camera_tape(
                 frames: b - a,
                 image: image_of(m),
                 color_space: m.color_space,
+                alpha_mode: m.alpha_mode,
                 super_scale: super_scale_of(m.super_scale, &p.settings),
                 retime: Retime::Nearest,
                 placed: Vec::new(),
@@ -2860,6 +2864,7 @@ fn laid_out(p: &Project, media: &[String]) -> Result<(RenderPlan, Vec<TapeEntry>
                     frames,
                     image: image_of(m),
                     color_space: m.color_space,
+                    alpha_mode: m.alpha_mode,
                     super_scale: super_scale_of(m.super_scale, &p.settings),
                     retime: Retime::Nearest,
                     placed: Vec::new(),

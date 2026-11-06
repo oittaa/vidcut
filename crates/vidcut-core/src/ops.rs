@@ -27,8 +27,8 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, ColorSpace, Generator, Marker, Media, MediaUpscaler, Project, Sharpness,
-    Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
+    AlphaMode, Clip, ClipAudio, ColorSpace, Generator, Marker, Media, MediaUpscaler, Project,
+    Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -249,7 +249,6 @@ pub(crate) fn block_clip(
         retime: crate::model::ClipRetime::Project,
         color: None,
         render_cache: crate::model::ClipCache::Auto,
-        input_lut: None,
     }
 }
 
@@ -327,7 +326,6 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
         retime: crate::model::ClipRetime::Project,
         color: None,
         render_cache: crate::model::ClipCache::Auto,
-        input_lut: None,
     })
 }
 
@@ -2026,7 +2024,6 @@ pub struct ClipProps {
     pub voice_isolation_on: Option<bool>,
     pub retime: Option<crate::model::ClipRetime>,
     pub render_cache: Option<crate::model::ClipCache>,
-    pub input_lut: Option<Option<PathBuf>>,
 }
 
 pub const ISOLATION: std::ops::RangeInclusive<f64> = 0.0..=100.0;
@@ -2101,12 +2098,6 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
                 return Err(Error::invalid(format!("{id} has no picture of its media")));
             }
             c.render_cache = r;
-        }
-        if let Some(lut) = &props.input_lut {
-            if !c.video || c.media.is_empty() {
-                return Err(Error::invalid(format!("{id} has no picture of its media")));
-            }
-            c.input_lut = lut.clone();
         }
         if props.muted.is_some()
             || props.gain_db.is_some()
@@ -2269,6 +2260,36 @@ pub fn set_media_color_space(p: &mut Project, ids: &[String], space: ColorSpace)
             return Err(Error::invalid(format!("{id} has no pictures")));
         }
         m.color_space = space;
+    }
+    Ok(())
+}
+
+pub fn set_media_input_lut(p: &mut Project, ids: &[String], lut: Option<PathBuf>) -> Result<()> {
+    for id in ids {
+        let m = p
+            .media
+            .iter_mut()
+            .find(|m| m.id == *id)
+            .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+        if m.info.video.is_none() {
+            return Err(Error::invalid(format!("{id} has no pictures")));
+        }
+        m.input_lut.clone_from(&lut);
+    }
+    Ok(())
+}
+
+pub fn set_media_alpha_mode(p: &mut Project, ids: &[String], mode: AlphaMode) -> Result<()> {
+    for id in ids {
+        let m = p
+            .media
+            .iter_mut()
+            .find(|m| m.id == *id)
+            .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+        if !m.info.video.as_ref().is_some_and(|v| v.alpha) {
+            return Err(Error::invalid(format!("{id} has no alpha channel")));
+        }
+        m.alpha_mode = mode;
     }
     Ok(())
 }

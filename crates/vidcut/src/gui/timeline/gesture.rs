@@ -1550,7 +1550,10 @@ mod tests {
             scene: None,
             shot: None,
             take: None,
+            comment: None,
             color_space: Default::default(),
+            input_lut: None,
+            alpha_mode: Default::default(),
             super_scale: Default::default(),
             left_out: Vec::new(),
             subclip: None,
@@ -1563,7 +1566,6 @@ mod tests {
 
     fn clip(id: &str, start: i64, duration: i64, source_in: i64) -> Clip {
         Clip {
-            input_lut: None,
             id: id.into(),
             media: "m1".into(),
             start,

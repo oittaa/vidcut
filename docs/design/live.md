@@ -16,7 +16,7 @@ flowchart LR
   CONN["vidcut-ipc-conn<br>one per connection"]
   STEP["vidcut-task, vidcut-make,<br>vidcut-measure"]
   JOB["vidcut-j1, vidcut-j2, …<br>export, proxy or transcription jobs"]
-  WORK["vidcut-worker-N<br>filmstrips, waveforms"]
+  WORK["vidcut-worker-N<br>waveforms"]
   MISS["vidcut-missing-media"]
   WATCH["notify callbacks, vidcut-look<br>project, preferences, themes, OS look, Omarchy"]
   TILES["vidcut-tiles-N<br>timeline tiles"]
@@ -34,7 +34,7 @@ flowchart LR
   S -->|"its turn: gate channel"| JOB
   JOB -->|"Msg::JobPlanned, JobProgress, JobDone"| S
   S -->|"Workers::run"| WORK
-  WORK -->|"Msg::Thumbs, Waveform"| S
+  WORK -->|"Msg::Waveform"| S
   MISS -->|"Msg::Missing"| S
   WATCH -->|"Msg::FileChanged, PreferencesChanged"| S
   UI -->|"queue: Mutex, Condvar"| TILES
@@ -135,9 +135,9 @@ Each pass:
 
 The snapshot:
 
-- The `Snapshot` carries the project, players, selection, notices, filmstrips, waveforms, missing media and jobs.
+- The `Snapshot` carries the project, players, selection, notices, waveforms, missing media and jobs.
 - It also carries the timecode count (`TimecodeDisplay`) and the Timer 1 zeros (`Timer1Origin`) of this session.
-- Each change of the project calls `Live::forget_removed`. The filmstrips, waveforms and ducking measurements of removed media leave memory.
+- Each change of the project calls `Live::forget_removed`. The waveforms and ducking measurements of removed media leave memory.
 - An undo that brings the media back makes them again.
 - `Port` passes `Renderer::attach`, `Renderer::present` and `Renderer::capture_viewer` to the viewer thread, and the rest to the UI.
 
@@ -376,7 +376,8 @@ The bar and the Jobs button:
 - The effect sections show the effects of the first selected clip (`effect_block`). Each change is one `effects.set` for that clip.
   - A dragged value previews as a picture with the changed effect (`knob_picture`). `Picture::preview` takes the effects of the dragged picture.
   - On, Move Up, Move Down, Reset and Delete send `effects.set`, `effects.move`, `effects.reset` and `effects.remove`.
-- `Workspace::input_lut_section` shows the Input LUT row, with a file pick and Reset. Each change is one `clip.set`.
+- `Workspace::input_lut_section` shows the Input LUT row of the media of the selected clips, with a file pick and Reset. Each change is one `media.set`.
+  - The Input LUT submenu of the pool's right-click menu sends the same request (`Workspace::pool_item_menu`, `Workspace::ask_input_lut`).
 - `speed_section` sends what the Change Clip Speed window sends (`SpeedDialog::params`). `Workspace::audio_section` sends `clip.set`.
   - On a clip with speed keyframes, it shows the section under the playhead (`Paced`). `section_speed` sends `speed.set`, `speed.freeze` or `speed.reverse` there.
   - A Speed value under `Speed::RANGE` on clips with no speed keyframes goes to `Workspace::send_freeze`, which sends `speed.set` at the playhead.
@@ -426,8 +427,19 @@ The bar and the Jobs button:
 **Timeline tiles.**
 
 - `Tiles` decodes them on `vidcut-tiles-N`. Each tile shows the source frame under its left edge (`tile_frame`), by the clip's pace (`Clip::pace`).
-- A tile that is not decoded yet shows the nearest kept tile (`Tiles::nearest`), else the nearest pool thumbnail. Why: the filmstrip stays full while a zoom or a scroll decodes new tiles.
+- A tile that is not decoded yet shows the nearest kept tile of its height (`Tiles::nearest`), else of any height (`Tiles::nearest_any_height`). Why: the filmstrip stays full while a zoom or a scroll decodes new tiles.
 - The filmstrips of the Trim Editor use the same tiles (`vidcut_core::ops::filmstrip`, `TrimAnchor`).
+- The pictures of the pool use the same tiles and the same limit (`Workspace::pool_picture`). Why: pictures of media share one `Lru`.
+- The aspect of a tile comes from the media's probe (`media_aspect`). Thus a thumbnail has its shape before its first picture is decoded.
+- The pool asks for some pictures ahead (`Workspace::preload`, `Workspace::preload_strip`):
+  - A visible thumbnail asks for its poster first (`poster_frame`), then for the pictures of a hover (`HOVER_PICTURES`).
+  - A thumbnail within one screen of the visible ones asks for its poster only.
+  - A row of the Filmstrip view within one screen asks for all pictures of that row.
+  - Why: the number of pictures follows the screen, not the number of media.
+- The pool asks for these pictures with `Tiles::prefetch`, and for the pictures that it shows with `Tiles::want`.
+  - `Tiles::prefetch` does not mark a tile as shown. Thus a tile that is only ahead can leave first.
+  - `Tiles::prefetch` asks for nothing while the tiles use more than `AHEAD_MEMORY`.
+  - Why: the pictures ahead never push the tiles over their limit, and a tile that left is not asked for again at once.
 - An `Lru` keeps the order in which the tiles were used. `Tiles::evict` removes the oldest tile until the cache is under its budget, and stops at a tile that the last paint showed. Why: each step of an eviction is one operation, with no scan of the kept tiles.
 - Another `Lru` keeps the tiles that did not decode (`FAILED_KEPT`). A tile that leaves it is tried once more when it shows again.
 - All workers share one `Lru` of the blocks that they read from disk (`Blocks`, `BLOCKS_KEPT`). A worker that writes a block removes it from this `Lru`.
@@ -448,16 +460,16 @@ The bar and the Jobs button:
 
 **The pool's cards** ([spec §3](../cut-page-spec.md#3-media-pool-ch-34-pp-653675)).
 
-- `Workspace::cards` draws the Metadata view. `cluster` gives the heading of each card, and `main_description` gives its first line. Each run of one heading is a block of rows, and only the rows in view are drawn.
+- `Workspace::cards` draws the Metadata view. `cluster` gives the heading of each card, and `main_description` gives its first line. `card_row` draws each other line. Each run of one heading is a block of rows, and only the rows in view are drawn.
 - `Workspace::tile_picture` draws the picture of a tile and of a card.
-- `PoolView::media` gives the order. With `PoolMode::Metadata` and `PoolSort::Name`, it goes by `first_letter` and then by timecode. `named_order` puts a clip with no value first.
+- `PoolView::media` gives the order. With `PoolMode::Metadata` and `PoolSort::Name`, it goes by `first_letter` and then by timecode. With `PoolMode::Metadata` and `PoolSort::Timecode`, it goes by `created` and then by timecode. `named_order` puts a clip with no value first.
   - Why: Source Tape reads the same order. Thus `pool.set` refreshes the tape when the view goes to or from the cards.
 
 **Media details.**
 
 - The metadata strip of the pool (`Workspace::metadata_strip`) shows what the project keeps of the chosen media (`clip_info::glance`). `pool.json` in the config folder keeps it on or off.
 - Clip Info (`Workspace::clip_info_window`) adds what `media.details` reads from the file (`probe::details`).
-- Its Date Created, Camera, Scene, Shot and Take rows are text fields (`Workspace::note_field`). Enter or a click elsewhere sends `media.set`, and Escape cancels.
+- Its Date Created, Camera, Scene, Shot, Take and Comment rows are text fields (`Workspace::note_field`). Enter or a click elsewhere sends `media.set`, and Escape cancels.
 
 **The Transcription window** (`TranscriptionUi`, `Workspace::transcription_window`).
 
