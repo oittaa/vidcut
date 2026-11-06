@@ -5,31 +5,9 @@ use vidcut_av::thumbs::Image;
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::fingerprint::Origin;
 use vidcut_core::model::ColorSpace;
-use vidcut_core::model::Media;
-
-use crate::paths;
 
 pub fn dir() -> PathBuf {
     Kind::Thumbs.dir()
-}
-
-fn file(media: &Media, origin: &Origin, count: usize, size: (u32, u32)) -> PathBuf {
-    let pictures = media
-        .sequence
-        .as_ref()
-        .map(|s| format!("-{}", s.count))
-        .unwrap_or_default();
-    let space = read_as(media.color_space);
-    Kind::Thumbs.file(
-        origin,
-        &format!("{count}-{}x{}{pictures}{space}.thumbs", size.0, size.1),
-    )
-}
-
-pub fn load(media: &Media, count: usize, size: (u32, u32)) -> Option<(Vec<Image>, Vec<f64>)> {
-    let origin = paths::media_origin(media);
-    let path = file(media, &origin, count, size);
-    vidcut_av::thumbs::from_bytes(origin.check(&disk_cache::read(&path)?)?)
 }
 
 pub const TILE_BLOCK: i64 = 64;
@@ -69,14 +47,6 @@ pub fn store_tiles(path: &Path, origin: &Origin, tiles: &[(i64, Image)]) {
     if let Ok(bytes) = vidcut_av::thumbs::to_bytes(&images, &frames) {
         let _ = disk_cache::write(path, &origin.stamp(&bytes));
     }
-}
-
-pub fn store(media: &Media, count: usize, size: (u32, u32), strip: (&[Image], &[f64])) {
-    let Ok(bytes) = vidcut_av::thumbs::to_bytes(strip.0, strip.1) else {
-        return;
-    };
-    let origin = paths::media_origin(media);
-    let _ = disk_cache::write(&file(media, &origin, count, size), &origin.stamp(&bytes));
 }
 
 pub fn clear() -> std::io::Result<()> {
