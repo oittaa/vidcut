@@ -756,6 +756,7 @@ impl Words<'_> {
         s.put("scene", "Scene", &text, |m| json!(m.scene));
         s.put("shot", "Shot", &text, |m| json!(m.shot));
         s.put("take", "Take", &text, |m| json!(m.take));
+        s.put("comment", "Comment", &text, |m| json!(m.comment));
         s.put("color_space", "Color Space", &color_space, |m| {
             json!(m.color_space)
         });

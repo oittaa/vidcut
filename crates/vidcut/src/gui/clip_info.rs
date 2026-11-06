@@ -19,12 +19,13 @@ pub struct ClipInfo {
 
 type Section = (String, Vec<(String, String)>);
 
-const NOTE_ROWS: [(&str, &str); 5] = [
+const NOTE_ROWS: [(&str, &str); 6] = [
     ("Date Created", "created"),
     ("Camera", "camera"),
     ("Scene", "scene"),
     ("Shot", "shot"),
     ("Take", "take"),
+    ("Comment", "comment"),
 ];
 
 pub(super) fn bytes(n: u64) -> String {
@@ -124,6 +125,11 @@ fn audio_line(a: &vidcut_core::model::AudioInfo) -> String {
     )
 }
 
+pub(super) fn scene_shot_take(m: &Media) -> [Option<String>; 3] {
+    [("Scene", &m.scene), ("Shot", &m.shot), ("Take", &m.take)]
+        .map(|(word, value)| value.as_ref().map(|v| format!("{word} {v}")))
+}
+
 pub(super) fn camera_label(name: &str) -> String {
     format!("Camera {name}")
 }
@@ -139,9 +145,7 @@ pub(super) fn glance(m: &Media) -> Vec<String> {
     }
     let mut out = Vec::new();
     out.extend(m.camera.as_deref().map(camera_label));
-    for (word, value) in [("Scene", &m.scene), ("Shot", &m.shot), ("Take", &m.take)] {
-        out.extend(value.as_ref().map(|v| format!("{word} {v}")));
-    }
+    out.extend(scene_shot_take(m).into_iter().flatten());
     if let Some(v) = &m.info.video {
         let (w, h) = v.display_size();
         out.push(format!("{w}×{h}"));
@@ -241,7 +245,9 @@ fn sections(app: &Workspace, m: &Media, read: Option<&MediaDetails>) -> Vec<Sect
         file.push(("Clip Color".into(), c.clone()));
     }
     if m.subtitles.is_none() {
-        let values = [&m.created, &m.camera, &m.scene, &m.shot, &m.take];
+        let values = [
+            &m.created, &m.camera, &m.scene, &m.shot, &m.take, &m.comment,
+        ];
         for ((row, _), value) in NOTE_ROWS.iter().zip(values) {
             file.push(((*row).into(), value.clone().unwrap_or_default()));
         }
