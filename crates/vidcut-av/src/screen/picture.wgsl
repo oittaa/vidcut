@@ -75,19 +75,32 @@ fn yuv_at(s: vec2<f32>) -> vec3<f32> {
     return vec3<f32>(y, cb, cr);
 }
 
+fn read_as(a: f32) -> f32 {
+    return select(a, 1.0 - a, p.site.z > 2.5);
+}
+
 fn opacity(u: vec2<f32>) -> f32 {
+    if p.site.z > 0.5 && p.site.z < 1.5 {
+        return 1.0;
+    }
     let s = stored(u) * p.upright.zw;
     if p.flags.z == 2u {
-        return textureSampleLevel(luma, bilinear, s, 0.0).r;
+        return read_as(textureSampleLevel(luma, bilinear, s, 0.0).r);
     }
     if p.per.w == 1u {
-        return textureSampleLevel(alpha_plane, bilinear, s, 0.0).r;
+        return read_as(textureSampleLevel(alpha_plane, bilinear, s, 0.0).r);
     }
     if p.per.w == 2u {
-        return min(textureSampleLevel(alpha_plane, bilinear, s, 0.0).r * 65535.0 / 4095.0, 1.0);
+        return read_as(min(textureSampleLevel(alpha_plane, bilinear, s, 0.0).r * 65535.0 / 4095.0, 1.0));
     }
     return 1.0;
 }
+
+fn premultiplied() -> bool {
+    return p.site.z > 1.5 && p.site.z < 2.5;
+}
+
+var<private> placed_share: f32 = 1.0;
 
 fn weight(x: f32, kind: u32) -> f32 {
     let a = abs(x);
@@ -365,6 +378,7 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     let size = p.upright.xy;
     let spans = vec2<f32>(length(across * size), length(down * size));
     let a = cover * p.placed.y * opacity(uv);
+    placed_share = cover * p.placed.y;
     if resamples(uv, spans) {
         return vec4<f32>(sharp(uv, spans), a);
     }
@@ -576,7 +590,7 @@ fn placed(px: vec2<f32>) -> vec4<f32> {
         return textureLoad(halved, vec2<i32>(px), 0) * p.placed.y;
     }
     let s = shown(px);
-    return vec4<f32>(s.rgb * s.a, s.a);
+    return vec4<f32>(s.rgb * select(s.a, placed_share, premultiplied()), s.a);
 }
 
 const BT709 = vec3<f32>(0.2126, 0.7152, 0.0722);
@@ -716,8 +730,9 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     let cover = p.upright.xy / p.place.zw;
     let a = opacity(clamp(rel, vec2<f32>(0.0), vec2<f32>(1.0))) * edge;
     let solid = select(1.0, a, keeps);
+    let share = select(a, edge, premultiplied());
     if resamples(rel, cover) {
-        return vec4<f32>(sharp(rel, cover) * a, solid);
+        return vec4<f32>(sharp(rel, cover) * share, solid);
     }
     let taps = box_taps(cover);
     let step = vec2<f32>(1.0) / (p.place.zw * vec2<f32>(taps));
@@ -728,7 +743,7 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
             sum += pixel(first + vec2<f32>(f32(i), f32(j)) * step);
         }
     }
-    return vec4<f32>(sum / f32(taps.x * taps.y) * a, solid);
+    return vec4<f32>(sum / f32(taps.x * taps.y) * share, solid);
 }
 
 struct Lettering {
