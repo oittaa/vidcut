@@ -61,7 +61,7 @@ vidcut is a video cutting tool in Rust. Its model is the Cut page of DaVinci Res
     - Do not write a new cache with a `HashMap`, a `HashSet`, a `Vec` or a `static`.
     - Data of the same kind shares one `Lru` and one limit. Do not add a second store for it.
     - Each cache has a named limit, for example `DISPLAYS_KEPT`.
-    - Use `lru::Uncapped` only when the owner removes entries, for example by a limit in bytes.
+    - A limit in bytes uses `lru::ByBytes`. Use `lru::Uncapped` only when the owner removes entries by another rule.
     - A global cache follows a memory limit in the preferences or a fixed budget in bytes.
     - A small cache inside one function is permitted only for heavy work.
     - Other collections (project data, undo, queues) have a limit, or an owner that removes their entries.

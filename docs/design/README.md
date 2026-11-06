@@ -68,7 +68,7 @@ flowchart TD
   between["A frame between two pictures<br>VideoFrames::retimed_frame"]
   earlier["An earlier source frame<br>VideoFrames::reversed_frame"]
   place["The picture is placed<br>Screen::draw"]
-  fx["The effects work on it<br>fs_blur"]
+  fx["The effects work on it<br>fs_blur, fs_mosaic"]
   mix["The layers are on the canvas<br>Screen::draw"]
   looked["The output LUT<br>fs_lut"]
   show["The viewer shows this frame"]
@@ -124,7 +124,7 @@ A clip skips each step that it does not use. The steps run in this order:
 - `Screen::draw` places the picture and mixes the layers (`place::Placing`, `screen::kernel`, [export](export.md#placed-pictures)).
   - A transition's two sides, and each clip placed over another, are layers of the same draw.
   - Titles and burned subtitles are draws in that same pass (`fs_title`, [export](export.md#subtitles)).
-  - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, [export](export.md#effects)).
+  - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, [export](export.md#effects)).
 - `fs_lut` runs the output LUT of the project on the whole canvas, after the titles and subtitles.
 - The viewer shows the canvas. A wide canvas goes through `fs_screen` first ([playback](playback.md#the-viewer-thread)).
 - The scopes read the canvas after `fs_lut` and before `fs_screen` ([gpu](gpu.md#the-scopes)).
@@ -139,7 +139,7 @@ vidcut has none of the other stages of the spec:
 
 - Camera Raw, Lens Correction, the display LUT and Fusion;
 - Input Sizing, Image Stabilization and the grades;
-- Open FX, the Resolve FX other than Gaussian Blur, Output Sizing and Data Burn-In.
+- Open FX, the Resolve FX other than Gaussian Blur and Mosaic Blur, Output Sizing and Data Burn-In.
 
 ### LUT files
 
@@ -155,15 +155,15 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
 - `cube::parse` refuses a file that does not give a whole table, and names the reason:
   - no size line, or a size below 2;
   - a keyword in lower case;
-  - too few rows, or a row that is not three finite numbers;
-  - a range with no width.
+  - too few rows, or a row that is not three finite numbers.
 - `Editor` reads the file when a request sets the path (`checked_lut`). Thus a request cannot put a broken file into the project.
 - A request refuses an input LUT on a clip with no media picture: a generator, a title, a compound clip or a sound clip. `ops::set_clips` tells this.
 - A file that goes away later stops an export or a `frame.render` with the reason. The viewer shows the picture with no output LUT, and the player's status holds the reason.
 - `fs_lut` works on colors that are not premultiplied. It leaves a pixel with no alpha as it is.
-- The input LUT follows the Alpha Mode of the clip ([spec §13](../cut-page-spec.md#the-lut-tables)). A LUT does not change alpha.
+- The canvas of a frame with no alpha starts as opaque black. Thus the output LUT also changes a gap, and the part of a clip that its alpha lets through.
+- The input LUT follows the Alpha Mode of the clip's media ([spec §13](../cut-page-spec.md#the-lut-tables)). A LUT does not change alpha.
   - In Premultiplied, `fs_convert_lut` takes the alpha out of the color, looks up the color, and multiplies by the alpha again. It gives 0 where the alpha is 0.
-  - In the other modes, it looks up the color as it is. Straight and Invert then multiply by their alpha when the picture is placed.
+  - In the other modes, it looks up the color as it is, before the alpha. Straight and Invert then multiply by their alpha when the picture is placed.
   - Before an AI upscaler, `Source::push` reads a Premultiplied picture in the same way (`PictureId`).
 - `fs_lut` reads the canvas, and the canvas holds 16-bit floats. `fs_convert_lut` reads the picture before it goes to 16-bit floats. Thus a table with steep steps gives a larger error as an output LUT than as an input LUT.
 
@@ -194,7 +194,7 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
 | snapshot | what the GUI draws, published by the live core | `Snapshot` |
 | origin | a cache stamp of the path, size and time of a file | `Origin` |
 | kept | data of another editor that vidcut carries without a model of it | `Kept` |
-| lru | a cache of a set number of entries that lets the least recently used go; an `Uncapped` one has no set number, and its owner decides what goes | `Lru`, `Uncapped` |
+| lru | a cache of a set number of entries that lets the least recently used go; a `ByBytes` one has a limit in bytes; an `Uncapped` one has no set number, and its owner decides what goes | `Lru`, `ByBytes`, `Uncapped` |
 
 ## Pages
 

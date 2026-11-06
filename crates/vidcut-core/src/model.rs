@@ -7,6 +7,8 @@ use std::sync::Arc;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use unicode_general_category::{GeneralCategory, get_general_category};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::time::{Rational, TimeContext, TimeSpec, format_timecode, label_frames};
 
@@ -408,6 +410,24 @@ pub struct Media {
     /// number. Left out until `media.set` gives one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<String>,
+    /// Date Created, as `YYYY-MM-DD`. Left out until `media.set` gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<String>,
+    /// Its scene: text, such as a number. Left out until `media.set` gives
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene: Option<String>,
+    /// Its shot: text, such as a letter or a number. Left out until
+    /// `media.set` gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shot: Option<String>,
+    /// Its take: text, such as a number. Left out until `media.set` gives
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub take: Option<String>,
+    /// A note on the clip. Left out until `media.set` gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
     /// SHA-256 of the file when it was added or relinked
     /// ([`fingerprint`](crate::fingerprint)): of the whole file up to
     /// 10 MiB (its `sha256sum`), else of 1 MiB from its start, middle and
@@ -2806,12 +2826,19 @@ impl Title {
         ((text / scale).round() * part / whole).floor().max(1.0) * scale
     }
 
+    pub fn small_size(text: f64, scale: f64) -> f64 {
+        ((text / scale).round() * TitleCase::SMALL_CAPS + Self::WIDTH_SLACK)
+            .round()
+            .max(1.0)
+            * scale
+    }
+
     pub fn underline_drop(thickness: f64) -> f64 {
         (thickness / 3.0 + 0.5).ceil() + 0.5
     }
 
-    pub fn line_width(width: f64, scale: f64) -> f64 {
-        ((width / scale + Self::WIDTH_SLACK).floor() * scale).floor()
+    pub fn line_end(from_block: f64, scale: f64) -> f64 {
+        (from_block / scale + Self::WIDTH_SLACK).floor() * scale
     }
 
     pub fn seated_left(&self, middle: f64, widest: f64, wrap: f64, pixel: f64) -> f64 {
@@ -3198,6 +3225,8 @@ pub struct Effect {
 pub enum EffectKind {
     /// A Gaussian blur across and down the frame.
     GaussianBlur(GaussianBlur),
+    /// The picture as cells of one color each.
+    MosaicBlur(MosaicBlur),
 }
 
 /// The effects there are.
@@ -3205,6 +3234,7 @@ pub enum EffectKind {
 #[serde(rename_all = "snake_case")]
 pub enum EffectType {
     GaussianBlur,
+    MosaicBlur,
 }
 
 /// A Gaussian blur. Its spread (the sigma of its curve) is 0.05625 × the
@@ -3237,6 +3267,86 @@ pub struct GaussianBlur {
     pub border: Option<Border>,
 }
 
+/// A mosaic: the frame in cells, each of one color. A cell is 2 × √(the
+/// picture's width × its height) / `pixel_frequency` high, and `aspect` times
+/// that wide. The picture's size is its size on the frame: its fit, times the
+/// zoom of the picture and of the compound clips around it. A cell's color is
+/// the mean of a box around its middle, `aliasing` cells across and down,
+/// which repeats the frame's edge pixels beyond the frame. It works on the
+/// code values, after the transform and the crop.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MosaicBlur {
+    /// How many cells there are: from 0.1 (few, large) to 4000. Usual: 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pixel_frequency: Option<f64>,
+    /// From 0 to 1. It does not change the picture. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smooth_strength: Option<f64>,
+    /// The shape of the cells. Usual: `square`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_shape: Option<CellShape>,
+    /// The size of the box that makes a cell's color, in cells, from 0 (the
+    /// one pixel at its middle) to 2. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aliasing: Option<f64>,
+    /// Moves the cells to the right by this many half cells, from -1 to 1.
+    /// Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_offset: Option<f64>,
+    /// Moves the cells up by this many half cells, from -1 to 1. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_offset: Option<f64>,
+    /// A cell's width over its height, from 0.001 to 1000. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aspect: Option<f64>,
+    /// The point the cells line up on, `[x, y]` as fractions of the picture
+    /// on the frame from its bottom left, each from -1000000 to 1000000.
+    /// Usual: `[0.5, 0.5]`, the picture's middle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 2]>,
+    /// It does not change the picture: the box always repeats the edge
+    /// pixels. Usual: `reflect`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border: Option<Border>,
+    /// Works at twice the size and then takes the mean of each 2 × 2, for
+    /// clean lines between the cells. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub antialias: bool,
+    /// On, a cell also takes the mean of the alpha. Off, the picture keeps
+    /// its own alpha and the cells keep their colors, so a clear part adds
+    /// its cell's color to the tracks below. Usual: on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur_alpha: Option<bool>,
+    /// With `blur_alpha` on, only a cell with no clear part in its box stays,
+    /// with an alpha of 1. Elsewhere the alpha is 0, and the picture's own
+    /// colors add to the tracks below. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub whole_cells: bool,
+}
+
+/// The shape of a mosaic's cells.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CellShape {
+    /// Rows and columns of rectangles. An edge of a cell is on the point the
+    /// cells line up on.
+    #[default]
+    Square,
+    /// Hexagons, flat at the top and the bottom. One has its middle on the
+    /// point the cells line up on.
+    Hexagon,
+    /// Triangles in rows, pointing up and down in turn.
+    Triangle,
+}
+
+impl CellShape {
+    pub const ALL: [CellShape; 3] = [CellShape::Square, CellShape::Hexagon, CellShape::Triangle];
+
+    pub fn code(self) -> u32 {
+        Self::ALL.iter().position(|s| *s == self).unwrap_or(0) as u32
+    }
+}
+
 /// What a blur takes from beyond the frame's edges.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -3266,17 +3376,19 @@ impl Border {
 }
 
 impl EffectType {
-    pub const ALL: [EffectType; 1] = [EffectType::GaussianBlur];
+    pub const ALL: [EffectType; 2] = [EffectType::GaussianBlur, EffectType::MosaicBlur];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::GaussianBlur => "Gaussian Blur",
+            Self::MosaicBlur => "Mosaic Blur",
         }
     }
 
     pub fn made(self) -> Effect {
         let kind = match self {
             Self::GaussianBlur => EffectKind::GaussianBlur(GaussianBlur::default()),
+            Self::MosaicBlur => EffectKind::MosaicBlur(MosaicBlur::default()),
         };
         Effect {
             on: true,
@@ -3292,6 +3404,7 @@ impl Effect {
     pub fn kind(&self) -> EffectType {
         match self.kind {
             EffectKind::GaussianBlur(_) => EffectType::GaussianBlur,
+            EffectKind::MosaicBlur(_) => EffectType::MosaicBlur,
         }
     }
 
@@ -3335,6 +3448,56 @@ impl GaussianBlur {
             of(self.across(), self.across_channels()),
             of(self.down(), self.down_channels()),
         )
+    }
+}
+
+impl MosaicBlur {
+    pub const CELL: f64 = 2.0;
+    pub const FREQUENCY: f64 = 100.0;
+    pub const FREQUENCIES: (f64, f64) = (0.1, 4000.0);
+    pub const ALIASING: f64 = 1.0;
+    pub const ALIASINGS: (f64, f64) = (0.0, 2.0);
+    pub const STRETCH: f64 = 1.0;
+    pub const STRETCHES: (f64, f64) = (0.001, 1000.0);
+    pub const OFFSETS: (f64, f64) = (-1.0, 1.0);
+    pub const SMOOTHS: (f64, f64) = (0.0, 1.0);
+    pub const MIDDLE: [f64; 2] = [0.5, 0.5];
+    pub const PLACES: (f64, f64) = (-1e6, 1e6);
+
+    pub fn frequency(&self) -> f64 {
+        self.pixel_frequency.unwrap_or(Self::FREQUENCY)
+    }
+
+    pub fn blurs_alpha(&self) -> bool {
+        self.blur_alpha.unwrap_or(true)
+    }
+
+    pub fn smooth(&self) -> f64 {
+        self.smooth_strength.unwrap_or(0.0)
+    }
+
+    pub fn shape(&self) -> CellShape {
+        self.cell_shape.unwrap_or_default()
+    }
+
+    pub fn box_size(&self) -> f64 {
+        self.aliasing.unwrap_or(Self::ALIASING)
+    }
+
+    pub fn offsets(&self) -> [f64; 2] {
+        [self.x_offset.unwrap_or(0.0), self.y_offset.unwrap_or(0.0)]
+    }
+
+    pub fn stretch(&self) -> f64 {
+        self.aspect.unwrap_or(Self::STRETCH)
+    }
+
+    pub fn place(&self) -> [f64; 2] {
+        self.position.unwrap_or(Self::MIDDLE)
+    }
+
+    pub fn edge(&self) -> Border {
+        self.border.unwrap_or_default()
     }
 }
 
@@ -4093,6 +4256,22 @@ pub enum SubtitleAlign {
     Right,
 }
 
+fn one_upper(c: char) -> char {
+    let mut mapped = c.to_uppercase();
+    match (mapped.next(), mapped.next()) {
+        (Some(one), None) => one,
+        _ => c,
+    }
+}
+
+fn one_lower(c: char) -> char {
+    let mut mapped = c.to_lowercase();
+    match (mapped.next(), mapped.next()) {
+        (Some(one), None) => one,
+        _ => c,
+    }
+}
+
 /// How a title's letters draw.
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -4130,37 +4309,34 @@ impl TitleCase {
         .find(|c| c.word() == word)
     }
 
-    pub fn pieces(self, text: &str, word_start: bool) -> Vec<(String, bool)> {
+    pub fn pieces(self, text: &str, before: &str) -> Vec<(String, bool)> {
         match self {
             Self::Mixed => vec![(text.to_string(), false)],
-            Self::Upper => vec![(text.to_uppercase(), false)],
-            Self::Lower => vec![(text.to_lowercase(), false)],
+            Self::Upper => vec![(text.chars().map(one_upper).collect(), false)],
+            Self::Lower => vec![(text.chars().map(one_lower).collect(), false)],
             Self::Title => {
+                let whole = format!("{before}{text}");
                 let mut out = String::with_capacity(text.len());
-                let mut start = word_start;
-                for c in text.chars() {
-                    if start {
-                        out.extend(c.to_uppercase());
-                    } else {
-                        out.push(c);
+                for (at, word) in whole.split_word_bound_indices() {
+                    let mut start = true;
+                    for (i, c) in word.char_indices() {
+                        if at + i >= before.len() {
+                            out.push(if start { one_upper(c) } else { c });
+                        }
+                        start = matches!(c, '.' | ':');
                     }
-                    start = c.is_whitespace();
                 }
                 vec![(out, false)]
             }
             Self::Small => {
                 let mut out: Vec<(String, bool)> = Vec::new();
                 for c in text.chars() {
-                    let small = c.is_lowercase();
+                    let small = get_general_category(c) == GeneralCategory::LowercaseLetter;
                     if out.last().is_none_or(|(_, s)| *s != small) {
                         out.push((String::new(), small));
                     }
                     let last = out.last_mut().expect("just pushed");
-                    if small {
-                        last.0.extend(c.to_uppercase());
-                    } else {
-                        last.0.push(c);
-                    }
+                    last.0.push(if small { one_upper(c) } else { c });
                 }
                 out
             }
@@ -4739,6 +4915,11 @@ impl Project {
             Some(s) => self.frames_in(s.end - s.start),
             None => self.file_frames(media),
         }
+    }
+
+    pub fn subclip_span(&self, media: &Media) -> Option<(i64, i64)> {
+        let first = self.frames_in(media.subclip?.start);
+        Some((first, first + self.media_frames(media)))
     }
 
     pub fn file_frames(&self, media: &Media) -> i64 {

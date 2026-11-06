@@ -13,11 +13,11 @@ use super::geometry::{Row, Rows, Scale, TrackRect, header_parts, is_subtitle};
 use super::gesture::Gesture;
 use super::{header_button, icon, paint};
 use crate::gui::export::Ask;
-use crate::gui::keys;
 use crate::gui::pool::elide;
 use crate::gui::subtitles::new_cue;
 use crate::gui::theme;
 use crate::gui::workspace::Workspace;
+use vidcut_core::shortcuts::Action;
 
 const EDGE: f32 = 8.0;
 const FILL: Color32 = Color32::from_rgb(52, 98, 108);
@@ -479,10 +479,11 @@ impl Workspace {
             });
             ui.separator();
             let inside = c.start < at && at < c.end();
+            let bindings = self.snap.bindings.clone();
             if ui
                 .add_enabled(
                     inside,
-                    egui::Button::new(keys("Split at Playhead  (Ctrl+B)")),
+                    egui::Button::new(bindings.named("Split at Playhead", Action::Split)),
                 )
                 .clicked()
             {
@@ -503,7 +504,10 @@ impl Workspace {
                 self.send("subtitles.join", json!({ "cues": cues }));
                 ui.close();
             }
-            if ui.button("Delete  (Delete)").clicked() {
+            if ui
+                .button(bindings.named("Delete", Action::Delete))
+                .clicked()
+            {
                 self.delete_key(false);
                 ui.close();
             }

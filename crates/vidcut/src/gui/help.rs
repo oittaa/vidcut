@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use eframe::egui::{self, RichText};
-use vidcut_core::shortcuts::{Group, SHORTCUTS, Shortcut, key_name};
+use vidcut_core::shortcuts::{Bindings, Group, SHORTCUTS, Shortcut, key_name};
 
 use super::export::near_center;
 use super::theme;
@@ -18,6 +18,7 @@ type Choices = (&'static str, Vec<(&'static str, &'static str)>);
 
 impl Workspace {
     pub(super) fn help_window(&mut self, ctx: &egui::Context) {
+        let bindings = self.snap.bindings.clone();
         let help = &mut self.help;
         if !help.open {
             help.search.clear();
@@ -45,7 +46,7 @@ impl Workspace {
                     .map(|g| {
                         let rows = SHORTCUTS
                             .iter()
-                            .filter(|s| s.group == g && matches(s, &query))
+                            .filter(|s| s.group == g && matches(s, &query, &bindings))
                             .collect::<Vec<_>>();
                         (g, rows)
                     })
@@ -71,7 +72,7 @@ impl Workspace {
                                     );
                                     return;
                                 }
-                                shortcuts(ui, &groups, &query, &mut help.explained);
+                                shortcuts(ui, &groups, &query, &bindings, &mut help.explained);
                                 settings(ui, &found);
                             });
                     });
@@ -86,6 +87,7 @@ fn shortcuts(
     ui: &mut egui::Ui,
     groups: &[(Group, Vec<&Shortcut>)],
     query: &str,
+    bindings: &Bindings,
     explained: &mut HashSet<&'static str>,
 ) {
     if groups.is_empty() {
@@ -94,7 +96,7 @@ fn shortcuts(
     let (left, right) = groups.split_at(halves(groups));
     two_columns(ui, |ui, side| {
         for (g, rows) in [left, right][side] {
-            group(ui, *g, rows, query, explained);
+            group(ui, *g, rows, query, bindings, explained);
         }
     });
 }
@@ -155,16 +157,21 @@ fn halves(groups: &[(Group, Vec<&Shortcut>)]) -> usize {
         .unwrap_or(1)
 }
 
-fn matches(s: &Shortcut, query: &str) -> bool {
+pub(super) fn matches(s: &Shortcut, query: &str, bindings: &Bindings) -> bool {
     if query.is_empty() {
         return true;
     }
-    let keys = s.keys.join("+").to_lowercase();
-    let key = keys == query || keys.split('+').any(|k| k == query);
+    let key = bindings.row(s).iter().any(|combo| {
+        let keys = combo.join("+").to_lowercase();
+        keys == query || keys.split('+').any(|k| k == query)
+    });
     key || query.chars().count() > 1
-        && (s.action.to_lowercase().contains(query)
-            || s.explanation
-                .is_some_and(|e| e.to_lowercase().contains(query)))
+        && (s.title.to_lowercase().contains(query) || explained_by(s, query, bindings))
+}
+
+fn explained_by(s: &Shortcut, query: &str, bindings: &Bindings) -> bool {
+    s.explanation
+        .is_some_and(|e| bindings.explain(e).to_lowercase().contains(query))
 }
 
 fn choices(query: &str) -> Vec<Choices> {
@@ -189,7 +196,7 @@ fn found_in(texts: &[&str], query: &str) -> bool {
         || query.chars().count() > 1 && texts.iter().any(|t| t.to_lowercase().contains(query))
 }
 
-fn heading(ui: &mut egui::Ui, title: &str) {
+pub(super) fn heading(ui: &mut egui::Ui, title: &str) {
     ui.label(
         RichText::new(title.to_uppercase())
             .small()
@@ -204,11 +211,12 @@ fn group(
     g: Group,
     rows: &[&Shortcut],
     query: &str,
+    bindings: &Bindings,
     explained: &mut HashSet<&'static str>,
 ) {
     heading(ui, g.title());
     for (i, s) in rows.iter().enumerate() {
-        row(ui, s, query, explained, i % 2 == 1);
+        row(ui, s, query, bindings, explained, i % 2 == 1);
     }
     ui.add_space(16.0);
 }
@@ -217,29 +225,27 @@ fn row(
     ui: &mut egui::Ui,
     s: &Shortcut,
     query: &str,
+    bindings: &Bindings,
     explained: &mut HashSet<&'static str>,
     stripe: bool,
 ) {
     let open = s.explanation.is_some()
-        && (explained.contains(s.action)
-            || (!query.is_empty()
-                && s.explanation
-                    .is_some_and(|e| e.to_lowercase().contains(query))));
+        && (explained.contains(s.title) || (!query.is_empty() && explained_by(s, query, bindings)));
     let mut toggle = false;
     striped(ui, stripe, |ui| {
         ui.horizontal(|ui| {
             if s.explanation.is_some() {
                 let r = mark(ui, open);
-                let name = format!("What {} does", s.action);
+                let name = format!("What {} does", s.title);
                 r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, open, &name));
                 toggle |= r.clicked();
             } else {
                 ui.add_space(MARK + ui.spacing().item_spacing.x);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                keys(ui, s.keys);
+                keys(ui, &bindings.row(s));
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    let name = egui::Label::new(s.action).wrap();
+                    let name = egui::Label::new(s.title).wrap();
                     if s.explanation.is_some() {
                         toggle |= ui.add(name.sense(egui::Sense::click())).clicked();
                     } else {
@@ -249,11 +255,11 @@ fn row(
             });
         });
         if open && let Some(e) = s.explanation {
-            indented(ui, dim(&super::keys(e)));
+            indented(ui, dim(&bindings.explain(e)));
         }
     });
-    if toggle && !explained.remove(s.action) {
-        explained.insert(s.action);
+    if toggle && !explained.remove(s.title) {
+        explained.insert(s.title);
     }
 }
 
@@ -317,25 +323,34 @@ fn mark(ui: &mut egui::Ui, open: bool) -> egui::Response {
     r.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-fn keys(ui: &mut egui::Ui, keys: &[&str]) {
+fn keys(ui: &mut egui::Ui, combos: &[Vec<&str>]) {
     let c = theme::colors();
-    for (i, key) in keys.iter().rev().enumerate() {
-        if i > 0 {
-            ui.label(RichText::new("+").color(c.text_dim));
+    if combos.is_empty() {
+        ui.label(RichText::new("No Key").color(c.text_dim));
+    }
+    for (n, combo) in combos.iter().rev().enumerate() {
+        if n > 0 {
+            ui.label(RichText::new(",").color(c.text_dim));
         }
-        let name = match *key {
-            "Left" => "←",
-            "Right" => "→",
-            "Up" => "↑",
-            "Down" => "↓",
-            k => key_name(k),
-        };
-        egui::Frame::new()
-            .fill(c.field)
-            .stroke(egui::Stroke::new(1.0, c.line))
-            .corner_radius(4)
-            .inner_margin(egui::Margin::symmetric(6, 1))
-            .show(ui, |ui| ui.label(RichText::new(name).strong()));
+        for (i, key) in combo.iter().rev().enumerate() {
+            if i > 0 {
+                ui.label(RichText::new("+").color(c.text_dim));
+            }
+            let name = match *key {
+                "Left" => "←",
+                "Right" => "→",
+                "Up" => "↑",
+                "Down" => "↓",
+                "Escape" => "Esc",
+                k => key_name(k),
+            };
+            egui::Frame::new()
+                .fill(c.field)
+                .stroke(egui::Stroke::new(1.0, c.line))
+                .corner_radius(4)
+                .inner_margin(egui::Margin::symmetric(6, 1))
+                .show(ui, |ui| ui.label(RichText::new(name).strong()));
+        }
     }
 }
 
@@ -347,8 +362,8 @@ mod tests {
     fn a_key_alone_finds_its_shortcuts() {
         let found: Vec<&str> = SHORTCUTS
             .iter()
-            .filter(|s| matches(s, "w"))
-            .map(|s| s.action)
+            .filter(|s| matches(s, "w", &Bindings::default()))
+            .map(|s| s.title)
             .collect();
         assert_eq!(found, vec!["Dynamic Trim"]);
     }

@@ -6,10 +6,12 @@ use vidcut_core::analysis;
 use vidcut_core::model::Project;
 use vidcut_core::ops::{self, Edge, furthest};
 use vidcut_core::request::Detect;
+use vidcut_core::shortcuts::Action;
 
 use super::{EditSel, Side, TrackRef};
 use crate::gui::export::Ask;
-use crate::gui::shuttle::{Jkl, first_press};
+use crate::gui::shortcuts::Fired;
+use crate::gui::shuttle::Jkl;
 use crate::gui::timeline::geometry::{Rows, Scale};
 use crate::gui::workspace::{Workspace, dim};
 use crate::live::{Audition, MAX_SPEED, PlayerId};
@@ -21,6 +23,8 @@ pub struct Stripe {
     pub end: i64,
     pub keep: bool,
 }
+
+const SHOTS_KEPT: usize = 100;
 
 #[derive(Debug, Clone, PartialEq)]
 struct Shot {
@@ -164,6 +168,9 @@ impl SilenceDialog {
 
     fn keep(&mut self, before: Shot) {
         if self.undone.last() != Some(&before) {
+            if self.undone.len() >= SHOTS_KEPT {
+                self.undone.remove(0);
+            }
             self.undone.push(before);
             self.redone.clear();
         }
@@ -592,6 +599,7 @@ impl Workspace {
         let Some(mut d) = self.timeline.silence.take() else {
             return;
         };
+        let bindings = self.snap.bindings.clone();
         if let Some((params, ask)) = &d.asked
             && let Some(result) = ask.take()
         {
@@ -746,7 +754,14 @@ impl Workspace {
             if edited {
                 dialog::warn(
                     ui,
-                    "A changed setting finds stripes again; Ctrl+Z brings edits back",
+                    match bindings.first(Action::Undo) {
+                        Some(key) => {
+                            format!(
+                                "A changed setting finds stripes again; {key} brings edits back"
+                            )
+                        }
+                        None => "A changed setting finds stripes again".to_string(),
+                    },
                 );
             }
             if others {
@@ -806,7 +821,10 @@ impl Workspace {
                         d.mark();
                         d.stripes.iter_mut().for_each(|s| s.keep = false);
                     }
-                    ui.label(dim("click one to keep it; X at the playhead"));
+                    ui.label(dim(match bindings.first(Action::KeepStripe) {
+                        Some(key) => format!("click one to keep it; {key} at the playhead"),
+                        None => "click one to keep it".to_string(),
+                    }));
                 });
             });
             dialog::footer(ui, |ui| {
@@ -839,32 +857,20 @@ impl Workspace {
         self.live.skip((!spans.is_empty()).then_some(spans));
     }
 
-    pub(crate) fn silence_keys(&mut self, input: &egui::InputState) {
+    pub(crate) fn silence_keys(&mut self, fired: &Fired) {
         let at = self.drawn_playhead();
         let Some(d) = &mut self.timeline.silence else {
             return;
         };
-        let m = input.modifiers;
-        if input.key_pressed(egui::Key::X)
-            && !m.command
-            && !m.alt
+        if fired.pressed(Action::KeepStripe)
             && let Some(i) = d.at(at)
         {
             d.mark();
             d.stripes[i].keep ^= true;
         }
-        if m.any() {
-            return;
-        }
-        let struck = |k: egui::Key| {
-            input.events.iter().any(|e| {
-                matches!(e, egui::Event::Key { key, physical_key, pressed: true, .. }
-                    if *key == k || *physical_key == Some(k))
-            })
-        };
         let dir = match (
-            struck(egui::Key::OpenBracket),
-            struck(egui::Key::CloseBracket),
+            fired.pressed(Action::PreviousKeyframe),
+            fired.pressed(Action::NextKeyframe),
         ) {
             (true, false) => -1,
             (false, true) => 1,
@@ -1345,18 +1351,17 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn dynamic_keys(&mut self, input: &egui::InputState) {
-        let pressed = |k: egui::Key| input.key_pressed(k);
+    pub(crate) fn dynamic_keys(&mut self, fired: &Fired) {
         let running = self.timeline.dynamic.as_ref().is_some_and(Dynamic::running);
         let playing = self.snap.timeline.playing;
-        if self.dynamic_target().is_some() && first_press(input, egui::Key::K) {
+        if self.dynamic_target().is_some() && fired.struck(Action::Stop) {
             if running {
                 self.dynamic_stop();
             } else if playing {
                 self.send("player.pause", json!({}));
             }
         }
-        if pressed(egui::Key::Space) {
+        if fired.pressed(Action::PlayOrStop) {
             if running {
                 self.dynamic_stop();
             } else if playing {

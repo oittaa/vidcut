@@ -10,9 +10,12 @@ use serde_json::{Value, json};
 use vidcut_core::lru::Lru;
 use vidcut_core::model::Project;
 use vidcut_core::request::ViewerMode;
+use vidcut_core::shortcuts::{Action, Bindings, Panel};
 
 use super::export::Ask;
 use super::fillers::{FillerEditor, Lists, Scope};
+use super::shortcuts::owner;
+use super::subclip::NewSubclip;
 use super::theme;
 use super::window::{Separate, Tool};
 use super::workspace::{Workspace, dim};
@@ -230,14 +233,6 @@ impl Searches {
     }
 }
 
-#[derive(Debug)]
-struct NewSubclip {
-    media: String,
-    range: (i64, i64),
-    name: String,
-    focus: bool,
-}
-
 #[derive(Debug, Default)]
 pub(super) struct TranscriptionUi {
     pub(super) open: bool,
@@ -288,7 +283,7 @@ fn digit(key: Key) -> Option<usize> {
 }
 
 impl TranscriptionUi {
-    pub(super) fn take_keys(&mut self, ctx: &egui::Context) {
+    pub(super) fn take_keys(&mut self, ctx: &egui::Context, b: &Bindings) {
         let keys = &mut self.keys;
         let picking = self.picking.is_some();
         let timeline = self
@@ -308,41 +303,20 @@ impl TranscriptionUi {
                         digit(*key).map(Pressed::Pick)
                     }
                     egui::Event::Key {
-                        key: Key::Delete | Key::Backspace,
-                        pressed: true,
-                        repeat: false,
-                        modifiers,
-                        ..
-                    } if !modifiers.any() => Some(Pressed::Delete),
-                    egui::Event::Key {
-                        key: Key::X,
-                        pressed: true,
-                        repeat: false,
-                        modifiers,
-                        ..
-                    } if !modifiers.any() => Some(Pressed::Sentence),
-                    egui::Event::Key {
-                        key: Key::A,
-                        pressed: true,
-                        modifiers,
-                        ..
-                    } if modifiers.command_only() => Some(Pressed::All),
-                    egui::Event::Key {
-                        key: Key::C,
-                        pressed: true,
-                        modifiers,
-                        ..
-                    } if modifiers.command_only() => Some(Pressed::Copy),
-                    egui::Event::Copy => Some(Pressed::Copy),
-                    egui::Event::Cut if timeline => Some(Pressed::Cut),
-                    egui::Event::Paste(_) if timeline => Some(Pressed::Paste),
-                    egui::Event::Key {
                         key: Key::Escape,
                         pressed: true,
                         modifiers,
                         ..
                     } if !modifiers.any() => Some(Pressed::Clear),
-                    _ => None,
+                    _ => match (owner(b, Panel::Transcription, e), owner(b, Panel::App, e)) {
+                        (Some((Action::SelectSentence, false)), _) => Some(Pressed::Sentence),
+                        (_, Some((Action::Delete, false))) => Some(Pressed::Delete),
+                        (_, Some((Action::SelectAll, _))) => Some(Pressed::All),
+                        (_, Some((Action::Copy, _))) => Some(Pressed::Copy),
+                        (_, Some((Action::Cut, _))) if timeline => Some(Pressed::Cut),
+                        (_, Some((Action::Paste, _))) if timeline => Some(Pressed::Paste),
+                        _ => None,
+                    },
                 };
                 match pressed {
                     Some(k) => {
@@ -971,11 +945,12 @@ impl Workspace {
             _ => Arc::default(),
         };
         let mut window = std::mem::take(&mut t.window);
+        let bindings = self.snap.bindings.clone();
         super::dialog::separate_window(ctx, &mut window, owner, &WINDOW, &mut open, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             let separate = ui.ctx().viewport_id() != egui::ViewportId::ROOT;
             if separate && !ui.ctx().egui_wants_keyboard_input() {
-                t.take_keys(ui.ctx());
+                t.take_keys(ui.ctx(), &bindings);
                 if !t.keys.is_empty() {
                     ui.ctx().request_repaint_of(egui::ViewportId::ROOT);
                 }
@@ -1511,7 +1486,7 @@ impl Workspace {
             t.footer = (ui.cursor().top() - footer_top).ceil();
             over = ui.ui_contains_pointer() && !separate;
             self.filler_words_window(ctx, t, &p.settings.fillers, &preferred);
-            self.new_subclip_window(ctx, t);
+            self.subclip_window(ctx, "Create Subclip", false, &mut t.subclip);
         });
         t.window = window;
         if let (Some(to), Some(items)) = (go, &items)
@@ -1551,46 +1526,6 @@ impl Workspace {
                     self.open_transcribe(ids);
                 }
             }
-        }
-    }
-
-    fn new_subclip_window(&mut self, ctx: &egui::Context, t: &mut TranscriptionUi) {
-        let Some(mut d) = t.subclip.take() else {
-            return;
-        };
-        let mut open = true;
-        let (mut create, mut cancel) = (false, false);
-        super::dialog::window(ctx, "Create Subclip", &mut open, |ui| {
-            let mut enter = false;
-            super::dialog::form(ui, "subclip-form", |ui| {
-                super::dialog::row(ui, "Name", |ui| {
-                    let field = ui.text_edit_singleline(&mut d.name);
-                    if d.focus {
-                        field.request_focus();
-                        d.focus = false;
-                    }
-                    enter = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                });
-            });
-            let ready = !d.name.trim().is_empty();
-            super::dialog::footer(ui, |ui| {
-                create = super::dialog::main_button(ui, "Create", ready) || (enter && ready);
-                cancel = ui.button("Cancel").clicked();
-            });
-        });
-        if create {
-            let (a, b) = d.range;
-            self.send(
-                "media.subclip",
-                json!({
-                    "media": d.media,
-                    "range": format!("{a}f..{b}f"),
-                    "name": d.name.trim(),
-                    "bin": self.snap.pool.bin,
-                }),
-            );
-        } else if open && !cancel {
-            t.subclip = Some(d);
         }
     }
 
@@ -1847,12 +1782,7 @@ impl Workspace {
                 let (Some(m), Some((_, _, a, b))) = (media, selected) else {
                     return;
                 };
-                t.subclip = Some(NewSubclip {
-                    media: m.to_string(),
-                    range: (a, b),
-                    name: String::new(),
-                    focus: true,
-                });
+                t.subclip = Some(NewSubclip::new(m, (a, b)));
             }
             Act::Edit(method) => {
                 let (Some(m), Some((_, _, a, b))) = (media, selected) else {

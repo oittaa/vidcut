@@ -72,7 +72,22 @@ pub(crate) fn frame_ref(src: &frame::Video) -> Result<frame::Video> {
     Ok(dst)
 }
 
-type Drawn = Lru<Option<i64>, (Look, frame::Video), 2>;
+#[derive(Default)]
+struct Drawings {
+    colors: Option<(Look, frame::Video)>,
+    matte: Option<(Look, frame::Video)>,
+}
+
+impl Drawings {
+    fn of(&mut self, matte: bool) -> &mut Option<(Look, frame::Video)> {
+        match matte {
+            true => &mut self.matte,
+            false => &mut self.colors,
+        }
+    }
+}
+
+type Drawn = Lru<Option<i64>, Drawings, 2>;
 
 const GENERATED_KEPT: usize = 2;
 
@@ -212,7 +227,6 @@ struct Source {
     retime: Retime,
     retimer: Option<crate::interpolate::User>,
     rgb: Drawn,
-    mattes: Drawn,
     matte: Option<Matte>,
     dynamic: frame::Video,
     meter: Option<crate::light::Meter>,
@@ -341,7 +355,6 @@ impl Source {
             retime: Retime::Nearest,
             retimer: None,
             rgb: Lru::new(),
-            mattes: Lru::new(),
             matte: None,
             dynamic: frame::Video::empty(),
             meter: measure.then(crate::light::Meter::new),
@@ -415,7 +428,6 @@ impl Source {
             retime: Retime::Nearest,
             retimer: None,
             rgb: Lru::new(),
-            mattes: Lru::new(),
             matte: None,
             dynamic: frame::Video::empty(),
             meter: measure.then(crate::light::Meter::new),
@@ -586,7 +598,6 @@ impl Source {
         self.ai = None;
         self.retimer = None;
         self.rgb.clear();
-        self.mattes.clear();
         self.scaled.clear();
     }
 
@@ -629,7 +640,6 @@ impl Source {
         self.prev = None;
         self.prev2 = None;
         self.rgb.clear();
-        self.mattes.clear();
         self.framed.clear();
         self.scaled.clear();
         self.lumas.clear();
@@ -639,7 +649,6 @@ impl Source {
         if self.drawn.as_ref().is_some_and(|s| !s.on_offscreen()) {
             self.drawn = None;
             self.rgb.clear();
-            self.mattes.clear();
             self.framed.clear();
         }
     }
@@ -653,6 +662,7 @@ impl Source {
         let held = self
             .rgb
             .peek(&pts)
+            .and_then(|d| d.colors.as_ref())
             .filter(|(l, _)| l.plain(size) && l.form.1.is_none())
             .map(|(_, rgb)| frame_ref(rgb))
             .transpose()?;
@@ -752,11 +762,7 @@ impl Source {
     ) -> Result<frame::Video> {
         self.follow_offscreen();
         let path = self.reader.path();
-        let kept = match look.alpha {
-            Some(Through { matte: true, .. }) => &mut self.mattes,
-            _ => &mut self.rgb,
-        };
-        drawn_once(kept, (f.pts(), look), || {
+        drawn_once(&mut self.rgb, (f.pts(), look), || {
             shown_rgb(&mut self.drawn, (f, around), rotation, look, reading, path)
         })
     }
@@ -1048,11 +1054,24 @@ fn drawn_once(
     (pts, look): (Option<i64>, &Look),
     draw: impl FnOnce() -> Result<frame::Video>,
 ) -> Result<frame::Video> {
-    if let Some((_, made)) = kept.get(&pts).filter(|(l, _)| l == look) {
+    let matte = matches!(look.alpha, Some(Through { matte: true, .. }));
+    if let Some((_, made)) = kept
+        .get_mut(&pts)
+        .and_then(|d| d.of(matte).as_ref())
+        .filter(|(l, _)| l == look)
+    {
         return frame_ref(made);
     }
     let made = draw()?;
-    kept.insert(pts, (look.clone(), frame_ref(&made)?));
+    let drawn = Some((look.clone(), frame_ref(&made)?));
+    match kept.get_mut(&pts) {
+        Some(drawings) => *drawings.of(matte) = drawn,
+        None => {
+            let mut drawings = Drawings::default();
+            *drawings.of(matte) = drawn;
+            kept.insert(pts, drawings);
+        }
+    }
     Ok(made)
 }
 
@@ -2386,11 +2405,12 @@ impl VideoFrames {
             .as_ref()
             .map(|p| crate::player::titles_of(p, k))
             .unwrap_or_default();
-        self.titles.draw_at(&at, (w, h), self.timeline_height);
-        let (mut titles, _) = self.titles.shown_at(&at, (w, h), &[]);
+        let timeline = self.timeline_height;
+        self.titles.hold_at(&at, (w, h), timeline);
+        let (mut titles, _) = self.titles.shown_at(&at, (w, h), timeline, &[]);
         let fps = self.fps.as_f64();
-        self.subtitles.draw_at(fps, (w, h), self.timeline_height, j);
-        titles.extend(self.subtitles.shown_at(fps, (w, h), j).0);
+        self.subtitles.hold_at(fps, (w, h), timeline, j);
+        titles.extend(self.subtitles.shown_at(fps, (w, h), timeline, j).0);
         let placed = piece
             .as_ref()
             .filter(|_| !self.colors)
@@ -2596,7 +2616,9 @@ impl VideoFrames {
                 let frame = if backward {
                     self.reversed_frame(i, s, (&piece, layer), k, colors)?
                 } else if retimed {
-                    self.retimed_frame(i, s, layer, k, at)?
+                    let mut own = at.to_vec();
+                    vidcut_core::render_cache::own_effects(&mut own);
+                    self.retimed_frame(i, s, layer, k, &own)?
                 } else if colors {
                     self.colors_source_frame(i, s, layer, k, at)?
                 } else {

@@ -37,6 +37,7 @@ flowchart TD
 
 - **Settings:** `settings`, a `preset`, or the default preset of the extension.
   - `set` changes fields (`apply_overrides`). `encoder` sets the video encoder. The extension sets the container.
+  - A `null` in `set` takes the field out, and the field gets its default. Why: the Export dialog sends `null` for a field that its preset has and the dialog does not.
   - The presets are `builtin_presets` and the user's TOML files (`export::presets`).
   - A preset's name is any text that is not empty. The file holds the name.
   - The file name is the preset's name when that name is short, lowercase ASCII and safe on each system (`user_preset_path`). Otherwise it is a digest of the name. Why: two names that differ only in case stay two files.
@@ -187,9 +188,9 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - Why: Super Scale works on the source, before the retime ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
   - The `Source` keeps the last two enlarged pictures (`Source::ai_picture`). Thus the later picture of one pair is the earlier picture of the next.
 - An AI upscaler takes the colors of a picture with no alpha in them. Why: its model has three channels.
-  - The alpha of the source frame is enlarged by the draw to the size of the enlarged picture (`Matte`). This occurs at each speed (`VideoFrames::shown`).
+  - The draw enlarges the alpha of the source frame to the size of the enlarged picture (`Matte`). This occurs at each speed (`VideoFrames::shown`).
   - The layer goes over the layers below as Straight, or as Premultiplied when its media has that Alpha Mode.
-  - Two enlarged pictures of a pair mix with no alpha in them. Thus a change of alpha between the two frames gives a darker edge than the plain pair below.
+  - Two enlarged pictures of a pair mix with no alpha in them ([todo](../todo/super-scale.md)). Where the alpha changes between the two frames, the edge is then darker or brighter than the pair with no upscaler.
 - With the frame rate conversion of macOS, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
   - The draw puts both frames into P416 VideoToolbox frames in the timeline color space first (`Source::frame_of`). They are sized and placed as the RGB pair is.
 - The pair is sized and placed before the frame is made. Why: Edit Sizing comes before Speed Effects ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
@@ -198,6 +199,7 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - A placed clip: the draw places each frame into RGB with its Transform, Crop and Dynamic Zoom (`Sampling::Colors`). The RGB covers only the bounds of the placed picture (`placed_look`).
   - Super Scale enlarges each frame with the kernel of its Sharpness, as the draw of an export does (`screen::kernel`).
   - `Source::rgb_from` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next, while the placing stays the same (`Look`).
+  - Each of the two frames keeps its colors and its gray picture in one entry (`Drawings`).
 - With the other processes, `interpolate::between` makes the frame from the two RGB pictures.
 - The key of a pair names its placing (`Source::look_id`). Thus a new placing gets new features.
 - A made frame of a placed clip is already placed (`Sampling::Placed`). The draw takes only its edges, its opacity and its composite mode from `place::Placing`.
@@ -208,11 +210,13 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - The draw makes each frame of the pair twice (`Look::with_alpha`): its colors by its Alpha Mode, and its alpha as gray (`AlphaUse::Matte`).
   - The colors have the alpha in them (`AlphaUse::Multiplied`). Why: a mix of two such pictures gives the mix of the two frames over any picture below.
   - `interpolate::matte_between` makes the gray picture from its own pair. The `Engine` holds that pair beside the pair of colors. Why: otherwise each pair would push the other out at each frame.
+  - AI Retime makes the gray picture with a flow of its own, from the gray pair. Thus the edges of the gray picture and of the colors can differ.
   - With the frame rate conversion of macOS, Frame Blend makes the gray picture. Why: that conversion takes VideoToolbox frames, and the gray pair is RGB.
   - At a shot change, the gray picture comes from the same frame as the colors.
   - The layer goes over the layers below as Premultiplied (`Matte::of`). With a composite mode, the draw first takes the alpha out of the colors (`AlphaUse::TakenOut`). A media with the Alpha Mode Premultiplied keeps its colors.
   - The Alpha Mode None makes no gray picture, and its colors have no alpha in them.
-  - A job of the clip level has no gray picture (`VideoFrames::colors_only`). Such a clip stays at the timeline level ([playback](playback.md#the-render-cache)).
+  - A retimed clip with alpha gets no job of the clip level (`Setup::keeps_alpha`). It stays at the timeline level ([playback](playback.md#the-render-cache)).
+  - A job of the clip level with AI Super Scale and no retime makes the alpha of the enlarged frame (`VideoFrames::shown`).
 
 Seeks:
 
@@ -395,7 +399,7 @@ Cancel:
 - `subtitles::shown` gives what each cue draws at the frame ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It gives the pieces, the spoken word in its color, the words not yet spoken, and the size of a pop.
 - `burn::draw` lays out the cues with cosmic-text: shaping, right-to-left text, and system fonts for the scripts that the first font does not have.
 - `burn::paint` draws one picture for each run of cues that share a place and a style. A popping word is a picture of its own over it.
-- The last lines laid out stay in an `Lru` (`laid_line`).
+- The last lines laid out stay in a `ByBytes` with a fixed limit (`laid_line`, `LINES_BYTES`). Why: exports use them, also with no viewer.
 - The player's `Subtitles` keeps the pictures while the same pieces show (`Subtitles::burned`). Thus a pop draws only its word again.
 - The pictures go onto the frame in the draw of the viewer ([todo](../todo/burn-in-ahead.md)).
 
@@ -445,10 +449,29 @@ The pictures:
 - The coverage of a pixel is the product of the levels: smoothed edges, soft crop edges and opacity (`place::Placing::at`).
 - A level of a clip in a compound clip is left out where the clip fills the frame at its usual values. Thus the edges of the compound clip are covered once.
 - A composite mode (`Placing::mode`) mixes in R'G'B' (D75). The shader mixes it with the layers below (`mixed`).
-  - `place::Placing` takes the first mode other than Normal, from the picture out through its compound clips.
+  - `place::Placing` takes the outermost mode other than Normal, from the compound clips in to the picture. Thus the mode of a compound clip replaces the mode of a picture inside it.
+  - It leaves out the compound clips that mix first (`Placing::inside`).
 - A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once.
 - A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
 - A Push or a Slide draws each side into its own picture. `fs_motion` moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
+
+A compound clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+
+- `render::expanded` puts a compound clip at its usual values in the `Placed` list only when a clip inside it has a composite mode (`holds_mode`). A compound clip without either draws as its tracks do.
+- `place::Mixes` finds, for each frame, the compound clips that mix first. Each one is a `place::Mix`.
+  - Two or more parts in the frame make a `place::Mix`, unless the compound clip is at its usual values and no part has a mode. Normal over Normal gives the same picture in each order.
+  - A picture alone makes none. `place::Placing` takes the levels, the mode and the effects of its compound clips, as for a plain clip.
+  - A title alone makes one only for a mode or an effect. Why: a title draws neither by itself.
+  - A compound clip with one `place::Mix` as its only part adds its level to that `place::Mix` (`Mix.placing`).
+- `Placing::inside` draws a part of a `place::Mix`. It opens the levels of the compound clips that mix first (`Level::open`) and takes no opacity, mode or effects from them.
+  - The maps of these levels stay. Thus the parts are at their places on the frame, in a picture as large as the frame.
+- `MixDraw` draws the parts of a `place::Mix` over transparent, in a picture of its own.
+- A part with a composite mode reads `Below`. It holds a copy of that picture only (`IN_MIX`). `fs_mode` mixes by the alpha below, and thus a part with nothing below it stays as it is.
+- `MixDraw::finished` then shows that picture as one layer:
+  - `blur::canvas_bind` covers it by the levels of `Mix.placing`: edges, soft edges and opacity. The shader reads it as `made` 6.
+  - With effects, `blur::canvas_effects` covers it with no opacity (`bared`), then runs the effects. `blur::shown_bind` then shows it with the opacity.
+  - The outer pass mixes it with the tracks below, by the mode of `Mix.placing`.
+- `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
 Dynamic Zoom and keyframes (D75):
 
@@ -471,29 +494,51 @@ Soft crop edges:
 The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)):
 
 - `place::Placing` holds the effects of the picture and of the compound clips around it, the inner ones first (`Placing.effects`).
-- Each `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas. It also holds the border, the blend and Use Alpha.
-  - The sigma is that of `GaussianBlur::spreads` at the width of the canvas.
-  - It is multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it, at the frame.
-  - An effect that is off, or at a blend of 0, is left out. So is a blur with no sigma and Use Alpha on.
+  - The effects of a compound clip that mixes first are on its `place::Mix` ([placed pictures](#placed-pictures)).
+- Each `place::Working` holds the blend, Use Alpha and the `place::Work` of its kind.
+  - An effect that is off, or at a blend of 0, is left out (`Working::of`).
+- `place::OnFrame` holds what an effect takes from the placement at the frame:
+  - The width of the canvas, multiplied by √|Zoom X × Zoom Y| of the picture and of each compound clip around it.
+  - The size of the picture on the frame: its fitted size, multiplied by each Zoom X and each Zoom Y.
+  - The middle of the picture on the frame, through the levels. A Dynamic Zoom box does not move it.
+- `place::Blurring` holds the sigma of each channel across and down, in pixels of the canvas, and the border.
+  - The sigma is that of `GaussianBlur::spreads` at that width.
+  - A blur with no sigma and Use Alpha on is left out.
+- `place::Tiling` holds the grid of a Mosaic Blur.
+  - That is the cell shape, the size of a cell, the step between columns, the origin and the size of the box.
+  - It also holds Blur Alpha and Whole Cells Only.
+  - The size of a cell comes from the area of the picture on the frame (`MosaicBlur::CELL`).
+  - The origin is the middle of the picture on the frame, moved by Position and the offsets.
+  - Its sizes are in samples. Antialias Result gives two samples for each pixel.
+  - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
 
 The draw:
 
 - `Screen::draw` draws a layer with effects into a picture of its own, with no opacity (`bared`).
 - `blur::Blurred` keeps that picture for each such layer. It also keeps two pictures for the passes.
+- `blur::steps` gives the passes of one effect: a pipeline and its parameters for each pass. `blur::effects_into` runs them.
 - `fs_blur` blurs across and then down, in passes (`blur::passes`).
-- The last pass of an effect mixes the blur with the picture that came in, by the blend.
-- With Use Alpha off, the first pass takes the colors without their alpha. Thus a clear part of the picture does not make it darker.
+- `fs_mosaic` makes the mosaic in three passes (`blur::mosaic_bytes`):
+  - The color of a cell is the mean of a box. The first two passes make a table of these means, across and then down.
+  - Only the columns and the rows that hold a middle of a cell get a mean. Thus the cost does not grow with the size of a cell.
+  - The third pass finds the cell of each pixel and reads its color from the table (`mosaic_nearest`).
+  - With Antialias Result, the third pass finds the cell of each of the four samples of a pixel, and takes their mean.
+  - The third pass applies Blur Alpha and Whole Cells Only to each sample (`mosaic_alpha`). With Use Alpha off, it does not.
+- The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
+- With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
 - Then the layer goes over the layers below, with its opacity and its mode, as other layers do (`blur::shown_bind`).
+  - A layer in the normal mode draws its premultiplied colors as they are (`placed`). Why: `mosaic_alpha` can give more color than alpha, or color with no alpha. That color adds to the layers below.
 
 A made frame of a speed change ([which source frame](#which-source-frame)):
 
-- The effects work on each source picture before the frame between them is made, as in the spec (§13).
+- The effects of the clip work on each source picture before the frame between them is made, as in the spec (§13).
+- The effects of a compound clip around it work later, at the draw (`render_cache::own_effects`). A file of the render cache also holds none of them.
 - The draw that places a source picture also blurs it (`Sampling::Colors`). It covers the whole frame, because the blur spreads past the picture (`placed_look`).
 - The made frame holds colors only. The later draw thus takes its alpha from the placement at that frame (`Sampling::Placed`, `Blurred::made`):
   - It draws the colors of the made frame with no edges (`blur::opened`).
   - It draws the coverage of the picture, and blurs it by the same effects (`blur::mask_bind`).
-  - The layer takes its colors from the first and its alpha from the second.
+  - The layer takes its colors from the first and its alpha from the second. It thus has no color at an alpha of 0.
 - A frame from a file of the render cache holds the effects up to the last checked effect ([playback](playback.md#the-render-cache)).
   - `VideoFrames` gives it a placement with only these effects (`Sampling::Placed`, `render_cache::baked`). The coverage takes only these effects.
   - The draw takes the later effects from the placement of the frame. It joins the colors and the coverage into one picture, then blurs it by these effects (`Blurred::made`).
