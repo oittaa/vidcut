@@ -2563,7 +2563,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - `LUT_3D_SIZE 1` gives a black picture.
   - The window of Resolve is not measured.
 - **vidcut:**
-  - `clip.set` and `project.set` refuse the file and give the reason.
+  - `media.set` and `project.set` refuse the file and give the reason.
 - **Why:**
   - An error is better than a wrong picture that looks correct.
   - The owner approved this difference.
@@ -2638,4 +2638,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The keys are the Keys page of the Preferences window.
 - **Why:**
   - vidcut stores the keys in the preferences, with the other settings of the user.
+  - The owner approved this difference.
+
+## X139. One Input LUT submenu takes any `.cube` file
+
+- **Resolve:**
+  - A right-click on Media Pool clips gives the 1D LUT and 3D LUT submenus. The user selects a LUT there (p. 3480).
+  - The submenus list the LUT files in the LUT folders that the preferences name (p. 3480).
+- **vidcut:**
+  - The right-click menu of the pool has one Input LUT submenu, with Choose… and Reset.
+  - Choose… opens a file picker for any `.cube` file.
+  - A file with both tables runs the 1D table, then the 3D table, as in Resolve ([spec](cut-page-spec.md#the-lut-tables)).
+- **Why:**
+  - The picture is the same.
+  - The picker reaches any file, with no LUT folder to set up.
   - The owner approved this difference.
