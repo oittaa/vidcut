@@ -191,6 +191,7 @@ Multicam layout:
 Media fields:
 
 - `camera` is the name of the camera, as text (spec §3). The file does not give it, and `media.set` sets it.
+- `created`, `scene`, `shot` and `take` are text (spec §3). The file does not give them, and `media.set` sets them. The project leaves out an empty one.
 - `color_space` (`ColorSpace`, spec §3) reads a file whose color tags are wrong as another space.
   - `Media::video_as_read` is the `VideoInfo` of the file, read in that space. Render pieces carry it.
   - `VideoReader` retags each decoded frame with it (`color::retag`). This drops the HDR side data.

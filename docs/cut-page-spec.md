@@ -208,21 +208,35 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - **Metadata** (pp. 661–663): a card for each clip, in as many columns as fit the pool.
     - A thumbnail is at the left of the card. A hover on it scrubs the clip, and I/O mark its source In/Out.
     - Beside the thumbnail, from the top:
-      - The main description, which follows the sort (p. 662). Timecode gives the start timecode. Each other sort gives the clip name.
+      - The main description, which follows the sort (p. 662):
+        - Timecode gives the start timecode.
+        - Camera gives the camera name and the start timecode.
+        - Date Time gives Date Created and the file name.
+        - Scene, Shot gives the scene, the shot and the take.
+        - Clip Color gives Date Created and the start timecode.
+        - Each other sort gives the clip name.
+        - An empty value shows `---`.
       - The start timecode and the camera name. A file with no timecode shows 00:00:00:00. A clip with no camera name shows `---`.
       - A subtitle file shows its cue count and its length on that line, and no camera name.
       - The clip name.
     - Sorted by Clip Name, the clips are in clusters by the first letter of the name, each under a heading (pp. 662–663).
       - Inside a cluster, the order is by timecode. The Source Tape takes this order.
     - Sorted by Date Modified, the clusters are the days of the file's modification time (p. 662).
-    - Sorted by Timecode, Date Imported or Duration, there are no clusters. vidcut keeps no creation date and no date of import.
+    - Sorted by Camera, the clusters are the camera names, under headings such as Camera A (pp. 662–663). The order is by name and then by timecode.
+    - Sorted by Date Time, the clusters are the days of Date Created (p. 662). The order is by day and then by timecode.
+    - Sorted by Bin, the clusters are the bins (p. 662). A heading shows the full path of the bin. The order is by bin and then by timecode.
+    - Sorted by Scene, Shot, the clusters are the scenes, under headings such as Scene 1 (pp. 662–663). The order is by scene, shot and take.
+    - Sorted by Clip Color, the clusters are the color names (p. 662). The order is by color and then by timecode.
+    - Sorted by Online Status, the clusters are Original and Proxy (p. 662). A clip is in Proxy when it has a proxy that fits its file.
+    - A clip with no value for the sort has no heading. In ascending order, these clips come first.
+    - Sorted by Timecode, Date Imported or Duration, there are no clusters. vidcut keeps no date of import.
     - Descending reverses the whole order (p. 663).
-    - vidcut keeps no Date Created, scene, shot, take or comment ([todo](todo/cut-page-gaps.md)). Thus the card and the main description leave them out.
+    - The card does not show Date Created, scene, shot, take or comment ([todo](todo/cut-page-gaps.md)).
     - `pool.set` with `view` `metadata` opens this view.
   - A sound file shows its waveform.
   - **Metadata Display** (p. 665): a tag icon beside the search field shows metadata of the selected clip at the top of the pool (deviation X60). The metadata is the camera name, scene, shot and take, frame rate and resolution.
 - **Sort and search** (pp. 666–667):
-  - Sort Media By has Clip Name, Date Imported, Date Modified and Timecode (D59), ascending or descending.
+  - Sort Media By has Clip Name, Date Imported, Date Modified, Timecode (D59), Camera, Date Time, Bin, Scene Shot, Clip Color and Online Status. Each is ascending or descending.
   - This order is also the Source Tape order.
   - The search field filters live, through the open bin and the bins inside it.
 - **Bins** (pp. 655–656, 377):
@@ -244,6 +258,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The Camera row of Clip Info edits it. `media.set` sets it on one or more items. An empty name clears it.
   - `media.get` and the metadata strip show it.
   - vidcut does not read the name from a file. No measurement shows which file tags give it.
+- **Date Created, Scene, Shot and Take** (pp. 661–663, 750):
+  - A media item can have `created`, `scene`, `shot` and `take`. Each is text, and `created` has the form `YYYY-MM-DD`.
+  - The rows of Clip Info edit them. `media.set` sets them on one or more items. An empty value clears the field.
+  - `media.get` shows them. The metadata strip shows the scene, the shot and the take.
+  - vidcut does not read Date Created from a file. No measurement shows which time or tag gives it.
 - **Multicam layout** (p. 1037):
   - `multicam.layout` tells where the files of a multicam clip lie. It changes nothing, and the project does not store the result.
   - The answer has rows. A named row holds all files of one camera name. Named rows come first, in camera order.

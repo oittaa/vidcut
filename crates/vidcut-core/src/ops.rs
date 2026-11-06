@@ -2585,6 +2585,28 @@ pub fn create_subclip(
     Ok(id)
 }
 
+pub fn is_date(text: &str) -> bool {
+    let parts: Vec<&str> = text.split('-').collect();
+    let [year, month, day] = parts[..] else {
+        return false;
+    };
+    let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
+    if !digits(year, 4) || !digits(month, 2) || !digits(day, 2) {
+        return false;
+    }
+    let number = |s: &str| s.parse::<u32>().unwrap_or(0);
+    let (year, month, day) = (number(year), number(month), number(day));
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let last = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=last).contains(&day)
+}
+
 fn clip_outside(tracks: &[Track], media: &str, part: std::ops::Range<i64>) -> Option<String> {
     for c in tracks.iter().flat_map(|t| &t.clips) {
         if let Some(k) = &c.compound
