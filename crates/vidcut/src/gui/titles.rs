@@ -301,14 +301,14 @@ fn anchor_row(ui: &mut egui::Ui, f: &mut LineFields, usual: TitleAnchor) -> bool
     ui.label("Anchor");
     ui.horizontal_wrapped(|ui| {
         for (i, label) in ["Left", "Middle", "Right"].into_iter().enumerate() {
-            if ui.radio(across == i, label).clicked() {
+            if ui.radio(across == i, label).clicked() && across != i {
                 f.anchor = Some(ANCHORS[down][i]);
                 changed = true;
             }
         }
         ui.separator();
         for (i, label) in ["Top", "Middle", "Bottom"].into_iter().enumerate() {
-            if ui.radio(down == i, label).clicked() {
+            if ui.radio(down == i, label).clicked() && down != i {
                 f.anchor = Some(ANCHORS[i][across]);
                 changed = true;
             }
@@ -737,7 +737,7 @@ impl Workspace {
         });
         ui.label(dim(match d.kind {
             TitleKind::LowerThird => "Across and Down: each line's anchor, in percents.",
-            TitleKind::Scroll => "Across: the lines' edge by Align, in percents of the picture.",
+            TitleKind::Scroll => "Across: the anchor's column, in percents of the picture.",
             TitleKind::Text => "Across and Down: the anchor's place, in percents of the picture.",
         }));
         if !d.error.is_empty() {

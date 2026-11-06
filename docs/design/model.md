@@ -191,6 +191,7 @@ Multicam layout:
 Media fields:
 
 - `camera` is the name of the camera, as text (spec §3). The file does not give it, and `media.set` sets it.
+- `created`, `scene`, `shot` and `take` are text (spec §3). The file does not give them, and `media.set` sets them. The project leaves out an empty one.
 - `color_space` (`ColorSpace`, spec §3) reads a file whose color tags are wrong as another space.
   - `Media::video_as_read` is the `VideoInfo` of the file, read in that space. Render pieces carry it.
   - `VideoReader` retags each decoded frame with it (`color::retag`). This drops the HDR side data.
@@ -213,6 +214,13 @@ Media fields:
   - `PoolFiles` and `otio::same_media` never take a subclip for its file.
   - An OTIO file gives a clip of a subclip as a clip of the whole file, at the right time.
   - `Speakers::share` gives a new subclip the people of its parent.
+  - `ops::set_subclip_limits` changes the part (`media.subclip_set`). `Project::subclip_span` gives the part in frames of the file.
+    - The source frames count from the start of the part. Thus a new start moves each frame that counts from it by the same amount.
+    - `ops::shift_source` moves `source_in`, the keyframes and the `from` of the effects of each clip. A clip with a `Speed` keeps its keyframes, because they count on the retimed source.
+    - The `head` and `tail` of a `GroupClip` take the change, so that its visible part stays.
+    - `validate` refuses a clip outside its media, so `ops::set_subclip_limits` refuses the change first and names the clip.
+    - A `Marker` can be outside the part for this reason. Nothing shows it there, and a later change can bring it back.
+    - `Tiles` forgets the pictures of the item, because their frames count from the start of the part.
 - `markers` holds the markers on the source clip, at its source frames (`ops::add_source_marker`). `Project::marker` finds a marker by id in the timeline or in a source clip.
 
 Folders:
@@ -258,6 +266,7 @@ Ranges and resolution:
 `ops::source_overwrite` holds `edit.source_overwrite`. The behavior is in [spec §7.2](../cut-page-spec.md#72-edit-functions).
 
 - `origin` turns `MediaInfo.timecode` into project frames with `StartTimecode::frames_at`. A file with no tag counts as 0.
+- A generator as the source has `origin` 0 and the length of `ops::titles::default_length`.
 - `shown` gives the timecode range that a clip shows, from `Clip::source_at`.
   - A clip with no media or with a still has no such range. Thus generators, titles and compound clips do not count.
 - `first_where` takes clips by the order of the tracks: video from the lowest, then audio.
@@ -265,7 +274,8 @@ Ranges and resolution:
   - A video clip and an audio clip that give different positions under one rule make the edit fail (`disagree`). No measurement tells which of them wins.
 - `track_above` gives the track. `place_on_top` uses it too.
 - The result names the clip, its track, the `reference` and the `playhead`. `playhead_after_edit` seeks to this `playhead`.
-- The GUI sends no `range` (`edit_from`). The core then reads `Media.marks`, and it can tell source marks from no marks.
+- The GUI sends no `range` for media (`edit_from`). The core then reads `Media.marks`, and it can tell source marks from no marks.
+- The GUI sends `range` for a generator with marks. Why: its marks are in the live session, not in the project.
 
 ## Ids
 
@@ -393,22 +403,22 @@ Writing:
 - Its `Title` holds:
   - a `TitleKind`: `text`, `lower_third` or `scroll`
   - the `TitleAlign` of its lines
-  - the `TitleAnchor` of a Text title
+  - an optional `TitleAnchor`. Without one, the block takes the usual anchor of its kind, alignment and part (`Title::usual_anchor`). `Title::anchor_of` gives the anchor in force.
   - its lines, with markup that `rich::spans` reads into `Span`s
   - a `TitleStyle`
-  - an optional `position`: the point that its anchor goes to (`Title::place`, `Title::anchor`, [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
+  - an optional `position`: the point that its anchor goes to (`Title::place`, [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
   - `position_keys` with `position_y`, `zoom_keys`, `rotation_keys` and `opacity_keys`: `Keyframe`s on source frames, beside the plain values
   - `position_handles`: the `PositionHandles` of the position keys that have any, each with the frame of its key
 - `Title::takes_keys` tells which values take keyframes. A scroll has no zoom or rotation.
 - `Title::as_picture` gives a `Picture` with these values, and `Title::take_picture` takes them back. Thus `ops::keyframes` and the sampling use the code of `Picture`.
 - `Title::sampled` gives the title of one frame, without keyframes.
 - The upper line of a lower third can go apart from its lower line:
-  - `Title::upper` holds a `TitleLine`: the place, zoom, rotation and keyframes of the upper line. The other fields are then those of the lower line.
+  - `Title::upper` holds a `TitleLine`: the anchor, place, zoom, rotation and keyframes of the upper line. The other fields are then those of the lower line.
   - Without `Title::upper`, the two lines go together. The point of the upper line is then `Title::UPPER_DROP` below the point of the lower line (`Title::upper_with_lower`).
   - `Title::swap_lines` swaps the values of the two lines, and `Title::upper_view` gives a title with the upper line's values in the fields of the title. Thus `ops::keyframes`, `ops::titles` and `otio::titles` have one code for the two lines.
   - `Title::part_lines` puts the values of `Title::upper_with_lower` into a `TitleLine`. `ops::titles::on_line` parts and swaps the lines around one edit.
   - `Title::each_line` makes one change on each line.
-- `Title::blocks` tells what to draw. A `TitleBlock` has its `TitlePart`, its pivot, the edge of its text, its zoom and its rotation:
+- `Title::blocks` tells what to draw. A `TitleBlock` has its `TitlePart`, its pivot, its anchor, the edge of its text, its zoom and its rotation:
   - A Text title or a scroll is one `TitlePart::Whole`.
   - A lower third is a `TitlePart::Lower` under a `TitlePart::Upper`, with a `TitlePart::Backing` under them when the title has a background. Each line has its own point, as in the file.
   - `Title::block_text` gives the text of a block.
@@ -446,8 +456,10 @@ Writing:
   - `generators::timeline_code` gives the code values of a color in the colors of the timeline.
   - `Generator::chart` gives the `Chart` of a kind that has no value over time. A `Chart` draws as rows of columns, from the size of the timeline. Its code values do not change with the colors of the timeline.
 - `generators::name` gives the name of a generator. `generators::shown` gives its JSON form, for `generators.list` and `clip_json`.
-- `ops::generators` holds the edits. `generators.add` and `titles.add` share `ops::titles::add_block`.
+- `ops::generators` holds the edits. `generators.add` and `titles.add` share `ops::titles::add_block`. `ops::block_clip` makes the clip of a title or a generator, for `add_block` and `make_clip`.
 - `GeneratorKind` is the kind that `generators.add` takes. `GeneratorSettings` holds the values of `generators.add` and `generators.set`. A kind refuses a value that it does not have.
+- `SourceParams`, `viewer.load` and `frame.render` also take a generator. `ops::generators::source_of` reads it.
+- `render::generator_tape` plans a generator alone on V1. Why: the source viewer and `frame.render` then draw it by the path of a clip on the timeline.
 - `ops::keyframes` keeps the keyframes of a volume and of a center on one path (`Number`).
 
 ## Pictures
@@ -618,9 +630,13 @@ Which kept transitions play (`otio::transitions`):
 The file:
 
 - Preferences are not in the project. They are in `preferences.toml` in the config dir (`preferences::path`).
-- The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services and viewer ([the disk cache limit](analysis.md#the-disk-cache-limit)).
+- The file holds a `Preferences` with these sections: appearance, GPU, player, thumbnails, cache, proxies, render cache, transcripts, services, viewer and keys ([the disk cache limit](analysis.md#the-disk-cache-limit)).
 - `ViewerPrefs.guides` (`Guides`, `Framing`) holds the framing aspect and the safe-area lines.
 - `ViewerPrefs.scopes` (`Scopes`) holds which scopes of the viewer are on.
+- `Preferences.keys` holds the keys of each `Action` that the user changed.
+  - An action that is not in the section has its default keys.
+  - An action with an empty list has no key.
+  - A file that gives one key to two actions fails to load.
 - No key of a service is ever in the file.
 
 Requests:
@@ -630,10 +646,11 @@ Requests:
   - The entries of a map, such as the languages of `transcripts.fillers`, are data, not keys. They stay.
 - `preferences.reset` keeps the old file under the first free backup name (`preferences.toml.bak`, then `.bak.2` and on), then writes the defaults. Why: a second reset never replaces the backup of the first.
 - `preferences.set` takes a `PreferencesPatch`, applies it (`Preferences::patched`), checks it, and replaces the file atomically.
+- `keys.set` and `keys.reset` are projectless too. They change `Preferences.keys` through `Bindings`, which refuses a key that another action uses.
 - `viewer.guides` changes the same `Guides` (`Guides::applied`). With no fields, it toggles the framing guides.
 - `viewer.scopes` changes the same `Scopes` (`ScopesPatch`). With no fields, it tells which scopes are on.
 - Code reads the file when it needs a value (`preferences::load`).
-- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words and the render cache. It also follows the viewer guides and the viewer scopes.
+- A running GUI also watches the file (`Msg::PreferencesChanged`). It follows GPU decoding, the audio device, the memory budget of the player, the theme, the filler words and the render cache. It also follows the viewer guides, the viewer scopes and the keys.
 
 Reset:
 

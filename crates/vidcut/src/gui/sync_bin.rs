@@ -125,6 +125,11 @@ impl Workspace {
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape))
         {
             self.show_timeline();
+        }
+    }
+
+    pub(super) fn sync_numbers(&mut self, ctx: &egui::Context) {
+        if self.left != LeftTab::SyncBin {
             return;
         }
         let number = ctx.input_mut(|i| {

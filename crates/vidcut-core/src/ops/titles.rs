@@ -2,13 +2,12 @@ use crate::error::{Error, Result};
 use crate::keyframes::{PictureValue, plain_channel, title_keys_problem};
 use crate::looks::TitleLook;
 use crate::model::{
-    Clip, Generator, Keyframe, LowerThirdLine, Picture, PositionHandles, Project, Title,
-    TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleShadow, TitleShape, TitleStyle, Track,
-    TrackKind,
+    Generator, Keyframe, LowerThirdLine, Picture, PositionHandles, Project, Title, TitleAlign,
+    TitleAnchor, TitleCase, TitleKind, TitleShadow, TitleShape, TitleStyle, Track, TrackKind,
 };
 
 use super::subtitles::{checked_background, checked_color, checked_font, checked_outline};
-use super::{clear_range, fix_audio, is_main, locate, place, tracks, unlocked};
+use super::{block_clip, clear_range, fix_audio, is_main, locate, place, tracks, unlocked};
 
 pub const DEFAULT_SECS: f64 = 5.0;
 
@@ -318,27 +317,7 @@ pub(super) fn add_block(
     place(
         p,
         ti,
-        Clip {
-            id: id.clone(),
-            media: String::new(),
-            start,
-            duration,
-            source_in: 0,
-            video: true,
-            audio: None,
-            enabled: true,
-            name: None,
-            effects: None,
-            generator,
-            title,
-            picture: None,
-            compound: None,
-            speed: None,
-            retime: crate::model::ClipRetime::Project,
-            color: None,
-            render_cache: crate::model::ClipCache::Auto,
-            input_lut: None,
-        },
+        block_clip(id.clone(), (start, duration), title, generator),
     );
     fix_audio(p, ti);
     Ok((id, p.tracks[ti].id.clone()))
