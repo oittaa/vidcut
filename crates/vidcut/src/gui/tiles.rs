@@ -309,13 +309,15 @@ impl Tiles {
         kept.texture.id()
     }
 
-    pub fn thumbs(&self, p: &Project, m: &Media) {
-        let kept = self.kept.get(&m.id).is_some_and(|k| {
+    pub fn thumbs(&self, p: &Project, m: &Media, shows: bool) {
+        let tiles = self.kept.get(&m.id);
+        let stand_ins = tiles.is_some_and(|k| {
             k.range((STAND_INS, i64::MIN)..=(STAND_INS, i64::MAX))
                 .next()
                 .is_some()
         });
-        if !self.disk || kept || self.bytes > AHEAD_MEMORY {
+        let first_look = shows && tiles.is_none_or(BTreeMap::is_empty);
+        if !self.disk || stand_ins || (self.bytes > AHEAD_MEMORY && !first_look) {
             return;
         }
         let origin = self.origin_of(m);

@@ -977,7 +977,7 @@ impl Workspace {
         let visible = shown(viewport.y_range(), top, size.y + gap, media.len());
         for i in visible.clone() {
             self.filmstrip(ui, place(i), media[i]);
-            self.pool_thumbs(media[i]);
+            self.pool_thumbs(media[i], true);
         }
         for i in shown(
             near_view(viewport.y_range()),
@@ -1459,11 +1459,11 @@ impl Workspace {
         }
     }
 
-    fn pool_thumbs(&self, m: &Media) {
+    fn pool_thumbs(&self, m: &Media, shows: bool) {
         if let (Some(p), Some(t)) = (self.project(), self.tiles.as_ref())
             && self.snap.thumbs.contains(&m.id)
         {
-            t.thumbs(p, m);
+            t.thumbs(p, m, shows);
         }
     }
 
@@ -1472,8 +1472,11 @@ impl Workspace {
         let picture = Rect::from_min_size(Pos2::ZERO, cell);
         let px =
             |m: &Media| super::tiles::media_aspect(m).map_or(cell.y, |a| fit(picture, a).height());
-        for m in seen.iter().chain(near) {
-            self.pool_thumbs(m);
+        for m in seen {
+            self.pool_thumbs(m, true);
+        }
+        for m in near {
+            self.pool_thumbs(m, false);
         }
         for m in near {
             let poster = poster_frame(p.media_frames(m));
@@ -1482,7 +1485,7 @@ impl Workspace {
     }
 
     fn preload_strip(&self, ctx: &egui::Context, m: &Media, width: f32) {
-        self.pool_thumbs(m);
+        self.pool_thumbs(m, false);
         let (Some(p), Some(aspect)) = (self.project(), super::tiles::media_aspect(m)) else {
             return;
         };

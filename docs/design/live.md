@@ -448,7 +448,10 @@ The bar and the Jobs button:
   - A tile worker reads the file before the tiles that wait. Its pictures go into the tiles as stand-ins at the frames of their times (`STAND_INS`).
   - A subclip uses the file of its source. Only the pictures in its range go into the tiles.
   - The stand-ins use the same `Lru` and limit as the other tiles. Thus they can leave memory.
-  - `Tiles::thumbs` reads the file again only when all stand-ins of the media left, and only while the tiles use less than `AHEAD_MEMORY`.
+  - `Tiles::thumbs` reads the file only when no stand-in of the media is kept.
+  - A media that shows, with no kept picture, reads it at any use of memory. Thus a thumbnail shows at once also when the tiles are full.
+  - Other media read it only while the tiles use less than `AHEAD_MEMORY`.
+  - Why: a read cannot loop. A media that shows keeps the picture that it shows, so it reads its file once.
   - Why: a thumbnail shows its poster and the pictures of a hover at once. A decoded tile then replaces each stand-in.
 - A hover over a thumbnail shows the kept picture nearest in time, of any height, until its frame is decoded.
 - An `Lru` keeps the order in which the tiles were used. `Tiles::evict` removes the oldest tile until the cache is under its budget, and stops at a tile that the last paint showed. Why: each step of an eviction is one operation, with no scan of the kept tiles.
