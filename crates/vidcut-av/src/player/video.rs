@@ -873,6 +873,7 @@ pub(crate) fn picture(layers: Vec<Layer>) -> Picture {
         let picture = Picture::new(frame, l.rotation, decoder, l.decoding)
             .with_sampling(l.sampling)
             .with_origin(l.origin)
+            .with_alpha_mode(l.alpha_mode)
             .with_lut(lut.clone());
         match l.woven {
             Some((top_first, before, after)) => {
