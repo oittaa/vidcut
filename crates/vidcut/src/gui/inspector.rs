@@ -2640,16 +2640,18 @@ impl Workspace {
             return;
         };
         let now = first.input_lut.as_deref();
+        let any = media
+            .iter()
+            .any(|id| p.media(id).is_some_and(|m| m.input_lut.is_some()));
         let mut choose = false;
         let header = |ui: &mut egui::Ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add_enabled(now.is_some(), egui::Button::new("Reset"))
-                    .clicked()
+                ui.add_enabled(any, egui::Button::new("Reset")).clicked()
             })
             .inner
         };
         let cleared = group(ui, "LUT", header, |ui| {
-            label(ui, "Input LUT", now.is_some());
+            label(ui, "Input LUT", any);
             ui.horizontal(|ui| {
                 choose = ui.button("Choose…").clicked();
                 let name = now

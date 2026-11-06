@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -5,6 +6,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::{Value, json};
 use vidcut_core::model::{Clip, Generator, GeneratorKind, Marks};
+use vidcut_core::multicam::camera_order;
 use vidcut_core::render::TapeEntry;
 use vidcut_core::request::{GeneratorSettings, TimecodeDisplay, ViewerFrame, ViewerMode};
 use vidcut_core::steps::{Span, Steps};
@@ -101,6 +103,15 @@ pub fn first_letter(name: &str) -> String {
         .map_or_else(String::new, |c| c.to_uppercase().collect())
 }
 
+fn named_order(a: Option<&str>, b: Option<&str>) -> Ordering {
+    match (a, b) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
+        (Some(a), Some(b)) => camera_order(a, b),
+    }
+}
+
 impl PoolView {
     pub fn media(&self, p: &Project) -> Vec<String> {
         let inside = |b: &str| {
@@ -112,7 +123,28 @@ impl PoolView {
         let start = |m: &vidcut_core::model::Media| {
             m.info.timecode.map_or(0.0, |t| t.label_seconds()) + m.skipped()
         };
+        let by_start = |a: &vidcut_core::model::Media, b: &vidcut_core::model::Media| {
+            start(a).total_cmp(&start(b))
+        };
         match self.sort {
+            PoolSort::Camera => media.sort_by(|a, b| {
+                named_order(a.camera.as_deref(), b.camera.as_deref()).then(by_start(a, b))
+            }),
+            PoolSort::DateTime => {
+                media.sort_by(|a, b| a.created.cmp(&b.created).then(by_start(a, b)));
+            }
+            PoolSort::Bin => {
+                media.sort_by(|a, b| camera_order(&a.bin, &b.bin).then(by_start(a, b)));
+            }
+            PoolSort::SceneShot => media.sort_by(|a, b| {
+                named_order(a.scene.as_deref(), b.scene.as_deref())
+                    .then(named_order(a.shot.as_deref(), b.shot.as_deref()))
+                    .then(named_order(a.take.as_deref(), b.take.as_deref()))
+            }),
+            PoolSort::ClipColor => media.sort_by(|a, b| {
+                named_order(a.color.as_deref(), b.color.as_deref()).then(by_start(a, b))
+            }),
+            PoolSort::OnlineStatus => media.sort_by_key(|m| m.fresh_proxy().is_some()),
             PoolSort::Added => {}
             PoolSort::Name if self.view == PoolMode::Metadata => media.sort_by(|a, b| {
                 first_letter(&a.name)
@@ -257,6 +289,7 @@ pub struct Snapshot {
     pub guides: vidcut_core::preferences::Guides,
     pub scopes: vidcut_core::preferences::Scopes,
     pub show_super_scale: bool,
+    pub bindings: Arc<vidcut_core::shortcuts::Bindings>,
     pub preview_error: Option<String>,
     pub theme: Arc<crate::themes::Theme>,
     pub history_preview: Option<Arc<HistoryPreview>>,

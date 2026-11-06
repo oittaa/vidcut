@@ -2887,6 +2887,10 @@ fn mutate(
             media,
             color,
             camera,
+            created,
+            scene,
+            shot,
+            take,
             color_space,
             input_lut,
             super_scale,
@@ -2899,15 +2903,16 @@ fn mutate(
                 sharpness: *sharpness,
                 upscaler: *upscaler,
             };
+            let notes = [camera, created, scene, shot, take];
             if color.is_none()
-                && camera.is_none()
+                && notes.iter().all(|note| note.is_none())
                 && color_space.is_none()
                 && input_lut.is_none()
                 && set.is_empty()
             {
                 return Err(Error::usage(
-                    "give color, camera, color_space, input_lut, or a Super Scale field: \
-                     super_scale, sharpness or upscaler",
+                    "give color, camera, created, scene, shot, take, color_space, input_lut, \
+                     or a Super Scale field: super_scale, sharpness or upscaler",
                 ));
             }
             if let Some(path) = input_lut {
@@ -2918,10 +2923,26 @@ fn mutate(
                 let color = (!color.is_empty()).then(|| color.clone());
                 ops::set_media_color(p, &media.to_vec(), color)?;
             }
-            if let Some(camera) = camera {
-                let camera = (!camera.is_empty()).then(|| camera.clone());
-                for id in media.to_vec() {
-                    pool_item_mut(p, &id)?.camera.clone_from(&camera);
+            if let Some(date) = created.as_deref().filter(|date| !date.is_empty())
+                && !ops::is_date(date)
+            {
+                return Err(Error::invalid(format!(
+                    "{date} is not a date; give YYYY-MM-DD"
+                )));
+            }
+            let fields: [fn(&mut Media) -> &mut Option<String>; 5] = [
+                |m| &mut m.camera,
+                |m| &mut m.created,
+                |m| &mut m.scene,
+                |m| &mut m.shot,
+                |m| &mut m.take,
+            ];
+            for (note, field) in notes.into_iter().zip(fields) {
+                if let Some(note) = note {
+                    let note = (!note.is_empty()).then(|| note.clone());
+                    for id in media.to_vec() {
+                        field(pool_item_mut(p, &id)?).clone_from(&note);
+                    }
                 }
             }
             if let Some(space) = color_space {
@@ -4896,6 +4917,10 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         proxy: None,
         color: None,
         camera: None,
+        created: None,
+        scene: None,
+        shot: None,
+        take: None,
         fingerprint: probed.fingerprint,
         subtitles: probed.subtitles,
         subclip: None,
@@ -8463,6 +8488,16 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
     }
     if let Some(c) = &m.camera {
         v["camera"] = json!(c);
+    }
+    for (key, value) in [
+        ("created", &m.created),
+        ("scene", &m.scene),
+        ("shot", &m.shot),
+        ("take", &m.take),
+    ] {
+        if let Some(value) = value {
+            v[key] = json!(value);
+        }
     }
     if let Some(g) = p.group_of(&m.id) {
         v["group"] = json!(g.id);

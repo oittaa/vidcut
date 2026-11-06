@@ -8,6 +8,8 @@ use vidcut_core::request::{Client, ClientKind, method_names, protocol_schema, re
 use vidcut_core::{Envelope, Error, Request, Result};
 
 pub const POSITIONAL: &[(&str, &[&str])] = &[
+    ("keys.set", &["action", "keys"]),
+    ("keys.reset", &["action"]),
     ("probe", &["path"]),
     ("schema", &["method"]),
     ("project.create", &["path"]),
@@ -458,6 +460,14 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "player.seek",
         "vidcut player seek 10s\n  vidcut player seek -2s",
+    ),
+    (
+        "keys.set",
+        "vidcut keys set mark_in Ctrl+M F5\n  vidcut keys set help   # leaves Help with no key",
+    ),
+    (
+        "keys.reset",
+        "vidcut keys reset mark_in\n  vidcut keys reset   # every action",
     ),
     ("mixer.preview", "vidcut mixer preview A1 -12"),
     ("mcp", "claude mcp add vidcut -- vidcut mcp -p talk.vidcut"),

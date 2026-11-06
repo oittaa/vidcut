@@ -98,6 +98,7 @@ flowchart TD
 - Apple silicon has one shared budget.
 - While an AI upscaler holds GPU memory, the video budget is smaller (`store::Lent`, [gpu](gpu.md)).
 - The least recently used pictures go first, whichever engine decoded them. The prepared picture of each engine never goes (`Store::hold`).
+- The drawings of titles and subtitles count in the memory budget. They take room from the kept pictures (`Store::keep_titles`).
 - `Store::kept_run` and `Store::touch` make their ids in small batches, outside the lock. They take the lock for one batch at a time. Why: the decoding threads and the presenter wait on this lock, and a long run must not hold them up.
 - An engine can show a picture that another engine decoded, by its `Id`.
 - Each engine plans its decoding with its part of the budget (`Config::part`). When the last engine ends, the cache empties.
@@ -175,7 +176,11 @@ flowchart TD
 - Titles and subtitles are not in the kept pictures. Thus an edit of a title or a cue keeps the frames decoded.
 - `player::titles` draws each `TitleBlock` of each title of the plan at the size of the plan, with `burn::title_blocks`, on the decoding thread. Then it wakes the viewer.
   - It draws before it keeps a frame under the title, for the prepared frame, and for the frame at the playhead.
-  - It keeps the drawings used last (an `Lru`).
+  - One store keeps the drawings for all engines and exports (`Store::keep_titles`, a `ByBytes`).
+  - The drawings take at most a part of the memory budget (`TITLES_PART`). Past that part, the least recently used drawings go.
+  - When the budget falls, for example for an AI upscaler, the drawings go at once. A frame that needs one draws it again. The render cache does not hold them.
+  - Each engine and export holds the drawings of its frame (`HeldTitles`). The frame at the playhead and the frame of an export keep them over the budget.
+  - Why: with no hold, a small budget makes the engine draw them again without end, and an export can lose a title.
   - Each drawing is where its kind puts it, without its own place, opacity or rotation. Thus a moved or turned title is not drawn again.
   - A title whose box goes past the picture's edge keeps its place in the drawing, because that edge cuts the box before it turns (`Title::shape_past_edge`).
   - A lower third with a level under 1 is one drawing of all its blocks (`burn::title`), with their places. Thus text over the box does not show the box. A new place of a line draws it again.
@@ -190,7 +195,7 @@ flowchart TD
   - the pictures of the compound clips around it (`ShownTitle::placed`)
 - Until a title is drawn, the newest drawing of its clip shows, moved to its place. Thus a drag, a new color or new text does not blink. The frame is not exact until then.
 - `Player::set_subtitles` takes the shown track (`SubtitleView`), each cue with its color set (`Speakers::color_of`).
-- `player::subtitles` draws what shows at a frame with `burn::draw`, at the times when titles draw. It keeps the drawings by what they show (`subtitles::shown`, an `Lru`).
+- `player::subtitles` draws what shows at a frame with `burn::draw`, at the times when titles draw. It keeps the drawings by what they show (`subtitles::shown`), in the store of the titles.
 - `Player::present` hands the subtitles with the titles, above each layer. A subtitle that is not drawn yet shows the newest drawing.
 - A cue with a `picture` is drawn alone, because the shader places it apart from the other cues. Its `TitleOver` holds one `Placed`, and the shader does the transform as for a title in a compound clip. Thus a keyframe does not draw it again.
 
@@ -287,7 +292,7 @@ The audio device:
   - The layers of a dissolve are more draws in the pass.
   - A placed layer maps each pixel back through its `place::Placing` levels, with their soft crop edges and opacity ([export](export.md#placed-pictures)). It covers its edges in part, and goes over the layers below, premultiplied.
   - A layer with a composite mode needs the layers below it. The pass ends, and the canvas is copied (`Below`). `fs_mode` mixes the layer with that copy (`mixed`).
-  - The tracks of a compound clip with an opacity or a mode mix first, in a picture of their own ([export](export.md#placed-pictures)).
+  - The tracks of a compound clip with two or more pictures in the frame can mix first, in a picture of their own ([export](export.md#placed-pictures)).
   - The two sides of a dissolve with a placed picture add into a picture of their own (`Mixing`). `fs_paired` lays it over the copy of the canvas. Thus a mix below 0 is not clipped before it goes over.
   - Each title is one more draw after the layers under it (`fs_title`). Its `Lettering` holds one affine map back to the drawing (`place::lettered`, `Placing::inner`), and the levels of its compound clips.
   - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
@@ -406,6 +411,7 @@ What it renders:
 - `Setup::reasons` keeps the reasons of the mode. Smart keeps all. User keeps `Reason::On`, `Reason::Effect` and the kinds that `RenderCachePrefs` turns on.
 - A clip set to `ClipCache::Off` gives no `Reason::Media` and no `Reason::SuperScale`. Its other reasons stay (spec D98).
 - An `Effect` with `render_cache` on gives `Reason::Effect`. An effect that is off gives none.
+  - A layer takes it only from its own picture (`checked_on_own`). The effects of a compound clip can work on its mix, at the draw.
   - A `Placed` around a title under another track gives it. The cache file holds that title.
   - A `Placed` around a title on top of all tracks gives none. The cache file does not hold that title.
 - Each `VideoPiece::Source`, `VideoPiece::Black` and `VideoPiece::Generated` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
@@ -460,6 +466,7 @@ The names of frames:
     - The `super_scale` holds the Sharpness. Why: the job draws the Sharpness into the file (`VideoFrames::colors_frame`).
     - With a Retime Process, it also holds the Retime Process and the exact source position (`VideoPiece::exact`).
     - Thus a change of the Transform or of an effect renders a placed clip again.
+    - `alone` keeps only the effects of the clip itself (`render_cache::own_effects`). Why: the effects of a compound clip can work on its mix, at the draw.
     - Without a Retime Process, `alone` keeps the effects up to the last checked effect (`render_cache::baked`). Thus a change of a later effect keeps the names.
     - `alone` takes the opacity and the composite mode out of the placement. Why: they change only the alpha and the mix, not the colors in the file.
 - `PieceKeys` keeps the frame names of each piece in memory. vidcut does not hash a piece again when the piece only moves, for example after a ripple edit.

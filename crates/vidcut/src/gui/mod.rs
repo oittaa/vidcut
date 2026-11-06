@@ -32,6 +32,7 @@ mod retime;
 mod retime_process;
 mod row;
 mod scopes;
+pub(crate) mod shortcuts;
 mod shuttle;
 mod speech;
 mod subclip;
@@ -121,25 +122,4 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
             format!("can't start the GUI{hint}: {e}"),
         )
     })
-}
-
-#[cfg(target_os = "macos")]
-pub fn keys(text: &str) -> String {
-    text.replace("Ctrl+", "Cmd+").replace("Alt+", "Option+")
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn keys(text: &str) -> String {
-    text.to_string()
-}
-
-#[cfg(all(test, target_os = "macos"))]
-mod tests {
-    #[test]
-    fn macos_names_ctrl_and_alt_cmd_and_option() {
-        assert_eq!(
-            super::keys("Lift (Alt+Delete), Shift+Ctrl+N"),
-            "Lift (Option+Delete), Shift+Cmd+N"
-        );
-    }
 }

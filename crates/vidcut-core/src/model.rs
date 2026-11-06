@@ -410,6 +410,21 @@ pub struct Media {
     /// number. Left out until `media.set` gives one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<String>,
+    /// Date Created, as `YYYY-MM-DD`. Left out until `media.set` gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<String>,
+    /// Its scene: text, such as a number. Left out until `media.set` gives
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene: Option<String>,
+    /// Its shot: text, such as a letter or a number. Left out until
+    /// `media.set` gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shot: Option<String>,
+    /// Its take: text, such as a number. Left out until `media.set` gives
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub take: Option<String>,
     /// SHA-256 of the file when it was added or relinked
     /// ([`fingerprint`](crate::fingerprint)): of the whole file up to
     /// 10 MiB (its `sha256sum`), else of 1 MiB from its start, middle and
@@ -2771,8 +2786,8 @@ impl Title {
         (thickness / 3.0 + 0.5).ceil() + 0.5
     }
 
-    pub fn line_width(width: f64, scale: f64) -> f64 {
-        ((width / scale + Self::WIDTH_SLACK).floor() * scale).floor()
+    pub fn line_end(from_block: f64, scale: f64) -> f64 {
+        (from_block / scale + Self::WIDTH_SLACK).floor() * scale
     }
 
     pub fn seated_left(&self, middle: f64, widest: f64, wrap: f64, pixel: f64) -> f64 {
