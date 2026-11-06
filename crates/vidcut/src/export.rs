@@ -1461,7 +1461,7 @@ pub fn frame(
                 )));
             }
             (
-                render::media_frame(p, id, t)?,
+                render::media_frame(p, m, t),
                 v.display_size(),
                 t,
                 None,

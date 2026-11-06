@@ -1445,7 +1445,7 @@ impl Workspace {
     ) -> Option<egui::TextureId> {
         let (p, t) = (self.project()?, self.tiles.as_ref()?);
         let (key, width) = tile_key(ctx, m, frame, px)?;
-        t.want(&key, || t.job(p, &key, width))
+        t.want(&key, || t.job(p, m, &key, width))
             .or_else(|| t.nearest(&m.id, key.height, frame, within))
             .or_else(|| t.nearest_any_height(&m.id, frame))
     }
@@ -1455,7 +1455,7 @@ impl Workspace {
             return;
         };
         if let Some((key, width)) = tile_key(ctx, m, frame, px) {
-            t.prefetch(&key, || t.job(p, &key, width));
+            t.prefetch(&key, || t.job(p, m, &key, width));
         }
     }
 
