@@ -1952,6 +1952,33 @@ impl Workspace {
         });
     }
 
+    pub(super) fn alpha_mode_menu(&mut self, ui: &mut egui::Ui, media: &[String]) {
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let alpha: Vec<&Media> = media
+            .iter()
+            .filter_map(|id| p.media(id))
+            .filter(|m| m.info.video.as_ref().is_some_and(|v| v.alpha))
+            .collect();
+        let Some(first) = alpha.first() else {
+            return;
+        };
+        let current = alpha
+            .iter()
+            .all(|m| m.alpha_mode == first.alpha_mode)
+            .then_some(first.alpha_mode);
+        let ids: Vec<&str> = alpha.iter().map(|m| m.id.as_str()).collect();
+        ui.menu_button("Alpha Mode", |ui| {
+            for mode in vidcut_core::model::AlphaMode::ALL {
+                if ui.radio(current == Some(mode), mode.title()).clicked() {
+                    self.send("media.set", json!({ "media": ids, "alpha_mode": mode }));
+                    ui.close();
+                }
+            }
+        });
+    }
+
     fn pool_item_menu(&mut self, ui: &mut egui::Ui, m: &Media) {
         let ids = if self.snap.selection.media.contains(&m.id) {
             self.snap.selection.media.clone()
@@ -1980,6 +2007,7 @@ impl Workspace {
         });
         if let Some(v) = &m.info.video {
             use vidcut_core::model::{ColorSpace, Hdr};
+            self.alpha_mode_menu(ui, &ids);
             let tagged = match v.hdr {
                 Some(Hdr::Pq) => "As Tagged (BT.2100 PQ)",
                 Some(Hdr::Hlg) => "As Tagged (BT.2100 HLG)",

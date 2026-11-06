@@ -1552,6 +1552,7 @@ mod tests {
             take: None,
             comment: None,
             color_space: Default::default(),
+            alpha_mode: Default::default(),
             super_scale: Default::default(),
             left_out: Vec::new(),
             subclip: None,

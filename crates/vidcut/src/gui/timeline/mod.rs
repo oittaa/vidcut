@@ -2852,6 +2852,14 @@ impl Workspace {
             self.send("edit.detect_scene_cuts", json!({ "clips": clips }));
             ui.close();
         }
+        let media: Vec<String> = self.project().map_or(Vec::new(), |p| {
+            clips
+                .iter()
+                .filter_map(|id| p.clip(id))
+                .map(|c| c.media.clone())
+                .collect()
+        });
+        self.alpha_mode_menu(ui, &media);
         self.render_cache_menu(ui, &clips);
         self.cached_effects_menu(ui, c);
     }

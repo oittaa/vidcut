@@ -333,6 +333,9 @@ fn sections(app: &Workspace, m: &Media, read: Option<&MediaDetails>) -> Vec<Sect
                 format!("{:?}, in place of its tags", m.color_space),
             ));
         }
+        if v.alpha {
+            rows.push(("Alpha Mode".into(), m.alpha_mode.title().into()));
+        }
         if let Some(p) = app.project_shared().filter(|_| !m.super_scale.is_off()) {
             rows.push((
                 "Super Scale".into(),
