@@ -760,6 +760,7 @@ impl Words<'_> {
             json!(m.color_space)
         });
         s.put("input_lut", "Input LUT", &text, |m| json!(m.input_lut));
+        s.put("alpha_mode", "Alpha Mode", &word, |m| json!(m.alpha_mode));
         s.put("super_scale", "Super Scale", &on_off, |m| {
             json!(m.super_scale.on)
         });

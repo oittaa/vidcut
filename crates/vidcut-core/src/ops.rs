@@ -27,8 +27,8 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Clip, ClipAudio, ColorSpace, Generator, Marker, Media, MediaUpscaler, Project, Sharpness,
-    Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
+    AlphaMode, Clip, ClipAudio, ColorSpace, Generator, Marker, Media, MediaUpscaler, Project,
+    Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -2275,6 +2275,21 @@ pub fn set_media_input_lut(p: &mut Project, ids: &[String], lut: Option<PathBuf>
             return Err(Error::invalid(format!("{id} has no pictures")));
         }
         m.input_lut.clone_from(&lut);
+    }
+    Ok(())
+}
+
+pub fn set_media_alpha_mode(p: &mut Project, ids: &[String], mode: AlphaMode) -> Result<()> {
+    for id in ids {
+        let m = p
+            .media
+            .iter_mut()
+            .find(|m| m.id == *id)
+            .ok_or_else(|| Error::not_found(format!("no media {id}")))?;
+        if !m.info.video.as_ref().is_some_and(|v| v.alpha) {
+            return Err(Error::invalid(format!("{id} has no alpha channel")));
+        }
+        m.alpha_mode = mode;
     }
     Ok(())
 }

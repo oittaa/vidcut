@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use vidcut_core::generators::Pattern;
 use vidcut_core::lru::Lru;
-use vidcut_core::model::{ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
+use vidcut_core::model::{AlphaMode, ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
 use vidcut_core::place::Placing;
 use vidcut_core::render::{Image, Moving, Placed, Ramp, Shape, Smooth, VideoPiece, WHOLE, Wipe};
 use vidcut_core::time::Rational;
@@ -775,6 +775,7 @@ pub(crate) struct Layer {
     pub(crate) share: f64,
     pub(crate) woven: Option<Weave>,
     pub(crate) origin: Option<Origin>,
+    pub(crate) alpha_mode: AlphaMode,
     pub(crate) lut: Option<crate::screen::Lut>,
 }
 
@@ -1881,23 +1882,6 @@ impl Single {
         })
     }
 
-    pub(crate) fn draw(
-        &mut self,
-        frame: &frame::Video,
-        rotation: u16,
-        size: (u32, u32),
-        pixel: format::Pixel,
-        path: &Path,
-    ) -> Result<frame::Video> {
-        let made = self.maker.make(&mut self.fitting, frame, path)?;
-        let picture = crate::player::Picture::new(made, rotation, None, None)
-            .with_sampling(Sampling::Rounded);
-        let picture = std::sync::Arc::new(picture);
-        let layers = (&[][..], &[][..], &[][..], None);
-        self.drawer
-            .frame(&picture, &[], layers, size, (pixel, (None, None)))
-    }
-
     fn on_offscreen(&self) -> bool {
         crate::screen::offscreen().is_ok_and(|o| std::sync::Arc::ptr_eq(&self.drawer.on, &o))
     }
@@ -2411,6 +2395,7 @@ impl VideoFrames {
                     image,
                     pace,
                     retime,
+                    alpha_mode,
                     super_scale,
                     made: shape,
                     ..
@@ -2454,6 +2439,7 @@ impl VideoFrames {
                                 took: started.elapsed(),
                                 cached: None,
                             }),
+                            alpha_mode: AlphaMode::Straight,
                         });
                         if let Some(smooth) = smooth {
                             self.smoothed(&mut made, &piece, i, smooth, started)?;
@@ -2544,6 +2530,7 @@ impl VideoFrames {
                         took: started.elapsed(),
                         cached: self.open[s].cached(),
                     }),
+                    alpha_mode: *alpha_mode,
                 });
                 if let Some(smooth) = smooth
                     && !backward
@@ -2586,6 +2573,7 @@ impl VideoFrames {
         last.moving = None;
         last.share = 1.0;
         last.woven = None;
+        last.alpha_mode = AlphaMode::Straight;
         last.lut = None;
         Ok(())
     }

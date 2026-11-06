@@ -336,6 +336,9 @@ fn sections(app: &Workspace, m: &Media, read: Option<&MediaDetails>) -> Vec<Sect
         if let Some(lut) = &m.input_lut {
             rows.push(("Input LUT".into(), lut.display().to_string()));
         }
+        if v.alpha {
+            rows.push(("Alpha Mode".into(), m.alpha_mode.title().into()));
+        }
         if let Some(p) = app.project_shared().filter(|_| !m.super_scale.is_off()) {
             rows.push((
                 "Super Scale".into(),

@@ -444,6 +444,10 @@ pub struct Media {
     /// timeline gets it. Left out when there is none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_lut: Option<PathBuf>,
+    /// How the alpha channel of its pictures is read. Left out while it is
+    /// `straight`.
+    #[serde(default, skip_serializing_if = "AlphaMode::is_straight")]
+    pub alpha_mode: AlphaMode,
     /// Super Scale: its pictures are enlarged with an AI upscaler or the
     /// classic one, as much as they need, before they are fitted. Absent
     /// while it is off.
@@ -827,6 +831,43 @@ impl ColorSpace {
     }
 }
 
+/// How the alpha channel of a picture is read, over the picture below it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AlphaMode {
+    /// The alpha is left out: the picture is opaque.
+    None,
+    /// Color + below x (1 - alpha), at most 1.
+    Premultiplied,
+    /// Below + (color - below) x alpha.
+    #[default]
+    Straight,
+    /// Below + (color - below) x (1 - alpha).
+    Invert,
+}
+
+impl AlphaMode {
+    pub const ALL: [Self; 4] = [
+        Self::None,
+        Self::Premultiplied,
+        Self::Straight,
+        Self::Invert,
+    ];
+
+    pub fn is_straight(&self) -> bool {
+        *self == Self::Straight
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Premultiplied => "Premultiplied",
+            Self::Straight => "Straight",
+            Self::Invert => "Invert",
+        }
+    }
+}
+
 /// The timeline color space. Every dissolve, wipe, placed picture, title
 /// and subtitle mixes in it, and each export converts the mixed frame to
 /// its own colors (decision D50).
@@ -881,6 +922,13 @@ impl Proxy {
 }
 
 impl Media {
+    pub fn opaque(&self) -> bool {
+        self.info
+            .video
+            .as_ref()
+            .is_some_and(|v| !v.alpha || self.alpha_mode == AlphaMode::None)
+    }
+
     pub fn video_as_read(&self) -> Option<VideoInfo> {
         let mut v = self.info.video.clone()?;
         if !self.color_space.is_tagged() {

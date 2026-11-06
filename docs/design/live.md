@@ -16,7 +16,7 @@ flowchart LR
   CONN["vidcut-ipc-conn<br>one per connection"]
   STEP["vidcut-task, vidcut-make,<br>vidcut-measure"]
   JOB["vidcut-j1, vidcut-j2, …<br>export, proxy or transcription jobs"]
-  WORK["vidcut-worker-N<br>filmstrips, waveforms"]
+  WORK["vidcut-worker-N<br>waveforms"]
   MISS["vidcut-missing-media"]
   WATCH["notify callbacks, vidcut-look<br>project, preferences, themes, OS look, Omarchy"]
   TILES["vidcut-tiles-N<br>timeline tiles"]
@@ -34,7 +34,7 @@ flowchart LR
   S -->|"its turn: gate channel"| JOB
   JOB -->|"Msg::JobPlanned, JobProgress, JobDone"| S
   S -->|"Workers::run"| WORK
-  WORK -->|"Msg::Thumbs, Waveform"| S
+  WORK -->|"Msg::Waveform"| S
   MISS -->|"Msg::Missing"| S
   WATCH -->|"Msg::FileChanged, PreferencesChanged"| S
   UI -->|"queue: Mutex, Condvar"| TILES
@@ -135,9 +135,9 @@ Each pass:
 
 The snapshot:
 
-- The `Snapshot` carries the project, players, selection, notices, filmstrips, waveforms, missing media and jobs.
+- The `Snapshot` carries the project, players, selection, notices, waveforms, missing media and jobs.
 - It also carries the timecode count (`TimecodeDisplay`) and the Timer 1 zeros (`Timer1Origin`) of this session.
-- Each change of the project calls `Live::forget_removed`. The filmstrips, waveforms and ducking measurements of removed media leave memory.
+- Each change of the project calls `Live::forget_removed`. The waveforms and ducking measurements of removed media leave memory.
 - An undo that brings the media back makes them again.
 - `Port` passes `Renderer::attach`, `Renderer::present` and `Renderer::capture_viewer` to the viewer thread, and the rest to the UI.
 
@@ -427,8 +427,15 @@ The bar and the Jobs button:
 **Timeline tiles.**
 
 - `Tiles` decodes them on `vidcut-tiles-N`. Each tile shows the source frame under its left edge (`tile_frame`), by the clip's pace (`Clip::pace`).
-- A tile that is not decoded yet shows the nearest kept tile (`Tiles::nearest`), else the nearest pool thumbnail. Why: the filmstrip stays full while a zoom or a scroll decodes new tiles.
+- A tile that is not decoded yet shows the nearest kept tile of its height (`Tiles::nearest`), else of any height (`Tiles::nearest_any_height`). Why: the filmstrip stays full while a zoom or a scroll decodes new tiles.
 - The filmstrips of the Trim Editor use the same tiles (`vidcut_core::ops::filmstrip`, `TrimAnchor`).
+- The pictures of the pool use the same tiles and the same limit (`Workspace::pool_picture`). Why: pictures of media share one `Lru`.
+- The aspect of a tile comes from the media's probe (`media_aspect`). Thus a thumbnail has its shape before its first picture is decoded.
+- The pool asks for some pictures ahead (`Workspace::preload`, `Workspace::preload_strip`):
+  - A visible thumbnail asks for its poster first (`poster_frame`), then for the pictures of a hover (`HOVER_PICTURES`).
+  - A thumbnail within one screen of the visible ones asks for its poster only.
+  - A row of the Filmstrip view within one screen asks for all pictures of that row.
+  - Why: the number of pictures follows the screen, not the number of media.
 - An `Lru` keeps the order in which the tiles were used. `Tiles::evict` removes the oldest tile until the cache is under its budget, and stops at a tile that the last paint showed. Why: each step of an eviction is one operation, with no scan of the kept tiles.
 - Another `Lru` keeps the tiles that did not decode (`FAILED_KEPT`). A tile that leaves it is tried once more when it shows again.
 - All workers share one `Lru` of the blocks that they read from disk (`Blocks`, `BLOCKS_KEPT`). A worker that writes a block removes it from this `Lru`.
