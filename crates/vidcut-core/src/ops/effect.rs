@@ -1,7 +1,9 @@
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::model::{Effect, EffectKind, EffectType, GaussianBlur, Glow, MosaicBlur, Project};
+use crate::model::{
+    Effect, EffectKind, EffectType, FilmGrain, GaussianBlur, Glow, MosaicBlur, Project,
+};
 use crate::request::EffectChange;
 
 use super::locate;
@@ -145,6 +147,36 @@ fn glow_values(c: &mut EffectChange, g: &mut Glow) -> Result<()> {
     Ok(())
 }
 
+fn grain_values(c: &mut EffectChange, g: &mut FilmGrain) -> Result<()> {
+    if let Some(preset) = c.preset.take() {
+        g.take_preset(preset);
+    }
+    given(&mut c.grain_composite, &mut g.grain_composite);
+    given(&mut c.opacity, &mut g.opacity);
+    taken(&mut c.grain_only, &mut g.grain_only);
+    taken(&mut c.freeze, &mut g.freeze);
+    given(&mut c.texture, &mut g.texture);
+    given(&mut c.grain_size, &mut g.grain_size);
+    given(&mut c.grain_aspect, &mut g.grain_aspect);
+    given(&mut c.grain_strength, &mut g.grain_strength);
+    given(&mut c.offset, &mut g.offset);
+    given(&mut c.symmetry, &mut g.symmetry);
+    given(&mut c.softness, &mut g.softness);
+    given(&mut c.saturation, &mut g.saturation);
+    given(&mut c.detail_loss, &mut g.detail_loss);
+    color(
+        "channel_gains",
+        c.channel_gains.take(),
+        &mut g.channel_gains,
+    )?;
+    given(&mut c.shadows, &mut g.shadows);
+    given(&mut c.midtones, &mut g.midtones);
+    given(&mut c.highlights, &mut g.highlights);
+    given(&mut c.optimized, &mut g.optimized);
+    taken(&mut c.animate, &mut g.animate);
+    Ok(())
+}
+
 pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result<()> {
     if *change == EffectChange::default() {
         return Err(Error::usage("effects.set needs a value to change"));
@@ -160,6 +192,7 @@ pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result
         EffectKind::GaussianBlur(b) => gaussian_values(&mut left, b)?,
         EffectKind::MosaicBlur(m) => mosaic_values(&mut left, m)?,
         EffectKind::Glow(g) => glow_values(&mut left, g)?,
+        EffectKind::FilmGrain(g) => grain_values(&mut left, g)?,
     }
     if left != EffectChange::default() {
         return Err(Error::invalid(format!(

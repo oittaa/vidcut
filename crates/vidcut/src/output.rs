@@ -1030,6 +1030,7 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 let values = match e["kind"].as_str() {
                     Some("mosaic_blur") => mosaic_values(e),
                     Some("glow") => glow_values(e),
+                    Some("film_grain") => grain_values(e),
                     _ => gaussian_values(e),
                 };
                 let border = match e["border"].as_str() {
@@ -1168,6 +1169,39 @@ fn glow_values(e: &Value) -> String {
             "  inverted"
         } else {
             ""
+        },
+    )
+}
+
+fn grain_values(e: &Value) -> String {
+    let n = |k: &str| effect_number(e, k);
+    let s = |k: &str| e[k].as_str().unwrap_or_default().to_string();
+    let on = |k: &str, text: &'static str| if e[k] == true { text } else { "" };
+    format!(
+        "{}  {} opacity {}  texture {} size {} aspect {} strength {} offset {} symmetry {} softness {} saturation {} detail loss {}  gains {}  tones {}, {}, {}{}{}{}{}",
+        s("preset"),
+        s("grain_composite"),
+        n("opacity"),
+        n("texture"),
+        n("grain_size"),
+        n("grain_aspect"),
+        n("grain_strength"),
+        n("offset"),
+        n("symmetry"),
+        n("softness"),
+        n("saturation"),
+        n("detail_loss"),
+        number_list(e, "channel_gains"),
+        n("shadows"),
+        n("midtones"),
+        n("highlights"),
+        on("grain_only", "  grain only"),
+        on("freeze", "  frozen"),
+        on("animate", "  animate"),
+        if e["optimized"] == true {
+            ""
+        } else {
+            "  not optimized"
         },
     )
 }

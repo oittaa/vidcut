@@ -10,7 +10,7 @@ use super::workspace::{Workspace, dim};
 
 type Card = (&'static str, EffectType);
 
-pub const GROUPS: [(&str, &[Card]); 2] = [
+pub const GROUPS: [(&str, &[Card]); 3] = [
     (
         "Blur",
         &[
@@ -19,6 +19,7 @@ pub const GROUPS: [(&str, &[Card]); 2] = [
         ],
     ),
     ("Light", &[("Glow", EffectType::Glow)]),
+    ("Film Emulation", &[("Film Grain", EffectType::FilmGrain)]),
 ];
 
 const CARD_WIDTH: f32 = 120.0;
@@ -81,6 +82,20 @@ fn paint(painter: &Painter, rect: Rect, kind: EffectType) {
                 painter.circle_filled(c, r * t, fill);
             }
             painter.circle_filled(c, r * 0.18, colors.text);
+        }
+        EffectType::FilmGrain => {
+            for k in 0..240_i32 {
+                let across = (k * 37).rem_euclid(64) as f32 / 64.0;
+                let down = (k * 23).rem_euclid(64) as f32 / 64.0;
+                let at = rect.min + vec2(across * rect.width(), down * rect.height());
+                let fill = Color32::from_rgba_unmultiplied(
+                    colors.text.r(),
+                    colors.text.g(),
+                    colors.text.b(),
+                    (60 + (k * 13).rem_euclid(160)) as u8,
+                );
+                painter.circle_filled(at, 1.0, fill);
+            }
         }
     }
 }

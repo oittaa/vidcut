@@ -1,10 +1,10 @@
 use vidcut_core::lru::Lru;
 use vidcut_core::model::GlowOutput;
 use vidcut_core::place::{
-    Blurring, GlowSpread, Glowing, Level, Placing, Soft, Tiling, Work, Working,
+    Blurring, GlowSpread, Glowing, GrainTile, Graining, Level, Placing, Soft, Tiling, Work, Working,
 };
 
-use super::{Gpu, MIXING, begin};
+use super::{Gpu, MIXING, begin, grain};
 
 const KERNEL: usize = 35;
 
@@ -28,6 +28,8 @@ const BORDER_BLACK: u32 = 0;
 
 const BORDER_MIRROR: u32 = 2;
 
+const BORDER_HALF: u32 = 4;
+
 const FLAG_INVERT: i32 = 1;
 
 const FLAG_SEEN: i32 = 2;
@@ -38,6 +40,14 @@ const FLAG_NOISE: i32 = 8;
 
 const SPARE_TEXTURES: usize = 6;
 
+const GRAIN_TILES: usize = 2;
+
+const GRAIN_ONLY: i32 = 1;
+
+const GRAIN_DETAIL: i32 = 2;
+
+const DETAIL_SLOTS: [u32; 2] = [4, 5];
+
 pub(super) struct Pipes {
     layout: wgpu::BindGroupLayout,
     blur: wgpu::RenderPipeline,
@@ -45,6 +55,8 @@ pub(super) struct Pipes {
     glow_mask: wgpu::RenderPipeline,
     glow_cells: wgpu::RenderPipeline,
     glow: wgpu::RenderPipeline,
+    grain_noise: wgpu::RenderPipeline,
+    grain: wgpu::RenderPipeline,
 }
 
 impl Pipes {
@@ -116,6 +128,8 @@ impl Pipes {
             glow_mask: pipeline("fs_glow_mask"),
             glow_cells: pipeline("fs_glow_cells"),
             glow: pipeline("fs_glow"),
+            grain_noise: pipeline("fs_grain_noise"),
+            grain: pipeline("fs_grain"),
             layout,
         }
     }
@@ -135,7 +149,7 @@ fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
                 params: mosaic_bytes(tiling, effect, stage),
             })
             .collect(),
-        Work::Glow(_) => Vec::new(),
+        Work::Glow(_) | Work::Grain(_) => Vec::new(),
     }
 }
 
@@ -431,6 +445,8 @@ impl Texture {
 
 type Spare = Lru<(u32, u32, u32), Texture, SPARE_TEXTURES>;
 
+type Tiles = Lru<[u64; 5], Texture, GRAIN_TILES>;
+
 fn spare_ready(gpu: &Gpu, spare: &mut Spare, (w, h): (u32, u32), slots: [u32; 2]) {
     for slot in slots {
         let key = (w, h, slot);
@@ -447,6 +463,7 @@ pub(super) struct Blurred {
     layers: Vec<Option<Texture>>,
     masks: Vec<Option<Texture>>,
     spare: Spare,
+    tiles: Tiles,
 }
 
 impl Blurred {
@@ -457,6 +474,7 @@ impl Blurred {
             self.layers.clear();
             self.masks.clear();
             self.spare.clear();
+            self.tiles.clear();
         }
         self.layers.resize_with(n, || None);
         self.masks.resize_with(n, || None);
@@ -486,7 +504,8 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        effects_into(gpu, own, (scratch, &mut self.spare), effects, encoder);
+        let room = (&*scratch, &mut self.spare, &mut self.tiles);
+        effects_into(gpu, own, room, effects, encoder);
         &own.view
     }
 
@@ -511,7 +530,8 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        effects_into(gpu, mask, (scratch, &mut self.spare), effects, encoder);
+        let room = (&*scratch, &mut self.spare, &mut self.tiles);
+        effects_into(gpu, mask, room, effects, encoder);
         if live.is_empty() {
             return (&own.view, &mask.view, 5.0);
         }
@@ -527,7 +547,8 @@ impl Blurred {
             own.texture.as_image_copy(),
             own.texture.size(),
         );
-        effects_into(gpu, own, (scratch, &mut self.spare), live, encoder);
+        let room = (&*scratch, &mut self.spare, &mut self.tiles);
+        effects_into(gpu, own, room, live, encoder);
         (&own.view, &own.view, 3.0)
     }
 }
@@ -604,6 +625,24 @@ fn draw_step(
     drawing.draw(0..3, 0..1);
 }
 
+fn blurred_between<'a>(
+    gpu: &Gpu,
+    (ways, border): (&[(Pass, bool)], u32),
+    (first, window): ([f64; 4], [f64; 4]),
+    (a, b): (&'a Texture, &'a Texture),
+    encoder: &mut wgpu::CommandEncoder,
+) -> &'a Texture {
+    let (mut from, mut to) = (a, b);
+    for (j, (pass, down)) in ways.iter().enumerate() {
+        let more = if j == 0 { first } else { [0.0; 4] };
+        let bytes = pass_bytes(pass, *down, border, more, window);
+        let step = (&gpu.blur.blur, &bytes[..]);
+        draw_step(gpu, step, Views::same(&from.view), &to.view, encoder);
+        std::mem::swap(&mut from, &mut to);
+    }
+    from
+}
+
 fn glow_blurred<'a>(
     gpu: &Gpu,
     grid: &GlowGrid,
@@ -620,14 +659,8 @@ fn glow_blurred<'a>(
     draw_step(gpu, cells, Views::same(mask), &a.view, encoder);
     let border = if seen { BORDER_BLACK } else { BORDER_MIRROR };
     let window = [1.0, TAIL.0, TAIL.1, 0.0];
-    let (mut from, mut to) = (a, b);
-    for (pass, down) in grid.ways() {
-        let bytes = pass_bytes(&pass, down, border, [0.0; 4], window);
-        let step = (&gpu.blur.blur, &bytes[..]);
-        draw_step(gpu, step, Views::same(&from.view), &to.view, encoder);
-        std::mem::swap(&mut from, &mut to);
-    }
-    &from.view
+    let ways = grid.ways();
+    &blurred_between(gpu, (&ways, border), ([0.0; 4], window), (a, b), encoder).view
 }
 
 fn glow_into(
@@ -680,10 +713,129 @@ fn glow_into(
     );
 }
 
+fn gaussian_ways(sigma: f64) -> Vec<(Pass, bool)> {
+    let want = [sigma, sigma, sigma, 0.0];
+    passes(want)
+        .into_iter()
+        .map(|p| (p, false))
+        .chain(passes(want).into_iter().map(|p| (p, true)))
+        .collect()
+}
+
+fn grain_bytes(grain: &Graining, effect: &Working, (shift, detailed): ([i32; 2], bool)) -> Vec<u8> {
+    let [c0, c1, c2, c3] = grain.curve;
+    let [low, high, near] = grain.tails;
+    let [gr, gg, gb] = grain.gains;
+    let [ts, tm, th] = grain.tones;
+    let mut out = float_bytes(&[grain.amount, grain.saturation, grain.offset, grain.opacity]);
+    out.extend(float_bytes(&[c0, c1, c2, c3]));
+    out.extend(float_bytes(&[low, high, near, 0.0]));
+    out.extend(float_bytes(&[gr, gg, gb, effect.blend]));
+    out.extend(float_bytes(&[ts, tm, th, 0.0]));
+    let flags = i32::from(grain.only) * GRAIN_ONLY + i32::from(detailed) * GRAIN_DETAIL;
+    for v in [shift[0], shift[1], grain.mode.code() as i32, flags] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
+fn grain_tile<'a>(
+    gpu: &Gpu,
+    tiles: &'a mut Tiles,
+    tile: &GrainTile,
+    (w, h): (u32, u32),
+) -> Option<&'a Texture> {
+    let key = [
+        tile.ring.to_bits(),
+        tile.width.to_bits(),
+        tile.scale.to_bits(),
+        tile.aspect.to_bits(),
+        tile.seed,
+    ];
+    if !tiles.contains(&key) {
+        let made = Texture::new(gpu, (w, h));
+        gpu.queue.write_texture(
+            made.texture.as_image_copy(),
+            &grain::tile_bytes(tile, (w, h)),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 8),
+                rows_per_image: Some(h),
+            },
+            made.texture.size(),
+        );
+        tiles.insert(key, made);
+    }
+    tiles.get(&key)
+}
+
+fn grain_into(
+    gpu: &Gpu,
+    own: &Texture,
+    (scratch, spare, tiles): (&[Texture; 2], &mut Spare, &mut Tiles),
+    (grain, effect): (&Graining, &Working),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let size = own.texture.size();
+    let canvas = (size.width, size.height);
+    let Some(tile) = grain_tile(gpu, tiles, &grain.tile, canvas) else {
+        return;
+    };
+    let detail = gaussian_ways(grain.detail);
+    let mut input = &own.view;
+    if !detail.is_empty() {
+        spare_ready(gpu, spare, canvas, DETAIL_SLOTS);
+        let slots = DETAIL_SLOTS.map(|slot| spare.peek(&(canvas.0, canvas.1, slot)));
+        if let [Some(a), Some(b)] = slots {
+            encoder.copy_texture_to_texture(
+                own.texture.as_image_copy(),
+                a.texture.as_image_copy(),
+                size,
+            );
+            let first = [1.0, 0.0, 0.0, 1.0];
+            let ways = (&detail[..], BORDER_HALF);
+            input = &blurred_between(gpu, ways, (first, [0.0; 4]), (a, b), encoder).view;
+        }
+    }
+    let shift = grain::shift(grain.tile.seed, grain.frame, canvas);
+    let bytes = grain_bytes(grain, effect, (shift, !detail.is_empty()));
+    let noise = (&gpu.blur.grain_noise, &bytes[..]);
+    draw_step(
+        gpu,
+        noise,
+        Views::same(&tile.view),
+        &scratch[0].view,
+        encoder,
+    );
+    let soft = gaussian_ways(grain.softness);
+    let ways = (&soft[..], BORDER_HALF);
+    let plain = ([0.0; 4], [0.0; 4]);
+    let [one, two] = scratch;
+    let blurred = blurred_between(gpu, ways, plain, (one, two), encoder);
+    let made = if soft.len().is_multiple_of(2) {
+        two
+    } else {
+        one
+    };
+    let views = Views {
+        source: &blurred.view,
+        start: &own.view,
+        second: &own.view,
+        mask: input,
+    };
+    let last = (&gpu.blur.grain, &bytes[..]);
+    draw_step(gpu, last, views, &made.view, encoder);
+    encoder.copy_texture_to_texture(
+        made.texture.as_image_copy(),
+        own.texture.as_image_copy(),
+        size,
+    );
+}
+
 fn effects_into(
     gpu: &Gpu,
     own: &Texture,
-    (scratch, spare): (&[Texture; 2], &mut Spare),
+    (scratch, spare, tiles): (&[Texture; 2], &mut Spare, &mut Tiles),
     effects: &[Working],
     encoder: &mut wgpu::CommandEncoder,
 ) {
@@ -691,6 +843,11 @@ fn effects_into(
     for effect in effects {
         if let Work::Glow(glow) = &effect.work {
             glow_into(gpu, own, (scratch, spare), (glow.as_ref(), effect), encoder);
+            continue;
+        }
+        if let Work::Grain(grain) = &effect.work {
+            let room = (scratch, &mut *spare, &mut *tiles);
+            grain_into(gpu, own, room, (grain.as_ref(), effect), encoder);
             continue;
         }
         let mut from = &own.view;

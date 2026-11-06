@@ -5,19 +5,25 @@
 The Cut page has separate tabs for transitions, titles and effects (p. 636). vidcut follows it.
 
 - The Transitions tab, the Transition Inspector, Dip To Color Dissolve, Smooth Cut, Push and Slide are there ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
-- The Effects tab, the effects of the Inspector, Gaussian Blur, Mosaic Blur and Glow are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
+- The Effects tab, the effects of the Inspector, Gaussian Blur, Mosaic Blur, Glow and Film Grain are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - The Generators page and its twelve kinds are there ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
 - If the bar gets too full, one Effects tab with categories can replace the tabs, as the Edit page has (p. 802).
 
 Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
-1. **More effects:** Sharpen, Vignette and Film Grain.
+1. **More effects:** Sharpen and Vignette.
    - Measure each one in Resolve first: its values, their ranges and defaults, and its math.
    - **Glow, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - Opacity below 1 on a picture with alpha, on the Edit page.
      - The size of the Atmosphere noise on other timeline sizes, with Threshold 0.25 and Spread 0 on a gray picture.
      - The exact sigma between 580.8 and 633.6 pixels that moves the mirror to the grid of 16.
      - A Zoom with Secondary Glow.
+   - **Film Grain, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
+     - What a film stock does to the other values, and when Film Grain Presets shows Custom.
+     - Detail Loss on other frame heights.
+     - Symmetry at Grain Strength 0.25 to 1, below 0.3 and above 0.9.
+     - Red, Green and Blue with a Symmetry other than 0.5.
+     - Texture under 0.25 and Grain Aspect Ratio under 0.5.
    - **Mosaic Blur, measure these on the Edit page.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - Blur Alpha off and Whole Cells Only.
      - Whole Cells Only with Hexagon, with Triangle, with other Aliasing values and with Antialias Result. The alpha limit of a whole cell.

@@ -1422,7 +1422,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - On the Cut page, a double-click on an effect adds it to the selected clip.
   - Measured in Resolve Studio 21.1.2: with several selected clips, only the first selected clip gets it.
   - The Effects panel of the Inspector has the values of the effects.
-  - vidcut: the Effects tab has the Blur group with Gaussian Blur and Mosaic Blur, and the Light group with Glow. The other effects come later ([todo](todo/effects-library.md)).
+  - vidcut: the Effects tab has three groups. Blur has Gaussian Blur and Mosaic Blur, Light has Glow, and Film Emulation has Film Grain.
+  - The other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
   - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
   - Measured in Resolve Studio 21.1.2: a generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API all leave it with none.
@@ -1602,6 +1603,63 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The grid `g` doubles at each doubling of 600 pixels of sigma. The renders put the first step between 580.8 and 633.6.
     - Opacity acts as Blend on a picture with alpha, as it does on an opaque one.
     - Color Filter values go from 0 to 1000000. No limit is measured.
+- **Film Grain** (p. 3559). Its values and their defaults, measured in Resolve Studio 21.1.2:
+  - Film Grain Presets has 17 film stocks and Custom. 16mm S1 is the default.
+  - Composite Type is Overlay, Multiply, Darken, Lighten, Screen, Subtract, Hard Light, Soft Light, Linear Light, Vivid Light, Pin Light or Custom.
+    - Overlay is the default. Custom gives the same picture as Linear Light.
+  - Opacity goes from 0 to 1 and is 0.5.
+  - Grain Only is off. Freeze is off.
+  - Grain Params:
+    - Texture goes from 0 to 1 and is 0.704.
+    - Grain Size goes from 0 to 1 and is 0.66.
+    - Grain Aspect Ratio goes from 0.2 to 5 and is 1.
+    - Grain Strength goes from 0 to 1 and is 0.14875.
+    - Offset goes from 0 to 1 and is 0.482.
+    - Symmetry goes from 0 to 1 and is 0.5.
+    - Softness goes from 0 to 1 and is 0.2984.
+    - Saturation goes from 0 to 1 and is 0.
+    - Detail Loss goes from 0 to 2 and is 0.
+  - Advanced Controls:
+    - Red, Green and Blue each go from −10 to 10 and are 1.
+    - Shadow Gain, Midtone Gain and Highlight Gain each go from 0 to 1 and are 0.5.
+    - Optimized Mode is on. Animate On Every Refresh is off.
+- **How the film grain works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
+  - `n` is the noise of a channel. `O` is Offset. Grain Only shows `G = clip(O + n)`, which does not depend on the picture.
+  - `c` is the picture's color without its alpha, after Detail Loss. `o` is Opacity. For each channel:
+    - `L = 0.5 + o × (256/255) × F(c) × (G − O)`.
+    - The result is `clip((1 − o) × c + o × f(c, L))`, with `f` the Composite Type.
+    - Opacity acts twice. So the grain goes with the square of Opacity.
+    - Offset changes the picture only where `G` stops at 0 or 1.
+  - `F` is the tones, on the channel's own value: `F(v) = 2 × (s × Ws + m × Wm + h × Wh)`.
+    - `s`, `m` and `h` are Shadow Gain, Midtone Gain and Highlight Gain.
+    - `Ws = clamp((0.4005 − v) / 0.299, 0, 1)`, `Wh = clamp((v − 0.5995) / 0.299, 0, 1)` and `Wm = 1 − Ws − Wh`.
+  - The output is `a` × the result, with `a` the alpha. `a` stays. With Grain Only it is `a` × `G`. Outside the picture nothing shows.
+  - Use Alpha changes nothing. Blend mixes the input and the output.
+  - Detail Loss is a Gaussian curve on the picture's colors without their alpha.
+    - Its sigma is 4.32 × Detail Loss² pixels on 1920×1080. The alpha stays sharp, and the black around a smaller picture enters the blur.
+  - The noise has the spectrum `R(f) = exp(−(f − C)² / 2W²) + exp(−(f + C)² / 2W²)`.
+    - `f = K × √((A × fx)² + fy²)`, with `fx` and `fy` in cycles for each pixel, and `A` the Grain Aspect Ratio.
+    - `C` and `W` come from Texture, and `K` comes from Grain Size, by tables. `K` also goes with the height of the fitted picture over 1080.
+    - Before Softness, its standard deviation is 0.1986 × Grain Strength. Its kurtosis is about 3.25.
+  - At Saturation 0 the channels are the same. At 1, they are three separate noises, 1.334 times as strong, and their BT.709 luma is the gray noise.
+  - Red, Green and Blue multiply the noise, after Saturation.
+  - Symmetry works on the noise of each channel, before Softness. It moves the noise down under 0.5 and up over 0.5, and changes its shape.
+  - Softness is a Gaussian curve with a sigma of 5 × Softness^1.5 × the height of the frame / 1080. The edge is a half-sample mirror.
+  - The grain stays in the pixels of the frame. Zoom and Position do not move it.
+  - Each frame of a clip has its own pattern, from the clip's first frame. A trim does not change it. Freeze keeps the first frame's pattern.
+  - A change of Texture, Grain Size, Grain Aspect Ratio, Optimized Mode or Animate On Every Refresh gives a new pattern.
+- **Film Grain in vidcut:**
+  - vidcut makes the noise itself. It has the spectrum and the statistics of the renders, not their pattern.
+    - One picture of noise comes from an inverse Fourier transform at the size of the canvas. Each frame reads it at another random shift.
+    - A cubic curve on the noise gives the kurtosis.
+  - Symmetry is a table of measured curves, with a step of 0.02 to 0.06. Each curve is a cubic near the middle and a straight line on each side.
+    - Resolve gives spikes at exactly 0.4 and 0.6, with a standard deviation of 0.0109 and 0.0855 against 0.026 on each side. vidcut does not copy them.
+  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+    - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
+    - Film Grain Presets shows Custom when a value differs from each film stock.
+    - The size of the Detail Loss sigma on other frame heights.
+    - Red, Green and Blue also multiply the shift that Symmetry makes.
+    - The straight lines of Symmetry below 0.3 and above 0.9.
 - **Compound clips:** vidcut: the effects of a compound clip work on each picture inside it ([todo](todo/compound-opacity.md)).
 - **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
 

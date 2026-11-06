@@ -3,9 +3,9 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectKind, GaussianBlur,
-    Glow, GlowAlpha, GlowFraming, GlowOutput, MosaicBlur, Picture, PictureTool, Project, TrackKind,
-    ZoomBox,
+    Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectKind, FilmGrain,
+    GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, MosaicBlur, Picture,
+    PictureTool, Project, TrackKind, ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -248,12 +248,114 @@ fn glow_checked(g: &Glow) -> Result<Glow> {
     })
 }
 
+fn grain_checked(g: &FilmGrain) -> Result<FilmGrain> {
+    for (v, range, why) in [
+        (
+            g.opacity,
+            FilmGrain::UNIT,
+            "a Film Grain's opacity is from 0 to 1",
+        ),
+        (
+            g.texture,
+            FilmGrain::UNIT,
+            "a Film Grain's texture is from 0 to 1",
+        ),
+        (
+            g.grain_size,
+            FilmGrain::UNIT,
+            "a Film Grain's grain_size is from 0 to 1",
+        ),
+        (
+            g.grain_aspect,
+            FilmGrain::ASPECTS,
+            "a Film Grain's grain_aspect is from 0.2 to 5",
+        ),
+        (
+            g.grain_strength,
+            FilmGrain::UNIT,
+            "a Film Grain's grain_strength is from 0 to 1",
+        ),
+        (
+            g.offset,
+            FilmGrain::UNIT,
+            "a Film Grain's offset is from 0 to 1",
+        ),
+        (
+            g.symmetry,
+            FilmGrain::UNIT,
+            "a Film Grain's symmetry is from 0 to 1",
+        ),
+        (
+            g.softness,
+            FilmGrain::UNIT,
+            "a Film Grain's softness is from 0 to 1",
+        ),
+        (
+            g.saturation,
+            FilmGrain::UNIT,
+            "a Film Grain's saturation is from 0 to 1",
+        ),
+        (
+            g.detail_loss,
+            FilmGrain::DETAILS,
+            "a Film Grain's detail_loss is from 0 to 2",
+        ),
+        (
+            g.shadows,
+            FilmGrain::UNIT,
+            "a Film Grain's shadows is from 0 to 1",
+        ),
+        (
+            g.midtones,
+            FilmGrain::UNIT,
+            "a Film Grain's midtones is from 0 to 1",
+        ),
+        (
+            g.highlights,
+            FilmGrain::UNIT,
+            "a Film Grain's highlights is from 0 to 1",
+        ),
+    ] {
+        within(v, range, why)?;
+    }
+    for v in g.channel_gains.iter().flatten() {
+        within(
+            Some(*v),
+            FilmGrain::GAINS,
+            "a Film Grain's channel_gains are from -10 to 10",
+        )?;
+    }
+    let off = |v: Option<f64>, usual: f64| v.filter(|v| *v != usual);
+    Ok(FilmGrain {
+        grain_composite: g
+            .grain_composite
+            .filter(|v| *v != GrainComposite::default()),
+        opacity: off(g.opacity, FilmGrain::OPACITY),
+        texture: off(g.texture, FilmGrain::TEXTURE),
+        grain_size: off(g.grain_size, FilmGrain::SIZE),
+        grain_aspect: off(g.grain_aspect, 1.0),
+        grain_strength: off(g.grain_strength, FilmGrain::STRENGTH),
+        offset: off(g.offset, FilmGrain::OFFSET),
+        symmetry: off(g.symmetry, FilmGrain::SYMMETRY),
+        softness: off(g.softness, FilmGrain::SOFTNESS),
+        saturation: off(g.saturation, 0.0),
+        detail_loss: off(g.detail_loss, 0.0),
+        channel_gains: g.channel_gains.filter(|k| *k != FilmGrain::WHITE),
+        shadows: off(g.shadows, FilmGrain::TONE),
+        midtones: off(g.midtones, FilmGrain::TONE),
+        highlights: off(g.highlights, FilmGrain::TONE),
+        optimized: g.optimized.filter(|v| !*v),
+        ..g.clone()
+    })
+}
+
 pub fn effect_checked(e: &Effect) -> Result<Effect> {
     within(e.blend, (0.0, 1.0), "an effect's blend is from 0 to 1")?;
     let kind = match &e.kind {
         EffectKind::GaussianBlur(b) => EffectKind::GaussianBlur(gaussian_checked(b)?),
         EffectKind::MosaicBlur(m) => EffectKind::MosaicBlur(mosaic_checked(m)?),
         EffectKind::Glow(g) => EffectKind::Glow(Box::new(glow_checked(g)?)),
+        EffectKind::FilmGrain(g) => EffectKind::FilmGrain(Box::new(grain_checked(g)?)),
     };
     Ok(Effect {
         kind,
@@ -616,6 +718,28 @@ pub fn effect_shown(e: &Effect) -> Value {
             "opacity": g.shown(),
             "invert": g.invert,
             "recovery": g.recovers(),
+        }),
+        EffectKind::FilmGrain(g) => json!({
+            "preset": g.preset(),
+            "grain_composite": g.over(),
+            "opacity": g.shown(),
+            "grain_only": g.grain_only,
+            "freeze": g.freeze,
+            "texture": g.rough(),
+            "grain_size": g.large(),
+            "grain_aspect": g.stretch(),
+            "grain_strength": g.strong(),
+            "offset": g.middle(),
+            "symmetry": g.lean(),
+            "softness": g.soft(),
+            "saturation": g.colorful(),
+            "detail_loss": g.lost(),
+            "channel_gains": g.gains(),
+            "shadows": g.tones()[0],
+            "midtones": g.tones()[1],
+            "highlights": g.tones()[2],
+            "optimized": g.is_optimized(),
+            "animate": g.animate,
         }),
     };
     if let (Some(out), Some(more)) = (out.as_object_mut(), more.as_object()) {
