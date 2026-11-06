@@ -266,6 +266,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Input LUT** (p. 3480, and [§13](#the-lut-tables)):
   - A media item with pictures has an Input LUT (`input_lut`). Each of its clips on the timeline gets it.
   - The Input LUT submenu of the pool's right-click menu and the LUT section of the Inspector set it.
+  - The submenu has a file picker in place of the 1D LUT and 3D LUT submenus ([deviation X139](deviations.md#x139-one-input-lut-submenu-takes-any-cube-file)).
   - `media.set` sets it on one or more items. An empty path clears it. `media.get` shows it.
   - A generator, a title and a compound clip have no media item. Thus they have no Input LUT.
 - **Multicam layout** (p. 1037):
