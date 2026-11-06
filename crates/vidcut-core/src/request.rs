@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
-    Border, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType, GeneratorKind,
-    Handle, LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign,
-    TitleAnchor, TitleKind, TitleStyle, TrackClip, ZoomBox,
+    Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType,
+    GeneratorKind, Handle, LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle,
+    TitleAlign, TitleAnchor, TitleKind, TitleStyle, TrackClip, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -295,6 +295,25 @@ pub enum Request {
         /// The bin it goes in. Default: the bin of `media`.
         #[serde(default)]
         bin: Option<String>,
+        /// Use Full Clip Extents: it holds the whole file, in place of
+        /// `range` and the marks.
+        #[serde(default)]
+        full_extents: bool,
+    },
+    /// Edit Subclip: change the part of its file that a subclip holds.
+    /// Its clips, marks and markers stay on the same frames of the file.
+    /// A clip or a synced group that uses frames outside the new part
+    /// refuses the change. A mark outside the new part is cleared. A marker
+    /// outside it is kept, not shown, and is back when the part holds it.
+    #[serde(rename = "media.subclip_set")]
+    MediaSubclipSet {
+        media: String,
+        /// The new part, in frames from the first frame of the file.
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        /// Use Full Clip Extents: the whole file, in place of `range`.
+        #[serde(default)]
+        full_extents: bool,
     },
     /// Transcribe Audio: hear each pool item's own sound (`stream`, counted
     /// from 0) and keep its words, with their times, with the media, for
@@ -485,9 +504,9 @@ pub enum Request {
         #[serde(default)]
         back: bool,
     },
-    /// Set the Clip Color, the camera name, the Input Color Space and the
-    /// Super Scale of media items. Their clips show the Clip Color unless
-    /// they have their own.
+    /// Set the Clip Color, the camera name, Date Created, the scene, shot and
+    /// take, the comment, the Input Color Space and the Super Scale of media
+    /// items. Their clips show the Clip Color unless they have their own.
     #[serde(rename = "media.set")]
     MediaSet {
         media: OneOrMany<String>,
@@ -498,6 +517,21 @@ pub enum Request {
         /// number. Empty string clears it.
         #[serde(default)]
         camera: Option<String>,
+        /// Date Created, as `YYYY-MM-DD`. Empty string clears it.
+        #[serde(default)]
+        created: Option<String>,
+        /// The scene, such as a number. Empty string clears it.
+        #[serde(default)]
+        scene: Option<String>,
+        /// The shot, such as a letter or a number. Empty string clears it.
+        #[serde(default)]
+        shot: Option<String>,
+        /// The take, such as a number. Empty string clears it.
+        #[serde(default)]
+        take: Option<String>,
+        /// A note on the clip. Empty string clears it.
+        #[serde(default)]
+        comment: Option<String>,
         /// How its pictures' colors are read: `tagged`, as the file says, or
         /// `bt709`, `bt601`, `pq` or `hlg` in place of the file's tags, for a
         /// file whose tags are wrong. The viewer, thumbnails and exports
@@ -2542,41 +2576,8 @@ pub enum Request {
     EffectsSet {
         clip: ClipRef,
         effect: usize,
-        /// Off, the effect stays on the clip and does nothing.
-        #[serde(default)]
-        on: Option<bool>,
-        /// How much of the effect shows, from 0 (the picture as it comes
-        /// in) to 1 (all of the effect).
-        #[serde(default)]
-        blend: Option<f64>,
-        /// Off, the picture keeps its own shape, and the clear area around
-        /// it counts as black.
-        #[serde(default)]
-        use_alpha: Option<bool>,
-        /// On, the render cache renders the frames of the effect, in its
-        /// Smart mode and in its User mode.
-        #[serde(default)]
-        render_cache: Option<bool>,
-        /// A blur's strength, from 0 (none) to 1; with `split`, across.
-        #[serde(default)]
-        strength: Option<f64>,
-        /// A blur across and down at strengths of their own.
-        #[serde(default)]
-        split: Option<bool>,
-        /// With `split`, a blur's strength down, from 0 to 1.
-        #[serde(default)]
-        vertical_strength: Option<f64>,
-        /// A blur across on red, green, blue and alpha, `[r, g, b, a]`, each
-        /// a multiple of its spread from 0 to 2.
-        #[serde(default)]
-        horizontal_channels: Option<Vec<f64>>,
-        /// A blur down on red, green, blue and alpha, `[r, g, b, a]`, each
-        /// a multiple of its spread from 0 to 2.
-        #[serde(default)]
-        vertical_channels: Option<Vec<f64>>,
-        /// What a blur takes from beyond the frame's edges.
-        #[serde(default)]
-        border: Option<Border>,
+        #[serde(flatten)]
+        change: EffectChange,
     },
     /// Put one effect of a clip back at its usual values. It stays on, and
     /// keeps its `render_cache`. An effect that is off does not change.
@@ -2602,14 +2603,21 @@ pub enum Request {
     /// marks are set, otherwise the whole timeline.
     #[serde(rename = "export.start")]
     ExportStart(ExportParams),
-    /// Render one frame as PNG: the timeline at `at`, or with `media` that
-    /// media's frame at `at` (source time).
+    /// Render one frame as PNG: the timeline at `at`, with `media` that
+    /// media's frame at `at` (source time), or with `generator` the frame of
+    /// that generator as a source of 5 s.
     #[serde(rename = "frame.render")]
     FrameRender {
         at: TimeSpec,
         out: PathBuf,
         #[serde(default)]
         media: Option<String>,
+        /// The generator to draw instead of the timeline. The settings below
+        /// go with it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generator: Option<GeneratorKind>,
+        #[serde(flatten)]
+        settings: GeneratorSettings,
         /// Output width; height follows the picture's aspect. Default: full size.
         #[serde(default)]
         width: Option<u32>,
@@ -2761,11 +2769,33 @@ pub enum Request {
     /// replaced.
     #[serde(rename = "preferences.reset")]
     PreferencesReset {},
-    /// The keyboard shortcuts, one action each, with a few plain words
-    /// where the action's name doesn't say what it does (spec §11). Ctrl
-    /// and Alt are Cmd and Option on macOS.
+    /// The keyboard shortcuts in force, one action each, with a few plain
+    /// words where the action's name doesn't say what it does (spec §11).
+    /// Ctrl and Alt are Cmd and Option on macOS.
     #[serde(rename = "keys.list")]
     KeysList {},
+    /// Give an action other keys in place of the ones it has (spec §11). A
+    /// key belongs to one action: a key that another action has is refused,
+    /// and the refusal names that action. A running GUI follows at once.
+    #[serde(rename = "keys.set")]
+    KeysSet {
+        /// The action, as `keys.list` names it.
+        action: crate::shortcuts::Action,
+        /// Its keys, like `Ctrl+Shift+Z`, `F5` or `+`. Cmd and Option are
+        /// other names for Ctrl and Alt. On macOS, Control is the Control
+        /// key. With no keys, the action has no key.
+        #[serde(default)]
+        #[schemars(with = "Vec<String>")]
+        keys: Vec<crate::shortcuts::Combo>,
+    },
+    /// Put default keys back. A default key that another action has now is
+    /// refused, and the refusal names that action.
+    #[serde(rename = "keys.reset")]
+    KeysReset {
+        /// The action, as `keys.list` names it. Without it, every action.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action: Option<crate::shortcuts::Action>,
+    },
     /// Keep a paid speech service's key in the system's keychain (macOS
     /// Keychain, Windows Credential Manager, the Secret Service on Linux).
     /// Without `key`, the CLI reads it from standard input. The key never
@@ -2934,9 +2964,11 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         alone: Option<bool>,
     },
-    /// Set the In and/or Out of the Multi Source viewer. They are frames of
-    /// its scroll area and hold for each camera; `out` is exclusive. The
-    /// files' own source marks do not change. A change of bin clears them.
+    /// Set the In and/or Out of the Multi Source viewer, or of a generator
+    /// open as the source. `out` is exclusive. In the Multi Source viewer they
+    /// are frames of its scroll area and hold for each camera. The files' own
+    /// source marks do not change. A change of bin clears them. A generator's
+    /// marks last until another source opens, and they are not in the project.
     #[serde(rename = "viewer.marks.set")]
     ViewerMarksSet {
         #[serde(rename = "in", default)]
@@ -2949,7 +2981,8 @@ pub enum Request {
         #[serde(default)]
         duration: Option<DurationSpec>,
     },
-    /// Clear the In and Out of the Multi Source viewer.
+    /// Clear the In and Out of the Multi Source viewer, or of a generator open
+    /// as the source.
     #[serde(rename = "viewer.marks.clear")]
     ViewerMarksClear {},
     /// Viewer framing and safe-area guides (decision D90). Stored in
@@ -2990,10 +3023,20 @@ pub enum Request {
     /// The choice lasts for this session. It is not in the project.
     #[serde(rename = "viewer.frame")]
     ViewerFrame { mode: ViewerFrame },
-    /// Open a media item in the viewer as Source Clip, optionally at a source time.
+    /// Open a media item in the viewer as Source Clip, optionally at a source
+    /// time. With `generator`, open that generator as a source of 5 s. The
+    /// timeline does not change.
     #[serde(rename = "viewer.load")]
     ViewerLoad {
+        /// Media id (`m1`). Omitted when `generator` is set.
+        #[serde(default)]
         media: String,
+        /// The generator to open instead of a media item. The settings below
+        /// go with it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        generator: Option<GeneratorKind>,
+        #[serde(flatten)]
+        settings: GeneratorSettings,
         #[serde(default)]
         at: Option<TimeSpec>,
     },
@@ -3342,6 +3385,7 @@ pub struct ExportParams {
     #[serde(default)]
     pub settings: Option<ExportSettings>,
     /// Overrides like `video.quality=20` or `audio.bitrate=192000`.
+    /// `null` gives a field its default.
     #[serde(default)]
     pub set: Vec<String>,
     /// Timeline range. Default: In–Out if both marks are set, else everything.
@@ -4123,6 +4167,21 @@ pub enum PoolSort {
     /// The label of the file's start timecode; media without one count
     /// as 00:00:00:00 (decision D59).
     Timecode,
+    /// The camera name, then the start timecode. Media without a name come
+    /// first.
+    Camera,
+    /// The day of Date Created, then the start timecode. Media without a
+    /// date come first.
+    DateTime,
+    /// The bin, then the start timecode.
+    Bin,
+    /// The scene, the shot, then the take. Media without one come first.
+    SceneShot,
+    /// The Clip Color, then the start timecode. Media without a color come
+    /// first.
+    ClipColor,
+    /// The media with no fresh proxy, then those with one.
+    OnlineStatus,
 }
 
 /// How the Media Pool shows its items (spec §3).
@@ -4137,10 +4196,14 @@ pub enum PoolMode {
     /// A row for each, its details in columns.
     List,
     /// A card for each: a picture that scrubs, a line that follows the sort,
-    /// its start timecode, its camera and its name. By `name`, the cards go
-    /// by first letter under a heading, and by timecode inside a letter;
-    /// Source Tape takes that order. By `date`, they go under a heading for
-    /// each day.
+    /// its start timecode, Date Created and camera, its scene, shot and take,
+    /// and its name and comment. By `name`, the cards go by first letter
+    /// under a heading, and by timecode inside a letter; Source Tape takes
+    /// that order. By `date`, they go under a heading for each day. By
+    /// `timecode`, they go under a heading for each Date Created, and by
+    /// timecode inside a date. By `camera`, `date_time`, `bin`, `scene_shot`,
+    /// `clip_color` and `online_status`, they go under a heading for each
+    /// value.
     Metadata,
 }
 
@@ -4216,31 +4279,31 @@ fn storyboard_width() -> u32 {
 pub struct GeneratorSettings {
     /// A `solid_color`'s color: `#rrggbb`, `#rgb` or a name such as `yellow`.
     /// Default: black.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     /// A `four_color_gradient`'s Center X: -1 is the left edge, 0 the middle
     /// and 1 the right edge. A number past an end takes that end. Default: 0.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center_x: Option<f64>,
     /// A `four_color_gradient`'s Center Y: -1 is the top edge, 0 the middle
     /// and 1 the bottom edge. A number past an end takes that end. Default: 0.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center_y: Option<f64>,
     /// A `four_color_gradient`'s upper left color. Default: `#ff0000`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper_left: Option<String>,
     /// A `four_color_gradient`'s upper right color. Default: `#ffff00`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper_right: Option<String>,
     /// A `four_color_gradient`'s lower left color. Default: `#0000ff`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lower_left: Option<String>,
     /// A `four_color_gradient`'s lower right color. Default: `#00ffff`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lower_right: Option<String>,
     /// An `ebu_color_bar`'s Level: the percent of its colored bars, `75` or
     /// `100`. Default: `75`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<EbuLevel>,
 }
 
@@ -4259,18 +4322,25 @@ impl GeneratorSettings {
     }
 }
 
-/// What to put on the timeline: a media range, and where.
+/// What to put on the timeline: a media range or a generator, and where.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceParams {
-    /// Media id (`m1`). Omitted when `tape` is set.
+    /// Media id (`m1`). Omitted when `tape` or `generator` is set.
     #[serde(default)]
     pub media: String,
     /// Edit the Source Tape In–Out span instead of one media item. Both marks
     /// must be set.
     #[serde(default)]
     pub tape: bool,
-    /// Source range (TimeSpecs relative to the media's start). Default: the
-    /// media's source marks, or all of it.
+    /// Use a generator as the source instead of a media item. The source is
+    /// 5 s long and has no sound. The settings below go with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generator: Option<GeneratorKind>,
+    #[serde(flatten)]
+    pub settings: GeneratorSettings,
+    /// Source range (TimeSpecs relative to the source's start). Default: the
+    /// media's source marks, or all of it. For a generator: its 5 s. A range
+    /// on a generator can be longer than 5 s.
     #[serde(default)]
     pub range: Option<RangeSpec>,
     /// Leave the audio out (Video Only).
@@ -4281,7 +4351,7 @@ pub struct SourceParams {
     pub audio_only: bool,
     /// The target track. Default: V1, or A1 for audio-only clips. The next new
     /// track (`V3` when there are two) is made. On an audio track only the
-    /// audio is used.
+    /// audio is used. A generator goes only on a video track.
     #[serde(default)]
     pub track: Option<String>,
     /// A part of the Multi Source viewer: the frames left empty before the
@@ -4357,6 +4427,94 @@ pub struct ProjectSet {
     /// language, `null` goes back to them.
     #[serde(default)]
     pub fillers: Option<std::collections::BTreeMap<String, Option<Vec<String>>>>,
+}
+
+/// A change to an effect: each value given replaces its own. Every value of
+/// every kind of effect is here, and each kind takes its own
+/// (`ops::effect::set`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct EffectChange {
+    /// Off, the effect stays on the clip and does nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// How much of the effect shows, from 0 (the picture as it comes in) to
+    /// 1 (all of the effect).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend: Option<f64>,
+    /// Off, the picture keeps its own shape, and the clear area around it
+    /// counts as black.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_alpha: Option<bool>,
+    /// On, the render cache renders the frames of the effect, in its Smart
+    /// mode and in its User mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_cache: Option<bool>,
+    /// A Gaussian Blur's strength, from 0 (none) to 1; with `split`, across.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strength: Option<f64>,
+    /// A Gaussian Blur across and down at strengths of their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split: Option<bool>,
+    /// With `split`, a Gaussian Blur's strength down, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_strength: Option<f64>,
+    /// A Gaussian Blur across on red, green, blue and alpha, `[r, g, b, a]`,
+    /// each a multiple of its spread from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizontal_channels: Option<Vec<f64>>,
+    /// A Gaussian Blur down on red, green, blue and alpha, `[r, g, b, a]`,
+    /// each a multiple of its spread from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_channels: Option<Vec<f64>>,
+    /// What a blur takes from beyond the frame's edges. On a Mosaic Blur it
+    /// does not change the picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border: Option<Border>,
+    /// How many cells a Mosaic Blur has, from 0.1 (few, large) to 4000. A
+    /// cell is 2 × √(the picture's width × its height, on the frame) / this
+    /// high.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pixel_frequency: Option<f64>,
+    /// A Mosaic Blur's Smooth Strength, from 0 to 1. It does not change the
+    /// picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smooth_strength: Option<f64>,
+    /// The shape of a Mosaic Blur's cells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell_shape: Option<CellShape>,
+    /// The size of the box that makes the color of a Mosaic Blur's cell, in
+    /// cells, from 0 (the one pixel at its middle) to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aliasing: Option<f64>,
+    /// Moves a Mosaic Blur's cells to the right by this many half cells,
+    /// from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_offset: Option<f64>,
+    /// Moves a Mosaic Blur's cells up by this many half cells, from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_offset: Option<f64>,
+    /// The width of a Mosaic Blur's cell over its height, from 0.001 to 1000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aspect: Option<f64>,
+    /// The point a Mosaic Blur's cells line up on, `[x, y]` as fractions of
+    /// the picture on the frame from its bottom left, each from -1000000 to
+    /// 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<Vec<f64>>,
+    /// A Mosaic Blur at twice the size, then the mean of each 2 × 2, for
+    /// clean lines between the cells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub antialias: Option<bool>,
+    /// On, a Mosaic Blur's cell also takes the mean of the alpha. Off, the
+    /// picture keeps its own alpha and the cells keep their colors, so a
+    /// clear part adds its cell's color to the tracks below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur_alpha: Option<bool>,
+    /// With `blur_alpha` on, only a Mosaic Blur's cell with no clear part in
+    /// its box stays, with an alpha of 1. Elsewhere the alpha is 0, and the
+    /// picture's own colors add to the tracks below.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub whole_cells: Option<bool>,
 }
 
 /// A change to a clip's Dynamic Zoom: each field given replaces its own,
@@ -4733,6 +4891,8 @@ impl Request {
                 | Self::ViewerGuides { .. }
                 | Self::ViewerScopes { .. }
                 | Self::KeysList {}
+                | Self::KeysSet { .. }
+                | Self::KeysReset { .. }
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
                 | Self::CacheList {}
@@ -4805,6 +4965,8 @@ impl Request {
                     | Self::ViewerGuides { .. }
                     | Self::ViewerScopes { .. }
                     | Self::KeysList {}
+                    | Self::KeysSet { .. }
+                    | Self::KeysReset { .. }
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }
                     | Self::EditCopy { .. }

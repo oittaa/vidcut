@@ -8,7 +8,9 @@ use eframe::egui::{
 use serde_json::json;
 use vidcut_core::model::{Media, Project};
 use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
+use vidcut_core::shortcuts::Action;
 
+use super::clip_info::scene_shot_take;
 use super::theme;
 use super::timeline::gesture::Gesture;
 use super::title_browser::LeftTab;
@@ -35,16 +37,18 @@ const HEADER: f32 = 20.0;
 const EDIT_ICONS: f32 = 8.0;
 const EDIT_ICON: f32 = 16.0;
 const EDIT_ICON_GAP: f32 = 4.0;
-const CARD_HEIGHT: f32 = 84.0;
+const CARD_HEIGHT: f32 = 96.0;
 const CARD_LEAST_WIDTH: f32 = 300.0;
 const CARD_MARGIN: f32 = 6.0;
 const CARD_PICTURE: egui::Vec2 = egui::Vec2::new(128.0, 72.0);
-const CARD_LINES: [f32; 2] = [28.0, 53.0];
+const CARD_LINES: [f32; 3] = [28.0, 50.0, 72.0];
 const CLUSTER_HEADING: f32 = 26.0;
+const NO_VALUE: &str = "---";
 
 #[derive(Default)]
 pub(super) struct BinsUi {
     pub(super) targets: Vec<(Rect, String)>,
+    pub(super) area: Option<Rect>,
     order: Vec<String>,
     rename: Option<Rename>,
     list: Option<ListLayout>,
@@ -138,7 +142,62 @@ fn cluster(sort: PoolSort, m: &Media) -> Option<String> {
     match sort {
         PoolSort::Name => Some(crate::live::first_letter(&m.name)),
         PoolSort::Date => Some(file_time(m).map_or_else(|| "-".to_string(), |d| d.day())),
-        PoolSort::Added | PoolSort::Duration | PoolSort::Timecode => None,
+        PoolSort::Camera => m.camera.as_deref().map(super::clip_info::camera_label),
+        PoolSort::DateTime | PoolSort::Timecode => m.created.clone(),
+        PoolSort::Bin => Some(match m.bin.as_str() {
+            "" => bin_name("").to_string(),
+            path => path.to_string(),
+        }),
+        PoolSort::SceneShot => m.scene.as_ref().map(|s| format!("Scene {s}")),
+        PoolSort::ClipColor => m.color.clone(),
+        PoolSort::OnlineStatus => Some(
+            match m.fresh_proxy() {
+                Some(_) => "Proxy",
+                None => "Original",
+            }
+            .to_string(),
+        ),
+        PoolSort::Added | PoolSort::Duration => None,
+    }
+}
+
+fn main_description(sort: PoolSort, m: &Media, start: &str) -> String {
+    let date = m.created.as_deref().unwrap_or(NO_VALUE);
+    match sort {
+        PoolSort::Camera => {
+            let camera = m
+                .camera
+                .as_deref()
+                .map_or_else(|| NO_VALUE.to_string(), super::clip_info::camera_label);
+            format!("{camera}  {start}")
+        }
+        PoolSort::DateTime | PoolSort::Date | PoolSort::Added => {
+            let file = m.path.file_name().unwrap_or_default().to_string_lossy();
+            format!("{date}  {file}")
+        }
+        PoolSort::SceneShot => {
+            let parts: Vec<String> = scene_shot_take(m).into_iter().flatten().collect();
+            match parts.is_empty() {
+                true => NO_VALUE.to_string(),
+                false => parts.join(", "),
+            }
+        }
+        PoolSort::Timecode | PoolSort::ClipColor => format!("{date}  {start}"),
+        PoolSort::Name | PoolSort::Duration | PoolSort::Bin | PoolSort::OnlineStatus => {
+            m.name.clone()
+        }
+    }
+}
+
+fn card_row(painter: &egui::Painter, x: Rangef, y: f32, cells: &[String], color: Color32) {
+    let each = x.span() / cells.len() as f32;
+    for (i, cell) in cells.iter().enumerate() {
+        let galley = one_line(painter, cell.clone(), 12.0, color, each - CARD_MARGIN);
+        let left = match i > 0 && i + 1 == cells.len() {
+            true => x.max - galley.size().x,
+            false => x.min + i as f32 * each,
+        };
+        painter.galley(Pos2::new(left, y), galley, color);
     }
 }
 
@@ -376,6 +435,12 @@ fn sort_label(s: PoolSort) -> &'static str {
         PoolSort::Duration => "Duration",
         PoolSort::Date => "Date",
         PoolSort::Timecode => "Timecode",
+        PoolSort::Camera => "Camera",
+        PoolSort::DateTime => "Date Time",
+        PoolSort::Bin => "Bin",
+        PoolSort::SceneShot => "Scene, Shot",
+        PoolSort::ClipColor => "Clip Color",
+        PoolSort::OnlineStatus => "Online Status",
     }
 }
 
@@ -412,6 +477,7 @@ impl Workspace {
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
         self.hover = None;
         self.bins.targets.clear();
+        self.bins.area = Some(ui.max_rect());
         let press = ui.input(|i| i.pointer.press_origin().filter(|_| i.pointer.any_pressed()));
         let snap = self.snap.clone();
         let project = snap.project();
@@ -553,9 +619,12 @@ impl Workspace {
                         } else if !view.bin.is_empty() {
                             ui.label(dim("Empty bin. Drag clips here, or use Move to Bin."));
                         } else {
-                            ui.label(dim(super::keys(
-                                "No media yet. Import with Ctrl+I, or `vidcut media add FILE…`",
-                            )));
+                            ui.label(dim(match snap.bindings.first(Action::Import) {
+                                Some(key) => format!(
+                                    "No media yet. Import with {key}, or `vidcut media add FILE…`"
+                                ),
+                                None => "No media yet. Use `vidcut media add FILE…`".to_string(),
+                            }));
                             if ui.button("Import Media…").clicked() {
                                 self.import_media();
                             }
@@ -730,7 +799,7 @@ impl Workspace {
                     let mut sort = view.sort;
                     let r = egui::ComboBox::from_id_salt("pool-sort")
                         .selected_text(sort_label(sort))
-                        .width(76.0)
+                        .width(100.0)
                         .show_ui(ui, |ui| {
                             for s in [
                                 PoolSort::Added,
@@ -738,6 +807,12 @@ impl Workspace {
                                 PoolSort::Duration,
                                 PoolSort::Date,
                                 PoolSort::Timecode,
+                                PoolSort::Camera,
+                                PoolSort::DateTime,
+                                PoolSort::Bin,
+                                PoolSort::SceneShot,
+                                PoolSort::ClipColor,
+                                PoolSort::OnlineStatus,
                             ] {
                                 ui.selectable_value(&mut sort, s, sort_label(s));
                             }
@@ -1133,12 +1208,7 @@ impl Workspace {
             .timecode
             .as_ref()
             .map_or_else(|| self.src_tc(0), super::clip_info::start_label);
-        let title = match self.snap.pool.sort {
-            PoolSort::Timecode => start.clone(),
-            PoolSort::Added | PoolSort::Name | PoolSort::Duration | PoolSort::Date => {
-                m.name.clone()
-            }
-        };
+        let title = main_description(self.snap.pool.sort, m, &start);
         let left = picture.right() + CARD_MARGIN;
         let room = rect.right() - CARD_MARGIN - left;
         let at = |y: f32| rect.top() + y;
@@ -1149,28 +1219,27 @@ impl Workspace {
             one_line(&painter, title, 14.0, text, room),
             text,
         );
-        painter.hline(left..=left + room, at(CARD_LINES[0]), line);
-        let details = self.cues_text(m).unwrap_or(start);
-        painter.galley(
-            Pos2::new(left, at(CARD_LINES[0] + 5.0)),
-            one_line(&painter, details, 12.0, dim, room * 0.6),
-            dim,
-        );
-        if m.subtitles.is_none() {
-            let camera = m
-                .camera
-                .as_deref()
-                .map_or_else(|| "---".to_string(), super::clip_info::camera_label);
-            let camera = one_line(&painter, camera, 12.0, dim, room * 0.4);
-            let x = left + room - camera.size().x;
-            painter.galley(Pos2::new(x, at(CARD_LINES[0] + 5.0)), camera, dim);
+        let x = Rangef::new(left, left + room);
+        for y in CARD_LINES {
+            painter.hline(x, at(y), line);
         }
-        painter.hline(left..=left + room, at(CARD_LINES[1]), line);
-        painter.galley(
-            Pos2::new(left, at(CARD_LINES[1] + 5.0)),
-            one_line(&painter, m.name.clone(), 12.0, dim, room),
-            dim,
-        );
+        let row = |y: f32, cells: &[String]| card_row(&painter, x, at(y + 4.0), cells, dim);
+        let name = m.name.clone();
+        match self.cues_text(m) {
+            Some(cues) => {
+                row(CARD_LINES[0], &[cues]);
+                row(CARD_LINES[2], &[name]);
+            }
+            None => {
+                let note =
+                    |value: &Option<String>| value.clone().unwrap_or_else(|| NO_VALUE.to_string());
+                let camera = m.camera.as_ref().map(|name| format!("Cam {name}"));
+                row(CARD_LINES[0], &[start, note(&m.created), note(&camera)]);
+                let scene = scene_shot_take(m).map(|cell| note(&cell));
+                row(CARD_LINES[1], &scene);
+                row(CARD_LINES[2], &[name, note(&m.comment)]);
+            }
+        }
         self.media_interaction(&resp, m);
     }
 
@@ -1849,6 +1918,10 @@ impl Workspace {
             self.open_clip_info(Some(m.id.clone()));
             ui.close();
         }
+        if m.subclip.is_some() && ui.button("Edit Subclip…").clicked() {
+            self.open_edit_subclip(&m.id);
+            ui.close();
+        }
         ui.menu_button("Clip Color", |ui| {
             if let Some(color) = theme::clip_color_menu(ui, current.as_deref()) {
                 self.send("media.set", json!({ "media": ids, "color": color }));
@@ -2112,15 +2185,21 @@ impl Workspace {
         let text = match sources.len() {
             0 if self.sync_grid_on() => "No source: select a camera".to_string(),
             0 => "No source: open a clip or select pool media".to_string(),
-            1 => {
-                let s = &sources[0];
-                let media = s["media"].as_str().unwrap_or_default();
-                let name = self
-                    .project()
-                    .and_then(|p| p.media(media))
-                    .map_or(media.to_string(), |m| m.name.clone());
-                format!("Source: {} ({})", elide(&name, 30), range_text(self, s))
-            }
+            1 => match self.snap.open_generator() {
+                Some(g) => {
+                    let (a, b) = g.range();
+                    format!("Source: {} ({} long)", g.name(), self.src_tc(b - a))
+                }
+                None => {
+                    let s = &sources[0];
+                    let media = s["media"].as_str().unwrap_or_default();
+                    let name = self
+                        .project()
+                        .and_then(|p| p.media(media))
+                        .map_or(media.to_string(), |m| m.name.clone());
+                    format!("Source: {} ({})", elide(&name, 30), range_text(self, s))
+                }
+            },
             n => format!("Source: {n} selected clips"),
         };
         ui.label(dim(text).small());

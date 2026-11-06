@@ -14,12 +14,19 @@ pub struct ClipInfo {
     media: Option<String>,
     asked: Option<(String, Ask)>,
     read: Option<(String, Result<MediaDetails, String>)>,
-    camera: Option<(String, String)>,
+    typing: Option<(String, &'static str, String)>,
 }
 
 type Section = (String, Vec<(String, String)>);
 
-const CAMERA_ROW: &str = "Camera";
+const NOTE_ROWS: [(&str, &str); 6] = [
+    ("Date Created", "created"),
+    ("Camera", "camera"),
+    ("Scene", "scene"),
+    ("Shot", "shot"),
+    ("Take", "take"),
+    ("Comment", "comment"),
+];
 
 pub(super) fn bytes(n: u64) -> String {
     match n {
@@ -118,6 +125,11 @@ fn audio_line(a: &vidcut_core::model::AudioInfo) -> String {
     )
 }
 
+pub(super) fn scene_shot_take(m: &Media) -> [Option<String>; 3] {
+    [("Scene", &m.scene), ("Shot", &m.shot), ("Take", &m.take)]
+        .map(|(word, value)| value.as_ref().map(|v| format!("{word} {v}")))
+}
+
 pub(super) fn camera_label(name: &str) -> String {
     format!("Camera {name}")
 }
@@ -133,6 +145,7 @@ pub(super) fn glance(m: &Media) -> Vec<String> {
     }
     let mut out = Vec::new();
     out.extend(m.camera.as_deref().map(camera_label));
+    out.extend(scene_shot_take(m).into_iter().flatten());
     if let Some(v) = &m.info.video {
         let (w, h) = v.display_size();
         out.push(format!("{w}×{h}"));
@@ -232,7 +245,12 @@ fn sections(app: &Workspace, m: &Media, read: Option<&MediaDetails>) -> Vec<Sect
         file.push(("Clip Color".into(), c.clone()));
     }
     if m.subtitles.is_none() {
-        file.push((CAMERA_ROW.into(), m.camera.clone().unwrap_or_default()));
+        let values = [
+            &m.created, &m.camera, &m.scene, &m.shot, &m.take, &m.comment,
+        ];
+        for ((row, _), value) in NOTE_ROWS.iter().zip(values) {
+            file.push(((*row).into(), value.clone().unwrap_or_default()));
+        }
     }
     let mut out: Vec<Section> = vec![("File".into(), file)];
     let mut format = vec![(
@@ -375,18 +393,26 @@ impl Workspace {
         self.clip_info.open = true;
     }
 
-    fn camera_field(&mut self, ui: &mut egui::Ui, m: &Media) {
-        let now = m.camera.clone().unwrap_or_default();
-        let mut text = match &self.clip_info.camera {
-            Some((id, draft)) if *id == m.id => draft.clone(),
-            _ => now.clone(),
+    fn note_field(&mut self, ui: &mut egui::Ui, m: &Media, key: &'static str, now: &str) {
+        let mut text = match &self.clip_info.typing {
+            Some((id, field, draft)) if *id == m.id && *field == key => draft.clone(),
+            _ => now.to_string(),
         };
         let field = ui.add(egui::TextEdit::singleline(&mut text).desired_width(160.0));
         let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
         if field.lost_focus() && !cancelled && text != now {
-            self.send("media.set", json!({ "media": m.id, "camera": text }));
+            self.send("media.set", json!({ "media": m.id, key: text }));
         }
-        self.clip_info.camera = field.has_focus().then(|| (m.id.clone(), text));
+        if field.has_focus() {
+            self.clip_info.typing = Some((m.id.clone(), key, text));
+        } else if self
+            .clip_info
+            .typing
+            .as_ref()
+            .is_some_and(|(id, field, _)| *id == m.id && *field == key)
+        {
+            self.clip_info.typing = None;
+        }
     }
 
     pub(super) fn clip_info_window(&mut self, ctx: &egui::Context) {
@@ -462,10 +488,13 @@ impl Workspace {
                                 ui.end_row();
                                 for (k, v) in rows {
                                     ui.label(dim(k));
-                                    if k == CAMERA_ROW {
-                                        self.camera_field(ui, m);
-                                    } else {
-                                        ui.add(egui::Label::new(v).wrap());
+                                    match NOTE_ROWS.iter().find(|(row, _)| *row == k) {
+                                        Some(&(_, key)) if title == "File" => {
+                                            self.note_field(ui, m, key, v);
+                                        }
+                                        _ => {
+                                            ui.add(egui::Label::new(v).wrap());
+                                        }
                                     }
                                     ui.end_row();
                                 }

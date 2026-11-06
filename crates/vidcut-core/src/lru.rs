@@ -177,6 +177,71 @@ impl<K: Hash + Eq + Clone, V, const N: usize> Lru<K, V, N> {
     }
 }
 
+#[derive(Debug)]
+pub struct ByBytes<K, V> {
+    entries: Uncapped<K, (V, usize)>,
+    bytes: usize,
+}
+
+impl<K, V> Default for ByBytes<K, V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K, V> ByBytes<K, V> {
+    pub const fn new() -> Self {
+        Self {
+            entries: Uncapped::new(),
+            bytes: 0,
+        }
+    }
+
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+}
+
+impl<K: Hash + Eq + Clone, V> ByBytes<K, V> {
+    pub fn contains<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.entries.contains(key)
+    }
+
+    pub fn get<Q>(&mut self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.entries.get(key).map(|(value, _)| value)
+    }
+
+    pub fn insert(&mut self, key: K, value: V, bytes: usize) {
+        if let Some((_, (_, old))) = self.entries.remove(&key) {
+            self.bytes -= old;
+        }
+        self.bytes += bytes;
+        self.entries.insert(key, (value, bytes));
+    }
+
+    pub fn fit(&mut self, limit: usize) {
+        while self.bytes > limit && self.entries.len() > 1 {
+            let Some((_, (_, old))) = self.entries.pop_oldest() else {
+                break;
+            };
+            self.bytes -= old;
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.bytes = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Lru;

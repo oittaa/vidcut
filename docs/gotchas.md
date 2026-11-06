@@ -78,6 +78,11 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - `hw::Keeper` copies the kept pictures of NVDEC, Direct3D 11 and VA-API (with `vaCopy`) into memory of their own.
   - CPU decoders decode into vidcut's buffers (`buffers.rs`, its `get_buffer2`).
   - The kept pictures of Mesa VA-API and Vulkan stay pool surfaces. `Store::evict` lets the pictures of a pool go together ([playback](design/playback.md#the-engine)).
+- **FFmpeg 8 has no demuxer or decoder for an animated WebP** (8.0.1). FFmpeg has them from 9.0.
+  - FFmpeg 8 reads the file with `webp_pipe`, as one image that it cannot decode. An animated WebP of one frame gives the same result.
+  - Without a check, the file comes in as a still of 2×2 pixels, and its picture never renders.
+  - Thus `probe` refuses a file that `webp_pipe` reads, when the animation flag of its VP8X chunk is on (`animated_webp`). The message says that the file needs FFmpeg 9.0.
+  - FFmpeg 9 reads a file with this flag with `webp_anim`. Thus the refusal does not occur there.
 - **`AVHWDeviceContext.user_opaque` is FFmpeg's** on the devices that `av_hwdevice_ctx_create` makes.
   - VA-API keeps its DRM file there, and frees the file through that pointer.
   - vidcut uses the field only on the CUDA devices that it allocates itself (`CudaDevice::with_own_stream`).
@@ -93,6 +98,17 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
 - **FFmpeg's `buffer` source takes the frame it is given** (`av_buffersrc_add_frame`, which ffmpeg-next's `Source::add` calls).
   - It moves the buffers out of the frame, and leaves the frame empty.
   - Thus `hw::run_graph` gives the graph of a turn a reference of its own (`av_frame_ref`).
+- **FFmpeg's scaler makes RGB and gray of more than 8 bits too bright when it converts them to YUV** (9.0.1, `scale`).
+  - The top of an input of N bits acts as 255 × 2^(N-8), not as 2^N - 1.
+  - Thus luma and chroma have a gain: 1.0039 at 16 bits, 1.0037 at 12 bits, 1.0029 at 10 bits.
+  - Limited and full range have the same gain. In full range, the top of the range also clips.
+  - RGB and gray of 8 bits have no gain.
+  - Thus `Relayout` keeps these pictures as RGB (`gbrp16le`, `gbrap16le`).
+- **FFmpeg's scaler does not reach the top of `gbrp16le` from planar RGB or gray of fewer bits** (9.0.1, `scale`).
+  - From `gbrp` forms, the top code gives 65408 at 9 bits, 65473 at 10 bits, 65520 at 12 bits and 65534 at 14 bits.
+  - The conversion through `rgb48le`, `rgba64le` or `gray16le` gives 65535 at each of these depths.
+  - Thus `Relayout` converts a picture of 9 to 15 bits through these forms.
+- **FFmpeg's scaler ignores the range of a gray input** (9.0.1, `scale`). It reads the codes as full range, with a tag or `in_range`. Thus vidcut reads all gray in full range.
 - **FFmpeg's GPU deinterlacers aren't `bwdif`** (9.0.1).
   - `bwdif_vulkan` reads black past the top and bottom edges, and does not clip to the bits of the frame.
   - Thus its 10-bit edge rows come out at half level, or overshoot.

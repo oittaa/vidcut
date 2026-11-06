@@ -12,22 +12,6 @@ use vidcut_core::{Editor, Envelope, Error, ErrorCode, Project, Request, Response
 use crate::env::AvEnv;
 use crate::threads::Work;
 
-fn shortcuts() -> Value {
-    use vidcut_core::shortcuts::{SHORTCUTS, key_name};
-    let list: Vec<Value> = SHORTCUTS
-        .iter()
-        .map(|s| {
-            json!({
-                "group": s.group,
-                "group_title": s.group.title(),
-                "action": s.action,
-                "keys": s.keys.iter().map(|k| key_name(k)).collect::<Vec<_>>(),
-                "explanation": s.explanation.map(crate::gui::keys),
-            })
-        })
-        .collect();
-    json!({ "shortcuts": list })
-}
 use crate::export;
 
 fn models_list() -> Value {
@@ -275,7 +259,15 @@ pub fn run_with(
             envelope.dry_run,
             |_| None,
         )?),
-        Request::KeysList {} => answer(shortcuts()),
+        Request::KeysList {} => answer(crate::preferences::keys_list()?),
+        Request::KeysSet { action, keys } => answer(crate::preferences::keys_set(
+            *action,
+            keys,
+            envelope.dry_run,
+        )?),
+        Request::KeysReset { action } => {
+            answer(crate::preferences::keys_reset(*action, envelope.dry_run)?)
+        }
         Request::ServicesSetKey { service, key } => answer(crate::services::set_key(
             *service,
             key.as_deref(),
@@ -469,30 +461,43 @@ pub fn render(
             at,
             out,
             media,
+            generator,
+            settings,
             width,
             viewer: true,
-        } => match media {
-            Some(_) => {
+        } => {
+            if media.is_some() {
                 return Err(Error::invalid(
                     "the viewer draws the timeline: leave out media",
                 ));
             }
-            None => answer(crate::gui::frame::render(project, at, out, *width, None)?),
-        },
+            if vidcut_core::ops::generators::source_of(*generator, settings)?.is_some() {
+                return Err(Error::invalid(
+                    "the viewer draws the timeline: leave out generator",
+                ));
+            }
+            answer(crate::gui::frame::render(project, at, out, *width, None)?)
+        }
         Request::FrameRender {
             at,
             out,
             media,
+            generator,
+            settings,
             width,
             viewer: false,
-        } => answer(export::frame(
-            project,
-            at,
-            out,
-            media.as_deref(),
-            *width,
-            None,
-        )?),
+        } => {
+            let generator = vidcut_core::ops::generators::source_of(*generator, settings)?;
+            answer(export::frame(
+                project,
+                at,
+                out,
+                media.as_deref(),
+                generator.as_ref(),
+                *width,
+                None,
+            )?)
+        }
         Request::FrameScope {
             at,
             out,
