@@ -318,9 +318,10 @@ fn anchor_row(ui: &mut egui::Ui, f: &mut LineFields, usual: TitleAnchor) -> bool
     changed
 }
 
-fn line_changes(params: &mut Value, t: &Title, stored: &Title) -> bool {
-    if let Some(a) = t.anchor.filter(|_| t.anchor != stored.anchor) {
-        params["anchor"] = json!(a);
+fn line_changes(params: &mut Value, t: &Title, stored: &Title, part: TitlePart) -> bool {
+    if t.anchor != stored.anchor {
+        let usual = Title::usual_anchor(t.kind, t.align(), part);
+        params["anchor"] = json!(t.anchor.unwrap_or(usual));
     }
     if t.position != stored.position {
         params["position"] = json!(t.position.map_or_else(Vec::new, |p| p.to_vec()));
@@ -351,7 +352,7 @@ fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Vec<Value> {
     if t.style != stored.style {
         params["style"] = serde_json::to_value(&t.style).unwrap_or(json!({}));
     }
-    if line_changes(&mut params, t, stored) && t.upper.is_some() {
+    if line_changes(&mut params, t, stored, TitlePart::Lower) && t.upper.is_some() {
         params["line"] = json!(LowerThirdLine::Lower);
     }
     if t.opacity != stored.opacity {
@@ -363,7 +364,14 @@ fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Vec<Value> {
         out.push(params);
     }
     let mut upper = json!({ "clip": clip, "line": LowerThirdLine::Upper, "at": at });
-    if t.upper.is_some() && line_changes(&mut upper, &t.upper_view(), &stored.upper_view()) {
+    if t.upper.is_some()
+        && line_changes(
+            &mut upper,
+            &t.upper_view(),
+            &stored.upper_view(),
+            TitlePart::Upper,
+        )
+    {
         out.push(upper);
     }
     out
