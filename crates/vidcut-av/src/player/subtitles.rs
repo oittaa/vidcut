@@ -252,6 +252,7 @@ fn painted_of(key: &Key) -> TitlePictures {
                 top: s.y,
                 width: s.width,
                 height: s.height,
+                lift: s.lift,
                 frame: (w, h),
                 rgba: s.premultiplied(),
             }))

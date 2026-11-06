@@ -1044,11 +1044,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - a Look list ([X59](#x59-looks-for-titles-too-some-built-in))
     - the kind of the title
     - the alignment
-    - the anchor of a Text title
     - the text
     - the font, typed or selected from the installed fonts
     - the size, the color, the outline, the background and the drop shadow, each color typed or picked with a swatch
-    - the place, as percents across and down (X54)
+    - the anchor and the place, as percents across and down (X54), of the title or of each line of a lower third
     - the zoom and the rotation
   - The viewer shows the title while the user edits it, drawn as an export draws it.
   - A change goes in as one `titles.set` when the user leaves the field. A button puts it in at once. Ctrl+Z undoes it.
@@ -1114,7 +1113,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The `position` of a title is `[x, y]`, in fractions of the width and the height of the picture, from its top left.
   - The x goes from -4 to 4, and the y goes from -3 to 5. Thus a title can start and end outside the picture.
   - The Title section of the Inspector shows it as percents.
-  - It is where the anchor of a Text title goes, or the point of a line of a lower third (D65).
+  - It is where the anchor of a Text title or of a line of a lower third goes (D65).
   - Without a position, the title takes the usual place of its kind.
 - **Why:**
   - Fractions mean the same at any picture size, and a script sets them exactly.
@@ -2618,6 +2617,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - One key on two actions is confusing.
   - The rule that selects the action in Resolve is not known.
+  - The owner approved this difference.
+
+## X137. A Scroll line wider than the picture wraps
+
+- **Resolve:**
+  - A line of a Scroll that is wider than its text box stays on one line. The box is as wide as the picture.
+  - The picture cuts the line at its edges, and those letters are lost (measured in Resolve Studio 21.1.2).
+- **vidcut:**
+  - The line wraps at 90% of the picture width, as the lines of other titles do.
+- **Why:**
+  - A wrapped line loses no letters.
   - The owner approved this difference.
 
 ## X138. The keys are a page of Preferences
