@@ -5,7 +5,7 @@ use cosmic_text::{
     LayoutRun, Metrics, Renderer, Shaping, Style, SwashCache, SwashContent, UnderlineStyle, Weight,
     Wrap, fontdb,
 };
-use vidcut_core::lru::Lru;
+use vidcut_core::lru::ByBytes;
 use vidcut_core::model::{
     Place, SubtitleAlign, SubtitleStyle, TextStroke, Title, TitleAlign, TitleBlock, TitleCase,
     TitleKind, TitlePart, TitleShadow, TitleStyle,
@@ -375,10 +375,12 @@ struct Line {
     style: SubtitleStyle,
 }
 
-const LINES: usize = 8;
+const LINES_BYTES: usize = 64 << 20;
 
-fn lines() -> MutexGuard<'static, Lru<Line, Laid, LINES>> {
-    static LINES_KEPT: Mutex<Lru<Line, Laid, LINES>> = Mutex::new(Lru::new());
+const LINE_ENTRY_BYTES: usize = 4 << 10;
+
+fn lines() -> MutexGuard<'static, ByBytes<Line, Laid>> {
+    static LINES_KEPT: Mutex<ByBytes<Line, Laid>> = Mutex::new(ByBytes::new());
     LINES_KEPT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -387,7 +389,11 @@ fn laid_line(line: Line, look: &Look) -> Option<Laid> {
         return Some(laid.clone());
     }
     let laid = lay_out(look)?;
-    lines().insert(line, laid.clone());
+    let pixels = laid.sprite.as_ref().map_or(0, |s| s.rgba.len());
+    let bytes = pixels * size_of::<[f32; 4]>() + LINE_ENTRY_BYTES;
+    let mut kept = lines();
+    kept.insert(line, laid.clone(), bytes);
+    kept.fit(LINES_BYTES);
     Some(laid)
 }
 
@@ -531,18 +537,28 @@ struct TextLine {
 fn text_lines(
     system: &mut FontSystem,
     run: &LayoutRun<'_>,
-    (scale, nudge, ceiling): (f32, f32, f32),
+    (lift, freed): (&[f32], &[f32]),
+    (scale, origin, nudge, ceiling): (f32, f32, f32, f32),
     ink: Color,
 ) -> Vec<TextLine> {
     let mut lines = Vec::new();
+    let line_freed = freed.get(run.line_i).copied().unwrap_or(0.0);
+    let block_left = origin + nudge;
+    let end = |x: f32| block_left + Title::line_end(f64::from(x - origin), f64::from(scale)) as f32;
     for span in run.decorations {
         let glyphs = &run.glyphs[span.glyph_range.clone()];
         let (x0, x1) = glyphs.iter().fold((f32::MAX, f32::MIN), |(a, b), g| {
             (a.min(g.x), b.max(g.x + g.w))
         });
+        let end_space = glyphs
+            .last()
+            .filter(|g| g.end == run.text.len())
+            .map_or(0.0, |g| line_freed * g.font_size);
+        let x1 = x1 - end_space;
         if x1 <= x0 {
             continue;
         }
+        let baseline = run.line_y + lift.get(span.glyph_range.start).copied().unwrap_or(0.0);
         let deco = &span.data;
         let full = deco.underline_metrics.thickness * span.font_size;
         let ascent = glyphs
@@ -552,8 +568,8 @@ fn text_lines(
             * span.font_size;
         let mut line = |middle: f32| {
             lines.push(TextLine {
-                left: (x0 + nudge).ceil(),
-                right: x0 + nudge + Title::line_width(f64::from(x1 - x0), f64::from(scale)) as f32,
+                left: end(x0).max(block_left.ceil()),
+                right: end(x1),
                 top: (middle - full / 2.0).max(ceiling),
                 bottom: middle + full / 2.0,
                 color: span.color_opt.unwrap_or(ink),
@@ -561,13 +577,13 @@ fn text_lines(
         };
         if deco.text_decoration.underline != UnderlineStyle::None {
             let drop = Title::underline_drop(f64::from(full / scale)) as f32;
-            line(run.line_y + drop * scale);
+            line(baseline + drop * scale);
         }
         if deco.text_decoration.strikethrough {
-            line(run.line_y - ascent / 3.0);
+            line(baseline - ascent / 3.0);
         }
         if deco.text_decoration.overline {
-            line(run.line_y - ascent);
+            line(baseline - ascent);
         }
     }
     lines
@@ -585,8 +601,7 @@ fn decorate<R: Renderer>(
     };
     for line in lines {
         let color = line.color;
-        let width = line.right - line.left;
-        let whole = width.floor();
+        let (whole_from, whole_to) = (line.left.ceil(), line.right.floor());
         let mut row = line.top.floor();
         while row < line.bottom {
             let cover = (row + 1.0).min(line.bottom) - row.max(line.top);
@@ -594,9 +609,32 @@ fn decorate<R: Renderer>(
                 let alpha = f32::from(color.a()) * cover * share;
                 Color::rgba(color.r(), color.g(), color.b(), alpha as u8)
             };
-            let (x, y) = (line.left as i32, row as i32);
-            renderer.rectangle(x, y, whole as u32, 1, shade(1.0));
-            renderer.rectangle(x + whole as i32, y, 1, 1, shade(width - whole));
+            let y = row as i32;
+            if whole_to < whole_from {
+                renderer.rectangle(
+                    line.left.floor() as i32,
+                    y,
+                    1,
+                    1,
+                    shade(line.right - line.left),
+                );
+            } else {
+                renderer.rectangle(
+                    whole_from as i32 - 1,
+                    y,
+                    1,
+                    1,
+                    shade(whole_from - line.left),
+                );
+                renderer.rectangle(
+                    whole_from as i32,
+                    y,
+                    (whole_to - whole_from) as u32,
+                    1,
+                    shade(1.0),
+                );
+                renderer.rectangle(whole_to as i32, y, 1, 1, shade(line.right - whole_to));
+            }
             row += 1.0;
         }
     }
@@ -1032,21 +1070,21 @@ fn pair_kerning(font: &Font, first: &str, next: &str) -> f32 {
     units as f32 / f32::from(font.metrics().units_per_em)
 }
 
-fn free_line_ends(buffer: &mut Buffer) -> bool {
-    let mut changed = false;
-    for line in &mut buffer.lines {
+fn free_line_ends(buffer: &mut Buffer) -> Vec<f32> {
+    let mut freed = vec![0.0; buffer.lines.len()];
+    for (line, freed) in buffer.lines.iter_mut().zip(&mut freed) {
         let Some((at, last)) = line.text().char_indices().last() else {
             continue;
         };
         let own = line.attrs_list().get_span(at);
-        if own.letter_spacing_opt.is_some_and(|s| s.0 < 0.0) {
+        if let Some(spacing) = own.letter_spacing_opt.map(|s| s.0).filter(|s| *s < 0.0) {
             let mut list = line.attrs_list().clone();
             list.add_span(at..at + last.len_utf8(), &own.letter_spacing(0.0));
             line.set_attrs_list(list);
-            changed = true;
+            *freed = -spacing;
         }
     }
-    changed
+    freed
 }
 
 fn kern_words(system: &mut FontSystem, buffer: &mut Buffer) -> bool {
@@ -1122,7 +1160,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     } else {
         CacheKeyFlags::empty()
     };
-    let mut word_start = true;
+    let mut before = String::new();
     let spans = match look.markup {
         Markup::Pieces(pieces) => spans(
             &f.system,
@@ -1189,15 +1227,12 @@ fn lay_out(look: &Look) -> Option<Laid> {
                     Title::tracking_pixels(f64::from(tracking), f64::from(letter)) as f32
                         * look.spacing.1
                 };
-                let pieces = r.look.case.unwrap_or(look.case).pieces(&r.text, word_start);
-                word_start = r
-                    .text
-                    .chars()
-                    .last()
-                    .map_or(word_start, char::is_whitespace);
+                let pieces = r.look.case.unwrap_or(look.case).pieces(&r.text, &before);
+                before.push_str(&r.text);
+                let scale = f64::from(look.spacing.1);
                 pieces.into_iter().map(move |(text, small)| {
                     let px = if small {
-                        px * TitleCase::SMALL_CAPS as f32
+                        Title::small_size(f64::from(px), scale) as f32
                     } else {
                         px
                     };
@@ -1220,7 +1255,12 @@ fn lay_out(look: &Look) -> Option<Laid> {
     if seat && kern_words(&mut f.system, &mut buffer) {
         buffer.shape_until_scroll(&mut f.system, false);
     }
-    if seat && free_line_ends(&mut buffer) {
+    let freed = if seat {
+        free_line_ends(&mut buffer)
+    } else {
+        Vec::new()
+    };
+    if freed.iter().any(|space| *space > 0.0) {
         buffer.shape_until_scroll(&mut f.system, false);
     }
     if buffer.layout_runs().map(|r| r.line_height).sum::<f32>() <= 0.0 {
@@ -1329,9 +1369,14 @@ fn lay_out(look: &Look) -> Option<Laid> {
     let white = Color::rgb(255, 255, 255);
     let drawn_lines: Option<Vec<Vec<TextLine>>> = look.title_gap.map(|_| {
         let nudge = exact.map_or(0.0, |at| at[0]);
-        let place = (look.spacing.1, nudge, rise);
+        let origin = runs
+            .iter()
+            .flat_map(|run| run.glyphs)
+            .fold(f32::MAX, |x, g| x.min(g.x));
+        let place = (look.spacing.1, origin, nudge, rise);
         runs.iter()
-            .map(|run| text_lines(&mut f.system, run, place, white))
+            .zip(&lifts)
+            .map(|(run, lift)| text_lines(&mut f.system, run, (lift, &freed), place, white))
             .collect()
     });
     if let Some(at) = exact.filter(|_| !look.bare) {

@@ -231,10 +231,10 @@ impl KeyCmd {
         }
     }
 
-    pub(super) fn keys(self) -> Option<&'static str> {
+    pub(super) fn action(self) -> Option<vidcut_core::shortcuts::Action> {
         match self {
-            KeyCmd::Add => Some("Ctrl+["),
-            KeyCmd::Delete => Some("Alt+]"),
+            KeyCmd::Add => Some(vidcut_core::shortcuts::Action::AddKeyframe),
+            KeyCmd::Delete => Some(vidcut_core::shortcuts::Action::DeleteKeyframe),
             KeyCmd::DeleteAll => None,
         }
     }

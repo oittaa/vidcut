@@ -371,7 +371,7 @@ Cancel:
 - `subtitles::shown` gives what each cue draws at the frame ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It gives the pieces, the spoken word in its color, the words not yet spoken, and the size of a pop.
 - `burn::draw` lays out the cues with cosmic-text: shaping, right-to-left text, and system fonts for the scripts that the first font does not have.
 - `burn::paint` draws one picture for each run of cues that share a place and a style. A popping word is a picture of its own over it.
-- The last lines laid out stay in an `Lru` (`laid_line`).
+- The last lines laid out stay in a `ByBytes` with a fixed limit (`laid_line`, `LINES_BYTES`). Why: exports use them, also with no viewer.
 - The player's `Subtitles` keeps the pictures while the same pieces show (`Subtitles::burned`). Thus a pop draws only its word again.
 - The pictures go onto the frame in the draw of the viewer ([todo](../todo/burn-in-ahead.md)).
 
@@ -421,10 +421,29 @@ The pictures:
 - The coverage of a pixel is the product of the levels: smoothed edges, soft crop edges and opacity (`place::Placing::at`).
 - A level of a clip in a compound clip is left out where the clip fills the frame at its usual values. Thus the edges of the compound clip are covered once.
 - A composite mode (`Placing::mode`) mixes in R'G'B' (D75). The shader mixes it with the layers below (`mixed`).
-  - `place::Placing` takes the first mode other than Normal, from the picture out through its compound clips.
+  - `place::Placing` takes the outermost mode other than Normal, from the compound clips in to the picture. Thus the mode of a compound clip replaces the mode of a picture inside it.
+  - It leaves out the compound clips that mix first (`Placing::inside`).
 - A crossing pair lays each side over the layers below, adds the two, and takes away the layers below once.
 - A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
 - A Push or a Slide draws each side into its own picture. `fs_motion` moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
+
+A compound clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)):
+
+- `render::expanded` puts a compound clip at its usual values in the `Placed` list only when a clip inside it has a composite mode (`holds_mode`). A compound clip without either draws as its tracks do.
+- `place::Mixes` finds, for each frame, the compound clips that mix first. Each one is a `place::Mix`.
+  - Two or more parts in the frame make a `place::Mix`, unless the compound clip is at its usual values and no part has a mode. Normal over Normal gives the same picture in each order.
+  - A picture alone makes none. `place::Placing` takes the levels, the mode and the effects of its compound clips, as for a plain clip.
+  - A title alone makes one only for a mode or an effect. Why: a title draws neither by itself.
+  - A compound clip with one `place::Mix` as its only part adds its level to that `place::Mix` (`Mix.placing`).
+- `Placing::inside` draws a part of a `place::Mix`. It opens the levels of the compound clips that mix first (`Level::open`) and takes no opacity, mode or effects from them.
+  - The maps of these levels stay. Thus the parts are at their places on the frame, in a picture as large as the frame.
+- `MixDraw` draws the parts of a `place::Mix` over transparent, in a picture of its own.
+- A part with a composite mode reads `Below`. It holds a copy of that picture only (`IN_MIX`). `fs_mode` mixes by the alpha below, and thus a part with nothing below it stays as it is.
+- `MixDraw::finished` then shows that picture as one layer:
+  - `blur::canvas_bind` covers it by the levels of `Mix.placing`: edges, soft edges and opacity. The shader reads it as `made` 6.
+  - With effects, `blur::Blurred::canvas_effects` covers it with no opacity (`bared`), then runs the effects. The grid pictures of a Glow come from the same `Spare`. `blur::shown_bind` then shows it with the opacity.
+  - The outer pass mixes it with the tracks below, by the mode of `Mix.placing`.
+- `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
 Dynamic Zoom and keyframes (D75):
 
@@ -447,6 +466,7 @@ Soft crop edges:
 The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)):
 
 - `place::Placing` holds the effects of the picture and of the compound clips around it, the inner ones first (`Placing.effects`).
+  - The effects of a compound clip that mixes first are on its `place::Mix` ([placed pictures](#placed-pictures)).
 - Each `place::Working` holds the blend, Use Alpha and the `place::Work` of its kind.
   - An effect that is off, or at a blend of 0, is left out (`Working::of`).
 - `place::OnFrame` holds what an effect takes from the placement at the frame:
@@ -504,7 +524,8 @@ The draw:
 
 A made frame of a speed change ([which source frame](#which-source-frame)):
 
-- The effects work on each source picture before the frame between them is made, as in the spec (§13).
+- The effects of the clip work on each source picture before the frame between them is made, as in the spec (§13).
+- The effects of a compound clip around it work later, at the draw (`render_cache::own_effects`). A file of the render cache also holds none of them.
 - The draw that places a source picture also blurs it (`Sampling::Colors`). It covers the whole frame, because the blur spreads past the picture (`placed_look`).
 - The made frame holds colors only. The later draw thus takes its alpha from the placement at that frame (`Sampling::Placed`, `Blurred::made`):
   - It draws the colors of the made frame with no edges (`blur::opened`).
