@@ -2870,7 +2870,7 @@ impl Title {
     pub fn line_gap(&self, heights: [f64; 3], text: f64, pixel: f64, zoom: f64) -> f64 {
         match self.kind {
             TitleKind::Scroll => {
-                heights.iter().sum::<f64>() * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel
+                (heights[0] + heights[1]) * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel
             }
             TitleKind::Text | TitleKind::LowerThird => {
                 let size = (text / zoom / pixel).round();

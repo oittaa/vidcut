@@ -565,7 +565,7 @@ fn text_lines(
         let full = deco.underline_metrics.thickness * span.font_size;
         let ascent = glyphs
             .first()
-            .and_then(|g| font_heights(system, g.font_id, g.font_weight))
+            .and_then(|g| font_heights(system, g.font_id, g.font_weight, true))
             .map_or(deco.ascent, |[ascent, ..]| ascent as f32)
             * span.font_size;
         let mut line = |middle: f32| {
@@ -902,7 +902,12 @@ fn with_face_weight<'a>(system: &FontSystem, attrs: Attrs<'a>) -> Attrs<'a> {
     attrs.weight(weight)
 }
 
-fn font_heights(system: &mut FontSystem, id: fontdb::ID, weight: Weight) -> Option<[f64; 3]> {
+fn font_heights(
+    system: &mut FontSystem,
+    id: fontdb::ID,
+    weight: Weight,
+    typo: bool,
+) -> Option<[f64; 3]> {
     use skrifa::raw::TableProvider;
     use skrifa::raw::tables::os2::SelectionFlags;
     let index = system.db().face(id)?.index;
@@ -913,7 +918,7 @@ fn font_heights(system: &mut FontSystem, id: fontdb::ID, weight: Weight) -> Opti
     let parts = face
         .os2()
         .ok()
-        .filter(|t| !t.fs_selection().contains(SelectionFlags::USE_TYPO_METRICS))
+        .filter(|t| !typo || !t.fs_selection().contains(SelectionFlags::USE_TYPO_METRICS))
         .map_or([m.ascent, -m.descent, m.leading], |t| {
             let ascent = f32::from(t.us_win_ascent());
             let descent = f32::from(t.us_win_descent());
@@ -968,7 +973,7 @@ fn line_gap(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) ->
     look.title_gap
         .and_then(|(title, pixel)| {
             let id = face_of(system, attrs)?;
-            let own = font_heights(system, id, attrs.weight)?;
+            let own = font_heights(system, id, attrs.weight, !title.moves())?;
             let zoom = f64::from(look.spacing.1) / pixel;
             Some(title.line_gap(own, f64::from(px), pixel, zoom) as f32)
         })
@@ -979,7 +984,7 @@ fn line_tall(system: &mut FontSystem, look: &Look, attrs: &Attrs<'_>, px: f32) -
     look.title_gap
         .and_then(|_| {
             let id = face_of(system, attrs)?;
-            let [ascent, descent, _] = font_heights(system, id, attrs.weight)?;
+            let [ascent, descent, _] = font_heights(system, id, attrs.weight, true)?;
             Some(((ascent + descent) * f64::from(px)) as f32)
         })
         .unwrap_or(px * look.line)
@@ -999,7 +1004,7 @@ fn shifts(system: &mut FontSystem, run: &LayoutRun<'_>, seat: bool) -> Vec<f32> 
             };
             let m = font.metrics();
             let em = g.font_size / f32::from(m.units_per_em);
-            let own = font_heights(system, g.font_id, g.font_weight).filter(|_| seat);
+            let own = font_heights(system, g.font_id, g.font_weight, true).filter(|_| seat);
             let height = own.map_or((m.ascent - m.descent) * em, |[ascent, descent, _]| {
                 (ascent + descent) as f32 * g.font_size
             });
@@ -1021,7 +1026,7 @@ fn ascents(system: &mut FontSystem, buffer: &Buffer) -> Vec<f32> {
             r.glyphs
                 .iter()
                 .filter_map(|g| {
-                    let [ascent, ..] = font_heights(system, g.font_id, g.font_weight)?;
+                    let [ascent, ..] = font_heights(system, g.font_id, g.font_weight, true)?;
                     let size = if g.metadata & (RAISED | LOWERED) != 0 {
                         f32::from_bits((g.metadata >> FULL_SIZE_BIT) as u32)
                     } else {
