@@ -1635,13 +1635,14 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Alpha Masks Sources: the mask is `a` × the mask of `P`.
     - Usual Behavior gives the same picture as Alpha Masks Sources.
     - Alpha Is Source: the mask is `max(0, a − th + 0.001) / (1 − th + 0.001)`, with `th` the Alpha Level Threshold, for all three colors.
-    - The output of each Select Output has an alpha of 1, also outside a smaller picture.
+    - The output of each Select Output has an alpha of 1, also outside a smaller picture. vidcut does not copy this black ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
     - Blend mixes the input and that output, with their alphas.
     - With Use Alpha off, the mask takes the color without its alpha, times `a`. The output is `a` × the result on that color, and `a` stays.
     - Invert Effect takes the negative of `P` and of the output, with an alpha of 1.
 - **Glow in vidcut:**
-  - Below a Spread of 0.1, Resolve's blur has steps of 8 pixels that the renders do not explain. vidcut uses the plain curve, with the coarse grid only at a large sigma.
-  - vidcut makes the Atmosphere noise itself. It has the statistics of the renders at the defaults and the measured sizes, not their pattern.
+  - With Use Alpha on, the alpha of the output is the larger of `a` and the brightest color of the output. Thus the tracks below show around a smaller picture ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
+  - Up to a Spread of 0.1, Resolve's blur has steps of 8 pixels that the renders do not explain. vidcut uses the plain curve, with the coarse grid only at a large sigma ([X141](deviations.md#x141-a-glow-up-to-a-spread-of-01-has-a-plain-blur)).
+  - vidcut makes the Atmosphere noise itself. It has the statistics of the renders at the defaults and the measured sizes, not their pattern ([X140](deviations.md#x140-the-atmosphere-noise-of-a-glow-has-its-own-pattern)).
     - The noise has one layer of Perlin noise for each octave, with 7 octaves. Detail is the gain from one octave to the next.
     - Its size is proportional to Scale × √(width × height) of the picture on the frame. The renders show only 1920×1080.
     - Follow FX Tracker changes nothing, as with no tracker in the renders.

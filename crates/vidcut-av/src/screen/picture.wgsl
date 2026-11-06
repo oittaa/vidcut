@@ -1631,6 +1631,7 @@ fn fs_glow(in: Out) -> @location(0) vec4<f32> {
     if glow_has(GLOW_INVERT) {
         out = vec4<f32>(1.0 - out.rgb, out.a);
     }
+    out.a = max(was.a, max(out.r, max(out.g, out.b)));
     let last = effect_mixed(px, out, glowing.mixing.z, glowing.mixing.w);
     return clamp(last, vec4<f32>(0.0), vec4<f32>(1.0));
 }
