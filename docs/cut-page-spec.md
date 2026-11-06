@@ -1702,11 +1702,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Each frame of a clip has its own pattern, from the clip's first frame. A trim does not change it. Freeze keeps the first frame's pattern.
   - A change of Texture, Grain Size, Grain Aspect Ratio, Optimized Mode or Animate On Every Refresh gives a new pattern.
 - **Film Grain in vidcut:**
-  - vidcut makes the noise itself. It has the spectrum and the statistics of the renders, not their pattern.
+  - vidcut makes the noise itself. It has the spectrum and the statistics of the renders, not their pattern ([X143](deviations.md#x143-the-noise-of-a-film-grain-has-its-own-pattern)).
     - One picture of noise comes from an inverse Fourier transform at the size of the canvas. Each frame reads it at another random shift.
     - A cubic curve on the noise gives the kurtosis.
   - Symmetry is a table of measured curves, with a step of 0.02 to 0.06. Each curve is a cubic near the middle and a straight line on each side.
-    - Resolve gives spikes at exactly 0.4 and 0.6, with a standard deviation of 0.0109 and 0.0855 against 0.026 on each side. vidcut does not copy them.
+    - Resolve gives spikes at exactly 0.4 and 0.6, with a standard deviation of 0.0109 and 0.0855 against 0.026 on each side. vidcut does not copy them ([X144](deviations.md#x144-a-film-grain-has-no-jumps-at-symmetry-04-and-06)).
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
     - Film Grain Presets shows Custom when a value differs from each film stock.
