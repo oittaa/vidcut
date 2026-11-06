@@ -263,6 +263,7 @@ pub struct Snapshot {
     pub clipboard: usize,
     pub key_clipboard: usize,
     pub notices: Arc<VecDeque<Notice>>,
+    pub thumbs: Arc<HashSet<String>>,
     pub missing: Arc<HashSet<String>>,
     pub transcribed: Arc<HashSet<String>>,
     pub fillers: Arc<std::collections::BTreeMap<String, Vec<String>>>,

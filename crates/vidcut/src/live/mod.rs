@@ -273,6 +273,11 @@ pub(crate) enum Msg {
         rev: u64,
         result: Result<Arc<Project>>,
     },
+    Thumbs {
+        media: String,
+        wanted: String,
+        result: std::result::Result<bool, String>,
+    },
     Waveform {
         media: String,
         wanted: String,
@@ -526,6 +531,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         clipboard: 0,
         key_clipboard: 0,
         notices: Arc::new(VecDeque::new()),
+        thumbs: Arc::new(HashSet::new()),
         missing: Arc::new(HashSet::new()),
         transcribed: Arc::new(HashSet::new()),
         fillers: Arc::default(),
@@ -611,12 +617,15 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         log_seq: 0,
         notices: Arc::new(VecDeque::new()),
         notice_seq: 0,
+        thumbs: Arc::new(HashSet::new()),
         missing: Arc::new(HashSet::new()),
         transcribed: Arc::new(HashSet::new()),
         fillers: Arc::new(crate::preferences::filler_lists()),
         lost_proxies: Arc::new(HashMap::new()),
         proxy_dir: Arc::from(Path::new("")),
         missing_watch: missing::MissingWatch::start(tx.clone()),
+        thumbs_wanted: HashMap::new(),
+        thumbs_on: thumbs_on(),
         waveforms: Arc::new(HashMap::new()),
         waveforms_wanted: HashMap::new(),
         workers: Workers::new(2),
@@ -786,6 +795,39 @@ fn media_version(m: &vidcut_core::model::Media) -> String {
     )
 }
 
+fn thumbs_on() -> bool {
+    crate::preferences::load()
+        .unwrap_or_default()
+        .thumbnails
+        .disk_cache
+}
+
+fn make_thumbs(media: &vidcut_core::model::Media) -> std::result::Result<bool, String> {
+    let origin = paths::media_origin(media);
+    let file = crate::thumbcache::thumbs_file(media, &origin);
+    if crate::thumbcache::has_thumbs(&file) {
+        return Ok(true);
+    }
+    let input = crate::env::input_of(media);
+    let decoder = crate::preferences::gpu_decoding().own_decoder();
+    let decoder = decoder.as_ref();
+    let (count, (w, h)) = (crate::thumbcache::THUMBS, crate::thumbcache::THUMB_SIZE);
+    let (images, times) = match media.sequence.as_ref().map(|s| s.count) {
+        Some(pictures) => vidcut_av::thumbs::filmstrip_pictures(
+            &input,
+            pictures,
+            count,
+            w,
+            h,
+            decoder,
+            media.color_space,
+        ),
+        None => vidcut_av::thumbs::filmstrip(&input, count, w, h, decoder, media.color_space),
+    }
+    .map_err(|e| e.to_string())?;
+    Ok(!images.is_empty() && crate::thumbcache::store_thumbs(&file, &origin, &images, &times))
+}
+
 fn chosen_name() -> String {
     crate::preferences::load()
         .map(|p| p.appearance.theme)
@@ -858,12 +900,15 @@ struct Live {
     log_seq: u64,
     notices: Arc<VecDeque<Notice>>,
     notice_seq: u64,
+    thumbs: Arc<HashSet<String>>,
     missing: Arc<HashSet<String>>,
     transcribed: Arc<HashSet<String>>,
     fillers: Arc<std::collections::BTreeMap<String, Vec<String>>>,
     lost_proxies: Arc<HashMap<String, PathBuf>>,
     proxy_dir: Arc<Path>,
     missing_watch: missing::MissingWatch,
+    thumbs_wanted: HashMap<String, String>,
+    thumbs_on: bool,
     waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     waveforms_wanted: HashMap<String, String>,
     workers: Workers,
@@ -1152,6 +1197,13 @@ impl Live {
                     self.bindings = Arc::new(bindings);
                     changed = true;
                 }
+                if self.thumbs_on != thumbs_on() {
+                    self.thumbs_on = !self.thumbs_on;
+                    self.thumbs = Arc::new(HashSet::new());
+                    self.thumbs_wanted.clear();
+                    self.check_media();
+                    changed = true;
+                }
                 self.follow_budget();
                 self.follow_theme();
                 if self
@@ -1187,6 +1239,18 @@ impl Live {
                 }
                 changed = refreshed;
             }
+            Msg::Thumbs { media, wanted, .. }
+                if self.thumbs_wanted.get(&media) != Some(&wanted) =>
+            {
+                changed = false;
+            }
+            Msg::Thumbs { media, result, .. } => match result {
+                Ok(true) => {
+                    Arc::make_mut(&mut self.thumbs).insert(media);
+                }
+                Ok(false) => changed = false,
+                Err(e) => self.notice(format!("thumbnails for {media}: {e}"), true),
+            },
             Msg::Waveform { media, wanted, .. }
                 if self.waveforms_wanted.get(&media) != Some(&wanted) =>
             {
@@ -1469,6 +1533,7 @@ impl Live {
             clipboard: self.clipboard.len(),
             key_clipboard: self.key_clipboard.len(),
             notices: self.notices.clone(),
+            thumbs: self.thumbs.clone(),
             missing: self.missing.clone(),
             transcribed: self.transcribed.clone(),
             fillers: self.fillers.clone(),
@@ -3535,6 +3600,8 @@ impl Live {
         self.tape_position = 0;
         self.player.unload(SOURCE);
         self.player.unload(TIMELINE);
+        self.thumbs = Arc::new(HashSet::new());
+        self.thumbs_wanted.clear();
         self.waveforms = Arc::new(HashMap::new());
         self.waveforms_wanted.clear();
         self.duck_kept.clear();
@@ -3636,6 +3703,10 @@ impl Live {
     fn forget_removed(&mut self, media: &[vidcut_core::model::Media]) {
         let ids: HashSet<&str> = media.iter().map(|m| m.id.as_str()).collect();
         let stays = |id: &String| ids.contains(id.as_str());
+        if !self.thumbs.iter().all(stays) {
+            Arc::make_mut(&mut self.thumbs).retain(stays);
+        }
+        self.thumbs_wanted.retain(|id, _| stays(id));
         if !self.waveforms.keys().all(stays) {
             Arc::make_mut(&mut self.waveforms).retain(|id, _| stays(id));
         }
@@ -3656,6 +3727,25 @@ impl Live {
         self.forget_removed(&media);
         for m in media {
             let version = media_version(&m);
+            let pictures = format!("{version}|{}", m.color_space.key());
+            if self.thumbs_on
+                && m.info.video.is_some()
+                && self.thumbs_wanted.get(&m.id) != Some(&pictures)
+            {
+                self.thumbs_wanted.insert(m.id.clone(), pictures.clone());
+                if self.thumbs.contains(&m.id) {
+                    Arc::make_mut(&mut self.thumbs).remove(&m.id);
+                }
+                let (tx, id, media) = (self.tx.clone(), m.id.clone(), m.clone());
+                let wanted = pictures;
+                self.workers.run(move || {
+                    let _ = tx.send(Msg::Thumbs {
+                        media: id,
+                        wanted,
+                        result: make_thumbs(&media),
+                    });
+                });
+            }
             let sound = format!("{version}|{channels}ch");
             if !m.info.audio.is_empty() && self.waveforms_wanted.get(&m.id) != Some(&sound) {
                 self.waveforms_wanted.insert(m.id.clone(), sound.clone());

@@ -21,7 +21,6 @@ const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
 const TILE_FULL: egui::Vec2 = egui::Vec2::new(TILE.x, TILE.y + 30.0);
 const TILE_GAP: f32 = 8.0;
 const POSTER_PART: i64 = 48;
-const HOVER_PICTURES: usize = 8;
 const LIST_COLUMNS: [&str; 9] = [
     "Name",
     "Duration",
@@ -978,6 +977,7 @@ impl Workspace {
         let visible = shown(viewport.y_range(), top, size.y + gap, media.len());
         for i in visible.clone() {
             self.filmstrip(ui, place(i), media[i]);
+            self.pool_thumbs(media[i]);
         }
         for i in shown(
             near_view(viewport.y_range()),
@@ -1160,7 +1160,7 @@ impl Workspace {
                 let shown = hovered_frame
                     .and_then(|f| {
                         let f = scrub_frame(f, frames, picture.width());
-                        self.pool_picture(ui.ctx(), m, f, r.height(), frames)
+                        self.pool_picture(ui.ctx(), m, f, r.height(), 0)
                     })
                     .or_else(|| self.pool_picture(ui.ctx(), m, poster, r.height(), 0));
                 match shown {
@@ -1410,7 +1410,7 @@ impl Workspace {
                 if let (Some(f), Some(pos)) = (hovered_frame, resp.hover_pos()) {
                     let slot = (((pos.x - film.left()) / w) as usize).min(slots - 1);
                     at[slot] = scrub_frame(f, frames, film.width());
-                    within[slot] = frames;
+                    within[slot] = 0;
                 }
                 let mut drawn = false;
                 for (i, f) in at.into_iter().enumerate() {
@@ -1459,17 +1459,21 @@ impl Workspace {
         }
     }
 
+    fn pool_thumbs(&self, m: &Media) {
+        if let (Some(p), Some(t)) = (self.project(), self.tiles.as_ref())
+            && self.snap.thumbs.contains(&m.id)
+        {
+            t.thumbs(p, m);
+        }
+    }
+
     fn preload(&self, ctx: &egui::Context, seen: &[&Media], near: &[&Media], cell: Vec2) {
         let Some(p) = self.project() else { return };
         let picture = Rect::from_min_size(Pos2::ZERO, cell);
         let px =
             |m: &Media| super::tiles::media_aspect(m).map_or(cell.y, |a| fit(picture, a).height());
-        for m in seen {
-            let frames = p.media_frames(m);
-            for f in strip_frames(HOVER_PICTURES, frames) {
-                let f = scrub_frame(f, frames, cell.x);
-                self.pool_ahead(ctx, m, f, px(m));
-            }
+        for m in seen.iter().chain(near) {
+            self.pool_thumbs(m);
         }
         for m in near {
             let poster = poster_frame(p.media_frames(m));
@@ -1478,6 +1482,7 @@ impl Workspace {
     }
 
     fn preload_strip(&self, ctx: &egui::Context, m: &Media, width: f32) {
+        self.pool_thumbs(m);
         let (Some(p), Some(aspect)) = (self.project(), super::tiles::media_aspect(m)) else {
             return;
         };

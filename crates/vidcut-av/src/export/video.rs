@@ -1881,6 +1881,23 @@ impl Single {
         })
     }
 
+    pub(crate) fn draw(
+        &mut self,
+        frame: &frame::Video,
+        rotation: u16,
+        size: (u32, u32),
+        pixel: format::Pixel,
+        path: &Path,
+    ) -> Result<frame::Video> {
+        let made = self.maker.make(&mut self.fitting, frame, path)?;
+        let picture = crate::player::Picture::new(made, rotation, None, None)
+            .with_sampling(Sampling::Rounded);
+        let picture = std::sync::Arc::new(picture);
+        let layers = (&[][..], &[][..], &[][..], None);
+        self.drawer
+            .frame(&picture, &[], layers, size, (pixel, (None, None)))
+    }
+
     fn on_offscreen(&self) -> bool {
         crate::screen::offscreen().is_ok_and(|o| std::sync::Arc::ptr_eq(&self.drawer.on, &o))
     }
