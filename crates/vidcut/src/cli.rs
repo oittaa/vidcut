@@ -8,6 +8,8 @@ use vidcut_core::request::{Client, ClientKind, method_names, protocol_schema, re
 use vidcut_core::{Envelope, Error, Request, Result};
 
 pub const POSITIONAL: &[(&str, &[&str])] = &[
+    ("keys.set", &["action", "keys"]),
+    ("keys.reset", &["action"]),
     ("probe", &["path"]),
     ("schema", &["method"]),
     ("project.create", &["path"]),
@@ -30,6 +32,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("media.relink", &["media", "path"]),
     ("media.rename", &["media", "name"]),
     ("media.subclip", &["media"]),
+    ("media.subclip_set", &["media"]),
     ("media.set", &["media"]),
     ("media.marks.set", &["media"]),
     ("media.marks.clear", &["media"]),
@@ -317,7 +320,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "edit.append",
-        "vidcut edit append m1\n  vidcut edit append m1 --range 10s..+20s --track V2",
+        "vidcut edit append m1\n  vidcut edit append m1 --range 10s..+20s --track V2\n  \
+         vidcut edit append --generator solid_color --color '#204060'",
     ),
     ("edit.split", "vidcut edit split --at 1m,1m30s"),
     (
@@ -459,6 +463,14 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "player.seek",
         "vidcut player seek 10s\n  vidcut player seek -2s",
+    ),
+    (
+        "keys.set",
+        "vidcut keys set mark_in Ctrl+M F5\n  vidcut keys set help   # leaves Help with no key",
+    ),
+    (
+        "keys.reset",
+        "vidcut keys reset mark_in\n  vidcut keys reset   # every action",
     ),
     ("mixer.preview", "vidcut mixer preview A1 -12"),
     ("mcp", "claude mcp add vidcut -- vidcut mcp -p talk.vidcut"),

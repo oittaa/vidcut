@@ -208,21 +208,35 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - **Metadata** (pp. 661–663): a card for each clip, in as many columns as fit the pool.
     - A thumbnail is at the left of the card. A hover on it scrubs the clip, and I/O mark its source In/Out.
     - Beside the thumbnail, from the top:
-      - The main description, which follows the sort (p. 662). Timecode gives the start timecode. Each other sort gives the clip name.
+      - The main description, which follows the sort (p. 662):
+        - Timecode gives the start timecode.
+        - Camera gives the camera name and the start timecode.
+        - Date Time gives Date Created and the file name.
+        - Scene, Shot gives the scene, the shot and the take.
+        - Clip Color gives Date Created and the start timecode.
+        - Each other sort gives the clip name.
+        - An empty value shows `---`.
       - The start timecode and the camera name. A file with no timecode shows 00:00:00:00. A clip with no camera name shows `---`.
       - A subtitle file shows its cue count and its length on that line, and no camera name.
       - The clip name.
     - Sorted by Clip Name, the clips are in clusters by the first letter of the name, each under a heading (pp. 662–663).
       - Inside a cluster, the order is by timecode. The Source Tape takes this order.
     - Sorted by Date Modified, the clusters are the days of the file's modification time (p. 662).
-    - Sorted by Timecode, Date Imported or Duration, there are no clusters. vidcut keeps no creation date and no date of import.
+    - Sorted by Camera, the clusters are the camera names, under headings such as Camera A (pp. 662–663). The order is by name and then by timecode.
+    - Sorted by Date Time, the clusters are the days of Date Created (p. 662). The order is by day and then by timecode.
+    - Sorted by Bin, the clusters are the bins (p. 662). A heading shows the full path of the bin. The order is by bin and then by timecode.
+    - Sorted by Scene, Shot, the clusters are the scenes, under headings such as Scene 1 (pp. 662–663). The order is by scene, shot and take.
+    - Sorted by Clip Color, the clusters are the color names (p. 662). The order is by color and then by timecode.
+    - Sorted by Online Status, the clusters are Original and Proxy (p. 662). A clip is in Proxy when it has a proxy that fits its file.
+    - A clip with no value for the sort has no heading. In ascending order, these clips come first.
+    - Sorted by Timecode, Date Imported or Duration, there are no clusters. vidcut keeps no date of import.
     - Descending reverses the whole order (p. 663).
-    - vidcut keeps no Date Created, scene, shot, take or comment ([todo](todo/cut-page-gaps.md)). Thus the card and the main description leave them out.
+    - The card does not show Date Created, scene, shot, take or comment ([todo](todo/cut-page-gaps.md)).
     - `pool.set` with `view` `metadata` opens this view.
   - A sound file shows its waveform.
   - **Metadata Display** (p. 665): a tag icon beside the search field shows metadata of the selected clip at the top of the pool (deviation X60). The metadata is the camera name, scene, shot and take, frame rate and resolution.
 - **Sort and search** (pp. 666–667):
-  - Sort Media By has Clip Name, Date Imported, Date Modified and Timecode (D59), ascending or descending.
+  - Sort Media By has Clip Name, Date Imported, Date Modified, Timecode (D59), Camera, Date Time, Bin, Scene Shot, Clip Color and Online Status. Each is ascending or descending.
   - This order is also the Source Tape order.
   - The search field filters live, through the open bin and the bins inside it.
 - **Bins** (pp. 655–656, 377):
@@ -244,6 +258,11 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The Camera row of Clip Info edits it. `media.set` sets it on one or more items. An empty name clears it.
   - `media.get` and the metadata strip show it.
   - vidcut does not read the name from a file. No measurement shows which file tags give it.
+- **Date Created, Scene, Shot and Take** (pp. 661–663, 750):
+  - A media item can have `created`, `scene`, `shot` and `take`. Each is text, and `created` has the form `YYYY-MM-DD`.
+  - The rows of Clip Info edit them. `media.set` sets them on one or more items. An empty value clears the field.
+  - `media.get` shows them. The metadata strip shows the scene, the shot and the take.
+  - vidcut does not read Date Created from a file. No measurement shows which time or tag gives it.
 - **Multicam layout** (p. 1037):
   - `multicam.layout` tells where the files of a multicam clip lie. It changes nothing, and the project does not store the result.
   - The answer has rows. A named row holds all files of one camera name. Named rows come first, in camera order.
@@ -665,6 +684,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - **A range with left-out frames:** each kept part goes in at its own place.
     - **`tape` across files:** each file lines up by itself, and the edit is one step.
     - **Several selected pool items:** each file lines up by itself, the timeline marks hold for all of them (`keep_marks`), and the edit is one step.
+    - **A generator as the source:** it has timecode 00:00:00:00 and 5 s of frames, as a still has one timecode. A timeline Out can make it longer. `group` refuses it.
 - **Close Up (later).**
 
 ### 7.3 Drag and drop from the pool or Viewer (pp. 648, 679, 694–695)
@@ -818,6 +838,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A marquee from empty space selects what it touches.
   - A click on empty space, or Ctrl+Shift+A, deselects.
   - Alt+Shift+V selects all clips under the playhead.
+  - Shift+V selects one clip under the playhead (pp. 889, 900, 942).
+    - It takes the lowest track that has a clip there.
+    - The manual ties this key to the Source Track Selector of the Edit page. vidcut has no such control.
 - **Edit points:**
   - The pointer at the center of an edit selects both sides (a roll).
   - The pointer just left or right of the edit selects one side (a resize).
@@ -1251,9 +1274,20 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Mark > Create Subclip and Alt+B open the New Subclip window.
     - Create Subclip in the menu of the scroll area also opens it. A drag from the viewer to the pool also opens it.
     - A drop on a bin of the pool moves the clip to that bin. The window does not open.
-    - The window has a Name and Create. The subclip goes in the bin that the pool shows (p. 864).
+    - The window has a Name, Use Full Clip Extents and Create. The subclip goes in the bin that the pool shows (p. 864).
     - Without an In, the subclip starts at the first frame of the clip. Without an Out, it ends at the last frame.
-    - `media.subclip` does this.
+    - Use Full Clip Extents makes the subclip hold the whole file (pp. 460–461).
+    - `media.subclip` does this. `full_extents` is the checkbox.
+  - Edit Subclip changes the part of the file that a subclip holds (pp. 461, 886).
+    - It is in the right-click menu of a subclip in the pool, and of a clip of a subclip in the timeline.
+    - The window title is Edit and the name. It shows the Current Subclip times, the New Subclip times and Use Full Clip Extents.
+    - Update stays off until the new times differ from the current times.
+    - Ends is the frame after the last frame of the subclip.
+    - `media.subclip_set` does this. It takes a `range` in frames from the first frame of the file, or `full_extents`.
+    - The clips of the subclip, its marks and its markers stay on the same frames of the file.
+    - A clip outside the new times refuses the change. A synced group outside the new times also refuses it.
+    - A mark outside the new times is cleared.
+    - A marker outside the new times stays and does not show. It shows again when the times hold it.
   - Add Marker puts a marker at one selected word, or a marker with a duration over more words (p. 998).
     - On a source clip, the marker is on that clip, at its source frame (`markers.add` with `media`).
     - The scroll area of the Source Clip viewer shows it. A marker with a duration also shows as a bar (p. 1018).
@@ -1535,27 +1569,31 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The radius of the shape is 0.7 × (Size + 0.01) × the height of the picture.
   - The mask has one cell for each 2 pixels, around the middle of the shape. Each cell is 1 inside the shape and 0 outside it.
   - The cells go from −W to W − 2 across and from −H to H − 2 down, in pixels from the middle of the shape.
-  - Anamorphism divides x. Then Rotation turns the shape. A rotated rectangle is thus a parallelogram.
+  - Rotation turns the shape. Then Anamorphism stretches it across the frame. A rotated rectangle is thus a parallelogram.
   - Three box blurs go across and then three go down, the widest first. Beyond the cells they take 0.
   - The sigma of the blurs is (966 / 1080) × the height × √Size × (0.05 + Softness²), in pixels.
-  - Then v = min(1, B / (B0 − L) − L). Here B is the blurred cell, B0 is the cell at the middle of the shape, and L is the smallest cell.
+  - Then v = min(1, B / (B0 − L) − L). Here B is the blurred cell, B0 is the cell at the middle of the shape, and L is the cell at the top left.
   - The value of a pixel is the linear mix of the four cells around it.
-  - The alpha does not change.
+  - The Center can put the shape outside the frame. Five Centers outside the frame follow the same rule.
+  - The rule works on the premultiplied colors, and the alpha does not change. A clear part of the picture thus adds the Color to the lower track.
   - Composite Type differs from the Composite section in these ways:
     - Color Dodge, Color Burn, Divide and Vivid Light do not stop at 0 or 1 before the mix.
-    - Divide is b / a, with an a of at least 0.000001. This is measured at one Color with a channel of 0.
+    - Divide is b / (a + 0.000001).
     - Linear Burn stops at 0.
-    - Hue with a gray Color gives one fixed hue. This is measured at one gray.
+    - Lighter Color and Darker Color take the Color on a tie.
+    - Hue with a black or a white Color takes the hue of red. The grays 0.2, 0.4, 0.6 and 0.8 give one other fixed hue.
 - **Vignette in vidcut:**
   - A source that fits with a half pixel takes the next whole pixel as its size. Only 607.5 and 608 were tried.
-  - The smallest cell is the smallest of the four corners. A blurred shape with no holes has its smallest value at a corner.
   - The GUI shows only the values that work in the Operating Mode.
+  - The pictures are 16-bit floats. Thus Lighter Color and Darker Color see a tie where the sums differ by less than one step of these floats.
+  - Divide takes b / a where a channel of the Color is 1/64 or more. There the 0.000001 changes the result by less than one step of the pictures.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
-    - The rule works on the premultiplied colors. A clear part of the picture thus adds a Color that is not black to the lower track.
     - Beyond the cells, a pixel takes the value of the nearest cell.
-    - Color takes any number. The GUI gives 0 to 1.
+    - With an odd width or height, B0 is the cell one pixel to the left of or above the middle.
+    - Hue gives the fixed hue at each gray between 0 and 1. A gray of 0 or less, or of 1 or more, takes the hue of red.
+    - Color takes any number. The GUI gives 0 to 1. Divide takes a Color below 0 as 0.
     - On a compound clip, the size of the picture is the size of the frame.
-- **Compound clips:** vidcut: the effects of a compound clip work on each picture inside it ([todo](todo/compound-opacity.md)).
+- **Compound clips:** the effects of a compound clip work on the mix of its tracks, after its transform ([D75](#12-decisions-on-gaps-and-contradictions)).
 - **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
 
 ### 8.17 Generators (p. 766)
@@ -1579,7 +1617,14 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Not measured: the track and the frame of a drop in Resolve.
   - Measured: a double-click on a card loads the generator in the viewer as a source of 5 s. The timeline does not change. The Inspector shows nothing to inspect, so it has no Color row.
   - Measured: a drag from the viewer onto a clip on V1 overwrites from the frame under the pointer. The clip then has its Color row.
-  - vidcut: a double-click on a card adds the generator at the playhead. The source viewer takes only media ([todo](todo/effects-library.md)).
+  - vidcut: a double-click on a card opens the generator in the Source Clip viewer (`viewer.load` with `generator`). The source is 5 s long, and the timeline does not change.
+  - vidcut: In and Out work on this source (`viewer.marks.set`). They last until another source opens, and they are not in the project.
+  - vidcut: Append, Smart Insert, Overwrite, Ripple Overwrite, Place On Top and Source Overwrite take `generator` as a source, with the settings of `generators.add`.
+    - The clip is the same as a clip of `generators.add`. Its source start is 0, because a generator keeps its source start at 0 (measured).
+    - Timeline marks can make it longer than 5 s, because a generator can have any length (measured).
+    - It has no sound. Audio Only and an audio track refuse it.
+    - The edits follow [§7.2](#72-edit-functions), with the rules of a media source. Not measured: each of these edits with a generator in Resolve.
+  - vidcut: a drag from the viewer drops as `generators.add`, with the length between the marks. Not measured: a drop on another track, and a drop with marks.
   - `generators.add` without a track uses the track that D66 gives a title.
   - A new generator is 5 s long, and it adds no sound clip (measured).
 - **Inspector:**
@@ -1830,6 +1875,17 @@ A generator is a clip that makes its own picture. It has no media and no sound.
 - macOS keeps the keys of the manual.
 - Shortcuts do nothing while a text field has focus, or while a modal question shows.
 - Esc dismisses the question and does nothing (Cancel, or Keep Running when quitting).
+- The table gives the default keys. The Keys page of Preferences (X138), `keys.set` and `keys.reset` change them.
+  - An action can have several keys, or no key.
+  - A key belongs to one action. vidcut refuses a key that another action uses, and names that action (X135).
+  - The Transcription window has its own level. There, X selects the sentence, and a key of that level can also have an action in the main window.
+- These keys and gestures do not change:
+  - The wheel, click and drag gestures. They have no key.
+  - The number keys of the Sync Bin, Multi Source and the Transcription window. The number is on the screen.
+  - Esc, other than the key that leaves the full screen. It closes or cancels the thing that is open.
+  - Enter and Esc in a text field or a dialog.
+  - Up, Down, Enter and Esc in the History window. They move in its list.
+  - The editing keys of a text field.
 
 | Key | Action |
 |---|---|
@@ -1862,6 +1918,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
 | Ctrl+[ / Alt+] | Add / delete a keyframe on the selected rows of the Keyframes tab or the keyframe tray (§2) |
 | Ctrl+A / Ctrl+Shift+A | Select all / deselect all |
 | Alt+Shift+V | Select clips under the playhead |
+| Shift+V† | Select one clip under the playhead (§8.1) |
 | V / U | Select nearest edit / cycle edit side |
 | , / . (Shift: 1 s)† | Trim the selected edits a frame |
 | D | Disable / enable clip video |
@@ -2737,10 +2794,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A title that Resolve reads from an OTIO file has one more edge on its letters. vidcut does not draw that edge ([X112](deviations.md#x112-a-title-from-an-otio-file-has-no-black-edge)).
     - The lines of a scroll are 4/3 of the sum of the three heights plus 10 timeline pixels apart. This fits Resolve Studio 21.1.2 within 5 pixels with four fonts.
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
+    - The Inspector takes -270 to 540, and the file holds the same number in `line-height`. A file can hold more, and Resolve draws 2000 from a file. Thus vidcut takes -4096 to 4096 (measured in Resolve Studio 21.1.2).
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
     - Below the last line, a positive value makes the block taller and a negative value does nothing (measured in Resolve Studio 21.1.2).
     - A very negative value keeps all the lines (X111).
     - Tracking adds space after each letter, also after the last letter (p. 1184). `tracking` in the style goes on each letter. `tracking` in markup goes on its words.
+    - The Inspector takes -100 to 100 (measured in Resolve Studio 21.1.2).
     - One unit is 1/100 of the width of the font's letter X, and 1/200 below 0. Zoom scales it.
     - The width of X is in whole pixels, for the size in whole pixels of the timeline, with no zoom.
       - Below the size in the font's `LTSH` table for X, it is the width from the font's hinting for one-bit drawing.
@@ -2763,12 +2822,17 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - `Σ` becomes `σ` also at the end of a word.
     - `<o>` draws a line over the words and `<s>` a line through them (p. 1184).
     - The height of these lines and `<u>` is `underlineThickness` in the font's `post` table.
-    - The left end is the start of the words, rounded up to a whole pixel.
-    - The right end is the exact start plus the width. The width goes down to whole pixels at zoom 1, and again after the zoom.
+    - The ends of a line come from the distance of the words from the left edge of the block, in exact pixels at zoom 1.
+    - The left end is that distance, rounded down to a whole pixel, times the zoom, from the edge of the block.
+    - The right end starts as that distance plus the width of the words. It then follows the same steps as the left end.
+    - The edge of the block cuts the line. Thus a line at the start of the block starts at the first whole pixel.
+    - At other places, each end can cover part of a pixel.
+    - The width of the words has a negative tracking after the last letter of a line. The width of the block does not.
     - The middle of `<u>` is under the baseline by a third of the thickness plus 1/2, rounded up, plus 1/2 pixel.
     - That distance comes from the thickness at zoom 1, and the zoom scales it.
     - The middle of `<s>` is a third of the ascent over the baseline. The middle of `<o>` is the ascent over the baseline.
-    - The top of the block cuts these lines. Thus `<o>` on the first line shows only its lower half.
+    - The top of the block cuts these lines. Thus `<o>` on the first line shows only its lower half, and `<o>` on a whole line of `<sup>` does not show.
+    - On `<sup>` and `<sub>`, these lines follow the shifted baseline. Their height and distance come from the small size.
     - These rules are measurements in Resolve Studio 21.1.2 on Windows, with 10 fonts at sizes 48 to 200, at three zooms and on two lines.
     - `<sup>` and `<sub>` draw the words at 2/3 of their size (p. 1184).
     - The small size is 2/3 of the size in whole pixels at zoom 1, rounded down to a whole pixel. The zoom scales it.
@@ -3194,11 +3258,36 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `edit.decompose` moves a compound clip's keyframes onto the source frames of each clip inside.
   - **Compound clips:**
     - A compound clip is placed as one picture. The pictures and the titles inside it go with it, cut at its frame and by its crop.
-    - Its tracks mix first, as the tracks of the timeline do. Its opacity then fades that mix, or its composite mode mixes that mix with the tracks below.
-      - Measured in Resolve Studio 21.1.2, with 16-bit renders. Inside the compound clip, a picture cropped to its left half is over a full picture.
-      - At an opacity of 50% over white, the frame is 0.5 × the mix + 0.5.
-      - At Multiply over 50% gray, the frame is 0.5 × the mix.
-    - Its soft edges fade each picture and title inside it ([todo](todo/compound-opacity.md)).
+    - The pictures of the compound clip in the frame set how they mix (measured in Resolve Studio 21.1.2). This rule is for each frame.
+    - **One picture in the frame:** it acts as if it were on the timeline.
+      - Its composite mode mixes with the tracks below the compound clip.
+      - Its opacity and the opacity of the compound clip multiply.
+      - A composite mode on the compound clip replaces its mode.
+      - A nested compound clip with one picture acts in the same way.
+    - **Two or more pictures in the frame:** they mix alone, over nothing.
+      - Where a picture has nothing of the compound clip below it, its mode does nothing.
+      - Where the picture below it is partly clear, the result is (1 − ab) × Cs + ab × blend(Cb, Cs), with an alpha of 1.
+        - Cb and ab are the color and the alpha below. Cs is the color above.
+      - The values are not clipped between the layers.
+      - The alpha of a soft edge of the upper picture mixes between the color below and that result.
+      - The opacity of the compound clip then fades the finished mix. At 50% over white, the frame is 0.5 × the mix + 0.5.
+      - Its composite mode mixes the finished mix with the tracks below. At Multiply over 50% gray, the frame is 0.5 × the mix.
+    - **Soft edges:** the soft edges of the compound clip fade the mix once, at the frame of the compound clip.
+      - A picture inside it at Zoom 0.5, away from the edge of that frame, gets no fade.
+      - The soft edges of a picture inside it also act.
+    - **Effects:** the effects of the compound clip work on the mix, after its transform, as on a plain clip.
+      - The width of a Gaussian Blur follows the Zoom of the compound clip. The Zoom of a picture inside it does not change that width.
+      - A blur spreads past the edge of the compound clip, over the tracks below.
+      - A picture alone with a composite mode keeps the mode, on the blurred picture.
+    - **Titles:** a title counts as a picture.
+      - A title alone takes the composite mode of the compound clip.
+      - The compound clip crops and fades a title at its own frame.
+    - vidcut's own choices, not measured ([todo](todo/compound-opacity.md)):
+      - A hard edge of the compound clip covers the mix once, as a soft edge does.
+      - A picture at an opacity of 0 counts as a picture.
+      - An upper soft edge over a partly clear picture gives the premultiplied sum of the same formula.
+      - The effects of the compound clip work on a title alone.
+      - A Mosaic Blur on the compound clip follows the rule of the Gaussian Blur.
     - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.
@@ -3646,8 +3735,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - It holds stills too.
     - It holds a Retime Process other than Nearest, and the checked effects (p. 204).
       - It holds the frame at the size of the timeline. Why: a Retime Process and an effect make each frame at the size that the clip shows.
-      - With a checked effect, it holds the effects up to the last checked effect. The viewer applies the later effects, as in Resolve (p. 202).
-      - With a Retime Process, it holds all the effects. Why: the effects come before the frames between two source frames (§13).
+      - With a checked effect, it holds the effects of the clip up to the last checked effect. The viewer applies the later effects, as in Resolve (p. 202).
+      - With a Retime Process, it holds all the effects of the clip. Why: the effects come before the frames between two source frames (§13).
+      - It never holds the effects of a compound clip around the clip. A checked effect there makes no file. Why: that effect can work on the mix of the compound clip.
       - For a placed clip, it holds the colors of the frame, with no edges and no alpha. The viewer makes them again from the placement. Thus the cache needs no alpha.
       - A change of the Transform, the crop or an effect that it holds renders it again.
       - A move, a split, a trim, or a change of the opacity, the composite mode or an effect after the last checked effect keeps it.

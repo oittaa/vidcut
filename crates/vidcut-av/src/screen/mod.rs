@@ -958,7 +958,6 @@ struct Below {
     size: (u32, u32),
     format: wgpu::TextureFormat,
     texture: wgpu::Texture,
-    view: wgpu::TextureView,
     bind: wgpu::BindGroup,
 }
 
@@ -994,7 +993,6 @@ impl Below {
             size,
             format,
             texture,
-            view,
             bind,
         }
     }
@@ -1306,19 +1304,24 @@ fn lettered_over(
 
 type Bound = (wgpu::BindGroup, Option<f64>, bool, u32);
 
+const OVER_ALL: f64 = 0.0;
+const ADDED: f64 = 1.0;
+const IN_MIX: f64 = 2.0;
+
 struct MixDraw<'a> {
     gpu: &'a Gpu,
     binds: &'a [Bound],
     canvases: &'a [blur::Texture],
-    canvas: &'a wgpu::Texture,
+    scratch: Option<blur::Scratch<'a>>,
     below: Option<&'a Below>,
     letters: &'a [Letters],
     titles: &'a [TitleOver],
 }
 
 impl MixDraw<'_> {
-    fn mix(&self, encoder: &mut wgpu::CommandEncoder, mix: &Mix, depth: usize) {
-        let canvas = &self.canvases[depth].view;
+    fn mix(&mut self, encoder: &mut wgpu::CommandEncoder, mix: &Mix, depth: usize) {
+        let canvases = self.canvases;
+        let canvas = &canvases[depth].view;
         drop(begin(encoder, canvas, Some(wgpu::Color::TRANSPARENT)));
         for part in &mix.parts {
             match part {
@@ -1333,11 +1336,40 @@ impl MixDraw<'_> {
                 }
                 MixPart::Mix(inner) => {
                     self.mix(encoder, inner, depth + 1);
-                    let bind = mixed_bind(self.gpu, &self.canvases[depth + 1], inner, 1.0);
-                    self.lay(encoder, depth, &bind, inner.mode.code());
+                    let bind = self.finished(encoder, inner, depth + 1, IN_MIX);
+                    self.lay(encoder, depth, &bind, inner.placing.mode.code());
                 }
             }
         }
+    }
+
+    fn finished(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        mix: &Mix,
+        depth: usize,
+        adds: f64,
+    ) -> wgpu::BindGroup {
+        let canvases = self.canvases;
+        let canvas = &canvases[depth];
+        let mut placing = mix.placing.clone();
+        let (effects, factor) = bared(&mut placing, &mut 1.0);
+        let mode = f64::from(placing.mode.code());
+        if effects.is_empty() {
+            return blur::canvas_bind(self.gpu, &canvas.view, &placing, (mode, adds));
+        }
+        let (scratch, cells) = self
+            .scratch
+            .as_mut()
+            .expect("made for the effects of a mix");
+        let how = (&placing, &effects[..]);
+        blur::canvas_effects(self.gpu, canvas, (scratch, cells), how, encoder);
+        blur::shown_bind(
+            self.gpu,
+            (&canvas.view, &canvas.view),
+            [1.0, factor, mode, adds],
+            [3.0, 0.0, 0.0, 0.0],
+        )
     }
 
     fn lay(
@@ -1347,10 +1379,16 @@ impl MixDraw<'_> {
         bind: &wgpu::BindGroup,
         mode: u32,
     ) {
+        let canvas = &self.canvases[depth];
         if mode != 0 {
-            self.flatten(encoder, depth);
+            let below = self.below.expect("made for a composite mode");
+            encoder.copy_texture_to_texture(
+                canvas.texture.as_image_copy(),
+                below.texture.as_image_copy(),
+                canvas.texture.size(),
+            );
         }
-        let mut pass = begin(encoder, &self.canvases[depth].view, None);
+        let mut pass = begin(encoder, &canvas.view, None);
         match self.below.filter(|_| mode != 0) {
             Some(below) => {
                 pass.set_pipeline(&self.gpu.placed_mode);
@@ -1361,37 +1399,6 @@ impl MixDraw<'_> {
         pass.set_bind_group(0, bind, &[]);
         pass.draw(0..3, 0..1);
     }
-
-    fn flatten(&self, encoder: &mut wgpu::CommandEncoder, depth: usize) {
-        let below = self.below.expect("made for a composite mode");
-        encoder.copy_texture_to_texture(
-            self.canvas.as_image_copy(),
-            below.texture.as_image_copy(),
-            self.canvas.size(),
-        );
-        for canvas in &self.canvases[..=depth] {
-            let bind = blur::shown_bind(
-                self.gpu,
-                (&canvas.view, &canvas.view),
-                [1.0, 1.0, 0.0, 0.0],
-                [3.0, 0.0, 0.0, 0.0],
-            );
-            let mut pass = begin(encoder, &below.view, None);
-            pass.set_pipeline(&self.gpu.wide_drawing.placed);
-            pass.set_bind_group(0, &bind, &[]);
-            pass.draw(0..3, 0..1);
-        }
-    }
-}
-
-fn mixed_bind(gpu: &Gpu, canvas: &blur::Texture, mix: &Mix, adds: f64) -> wgpu::BindGroup {
-    let shown = [1.0, mix.opacity, f64::from(mix.mode.code()), adds];
-    blur::shown_bind(
-        gpu,
-        (&canvas.view, &canvas.view),
-        shown,
-        [3.0, 0.0, 0.0, 0.0],
-    )
 }
 
 impl Letters {
@@ -1422,8 +1429,8 @@ impl Letters {
         let (fw, fh) = (f64::from(p.frame.0.max(1)), f64::from(p.frame.1.max(1)));
         let (sx, sy) = (f64::from(size.0) / fw, f64::from(size.1) / fh);
         let frame = (f64::from(size.0), f64::from(size.1));
-        let placing = (!t.placed.is_empty())
-            .then(|| Placing::whole(&t.placed, frame).inside(&t.placed, around));
+        let placing =
+            (!t.placed.is_empty()).then(|| Placing::whole_inside(&t.placed, frame, around));
         for tile in &self.tiles {
             let (pw, ph) = (f64::from(tile.size.0), f64::from(tile.size.1));
             let (left, top) = (
@@ -1754,7 +1761,7 @@ impl Screen {
                 let around = nests.around_layer(i);
                 let mut placing = made_with.or(full).filter(|p| !p.is_empty()).map(|p| {
                     let (frame, fitted, pixels) = picture.placed_in(size);
-                    let placing = Placing::new(p, frame, fitted, pixels).inside(p, around);
+                    let placing = Placing::inside(p, frame, (fitted, pixels), around);
                     (placing, level.unwrap_or(1.0))
                 });
                 let colors_only = matches!(picture.sampling(), Sampling::Colors { .. });
@@ -1764,7 +1771,7 @@ impl Screen {
                 let live = match (made_with, full) {
                     (Some(_), Some(full)) if placing.is_some() => {
                         let (frame, fitted, pixels) = picture.placed_in(size);
-                        let all = Placing::new(full, frame, fitted, pixels).effects;
+                        let all = Placing::inside(full, frame, (fitted, pixels), around).effects;
                         all.get(effects.len()..)
                             .map(<[_]>::to_vec)
                             .unwrap_or_default()
@@ -1783,10 +1790,14 @@ impl Screen {
                 } | if alpha { ALPHA } else { 0 };
                 let made = made_with.filter(|_| blurs).and(placing.as_ref());
                 let open = made.map(|(p, l)| (blur::opened(p), *l));
-                let adds = paired[i] || around > 0;
+                let adds = match (around > 0, paired[i]) {
+                    (true, _) => IN_MIX,
+                    (false, true) => ADDED,
+                    (false, false) => OVER_ALL,
+                };
                 let how = (open.as_ref().or(placing.as_ref()), kernel, colors, adds);
                 let bind = slot.prepare(gpu, picture, size, how, &mut encoder);
-                let shown = [1.0, factor, f64::from(mode), f64::from(u8::from(adds))];
+                let shown = [1.0, factor, f64::from(mode), adds];
                 let bind = match (blurs, made) {
                     (false, _) => {
                         blurred.drop_layer(i);
@@ -1878,6 +1889,9 @@ impl Screen {
         while self.canvases.len() < nests.deepest {
             self.canvases.push(blur::Texture::new(gpu, size));
         }
+        if nests.blurs {
+            self.blurred.make_scratch(gpu);
+        }
         if self.output_lut.is_none() {
             self.looked_up = None;
         } else if self.looked_up.as_ref().is_none_or(|l| l.size != size) {
@@ -1920,18 +1934,18 @@ impl Screen {
                     drop(begin(&mut encoder, canvas, clear.take()));
                 }
                 let below = self.below.as_ref();
-                MixDraw {
+                let mut mixing = MixDraw {
                     gpu,
                     binds: &binds,
                     canvases: &self.canvases,
-                    canvas: canvas_texture,
+                    scratch: self.blurred.scratch(),
                     below,
                     letters: &self.letters,
                     titles,
-                }
-                .mix(&mut encoder, &outer.mix, 0);
-                let bind = mixed_bind(gpu, &self.canvases[0], &outer.mix, 0.0);
-                let moded = below.filter(|_| outer.mix.mode.code() != 0);
+                };
+                mixing.mix(&mut encoder, &outer.mix, 0);
+                let bind = mixing.finished(&mut encoder, &outer.mix, 0, OVER_ALL);
+                let moded = below.filter(|_| outer.mix.placing.mode.code() != 0);
                 if let Some(below) = moded {
                     encoder.copy_texture_to_texture(
                         canvas_texture.as_image_copy(),
@@ -2189,7 +2203,7 @@ impl Slot {
         gpu: &Gpu,
         picture: &Arc<Picture>,
         size: (u32, u32),
-        how: (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+        how: (Option<&(Placing, f64)>, u32, Option<Hdr>, f64),
         encoder: &mut wgpu::CommandEncoder,
     ) -> wgpu::BindGroup {
         self.prepare_with(gpu, picture, size, how, encoder, true)
@@ -2203,7 +2217,7 @@ impl Slot {
         encoder: &mut wgpu::CommandEncoder,
     ) -> wgpu::TextureView {
         let size = (picture.width(), picture.height());
-        let how = (None, 0, timeline, false);
+        let how = (None, 0, timeline, OVER_ALL);
         self.prepare_with(gpu, picture, size, how, encoder, false);
         let converted = &self.converted.as_ref().expect("prepared").0;
         converted.create_view(&Default::default())
@@ -2214,7 +2228,7 @@ impl Slot {
         gpu: &Gpu,
         picture: &Arc<Picture>,
         size: (u32, u32),
-        how: (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+        how: (Option<&(Placing, f64)>, u32, Option<Hdr>, f64),
         encoder: &mut wgpu::CommandEncoder,
         weave: bool,
     ) -> wgpu::BindGroup {
@@ -3673,7 +3687,7 @@ const KEEP_ALL: [f64; 4] = [-1e6, -1e6, 1e6, 1e6];
 fn halvings(
     picture: &Picture,
     size: (u32, u32),
-    (placing, kernel, ..): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+    (placing, kernel, ..): (Option<&(Placing, f64)>, u32, Option<Hdr>, f64),
 ) -> u32 {
     if kernel & WIDENS == 0 || kernel & 7 == 0 {
         return 0;
@@ -3933,7 +3947,7 @@ fn params_of(
     size: (u32, u32),
     wide: bool,
     cover: (f64, f64),
-    (placing, kernel, timeline, paired): (Option<&(Placing, f64)>, u32, Option<Hdr>, bool),
+    (placing, kernel, timeline, adds): (Option<&(Placing, f64)>, u32, Option<Hdr>, f64),
     (halvings, alpha): (u32, u32),
 ) -> Vec<u8> {
     let colors = shader_colors(picture.colors());
@@ -3992,7 +4006,7 @@ fn params_of(
         levels.len() as f64,
         placing.map_or(0.0, |(_, l)| *l),
         placing.map_or(0.0, |(p, _)| f64::from(p.mode.code())),
-        f64::from(u8::from(paired)),
+        adds,
     ];
     let (made, part) = match picture.sampling() {
         Sampling::Own | Sampling::Rounded => ([0.0; 4], [0.0; 4]),
