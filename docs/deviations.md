@@ -675,11 +675,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
 ## X40. Subtitle files are read as they are written
 
 - **Resolve:**
-  - These results are from Resolve Studio 21.1.1, through its scripting API.
+  - These results are from Resolve Studio 21.1.1, through its scripting API. The TTML results are from Resolve Studio 21.2.
   - A Windows-1252 file shows U+FFFD for each accented letter.
   - Resolve leaves out a WebVTT cue that has no hours in its times.
   - From a TTML file, it keeps only the cues of the first region. With no named region, it imports nothing.
-  - From a TTML file, it keeps only the first span of each cue: `Two <span>spans</span> here` becomes "Two spans".
+  - An italic span in a TTML cue makes the whole cue italic: `Some <span tts:fontStyle="italic">italic</span> words` comes in all italic.
+  - An italic span after a `<br/>` in a TTML cue does not come in italic.
   - A cue that starts before the previous cue ends starts at that end instead.
   - When nothing of such a cue remains, Resolve leaves it out. TOS-HE.srt loses its cue 12.
   - `{\an8}` shows as text.
@@ -689,7 +690,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It reads WebVTT times without hours, and every TTML cue, span and region.
   - It keeps cues that overlap.
   - `{\an8}`, WebVTT `line` and the place of a TTML region put a cue at the top, middle or bottom.
-  - Italic, bold, underline and colors come in from all three formats.
+  - Italic, bold, underline and colors come in from all three formats, on the words that have them.
 - **Why:**
   - An imported subtitle file must not lose text without a message.
 
