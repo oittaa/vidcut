@@ -1,6 +1,6 @@
 use crate::model::{
     Border, CellShape, CompositeMode, Effect, EffectKind, FilmGrain, Glow, GlowAlpha, GlowFraming,
-    GlowOutput, MosaicBlur, Picture, VideoInfo,
+    GlowOutput, Media, MosaicBlur, Picture,
 };
 use crate::render::Placed;
 
@@ -1124,10 +1124,13 @@ pub fn no_bars_at([x, y, w, h]: [f64; 4], frame: (f64, f64)) -> bool {
     no_bars([[x, y], [x + w, y], [x + w, y + h], [x, y + h]], frame)
 }
 
-pub fn fills(v: &VideoInfo, frame: (u32, u32)) -> bool {
-    let sar = (v.sar[0], v.sar[1]);
-    let place = fitted((v.width, v.height), sar, v.rotation, frame);
-    !v.alpha && no_bars_at(place, (f64::from(frame.0), f64::from(frame.1)))
+pub fn fills(m: &Media, frame: (u32, u32)) -> bool {
+    m.opaque()
+        && m.info.video.as_ref().is_some_and(|v| {
+            let sar = (v.sar[0], v.sar[1]);
+            let place = fitted((v.width, v.height), sar, v.rotation, frame);
+            no_bars_at(place, (f64::from(frame.0), f64::from(frame.1)))
+        })
 }
 
 pub fn detail(placed: &[Placed]) -> f64 {
