@@ -209,14 +209,6 @@ pub struct Notice {
     pub error: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Filmstrip {
-    pub width: u32,
-    pub height: u32,
-    pub frames: Vec<Vec<u8>>,
-    pub times: Vec<f64>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SourceGenerator {
     pub kind: GeneratorKind,
@@ -271,7 +263,6 @@ pub struct Snapshot {
     pub clipboard: usize,
     pub key_clipboard: usize,
     pub notices: Arc<VecDeque<Notice>>,
-    pub thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
     pub missing: Arc<HashSet<String>>,
     pub transcribed: Arc<HashSet<String>>,
     pub fillers: Arc<std::collections::BTreeMap<String, Vec<String>>>,
