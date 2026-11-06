@@ -264,6 +264,7 @@ fn between<const N: usize>(rows: &[[f64; N]], x: f64) -> [f64; N] {
 impl Graining {
     const AMOUNT: f64 = 1.334 * 0.1986;
     const HIGH: f64 = 1080.0;
+    const WIDE: f64 = 1920.0;
     const SOFT: f64 = 5.0;
     const DETAIL: f64 = 4.32;
     const SHIFT: f64 = 0.13;
@@ -338,7 +339,9 @@ impl Graining {
         let [_, ring, width] = between(&Self::TEXTURES, g.rough());
         let sizes = Self::SIZES.map(|[s, k]| [s, k.ln()]);
         let scale = between(&sizes, g.large())[1].exp() * on.fit_height / Self::HIGH;
-        let tall = on.frame_height / Self::HIGH;
+        let [across, down] = on.canvas;
+        let tall = down / Self::HIGH;
+        let spread = (across * down / (Self::WIDE * Self::HIGH)).sqrt();
         let seed = g.rough().to_bits()
             ^ g.large().to_bits().rotate_left(17)
             ^ g.stretch().to_bits().rotate_left(34)
@@ -369,7 +372,7 @@ impl Graining {
             gains: g.gains(),
             offset: g.middle(),
             softness: Self::SOFT * g.soft().powf(1.5) * tall,
-            detail: Self::DETAIL * g.lost() * g.lost() * tall,
+            detail: Self::DETAIL * g.lost() * g.lost() * spread,
             tones: g.tones(),
             opacity: g.shown(),
             mode: g.over().mode(),
@@ -385,7 +388,7 @@ struct OnFrame {
     middle: [f64; 2],
     frame: i64,
     fit_height: f64,
-    frame_height: f64,
+    canvas: [f64; 2],
 }
 
 impl Tiling {
@@ -670,7 +673,7 @@ impl Placing {
                 middle: ahead(&back, unzoomed),
                 frame: p.frame,
                 fit_height: at[3],
-                frame_height: frame.1,
+                canvas: [frame.0, frame.1],
             };
             if i < kept {
                 let mut made: Vec<Working> = p

@@ -1671,6 +1671,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Use Alpha changes nothing. Blend mixes the input and the output.
   - Detail Loss is a Gaussian curve on the picture's colors without their alpha.
     - Its sigma is 4.32 × Detail Loss² pixels on 1920×1080. The alpha stays sharp, and the black around a smaller picture enters the blur.
+    - On 3840×2160 the sigma is twice as large. On 1080×1920 it is the same as on 1920×1080.
   - The noise has the spectrum `R(f) = exp(−(f − C)² / 2W²) + exp(−(f + C)² / 2W²)`.
     - `f = K × √((A × fx)² + fy²)`, with `fx` and `fy` in cycles for each pixel, and `A` the Grain Aspect Ratio.
     - `C` and `W` come from Texture, and `K` comes from Grain Size, by tables. `K` also goes with the height of the fitted picture over 1080.
@@ -1691,7 +1692,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
     - Film Grain Presets shows Custom when a value differs from each film stock.
-    - The Detail Loss sigma follows the height of the frame over 1080, as Softness does.
+    - The Detail Loss sigma follows the square root of the frame's area. The renders fit the short side of the frame equally well.
+    - On other frame heights, the noise keeps its standard deviation before Softness.
     - Red, Green and Blue also multiply the shift that Symmetry makes.
     - Below Symmetry 0.3, the straight lines are the mirror of those at 1 − Symmetry. Under 0.1 and over 0.9, they stay as at 0.1 and 0.9.
 - **Compound clips:** the effects of a compound clip work on the mix of its tracks, after its transform ([D75](#12-decisions-on-gaps-and-contradictions)).
