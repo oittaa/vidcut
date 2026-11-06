@@ -106,7 +106,6 @@ cargo run --release -p vidcut-av --example make_fixture -- hevc10 mkv 3840x2160 
 
 - `read_barcode FILE...`: the barcode index in images or video.
 - `packets FILE [FROM TO]`: video packets in decode order, with pts, dts and keyframe flags.
-- `filmstrip FILE OUTDIR [N]`: pool thumbnails, timed.
 - `tiles FILE [HEIGHT] [gpu]`: timeline tiles, timed at spacings from 0.25 to 30 s. `gpu` decodes on the GPU in use.
 - `seek_check FILE...`: seeks to each frame of barcode fixtures, on the CPU and on each GPU decoder. It lists the seeks that show other frames.
 - `player_load PROJECT [SECONDS] [gpu]` (release build):

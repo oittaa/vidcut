@@ -20,7 +20,6 @@ use super::gesture::{Preview, Target};
 use crate::gui::pool::elide;
 use crate::gui::theme;
 use crate::gui::tiles::{self, TileKey, Tiles};
-use crate::gui::workspace::Thumbs;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Look {
@@ -33,7 +32,6 @@ pub struct Look {
 }
 
 pub struct Assets<'a> {
-    pub thumbs: &'a HashMap<String, Thumbs>,
     pub waveforms: &'a HashMap<String, Arc<Waveform>>,
     pub tiles: Option<&'a Tiles>,
     pub missing: &'a HashSet<String>,
@@ -383,15 +381,7 @@ fn clip(
         && video.height() >= 24.0
         && width > 24.0
     {
-        filmstrip(
-            &painter,
-            video.shrink2(vec2(1.0, 1.0)),
-            scale,
-            p,
-            c,
-            assets,
-            fps,
-        );
+        filmstrip(&painter, video.shrink2(vec2(1.0, 1.0)), scale, p, c, assets);
         if let Some(t) = tint {
             painter.rect_filled(parted(video), corners, t.gamma_multiply(0.35));
         }
@@ -736,25 +726,11 @@ fn tag(painter: &Painter, text: String, at: impl FnOnce(egui::Vec2) -> Pos2) {
     painter.galley(pos, galley, theme::colors().accent);
 }
 
-fn filmstrip(
-    painter: &Painter,
-    rect: Rect,
-    scale: &Scale,
-    p: &Project,
-    c: &Clip,
-    assets: &Assets,
-    fps: Rational,
-) {
+fn filmstrip(painter: &Painter, rect: Rect, scale: &Scale, p: &Project, c: &Clip, assets: &Assets) {
     let Some(m) = assets.pool.get(c.media.as_str()) else {
         return;
     };
-    let pool = assets.thumbs.get(&c.media);
-    let aspect = pool
-        .and_then(|t| t.textures.first())
-        .map(|t| t.size_vec2().x / t.size_vec2().y.max(1.0))
-        .or_else(|| tiles::media_aspect(m))
-        .unwrap_or(16.0 / 9.0)
-        .clamp(0.1, 10.0);
+    let aspect = tiles::media_aspect(m).unwrap_or(16.0 / 9.0);
     let tile_w = (rect.height() * aspect).max(8.0);
     let height = tiles::tile_height(rect.height() * painter.ctx().pixels_per_point());
     let width = (height as f32 * aspect).round().max(1.0) as u32;
@@ -778,16 +754,11 @@ fn filmstrip(
             frame,
             height,
         };
-        let texture = assets
-            .tiles
-            .and_then(|t| {
-                t.want(&key, || t.job(p, &key, width))
-                    .or_else(|| t.nearest(&c.media, height, frame, span))
-            })
-            .or_else(|| {
-                let skipped = p.media(&c.media).map_or(0.0, |m| m.skipped());
-                pool?.nearest(fps.frames_to_secs(frame) + skipped)
-            });
+        let texture = assets.tiles.and_then(|t| {
+            t.want(&key, || t.job(p, m, &key, width))
+                .or_else(|| t.nearest(&c.media, height, frame, span))
+                .or_else(|| t.nearest_any_height(&c.media, frame))
+        });
         if let Some(texture) = texture {
             let tile = Rect::from_min_size(pos2(x, rect.top()), vec2(tile_w, rect.height()));
             painter.image(

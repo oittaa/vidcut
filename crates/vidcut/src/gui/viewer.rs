@@ -625,7 +625,7 @@ impl Workspace {
                 None
             } else {
                 match shown.frame {
-                    Some(frame) => vidcut_core::render::media_frame(p, &m.id, frame).ok(),
+                    Some(frame) => Some(vidcut_core::render::media_frame(p, m, frame)),
                     None => Some(vidcut_core::render::VideoPiece::black(1)),
                 }
             };

@@ -20,6 +20,7 @@ use crate::live::PoolView;
 const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
 const TILE_FULL: egui::Vec2 = egui::Vec2::new(TILE.x, TILE.y + 30.0);
 const TILE_GAP: f32 = 8.0;
+const POSTER_PART: i64 = 48;
 const LIST_COLUMNS: [&str; 9] = [
     "Name",
     "Duration",
@@ -352,6 +353,35 @@ fn scrub_frame(frame: i64, frames: i64, px: f32) -> i64 {
     frame - frame.rem_euclid(step)
 }
 
+fn tile_key(
+    ctx: &egui::Context,
+    m: &Media,
+    frame: i64,
+    px: f32,
+) -> Option<(super::tiles::TileKey, u32)> {
+    let aspect = super::tiles::media_aspect(m)?;
+    let height = super::tiles::tile_height(px * ctx.pixels_per_point());
+    let width = (height as f32 * aspect).round().max(1.0) as u32;
+    let key = super::tiles::TileKey {
+        media: m.id.clone(),
+        frame,
+        height,
+    };
+    Some((key, width))
+}
+
+fn poster_frame(frames: i64) -> i64 {
+    frames / POSTER_PART
+}
+
+fn strip_slots(width: f32, picture: f32) -> usize {
+    (width / picture).ceil().max(1.0) as usize
+}
+
+fn near_view(view: Rangef) -> Rangef {
+    view.expand(view.span())
+}
+
 fn no_pictures(painter: &egui::Painter, rect: Rect, m: &Media) {
     let text = if m.info.video.is_none() {
         "♪ audio"
@@ -475,6 +505,7 @@ fn proxy_state(m: &Media, lost: bool) -> Option<ProxyState> {
 
 impl Workspace {
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
+        self.input_lut_picked();
         self.hover = None;
         self.bins.targets.clear();
         self.bins.area = Some(ui.max_rect());
@@ -901,7 +932,8 @@ impl Workspace {
             let at = vec2((k % per_row) as f32 * step.x, (k / per_row) as f32 * step.y);
             Rect::from_min_size(origin + at, TILE_FULL)
         };
-        for row in shown(viewport.y_range(), top, step.y, rows) {
+        let visible = shown(viewport.y_range(), top, step.y, rows);
+        for row in visible.clone() {
             for k in row * per_row..((row + 1) * per_row).min(count) {
                 let rect = place(k);
                 match k.checked_sub(folders.len()) {
@@ -910,6 +942,17 @@ impl Workspace {
                 }
             }
         }
+        let cells = |row: usize| {
+            let at = |k: usize| k.min(count).saturating_sub(folders.len());
+            &media[at(row * per_row)..at((row + 1) * per_row)]
+        };
+        let seen: Vec<&Media> = visible.clone().flat_map(cells).copied().collect();
+        let near: Vec<&Media> = shown(near_view(viewport.y_range()), top, step.y, rows)
+            .filter(|row| !visible.contains(row))
+            .flat_map(cells)
+            .copied()
+            .collect();
+        self.preload(ui.ctx(), &seen, &near, TILE);
         self.bins.places = (folders.len()..count).map(place).collect();
         let size = vec2(per_row.min(count) as f32, rows as f32) * step - Vec2::splat(TILE_GAP);
         ui.expand_to_include_rect(Rect::from_min_size(origin, size));
@@ -932,8 +975,20 @@ impl Workspace {
         let top = origin.y - ui.max_rect().top();
         let place =
             |i: usize| Rect::from_min_size(origin + vec2(0.0, i as f32 * (size.y + gap)), size);
-        for i in shown(viewport.y_range(), top, size.y + gap, media.len()) {
+        let visible = shown(viewport.y_range(), top, size.y + gap, media.len());
+        for i in visible.clone() {
             self.filmstrip(ui, place(i), media[i]);
+            self.pool_thumbs(media[i], true);
+        }
+        for i in shown(
+            near_view(viewport.y_range()),
+            top,
+            size.y + gap,
+            media.len(),
+        ) {
+            if !visible.contains(&i) {
+                self.preload_strip(ui.ctx(), media[i], size.x);
+            }
         }
         self.bins.places = (0..media.len()).map(place).collect();
         if !media.is_empty() {
@@ -1098,23 +1153,26 @@ impl Workspace {
         if let Some(f) = hovered_frame {
             self.hover = Some((m.id.clone(), f));
         }
-        match self.thumbs.get(&m.id) {
-            Some(t) if !t.textures.is_empty() => {
-                let size = t.textures[0].size_vec2();
-                let r = fit(picture, size.x / size.y.max(1.0));
+        match super::tiles::media_aspect(m) {
+            _ if m.subtitles.is_some() => subtitle_card(painter, picture, m),
+            Some(aspect) => {
+                let r = fit(picture, aspect);
+                let poster = poster_frame(frames);
                 let shown = hovered_frame
                     .and_then(|f| {
                         let f = scrub_frame(f, frames, picture.width());
-                        self.pool_picture(ui.ctx(), m, f, r.height(), frames)
+                        self.pool_picture(ui.ctx(), m, f, r.height(), 0)
                     })
-                    .unwrap_or_else(|| t.textures[0].id());
-                painter.image(shown, r, FULL, Color32::WHITE);
+                    .or_else(|| self.pool_picture(ui.ctx(), m, poster, r.height(), 0));
+                match shown {
+                    Some(shown) => {
+                        painter.image(shown, r, FULL, Color32::WHITE);
+                    }
+                    None => no_pictures(painter, picture, m),
+                }
             }
-            _ if m.subtitles.is_some() => subtitle_card(painter, picture, m),
-            _ if m.info.video.is_none() && ui.is_rect_visible(picture) => {
-                self.sound(painter, picture, m);
-            }
-            _ => no_pictures(painter, picture, m),
+            None if ui.is_rect_visible(picture) => self.sound(painter, picture, m),
+            None => no_pictures(painter, picture, m),
         }
         marks(painter, picture, m, frames, hovered_frame);
         if let Some(color) = m.color.as_deref().and_then(theme::clip_color) {
@@ -1153,6 +1211,7 @@ impl Workspace {
         self.bins.places.clear();
         let mut y = 0.0;
         let mut first = 0;
+        let (mut seen, mut near): (Vec<&Media>, Vec<&Media>) = (Vec::new(), Vec::new());
         for run in clusters.chunk_by(|a, b| a == b) {
             if let Some(name) = &run[0] {
                 ui.painter().text(
@@ -1172,15 +1231,23 @@ impl Workspace {
                 );
                 Rect::from_min_size(origin + at, size)
             };
-            for row in shown(viewport.y_range(), top + y, step.y, rows) {
-                for i in row * per_row..((row + 1) * per_row).min(run.len()) {
+            let visible = shown(viewport.y_range(), top + y, step.y, rows);
+            for row in shown(near_view(viewport.y_range()), top + y, step.y, rows) {
+                let cells = row * per_row..((row + 1) * per_row).min(run.len());
+                if !visible.contains(&row) {
+                    near.extend(cells.map(|i| media[first + i]));
+                    continue;
+                }
+                for i in cells {
                     self.card(ui, place(i), media[first + i]);
+                    seen.push(media[first + i]);
                 }
             }
             self.bins.places.extend((0..run.len()).map(place));
             first += run.len();
             y += rows as f32 * step.y;
         }
+        self.preload(ui.ctx(), &seen, &near, CARD_PICTURE);
         if y > 0.0 {
             ui.expand_to_include_rect(Rect::from_min_size(origin, vec2(width, y - TILE_GAP)));
         }
@@ -1333,18 +1400,20 @@ impl Workspace {
             theme::colors().text_dim,
         );
         painter.rect_filled(film, CornerRadius::same(3), theme::colors().track);
-        match self.thumbs.get(&m.id) {
+        match super::tiles::media_aspect(m) {
             _ if !ui.is_rect_visible(rect) => {}
-            Some(t) if !t.textures.is_empty() => {
-                let w = film.height() * t.strip.width as f32 / t.strip.height.max(1) as f32;
-                let slots = (film.width() / w).ceil().max(1.0) as usize;
+            _ if m.subtitles.is_some() => subtitle_card(&painter, film, m),
+            Some(aspect) => {
+                let w = film.height() * aspect;
+                let slots = strip_slots(film.width(), w);
                 let mut at = strip_frames(slots, frames);
                 let mut within = vec![frames / slots as i64 / 2; slots];
                 if let (Some(f), Some(pos)) = (hovered_frame, resp.hover_pos()) {
                     let slot = (((pos.x - film.left()) / w) as usize).min(slots - 1);
                     at[slot] = scrub_frame(f, frames, film.width());
-                    within[slot] = frames;
+                    within[slot] = 0;
                 }
+                let mut drawn = false;
                 for (i, f) in at.into_iter().enumerate() {
                     let r = Rect::from_min_size(
                         film.min + vec2(i as f32 * w, 0.0),
@@ -1352,12 +1421,14 @@ impl Workspace {
                     );
                     if let Some(shown) = self.pool_picture(ui.ctx(), m, f, r.height(), within[i]) {
                         painter.image(shown, r, FULL, Color32::WHITE);
+                        drawn = true;
                     }
                 }
+                if !drawn {
+                    no_pictures(&painter, film, m);
+                }
             }
-            _ if m.subtitles.is_some() => subtitle_card(&painter, film, m),
-            _ if m.info.video.is_none() => self.sound(&painter, film, m),
-            _ => no_pictures(&painter, film, m),
+            None => self.sound(&painter, film, m),
         }
         marks(&painter, film, m, frames, hovered_frame);
         self.outline(&painter, film, m);
@@ -1373,23 +1444,56 @@ impl Workspace {
         px: f32,
         within: i64,
     ) -> Option<egui::TextureId> {
-        let p = self.project()?;
-        let thumbs = self.thumbs.get(&m.id)?;
-        let aspect = thumbs.strip.width as f32 / thumbs.strip.height.max(1) as f32;
-        let height = super::tiles::tile_height(px * ctx.pixels_per_point());
-        let width = (height as f32 * aspect).round().max(1.0) as u32;
-        let key = super::tiles::TileKey {
-            media: m.id.clone(),
-            frame,
-            height,
+        let (p, t) = (self.project()?, self.tiles.as_ref()?);
+        let (key, width) = tile_key(ctx, m, frame, px)?;
+        t.want(&key, || t.job(p, m, &key, width))
+            .or_else(|| t.nearest(&m.id, key.height, frame, within))
+            .or_else(|| t.nearest_any_height(&m.id, frame))
+    }
+
+    fn pool_ahead(&self, ctx: &egui::Context, m: &Media, frame: i64, px: f32) {
+        let (Some(p), Some(t)) = (self.project(), self.tiles.as_ref()) else {
+            return;
         };
-        self.tiles
-            .as_ref()
-            .and_then(|t| {
-                t.want(&key, || t.job(p, &key, width))
-                    .or_else(|| t.nearest(&m.id, height, frame, within))
-            })
-            .or_else(|| thumbs.nearest(p.settings.fps.frames_to_secs(frame) + m.skipped()))
+        if let Some((key, width)) = tile_key(ctx, m, frame, px) {
+            t.prefetch(&key, || t.job(p, m, &key, width));
+        }
+    }
+
+    fn pool_thumbs(&self, m: &Media, shows: bool) {
+        if let (Some(p), Some(t)) = (self.project(), self.tiles.as_ref())
+            && self.snap.thumbs.contains(&m.id)
+        {
+            t.thumbs(p, m, shows);
+        }
+    }
+
+    fn preload(&self, ctx: &egui::Context, seen: &[&Media], near: &[&Media], cell: Vec2) {
+        let Some(p) = self.project() else { return };
+        let picture = Rect::from_min_size(Pos2::ZERO, cell);
+        let px =
+            |m: &Media| super::tiles::media_aspect(m).map_or(cell.y, |a| fit(picture, a).height());
+        for m in seen {
+            self.pool_thumbs(m, true);
+        }
+        for m in near {
+            self.pool_thumbs(m, false);
+        }
+        for m in near {
+            let poster = poster_frame(p.media_frames(m));
+            self.pool_ahead(ctx, m, poster, px(m));
+        }
+    }
+
+    fn preload_strip(&self, ctx: &egui::Context, m: &Media, width: f32) {
+        self.pool_thumbs(m, false);
+        let (Some(p), Some(aspect)) = (self.project(), super::tiles::media_aspect(m)) else {
+            return;
+        };
+        let slots = strip_slots(width, STRIP_HEIGHT * aspect);
+        for f in strip_frames(slots, p.media_frames(m)) {
+            self.pool_ahead(ctx, m, f, STRIP_HEIGHT);
+        }
     }
 
     fn sound(&self, painter: &egui::Painter, rect: Rect, m: &Media) {
@@ -1948,6 +2052,21 @@ impl Workspace {
                         self.send("media.set", json!({ "media": ids, "color_space": space }));
                         ui.close();
                     }
+                }
+            });
+            let any_lut = self.project().is_some_and(|p| {
+                ids.iter()
+                    .any(|id| p.media(id).is_some_and(|x| x.input_lut.is_some()))
+            });
+            ui.menu_button("Input LUT", |ui| {
+                if ui.button("Choose…").clicked() {
+                    self.ask_input_lut(ui.ctx(), ids.clone(), m.input_lut.as_deref());
+                    ui.close();
+                }
+                let reset = egui::Button::new("Reset");
+                if ui.add_enabled(any_lut, reset).clicked() {
+                    self.send("media.set", json!({ "media": ids, "input_lut": "" }));
+                    ui.close();
                 }
             });
             let mut put = None;

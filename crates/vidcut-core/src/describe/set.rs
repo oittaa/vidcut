@@ -476,7 +476,13 @@ impl Words<'_> {
         let first = s.of.first().copied();
         let align = first.map_or(Value::Null, |t| json!(t.align()));
         s.usual("align", "Align", &word, align, |t| json!(t.align));
-        let anchor = json!(crate::model::TitleAnchor::default());
+        let anchor = first.map_or(Value::Null, |t| {
+            json!(Title::usual_anchor(
+                t.kind,
+                t.align(),
+                crate::model::TitlePart::Lower
+            ))
+        });
         s.usual("anchor", "Anchor", &word, anchor, |t| json!(t.anchor));
         if self.params["style"].is_object() {
             let size = Title::usual_size(first.map_or(TitleKind::Text, |t| t.kind));
@@ -732,7 +738,6 @@ impl Words<'_> {
         s.put("render_cache", "Render Cache", &word, |c| {
             json!(c.render_cache)
         });
-        s.put("input_lut", "Input LUT", &text, |c| json!(c.input_lut));
         s.f.text()
     }
 
@@ -760,6 +765,7 @@ impl Words<'_> {
         s.put("color_space", "Color Space", &color_space, |m| {
             json!(m.color_space)
         });
+        s.put("input_lut", "Input LUT", &text, |m| json!(m.input_lut));
         s.put("alpha_mode", "Alpha Mode", &word, |m| json!(m.alpha_mode));
         s.put("super_scale", "Super Scale", &on_off, |m| {
             json!(m.super_scale.on)

@@ -309,7 +309,7 @@ flowchart TD
 
 | What | Where | Key |
 |---|---|---|
-| pool filmstrips, timeline tiles | `thumbs` (`thumbcache`) | origin, size, frames, input color space |
+| tiles of the timeline and the pool, 24 pool pictures of each video media | `thumbs` (`thumbcache`) | origin, size, frames or picture count, input color space |
 | waveforms | `waveforms` | origin, channels |
 | audio levels, voice activity, picture stats | `analysis` (`AvEnv`) | origin, stream or picture count |
 | sound matches of two files | `analysis` (`AvEnv`) | both origins |
