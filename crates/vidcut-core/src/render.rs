@@ -2640,19 +2640,16 @@ pub fn clip_frame(p: &Project, clip: &str, at: i64) -> Result<VideoPiece> {
         .ok_or_else(|| Error::not_found(format!("no frame {at} of {clip}")))
 }
 
-pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
-    let m = p
-        .media(media)
-        .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-    Ok(match &m.info.video {
+pub fn media_frame(p: &Project, m: &Media, at: i64) -> VideoPiece {
+    match &m.info.video {
         Some(_) => VideoPiece::Source {
             pace: Default::default(),
-            media: media.into(),
+            media: m.id.clone(),
             path: m.path.clone(),
             origin: m.origin(),
             source_frame: at,
             frames: 1,
-            image: p.media_image(media),
+            image: image_of(m),
             color_space: m.color_space,
             alpha_mode: m.alpha_mode,
             super_scale: super_scale_of(m.super_scale, &p.settings),
@@ -2664,7 +2661,7 @@ pub fn media_frame(p: &Project, media: &str, at: i64) -> Result<VideoPiece> {
             input_lut: None,
         },
         None => VideoPiece::black(1),
-    })
+    }
 }
 
 /// A media item's place on a source tape.

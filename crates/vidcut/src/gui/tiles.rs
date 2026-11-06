@@ -284,9 +284,8 @@ impl Tiles {
             .map(|(_, kept)| kept.texture.id())
     }
 
-    pub fn job(&self, p: &Project, key: &TileKey, width: u32) -> Option<Job> {
-        let m = p.media(&key.media)?;
-        let piece = vidcut_core::render::media_frame(p, &key.media, key.frame).ok()?;
+    pub fn job(&self, p: &Project, m: &Media, key: &TileKey, width: u32) -> Option<Job> {
+        let piece = vidcut_core::render::media_frame(p, m, key.frame);
         let mut pieces = Vec::new();
         let proxy = m.fresh_proxy().map(|x| x.path_in(&self.proxies));
         if let (Some(proxy), VideoPiece::Source { path, image, .. }) = (proxy, &piece)
