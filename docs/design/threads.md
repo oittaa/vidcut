@@ -38,7 +38,7 @@ The values in the Priority column:
 | `vidcut-cache` | `main`, for the GUI | `disk_cache::start`: the index from one listing at startup, then `disk_cache::rebuild` at each `REBUILD_EVERY` | job |
 | `vidcut-render-cache`, `vidcut-render-index` | `Background::tick`, `Background::apply` | the background render of the render cache; the scan of its index | job |
 | `vidcut-preview` | `Live::preview_step` | the project at a step of the history (`Store::project_at`, from the nearest state its `Past` keeps); only the newest step asked | interactive |
-| `vidcut-worker-N`, `vidcut-tiles-N` | `Workers::new`, `Tiles::begin_frame` | filmstrips and waveforms; timeline tiles | job |
+| `vidcut-worker-N`, `vidcut-tiles-N` | `Workers::new`, `Tiles::begin_frame` | waveforms; tiles of the timeline and the pool | job |
 | `vidcut-missing-media`, `vidcut-look` | `MissingWatch::start`, `look::watch` | media and proxy files; the OS's look | interactive |
 | `vidcut-ask` | `Ask::send` | a UI helper | interactive |
 | `vidcut-file-dialog` | `Picked::ask` | a UI helper | interactive |

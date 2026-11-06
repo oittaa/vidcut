@@ -803,7 +803,6 @@ impl Workspace {
         let none = Vec::new();
         let placed_on = |t: &Track| placed.get(&t.id).unwrap_or(&none);
         let pool = drawn.pool();
-        let thumbs = std::mem::take(&mut self.thumbs);
         let tiles = self.tiles.take();
         let (waveforms, missing) = (self.snap.waveforms.clone(), self.snap.missing.clone());
         let transcribed = self.snap.transcribed.clone();
@@ -811,7 +810,6 @@ impl Workspace {
         let chosen_keys = self.timeline.keys.clone();
         let audio_trim = self.audio_trim(drawn);
         let assets = Assets {
-            thumbs: &thumbs,
             waveforms: &waveforms,
             tiles: tiles.as_ref(),
             missing: &missing,
@@ -1024,7 +1022,6 @@ impl Workspace {
                 self.playhead_color(),
             );
         }
-        self.thumbs = thumbs;
         self.tiles = tiles;
         let mut headers = ui.new_child(egui::UiBuilder::new().max_rect(lower_rect));
         headers.set_clip_rect(rows_clip.intersect(ui.clip_rect()));
@@ -2855,6 +2852,14 @@ impl Workspace {
             self.send("edit.detect_scene_cuts", json!({ "clips": clips }));
             ui.close();
         }
+        let media: Vec<String> = self.project().map_or(Vec::new(), |p| {
+            clips
+                .iter()
+                .filter_map(|id| p.clip(id))
+                .map(|c| c.media.clone())
+                .collect()
+        });
+        self.alpha_mode_menu(ui, &media);
         self.render_cache_menu(ui, &clips);
         self.cached_effects_menu(ui, c);
     }
