@@ -439,6 +439,11 @@ pub struct Media {
     /// says in their place, for a file whose tags are wrong.
     #[serde(default, skip_serializing_if = "ColorSpace::is_tagged")]
     pub color_space: ColorSpace,
+    /// The `.cube` file that its pictures go through just after their
+    /// conversion into the timeline color space. Each of its clips on the
+    /// timeline gets it. Left out when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_lut: Option<PathBuf>,
     /// How the alpha channel of its pictures is read. Left out while it is
     /// `straight`.
     #[serde(default, skip_serializing_if = "AlphaMode::is_straight")]
@@ -1810,11 +1815,6 @@ pub struct Clip {
     /// slow media and AI Super Scale out of both. Left out at `auto`.
     #[serde(default, skip_serializing_if = "ClipCache::is_auto")]
     pub render_cache: ClipCache,
-    /// The `.cube` file that its picture goes through just after its
-    /// conversion into the timeline color space. Left out when there is
-    /// none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_lut: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -2322,10 +2322,12 @@ pub struct Title {
     /// Usual: middle for a `text` title, left for a lower third and a scroll.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<TitleAlign>,
-    /// The point of a `text` title's block that goes to its `position`:
-    /// `top_left`, `top`, `top_right`, `left`, `middle`, `right`,
-    /// `bottom_left`, `bottom` or `bottom_right`. Usual: `middle`. Left out
-    /// on a lower third and a scroll.
+    /// The point that goes to its `position`: `top_left`, `top`, `top_right`,
+    /// `left`, `middle`, `right`, `bottom_left`, `bottom` or `bottom_right`.
+    /// On a `text` title, a point of its block. Usual: `middle`. On a lower
+    /// third, a point of its lower line. Usual: the end of the line's top edge
+    /// by `align`. On a scroll, a point of a text box as wide as the picture.
+    /// Usual: `middle`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<TitleAnchor>,
     /// Its lines, separated by `\n`: two at most for a lower third. `<b>`,
@@ -2340,13 +2342,13 @@ pub struct Title {
     pub style: TitleStyle,
     /// Where it goes, as fractions of the picture's width and height from
     /// its top left, from -4 to 4 across and from -3 to 5 down: the `anchor`
-    /// of a `text` title's block (usual: `[0.5, 0.5]`), the left, middle or
-    /// right end of the top edge of a lower third's lower line by its `align`
-    /// (usual: 10%, 50% or 90% across and 78% down: `[0.1, 0.78]`,
-    /// `[0.5, 0.78]` and `[0.9, 0.78]`). A scroll's `x` is
-    /// where its lines' left edge, middle or right edge goes by its `align`
-    /// (usual: 1%, 50% or 99% across); its `y` moves only a `shape`. With
-    /// `position_keys`, the place at a frame is that curve.
+    /// of a `text` title's block (usual: `[0.5, 0.5]`), the `anchor` of a lower
+    /// third's lower line (usual: 10%, 50% or 90% across by its `align` and
+    /// 78% down: `[0.1, 0.78]`, `[0.5, 0.78]` and `[0.9, 0.78]`). A scroll's
+    /// `x` is where its lines' left edge, middle or right edge goes by its
+    /// `align` (usual: 1%, 50% or 99% across), with an `anchor` in the middle
+    /// column; its `y` moves only a `shape`. With `position_keys`, the place
+    /// at a frame is that curve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
     /// Position keyframes, one for X and Y, on the clip's source frames.
@@ -2392,7 +2394,8 @@ pub struct Title {
     pub opacity_keys: Vec<Keyframe>,
     /// A lower third's upper line, when it goes apart from the lower line.
     /// `position`, `zoom` and `rotation` and their keyframes above are then
-    /// the lower line's alone. Left out when the two lines go together.
+    /// the lower line's alone. `anchor` above is always the lower line's. Left
+    /// out when the two lines go together.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upper: Option<TitleLine>,
 }
@@ -2405,13 +2408,16 @@ pub enum LowerThirdLine {
     Lower,
 }
 
-/// The place, zoom and rotation of a lower third's upper line. The fields
-/// work as the title's fields with the same names. `position` is the left,
-/// middle or right end of this line's bottom edge, by the title's `align`,
-/// and `zoom` and `rotation` work about it. With no `upper`, this point is
-/// 2% of the picture height below the lower line's point.
+/// The place, anchor, zoom and rotation of a lower third's upper line. The
+/// fields work as the title's fields with the same names. `position` is this
+/// line's `anchor`, and `zoom` and `rotation` work about it. The usual `anchor`
+/// is the left, middle or right end of this line's bottom edge, by the title's
+/// `align`. With no `upper`, this point is 2% of the picture height below the
+/// lower line's point.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TitleLine {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<TitleAnchor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2442,6 +2448,7 @@ pub enum TitlePart {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TitleBlock {
     pub part: TitlePart,
+    pub anchor: [f64; 2],
     pub pivot: [f64; 2],
     pub edge: f64,
     pub zoom: f64,
@@ -2502,7 +2509,7 @@ impl TitleAlign {
     }
 }
 
-/// The point of a `text` title's block that goes to its position.
+/// The point of a title's text that goes to its position.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TitleAnchor {
@@ -2748,11 +2755,24 @@ impl Title {
             .unwrap_or_else(|| Self::usual_position(self.kind, self.align()))
     }
 
-    pub fn anchor(&self) -> [f64; 2] {
-        match self.kind {
-            TitleKind::Text => self.anchor.unwrap_or_default().fractions(),
-            TitleKind::LowerThird | TitleKind::Scroll => [self.align().fraction(), 0.0],
+    pub fn usual_anchor(kind: TitleKind, align: TitleAlign, part: TitlePart) -> TitleAnchor {
+        match (kind, part, align) {
+            (TitleKind::LowerThird, TitlePart::Upper, TitleAlign::Left) => TitleAnchor::BottomLeft,
+            (TitleKind::LowerThird, TitlePart::Upper, TitleAlign::Middle) => TitleAnchor::Bottom,
+            (TitleKind::LowerThird, TitlePart::Upper, TitleAlign::Right) => {
+                TitleAnchor::BottomRight
+            }
+            (TitleKind::LowerThird, _, TitleAlign::Left) => TitleAnchor::TopLeft,
+            (TitleKind::LowerThird, _, TitleAlign::Middle) => TitleAnchor::Top,
+            (TitleKind::LowerThird, _, TitleAlign::Right) => TitleAnchor::TopRight,
+            (TitleKind::Text | TitleKind::Scroll, _, _) => TitleAnchor::Middle,
         }
+    }
+
+    pub fn anchor_of(&self, part: TitlePart) -> [f64; 2] {
+        self.anchor
+            .unwrap_or_else(|| Self::usual_anchor(self.kind, self.align(), part))
+            .fractions()
     }
 
     pub fn usual_size(kind: TitleKind) -> f64 {
@@ -2841,16 +2861,16 @@ impl Title {
         (from_block / scale + Self::WIDTH_SLACK).floor() * scale
     }
 
-    pub fn seated_left(&self, middle: f64, widest: f64, wrap: f64, pixel: f64) -> f64 {
+    pub fn seated_left(&self, across: f64, middle: f64, widest: f64, wrap: f64, pixel: f64) -> f64 {
         let lined = self.align().fraction();
         let width = (widest / pixel + Self::WIDTH_SLACK).floor();
-        ((middle / pixel).round() - self.anchor()[0] * width) * pixel + lined * (widest - wrap)
+        ((middle / pixel).round() - across * width) * pixel + lined * (widest - wrap)
     }
 
     pub fn line_gap(&self, heights: [f64; 3], text: f64, pixel: f64, zoom: f64) -> f64 {
         match self.kind {
             TitleKind::Scroll => {
-                heights.iter().sum::<f64>() * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel
+                (heights[0] + heights[1]) * Self::SCROLL_LINE * text + Self::SCROLL_LEAD * pixel
             }
             TitleKind::Text | TitleKind::LowerThird => {
                 let size = (text / zoom / pixel).round();
@@ -2934,6 +2954,7 @@ impl Title {
 
     pub fn line(&self) -> TitleLine {
         TitleLine {
+            anchor: self.anchor,
             position: self.position,
             position_keys: self.position_keys.clone(),
             position_y: self.position_y.clone(),
@@ -2949,6 +2970,7 @@ impl Title {
         let dropped = |y: f64| crate::otio::effects::rounded(y + Self::UPPER_DROP);
         let [x, y] = self.place();
         TitleLine {
+            anchor: None,
             position: Some([x, dropped(y)]),
             position_y: self.position_y.iter().map(|y| dropped(*y)).collect(),
             ..self.line()
@@ -2965,6 +2987,7 @@ impl Title {
         let Some(mut u) = self.upper.take() else {
             return;
         };
+        std::mem::swap(&mut self.anchor, &mut u.anchor);
         std::mem::swap(&mut self.position, &mut u.position);
         std::mem::swap(&mut self.position_keys, &mut u.position_keys);
         std::mem::swap(&mut self.position_y, &mut u.position_y);
@@ -2998,6 +3021,7 @@ impl Title {
         let place = self.place();
         TitleBlock {
             part,
+            anchor: self.anchor_of(part),
             pivot: if part == TitlePart::Shape && self.kind == TitleKind::Scroll {
                 [place[0] + 0.5 - self.align().fraction(), place[1]]
             } else {
@@ -4740,7 +4764,6 @@ impl Cue {
             retime: ClipRetime::Project,
             color: None,
             render_cache: ClipCache::Auto,
-            input_lut: None,
         }
     }
 
@@ -5140,6 +5163,7 @@ impl Hash for Title {
             .as_ref()
             .map(|u| {
                 (
+                    u.anchor,
                     pair_bits(u.position),
                     floats_bits(u.zoom),
                     floats_bits(u.rotation),

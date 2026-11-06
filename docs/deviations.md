@@ -675,11 +675,12 @@ This file also lists the features that vidcut adds. Where the manual does not te
 ## X40. Subtitle files are read as they are written
 
 - **Resolve:**
-  - These results are from Resolve Studio 21.1.1, through its scripting API.
+  - These results are from Resolve Studio 21.1.1, through its scripting API. The TTML results are from Resolve Studio 21.2.
   - A Windows-1252 file shows U+FFFD for each accented letter.
   - Resolve leaves out a WebVTT cue that has no hours in its times.
   - From a TTML file, it keeps only the cues of the first region. With no named region, it imports nothing.
-  - From a TTML file, it keeps only the first span of each cue: `Two <span>spans</span> here` becomes "Two spans".
+  - An italic span in a TTML cue makes the whole cue italic: `Some <span tts:fontStyle="italic">italic</span> words` comes in all italic.
+  - An italic span after a `<br/>` in a TTML cue does not come in italic.
   - A cue that starts before the previous cue ends starts at that end instead.
   - When nothing of such a cue remains, Resolve leaves it out. TOS-HE.srt loses its cue 12.
   - `{\an8}` shows as text.
@@ -689,7 +690,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It reads WebVTT times without hours, and every TTML cue, span and region.
   - It keeps cues that overlap.
   - `{\an8}`, WebVTT `line` and the place of a TTML region put a cue at the top, middle or bottom.
-  - Italic, bold, underline and colors come in from all three formats.
+  - Italic, bold, underline and colors come in from all three formats, on the words that have them.
 - **Why:**
   - An imported subtitle file must not lose text without a message.
 
@@ -1044,11 +1045,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - a Look list ([X59](#x59-looks-for-titles-too-some-built-in))
     - the kind of the title
     - the alignment
-    - the anchor of a Text title
     - the text
     - the font, typed or selected from the installed fonts
     - the size, the color, the outline, the background and the drop shadow, each color typed or picked with a swatch
-    - the place, as percents across and down (X54)
+    - the anchor and the place, as percents across and down (X54), of the title or of each line of a lower third
     - the zoom and the rotation
   - The viewer shows the title while the user edits it, drawn as an export draws it.
   - A change goes in as one `titles.set` when the user leaves the field. A button puts it in at once. Ctrl+Z undoes it.
@@ -1114,7 +1114,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The `position` of a title is `[x, y]`, in fractions of the width and the height of the picture, from its top left.
   - The x goes from -4 to 4, and the y goes from -3 to 5. Thus a title can start and end outside the picture.
   - The Title section of the Inspector shows it as percents.
-  - It is where the anchor of a Text title goes, or the point of a line of a lower third (D65).
+  - It is where the anchor of a Text title or of a line of a lower third goes (D65).
   - Without a position, the title takes the usual place of its kind.
 - **Why:**
   - Fractions mean the same at any picture size, and a script sets them exactly.
@@ -2564,7 +2564,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - `LUT_3D_SIZE 1` gives a black picture.
   - The window of Resolve is not measured.
 - **vidcut:**
-  - `clip.set` and `project.set` refuse the file and give the reason.
+  - `media.set` and `project.set` refuse the file and give the reason.
 - **Why:**
   - An error is better than a wrong picture that looks correct.
   - The owner approved this difference.
@@ -2631,6 +2631,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - In FFmpeg 9.0.1 it lists four pixel formats: `yuv422p`, `yuv422p10le`, `yuv444p10le` and `gbrp10le`. None of them has alpha.
   - The owner approved this difference.
 
+## X137. A Scroll line wider than the picture wraps
+
+- **Resolve:**
+  - A line of a Scroll that is wider than its text box stays on one line. The box is as wide as the picture.
+  - The picture cuts the line at its edges, and those letters are lost (measured in Resolve Studio 21.1.2).
+- **vidcut:**
+  - The line wraps at 90% of the picture width, as the lines of other titles do.
+- **Why:**
+  - A wrapped line loses no letters.
+  - The owner approved this difference.
+
 ## X138. The keys are a page of Preferences
 
 - **Resolve:**
@@ -2639,4 +2650,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The keys are the Keys page of the Preferences window.
 - **Why:**
   - vidcut stores the keys in the preferences, with the other settings of the user.
+  - The owner approved this difference.
+
+## X139. One Input LUT submenu takes any `.cube` file
+
+- **Resolve:**
+  - A right-click on Media Pool clips gives the 1D LUT and 3D LUT submenus. The user selects a LUT there (p. 3480).
+  - The submenus list the LUT files in the LUT folders that the preferences name (p. 3480).
+- **vidcut:**
+  - The right-click menu of the pool has one Input LUT submenu, with Choose… and Reset.
+  - Choose… opens a file picker for any `.cube` file.
+  - A file with both tables runs the 1D table, then the 3D table, as in Resolve ([spec](cut-page-spec.md#the-lut-tables)).
+- **Why:**
+  - The picture is the same.
+  - The picker reaches any file, with no LUT folder to set up.
   - The owner approved this difference.

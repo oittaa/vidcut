@@ -505,8 +505,9 @@ pub enum Request {
         back: bool,
     },
     /// Set the Clip Color, the camera name, Date Created, the scene, shot and
-    /// take, the comment, the Input Color Space and the Super Scale of media
-    /// items. Their clips show the Clip Color unless they have their own.
+    /// take, the comment, the Input Color Space, the Input LUT and the Super
+    /// Scale of media items. Their clips show the Clip Color unless they have
+    /// their own.
     #[serde(rename = "media.set")]
     MediaSet {
         media: OneOrMany<String>,
@@ -538,6 +539,12 @@ pub enum Request {
         /// follow it.
         #[serde(default)]
         color_space: Option<crate::model::ColorSpace>,
+        /// Input LUT: a `.cube` file that their pictures go through just
+        /// after their conversion into the timeline color space. Each of
+        /// their clips on the timeline gets it. A file that can't be read is
+        /// refused, with the reason. An empty path clears it.
+        #[serde(default)]
+        input_lut: Option<PathBuf>,
         /// How the alpha channel of its pictures is read: `none`,
         /// `premultiplied`, `straight` or `invert`. Media with no alpha
         /// channel refuse it.
@@ -1560,7 +1567,7 @@ pub enum Request {
         look: Option<String>,
     },
     /// Enable/disable video (D), mute, gain (dB, -100..30), name, Clip Color,
-    /// Voice Isolation, Retime Process, Render Cache and Input LUT.
+    /// Voice Isolation, Retime Process and Render Cache.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -1609,12 +1616,6 @@ pub enum Request {
         /// AI Super Scale out of both.
         #[serde(default)]
         render_cache: Option<crate::model::ClipCache>,
-        /// Input LUT: a `.cube` file that the picture goes through just
-        /// after its conversion into the timeline color space. A file that
-        /// can't be read is refused, with the reason. An empty path clears
-        /// it.
-        #[serde(default)]
-        input_lut: Option<PathBuf>,
         /// Download Voice Isolation's model, or the model of the Retime
         /// Process that the clips then use, if this computer doesn't have it
         /// yet, checked against its SHA-256. Without it, a missing Voice
@@ -2301,9 +2302,12 @@ pub enum Request {
         /// each line in the block, which is as wide as its widest line.
         #[serde(default)]
         align: Option<TitleAlign>,
-        /// The point of a `text` title's block that goes to its `position`:
-        /// `top_left`, `top`, `top_right`, `left`, `middle`, `right`,
-        /// `bottom_left`, `bottom` or `bottom_right`. Default: `middle`.
+        /// The point that goes to its `position`: `top_left`, `top`,
+        /// `top_right`, `left`, `middle`, `right`, `bottom_left`, `bottom` or
+        /// `bottom_right`. On a `text` title, a point of its block. On a lower
+        /// third, a point of its lower line. On a scroll, a point of a text box
+        /// as wide as the picture. Default: `middle`, and on a lower third the
+        /// end of the line's top edge by `align`.
         #[serde(default)]
         anchor: Option<TitleAnchor>,
         /// Its look: `font` (a family name), `size` (the text height as a
@@ -2325,9 +2329,9 @@ pub enum Request {
         #[serde(default)]
         style: Option<TitleStyle>,
         /// Where it goes, `[x, y]` as fractions of the picture from its top
-        /// left, from -4 to 4 across and from -3 to 5 down: a `text` title's
-        /// `anchor`, the end of the top edge of a lower third's lower line by
-        /// its `align`. Default: the kind's usual place.
+        /// left, from -4 to 4 across and from -3 to 5 down: the `anchor` of a
+        /// `text` title or of a lower third's lower line. Default: the kind's
+        /// usual place.
         #[serde(default)]
         position: Option<[f64; 2]>,
         /// How much larger its text is drawn, from 1/4 to 4. Default: 1.
@@ -2353,9 +2357,10 @@ pub enum Request {
     },
     /// Change a title clip (`c3`, or `V2@15s` for the clip on V2 at 15 s):
     /// each field given replaces its own. A `style` replaces the whole
-    /// style, a field left out going back to the usual look. Switching to or
-    /// from `text` drops the `align` and the `anchor`. Switching to `scroll`
-    /// drops the zoom and rotation keyframes and the position handles. A
+    /// style, a field left out going back to the usual look. A new `kind` drops
+    /// the `anchor`. Switching to or from `text` also drops the `align`.
+    /// Switching to `scroll` drops the zoom and rotation keyframes and the
+    /// position handles. A
     /// `look` replaces all but
     /// the text and the keyframes, and the other fields given go on top. A
     /// look that makes a scroll drops what that switch drops. A look adds no
@@ -2372,6 +2377,8 @@ pub enum Request {
         kind: Option<TitleKind>,
         #[serde(default)]
         align: Option<TitleAlign>,
+        /// The point that goes to its `position`, as in `titles.add`. On a
+        /// lower third, this is the lower line's, or the one that `line` names.
         #[serde(default)]
         anchor: Option<TitleAnchor>,
         #[serde(default)]
@@ -2393,10 +2400,10 @@ pub enum Request {
         /// A title look's name, built in or yours (`looks.list`).
         #[serde(default)]
         look: Option<String>,
-        /// The line of a lower third that takes `position`, `zoom` and
-        /// `rotation`. The two lines then go apart. Without it, the two
-        /// lines take them together until they go apart, then the lower
-        /// line alone. Not with `kind` or `look`.
+        /// The line of a lower third that takes `anchor`, `position`, `zoom`
+        /// and `rotation`. The two lines then go apart. Without it, the two
+        /// lines take `position`, `zoom` and `rotation` together until they
+        /// go apart, then the lower line alone. Not with `kind` or `look`.
         #[serde(default)]
         line: Option<LowerThirdLine>,
         /// The frame of a value with keyframes: the new number goes on a
@@ -5021,7 +5028,7 @@ impl Request {
             | Self::StoryboardRender { out, .. }
             | Self::GuiScreenshot { out, .. } => vec![out],
             Self::Apply { commands, .. } => commands.iter_mut().flat_map(Self::paths_mut).collect(),
-            Self::ClipSet { input_lut, .. } => input_lut
+            Self::MediaSet { input_lut, .. } => input_lut
                 .iter_mut()
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect(),

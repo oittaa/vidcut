@@ -333,6 +333,9 @@ fn sections(app: &Workspace, m: &Media, read: Option<&MediaDetails>) -> Vec<Sect
                 format!("{:?}, in place of its tags", m.color_space),
             ));
         }
+        if let Some(lut) = &m.input_lut {
+            rows.push(("Input LUT".into(), lut.display().to_string()));
+        }
         if v.alpha {
             rows.push(("Alpha Mode".into(), m.alpha_mode.title().into()));
         }
