@@ -7,12 +7,13 @@ use vidcut_core::render::ShownTitle;
 use super::frame::{TitleOver, TitlePicture};
 use super::lock;
 use super::plan::Plan;
+use super::store::{self, HeldTitles, TitleKey, TitlePictures};
 
-const KEPT: usize = 16;
+const LAST_KEPT: usize = 16;
 
 type Preview = Option<(String, Title)>;
 
-type Key = (Title, (u32, u32), bool);
+pub(crate) type Key = (Title, (u32, u32), u32, bool);
 
 fn steady(t: &Title, size: (u32, u32)) -> Title {
     let bare = Title {
@@ -37,15 +38,15 @@ fn level(t: &Title, s: &ShownTitle) -> f64 {
     t.opaque() * s.fade.map_or(1.0, |r| r.level(0))
 }
 
-fn key_of(t: &Title, s: &ShownTitle, size: (u32, u32)) -> Key {
+fn key_of(t: &Title, s: &ShownTitle, size: (u32, u32), timeline: u32) -> Key {
     if t.kind == TitleKind::LowerThird && level(t, s) < 1.0 {
         let whole = Title {
             opacity: None,
             ..t.clone()
         };
-        return (whole, size, true);
+        return (whole, size, timeline, true);
     }
-    (steady(t, size), size, false)
+    (steady(t, size), size, timeline, false)
 }
 
 fn wanted(preview: &Preview, s: &ShownTitle) -> Title {
@@ -57,8 +58,14 @@ fn wanted(preview: &Preview, s: &ShownTitle) -> Title {
 
 #[derive(Default)]
 struct Kept {
-    pictures: Lru<Key, Vec<Option<Arc<TitlePicture>>>, KEPT>,
-    last: Lru<String, Key, KEPT>,
+    held: HeldTitles,
+    last: Lru<String, Key, LAST_KEPT>,
+}
+
+impl Kept {
+    fn pictures(&self, key: &Key) -> Option<TitlePictures> {
+        self.held.get(&TitleKey::Title(Box::new(key.clone())))
+    }
 }
 
 #[derive(Default)]
@@ -81,13 +88,15 @@ impl Titles {
         t: i64,
         placing: &[(String, Picture)],
     ) -> (Vec<TitleOver>, bool) {
-        self.shown_at(&plan.titles_at(t), plan.size(), placing)
+        let size = plan.size();
+        self.shown_at(&plan.titles_at(t), size, size.1, placing)
     }
 
     pub(crate) fn shown_at(
         &self,
         at: &[(usize, ShownTitle)],
         size: (u32, u32),
+        timeline: u32,
         placing: &[(String, Picture)],
     ) -> (Vec<TitleOver>, bool) {
         let preview = lock(&self.preview).clone();
@@ -97,20 +106,23 @@ impl Titles {
         let mut all = true;
         for (above, shown) in at {
             let to = wanted(&preview, shown);
-            let exact = key_of(&to, shown, size);
-            let key = if kept.pictures.contains(&exact) {
-                exact
-            } else {
-                all = false;
-                let last = kept.last.get(&shown.clip).cloned();
-                match last.filter(|k| k.1 == size && kept.pictures.contains(k)) {
-                    Some(k) => k,
-                    None => continue,
+            let exact = key_of(&to, shown, size, timeline);
+            let (key, pictures) = match kept.pictures(&exact) {
+                Some(pictures) => (exact, pictures),
+                None => {
+                    all = false;
+                    let last = kept.last.get(&shown.clip).cloned();
+                    let found = last
+                        .filter(|k| k.1 == size)
+                        .and_then(|k| kept.pictures(&k).map(|p| (k, p)));
+                    match found {
+                        Some(found) => found,
+                        None => continue,
+                    }
                 }
             };
-            let pictures = kept.pictures.get(&key).cloned().unwrap_or_default();
             let alpha = level(&to, shown) as f32;
-            if key.2 {
+            if key.3 {
                 out.extend(pictures.iter().flatten().map(|p| TitleOver {
                     above: *above,
                     picture: p.clone(),
@@ -135,10 +147,10 @@ impl Titles {
                     .zip(to.shape_pixels(now.pivot, (w, h)));
                 let (dx, dy) = match boxes {
                     Some((a, b)) => ((b[0] - a[0]) as i32, (b[1] - a[1]) as i32),
-                    None if to.moves() => (
-                        ((x - x0) * w).round() as i32,
-                        shown.run.top(0, h, f64::from(p.height)).round() as i32 - p.top,
-                    ),
+                    None if to.moves() => {
+                        let top = shown.run.top(0, h, f64::from(p.height)) + f64::from(p.lift);
+                        (((x - x0) * w).round() as i32, top.round() as i32 - p.top)
+                    }
                     None => (
                         ((x * w).round() - (x0 * w).round()) as i32,
                         ((y * h).round() - (y0 * h).round()) as i32,
@@ -166,42 +178,56 @@ impl Titles {
 
     pub(crate) fn draw(&self, plan: &Plan, t: i64) -> bool {
         let size = plan.size();
-        self.draw_at(&plan.titles_at(t), size, size.1)
+        self.pictures_at(&plan.titles_at(t), size, size.1).0
     }
 
-    pub(crate) fn draw_at(
+    pub(crate) fn hold(&self, plan: &Plan, t: i64) -> bool {
+        let size = plan.size();
+        self.hold_at(&plan.titles_at(t), size, size.1)
+    }
+
+    pub(crate) fn hold_at(
         &self,
         at: &[(usize, ShownTitle)],
         size: (u32, u32),
         timeline: u32,
     ) -> bool {
+        let (drew, held) = self.pictures_at(at, size, timeline);
+        lock(&self.kept).held = HeldTitles::new(held);
+        drew
+    }
+
+    fn pictures_at(
+        &self,
+        at: &[(usize, ShownTitle)],
+        size: (u32, u32),
+        timeline: u32,
+    ) -> (bool, Vec<(TitleKey, TitlePictures)>) {
         let preview = lock(&self.preview).clone();
-        let missing: Vec<(String, Key)> = {
-            let kept = lock(&self.kept);
-            let mut keys: Vec<(String, Key)> = Vec::new();
-            for (_, shown) in at {
-                let key = key_of(&wanted(&preview, shown), shown, size);
-                if !kept.pictures.contains(&key) && !keys.iter().any(|(_, k)| *k == key) {
-                    keys.push((shown.clip.clone(), key));
-                }
+        let mut drew = false;
+        let mut out: Vec<(TitleKey, TitlePictures)> = Vec::new();
+        for (_, shown) in at {
+            let key = key_of(&wanted(&preview, shown), shown, size, timeline);
+            let whole = TitleKey::Title(Box::new(key.clone()));
+            if out.iter().any(|(k, _)| *k == whole) {
+                continue;
             }
-            keys
-        };
-        if missing.is_empty() {
-            return false;
+            let found = lock(&self.kept).pictures(&key);
+            let pictures = found.unwrap_or_else(|| {
+                let pictures = drawn(&key);
+                lock(&self.kept).last.insert(shown.clip.clone(), key);
+                store::global().keep_titles(whole.clone(), pictures.clone());
+                drew = true;
+                pictures
+            });
+            out.push((whole, pictures));
         }
-        for (clip, key) in missing {
-            let picture = drawn(&key, timeline);
-            let mut kept = lock(&self.kept);
-            kept.last.insert(clip, key.clone());
-            kept.pictures.insert(key, picture);
-        }
-        true
+        (drew, out)
     }
 }
 
-fn drawn((t, (width, height), whole): &Key, timeline: u32) -> Vec<Option<Arc<TitlePicture>>> {
-    let (width, height) = (*width, *height);
+fn drawn((t, (width, height), timeline, whole): &Key) -> TitlePictures {
+    let (width, height, timeline) = (*width, *height, *timeline);
     let sprites = if *whole {
         crate::burn::title(t, width, height, timeline)
             .into_iter()
@@ -219,6 +245,7 @@ fn drawn((t, (width, height), whole): &Key, timeline: u32) -> Vec<Option<Arc<Tit
                     top: sprite.y,
                     width: sprite.width,
                     height: sprite.height,
+                    lift: sprite.lift,
                     frame: (width, height),
                     rgba: sprite.premultiplied(),
                 })

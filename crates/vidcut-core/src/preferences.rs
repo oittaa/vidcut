@@ -24,6 +24,12 @@ pub struct Preferences {
     pub transcripts: Transcripts,
     pub services: Services,
     pub viewer: ViewerPrefs,
+    /// The keys that differ from the defaults, by action. `keys.list` names
+    /// the actions. An action that is not here has its default keys, and an
+    /// empty list leaves an action with no key. `keys.set` and `keys.reset`
+    /// change them.
+    #[schemars(with = "BTreeMap<String, Vec<String>>")]
+    pub keys: crate::shortcuts::Custom,
 }
 
 /// How this computer makes the render cache of the project that is open
@@ -524,8 +530,8 @@ impl Default for Appearance {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Player {
-    /// Memory for pictures in MB. `0` (the default): the larger of 1 GB and
-    /// half the computer's memory.
+    /// Memory for pictures, titles and subtitles in MB. `0` (the default):
+    /// the larger of 1 GB and half the computer's memory.
     pub memory_mb: u64,
     /// Video memory for pictures the GPU decoded and keeps there, in MB.
     /// `0` (the default): half the memory the system reports for the GPU
@@ -1028,6 +1034,7 @@ impl Preferences {
     }
 
     pub fn check(&self) -> Result<()> {
+        crate::shortcuts::Bindings::of(&self.keys)?;
         for (key, mb) in [
             ("player.memory_mb", self.player.memory_mb),
             ("player.video_memory_mb", self.player.video_memory_mb),

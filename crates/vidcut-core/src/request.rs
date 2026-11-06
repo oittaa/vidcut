@@ -504,9 +504,9 @@ pub enum Request {
         #[serde(default)]
         back: bool,
     },
-    /// Set the Clip Color, the camera name, the Input Color Space and the
-    /// Super Scale of media items. Their clips show the Clip Color unless
-    /// they have their own.
+    /// Set the Clip Color, the camera name, Date Created, the scene, shot and
+    /// take, the Input Color Space and the Super Scale of media items. Their
+    /// clips show the Clip Color unless they have their own.
     #[serde(rename = "media.set")]
     MediaSet {
         media: OneOrMany<String>,
@@ -517,6 +517,18 @@ pub enum Request {
         /// number. Empty string clears it.
         #[serde(default)]
         camera: Option<String>,
+        /// Date Created, as `YYYY-MM-DD`. Empty string clears it.
+        #[serde(default)]
+        created: Option<String>,
+        /// The scene, such as a number. Empty string clears it.
+        #[serde(default)]
+        scene: Option<String>,
+        /// The shot, such as a letter or a number. Empty string clears it.
+        #[serde(default)]
+        shot: Option<String>,
+        /// The take, such as a number. Empty string clears it.
+        #[serde(default)]
+        take: Option<String>,
         /// How its pictures' colors are read: `tagged`, as the file says, or
         /// `bt709`, `bt601`, `pq` or `hlg` in place of the file's tags, for a
         /// file whose tags are wrong. The viewer, thumbnails and exports
@@ -2281,9 +2293,12 @@ pub enum Request {
         /// each line in the block, which is as wide as its widest line.
         #[serde(default)]
         align: Option<TitleAlign>,
-        /// The point of a `text` title's block that goes to its `position`:
-        /// `top_left`, `top`, `top_right`, `left`, `middle`, `right`,
-        /// `bottom_left`, `bottom` or `bottom_right`. Default: `middle`.
+        /// The point that goes to its `position`: `top_left`, `top`,
+        /// `top_right`, `left`, `middle`, `right`, `bottom_left`, `bottom` or
+        /// `bottom_right`. On a `text` title, a point of its block. On a lower
+        /// third, a point of its lower line. On a scroll, a point of a text box
+        /// as wide as the picture. Default: `middle`, and on a lower third the
+        /// end of the line's top edge by `align`.
         #[serde(default)]
         anchor: Option<TitleAnchor>,
         /// Its look: `font` (a family name), `size` (the text height as a
@@ -2305,9 +2320,9 @@ pub enum Request {
         #[serde(default)]
         style: Option<TitleStyle>,
         /// Where it goes, `[x, y]` as fractions of the picture from its top
-        /// left, from -4 to 4 across and from -3 to 5 down: a `text` title's
-        /// `anchor`, the end of the top edge of a lower third's lower line by
-        /// its `align`. Default: the kind's usual place.
+        /// left, from -4 to 4 across and from -3 to 5 down: the `anchor` of a
+        /// `text` title or of a lower third's lower line. Default: the kind's
+        /// usual place.
         #[serde(default)]
         position: Option<[f64; 2]>,
         /// How much larger its text is drawn, from 1/4 to 4. Default: 1.
@@ -2333,9 +2348,10 @@ pub enum Request {
     },
     /// Change a title clip (`c3`, or `V2@15s` for the clip on V2 at 15 s):
     /// each field given replaces its own. A `style` replaces the whole
-    /// style, a field left out going back to the usual look. Switching to or
-    /// from `text` drops the `align` and the `anchor`. Switching to `scroll`
-    /// drops the zoom and rotation keyframes and the position handles. A
+    /// style, a field left out going back to the usual look. A new `kind` drops
+    /// the `anchor`. Switching to or from `text` also drops the `align`.
+    /// Switching to `scroll` drops the zoom and rotation keyframes and the
+    /// position handles. A
     /// `look` replaces all but
     /// the text and the keyframes, and the other fields given go on top. A
     /// look that makes a scroll drops what that switch drops. A look adds no
@@ -2352,6 +2368,8 @@ pub enum Request {
         kind: Option<TitleKind>,
         #[serde(default)]
         align: Option<TitleAlign>,
+        /// The point that goes to its `position`, as in `titles.add`. On a
+        /// lower third, this is the lower line's, or the one that `line` names.
         #[serde(default)]
         anchor: Option<TitleAnchor>,
         #[serde(default)]
@@ -2373,10 +2391,10 @@ pub enum Request {
         /// A title look's name, built in or yours (`looks.list`).
         #[serde(default)]
         look: Option<String>,
-        /// The line of a lower third that takes `position`, `zoom` and
-        /// `rotation`. The two lines then go apart. Without it, the two
-        /// lines take them together until they go apart, then the lower
-        /// line alone. Not with `kind` or `look`.
+        /// The line of a lower third that takes `anchor`, `position`, `zoom`
+        /// and `rotation`. The two lines then go apart. Without it, the two
+        /// lines take `position`, `zoom` and `rotation` together until they
+        /// go apart, then the lower line alone. Not with `kind` or `look`.
         #[serde(default)]
         line: Option<LowerThirdLine>,
         /// The frame of a value with keyframes: the new number goes on a
@@ -2749,11 +2767,33 @@ pub enum Request {
     /// replaced.
     #[serde(rename = "preferences.reset")]
     PreferencesReset {},
-    /// The keyboard shortcuts, one action each, with a few plain words
-    /// where the action's name doesn't say what it does (spec §11). Ctrl
-    /// and Alt are Cmd and Option on macOS.
+    /// The keyboard shortcuts in force, one action each, with a few plain
+    /// words where the action's name doesn't say what it does (spec §11).
+    /// Ctrl and Alt are Cmd and Option on macOS.
     #[serde(rename = "keys.list")]
     KeysList {},
+    /// Give an action other keys in place of the ones it has (spec §11). A
+    /// key belongs to one action: a key that another action has is refused,
+    /// and the refusal names that action. A running GUI follows at once.
+    #[serde(rename = "keys.set")]
+    KeysSet {
+        /// The action, as `keys.list` names it.
+        action: crate::shortcuts::Action,
+        /// Its keys, like `Ctrl+Shift+Z`, `F5` or `+`. Cmd and Option are
+        /// other names for Ctrl and Alt. On macOS, Control is the Control
+        /// key. With no keys, the action has no key.
+        #[serde(default)]
+        #[schemars(with = "Vec<String>")]
+        keys: Vec<crate::shortcuts::Combo>,
+    },
+    /// Put default keys back. A default key that another action has now is
+    /// refused, and the refusal names that action.
+    #[serde(rename = "keys.reset")]
+    KeysReset {
+        /// The action, as `keys.list` names it. Without it, every action.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action: Option<crate::shortcuts::Action>,
+    },
     /// Keep a paid speech service's key in the system's keychain (macOS
     /// Keychain, Windows Credential Manager, the Secret Service on Linux).
     /// Without `key`, the CLI reads it from standard input. The key never
@@ -4122,6 +4162,21 @@ pub enum PoolSort {
     /// The label of the file's start timecode; media without one count
     /// as 00:00:00:00 (decision D59).
     Timecode,
+    /// The camera name, then the start timecode. Media without a name come
+    /// first.
+    Camera,
+    /// The day of Date Created, then the start timecode. Media without a
+    /// date come first.
+    DateTime,
+    /// The bin, then the start timecode.
+    Bin,
+    /// The scene, the shot, then the take. Media without one come first.
+    SceneShot,
+    /// The Clip Color, then the start timecode. Media without a color come
+    /// first.
+    ClipColor,
+    /// The media with no fresh proxy, then those with one.
+    OnlineStatus,
 }
 
 /// How the Media Pool shows its items (spec §3).
@@ -4139,7 +4194,8 @@ pub enum PoolMode {
     /// its start timecode, its camera and its name. By `name`, the cards go
     /// by first letter under a heading, and by timecode inside a letter;
     /// Source Tape takes that order. By `date`, they go under a heading for
-    /// each day.
+    /// each day. By `camera`, `date_time`, `bin`, `scene_shot`, `clip_color`
+    /// and `online_status`, they go under a heading for each value.
     Metadata,
 }
 
@@ -4827,6 +4883,8 @@ impl Request {
                 | Self::ViewerGuides { .. }
                 | Self::ViewerScopes { .. }
                 | Self::KeysList {}
+                | Self::KeysSet { .. }
+                | Self::KeysReset { .. }
                 | Self::ServicesSetKey { .. }
                 | Self::ServicesRemoveKey { .. }
                 | Self::CacheList {}
@@ -4899,6 +4957,8 @@ impl Request {
                     | Self::ViewerGuides { .. }
                     | Self::ViewerScopes { .. }
                     | Self::KeysList {}
+                    | Self::KeysSet { .. }
+                    | Self::KeysReset { .. }
                     | Self::ServicesSetKey { .. }
                     | Self::ServicesRemoveKey { .. }
                     | Self::EditCopy { .. }

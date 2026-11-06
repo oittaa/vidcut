@@ -7,16 +7,10 @@
 - Position, zoom, rotation and opacity take keyframes ([keyframes](keyframes.md#titles)).
 - vidcut reads and writes them in OTIO in Resolve's shape ([D67](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
-## Line Spacing and Tracking in the Inspector
+## Tracking
 
-- Measure the range of the two controls in Resolve's Inspector, and the unit of Line Spacing.
-- vidcut holds the number of the file for Line Spacing until then.
-- vidcut accepts -4096 to 4096 until then. The reason is that Resolve draws a line spacing of 2000 from a file.
-- Measure Tracking on bold letters, and with `<sup>`, `<sub>` and small capitals. vidcut uses the width of X in the bold font, at the size before the shift or the small capitals.
 - Measure a tracking with a fraction of a pixel at a zoom. vidcut takes the step of 1/64 of a pixel before the zoom.
 - Find why some blocks with a negative tracking are up to 1 pixel from the rule, as "Ab" in Arial 96.
-- Measure `<u>`, `<o>` and `<s>` with Tracking. vidcut draws them across the last letter's space. Also measure them on part of a line, and on `<sup>`.
-- Measure `<sup>` and `<sub>` beside other letters on a line. The measurements have them on a whole line only.
 
 ## Font heights
 
@@ -33,13 +27,3 @@
 
 - The measurements of `shape` read files. Measure the range and the units of these controls in Resolve's Inspector.
 - vidcut uses the numbers of the file until then.
-
-## Anchor of a lower third and a scroll
-
-- In vidcut, only a Text title has `anchor`.
-- In Resolve, each line of a lower third and a Scroll have an anchor too.
-- A Scroll's anchor works on a text box as wide as the picture (measured in Resolve Studio 21.1.2):
-  - The left column puts the left edge of the lines at the middle of the picture.
-  - The right column puts the lines off the picture.
-  - The row moves the lines by half of a text height, up or down.
-- **Why it is open:** the shape of this control in Resolve's Inspector is not checked.

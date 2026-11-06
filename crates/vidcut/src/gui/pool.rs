@@ -8,6 +8,7 @@ use eframe::egui::{
 use serde_json::json;
 use vidcut_core::model::{Media, Project};
 use vidcut_core::request::{PoolMode, PoolSort, ViewerMode};
+use vidcut_core::shortcuts::Action;
 
 use super::theme;
 use super::timeline::gesture::Gesture;
@@ -41,6 +42,7 @@ const CARD_MARGIN: f32 = 6.0;
 const CARD_PICTURE: egui::Vec2 = egui::Vec2::new(128.0, 72.0);
 const CARD_LINES: [f32; 2] = [28.0, 53.0];
 const CLUSTER_HEADING: f32 = 26.0;
+const NO_VALUE: &str = "---";
 
 #[derive(Default)]
 pub(super) struct BinsUi {
@@ -139,7 +141,60 @@ fn cluster(sort: PoolSort, m: &Media) -> Option<String> {
     match sort {
         PoolSort::Name => Some(crate::live::first_letter(&m.name)),
         PoolSort::Date => Some(file_time(m).map_or_else(|| "-".to_string(), |d| d.day())),
+        PoolSort::Camera => m.camera.as_deref().map(super::clip_info::camera_label),
+        PoolSort::DateTime => m.created.clone(),
+        PoolSort::Bin => Some(match m.bin.as_str() {
+            "" => bin_name("").to_string(),
+            path => path.to_string(),
+        }),
+        PoolSort::SceneShot => m.scene.as_ref().map(|s| format!("Scene {s}")),
+        PoolSort::ClipColor => m.color.clone(),
+        PoolSort::OnlineStatus => Some(
+            match m.fresh_proxy() {
+                Some(_) => "Proxy",
+                None => "Original",
+            }
+            .to_string(),
+        ),
         PoolSort::Added | PoolSort::Duration | PoolSort::Timecode => None,
+    }
+}
+
+fn scene_shot_take(m: &Media) -> String {
+    let parts: Vec<String> = [("Scene", &m.scene), ("Shot", &m.shot), ("Take", &m.take)]
+        .into_iter()
+        .filter_map(|(word, value)| value.as_ref().map(|v| format!("{word} {v}")))
+        .collect();
+    if parts.is_empty() {
+        NO_VALUE.to_string()
+    } else {
+        parts.join(", ")
+    }
+}
+
+fn main_description(sort: PoolSort, m: &Media, start: &str) -> String {
+    let date = m.created.as_deref().unwrap_or(NO_VALUE);
+    match sort {
+        PoolSort::Timecode => start.to_string(),
+        PoolSort::Camera => {
+            let camera = m
+                .camera
+                .as_deref()
+                .map_or_else(|| NO_VALUE.to_string(), super::clip_info::camera_label);
+            format!("{camera}  {start}")
+        }
+        PoolSort::DateTime => {
+            let file = m.path.file_name().unwrap_or_default().to_string_lossy();
+            format!("{date}  {file}")
+        }
+        PoolSort::SceneShot => scene_shot_take(m),
+        PoolSort::ClipColor => format!("{date}  {start}"),
+        PoolSort::Added
+        | PoolSort::Name
+        | PoolSort::Duration
+        | PoolSort::Date
+        | PoolSort::Bin
+        | PoolSort::OnlineStatus => m.name.clone(),
     }
 }
 
@@ -377,6 +432,12 @@ fn sort_label(s: PoolSort) -> &'static str {
         PoolSort::Duration => "Duration",
         PoolSort::Date => "Date",
         PoolSort::Timecode => "Timecode",
+        PoolSort::Camera => "Camera",
+        PoolSort::DateTime => "Date Time",
+        PoolSort::Bin => "Bin",
+        PoolSort::SceneShot => "Scene, Shot",
+        PoolSort::ClipColor => "Clip Color",
+        PoolSort::OnlineStatus => "Online Status",
     }
 }
 
@@ -555,9 +616,12 @@ impl Workspace {
                         } else if !view.bin.is_empty() {
                             ui.label(dim("Empty bin. Drag clips here, or use Move to Bin."));
                         } else {
-                            ui.label(dim(super::keys(
-                                "No media yet. Import with Ctrl+I, or `vidcut media add FILE…`",
-                            )));
+                            ui.label(dim(match snap.bindings.first(Action::Import) {
+                                Some(key) => format!(
+                                    "No media yet. Import with {key}, or `vidcut media add FILE…`"
+                                ),
+                                None => "No media yet. Use `vidcut media add FILE…`".to_string(),
+                            }));
                             if ui.button("Import Media…").clicked() {
                                 self.import_media();
                             }
@@ -732,7 +796,7 @@ impl Workspace {
                     let mut sort = view.sort;
                     let r = egui::ComboBox::from_id_salt("pool-sort")
                         .selected_text(sort_label(sort))
-                        .width(76.0)
+                        .width(100.0)
                         .show_ui(ui, |ui| {
                             for s in [
                                 PoolSort::Added,
@@ -740,6 +804,12 @@ impl Workspace {
                                 PoolSort::Duration,
                                 PoolSort::Date,
                                 PoolSort::Timecode,
+                                PoolSort::Camera,
+                                PoolSort::DateTime,
+                                PoolSort::Bin,
+                                PoolSort::SceneShot,
+                                PoolSort::ClipColor,
+                                PoolSort::OnlineStatus,
                             ] {
                                 ui.selectable_value(&mut sort, s, sort_label(s));
                             }
@@ -1135,12 +1205,7 @@ impl Workspace {
             .timecode
             .as_ref()
             .map_or_else(|| self.src_tc(0), super::clip_info::start_label);
-        let title = match self.snap.pool.sort {
-            PoolSort::Timecode => start.clone(),
-            PoolSort::Added | PoolSort::Name | PoolSort::Duration | PoolSort::Date => {
-                m.name.clone()
-            }
-        };
+        let title = main_description(self.snap.pool.sort, m, &start);
         let left = picture.right() + CARD_MARGIN;
         let room = rect.right() - CARD_MARGIN - left;
         let at = |y: f32| rect.top() + y;
@@ -1162,7 +1227,7 @@ impl Workspace {
             let camera = m
                 .camera
                 .as_deref()
-                .map_or_else(|| "---".to_string(), super::clip_info::camera_label);
+                .map_or_else(|| NO_VALUE.to_string(), super::clip_info::camera_label);
             let camera = one_line(&painter, camera, 12.0, dim, room * 0.4);
             let x = left + room - camera.size().x;
             painter.galley(Pos2::new(x, at(CARD_LINES[0] + 5.0)), camera, dim);

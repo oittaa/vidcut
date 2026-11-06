@@ -138,7 +138,8 @@ pub(super) fn picture<'a>(
 
 fn scrolled(sprite: Option<&Sprite>, h: u32, fraction: f64) -> i32 {
     sprite.map_or(0, |s| {
-        let top = f64::from(h) - fraction * (f64::from(h) + f64::from(s.height));
+        let tall = f64::from(s.height);
+        let top = f64::from(h) - fraction * (f64::from(h) + tall) + f64::from(s.lift);
         top.round() as i32 - s.y
     })
 }

@@ -1,6 +1,7 @@
 use eframe::egui::{self, Key};
 use serde_json::json;
 use vidcut_core::request::ViewerMode;
+use vidcut_core::shortcuts::Action;
 use vidcut_core::time::{format_timecode, parse_counter};
 
 use super::viewer::timecode_input;
@@ -75,7 +76,12 @@ impl Workspace {
     }
 
     pub(super) fn create_subclip_button(&mut self, ui: &mut egui::Ui) {
-        let button = egui::Button::new("Create Subclip").shortcut_text(super::keys("Alt+B"));
+        let key = self
+            .snap
+            .bindings
+            .first(Action::CreateSubclip)
+            .unwrap_or_default();
+        let button = egui::Button::new("Create Subclip").shortcut_text(key);
         if ui
             .add_enabled(self.source_clip().is_some(), button)
             .clicked()

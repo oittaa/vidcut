@@ -4,6 +4,7 @@ use vidcut_core::keyframes::{PictureValue, ease_of, eases};
 use vidcut_core::looks::{LookKind, Styled, TitleLook};
 use vidcut_core::model::{
     Clip, Ease, LowerThirdLine, Title, TitleAlign, TitleAnchor, TitleCase, TitleKind, TitleLine,
+    TitlePart,
 };
 
 use super::export::Ask;
@@ -16,6 +17,7 @@ use crate::live::PlayerId;
 
 #[derive(Debug, Default)]
 struct LineFields {
+    anchor: Option<TitleAnchor>,
     across: String,
     down: String,
     zoom: String,
@@ -25,6 +27,7 @@ struct LineFields {
 impl LineFields {
     fn of(t: &Title) -> Self {
         Self {
+            anchor: t.anchor,
             across: percent(t.position.map(|p| p[0])),
             down: percent(t.position.map(|p| p[1])),
             zoom: percent(t.zoom),
@@ -51,7 +54,6 @@ pub struct TitleDialog {
     at: i64,
     kind: TitleKind,
     align: TitleAlign,
-    anchor: TitleAnchor,
     text: String,
     fields: TextFields,
     shape: ShapeFields,
@@ -111,7 +113,6 @@ impl TitleDialog {
             at: 0,
             kind: TitleKind::Text,
             align: TitleAlign::Left,
-            anchor: TitleAnchor::default(),
             text: String::new(),
             fields: TextFields::default(),
             shape: ShapeFields::default(),
@@ -144,7 +145,6 @@ impl TitleDialog {
     fn load(&mut self, t: &Title) {
         self.kind = t.kind;
         self.align = t.align();
-        self.anchor = t.anchor.unwrap_or_default();
         self.text = t.text.clone();
         self.fields = TextFields::load(&Parts::of_title(&t.style));
         self.shape = ShapeFields::load(t.style.shape.as_ref());
@@ -235,6 +235,7 @@ fn line_of(d: &TitleDialog, f: &LineFields, stored: &Title) -> Result<TitleLine,
         }
     };
     Ok(TitleLine {
+        anchor: f.anchor,
         position,
         zoom: if scroll {
             None
@@ -268,13 +269,11 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
         k if stored.kind == k && stored.align() == d.align => stored.align,
         _ => Some(d.align),
     };
-    let anchor =
-        (d.kind == TitleKind::Text && d.anchor != TitleAnchor::default()).then_some(d.anchor);
     let lines = d.kind == TitleKind::LowerThird && stored.kind == TitleKind::LowerThird;
     let title = Title {
         kind: d.kind,
         align,
-        anchor,
+        anchor: lower.anchor,
         text: d.text.clone(),
         style,
         position: lower.position,
@@ -292,7 +291,37 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
     vidcut_core::ops::titles::checked(&title).map_err(|e| e.message)
 }
 
+fn anchor_row(ui: &mut egui::Ui, f: &mut LineFields, usual: TitleAnchor) -> bool {
+    let [across, down] = f
+        .anchor
+        .unwrap_or(usual)
+        .fractions()
+        .map(|v| (v * 2.0) as usize);
+    let mut changed = false;
+    ui.label("Anchor");
+    ui.horizontal_wrapped(|ui| {
+        for (i, label) in ["Left", "Middle", "Right"].into_iter().enumerate() {
+            if ui.radio(across == i, label).clicked() && across != i {
+                f.anchor = Some(ANCHORS[down][i]);
+                changed = true;
+            }
+        }
+        ui.separator();
+        for (i, label) in ["Top", "Middle", "Bottom"].into_iter().enumerate() {
+            if ui.radio(down == i, label).clicked() && down != i {
+                f.anchor = Some(ANCHORS[i][across]);
+                changed = true;
+            }
+        }
+    });
+    ui.end_row();
+    changed
+}
+
 fn line_changes(params: &mut Value, t: &Title, stored: &Title) -> bool {
+    if let Some(a) = t.anchor.filter(|_| t.anchor != stored.anchor) {
+        params["anchor"] = json!(a);
+    }
     if t.position != stored.position {
         params["position"] = json!(t.position.map_or_else(Vec::new, |p| p.to_vec()));
     }
@@ -302,7 +331,10 @@ fn line_changes(params: &mut Value, t: &Title, stored: &Title) -> bool {
     if t.rotation != stored.rotation {
         params["rotation"] = json!(t.turn());
     }
-    t.position != stored.position || t.zoom != stored.zoom || t.rotation != stored.rotation
+    t.anchor != stored.anchor
+        || t.position != stored.position
+        || t.zoom != stored.zoom
+        || t.rotation != stored.rotation
 }
 
 fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Vec<Value> {
@@ -315,11 +347,6 @@ fn changes(clip: &str, t: &Title, stored: &Title, at: i64) -> Vec<Value> {
     }
     if t.kind != stored.kind || t.align() != stored.align() {
         params["align"] = json!(t.align());
-    }
-    if t.kind == TitleKind::Text
-        && t.anchor.unwrap_or_default() != stored.anchor.unwrap_or_default()
-    {
-        params["anchor"] = json!(t.anchor.unwrap_or_default());
     }
     if t.style != stored.style {
         params["style"] = serde_json::to_value(&t.style).unwrap_or(json!({}));
@@ -530,7 +557,8 @@ impl Workspace {
                 ..Title::new("")
             }
             .align();
-            d.anchor = TitleAnchor::default();
+            d.line.anchor = None;
+            d.upper.anchor = None;
         }
         ui.horizontal(|ui| {
             ui.label("Align");
@@ -538,25 +566,6 @@ impl Workspace {
                 changed |= ui.radio_value(&mut d.align, align, label).changed();
             }
         });
-        if d.kind == TitleKind::Text {
-            let [across, down] = d.anchor.fractions().map(|v| (v * 2.0) as usize);
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Anchor");
-                for (i, label) in ["Left", "Middle", "Right"].into_iter().enumerate() {
-                    if ui.radio(across == i, label).clicked() {
-                        d.anchor = ANCHORS[down][i];
-                        changed = true;
-                    }
-                }
-                ui.separator();
-                for (i, label) in ["Top", "Middle", "Bottom"].into_iter().enumerate() {
-                    if ui.radio(down == i, label).clicked() {
-                        d.anchor = ANCHORS[i][across];
-                        changed = true;
-                    }
-                }
-            });
-        }
         if d.kind != TitleKind::Scroll {
             ui.horizontal_wrapped(|ui| {
                 ui.label("Case");
@@ -635,6 +644,7 @@ impl Workspace {
             d.focus = false;
         }
         let scroll = d.kind == TitleKind::Scroll;
+        let (kind, align) = (d.kind, d.align);
         let usual = Title::usual_position(d.kind, d.align);
         let size_hint = format!(
             "{}% of the picture",
@@ -685,7 +695,13 @@ impl Workspace {
             };
             let mut line_rows =
                 |ui: &mut egui::Ui, f: &mut LineFields, line: Option<LowerThirdLine>| {
-                    let mut moved = row(ui, "Across", &mut f.across, &across_hint);
+                    let part = if line == Some(LowerThirdLine::Upper) {
+                        TitlePart::Upper
+                    } else {
+                        TitlePart::Lower
+                    };
+                    let mut moved = anchor_row(ui, f, Title::usual_anchor(kind, align, part));
+                    moved |= row(ui, "Across", &mut f.across, &across_hint);
                     keys(ui, PictureValue::Position, line);
                     ui.end_row();
                     if !scroll {
@@ -720,8 +736,8 @@ impl Workspace {
             ui.end_row();
         });
         ui.label(dim(match d.kind {
-            TitleKind::LowerThird => "Across and Down: where the lines meet, in percents.",
-            TitleKind::Scroll => "Across: the lines' edge by Align, in percents of the picture.",
+            TitleKind::LowerThird => "Across and Down: each line's anchor, in percents.",
+            TitleKind::Scroll => "Across: the anchor's column, in percents of the picture.",
             TitleKind::Text => "Across and Down: the anchor's place, in percents of the picture.",
         }));
         if !d.error.is_empty() {

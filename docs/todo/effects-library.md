@@ -24,7 +24,7 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 3. **Later:**
    - Measure Smooth Cut in Resolve with a side that is a gap, a moved or resized side, and a side played backward. vidcut plays these as a Cross Dissolve now ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
    - Measure the Gaussian Blur with Dynamic Zoom. vidcut does not change the sigma by the Dynamic Zoom box.
-   - Measure where Resolve applies the effects of a compound clip ([todo](compound-opacity.md)).
+   - Measure effects other than Gaussian Blur on a compound clip ([todo](compound-opacity.md)).
    - Measure the Gaussian Blur with Use Alpha off on a clip that is partly clear, for example with Crop Softness. vidcut blurs its colors without their alpha.
    - Audio effects: equalizer, compressor, reverb and broadband noise reduction.
    - Voice Isolation separates a voice. Broadband noise reduction is the room and the hiss.

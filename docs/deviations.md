@@ -190,9 +190,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - File > Preferences (Ctrl+,) holds the settings of `preferences.toml` ([design/model.md](design/model.md#preferences)).
   - These are the theme, GPU use, and the memory and the audio device of the player.
-  - They also include the limit of the disk cache, the thumbnails, the proxy rules and folder, and the filler words.
+  - They also include the limit of the disk cache, the thumbnails, the proxy rules and folder, the filler words and the keys.
   - The viewer guides are in the same file. The Safe Area control sets them, not a page of this window.
-  - `preferences get|set|reset` give scripts access to them.
+  - `preferences get|set|reset` give scripts access to them. `keys.list`, `keys.set` and `keys.reset` give access to the keys.
   - A sidebar selects one page at a time:
     - General: the theme, the preferences file and Reset vidcut…
     - GPU
@@ -202,6 +202,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Proxies
     - Services: the keys of the paid services, and whether to ask before vidcut sends audio
     - Filler Words
+    - Keys ([X138](#x138-the-keys-are-a-page-of-preferences))
   - When vidcut cannot read the file, the window shows why, with Show in Folder and Reset Preferences.
   - Reset Preferences restores the defaults. It keeps the old file as `preferences.toml.bak`, or `.bak.2` and higher. It never replaces a backup.
   - Reset vidcut… on the General page, and `vidcut reset`, restore the state of a fresh install.
@@ -371,7 +372,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **vidcut:**
   - F1, or Help in the top bar, opens the Help window. It lists every shortcut, with one action in each row.
   - A ? beside a less obvious action explains it in a few plain words.
-  - The user cannot change keys.
   - Under the shortcuts, Help tells in a few words what each upscaler of Super Scale does ([X91](#x91-super-scale-uses-the-upscaler-of-the-gpu)).
   - It also tells what each Retime Process does ([X93](#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
   - It lists only the choices that this computer has.
@@ -1044,11 +1044,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - a Look list ([X59](#x59-looks-for-titles-too-some-built-in))
     - the kind of the title
     - the alignment
-    - the anchor of a Text title
     - the text
     - the font, typed or selected from the installed fonts
     - the size, the color, the outline, the background and the drop shadow, each color typed or picked with a swatch
-    - the place, as percents across and down (X54)
+    - the anchor and the place, as percents across and down (X54), of the title or of each line of a lower third
     - the zoom and the rotation
   - The viewer shows the title while the user edits it, drawn as an export draws it.
   - A change goes in as one `titles.set` when the user leaves the field. A button puts it in at once. Ctrl+Z undoes it.
@@ -1114,7 +1113,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The `position` of a title is `[x, y]`, in fractions of the width and the height of the picture, from its top left.
   - The x goes from -4 to 4, and the y goes from -3 to 5. Thus a title can start and end outside the picture.
   - The Title section of the Inspector shows it as percents.
-  - It is where the anchor of a Text title goes, or the point of a line of a lower third (D65).
+  - It is where the anchor of a Text title or of a line of a lower third goes (D65).
   - Without a position, the title takes the usual place of its kind.
 - **Why:**
   - Fractions mean the same at any picture size, and a script sets them exactly.
@@ -1241,7 +1240,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The File tab of the Inspector shows the clip details and edits the logging fields (p. 412).
 - **vidcut:**
   - The tag icon shows a strip at the top of the pool. The strip stays on until the user turns it off.
-  - The strip shows the camera name, when the clip has one.
+  - The strip shows the camera name, scene, shot and take, when the clip has them.
   - It shows the size, frame rate, codec, bits and chroma subsampling, SDR or HDR, and length of the selected clip.
   - It also shows the start timecode, the sound and the file size.
   - Clip Info shows all that vidcut knows of the file.
@@ -1249,7 +1248,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It reads the file again for its container and streams: codecs and profiles, bit rates, color tags, channel layouts, languages and tags (`media.details`).
   - Copy puts all of it on the clipboard as text.
 - **Why:**
-  - vidcut keeps no scene, shot or take. Thus the strip shows the format, which every file has.
+  - Every file has a format. Thus the strip tells something also when the camera name, scene, shot and take are empty.
   - One window with all the information, read fresh from the file, tells the format without a separate tool.
 
 ## X61. Speakers are numbered per file or per run, and joined by hand
@@ -2603,4 +2602,40 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - FFmpeg 8 reads the file as a still of 2×2 pixels, and its picture never renders ([gotchas](gotchas.md#ffmpeg-reading-and-decoding)).
   - A refusal gives the reason. A still that shows nothing does not.
+  - The owner approved this difference.
+
+## X135. One key has one action
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2. The manual tells the warning and the badge (p. 125).
+  - A warning names each command that has the key.
+  - Assign keeps the key on all these commands, with a warning mark on each row.
+  - At most one command runs on a press.
+- **vidcut:**
+  - vidcut refuses a key that another action uses. The refusal names that action.
+  - The user gives that action another key first.
+- **Why:**
+  - One key on two actions is confusing.
+  - The rule that selects the action in Resolve is not known.
+  - The owner approved this difference.
+
+## X137. A Scroll line wider than the picture wraps
+
+- **Resolve:**
+  - A line of a Scroll that is wider than its text box stays on one line. The box is as wide as the picture.
+  - The picture cuts the line at its edges, and those letters are lost (measured in Resolve Studio 21.1.2).
+- **vidcut:**
+  - The line wraps at 90% of the picture width, as the lines of other titles do.
+- **Why:**
+  - A wrapped line loses no letters.
+  - The owner approved this difference.
+
+## X138. The keys are a page of Preferences
+
+- **Resolve:**
+  - Keyboard Customization is a separate window (p. 121).
+- **vidcut:**
+  - The keys are the Keys page of the Preferences window.
+- **Why:**
+  - vidcut stores the keys in the preferences, with the other settings of the user.
   - The owner approved this difference.
