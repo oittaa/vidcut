@@ -378,7 +378,7 @@ impl Decoder {
         let store = &self.shared.store;
         let missing = |t: i64| !store.contains(&plan.id(t));
         let focus = snap.focus;
-        if self.shared.titles.draw(&plan, focus) | self.shared.subtitles.draw(&plan, focus) {
+        if self.shared.titles.hold(&plan, focus) | self.shared.subtitles.hold(&plan, focus) {
             self.shared.drew_titles();
             return Ok(true);
         }

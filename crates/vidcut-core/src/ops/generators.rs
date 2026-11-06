@@ -99,6 +99,16 @@ pub fn made(kind: GeneratorKind, s: &GeneratorSettings) -> Result<Generator> {
     }
 }
 
+pub fn source_of(kind: Option<GeneratorKind>, s: &GeneratorSettings) -> Result<Option<Generator>> {
+    match kind {
+        Some(kind) => made(kind, s).map(Some),
+        None => match s.named().into_iter().find(|(_, there)| *there) {
+            Some((name, _)) => Err(Error::usage(format!("`{name}` goes with `generator`"))),
+            None => Ok(None),
+        },
+    }
+}
+
 pub fn add(
     p: &mut Project,
     track: Option<&str>,

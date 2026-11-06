@@ -3,6 +3,7 @@ use std::ops::Range;
 use crate::error::{Error, Result};
 use crate::model::{Clip, Media, Project, SyncGroup, TrackKind, uncovered};
 
+use super::titles::default_length;
 use super::{Source, fix_audio, make_clip, place_block, track_above, tracks, unlocked};
 
 pub struct Placed {
@@ -133,21 +134,29 @@ pub fn source_overwrite(
     playhead: Option<i64>,
     by_group: bool,
 ) -> Result<Placed> {
-    let m = p
-        .media(&src.media)
-        .ok_or_else(|| Error::not_found(format!("no media {}", src.media)))?;
+    let m = match src.generator {
+        Some(_) => None,
+        None => Some(
+            p.media(&src.media)
+                .ok_or_else(|| Error::not_found(format!("no media {}", src.media)))?,
+        ),
+    };
     if p.tracks.iter().all(|t| t.clips.is_empty()) {
         return Err(Error::invalid("The timeline is empty"));
     }
-    let group = match by_group {
-        true => Some(
+    let group = match (by_group, m) {
+        (false, _) => None,
+        (true, Some(m)) => Some(
             p.group_of(&m.id)
                 .ok_or_else(|| Error::invalid(format!("{} is in no synced group", m.name)))?,
         ),
-        false => None,
+        (true, None) => return Err(Error::invalid("A generator is in no synced group")),
     };
     let l = Lining { p, group };
-    let (o, frames) = (l.origin(m).unwrap_or_default(), p.media_frames(m));
+    let (o, frames) = match m {
+        Some(m) => (l.origin(m).unwrap_or_default(), p.media_frames(m)),
+        None => (0, default_length(p).max(src.range.1)),
+    };
     let whole = o..o + frames;
     let part = o + src.range.0..o + src.range.1;
     let marks = (p.marks.mark_in, p.marks.mark_out);
@@ -177,11 +186,15 @@ pub fn source_overwrite(
             b.map_or(frames, |b| b - file_start),
         ),
     };
-    let (a, b) = (a.max(0).max(-file_start), b.min(frames));
+    let a = a.max(0).max(-file_start);
+    let b = if m.is_some() { b.min(frames) } else { b };
     if a >= b {
         return Err(no_common_time());
     }
-    let kept = uncovered(a, b, &m.left_out);
+    let kept = match m {
+        Some(m) => uncovered(a, b, &m.left_out),
+        None => vec![(a, b)],
+    };
     let (Some(first), Some(last)) = (kept.first(), kept.last()) else {
         return Err(Error::invalid(
             "every frame of the range is left out (media.leave_out)",

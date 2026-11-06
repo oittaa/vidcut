@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::generators::{Axis, Pattern};
 use crate::model::{
-    AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, DuckDetect, Generator, Gradient,
-    Hdr, Keyframe, Media, MediaSuperScale, Picture, PictureTransition, Project, PushPreset, Retime,
-    Section, Settings, SlidePreset, SmoothMode, SuperScale, TimelineColors, Title, TrackKind,
-    WipeDirection,
+    AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, DuckDetect,
+    Generator, Gradient, Hdr, Keyframe, Media, MediaSuperScale, Picture, PictureTransition,
+    Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode, SuperScale,
+    TimelineColors, Title, TrackKind, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -1739,6 +1739,17 @@ pub(crate) fn plays_inside(c: &Clip) -> bool {
     c.compound.as_ref().is_some_and(|k| !k.tracks.is_empty())
 }
 
+fn holds_mode(c: &Clip) -> bool {
+    c.compound
+        .iter()
+        .flat_map(|k| &k.tracks)
+        .flat_map(|t| &t.clips)
+        .any(|x| {
+            let moded = x.picture.as_ref().map(Picture::mode);
+            moded.is_some_and(|m| m != CompositeMode::Normal) || holds_mode(x)
+        })
+}
+
 #[derive(Debug, Clone, Default)]
 struct Nest {
     outer: Vec<Placed>,
@@ -1786,11 +1797,10 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                 if !c.enabled {
                     continue;
                 }
-                let chain: Vec<Placed> = c
-                    .picture
-                    .iter()
-                    .filter(|x| !x.is_usual())
-                    .map(|x| Placed::of(c, x.clone(), run_of(c, nest.run)))
+                let own = c.picture.clone().unwrap_or_default();
+                let chain: Vec<Placed> = (!own.is_usual() || holds_mode(c))
+                    .then(|| Placed::of(c, own, run_of(c, nest.run)))
+                    .into_iter()
                     .chain(nest.outer.iter().cloned())
                     .collect();
                 let k = c.compound.as_ref().expect("plays inside");
@@ -2555,6 +2565,30 @@ pub fn flatten_clip(p: &Project, clip: &str) -> Result<RenderPlan> {
         .clone()
         .or_else(|| p.media(&c.media).map(|m| stem(&m.name)))
         .unwrap_or_else(|| c.id.clone());
+    Ok(plan)
+}
+
+pub fn generator_tape(p: &Project, generator: &Generator, a: i64, b: i64) -> Result<RenderPlan> {
+    let mut alone = p.clone();
+    for t in &mut alone.tracks {
+        t.clips.clear();
+        t.transitions.clear();
+        t.video_enabled = true;
+    }
+    let clip = crate::ops::block_clip(
+        String::from("generator"),
+        (0, b),
+        None,
+        Some(generator.clone()),
+    );
+    alone
+        .track_mut(crate::ops::MAIN)
+        .expect("every project has V1")
+        .clips
+        .push(clip);
+    let mut plan = flatten(&alone, a, b)?;
+    plan.colors = timeline_colors(p);
+    plan.name = crate::generators::name(generator).to_string();
     Ok(plan)
 }
 
