@@ -812,17 +812,12 @@ fn make_thumbs(media: &vidcut_core::model::Media) -> std::result::Result<bool, S
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     let decoder = decoder.as_ref();
     let (count, (w, h)) = (crate::thumbcache::THUMBS, crate::thumbcache::THUMB_SIZE);
+    let look = (media.color_space, crate::thumbcache::drawn_alpha(media));
     let (images, times) = match media.sequence.as_ref().map(|s| s.count) {
-        Some(pictures) => vidcut_av::thumbs::filmstrip_pictures(
-            &input,
-            pictures,
-            count,
-            w,
-            h,
-            decoder,
-            media.color_space,
-        ),
-        None => vidcut_av::thumbs::filmstrip(&input, count, w, h, decoder, media.color_space),
+        Some(pictures) => {
+            vidcut_av::thumbs::filmstrip_pictures(&input, pictures, count, w, h, decoder, look)
+        }
+        None => vidcut_av::thumbs::filmstrip(&input, count, w, h, decoder, look),
     }
     .map_err(|e| e.to_string())?;
     Ok(!images.is_empty() && crate::thumbcache::store_thumbs(&file, &origin, &images, &times))
@@ -3727,7 +3722,11 @@ impl Live {
         self.forget_removed(&media);
         for m in media {
             let version = media_version(&m);
-            let pictures = format!("{version}|{}", m.color_space.key());
+            let pictures = format!(
+                "{version}|{}|{}",
+                m.color_space.key(),
+                crate::thumbcache::drawn_alpha(&m).title()
+            );
             if self.thumbs_on
                 && m.info.video.is_some()
                 && self.thumbs_wanted.get(&m.id) != Some(&pictures)
