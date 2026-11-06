@@ -28,7 +28,7 @@ classDiagram
     path, name, bin, color, camera
     size, mtime_ns, fingerprint
     info: MediaInfo
-    color_space, super_scale, left_out
+    color_space, alpha_mode, super_scale, left_out
     sequence, subtitles, words
     subclip, markers
   }
@@ -196,6 +196,9 @@ Media fields:
   - `Media::video_as_read` is the `VideoInfo` of the file, read in that space. Render pieces carry it.
   - `VideoReader` retags each decoded frame with it (`color::retag`). This drops the HDR side data.
   - A proxy is made from the pictures as read in that space. Thus its own tags are right.
+- `alpha_mode` (`AlphaMode`, spec §3) tells how to read the alpha channel of the pictures.
+  - `VideoPiece::Source` carries it. `Picture::alpha_mode` gives it to the draw ([playback](playback.md#gpu-pictures)).
+  - `Media::opaque` is true for a picture with no alpha channel, or with the mode None.
 - `super_scale` (`SuperScale`, spec §3) enlarges the pictures with a better upscaler before they are fitted.
   - `upscaler` (`Upscaler`) is AI Fast, AI Slow or Classic. [gpu](gpu.md#super-scale) tells which upscaler each path uses.
   - Proxies do not use it. The viewer uses it only with `viewer.super_scale` ([playback](playback.md)).

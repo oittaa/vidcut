@@ -2893,6 +2893,7 @@ fn mutate(
             take,
             comment,
             color_space,
+            alpha_mode,
             super_scale,
             sharpness,
             upscaler,
@@ -2907,11 +2908,12 @@ fn mutate(
             if color.is_none()
                 && notes.iter().all(|note| note.is_none())
                 && color_space.is_none()
+                && alpha_mode.is_none()
                 && set.is_empty()
             {
                 return Err(Error::usage(
-                    "give color, camera, created, scene, shot, take, comment, color_space, or a \
-                     Super Scale field: super_scale, sharpness or upscaler",
+                    "give color, camera, created, scene, shot, take, comment, color_space, \
+                     alpha_mode, or a Super Scale field: super_scale, sharpness or upscaler",
                 ));
             }
             if let Some(color) = color {
@@ -2943,6 +2945,9 @@ fn mutate(
             }
             if let Some(space) = color_space {
                 ops::set_media_color_space(p, &media.to_vec(), *space)?;
+            }
+            if let Some(mode) = alpha_mode {
+                ops::set_media_alpha_mode(p, &media.to_vec(), *mode)?;
             }
             if *download && !dry_run {
                 for upscaler in ops::ai_upscalers(p, &media.to_vec(), &set) {
@@ -4911,6 +4916,7 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         marks: Default::default(),
         bin: String::new(),
         color_space: Default::default(),
+        alpha_mode: Default::default(),
         super_scale: Default::default(),
         left_out: Vec::new(),
         words: Vec::new(),
@@ -6052,8 +6058,7 @@ fn give_picture(p: &mut Project, block: &Clip, picture: &Picture, made: &[String
         let fills = c.compound.is_some()
             || c.draws()
             || p.media(&c.media)
-                .and_then(|m| m.info.video.as_ref())
-                .is_some_and(|v| crate::place::fills(v, frame));
+                .is_some_and(|m| crate::place::fills(m, frame));
         let whole = picture.dynamic_zoom.is_none()
             || (c.start == block.start && c.duration == block.duration);
         if c.title.is_none() && c.picture.is_none() && fills && whole {
@@ -8509,6 +8514,9 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
     }
     if !m.color_space.is_tagged() {
         v["color_space"] = json!(m.color_space);
+    }
+    if !m.alpha_mode.is_straight() {
+        v["alpha_mode"] = json!(m.alpha_mode);
     }
     if !m.super_scale.is_off() {
         v["super_scale"] = json!(m.super_scale);
