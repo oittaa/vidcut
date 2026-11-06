@@ -2891,6 +2891,7 @@ fn mutate(
             scene,
             shot,
             take,
+            comment,
             color_space,
             alpha_mode,
             super_scale,
@@ -2903,7 +2904,7 @@ fn mutate(
                 sharpness: *sharpness,
                 upscaler: *upscaler,
             };
-            let notes = [camera, created, scene, shot, take];
+            let notes = [camera, created, scene, shot, take, comment];
             if color.is_none()
                 && notes.iter().all(|note| note.is_none())
                 && color_space.is_none()
@@ -2911,7 +2912,8 @@ fn mutate(
                 && set.is_empty()
             {
                 return Err(Error::usage(
-                    "give color, camera, created, scene, shot, take, color_space, alpha_mode, or                      a Super Scale field: super_scale, sharpness or upscaler",
+                    "give color, camera, created, scene, shot, take, comment, color_space, \
+                     alpha_mode, or a Super Scale field: super_scale, sharpness or upscaler",
                 ));
             }
             if let Some(color) = color {
@@ -2925,12 +2927,13 @@ fn mutate(
                     "{date} is not a date; give YYYY-MM-DD"
                 )));
             }
-            let fields: [fn(&mut Media) -> &mut Option<String>; 5] = [
+            let fields: [fn(&mut Media) -> &mut Option<String>; 6] = [
                 |m| &mut m.camera,
                 |m| &mut m.created,
                 |m| &mut m.scene,
                 |m| &mut m.shot,
                 |m| &mut m.take,
+                |m| &mut m.comment,
             ];
             for (note, field) in notes.into_iter().zip(fields) {
                 if let Some(note) = note {
@@ -4925,6 +4928,7 @@ fn add_media(p: &mut Project, files: &mut PoolFiles, probed: ProbedMedia) -> Str
         scene: None,
         shot: None,
         take: None,
+        comment: None,
         fingerprint: probed.fingerprint,
         subtitles: probed.subtitles,
         subclip: None,
@@ -8499,6 +8503,7 @@ fn media_json(p: &Project, m: &Media, env: &dyn Env, proxies: &Path) -> Value {
         ("scene", &m.scene),
         ("shot", &m.shot),
         ("take", &m.take),
+        ("comment", &m.comment),
     ] {
         if let Some(value) = value {
             v[key] = json!(value);

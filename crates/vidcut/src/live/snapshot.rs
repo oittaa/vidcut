@@ -154,6 +154,9 @@ impl PoolView {
             PoolSort::Name => media.sort_by_key(|m| m.name.to_lowercase()),
             PoolSort::Duration => media.sort_by_key(|m| p.media_frames(m)),
             PoolSort::Date => media.sort_by_key(|m| m.mtime_ns),
+            PoolSort::Timecode if self.view == PoolMode::Metadata => {
+                media.sort_by(|a, b| a.created.cmp(&b.created).then(by_start(a, b)));
+            }
             PoolSort::Timecode => media.sort_by(|a, b| start(a).total_cmp(&start(b))),
         }
         if self.descending {
