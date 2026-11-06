@@ -16,6 +16,7 @@
 
 - **Scroll:**
   - In Times New Roman at 108, the line distance is 174 pixels in Resolve and 169.5 in vidcut. The other measured fonts fit within 1.5 pixels. Find the reason.
+  - Only Gabriola sets `USE_TYPO_METRICS` among the measured fonts. Measure one more such font, for the line distance and for the rows.
   - vidcut keeps the exact size of a Scroll, because its rounding is not measured. Measure a Scroll at a size with a fraction.
 - **Variable fonts:** a stored title with only the family name draws Bahnschrift narrower in Resolve than in vidcut. Choose the font and its face in the Inspector, and measure which face Resolve takes.
 - **Gabriola:** the letters are 0.3 pixels left of Resolve, and the rows match. Find the reason.
