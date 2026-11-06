@@ -2601,40 +2601,57 @@ impl Workspace {
             .unwrap_or_default()
     }
 
-    fn input_lut_picked(&mut self) {
-        let Some((clips, picked)) = self.inspector.lut_pick.take() else {
+    pub(super) fn input_lut_picked(&mut self) {
+        let Some((media, picked)) = self.inspector.lut_pick.take() else {
             return;
         };
         match picked.take() {
-            None => self.inspector.lut_pick = Some((clips, picked)),
+            None => self.inspector.lut_pick = Some((media, picked)),
             Some(None) => {}
             Some(Some(path)) => {
-                self.send("clip.set", json!({ "clips": clips, "input_lut": path }));
+                self.send("media.set", json!({ "media": media, "input_lut": path }));
             }
         }
     }
 
+    pub(super) fn ask_input_lut(
+        &mut self,
+        ctx: &egui::Context,
+        media: Vec<String>,
+        now: Option<&Path>,
+    ) {
+        let (dialogs, folder) = (self.dialogs.clone(), self.lut_folder(now));
+        let picked = Picked::ask(ctx, move || {
+            dialogs.pick_file("Input LUT", &folder, &["cube"])
+        });
+        self.inspector.lut_pick = Some((media, picked));
+    }
+
     fn input_lut_section(&mut self, ui: &mut egui::Ui, p: &Project, chosen: &[Chosen]) {
-        let clips: Vec<&Clip> = chosen
+        let mut media: Vec<String> = chosen
             .iter()
             .filter_map(|c| p.clip(&c.id))
-            .filter(|c| !c.media.is_empty())
+            .filter(|c| c.video && !c.media.is_empty())
+            .map(|c| c.media.clone())
             .collect();
-        let Some(first) = clips.first() else {
+        media.sort_unstable();
+        media.dedup();
+        let Some(first) = media.first().and_then(|id| p.media(id)) else {
             return;
         };
         let now = first.input_lut.as_deref();
-        let ids: Vec<String> = clips.iter().map(|c| c.id.clone()).collect();
+        let any = media
+            .iter()
+            .any(|id| p.media(id).is_some_and(|m| m.input_lut.is_some()));
         let mut choose = false;
         let header = |ui: &mut egui::Ui| {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add_enabled(now.is_some(), egui::Button::new("Reset"))
-                    .clicked()
+                ui.add_enabled(any, egui::Button::new("Reset")).clicked()
             })
             .inner
         };
         let cleared = group(ui, "LUT", header, |ui| {
-            label(ui, "Input LUT", now.is_some());
+            label(ui, "Input LUT", any);
             ui.horizontal(|ui| {
                 choose = ui.button("Choose…").clicked();
                 let name = now
@@ -2648,14 +2665,10 @@ impl Workspace {
             ui.end_row();
         });
         if cleared {
-            self.send("clip.set", json!({ "clips": ids, "input_lut": "" }));
+            self.send("media.set", json!({ "media": media, "input_lut": "" }));
         }
         if choose {
-            let (dialogs, folder) = (self.dialogs.clone(), self.lut_folder(now));
-            let picked = Picked::ask(ui.ctx(), move || {
-                dialogs.pick_file("Input LUT", &folder, &["cube"])
-            });
-            self.inspector.lut_pick = Some((ids, picked));
+            self.ask_input_lut(ui.ctx(), media, now);
         }
     }
 

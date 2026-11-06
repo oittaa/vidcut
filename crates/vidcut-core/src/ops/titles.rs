@@ -103,9 +103,6 @@ pub fn checked(t: &Title) -> Result<Title> {
     if t.kind == TitleKind::LowerThird && text.lines().count() > 2 {
         return Err(Error::invalid("a lower third has two lines at the most"));
     }
-    if t.kind != TitleKind::Text && t.anchor.is_some() {
-        return Err(Error::invalid("anchor is a text title's"));
-    }
     if t.kind == TitleKind::Scroll
         && (t.zoom.is_some_and(|z| z != 1.0) || t.rotation.is_some_and(|r| r != 0.0))
     {
@@ -356,9 +353,11 @@ pub fn changed(old: &Title, change: &TitleChange) -> Title {
         None => old.clone(),
     };
     if let Some(k) = change.kind {
+        if k != t.kind {
+            t.anchor = None;
+        }
         if k != t.kind && (k == TitleKind::Text || t.kind == TitleKind::Text) {
             t.align = None;
-            t.anchor = None;
         }
         t.kind = k;
     }
