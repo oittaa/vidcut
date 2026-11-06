@@ -188,9 +188,9 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - Why: Super Scale works on the source, before the retime ([deviation X93](../deviations.md#x93-retime-process-has-ai-models-in-the-place-of-optical-flow)).
   - The `Source` keeps the last two enlarged pictures (`Source::ai_picture`). Thus the later picture of one pair is the earlier picture of the next.
 - An AI upscaler takes the colors of a picture with no alpha in them. Why: its model has three channels.
-  - The alpha of the source frame is enlarged by the draw to the size of the enlarged picture (`Matte`). This occurs at each speed (`VideoFrames::shown`).
+  - The draw enlarges the alpha of the source frame to the size of the enlarged picture (`Matte`). This occurs at each speed (`VideoFrames::shown`).
   - The layer goes over the layers below as Straight, or as Premultiplied when its media has that Alpha Mode.
-  - Two enlarged pictures of a pair mix with no alpha in them. Thus a change of alpha between the two frames gives a darker edge than the plain pair below.
+  - Two enlarged pictures of a pair mix with no alpha in them ([todo](../todo/super-scale.md)). Where the alpha changes between the two frames, the edge is then darker or brighter than the pair with no upscaler.
 - With the frame rate conversion of macOS, `interpolate::between_frames` makes a VideoToolbox frame from the pair ([gpu](gpu.md#frame-interpolation)).
   - The draw puts both frames into P416 VideoToolbox frames in the timeline color space first (`Source::frame_of`). They are sized and placed as the RGB pair is.
 - The pair is sized and placed before the frame is made. Why: Edit Sizing comes before Speed Effects ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
@@ -199,6 +199,7 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - A placed clip: the draw places each frame into RGB with its Transform, Crop and Dynamic Zoom (`Sampling::Colors`). The RGB covers only the bounds of the placed picture (`placed_look`).
   - Super Scale enlarges each frame with the kernel of its Sharpness, as the draw of an export does (`screen::kernel`).
   - `Source::rgb_from` keeps the RGB of the last two frames. Thus the later frame of one pair is the earlier frame of the next, while the placing stays the same (`Look`).
+  - Each of the two frames keeps its colors and its gray picture in one entry (`Drawings`).
 - With the other processes, `interpolate::between` makes the frame from the two RGB pictures.
 - The key of a pair names its placing (`Source::look_id`). Thus a new placing gets new features.
 - A made frame of a placed clip is already placed (`Sampling::Placed`). The draw takes only its edges, its opacity and its composite mode from `place::Placing`.
@@ -209,11 +210,13 @@ Retimed frames ([deviation X93](../deviations.md#x93-retime-process-has-ai-model
   - The draw makes each frame of the pair twice (`Look::with_alpha`): its colors by its Alpha Mode, and its alpha as gray (`AlphaUse::Matte`).
   - The colors have the alpha in them (`AlphaUse::Multiplied`). Why: a mix of two such pictures gives the mix of the two frames over any picture below.
   - `interpolate::matte_between` makes the gray picture from its own pair. The `Engine` holds that pair beside the pair of colors. Why: otherwise each pair would push the other out at each frame.
+  - AI Retime makes the gray picture with a flow of its own, from the gray pair. Thus the edges of the gray picture and of the colors can differ.
   - With the frame rate conversion of macOS, Frame Blend makes the gray picture. Why: that conversion takes VideoToolbox frames, and the gray pair is RGB.
   - At a shot change, the gray picture comes from the same frame as the colors.
   - The layer goes over the layers below as Premultiplied (`Matte::of`). With a composite mode, the draw first takes the alpha out of the colors (`AlphaUse::TakenOut`). A media with the Alpha Mode Premultiplied keeps its colors.
   - The Alpha Mode None makes no gray picture, and its colors have no alpha in them.
-  - A job of the clip level has no gray picture (`VideoFrames::colors_only`). Such a clip stays at the timeline level ([playback](playback.md#the-render-cache)).
+  - A retimed clip with alpha gets no job of the clip level (`Setup::keeps_alpha`). It stays at the timeline level ([playback](playback.md#the-render-cache)).
+  - A job of the clip level with AI Super Scale and no retime makes the alpha of the enlarged frame (`VideoFrames::shown`).
 
 Seeks:
 

@@ -497,6 +497,7 @@ impl Picture {
 
     pub(crate) fn layers(&self) -> Vec<(usize, Option<crate::hw::Kind>, bool)> {
         std::iter::once((self.bytes, self.gpu(), self.held()))
+            .chain(self.matte.iter().flat_map(|m| m.layers()))
             .chain(self.over.iter().flat_map(|o| o.picture.layers()))
             .collect()
     }
