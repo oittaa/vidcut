@@ -432,6 +432,8 @@ The bar and the Jobs button:
 - The filmstrips of the Trim Editor use the same tiles (`vidcut_core::ops::filmstrip`, `TrimAnchor`).
 - The pictures of the pool use the same tiles and the same limit (`Workspace::pool_picture`). Why: pictures of media share one `Lru`.
 - The aspect of a tile comes from the media's probe (`media_aspect`). Thus a thumbnail has its shape before its first picture is decoded.
+- A change of the file, the input color space, the Alpha Mode or the subclip range of a media removes its tiles from memory (`Seen`).
+- The names of the tile files on disk hold the input color space and the Alpha Mode (`thumbcache::tile_block`). Thus a media does not read tiles of an earlier color space or Alpha Mode.
 - The pool asks for some pictures ahead (`Workspace::preload`, `Workspace::preload_strip`):
   - Each media that shows, or is within one screen of the view, asks for its small pictures (`Tiles::thumbs`, in the next item).
   - A thumbnail within one screen of the visible ones asks for its poster (`poster_frame`).
@@ -444,6 +446,8 @@ The bar and the Jobs button:
 - Each video media has a file of 24 small pictures on disk (`thumbcache::thumbs_file`, `THUMBS`, `THUMB_SIZE`):
   - `vidcut-worker-N` makes the file once for each version of the media (`make_thumbs`). It does this only while `thumbnails.disk_cache` is on.
   - A fast decode makes the pictures (`vidcut_av::thumbs::filmstrip`). It decodes only reference frames.
+  - The pictures follow the input color space and the Alpha Mode of the media, as the viewer does.
+  - The Alpha Mode counts only for a file with an alpha channel (`thumbcache::drawn_alpha`). Why: the other Alpha Modes give the same picture without alpha.
   - The file keeps the time of the frame that each picture shows. The first picture is the first reference frame at or after the poster frame.
   - The `Snapshot` lists the media whose file is on disk (`Snapshot::thumbs`).
   - A tile worker reads the file before the tiles that wait. Its pictures go into the tiles as stand-ins at the frames of their times (`STAND_INS`).

@@ -1986,10 +1986,12 @@ impl Single {
         size: (u32, u32),
         pixel: format::Pixel,
         path: &Path,
+        alpha: AlphaMode,
     ) -> Result<frame::Video> {
         let made = self.maker.make(&mut self.fitting, frame, path)?;
         let picture = crate::player::Picture::new(made, rotation, None, None)
-            .with_sampling(Sampling::Rounded);
+            .with_sampling(Sampling::Rounded)
+            .with_alpha_mode(alpha);
         let picture = std::sync::Arc::new(picture);
         let layers = (&[][..], &[][..], &[][..], None);
         self.drawer

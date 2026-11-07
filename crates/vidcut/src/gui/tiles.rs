@@ -70,6 +70,7 @@ struct Seen {
     mtime_ns: i64,
     origin: Origin,
     color_space: vidcut_core::model::ColorSpace,
+    alpha: vidcut_core::model::AlphaMode,
     subclip: Option<vidcut_core::model::Subclip>,
 }
 
@@ -81,6 +82,7 @@ impl Seen {
             mtime_ns: m.mtime_ns,
             origin: paths::media_origin(m),
             color_space: m.color_space,
+            alpha: thumbcache::drawn_alpha(m),
             subclip: m.subclip,
         }
     }
@@ -90,6 +92,7 @@ impl Seen {
             && self.size == m.size
             && self.mtime_ns == m.mtime_ns
             && self.color_space == m.color_space
+            && self.alpha == thumbcache::drawn_alpha(m)
             && self.subclip == m.subclip
     }
 }
@@ -379,7 +382,7 @@ impl Tiles {
             disk: (self.disk && m.subclip.is_none()).then(|| {
                 let block = key.frame.div_euclid(TILE_BLOCK);
                 let origin = self.origin_of(m);
-                let path = thumbcache::tile_block(&origin, key.height, block, m.color_space);
+                let path = thumbcache::tile_block(&origin, key.height, block, m);
                 BlockFile { path, origin }
             }),
             thumbs: None,
