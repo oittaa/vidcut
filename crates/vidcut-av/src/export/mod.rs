@@ -17,7 +17,8 @@ use serde::Serialize;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind};
 use vidcut_core::export::metadata::{self, Measured, MetadataChoice, PieceMeta};
 use vidcut_core::export::{
-    EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Rounded, VideoSettings, validate,
+    AlphaOut, Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Numbering, Rounded,
+    VideoSettings, validate,
 };
 use vidcut_core::model::{Hdr, SubtitleStyle};
 use vidcut_core::render::{RenderPlan, VideoPiece};
@@ -232,7 +233,10 @@ pub fn probed_metadata<'a>(
 }
 
 pub fn needs_light(v: &VideoSettings, m: &PieceMeta) -> bool {
-    if v.hdr.transfer() != Some(Hdr::Pq) || v.hdr_metadata == HdrMetadata::None {
+    if v.hdr.transfer() != Some(Hdr::Pq)
+        || v.hdr_metadata == HdrMetadata::None
+        || v.image_bits().is_some()
+    {
         return false;
     }
     match v.max_cll.as_deref() {
@@ -422,7 +426,19 @@ pub fn run(
 ) -> Result<Report> {
     let none = Subtitles::default();
     run_decoding_on(
-        plan, settings, output, available, None, &none, cancel, progress,
+        plan,
+        settings,
+        output,
+        Numbering {
+            first: plan.range.0,
+            record: plan.range.0,
+            drop_frame: false,
+        },
+        available,
+        None,
+        &none,
+        cancel,
+        progress,
     )
 }
 
@@ -431,6 +447,7 @@ pub fn run_decoding_on(
     plan: &RenderPlan,
     settings: &ExportSettings,
     output: &Path,
+    numbering: Numbering,
     available: &Availability,
     decoder: Option<&crate::hw::GpuDecoder>,
     subtitles: &Subtitles,
@@ -481,19 +498,166 @@ pub fn run_decoding_on(
         settings,
         part.path(),
         output,
+        numbering,
         available,
         decoder,
         subtitles,
         cancel,
         progress,
     )?;
-    part.keep(output)?;
+    if !settings.container.image_sequence() {
+        part.keep(output)?;
+    }
     Ok(Report {
         color: chosen,
         metadata: metadata_chosen,
         copies: copies.counted(),
         ..report
     })
+}
+
+struct FrameFiles {
+    dir: vidcut_core::temp::Temp,
+    settings: ExportSettings,
+    output: PathBuf,
+    numbering: Numbering,
+    fps: Rational,
+    written: i64,
+    associated: bool,
+}
+
+const EXR_START: [u8; 8] = [0x76, 0x2f, 0x31, 0x01, 2, 0, 0, 0];
+const EXR_TIMECODE_NAME: &[u8] = b"timeCode";
+const EXR_TIMECODE_TYPE: &[u8] = b"timecode";
+const EXR_LINE_ORDER_NAME: &[u8] = b"lineOrder";
+
+fn exr_layout(data: &[u8]) -> Option<(usize, usize)> {
+    if !data.starts_with(&EXR_START) {
+        return None;
+    }
+    let zero = |from: usize| Some(from + data.get(from..)?.iter().position(|&b| b == 0)?);
+    let mut at = EXR_START.len();
+    while *data.get(at)? != 0 {
+        let name = zero(at)?;
+        if &data[at..name] == EXR_TIMECODE_NAME {
+            return None;
+        }
+        let kind = zero(name + 1)?;
+        if &data[at..name] == EXR_LINE_ORDER_NAME && *data.get(kind + 5)? != 0 {
+            return None;
+        }
+        let size = i32::from_le_bytes(data.get(kind + 1..kind + 5)?.try_into().ok()?);
+        at = kind + 5 + usize::try_from(size).ok()?;
+    }
+    let table = at + 1;
+    let first = u64::from_le_bytes(data.get(table..table + 8)?.try_into().ok()?);
+    let first = usize::try_from(first).ok()?;
+    let length = first.checked_sub(table)?;
+    (length > 0 && length % 8 == 0 && first <= data.len()).then_some((at, first))
+}
+
+fn exr_timecode(time: u32) -> Vec<u8> {
+    let mut attribute = [EXR_TIMECODE_NAME, b"\0", EXR_TIMECODE_TYPE, b"\0"].concat();
+    attribute.extend(8i32.to_le_bytes());
+    attribute.extend(time.to_le_bytes());
+    attribute.extend(0u32.to_le_bytes());
+    attribute
+}
+
+const TIFF_EXTRA_SAMPLES: u16 = 338;
+const TIFF_SHORT: u16 = 3;
+const TIFF_ASSOCIATED_ALPHA: u16 = 1;
+
+fn tiff_extra_samples(data: &[u8]) -> Option<usize> {
+    if !data.starts_with(b"II*\0") {
+        return None;
+    }
+    let short = |at: usize| Some(u16::from_le_bytes(data.get(at..at + 2)?.try_into().ok()?));
+    let long = |at: usize| Some(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?));
+    let ifd = usize::try_from(long(4)?).ok()?;
+    (0..usize::from(short(ifd)?))
+        .map(|i| ifd + 2 + i * 12)
+        .find_map(|entry| {
+            let found = short(entry)? == TIFF_EXTRA_SAMPLES
+                && short(entry + 2)? == TIFF_SHORT
+                && long(entry + 4)? == 1;
+            found.then_some(entry + 8)
+        })
+}
+
+impl FrameFiles {
+    fn new(
+        settings: &ExportSettings,
+        output: &Path,
+        numbering: Numbering,
+        fps: Rational,
+    ) -> Result<Self> {
+        let associated = settings.container == Container::Tiff
+            && settings
+                .video
+                .as_ref()
+                .is_some_and(|v| v.alpha && v.alpha_mode == AlphaOut::Premultiplied);
+        Ok(Self {
+            dir: vidcut_core::temp::dir(output)?,
+            settings: settings.clone(),
+            output: output.to_path_buf(),
+            numbering,
+            fps,
+            written: 0,
+            associated,
+        })
+    }
+
+    fn write(&mut self, packet: &ffmpeg::Packet) -> Result<()> {
+        use std::io::Write;
+        let path = self.dir.path().join(self.written.to_string());
+        let data = packet.data().unwrap_or_default();
+        let alpha = self.associated.then(|| tiff_extra_samples(data)).flatten();
+        let exr = (self.settings.container == Container::Exr)
+            .then(|| exr_layout(data))
+            .flatten();
+        let time = vidcut_core::time::packed_timecode(
+            self.numbering.record + self.written,
+            self.fps,
+            self.numbering.drop_frame,
+        );
+        let mut file = std::fs::File::create(path)?;
+        match (alpha, exr.zip(time)) {
+            (Some(at), _) => {
+                file.write_all(&data[..at])?;
+                file.write_all(&TIFF_ASSOCIATED_ALPHA.to_le_bytes())?;
+                file.write_all(&data[at + 2..])?;
+            }
+            (None, Some(((end, first), time))) => {
+                let attribute = exr_timecode(time);
+                let shift = attribute.len() as u64;
+                let offsets: Vec<u8> = data[end + 1..first]
+                    .as_chunks::<8>()
+                    .0
+                    .iter()
+                    .flat_map(|&o| (u64::from_le_bytes(o) + shift).to_le_bytes())
+                    .collect();
+                file.write_all(&data[..end])?;
+                file.write_all(&attribute)?;
+                file.write_all(&data[end..end + 1])?;
+                file.write_all(&offsets)?;
+                file.write_all(&data[first..])?;
+            }
+            (None, None) => file.write_all(data)?,
+        }
+        self.written += 1;
+        Ok(())
+    }
+
+    fn keep(&self) -> Result<()> {
+        for i in 0..self.written {
+            let file = self
+                .settings
+                .frame_file(&self.output, self.numbering.first + i);
+            std::fs::rename(self.dir.path().join(i.to_string()), file)?;
+        }
+        Ok(())
+    }
 }
 
 struct PassFiles {
@@ -676,6 +840,7 @@ struct VideoOut {
     hdr10plus: Option<(ffmpeg::codec::Id, std::collections::HashMap<i64, Vec<u8>>)>,
     codec: ffmpeg::codec::Id,
     kind: EncoderChoice,
+    files: Option<FrameFiles>,
 }
 
 impl VideoOut {
@@ -709,6 +874,10 @@ impl VideoOut {
     fn drain(&mut self, octx: &mut format::context::Output) -> Result<()> {
         let mut p = ffmpeg::Packet::empty();
         while self.encoder.receive_packet(&mut p).is_ok() {
+            if let Some(files) = &mut self.files {
+                files.write(&p)?;
+                continue;
+            }
             if let Some((id, waiting)) = self.hdr10plus.as_mut()
                 && let Some(t35) = p.pts().and_then(|pts| waiting.remove(&pts))
             {
@@ -888,7 +1057,11 @@ impl Writer {
                 .ctx(|| "flushing video encoder".into())?;
             v.drain(&mut self.octx)?;
         }
-        self.octx.write_trailer().ctx(|| "writing trailer".into())
+        self.octx.write_trailer().ctx(|| "writing trailer".into())?;
+        match self.video.as_ref().and_then(|v| v.files.as_ref()) {
+            Some(files) => files.keep(),
+            None => Ok(()),
+        }
     }
 }
 
@@ -898,6 +1071,7 @@ fn encode(
     settings: &ExportSettings,
     part: &Path,
     output: &Path,
+    numbering: Numbering,
     available: &Availability,
     decoder: Option<&crate::hw::GpuDecoder>,
     subs: &Subtitles,
@@ -1074,6 +1248,10 @@ fn encode(
                 hdr10plus,
                 codec: id,
                 kind: enc.kind,
+                files: match settings.container.image_sequence() {
+                    true => Some(FrameFiles::new(settings, output, numbering, plan.fps)?),
+                    false => None,
+                },
             };
             (Some(made), Some(encoding))
         }
@@ -1313,7 +1491,7 @@ fn encode(
         })
     });
     Ok(Report {
-        output: output.to_path_buf(),
+        output: settings.first_file(output, numbering.first),
         frames: plan.frames,
         samples: if audio_encoder.is_some() {
             plan.samples()

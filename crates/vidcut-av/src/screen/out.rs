@@ -46,6 +46,10 @@ const RED: u32 = 3;
 const ALPHA: u32 = 4;
 const RGBA: u32 = 5;
 const AYUV: u32 = 6;
+const FLOAT_RED: u32 = 7;
+const FLOAT_GREEN: u32 = 8;
+const FLOAT_BLUE: u32 = 9;
+const FLOAT_ALPHA: u32 = 10;
 const KEEPS_STRAIGHT: u32 = 1;
 const KEEPS_PREMULTIPLIED: u32 = 2;
 
@@ -88,8 +92,10 @@ impl Encoders {
         });
         let uints = FORMATS.iter().map(|&f| (f, "fs_encode"));
         let unorms = FORMATS.iter().map(|&f| (unorm(f), "fs_encode_unorm"));
+        let floats = [(wgpu::TextureFormat::R32Float, "fs_encode_float")];
         let pipelines = uints
             .chain(unorms)
+            .chain(floats)
             .filter_map(|(format, entry)| {
                 let made = super::checked(device, || {
                     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -205,6 +211,19 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
             alpha: 0,
         }
     };
+    let floats = |alpha: bool| {
+        let kinds = [FLOAT_GREEN, FLOAT_BLUE, FLOAT_RED, FLOAT_ALPHA];
+        let count = if alpha { 4 } else { 3 };
+        Layout {
+            depth: 32,
+            shift: 0,
+            planes: kinds[..count]
+                .iter()
+                .map(|&kind| plane(kind, T::R32Float, 4, (0, 0)))
+                .collect(),
+            alpha: 0,
+        }
+    };
     Some(match pixel {
         P::YUV420P => planar(8, (1, 1), false),
         P::YUV422P => planar(8, (1, 0), false),
@@ -232,6 +251,14 @@ fn layout_of(pixel: format::Pixel) -> Option<Layout> {
             planes: vec![plane(RGBA, T::Rgba8Uint, 4, (0, 0))],
             alpha: 0,
         },
+        P::RGBA64LE => Layout {
+            depth: 16,
+            shift: 0,
+            planes: vec![plane(RGBA, T::Rgba16Uint, 8, (0, 0))],
+            alpha: 0,
+        },
+        P::GBRPF32LE => floats(false),
+        P::GBRAPF32LE => floats(true),
         P::AYUV64LE => Layout {
             depth: 16,
             shift: 0,
@@ -487,7 +514,12 @@ impl Screen {
         let size = wide.size;
         let mut layout = layout_of(pixel)
             .ok_or_else(|| Error::Invalid(format!("the GPU can't make frames in {pixel:?}")))?;
-        if self.alpha && layout.planes.iter().any(|p| matches!(p.kind, ALPHA | AYUV)) {
+        if self.alpha
+            && layout
+                .planes
+                .iter()
+                .any(|p| matches!(p.kind, ALPHA | AYUV | RGBA | FLOAT_ALPHA))
+        {
             layout.alpha = match self.premultiplied {
                 true => KEEPS_PREMULTIPLIED,
                 false => KEEPS_STRAIGHT,

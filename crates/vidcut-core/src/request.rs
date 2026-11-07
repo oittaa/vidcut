@@ -3381,10 +3381,12 @@ pub enum Request {
 pub struct ExportParams {
     /// Output file; for `per_clip`, a directory. A timeline for other editors
     /// instead of media: `.otio` (the edit), `.otioz` (a zip bundle of the edit
-    /// and its media) or `.otiod` (the same as a folder).
+    /// and its media) or `.otiod` (the same as a folder). `.tif` and `.exr`
+    /// write one file for each frame: `out.tif` gives `out00000000.tif` and so on.
     pub output: PathBuf,
     /// Preset name (see `presets.list`). Default: from the output extension
-    /// (`h264-master` settings for video, the matching `audio-*` preset for audio).
+    /// (`h264-master` settings for video, the matching `audio-*` preset for audio,
+    /// `tiff` or `openexr` for frames).
     #[serde(default)]
     pub preset: Option<String>,
     /// Full settings instead of a preset.
