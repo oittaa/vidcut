@@ -829,6 +829,9 @@ fn read_style(
     read: Option<SubtitleStyle>,
 ) -> Option<SubtitleStyle> {
     let mut s = read?;
+    if s.align == Some(track.line_align()) {
+        s.align = None;
+    }
     if s.anchor == Some(track.anchor_in(place)) {
         s.anchor = None;
     }
@@ -877,6 +880,16 @@ pub fn import(
             add_track(p, name);
             let ti = p.subtitles.len() - 1;
             p.subtitles[ti].language = read.language.clone();
+            let shared = read
+                .cues
+                .iter()
+                .map(|c| c.style.as_ref().and_then(|s| s.align))
+                .reduce(|a, b| if a == b { a } else { None })
+                .flatten();
+            let style = &mut p.subtitles[ti].style;
+            if shared.is_some_and(|a| a != style.line_align()) {
+                style.align = shared;
+            }
             ti
         }
     };
