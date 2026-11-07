@@ -3182,6 +3182,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - A drop shadow is a blurred copy of the text and its outline. It is over the background and under the text, as in Resolve.
   - By default, the shadow is black, 75% opaque and blurred 20. These are Resolve's own values.
   - Its offset is 0, which draws no shadow (measured in Resolve Studio 21.1.2).
+  - The blur, measured in Resolve Studio 21.2 at 1920×1080 with blur 1, 10, 40 and 100:
+    - It is a Gaussian. Its sigma is the blur times the picture height, divided by 3370.
+    - The shadow is the blurred letters times its opacity. No other gain applies.
+    - It reaches about 3.5 sigma past the letters. vidcut's blur stops at 3.5 sigma.
+    - The titles were read from a file, with the outline of the import removed ([gotchas](gotchas.md)).
   - The precision, measured in Resolve Studio 21.2 with renders to OpenEXR RGB float:
     - Plain letters are on the steps of 8-bit numbers.
     - 98% of the values of a soft shadow (blur 40) are between those steps. Thus the shadow is in floats.
@@ -3286,7 +3291,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - No background is a height of 0.
   - **Drop shadow:**
     - `shadow offset` is in fractions of the picture, right and up.
-    - `shadow` is its blur: a Gaussian whose radius is that many 3300ths of the picture height.
+    - `shadow` is its blur: a Gaussian whose sigma is that many 3370ths of the picture height.
     - `shadow opacity` is in percent, and `shadow color` is its color.
     - No shadow is an offset of 0, which Resolve does not draw.
   - **Opacity:**
