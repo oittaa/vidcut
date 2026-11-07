@@ -21,7 +21,6 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
    - **Film Grain, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - What a film stock does to the other values, and when Film Grain Presets shows Custom.
      - Detail Loss on a square frame, for example 1440×1440. Does its sigma follow the area or the short side?
-     - A viewer that draws fewer pixels than the frame. There, the grain must match the export, scaled down to the viewer. Measure it, and change it in its own pull request.
      - Symmetry at Grain Strength 0.25 to 1, below 0.3 and above 0.9.
      - Red, Green and Blue with a Symmetry other than 0.5.
      - Texture under 0.25 and Grain Aspect Ratio under 0.5.

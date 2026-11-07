@@ -9,14 +9,15 @@ use crate::ffmpeg::{self, codec, encoder, format};
 pub fn png(
     piece: &VideoPiece,
     fps: Rational,
-    (width, height): (u32, u32),
+    ((width, height), frame): ((u32, u32), (u32, u32)),
     colors: super::renderer::Finish<'_>,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<Vec<u8>> {
     crate::cancel::stop()?;
     crate::init();
     let pixel = format::Pixel::RGB24;
-    let mut frames = super::renderer::frames(fps, (width, height), pixel, colors, decoder)?;
+    let mut frames =
+        super::renderer::frames(fps, (width, height), pixel, colors, decoder)?.in_frame(frame);
     frames.read_piece(piece);
     let frame = frames
         .next_frame()?
@@ -74,12 +75,12 @@ fn encoded(mut frame: ffmpeg::frame::Video) -> Result<Vec<u8>> {
 pub fn write_png(
     piece: &VideoPiece,
     fps: Rational,
-    size: (u32, u32),
+    sizes: ((u32, u32), (u32, u32)),
     colors: super::renderer::Finish<'_>,
     path: &Path,
     decoder: Option<&crate::hw::GpuDecoder>,
 ) -> Result<()> {
-    let bytes = png(piece, fps, size, colors, decoder)?;
+    let bytes = png(piece, fps, sizes, colors, decoder)?;
     vidcut_core::temp::write(path, &bytes)?;
     Ok(())
 }

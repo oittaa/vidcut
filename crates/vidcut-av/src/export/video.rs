@@ -1834,6 +1834,7 @@ pub struct VideoFrames {
     written_alpha: Option<AlphaOut>,
     written: Option<(u32, u32)>,
     output_lut: Option<crate::screen::Lut>,
+    frame_size: Option<(u32, u32)>,
     input_luts: vidcut_core::lru::Lru<String, crate::screen::Lut, INPUT_LUTS_KEPT>,
 }
 
@@ -2174,6 +2175,7 @@ impl VideoFrames {
             written_alpha: None,
             written: None,
             output_lut: None,
+            frame_size: None,
             input_luts: Default::default(),
         }
     }
@@ -2202,6 +2204,11 @@ impl VideoFrames {
     pub fn with_output_lut(mut self, path: Option<&Path>) -> Result<Self> {
         self.output_lut = path.map(crate::screen::load_lut).transpose()?;
         Ok(self)
+    }
+
+    pub fn in_frame(mut self, size: (u32, u32)) -> Self {
+        self.frame_size = Some(size);
+        self
     }
 
     pub fn drawing_in(mut self, colors: Option<Hdr>) -> Self {
@@ -2339,6 +2346,7 @@ impl VideoFrames {
                 .premultiply(self.written_alpha == Some(AlphaOut::Premultiplied));
             drawer.screen.write_at(self.written);
             drawer.screen.set_output_lut(self.output_lut.clone());
+            drawer.screen.set_frame_size(self.frame_size);
             let (out, reading) = (self.maker.out(), self.maker.reading());
             self.maker = Maker::new(out, drawer.keeps(), reading).holding().drawing();
             self.drawer = Some(drawer);

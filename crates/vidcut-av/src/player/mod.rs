@@ -1065,6 +1065,7 @@ impl Player {
         let crosses = plan.crosses_at(pos);
         let scales = plan.scales_at(pos);
         let colors = plan.plan.colors;
+        let size = plan.size();
         let output_lut = match plan.output_lut() {
             Ok(lut) => lut.clone(),
             Err(why) => {
@@ -1098,6 +1099,7 @@ impl Player {
                     scales,
                     colors,
                     output_lut,
+                    size,
                 };
                 p.shown = Some(shown.clone());
                 p.shown_landing = landed.0;
@@ -1121,6 +1123,7 @@ impl Player {
                         scales: scales.clone(),
                         colors,
                         output_lut: output_lut.clone(),
+                        size,
                     });
                 }
                 p.shown.clone().map(|s| Shown {
@@ -1132,6 +1135,7 @@ impl Player {
                     scales,
                     colors,
                     output_lut,
+                    size,
                     ..s
                 })
             }

@@ -1737,6 +1737,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - At the defaults, the renders on 3840×2160, 1080×1920 and 1440×1440 agree within 1.6%.
     - 35mm 400T at Grain Size 0 gives 1.018, 1.031 and 1.032 of the standard deviation of the renders, on 1920×1080, 3840×2160 and 1080×1920.
     - 8mm 100D at Grain Size 0.2156 and Grain Strength 1 gives 1.045, 1.046 and 1.048.
+  - A picture with fewer pixels than the frame shows the export, scaled down. The viewer and `frame render --width` draw such pictures.
+    - Each of its pixels is the mean of the pixels of the frame that it covers. vidcut puts that mean and Softness into the spectrum of the noise.
+    - At 960 and 640 pixels wide, Grain Size 0 to 1 with Softness 0 and 0.2984 agree with the scaled export within 2%.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
     - Film Grain Presets shows Custom when a value differs from each film stock.

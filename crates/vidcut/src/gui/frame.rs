@@ -98,6 +98,7 @@ impl Frame {
             false => Vec::new(),
         };
         screen.set_output_lut(shown.output_lut.clone());
+        screen.set_frame_size(Some(shown.size));
         screen.draw(
             &self.offscreen.gpu,
             Some(&shown.picture),
