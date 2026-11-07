@@ -169,7 +169,7 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
   - In the other modes, it looks up the color as it is, before the alpha. Straight and Invert then multiply by their alpha when the picture is placed.
   - Before an AI upscaler, `Source::push` reads a Premultiplied picture in the same way (`PictureId`).
   - The frames around an interlaced picture take its Alpha Mode too (`Woven`). Why: the deinterlacer mixes the three converted frames.
-- `fs_lut` reads the canvas, and the canvas holds 16-bit floats. `fs_convert_lut` reads the picture before it goes to 16-bit floats. Thus a table with steep steps gives a larger error as an output LUT than as an input LUT.
+- `fs_lut` reads the canvas, and the canvas holds 32-bit floats.
 
 ## Rules the code follows
 
