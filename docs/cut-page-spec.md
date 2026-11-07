@@ -3179,6 +3179,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A box at 50% opacity is on the steps, and so are the letters on it. The edges of the letters over the box are between the steps.
     - Thus the letters and the box are each 8-bit, and they are joined in floats.
     - Zoom 1.7 with rotation 13 puts 87% of the values between the steps. Opacity 0.5 puts the values on steps of half of 1/255.
+    - A subtitle in the default style, burned in, is on the steps: all 2,823 edge values.
   - vidcut: the letters with their outline are 8-bit, and the box is 8-bit. The shadow is in 32-bit floats.
   - vidcut joins these layers in 32-bit floats. A title with no shadow and no box stays 8-bit.
   - Zoom draws the text larger, and the outline and the background box grow with it. The zoom scales the outline, measured in Resolve Studio 21.1.2.
