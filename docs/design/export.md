@@ -37,6 +37,7 @@ flowchart TD
 
 - **Settings:** `settings`, a `preset`, or the default preset of the extension.
   - `set` changes fields (`apply_overrides`). `encoder` sets the video encoder. The extension sets the container.
+  - A `null` in `set` takes the field out, and the field gets its default. Why: the Export dialog sends `null` for a field that its preset has and the dialog does not.
   - The presets are `builtin_presets` and the user's TOML files (`export::presets`).
   - A preset's name is any text that is not empty. The file holds the name.
   - The file name is the preset's name when that name is short, lowercase ASCII and safe on each system (`user_preset_path`). Otherwise it is a digest of the name. Why: two names that differ only in case stay two files.
@@ -124,6 +125,17 @@ The plan:
   - It writes profile 8, or profile 10 in AV1. Only libx265 and libsvtav1 write it.
   - Each frame needs it. Thus a black or generated frame takes the metadata of the frame before it.
   - Black or generated frames at the start have no frame before them. Then the export has no Dolby Vision.
+
+**Export Alpha** ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
+
+- `VideoSettings::holds_alpha` tells which settings have alpha. `validate` refuses `video.alpha` for the others.
+- With it off, the canvas starts black, and each frame is opaque. ProRes 4444 and 4444 XQ are `YUV444P10LE` on the CPU and `P416LE` on VideoToolbox. Thus the file has no alpha channel.
+- With it on, `VideoFrames::writing_alpha` starts the canvas transparent. ProRes 4444 and 4444 XQ are `YUVA444P10LE` on the CPU and `AYUV64LE` on VideoToolbox.
+- A black piece is then a picture with an alpha of 0 (`VideoFrames::clear`). Thus a gap and a dip to black are transparent.
+- The canvas holds premultiplied colors. `pixel_at` in `picture.wgsl` takes the alpha out before it converts the colors of the output. Why: a transfer curve gives another color for a premultiplied color.
+  - `AlphaOut::Straight` writes that color.
+  - `AlphaOut::Premultiplied` multiplies it by the alpha again.
+- A composite mode over a part with alpha (`mode_mixed`) mixes with the color below as far as that part shows. Over nothing, the color stays as it is.
 
 Sources:
 

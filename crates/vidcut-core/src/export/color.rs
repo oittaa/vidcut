@@ -354,6 +354,8 @@ mod tests {
             hdr_metadata: Default::default(),
             mastering_display: None,
             max_cll: None,
+            alpha: false,
+            alpha_mode: Default::default(),
         }
     }
 

@@ -6,8 +6,9 @@ use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_av::export::SpeechNote;
 use vidcut_core::export::{
-    AAC_BITRATE, AAC_BITRATES, AAC_RATES, AudioCodec, AudioSettings, Container, EncoderChoice,
-    ExportSettings, HdrMetadata, HdrMode, VideoCodec, VideoSettings, apply_overrides, validate,
+    AAC_BITRATE, AAC_BITRATES, AAC_RATES, AlphaOut, AudioCodec, AudioSettings, Container,
+    EncoderChoice, ExportSettings, HdrMetadata, HdrMode, VideoCodec, VideoSettings,
+    apply_overrides, validate,
 };
 use vidcut_core::request::{FindSpeech, ImportMode, SubtitleFormat, SubtitlesAs};
 use vidcut_core::{Envelope, Error, Response};
@@ -345,7 +346,7 @@ const CONTAINERS: [Container; 9] = [
 
 fn profiles(c: VideoCodec) -> &'static [&'static str] {
     match c {
-        VideoCodec::Prores => &["proxy", "lt", "standard", "hq", "4444"],
+        VideoCodec::Prores => &["proxy", "lt", "standard", "hq", "4444", "xq"],
         VideoCodec::Dnxhr => &["lb", "sq", "hq", "hqx", "444"],
         VideoCodec::H264 => &["baseline", "main", "high"],
         VideoCodec::Hevc => &["main", "main10"],
@@ -2645,6 +2646,8 @@ fn settings_form(
                                 hdr_metadata: Default::default(),
                                 mastering_display: None,
                                 max_cll: None,
+                                alpha: false,
+                                alpha_mode: Default::default(),
                             }),
                         );
                         fit_codecs(&mut d.settings);
@@ -2810,6 +2813,26 @@ fn settings_form(
                     }
                 });
                 ui.end_row();
+
+                if v.holds_alpha() {
+                    ui.label("");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut v.alpha, "Export Alpha");
+                        if v.alpha {
+                            ui.label(dim("Alpha Mode"));
+                            egui::ComboBox::from_id_salt("export-alpha-mode")
+                                .selected_text(v.alpha_mode.title())
+                                .show_ui(ui, |ui| {
+                                    for m in AlphaOut::ALL {
+                                        ui.selectable_value(&mut v.alpha_mode, m, m.title());
+                                    }
+                                });
+                        }
+                    });
+                    ui.end_row();
+                } else {
+                    v.alpha = false;
+                }
 
                 ui.label("");
                 ui.horizontal(|ui| {

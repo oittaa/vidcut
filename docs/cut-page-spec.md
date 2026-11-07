@@ -1890,6 +1890,20 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - Resolve makes a side under 256 into 256 with H.264 and ProRes. It makes a side over 32768 into 32768 with ProRes.
     - Resolve writes H.264 at 8192 x 4320. A job of H.264 at 8193 x 4321 stops its scripting API. It writes ProRes at 8193 x 4321.
     - vidcut refuses a side outside these limits. It does not change a setting without a word.
+- **Export Alpha** (Deliver page):
+  - An export writes alpha only with Export Alpha on, in a format that has alpha (p. 1205).
+  - The formats with alpha are TIFF, OpenEXR, ProRes 4444, ProRes 4444 XQ and DNxHR 444 (p. 4093).
+  - The box does not appear if the codec has no alpha (p. 4093).
+  - The Alpha Mode of the file is Premultiplied or Straight (p. 4117). Premultiplied is the default (p. 4093).
+  - When a program renders as one file, its layers composite into one picture (p. 473).
+  - **In vidcut:**
+    - `video.alpha` is Export Alpha. `video.alpha_mode` is `premultiplied` or `straight`. The Export dialog shows both only for ProRes 4444 and 4444 XQ.
+    - An export refuses `video.alpha` in another format. It does not change a setting without a word.
+    - DNxHR 444 has no alpha ([X136](deviations.md#x136-dnxhr-444-exports-without-alpha)).
+    - vidcut does not export TIFF or OpenEXR yet ([todo](todo/export-tiff-exr.md)).
+    - With it off, the export composites over black, and the file has no alpha channel.
+    - With it on, what shows nothing is transparent: a gap, a bar beside a picture, and a dip to black.
+    - With it on, a composite mode mixes with the layers below as far as they show. Over nothing, the color stays as it is.
 
 ## 11. Keyboard shortcuts
 
