@@ -101,8 +101,8 @@ pub struct Settings {
     pub ripple_on: bool,
     /// Record timecode of timeline frame 0, in frames (deviation X7: 0, not 01:00:00:00).
     pub start_tc: i64,
-    /// Record timecode counts drop-frame (decision D47): at 29.97 and 59.94,
-    /// and nothing at other rates.
+    /// Record timecode counts drop-frame (decision D47): at 29.97, 59.94 and
+    /// 119.88, and nothing at other rates.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub drop_frame: bool,
     /// Format not chosen yet: the first video media added sets fps and size.
@@ -216,7 +216,7 @@ impl Settings {
     pub fn set_drop_frame(&mut self, on: bool) -> crate::error::Result<()> {
         if on && !self.fps.has_drop_frame() {
             return Err(crate::error::Error::invalid(format!(
-                "drop-frame timecode is for 29.97 and 59.94 fps, not {}",
+                "drop-frame timecode is for 29.97, 59.94 and 119.88 fps, not {}",
                 self.fps.decimal()
             )));
         }

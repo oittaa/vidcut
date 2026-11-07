@@ -172,7 +172,9 @@ Sources:
 - A `VideoPiece::Generated` has no file. `VideoFrames::generated_frame` makes its frame at the size of the plan.
   - `Generated::at` gives the `generators::Pattern` of a frame. A gradient with keyframes gives a new pattern on each frame.
   - A Solid Color in an SDR timeline is RGB24.
-  - Each other frame is RGB48LE. It holds the code values from `generators::draw`, with the tag of the timeline colors (`screen::held::tag`).
+  - Each other frame is RGBAF32LE, in 32-bit floats with an alpha of 1. It holds the code values from `generators::draw`, with the tag of the timeline colors (`screen::held::tag`).
+  - Why: Resolve draws its generators in 32-bit floats ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
+  - The screen takes the frame as one `Rgba32Float` texture (`Layout::Rgbaf32`). Thus the shader reads it as RGB, with no unpack pass.
   - `VideoFrames` keeps the last patterns. Why: two generators under a dissolve need two frames.
 
 Notes:

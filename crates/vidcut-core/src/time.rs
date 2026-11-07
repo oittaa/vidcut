@@ -93,9 +93,13 @@ impl Rational {
         ((self.num + self.den / 2) / self.den).max(1)
     }
 
+    pub fn frame_digits(self) -> usize {
+        ((self.timecode_base() - 1).max(1).ilog10() as usize + 1).max(2)
+    }
+
     pub fn dropped_per_minute(self) -> i64 {
         match (self.den, self.timecode_base()) {
-            (1001, b @ (30 | 60)) => b / 15,
+            (1001, b @ (30 | 60 | 120)) => b / 15,
             _ => 0,
         }
     }
@@ -203,12 +207,13 @@ pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64, drop: bool) ->
     let ff = t % base;
     let s = t / base;
     format!(
-        "{sign}{:02}:{:02}:{:02}{}{:02}",
+        "{sign}{:02}:{:02}:{:02}{}{:0digits$}",
         s / 3600,
         (s / 60) % 60,
         s % 60,
         if dropped > 0 { ';' } else { ':' },
-        ff
+        ff,
+        digits = fps.frame_digits()
     )
 }
 
@@ -509,7 +514,7 @@ impl schemars::JsonSchema for TimeSpec {
 
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
-            "description": "A time: an integer number of frames, or a string: `450f`, `15s`, `1m30s`, `250ms`, `HH:MM:SS:FF` (timecode; drop-frame in a project that counts so), `HH:MM:SS;FF` (drop-frame, at 29.97 and 59.94), `HH:MM:SS.mmm`, `start`, `end`, `in`, `out`, `playhead`, or a relative `+10f` / `-2s` where the command allows it.",
+            "description": "A time: an integer number of frames, or a string: `450f`, `15s`, `1m30s`, `250ms`, `HH:MM:SS:FF` (timecode; drop-frame in a project that counts so), `HH:MM:SS;FF` (drop-frame, at 29.97, 59.94 and 119.88), `HH:MM:SS.mmm`, `start`, `end`, `in`, `out`, `playhead`, or a relative `+10f` / `-2s` where the command allows it.",
             "oneOf": [{"type": "integer"}, {"type": "string"}],
             "examples": [450, "450f", "15s", "1m30s", "00:01:00:00", "end", "+10f"]
         })
@@ -709,7 +714,9 @@ impl TimeContext {
                     return Err(bad("frame field exceeds the frame rate"));
                 }
                 if *drop && !self.fps.has_drop_frame() {
-                    return Err(bad("drop-frame timecode is for 29.97 and 59.94 fps"));
+                    return Err(bad(
+                        "drop-frame timecode is for 29.97, 59.94 and 119.88 fps",
+                    ));
                 }
                 timecode_frames(*h, *m, *s, *f, self.fps, *drop || self.drop_frame)
                     .ok_or_else(|| bad("drop-frame timecode skips that label"))?

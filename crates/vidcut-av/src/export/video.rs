@@ -3871,7 +3871,7 @@ fn filled_generator(pattern: Pattern, (w, h): (u32, u32), colors: Option<Hdr>) -
     if let (Pattern::SolidColor(color), None) = (pattern, colors) {
         return filled(color, (w, h));
     }
-    let mut f = frame::Video::new(format::Pixel::RGB48LE, w, h);
+    let mut f = frame::Video::new(format::Pixel::RGBAF32LE, w, h);
     let stride = f.stride(0);
     vidcut_core::generators::draw(pattern, (w, h), colors, f.data_mut(0), stride);
     crate::screen::held::tag(&mut f, colors);

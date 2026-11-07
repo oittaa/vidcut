@@ -252,7 +252,7 @@ Requests take times as strings that parse into a `TimeSpec`:
 
 - frames: "450f", or a JSON integer
 - seconds: "15s", "1m30s", "250ms"
-- timecode: "HH:MM:SS:FF", with ";" for drop-frame
+- timecode: "HH:MM:SS:FF", with ";" for drop-frame. FF has three digits where the rate has more than 100 frames in a second (`Rational::frame_digits`).
 - a keyword: start, end, in, out, playhead
 - an offset: "+5s"
 
@@ -455,7 +455,7 @@ Writing:
 - A `Gradient` holds a plain Center X and Center Y and the keyframes of each one.
   - Keyframes stay on source frames, as other keyframes do. Thus a trim or a split does not move the picture.
   - `Gradient::center_at` gives the value on a source frame.
-- `generators::Pattern` is one frame of a generator's picture, with nothing that changes over time. `generators::draw` writes it as RGB48LE.
+- `generators::Pattern` is one frame of a generator's picture, with nothing that changes over time. `generators::draw` writes it as RGBAF32LE, in 32-bit floats.
   - The render plan and the GUI cards share this rule. Why: each picture has one rule.
   - `generators::timeline_code` gives the code values of a color in the colors of the timeline.
   - `Generator::chart` gives the `Chart` of a kind that has no value over time. A `Chart` draws as rows of columns, from the size of the timeline. Its code values do not change with the colors of the timeline.

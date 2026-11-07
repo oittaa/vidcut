@@ -2991,6 +2991,13 @@ impl Slot {
                     v: make((1, 1), one),
                     a: a(wgpu::TextureFormat::R8Unorm),
                 },
+                Layout::Rgbaf32 => Planes {
+                    key,
+                    y: make((w, h), wgpu::TextureFormat::Rgba32Float),
+                    u: make((1, 1), one),
+                    v: make((1, 1), one),
+                    a: a(wgpu::TextureFormat::R8Unorm),
+                },
                 Layout::Rgb | Layout::Rgb48 => Planes {
                     key,
                     y: made(
@@ -3080,6 +3087,7 @@ impl Slot {
                 put(&planes.u, 1, (cw, ch), 4);
             }
             (Layout::Rgb | Layout::Rgb48, _) => {}
+            (Layout::Rgbaf32, _) => put(&planes.y, 0, (w, h), 16),
             (Layout::Ayuv64, true) => put(&planes.y, 0, (w, h), 8),
             (Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64, false) => {
                 let textures = match layout {
@@ -3474,7 +3482,7 @@ fn nvdec_bytes(gpu: &Gpu, layout: Layout) -> Result<u64, String> {
         Layout::Nv12 => Ok(1),
         Layout::P010 | Layout::P210 if gpu.wide => Ok(2),
         Layout::P010 | Layout::P210 => Err(format!("no 16-bit textures for {layout:?}")),
-        Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 => {
+        Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 | Layout::Rgbaf32 => {
             Err(format!("{layout:?} pictures aren't NVDEC's"))
         }
         Layout::Yuv420p
@@ -3498,9 +3506,12 @@ fn vaapi_formats(
             wgpu::TextureFormat::Rg16Unorm,
         )),
         Layout::P010 => Err("no 16-bit textures for P010".into()),
-        Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 => {
-            Err(format!("{layout:?} pictures aren't VA-API's"))
-        }
+        Layout::P210
+        | Layout::P416
+        | Layout::Ayuv64
+        | Layout::Rgb
+        | Layout::Rgb48
+        | Layout::Rgbaf32 => Err(format!("{layout:?} pictures aren't VA-API's")),
         Layout::Yuv420p
         | Layout::Yuv420p10
         | Layout::Yuv422p
@@ -3534,9 +3545,12 @@ fn d3d11_formats(
             wgpu::TextureFormat::Rg16Unorm,
         )),
         Layout::P010 => Err("no P010 or 16-bit textures for P010".into()),
-        Layout::P210 | Layout::P416 | Layout::Ayuv64 | Layout::Rgb | Layout::Rgb48 => {
-            Err(format!("{layout:?} pictures aren't Direct3D 11's"))
-        }
+        Layout::P210
+        | Layout::P416
+        | Layout::Ayuv64
+        | Layout::Rgb
+        | Layout::Rgb48
+        | Layout::Rgbaf32 => Err(format!("{layout:?} pictures aren't Direct3D 11's")),
         Layout::Yuv420p
         | Layout::Yuv420p10
         | Layout::Yuv422p
@@ -3566,7 +3580,9 @@ fn videotoolbox_formats(
         Layout::P010 | Layout::P210 | Layout::P416 | Layout::Ayuv64 => {
             Err(format!("no 16-bit textures for {layout:?}"))
         }
-        Layout::Rgb | Layout::Rgb48 => Err("RGB pictures aren't VideoToolbox's".into()),
+        Layout::Rgb | Layout::Rgb48 | Layout::Rgbaf32 => {
+            Err("RGB pictures aren't VideoToolbox's".into())
+        }
         Layout::Yuv420p
         | Layout::Yuv420p10
         | Layout::Yuv422p
@@ -3589,6 +3605,7 @@ fn vulkan_layout(gpu: &Gpu, layout: Layout) -> Result<(), String> {
         | Layout::Ayuv64
         | Layout::Rgb
         | Layout::Rgb48
+        | Layout::Rgbaf32
         | Layout::Gbrp16
         | Layout::Yuv420p
         | Layout::Yuv422p => Err(format!("{layout:?} pictures aren't Vulkan's")),
@@ -3867,7 +3884,12 @@ fn write_alpha(
 
 fn sixteen(layout: Layout) -> bool {
     match layout {
-        Layout::Yuv420p | Layout::Nv12 | Layout::Yuv422p | Layout::Rgb | Layout::Rgb48 => false,
+        Layout::Yuv420p
+        | Layout::Nv12
+        | Layout::Yuv422p
+        | Layout::Rgb
+        | Layout::Rgb48
+        | Layout::Rgbaf32 => false,
         Layout::P010
         | Layout::Yuv420p10
         | Layout::Yuv422p10
@@ -3901,7 +3923,7 @@ fn packing(layout: Layout) -> u32 {
         | Layout::Yuv444p12 => 0,
         Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => 1,
         Layout::Ayuv64 => 2,
-        Layout::Rgb | Layout::Rgb48 => 3,
+        Layout::Rgb | Layout::Rgb48 | Layout::Rgbaf32 => 3,
         Layout::Gbrp16 => 4,
     }
 }
@@ -3915,6 +3937,7 @@ fn per_chroma(layout: Layout) -> (u32, u32) {
         | Layout::Ayuv64
         | Layout::Rgb
         | Layout::Rgb48
+        | Layout::Rgbaf32
         | Layout::Gbrp16 => (1, 1),
     }
 }

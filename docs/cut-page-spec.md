@@ -479,8 +479,12 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - Click the timecode field and type.
   - Or type `=` and a timecode, or `+` or `-` and a value to jump by.
   - Digits fill a timecode from the right: `100` is 1 second, and `10000` is 1 minute.
+  - At 119.88 and 120 fps, the frames take three digits. Thus `1000` is 1 second, and `+100` is 100 frames.
   - A value with a unit (`5s`, `450f`) is that duration.
 - **Display:**
+  - The frames of a timecode have as many digits as the last frame of a second: two, or three at 119.88 and 120 fps.
+  - Thus `01:00:00:000` is the hour at 120 fps, and `01:00:00:00` is the hour at 100 fps.
+  - Resolve Studio 21.2 shows three digits there on the Cut and Edit pages. Its timecode field also takes three digits for the frames.
   - The source modes show source timecode. Timeline mode shows record timecode.
   - The timecode is drop-frame where the project counts drop-frame (D47).
   - That default is Auto (D91).
@@ -1859,6 +1863,11 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: Pitch and Yaw differ at the edge pixels, by at most 78.2 of 255. These pixels are 0.3% of the values. A still in Resolve gives the same picture.
   - Not measured on a generator: Dynamic Zoom, Stabilization, keyframes in a render, Push, Slide, Wipe and Dip To Color.
   - vidcut: the sections and these transitions act as on a still. On a Solid Color and on a still, the same requests give the same frames (0.0 of 255).
+- **Precision:**
+  - Measured in Resolve Studio 21.2, with renders to OpenEXR RGB float: the generators are drawn in 32-bit floats.
+  - 10 Step holds 0.1, 0.2 and on as 32-bit floats. Grey Scale holds x/W in each column. 98% of the Four Color Gradient values are between the steps of 16-bit numbers.
+  - vidcut: the generators are drawn in 32-bit floats, and the screen reads them as 32-bit floats.
+  - A Solid Color in an SDR timeline is 8-bit. Its color is a value out of 255, so 8 bits hold it exactly.
 - **Speed:**
   - Measured: Speed Change on a generator has a dim dot and does not open. A still acts the same.
   - Measured: the right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
@@ -2602,8 +2611,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - HDR10+ (PQ only) when any picture has it. For the other pictures, it is made from measured light.
     - Dolby Vision when every picture has it, in one profile.
 - **D47. Drop-frame timecode** (§4.3).
-  - At 29.97 and 59.94 fps, record timecode can count drop-frame, as Resolve's project settings offer.
-  - Each minute, drop-frame skips the frame numbers 00 and 01 (00–03 at 59.94), except each tenth minute.
+  - At 29.97, 59.94 and 119.88 fps, record timecode can count drop-frame, as Resolve's project settings offer.
+  - Resolve Studio 21.2 refuses it at other rates, also at 23.976, 47.952 and 95.904 (`timelineDropFrameTimecode` in a script).
+  - Each minute, drop-frame skips the frame numbers 00 and 01, except each tenth minute.
+    - At 59.94, it skips 00–03.
+    - At 119.88, it skips 000–007. Thus ten minutes have 71,928 frames, which is 600 s at 119.88 fps.
+    - The numbers at 119.88 are measured in Resolve Studio 21.2, by script and on the Edit page.
   - New Project and Project Settings offer it.
   - It turns on when the media's timecode counts drop-frame, in two cases:
     - The first video sets the format (D37).
