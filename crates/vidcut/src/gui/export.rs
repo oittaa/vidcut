@@ -998,16 +998,17 @@ impl Workspace {
                             }
                         });
                         if d.range == RangeChoice::Custom {
+                            let frames = "0".repeat(self.frame_digits());
                             super::dialog::row(ui, "From", |ui| {
                                 ui.add(
                                     egui::TextEdit::singleline(&mut d.from)
-                                        .hint_text("00:00:00:00")
+                                        .hint_text(format!("00:00:00:{frames}"))
                                         .desired_width(110.0),
                                 );
                                 ui.label(dim("to"));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut d.to)
-                                        .hint_text("00:01:00:00")
+                                        .hint_text(format!("00:01:00:{frames}"))
                                         .desired_width(110.0),
                                 );
                                 ui.label(dim("its frame left out"));
