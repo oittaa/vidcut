@@ -1717,11 +1717,15 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A cubic curve on the noise gives the kurtosis.
   - Symmetry is a table of measured curves, with a step of 0.02 to 0.06. Each curve is a cubic near the middle and a straight line on each side.
     - Resolve gives spikes at exactly 0.4 and 0.6, with a standard deviation of 0.0109 and 0.0855 against 0.026 on each side. vidcut does not copy them ([X144](deviations.md#x144-a-film-grain-has-no-jumps-at-symmetry-04-and-06)).
+  - On other frame heights, the noise keeps its standard deviation before Softness.
+    - At the defaults, the renders on 3840×2160, 1080×1920 and 1440×1440 agree with this within 1.3%.
+    - A small grain is weaker in vidcut, on 3840×2160 and 1080×1920 ([todo](todo/effects-library.md)).
+    - There, 35mm 400T at Grain Size 0 gives 0.61 and 0.66 of the standard deviation of the renders.
+    - 8mm 100D at Grain Size 0.2156 gives 0.75 and 0.76.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
     - Film Grain Presets shows Custom when a value differs from each film stock.
     - The Detail Loss sigma follows the square root of the frame's area. The renders fit the short side of the frame equally well.
-    - On other frame heights, the noise keeps its standard deviation before Softness.
     - Red, Green and Blue also multiply the shift that Symmetry makes.
     - Below Symmetry 0.3, the straight lines are the mirror of those at 1 − Symmetry. Under 0.1 and over 0.9, they stay as at 0.1 and 0.9.
 - **Vignette.** Its values and their defaults, measured in Resolve Studio 21.1.2:
