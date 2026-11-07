@@ -230,6 +230,8 @@ fn cpu_part(codec: VideoCodec) -> &'static crate::parts::Part {
         VideoCodec::Vp9 => &parts::VP9,
         VideoCodec::Prores => &parts::PRORES,
         VideoCodec::Dnxhr => &parts::DNXHR,
+        VideoCodec::Tiff => &parts::TIFF,
+        VideoCodec::Exr => &parts::EXR,
     }
 }
 
@@ -238,7 +240,14 @@ pub(crate) fn cpu_ten_bit(name: &str) -> bool {
     encoder::find_by_name(name)
         .and_then(|c| c.video().ok())
         .and_then(|v| v.formats())
-        .is_some_and(|mut f| f.any(|p| matches!(p, Pixel::YUV420P10LE | Pixel::YUV422P10LE)))
+        .is_some_and(|mut f| {
+            f.any(|p| {
+                matches!(
+                    p,
+                    Pixel::YUV420P10LE | Pixel::YUV422P10LE | Pixel::RGB48LE | Pixel::GBRPF32LE
+                )
+            })
+        })
 }
 
 #[cfg(windows)]
@@ -751,6 +760,31 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
                 _ => Pixel::YUV422P,
             };
             (pixel, vec![opt("profile", format!("dnxhr_{p}"))])
+        }
+        "tiff" => {
+            let named = v.profile.as_deref().unwrap_or("rgb16");
+            c.profile = Some(named.to_string());
+            let (depth, compression) = named.split_once('_').unwrap_or((named, "raw"));
+            let pixel = match (depth, v.alpha) {
+                ("rgb8", false) => Pixel::RGB24,
+                ("rgb8", true) => Pixel::RGBA,
+                (_, false) => Pixel::RGB48LE,
+                (_, true) => Pixel::RGBA64LE,
+            };
+            (pixel, vec![opt("compression_algo", compression)])
+        }
+        "exr" => {
+            let named = v.profile.as_deref().unwrap_or("half");
+            c.profile = Some(named.to_string());
+            let (kind, compression) = named.split_once('_').unwrap_or((named, "none"));
+            let pixel = match v.alpha {
+                true => Pixel::GBRAPF32LE,
+                false => Pixel::GBRPF32LE,
+            };
+            (
+                pixel,
+                vec![opt("format", kind), opt("compression", compression)],
+            )
         }
         n => return Err(Error::Invalid(format!("{n}: no settings for it"))),
     };

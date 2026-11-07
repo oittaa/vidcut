@@ -84,6 +84,8 @@ pub const AV1: Part = encoder(
 pub const VP9: Part = encoder(&[lib("libvpx-vp9", "libvpx")], "VP9");
 pub const PRORES: Part = encoder(&[own("prores_ks"), own("prores_aw")], "ProRes");
 pub const DNXHR: Part = encoder(&[own("dnxhd")], "DNxHR");
+pub const TIFF: Part = encoder(&[own("tiff")], "TIFF");
+pub const EXR: Part = encoder(&[own("exr")], "OpenEXR");
 pub const AAC: Part = encoder(&[own("aac")], "AAC sound");
 pub const OPUS: Part = encoder(&[lib("libopus", "libopus"), own("opus")], "Opus sound");
 pub const MP3: Part = encoder(&[lib("libmp3lame", "LAME")], "MP3 sound");
@@ -95,6 +97,8 @@ pub const PARTS: &[Part] = &[
     VP9,
     PRORES,
     DNXHR,
+    TIFF,
+    EXR,
     AAC,
     OPUS,
     MP3,
