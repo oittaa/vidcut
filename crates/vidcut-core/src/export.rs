@@ -392,7 +392,8 @@ pub struct VideoSettings {
     /// opaque frames.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub alpha: bool,
-    /// How a file with `alpha` holds its colors.
+    /// How a file with `alpha` holds its colors. OpenEXR takes only
+    /// `premultiplied`.
     #[serde(default, skip_serializing_if = "AlphaOut::is_default")]
     pub alpha_mode: AlphaOut,
     /// The digits of the frame number in the name of a TIFF or OpenEXR file.
@@ -437,6 +438,13 @@ impl VideoSettings {
             VideoCodec::Prores => matches!(self.profile.as_deref(), Some("4444" | "xq")),
             VideoCodec::Tiff | VideoCodec::Exr => true,
             _ => false,
+        }
+    }
+
+    pub fn alpha_modes(&self) -> &'static [AlphaOut] {
+        match self.codec {
+            VideoCodec::Exr => &[AlphaOut::Premultiplied],
+            _ => &AlphaOut::ALL,
         }
     }
 
@@ -1040,6 +1048,11 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
             return Err(Error::usage(
                 "video.alpha needs a format with alpha: ProRes with profile 4444 or xq, TIFF \
                  or OpenEXR",
+            ));
+        }
+        if v.alpha && !v.alpha_modes().contains(&v.alpha_mode) {
+            return Err(Error::usage(
+                "OpenEXR holds only premultiplied colors: set video.alpha_mode to premultiplied",
             ));
         }
         let fixed = match (v.codec, v.profile.as_deref()) {

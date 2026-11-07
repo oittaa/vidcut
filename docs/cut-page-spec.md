@@ -1936,6 +1936,8 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - A PNG holds straight colors in both modes.
   - **In vidcut:**
     - `video.alpha` is Export Alpha. `video.alpha_mode` is `premultiplied` or `straight`. The Export dialog shows both only for ProRes 4444, 4444 XQ, TIFF and OpenEXR.
+    - Straight writes straight colors in a TIFF ([X145](deviations.md#x145-a-tiff-can-hold-straight-colors)) and in ProRes 4444 and 4444 XQ ([X146](deviations.md#x146-straight-prores-4444-holds-straight-colors)).
+    - OpenEXR takes only Premultiplied. An export refuses Straight with it, and the Export dialog lists only Premultiplied. Why: the OpenEXR format takes premultiplied colors, so another program reads a straight file wrongly.
     - An export refuses `video.alpha` in another format. It does not change a setting without a word.
     - DNxHR 444 has no alpha ([X136](deviations.md#x136-dnxhr-444-exports-without-alpha)).
     - With it off, the export composites over black, and the file has no alpha channel.
@@ -1966,10 +1968,10 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - vidcut has no PIZ, DWAA, DWAB, HTJ2K and Compression Level ([todo](todo/image-compression.md)).
     - Each OpenEXR has the `timeCode` of its frame on the timeline, with the drop frame flag. A TIFF has no timecode.
     - Above 30 fps, the frame digits of `timeCode` count pairs of frames, and bit 15 marks the second frame of a pair. This is not measured in Resolve.
+    - Above 60 fps, an OpenEXR has no `timeCode`.
     - The files hold the code values of the timeline. An OpenEXR keeps a value above 1 (measured for a render with no color management).
-    - The files hold no sound. An export with sound settings is refused.
+    - The files hold no sound. An export with sound settings is refused ([X147](deviations.md#x147-an-image-sequence-refuses-sound-settings)).
     - The ExtraSamples tag of a TIFF with alpha follows the Alpha Mode: 1 for Premultiplied and 2 for Straight ([gotchas](gotchas.md#ffmpeg-encoding-and-muxing)).
-    - An OpenEXR with Straight holds colors with no alpha in them. The OpenEXR format takes premultiplied colors, so another program can read it wrongly.
     - A frame file name that the system refuses stops the export before the encode starts.
 
 ## 11. Keyboard shortcuts

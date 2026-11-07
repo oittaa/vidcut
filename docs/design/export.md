@@ -141,6 +141,7 @@ The plan:
 - The canvas holds premultiplied colors. `pixel_at` in `picture.wgsl` takes the alpha out before it converts the colors of the output. Why: a transfer curve gives another color for a premultiplied color.
   - `AlphaOut::Straight` writes that color.
   - `AlphaOut::Premultiplied` multiplies it by the alpha again.
+  - `VideoSettings::alpha_modes` gives the modes of a format. OpenEXR takes only `AlphaOut::Premultiplied`, and `validate` refuses Straight with it.
 - A composite mode over a part with alpha (`mode_mixed`) mixes with the color below as far as that part shows. Over nothing, the color stays as it is.
 
 **Image sequences** ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
@@ -153,6 +154,8 @@ The plan:
 - For an OpenEXR, `FrameFiles` adds the `timeCode` attribute at the end of the header (`exr_layout`, `exr_timecode`). It adds the size of the attribute to each offset in the table after the header.
   - `packed_timecode` packs the timecode of the frame on the timeline, as two digits for each field.
   - `exr_layout` reads only a single-part scan line file. It does not change a file that has a `timeCode` already.
+  - It also does not change a file whose `lineOrder` is not increasing Y. Why: it takes the length of the table from the first offset, and that is correct only when the lines go from the top down.
+  - Above 60 fps, `packed_timecode` gives nothing, and the file has no `timeCode`.
 - The muxer is `null`. Why: FFmpeg's image muxer takes a pattern, and a percent sign in a folder name would break the pattern.
 - `ExportSettings::frame_file` makes each name. `ExportSettings::numbering` makes the `Numbering` of an output: the first number, and the frame on the timeline for the timecode.
 - `VideoSettings::image_bits` gives the depth from the profile. `ColorChoice` reports it.

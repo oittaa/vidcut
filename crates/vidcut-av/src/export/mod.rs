@@ -529,6 +529,7 @@ struct FrameFiles {
 const EXR_START: [u8; 8] = [0x76, 0x2f, 0x31, 0x01, 2, 0, 0, 0];
 const EXR_TIMECODE_NAME: &[u8] = b"timeCode";
 const EXR_TIMECODE_TYPE: &[u8] = b"timecode";
+const EXR_LINE_ORDER_NAME: &[u8] = b"lineOrder";
 
 fn exr_layout(data: &[u8]) -> Option<(usize, usize)> {
     if !data.starts_with(&EXR_START) {
@@ -542,6 +543,9 @@ fn exr_layout(data: &[u8]) -> Option<(usize, usize)> {
             return None;
         }
         let kind = zero(name + 1)?;
+        if &data[at..name] == EXR_LINE_ORDER_NAME && *data.get(kind + 5)? != 0 {
+            return None;
+        }
         let size = i32::from_le_bytes(data.get(kind + 1..kind + 5)?.try_into().ok()?);
         at = kind + 5 + usize::try_from(size).ok()?;
     }

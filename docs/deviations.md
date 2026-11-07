@@ -2665,3 +2665,35 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The picture is the same.
   - The picker reaches any file, with no LUT folder to set up.
   - The owner approved this difference.
+
+## X145. A TIFF can hold straight colors
+
+- **Resolve:**
+  - With TIFF, Alpha Mode shows Premultiplied and is greyed out (measured in Resolve Studio 21.2).
+- **vidcut:**
+  - A TIFF takes `video.alpha_mode` `straight`. The file then holds straight colors, and its ExtraSamples tag is 2.
+- **Why:**
+  - ExtraSamples 2 marks the colors as straight. Thus another program reads the file correctly.
+  - OpenEXR takes only Premultiplied, because the OpenEXR format takes premultiplied colors ([spec](cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
+  - The owner approved this difference.
+
+## X146. Straight ProRes 4444 holds straight colors
+
+- **Resolve:**
+  - With Straight, a ProRes 4444 file still holds premultiplied colors (measured in Resolve Studio 21.2). ProRes 4444 XQ is not measured.
+- **vidcut:**
+  - With `video.alpha_mode` `straight`, ProRes 4444 and 4444 XQ hold straight colors.
+- **Why:**
+  - The file holds what its Alpha Mode says. The file from Resolve does not agree with its own setting.
+  - The owner approved this difference.
+
+## X147. An image sequence refuses sound settings
+
+- **Resolve:**
+  - With TIFF and OpenEXR, the Audio tab is greyed out.
+  - A render from the scripting API with Export Audio on writes only the frames (measured in Resolve Studio 21.2).
+- **vidcut:**
+  - A TIFF or OpenEXR export with `audio` settings stops with an error. It writes no files.
+- **Why:**
+  - The files cannot hold sound. vidcut does not drop a setting without a word.
+  - The owner approved this difference.
