@@ -1,11 +1,11 @@
 use vidcut_core::lru::Lru;
 use vidcut_core::model::GlowOutput;
 use vidcut_core::place::{
-    Blurring, GlowSpread, Glowing, GrainTile, Graining, Level, Placing, Shading, Tiling, Work,
-    Working,
+    Blurring, GlowSpread, Glowing, GrainTile, Graining, Level, Placing, Shading, Sharpening,
+    Tiling, Work, Working,
 };
 
-use super::{Gpu, MIXING, begin, grain, vignette};
+use super::{Gpu, MIXING, begin, grain, sharpen, vignette};
 
 const KERNEL: usize = 35;
 
@@ -53,6 +53,8 @@ pub(super) struct Pipes {
     blur: wgpu::RenderPipeline,
     mosaic: wgpu::RenderPipeline,
     vignette: wgpu::RenderPipeline,
+    sharpen_taken: wgpu::RenderPipeline,
+    sharpen: wgpu::RenderPipeline,
     glow_mask: wgpu::RenderPipeline,
     glow_cells: wgpu::RenderPipeline,
     glow: wgpu::RenderPipeline,
@@ -139,6 +141,8 @@ impl Pipes {
             blur: pipeline(&plain, "fs_blur"),
             mosaic: pipeline(&plain, "fs_mosaic"),
             vignette: pipeline(&of(&reading), "fs_vignette"),
+            sharpen_taken: pipeline(&plain, "fs_sharpen_taken"),
+            sharpen: pipeline(&of(&reading), "fs_sharpen"),
             glow_mask: pipeline(&plain, "fs_glow_mask"),
             glow_cells: pipeline(&plain, "fs_glow_cells"),
             glow: pipeline(&plain, "fs_glow"),
@@ -167,6 +171,10 @@ fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
         Work::Vignette(shading) => vec![Step {
             pipeline: &pipes.vignette,
             params: vignette_bytes(shading, effect),
+        }],
+        Work::Sharpen(sharpening) => vec![Step {
+            pipeline: &pipes.sharpen,
+            params: sharpen_bytes(sharpening, effect),
         }],
         Work::Glow(_) | Work::Grain(_) => Vec::new(),
     }
@@ -444,6 +452,15 @@ fn vignette_bytes(shading: &Shading, effect: &Working) -> Vec<u8> {
     out
 }
 
+fn sharpen_bytes(sharpening: &Sharpening, effect: &Working) -> Vec<u8> {
+    float_bytes(&[
+        effect.blend,
+        flag(effect.use_alpha),
+        flag(sharpening.colors()),
+        0.0,
+    ])
+}
+
 pub(super) struct Texture {
     pub(super) texture: wgpu::Texture,
     pub(super) view: wgpu::TextureView,
@@ -487,10 +504,11 @@ fn spare_ready(gpu: &Gpu, spare: &mut Spare, (w, h): (u32, u32), slots: [u32; 2]
 }
 
 #[derive(Default)]
-struct Kept {
+struct Worked {
+    cells: Option<vignette::Cells>,
+    planes: Option<sharpen::Planes>,
     spare: Spare,
     tiles: Tiles,
-    cells: Option<vignette::Cells>,
 }
 
 #[derive(Default)]
@@ -499,7 +517,7 @@ pub(super) struct Blurred {
     scratch: Option<[Texture; 2]>,
     layers: Vec<Option<Texture>>,
     masks: Vec<Option<Texture>>,
-    kept: Kept,
+    worked: Worked,
 }
 
 impl Blurred {
@@ -507,9 +525,9 @@ impl Blurred {
         if self.size != size {
             self.size = size;
             self.scratch = None;
+            self.worked = Worked::default();
             self.layers.clear();
             self.masks.clear();
-            self.kept = Kept::default();
         }
         self.layers.resize_with(n, || None);
         self.masks.resize_with(n, || None);
@@ -539,7 +557,7 @@ impl Blurred {
             canvas.texture.as_image_copy(),
             canvas.texture.size(),
         );
-        effects_into(gpu, canvas, (scratch, &mut self.kept), effects, encoder);
+        effects_into(gpu, canvas, (scratch, &mut self.worked), effects, encoder);
     }
 
     pub(super) fn drop_layer(&mut self, i: usize) {
@@ -566,7 +584,7 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        effects_into(gpu, own, (scratch, &mut self.kept), effects, encoder);
+        effects_into(gpu, own, (scratch, &mut self.worked), effects, encoder);
         &own.view
     }
 
@@ -591,7 +609,7 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        effects_into(gpu, mask, (scratch, &mut self.kept), effects, encoder);
+        effects_into(gpu, mask, (scratch, &mut self.worked), effects, encoder);
         if live.is_empty() {
             return (&own.view, &mask.view, 5.0);
         }
@@ -607,7 +625,7 @@ impl Blurred {
             own.texture.as_image_copy(),
             own.texture.size(),
         );
-        effects_into(gpu, own, (scratch, &mut self.kept), live, encoder);
+        effects_into(gpu, own, (scratch, &mut self.worked), live, encoder);
         (&own.view, &own.view, 3.0)
     }
 }
@@ -907,30 +925,45 @@ fn grain_into(
 fn effects_into(
     gpu: &Gpu,
     own: &Texture,
-    (scratch, kept): (&[Texture; 2], &mut Kept),
+    (scratch, worked): (&[Texture; 2], &mut Worked),
     effects: &[Working],
     encoder: &mut wgpu::CommandEncoder,
 ) {
     let pipes = &gpu.blur;
     for effect in effects {
+        let mut from = &own.view;
+        let mut k = 0;
         let read = match &effect.work {
             Work::Glow(glow) => {
-                let room = (scratch, &mut kept.spare);
+                let room = (scratch, &mut worked.spare);
                 glow_into(gpu, own, room, (glow.as_ref(), effect), encoder);
                 continue;
             }
             Work::Grain(grain) => {
-                let room = (scratch, &mut kept.spare, &mut kept.tiles);
+                let room = (scratch, &mut worked.spare, &mut worked.tiles);
                 grain_into(gpu, own, room, (grain.as_ref(), effect), encoder);
                 continue;
             }
             Work::Vignette(shading) => {
-                Some(vignette::cells(gpu, shading, &mut kept.cells, encoder))
+                Some(vignette::cells(gpu, shading, &mut worked.cells, encoder))
+            }
+            Work::Sharpen(sharpening) => {
+                let taken = (&pipes.sharpen_taken, &sharpen_bytes(sharpening, effect)[..]);
+                let to = &scratch[0].view;
+                draw_step(gpu, taken, Views::with(from, &own.view), to, encoder);
+                from = to;
+                k = 1;
+                let on = (to, own.texture.size());
+                Some(sharpen::planes(
+                    gpu,
+                    sharpening,
+                    on,
+                    &mut worked.planes,
+                    encoder,
+                ))
             }
             _ => None,
         };
-        let mut from = &own.view;
-        let mut k = 0;
         for step in steps(pipes, effect) {
             let to = &scratch[k];
             let views = Views {

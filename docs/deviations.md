@@ -2664,6 +2664,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The picture is the same.
   - The picker reaches any file, with no LUT folder to set up.
+  - The owner approved this difference.
 
 ## X140. The Atmosphere noise of a Glow has its own pattern
 

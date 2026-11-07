@@ -1479,8 +1479,12 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - On the Cut page, a double-click on an effect adds it to the selected clip.
   - Measured in Resolve Studio 21.1.2: with several selected clips, only the first selected clip gets it.
   - The Effects panel of the Inspector has the values of the effects.
-  - vidcut: the Effects tab has three groups. Blur has Gaussian Blur and Mosaic Blur, Light has Glow, and Film Emulation has Film Grain and Vignette.
-  - The other effects come later ([todo](todo/effects-library.md)).
+  - vidcut: the Effects tab has four groups:
+    - Blur has Gaussian Blur and Mosaic Blur.
+    - Light has Glow.
+    - Film Emulation has Film Grain and Vignette.
+    - Sharpen has Sharpen.
+  - vidcut: the other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
   - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
   - Measured in Resolve Studio 21.1.2: a generator takes no effect. A drag on the Cut page, a drag on the Edit page and the scripting API all leave it with none.
@@ -1773,6 +1777,38 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Hue gives the fixed hue at each gray between 0 and 1. A gray of 0 or less, or of 1 or more, takes the hue of red.
     - Color takes any number. The GUI gives 0 to 1. Divide takes a Color below 0 as 0.
     - On a compound clip, the size of the picture is the size of the frame.
+- **Sharpen.** Its values and their defaults, measured in Resolve Studio 21.1.2:
+  - Sharpen Amount goes from 1 to 5 and is 1.8.
+  - The Detail Levels group has Fine Detail Size, Fine Details, Medium Details and Large Details.
+  - Fine Detail Size goes from 0.01 to 0.1 and is 0.05.
+  - Fine Details, Medium Details and Large Details go from 1 to 5 and are 1.
+  - The Chroma group has Sharpen Chroma. It goes from 1 to 5 and is 1.
+- **How the sharpen works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
+  - It works after the Transform, in pixels of the frame. A black gap in the frame counts as picture.
+  - A source of another size, and a Zoom, go through the scaler first. Zoom 2, Zoom X 2, Zoom 0.5 and a 3840×2160 source were measured.
+  - No value grows with the size of the frame.
+  - One solve makes a smooth plane u from a plane p of the picture, with a strength λ and a number n of half sweeps.
+    - The link between two neighbor pixels q and r is λ / (|p(q) − p(r)|^1.2 + 0.0001).
+    - A neighbor outside the frame is the pixel itself, with the link λ / 0.0001.
+    - u starts as p.
+    - The first half sweep changes the pixels where x + y is odd. Then the half sweeps alternate.
+    - A half sweep finds t = (p + the sum of link × u of the neighbor) / (1 + the sum of the links). Then u becomes u + 1.8 × (t − u).
+  - Three solves start from p, each one apart from the others:
+    - u1 has λ = Size² and 15 half sweeps.
+    - u2 has λ = 4 × Size² and 15 half sweeps.
+    - u3 has λ = 32 × Size² and 20 half sweeps.
+    - The bands are B1 = p − u1, B2 = u1 − u2 and B3 = u2 − u3.
+  - The plane of the brightness is y = 0.2126 R + 0.7152 G + 0.0722 B.
+    - y′ = y + the sum of (Sharpen Amount × g − 1) × B. Here g is the Details value of the band.
+  - The planes of the colors are Pr = 0.65 (R − y) and Pb = 0.552 (B − y).
+    - Pr′ = Pr + the sum of (Sharpen Chroma × g − 1) × B, with the bands of Pr. Pb′ is the same.
+    - At a Sharpen Chroma of 1, Pr and Pb do not change, whatever the Details values are.
+  - The output is R′ = y′ + Pr′ / 0.65, B′ = y′ + Pb′ / 0.552 and G′ = (y′ − 0.2126 R′ − 0.0722 B′) / 0.7152.
+  - Nothing stops the colors at 0 or 1 before the output.
+  - It works on the premultiplied colors. The alpha does not change.
+- **Sharpen in vidcut:** vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+  - A viewer that draws fewer pixels than the frame uses the same numbers on the pixels that it draws.
+  - A Sharpen Chroma between 1 and 2 uses Sharpen Chroma × g − 1. Only 1, 2, 3 and 5 are measured.
 - **Compound clips:** the effects of a compound clip work on the mix of its tracks, after its transform ([D75](#12-decisions-on-gaps-and-contradictions)).
 - **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
 
@@ -4100,7 +4136,8 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - With no LUT, the input comes out unchanged, also below 0 and above 1.
 - A LUT does not change the alpha of a picture. In these results, `T` is the table, `C` is the color in the file and `A` is the alpha:
   - With the Alpha Mode Straight, the result is `T(C) * A`.
-  - With the Alpha Mode Premultiplied, the result is `T(C / A) * A`. With `A` at 0, the result is 0.
+  - With the Alpha Mode Premultiplied, the result is `T(clamp(C / A)) * A`. With `A` at 0, the result is 0.
+  - With the Alpha Mode Premultiplied and no LUT, `C` stays where `A` is 0.
 
 **Where a LUT goes:**
 

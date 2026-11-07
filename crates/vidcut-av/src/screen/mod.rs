@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock};
 use crate::color::shader_colors;
 use crate::cuda::{CudaDevice, PlaneCopy};
 use crate::hw::Kind;
-use crate::player::{Layout, Picture, Sampling, TitleOver, TitlePicture};
+use crate::player::{AlphaUse, Layout, Picture, Sampling, TitleOver, TitlePicture};
 use crate::thumbs::Image;
 use vidcut_core::model::{AlphaMode, Hdr, WipeDirection};
 use vidcut_core::place::{Level, Mix, MixPart, Mixes, Placing, Working, chain, lettered};
@@ -25,6 +25,7 @@ mod lut;
 mod out;
 pub mod scope;
 mod shared;
+mod sharpen;
 mod vignette;
 #[cfg(any(target_os = "linux", windows))]
 mod vulkan;
@@ -81,6 +82,7 @@ pub struct Gpu {
     scope: OnceLock<scope::Pipes>,
     blur: blur::Pipes,
     vignette: OnceLock<vignette::Pipes>,
+    sharpen: OnceLock<sharpen::Pipes>,
 }
 
 struct Drawing {
@@ -710,6 +712,7 @@ impl Gpu {
             scope: OnceLock::new(),
             blur: blur::Pipes::new(device, &shader),
             vignette: OnceLock::new(),
+            sharpen: OnceLock::new(),
         }
     }
 
@@ -865,7 +868,7 @@ fn shown_from_gpu(takes: &Takes) -> Vec<Kind> {
 }
 
 struct Planes {
-    key: (Layout, u32, u32, bool, bool),
+    key: (Layout, u32, u32, bool, bool, Option<(u32, u32)>),
     y: wgpu::Texture,
     u: wgpu::Texture,
     v: wgpu::Texture,
@@ -1571,6 +1574,7 @@ struct Slot {
     held_shared: bool,
     written: Option<Arc<Picture>>,
     rgb: Option<wgpu::Buffer>,
+    rgb_matte: Option<wgpu::Buffer>,
     converted: Option<(wgpu::Texture, (u32, u32, u32))>,
     converted_from: Option<(std::sync::Weak<Picture>, Option<Hdr>)>,
     own: Option<wgpu::Texture>,
@@ -2248,6 +2252,7 @@ impl Slot {
         });
         let halvings = halvings(picture, size, how);
         let alpha = match (&self.a_view, &self.views) {
+            _ if picture.matte().is_some() => 1,
             (Some(_), _) => ALPHA_OF_16,
             (None, None) => u32::from(picture.alpha_plane()),
             (None, Some(_)) => 0,
@@ -2489,6 +2494,7 @@ impl Slot {
             self.unimported.clear();
         }
         self.make_planes(gpu, picture);
+        self.write_matte(gpu, picture, encoder);
         let written = self.written.take();
         if picture.gpu().is_some() && written.as_ref().is_some_and(|w| Arc::ptr_eq(w, picture)) {
             self.written = written;
@@ -2905,7 +2911,8 @@ impl Slot {
         let (cw, ch) = chroma_size(layout, w, h);
         let wide = gpu.wide && sixteen(layout);
         let alpha = picture.alpha_plane();
-        let key = (layout, w, h, wide, alpha);
+        let matte = picture.matte().map(|m| (m.width(), m.height()));
+        let key = (layout, w, h, wide, alpha, matte);
         if self.planes.as_ref().is_none_or(|p| p.key != key) {
             self.written = None;
             let (one, two, four) = if wide {
@@ -2940,6 +2947,14 @@ impl Slot {
                 })
             };
             let make = |size: (u32, u32), format| made(size, format, wgpu::TextureUsages::empty());
+            let a = |plain| match matte {
+                Some(size) => made(
+                    size,
+                    wgpu::TextureFormat::Rgba16Float,
+                    wgpu::TextureUsages::STORAGE_BINDING,
+                ),
+                None => make(if alpha { (w, h) } else { (1, 1) }, plain),
+            };
             self.planes = Some(match layout {
                 Layout::Yuv420p
                 | Layout::Yuv420p10
@@ -2951,27 +2966,24 @@ impl Slot {
                     y: make((w, h), one),
                     u: make((cw, ch), one),
                     v: make((cw, ch), one),
-                    a: make(
-                        if alpha { (w, h) } else { (1, 1) },
-                        match layout {
-                            Layout::Gbrp16 => one,
-                            _ => wgpu::TextureFormat::R8Unorm,
-                        },
-                    ),
+                    a: a(match layout {
+                        Layout::Gbrp16 => one,
+                        _ => wgpu::TextureFormat::R8Unorm,
+                    }),
                 },
                 Layout::Nv12 | Layout::P010 | Layout::P210 | Layout::P416 => Planes {
                     key,
                     y: make((w, h), one),
                     u: make((cw, ch), two),
                     v: make((1, 1), one),
-                    a: make((1, 1), wgpu::TextureFormat::R8Unorm),
+                    a: a(wgpu::TextureFormat::R8Unorm),
                 },
                 Layout::Ayuv64 => Planes {
                     key,
                     y: make((w, h), four),
                     u: make((1, 1), one),
                     v: make((1, 1), one),
-                    a: make((1, 1), wgpu::TextureFormat::R8Unorm),
+                    a: a(wgpu::TextureFormat::R8Unorm),
                 },
                 Layout::Rgb | Layout::Rgb48 => Planes {
                     key,
@@ -2985,7 +2997,7 @@ impl Slot {
                     ),
                     u: make((1, 1), one),
                     v: make((1, 1), one),
-                    a: make((1, 1), wgpu::TextureFormat::R8Unorm),
+                    a: a(wgpu::TextureFormat::R8Unorm),
                 },
             });
         }
@@ -2995,7 +3007,7 @@ impl Slot {
         let (w, h) = (picture.width(), picture.height());
         let layout = picture.layout();
         if matches!(layout, Layout::Rgb | Layout::Rgb48) {
-            return self.write_rgb(gpu, picture.frame(), encoder);
+            return self.write_rgb(gpu, picture.frame(), false, encoder);
         }
         let (cw, ch) = chroma_size(layout, w, h);
         let wide = gpu.wide && sixteen(layout);
@@ -3083,10 +3095,21 @@ impl Slot {
         }
     }
 
+    fn write_matte(&mut self, gpu: &Gpu, picture: &Picture, encoder: &mut wgpu::CommandEncoder) {
+        let Some(matte) = picture.matte() else {
+            return;
+        };
+        let last = self.written.as_ref().and_then(|w| w.matte());
+        if !last.is_some_and(|w| same_data(w, matte)) {
+            self.write_rgb(gpu, matte.frame(), true, encoder);
+        }
+    }
+
     fn write_rgb(
         &mut self,
         gpu: &Gpu,
         frame: &crate::ffmpeg::frame::Video,
+        matte: bool,
         encoder: &mut wgpu::CommandEncoder,
     ) {
         let found = held::of(frame);
@@ -3102,7 +3125,9 @@ impl Slot {
             },
             None => None,
         };
-        self.held_shared = lent.is_some();
+        if !matte {
+            self.held_shared = lent.is_some();
+        }
         let source = match lent {
             Some(buffer) => buffer,
             None => {
@@ -3119,22 +3144,28 @@ impl Slot {
                 };
                 bytes.resize(bytes.len().next_multiple_of(4), 0);
                 let size = bytes.len() as u64;
-                if self.rgb.as_ref().is_none_or(|b| b.size() != size) {
-                    self.rgb = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                let kept = if matte {
+                    &mut self.rgb_matte
+                } else {
+                    &mut self.rgb
+                };
+                if kept.as_ref().is_none_or(|b| b.size() != size) {
+                    *kept = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
                         label: Some("vidcut rgb picture"),
                         size,
                         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                         mapped_at_creation: false,
                     }));
                 }
-                let buffer = self.rgb.clone().expect("made above");
+                let buffer = kept.clone().expect("made above");
                 gpu.queue.write_buffer(&buffer, 0, &bytes);
                 crate::copies::up(frame);
                 buffer
             }
         };
         let planes = self.planes.as_ref().expect("made for it");
-        gpu.held.unpack(&gpu.device, encoder, &source, &planes.y);
+        let plane = if matte { &planes.a } else { &planes.y };
+        gpu.held.unpack(&gpu.device, encoder, &source, plane);
     }
 }
 
@@ -4023,7 +4054,13 @@ fn params_of(
         AlphaMode::Premultiplied => 2.0,
         AlphaMode::Invert => 3.0,
     };
-    floats.extend([site[0], site[1], alpha_mode, 0.0]);
+    let alpha_use = match picture.alpha_use() {
+        AlphaUse::Shown => 0.0,
+        AlphaUse::Multiplied => 1.0,
+        AlphaUse::Matte => 2.0,
+        AlphaUse::TakenOut => 3.0,
+    };
+    floats.extend([site[0], site[1], alpha_mode, alpha_use]);
     let woven = picture.woven().map_or([0.0, 0.0], |w| {
         [
             if w.top_first { 1.0 } else { 2.0 },

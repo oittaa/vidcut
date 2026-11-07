@@ -2,7 +2,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Effect, EffectKind, EffectType, FilmGrain, GaussianBlur, Glow, MosaicBlur, Project, Vignette,
+    Effect, EffectKind, EffectType, FilmGrain, GaussianBlur, Glow, MosaicBlur, Project, Sharpen,
+    Vignette,
 };
 use crate::request::EffectChange;
 
@@ -194,6 +195,15 @@ fn vignette_values(c: &mut EffectChange, v: &mut Vignette) -> Result<()> {
     Ok(())
 }
 
+fn sharpen_values(c: &mut EffectChange, s: &mut Sharpen) {
+    given(&mut c.sharpen_amount, &mut s.sharpen_amount);
+    given(&mut c.fine_detail_size, &mut s.fine_detail_size);
+    given(&mut c.fine_details, &mut s.fine_details);
+    given(&mut c.medium_details, &mut s.medium_details);
+    given(&mut c.large_details, &mut s.large_details);
+    given(&mut c.sharpen_chroma, &mut s.sharpen_chroma);
+}
+
 pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result<()> {
     if *change == EffectChange::default() {
         return Err(Error::usage("effects.set needs a value to change"));
@@ -211,6 +221,7 @@ pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result
         EffectKind::Glow(g) => glow_values(&mut left, g)?,
         EffectKind::FilmGrain(g) => grain_values(&mut left, g)?,
         EffectKind::Vignette(v) => vignette_values(&mut left, v)?,
+        EffectKind::Sharpen(s) => sharpen_values(&mut left, s),
     }
     if left != EffectChange::default() {
         return Err(Error::invalid(format!(
