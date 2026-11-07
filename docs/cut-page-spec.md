@@ -2961,7 +2961,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Measured in Resolve Studio 21.2, on 1920×1080 and 3840×2160 timelines:
       - The Inspector shows the offset in pixels of the timeline. It stops at 4 times the width and 4 times the height.
       - A change of the timeline size keeps the fraction. From 1920×1080 to 3840×1080, 40 pixels right became 80, and 40 pixels down stayed 40.
-      - The shadow moves by the shown pixels. A move to the right is 1 pixel less. vidcut moves it by the shown pixels.
+      - The shadow moves by the shown pixels. A move to the right is 1 pixel less. vidcut moves it by the shown pixels ([X150](deviations.md#x150-a-subtitle-shadow-moves-right-by-its-full-offset)).
     - `off` in `background` or `shadow` draws none and keeps the values.
   - The Subtitle Track section has these rules for empty boxes and for switches:
     - A color has no empty state, measured in Resolve Studio 21.1.2. An outline, background or shadow color box that the user empties keeps its color.
