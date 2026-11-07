@@ -1479,7 +1479,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - On the Cut page, a double-click on an effect adds it to the selected clip.
   - Measured in Resolve Studio 21.1.2: with several selected clips, only the first selected clip gets it.
   - The Effects panel of the Inspector has the values of the effects.
-  - vidcut: the Effects tab has three groups. Blur has Gaussian Blur and Mosaic Blur, Light has Glow, and Film Emulation has Film Grain.
+  - vidcut: the Effects tab has three groups. Blur has Gaussian Blur and Mosaic Blur, Light has Glow, and Film Emulation has Film Grain and Vignette.
   - The other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
   - vidcut: the right-click menu of an effect has Add to Selected Clips. It adds the effect to each selected clip with a picture.
@@ -1724,6 +1724,48 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - On other frame heights, the noise keeps its standard deviation before Softness.
     - Red, Green and Blue also multiply the shift that Symmetry makes.
     - Below Symmetry 0.3, the straight lines are the mirror of those at 1 − Symmetry. Under 0.1 and over 0.9, they stay as at 0.1 and 0.9.
+- **Vignette.** Its values and their defaults, measured in Resolve Studio 21.1.2:
+  - Operating Mode is Basic or Advanced. Basic is the default.
+  - Border Shape is Oval, Triangle, Diamond, Rectangle, Hexagon or Octagon. Oval is the default.
+  - Size goes from 0.01 to 2 and is 0.5.
+  - Rotation goes from −360 to 360 and is 0.
+  - Anamorphism goes from 0.2 to 5 and is 1.78.
+  - Center goes from −1000000 to 1000000. It is the middle of the picture.
+  - Softness goes from 0 to 1 and is 0.5.
+  - Transparency goes from 0 to 1 and is 0.
+  - Color is black.
+  - Composite Type has the 27 modes of the Composite section. Multiply is the default.
+- **How the vignette works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
+  - The output is b + (m − b) × (1 − v) × (1 − Transparency), held between 0 and 1. Here b is the picture that comes in, m is the Composite Type of Color and b, and v is the shape picture.
+  - Basic uses Size, Softness, Anamorphism and Color. It always has an Oval, the Normal mode, no Rotation, no Transparency and the Center in the middle.
+  - The size of the picture is its fit in the frame, before Zoom and Position. The shape does not follow them.
+  - The radius of the shape is 0.7 × (Size + 0.01) × the height of the picture.
+  - The mask has one cell for each 2 pixels, around the middle of the shape. Each cell is 1 inside the shape and 0 outside it.
+  - The cells go from −W to W − 2 across and from −H to H − 2 down, in pixels from the middle of the shape.
+  - Rotation turns the shape. Then Anamorphism stretches it across the frame. A rotated rectangle is thus a parallelogram.
+  - Three box blurs go across and then three go down, the widest first. Beyond the cells they take 0.
+  - The sigma of the blurs is (966 / 1080) × the height × √Size × (0.05 + Softness²), in pixels.
+  - Then v = min(1, B / (B0 − L) − L). Here B is the blurred cell, B0 is the cell at the middle of the shape, and L is the cell at the top left.
+  - The value of a pixel is the linear mix of the four cells around it.
+  - The Center can put the shape outside the frame. Five Centers outside the frame follow the same rule.
+  - The rule works on the premultiplied colors, and the alpha does not change. A clear part of the picture thus adds the Color to the lower track.
+  - Composite Type differs from the Composite section in these ways:
+    - Color Dodge, Color Burn, Divide and Vivid Light do not stop at 0 or 1 before the mix.
+    - Divide is b / (a + 0.000001).
+    - Linear Burn stops at 0.
+    - Lighter Color and Darker Color take the Color on a tie.
+    - Hue with a black or a white Color takes the hue of red. The grays 0.2, 0.4, 0.6 and 0.8 give one other fixed hue.
+- **Vignette in vidcut:**
+  - A source that fits with a half pixel takes the next whole pixel as its size. Only 607.5 and 608 were tried.
+  - The GUI shows only the values that work in the Operating Mode.
+  - The pictures are 16-bit floats. Thus Lighter Color and Darker Color see a tie where the sums differ by less than one step of these floats.
+  - Divide takes b / a where a channel of the Color is 1/64 or more. There the 0.000001 changes the result by less than one step of the pictures.
+  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+    - Beyond the cells, a pixel takes the value of the nearest cell.
+    - With an odd width or height, B0 is the cell one pixel to the left of or above the middle.
+    - Hue gives the fixed hue at each gray between 0 and 1. A gray of 0 or less, or of 1 or more, takes the hue of red.
+    - Color takes any number. The GUI gives 0 to 1. Divide takes a Color below 0 as 0.
+    - On a compound clip, the size of the picture is the size of the frame.
 - **Compound clips:** the effects of a compound clip work on the mix of its tracks, after its transform ([D75](#12-decisions-on-gaps-and-contradictions)).
 - **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
 
@@ -1998,6 +2040,20 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - Resolve makes a side under 256 into 256 with H.264 and ProRes. It makes a side over 32768 into 32768 with ProRes.
     - Resolve writes H.264 at 8192 x 4320. A job of H.264 at 8193 x 4321 stops its scripting API. It writes ProRes at 8193 x 4321.
     - vidcut refuses a side outside these limits. It does not change a setting without a word.
+- **Export Alpha** (Deliver page):
+  - An export writes alpha only with Export Alpha on, in a format that has alpha (p. 1205).
+  - The formats with alpha are TIFF, OpenEXR, ProRes 4444, ProRes 4444 XQ and DNxHR 444 (p. 4093).
+  - The box does not appear if the codec has no alpha (p. 4093).
+  - The Alpha Mode of the file is Premultiplied or Straight (p. 4117). Premultiplied is the default (p. 4093).
+  - When a program renders as one file, its layers composite into one picture (p. 473).
+  - **In vidcut:**
+    - `video.alpha` is Export Alpha. `video.alpha_mode` is `premultiplied` or `straight`. The Export dialog shows both only for ProRes 4444 and 4444 XQ.
+    - An export refuses `video.alpha` in another format. It does not change a setting without a word.
+    - DNxHR 444 has no alpha ([X136](deviations.md#x136-dnxhr-444-exports-without-alpha)).
+    - vidcut does not export TIFF or OpenEXR yet ([todo](todo/export-tiff-exr.md)).
+    - With it off, the export composites over black, and the file has no alpha channel.
+    - With it on, what shows nothing is transparent: a gap, a bar beside a picture, and a dip to black.
+    - With it on, a composite mode mixes with the layers below as far as they show. Over nothing, the color stays as it is.
 
 ## 11. Keyboard shortcuts
 

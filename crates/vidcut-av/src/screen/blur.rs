@@ -1,10 +1,11 @@
 use vidcut_core::lru::Lru;
 use vidcut_core::model::GlowOutput;
 use vidcut_core::place::{
-    Blurring, GlowSpread, Glowing, GrainTile, Graining, Level, Placing, Tiling, Work, Working,
+    Blurring, GlowSpread, Glowing, GrainTile, Graining, Level, Placing, Shading, Tiling, Work,
+    Working,
 };
 
-use super::{Gpu, MIXING, begin, grain};
+use super::{Gpu, MIXING, begin, grain, vignette};
 
 const KERNEL: usize = 35;
 
@@ -48,8 +49,10 @@ const DETAIL_SLOTS: [u32; 2] = [4, 5];
 
 pub(super) struct Pipes {
     layout: wgpu::BindGroupLayout,
+    reading: wgpu::BindGroupLayout,
     blur: wgpu::RenderPipeline,
     mosaic: wgpu::RenderPipeline,
+    vignette: wgpu::RenderPipeline,
     glow_mask: wgpu::RenderPipeline,
     glow_cells: wgpu::RenderPipeline,
     glow: wgpu::RenderPipeline,
@@ -69,34 +72,45 @@ impl Pipes {
             },
             count: None,
         };
+        let buffer = |binding, ty| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let params = buffer(0, wgpu::BufferBindingType::Uniform);
+        let views = [texture(1), texture(2), texture(14), texture(15)];
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut blur"),
+            entries: &[params, views[0], views[1], views[2], views[3]],
+        });
+        let read = wgpu::BufferBindingType::Storage { read_only: true };
+        let reading = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("vidcut blur"),
             entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                texture(1),
-                texture(2),
-                texture(14),
-                texture(15),
+                params,
+                views[0],
+                views[1],
+                views[2],
+                views[3],
+                buffer(3, read),
             ],
         });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("vidcut blur"),
-            bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
-        let pipeline = |entry: &str| {
+        let of = |layout: &wgpu::BindGroupLayout| {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("vidcut blur"),
+                bind_group_layouts: &[Some(layout)],
+                immediate_size: 0,
+            })
+        };
+        let pipeline = |layout: &wgpu::PipelineLayout, entry: &str| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(entry),
-                layout: Some(&pipeline_layout),
+                layout: Some(layout),
                 vertex: wgpu::VertexState {
                     module: shader,
                     entry_point: Some("vs"),
@@ -120,15 +134,18 @@ impl Pipes {
                 cache: None,
             })
         };
+        let plain = of(&layout);
         Self {
-            blur: pipeline("fs_blur"),
-            mosaic: pipeline("fs_mosaic"),
-            glow_mask: pipeline("fs_glow_mask"),
-            glow_cells: pipeline("fs_glow_cells"),
-            glow: pipeline("fs_glow"),
-            grain_noise: pipeline("fs_grain_noise"),
-            grain: pipeline("fs_grain"),
+            blur: pipeline(&plain, "fs_blur"),
+            mosaic: pipeline(&plain, "fs_mosaic"),
+            vignette: pipeline(&of(&reading), "fs_vignette"),
+            glow_mask: pipeline(&plain, "fs_glow_mask"),
+            glow_cells: pipeline(&plain, "fs_glow_cells"),
+            glow: pipeline(&plain, "fs_glow"),
+            grain_noise: pipeline(&plain, "fs_grain_noise"),
+            grain: pipeline(&plain, "fs_grain"),
             layout,
+            reading,
         }
     }
 }
@@ -147,6 +164,10 @@ fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
                 params: mosaic_bytes(tiling, effect, stage),
             })
             .collect(),
+        Work::Vignette(shading) => vec![Step {
+            pipeline: &pipes.vignette,
+            params: vignette_bytes(shading, effect),
+        }],
         Work::Glow(_) | Work::Grain(_) => Vec::new(),
     }
 }
@@ -412,6 +433,17 @@ fn glow_bytes(
     out
 }
 
+fn vignette_bytes(shading: &Shading, effect: &Working) -> Vec<u8> {
+    let [x, y] = shading.first;
+    let [r, g, b] = shading.color;
+    let mut out = float_bytes(&[x, y, shading.strength, effect.blend]);
+    out.extend(float_bytes(&[r, g, b, flag(effect.use_alpha)]));
+    for v in [shading.cells[0], shading.cells[1], shading.mode.code(), 0] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
 pub(super) struct Texture {
     pub(super) texture: wgpu::Texture,
     pub(super) view: wgpu::TextureView,
@@ -455,13 +487,19 @@ fn spare_ready(gpu: &Gpu, spare: &mut Spare, (w, h): (u32, u32), slots: [u32; 2]
 }
 
 #[derive(Default)]
+struct Kept {
+    spare: Spare,
+    tiles: Tiles,
+    cells: Option<vignette::Cells>,
+}
+
+#[derive(Default)]
 pub(super) struct Blurred {
     size: (u32, u32),
     scratch: Option<[Texture; 2]>,
     layers: Vec<Option<Texture>>,
     masks: Vec<Option<Texture>>,
-    spare: Spare,
-    tiles: Tiles,
+    kept: Kept,
 }
 
 impl Blurred {
@@ -471,8 +509,7 @@ impl Blurred {
             self.scratch = None;
             self.layers.clear();
             self.masks.clear();
-            self.spare.clear();
-            self.tiles.clear();
+            self.kept = Kept::default();
         }
         self.layers.resize_with(n, || None);
         self.masks.resize_with(n, || None);
@@ -502,8 +539,7 @@ impl Blurred {
             canvas.texture.as_image_copy(),
             canvas.texture.size(),
         );
-        let room = (scratch, &mut self.spare, &mut self.tiles);
-        effects_into(gpu, canvas, room, effects, encoder);
+        effects_into(gpu, canvas, (scratch, &mut self.kept), effects, encoder);
     }
 
     pub(super) fn drop_layer(&mut self, i: usize) {
@@ -530,8 +566,7 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        let room = (&*scratch, &mut self.spare, &mut self.tiles);
-        effects_into(gpu, own, room, effects, encoder);
+        effects_into(gpu, own, (scratch, &mut self.kept), effects, encoder);
         &own.view
     }
 
@@ -556,8 +591,7 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        let room = (&*scratch, &mut self.spare, &mut self.tiles);
-        effects_into(gpu, mask, room, effects, encoder);
+        effects_into(gpu, mask, (scratch, &mut self.kept), effects, encoder);
         if live.is_empty() {
             return (&own.view, &mask.view, 5.0);
         }
@@ -573,8 +607,7 @@ impl Blurred {
             own.texture.as_image_copy(),
             own.texture.size(),
         );
-        let room = (&*scratch, &mut self.spare, &mut self.tiles);
-        effects_into(gpu, own, room, live, encoder);
+        effects_into(gpu, own, (scratch, &mut self.kept), live, encoder);
         (&own.view, &own.view, 3.0)
     }
 }
@@ -596,6 +629,7 @@ struct Views<'a> {
     start: &'a wgpu::TextureView,
     second: &'a wgpu::TextureView,
     mask: &'a wgpu::TextureView,
+    cells: Option<&'a wgpu::Buffer>,
 }
 
 impl<'a> Views<'a> {
@@ -609,6 +643,7 @@ impl<'a> Views<'a> {
             start,
             second: start,
             mask: start,
+            cells: None,
         }
     }
 }
@@ -631,19 +666,28 @@ fn draw_step(
         binding,
         resource: wgpu::BindingResource::TextureView(view),
     };
+    let mut entries = vec![
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: params.as_entire_binding(),
+        },
+        texture(1, views.source),
+        texture(2, views.start),
+        texture(14, views.second),
+        texture(15, views.mask),
+    ];
+    entries.extend(views.cells.map(|buffer| wgpu::BindGroupEntry {
+        binding: 3,
+        resource: buffer.as_entire_binding(),
+    }));
     let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("vidcut blur"),
-        layout: &gpu.blur.layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: params.as_entire_binding(),
-            },
-            texture(1, views.source),
-            texture(2, views.start),
-            texture(14, views.second),
-            texture(15, views.mask),
-        ],
+        layout: if views.cells.is_some() {
+            &gpu.blur.reading
+        } else {
+            &gpu.blur.layout
+        },
+        entries: &entries,
     });
     let mut drawing = begin(encoder, to, None);
     drawing.set_pipeline(pipeline);
@@ -723,6 +767,7 @@ fn glow_into(
         start: &own.view,
         second: blurred(two_blurs, [2, 3]),
         mask,
+        cells: None,
     };
     let made = &scratch[1];
     draw_step(
@@ -848,6 +893,7 @@ fn grain_into(
         start: &own.view,
         second: &own.view,
         mask: input,
+        cells: None,
     };
     let last = (&gpu.blur.grain, &bytes[..]);
     draw_step(gpu, last, views, &made.view, encoder);
@@ -861,26 +907,36 @@ fn grain_into(
 fn effects_into(
     gpu: &Gpu,
     own: &Texture,
-    (scratch, spare, tiles): (&[Texture; 2], &mut Spare, &mut Tiles),
+    (scratch, kept): (&[Texture; 2], &mut Kept),
     effects: &[Working],
     encoder: &mut wgpu::CommandEncoder,
 ) {
     let pipes = &gpu.blur;
     for effect in effects {
-        if let Work::Glow(glow) = &effect.work {
-            glow_into(gpu, own, (scratch, spare), (glow.as_ref(), effect), encoder);
-            continue;
-        }
-        if let Work::Grain(grain) = &effect.work {
-            let room = (scratch, &mut *spare, &mut *tiles);
-            grain_into(gpu, own, room, (grain.as_ref(), effect), encoder);
-            continue;
-        }
+        let read = match &effect.work {
+            Work::Glow(glow) => {
+                let room = (scratch, &mut kept.spare);
+                glow_into(gpu, own, room, (glow.as_ref(), effect), encoder);
+                continue;
+            }
+            Work::Grain(grain) => {
+                let room = (scratch, &mut kept.spare, &mut kept.tiles);
+                grain_into(gpu, own, room, (grain.as_ref(), effect), encoder);
+                continue;
+            }
+            Work::Vignette(shading) => {
+                Some(vignette::cells(gpu, shading, &mut kept.cells, encoder))
+            }
+            _ => None,
+        };
         let mut from = &own.view;
         let mut k = 0;
         for step in steps(pipes, effect) {
             let to = &scratch[k];
-            let views = Views::with(from, &own.view);
+            let views = Views {
+                cells: read,
+                ..Views::with(from, &own.view)
+            };
             draw_step(
                 gpu,
                 (step.pipeline, &step.params[..]),

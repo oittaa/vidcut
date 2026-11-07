@@ -11,7 +11,7 @@ use crate::model::{
     Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType,
     GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, GrainPreset, Handle,
     LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign, TitleAnchor,
-    TitleKind, TitleStyle, TrackClip, ZoomBox,
+    TitleKind, TitleStyle, TrackClip, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -3391,6 +3391,7 @@ pub struct ExportParams {
     #[serde(default)]
     pub settings: Option<ExportSettings>,
     /// Overrides like `video.quality=20` or `audio.bitrate=192000`.
+    /// `null` gives a field its default.
     #[serde(default)]
     pub set: Vec<String>,
     /// Timeline range. Default: In–Out if both marks are set, else everything.
@@ -4600,7 +4601,8 @@ pub struct EffectChange {
     /// What a Glow's blur takes from beyond the frame.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub framing: Option<GlowFraming>,
-    /// How a Glow goes over the picture.
+    /// How a Glow goes over the picture, or how a Vignette's color mixes
+    /// with the picture in `advanced`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composite_type: Option<CompositeMode>,
     /// How much of a Glow's composite shows, or how much of a Film Grain
@@ -4648,7 +4650,8 @@ pub struct EffectChange {
     /// from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symmetry: Option<f64>,
-    /// How soft a Film Grain is, from 0 to 1.
+    /// How soft a Film Grain is, or how soft the edge of a Vignette's shape
+    /// is, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub softness: Option<f64>,
     /// Blurs the picture under a Film Grain, from 0 to 2.
@@ -4676,6 +4679,34 @@ pub struct EffectChange {
     /// On, another pattern of a Film Grain with the same look.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animate: Option<bool>,
+    /// `basic` is a Vignette's oval in the middle, with its color in the
+    /// `normal` mode. `advanced` uses all its values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operating_mode: Option<VignetteMode>,
+    /// The shape of a Vignette, in `advanced`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border_shape: Option<VignetteShape>,
+    /// How large a Vignette's shape is, from 0.01 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f64>,
+    /// Turns a Vignette's shape counter-clockwise, in `advanced`, in degrees
+    /// from -360 to 360.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<f64>,
+    /// How much wider than high a Vignette's shape is, from 0.2 to 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anamorphism: Option<f64>,
+    /// The middle of a Vignette's shape, in `advanced`, `[x, y]` as fractions
+    /// of the picture from its bottom left, each from -1000000 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub center: Option<Vec<f64>>,
+    /// How much of the picture shows through a Vignette's color, in
+    /// `advanced`, from 0 (none) to 1 (all).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transparency: Option<f64>,
+    /// The color around a Vignette's shape, `[r, g, b]` in code values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<Vec<f64>>,
 }
 
 /// A change to a clip's Dynamic Zoom: each field given replaces its own,

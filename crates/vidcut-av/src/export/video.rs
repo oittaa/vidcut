@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use vidcut_core::export::AlphaOut;
 use vidcut_core::generators::Pattern;
 use vidcut_core::lru::Lru;
 use vidcut_core::model::{AlphaMode, ColorSpace, Hdr, Retime, SubtitleStyle, SuperScale, Upscaler};
@@ -1706,6 +1707,7 @@ pub struct VideoFrames {
     reading: Vec<Option<usize>>,
     ahead: Ahead<Source, (Input, u64, i64)>,
     black: Option<frame::Video>,
+    clear: Option<frame::Video>,
     colored: Option<([u8; 3], frame::Video)>,
     generated: Lru<Pattern, frame::Video, GENERATED_KEPT>,
     color_sides: ColorSides,
@@ -1735,6 +1737,7 @@ pub struct VideoFrames {
     smoother: Option<(Retime, crate::interpolate::User)>,
     colors: bool,
     alpha: bool,
+    written_alpha: Option<AlphaOut>,
     written: Option<(u32, u32)>,
     output_lut: Option<crate::screen::Lut>,
     input_luts: vidcut_core::lru::Lru<String, crate::screen::Lut, INPUT_LUTS_KEPT>,
@@ -2025,6 +2028,7 @@ impl VideoFrames {
             reading: Vec::new(),
             ahead: Ahead::new(),
             black: None,
+            clear: None,
             colored: None,
             generated: Lru::new(),
             color_sides: ColorSides::new(),
@@ -2057,6 +2061,7 @@ impl VideoFrames {
             smoother: None,
             colors: false,
             alpha: false,
+            written_alpha: None,
             written: None,
             output_lut: None,
             input_luts: Default::default(),
@@ -2157,6 +2162,12 @@ impl VideoFrames {
         self
     }
 
+    pub(crate) fn writing_alpha(mut self, form: Option<AlphaOut>) -> Self {
+        self.alpha = form.is_some();
+        self.written_alpha = form;
+        self
+    }
+
     pub fn decoded_on(&self) -> Option<crate::hw::Kind> {
         self.last_decoder
     }
@@ -2213,6 +2224,9 @@ impl VideoFrames {
         if self.drawer.is_none() {
             let mut drawer = Drawer::new(self.encoder.take())?;
             drawer.screen.keep_alpha(self.alpha);
+            drawer
+                .screen
+                .premultiply(self.written_alpha == Some(AlphaOut::Premultiplied));
             drawer.screen.write_at(self.written);
             drawer.screen.set_output_lut(self.output_lut.clone());
             let (out, reading) = (self.maker.out(), self.maker.reading());
@@ -2608,7 +2622,9 @@ impl VideoFrames {
     }
 
     fn solid_frame(&mut self, color: [u8; 3]) -> Result<frame::Video> {
-        let mut out = match color == vidcut_core::render::BLACK {
+        let black = color == vidcut_core::render::BLACK;
+        let mut out = match black {
+            true if self.written_alpha.is_some() => frame_ref(self.clear()?)?,
             true => frame_ref(self.black()?)?,
             false => frame_ref(self.colored(color))?,
         };
@@ -2717,6 +2733,18 @@ impl VideoFrames {
         self.piece = 0;
         self.k = 0;
         self.ahead.forget();
+    }
+
+    fn clear(&mut self) -> Result<&frame::Video> {
+        if self.clear.is_none() {
+            let (w, h, _) = self.maker.out();
+            let mut f = frame::Video::new(format::Pixel::YUVA444P12LE, w, h);
+            fill_black(&mut f)?;
+            f.data_mut(3).fill(0);
+            crate::color::tag_frame(&mut f, None);
+            self.clear = Some(f);
+        }
+        Ok(self.clear.as_ref().expect("just set"))
     }
 
     fn black(&mut self) -> Result<&frame::Video> {

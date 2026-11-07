@@ -19,7 +19,13 @@ pub const GROUPS: [(&str, &[Card]); 3] = [
         ],
     ),
     ("Light", &[("Glow", EffectType::Glow)]),
-    ("Film Emulation", &[("Film Grain", EffectType::FilmGrain)]),
+    (
+        "Film Emulation",
+        &[
+            ("Film Grain", EffectType::FilmGrain),
+            ("Vignette", EffectType::Vignette),
+        ],
+    ),
 ];
 
 const CARD_WIDTH: f32 = 120.0;
@@ -95,6 +101,23 @@ fn paint(painter: &Painter, rect: Rect, kind: EffectType) {
                     (60 + (k * 13).rem_euclid(160)) as u8,
                 );
                 painter.circle_filled(at, 1.0, fill);
+            }
+        }
+        EffectType::Vignette => {
+            let c = rect.center();
+            let r = rect.height() * 0.32;
+            for k in (1..=8).rev() {
+                let t = k as f32 / 8.0;
+                let a = ((1.0 - t) * 180.0) as u8 + 20;
+                let fill = Color32::from_rgba_unmultiplied(
+                    colors.text.r(),
+                    colors.text.g(),
+                    colors.text.b(),
+                    a,
+                );
+                let reach = vec2(r * (1.0 + t) * rect.aspect_ratio(), r * (1.0 + t));
+                let oval = egui::epaint::EllipseShape::filled(c, reach, fill);
+                painter.add(oval);
             }
         }
     }

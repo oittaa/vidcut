@@ -610,12 +610,20 @@ fn from_ycc(c: vec3<f32>) -> vec3<f32> {
     return c.x + c.y * vec3<f32>(-0.001336, -0.343456, 1.770592) + c.z * vec3<f32>(1.402406, -0.714457, 0.002013);
 }
 
+fn dodged(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
+    return select(b / (1.0 - a), vec3<f32>(1.0), a >= vec3<f32>(1.0));
+}
+
 fn dodge(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
-    return select(min(b / (1.0 - a), vec3<f32>(1.0)), vec3<f32>(1.0), a >= vec3<f32>(1.0));
+    return min(dodged(b, a), vec3<f32>(1.0));
+}
+
+fn burned(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
+    return select(1.0 - (1.0 - b) / a, vec3<f32>(0.0), a <= vec3<f32>(0.0));
 }
 
 fn burn(b: vec3<f32>, a: vec3<f32>) -> vec3<f32> {
-    return select(1.0 - min((1.0 - b) / a, vec3<f32>(1.0)), vec3<f32>(0.0), a <= vec3<f32>(0.0));
+    return max(burned(b, a), vec3<f32>(0.0));
 }
 
 fn hard(by: vec3<f32>, other: vec3<f32>) -> vec3<f32> {
@@ -674,6 +682,11 @@ fn mixed(mode: u32, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
 
 @group(1) @binding(0) var below: texture_2d<f32>;
 
+fn mode_mixed(mode: u32, c: vec3<f32>, under: vec4<f32>) -> vec3<f32> {
+    let b = select(under.rgb, under.rgb / under.a, under.a > 0.0);
+    return mix(c, mixed(mode, c, b), under.a);
+}
+
 @fragment
 fn fs_mode(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
@@ -686,20 +699,19 @@ fn fs_mode(in: Out) -> @location(0) vec4<f32> {
         }
         return vec4<f32>(alone * top.a, top.a);
     }
-    let b = under.rgb;
-    let m = mixed(u32(p.placed.z + 0.5), top.rgb, b);
+    let m = mode_mixed(u32(p.placed.z + 0.5), top.rgb, under);
     if p.placed.w > 0.5 {
         return vec4<f32>(m * top.a, top.a);
     }
-    return vec4<f32>(mix(b, m, top.a), 1.0);
+    return vec4<f32>(m * top.a + under.rgb * (1.0 - top.a), top.a + under.a * (1.0 - top.a));
 }
 
 @fragment
 fn fs_paired(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let top = textureLoad(letters, px, 0);
-    let b = textureLoad(below, px, 0).rgb;
-    return vec4<f32>(top.rgb + b * (1.0 - top.a), 1.0);
+    let under = textureLoad(below, px, 0);
+    return top + under * (1.0 - top.a);
 }
 
 @fragment
@@ -928,12 +940,12 @@ fn fs_motion(in: Out) -> @location(0) vec4<f32> {
 @fragment
 fn fs_motion_mode(in: Out) -> @location(0) vec4<f32> {
     let top = moved(floor(in.position.xy));
-    let b = textureLoad(below, vec2<i32>(in.position.xy), 0).rgb;
+    let under = textureLoad(below, vec2<i32>(in.position.xy), 0);
     if top.a <= 0.0 {
-        return vec4<f32>(b, 1.0);
+        return under;
     }
-    let m = mixed(motion.mode.x, top.rgb / top.a, b);
-    return vec4<f32>(mix(b, m, top.a), 1.0);
+    let m = mode_mixed(motion.mode.x, top.rgb / top.a, under);
+    return vec4<f32>(m * top.a + under.rgb * (1.0 - top.a), top.a + under.a * (1.0 - top.a));
 }
 
 fn moved(q: vec2<f32>) -> vec4<f32> {
@@ -1024,8 +1036,11 @@ fn drawn_at(x: i32, y: i32) -> vec4<f32> {
 
 fn pixel_at(x: i32, y: i32) -> vec3<f32> {
     let c = drawn_at(x, y);
-    let straight = encoding.alpha.x == 1u && c.a > 0.0;
-    return encoded_rgb(select(c.rgb, c.rgb / c.a, straight));
+    if encoding.alpha.x == 0u || c.a <= 0.0 {
+        return encoded_rgb(c.rgb);
+    }
+    let color = encoded_rgb(c.rgb / c.a);
+    return select(color, color * min(c.a, 1.0), encoding.alpha.x == 2u);
 }
 
 fn output_ycc(c: vec3<f32>) -> vec3<f32> {
@@ -1065,6 +1080,12 @@ fn chroma_at(px: vec2<i32>) -> vec2<f32> {
     return sum / total;
 }
 
+fn alpha_code(px: vec2<i32>) -> u32 {
+    let top = (1u << encoding.how.z) - 1u;
+    let a = select(1.0, clamp(drawn_at(px.x, px.y).a, 0.0, 1.0), encoding.alpha.x != 0u);
+    return u32(round(a * f32(top))) << encoding.how.w;
+}
+
 fn encoded_at(px: vec2<i32>) -> vec4<u32> {
     let kind = encoding.plane.x;
     var out = vec4<u32>(0u);
@@ -1076,9 +1097,10 @@ fn encoded_at(px: vec2<i32>) -> vec4<u32> {
         let cr = code_of(c.y, 128.0, 224.0);
         out = select(vec4<u32>(cb, cr, 0u, 0u), vec4<u32>(cr, 0u, 0u, 0u), kind == 3u);
     } else if kind == 4u {
-        let top = (1u << encoding.how.z) - 1u;
-        let a = select(1.0, clamp(drawn_at(px.x, px.y).a, 0.0, 1.0), encoding.alpha.x == 1u);
-        out.x = u32(round(a * f32(top))) << encoding.how.w;
+        out.x = alpha_code(px);
+    } else if kind == 6u {
+        let c = output_ycc(pixel_at(px.x, px.y));
+        out = vec4<u32>(alpha_code(px), code_of(c.x, 16.0, 219.0), code_of(c.y, 128.0, 224.0), code_of(c.z, 128.0, 224.0));
     } else {
         let top = (1u << encoding.how.z) - 1u;
         out = vec4<u32>(vec3<u32>(round(pixel_at(px.x, px.y) * f32(top))), top);
@@ -1203,6 +1225,80 @@ fn fs_blur(in: Out) -> @location(0) vec4<f32> {
         return effect_mixed(px, out, blurring.blend.x, blurring.blend.y);
     }
     return out;
+}
+
+struct Vignetting {
+    first: vec4<f32>,
+    color: vec4<f32>,
+    way: vec4<i32>,
+};
+
+@group(0) @binding(0) var<uniform> vignetting: Vignetting;
+@group(0) @binding(3) var<storage, read> vignette_cells: array<f32>;
+
+const GRAY_HUE = vec3<f32>(-0.2625036, 0.14574469, -0.67075189);
+
+fn vignette_mixed(a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
+    let mode = u32(vignetting.way.z);
+    switch mode {
+        case 11u: { return dodged(b, a); }
+        case 12u: { return burned(b, a); }
+        case 14u: {
+            if spread(a) > 0.0 {
+                return mixed(mode, a, b);
+            }
+            if a.r <= 0.0 || a.r >= 1.0 {
+                return mixed(mode, vec3<f32>(1.0, 0.0, 0.0), b);
+            }
+            return dot(b, BT709) + spread(b) * GRAY_HUE;
+        }
+        case 18u: {
+            let d = max(a, vec3<f32>(0.0));
+            return b / select(d + 1e-6, d, d >= vec3<f32>(0.015625));
+        }
+        case 20u: { return max(a + b - 1.0, vec3<f32>(0.0)); }
+        case 22u: { return select(dodged(b, 2.0 * a - 1.0), burned(b, 2.0 * a), a <= vec3<f32>(0.5)); }
+        case 25u: { return select(b, a, dot(a, vec3<f32>(1.0)) >= dot(b, vec3<f32>(1.0))); }
+        case 26u: { return select(b, a, dot(a, vec3<f32>(1.0)) <= dot(b, vec3<f32>(1.0))); }
+        default: { return mixed(mode, a, b); }
+    }
+}
+
+fn vignette_cell(x: i32, y: i32) -> f32 {
+    let n = vignetting.way.xy;
+    return vignette_cells[clamp(y, 0, n.y - 1) * n.x + clamp(x, 0, n.x - 1)];
+}
+
+fn vignette_kept(x: i32, y: i32, wide: f32, least: f32) -> f32 {
+    return min(vignette_cell(x, y) / wide - least, 1.0);
+}
+
+fn vignette_shape(px: vec2<i32>) -> f32 {
+    let n = vignetting.way.xy;
+    let top = vignette_cell(n.x / 2, n.y / 2);
+    let least = vignette_cell(0, 0);
+    let wide = top - least;
+    if wide <= 0.0 {
+        return 0.0;
+    }
+    let at = (vec2<f32>(px) - vignetting.first.xy) * 0.5;
+    let whole = floor(at);
+    let part = at - whole;
+    let i = vec2<i32>(whole);
+    let upper = mix(vignette_kept(i.x, i.y, wide, least), vignette_kept(i.x + 1, i.y, wide, least), part.x);
+    let lower = mix(vignette_kept(i.x, i.y + 1, wide, least), vignette_kept(i.x + 1, i.y + 1, wide, least), part.x);
+    return mix(upper, lower, part.y);
+}
+
+@fragment
+fn fs_vignette(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let use_alpha = vignetting.color.w;
+    let was = effect_taken(textureLoad(blur_source, px, 0), use_alpha);
+    let share = (1.0 - vignette_shape(px)) * vignetting.first.z;
+    let m = vignette_mixed(vignetting.color.rgb, was.rgb);
+    let made = clamp(was.rgb + (m - was.rgb) * share, vec3<f32>(0.0), vec3<f32>(1.0));
+    return effect_mixed(px, vec4<f32>(made, was.a), vignetting.first.w, use_alpha);
 }
 
 struct Mosaic {

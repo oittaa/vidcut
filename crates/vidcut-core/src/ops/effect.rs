@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Effect, EffectKind, EffectType, FilmGrain, GaussianBlur, Glow, MosaicBlur, Project,
+    Effect, EffectKind, EffectType, FilmGrain, GaussianBlur, Glow, MosaicBlur, Project, Vignette,
 };
 use crate::request::EffectChange;
 
@@ -177,6 +177,24 @@ fn grain_values(c: &mut EffectChange, g: &mut FilmGrain) -> Result<()> {
     Ok(())
 }
 
+fn vignette_values(c: &mut EffectChange, v: &mut Vignette) -> Result<()> {
+    given(&mut c.operating_mode, &mut v.operating_mode);
+    given(&mut c.border_shape, &mut v.border_shape);
+    given(&mut c.size, &mut v.size);
+    given(&mut c.rotation, &mut v.rotation);
+    given(&mut c.anamorphism, &mut v.anamorphism);
+    if let Some(at) = c.center.take() {
+        let at =
+            <[f64; 2]>::try_from(at).map_err(|_| Error::usage("center is two numbers: x and y"))?;
+        v.center = Some(at);
+    }
+    given(&mut c.softness, &mut v.softness);
+    given(&mut c.transparency, &mut v.transparency);
+    color("color", c.color.take(), &mut v.color)?;
+    given(&mut c.composite_type, &mut v.composite_type);
+    Ok(())
+}
+
 pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result<()> {
     if *change == EffectChange::default() {
         return Err(Error::usage("effects.set needs a value to change"));
@@ -193,6 +211,7 @@ pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result
         EffectKind::MosaicBlur(m) => mosaic_values(&mut left, m)?,
         EffectKind::Glow(g) => glow_values(&mut left, g)?,
         EffectKind::FilmGrain(g) => grain_values(&mut left, g)?,
+        EffectKind::Vignette(v) => vignette_values(&mut left, v)?,
     }
     if left != EffectChange::default() {
         return Err(Error::invalid(format!(

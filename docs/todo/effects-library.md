@@ -5,13 +5,13 @@
 The Cut page has separate tabs for transitions, titles and effects (p. 636). vidcut follows it.
 
 - The Transitions tab, the Transition Inspector, Dip To Color Dissolve, Smooth Cut, Push and Slide are there ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
-- The Effects tab, the effects of the Inspector, Gaussian Blur, Mosaic Blur, Glow and Film Grain are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
+- The Effects tab, the effects of the Inspector, Gaussian Blur, Mosaic Blur, Glow, Film Grain and Vignette are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - The Generators page and its twelve kinds are there ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
 - If the bar gets too full, one Effects tab with categories can replace the tabs, as the Edit page has (p. 802).
 
 Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
-1. **More effects:** Sharpen and Vignette.
+1. **More effects:** Sharpen.
    - Measure each one in Resolve first: its values, their ranges and defaults, and its math.
    - **Glow, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - Opacity below 1 on a picture with alpha, on the Edit page.
@@ -25,6 +25,11 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
      - Symmetry at Grain Strength 0.25 to 1, below 0.3 and above 0.9.
      - Red, Green and Blue with a Symmetry other than 0.5.
      - Texture under 0.25 and Grain Aspect Ratio under 0.5.
+   - **Vignette, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
+     - Blend on the Edit page, at 0.5.
+     - A Pan in another frame shape: a 1920×1080 source in a 1080×1920 timeline, Pan Y 800.
+     - Hue at grays other than 0, 0.2, 0.4, 0.6, 0.8 and 1, for example 0.3 and 0.5.
+     - An odd width or height of the picture.
    - **Mosaic Blur, measure these on the Edit page.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - Blur Alpha off and Whole Cells Only.
      - Whole Cells Only with Hexagon, with Triangle, with other Aliasing values and with Antialias Result. The alpha limit of a whole cell.

@@ -2620,6 +2620,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The rule that selects the action in Resolve is not known.
   - The owner approved this difference.
 
+## X136. DNxHR 444 exports without alpha
+
+- **Resolve:**
+  - Export Alpha works with DNxHR 444 (p. 4093).
+- **vidcut:**
+  - `video.alpha` refuses DNxHR 444. The Export dialog does not show Export Alpha for it.
+- **Why:**
+  - The FFmpeg encoder `dnxhd` cannot write alpha.
+  - In FFmpeg 9.0.1 it lists four pixel formats: `yuv422p`, `yuv422p10le`, `yuv444p10le` and `gbrp10le`. None of them has alpha.
+  - The owner approved this difference.
+
 ## X137. A Scroll line wider than the picture wraps
 
 - **Resolve:**
