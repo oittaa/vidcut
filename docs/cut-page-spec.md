@@ -479,8 +479,12 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - Click the timecode field and type.
   - Or type `=` and a timecode, or `+` or `-` and a value to jump by.
   - Digits fill a timecode from the right: `100` is 1 second, and `10000` is 1 minute.
+  - At 119.88 and 120 fps, the frames take three digits. Thus `1000` is 1 second, and `+100` is 100 frames.
   - A value with a unit (`5s`, `450f`) is that duration.
 - **Display:**
+  - The frames of a timecode have as many digits as the last frame of a second: two, or three at 119.88 and 120 fps.
+  - Thus `01:00:00:000` is the hour at 120 fps, and `01:00:00:00` is the hour at 100 fps.
+  - Resolve Studio 21.2 shows three digits there on the Cut and Edit pages. Its timecode field also takes three digits for the frames.
   - The source modes show source timecode. Timeline mode shows record timecode.
   - The timecode is drop-frame where the project counts drop-frame (D47).
   - That default is Auto (D91).

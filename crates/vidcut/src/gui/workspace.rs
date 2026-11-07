@@ -554,6 +554,10 @@ impl Workspace {
         }
     }
 
+    pub(super) fn frame_digits(&self) -> usize {
+        self.fps().frame_digits()
+    }
+
     pub(super) fn tc(&self, frame: i64) -> String {
         match self.project() {
             Some(p) => p.settings.timecode(frame),
