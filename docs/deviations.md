@@ -2784,3 +2784,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - A file at another rate keeps each frame at its own rate. Examples are a 15 fps screen recording and a 144 fps game capture. A project at one of the 19 rates retimes such a file.
   - The owner approved this difference.
+
+## X150. A subtitle shadow moves right by its full offset
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.2, on 1920×1080 and 3840×2160 timelines.
+  - A positive X offset of a subtitle shadow moves it 1 pixel less than the Inspector shows. An offset of 40 moves it 39 pixels, and an offset of 2 moves it 1 pixel.
+  - A negative X offset moves it by the value that the Inspector shows, within 0.1 pixel.
+- **vidcut:**
+  - The shadow moves by the value that the Inspector shows, to the left and to the right.
+- **Why:**
+  - Only a move to the right is short. Thus the short move is not a rule of the offset, and vidcut does not copy it.
