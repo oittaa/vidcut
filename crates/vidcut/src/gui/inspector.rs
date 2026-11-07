@@ -1110,9 +1110,10 @@ fn typed(text: &str) -> Option<f64> {
         .ok()
 }
 
-fn frames(p: &Project, text: &str, dropped: i64) -> Option<f64> {
+fn frames(p: &Project, text: &str, shown: &str, dropped: i64) -> Option<f64> {
     let spec = TimeSpec::parse(&timecode_input(
         text,
+        shown,
         dropped,
         p.settings.fps.frame_digits(),
     )?)
@@ -1639,9 +1640,10 @@ fn drag(
                 .custom_parser(typed)
                 .min_size(vec2(FIELD_WIDTH, ui.spacing().interact_size.y));
             if let Some((p, dropped)) = look.timecode {
+                let now = p.settings.length_timecode(before.round() as i64);
                 drag = drag
                     .custom_formatter(|n, _| p.settings.length_timecode(n.round() as i64))
-                    .custom_parser(move |t| frames(p, t, dropped));
+                    .custom_parser(move |t| frames(p, t, &now, dropped));
             }
             ui.add(drag)
         })

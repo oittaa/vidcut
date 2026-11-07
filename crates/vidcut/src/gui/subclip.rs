@@ -176,10 +176,11 @@ impl Workspace {
         self.edit_subclip = Some(edit);
     }
 
-    fn typed_frame(&self, text: &str, origin: i64) -> Option<i64> {
+    fn typed_frame(&self, text: &str, shown: &str, origin: i64) -> Option<i64> {
         let p = self.project()?;
         let drop = p.settings.counts_drop_frame();
-        let spec = timecode_input(text, self.dropped(), p.settings.fps.frame_digits())?;
+        let digits = p.settings.fps.frame_digits();
+        let spec = timecode_input(text, shown, self.dropped(), digits)?;
         parse_counter(&spec, p.settings.fps, drop, origin)
     }
 
@@ -194,8 +195,8 @@ impl Workspace {
         let (mut now_start, mut now_end) = (label(d.current.0), label(d.current.1));
         let (mut all_start, mut all_end) = (label(0), label(d.whole));
         let typed = match (
-            self.typed_frame(&d.start, d.origin),
-            self.typed_frame(&d.end, d.origin),
+            self.typed_frame(&d.start, &now_start, d.origin),
+            self.typed_frame(&d.end, &now_end, d.origin),
         ) {
             (Some(a), Some(b)) if a < b && a >= 0 && b <= d.whole => Some((a, b)),
             _ => None,
