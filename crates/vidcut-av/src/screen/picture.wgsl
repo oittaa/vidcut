@@ -1265,8 +1265,7 @@ fn vignette_mixed(a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
             return dot(b, BT709) + spread(b) * GRAY_HUE;
         }
         case 18u: {
-            let d = max(a, vec3<f32>(0.0));
-            return b / select(d + 1e-6, d, d >= vec3<f32>(0.015625));
+            return b / (max(a, vec3<f32>(0.0)) + 1e-6);
         }
         case 20u: { return max(a + b - 1.0, vec3<f32>(0.0)); }
         case 22u: { return select(dodged(b, 2.0 * a - 1.0), burned(b, 2.0 * a), a <= vec3<f32>(0.5)); }

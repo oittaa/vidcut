@@ -1612,8 +1612,6 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Vignette in vidcut:**
   - A source that fits with a half pixel takes the next whole pixel as its size. Only 607.5 and 608 were tried.
   - The GUI shows only the values that work in the Operating Mode.
-  - The pictures are 16-bit floats. Thus Lighter Color and Darker Color see a tie where the sums differ by less than one step of these floats.
-  - Divide takes b / a where a channel of the Color is 1/64 or more. There the 0.000001 changes the result by less than one step of the pictures.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - Beyond the cells, a pixel takes the value of the nearest cell.
     - With an odd width or height, B0 is the cell one pixel to the left of or above the middle.
@@ -3292,7 +3290,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - Color: the BT.601 Y of b with the Cb and Cr of a. Luminosity: the Y of a with the Cb and Cr of b.
       - Resolve goes back from Y, Cb and Cr by a matrix a little off BT.601. vidcut uses the matrix fitted to the renders.
     - The manual's words do not match the renders for some modes, for example Subtract and Hard Mix (pp. 1200–1202). vidcut follows the renders.
-    - vidcut also keeps these values between the layers. The export keeps them in 32-bit floats, and the viewer in 16-bit floats.
+    - vidcut also keeps these values between the layers, in 32-bit floats.
     - In an export, a title between layers cuts them ([todo](todo/composite-masks.md)).
   - **Units** (vidcut's, X65):
     - `position` is where the middle of the picture goes before the zoom and the turn: `[x, y]` in fractions of the frame from its top left.
