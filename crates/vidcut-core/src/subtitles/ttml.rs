@@ -6,7 +6,7 @@ use super::text::{self, Tag, Token, escape_xml};
 use super::{Read, Timed, clock};
 use crate::error::{Error, Result};
 use crate::model::hex;
-use crate::model::{Place, SubtitleAlign, SubtitleStyle};
+use crate::model::{Place, SubtitleAlign, SubtitleStyle, TitleAnchor};
 
 const TTP: &str = "http://www.w3.org/ns/ttml#parameter";
 const TTS: &str = "http://www.w3.org/ns/ttml#styling";
@@ -19,6 +19,16 @@ struct Style {
     bold: Option<bool>,
     underline: Option<bool>,
     color: Option<String>,
+    across: Option<f64>,
+}
+
+fn side(v: &str) -> Option<f64> {
+    match v {
+        "start" | "left" => Some(0.0),
+        "center" => Some(0.5),
+        "end" | "right" => Some(1.0),
+        _ => None,
+    }
 }
 
 impl Style {
@@ -28,6 +38,7 @@ impl Style {
             bold: self.bold.or(base.bold),
             underline: self.underline.or(base.underline),
             color: self.color.clone().or_else(|| base.color.clone()),
+            across: self.across.or(base.across),
         }
     }
 
@@ -39,6 +50,7 @@ impl Style {
             underline: get("textDecoration")
                 .map(|v| v.contains("underline") && !v.contains("noUnderline")),
             color: get("color").and_then(text::color),
+            across: get("textAlign").and_then(side),
         }
     }
 }
@@ -193,19 +205,55 @@ impl<'a> Sheet<'a> {
         Some(100.0 * px / if axis == 0 { w } else { h })
     }
 
+    fn region_attr(&self, r: Node<'a, 'a>, name: &str) -> Option<&'a str> {
+        r.attribute((TTS, name))
+            .or_else(|| {
+                r.children()
+                    .filter(|c| c.has_tag_name("style"))
+                    .find_map(|c| c.attribute((TTS, name)))
+            })
+            .or_else(|| self.named(r, name, 0))
+    }
+
+    fn position(&self, region: &str, place: Place, across: Option<f64>) -> Option<SubtitleStyle> {
+        let r = *self.regions.get(region)?;
+        let attr = |name: &str| self.region_attr(r, name);
+        let origin = attr("origin")?;
+        let (left, top) = (self.percent(origin, 0)?, self.percent(origin, 1)?);
+        let size = |axis: usize| {
+            attr("extent")
+                .and_then(|e| self.percent(e, axis))
+                .unwrap_or(0.0)
+        };
+        let (width, height) = (size(0), size(1));
+        let middle = [left + width / 2.0, top + height / 2.0].map(|v| v / 100.0);
+        if super::close(middle, SubtitleStyle::default().usual_position(place)) {
+            return None;
+        }
+        let across = across
+            .or_else(|| attr("textAlign").and_then(side))
+            .unwrap_or(0.0);
+        let down = match attr("displayAlign") {
+            Some("center") => 0.5,
+            Some("after") => 1.0,
+            _ => 0.0,
+        };
+        let point = [left + across * width, top + down * height].map(|v| v / 100.0);
+        point
+            .iter()
+            .all(|v| (0.0..=1.0).contains(v))
+            .then(|| SubtitleStyle {
+                position: Some(point),
+                anchor: Some(TitleAnchor::at([across, down])),
+                ..SubtitleStyle::default()
+            })
+    }
+
     fn place(&self, region: &str) -> Place {
         let Some(r) = self.regions.get(region) else {
             return Place::Bottom;
         };
-        let attr = |name: &str| {
-            r.attribute((TTS, name))
-                .or_else(|| {
-                    r.children()
-                        .filter(|c| c.has_tag_name("style"))
-                        .find_map(|c| c.attribute((TTS, name)))
-                })
-                .or_else(|| self.named(*r, name, 0))
-        };
+        let attr = |name: &str| self.region_attr(*r, name);
         let top = attr("origin").and_then(|o| self.percent(o, 1));
         let height = attr("extent").and_then(|e| self.percent(e, 1));
         let Some(top) = top else {
@@ -297,17 +345,16 @@ impl Walk<'_, '_> {
         if text.trim().is_empty() {
             return;
         }
+        let region = scope.region.as_deref();
+        let place = region.map_or(Place::Bottom, |r| self.sheet.place(r));
         self.cues.push(Timed {
             start: scope.begin,
             end,
             text,
-            place: scope
-                .region
-                .as_deref()
-                .map_or(Place::Bottom, |r| self.sheet.place(r)),
+            place,
             words: Vec::new(),
             speaker: None,
-            style: None,
+            style: region.and_then(|r| self.sheet.position(r, place, scope.style.across)),
             word_styles: Vec::new(),
         });
     }

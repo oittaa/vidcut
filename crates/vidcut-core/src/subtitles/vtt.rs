@@ -1,7 +1,7 @@
 use super::text::{self, Dialect, PALETTE, Tag, Token};
 use super::{Read, Timed, clock, srt};
 use crate::error::{Error, Result};
-use crate::model::{Place, SubtitleStyle};
+use crate::model::{Place, SubtitleStyle, TitleAnchor};
 
 fn place(settings: &str) -> Place {
     let Some(line) = settings
@@ -22,6 +22,59 @@ fn place(settings: &str) -> Place {
         Ok(n) if n >= 0 => Place::Top,
         _ => Place::Bottom,
     }
+}
+
+fn style(settings: &str, place: Place) -> Option<SubtitleStyle> {
+    let value = |name: &str| {
+        settings
+            .split_whitespace()
+            .find_map(|s| s.strip_prefix(name))
+    };
+    let fraction = |v: &str| {
+        v.strip_suffix('%')?
+            .parse::<f64>()
+            .ok()
+            .filter(|p| (0.0..=100.0).contains(p))
+            .map(|p| p / 100.0)
+    };
+    let setting = |name: &str, usual: &'static str| {
+        value(name).and_then(|v| {
+            let (at, side) = v.split_once(',').unwrap_or((v, usual));
+            Some((fraction(at)?, side.to_string()))
+        })
+    };
+    let position = setting("position:", "auto");
+    let line = setting("line:", "start");
+    if position.is_none() && line.is_none() {
+        return None;
+    }
+    let side = match value("align:") {
+        Some("left" | "start") => 0.0,
+        Some("right" | "end") => 1.0,
+        _ => 0.5,
+    };
+    let (x, across) = match position {
+        Some((x, s)) => match s.as_str() {
+            "line-left" => (x, 0.0),
+            "line-right" => (x, 1.0),
+            "center" => (x, 0.5),
+            _ => (x, side),
+        },
+        None => (side, side),
+    };
+    let (y, down) = match line {
+        Some((y, s)) => match s.as_str() {
+            "center" => (y, 0.5),
+            "end" => (y, 1.0),
+            _ => (y, 0.0),
+        },
+        None => SubtitleStyle::default().anchor(place),
+    };
+    Some(SubtitleStyle {
+        position: Some([x, y]),
+        anchor: Some(TitleAnchor::at([across, down])),
+        ..SubtitleStyle::default()
+    })
 }
 
 pub fn read(source: &str) -> Result<Read> {
@@ -61,14 +114,15 @@ pub fn read(source: &str) -> Result<Read> {
         let (body, _) = text::markup(&raw, Dialect::Vtt, &classes);
         let text = text::clean(&body);
         let words = word_times(&raw, &classes, (start, end), &text);
+        let place = place(&settings);
         cues.push(Timed {
             start,
             end,
             text,
-            place: place(&settings),
+            place,
             words,
             speaker: text::voice(&raw),
-            style: None,
+            style: style(&settings, place),
             word_styles: Vec::new(),
         });
     }

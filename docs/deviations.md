@@ -690,9 +690,14 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - It reads WebVTT times without hours, and every TTML cue, span and region.
   - It keeps cues that overlap.
   - `{\an8}`, WebVTT `line` and the place of a TTML region put a cue at the top, middle or bottom.
+  - A WebVTT `position`, or a `line` in percent, also gives the cue a position and an anchor.
+  - A TTML region with an origin does the same, by its extent, `tts:textAlign` and `tts:displayAlign`.
+  - A TTML region whose middle is the usual point of its place gives only the place.
+  - The cue keeps the position and the anchor only where they differ from the style of its track.
   - Italic, bold, underline and colors come in from all three formats, on the words that have them.
 - **Why:**
   - An imported subtitle file must not lose text without a message.
+  - A cue from a file shows where the file puts it. Thus a file that vidcut wrote comes back the same.
 
 ## X41. Subtitle files placed by their timecode, or from the timeline's start
 

@@ -37,6 +37,12 @@ pub struct Read {
     pub language: Option<String>,
 }
 
+const CLOSE: f64 = 0.001;
+
+pub(crate) fn close(a: [f64; 2], b: [f64; 2]) -> bool {
+    a.iter().zip(b).all(|(a, b)| (a - b).abs() < CLOSE)
+}
+
 pub fn clock(secs: f64, separator: char) -> String {
     let ms = (secs.max(0.0) * 1000.0).round() as i64;
     format!(

@@ -823,6 +823,24 @@ fn timecode_offset(p: &Project, first: i64, forced: bool) -> i64 {
     }
 }
 
+fn read_style(
+    track: &SubtitleStyle,
+    place: Place,
+    read: Option<SubtitleStyle>,
+) -> Option<SubtitleStyle> {
+    let mut s = read?;
+    if s.anchor == Some(track.anchor_in(place)) {
+        s.anchor = None;
+    }
+    let usual = track
+        .position
+        .unwrap_or_else(|| track.usual_position(place));
+    if s.position.is_some_and(|at| subtitles::close(at, usual)) {
+        s.position = None;
+    }
+    (!s.is_empty()).then_some(s)
+}
+
 pub fn import(
     p: &mut Project,
     read: Read,
@@ -881,6 +899,7 @@ pub fn import(
             .collect();
         let id = p.alloc_cue_id();
         let speaker = c.speaker.as_deref().map(|n| p.speakers.key_for(n));
+        let style = read_style(&p.subtitles[ti].style, c.place, c.style);
         place_cue(
             &mut p.subtitles[ti],
             Cue {
@@ -892,7 +911,7 @@ pub fn import(
                 place: c.place,
                 speaker,
                 color: None,
-                style: None,
+                style,
                 picture: None,
             },
         );
