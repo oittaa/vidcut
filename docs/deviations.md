@@ -693,6 +693,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A WebVTT `position`, or a `line` in percent, also gives the cue a position and an anchor.
   - A TTML region with an origin does the same, by its extent, `tts:textAlign` and `tts:displayAlign`.
   - A TTML region whose middle is the usual point of its place gives the place, but no position and no anchor.
+  - A TTML cue without a region comes in at the bottom middle. Its lines still follow the alignment of the file.
   - WebVTT `align` gives the alignment of the lines. Without a `position`, it also puts the block at the left or right edge, as WebVTT does.
   - In TTML, `ebutts:multiRowAlign` gives the alignment of the lines. Without it, `tts:textAlign` does, and its usual value is start.
   - The cue keeps the position, the anchor and the alignment only where they differ from the style of its track.
@@ -701,6 +702,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - An imported subtitle file must not lose text without a message.
   - A cue from a file shows where the file puts it.
+  - A TTML cue without a region has no place in the file. Thus it takes the usual place of a subtitle.
 
 ## X41. Subtitle files placed by their timecode, or from the timeline's start
 
