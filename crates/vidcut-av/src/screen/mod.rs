@@ -1488,23 +1488,28 @@ impl LetterTile {
             height: size.1,
             depth_or_array_layers: 1,
         };
+        let (format, texel) = if picture.float {
+            (wgpu::TextureFormat::Rgba32Float, 16)
+        } else {
+            (wgpu::TextureFormat::Rgba8Unorm, 4)
+        };
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("vidcut title"),
             size: extent,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let row = picture.width as usize * 4;
+        let row = picture.width as usize * texel;
         if row > 0 && picture.rgba.len() >= row * picture.height as usize {
             gpu.queue.write_texture(
                 texture.as_image_copy(),
                 &picture.rgba,
                 wgpu::TexelCopyBufferLayout {
-                    offset: (at.1 as usize * row + at.0 as usize * 4) as u64,
+                    offset: (at.1 as usize * row + at.0 as usize * texel) as u64,
                     bytes_per_row: Some(row as u32),
                     rows_per_image: Some(size.1),
                 },

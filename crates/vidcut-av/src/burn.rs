@@ -32,6 +32,7 @@ pub struct Sprite {
     pub width: u32,
     pub height: u32,
     pub lift: f32,
+    pub float: bool,
     pub rgba: Vec<[f32; 4]>,
 }
 
@@ -248,6 +249,20 @@ fn over(dst: [f32; 4], src: [f32; 4]) -> [f32; 4] {
     out
 }
 
+fn eight_bit(p: [f32; 4]) -> [u8; 4] {
+    let a = p[3].clamp(0.0, 1.0);
+    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    [byte(p[0] * a), byte(p[1] * a), byte(p[2] * a), byte(a)]
+}
+
+fn stepped(p: [f32; 4]) -> [f32; 4] {
+    let [r, g, b, a] = eight_bit(p).map(|v| f32::from(v) / 255.0);
+    if a <= 0.0 {
+        return [0.0; 4];
+    }
+    [r / a, g / a, b / a, a]
+}
+
 struct Look<'a> {
     font: Option<&'a str>,
     size: f32,
@@ -267,6 +282,7 @@ struct Look<'a> {
     markup: Markup<'a>,
     bare: bool,
     drop: f32,
+    float: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1462,6 +1478,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
         }
         None => Vec::new(),
     };
+    let float = look.float && !look.bare && (look.shadow.is_some() || band.is_some());
     let rgba: Vec<[f32; 4]> = canvas
         .iter()
         .zip(&ring)
@@ -1477,8 +1494,19 @@ fn lay_out(look: &Look) -> Option<Laid> {
             } else {
                 [0.0; 4]
             };
-            let behind = match look.shadow {
-                Some(sh) => over(bg, unit(sh.ink, shade[i])),
+            let shadow = look.shadow.map(|sh| unit(sh.ink, shade[i]));
+            if float {
+                let letters = if on_top {
+                    over(text, unit(edge, o))
+                } else {
+                    over(unit(edge, o), text)
+                };
+                let under = stepped(bg);
+                let under = shadow.map_or(under, |s| over(under, s));
+                return over(under, stepped(letters));
+            }
+            let behind = match shadow {
+                Some(s) => over(bg, s),
                 None => bg,
             };
             if on_top {
@@ -1504,6 +1532,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
         lift: 0.0,
+        float,
         rgba: (y0..y1)
             .flat_map(|y| rgba[y * w + x0..y * w + x1].iter().copied())
             .collect(),
@@ -1538,6 +1567,7 @@ fn inside(s: Sprite, (w, h): (f64, f64)) -> Option<Sprite> {
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
         lift: s.lift,
+        float: s.float,
         rgba,
     })
 }
@@ -1589,6 +1619,7 @@ fn block(
         markup: Markup::Pieces(pieces),
         bare: false,
         drop: 0.0,
+        float: false,
     };
     let line = Line {
         pieces: pieces.to_vec(),
@@ -1754,6 +1785,7 @@ fn merged(mut sprites: Vec<Sprite>) -> Option<Sprite> {
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
         lift: 0.0,
+        float: sprites.iter().any(|s| s.float),
         rgba,
     })
 }
@@ -1814,6 +1846,7 @@ fn shaped_box(t: &Title, block: &TitleBlock, (w, h): (f64, f64), pixel: f64) -> 
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
         lift: 0.0,
+        float: false,
         rgba,
     };
     let [px, py] = block.pivot;
@@ -1890,6 +1923,7 @@ fn title_block(
         markup: Markup::Title(&text, (h * zoom) as f32),
         bare,
         drop: (h * Title::UPPER_DROP) as f32,
+        float: true,
     };
     let Laid {
         sprite: Some(sprite),
@@ -1997,6 +2031,7 @@ fn turned(s: Sprite, (px, py): (f32, f32), degrees: f64) -> Sprite {
         width: ow as u32,
         height: oh as u32,
         lift: s.lift,
+        float: s.float,
         rgba,
     }
 }
@@ -2027,13 +2062,16 @@ pub fn backing_box(t: &Title, width: u32, height: u32) -> Option<[f64; 4]> {
 
 impl Sprite {
     pub fn premultiplied(&self) -> Vec<u8> {
+        if !self.float {
+            return self.rgba.iter().flat_map(|p| eight_bit(*p)).collect();
+        }
         self.rgba
             .iter()
             .flat_map(|p| {
                 let a = p[3].clamp(0.0, 1.0);
-                let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-                [byte(p[0] * a), byte(p[1] * a), byte(p[2] * a), byte(a)]
+                [p[0] * a, p[1] * a, p[2] * a, a].map(|v| v.clamp(0.0, 1.0))
             })
+            .flat_map(f32::to_le_bytes)
             .collect()
     }
 }
