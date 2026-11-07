@@ -5,7 +5,8 @@ use eframe::egui::{self, Key};
 use serde_json::json;
 use vidcut_core::looks::{Look, LookKind, Styled, SubtitleLook};
 use vidcut_core::model::{
-    SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleShadow, TitleShape, TitleStyle,
+    Picture, SubtitleBackground, SubtitleOutline, SubtitleStyle, Title, TitleShadow, TitleShape,
+    TitleStyle,
 };
 
 use super::export::Ask;
@@ -336,10 +337,11 @@ pub(super) struct Parts {
     pub outline: Option<SubtitleOutline>,
     pub background: Option<SubtitleBackground>,
     pub shadow: Option<TitleShadow>,
+    pub frame: Option<[f64; 2]>,
 }
 
 impl Parts {
-    pub(super) fn of_subtitles(s: &SubtitleStyle) -> Self {
+    pub(super) fn of_subtitles(s: &SubtitleStyle, frame: [f64; 2]) -> Self {
         Self {
             font: s.font.clone(),
             size: s.size,
@@ -347,6 +349,7 @@ impl Parts {
             outline: s.outline.clone(),
             background: s.background.clone(),
             shadow: s.shadow.clone(),
+            frame: Some(frame),
         }
     }
 
@@ -358,6 +361,7 @@ impl Parts {
             outline: s.outline.clone(),
             background: s.background.clone(),
             shadow: s.shadow.clone(),
+            frame: None,
         }
     }
 
@@ -394,6 +398,7 @@ pub(super) struct TextFields {
     shadow_across: String,
     shadow_down: String,
     shadow_blur: String,
+    frame: Option<[f64; 2]>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -498,6 +503,24 @@ pub(super) fn kept_plain(
         .map_err(|_| format!("{what} is a number, such as 20"))
 }
 
+fn offset_text(size: Option<f64>, v: Option<f64>) -> String {
+    match size {
+        Some(size) => plain(v.map(|v| v * size)),
+        None => percent(v),
+    }
+}
+
+fn kept_offset(shown: &str, stored: Option<f64>, size: Option<f64>) -> Result<Option<f64>, String> {
+    let Some(size) = size else {
+        return kept_number(shown, stored, "shadow offset");
+    };
+    if shown.trim() == offset_text(Some(size), stored) {
+        return Ok(stored);
+    }
+    let pixels = kept_plain(shown, None, "shadow offset")?;
+    Ok(pixels.map(|v| (v / size).clamp(-Picture::REACH, Picture::REACH)))
+}
+
 impl TextFields {
     pub(super) fn load(s: &Parts) -> Self {
         let shade = s.shadow.as_ref();
@@ -527,9 +550,16 @@ impl TextFields {
                 h.color.clone().unwrap_or_else(|| SHADOW_INK.to_string())
             }),
             shadow_opacity: percent(shade.and_then(|h| h.opacity)),
-            shadow_across: percent(shade.and_then(|h| h.offset).map(|o| o[0])),
-            shadow_down: percent(shade.and_then(|h| h.offset).map(|o| o[1])),
+            shadow_across: offset_text(
+                s.frame.map(|f| f[0]),
+                shade.and_then(|h| h.offset).map(|o| o[0]),
+            ),
+            shadow_down: offset_text(
+                s.frame.map(|f| f[1]),
+                shade.and_then(|h| h.offset).map(|o| o[1]),
+            ),
             shadow_blur: plain(shade.and_then(|h| h.blur)),
+            frame: s.frame,
         }
     }
 
@@ -597,8 +627,12 @@ impl TextFields {
             r.changed()
         };
         let shadow_opacity = format!("{}%", percent(Some(TitleShadow::OPACITY)));
-        let shadow_across = format!("{}%", percent(Some(TitleShadow::OFFSET[0])));
-        let shadow_down = format!("{}%", percent(Some(TitleShadow::OFFSET[1])));
+        let usual_offset = |size: Option<f64>, v: f64| match size {
+            Some(_) => offset_text(size, Some(v)),
+            None => format!("{}%", percent(Some(v))),
+        };
+        let shadow_across = usual_offset(self.frame.map(|f| f[0]), TitleShadow::OFFSET[0]);
+        let shadow_down = usual_offset(self.frame.map(|f| f[1]), TitleShadow::OFFSET[1]);
         let shadow_blur = plain(Some(TitleShadow::BLUR));
         changed |= row(ui, true, "Font", &mut self.font, usual_font());
         changed |= font_list(ui, &format!("{salt}-font"), &mut self.font, families);
@@ -715,8 +749,9 @@ impl TextFields {
             None => return Err("a shadow needs a color".into()),
         };
         let offset = stored.and_then(|h| h.offset);
-        let across = kept_number(&self.shadow_across, offset.map(|o| o[0]), "shadow offset")?;
-        let down = kept_number(&self.shadow_down, offset.map(|o| o[1]), "shadow offset")?;
+        let size = |i: usize| self.frame.map(|f| f[i]);
+        let across = kept_offset(&self.shadow_across, offset.map(|o| o[0]), size(0))?;
+        let down = kept_offset(&self.shadow_down, offset.map(|o| o[1]), size(1))?;
         let offset = match (across, down) {
             (None, None) => None,
             (x, y) => Some([
@@ -782,6 +817,7 @@ impl TextFields {
                 }),
             background,
             shadow: self.shadow(stored.shadow.as_ref(), usual_box.is_some())?,
+            frame: stored.frame,
         })
     }
 }

@@ -4,8 +4,8 @@ use eframe::egui::{self, Key, RichText};
 use serde_json::{Value, json};
 use vidcut_core::looks::{LookKind, Styled, SubtitleLook};
 use vidcut_core::model::{
-    Cue, LetterCase, Place, Project, SpeakerPaint, Speakers, SubtitleAlign, SubtitleStyle,
-    SubtitleTrack, SubtitleWords, WordsShow,
+    Cue, LetterCase, Place, Project, Settings, SpeakerPaint, Speakers, SubtitleAlign,
+    SubtitleStyle, SubtitleTrack, SubtitleWords, WordsShow,
 };
 use vidcut_core::ops::subtitles as subtitle_ops;
 use vidcut_core::time::{Rational, TimeSpec};
@@ -38,6 +38,7 @@ pub struct CueDialog {
     kept: Option<SubtitleStyle>,
     base: SubtitleStyle,
     track: SubtitleStyle,
+    frame: [f64; 2],
     families: Vec<String>,
     error: String,
     loaded: bool,
@@ -131,7 +132,7 @@ impl CueDialog {
         self.align = own.align;
         self.across = percent(own.position.map(|p| p[0]));
         self.down = percent(own.position.map(|p| p[1]));
-        self.fields = TextFields::load(&Parts::of_subtitles(&own));
+        self.fields = TextFields::load(&Parts::of_subtitles(&own, self.frame));
         self.margin = percent(own.margin);
         self.bold = own.bold == Some(true);
         self.case = own.case;
@@ -167,7 +168,9 @@ impl CueDialog {
     }
 
     fn cue_style(&self) -> Result<SubtitleStyle, String> {
-        let parts = self.fields.parts(&Parts::of_subtitles(&self.base), None)?;
+        let parts = self
+            .fields
+            .parts(&Parts::of_subtitles(&self.base, self.frame), None)?;
         let mut style = SubtitleStyle {
             font: parts.font,
             size: parts.size,
@@ -227,13 +230,13 @@ fn position_of(
     })
 }
 
-fn raw_of(style: Option<&SubtitleStyle>) -> LookRaw {
+fn raw_of(style: Option<&SubtitleStyle>, frame: [f64; 2]) -> LookRaw {
     let own = style.cloned().unwrap_or_default();
     LookRaw {
         align: own.align,
         across: percent(own.position.map(|p| p[0])),
         down: percent(own.position.map(|p| p[1])),
-        fields: TextFields::load(&Parts::of_subtitles(&own)),
+        fields: TextFields::load(&Parts::of_subtitles(&own, frame)),
         margin: percent(own.margin),
         bold: own.bold == Some(true),
         case: own.case,
@@ -274,6 +277,7 @@ fn settled(
     speakers: &Speakers,
     c: &Cue,
     word: Option<usize>,
+    frame: [f64; 2],
 ) -> (Typing, String, LookRaw) {
     let color = c.color.clone().unwrap_or_default();
     let word_style = word.and_then(|i| c.words.get(i).and_then(|w| w.style.clone()));
@@ -293,7 +297,7 @@ fn settled(
             word_style,
         },
         person_name(speakers, c.speaker.as_deref()),
-        raw_of(fields.as_ref()),
+        raw_of(fields.as_ref(), frame),
     )
 }
 
@@ -303,6 +307,10 @@ fn cue_copies(dirty: bool, loaded: bool, current: bool) -> bool {
 
 fn cue_saves(dirty: bool, commit: bool) -> bool {
     dirty && commit
+}
+
+fn frame_of(s: &Settings) -> [f64; 2] {
+    [f64::from(s.width), f64::from(s.height)]
 }
 
 fn people(p: &Project) -> Vec<(String, String)> {
@@ -589,6 +597,7 @@ pub struct TrackDialog {
     across: String,
     down: String,
     base: SubtitleStyle,
+    frame: [f64; 2],
     dirty: bool,
     from: Option<(Option<String>, Option<String>, SubtitleStyle)>,
     error: String,
@@ -599,7 +608,7 @@ pub struct TrackDialog {
 
 impl TrackDialog {
     fn load(&mut self, s: &SubtitleStyle) {
-        self.fields = TextFields::load(&Parts::of_subtitles(s));
+        self.fields = TextFields::load(&Parts::of_subtitles(s, self.frame));
         self.margin = percent(s.margin);
         self.bold = s.bold == Some(true);
         self.case = s.case;
@@ -733,7 +742,7 @@ pub(super) fn filled(shown: &str, stored: Option<f64>) -> String {
 
 fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
     let stored = &d.base;
-    let was = Parts::of_subtitles(stored);
+    let was = Parts::of_subtitles(stored, d.frame);
     let parts = d
         .fields
         .colors_kept(&was)
@@ -976,6 +985,7 @@ impl Workspace {
             kept: None,
             base: SubtitleStyle::default(),
             track: SubtitleStyle::default(),
+            frame: frame_of(&Settings::default()),
             families: Vec::new(),
             error: String::new(),
             loaded: false,
@@ -989,6 +999,7 @@ impl Workspace {
             && let Some((t, c)) = p.find_cue(id)
         {
             d.track = p.subtitles[t].style.clone();
+            d.frame = frame_of(&p.settings);
             d.load(&p.speakers, &p.subtitles[t].cues[c]);
         }
         if let Some(l) = landing {
@@ -1028,6 +1039,7 @@ impl Workspace {
             across: String::new(),
             down: String::new(),
             base: SubtitleStyle::default(),
+            frame: frame_of(self.project().map_or(&Settings::default(), |p| &p.settings)),
             dirty: false,
             from: None,
             error: String::new(),
@@ -1155,10 +1167,12 @@ impl Workspace {
         {
             d.track = track.style.clone();
         }
-        let shown =
-            found.is_some_and(|(_, cue)| settled(&d.cue, &p.speakers, cue, d.word) == d.state());
+        let frame = frame_of(&p.settings);
+        let shown = found
+            .is_some_and(|(_, cue)| settled(&d.cue, &p.speakers, cue, d.word, frame) == d.state());
         match found {
             Some((_, cue)) if cue_copies(d.dirty, d.loaded, waiting || shown) => {
+                d.frame = frame;
                 d.load(&p.speakers, cue);
                 d.dirty = false;
             }
@@ -1641,15 +1655,15 @@ impl Workspace {
         let Some(mut d) = self.timeline.track_dialog.take() else {
             return false;
         };
-        let Some(t) = self
+        let Some((t, frame)) = self
             .project()
-            .and_then(|p| p.subtitle_track(&d.track))
-            .cloned()
+            .and_then(|p| Some((p.subtitle_track(&d.track)?.clone(), frame_of(&p.settings))))
         else {
             return false;
         };
         let now = (t.name.clone(), t.language.clone(), t.style);
-        if !d.dirty && d.from.as_ref() != Some(&now) {
+        if !d.dirty && (d.from.as_ref() != Some(&now) || d.frame != frame) {
+            d.frame = frame;
             d.name = now.0.clone().unwrap_or_default();
             d.language = now.1.clone().unwrap_or_default();
             d.load(&now.2);
