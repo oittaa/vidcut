@@ -1,5 +1,6 @@
 use vidcut_core::model::{AlphaMode, ColorSpace};
 
+use crate::decode::Decoder as _;
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, decoder, encoder, format, frame, media, software::scaling};
 
@@ -269,7 +270,7 @@ fn stream_rate(stream: &format::stream::Stream) -> f64 {
 
 fn one_sequence_picture(
     input: &mut format::context::Input,
-    decoder: &mut ffmpeg::decoder::Video,
+    decoder: &mut crate::decode::VideoDecoder,
     stream: usize,
     index: u64,
 ) -> Option<frame::Video> {
@@ -464,7 +465,7 @@ fn unjpeg(jpeg: &[u8], width: u32, height: u32) -> Option<Vec<u8>> {
 
 fn next_frame(
     input: &mut format::context::Input,
-    decoder: &mut ffmpeg::decoder::Video,
+    decoder: &mut crate::decode::VideoDecoder,
     index: usize,
 ) -> Result<Option<frame::Video>> {
     let mut eof = false;

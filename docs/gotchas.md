@@ -78,6 +78,16 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - `hw::Keeper` copies the kept pictures of NVDEC, Direct3D 11 and VA-API (with `vaCopy`) into memory of their own.
   - CPU decoders decode into vidcut's buffers (`buffers.rs`, its `get_buffer2`).
   - The kept pictures of Mesa VA-API and Vulkan stay pool surfaces. `Store::evict` lets the pictures of a pool go together ([playback](design/playback.md#the-engine)).
+- **FFmpeg's `exr` decoder fails on most float PIZ files** (9.0.1, 9.0.2; master has the same code).
+  - It makes the Huffman table of PIZ with FFmpeg's VLC tables (vlc.c). There, the index of a subtable is a 16-bit integer.
+  - PIZ splits each float sample into two 16-bit halves. In a real picture the low halves are noise. Thus one block uses almost all 65536 codes.
+  - The table then needs more than 32767 entries. The build stops with "strange codes", and each block fails.
+  - FFmpeg returns the frame all the same, with the failed blocks not filled, and no error.
+  - Smooth gradients and half floats decode correctly. Thus the fault depends on the picture, not on its size. Renders of Resolve Studio 21.2 fail too.
+  - Thus vidcut decodes each OpenEXR with the `exr` crate ([design/gpu.md](design/gpu.md#the-gpu-and-the-decoder)).
+- **FFmpeg's scaler clamps half floats** (9.0.2).
+  - The `exr` decoder gives `gbrpf16le` for half floats. swscale converts it to `gbrpf32le` between 0 and 1, and not exactly.
+  - `ffmpeg -pix_fmt gbrpf32le` does the same. Thus a test of a half file compares the `gbrpf16le` samples.
 - **FFmpeg 8 has no demuxer or decoder for an animated WebP** (8.0.1). FFmpeg has them from 9.0.
   - FFmpeg 8 reads the file with `webp_pipe`, as one image that it cannot decode. An animated WebP of one frame gives the same result.
   - Without a check, the file comes in as a still of 2×2 pixels, and its picture never renders.

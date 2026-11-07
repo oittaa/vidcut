@@ -6,7 +6,7 @@ use rustfft::num_complex::Complex32;
 use vidcut_core::analysis::{AudioLevels, Loudness, PictureStats, SoundMatch};
 use vidcut_core::render::{AudioPiece, Ducking, RenderPlan};
 
-use crate::decode::decode_stream;
+use crate::decode::{Decoder, decode_stream};
 use crate::error::{Context, Error, Result};
 use crate::export::audio::{AudioMix, Resampler, channel_layout, discard_others};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
@@ -400,7 +400,7 @@ impl Measuring {
 fn decode_pictures(
     input: &mut format::context::Input,
     index: usize,
-    decoder: &mut ffmpeg::decoder::Opened,
+    decoder: &mut impl Decoder,
     pictures: u64,
     mut each: impl FnMut(&frame::Video) -> Result<()>,
 ) -> Result<()> {

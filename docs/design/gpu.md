@@ -33,6 +33,15 @@ flowchart LR
   - Why: on the player's decoder, their work waits behind playback.
 - `gpu.acceleration` lets the GPU decode, scale and encode. `gpu.decoding` lets it decode. Both are on by default.
 - `GpuDecoder::why_not` names the streams that the CPU decodes. Stills and image sequences decode on the CPU.
+- An OpenEXR decodes with the `exr` crate, not with FFmpeg's `exr` decoder ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)):
+  - `VideoDecoder` opens FFmpeg's `rawvideo` decoder in its place. Its `send_packet` turns each file into the planes of that decoder (`openexr::Planes`).
+  - The pixel format is the format that the probe gets from FFmpeg's `exr` decoder. Thus the frames and their path stay the same.
+  - It takes R, G, B and A, or Y and A, by the names that FFmpeg's decoder takes. It reads the first part at its full size.
+  - The data window goes into the display window, at its place from the origin of the display window. The rest of the picture is 0.
+  - A file with another pixel format than the stream gives a damaged frame.
+  - It decodes on one thread. Why: frames that stand alone decode on the pool, one frame on each thread, as with FFmpeg.
+  - `VideoDecoder` gives no mutable access to FFmpeg's decoder. Thus each packet goes through its `send_packet`.
+  - The report of the reader names the `exr` codec and FFmpeg's `rawvideo` decoder.
 - A stream that the GPU's decoder refuses decodes on the CPU (`VideoReader::open_gpu_or_cpu`).
 
 ## Routes
