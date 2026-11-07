@@ -61,7 +61,7 @@ pub enum Request {
         sample_rate: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channels: Option<u16>,
-        /// Count record timecode drop-frame (29.97 and 59.94; decision D47).
+        /// Count record timecode drop-frame (29.97, 59.94 and 119.88; decision D47).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         drop_frame: Option<bool>,
         /// Record timecode of the first frame: `00:00:00:00` (the default),
@@ -2936,7 +2936,7 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height: Option<u32>,
         /// With `create` or an OpenTimelineIO file, count record timecode
-        /// drop-frame (29.97 and 59.94; decision D47).
+        /// drop-frame (29.97, 59.94 and 119.88; decision D47).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         drop_frame: Option<bool>,
         /// With `create` or an OpenTimelineIO file, the record timecode of
@@ -4386,7 +4386,7 @@ pub struct ProjectSet {
     pub channels: Option<u16>,
     #[serde(default)]
     pub ripple_on: Option<bool>,
-    /// Count record timecode drop-frame: at 29.97 and 59.94 (decision D47).
+    /// Count record timecode drop-frame: at 29.97, 59.94 and 119.88 (decision D47).
     #[serde(default)]
     pub drop_frame: Option<bool>,
     /// Record timecode of the first frame, e.g. `01:00:00:00` (`01:00:00;00`
