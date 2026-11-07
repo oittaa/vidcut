@@ -2063,7 +2063,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - With no suffix, the file has no compression.
     - vidcut has no PIZ, DWAA, DWAB, HTJ2K and Compression Level ([todo](todo/image-compression.md)).
     - Each OpenEXR has the `timeCode` of its frame on the timeline, with the frame digits and bit 15 that Resolve writes. A TIFF has no timecode.
-    - In drop-frame timecode, vidcut sets the drop-frame flag.
+    - In drop-frame timecode, vidcut sets the drop-frame flag ([X148](deviations.md#x148-an-openexr-in-drop-frame-timecode-has-the-drop-frame-flag)).
     - The files hold the code values of the timeline. An OpenEXR keeps a value above 1 (measured for a render with no color management).
     - The files hold no sound. An export with sound settings is refused ([X147](deviations.md#x147-an-image-sequence-refuses-sound-settings)).
     - The ExtraSamples tag of a TIFF with alpha follows the Alpha Mode: 1 for Premultiplied and 2 for Straight ([gotchas](gotchas.md#ffmpeg-encoding-and-muxing)).

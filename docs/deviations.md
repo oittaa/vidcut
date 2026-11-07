@@ -2736,3 +2736,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The files cannot hold sound. vidcut does not drop a setting without a word.
   - The owner approved this difference.
+
+## X148. An OpenEXR in drop-frame timecode has the drop-frame flag
+
+- **Resolve:**
+  - In drop-frame timecode, the frame digits of `timeCode` skip the dropped numbers. The drop-frame flag (bit 6) is 0.
+  - This is so at 29.97, 59.94 and 119.88 fps (measured in Resolve Studio 21.2).
+- **vidcut:**
+  - The frame digits are the same. vidcut sets the drop-frame flag.
+- **Why:**
+  - The `timeCode` of OpenEXR follows SMPTE 12M. There, bit 6 is the drop-frame flag.
+  - Without the flag, a reader takes the digits as non-drop-frame. At 29.97 fps, a frame count from them is then 2 frames too high for each minute that drops numbers.
+  - The owner approved this difference.
