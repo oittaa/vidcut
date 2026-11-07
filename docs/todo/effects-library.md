@@ -5,14 +5,19 @@
 The Cut page has separate tabs for transitions, titles and effects (p. 636). vidcut follows it.
 
 - The Transitions tab, the Transition Inspector, Dip To Color Dissolve, Smooth Cut, Push and Slide are there ([spec §8.11](../cut-page-spec.md#811-dissolves-pp-645-747-758761-895-1114-1159-1173)).
-- The Effects tab, the effects of the Inspector, Gaussian Blur, Mosaic Blur and Vignette are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
+- The Effects tab, the effects of the Inspector, Gaussian Blur, Mosaic Blur, Vignette and Sharpen are there ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
 - The Generators page and its twelve kinds are there ([spec §8.17](../cut-page-spec.md#817-generators-p-766)).
 - If the bar gets too full, one Effects tab with categories can replace the tabs, as the Edit page has (p. 802).
 
 Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
-1. **More effects:** Sharpen, Film Grain and Glow.
+1. **More effects:** Film Grain and Glow.
    - Measure each one in Resolve first: its values, their ranges and defaults, and its math.
+   - **Sharpen, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
+     - Blend on the Edit page, at 0.5.
+     - A picture with alpha on the Edit page, over black and over white.
+     - A viewer that draws fewer pixels than the frame.
+     - A Sharpen Chroma between 1 and 2, for example 1.01 and 1.5, with Fine Details 3.
    - **Vignette, measure these.** vidcut's choices for them are in the [spec](../cut-page-spec.md#816-effects-pp-765-3526-3536):
      - Blend on the Edit page, at 0.5.
      - A Pan in another frame shape: a 1920×1080 source in a 1080×1920 timeline, Pan Y 800.

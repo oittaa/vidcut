@@ -513,6 +513,8 @@ The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3
   - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
 - `place::Shading` holds the shape of a Vignette: its radius, its cells, its boxes and the place of its first cell.
   - The fit of the picture sets its size (`OnFrame.fit`). Thus a Zoom and a Pan do not change the shape.
+- `place::Sharpening` holds the gain of each band of a Sharpen, for the brightness and for the colors.
+  - A Sharpen with all gains at 0 and Use Alpha on is no work at all (`Sharpening::still`).
 
 The draw:
 
@@ -535,6 +537,16 @@ The draw:
 - `fs_vignette` reads the cells and mixes the Color (`vignette_shape`, `vignette_mixed`).
   - `vignette_mixed` adds its own rules to `mixed`. The shared forms `dodged` and `burned` have no limits. `dodge` and `burn` put the limits of a layer's mode on them.
   - Divide, Hue, Lighter Color and Darker Color have their own rules in `vignette_mixed`. A layer's mode has other rules for a Color of 0, a gray Color and a tie.
+- `fs_sharpen_taken` writes the colors that a Sharpen works on into one of the two pictures.
+- `sharpen::planes` makes the changes of a Sharpen in compute passes, before its one fragment pass:
+  - The `split` entry makes the plane. The `linked` entry makes the links. The `sweep` entry makes one half sweep of a solve.
+  - The `collect` entry adds a solve to the result, with the gains of two bands. Thus the result needs no buffer for each band.
+  - A half sweep writes only the pixels of one color of a checkerboard, and reads only the other color. Thus it works in place.
+  - A half sweep and the `collect` entry work on differences from the plane. Thus a flat area has a change of exactly 0, and rounding does not move it.
+  - The planes are 32-bit floats in storage buffers. `MIXING` is not exact enough for the small differences of the solves.
+  - `Blurred` keeps the buffers (`sharpen::Planes`) until the size changes. Each frame makes the planes again, so there is no cache to keep up to date.
+  - The color planes are made only when a color gain is not 0. At a Sharpen Chroma of 1 the color gains are 0 (`Sharpening`).
+- `fs_sharpen` adds the changes to the colors. Each change is for the output, so the colors need no second conversion.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.

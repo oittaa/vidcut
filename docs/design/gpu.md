@@ -116,6 +116,8 @@ The draw:
   - The viewer's frame render, the AI upscalers and the frame interpolation use that device too (`compute::Gpu`).
   - It opens with all the limits of the GPU. Why: the AI kernels need large buffers and much workgroup memory.
   - It is not the device of the viewer: a submit from another thread can make the viewer's surface fail ([gotchas](../gotchas.md#wgpu-and-egui)).
+    - The viewer's device opens with the largest texture, buffer and storage binding of the GPU. Its other limits are the defaults of wgpu.
+    - Why: a Sharpen of the colors keeps 12 bytes for each pixel of the frame in one storage buffer ([export](export.md#effects)).
 - There, `fs_encode` writes the planes of the encoder ([export](export.md#timeline-colors)).
   - NVENC takes them through memory that Vulkan shares with CUDA (`Shared::out`).
   - VideoToolbox takes them in the IOSurfaces of its own frames (`Sink::Surface`).

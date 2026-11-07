@@ -3253,6 +3253,8 @@ pub enum EffectKind {
     MosaicBlur(MosaicBlur),
     /// A soft shape with the picture inside it and a color around it.
     Vignette(Vignette),
+    /// Makes the detail of the picture stronger.
+    Sharpen(Sharpen),
 }
 
 /// The effects there are.
@@ -3262,6 +3264,7 @@ pub enum EffectType {
     GaussianBlur,
     MosaicBlur,
     Vignette,
+    Sharpen,
 }
 
 /// A Gaussian blur. Its spread (the sigma of its curve) is 0.05625 × the
@@ -3403,6 +3406,36 @@ pub struct Vignette {
     pub composite_type: Option<CompositeMode>,
 }
 
+/// A sharpen: it makes three bands of detail stronger, from fine to large. A
+/// band is the difference between two smoothings that keep strong edges. It
+/// works on the code values, after the transform and the crop, in pixels of
+/// the frame. No value grows with the frame's size. The alpha does not change,
+/// and nothing stops the colors at 0 or 1 before the output.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Sharpen {
+    /// How strong the detail of the brightness is, from 1 (no change) to 5.
+    /// Usual: 1.8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharpen_amount: Option<f64>,
+    /// How large each band's detail is, from 0.01 to 0.1. Usual: 0.05.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fine_detail_size: Option<f64>,
+    /// Multiplies the strength of the fine band, from 1 to 5. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fine_details: Option<f64>,
+    /// Multiplies the strength of the medium band, from 1 to 5. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub medium_details: Option<f64>,
+    /// Multiplies the strength of the large band, from 1 to 5. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub large_details: Option<f64>,
+    /// How strong the detail of the colors is, from 1 to 5. Above 1 it
+    /// multiplies the three Details values, and `sharpen_amount` does not
+    /// change it. At 1 the colors keep their detail. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharpen_chroma: Option<f64>,
+}
+
 /// Which values of a vignette work.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -3504,10 +3537,11 @@ impl Border {
 }
 
 impl EffectType {
-    pub const ALL: [EffectType; 3] = [
+    pub const ALL: [EffectType; 4] = [
         EffectType::GaussianBlur,
         EffectType::MosaicBlur,
         EffectType::Vignette,
+        EffectType::Sharpen,
     ];
 
     pub fn name(self) -> &'static str {
@@ -3515,6 +3549,7 @@ impl EffectType {
             Self::GaussianBlur => "Gaussian Blur",
             Self::MosaicBlur => "Mosaic Blur",
             Self::Vignette => "Vignette",
+            Self::Sharpen => "Sharpen",
         }
     }
 
@@ -3523,6 +3558,7 @@ impl EffectType {
             Self::GaussianBlur => EffectKind::GaussianBlur(GaussianBlur::default()),
             Self::MosaicBlur => EffectKind::MosaicBlur(MosaicBlur::default()),
             Self::Vignette => EffectKind::Vignette(Vignette::default()),
+            Self::Sharpen => EffectKind::Sharpen(Sharpen::default()),
         };
         Effect {
             on: true,
@@ -3540,6 +3576,7 @@ impl Effect {
             EffectKind::GaussianBlur(_) => EffectType::GaussianBlur,
             EffectKind::MosaicBlur(_) => EffectType::MosaicBlur,
             EffectKind::Vignette(_) => EffectType::Vignette,
+            EffectKind::Sharpen(_) => EffectType::Sharpen,
         }
     }
 
@@ -3687,6 +3724,38 @@ impl Vignette {
 
     pub fn mixing(&self) -> CompositeMode {
         self.composite_type.unwrap_or(Self::MIXING)
+    }
+}
+
+impl Sharpen {
+    pub const AMOUNT: f64 = 1.8;
+    pub const GAIN: f64 = 1.0;
+    pub const GAINS: (f64, f64) = (1.0, 5.0);
+    pub const SIZE: f64 = 0.05;
+    pub const SIZES: (f64, f64) = (0.01, 0.1);
+
+    pub fn amount(&self) -> f64 {
+        self.sharpen_amount.unwrap_or(Self::AMOUNT)
+    }
+
+    pub fn size(&self) -> f64 {
+        self.fine_detail_size.unwrap_or(Self::SIZE)
+    }
+
+    pub fn fine(&self) -> f64 {
+        self.fine_details.unwrap_or(Self::GAIN)
+    }
+
+    pub fn medium(&self) -> f64 {
+        self.medium_details.unwrap_or(Self::GAIN)
+    }
+
+    pub fn large(&self) -> f64 {
+        self.large_details.unwrap_or(Self::GAIN)
+    }
+
+    pub fn chroma(&self) -> f64 {
+        self.sharpen_chroma.unwrap_or(Self::GAIN)
     }
 }
 

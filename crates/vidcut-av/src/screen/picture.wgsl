@@ -1313,6 +1313,36 @@ fn fs_vignette(in: Out) -> @location(0) vec4<f32> {
     return effect_mixed(px, vec4<f32>(made, was.a), vignetting.first.w, use_alpha);
 }
 
+struct Sharpening {
+    more: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> sharpening: Sharpening;
+@group(0) @binding(3) var<storage, read> sharpen_planes: array<f32>;
+
+@fragment
+fn fs_sharpen_taken(in: Out) -> @location(0) vec4<f32> {
+    return effect_taken(textureLoad(blur_source, vec2<i32>(in.position.xy), 0), sharpening.more.y);
+}
+
+@fragment
+fn fs_sharpen(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let was = textureLoad(blur_source, px, 0);
+    let size = vec2<i32>(textureDimensions(blur_source));
+    let at = px.y * size.x + px.x;
+    var red = 0.0;
+    var blue = 0.0;
+    if sharpening.more.z > 0.5 {
+        let plane = size.x * size.y;
+        red = sharpen_planes[plane + at];
+        blue = sharpen_planes[2 * plane + at];
+    }
+    let green = -(BT709.r * red + BT709.b * blue) / BT709.g;
+    let made = was.rgb + sharpen_planes[at] + vec3<f32>(red, green, blue);
+    return effect_mixed(px, vec4<f32>(made, was.a), sharpening.more.x, sharpening.more.y);
+}
+
 struct Mosaic {
     grid: vec4<f32>,
     way: vec4<i32>,

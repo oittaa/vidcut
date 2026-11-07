@@ -165,7 +165,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("edit", "Edit the timeline"),
     (
         "effects",
-        "Effects on clips' pictures, in their order: Gaussian Blur, Mosaic Blur, Vignette",
+        "Effects on clips' pictures, in their order: Gaussian Blur, Mosaic Blur, Vignette, Sharpen",
     ),
     ("encoders", "Hardware encoders that work here"),
     (
@@ -405,7 +405,8 @@ const EXAMPLES: &[(&str, &str)] = &[
     (
         "effects.add",
         "vidcut effects add c3 gaussian_blur\n  vidcut effects add V2@10s gaussian_blur\n  \
-         vidcut effects add c3 mosaic_blur\n  vidcut effects add c3 vignette",
+         vidcut effects add c3 mosaic_blur\n  vidcut effects add c3 vignette\n  \
+         vidcut effects add c3 sharpen",
     ),
     (
         "effects.set",
@@ -418,7 +419,9 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut effects set c3 1 --position 0.25,0.75 --aspect 2 --antialias true\n  \
          vidcut effects set c3 2 --size 0.7 --softness 0.25 --color 0.1,0,0.2\n  \
          vidcut effects set c3 2 --operating-mode advanced --border-shape hexagon --rotation 30\n  \
-         vidcut effects set c3 2 --center 0.25,0.75 --transparency 0.5 --composite-type screen",
+         vidcut effects set c3 2 --center 0.25,0.75 --transparency 0.5 --composite-type screen\n  \
+         vidcut effects set c3 3 --sharpen-amount 2.5 --fine-detail-size 0.03\n  \
+         vidcut effects set c3 3 --fine-details 2 --large-details 3 --sharpen-chroma 1.5",
     ),
     (
         "export.start",

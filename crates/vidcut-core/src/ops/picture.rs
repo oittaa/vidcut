@@ -4,8 +4,8 @@ use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
     Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectKind, GaussianBlur,
-    MosaicBlur, Picture, PictureTool, Project, TrackKind, Vignette, VignetteMode, VignetteShape,
-    ZoomBox,
+    MosaicBlur, Picture, PictureTool, Project, Sharpen, TrackKind, Vignette, VignetteMode,
+    VignetteShape, ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -179,12 +179,55 @@ fn vignette_checked(v: &Vignette) -> Result<Vignette> {
     })
 }
 
+fn sharpen_checked(s: &Sharpen) -> Result<Sharpen> {
+    within(
+        s.sharpen_amount,
+        Sharpen::GAINS,
+        "a Sharpen's amount is from 1 to 5",
+    )?;
+    within(
+        s.fine_detail_size,
+        Sharpen::SIZES,
+        "a Sharpen's fine detail size is from 0.01 to 0.1",
+    )?;
+    within(
+        s.fine_details,
+        Sharpen::GAINS,
+        "a Sharpen's fine details are from 1 to 5",
+    )?;
+    within(
+        s.medium_details,
+        Sharpen::GAINS,
+        "a Sharpen's medium details are from 1 to 5",
+    )?;
+    within(
+        s.large_details,
+        Sharpen::GAINS,
+        "a Sharpen's large details are from 1 to 5",
+    )?;
+    within(
+        s.sharpen_chroma,
+        Sharpen::GAINS,
+        "a Sharpen's chroma is from 1 to 5",
+    )?;
+    let gain = |v: Option<f64>| v.filter(|g| *g != Sharpen::GAIN);
+    Ok(Sharpen {
+        sharpen_amount: s.sharpen_amount.filter(|a| *a != Sharpen::AMOUNT),
+        fine_detail_size: s.fine_detail_size.filter(|z| *z != Sharpen::SIZE),
+        fine_details: gain(s.fine_details),
+        medium_details: gain(s.medium_details),
+        large_details: gain(s.large_details),
+        sharpen_chroma: gain(s.sharpen_chroma),
+    })
+}
+
 pub fn effect_checked(e: &Effect) -> Result<Effect> {
     within(e.blend, (0.0, 1.0), "an effect's blend is from 0 to 1")?;
     let kind = match &e.kind {
         EffectKind::GaussianBlur(b) => EffectKind::GaussianBlur(gaussian_checked(b)?),
         EffectKind::MosaicBlur(m) => EffectKind::MosaicBlur(mosaic_checked(m)?),
         EffectKind::Vignette(v) => EffectKind::Vignette(vignette_checked(v)?),
+        EffectKind::Sharpen(s) => EffectKind::Sharpen(sharpen_checked(s)?),
     };
     Ok(Effect {
         kind,
@@ -529,6 +572,14 @@ pub fn effect_shown(e: &Effect) -> Value {
             "transparency": v.through(),
             "color": v.tint(),
             "composite_type": v.mixing(),
+        }),
+        EffectKind::Sharpen(s) => json!({
+            "sharpen_amount": s.amount(),
+            "fine_detail_size": s.size(),
+            "fine_details": s.fine(),
+            "medium_details": s.medium(),
+            "large_details": s.large(),
+            "sharpen_chroma": s.chroma(),
         }),
     };
     if let (Some(out), Some(more)) = (out.as_object_mut(), more.as_object()) {
