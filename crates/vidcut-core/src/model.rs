@@ -3745,9 +3745,6 @@ pub struct FilmGrain {
     /// Usual: 0.5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub highlights: Option<f64>,
-    /// Off, another pattern with the same look. Usual: on.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub optimized: Option<bool>,
     /// On, another pattern with the same look. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub animate: bool,
@@ -4358,10 +4355,6 @@ impl FilmGrain {
         [self.shadows, self.midtones, self.highlights].map(|t| t.unwrap_or(Self::TONE))
     }
 
-    pub fn is_optimized(&self) -> bool {
-        self.optimized.unwrap_or(true)
-    }
-
     pub fn preset(&self) -> GrainPreset {
         let plain = self.shown() == Self::OPACITY
             && self.stretch() == 1.0
@@ -4402,7 +4395,6 @@ impl FilmGrain {
             grain_composite: self.grain_composite,
             grain_only: self.grain_only,
             freeze: self.freeze,
-            optimized: self.optimized,
             animate: self.animate,
             texture: Some(texture),
             grain_size: Some(size),

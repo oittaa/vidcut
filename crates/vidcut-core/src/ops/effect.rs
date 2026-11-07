@@ -172,7 +172,6 @@ fn grain_values(c: &mut EffectChange, g: &mut FilmGrain) -> Result<()> {
     given(&mut c.shadows, &mut g.shadows);
     given(&mut c.midtones, &mut g.midtones);
     given(&mut c.highlights, &mut g.highlights);
-    given(&mut c.optimized, &mut g.optimized);
     taken(&mut c.animate, &mut g.animate);
     Ok(())
 }

@@ -346,7 +346,7 @@ impl Graining {
         let seed = g.rough().to_bits()
             ^ g.large().to_bits().rotate_left(17)
             ^ g.stretch().to_bits().rotate_left(34)
-            ^ u64::from(g.is_optimized())
+            ^ 1
             ^ (u64::from(g.animate) << 1);
         let lean = g.lean();
         let [_, c0, c1, c2, c3] = between(&Self::SYMMETRIES, lean);

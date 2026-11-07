@@ -1177,7 +1177,7 @@ fn grain_values(e: &Value) -> String {
     let s = |k: &str| e[k].as_str().unwrap_or_default().to_string();
     let on = |k: &str, text: &'static str| if e[k] == true { text } else { "" };
     format!(
-        "{}  {} opacity {}  texture {} size {} aspect {} strength {} offset {} symmetry {} softness {} saturation {} detail loss {}  gains {}  tones {}, {}, {}{}{}{}{}",
+        "{}  {} opacity {}  texture {} size {} aspect {} strength {} offset {} symmetry {} softness {} saturation {} detail loss {}  gains {}  tones {}, {}, {}{}{}{}",
         s("preset"),
         s("grain_composite"),
         n("opacity"),
@@ -1197,11 +1197,6 @@ fn grain_values(e: &Value) -> String {
         on("grain_only", "  grain only"),
         on("freeze", "  frozen"),
         on("animate", "  animate"),
-        if e["optimized"] == true {
-            ""
-        } else {
-            "  not optimized"
-        },
     )
 }
 

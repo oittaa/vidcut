@@ -344,7 +344,6 @@ fn grain_checked(g: &FilmGrain) -> Result<FilmGrain> {
         shadows: off(g.shadows, FilmGrain::TONE),
         midtones: off(g.midtones, FilmGrain::TONE),
         highlights: off(g.highlights, FilmGrain::TONE),
-        optimized: g.optimized.filter(|v| !*v),
         ..g.clone()
     })
 }
@@ -789,7 +788,6 @@ pub fn effect_shown(e: &Effect) -> Value {
             "shadows": g.tones()[0],
             "midtones": g.tones()[1],
             "highlights": g.tones()[2],
-            "optimized": g.is_optimized(),
             "animate": g.animate,
         }),
         EffectKind::Vignette(v) => json!({

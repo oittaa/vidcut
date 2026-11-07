@@ -2301,12 +2301,6 @@ fn grain_rows(
         }
         check(
             ui,
-            (n, "Optimized Mode", g.is_optimized(), true),
-            "optimized",
-            acts,
-        );
-        check(
-            ui,
             (n, "Animate On Every Refresh", g.animate, false),
             "animate",
             acts,

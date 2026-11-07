@@ -4673,9 +4673,6 @@ pub struct EffectChange {
     /// to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub highlights: Option<f64>,
-    /// Off, another pattern of a Film Grain with the same look.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub optimized: Option<bool>,
     /// On, another pattern of a Film Grain with the same look.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub animate: Option<bool>,

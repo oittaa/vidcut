@@ -1685,7 +1685,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Red, Green and Blue each go from −10 to 10 and are 1.
     - Shadows, Midtones and Highlights each go from 0 to 1 and are 0.5.
     - The Inspector of Resolve 21.2 shows these names. The manual (p. 3559) calls them Shadow, Midtone and Highlight Gain.
-    - Optimized Mode is on. Animate On Every Refresh is off.
+    - Animate On Every Refresh is off.
+    - The Inspector of Resolve 21.2 has no Optimized Mode row. The manual (p. 3559) names an Optimized Mode checkbox, on by default.
 - **How the film grain works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
   - `n` is the noise of a channel. `O` is Offset. Grain Only shows `G = clip(O + n)`, which does not depend on the picture.
   - `c` is the picture's color without its alpha, after Detail Loss. `o` is Opacity. For each channel:
@@ -1711,8 +1712,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Softness is a Gaussian curve with a sigma of 5 × Softness^1.5 × the height of the frame / 1080. The edge is a half-sample mirror.
   - The grain stays in the pixels of the frame. Zoom and Position do not move it.
   - Each frame of a clip has its own pattern, from the clip's first frame. A trim does not change it. Freeze keeps the first frame's pattern.
-  - A change of Texture, Grain Size, Grain Aspect Ratio, Optimized Mode or Animate On Every Refresh gives a new pattern.
+  - A change of Texture, Grain Size, Grain Aspect Ratio or Animate On Every Refresh gives a new pattern.
 - **Film Grain in vidcut:**
+  - vidcut has no Optimized Mode, as the Inspector of Resolve 21.2 has none.
   - vidcut makes the noise itself. It has the spectrum and the statistics of the renders, not their pattern ([X143](deviations.md#x143-the-noise-of-a-film-grain-has-its-own-pattern)).
     - One picture of noise comes from an inverse Fourier transform at the size of the canvas. Each frame reads it at another random shift.
     - A cubic curve on the noise gives the kurtosis.
