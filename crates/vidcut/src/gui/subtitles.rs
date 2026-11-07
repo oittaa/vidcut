@@ -374,7 +374,7 @@ fn edge_field(
 }
 
 fn typed_frame(p: &Project, text: &str, base: i64, (playhead, dropped): (i64, i64)) -> Option<i64> {
-    let spec = super::viewer::timecode_input(text, dropped)?;
+    let spec = super::viewer::timecode_input(text, dropped, p.settings.fps.frame_digits())?;
     let sign = match text.trim().chars().next() {
         Some(c @ ('+' | '-')) => c.to_string(),
         _ => String::new(),

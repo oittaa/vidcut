@@ -179,7 +179,7 @@ impl Workspace {
     fn typed_frame(&self, text: &str, origin: i64) -> Option<i64> {
         let p = self.project()?;
         let drop = p.settings.counts_drop_frame();
-        let spec = timecode_input(text, self.dropped())?;
+        let spec = timecode_input(text, self.dropped(), p.settings.fps.frame_digits())?;
         parse_counter(&spec, p.settings.fps, drop, origin)
     }
 

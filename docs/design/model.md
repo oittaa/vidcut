@@ -252,7 +252,7 @@ Requests take times as strings that parse into a `TimeSpec`:
 
 - frames: "450f", or a JSON integer
 - seconds: "15s", "1m30s", "250ms"
-- timecode: "HH:MM:SS:FF", with ";" for drop-frame
+- timecode: "HH:MM:SS:FF", with ";" for drop-frame. FF has three digits where the rate has more than 100 frames in a second (`Rational::frame_digits`).
 - a keyword: start, end, in, out, playhead
 - an offset: "+5s"
 
