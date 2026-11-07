@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use vidcut_core::looks::{LookKind, Styled, SubtitleLook};
 use vidcut_core::model::{
     Cue, LetterCase, Place, Project, Settings, SpeakerPaint, Speakers, SubtitleAlign,
-    SubtitleStyle, SubtitleTrack, SubtitleWords, WordsShow,
+    SubtitleStyle, SubtitleTrack, SubtitleWords, Title, WordsShow,
 };
 use vidcut_core::ops::subtitles as subtitle_ops;
 use vidcut_core::time::{Rational, TimeSpec};
@@ -13,7 +13,7 @@ use vidcut_core::time::{Rational, TimeSpec};
 use super::dialog;
 use super::export::{Ask, Picked};
 use super::folders::Kind;
-use super::looks::{Parts, Picker, TextFields, Usual};
+use super::looks::{Parts, Picker, TextFields, Usual, kept_plain, plain};
 use super::theme;
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
@@ -130,8 +130,7 @@ impl CueDialog {
     fn apply_style(&mut self, style: Option<&SubtitleStyle>) {
         let own = style.cloned().unwrap_or_default();
         self.align = own.align;
-        self.across = percent(own.position.map(|p| p[0]));
-        self.down = percent(own.position.map(|p| p[1]));
+        [self.across, self.down] = position_text(own.position, self.frame);
         self.fields = TextFields::load(&Parts::of_subtitles(&own, self.frame));
         self.margin = percent(own.margin);
         self.bold = own.bold == Some(true);
@@ -190,7 +189,12 @@ impl CueDialog {
         let usual = look
             .position
             .unwrap_or_else(|| look.usual_position(self.place));
-        style.position = position_of(&self.across, &self.down, self.base.position, usual)?;
+        style.position = position_of(
+            [&self.across, &self.down],
+            self.base.position,
+            usual,
+            self.frame,
+        )?;
         Ok(style)
     }
 
@@ -216,14 +220,32 @@ impl CueDialog {
     }
 }
 
+fn position_text(position: Option<[f64; 2]>, [w, h]: [f64; 2]) -> [String; 2] {
+    [
+        plain(position.map(|p| p[0] * w)),
+        plain(position.map(|p| (1.0 - p[1]) * h)),
+    ]
+}
+
 fn position_of(
-    across: &str,
-    down: &str,
+    [across, down]: [&str; 2],
     stored: Option<[f64; 2]>,
     usual: [f64; 2],
+    [w, h]: [f64; 2],
 ) -> Result<Option<[f64; 2]>, String> {
-    let x = kept_number(across, stored.map(|p| p[0]), "across")?;
-    let y = kept_number(down, stored.map(|p| p[1]), "down")?;
+    let [was_x, was_y] = position_text(stored, [w, h]);
+    let x = if across.trim() == was_x {
+        stored.map(|p| p[0])
+    } else {
+        kept_plain(across, None, "Position X")?
+            .map(|v| (v / w).clamp(Title::ACROSS.0, Title::ACROSS.1))
+    };
+    let y = if down.trim() == was_y {
+        stored.map(|p| p[1])
+    } else {
+        kept_plain(down, None, "Position Y")?
+            .map(|v| (1.0 - v / h).clamp(Title::DOWN.0, Title::DOWN.1))
+    };
     Ok(match (x, y) {
         (None, None) => None,
         (x, y) => Some([x.unwrap_or(usual[0]), y.unwrap_or(usual[1])]),
@@ -232,10 +254,11 @@ fn position_of(
 
 fn raw_of(style: Option<&SubtitleStyle>, frame: [f64; 2]) -> LookRaw {
     let own = style.cloned().unwrap_or_default();
+    let [across, down] = position_text(own.position, frame);
     LookRaw {
         align: own.align,
-        across: percent(own.position.map(|p| p[0])),
-        down: percent(own.position.map(|p| p[1])),
+        across,
+        down,
         fields: TextFields::load(&Parts::of_subtitles(&own, frame)),
         margin: percent(own.margin),
         bold: own.bold == Some(true),
@@ -621,8 +644,7 @@ impl TrackDialog {
         self.pop = percent(s.words.as_ref().and_then(|w| w.pop));
         self.paint = s.speaker_color;
         self.align = s.align;
-        self.across = percent(s.position.map(|p| p[0]));
-        self.down = percent(s.position.map(|p| p[1]));
+        [self.across, self.down] = position_text(s.position, self.frame);
         self.base = s.clone();
     }
 }
@@ -759,8 +781,16 @@ fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
         }
         None => None,
     };
-    let across = filled(&d.across, stored.position.map(|p| p[0]));
-    let down = filled(&d.down, stored.position.map(|p| p[1]));
+    let [was_x, was_y] = position_text(stored.position, d.frame);
+    let or_was = |shown: &str, was: String| {
+        if shown.trim().is_empty() {
+            was
+        } else {
+            shown.to_string()
+        }
+    };
+    let across = or_was(&d.across, was_x);
+    let down = or_was(&d.down, was_y);
     let mut style = SubtitleStyle {
         font: parts.font,
         size: parts.size,
@@ -777,7 +807,7 @@ fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
         position: None,
     };
     let usual = style.usual_position(Place::Bottom);
-    style.position = position_of(&across, &down, stored.position, usual)?;
+    style.position = position_of([&across, &down], stored.position, usual, d.frame)?;
     vidcut_core::ops::subtitles::checked_style(&style).map_err(|e| e.message)
 }
 
@@ -1371,21 +1401,19 @@ impl Workspace {
                     }
                 });
             });
-            dialog::row(ui, "Across", |ui| {
+            dialog::row(ui, "Position X", |ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut d.across)
                         .hint_text("the track")
                         .desired_width(80.0),
                 );
-                ui.label(dim("%"));
             });
-            dialog::row(ui, "Down", |ui| {
+            dialog::row(ui, "Position Y", |ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut d.down)
                         .hint_text("the track")
                         .desired_width(80.0),
                 );
-                ui.label(dim("%"));
             });
         });
         egui::Grid::new("cue-style-fields").show(ui, |ui| {
@@ -1733,11 +1761,9 @@ impl Workspace {
                 }
             });
             ui.end_row();
-            changed |= row(ui, "Across", &mut d.across, "the place");
-            ui.label(dim("%"));
+            changed |= row(ui, "Position X", &mut d.across, "the place");
             ui.end_row();
-            changed |= row(ui, "Down", &mut d.down, "the place");
-            ui.label(dim("%"));
+            changed |= row(ui, "Position Y", &mut d.down, "the place");
             ui.end_row();
             ui.label("Letters");
             ui.horizontal(|ui| {
