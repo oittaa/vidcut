@@ -5,7 +5,7 @@ use crate::keyframes::PictureValue;
 use crate::model::{
     Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectKind, GaussianBlur,
     Glow, GlowAlpha, GlowFraming, GlowOutput, MosaicBlur, Picture, PictureTool, Project, TrackKind,
-    ZoomBox,
+    Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -248,12 +248,63 @@ fn glow_checked(g: &Glow) -> Result<Glow> {
     })
 }
 
+fn vignette_checked(v: &Vignette) -> Result<Vignette> {
+    within(
+        v.size,
+        Vignette::SIZES,
+        "a Vignette's size is from 0.01 to 2",
+    )?;
+    within(
+        v.rotation,
+        Vignette::TURNS,
+        "a Vignette's rotation is from -360 to 360",
+    )?;
+    within(
+        v.anamorphism,
+        Vignette::STRETCHES,
+        "a Vignette's anamorphism is from 0.2 to 5",
+    )?;
+    for c in v.center.into_iter().flatten() {
+        within(
+            Some(c),
+            Vignette::PLACES,
+            "a Vignette's center is from -1000000 to 1000000",
+        )?;
+    }
+    within(
+        v.softness,
+        Vignette::SHARES,
+        "a Vignette's softness is from 0 to 1",
+    )?;
+    within(
+        v.transparency,
+        Vignette::SHARES,
+        "a Vignette's transparency is from 0 to 1",
+    )?;
+    if v.color.into_iter().flatten().any(|c| !c.is_finite()) {
+        return Err(Error::invalid("a Vignette's color is three numbers"));
+    }
+    Ok(Vignette {
+        operating_mode: v.operating_mode.filter(|m| *m != VignetteMode::default()),
+        border_shape: v.border_shape.filter(|s| *s != VignetteShape::default()),
+        size: v.size.filter(|s| *s != Vignette::SIZE),
+        rotation: v.rotation.filter(|r| *r != 0.0),
+        anamorphism: v.anamorphism.filter(|a| *a != Vignette::STRETCH),
+        center: v.center.filter(|c| *c != Vignette::MIDDLE),
+        softness: v.softness.filter(|s| *s != Vignette::SOFTNESS),
+        transparency: v.transparency.filter(|t| *t != 0.0),
+        color: v.color.filter(|c| *c != Vignette::BLACK),
+        composite_type: v.composite_type.filter(|m| *m != Vignette::MIXING),
+    })
+}
+
 pub fn effect_checked(e: &Effect) -> Result<Effect> {
     within(e.blend, (0.0, 1.0), "an effect's blend is from 0 to 1")?;
     let kind = match &e.kind {
         EffectKind::GaussianBlur(b) => EffectKind::GaussianBlur(gaussian_checked(b)?),
         EffectKind::MosaicBlur(m) => EffectKind::MosaicBlur(mosaic_checked(m)?),
         EffectKind::Glow(g) => EffectKind::Glow(Box::new(glow_checked(g)?)),
+        EffectKind::Vignette(v) => EffectKind::Vignette(vignette_checked(v)?),
     };
     Ok(Effect {
         kind,
@@ -616,6 +667,18 @@ pub fn effect_shown(e: &Effect) -> Value {
             "opacity": g.shown(),
             "invert": g.invert,
             "recovery": g.recovers(),
+        }),
+        EffectKind::Vignette(v) => json!({
+            "operating_mode": v.mode(),
+            "border_shape": v.shape(),
+            "size": v.large(),
+            "rotation": v.turn(),
+            "anamorphism": v.stretch(),
+            "center": v.middle(),
+            "softness": v.soft(),
+            "transparency": v.through(),
+            "color": v.tint(),
+            "composite_type": v.mixing(),
         }),
     };
     if let (Some(out), Some(more)) = (out.as_object_mut(), more.as_object()) {

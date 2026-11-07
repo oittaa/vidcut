@@ -1031,14 +1031,11 @@ pub fn print(method: &str, r: &Response, json: bool) {
                 let values = match e["kind"].as_str() {
                     Some("mosaic_blur") => mosaic_values(e),
                     Some("glow") => glow_values(e),
+                    Some("vignette") => vignette_values(e),
                     _ => gaussian_values(e),
                 };
-                let border = match e["border"].as_str() {
-                    Some(b) => format!("  border {b}"),
-                    None => String::new(),
-                };
                 println!(
-                    "  effect {i} {}{}  {values}{border}  blend {}{}{}",
+                    "  effect {i} {}{}  {values}  blend {}{}{}",
                     e["kind"].as_str().unwrap_or_default(),
                     if e["on"] == true { "" } else { " (off)" },
                     effect_number(e, "blend"),
@@ -1108,9 +1105,10 @@ fn gaussian_values(e: &Value) -> String {
         false => format!("strength {}", n("strength")),
     };
     format!(
-        "{strength}  channels across {}  down {}",
+        "{strength}  channels across {}  down {}  border {}",
         list("horizontal_channels"),
         list("vertical_channels"),
+        e["border"].as_str().unwrap_or_default(),
     )
 }
 
@@ -1177,7 +1175,7 @@ fn mosaic_values(e: &Value) -> String {
     let n = |k: &str| effect_number(e, k);
     let at = |i: usize| e["position"][i].as_f64().unwrap_or_default();
     format!(
-        "pixel frequency {}  smooth strength {}  {} cells  aliasing {}  offset {}, {}  aspect {}  position {}, {}{}{}{}",
+        "pixel frequency {}  smooth strength {}  {} cells  aliasing {}  offset {}, {}  aspect {}  position {}, {}  border {}{}{}{}",
         n("pixel_frequency"),
         n("smooth_strength"),
         e["cell_shape"].as_str().unwrap_or_default(),
@@ -1187,6 +1185,7 @@ fn mosaic_values(e: &Value) -> String {
         n("aspect"),
         at(0),
         at(1),
+        e["border"].as_str().unwrap_or_default(),
         if e["antialias"] == true {
             "  antialias"
         } else {
@@ -1202,6 +1201,27 @@ fn mosaic_values(e: &Value) -> String {
         } else {
             ""
         },
+    )
+}
+
+fn vignette_values(e: &Value) -> String {
+    let n = |k: &str| effect_number(e, k);
+    let at = |k: &str, i: usize| e[k][i].as_f64().unwrap_or_default();
+    format!(
+        "{}  {}  size {}  rotation {}  anamorphism {}  center {}, {}  softness {}  transparency {}  color {}, {}, {}  {}",
+        e["operating_mode"].as_str().unwrap_or_default(),
+        e["border_shape"].as_str().unwrap_or_default(),
+        n("size"),
+        n("rotation"),
+        n("anamorphism"),
+        at("center", 0),
+        at("center", 1),
+        n("softness"),
+        n("transparency"),
+        at("color", 0),
+        at("color", 1),
+        at("color", 2),
+        e["composite_type"].as_str().unwrap_or_default(),
     )
 }
 

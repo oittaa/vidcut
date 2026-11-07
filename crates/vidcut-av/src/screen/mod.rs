@@ -24,6 +24,7 @@ mod lut;
 mod out;
 pub mod scope;
 mod shared;
+mod vignette;
 #[cfg(any(target_os = "linux", windows))]
 mod vulkan;
 
@@ -78,6 +79,7 @@ pub struct Gpu {
     luts: OnceLock<lut::Pipes>,
     scope: OnceLock<scope::Pipes>,
     blur: blur::Pipes,
+    vignette: OnceLock<vignette::Pipes>,
 }
 
 struct Drawing {
@@ -706,6 +708,7 @@ impl Gpu {
             luts: OnceLock::new(),
             scope: OnceLock::new(),
             blur: blur::Pipes::new(device, &shader),
+            vignette: OnceLock::new(),
         }
     }
 
@@ -1050,6 +1053,7 @@ pub struct Screen {
     imports_before: u64,
     exported: bool,
     alpha: bool,
+    premultiplied: bool,
     written: Option<(u32, u32)>,
     whole: Option<Wide>,
     encoded: out::Encoded,
@@ -1347,7 +1351,8 @@ impl MixDraw<'_> {
         depth: usize,
         adds: f64,
     ) -> wgpu::BindGroup {
-        let canvas = &self.canvases[depth];
+        let canvases = self.canvases;
+        let canvas = &canvases[depth];
         let mut placing = mix.placing.clone();
         let (effects, factor) = bared(&mut placing, &mut 1.0);
         let mode = f64::from(placing.mode.code());

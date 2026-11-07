@@ -37,6 +37,7 @@ flowchart TD
 
 - **Settings:** `settings`, a `preset`, or the default preset of the extension.
   - `set` changes fields (`apply_overrides`). `encoder` sets the video encoder. The extension sets the container.
+  - A `null` in `set` takes the field out, and the field gets its default. Why: the Export dialog sends `null` for a field that its preset has and the dialog does not.
   - The presets are `builtin_presets` and the user's TOML files (`export::presets`).
   - A preset's name is any text that is not empty. The file holds the name.
   - The file name is the preset's name when that name is short, lowercase ASCII and safe on each system (`user_preset_path`). Otherwise it is a digest of the name. Why: two names that differ only in case stay two files.
@@ -124,6 +125,17 @@ The plan:
   - It writes profile 8, or profile 10 in AV1. Only libx265 and libsvtav1 write it.
   - Each frame needs it. Thus a black or generated frame takes the metadata of the frame before it.
   - Black or generated frames at the start have no frame before them. Then the export has no Dolby Vision.
+
+**Export Alpha** ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
+
+- `VideoSettings::holds_alpha` tells which settings have alpha. `validate` refuses `video.alpha` for the others.
+- With it off, the canvas starts black, and each frame is opaque. ProRes 4444 and 4444 XQ are `YUV444P10LE` on the CPU and `P416LE` on VideoToolbox. Thus the file has no alpha channel.
+- With it on, `VideoFrames::writing_alpha` starts the canvas transparent. ProRes 4444 and 4444 XQ are `YUVA444P10LE` on the CPU and `AYUV64LE` on VideoToolbox.
+- A black piece is then a picture with an alpha of 0 (`VideoFrames::clear`). Thus a gap and a dip to black are transparent.
+- The canvas holds premultiplied colors. `pixel_at` in `picture.wgsl` takes the alpha out before it converts the colors of the output. Why: a transfer curve gives another color for a premultiplied color.
+  - `AlphaOut::Straight` writes that color.
+  - `AlphaOut::Premultiplied` multiplies it by the alpha again.
+- A composite mode over a part with alpha (`mode_mixed`) mixes with the color below as far as that part shows. Over nothing, the color stays as it is.
 
 Sources:
 
@@ -487,6 +499,8 @@ The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3
   - `place::GlowSpread` holds the sigma of each color across and down, for one glow, and its grid. The sigma comes from the area of the picture on the frame (`Glow::SIGMA`).
   - `place::GlowNoise` holds the Atmosphere noise at this frame. `Placed.frame` gives the frame of the clip.
   - `Effect::moves_by_itself` is true for a Glow with Atmosphere. Then `render_cache` keeps a frame for each frame of the clip, and not one frame for a still.
+- `place::Shading` holds the shape of a Vignette: its radius, its cells, its boxes and the place of its first cell.
+  - The fit of the picture sets its size (`OnFrame.fit`). Thus a Zoom and a Pan do not change the shape.
 
 The draw:
 
@@ -510,6 +524,15 @@ The draw:
   - The tail window of the blur is in `blur_end`.
   - `blur::Blurred` keeps the grid pictures of a Glow in an `Lru` (`Spare`). A change of the frame size clears it. Its size bounds the bytes.
   - `glow_atmosphere` makes the noise in the shader, with no picture of its own.
+- `vignette::cells` makes the shape of a Vignette in compute passes, before its one fragment pass:
+  - The `mask` entry fills the cells. The `run` entry makes each box blur, one line at a time, with a running sum.
+  - Why: a running sum costs the same at each box width. The widest boxes are hundreds of cells wide.
+  - The cells are 32-bit floats in a storage buffer. `MIXING` is not exact enough for the blurred shape.
+  - `Blurred` keeps the two buffers (`vignette::Cells`). Each frame makes the cells again, so there is no cache to keep up to date.
+  - The effects of a compound clip use the same buffers (`Blurred::canvas_effects`).
+- `fs_vignette` reads the cells and mixes the Color (`vignette_shape`, `vignette_mixed`).
+  - `vignette_mixed` adds its own rules to `mixed`. The shared forms `dodged` and `burned` have no limits. `dodge` and `burn` put the limits of a layer's mode on them.
+  - Divide, Hue, Lighter Color and Darker Color have their own rules in `vignette_mixed`. A layer's mode has other rules for a Color of 0, a gray Color and a tie.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.

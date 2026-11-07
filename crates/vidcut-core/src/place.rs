@@ -1,6 +1,6 @@
 use crate::model::{
     Border, CellShape, CompositeMode, Effect, EffectKind, Glow, GlowAlpha, GlowFraming, GlowOutput,
-    Media, MosaicBlur, Picture,
+    Media, MosaicBlur, Picture, Vignette, VignetteMode, VignetteShape,
 };
 use crate::render::Placed;
 
@@ -87,6 +87,7 @@ pub enum Work {
     Blur(Blurring),
     Mosaic(Tiling),
     Glow(Box<Glowing>),
+    Vignette(Shading),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -227,11 +228,26 @@ impl Glowing {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shading {
+    pub shape: VignetteShape,
+    pub radius: f64,
+    pub stretch: f64,
+    pub turn: f64,
+    pub cells: [u32; 2],
+    pub boxes: [u32; 3],
+    pub first: [f64; 2],
+    pub color: [f64; 3],
+    pub strength: f64,
+    pub mode: CompositeMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct OnFrame {
     width: f64,
     size: [f64; 2],
     middle: [f64; 2],
     frame: i64,
+    fit: [f64; 4],
 }
 
 impl Tiling {
@@ -269,6 +285,67 @@ impl Tiling {
     }
 }
 
+impl Shading {
+    const SPREAD: f64 = 966.0 / 1080.0;
+    const RADIUS: f64 = 0.7;
+    const LEAST_SIZE: f64 = 0.01;
+    const LEAST_SOFT: f64 = 0.05;
+    const CELL: f64 = 2.0;
+    const EXACT: f64 = 1e-6;
+
+    fn boxes(sigma: f64) -> [u32; 3] {
+        let wide = 12.0 * sigma * sigma;
+        let floor = (wide / 3.0 + 1.0).sqrt().floor() as u32;
+        let low = if floor.is_multiple_of(2) {
+            floor - 1
+        } else {
+            floor
+        };
+        let l = f64::from(low);
+        let narrow = ((wide - 3.0 * l * l - 12.0 * l - 9.0) / (-4.0 * l - 4.0))
+            .round_ties_even()
+            .clamp(0.0, 3.0) as usize;
+        std::array::from_fn(|i| if i + narrow < 3 { low + 2 } else { low })
+    }
+
+    fn of(v: &Vignette, on: &OnFrame) -> Self {
+        let [x, y, fw, fh] = on.fit;
+        let (w, h) = ((fw - Self::EXACT).ceil(), (fh - Self::EXACT).ceil());
+        let advanced = v.mode() == VignetteMode::Advanced;
+        let [cx, cy] = if advanced {
+            v.middle()
+        } else {
+            Vignette::MIDDLE
+        };
+        let size = v.large();
+        let soft = v.soft();
+        let sigma = Self::SPREAD * h * size.sqrt() * (Self::LEAST_SOFT + soft * soft);
+        Self {
+            shape: if advanced {
+                v.shape()
+            } else {
+                VignetteShape::Oval
+            },
+            radius: Self::RADIUS * (size + Self::LEAST_SIZE) * h,
+            stretch: v.stretch(),
+            turn: if advanced { v.turn() } else { 0.0 },
+            cells: [w as u32, h as u32],
+            boxes: Self::boxes(sigma / Self::CELL),
+            first: [
+                (x + fw / 2.0).floor() + (cx - 0.5) * w - w,
+                (y + fh / 2.0).floor() + (0.5 - cy) * h - h,
+            ],
+            color: v.tint(),
+            strength: if advanced { 1.0 - v.through() } else { 1.0 },
+            mode: if advanced {
+                v.mixing()
+            } else {
+                CompositeMode::Normal
+            },
+        }
+    }
+}
+
 impl Working {
     fn of(e: &Effect, on: &OnFrame) -> Option<Self> {
         if !e.on || e.mixed() <= 0.0 {
@@ -289,6 +366,7 @@ impl Working {
             }
             EffectKind::MosaicBlur(m) => Work::Mosaic(Tiling::of(m, on)),
             EffectKind::Glow(g) => Work::Glow(Box::new(Glowing::of(g, on))),
+            EffectKind::Vignette(v) => Work::Vignette(Shading::of(v, on)),
         };
         Some(Self {
             work,
@@ -514,6 +592,7 @@ impl Placing {
                 size: [at[2] * stretch[0], at[3] * stretch[1]],
                 middle: ahead(&back, unzoomed),
                 frame: p.frame,
+                fit: at,
             };
             if i < kept {
                 let mut made: Vec<Working> = p

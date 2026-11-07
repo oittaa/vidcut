@@ -14,7 +14,7 @@ use vidcut_core::model::{
     Border, CellShape, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel, Effect,
     EffectKind, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming, GlowOutput, Gradient,
     Keyframe, MosaicBlur, Picture, PictureTool, Project, Retime, Speed, TrackKind, Upscaler,
-    ZoomBox,
+    Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -78,6 +78,7 @@ enum Knob {
     Gaussian(GaussianKnob),
     Mosaic(MosaicKnob),
     Glow(GlowKnob),
+    Vignette(VignetteKnob),
     Blend,
 }
 
@@ -124,6 +125,17 @@ enum MosaicKnob {
     Aspect,
     PositionX,
     PositionY,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum VignetteKnob {
+    Size,
+    Rotation,
+    Anamorphism,
+    CenterX,
+    CenterY,
+    Softness,
+    Transparency,
 }
 
 struct Dial {
@@ -390,12 +402,75 @@ impl GlowKnob {
     }
 }
 
+impl VignetteKnob {
+    fn dial(self) -> Dial {
+        let dial = |label, usual, range, speed| Dial {
+            label,
+            usual,
+            range,
+            speed,
+        };
+        let anywhere = pair(Vignette::PLACES);
+        let share = pair(Vignette::SHARES);
+        match self {
+            Self::Size => dial("Size", Vignette::SIZE, pair(Vignette::SIZES), 0.005),
+            Self::Rotation => dial("Rotation", 0.0, pair(Vignette::TURNS), 0.5),
+            Self::Anamorphism => dial(
+                "Anamorphism",
+                Vignette::STRETCH,
+                pair(Vignette::STRETCHES),
+                0.005,
+            ),
+            Self::CenterX => dial("Center X", Vignette::MIDDLE[0], anywhere, 0.001),
+            Self::CenterY => dial("Center Y", Vignette::MIDDLE[1], anywhere, 0.001),
+            Self::Softness => dial("Softness", Vignette::SOFTNESS, share, 0.005),
+            Self::Transparency => dial("Transparency", 0.0, share, 0.005),
+        }
+    }
+
+    fn read(self, v: &Vignette) -> f64 {
+        match self {
+            Self::Size => v.large(),
+            Self::Rotation => v.turn(),
+            Self::Anamorphism => v.stretch(),
+            Self::CenterX => v.middle()[0],
+            Self::CenterY => v.middle()[1],
+            Self::Softness => v.soft(),
+            Self::Transparency => v.through(),
+        }
+    }
+
+    fn put(self, v: &mut Vignette, to: f64) {
+        match self {
+            Self::Size => v.size = Some(to),
+            Self::Rotation => v.rotation = Some(to),
+            Self::Anamorphism => v.anamorphism = Some(to),
+            Self::CenterX => v.center = Some([to, v.middle()[1]]),
+            Self::CenterY => v.center = Some([v.middle()[0], to]),
+            Self::Softness => v.softness = Some(to),
+            Self::Transparency => v.transparency = Some(to),
+        }
+    }
+
+    fn param(self, v: &Vignette) -> (&'static str, Value) {
+        match self {
+            Self::Size => ("size", json!(v.large())),
+            Self::Rotation => ("rotation", json!(v.turn())),
+            Self::Anamorphism => ("anamorphism", json!(v.stretch())),
+            Self::CenterX | Self::CenterY => ("center", json!(v.middle())),
+            Self::Softness => ("softness", json!(v.soft())),
+            Self::Transparency => ("transparency", json!(v.through())),
+        }
+    }
+}
+
 impl Knob {
     fn dial(self) -> Dial {
         match self {
             Knob::Gaussian(k) => k.dial(),
             Knob::Mosaic(k) => k.dial(),
             Knob::Glow(k) => k.dial(),
+            Knob::Vignette(k) => k.dial(),
             Knob::Blend => Dial {
                 label: "Blend",
                 usual: 1.0,
@@ -410,6 +485,7 @@ impl Knob {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.read(g),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.read(m),
             (Knob::Glow(k), EffectKind::Glow(g)) => k.read(g),
+            (Knob::Vignette(k), EffectKind::Vignette(s)) => k.read(s),
             (Knob::Blend, _) => e.mixed(),
             _ => self.dial().usual,
         }
@@ -423,6 +499,7 @@ impl Knob {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.put(g, v),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.put(m, v),
             (Knob::Glow(k), EffectKind::Glow(g)) => k.put(g, v),
+            (Knob::Vignette(k), EffectKind::Vignette(s)) => k.put(s, v),
             (Knob::Blend, _) => out.blend = Some(v),
             _ => {}
         }
@@ -434,6 +511,7 @@ impl Knob {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.param(g),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.param(m),
             (Knob::Glow(k), EffectKind::Glow(g)) => k.param(g),
+            (Knob::Vignette(k), EffectKind::Vignette(s)) => k.param(s),
             _ => ("blend", json!(e.mixed())),
         }
     }
@@ -1003,7 +1081,17 @@ pub struct Inspector {
     moved: bool,
     commit: bool,
     recolored: Option<Recolored>,
+    tinted: Option<Tinted>,
     lut_pick: Option<(Vec<String>, Picked)>,
+}
+
+#[derive(Debug)]
+struct Tinted {
+    clip: String,
+    effect: usize,
+    from: [u8; 3],
+    to: [u8; 3],
+    since: Option<Instant>,
 }
 
 #[derive(Debug)]
@@ -1083,6 +1171,7 @@ enum Act {
     EffectReset(usize),
     EffectRemove(usize),
     EffectMove(usize, usize),
+    Tint(usize, [u8; 3], [u8; 3]),
 }
 
 fn param_name(key: Key) -> Option<&'static str> {
@@ -2017,6 +2106,123 @@ fn glow_rows(
     });
 }
 
+fn vignette_mode_label(m: VignetteMode) -> &'static str {
+    match m {
+        VignetteMode::Basic => "Basic",
+        VignetteMode::Advanced => "Advanced",
+    }
+}
+
+fn vignette_shape_label(s: VignetteShape) -> &'static str {
+    match s {
+        VignetteShape::Oval => "Oval",
+        VignetteShape::Triangle => "Triangle",
+        VignetteShape::Diamond => "Diamond",
+        VignetteShape::Rectangle => "Rectangle",
+        VignetteShape::Hexagon => "Hexagon",
+        VignetteShape::Octagon => "Octagon",
+    }
+}
+
+fn tint_bytes(color: [f64; 3]) -> [u8; 3] {
+    color.map(|c| (c.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
+fn vignette_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, v): (usize, &Effect, &Vignette),
+    acts: &mut Vec<Act>,
+) {
+    let vignette = |ui: &mut egui::Ui, k: VignetteKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Vignette(k)), e, acts);
+    };
+    let advanced = v.mode() == VignetteMode::Advanced;
+    rows(ui, (n, "main"), |ui| {
+        let mode = v.mode();
+        label(ui, "Operating Mode", mode != VignetteMode::default());
+        dialog::switch(ui, |ui| {
+            for m in VignetteMode::ALL {
+                if ui
+                    .selectable_label(m == mode, vignette_mode_label(m))
+                    .clicked()
+                    && m != mode
+                {
+                    acts.push(Act::EffectSet(n, json!({ "operating_mode": m })));
+                }
+            }
+        });
+        if reset(ui, mode != VignetteMode::default()) {
+            let m = VignetteMode::default();
+            acts.push(Act::EffectSet(n, json!({ "operating_mode": m })));
+        }
+        ui.end_row();
+        if advanced {
+            let shape = v.shape();
+            label(ui, "Border Shape", shape != VignetteShape::default());
+            egui::ComboBox::from_id_salt(("inspector-vignette-shape", n))
+                .selected_text(vignette_shape_label(shape))
+                .show_ui(ui, |ui| {
+                    for s in VignetteShape::ALL {
+                        let name = vignette_shape_label(s);
+                        if ui.selectable_label(s == shape, name).clicked() && s != shape {
+                            acts.push(Act::EffectSet(n, json!({ "border_shape": s })));
+                        }
+                    }
+                });
+            if reset(ui, shape != VignetteShape::default()) {
+                let s = VignetteShape::default();
+                acts.push(Act::EffectSet(n, json!({ "border_shape": s })));
+            }
+            ui.end_row();
+        }
+        vignette(ui, VignetteKnob::Size, acts);
+        if advanced {
+            vignette(ui, VignetteKnob::Rotation, acts);
+        }
+        vignette(ui, VignetteKnob::Anamorphism, acts);
+        if advanced {
+            vignette(ui, VignetteKnob::CenterX, acts);
+            vignette(ui, VignetteKnob::CenterY, acts);
+        }
+        vignette(ui, VignetteKnob::Softness, acts);
+        if advanced {
+            vignette(ui, VignetteKnob::Transparency, acts);
+        }
+        let stored = tint_bytes(v.tint());
+        let held = i.tinted.as_ref().filter(|t| t.effect == n);
+        let mut rgb = held.map_or(stored, |t| t.to);
+        let tinted = v.tint() != Vignette::BLACK;
+        label(ui, "Color", tinted);
+        if ui.color_edit_button_srgb(&mut rgb).changed() {
+            acts.push(Act::Tint(n, stored, rgb));
+        }
+        if reset(ui, tinted) {
+            let black = Vignette::BLACK;
+            acts.push(Act::EffectSet(n, json!({ "color": black })));
+        }
+        ui.end_row();
+        if advanced {
+            let now = v.mixing();
+            label(ui, "Composite Type", now != Vignette::MIXING);
+            egui::ComboBox::from_id_salt(("inspector-vignette-mode", n))
+                .selected_text(mode_label(now))
+                .show_ui(ui, |ui| {
+                    for m in CompositeMode::ALL {
+                        if ui.selectable_label(m == now, mode_label(m)).clicked() && m != now {
+                            acts.push(Act::EffectSet(n, json!({ "composite_type": m })));
+                        }
+                    }
+                });
+            if reset(ui, now != Vignette::MIXING) {
+                let m = Vignette::MIXING;
+                acts.push(Act::EffectSet(n, json!({ "composite_type": m })));
+            }
+            ui.end_row();
+        }
+    });
+}
+
 fn effect_block(
     ui: &mut egui::Ui,
     i: &Inspector,
@@ -2064,6 +2270,7 @@ fn effect_block(
                     EffectKind::GaussianBlur(g) => gaussian_rows(ui, i, (n, e, g), acts),
                     EffectKind::MosaicBlur(m) => mosaic_rows(ui, i, (n, e, m), acts),
                     EffectKind::Glow(g) => glow_rows(ui, i, (n, e, g), acts),
+                    EffectKind::Vignette(v) => vignette_rows(ui, i, (n, e, v), acts),
                 }
                 fold(ui, (n, "Global Blend"), |ui| {
                     knob(ui, i, (n, Knob::Blend), e, acts);
@@ -3290,6 +3497,17 @@ impl Workspace {
             Act::EffectMove(n, to) => {
                 self.send_effect("effects.move", chosen, n, json!({ "to": to }));
             }
+            Act::Tint(effect, from, to) => {
+                if let Some(c) = chosen.first() {
+                    self.inspector.tinted = Some(Tinted {
+                        clip: c.id.clone(),
+                        effect,
+                        from,
+                        to,
+                        since: None,
+                    });
+                }
+            }
             Act::Unkey => {
                 let keyed: Vec<&str> = sounds
                     .iter()
@@ -3307,6 +3525,36 @@ impl Workspace {
                 ]);
                 self.send("apply", json!({ "commands": commands }));
             }
+        }
+    }
+
+    fn settle_tint(&mut self, chosen: &[Chosen], held: bool) {
+        let Some(t) = self.inspector.tinted.as_mut() else {
+            return;
+        };
+        let stored = chosen
+            .first()
+            .filter(|c| c.id == t.clip)
+            .and_then(|c| c.shown.effects.get(t.effect))
+            .and_then(|e| match &e.kind {
+                EffectKind::Vignette(v) => Some(tint_bytes(v.tint())),
+                _ => None,
+            });
+        let Some(stored) = stored else {
+            self.inspector.tinted = None;
+            return;
+        };
+        match t.since {
+            Some(since) if landing(t.to, since.elapsed(), t.from, stored).is_none() => {
+                self.inspector.tinted = None;
+            }
+            None if !held => {
+                t.since = Some(Instant::now());
+                let (n, to) = (t.effect, t.to);
+                let color = to.map(|c| f64::from(c) / 255.0);
+                self.send_effect("effects.set", chosen, n, json!({ "color": color }));
+            }
+            _ => {}
         }
     }
 
@@ -3432,6 +3680,7 @@ impl Workspace {
         for act in acts {
             self.inspect(act, (&chosen, &sounds, &paced));
         }
+        self.settle_tint(&chosen, ui.input(|i| i.pointer.any_down()));
         self.sync_picture_preview();
     }
 }
