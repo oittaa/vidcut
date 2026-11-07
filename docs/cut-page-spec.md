@@ -1237,7 +1237,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A field left out of that style keeps the track's style.
   - The cue leaves the whole style out when it keeps the track's style.
   - The viewer and a burn-in draw that one result.
-  - WebVTT writes the cue's position. SRT writes the cue's place.
+  - IMSC1 and WebVTT write the cue's position. SRT writes the cue's place.
   - Neither writes the alignment. Their settings move the block with its lines.
   - An IMSC1 paragraph takes a font, size, color, bold face, or alignment that the cue sets.
   - The alignment is `ebutts:multiRowAlign`, which IMSC1 permits. `tts:textAlign` stays center, thus the longest line stays in the middle.
@@ -3077,7 +3077,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The middle of a bottom region stays below 60%.
     - Thus vidcut reads each cue back at its place.
     - A region whose cues need more lines than fit in that height takes all the height that the picture allows.
-  - IMSC1 lets at most four regions show at once (§6.8.3), one more than the three places.
+  - A cue with a position has a region of its own. Cues with the same position share one region.
+    - The region is centered on Position X. It is as wide as the text wraps, but it stays inside the picture.
+    - Its middle is at Position Y. With a margin, its top or bottom edge is there, as in the picture.
+  - IMSC1 lets at most four regions show at once (§6.8.3). More regions at once are named in the notes of the export.
   - IMSC1 forbids overlap only between regions shown at the same time (§6.8.2).
   - Thus, where cues at two places show at once, their two regions share the room between them.
   - Each region keeps the lines its cues need, where both fit.
