@@ -665,19 +665,20 @@ fn name(place: Place) -> &'static str {
     }
 }
 
-fn stacks(cues: &[Timed]) -> (Vec<usize>, [[bool; 3]; 3]) {
+fn stacks(cues: &[Timed], of: &[usize], n: usize) -> (Vec<usize>, Vec<Vec<bool>>, usize) {
     let lines = |c: &Timed| c.text.split('\n').count();
     let mut order: Vec<usize> = (0..cues.len()).collect();
     order.sort_by(|&a, &b| cues[a].start.total_cmp(&cues[b].start));
     let mut stacked = vec![0; cues.len()];
-    let mut together = [[false; 3]; 3];
+    let mut together = vec![vec![false; n]; n];
+    let mut most = 0;
     let mut showing: Vec<usize> = Vec::new();
     for i in order {
         let c = &cues[i];
         showing.retain(|&j| cues[j].end > c.start);
         stacked[i] = lines(c);
         for &j in &showing {
-            let (a, b) = (slot(cues[j].place), slot(c.place));
+            let (a, b) = (of[j], of[i]);
             if a == b {
                 stacked[i] += lines(&cues[j]);
             } else {
@@ -685,8 +686,105 @@ fn stacks(cues: &[Timed]) -> (Vec<usize>, [[bool; 3]; 3]) {
             }
         }
         showing.push(i);
+        let mut shown: Vec<usize> = showing.iter().map(|&j| of[j]).collect();
+        shown.sort_unstable();
+        shown.dedup();
+        most = most.max(shown.len());
     }
-    (stacked, together)
+    (stacked, together, most)
+}
+
+struct Spot {
+    place: Place,
+    position: Option<[f64; 2]>,
+    at: f64,
+    above: f64,
+    left: i64,
+    width: i64,
+}
+
+impl Spot {
+    fn id(&self, index: usize) -> String {
+        match self.position {
+            Some(_) => format!("p{}", index + 1 - PLACES.len()),
+            None => name(self.place).to_string(),
+        }
+    }
+
+    fn named(&self) -> String {
+        match self.position {
+            Some([x, y]) => format!(
+                "at {}% across and {}% down",
+                plain_number(x * 100.0),
+                plain_number(y * 100.0)
+            ),
+            None => format!("at the {}", name(self.place)),
+        }
+    }
+
+    fn shares_width(&self, other: &Spot) -> bool {
+        self.left < other.left + other.width && other.left < self.left + self.width
+    }
+}
+
+fn centered(x: f64, wrap: f64) -> (i64, i64) {
+    let grid = GRID as i64;
+    let wide = ((wrap * GRID).floor() as i64).min(grid);
+    let middle = (x * GRID).round() as i64;
+    let half = (wide / 2).min(middle).min(grid - middle);
+    let least = wide / 2;
+    if 2 * half >= least {
+        return (middle - half, 2 * half);
+    }
+    ((middle - least / 2).clamp(0, grid - least), least)
+}
+
+fn spots(cues: &[Timed], style: &SubtitleStyle) -> (Vec<Spot>, Vec<usize>) {
+    let inset = (style.inset() * GRID).round() as i64;
+    let mut spots: Vec<Spot> = PLACES
+        .map(|place| {
+            let (at, above) = style.anchor(place);
+            Spot {
+                place,
+                position: None,
+                at,
+                above,
+                left: inset,
+                width: GRID as i64 - 2 * inset,
+            }
+        })
+        .into();
+    let mut of = Vec::with_capacity(cues.len());
+    for c in cues {
+        let look = style.for_cue(c.style.as_ref());
+        let Some([x, y]) = look.position else {
+            of.push(slot(c.place));
+            continue;
+        };
+        let (left, width) = centered(x, 1.0 - 2.0 * look.inset());
+        let spot = Spot {
+            place: c.place,
+            position: Some([x, y]),
+            at: y,
+            above: look.anchor(c.place).1,
+            left,
+            width,
+        };
+        let same = |s: &Spot| {
+            s.position.is_some()
+                && s.at == spot.at
+                && s.above == spot.above
+                && (s.left, s.width) == (spot.left, spot.width)
+        };
+        match spots.iter().position(same) {
+            Some(i) => of.push(i),
+            None => {
+                of.push(spots.len());
+                spots.push(spot);
+            }
+        }
+    }
+    (spots, of)
 }
 
 struct Region {
@@ -695,45 +793,63 @@ struct Region {
     align: &'static str,
 }
 
-fn layout(cues: &[Timed], style: &SubtitleStyle) -> ([Region; 3], Vec<String>) {
+fn layout(
+    cues: &[Timed],
+    style: &SubtitleStyle,
+    spots: &[Spot],
+    of: &[usize],
+) -> (Vec<Region>, Vec<String>) {
     let line = style.text_fraction() * SubtitleStyle::LINE;
-    let (stacked, together) = stacks(cues);
-    let mut need = [0.0f64; 3];
-    for (c, &n) in cues.iter().zip(&stacked) {
-        let s = slot(c.place);
-        need[s] = need[s].max(n as f64 * line);
+    let n = spots.len();
+    let (stacked, together, most) = stacks(cues, of, n);
+    let mut need = vec![0.0f64; n];
+    for (&s, &k) in of.iter().zip(&stacked) {
+        need[s] = need[s].max(k as f64 * line);
     }
-    let anchors = PLACES.map(|p| style.anchor(p));
-    let mut h = [0, 1, 2].map(|s| {
-        let (at, above) = anchors[s];
-        let below = if above < 1.0 {
-            (1.0 - at) / (1.0 - above)
-        } else {
-            f64::INFINITY
-        };
-        let fits = below.min(if above > 0.0 {
-            at / above
-        } else {
-            f64::INFINITY
-        });
-        let tilt = 0.5 - above;
-        let read = match PLACES[s] {
-            Place::Top if tilt > 0.0 => (0.399 - at) / tilt,
-            Place::Bottom if tilt < 0.0 => (at - 0.601) / -tilt,
-            _ => f64::INFINITY,
-        };
-        if need[s] <= read {
-            read.min(fits)
-        } else {
-            fits
-        }
-    });
-    for (a, b) in [(0, 1), (1, 2), (0, 2)] {
-        if !together[a][b] {
+    let ats: Vec<f64> = spots
+        .iter()
+        .zip(&need)
+        .map(|(spot, &need)| match spot.position {
+            Some(_) if need <= 1.0 => spot
+                .at
+                .clamp(spot.above * need, 1.0 - (1.0 - spot.above) * need),
+            _ => spot.at,
+        })
+        .collect();
+    let mut h: Vec<f64> = spots
+        .iter()
+        .zip(need.iter().zip(&ats))
+        .map(|(spot, (&need, &at))| {
+            let above = spot.above;
+            let below = if above < 1.0 {
+                (1.0 - at) / (1.0 - above)
+            } else {
+                f64::INFINITY
+            };
+            let fits = below
+                .min(if above > 0.0 {
+                    at / above
+                } else {
+                    f64::INFINITY
+                })
+                .max(0.0);
+            let tilt = 0.5 - above;
+            let read = match (spot.position, spot.place) {
+                (None, Place::Top) if tilt > 0.0 => (0.399 - at) / tilt,
+                (None, Place::Bottom) if tilt < 0.0 => (at - 0.601) / -tilt,
+                _ => f64::INFINITY,
+            };
+            if need <= read { read.min(fits) } else { fits }
+        })
+        .collect();
+    let later = (PLACES.len()..n).flat_map(|b| (0..b).map(move |a| (a, b)));
+    for (a, b) in [(0, 1), (1, 2), (0, 2)].into_iter().chain(later) {
+        if !together[a][b] || !spots[a].shares_width(&spots[b]) {
             continue;
         }
-        let (ka, kb) = (1.0 - anchors[a].1, anchors[b].1);
-        let gap = anchors[b].0 - anchors[a].0 - 1.0 / GRID;
+        let (a, b) = if ats[a] <= ats[b] { (a, b) } else { (b, a) };
+        let (ka, kb) = (1.0 - spots[a].above, spots[b].above);
+        let gap = ats[b] - ats[a] - 1.0 / GRID;
         let want = ka * h[a] + kb * h[b];
         if want <= gap {
             continue;
@@ -747,48 +863,58 @@ fn layout(cues: &[Timed], style: &SubtitleStyle) -> ([Region; 3], Vec<String>) {
                 kept[1] + k * (h[b] - kept[1]),
             )
         } else {
-            let k = gap.max(0.0) / firm;
+            let k = match firm > 0.0 {
+                true => gap.max(0.0) / firm,
+                false => 1.0,
+            };
             (kept[0] * k, kept[1] * k)
         };
         h[a] = fa;
         h[b] = fb;
     }
-    let regions = [0, 1, 2].map(|s| {
-        let (at, above) = anchors[s];
-        let y0 = at - above * h[s];
-        let top = (y0 * GRID - 1e-6).ceil().max(0.0) as i64;
-        let bottom = ((y0 + h[s]) * GRID + 1e-6).floor().min(GRID) as i64;
-        Region {
-            top,
-            height: (bottom - top).max(0),
-            align: if above < 0.25 {
-                "before"
-            } else if above > 0.75 {
-                "after"
-            } else {
-                "center"
-            },
-        }
-    });
+    let regions: Vec<Region> = (0..n)
+        .map(|s| {
+            let (at, above) = (ats[s], spots[s].above);
+            let y0 = at - above * h[s];
+            let top = (y0 * GRID - 1e-6).ceil().max(0.0) as i64;
+            let bottom = ((y0 + h[s]) * GRID + 1e-6).floor().min(GRID) as i64;
+            Region {
+                top,
+                height: (bottom - top).max(0),
+                align: if above < 0.25 {
+                    "before"
+                } else if above > 0.75 {
+                    "after"
+                } else {
+                    "center"
+                },
+            }
+        })
+        .collect();
     let mut warnings = Vec::new();
     for (s, region) in regions.iter().enumerate() {
         let room = region.height as f64 / GRID;
         let over: Vec<&Timed> = cues
             .iter()
-            .zip(&stacked)
-            .filter(|&(c, &n)| slot(c.place) == s && n as f64 * line > room + 2.0 / GRID)
+            .zip(of.iter().zip(&stacked))
+            .filter(|&(_, (&at, &k))| at == s && k as f64 * line > room + 2.0 / GRID)
             .map(|(c, _)| c)
             .collect();
         if let Some(first) = over.iter().min_by(|a, b| a.start.total_cmp(&b.start)) {
             warnings.push(format!(
-                "{} cue(s) at the {} need more lines than the IMSC1 file's region there holds \
+                "{} cue(s) {} need more lines than the IMSC1 file's region there holds \
                  ({}), the first at {}; players may cut them off",
                 over.len(),
-                name(PLACES[s]),
+                spots[s].named(),
                 (room / line + 1e-9).floor(),
                 clock(first.start, '.')
             ));
         }
+    }
+    if most > 4 {
+        warnings.push(format!(
+            "{most} regions of the IMSC1 file show at once, more than the 4 that IMSC1 allows"
+        ));
     }
     (regions, warnings)
 }
@@ -898,7 +1024,8 @@ pub fn write(
     style: &SubtitleStyle,
     height: u32,
 ) -> (String, Vec<String>) {
-    let (placed, mut warnings) = layout(cues, style);
+    let (spots, of) = spots(cues, style);
+    let (placed, mut warnings) = layout(cues, style, &spots, &of);
     if outline_share(style, height).is_some_and(|share| share > OUTLINE_MOST) {
         warnings.push(
             "the outline is wider than the IMSC1 file holds, a tenth of the text height; \
@@ -906,18 +1033,20 @@ pub fn write(
                 .to_string(),
         );
     }
-    let inset = (style.inset() * GRID).round() as i64;
-    let regions: String = [Place::Bottom, Place::Middle, Place::Top]
+    let order = [Place::Bottom, Place::Middle, Place::Top]
+        .map(slot)
         .into_iter()
-        .map(|p| {
-            let r = &placed[slot(p)];
+        .chain(PLACES.len()..spots.len());
+    let regions: String = order
+        .map(|s| {
+            let (spot, r) = (&spots[s], &placed[s]);
             format!(
                 "      <region xml:id=\"{}\" tts:origin=\"{}% {}%\" tts:extent=\"{}% {}%\" \
                  tts:displayAlign=\"{}\"/>\n",
-                name(p),
-                percent(inset),
+                spot.id(s),
+                percent(spot.left),
                 percent(r.top),
-                percent(GRID as i64 - 2 * inset),
+                percent(spot.width),
                 percent(r.height),
                 r.align
             )
@@ -940,7 +1069,7 @@ pub fn write(
         style_attrs(style, height),
     );
     let track_background = background(style);
-    for c in cues {
+    for (c, &s) in cues.iter().zip(&of) {
         let look = style.for_cue(c.style.as_ref());
         let body = styled_body(&c.text, &look, &c.word_styles);
         let backing = match c.style.as_ref().and_then(|s| s.background.as_ref()) {
@@ -955,7 +1084,7 @@ pub fn write(
             "      <p begin=\"{}\" end=\"{}\" region=\"{}\"{}>{text}</p>\n",
             clock(c.start, '.'),
             clock(c.end, '.'),
-            name(c.place),
+            spots[s].id(s),
             cue_attrs(style, c)
         ));
     }
