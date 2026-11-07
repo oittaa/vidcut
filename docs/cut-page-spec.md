@@ -3080,7 +3080,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A region whose cues need more lines than fit in that height takes all the height that the picture allows.
   - A cue with a position has a region of its own. Cues with the same position share one region.
     - The region is centered on Position X. It is as wide as the text wraps, but it stays inside the picture.
+    - Near an edge, it gets narrower. It is never narrower than half the wrap. There, it moves inside the picture instead.
     - Its middle is at Position Y. With a margin, its top or bottom edge is there, as in the picture.
+    - Near the top or the bottom, it moves inside the picture, so that its lines fit.
+    - Thus a cue at the edge, or past it, still shows in the file.
   - IMSC1 lets at most four regions show at once (§6.8.3). More regions at once are named in the notes of the export.
   - IMSC1 forbids overlap only between regions shown at the same time (§6.8.2).
   - Thus, where cues at two places show at once, their two regions share the room between them.
