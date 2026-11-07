@@ -755,7 +755,7 @@ fn filmstrip(painter: &Painter, rect: Rect, scale: &Scale, p: &Project, c: &Clip
             height,
         };
         let texture = assets.tiles.and_then(|t| {
-            t.want(&key, || t.job(p, &key, width))
+            t.want(&key, || t.job(p, m, &key, width))
                 .or_else(|| t.nearest(&c.media, height, frame, span))
                 .or_else(|| t.nearest_any_height(&c.media, frame))
         });

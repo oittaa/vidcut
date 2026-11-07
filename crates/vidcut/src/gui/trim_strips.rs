@@ -376,7 +376,7 @@ impl Workspace {
                     height,
                 };
                 let t = self.tiles.as_ref()?;
-                t.want(&key, || t.job(p, &key, width))
+                t.want(&key, || t.job(p, m, &key, width))
                     .or_else(|| t.nearest(&m.id, height, frame, 2))
             });
             if let Some(texture) = texture {

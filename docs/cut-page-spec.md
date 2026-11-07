@@ -263,6 +263,12 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - The rows of Clip Info edit them. `media.set` sets them on one or more items. An empty value clears the field.
   - `media.get` shows them. The metadata strip shows the scene, the shot and the take.
   - vidcut does not read Date Created from a file. No measurement shows which time or tag gives it.
+- **Input LUT** (p. 3480, and [§13](#the-lut-tables)):
+  - A media item with pictures has an Input LUT (`input_lut`). Each of its clips on the timeline gets it.
+  - The Input LUT submenu of the pool's right-click menu and the LUT section of the Inspector set it.
+  - The submenu has a file picker in place of the 1D LUT and 3D LUT submenus ([deviation X139](deviations.md#x139-one-input-lut-submenu-takes-any-cube-file)).
+  - `media.set` sets it on one or more items. An empty path clears it. `media.get` shows it.
+  - A generator, a title and a compound clip have no media item. Thus they have no Input LUT.
 - **Multicam layout** (p. 1037):
   - `multicam.layout` tells where the files of a multicam clip lie. It changes nothing, and the project does not store the result.
   - The answer has rows. A named row holds all files of one camera name. Named rows come first, in camera order.
@@ -1599,6 +1605,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Advanced Controls:
     - Glow Framing is Only As Seen or Reflect In Camera. Reflect In Camera is the default.
     - Composite Type has the 27 modes of Composite ([§8.15](#815-transform-and-crop-pp-766768)). Add is the default.
+    - The manual (p. 3590) gives Screen as the default. The readback and the renders of a new Glow give Add, and vidcut uses Add.
     - Opacity goes from 0 to 1 and is 1.
     - Invert Effect is off.
     - Source Recovery goes from 0 to 5 and is 0.
@@ -1624,6 +1631,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Atmosphere multiplies the glow by `max(0, 1 + Strength × N)`. `N` is one noise for all three colors, in the directions of the frame.
   - Source Recovery and Atmosphere work before Gamma. Each multiplies the three colors alike, so Saturation does not change them.
   - The glow does not stop at 1. Composite Type mixes it with the picture, and the mix stops at 0..1 after Opacity and Blend.
+  - Two modes have their own rules at the ends of the range of the glow:
+    - Color Dodge with a glow of 1 or more gives 1 where the picture is above 0, and 0 where it is 0.
+    - Color Burn with a glow of 0 or less gives 1 where the picture is 1, and 0 elsewhere.
   - Opacity and Blend give the same result.
   - Invert Effect is `1 − effect(1 − picture)`.
   - Glow Alone is the glow, and Reflect In Camera is a mirror on a grid `g` of 8 pixels:
@@ -2913,7 +2923,8 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Zoom draws the letters as the bigger font. The height of a line is its height at zoom 1, in whole pixels, times the zoom (same renders).
     - A scroll keeps hinted letters (measured in Resolve Studio 21.1.2). Subtitles keep them too.
     - A title that Resolve reads from an OTIO file has one more edge on its letters. vidcut does not draw that edge ([X112](deviations.md#x112-a-title-from-an-otio-file-has-no-black-edge)).
-    - The lines of a scroll are 4/3 of the sum of the three heights plus 10 timeline pixels apart. This fits Resolve Studio 21.1.2 within 5 pixels with four fonts.
+    - The distance between the lines of a scroll is 4/3 of `usWinAscent` plus `usWinDescent`, plus 10 timeline pixels. This holds also for a font that sets `USE_TYPO_METRICS`.
+    - This fits Resolve Studio 21.1.2 within 1.5 pixels with six fonts and with eight sizes of Arial. Times New Roman is 4.5 pixels too near.
     - Line spacing adds pixels of the timeline below a line, also negative (p. 1184). `line_spacing` in the style goes on each line. `spacing` in markup goes on its line.
     - The Inspector takes -270 to 540, and the file holds the same number in `line-height`. A file can hold more, and Resolve draws 2000 from a file. Thus vidcut takes -4096 to 4096 (measured in Resolve Studio 21.1.2).
     - The value takes the same pixels at any timeline height, and zoom scales it (measured in Resolve Studio 21.1.2).
@@ -2965,13 +2976,23 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - `align` sets each line in the block: left, middle or right. By default, it is middle.
     - `anchor` names the point of the block that goes to `position`: a corner, the middle of a side, or the middle.
     - By default, `anchor` is the middle, and `position` is the middle of the picture.
-    - A change of `align` or `anchor` keeps `position`.
+    - A change of `align` or `anchor` keeps `position`. A change of `kind` drops `anchor`.
     - A file's `justify` reads as left. Resolve draws it as left, because its lines do not wrap (measured in Resolve Studio 21.1.2).
   - The lines of a lower third align left, center or right.
   - The lower line of a lower third hangs from a point that is 10%, 50% or 90% across and 78% down, by its alignment.
   - The upper line stands on a point 80% down, at the same place across.
   - These are the points of Resolve's own lower thirds (measured in Resolve Studio 21.1.2). The two lines overlap by 2% of the picture height.
   - `position` moves the point of the lower line (X54). Lines that go together keep the 2% between their points.
+  - Each line of a lower third has its own `anchor`. It acts on that line as on the block of a Text title (measured in Resolve Studio 21.1.2).
+    - The upper line's usual anchor is the end of its bottom edge by `align`. The lower line's usual anchor is the end of its top edge by `align`.
+    - `titles.set` with `anchor` changes the lower line. With `line`, it changes the named line.
+  - The `anchor` of a Scroll acts on a text box as wide as the picture (measured in Resolve Studio 21.1.2).
+    - The x of the position in the file goes to the column of the anchor. The columns are the left edge, the middle and the right edge of the box.
+    - A left column thus moves the lines half a picture right. A right column moves them half a picture left.
+    - A top row moves the lines down by half of one line's height. A bottom row moves them up by that much.
+    - That height is the font's ascent plus its descent, as above. The number of lines does not change the move.
+    - Gabriola sets `USE_TYPO_METRICS`. Its rows move by its typographic heights, not by the `usWin` heights of its line distance.
+    - A line wider than the box wraps at 90% of the picture width ([X137](deviations.md#x137-a-scroll-line-wider-than-the-picture-wraps)).
   - Markup in the text styles words separately (X53): `<b>`, `<i>`, `<u>`, `<o>`, `<s>`, `<sup>`, `<sub>` and `<font>`.
   - `<font>` takes a `color`, a `face`, a `size`, a `spacing`, a `tracking` and a `case`.
   - A line takes the height of its largest size.
@@ -3070,10 +3091,14 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Resolve's own titles have 1/1080 of the picture height to a point ([gotchas](gotchas.md#resolves-otio-files)).
   - **Positions:**
     - The `position` of a Text title is the point of its block that its `anchor` names.
-    - The upper line of a lower third stands on its point (anchor 0, 1 or 2). By default, this is 20% up the picture.
-    - Its lower line hangs from its point (6, 7 or 8). By default, this is 22% up the picture.
+    - The `position` of a line of a lower third is the point of that line that its `anchor` names.
+    - The upper line of a lower third stands on its point by default (anchor 0, 1 or 2). By default, this is 20% up the picture.
+    - Its lower line hangs from its point by default (6, 7 or 8). By default, this is 22% up the picture.
     - The file holds the points of `position`, with y counted from the bottom.
-    - Resolve's own lower thirds put their upper line first.
+    - Resolve's own lower thirds put their upper line first. They keep that order at any anchor.
+    - The default value of `anchor` is the usual anchor of the group.
+      - The upper line has 0, 1 or 2, and the lower line has 6, 7 or 8.
+      - A Text title and a Scroll have 4.
   - **Stroke:**
     - `strokeSize` is the width of the outline in pixels of the timeline, as a whole number. Thus 16 is the maximum of both.
     - `strokeOutsideOnly` holds `outside`.
@@ -3105,10 +3130,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - the place, the zoom (X), the rotation and the keyframes of its Text group, or of each line of a lower third
   - The lines of a lower third go apart when the place, zoom, rotation or keyframes of their two groups are different.
   - Resolve's own lower thirds are different: the upper line stands at 20% from the bottom, and the lower line hangs from 22%.
-  - The lower line of a lower third is the group anchored by its top, else its second group.
+  - The first group of a lower third is its upper line, and the second group is its lower line. A lone group is the lower line.
+  - Each line of a lower third takes the `anchor` of its group.
   - A Text title takes the alignment of its first line and the `anchor` of its group. The manual gives one alignment and one anchor for the entire title (p. 1178).
   - **A Scroll** has these parts:
-    - a `Text` group, with its plain `text` and its `position`. The x of the position is the middle of a text box as wide as the picture.
+    - a `Text` group, with its plain `text` and its `position`. The x of the position is the anchor's column in a text box as wide as the picture, the middle by default.
     - a `Formatting` group, with its `font` as Qt writes one, its `size` in points (pixels, as above), its `alignment`, `anchor` and `color`. The `alignment` is 0 left, 1 middle or 2 right in that box.
     - then `Drop Shadow` and `Background`, with no `Stroke`
   - vidcut writes the left edge, middle or right edge of its lines there, in plain text, because Resolve's Scroll has no rich text.
