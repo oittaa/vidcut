@@ -6,9 +6,8 @@ use eframe::egui::{self, RichText};
 use serde_json::{Value, json};
 use vidcut_av::export::SpeechNote;
 use vidcut_core::export::{
-    AAC_BITRATE, AAC_BITRATES, AAC_RATES, AlphaOut, AudioCodec, AudioSettings, Container,
-    EncoderChoice, ExportSettings, HdrMetadata, HdrMode, VideoCodec, VideoSettings,
-    apply_overrides, validate,
+    AAC_BITRATE, AAC_BITRATES, AAC_RATES, AudioCodec, AudioSettings, Container, EncoderChoice,
+    ExportSettings, HdrMetadata, HdrMode, VideoCodec, VideoSettings, apply_overrides, validate,
 };
 use vidcut_core::request::{FindSpeech, ImportMode, SubtitleFormat, SubtitlesAs};
 use vidcut_core::{Envelope, Error, Response};
@@ -302,6 +301,8 @@ fn video_codecs(c: Container) -> &'static [VideoCodec] {
         Container::Mov => &[V::H264, V::Hevc, V::Prores, V::Dnxhr],
         Container::Mkv => &[V::H264, V::Hevc, V::Av1, V::Vp9, V::Prores, V::Dnxhr],
         Container::Webm => &[V::Vp9, V::Av1],
+        Container::Tiff => &[V::Tiff],
+        Container::Exr => &[V::Exr],
         _ => &[],
     }
 }
@@ -317,6 +318,7 @@ fn audio_codecs(c: Container) -> &'static [AudioCodec] {
         Container::Mp3 => &[A::Mp3],
         Container::Flac => &[A::Flac],
         Container::Wav => &[A::PcmS24, A::PcmS16],
+        Container::Tiff | Container::Exr => &[],
     }
 }
 
@@ -332,11 +334,13 @@ const GPU_ENCODERS: &[EncoderChoice] = &[
     EncoderChoice::Qsv,
 ];
 
-const CONTAINERS: [Container; 9] = [
+const CONTAINERS: [Container; 11] = [
     Container::Mp4,
     Container::Mov,
     Container::Mkv,
     Container::Webm,
+    Container::Tiff,
+    Container::Exr,
     Container::Wav,
     Container::Flac,
     Container::Mp3,
@@ -351,7 +355,16 @@ fn profiles(c: VideoCodec) -> &'static [&'static str] {
         VideoCodec::H264 => &["baseline", "main", "high"],
         VideoCodec::Hevc => &["main", "main10"],
         VideoCodec::Av1 | VideoCodec::Vp9 => &[],
+        VideoCodec::Tiff => &vidcut_core::export::TIFF_PROFILES,
+        VideoCodec::Exr => &vidcut_core::export::EXR_PROFILES,
     }
+}
+
+fn fixed_format(c: VideoCodec) -> bool {
+    matches!(
+        c,
+        VideoCodec::Prores | VideoCodec::Dnxhr | VideoCodec::Tiff | VideoCodec::Exr
+    )
 }
 
 fn name<T: serde::Serialize>(v: &T) -> String {
@@ -381,7 +394,22 @@ fn fit_codecs(s: &mut ExportSettings) {
         if !ok.contains(&v.codec) {
             v.codec = ok[0];
             v.profile = None;
+            v.filename_digits = None;
+            v.first_frame = None;
+            if fixed_format(v.codec) {
+                v.bit_depth = None;
+            }
         }
+        if v.image_bits().is_some() {
+            if !matches!(v.hdr_metadata, HdrMetadata::Auto | HdrMetadata::None) {
+                v.hdr_metadata = HdrMetadata::Auto;
+            }
+            v.mastering_display = None;
+            v.max_cll = None;
+        }
+    }
+    if s.container.image_sequence() {
+        s.audio = None;
     }
     if let Some(a) = &mut s.audio {
         let ok = audio_codecs(s.container);
@@ -2600,16 +2628,20 @@ fn settings_form(
                     if d.settings.container.audio_only() && d.settings.video.is_some() {
                         d.stashed_video = d.settings.video.take();
                     } else if !d.settings.container.audio_only()
-                        && before.audio_only()
+                        && (before.audio_only() || d.settings.container.image_sequence())
                         && d.settings.video.is_none()
                     {
                         d.settings.video = d.stashed_video.take().or(d.base.video.clone());
+                    }
+                    if before.image_sequence() && d.settings.audio.is_none() {
+                        d.settings.audio = d.base.audio.clone();
                     }
                     fit_codecs(&mut d.settings);
                     d.match_output();
                 }
                 let mut audio_only = d.settings.video.is_none();
-                let can_choose = !d.settings.container.audio_only();
+                let sequence = d.settings.container.image_sequence();
+                let can_choose = !d.settings.container.audio_only() && !sequence;
                 let audio_box = ui.add_enabled(
                     can_choose,
                     egui::Checkbox::new(&mut audio_only, "Audio only"),
@@ -2618,8 +2650,9 @@ fn settings_form(
                     super::dialog::why(
                         ui,
                         format!(
-                            "{} holds only sound",
-                            d.settings.container.extension().to_uppercase()
+                            "{} holds only {}",
+                            d.settings.container.extension().to_uppercase(),
+                            if sequence { "frames" } else { "sound" },
                         ),
                     );
                 }
@@ -2648,6 +2681,8 @@ fn settings_form(
                                 max_cll: None,
                                 alpha: false,
                                 alpha_mode: Default::default(),
+                                filename_digits: None,
+                                first_frame: None,
                             }),
                         );
                         fit_codecs(&mut d.settings);
@@ -2666,7 +2701,7 @@ fn settings_form(
                                 let why = why_video(can, *c, v.encoder);
                                 if choice(ui, &mut v.codec, *c, name(c), why).changed() {
                                     v.profile = None;
-                                    if matches!(c, VideoCodec::Prores | VideoCodec::Dnxhr) {
+                                    if fixed_format(*c) {
                                         v.bit_depth = None;
                                     }
                                 }
@@ -2741,8 +2776,7 @@ fn settings_form(
                 });
                 ui.end_row();
 
-                if v.bitrate.is_some() && !matches!(v.codec, VideoCodec::Prores | VideoCodec::Dnxhr)
-                {
+                if v.bitrate.is_some() && !fixed_format(v.codec) {
                     ui.label("");
                     let auto = auto_label(&picked, "passes", |p| {
                         p["kind"].as_str().map(|k| match k {
@@ -2799,7 +2833,7 @@ fn settings_form(
                                 }
                             });
                     }
-                    if !matches!(v.codec, VideoCodec::Prores | VideoCodec::Dnxhr) {
+                    if !fixed_format(v.codec) {
                         ui.label(dim("bit depth"));
                         let auto =
                             auto_label(&picked, "bit_depth", |b| b.as_u64().map(|b| b.to_string()));
@@ -2823,7 +2857,7 @@ fn settings_form(
                             egui::ComboBox::from_id_salt("export-alpha-mode")
                                 .selected_text(v.alpha_mode.title())
                                 .show_ui(ui, |ui| {
-                                    for m in AlphaOut::ALL {
+                                    for &m in v.alpha_modes() {
                                         ui.selectable_value(&mut v.alpha_mode, m, m.title());
                                     }
                                 });
@@ -2832,6 +2866,29 @@ fn settings_form(
                     ui.end_row();
                 } else {
                     v.alpha = false;
+                }
+
+                if v.image_bits().is_some() {
+                    ui.label("");
+                    ui.horizontal(|ui| {
+                        use vidcut_core::export::{FILENAME_DIGIT_COUNTS, FILENAME_DIGITS};
+                        ui.label(dim("filename digits"));
+                        let mut digits = v.filename_digits.unwrap_or(FILENAME_DIGITS);
+                        if ui
+                            .add(egui::DragValue::new(&mut digits).range(FILENAME_DIGIT_COUNTS))
+                            .changed()
+                        {
+                            v.filename_digits = Some(digits);
+                        }
+                        let mut own = v.first_frame.is_some();
+                        if ui.checkbox(&mut own, "First Frame").changed() {
+                            v.first_frame = own.then_some(0);
+                        }
+                        if let Some(first) = &mut v.first_frame {
+                            ui.add(egui::DragValue::new(first));
+                        }
+                    });
+                    ui.end_row();
                 }
 
                 ui.label("");
@@ -2862,7 +2919,7 @@ fn settings_form(
                         if v.hdr.transfer().is_some() && v.bit_depth == Some(8) {
                             v.bit_depth = None;
                         }
-                        if v.hdr != HdrMode::Sdr {
+                        if v.hdr != HdrMode::Sdr && v.image_bits().is_none() {
                             use vidcut_core::export::HdrMetadata as M;
                             let kind = |m: M| match m {
                                 M::Auto => "auto",
@@ -2920,7 +2977,12 @@ fn settings_form(
             ui.label("Audio");
             ui.horizontal(|ui| {
                 let mut on = d.settings.audio.is_some();
-                if ui.checkbox(&mut on, "").changed() {
+                let can_hold = !audio_codecs(d.settings.container).is_empty();
+                let audio_box = ui.add_enabled(can_hold, egui::Checkbox::new(&mut on, ""));
+                if !can_hold {
+                    super::dialog::why(ui, "Frames hold no sound");
+                }
+                if audio_box.changed() {
                     d.settings.audio = on.then(|| AudioSettings {
                         codec: audio_codecs(d.settings.container)[0],
                         bitrate: None,
