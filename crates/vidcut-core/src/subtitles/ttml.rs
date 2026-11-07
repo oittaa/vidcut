@@ -729,19 +729,26 @@ impl Spot {
 
 fn across(x: f64, wrap: f64, side: f64) -> (i64, i64) {
     let grid = GRID as i64;
-    let at = (x.clamp(0.0, 1.0) * GRID).round() as i64;
-    let wide = (wrap * GRID).floor() as i64;
-    match side {
-        s if s <= 0.0 => (at, wide.min(grid - at)),
-        s if s >= 1.0 => {
-            let width = wide.min(at);
-            (at - width, width)
-        }
+    let wide = ((wrap * GRID).floor() as i64).min(grid);
+    let at = (x * GRID).round() as i64;
+    let least = wide / 2;
+    let (left, right) = match side {
+        s if s <= 0.0 => (at.max(0), (at + wide).min(grid)),
+        s if s >= 1.0 => ((at - wide).max(0), at.min(grid)),
         _ => {
             let half = (wide / 2).min(at).min(grid - at);
-            (at - half, 2 * half)
+            (at - half, at + half)
         }
+    };
+    if right - left >= least {
+        return (left, right - left);
     }
+    let start = match side {
+        s if s <= 0.0 => at,
+        s if s >= 1.0 => at - least,
+        _ => at - least / 2,
+    };
+    (start.clamp(0, grid - least), least)
 }
 
 fn text_side(style: &SubtitleStyle) -> &'static str {
@@ -826,11 +833,21 @@ fn layout(
     for (&s, &k) in of.iter().zip(&stacked) {
         need[s] = need[s].max(k as f64 * line);
     }
-    let mut h: Vec<f64> = spots
+    let ats: Vec<f64> = spots
         .iter()
         .zip(&need)
-        .map(|(spot, &need)| {
-            let (at, above) = (spot.at, spot.above);
+        .map(|(spot, &need)| match spot.own {
+            Some(_) if need <= 1.0 => spot
+                .at
+                .clamp(spot.above * need, 1.0 - (1.0 - spot.above) * need),
+            _ => spot.at,
+        })
+        .collect();
+    let mut h: Vec<f64> = spots
+        .iter()
+        .zip(need.iter().zip(&ats))
+        .map(|(spot, (&need, &at))| {
+            let above = spot.above;
             let below = if above < 1.0 {
                 (1.0 - at) / (1.0 - above)
             } else {
@@ -857,13 +874,9 @@ fn layout(
         if !together[a][b] || !spots[a].shares_width(&spots[b]) {
             continue;
         }
-        let (a, b) = if spots[a].at <= spots[b].at {
-            (a, b)
-        } else {
-            (b, a)
-        };
+        let (a, b) = if ats[a] <= ats[b] { (a, b) } else { (b, a) };
         let (ka, kb) = (1.0 - spots[a].above, spots[b].above);
-        let gap = spots[b].at - spots[a].at - 1.0 / GRID;
+        let gap = ats[b] - ats[a] - 1.0 / GRID;
         let want = ka * h[a] + kb * h[b];
         if want <= gap {
             continue;
@@ -888,7 +901,7 @@ fn layout(
     }
     let regions: Vec<Region> = (0..n)
         .map(|s| {
-            let (at, above) = (spots[s].at, spots[s].above);
+            let (at, above) = (ats[s], spots[s].above);
             let y0 = at - above * h[s];
             let top = (y0 * GRID - 1e-6).ceil().max(0.0) as i64;
             let bottom = ((y0 + h[s]) * GRID + 1e-6).floor().min(GRID) as i64;

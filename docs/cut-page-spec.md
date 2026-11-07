@@ -1245,7 +1245,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - WebVTT writes an anchor as `line-left` or `line-right` with `align:left` or `align:right`, and as the alignment of `line`.
   - Thus in WebVTT, all lines of a block anchored left start at the position.
   - An IMSC1 paragraph takes a font, size, color, bold face, or alignment that the cue sets.
-  - The alignment is `ebutts:multiRowAlign`, which IMSC1 permits. `tts:textAlign` stays center, thus the longest line stays in the middle.
+  - The alignment is `ebutts:multiRowAlign`, which IMSC1 permits. `tts:textAlign` follows the anchor across: start, center or end. Thus the longest line stays at the anchor's point.
   - `subtitles.set` takes `style`. An empty style drops the cue's own style.
   - Other cues on the track stay as they were.
 - **Style of one word** (p. 1238):
@@ -3084,7 +3084,10 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - A region whose cues need more lines than fit in that height takes all the height that the picture allows.
   - A cue with a position, or with an anchor other than the track's, has a region of its own. Cues with the same point share one region.
     - The region starts, is centered or ends at Position X, by the anchor. It is as wide as the text wraps, but it stays inside the picture.
+    - Near an edge, it gets narrower. It is never narrower than half the wrap. There, it moves inside the picture instead.
     - Its middle is at Position Y. With a margin or an anchor, its top or bottom edge is there, as in the picture.
+    - Near the top or the bottom, it moves inside the picture, so that its lines fit.
+    - Thus a cue at the edge, or past it, still shows in the file.
     - `tts:textAlign` is start, center or end, by the anchor. `ebutts:multiRowAlign` gives the alignment where it is different.
   - An anchor other than the middle across also changes the regions of the three places. Each starts or ends at the middle of the picture.
   - IMSC1 lets at most four regions show at once (§6.8.3). More regions at once are named in the notes of the export.

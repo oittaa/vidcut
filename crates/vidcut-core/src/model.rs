@@ -5278,8 +5278,9 @@ pub struct SubtitleStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<SubtitleAlign>,
     /// Where the block sits, `[x, y]` as fractions of the picture from its
-    /// top left, from -4 to 4 across and from -3 to 5 down. `x` is the
-    /// middle of the longest line. `y` is the middle of the block, or with a
+    /// top left, from -4 to 4 across and from -3 to 5 down. It is the point
+    /// of the block that `anchor` names. Without an anchor, `x` is the middle
+    /// of the longest line, and `y` the middle of the block, or with a
     /// `margin` the edge of a top or bottom cue. Usual: the cue's place. On a
     /// cue, left out keeps the track's position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
