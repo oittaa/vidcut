@@ -1414,6 +1414,10 @@ impl Workspace {
             });
             let usual = d.track.for_cue(Some(&d.base)).anchor_in(d.place);
             dialog::row(ui, "Anchor", |ui| {
+                if ui.radio(d.anchor.is_none(), "Track").clicked() {
+                    d.anchor = None;
+                }
+                ui.separator();
                 super::titles::anchor_buttons(ui, &mut d.anchor, usual);
             });
             dialog::row(ui, "Position X", |ui| {
