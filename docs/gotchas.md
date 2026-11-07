@@ -307,12 +307,14 @@ These facts come from measurements in Resolve Studio 21.1.1 and 21.1.2, through 
   - In Arial, Resolve Studio 21.1.2 draws Bold from 576, 600 and 648.
   - It draws Arial Black from 696 and 700.
   - `otio::titles` writes 600 and reads 600 or more as bold.
-- **Resolve draws no stroke on a title read from a file.**
+- **Resolve draws no stroke from the file on a title read from a file.**
   - It keeps `strokeSize` and `strokeColor`, and writes them back. But it draws nothing at 4, 8 or 16.
   - It drops `-qt-stroke` styles from the rich text.
-  - In two of seven imports, it also sets the `strokeSize` of the first title to 1 and its `strokeColor` to black, whatever the file says.
-  - One of those files, imported again, keeps its values. The cause is not known.
   - The outline of a title does not show in Resolve.
+  - Resolve Studio 21.2 sets Stroke Size 1 and a black color on each title that it reads, whatever the file says.
+  - This occurs with `strokeSize` 0, with no `strokeSize`, and with the Stroke group off or not there.
+  - It draws that thin black line around the letters.
+  - A measurement of a title read from a file removes that line first.
 - **Resolve drops metadata it doesn't know**, which includes the `vidcut` key of the clip.
   - Thus a title comes back from Resolve by its parameters alone.
   - A placed clip comes back by its Transform, Cropping, Dynamic Zoom, Composite and Retime and Scaling alone.

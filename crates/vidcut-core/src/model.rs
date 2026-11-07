@@ -2640,8 +2640,7 @@ impl TitleShadow {
     pub const OPACITY: f64 = 0.75;
     pub const OFFSET: [f64; 2] = [0.0, 0.0];
     pub const BLUR: f64 = 20.0;
-    pub const BLUR_PER_PICTURE: f64 = 3300.0;
-    pub const GAIN: f64 = 1.24;
+    pub const BLUR_PER_PICTURE: f64 = 3370.0;
 
     pub fn is_off(&self) -> bool {
         self.off == Some(true)

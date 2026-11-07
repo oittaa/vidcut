@@ -442,56 +442,60 @@ fn shade(s: &TitleShadow, w: f64, h: f64) -> Option<Shade> {
     })
 }
 
-fn radii(sigma: f32) -> [usize; 3] {
-    let n = 3.0;
-    let ideal = (12.0 * sigma * sigma / n + 1.0).sqrt();
-    let mut low = ideal.floor() as i32;
-    if low % 2 == 0 {
-        low -= 1;
-    }
-    let low = low.max(1);
-    let lw = low as f32;
-    let m =
-        ((12.0 * sigma * sigma - n * lw * lw - 4.0 * n * lw - 3.0 * n) / (-4.0 * lw - 4.0)).round();
-    let mut out = [0; 3];
-    for (i, r) in out.iter_mut().enumerate() {
-        let width = if (i as f32) < m { low } else { low + 2 };
-        *r = ((width - 1) / 2) as usize;
-    }
-    out
+const SHADOW_REACH: f32 = 3.5;
+
+fn blur_reach(sigma: f32) -> usize {
+    (SHADOW_REACH * sigma).ceil() as usize
 }
 
-fn box_pass(src: &[f32], dst: &mut [f32], w: usize, h: usize, r: usize, across: bool) {
-    let (lines, len, step, stride) = if across { (h, w, 1, w) } else { (w, h, w, 1) };
-    let scale = 1.0 / (2 * r + 1) as f32;
-    for l in 0..lines {
-        let base = l * stride;
-        let at = |i: isize| -> f32 {
-            if i < 0 || i >= len as isize {
-                0.0
-            } else {
-                src[base + i as usize * step]
-            }
-        };
-        let mut sum: f32 = (-(r as isize)..=r as isize).map(at).sum();
-        for i in 0..len {
-            dst[base + i * step] = sum * scale;
-            sum += at(i as isize + r as isize + 1) - at(i as isize - r as isize);
-        }
-    }
+fn kernel(sigma: f32) -> Vec<f32> {
+    let r = blur_reach(sigma) as i32;
+    let twice = 2.0 * f64::from(sigma).powi(2);
+    let k: Vec<f64> = (-r..=r)
+        .map(|i| (-f64::from(i * i) / twice).exp())
+        .collect();
+    let sum: f64 = k.iter().sum();
+    k.into_iter().map(|v| (v / sum) as f32).collect()
+}
+
+fn add_scaled(dst: &mut [f32], src: &[f32], k: f32) {
+    dst.iter_mut().zip(src).for_each(|(d, s)| *d += k * s);
 }
 
 fn soften(alpha: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
-    let mut a = alpha.to_vec();
-    if sigma < 0.5 {
-        return a;
+    if sigma <= 0.0 || w == 0 {
+        return alpha.to_vec();
     }
-    let mut b = vec![0.0; a.len()];
-    for r in radii(sigma) {
-        box_pass(&a, &mut b, w, h, r, true);
-        box_pass(&b, &mut a, w, h, r, false);
+    let k = kernel(sigma);
+    let r = k.len() / 2;
+    let mut across = vec![0.0; alpha.len()];
+    for (row, dst) in alpha.chunks_exact(w).zip(across.chunks_exact_mut(w)) {
+        if row.iter().all(|&v| v == 0.0) {
+            continue;
+        }
+        for (t, &kt) in k.iter().enumerate() {
+            let (d0, s0) = (r.saturating_sub(t), t.saturating_sub(r));
+            let n = w.saturating_sub(d0.max(s0));
+            if n > 0 {
+                add_scaled(&mut dst[d0..d0 + n], &row[s0..s0 + n], kt);
+            }
+        }
     }
-    a
+    let live: Vec<bool> = across
+        .chunks_exact(w)
+        .map(|row| row.iter().any(|&v| v != 0.0))
+        .collect();
+    let mut out = vec![0.0; alpha.len()];
+    for (y, dst) in out.chunks_exact_mut(w).enumerate() {
+        let lo = y.saturating_sub(r);
+        let hi = (y + r + 1).min(h);
+        for (j, &kt) in (lo..hi).zip(&k[lo + r - y..]) {
+            if live[j] {
+                add_scaled(dst, &across[j * w..(j + 1) * w], kt);
+            }
+        }
+    }
+    out
 }
 
 fn shifted(alpha: &[f32], w: usize, h: usize, (dx, dy): (i32, i32)) -> Vec<f32> {
@@ -1357,7 +1361,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     let outline = stroke.map_or(0.0, |s| s.past());
     let frame = look.frame;
     let reach = look.shadow.map_or(0, |s| {
-        s.shift.0.abs().max(s.shift.1.abs()) + (3.0 * s.sigma).ceil() as i32 + 1
+        s.shift.0.abs().max(s.shift.1.abs()) + blur_reach(s.sigma) as i32 + 1
     });
     let pad = if backing.is_some() {
         (outline.ceil() as i32 + 2).max(frame.down.ceil() as i32)
@@ -1470,10 +1474,9 @@ fn lay_out(look: &Look) -> Option<Laid> {
                 .zip(&ring)
                 .map(|(&a, &o)| a + o * (1.0 - a))
                 .collect();
-            let gain = TitleShadow::GAIN as f32;
             soften(&shifted(&shape, w, h, s.shift), w, h, s.sigma)
                 .into_iter()
-                .map(|v| (v * gain).min(1.0) * s.opacity)
+                .map(|v| v.min(1.0) * s.opacity)
                 .collect()
         }
         None => Vec::new(),
