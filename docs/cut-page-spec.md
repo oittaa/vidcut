@@ -1242,6 +1242,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - WebVTT writes the cue's position, and SRT writes the cue's place.
   - Neither writes the alignment. Their settings move the block with its lines.
   - IMSC1 writes the position as a region of the cue (D64).
+  - WebVTT writes an anchor as `line-left` or `line-right` with `align:left` or `align:right`, and as the alignment of `line`.
+  - Thus in WebVTT, all lines of a block anchored left start at the position.
   - An IMSC1 paragraph takes a font, size, color, bold face, or alignment that the cue sets.
   - The alignment is `ebutts:multiRowAlign`, which IMSC1 permits. `tts:textAlign` stays center, thus the longest line stays in the middle.
   - `subtitles.set` takes `style`. An empty style drops the cue's own style.
