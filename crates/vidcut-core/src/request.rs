@@ -9,9 +9,9 @@ use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType,
-    GeneratorKind, Handle, LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle,
-    TitleAlign, TitleAnchor, TitleKind, TitleStyle, TrackClip, VignetteMode, VignetteShape,
-    ZoomBox,
+    GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, Handle, LowerThirdLine, PictureTool,
+    PictureTransition, Place, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle,
+    TrackClip, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -2585,7 +2585,7 @@ pub enum Request {
         clip: ClipRef,
         effect: usize,
         #[serde(flatten)]
-        change: EffectChange,
+        change: Box<EffectChange>,
     },
     /// Put one effect of a clip back at its usual values. It stays on, and
     /// keeps its `render_cache`. An effect that is off does not change.
@@ -4521,6 +4521,99 @@ pub struct EffectChange {
     /// picture's own colors add to the tracks below.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub whole_cells: Option<bool>,
+    /// What a Glow gives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<GlowOutput>,
+    /// How a Glow uses the picture's alpha.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_alpha: Option<GlowAlpha>,
+    /// The code value where a Glow's channel starts to shine, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<f64>,
+    /// With `input_alpha` `is_source`, the alpha where a Glow's picture starts
+    /// to shine, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha_threshold: Option<f64>,
+    /// How wide a Glow is, from 0 to 3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spread: Option<f64>,
+    /// Multiplies a Glow's spread across by 1 + this and down by 1 − this,
+    /// from -1 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hv_ratio: Option<f64>,
+    /// A Glow's spread on red, green and blue, `[r, g, b]`, each a multiple
+    /// from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_spread: Option<Vec<f64>>,
+    /// How bright a Glow is, from 0 to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain: Option<f64>,
+    /// The gamma of a Glow, from 0.1 to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gamma: Option<f64>,
+    /// The colorfulness of a Glow, from 0 to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saturation: Option<f64>,
+    /// Multiplies a Glow's red, green and blue, `[r, g, b]`, each from 0 to
+    /// 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_filter: Option<Vec<f64>>,
+    /// Adds a second glow to a Glow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary: Option<bool>,
+    /// How bright a Glow's second glow is, from 0 to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary_gain: Option<f64>,
+    /// How wide a Glow's second glow is, from 0 to 3. Its sigma is 3 times
+    /// that of a `spread` of the same value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary_spread: Option<f64>,
+    /// Multiplies the red, green and blue of a Glow's second glow, `[r, g,
+    /// b]`, each from 0 to 1000000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary_color: Option<Vec<f64>>,
+    /// Breaks up a Glow with soft noise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere: Option<bool>,
+    /// How much the noise changes a Glow, from -5 to 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_strength: Option<f64>,
+    /// How much fine noise a Glow has, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_detail: Option<f64>,
+    /// The size of a Glow's noise, from 0.01 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_scale: Option<f64>,
+    /// Multiplies the size of a Glow's noise across by 1 + this and down by
+    /// 1 − this, from -0.99 to 0.99.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_ratio: Option<f64>,
+    /// Another pattern of a Glow's noise, from 0 to 1000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_evolution: Option<f64>,
+    /// How fast a Glow's noise changes from frame to frame, from 0 to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_seethe: Option<f64>,
+    /// A Glow's Follow FX Tracker. It does not change the picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_tracked: Option<bool>,
+    /// What a Glow's blur takes from beyond the frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub framing: Option<GlowFraming>,
+    /// How a Glow goes over the picture, or how a Vignette's color mixes
+    /// with the picture in `advanced`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composite_type: Option<CompositeMode>,
+    /// How much of a Glow's composite shows, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+    /// A Glow on the picture's negative, which gives the negative of the
+    /// result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invert: Option<bool>,
+    /// Takes a Glow away where the picture shines, from 0 to 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<f64>,
     /// `basic` is a Vignette's oval in the middle, with its color in the
     /// `normal` mode. `advanced` uses all its values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4552,9 +4645,6 @@ pub struct EffectChange {
     /// The color around a Vignette's shape, `[r, g, b]` in code values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<Vec<f64>>,
-    /// How a Vignette's color mixes with the picture, in `advanced`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub composite_type: Option<CompositeMode>,
     /// How strong a Sharpen's detail of the brightness is, from 1 (no change)
     /// to 5.
     #[serde(default, skip_serializing_if = "Option::is_none")]

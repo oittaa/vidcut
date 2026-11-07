@@ -2665,3 +2665,42 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The picture is the same.
   - The picker reaches any file, with no LUT folder to set up.
   - The owner approved this difference.
+
+## X140. The Atmosphere noise of a Glow has its own pattern
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2 (Glow, p. 3590).
+  - Atmosphere multiplies the glow by a noise.
+  - The renders show the statistics and the size of the noise at 1920×1080. They do not show the rule that makes its pattern.
+- **vidcut:**
+  - vidcut makes the noise itself, with 7 octaves of Perlin noise ([spec §8.16](cut-page-spec.md#816-effects-pp-765-3526-3536)).
+  - The noise has the statistics of the renders at the measured values. Its pattern is not the pattern of Resolve.
+- **Why:**
+  - No render shows how Resolve makes the pattern. Thus no frame can be the same.
+  - The owner approved this difference.
+
+## X141. A Glow up to a Spread of 0.1 has a plain blur
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2 (Glow, p. 3590).
+  - At a Spread of 0.02, 0.05 and 0.1, the blur has steps of 8 pixels. The renders do not show the rule of the steps.
+- **vidcut:**
+  - The blur is the plain Gaussian curve at these values.
+  - Against the renders, the largest difference is 0.0099, at a Spread of 0.05. The rms difference is about 0.0002.
+- **Why:**
+  - No rule for the steps is known. The difference is small.
+  - The owner approved this difference.
+
+## X142. A Glow keeps the tracks below around a smaller picture
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2 (Glow, p. 3590), with Use Alpha on, as an effect added in the GUI has it.
+  - The output of a Glow has an alpha of 1, also outside a smaller picture and in the clear parts of the picture.
+  - Thus a Glow on a clip at Zoom 0.5 makes the frame black around the clip. The tracks below do not show.
+- **vidcut:**
+  - The alpha of the output is the larger of the picture's alpha and the brightest color of the output.
+  - Over black, the frame is the same as in Resolve.
+  - Other tracks below show around the clip and through its clear parts. The glow around the clip covers them by its brightest color.
+- **Why:**
+  - The black is a fault in Resolve. An effect on a clip does not hide the tracks below.
+  - The owner approved this difference.

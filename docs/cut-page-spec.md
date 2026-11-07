@@ -1479,8 +1479,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - On the Cut page, a double-click on an effect adds it to the selected clip.
   - Measured in Resolve Studio 21.1.2: with several selected clips, only the first selected clip gets it.
   - The Effects panel of the Inspector has the values of the effects.
-  - vidcut: the Effects tab has three groups:
+  - vidcut: the Effects tab has four groups:
     - Blur has Gaussian Blur and Mosaic Blur.
+    - Light has Glow.
     - Film Emulation has Vignette.
     - Sharpen has Sharpen.
   - vidcut: the other effects come later ([todo](todo/effects-library.md)).
@@ -1578,6 +1579,96 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - With Use Alpha off, Blur Alpha and Whole Cells Only change nothing.
     - Whole Cells Only tests each sample's cell, with each Cell Shape and each Aliasing.
     - A made frame of a speed change, and a frame from the render cache, keep no color at an alpha of 0.
+- **Glow** (p. 3590). Its values and their defaults, measured in Resolve Studio 21.1.2:
+  - Select Output is Shiny Regions, Glow Alone or Glowing Image. Glowing Image is the default.
+  - Input Alpha is Alpha Masks Sources, Usual Behavior or Alpha Is Source. Alpha Masks Sources is the default.
+  - Shine Threshold goes from 0 to 1 and is 0.75. Alpha Level Threshold goes from 0 to 1 and is 0.5.
+  - Shape And Spread:
+    - Spread goes from 0 to 3 and is 0.5.
+    - H vs V Ratio goes from −1 to 1 and is 0.
+    - Relative Spread has Red, Green and Blue. Each goes from 0 to 2 and is 1.
+  - Color and Composite:
+    - Gain goes from 0 to 10 and is 0.5.
+    - Gamma goes from 0.1 to 10 and is 1.
+    - Saturation goes from 0 to 10 and is 1.
+    - Color Filter has Red, Green and Blue. Each is 1.
+  - Secondary Glow:
+    - Add Secondary Glow is off.
+    - Gain goes from 0 to 10 and is 0.75.
+    - Spread goes from 0 to 3 and is 0.25.
+    - Its Color Filter has Red, Green and Blue. Each is 1.
+  - Atmosphere:
+    - Add Atmosphere is off.
+    - Strength goes from −5 to 5 and is 0.25.
+    - Detail goes from 0 to 1 and is 0.55.
+    - Scale goes from 0.01 to 100 and is 0.6.
+    - H vs V Ratio goes from −0.99 to 0.99 and is 0.
+    - Evolution goes from 0 to 1000 and is 0.
+    - Seethe goes from 0 to 10 and is 0.3.
+    - Follow FX Tracker is off.
+  - Advanced Controls:
+    - Glow Framing is Only As Seen or Reflect In Camera. Reflect In Camera is the default.
+    - Composite Type has the 27 modes of Composite ([§8.15](#815-transform-and-crop-pp-766768)). Add is the default.
+    - The manual (p. 3590) gives Screen as the default. The readback and the renders of a new Glow give Add, and vidcut uses Add.
+    - Opacity goes from 0 to 1 and is 1.
+    - Invert Effect is off.
+    - Source Recovery goes from 0 to 5 and is 0.
+- **How the glow works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
+  - It works after Zoom and Position, on the pixels of the frame, with colors clipped to 0..1.
+  - The mask of each color is `m = max(0, c − t) / (1 − t + 0.001)`, with `t` the Shine Threshold.
+  - The mask is `M = (1 − t) × m + t × (the mean of the three m)`. Shiny Regions shows `M`.
+  - The blur is a Gaussian curve across the frame and then down it, for each color.
+    - Its sigma is 0.146667 × Spread × √(width × height), with the size of the picture on the frame.
+    - H vs V Ratio `h` multiplies the sigma across by 1 + `h` and the sigma down by 1 − `h`.
+    - Relative Spread multiplies the sigma of each color.
+    - A window takes the curve from 1 at 3.8 sigma to 0 at 4.3 sigma, as a smoothstep.
+  - The blur also crosses the black bars around a smaller picture.
+  - The glow is 4 × Gain × the blurred mask.
+  - Secondary Glow adds 4 × its Gain × a second blur × its Color Filter.
+    - Its sigma is 3 × its Spread × 0.146667 × √(width × height). Spread does not change it.
+    - H vs V Ratio and Relative Spread also apply to it.
+  - Color Filter multiplies the sum of the glows, for each color.
+  - Saturation and Gamma use `P = √(0.299 R² + 0.587 G² + 0.114 B²)`.
+    - Saturation multiplies the HSV saturation and stops at 1. It keeps the hue and `P`. At 0, each color is `P`.
+    - Gamma multiplies each color by `P^(1 / Gamma) / P`.
+  - Source Recovery multiplies the glow by `max(0, 1 − (12/7) × Recovery × the largest M)`, with `M` not blurred.
+  - Atmosphere multiplies the glow by `max(0, 1 + Strength × N)`. `N` is one noise for all three colors, in the directions of the frame.
+  - Source Recovery and Atmosphere work before Gamma. Each multiplies the three colors alike, so Saturation does not change them.
+  - The glow does not stop at 1. Composite Type mixes it with the picture, and the mix stops at 0..1 after Opacity and Blend.
+  - Two modes have their own rules at the ends of the range of the glow:
+    - Color Dodge with a glow of 1 or more gives 1 where the picture is above 0, and 0 where it is 0.
+    - Color Burn with a glow of 0 or less gives 1 where the picture is 1, and 0 elsewhere.
+  - Opacity and Blend give the same result.
+  - Invert Effect is `1 − effect(1 − picture)`.
+  - Glow Alone is the glow, and Reflect In Camera is a mirror on a grid `g` of 8 pixels:
+    - The mirror points are `−g / 2` and the last grid point, from the grid `g × i + g / 2`.
+    - The grid across and the grid down are separate. Each follows the largest sigma of the three colors in its direction.
+    - On 1920×1080, 3840×2160 and 1080×1920, `g` is 8 at a sigma of 580.8 pixels and 16 at 633.6 and 844.8. `g` is 32 at 1267.2.
+    - Only As Seen has no mirror. It multiplies the glow near each frame edge by a soft window.
+  - In Input Alpha, measured on the Edit page, with the values that an effect added in the GUI has:
+    - `P` is the color multiplied by its alpha, and `a` is the alpha.
+    - Alpha Masks Sources: the mask is `a` × the mask of `P`.
+    - Usual Behavior gives the same picture as Alpha Masks Sources.
+    - Alpha Is Source: the mask is `max(0, a − th + 0.001) / (1 − th + 0.001)`, with `th` the Alpha Level Threshold, for all three colors.
+    - The output of each Select Output has an alpha of 1, also outside a smaller picture. vidcut does not copy this black ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
+    - Blend mixes the input and that output, with their alphas.
+    - With Use Alpha off, the mask takes the color without its alpha, times `a`. The output is `a` × the result on that color, and `a` stays.
+    - Invert Effect takes the negative of `P` and of the output, with an alpha of 1.
+- **Glow in vidcut:**
+  - With Use Alpha on, the alpha of the output is the larger of `a` and the brightest color of the output. Thus the tracks below show around a smaller picture ([X142](deviations.md#x142-a-glow-keeps-the-tracks-below-around-a-smaller-picture)).
+  - Up to a Spread of 0.1, Resolve's blur has steps of 8 pixels that the renders do not explain. vidcut uses the plain curve, with the coarse grid only at a large sigma ([X141](deviations.md#x141-a-glow-up-to-a-spread-of-01-has-a-plain-blur)).
+  - vidcut makes the Atmosphere noise itself. It has the statistics of the renders at the defaults and the measured sizes, not their pattern ([X140](deviations.md#x140-the-atmosphere-noise-of-a-glow-has-its-own-pattern)).
+    - The noise has one layer of Perlin noise for each octave, with 7 octaves. Detail is the gain from one octave to the next.
+    - Its size is proportional to Scale × √(width × height) of the picture on the frame. The renders show only 1920×1080.
+    - Follow FX Tracker changes nothing, as with no tracker in the renders.
+    - Evolution and Seethe move the noise along a third direction. Seethe moves it at each frame from the start of the clip.
+    - Each octave has its own scale in that direction, so Detail also changes the speed.
+  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+    - Source Recovery works on the sum of the glows.
+    - With a Zoom, the sigma of Secondary Glow takes the same size of the picture as the first sigma.
+    - The grid `g` doubles at each doubling of 600 pixels of sigma. The renders put the first step between 580.8 and 633.6.
+    - Opacity acts as Blend on a picture with alpha, as it does on an opaque one.
+    - Color Filter values go from 0 to 1000000. No limit is measured.
 - **Vignette.** Its values and their defaults, measured in Resolve Studio 21.1.2:
   - Operating Mode is Basic or Advanced. Basic is the default.
   - Border Shape is Oval, Triangle, Diamond, Rectangle, Hexagon or Octagon. Oval is the default.
@@ -3374,7 +3465,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - A picture at an opacity of 0 counts as a picture.
       - An upper soft edge over a partly clear picture gives the premultiplied sum of the same formula.
       - The effects of the compound clip work on a title alone.
-      - A Mosaic Blur on the compound clip follows the rule of the Gaussian Blur.
+      - A Mosaic Blur and a Glow on the compound clip follow the rule of the Gaussian Blur.
     - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.

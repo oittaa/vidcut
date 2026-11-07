@@ -485,6 +485,11 @@ pub struct Placed {
     /// read here. `after` moves it with the piece (decision D75).
     #[serde(default, skip_serializing_if = "zero_i64")]
     pub source: i64,
+    /// How many frames this picture is after the clip's first, for an effect
+    /// that changes by itself from frame to frame. A cached piece has 0 here
+    /// when no effect of its picture does.
+    #[serde(default, skip_serializing_if = "zero_i64")]
+    pub frame: i64,
     /// Timeline start of the clip, until the first `after` places it.
     #[serde(default, skip_serializing_if = "zero_i64")]
     pub start: i64,
@@ -504,6 +509,7 @@ impl Placed {
             run: picture.dynamic_zoom.map(|_| run),
             picture,
             source: clip.content_at(clip.start),
+            frame: 0,
             start: clip.start,
             ready: false,
         }
@@ -516,6 +522,7 @@ impl Placed {
             picture,
             run,
             source: clip.content_at(time),
+            frame: time - clip.start,
             start: clip.start,
             ready: true,
         }
@@ -531,6 +538,7 @@ impl Placed {
             picture: self.picture.clone(),
             run: self.run.map(|r| r.after(k)),
             source: self.source_after(k),
+            frame: self.frame + if self.ready { k } else { k - self.start },
             start: self.start,
             ready: true,
         }

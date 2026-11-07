@@ -526,6 +526,7 @@ mod tests {
                 },
                 run: None,
                 source: 0,
+                frame: 0,
                 start,
                 ready: true,
             }],

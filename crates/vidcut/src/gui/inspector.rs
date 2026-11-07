@@ -12,9 +12,9 @@ use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     Border, CellShape, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel, Effect,
-    EffectKind, GaussianBlur, Generator, Gradient, Keyframe, MosaicBlur, Picture, PictureTool,
-    Project, Retime, Sharpen, Speed, TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape,
-    ZoomBox,
+    EffectKind, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming, GlowOutput, Gradient,
+    Keyframe, MosaicBlur, Picture, PictureTool, Project, Retime, Sharpen, Speed, TrackKind,
+    Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -77,9 +77,34 @@ enum Key {
 enum Knob {
     Gaussian(GaussianKnob),
     Mosaic(MosaicKnob),
+    Glow(GlowKnob),
     Vignette(VignetteKnob),
     Sharpen(SharpenKnob),
     Blend,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum GlowKnob {
+    Threshold,
+    AlphaThreshold,
+    Spread,
+    Ratio,
+    Relative(usize),
+    Gain,
+    Gamma,
+    Saturation,
+    Filter(usize),
+    SecondGain,
+    SecondSpread,
+    SecondColor(usize),
+    Strength,
+    Detail,
+    Scale,
+    NoiseRatio,
+    Evolution,
+    Seethe,
+    Opacity,
+    Recovery,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -271,6 +296,123 @@ impl MosaicKnob {
     }
 }
 
+impl GlowKnob {
+    fn dial(self) -> Dial {
+        let dial = |label, usual, range, speed| Dial {
+            label,
+            usual,
+            range,
+            speed,
+        };
+        let unit = pair(Glow::UNIT);
+        let gains = pair(Glow::GAINS);
+        let spreads = pair(Glow::SPREADS);
+        let colors = pair(Glow::COLORS);
+        match self {
+            Self::Threshold => dial("Shine Threshold", Glow::THRESHOLD, unit, 0.005),
+            Self::AlphaThreshold => {
+                dial("Alpha Level Threshold", Glow::ALPHA_THRESHOLD, unit, 0.005)
+            }
+            Self::Spread => dial("Spread", Glow::SPREAD, spreads, 0.005),
+            Self::Ratio => dial("H vs V Ratio", 0.0, pair(Glow::RATIOS), 0.005),
+            Self::Relative(c) => dial(CHANNELS[c], 1.0, pair(Glow::RELATIVES), 0.005),
+            Self::Gain => dial("Gain", Glow::GAIN, gains, 0.005),
+            Self::Gamma => dial("Gamma", 1.0, pair(Glow::GAMMAS), 0.005),
+            Self::Saturation => dial("Saturation", 1.0, pair(Glow::SATURATIONS), 0.005),
+            Self::Filter(c) | Self::SecondColor(c) => dial(CHANNELS[c], 1.0, colors, 0.005),
+            Self::SecondGain => dial("Gain", Glow::SECONDARY_GAIN, gains, 0.005),
+            Self::SecondSpread => dial("Spread", Glow::SECONDARY_SPREAD, spreads, 0.005),
+            Self::Strength => dial("Strength", Glow::STRENGTH, pair(Glow::STRENGTHS), 0.005),
+            Self::Detail => dial("Detail", Glow::DETAIL, unit, 0.005),
+            Self::Scale => dial("Scale", Glow::SCALE, pair(Glow::SCALES), 0.005),
+            Self::NoiseRatio => dial("H vs V Ratio", 0.0, pair(Glow::NOISE_RATIOS), 0.005),
+            Self::Evolution => dial("Evolution", 0.0, pair(Glow::EVOLUTIONS), 0.005),
+            Self::Seethe => dial("Seethe", Glow::SEETHE, pair(Glow::SEETHES), 0.005),
+            Self::Opacity => dial("Opacity", 1.0, unit, 0.005),
+            Self::Recovery => dial("Source Recovery", 0.0, pair(Glow::RECOVERIES), 0.005),
+        }
+    }
+
+    fn read(self, g: &Glow) -> f64 {
+        match self {
+            Self::Threshold => g.shine(),
+            Self::AlphaThreshold => g.alpha_shine(),
+            Self::Spread => g.wide(),
+            Self::Ratio => g.ratio(),
+            Self::Relative(c) => g.relative()[c],
+            Self::Gain => g.bright(),
+            Self::Gamma => g.curve(),
+            Self::Saturation => g.colorful(),
+            Self::Filter(c) => g.filter()[c],
+            Self::SecondGain => g.second_bright(),
+            Self::SecondSpread => g.second_wide(),
+            Self::SecondColor(c) => g.second_color()[c],
+            Self::Strength => g.noise_strength(),
+            Self::Detail => g.noise_detail(),
+            Self::Scale => g.noise_scale(),
+            Self::NoiseRatio => g.noise_ratio(),
+            Self::Evolution => g.noise_evolution(),
+            Self::Seethe => g.noise_seethe(),
+            Self::Opacity => g.shown(),
+            Self::Recovery => g.recovers(),
+        }
+    }
+
+    fn put(self, g: &mut Glow, v: f64) {
+        let with = |mut all: [f64; 3], c: usize| {
+            all[c] = v;
+            Some(all)
+        };
+        match self {
+            Self::Threshold => g.threshold = Some(v),
+            Self::AlphaThreshold => g.alpha_threshold = Some(v),
+            Self::Spread => g.spread = Some(v),
+            Self::Ratio => g.hv_ratio = Some(v),
+            Self::Relative(c) => g.relative_spread = with(g.relative(), c),
+            Self::Gain => g.gain = Some(v),
+            Self::Gamma => g.gamma = Some(v),
+            Self::Saturation => g.saturation = Some(v),
+            Self::Filter(c) => g.color_filter = with(g.filter(), c),
+            Self::SecondGain => g.secondary_gain = Some(v),
+            Self::SecondSpread => g.secondary_spread = Some(v),
+            Self::SecondColor(c) => g.secondary_color = with(g.second_color(), c),
+            Self::Strength => g.atmosphere_strength = Some(v),
+            Self::Detail => g.atmosphere_detail = Some(v),
+            Self::Scale => g.atmosphere_scale = Some(v),
+            Self::NoiseRatio => g.atmosphere_ratio = Some(v),
+            Self::Evolution => g.atmosphere_evolution = Some(v),
+            Self::Seethe => g.atmosphere_seethe = Some(v),
+            Self::Opacity => g.opacity = Some(v),
+            Self::Recovery => g.recovery = Some(v),
+        }
+    }
+
+    fn param(self, g: &Glow) -> (&'static str, Value) {
+        match self {
+            Self::Threshold => ("threshold", json!(g.shine())),
+            Self::AlphaThreshold => ("alpha_threshold", json!(g.alpha_shine())),
+            Self::Spread => ("spread", json!(g.wide())),
+            Self::Ratio => ("hv_ratio", json!(g.ratio())),
+            Self::Relative(_) => ("relative_spread", json!(g.relative())),
+            Self::Gain => ("gain", json!(g.bright())),
+            Self::Gamma => ("gamma", json!(g.curve())),
+            Self::Saturation => ("saturation", json!(g.colorful())),
+            Self::Filter(_) => ("color_filter", json!(g.filter())),
+            Self::SecondGain => ("secondary_gain", json!(g.second_bright())),
+            Self::SecondSpread => ("secondary_spread", json!(g.second_wide())),
+            Self::SecondColor(_) => ("secondary_color", json!(g.second_color())),
+            Self::Strength => ("atmosphere_strength", json!(g.noise_strength())),
+            Self::Detail => ("atmosphere_detail", json!(g.noise_detail())),
+            Self::Scale => ("atmosphere_scale", json!(g.noise_scale())),
+            Self::NoiseRatio => ("atmosphere_ratio", json!(g.noise_ratio())),
+            Self::Evolution => ("atmosphere_evolution", json!(g.noise_evolution())),
+            Self::Seethe => ("atmosphere_seethe", json!(g.noise_seethe())),
+            Self::Opacity => ("opacity", json!(g.shown())),
+            Self::Recovery => ("recovery", json!(g.recovers())),
+        }
+    }
+}
+
 impl VignetteKnob {
     fn dial(self) -> Dial {
         let dial = |label, usual, range, speed| Dial {
@@ -395,6 +537,7 @@ impl Knob {
         match self {
             Knob::Gaussian(k) => k.dial(),
             Knob::Mosaic(k) => k.dial(),
+            Knob::Glow(k) => k.dial(),
             Knob::Vignette(k) => k.dial(),
             Knob::Sharpen(k) => k.dial(),
             Knob::Blend => Dial {
@@ -410,6 +553,7 @@ impl Knob {
         match (self, &e.kind) {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.read(g),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.read(m),
+            (Knob::Glow(k), EffectKind::Glow(g)) => k.read(g),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.read(s),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.read(s),
             (Knob::Blend, _) => e.mixed(),
@@ -424,6 +568,7 @@ impl Knob {
         match (self, &mut out.kind) {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.put(g, v),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.put(m, v),
+            (Knob::Glow(k), EffectKind::Glow(g)) => k.put(g, v),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.put(s, v),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.put(s, v),
             (Knob::Blend, _) => out.blend = Some(v),
@@ -436,6 +581,7 @@ impl Knob {
         match (self, &e.kind) {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.param(g),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.param(m),
+            (Knob::Glow(k), EffectKind::Glow(g)) => k.param(g),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.param(s),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.param(s),
             _ => ("blend", json!(e.mixed())),
@@ -1877,6 +2023,161 @@ fn mosaic_rows(
     });
 }
 
+fn choice_row<T: Copy + PartialEq + serde::Serialize>(
+    ui: &mut egui::Ui,
+    (n, name, put): (usize, &str, &str),
+    (now, usual): (T, T),
+    (all, text): (&[T], fn(T) -> &'static str),
+    acts: &mut Vec<Act>,
+) {
+    let set = |v: T| {
+        let mut params = json!({});
+        params[put] = json!(v);
+        Act::EffectSet(n, params)
+    };
+    label(ui, name, now != usual);
+    egui::ComboBox::from_id_salt(("inspector-effect-choice", n, put))
+        .selected_text(text(now))
+        .show_ui(ui, |ui| {
+            for v in all {
+                if ui.selectable_label(*v == now, text(*v)).clicked() && *v != now {
+                    acts.push(set(*v));
+                }
+            }
+        });
+    if reset(ui, now != usual) {
+        acts.push(set(usual));
+    }
+    ui.end_row();
+}
+
+fn glow_output_label(o: GlowOutput) -> &'static str {
+    match o {
+        GlowOutput::ShinyRegions => "Shiny Regions",
+        GlowOutput::GlowAlone => "Glow Alone",
+        GlowOutput::GlowingImage => "Glowing Image",
+    }
+}
+
+fn glow_alpha_label(a: GlowAlpha) -> &'static str {
+    match a {
+        GlowAlpha::MasksSources => "Alpha Masks Sources",
+        GlowAlpha::Usual => "Usual Behavior",
+        GlowAlpha::IsSource => "Alpha Is Source",
+    }
+}
+
+fn glow_framing_label(f: GlowFraming) -> &'static str {
+    match f {
+        GlowFraming::OnlyAsSeen => "Only As Seen",
+        GlowFraming::ReflectInCamera => "Reflect In Camera",
+    }
+}
+
+fn glow_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, g): (usize, &Effect, &Glow),
+    acts: &mut Vec<Act>,
+) {
+    let glow = |ui: &mut egui::Ui, k: GlowKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Glow(k)), e, acts);
+    };
+    rows(ui, (n, "main"), |ui| {
+        choice_row(
+            ui,
+            (n, "Select Output", "output"),
+            (g.shows(), GlowOutput::default()),
+            (&GlowOutput::ALL, glow_output_label),
+            acts,
+        );
+        choice_row(
+            ui,
+            (n, "Input Alpha", "input_alpha"),
+            (g.alpha(), GlowAlpha::default()),
+            (&GlowAlpha::ALL, glow_alpha_label),
+            acts,
+        );
+        glow(ui, GlowKnob::Threshold, acts);
+        glow(ui, GlowKnob::AlphaThreshold, acts);
+    });
+    fold(ui, (n, "Shape And Spread"), |ui| {
+        glow(ui, GlowKnob::Spread, acts);
+        glow(ui, GlowKnob::Ratio, acts);
+        label(ui, "Relative Spread", false);
+        ui.end_row();
+        for c in 0..3 {
+            glow(ui, GlowKnob::Relative(c), acts);
+        }
+    });
+    fold(ui, (n, "Color and Composite"), |ui| {
+        glow(ui, GlowKnob::Gain, acts);
+        glow(ui, GlowKnob::Gamma, acts);
+        glow(ui, GlowKnob::Saturation, acts);
+        label(ui, "Color Filter", false);
+        ui.end_row();
+        for c in 0..3 {
+            glow(ui, GlowKnob::Filter(c), acts);
+        }
+    });
+    fold(ui, (n, "Secondary Glow"), |ui| {
+        check(
+            ui,
+            (n, "Add Secondary Glow", g.secondary, false),
+            "secondary",
+            acts,
+        );
+        glow(ui, GlowKnob::SecondGain, acts);
+        glow(ui, GlowKnob::SecondSpread, acts);
+        for c in 0..3 {
+            glow(ui, GlowKnob::SecondColor(c), acts);
+        }
+    });
+    fold(ui, (n, "Atmosphere"), |ui| {
+        check(
+            ui,
+            (n, "Add Atmosphere", g.atmosphere, false),
+            "atmosphere",
+            acts,
+        );
+        for k in [
+            GlowKnob::Strength,
+            GlowKnob::Detail,
+            GlowKnob::Scale,
+            GlowKnob::NoiseRatio,
+            GlowKnob::Evolution,
+            GlowKnob::Seethe,
+        ] {
+            glow(ui, k, acts);
+        }
+        check(
+            ui,
+            (n, "Follow FX Tracker", g.atmosphere_tracked, false),
+            "atmosphere_tracked",
+            acts,
+        );
+    });
+    fold(ui, (n, "Advanced Controls"), |ui| {
+        choice_row(
+            ui,
+            (n, "Glow Framing", "framing"),
+            (g.frames(), GlowFraming::default()),
+            (&GlowFraming::ALL, glow_framing_label),
+            acts,
+        );
+        choice_row(
+            ui,
+            (n, "Composite Type", "composite_type"),
+            (g.over(), CompositeMode::Add),
+            (&CompositeMode::ALL, mode_label),
+            acts,
+        );
+        glow(ui, GlowKnob::Opacity, acts);
+        check(ui, (n, "Invert Effect", g.invert, false), "invert", acts);
+        glow(ui, GlowKnob::Recovery, acts);
+    });
+}
+
 fn vignette_mode_label(m: VignetteMode) -> &'static str {
     match m {
         VignetteMode::Basic => "Basic",
@@ -2058,6 +2359,7 @@ fn effect_block(
                 match &e.kind {
                     EffectKind::GaussianBlur(g) => gaussian_rows(ui, i, (n, e, g), acts),
                     EffectKind::MosaicBlur(m) => mosaic_rows(ui, i, (n, e, m), acts),
+                    EffectKind::Glow(g) => glow_rows(ui, i, (n, e, g), acts),
                     EffectKind::Vignette(v) => vignette_rows(ui, i, (n, e, v), acts),
                     EffectKind::Sharpen(_) => sharpen_rows(ui, i, (n, e), acts),
                 }
