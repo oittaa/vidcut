@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use vidcut_av::thumbs::Image;
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::fingerprint::Origin;
-use vidcut_core::model::{ColorSpace, Media};
+use vidcut_core::model::{AlphaMode, ColorSpace, Media};
 
 pub const THUMBS: usize = 24;
 
@@ -20,12 +20,9 @@ pub fn thumbs_file(media: &Media, origin: &Origin) -> PathBuf {
         .as_ref()
         .map(|s| format!("-{}", s.count))
         .unwrap_or_default();
-    let space = read_as(media.color_space);
+    let look = look_of(media);
     let (w, h) = THUMB_SIZE;
-    Kind::Thumbs.file(
-        origin,
-        &format!("s{THUMBS}-{w}x{h}{pictures}{space}.thumbs"),
-    )
+    Kind::Thumbs.file(origin, &format!("s{THUMBS}-{w}x{h}{pictures}{look}.thumbs"))
 }
 
 pub fn load_thumbs(path: &Path, origin: &Origin) -> Option<(Vec<Image>, Vec<f64>)> {
@@ -47,16 +44,28 @@ pub fn store_thumbs(path: &Path, origin: &Origin, images: &[Image], times: &[f64
 
 pub const TILE_BLOCK: i64 = 64;
 
-pub fn tile_block(origin: &Origin, height: u32, block: i64, space: ColorSpace) -> PathBuf {
-    let space = read_as(space);
-    Kind::Thumbs.file(origin, &format!("t{height}-b{block}{space}.thumbs"))
+pub fn tile_block(origin: &Origin, height: u32, block: i64, media: &Media) -> PathBuf {
+    let look = look_of(media);
+    Kind::Thumbs.file(origin, &format!("t{height}-b{block}{look}.thumbs"))
 }
 
-fn read_as(space: ColorSpace) -> String {
-    match space {
+pub fn drawn_alpha(media: &Media) -> AlphaMode {
+    match &media.info.video {
+        Some(v) if v.alpha => media.alpha_mode,
+        _ => AlphaMode::Straight,
+    }
+}
+
+fn look_of(media: &Media) -> String {
+    let space = match media.color_space {
         ColorSpace::Tagged => String::new(),
         s => format!("-{}", s.key()),
-    }
+    };
+    let alpha = match drawn_alpha(media) {
+        AlphaMode::Straight => String::new(),
+        a => format!("-alpha-{}", a.title().to_lowercase()),
+    };
+    format!("{space}{alpha}")
 }
 
 pub fn load_tiles(path: &Path, origin: &Origin) -> Option<Vec<(i64, Image)>> {

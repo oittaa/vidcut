@@ -201,8 +201,11 @@ struct Engine {
     gpu: Gpu,
     kernels: Kernels,
     nets: Vec<(Retime, Net)>,
-    held: Option<Held>,
+    held: [Option<Held>; 2],
 }
+
+const COLORS: usize = 0;
+const MATTE: usize = 1;
 
 static ENGINE: Mutex<Option<crate::screen::Started<Engine>>> = Mutex::new(None);
 static USERS: Mutex<usize> = Mutex::new(0);
@@ -299,7 +302,7 @@ impl Engine {
             gpu,
             kernels,
             nets: Vec::new(),
-            held: None,
+            held: [None, None],
         })
     }
 
@@ -340,16 +343,19 @@ impl Engine {
 
     fn hold(
         &mut self,
-        r: Retime,
+        (slot, r): (usize, Retime),
         key: &(PathBuf, u64, i64, i64),
         (ua, ub): (&wgpu::Buffer, &wgpu::Buffer),
         size: (u32, u32),
     ) -> Result<()> {
         let same = |h: &Held| h.retime == r && h.size == size;
-        if self.held.as_ref().is_some_and(|h| h.key == *key && same(h)) {
+        if self.held[slot]
+            .as_ref()
+            .is_some_and(|h| h.key == *key && same(h))
+        {
             return Ok(());
         }
-        let kept = self.held.take().filter(same);
+        let kept = self.held[slot].take().filter(same);
         if r.ai() {
             self.net(r)?;
         }
@@ -396,7 +402,7 @@ impl Engine {
             }
             _ => {}
         });
-        self.held = Some(Held {
+        self.held[slot] = Some(Held {
             key: key.clone(),
             retime: r,
             size,
@@ -406,8 +412,8 @@ impl Engine {
         Ok(())
     }
 
-    fn frame(&self, r: Retime, t: f32) -> Result<held::Held> {
-        let held = self.held.as_ref().expect("held");
+    fn frame(&self, (slot, r): (usize, Retime), t: f32) -> Result<held::Held> {
+        let held = self.held[slot].as_ref().expect("held");
         let size = held.size;
         self.submit(|o| match (&held.state, self.loaded(r)) {
             (State::Blend(img, mixed), _) => {
@@ -483,6 +489,27 @@ pub(crate) fn between(
     size: (u32, u32),
     t: f64,
 ) -> Result<Picture> {
+    between_in((COLORS, r), key, (a, b), size, t)
+}
+
+pub(crate) fn matte_between(
+    r: Retime,
+    key: &(PathBuf, u64, i64, i64),
+    a: &frame::Video,
+    b: &frame::Video,
+    size: (u32, u32),
+    t: f64,
+) -> Result<Picture> {
+    between_in((MATTE, r), key, (a, b), size, t)
+}
+
+fn between_in(
+    (slot, r): (usize, Retime),
+    key: &(PathBuf, u64, i64, i64),
+    (a, b): (&frame::Video, &frame::Video),
+    size: (u32, u32),
+    t: f64,
+) -> Result<Picture> {
     let clock = Instant::now();
     if !held::deep(a) || !held::deep(b) {
         return Err(Error::Invalid(format!("{} takes 16-bit pictures", name(r))));
@@ -495,8 +522,8 @@ pub(crate) fn between(
     }
     let pair = (held::held(a)?.buffer(), held::held(b)?.buffer());
     let made = Picture::Held(with_engine(|e| {
-        e.hold(r, key, pair, size)?;
-        e.frame(r, t as f32)
+        e.hold((slot, r), key, pair, size)?;
+        e.frame((slot, r), t as f32)
     })?);
     made_in(r, size, t, clock);
     if std::env::var_os("VIDCUT_INTERPOLATE_DUMP").is_some() {

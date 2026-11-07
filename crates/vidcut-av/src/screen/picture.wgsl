@@ -83,7 +83,10 @@ fn opacity(u: vec2<f32>) -> f32 {
     if p.site.z > 0.5 && p.site.z < 1.5 {
         return 1.0;
     }
-    let s = stored(u) * p.upright.zw;
+    return stored_opacity(stored(u) * p.upright.zw);
+}
+
+fn stored_opacity(s: vec2<f32>) -> f32 {
     if p.flags.z == 2u {
         return read_as(textureSampleLevel(luma, bilinear, s, 0.0).r);
     }
@@ -100,7 +103,12 @@ fn premultiplied() -> bool {
     return p.site.z > 1.5 && p.site.z < 2.5;
 }
 
+fn matte() -> bool {
+    return p.site.w > 1.5 && p.site.w < 2.5;
+}
+
 var<private> placed_share: f32 = 1.0;
+var<private> file_alpha: f32 = 1.0;
 
 fn weight(x: f32, kind: u32) -> f32 {
     let a = abs(x);
@@ -373,12 +381,15 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     }
     if p.made.x > 1.5 {
         let q = (px / p.made.yz - p.part.xy) / p.part.zw;
-        return vec4<f32>(pixel(q), cover * p.placed.y);
+        file_alpha = opacity(q);
+        placed_share = cover * p.placed.y;
+        return vec4<f32>(pixel(q), placed_share * file_alpha);
     }
     let size = p.upright.xy;
     let spans = vec2<f32>(length(across * size), length(down * size));
-    let a = cover * p.placed.y * opacity(uv);
+    file_alpha = opacity(uv);
     placed_share = cover * p.placed.y;
+    let a = placed_share * file_alpha;
     if resamples(uv, spans) {
         return vec4<f32>(sharp(uv, spans), a);
     }
@@ -502,7 +513,16 @@ fn looked_up(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_convert_lut(in: Out) -> @location(0) vec4<f32> {
-    return vec4<f32>(looked_up(rgb(yuv_woven(floor(in.position.xy)))), 1.0);
+    let px = floor(in.position.xy);
+    let c = rgb(yuv_woven(px));
+    if !premultiplied() {
+        return vec4<f32>(looked_up(c), 1.0);
+    }
+    let a = stored_opacity((px + 0.5) / stored_size() * p.upright.zw);
+    if a <= 0.0 {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    return vec4<f32>(looked_up(c / a) * a, 1.0);
 }
 
 @fragment
@@ -682,6 +702,10 @@ fn mixed(mode: u32, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
 
 @group(1) @binding(0) var below: texture_2d<f32>;
 
+fn own_color(c: vec3<f32>) -> vec3<f32> {
+    return select(c, c / file_alpha, p.site.w > 2.5 && file_alpha > 0.0);
+}
+
 fn mode_mixed(mode: u32, c: vec3<f32>, under: vec4<f32>) -> vec3<f32> {
     let b = select(under.rgb, under.rgb / under.a, under.a > 0.0);
     return mix(c, mixed(mode, c, b), under.a);
@@ -692,14 +716,15 @@ fn fs_mode(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
     let top = shown(px);
     let under = textureLoad(below, vec2<i32>(px), 0);
+    let c = own_color(top.rgb);
     if p.placed.w > 1.5 {
-        var alone = top.rgb;
+        var alone = c;
         if under.a > 0.0 {
-            alone = mix(top.rgb, mixed(u32(p.placed.z + 0.5), top.rgb, under.rgb / under.a), under.a);
+            alone = mix(c, mixed(u32(p.placed.z + 0.5), c, under.rgb / under.a), under.a);
         }
         return vec4<f32>(alone * top.a, top.a);
     }
-    let m = mode_mixed(u32(p.placed.z + 0.5), top.rgb, under);
+    let m = mode_mixed(u32(p.placed.z + 0.5), c, under);
     if p.placed.w > 0.5 {
         return vec4<f32>(m * top.a, top.a);
     }
@@ -719,7 +744,11 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
     if p.placed.x > 0.5 {
         if (p.made.x > 0.5 && p.made.x < 1.5) || p.made.w > 0.5 {
-            return vec4<f32>(shown(px + p.part.xy).rgb, 1.0);
+            let c = shown(px + p.part.xy).rgb;
+            if matte() {
+                return vec4<f32>(vec3<f32>(file_alpha), 1.0);
+            }
+            return vec4<f32>(c * select(1.0, file_alpha, p.site.w > 0.5 && !premultiplied()), 1.0);
         }
         return placed(px);
     }
@@ -733,6 +762,9 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     let rel = (px - p.place.xy) / p.place.zw;
     let cover = p.upright.xy / p.place.zw;
     let a = opacity(clamp(rel, vec2<f32>(0.0), vec2<f32>(1.0))) * edge;
+    if matte() {
+        return vec4<f32>(vec3<f32>(a), 1.0);
+    }
     let solid = select(1.0, a, keeps);
     let share = select(a, edge, premultiplied());
     if resamples(rel, cover) {
@@ -1292,6 +1324,36 @@ fn fs_vignette(in: Out) -> @location(0) vec4<f32> {
     let m = vignette_mixed(vignetting.color.rgb, was.rgb);
     let made = clamp(was.rgb + (m - was.rgb) * share, vec3<f32>(0.0), vec3<f32>(1.0));
     return effect_mixed(px, vec4<f32>(made, was.a), vignetting.first.w, use_alpha);
+}
+
+struct Sharpening {
+    more: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> sharpening: Sharpening;
+@group(0) @binding(3) var<storage, read> sharpen_planes: array<f32>;
+
+@fragment
+fn fs_sharpen_taken(in: Out) -> @location(0) vec4<f32> {
+    return effect_taken(textureLoad(blur_source, vec2<i32>(in.position.xy), 0), sharpening.more.y);
+}
+
+@fragment
+fn fs_sharpen(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let was = textureLoad(blur_source, px, 0);
+    let size = vec2<i32>(textureDimensions(blur_source));
+    let at = px.y * size.x + px.x;
+    var red = 0.0;
+    var blue = 0.0;
+    if sharpening.more.z > 0.5 {
+        let plane = size.x * size.y;
+        red = sharpen_planes[plane + at];
+        blue = sharpen_planes[2 * plane + at];
+    }
+    let green = -(BT709.r * red + BT709.b * blue) / BT709.g;
+    let made = was.rgb + sharpen_planes[at] + vec3<f32>(red, green, blue);
+    return effect_mixed(px, vec4<f32>(made, was.a), sharpening.more.x, sharpening.more.y);
 }
 
 struct Mosaic {

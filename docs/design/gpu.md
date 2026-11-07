@@ -79,7 +79,7 @@ In the viewer, exports, proxies and thumbnails:
   - Each job opens a new display (`own_decoder`). Thus each list is an `Lru` with a limit.
   - vidcut finds a fact again after it leaves its list.
 
-- A ProRes 4444 or 4444 XQ export on VideoToolbox takes P416. With Export Alpha on, it takes AYUV64, which has the alpha (`gpu_pixel`).
+- A ProRes 4444 or 4444 XQ export on VideoToolbox takes P416. With Export Alpha on, it takes AYUV64, which has the alpha (`gpu_pixel`, [export](export.md#encoding-one-output)).
 - A Vulkan picture with an alpha channel has a fourth image. The draw takes it as the alpha plane (`Import::alpha`).
   - The image holds 12-bit values in 16-bit samples. Thus the shader scales them (`ALPHA_OF_16`).
   - A picture with alpha that comes without its fourth image comes down from the GPU.
@@ -116,6 +116,8 @@ The draw:
   - The viewer's frame render, the AI upscalers and the frame interpolation use that device too (`compute::Gpu`).
   - It opens with all the limits of the GPU. Why: the AI kernels need large buffers and much workgroup memory.
   - It is not the device of the viewer: a submit from another thread can make the viewer's surface fail ([gotchas](../gotchas.md#wgpu-and-egui)).
+    - The viewer's device opens with the largest texture, buffer and storage binding of the GPU. Its other limits are the defaults of wgpu.
+    - Why: a Sharpen of the colors keeps 12 bytes for each pixel of the frame in one storage buffer ([export](export.md#effects)).
 - There, `fs_encode` writes the planes of the encoder ([export](export.md#timeline-colors)).
   - NVENC takes them through memory that Vulkan shares with CUDA (`Shared::out`).
   - VideoToolbox takes them in the IOSurfaces of its own frames (`Sink::Surface`).

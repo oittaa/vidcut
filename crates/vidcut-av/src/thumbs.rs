@@ -1,4 +1,4 @@
-use vidcut_core::model::ColorSpace;
+use vidcut_core::model::{AlphaMode, ColorSpace};
 
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, decoder, encoder, format, frame, media, software::scaling};
@@ -26,9 +26,9 @@ pub fn filmstrip(
     max_w: u32,
     max_h: u32,
     decoder: Option<&crate::hw::GpuDecoder>,
-    space: ColorSpace,
+    look: (ColorSpace, AlphaMode),
 ) -> Result<(Vec<Image>, Vec<f64>)> {
-    filmstrip_inner(source, count, max_w, max_h, None, decoder, space)
+    filmstrip_inner(source, count, max_w, max_h, None, decoder, look)
 }
 
 pub fn filmstrip_pictures(
@@ -38,9 +38,9 @@ pub fn filmstrip_pictures(
     max_w: u32,
     max_h: u32,
     decoder: Option<&crate::hw::GpuDecoder>,
-    space: ColorSpace,
+    look: (ColorSpace, AlphaMode),
 ) -> Result<(Vec<Image>, Vec<f64>)> {
-    filmstrip_inner(source, count, max_w, max_h, Some(pictures), decoder, space)
+    filmstrip_inner(source, count, max_w, max_h, Some(pictures), decoder, look)
 }
 
 fn filmstrip_inner(
@@ -50,14 +50,14 @@ fn filmstrip_inner(
     max_h: u32,
     pictures: Option<u64>,
     gpu: Option<&crate::hw::GpuDecoder>,
-    space: ColorSpace,
+    look: (ColorSpace, AlphaMode),
 ) -> Result<(Vec<Image>, Vec<f64>)> {
     if gpu.is_some()
-        && let Ok(Some(strip)) = strip_on(source, (count, max_w, max_h), pictures, gpu, space)
+        && let Ok(Some(strip)) = strip_on(source, (count, max_w, max_h), pictures, gpu, look)
     {
         return Ok(strip);
     }
-    strip_on(source, (count, max_w, max_h), pictures, None, space).map(Option::unwrap_or_default)
+    strip_on(source, (count, max_w, max_h), pictures, None, look).map(Option::unwrap_or_default)
 }
 
 fn strip_on(
@@ -65,7 +65,7 @@ fn strip_on(
     (count, max_w, max_h): (usize, u32, u32),
     pictures: Option<u64>,
     gpu: Option<&crate::hw::GpuDecoder>,
-    space: ColorSpace,
+    (space, alpha): (ColorSpace, AlphaMode),
 ) -> Result<Option<(Vec<Image>, Vec<f64>)>> {
     if pictures == Some(0) {
         return Ok(Some((Vec::new(), Vec::new())));
@@ -111,6 +111,7 @@ fn strip_on(
     let mut fit = Fit {
         drawn: None,
         space,
+        alpha,
         path: path.to_path_buf(),
     };
 
@@ -223,6 +224,7 @@ fn keep(
 struct Fit {
     drawn: Option<crate::export::video::Single>,
     space: ColorSpace,
+    alpha: AlphaMode,
     path: std::path::PathBuf,
 }
 
@@ -244,7 +246,14 @@ impl Fit {
                 crate::decode::Reading::Frames,
             )?),
         };
-        let out = single.draw(decoded, rotation, (tw, th), format::Pixel::RGBA, &self.path)?;
+        let out = single.draw(
+            decoded,
+            rotation,
+            (tw, th),
+            format::Pixel::RGBA,
+            &self.path,
+            self.alpha,
+        )?;
         Ok(Image::of(&out))
     }
 }

@@ -81,14 +81,19 @@ pub fn run(project: Option<PathBuf>) -> Result<()> {
                     backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY),
                     ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
                 },
-                device_descriptor: std::sync::Arc::new(|adapter| wgpu::DeviceDescriptor {
-                    label: Some("vidcut"),
-                    required_features: vidcut_av::screen::features(adapter),
-                    required_limits: wgpu::Limits {
-                        max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d,
-                        ..wgpu::Limits::default()
-                    },
-                    ..Default::default()
+                device_descriptor: std::sync::Arc::new(|adapter| {
+                    let most = adapter.limits();
+                    wgpu::DeviceDescriptor {
+                        label: Some("vidcut"),
+                        required_features: vidcut_av::screen::features(adapter),
+                        required_limits: wgpu::Limits {
+                            max_texture_dimension_2d: most.max_texture_dimension_2d,
+                            max_storage_buffer_binding_size: most.max_storage_buffer_binding_size,
+                            max_buffer_size: most.max_buffer_size,
+                            ..wgpu::Limits::default()
+                        },
+                        ..Default::default()
+                    }
                 }),
                 ..WgpuSetupCreateNew::without_display_handle()
             }),

@@ -2585,7 +2585,7 @@ pub enum Request {
         clip: ClipRef,
         effect: usize,
         #[serde(flatten)]
-        change: EffectChange,
+        change: Box<EffectChange>,
     },
     /// Put one effect of a clip back at its usual values. It stays on, and
     /// keeps its `render_cache`. An effect that is off does not change.
@@ -4645,6 +4645,25 @@ pub struct EffectChange {
     /// The color around a Vignette's shape, `[r, g, b]` in code values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<Vec<f64>>,
+    /// How strong a Sharpen's detail of the brightness is, from 1 (no change)
+    /// to 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharpen_amount: Option<f64>,
+    /// How large each band of a Sharpen's detail is, from 0.01 to 0.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fine_detail_size: Option<f64>,
+    /// Multiplies the strength of a Sharpen's fine band, from 1 to 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fine_details: Option<f64>,
+    /// Multiplies the strength of a Sharpen's medium band, from 1 to 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub medium_details: Option<f64>,
+    /// Multiplies the strength of a Sharpen's large band, from 1 to 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub large_details: Option<f64>,
+    /// How strong a Sharpen's detail of the colors is, from 1 to 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sharpen_chroma: Option<f64>,
 }
 
 /// A change to a clip's Dynamic Zoom: each field given replaces its own,
