@@ -2363,6 +2363,9 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
   - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate.
+  - Its Frame rate menu offers the rates that Resolve Studio 21.2 takes for a project (`timelineFrameRate` in a script):
+    - 16, 18, 23.976, 24, 25, 29.97, 30, 47.952, 48, 50, 59.94, 60, 72, 90, 95.904, 96, 100, 119.88 and 120 fps.
+    - Resolve refuses other rates, for example 15, 20, 144 and 240.
   - An export in H.264 or H.265 rounds an odd side up (§10).
   - A side under 256 sets both sides to 256, whichever side it is. 16 x 720, 99999 x 16 and 16 x 99999 give 256 x 256.
   - Else a side over 32768 sets both sides to 32768. 99999 x 720 gives 32768 x 32768.
