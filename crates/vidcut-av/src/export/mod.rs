@@ -720,6 +720,7 @@ fn first_run(
 ) -> Result<Option<String>> {
     let mut frames = VideoFrames::new(&plan.video, plan.fps, w, h, enc.pixel, enc.hdr)
         .written_at(written)
+        .in_frame((plan.width, plan.height))
         .with_timeline(plan.colors)?
         .with_output_lut(plan.output_lut.as_deref())?
         .with_dynamic(enc.dynamic)
@@ -1217,6 +1218,7 @@ fn encode(
                 VideoFrames::new(&plan.video, plan.fps, drawn.0, drawn.1, pixel, enc.hdr)
                     .encode_on(handoff)
                     .written_at((w, h))
+                    .in_frame(timeline)
                     .with_timeline(plan.colors)?
                     .with_output_lut(plan.output_lut.as_deref())?
                     .with_dynamic(enc.dynamic)

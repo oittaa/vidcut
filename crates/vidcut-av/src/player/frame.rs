@@ -549,6 +549,7 @@ pub struct Shown {
     pub scales: Vec<Option<vidcut_core::model::Sharpness>>,
     pub colors: Option<vidcut_core::model::Hdr>,
     pub output_lut: Option<crate::screen::Lut>,
+    pub size: (u32, u32),
 }
 
 pub struct TitlePicture {

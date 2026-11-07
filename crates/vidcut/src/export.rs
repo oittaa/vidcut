@@ -1526,6 +1526,7 @@ pub fn frame(
             )
         }
     };
+    let frame_size = (w, h);
     let (w, h) = match width {
         Some(nw) => (
             nw & !1,
@@ -1536,7 +1537,8 @@ pub fn frame(
     let decoder = crate::preferences::gpu_decoding().own_decoder();
     let size = (w.max(2), h.max(2));
     let colors = (colors, lut.as_deref());
-    vidcut_av::export::still::write_png(&piece, fps, size, colors, out, decoder.as_ref())
+    let sizes = (size, frame_size);
+    vidcut_av::export::still::write_png(&piece, fps, sizes, colors, out, decoder.as_ref())
         .map_err(from_av)?;
     Ok(json!({ "path": out, "frame": frame, "width": w, "height": h }))
 }

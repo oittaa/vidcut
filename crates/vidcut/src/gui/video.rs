@@ -357,6 +357,7 @@ fn run(shared: &Shared, gpu: &Gpu, repaint: &dyn Fn()) {
             })
             .unwrap_or_default();
         screen.set_output_lut(shown.as_ref().and_then(|s| s.output_lut.clone()));
+        screen.set_frame_size(shown.as_ref().map(|s| s.size));
         screen.scoping(!scopes.is_empty());
         let drawn = screen.draw(
             gpu,

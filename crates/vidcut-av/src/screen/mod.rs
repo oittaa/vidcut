@@ -1075,6 +1075,7 @@ pub struct Screen {
     blurred: blur::Blurred,
     output_lut: Option<Lut>,
     drawn_output_lut: Option<Lut>,
+    frame: Option<(u32, u32)>,
     looked_up: Option<lut::LookedUp>,
     scoping: bool,
     drawn_scoping: bool,
@@ -1646,6 +1647,13 @@ impl Screen {
         self.output_lut = lut;
     }
 
+    pub fn set_frame_size(&mut self, frame: Option<(u32, u32)>) {
+        if self.frame != frame {
+            self.frame = frame;
+            self.drawn = None;
+        }
+    }
+
     pub fn draw(
         &mut self,
         gpu: &Gpu,
@@ -1758,7 +1766,7 @@ impl Screen {
         let exported = self.exported;
         let alpha = self.alpha;
         let clock = std::time::Instant::now();
-        self.blurred.sized(size, n);
+        self.blurred.sized(size, self.frame.unwrap_or(size), n);
         let blurred = &mut self.blurred;
         let binds: Vec<Bound> = layers
             .iter()

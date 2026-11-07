@@ -11,7 +11,7 @@ const KERNEL: usize = 35;
 
 const MOST: f64 = 128.0;
 
-const REACH: f64 = 4.0;
+pub(super) const REACH: f64 = 4.0;
 
 const LEFT: f64 = 1e-3;
 
@@ -492,7 +492,7 @@ impl Texture {
 
 type Spare = Lru<(u32, u32, u32), Texture, SPARE_TEXTURES>;
 
-type Tiles = Lru<[u64; 5], Texture, GRAIN_TILES>;
+type Tiles = Lru<[u64; 8], Texture, GRAIN_TILES>;
 
 fn spare_ready(gpu: &Gpu, spare: &mut Spare, (w, h): (u32, u32), slots: [u32; 2]) {
     for slot in slots {
@@ -509,6 +509,7 @@ struct Worked {
     planes: Option<sharpen::Planes>,
     spare: Spare,
     tiles: Tiles,
+    shrink: [f64; 2],
 }
 
 #[derive(Default)]
@@ -521,7 +522,7 @@ pub(super) struct Blurred {
 }
 
 impl Blurred {
-    pub(super) fn sized(&mut self, size: (u32, u32), n: usize) {
+    pub(super) fn sized(&mut self, size: (u32, u32), frame: (u32, u32), n: usize) {
         if self.size != size {
             self.size = size;
             self.scratch = None;
@@ -529,6 +530,8 @@ impl Blurred {
             self.layers.clear();
             self.masks.clear();
         }
+        let part = |drawn: u32, whole: u32| (f64::from(drawn) / f64::from(whole.max(1))).min(1.0);
+        self.worked.shrink = [part(size.0, frame.0), part(size.1, frame.1)];
         self.layers.resize_with(n, || None);
         self.masks.resize_with(n, || None);
     }
@@ -831,7 +834,7 @@ fn grain_bytes(grain: &Graining, effect: &Working, (shift, detailed): ([i32; 2],
 fn grain_tile<'a>(
     gpu: &Gpu,
     tiles: &'a mut Tiles,
-    tile: &GrainTile,
+    (tile, shrunk): (&GrainTile, &grain::Shrunk),
     (w, h): (u32, u32),
 ) -> Option<&'a Texture> {
     let key = [
@@ -840,12 +843,15 @@ fn grain_tile<'a>(
         tile.scale.to_bits(),
         tile.aspect.to_bits(),
         tile.seed,
+        shrunk.shrink[0].to_bits(),
+        shrunk.shrink[1].to_bits(),
+        shrunk.soft.to_bits(),
     ];
     if !tiles.contains(&key) {
         let made = Texture::new(gpu, (w, h));
         gpu.queue.write_texture(
             made.texture.as_image_copy(),
-            &grain::tile_bytes(tile, (w, h)),
+            &grain::tile_bytes(tile, (w, h), shrunk),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(w * grain::BYTES as u32),
@@ -861,13 +867,18 @@ fn grain_tile<'a>(
 fn grain_into(
     gpu: &Gpu,
     own: &Texture,
-    (scratch, spare, tiles): (&[Texture; 2], &mut Spare, &mut Tiles),
+    (scratch, spare, tiles, shrink): (&[Texture; 2], &mut Spare, &mut Tiles, [f64; 2]),
     (grain, effect): (&Graining, &Working),
     encoder: &mut wgpu::CommandEncoder,
 ) {
     let size = own.texture.size();
     let canvas = (size.width, size.height);
-    let Some(tile) = grain_tile(gpu, tiles, &grain.tile, canvas) else {
+    let whole = shrink.iter().all(|s| *s >= 1.0);
+    let shrunk = grain::Shrunk {
+        shrink,
+        soft: if whole { 0.0 } else { grain.softness },
+    };
+    let Some(tile) = grain_tile(gpu, tiles, (&grain.tile, &shrunk), canvas) else {
         return;
     };
     let detail = gaussian_ways(grain.detail);
@@ -896,7 +907,7 @@ fn grain_into(
         &scratch[0].view,
         encoder,
     );
-    let soft = gaussian_ways(grain.softness);
+    let soft = gaussian_ways(if whole { grain.softness } else { 0.0 });
     let ways = (&soft[..], BORDER_HALF);
     let plain = ([0.0; 4], [0.0; 4]);
     let [one, two] = scratch;
@@ -940,7 +951,7 @@ fn effects_into(
                 continue;
             }
             Work::Grain(grain) => {
-                let room = (scratch, &mut worked.spare, &mut worked.tiles);
+                let room = (scratch, &mut worked.spare, &mut worked.tiles, worked.shrink);
                 grain_into(gpu, own, room, (grain.as_ref(), effect), encoder);
                 continue;
             }
