@@ -1215,6 +1215,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Without an anchor, Position Y is the middle of the block. With a margin, it is the bottom edge of a bottom block, or the top edge of a top block.
   - The anchor names the point of the block that goes to the position: a corner, the middle of a side, or the middle.
   - The Subtitle Track section and the style of a cue show the anchor as Left, Middle or Right, and Top, Middle or Bottom.
+  - In the style of a cue, Track drops the cue's own anchor. Then the cue keeps the track's anchor, as Track does for the alignment.
   - The Subtitle Track section and the style of a cue show Position X and Position Y in pixels of the timeline:
     - Position X counts from the left edge. Position Y counts up from the bottom edge.
     - A typed value stops at 4 times the width or the height, to either side.
