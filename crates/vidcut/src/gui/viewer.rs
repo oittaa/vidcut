@@ -1782,7 +1782,7 @@ impl Workspace {
             return;
         }
         if let Some(sign) = entry.sign {
-            let Some(spec) = timecode_input(raw, self.dropped(), self.frame_digits()) else {
+            let Some(spec) = timecode_input(raw, "", self.dropped(), self.frame_digits()) else {
                 return;
             };
             let at = if sign > 0 {
@@ -1794,8 +1794,10 @@ impl Workspace {
             return;
         }
         let view = self.snap.timecode_view();
+        let shown = self.snap.timecode_text();
         if view.display == TimecodeDisplay::Auto && !view.viewer.is_source() {
-            let Some(spec) = timecode_input(raw, self.dropped(), self.frame_digits()) else {
+            let Some(spec) = timecode_input(raw, &shown, self.dropped(), self.frame_digits())
+            else {
                 return;
             };
             self.send("player.seek", json!({ "at": spec }));
@@ -1811,7 +1813,8 @@ impl Workspace {
             }
             raw.to_string()
         } else {
-            let Some(spec) = timecode_input(raw, self.dropped(), self.frame_digits()) else {
+            let Some(spec) = timecode_input(raw, &shown, self.dropped(), self.frame_digits())
+            else {
                 return;
             };
             if !spec.contains([':', ';']) {
@@ -2183,8 +2186,15 @@ fn stats_panel(
     painter.ctx().data_mut(|d| d.insert_temp(key, held));
 }
 
-pub(super) fn timecode_input(text: &str, dropped: i64, digits: usize) -> Option<String> {
-    let t = text.trim().trim_start_matches(['+', '-', '=']);
+pub(super) fn timecode_input(
+    text: &str,
+    shown: &str,
+    dropped: i64,
+    digits: usize,
+) -> Option<String> {
+    let text = text.trim();
+    let relative = text.starts_with(['+', '-']);
+    let t = text.trim_start_matches(['+', '-', '=']);
     if t.is_empty() {
         return None;
     }
@@ -2192,14 +2202,29 @@ pub(super) fn timecode_input(text: &str, dropped: i64, digits: usize) -> Option<
         let width = 6 + digits;
         let padded = format!("{t:0>width$}");
         let d = &padded[padded.len() - width..];
-        let field = |a: usize, b: usize| d[a..b].parse::<i64>().unwrap_or(0);
+        let kept = shown_places(shown, digits)
+            .filter(|_| !relative)
+            .unwrap_or_else(|| "0".repeat(width));
+        let cut = width.saturating_sub(t.len());
+        let place = |a: usize, b: usize| if b <= cut { &kept[a..b] } else { &d[a..b] };
+        let field = |a: usize, b: usize| place(a, b).parse::<i64>().unwrap_or(0);
         let (m, s, mut f) = (field(2, 4), field(4, 6), field(6, width));
         if s == 0 && f < dropped && m % 10 != 0 {
             f = dropped;
         }
-        return Some(format!("{}:{m:02}:{s:02}:{f:0digits$}", &d[0..2]));
+        return Some(format!("{}:{m:02}:{s:02}:{f:0digits$}", place(0, 2)));
     }
     Some(t.to_string())
+}
+
+fn shown_places(shown: &str, digits: usize) -> Option<String> {
+    let parts: Vec<&str> = shown.trim().split([':', ';']).collect();
+    let fits = parts.len() == 4
+        && parts
+            .iter()
+            .zip([2, 2, 2, digits])
+            .all(|(p, n)| p.len() == n && p.bytes().all(|b| b.is_ascii_digit()));
+    fits.then(|| parts.concat())
 }
 
 #[cfg(test)]
@@ -2273,20 +2298,26 @@ mod tests {
 
     #[test]
     fn digits_fill_timecodes_from_the_right() {
-        assert_eq!(timecode_input("100", 0, 2).as_deref(), Some("00:00:01:00"));
-        assert_eq!(timecode_input("+12", 0, 2).as_deref(), Some("00:00:00:12"));
         assert_eq!(
-            timecode_input("1000000", 0, 2).as_deref(),
+            timecode_input("100", "", 0, 2).as_deref(),
+            Some("00:00:01:00")
+        );
+        assert_eq!(
+            timecode_input("+12", "", 0, 2).as_deref(),
+            Some("00:00:00:12")
+        );
+        assert_eq!(
+            timecode_input("1000000", "", 0, 2).as_deref(),
             Some("01:00:00:00")
         );
-        assert_eq!(timecode_input("5s", 0, 2).as_deref(), Some("5s"));
-        assert_eq!(timecode_input("  ", 0, 2).as_deref(), None);
+        assert_eq!(timecode_input("5s", "", 0, 2).as_deref(), Some("5s"));
+        assert_eq!(timecode_input("  ", "", 0, 2).as_deref(), None);
     }
 
     #[test]
     fn a_minute_typed_in_drop_frame_lands_on_its_first_frame() {
         assert_eq!(
-            timecode_input("10000", 2, 2).as_deref(),
+            timecode_input("10000", "", 2, 2).as_deref(),
             Some("00:01:00:02")
         );
     }

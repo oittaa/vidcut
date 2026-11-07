@@ -478,8 +478,13 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - **Go to a time:**
   - Click the timecode field and type.
   - Or type `=` and a timecode, or `+` or `-` and a value to jump by.
-  - Digits fill a timecode from the right: `100` is 1 second, and `10000` is 1 minute.
-  - At 119.88 and 120 fps, the frames take three digits. Thus `1000` is 1 second, and `+100` is 100 frames.
+  - Digits fill a timecode from the right. Each field takes two digits: the hours, the minutes, the seconds and the frames.
+  - A field that the digits do not reach keeps its value from the timecode that the field shows.
+  - Measured in Resolve Studio 21.2 at 30 fps: `305` on `01:00:12:10` gives `01:00:03:05`.
+  - A value to jump by starts from zero. Thus `+100` jumps 1 second, and `+10000` jumps 1 minute.
+  - At 119.88 and 120 fps, the frames take three digits. Thus `+1000` is 1 second, and `+100` is 100 frames.
+  - The same rule applies in the Duration of Speed Change, the In and Out of a subtitle, and Edit Subclip.
+  - The field of Change Clip Duration starts empty. Thus its digits count from zero.
   - A value with a unit (`5s`, `450f`) is that duration.
 - **Display:**
   - The frames of a timecode have as many digits as the last frame of a second: two, or three at 119.88 and 120 fps.

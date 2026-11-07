@@ -3381,7 +3381,7 @@ impl Workspace {
                 );
             };
             let typed =
-                crate::gui::viewer::timecode_input(&text, self.dropped(), self.frame_digits());
+                crate::gui::viewer::timecode_input(&text, "", self.dropped(), self.frame_digits());
             let mut enter = false;
             super::dialog::form(ui, "duration-form", |ui| {
                 super::dialog::row(ui, "Clips", |ui| ui.label(clips.len().to_string()));
