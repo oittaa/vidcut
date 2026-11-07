@@ -1732,10 +1732,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - Symmetry is a table of measured curves, with a step of 0.02 to 0.06. Each curve is a cubic near the middle and a straight line on each side.
     - Resolve gives spikes at exactly 0.4 and 0.6, with a standard deviation of 0.0109 and 0.0855 against 0.026 on each side. vidcut does not copy them ([X144](deviations.md#x144-a-film-grain-has-no-jumps-at-symmetry-04-and-06)).
   - vidcut adds the folds of `R` at each frequency of the canvas. Thus the noise keeps its standard deviation before Softness on each frame height.
-    - The table of `K` for Grain Size 0 to 0.4 comes from one fit to the renders on 1280×720, 1920×1080 and 3840×2160.
+    - The table of `K` for Grain Size 0 to 0.4 comes from fits to the renders on 1280×720, 1920×1080 and 3840×2160.
+    - The value at Grain Size 0.2156 comes from the values of 8mm 100D with Softness 0. The value at 0 also fits 35mm 400T.
     - At the defaults, the renders on 3840×2160, 1080×1920 and 1440×1440 agree within 1.6%.
-    - 35mm 400T at Grain Size 0 gives 1.020, 1.053 and 1.054 of the standard deviation of the renders, on 1920×1080, 3840×2160 and 1080×1920.
-    - 8mm 100D at Grain Size 0.2156 and Grain Strength 1 gives 1.112, 1.119 and 1.121.
+    - 35mm 400T at Grain Size 0 gives 1.018, 1.031 and 1.032 of the standard deviation of the renders, on 1920×1080, 3840×2160 and 1080×1920.
+    - 8mm 100D at Grain Size 0.2156 and Grain Strength 1 gives 1.045, 1.046 and 1.048.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
     - Film Grain Presets shows Custom when a value differs from each film stock.
