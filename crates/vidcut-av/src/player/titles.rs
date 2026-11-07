@@ -247,6 +247,7 @@ fn drawn((t, (width, height), timeline, whole): &Key) -> TitlePictures {
                     height: sprite.height,
                     lift: sprite.lift,
                     frame: (width, height),
+                    float: sprite.float,
                     rgba: sprite.premultiplied(),
                 })
             })

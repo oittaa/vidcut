@@ -445,6 +445,11 @@ Cancel:
     - The `drop` field of `Look` brings the top of the box down to where the upper line starts.
   - `lay_out` strokes the outlines of the glyphs with zeno. When a glyph has no outline, it grows the drawn letters instead (`dilate`).
   - A stroke goes over the letters. An `outside` stroke goes behind them, at the same width.
+  - A title with a shadow or a box keeps its layers in floats (`Look` and `Sprite`, their `float` field). This is what Resolve does ([spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
+    - `lay_out` rounds the letters with their stroke to 8 bits, and the box to 8 bits. The shadow stays in floats.
+    - It then lays the box, the shadow and the letters over each other in floats.
+    - A title with no shadow and no box rounds to 8 bits once, at the end. Subtitles do the same.
+    - A title of several parts, for example a lower third with its shape, is in floats when one part is. Then `merged` rounds each other part to 8 bits before the join.
   - `Edge` holds its width in pixels of the picture. `burn::title` and `burn::paint` take the timeline height for this, because a width is in pixels of the timeline.
   - A title has spans, each with its own face, size, weight, slant, underline and color.
   - Its kind aligns it, and title safe wraps it. It has one box behind the block, and its anchor places it.

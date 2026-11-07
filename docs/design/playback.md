@@ -189,6 +189,7 @@ flowchart TD
 - `Player::preview_title` shows the title of one clip (`ShownTitle::clip`) in place of the plan's title, without a new plan.
 - `Player::present` hands each block of a title of a frame as a `TitleOver`:
   - the picture, in premultiplied RGBA, and how many layers go under it. A picture larger than the largest texture of the GPU goes in parts (`LetterTile`), for example a long scroll.
+    - The picture is 8-bit. With its `float` field set, it is in 32-bit floats (`TitlePicture`, [export](export.md#titles)).
   - its move from how it was drawn: its place, zoom and rotation, or the `Run::top` of a scroll. The viewer's shader does the transform.
   - For a turned title, the shader first cuts the picture at the edges of the frame (`Lettering`).
   - its level, from a fade or its opacity (`Lettering`)
