@@ -3,6 +3,7 @@ pub mod audio;
 pub mod encode;
 pub(crate) mod make;
 pub(crate) mod normalize;
+mod openexr;
 pub mod renderer;
 pub mod still;
 pub mod subtitles;
@@ -524,44 +525,7 @@ struct FrameFiles {
     fps: Rational,
     written: i64,
     associated: bool,
-}
-
-const EXR_START: [u8; 8] = [0x76, 0x2f, 0x31, 0x01, 2, 0, 0, 0];
-const EXR_TIMECODE_NAME: &[u8] = b"timeCode";
-const EXR_TIMECODE_TYPE: &[u8] = b"timecode";
-const EXR_LINE_ORDER_NAME: &[u8] = b"lineOrder";
-
-fn exr_layout(data: &[u8]) -> Option<(usize, usize)> {
-    if !data.starts_with(&EXR_START) {
-        return None;
-    }
-    let zero = |from: usize| Some(from + data.get(from..)?.iter().position(|&b| b == 0)?);
-    let mut at = EXR_START.len();
-    while *data.get(at)? != 0 {
-        let name = zero(at)?;
-        if &data[at..name] == EXR_TIMECODE_NAME {
-            return None;
-        }
-        let kind = zero(name + 1)?;
-        if &data[at..name] == EXR_LINE_ORDER_NAME && *data.get(kind + 5)? != 0 {
-            return None;
-        }
-        let size = i32::from_le_bytes(data.get(kind + 1..kind + 5)?.try_into().ok()?);
-        at = kind + 5 + usize::try_from(size).ok()?;
-    }
-    let table = at + 1;
-    let first = u64::from_le_bytes(data.get(table..table + 8)?.try_into().ok()?);
-    let first = usize::try_from(first).ok()?;
-    let length = first.checked_sub(table)?;
-    (length > 0 && length % 8 == 0 && first <= data.len()).then_some((at, first))
-}
-
-fn exr_timecode(time: u32) -> Vec<u8> {
-    let mut attribute = [EXR_TIMECODE_NAME, b"\0", EXR_TIMECODE_TYPE, b"\0"].concat();
-    attribute.extend(8i32.to_le_bytes());
-    attribute.extend(time.to_le_bytes());
-    attribute.extend(0u32.to_le_bytes());
-    attribute
+    exr: Option<openexr::Writer>,
 }
 
 const TIFF_EXTRA_SAMPLES: u16 = 338;
@@ -591,12 +555,17 @@ impl FrameFiles {
         output: &Path,
         numbering: Numbering,
         fps: Rational,
+        size: (u32, u32),
     ) -> Result<Self> {
         let associated = settings.container == Container::Tiff
             && settings
                 .video
                 .as_ref()
                 .is_some_and(|v| v.alpha && v.alpha_mode == AlphaOut::Premultiplied);
+        let exr = match (settings.container, &settings.video) {
+            (Container::Exr, Some(v)) => Some(openexr::Writer::new(v, size, fps)),
+            _ => None,
+        };
         Ok(Self {
             dir: vidcut_core::temp::dir(output)?,
             settings: settings.clone(),
@@ -605,6 +574,7 @@ impl FrameFiles {
             fps,
             written: 0,
             associated,
+            exr,
         })
     }
 
@@ -612,38 +582,25 @@ impl FrameFiles {
         use std::io::Write;
         let path = self.dir.path().join(self.written.to_string());
         let data = packet.data().unwrap_or_default();
+        if let Some(exr) = &self.exr {
+            let time = vidcut_core::time::packed_timecode(
+                self.numbering.record + self.written,
+                self.fps,
+                self.numbering.drop_frame,
+            );
+            exr.write(data, time, &path)?;
+            self.written += 1;
+            return Ok(());
+        }
         let alpha = self.associated.then(|| tiff_extra_samples(data)).flatten();
-        let exr = (self.settings.container == Container::Exr)
-            .then(|| exr_layout(data))
-            .flatten();
-        let time = vidcut_core::time::packed_timecode(
-            self.numbering.record + self.written,
-            self.fps,
-            self.numbering.drop_frame,
-        );
         let mut file = std::fs::File::create(path)?;
-        match (alpha, exr.zip(time)) {
-            (Some(at), _) => {
+        match alpha {
+            Some(at) => {
                 file.write_all(&data[..at])?;
                 file.write_all(&TIFF_ASSOCIATED_ALPHA.to_le_bytes())?;
                 file.write_all(&data[at + 2..])?;
             }
-            (None, Some(((end, first), time))) => {
-                let attribute = exr_timecode(time);
-                let shift = attribute.len() as u64;
-                let offsets: Vec<u8> = data[end + 1..first]
-                    .as_chunks::<8>()
-                    .0
-                    .iter()
-                    .flat_map(|&o| (u64::from_le_bytes(o) + shift).to_le_bytes())
-                    .collect();
-                file.write_all(&data[..end])?;
-                file.write_all(&attribute)?;
-                file.write_all(&data[end..end + 1])?;
-                file.write_all(&offsets)?;
-                file.write_all(&data[first..])?;
-            }
-            (None, None) => file.write_all(data)?,
+            None => file.write_all(data)?,
         }
         self.written += 1;
         Ok(())
@@ -1251,7 +1208,13 @@ fn encode(
                 codec: id,
                 kind: enc.kind,
                 files: match settings.container.image_sequence() {
-                    true => Some(FrameFiles::new(settings, output, numbering, plan.fps)?),
+                    true => Some(FrameFiles::new(
+                        settings,
+                        output,
+                        numbering,
+                        plan.fps,
+                        (w, h),
+                    )?),
                     false => None,
                 },
             };

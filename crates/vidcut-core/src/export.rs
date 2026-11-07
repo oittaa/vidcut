@@ -123,7 +123,7 @@ pub const TIFF_PROFILES: [&str; 8] = [
     "rgb16_deflate",
 ];
 
-pub const EXR_PROFILES: [&str; 8] = [
+pub const EXR_PROFILES: [&str; 14] = [
     "half",
     "float",
     "half_rle",
@@ -132,7 +132,16 @@ pub const EXR_PROFILES: [&str; 8] = [
     "float_zip1",
     "half_zip16",
     "float_zip16",
+    "half_piz",
+    "float_piz",
+    "half_dwaa",
+    "float_dwaa",
+    "half_dwab",
+    "float_dwab",
 ];
+
+pub const DWA_LEVEL: u32 = 45;
+pub const DWA_LEVELS: std::ops::RangeInclusive<u32> = 0..=300;
 
 impl VideoCodec {
     pub const ALL: [Self; 8] = [
@@ -325,8 +334,9 @@ pub struct VideoSettings {
     /// ProRes: proxy, lt, standard, hq, 4444, xq. DNxHR: lb, sq, hq, hqx, 444.
     /// TIFF: rgb8, rgb16 (the default), each also with `_packbits`, `_lzw` or
     /// `_deflate`; without one it has no compression. OpenEXR: half (the
-    /// default), float, each also with `_rle`, `_zip1` or `_zip16`; without
-    /// one it has no compression.
+    /// default), float, each also with `_rle`, `_zip1`, `_zip16`, `_piz`,
+    /// `_dwaa` or `_dwab`; without one it has no compression. DWAA and DWAB
+    /// lose detail, by `compression_level`.
     #[serde(default)]
     pub profile: Option<String>,
     /// 8 or 10. Unset: 10 for HDR, and for SDR when most of the shown
@@ -404,6 +414,10 @@ pub struct VideoSettings {
     /// clip starts at it. Unset: the frame count of the record timecode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_frame: Option<u32>,
+    /// The Compression Level of an OpenEXR with DWAA or DWAB, from 0 to 300.
+    /// A higher level gives a smaller file with more loss. Unset: 45.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compression_level: Option<u32>,
 }
 
 impl VideoSettings {
@@ -430,7 +444,16 @@ impl VideoSettings {
             alpha_mode: AlphaOut::default(),
             filename_digits: None,
             first_frame: None,
+            compression_level: None,
         }
+    }
+
+    pub fn dwa(&self) -> bool {
+        self.codec == VideoCodec::Exr
+            && self
+                .profile
+                .as_deref()
+                .is_some_and(|p| p.ends_with("_dwaa") || p.ends_with("_dwab"))
     }
 
     pub fn holds_alpha(&self) -> bool {
@@ -700,6 +723,7 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
         alpha_mode: AlphaOut::default(),
         filename_digits: None,
         first_frame: None,
+        compression_level: None,
     }
 }
 
@@ -1128,6 +1152,20 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
                 FILENAME_DIGIT_COUNTS.end()
             )));
         }
+        if let Some(level) = v.compression_level {
+            if !v.dwa() {
+                return Err(Error::usage(
+                    "video.compression_level is for OpenEXR with profile _dwaa or _dwab",
+                ));
+            }
+            if !DWA_LEVELS.contains(&level) {
+                return Err(Error::usage(format!(
+                    "video.compression_level {level} is outside {}..{}",
+                    DWA_LEVELS.start(),
+                    DWA_LEVELS.end()
+                )));
+            }
+        }
         if v.image_bits().is_some()
             && (!matches!(v.hdr_metadata, HdrMetadata::Auto | HdrMetadata::None)
                 || v.mastering_display.is_some()
@@ -1189,4 +1227,39 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn exr(profile: &str, level: Option<u32>) -> ExportSettings {
+        let mut v = VideoSettings::new(VideoCodec::Exr, EncoderChoice::Cpu);
+        v.profile = Some(profile.to_string());
+        v.compression_level = level;
+        frames(Container::Exr, v)
+    }
+
+    #[test]
+    fn a_dwab_level_of_300_is_valid() {
+        assert!(validate(&exr("float_dwab", Some(300))).is_ok());
+    }
+
+    #[test]
+    fn a_dwaa_level_above_300_is_refused() {
+        let e = validate(&exr("half_dwaa", Some(301))).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "video.compression_level 301 is outside 0..300"
+        );
+    }
+
+    #[test]
+    fn a_level_without_dwa_is_refused() {
+        let e = validate(&exr("half_piz", Some(45))).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "video.compression_level is for OpenEXR with profile _dwaa or _dwab"
+        );
+    }
 }

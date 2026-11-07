@@ -2806,3 +2806,13 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The shadow moves by the value that the Inspector shows, to the left and to the right.
 - **Why:**
   - Only a move to the right is short. Thus the short move is not a rule of the offset, and vidcut does not copy it.
+
+## X151. An OpenEXR with DWAA or DWAB holds its level
+
+- **Resolve:**
+  - The header of an OpenEXR with DWAA or DWAB has no `dwaCompressionLevel` (measured in Resolve Studio 21.2).
+- **vidcut:**
+  - The header has `dwaCompressionLevel`, the Compression Level of the export.
+- **Why:**
+  - The OpenEXR writer of vidcut, the `exr` crate, writes this attribute for each level that it gets.
+  - The attribute is part of the OpenEXR format. A reader can see the level of the file, and a reader that does not know it skips it.

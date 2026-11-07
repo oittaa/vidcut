@@ -24,6 +24,7 @@ sha2.workspace = true
 transcribe-cpp.workspace = true
 transcribe-cpp-sys.workspace = true
 flate2.workspace = true
+exr.workspace = true
 tar.workspace = true
 ureq.workspace = true
 tract-onnx.workspace = true

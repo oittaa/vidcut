@@ -2168,17 +2168,32 @@ A generator is a clip that makes its own picture. It has no media and no sound.
       - At 72 and 90 fps, 3 frames share each number. At 95.904, 96, 100, 119.88 and 120 fps, 4 frames do. Bit 15 is 0.
     - In drop-frame timecode, the frame digits skip the dropped numbers, but the drop-frame flag (bit 6) is 0. This is so at 29.97, 59.94 and 119.88 fps.
     - The frame rates above 30 fps are 47.952, 48, 50, 59.94, 60, 72, 90, 95.904, 96, 100, 119.88 and 120. The scripting API refuses 144, 180 and 240.
-    - TIFF has the compressions None, LZW and ZIP. Its Compression Level row is greyed out at None.
+    - TIFF has the compressions None, LZW and ZIP. Its Compression Level row is greyed out at None and LZW.
+    - The Compression Level of a ZIP TIFF is from 0 to 9. The default is 5.
     - OpenEXR has RGB half and RGB float, each with no compression, RLE, ZIP, ZIP1, PIZ, DWAA, DWAB, HTJ2K 32 lines or HTJ2K 256 lines.
+    - An OpenEXR shows a Compression Level row for ZIP, ZIP1, DWAA and DWAB, in half and in float. The other compressions have no row.
+    - With ZIP and ZIP1, the level is the zlib level, from 0 to 9. The default is 4. At 0 the file has nearly the size of no compression.
+    - With DWAA and DWAB, the level is the DWA level of OpenEXR, from 0 to 300. The default is 45. A higher level gives a smaller file with more loss.
+    - Renders at DWA levels 0, 45 and 300 match an OpenEXR DWA encoder at the same level in 95% to 98% of the values.
+    - The ZIP level and the DWA level are two different values. The file does not hold the level.
+    - The field takes whole numbers. A number outside the range becomes the nearest limit. The field drops a dot: 12.5 becomes 125.
+    - DWAA and DWAB also lose detail in a float file. Such a file has the size of the half file.
+    - A half file holds each value rounded to the nearest half float.
   - **In vidcut:**
     - `out.tif` gives `out00000000.tif`, `out00000001.tif` and so on. `video.filename_digits` sets the digits, from 1 to 18.
     - The first number is the start timecode plus the first frame of the export, as a frame count.
     - `video.first_frame` sets the first number. With `per_clip`, each clip starts at it.
     - `video.profile` of a TIFF is `rgb8` or `rgb16` (the default), each also with `_packbits`, `_lzw` or `_deflate`.
-    - `video.profile` of an OpenEXR is `half` (the default) or `float`, each also with `_rle`, `_zip1` or `_zip16`.
+    - `video.profile` of an OpenEXR is `half` (the default) or `float`, each also with `_rle`, `_zip1`, `_zip16`, `_piz`, `_dwaa` or `_dwab`. `_zip16` is ZIP.
     - With no suffix, the file has no compression.
-    - vidcut has no PIZ, DWAA, DWAB, HTJ2K and Compression Level ([todo](todo/image-compression.md)).
+    - `video.compression_level` is the Compression Level of DWAA and DWAB, from 0 to 300. Unset, it is 45. The Export dialog shows it only for these two.
+    - An export refuses `video.compression_level` with another profile. It does not drop a setting without a word.
+    - A half OpenEXR holds each value rounded to the nearest half float, as Resolve's files do.
+    - The ZIP level of an OpenEXR is always 4, the default. A `_deflate` TIFF has zlib level 6.
+    - vidcut has no Compression Level for ZIP, and no HTJ2K ([todo](todo/image-compression.md)).
     - Each OpenEXR has the `timeCode` of its frame on the timeline, with the frame digits and bit 15 that Resolve writes. A TIFF has no timecode.
+    - Each OpenEXR also has the `framesPerSecond` of the timeline.
+    - A DWAA or DWAB file holds its level in `dwaCompressionLevel` ([X151](deviations.md#x151-an-openexr-with-dwaa-or-dwab-holds-its-level)).
     - In drop-frame timecode, vidcut sets the drop-frame flag ([X148](deviations.md#x148-an-openexr-in-drop-frame-timecode-has-the-drop-frame-flag)).
     - The files hold the code values of the timeline. An OpenEXR keeps a value above 1 (measured for a render with no color management).
     - The files hold no sound. An export with sound settings is refused ([X147](deviations.md#x147-an-image-sequence-refuses-sound-settings)).

@@ -279,6 +279,9 @@ transcribe-cpp-sys = { path = "crates/transcribe-cpp-sys", version = "=0.4.1" }
 # Unpacking that library's .tar.gz on first use, with zlib-rs as zip does.
 # MIT or Apache-2.0.
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+# OpenEXR frames of exports: PIZ, DWAA and DWAB, which FFmpeg's encoder
+# lacks, and half floats rounded to the nearest. BSD-3-Clause.
+exr = "1.74.2"
 tar = { version = "0.4", default-features = false }
 
 [patch.crates-io]

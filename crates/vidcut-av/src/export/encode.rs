@@ -239,13 +239,9 @@ pub(crate) fn cpu_ten_bit(name: &str) -> bool {
     use format::Pixel;
     encoder::find_by_name(name)
         .and_then(|c| c.video().ok())
-        .and_then(|v| v.formats())
-        .is_some_and(|mut f| {
-            f.any(|p| {
-                matches!(
-                    p,
-                    Pixel::YUV420P10LE | Pixel::YUV422P10LE | Pixel::RGB48LE | Pixel::GBRPF32LE
-                )
+        .is_some_and(|v| {
+            v.formats().is_none_or(|mut f| {
+                f.any(|p| matches!(p, Pixel::YUV420P10LE | Pixel::YUV422P10LE | Pixel::RGB48LE))
             })
         })
 }
@@ -773,18 +769,13 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
             };
             (pixel, vec![opt("compression_algo", compression)])
         }
-        "exr" => {
-            let named = v.profile.as_deref().unwrap_or("half");
-            c.profile = Some(named.to_string());
-            let (kind, compression) = named.split_once('_').unwrap_or((named, "none"));
+        "rawvideo" => {
+            c.profile = Some(v.profile.as_deref().unwrap_or("half").to_string());
             let pixel = match v.alpha {
                 true => Pixel::GBRAPF32LE,
                 false => Pixel::GBRPF32LE,
             };
-            (
-                pixel,
-                vec![opt("format", kind), opt("compression", compression)],
-            )
+            (pixel, Vec::new())
         }
         n => return Err(Error::Invalid(format!("{n}: no settings for it"))),
     };

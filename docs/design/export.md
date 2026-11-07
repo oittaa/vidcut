@@ -146,15 +146,21 @@ The plan:
 
 **Image sequences** ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)):
 
-- `Container::image_sequence` is true for TIFF and OpenEXR. Each packet of the encoder is one whole file.
+- `Container::image_sequence` is true for TIFF and OpenEXR.
+- A packet of FFmpeg's `tiff` encoder is one whole file.
+- An OpenEXR does not use FFmpeg's encoder ([gotchas](../gotchas.md#ffmpeg-encoding-and-muxing)):
+  - FFmpeg's `rawvideo` encoder gives the float planes of each frame. Thus the choice of encoder, the stream and the report stay as for other formats. The report names `rawvideo`.
+  - `openexr::Writer` writes each file with the `exr` crate, in scan lines from the top down.
+  - `openexr::chosen` gives the half or float samples and the compression from the profile.
+  - DWAA and DWAB take `compression_level`, or `DWA_LEVEL`. ZIP and ZIP1 have the fixed level 4 of the crate, which is Resolve's default.
+  - A half sample is the nearest half float to the 32-bit value.
+  - Each channel has `quantize_linearly` off, as OpenEXR's channels have by default.
 - `FrameFiles` writes the packets to a temporary folder beside the output, and `Writer::end` moves them to their names. Thus a cancelled export leaves no frames and keeps the old ones.
 - `Output::named` reads the name of the last frame file before the encode. Thus a name that the system refuses stops the export before the encode, and not at the move.
 - `Output::taken` reads the folder once. It checks only the files whose names end in a number of the export. Why: a check of each frame file costs one call to the system for each frame, on each `export.plan`.
 - For a Premultiplied TIFF, `FrameFiles` changes the ExtraSamples tag of each file to associated alpha ([gotchas](../gotchas.md#ffmpeg-encoding-and-muxing)).
-- For an OpenEXR, `FrameFiles` adds the `timeCode` attribute at the end of the header (`exr_layout`, `exr_timecode`). It adds the size of the attribute to each offset in the table after the header.
-  - `packed_timecode` packs the timecode of the frame on the timeline, as two digits for each field.
-  - `exr_layout` reads only a single-part scan line file. It does not change a file that has a `timeCode` already.
-  - It also does not change a file whose `lineOrder` is not increasing Y. Why: it takes the length of the table from the first offset, and that is correct only when the lines go from the top down.
+- `openexr::Writer` puts the timecode of the frame on the timeline and the frame rate (`frames_per_second`) in the header of each OpenEXR.
+  - `packed_timecode` packs the timecode, as two digits for each field.
   - The frame digits count at most 30 numbers in each second. Above 30 fps, 2, 3 or 4 frames in a row share one number. Why: Resolve writes this ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
   - Bit 15 marks the second frame only where 2 frames share a number.
 - The muxer is `null`. Why: FFmpeg's image muxer takes a pattern, and a percent sign in a folder name would break the pattern.

@@ -365,6 +365,7 @@ mod tests {
             alpha_mode: Default::default(),
             filename_digits: None,
             first_frame: None,
+            compression_level: None,
         }
     }
 
