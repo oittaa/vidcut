@@ -25,9 +25,10 @@ fontdb = "0.24"
 # Subtitles drawn into exported pictures: shaping, right-to-left text and
 # fallback fonts for every script. MIT or Apache-2.0.
 cosmic-text = "0.19"
+# 16-bit floats for the noise picture of a Film Grain. MIT or Apache-2.0.
+half = "2"
 # The kerning of a pair of letters, by the shaper cosmic-text uses. MIT or
 # Apache-2.0.
-half = "2"
 harfrust = "0.5"
 # Title outlines stroked along the glyphs' paths, by the rasterizer
 # cosmic-text draws with. MIT or Apache-2.0.

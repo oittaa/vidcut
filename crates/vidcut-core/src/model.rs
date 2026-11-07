@@ -3621,7 +3621,8 @@ pub struct FilmGrain {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub saturation: Option<f64>,
     /// Blurs the picture under the grain, from 0 to 2. Its sigma is 4.32 ×
-    /// this² × the frame's height / 1080 pixels. Usual: 0.
+    /// this² × √(width × height / (1920 × 1080)) pixels of the frame.
+    /// Usual: 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail_loss: Option<f64>,
     /// Multiplies the grain on red, green and blue, each from -10 to 10.
