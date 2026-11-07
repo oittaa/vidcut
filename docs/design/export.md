@@ -148,9 +148,13 @@ The plan:
 - `Container::image_sequence` is true for TIFF and OpenEXR. Each packet of the encoder is one whole file.
 - `FrameFiles` writes the packets to a temporary folder beside the output, and `Writer::end` moves them to their names. Thus a cancelled export leaves no frames and keeps the old ones.
 - `Output::named` reads the name of the last frame file before the encode. Thus a name that the system refuses stops the export before the encode, and not at the move.
+- `Output::taken` reads the folder once. It checks only the files whose names end in a number of the export. Why: a check of each frame file costs one call to the system for each frame, on each `export.plan`.
 - For a Premultiplied TIFF, `FrameFiles` changes the ExtraSamples tag of each file to associated alpha ([gotchas](../gotchas.md#ffmpeg-encoding-and-muxing)).
+- For an OpenEXR, `FrameFiles` adds the `timeCode` attribute at the end of the header (`exr_layout`, `exr_timecode`). It adds the size of the attribute to each offset in the table after the header.
+  - `packed_timecode` packs the timecode of the frame on the timeline, as two digits for each field.
+  - `exr_layout` reads only a single-part scan line file. It does not change a file that has a `timeCode` already.
 - The muxer is `null`. Why: FFmpeg's image muxer takes a pattern, and a percent sign in a folder name would break the pattern.
-- `ExportSettings::frame_file` makes each name. `Output::first_number` comes from `ExportSettings::first_number`.
+- `ExportSettings::frame_file` makes each name. `ExportSettings::numbering` makes the `Numbering` of an output: the first number, and the frame on the timeline for the timecode.
 - `VideoSettings::image_bits` gives the depth from the profile. `ColorChoice` reports it.
 - `carries_hdr` is true for both, because their files hold the code values of the timeline. The FFmpeg encoders write no HDR tags and no HDR metadata.
 - OpenEXR planes are `R32Float` and use `fs_encode_float`. `encoded_rgb` does not clamp them when the transfer does not change. Thus a value above 1 stays in the file.

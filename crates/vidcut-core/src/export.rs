@@ -23,7 +23,7 @@ pub enum Container {
     Wav,
     Ogg,
     /// Image sequences: one file for each frame, without sound. The output
-    /// `out.tif` gives `out_00000000.tif` and so on. The number is the frame
+    /// `out.tif` gives `out00000000.tif` and so on. The number is the frame
     /// count of the record timecode, unless `video.first_frame` is set.
     Tiff,
     Exr,
@@ -620,7 +620,7 @@ impl ExportSettings {
         let digits = self.video.as_ref().and_then(|v| v.filename_digits);
         let digits = usize::from(digits.unwrap_or(FILENAME_DIGITS));
         let mut name = output.file_stem().unwrap_or_default().to_os_string();
-        name.push(format!("_{number:0digits$}."));
+        name.push(format!("{number:0digits$}."));
         match output.extension() {
             Some(ext) => name.push(ext),
             None => name.push(self.container.extension()),
@@ -639,6 +639,21 @@ impl ExportSettings {
         let first = self.video.as_ref().and_then(|v| v.first_frame);
         first.map_or(record_frame, i64::from)
     }
+
+    pub fn numbering(&self, record_frame: i64, drop_frame: bool) -> Numbering {
+        Numbering {
+            first: self.first_number(record_frame),
+            record: record_frame,
+            drop_frame,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Numbering {
+    pub first: i64,
+    pub record: i64,
+    pub drop_frame: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

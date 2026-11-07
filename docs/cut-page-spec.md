@@ -1896,6 +1896,10 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - The box does not appear if the codec has no alpha (p. 4093).
   - The Alpha Mode of the file is Premultiplied or Straight (p. 4117). Premultiplied is the default (p. 4093).
   - When a program renders as one file, its layers composite into one picture (p. 473).
+  - Measured in Resolve Studio 21.2, with renders from the scripting API:
+    - With TIFF and OpenEXR, Alpha Mode shows Premultiplied and is greyed out.
+    - With Straight, TIFF, OpenEXR and ProRes 4444 still hold premultiplied colors.
+    - A PNG holds straight colors in both modes.
   - **In vidcut:**
     - `video.alpha` is Export Alpha. `video.alpha_mode` is `premultiplied` or `straight`. The Export dialog shows both only for ProRes 4444, 4444 XQ, TIFF and OpenEXR.
     - An export refuses `video.alpha` in another format. It does not change a setting without a word.
@@ -1911,14 +1915,23 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Use filename digits sets the digits in the file name. The default is eight (p. 4126).
   - Each clips starts at frame sets the first frame count of Individual Clips (p. 4126).
   - Start timeline timecode at sets the first timecode of a Single Clip (p. 4126).
+  - Measured in Resolve Studio 21.2:
+    - The name has no underscore before the digits. The Custom name `tiffsound` from 01:00:01:00 at 60 fps gives `tiffsound00216060.tif` and on.
+    - The Audio tab is greyed out. A render from the scripting API with Export Audio on writes only the frames.
+    - A TIFF has the tags 256-262, 266, 270 (empty), 273, 274, 277-279, 284, 338 (ExtraSamples 1), 339 and 34675 (an ICC profile). It has no timecode.
+    - The header of an OpenEXR has `timeCode` and `framesPerSecond`, and also `proimCameraID`.
+    - TIFF has the compressions None, LZW and ZIP. Its Compression Level row is greyed out at None.
+    - OpenEXR has RGB half and RGB float, each with no compression, RLE, ZIP, ZIP1, PIZ, DWAA, DWAB, HTJ2K 32 lines or HTJ2K 256 lines.
   - **In vidcut:**
-    - `out.tif` gives `out_00000000.tif`, `out_00000001.tif` and so on. `video.filename_digits` sets the digits.
+    - `out.tif` gives `out00000000.tif`, `out00000001.tif` and so on. `video.filename_digits` sets the digits.
     - The first number is the start timecode plus the first frame of the export, as a frame count.
     - `video.first_frame` sets the first number. With `per_clip`, each clip starts at it.
     - `video.profile` of a TIFF is `rgb8` or `rgb16` (the default), each also with `_packbits`, `_lzw` or `_deflate`.
     - `video.profile` of an OpenEXR is `half` (the default) or `float`, each also with `_rle`, `_zip1` or `_zip16`.
     - With no suffix, the file has no compression.
-    - FFmpeg's encoders have no DWAA, no DWAB and no Compression level. They write no timecode.
+    - vidcut has no PIZ, DWAA, DWAB, HTJ2K and Compression Level ([todo](todo/image-compression.md)).
+    - Each OpenEXR has the `timeCode` of its frame on the timeline, with the drop frame flag. A TIFF has no timecode.
+    - Above 30 fps, the frame digits of `timeCode` count pairs of frames, and bit 15 marks the second frame of a pair. This is not measured in Resolve.
     - The files hold the code values of the timeline. An OpenEXR keeps a value above 1 (measured for a render with no color management).
     - The files hold no sound. An export with sound settings is refused.
     - The ExtraSamples tag of a TIFF with alpha follows the Alpha Mode: 1 for Premultiplied and 2 for Straight ([gotchas](gotchas.md#ffmpeg-encoding-and-muxing)).

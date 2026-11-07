@@ -10,8 +10,8 @@ use vidcut_core::editor::source_context;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind, PictureShare};
 use vidcut_core::export::metadata::{Measured, PieceMeta};
 use vidcut_core::export::{
-    Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Preset, VideoSettings,
-    apply_overrides, builtin_presets, validate,
+    Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Numbering, Preset,
+    VideoSettings, apply_overrides, builtin_presets, validate,
 };
 use vidcut_core::fingerprint::short_digest;
 use vidcut_core::looks::checked_name;
@@ -431,7 +431,7 @@ fn default_preset(output: &Path) -> &'static str {
 pub struct Output {
     pub plan: RenderPlan,
     pub path: PathBuf,
-    pub first_number: i64,
+    pub numbering: Numbering,
     pub settings: ExportSettings,
     pub color: Option<ColorChoice>,
     pub metadata: Option<vidcut_core::export::metadata::MetadataChoice>,
@@ -561,14 +561,14 @@ fn add_subtitles(
 
 impl Output {
     pub fn written(&self) -> PathBuf {
-        self.settings.first_file(&self.path, self.first_number)
+        self.settings.first_file(&self.path, self.numbering.first)
     }
 
     fn named(&self) -> Result<()> {
         let last = self.plan.frames.max(1) - 1;
         let file = self
             .settings
-            .first_file(&self.path, self.first_number + last);
+            .first_file(&self.path, self.numbering.first + last);
         match file.try_exists() {
             Ok(_) => Ok(()),
             Err(e) => Err(Error::usage(format!("{}: {e}", file.display()))),
@@ -576,12 +576,33 @@ impl Output {
     }
 
     fn taken(&self) -> Option<PathBuf> {
-        match self.settings.container.image_sequence() {
-            true => (0..self.plan.frames)
-                .map(|i| self.settings.frame_file(&self.path, self.first_number + i))
-                .find(|file| file.exists()),
-            false => Some(self.path.clone()).filter(|file| file.exists()),
+        if !self.settings.container.image_sequence() {
+            return Some(self.path.clone()).filter(|file| file.exists());
         }
+        let numbers = self.numbering.first..self.numbering.first + self.plan.frames;
+        let first = self.settings.frame_file(&self.path, numbers.start);
+        let dir = first
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        std::fs::read_dir(dir).ok()?.flatten().find_map(|entry| {
+            let name = entry.file_name();
+            let name = name.as_encoded_bytes();
+            let stem = &name[..name.iter().rposition(|&b| b == b'.')?];
+            let run =
+                &stem[stem.len() - stem.iter().rev().take_while(|b| b.is_ascii_digit()).count()..];
+            (1..=run.len().min(18))
+                .filter(|&k| k == 1 || run[run.len() - k] != b'0')
+                .filter_map(|k| {
+                    std::str::from_utf8(&run[run.len() - k..])
+                        .ok()?
+                        .parse::<i64>()
+                        .ok()
+                })
+                .filter(|n| numbers.contains(n))
+                .map(|n| self.settings.frame_file(&self.path, n))
+                .find(|file| file.exists())
+        })
     }
 }
 
@@ -702,6 +723,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         proj.settings.channels = enc.channels;
     }
     let ext = settings.container.extension();
+    let drop_frame = p.settings.counts_drop_frame();
     let mut outputs = Vec::new();
     if params.per_clip {
         let template = params.name.as_deref().unwrap_or("{index:03}-{name}");
@@ -719,7 +741,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             let name = file_name(template, i + 1, &plan.name, id, media);
             outputs.push(Output {
                 path: params.output.join(format!("{name}.{ext}")),
-                first_number: settings.first_number(p.settings.start_tc + start),
+                numbering: settings.numbering(p.settings.start_tc + start, drop_frame),
                 plan,
                 settings: settings.clone(),
                 color: None,
@@ -734,7 +756,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         outputs.push(Output {
             plan: render::flatten(&proj, a, b)?,
             path: params.output.clone(),
-            first_number: settings.first_number(p.settings.start_tc + a),
+            numbering: settings.numbering(p.settings.start_tc + a, drop_frame),
             settings: settings.clone(),
             color: None,
             metadata: None,
@@ -744,7 +766,9 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     add_subtitles(p, params, &settings, &mut outputs)?;
     for o in &outputs {
         o.named()?;
-        if let Some(taken) = o.taken().filter(|_| !params.overwrite) {
+        if !params.overwrite
+            && let Some(taken) = o.taken()
+        {
             return Err(Error::invalid(format!(
                 "{} exists; pass overwrite to replace it",
                 taken.display()
@@ -1371,7 +1395,7 @@ pub fn run(
             &o.plan,
             &o.settings,
             &o.path,
-            o.first_number,
+            o.numbering,
             available,
             decoder,
             &o.subtitles,

@@ -222,6 +222,29 @@ pub fn label_frames(frames: i64, fps: Rational, drop: bool) -> i64 {
     frames + dropped * (9 * tens + minutes)
 }
 
+pub fn packed_timecode(frames: i64, fps: Rational, drop: bool) -> Option<u32> {
+    let base = fps.timecode_base();
+    if frames < 0 || base > 60 {
+        return None;
+    }
+    let drop = drop && fps.dropped_per_minute() > 0;
+    let t = label_frames(frames, fps, drop);
+    let (ff, s) = (t % base, t / base);
+    let (frame, second_of_pair) = match base > 30 {
+        true => (ff / 2, ff % 2 == 1),
+        false => (ff, false),
+    };
+    let bcd = |v: i64| u32::try_from(v / 10 * 16 + v % 10).ok();
+    Some(
+        bcd(frame)?
+            | u32::from(drop) << 6
+            | bcd(s % 60)? << 8
+            | u32::from(second_of_pair) << 15
+            | bcd(s / 60 % 60)? << 16
+            | bcd(s / 3600 % 24)? << 24,
+    )
+}
+
 pub fn timecode_frames(h: i64, m: i64, s: i64, f: i64, fps: Rational, drop: bool) -> Option<i64> {
     let base = fps.timecode_base();
     if h < 0 || !(0..60).contains(&m) || !(0..60).contains(&s) || !(0..base).contains(&f) {

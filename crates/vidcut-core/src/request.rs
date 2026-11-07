@@ -3382,7 +3382,7 @@ pub struct ExportParams {
     /// Output file; for `per_clip`, a directory. A timeline for other editors
     /// instead of media: `.otio` (the edit), `.otioz` (a zip bundle of the edit
     /// and its media) or `.otiod` (the same as a folder). `.tif` and `.exr`
-    /// write one file for each frame: `out.tif` gives `out_00000000.tif` and so on.
+    /// write one file for each frame: `out.tif` gives `out00000000.tif` and so on.
     pub output: PathBuf,
     /// Preset name (see `presets.list`). Default: from the output extension
     /// (`h264-master` settings for video, the matching `audio-*` preset for audio,
