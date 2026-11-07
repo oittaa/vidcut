@@ -280,7 +280,7 @@ A Smooth Cut morphs its outgoing picture into its incoming picture ([spec §8.11
 
 Each mix occurs in the timeline color space ([spec D50](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
-- `Screen::for_export` draws each frame into `Wide`: 16-bit floats in the code values of the timeline (`VideoFrames::with_timeline`).
+- `Screen::for_export` draws each frame into `Wide`: 32-bit floats in the code values of the timeline (`VideoFrames::with_timeline`).
   - Each layer, title and subtitle goes there as in the viewer.
   - Why: a color above 1 or below 0 stays between the layers ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - `fs_lut` then runs the output LUT on `Wide` (`VideoFrames::with_output_lut`, [the LUT files](README.md#lut-files)). A black piece of the plan goes through it too. The render cache holds no output LUT.
@@ -554,7 +554,7 @@ The draw:
 - `vignette::cells` makes the shape of a Vignette in compute passes, before its one fragment pass:
   - The `mask` entry fills the cells. The `run` entry makes each box blur, one line at a time, with a running sum.
   - Why: a running sum costs the same at each box width. The widest boxes are hundreds of cells wide.
-  - The cells are 32-bit floats in a storage buffer. `MIXING` is not exact enough for the blurred shape.
+  - The cells are 32-bit floats in a storage buffer.
   - `Blurred` keeps the two buffers (`vignette::Cells`). Each frame makes the cells again, so there is no cache to keep up to date.
   - The effects of a compound clip use the same buffers (`blur::Scratch`).
 - `fs_vignette` reads the cells and mixes the Color (`vignette_shape`, `vignette_mixed`).
@@ -566,7 +566,7 @@ The draw:
   - The `collect` entry adds a solve to the result, with the gains of two bands. Thus the result needs no buffer for each band.
   - A half sweep writes only the pixels of one color of a checkerboard, and reads only the other color. Thus it works in place.
   - A half sweep and the `collect` entry work on differences from the plane. Thus a flat area has a change of exactly 0, and rounding does not move it.
-  - The planes are 32-bit floats in storage buffers. `MIXING` is not exact enough for the small differences of the solves.
+  - The planes are 32-bit floats in storage buffers.
   - `Blurred` keeps the buffers (`sharpen::Planes`) until the size changes. Each frame makes the planes again, so there is no cache to keep up to date.
   - The color planes are made only when a color gain is not 0. At a Sharpen Chroma of 1 the color gains are 0 (`Sharpening`).
 - `fs_sharpen` adds the changes to the colors. Each change is for the output, so the colors need no second conversion.
