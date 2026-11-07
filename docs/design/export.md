@@ -483,6 +483,8 @@ The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3
   - The origin is the middle of the picture on the frame, moved by Position and the offsets.
   - Its sizes are in samples. Antialias Result gives two samples for each pixel.
   - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
+- `place::Shading` holds the shape of a Vignette: its radius, its cells, its boxes and the place of its first cell.
+  - The fit of the picture sets its size (`OnFrame.fit`). Thus a Zoom and a Pan do not change the shape.
 
 The draw:
 
@@ -496,6 +498,15 @@ The draw:
   - The third pass finds the cell of each pixel and reads its color from the table (`mosaic_nearest`).
   - With Antialias Result, the third pass finds the cell of each of the four samples of a pixel, and takes their mean.
   - The third pass applies Blur Alpha and Whole Cells Only to each sample (`mosaic_alpha`). With Use Alpha off, it does not.
+- `vignette::cells` makes the shape of a Vignette in compute passes, before its one fragment pass:
+  - The `mask` entry fills the cells. The `run` entry makes each box blur, one line at a time, with a running sum.
+  - Why: a running sum costs the same at each box width. The widest boxes are hundreds of cells wide.
+  - The cells are 32-bit floats in a storage buffer. `MIXING` is not exact enough for the blurred shape.
+  - `Blurred` keeps the two buffers (`vignette::Cells`). Each frame makes the cells again, so there is no cache to keep up to date.
+  - The effects of a compound clip use the same buffers (`blur::Scratch`).
+- `fs_vignette` reads the cells and mixes the Color (`vignette_shape`, `vignette_mixed`).
+  - `vignette_mixed` adds its own rules to `mixed`. The shared forms `dodged` and `burned` have no limits. `dodge` and `burn` put the limits of a layer's mode on them.
+  - Divide, Hue, Lighter Color and Darker Color have their own rules in `vignette_mixed`. A layer's mode has other rules for a Color of 0, a gray Color and a tie.
 - The last pass of an effect mixes its result with the picture that came in, by the blend (`effect_mixed`).
 - With Use Alpha off, the first pass takes the colors without their alpha (`effect_taken`). Thus a clear part of the picture does not make it darker.
   - The area around the picture stays black, and the last pass keeps the alpha of the picture that came in.
