@@ -256,6 +256,8 @@ fn percent(n: i64, total: i64) -> String {
     }
 }
 
+const NO_METADATA: &str = "None: TIFF and OpenEXR hold no HDR metadata";
+
 pub fn choose(
     v: &VideoSettings,
     video: &[VideoPiece],
@@ -279,6 +281,10 @@ pub fn choose(
         choice.why.push("None: SDR carries no HDR metadata".into());
         return choice;
     };
+    if v.image_bits().is_some() {
+        choice.why.push(NO_METADATA.into());
+        return choice;
+    }
     let shown: Vec<(i64, PieceMeta)> = video
         .iter()
         .flat_map(VideoPiece::layers)
@@ -485,6 +491,10 @@ pub fn choose_through_lut(v: &VideoSettings) -> MetadataChoice {
         choice.why.push("None: SDR carries no HDR metadata".into());
         return choice;
     };
+    if v.image_bits().is_some() {
+        choice.why.push(NO_METADATA.into());
+        return choice;
+    }
     choice.why.push(THROUGH_LUT.into());
     if out == Hdr::Pq {
         if let Some(s) = &v.mastering_display {
