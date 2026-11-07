@@ -396,6 +396,7 @@ fn fit_codecs(s: &mut ExportSettings) {
             v.profile = None;
             v.filename_digits = None;
             v.first_frame = None;
+            v.compression_level = None;
             if fixed_format(v.codec) {
                 v.bit_depth = None;
             }
@@ -2684,6 +2685,7 @@ fn settings_form(
                                 alpha_mode: Default::default(),
                                 filename_digits: None,
                                 first_frame: None,
+                                compression_level: None,
                             }),
                         );
                         fit_codecs(&mut d.settings);
@@ -2833,6 +2835,19 @@ fn settings_form(
                                     ui.selectable_value(&mut v.profile, Some(p.to_string()), *p);
                                 }
                             });
+                    }
+                    if v.dwa() {
+                        use vidcut_core::export::{DWA_LEVEL, DWA_LEVELS};
+                        ui.label(dim("Compression Level"));
+                        let mut level = v.compression_level.unwrap_or(DWA_LEVEL);
+                        if ui
+                            .add(egui::DragValue::new(&mut level).range(DWA_LEVELS))
+                            .changed()
+                        {
+                            v.compression_level = Some(level);
+                        }
+                    } else {
+                        v.compression_level = None;
                     }
                     if !fixed_format(v.codec) {
                         ui.label(dim("bit depth"));
