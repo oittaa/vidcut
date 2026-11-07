@@ -6,6 +6,10 @@ use vidcut_core::place::GrainTile;
 
 const CUBIC: f32 = 0.01245;
 
+const FADE: f64 = 5.0;
+
+const FLAT: f64 = 0.75;
+
 pub(super) const BYTES: usize = 16;
 
 const THIRD: (usize, usize) = (17, 29);
@@ -39,16 +43,38 @@ fn wrapped_frequency(i: usize, n: usize) -> f64 {
     if 2.0 * i < n { i / n } else { (i - n) / n }
 }
 
+fn folds(t: &GrainTile, reach: f64) -> Vec<(f64, f64)> {
+    let past = |j: i32| (f64::from(j.abs()) - 0.5).max(0.0);
+    let most = |stretch: f64| (reach / stretch + 0.5).ceil() as i32;
+    let (nx, ny) = (most(t.aspect), most(1.0));
+    (-ny..=ny)
+        .flat_map(|jy| (-nx..=nx).map(move |jx| (jx, jy)))
+        .filter(|&(jx, jy)| (t.aspect * past(jx)).hypot(past(jy)) < reach)
+        .map(|(jx, jy)| (f64::from(jx), f64::from(jy)))
+        .collect()
+}
+
 fn amplitudes(t: &GrainTile, (w, h): (usize, usize)) -> Vec<f32> {
+    if t.width >= FLAT * t.scale * t.aspect.max(1.0) {
+        return vec![1.0; w * h];
+    }
     let two = 2.0 * t.width * t.width;
     let bump = |d: f64| (-(d * d) / two).exp();
+    let reach = (t.ring + FADE * t.width) / t.scale;
+    let folds = folds(t, reach);
     let mut power = Vec::with_capacity(w * h);
     for y in 0..h {
         let fy = wrapped_frequency(y, h);
         for x in 0..w {
-            let fx = t.aspect * wrapped_frequency(x, w);
-            let f = t.scale * fx.hypot(fy);
-            power.push(bump(f - t.ring) + bump(f + t.ring));
+            let fx = wrapped_frequency(x, w);
+            let p = folds
+                .iter()
+                .map(|&(jx, jy)| (t.aspect * (fx + jx)).powi(2) + (fy + jy).powi(2))
+                .filter(|&d| d < reach * reach)
+                .map(|d| t.scale * d.sqrt())
+                .map(|f| bump(f - t.ring) + bump(f + t.ring))
+                .sum::<f64>();
+            power.push(p);
         }
     }
     let mean = power.iter().sum::<f64>() / power.len().max(1) as f64;

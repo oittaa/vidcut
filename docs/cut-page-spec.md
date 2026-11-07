@@ -1709,6 +1709,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The noise has the spectrum `R(f) = exp(−(f − C)² / 2W²) + exp(−(f + C)² / 2W²)`.
     - `f = K × √((A × fx)² + fy²)`, with `fx` and `fy` in cycles for each pixel, and `A` the Grain Aspect Ratio.
     - `C` and `W` come from Texture, and `K` comes from Grain Size, by tables. `K` also goes with the height of the fitted picture over 1080.
+    - The noise is one continuous field, and each pixel is a sample of it. Thus the parts of `R` above 0.5 cycles for each pixel fold back.
+    - On 3840×2160, 1920×1080 and 1280×720, Grain Only at Grain Size 0, 0.1 and 0.25 with Softness 0 has the same standard deviation.
+    - The spectrum of the 3840×2160 render, folded onto the two smaller sizes, agrees with their renders within about 1% at each frequency.
     - Before Softness, its standard deviation is 0.1986 × Grain Strength. Its kurtosis is about 3.25.
   - At Saturation 0 the channels are the same. At 1, they are three separate noises, 1.334 times as strong, and their BT.709 luma is the gray noise.
   - Red, Green and Blue multiply the noise, after Saturation.
@@ -1724,11 +1727,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - A cubic curve on the noise gives the kurtosis.
   - Symmetry is a table of measured curves, with a step of 0.02 to 0.06. Each curve is a cubic near the middle and a straight line on each side.
     - Resolve gives spikes at exactly 0.4 and 0.6, with a standard deviation of 0.0109 and 0.0855 against 0.026 on each side. vidcut does not copy them ([X144](deviations.md#x144-a-film-grain-has-no-jumps-at-symmetry-04-and-06)).
-  - On other frame heights, the noise keeps its standard deviation before Softness.
-    - At the defaults, the renders on 3840×2160, 1080×1920 and 1440×1440 agree with this within 1.3%.
-    - A small grain is weaker in vidcut, on 3840×2160 and 1080×1920 ([todo](todo/effects-library.md)).
-    - There, 35mm 400T at Grain Size 0 gives 0.61 and 0.66 of the standard deviation of the renders.
-    - 8mm 100D at Grain Size 0.2156 gives 0.75 and 0.76.
+  - vidcut adds the folds of `R` at each frequency of the canvas. Thus the noise keeps its standard deviation before Softness on each frame height.
+    - The table of `K` for Grain Size 0 to 0.4 comes from one fit to the renders on 1280×720, 1920×1080 and 3840×2160.
+    - At the defaults, the renders on 3840×2160, 1080×1920 and 1440×1440 agree within 1.6%.
+    - 35mm 400T at Grain Size 0 gives 1.020, 1.053 and 1.054 of the standard deviation of the renders, on 1920×1080, 3840×2160 and 1080×1920.
+    - 8mm 100D at Grain Size 0.2156 and Grain Strength 1 gives 1.112, 1.119 and 1.121.
   - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
     - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
     - Film Grain Presets shows Custom when a value differs from each film stock.

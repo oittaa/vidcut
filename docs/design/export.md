@@ -572,6 +572,8 @@ The draw:
   - `glow_atmosphere` makes the noise in the shader, with no picture of its own.
 - `fs_grain` makes the last pass of a Film Grain (`blur::grain_into`):
   - `grain::tile_bytes` makes a picture of noise at the size of the canvas, with an inverse Fourier transform. Why: a filter of that spectrum in the shader costs more at each frame.
+  - `grain::amplitudes` adds the folds of the spectrum at each frequency of the canvas ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
+    - A ring that is wide in cycles for each pixel gives a flat sum. Then it uses a flat spectrum. Why: that sum has many folds, and they change nothing.
   - `blur::Blurred` keeps two of these pictures in an `Lru` (`Tiles`). A change of the frame size clears it. Its size bounds the bytes.
   - `fs_grain_noise` reads that picture at the shift of this frame (`grain::shift`), and gives the noise its Saturation, Symmetry and gains.
   - `fs_blur` softens the noise. With Detail Loss, it also blurs the colors without their alpha, into two of the `Spare` pictures.
