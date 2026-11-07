@@ -271,10 +271,6 @@ pub(crate) fn small_luma(
     Held::new(small, (&gpu.device, &gpu.queue), gpu.id).read(ow as usize * oh as usize)
 }
 
-fn half_float(picture: &wgpu::Texture) -> bool {
-    picture.format() == wgpu::TextureFormat::Rgba16Float
-}
-
 fn sixteen_bit(encoded: &wgpu::Texture) -> bool {
     encoded.format() == wgpu::TextureFormat::Rgba16Uint
 }
@@ -285,6 +281,7 @@ fn packed_words(encoded: &wgpu::Texture) -> u64 {
 }
 
 pub(super) struct Pipes {
+    pub(super) deep: wgpu::TextureFormat,
     pack: wgpu::ComputePipeline,
     pack16: wgpu::ComputePipeline,
     unpack: wgpu::ComputePipeline,
@@ -295,9 +292,21 @@ pub(super) struct Pipes {
 
 impl Pipes {
     pub(super) fn new(device: &wgpu::Device) -> Self {
+        let (deep, stored) = if device
+            .features()
+            .contains(wgpu::Features::TEXTURE_FORMAT_16BIT_NORM)
+        {
+            (wgpu::TextureFormat::Rgba16Unorm, "rgba16unorm")
+        } else {
+            (wgpu::TextureFormat::Rgba32Float, "rgba32float")
+        };
+        let source = format!(
+            "alias Deep = texture_storage_2d<{stored}, write>;\n{}",
+            include_str!("rgb.wgsl")
+        );
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("vidcut rgb"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("rgb.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
         });
         let made = |entry| {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -310,6 +319,7 @@ impl Pipes {
             })
         };
         Self {
+            deep,
             pack: made("pack"),
             pack16: made("pack16"),
             unpack: made("unpack"),
@@ -387,7 +397,7 @@ impl Pipes {
                     resource: rgb.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: if half_float(picture) { 6 } else { 3 },
+                    binding: if picture.format() == self.deep { 6 } else { 3 },
                     resource: wgpu::BindingResource::TextureView(&view),
                 },
             ],
@@ -411,7 +421,7 @@ impl Pipes {
     }
 
     fn unpacker(&self, picture: &wgpu::Texture) -> &wgpu::ComputePipeline {
-        if half_float(picture) {
+        if picture.format() == self.deep {
             &self.unpack16
         } else {
             &self.unpack

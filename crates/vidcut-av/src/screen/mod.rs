@@ -98,7 +98,10 @@ static IDS: AtomicU64 = AtomicU64::new(1);
 
 const TARGET: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-const MIXING: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+const MIXING: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+
+const MIXING_NEEDS: wgpu::Features =
+    wgpu::Features::FLOAT32_FILTERABLE.union(wgpu::Features::FLOAT32_BLENDABLE);
 
 fn checked<T>(device: &wgpu::Device, f: impl FnOnce() -> T) -> Result<T, String> {
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -119,7 +122,7 @@ pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
         | wgpu::Features::VULKAN_EXTERNAL_MEMORY_WIN32
         | wgpu::Features::TEXTURE_FORMAT_NV12
         | wgpu::Features::TEXTURE_FORMAT_P010;
-    adapter.features() & wanted
+    (adapter.features() & wanted) | MIXING_NEEDS
 }
 
 pub struct Offscreen {
@@ -287,6 +290,13 @@ fn device(
         }
         _ => adapter,
     };
+    let missing = MIXING_NEEDS.difference(adapter.features());
+    if !missing.is_empty() {
+        return Err(format!(
+            "{} can't mix pictures in 32-bit floats: it lacks {missing}",
+            adapter.get_info().name
+        ));
+    }
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some(label),
         required_features: features(&adapter),
@@ -2948,11 +2958,7 @@ impl Slot {
             };
             let make = |size: (u32, u32), format| made(size, format, wgpu::TextureUsages::empty());
             let a = |plain| match matte {
-                Some(size) => made(
-                    size,
-                    wgpu::TextureFormat::Rgba16Float,
-                    wgpu::TextureUsages::STORAGE_BINDING,
-                ),
+                Some(size) => made(size, gpu.held.deep, wgpu::TextureUsages::STORAGE_BINDING),
                 None => make(if alpha { (w, h) } else { (1, 1) }, plain),
             };
             self.planes = Some(match layout {
@@ -2990,7 +2996,7 @@ impl Slot {
                     y: made(
                         (w, h),
                         match layout {
-                            Layout::Rgb48 => wgpu::TextureFormat::Rgba16Float,
+                            Layout::Rgb48 => gpu.held.deep,
                             _ => wgpu::TextureFormat::Rgba8Unorm,
                         },
                         wgpu::TextureUsages::STORAGE_BINDING,

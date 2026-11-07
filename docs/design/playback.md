@@ -256,7 +256,7 @@ The audio device:
 - `Viewer::start` spawns `vidcut-viewer`. The thread wakes when the session notifies or asks, when the size changes, or when `next_change` comes due.
 - Each turn calls `Player::present`, then `Screen::draw` into an RGBA target the size of the viewer's picture in physical pixels.
 - With an SDR timeline and one layer, one render pass of `crates/vidcut-av/src/screen/picture.wgsl` draws it all.
-- With an HDR timeline, the passes draw into a picture of 16-bit floats (`Wide`), in the PQ or HLG code values of the timeline.
+- With an HDR timeline, the passes draw into a picture of 32-bit floats (`Wide`), in the PQ or HLG code values of the timeline.
   - Each layer, title and subtitle goes to linear light, to BT.2020, and to the curve of the timeline.
   - Then `fs_screen` converts that picture to the target: BT.709, tone-mapped.
   - Thus the layers, titles and subtitles mix in the code values of the timeline.
@@ -274,7 +274,7 @@ The audio device:
   - It first converts each picture into the timeline color space, at the size of the picture (`fs_convert`, `shader_colors`). In an SDR timeline, it tone-maps HDR.
     - A picture with an input LUT takes `fs_convert_lut` (`Picture::with_lut`, [the LUT files](README.md#lut-files)).
     - Then it deinterlaces an interlaced picture (`fs_bwdif`, [gpu](gpu.md#deinterlacing-and-hdr)).
-    - The converted picture is 16-bit floats. The scaling below reads it.
+    - The converted picture is 32-bit floats. The scaling below reads it.
     - Why: the spec converts the input before the sizing ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)). A conversion that is not linear gives other edges after a scale.
   - It reads the chroma of each frame at the site that the frame's chroma location gives (`chroma_site`). An H.264 or HEVC 4:2:0 frame with no chroma location is sited left, the default of these formats (`color::default_site`). Another frame with no chroma location is read as centered.
   - The viewer enlarges with one bilinear sample, and shrinks with a box of bilinear samples.
