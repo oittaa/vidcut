@@ -557,7 +557,7 @@ dependencies = [
  "regex",
  "rustc-hash 2.1.3",
  "shlex",
- "syn 3.0.7",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -5312,7 +5312,7 @@ dependencies = [
  "exr",
  "ffmpeg-next",
  "flate2",
- "harfrust 0.5.2",
+ "harfrust 0.12.0",
  "libc",
  "libloading 0.9.0",
  "naga",

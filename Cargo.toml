@@ -27,7 +27,7 @@ fontdb = "0.24"
 cosmic-text = "0.19"
 # The kerning of a pair of letters, by the shaper cosmic-text uses. MIT or
 # Apache-2.0.
-harfrust = "0.5"
+harfrust = "0.12"
 # Title outlines stroked along the glyphs' paths, by the rasterizer
 # cosmic-text draws with. MIT or Apache-2.0.
 zeno = "0.3"
