@@ -2748,3 +2748,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The `timeCode` of OpenEXR follows SMPTE 12M. There, bit 6 is the drop-frame flag.
   - Without the flag, a reader takes the digits as non-drop-frame. At 29.97 fps, a frame count from them is then 2 frames too high for each minute that drops numbers.
   - The owner approved this difference.
+
+## X149. A project takes any frame rate
+
+- **Resolve:**
+  - A project takes only the 19 frame rates of spec D37.
+  - The scripting API refuses other rates, for example 15, 20, 144 and 240 (`timelineFrameRate`, measured in Resolve Studio 21.2).
+- **vidcut:**
+  - The Frame rate menu offers the same 19 rates.
+  - `project create --fps` and the first video can set any positive rate.
+- **Why:**
+  - A file at another rate keeps each frame at its own rate. Examples are a 15 fps screen recording and a 144 fps game capture. A project at one of the 19 rates retimes such a file.
+  - The owner approved this difference.
