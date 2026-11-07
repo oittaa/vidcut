@@ -1211,8 +1211,10 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The alignment lines up the lines with the longest line. The block stays where it is.
   - Position is `[x, y]`, two fractions of the picture from the top left.
   - The fractions are from −4 to 4 across and from −3 to 5 down. Left out, the block stays in the cue's place.
-  - Position X is the middle of the longest line. Without a position, that middle is at the middle of the picture.
-  - Position Y is the middle of the block. With a margin, it is the bottom edge of a bottom block, or the top edge of a top block.
+  - Without an anchor, Position X is the middle of the longest line. Without a position, that point is at the middle of the picture.
+  - Without an anchor, Position Y is the middle of the block. With a margin, it is the bottom edge of a bottom block, or the top edge of a top block.
+  - The anchor names the point of the block that goes to the position: a corner, the middle of a side, or the middle.
+  - The Subtitle Track section and the style of a cue show the anchor as Left, Middle or Right, and Top, Middle or Bottom.
   - The Subtitle Track section and the style of a cue show Position X and Position Y in pixels of the timeline:
     - Position X counts from the left edge. Position Y counts up from the bottom edge.
     - A typed value stops at 4 times the width or the height, to either side.
@@ -1271,7 +1273,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It exports or imports a preset as a `.preset` file.
   - vidcut: looks, for titles too. Some looks are built in (X59). Details: D71.
 - **Later:**
-  - the faces of a track style other than regular and bold, line spacing, kerning, zoom, opacity and the Anchor buttons (p. 1237)
+  - the faces of a track style other than regular and bold, line spacing, kerning, zoom, opacity (p. 1237)
   - caption presets (p. 1235)
   - fades (p. 1240)
   - subtitle regions (pp. 1243–1244)
@@ -3077,9 +3079,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The middle of a bottom region stays below 60%.
     - Thus vidcut reads each cue back at its place.
     - A region whose cues need more lines than fit in that height takes all the height that the picture allows.
-  - A cue with a position has a region of its own. Cues with the same position share one region.
-    - The region is centered on Position X. It is as wide as the text wraps, but it stays inside the picture.
-    - Its middle is at Position Y. With a margin, its top or bottom edge is there, as in the picture.
+  - A cue with a position, or with an anchor other than the track's, has a region of its own. Cues with the same point share one region.
+    - The region starts, is centered or ends at Position X, by the anchor. It is as wide as the text wraps, but it stays inside the picture.
+    - Its middle is at Position Y. With a margin or an anchor, its top or bottom edge is there, as in the picture.
+    - `tts:textAlign` is start, center or end, by the anchor. `ebutts:multiRowAlign` gives the alignment where it is different.
+  - An anchor other than the middle across also changes the regions of the three places. Each starts or ends at the middle of the picture.
   - IMSC1 lets at most four regions show at once (§6.8.3). More regions at once are named in the notes of the export.
   - IMSC1 forbids overlap only between regions shown at the same time (§6.8.2).
   - Thus, where cues at two places show at once, their two regions share the room between them.

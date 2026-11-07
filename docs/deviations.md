@@ -1014,7 +1014,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - the color, the outline, the background and the color of a drop shadow, each typed or picked with a swatch
     - the opacity, offset and blur of the shadow
     - the margin
-    - the alignment, and Position X and Position Y in pixels of the timeline
+    - the alignment, the anchor, and Position X and Position Y in pixels of the timeline
     - bold, capitals or small letters
     - how the words show as they are spoken
   - The viewer shows the style while the user edits it.

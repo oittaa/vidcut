@@ -2509,7 +2509,7 @@ impl TitleAlign {
     }
 }
 
-/// The point of a title's text that goes to its position.
+/// The point of a title's or a subtitle's text that goes to its position.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TitleAnchor {
@@ -2538,6 +2538,24 @@ impl TitleAnchor {
             Self::BottomLeft | Self::Bottom | Self::BottomRight => 1.0,
         };
         [across, down]
+    }
+
+    pub fn at([across, down]: [f64; 2]) -> Self {
+        const ALL: [[TitleAnchor; 3]; 3] = [
+            [
+                TitleAnchor::TopLeft,
+                TitleAnchor::Top,
+                TitleAnchor::TopRight,
+            ],
+            [TitleAnchor::Left, TitleAnchor::Middle, TitleAnchor::Right],
+            [
+                TitleAnchor::BottomLeft,
+                TitleAnchor::Bottom,
+                TitleAnchor::BottomRight,
+            ],
+        ];
+        let index = |v: f64| ((v * 2.0).round() as usize).min(2);
+        ALL[index(down)][index(across)]
     }
 }
 
@@ -5266,6 +5284,13 @@ pub struct SubtitleStyle {
     /// cue, left out keeps the track's position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
+    /// The point of the block that goes to `position`, or to the cue's
+    /// place: a corner, the middle of a side, or `middle`. Across, the block
+    /// is as wide as its longest line. Usual: the middle across; down, the
+    /// middle, or with a `margin` the top edge of a top cue and the bottom
+    /// edge of a bottom cue. On a cue, left out keeps the track's anchor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<TitleAnchor>,
 }
 
 /// What a cue's own or its speaker's color paints.
@@ -5491,6 +5516,7 @@ impl SubtitleStyle {
             && self.speaker_color.is_none()
             && self.align.is_none()
             && self.position.is_none()
+            && self.anchor.is_none()
     }
 
     pub fn over(&self, cue: &Self) -> Self {
@@ -5508,6 +5534,7 @@ impl SubtitleStyle {
             speaker_color: cue.speaker_color.or(self.speaker_color),
             align: cue.align.or(self.align),
             position: cue.position.or(self.position),
+            anchor: cue.anchor.or(self.anchor),
         }
     }
 
@@ -5566,13 +5593,22 @@ impl SubtitleStyle {
     }
 
     pub fn anchor(&self, place: Place) -> (f64, f64) {
-        match (self.margin, place) {
+        let (at, above) = match (self.margin, place) {
             (Some(m), Place::Top) => (m, 0.0),
             (Some(m), Place::Bottom) => (1.0 - m, 1.0),
             (_, Place::Middle) => (0.5, 0.5),
             (None, Place::Top) => (0.2, 0.5),
             (None, Place::Bottom) => (0.8, 0.5),
-        }
+        };
+        (at, self.anchor.map_or(above, |a| a.fractions()[1]))
+    }
+
+    pub fn anchor_across(&self) -> f64 {
+        self.anchor.map_or(0.5, |a| a.fractions()[0])
+    }
+
+    pub fn anchor_in(&self, place: Place) -> TitleAnchor {
+        TitleAnchor::at([self.anchor_across(), self.anchor(place).1])
     }
 
     pub fn usual_position(&self, place: Place) -> [f64; 2] {
@@ -5593,12 +5629,13 @@ impl SubtitleStyle {
     ) -> (f64, f64) {
         let (at, above) = self.anchor(place);
         let [x, y] = self.position.unwrap_or([0.5, at]);
-        let middle = match self.line_align() {
-            SubtitleAlign::Left => widest / 2.0,
-            SubtitleAlign::Center => wrap / 2.0,
-            SubtitleAlign::Right => wrap - widest / 2.0,
+        let lined = match self.line_align() {
+            SubtitleAlign::Left => 0.0,
+            SubtitleAlign::Center => 0.5,
+            SubtitleAlign::Right => 1.0,
         };
-        (picture_w * x - middle, picture_h * y - lines * above)
+        let point = lined * (wrap - widest) + self.anchor_across() * widest;
+        (picture_w * x - point, picture_h * y - lines * above)
     }
 }
 
@@ -6264,6 +6301,7 @@ impl Hash for SubtitleStyle {
             speaker_color,
             align,
             position,
+            anchor,
         } = self;
         (font, floats_bits(*size), color, outline, background).hash(h);
         (
@@ -6275,6 +6313,7 @@ impl Hash for SubtitleStyle {
             speaker_color,
             align,
             pair_bits(*position),
+            anchor,
         )
             .hash(h);
     }

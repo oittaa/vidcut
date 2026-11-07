@@ -358,6 +358,7 @@ Relinking:
   - `SpeakerPaint`: what the color of a cue paints (`SubtitleStyle::paints`)
   - `SubtitleAlign`: `left`, `center` or `right`. It lines up the lines with the longest line. Left out, the lines are centered.
   - `position`: `[x, y]` as fractions of the picture from the top left. `x` is the middle of the longest line. Left out, the block stays in the place of the cue.
+  - `anchor`: a `TitleAnchor`, the point of the block that goes to the position. `SubtitleStyle::anchor` gives the point down, and `SubtitleStyle::anchor_across` the point across.
 - `ops::subtitles` holds the edits. `editor::resolve_cue` reads a cue reference: its id, or a track and a time (S1@15s).
 
 **Cues follow Track 1** ([spec D57](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).

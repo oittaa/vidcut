@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use vidcut_core::looks::{LookKind, Styled, SubtitleLook};
 use vidcut_core::model::{
     Cue, LetterCase, Place, Project, Settings, SpeakerPaint, Speakers, SubtitleAlign,
-    SubtitleStyle, SubtitleTrack, SubtitleWords, Title, WordsShow,
+    SubtitleStyle, SubtitleTrack, SubtitleWords, Title, TitleAnchor, WordsShow,
 };
 use vidcut_core::ops::subtitles as subtitle_ops;
 use vidcut_core::time::{Rational, TimeSpec};
@@ -28,6 +28,7 @@ pub struct CueDialog {
     color: String,
     person_name: String,
     align: Option<SubtitleAlign>,
+    anchor: Option<TitleAnchor>,
     across: String,
     down: String,
     fields: TextFields,
@@ -130,6 +131,7 @@ impl CueDialog {
     fn apply_style(&mut self, style: Option<&SubtitleStyle>) {
         let own = style.cloned().unwrap_or_default();
         self.align = own.align;
+        self.anchor = own.anchor;
         [self.across, self.down] = position_text(own.position, self.frame);
         self.fields = TextFields::load(&Parts::of_subtitles(&own, self.frame));
         self.margin = percent(own.margin);
@@ -151,6 +153,7 @@ impl CueDialog {
     fn raw(&self) -> LookRaw {
         LookRaw {
             align: self.align,
+            anchor: self.anchor,
             across: self.across.clone(),
             down: self.down.clone(),
             fields: self.fields.clone(),
@@ -183,6 +186,7 @@ impl CueDialog {
             words: self.base.words.clone(),
             speaker_color: self.base.speaker_color,
             align: self.align,
+            anchor: self.anchor,
             position: None,
         };
         let look = self.track.for_cue(Some(&style));
@@ -257,6 +261,7 @@ fn raw_of(style: Option<&SubtitleStyle>, frame: [f64; 2]) -> LookRaw {
     let [across, down] = position_text(own.position, frame);
     LookRaw {
         align: own.align,
+        anchor: own.anchor,
         across,
         down,
         fields: TextFields::load(&Parts::of_subtitles(&own, frame)),
@@ -269,6 +274,7 @@ fn raw_of(style: Option<&SubtitleStyle>, frame: [f64; 2]) -> LookRaw {
 #[derive(Debug, Clone, PartialEq)]
 struct LookRaw {
     align: Option<SubtitleAlign>,
+    anchor: Option<TitleAnchor>,
     across: String,
     down: String,
     fields: TextFields,
@@ -617,6 +623,7 @@ pub struct TrackDialog {
     pop: String,
     paint: Option<SpeakerPaint>,
     align: Option<SubtitleAlign>,
+    anchor: Option<TitleAnchor>,
     across: String,
     down: String,
     base: SubtitleStyle,
@@ -644,6 +651,7 @@ impl TrackDialog {
         self.pop = percent(s.words.as_ref().and_then(|w| w.pop));
         self.paint = s.speaker_color;
         self.align = s.align;
+        self.anchor = s.anchor;
         [self.across, self.down] = position_text(s.position, self.frame);
         self.base = s.clone();
     }
@@ -804,6 +812,7 @@ fn style_of(d: &TrackDialog) -> Result<SubtitleStyle, String> {
         words,
         speaker_color: d.paint,
         align: d.align,
+        anchor: d.anchor,
         position: None,
     };
     let usual = style.usual_position(Place::Bottom);
@@ -1005,6 +1014,7 @@ impl Workspace {
             color: String::new(),
             person_name: String::new(),
             align: None,
+            anchor: None,
             across: String::new(),
             down: String::new(),
             fields: TextFields::default(),
@@ -1066,6 +1076,7 @@ impl Workspace {
             pop: String::new(),
             paint: None,
             align: None,
+            anchor: None,
             across: String::new(),
             down: String::new(),
             base: SubtitleStyle::default(),
@@ -1400,6 +1411,10 @@ impl Workspace {
                         ui.selectable_value(&mut d.align, align, label);
                     }
                 });
+            });
+            let usual = d.track.for_cue(Some(&d.base)).anchor_in(d.place);
+            dialog::row(ui, "Anchor", |ui| {
+                super::titles::anchor_buttons(ui, &mut d.anchor, usual);
             });
             dialog::row(ui, "Position X", |ui| {
                 ui.add(
@@ -1759,6 +1774,12 @@ impl Workspace {
                 for (align, label) in TRACK_ALIGNS {
                     changed |= ui.selectable_value(&mut d.align, align, label).changed();
                 }
+            });
+            ui.end_row();
+            ui.label("Anchor");
+            let usual = d.base.anchor_in(Place::Bottom);
+            ui.horizontal(|ui| {
+                changed |= super::titles::anchor_buttons(ui, &mut d.anchor, usual);
             });
             ui.end_row();
             changed |= row(ui, "Position X", &mut d.across, "the place");

@@ -92,20 +92,6 @@ const ALIGNS: [(TitleAlign, &str); 3] = [
     (TitleAlign::Right, "Right"),
 ];
 
-const ANCHORS: [[TitleAnchor; 3]; 3] = [
-    [
-        TitleAnchor::TopLeft,
-        TitleAnchor::Top,
-        TitleAnchor::TopRight,
-    ],
-    [TitleAnchor::Left, TitleAnchor::Middle, TitleAnchor::Right],
-    [
-        TitleAnchor::BottomLeft,
-        TitleAnchor::Bottom,
-        TitleAnchor::BottomRight,
-    ],
-];
-
 impl TitleDialog {
     fn new(clip: &str, t: Option<&Title>) -> Self {
         let mut d = Self {
@@ -292,29 +278,35 @@ fn title_of(d: &TitleDialog, stored: &Title) -> Result<Title, String> {
 }
 
 fn anchor_row(ui: &mut egui::Ui, f: &mut LineFields, usual: TitleAnchor) -> bool {
-    let [across, down] = f
-        .anchor
-        .unwrap_or(usual)
-        .fractions()
-        .map(|v| (v * 2.0) as usize);
-    let mut changed = false;
     ui.label("Anchor");
-    ui.horizontal_wrapped(|ui| {
-        for (i, label) in ["Left", "Middle", "Right"].into_iter().enumerate() {
-            if ui.radio(across == i, label).clicked() && across != i {
-                f.anchor = Some(ANCHORS[down][i]);
-                changed = true;
-            }
-        }
-        ui.separator();
-        for (i, label) in ["Top", "Middle", "Bottom"].into_iter().enumerate() {
-            if ui.radio(down == i, label).clicked() && down != i {
-                f.anchor = Some(ANCHORS[i][across]);
-                changed = true;
-            }
-        }
-    });
+    let changed = ui
+        .horizontal_wrapped(|ui| anchor_buttons(ui, &mut f.anchor, usual))
+        .inner;
     ui.end_row();
+    changed
+}
+
+pub(super) fn anchor_buttons(
+    ui: &mut egui::Ui,
+    anchor: &mut Option<TitleAnchor>,
+    usual: TitleAnchor,
+) -> bool {
+    let [across, down] = anchor.unwrap_or(usual).fractions();
+    let at = |i: usize| i as f64 / 2.0;
+    let mut changed = false;
+    for (i, label) in ["Left", "Middle", "Right"].into_iter().enumerate() {
+        if ui.radio(across == at(i), label).clicked() && across != at(i) {
+            *anchor = Some(TitleAnchor::at([at(i), down]));
+            changed = true;
+        }
+    }
+    ui.separator();
+    for (i, label) in ["Top", "Middle", "Bottom"].into_iter().enumerate() {
+        if ui.radio(down == at(i), label).clicked() && down != at(i) {
+            *anchor = Some(TitleAnchor::at([across, at(i)]));
+            changed = true;
+        }
+    }
     changed
 }
 

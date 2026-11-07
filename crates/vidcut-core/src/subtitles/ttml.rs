@@ -696,7 +696,7 @@ fn stacks(cues: &[Timed], of: &[usize], n: usize) -> (Vec<usize>, Vec<Vec<bool>>
 
 struct Spot {
     place: Place,
-    position: Option<[f64; 2]>,
+    own: Option<f64>,
     at: f64,
     above: f64,
     left: i64,
@@ -705,18 +705,18 @@ struct Spot {
 
 impl Spot {
     fn id(&self, index: usize) -> String {
-        match self.position {
+        match self.own {
             Some(_) => format!("p{}", index + 1 - PLACES.len()),
             None => name(self.place).to_string(),
         }
     }
 
     fn named(&self) -> String {
-        match self.position {
-            Some([x, y]) => format!(
+        match self.own {
+            Some(x) => format!(
                 "at {}% across and {}% down",
                 plain_number(x * 100.0),
-                plain_number(y * 100.0)
+                plain_number(self.at * 100.0)
             ),
             None => format!("at the {}", name(self.place)),
         }
@@ -727,48 +727,71 @@ impl Spot {
     }
 }
 
-fn centered(x: f64, wrap: f64) -> (i64, i64) {
+fn across(x: f64, wrap: f64, side: f64) -> (i64, i64) {
     let grid = GRID as i64;
-    let middle = (x.clamp(0.0, 1.0) * GRID).round() as i64;
-    let half = ((wrap / 2.0 * GRID).floor() as i64)
-        .min(middle)
-        .min(grid - middle);
-    (middle - half, 2 * half)
+    let at = (x.clamp(0.0, 1.0) * GRID).round() as i64;
+    let wide = (wrap * GRID).floor() as i64;
+    match side {
+        s if s <= 0.0 => (at, wide.min(grid - at)),
+        s if s >= 1.0 => {
+            let width = wide.min(at);
+            (at - width, width)
+        }
+        _ => {
+            let half = (wide / 2).min(at).min(grid - at);
+            (at - half, 2 * half)
+        }
+    }
+}
+
+fn text_side(style: &SubtitleStyle) -> &'static str {
+    match style.anchor_across() {
+        s if s <= 0.0 => "start",
+        s if s >= 1.0 => "end",
+        _ => "center",
+    }
 }
 
 fn spots(cues: &[Timed], style: &SubtitleStyle) -> (Vec<Spot>, Vec<usize>) {
     let inset = (style.inset() * GRID).round() as i64;
+    let side = style.anchor_across();
+    let (left, width) = match text_side(style) {
+        "center" => (inset, GRID as i64 - 2 * inset),
+        _ => across(0.5, 1.0 - 2.0 * style.inset(), side),
+    };
     let mut spots: Vec<Spot> = PLACES
         .map(|place| {
             let (at, above) = style.anchor(place);
             Spot {
                 place,
-                position: None,
+                own: None,
                 at,
                 above,
-                left: inset,
-                width: GRID as i64 - 2 * inset,
+                left,
+                width,
             }
         })
         .into();
     let mut of = Vec::with_capacity(cues.len());
     for c in cues {
         let look = style.for_cue(c.style.as_ref());
-        let Some([x, y]) = look.position else {
+        if look.position.is_none() && look.anchor == style.anchor {
             of.push(slot(c.place));
             continue;
-        };
-        let (left, width) = centered(x, 1.0 - 2.0 * look.inset());
+        }
+        let (at, above) = look.anchor(c.place);
+        let [x, y] = look.position.unwrap_or([0.5, at]);
+        let (left, width) = across(x, 1.0 - 2.0 * look.inset(), look.anchor_across());
         let spot = Spot {
             place: c.place,
-            position: Some([x, y]),
+            own: Some(x),
             at: y,
-            above: look.anchor(c.place).1,
+            above,
             left,
             width,
         };
         let same = |s: &Spot| {
-            s.position.is_some()
+            s.own.is_some()
                 && s.at == spot.at
                 && s.above == spot.above
                 && (s.left, s.width) == (spot.left, spot.width)
@@ -821,7 +844,7 @@ fn layout(
                 })
                 .max(0.0);
             let tilt = 0.5 - above;
-            let read = match (spot.position, spot.place) {
+            let read = match (spot.own, spot.place) {
                 (None, Place::Top) if tilt > 0.0 => (0.399 - at) / tilt,
                 (None, Place::Bottom) if tilt < 0.0 => (at - 0.601) / -tilt,
                 _ => f64::INFINITY,
@@ -927,12 +950,13 @@ fn style_attrs(style: &SubtitleStyle, height: u32) -> String {
     };
     let mut attrs = format!(
         "tts:color=\"{}\" tts:fontFamily=\"{font}\" tts:fontSize=\"{}%\" tts:lineHeight=\"{}%\" \
-         tts:textAlign=\"center\"",
+         tts:textAlign=\"{}\"",
         hex(style.ink()),
         plain_number(style.text_fraction() * 10_000.0),
         plain_number(SubtitleStyle::LINE * 100.0),
+        text_side(style),
     );
-    if style.line_align() != SubtitleAlign::Center {
+    if row_align(style.line_align()) != text_side(style) {
         attrs.push_str(&format!(
             " ebutts:multiRowAlign=\"{}\"",
             row_align(style.line_align())
@@ -960,10 +984,12 @@ fn row_align(align: SubtitleAlign) -> &'static str {
 }
 
 fn rows_aligned(cues: &[Timed], style: &SubtitleStyle) -> bool {
-    style.line_align() != SubtitleAlign::Center
-        || cues
-            .iter()
-            .any(|c| c.style.as_ref().is_some_and(|s| s.align.is_some()))
+    row_align(style.line_align()) != text_side(style)
+        || cues.iter().any(|c| {
+            c.style
+                .as_ref()
+                .is_some_and(|s| s.align.is_some() || s.anchor.is_some())
+        })
 }
 
 fn cue_attrs(track: &SubtitleStyle, cue: &Timed) -> String {
@@ -972,7 +998,10 @@ fn cue_attrs(track: &SubtitleStyle, cue: &Timed) -> String {
     };
     let look = track.over(over);
     let mut attrs = String::new();
-    if over.align.is_some() {
+    if over.anchor.is_some() {
+        attrs.push_str(&format!(" tts:textAlign=\"{}\"", text_side(&look)));
+    }
+    if over.align.is_some() || over.anchor.is_some() {
         attrs.push_str(&format!(
             " ebutts:multiRowAlign=\"{}\"",
             row_align(look.line_align())

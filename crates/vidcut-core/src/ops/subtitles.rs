@@ -208,6 +208,7 @@ pub fn checked_style(style: &SubtitleStyle) -> Result<SubtitleStyle> {
         speaker_color: style.speaker_color,
         align: style.align,
         position,
+        anchor: style.anchor,
     })
 }
 
