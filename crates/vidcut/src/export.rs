@@ -10,8 +10,8 @@ use vidcut_core::editor::source_context;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind, PictureShare};
 use vidcut_core::export::metadata::{Measured, PieceMeta};
 use vidcut_core::export::{
-    Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Preset, VideoSettings,
-    apply_overrides, builtin_presets, validate,
+    Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Numbering, Preset,
+    VideoSettings, apply_overrides, builtin_presets, validate,
 };
 use vidcut_core::fingerprint::short_digest;
 use vidcut_core::looks::checked_name;
@@ -422,6 +422,8 @@ fn default_preset(output: &Path) -> &'static str {
         Some(Container::M4a) => "audio-aac",
         Some(Container::Ogg) => "audio-opus",
         Some(Container::Webm) => "vp9-webm",
+        Some(Container::Tiff) => "tiff",
+        Some(Container::Exr) => "openexr",
         _ => "h264-master",
     }
 }
@@ -429,6 +431,7 @@ fn default_preset(output: &Path) -> &'static str {
 pub struct Output {
     pub plan: RenderPlan,
     pub path: PathBuf,
+    pub numbering: Numbering,
     pub settings: ExportSettings,
     pub color: Option<ColorChoice>,
     pub metadata: Option<vidcut_core::export::metadata::MetadataChoice>,
@@ -556,6 +559,53 @@ fn add_subtitles(
     Ok(())
 }
 
+impl Output {
+    pub fn written(&self) -> PathBuf {
+        self.settings.first_file(&self.path, self.numbering.first)
+    }
+
+    fn named(&self) -> Result<()> {
+        let last = self.plan.frames.max(1) - 1;
+        let file = self
+            .settings
+            .first_file(&self.path, self.numbering.first + last);
+        match file.try_exists() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(Error::usage(format!("{}: {e}", file.display()))),
+        }
+    }
+
+    fn taken(&self) -> Option<PathBuf> {
+        if !self.settings.container.image_sequence() {
+            return Some(self.path.clone()).filter(|file| file.exists());
+        }
+        let numbers = self.numbering.first..self.numbering.first + self.plan.frames;
+        let first = self.settings.frame_file(&self.path, numbers.start);
+        let dir = first
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        std::fs::read_dir(dir).ok()?.flatten().find_map(|entry| {
+            let name = entry.file_name();
+            let name = name.as_encoded_bytes();
+            let stem = &name[..name.iter().rposition(|&b| b == b'.')?];
+            let run =
+                &stem[stem.len() - stem.iter().rev().take_while(|b| b.is_ascii_digit()).count()..];
+            (1..=run.len().min(18))
+                .filter(|&k| k == 1 || run[run.len() - k] != b'0')
+                .filter_map(|k| {
+                    std::str::from_utf8(&run[run.len() - k..])
+                        .ok()?
+                        .parse::<i64>()
+                        .ok()
+                })
+                .filter(|n| numbers.contains(n))
+                .map(|n| self.settings.frame_file(&self.path, n))
+                .find(|file| file.exists())
+        })
+    }
+}
+
 pub struct Prepared {
     pub settings: ExportSettings,
     pub preset: Option<String>,
@@ -608,8 +658,8 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             {
                 return Err(Error::usage(format!(
                     "{}: vidcut doesn't export .{ext} files; name the file .mp4, .mov, .mkv, \
-                     .webm, .m4a, .mp3, .flac, .wav or .ogg (or .otio, .otioz or .otiod for a \
-                     timeline), or give a preset",
+                     .webm, .tif, .exr, .m4a, .mp3, .flac, .wav or .ogg (or .otio, .otioz or \
+                     .otiod for a timeline), or give a preset",
                     params.output.display()
                 )));
             }
@@ -673,6 +723,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         proj.settings.channels = enc.channels;
     }
     let ext = settings.container.extension();
+    let drop_frame = p.settings.counts_drop_frame();
     let mut outputs = Vec::new();
     if params.per_clip {
         let template = params.name.as_deref().unwrap_or("{index:03}-{name}");
@@ -685,11 +736,12 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
             .collect();
         let mut clips = clips;
         clips.sort();
-        for (i, (_, id, media)) in clips.iter().enumerate() {
+        for (i, (start, id, media)) in clips.iter().enumerate() {
             let plan = render::flatten_clip(&proj, id)?;
             let name = file_name(template, i + 1, &plan.name, id, media);
             outputs.push(Output {
                 path: params.output.join(format!("{name}.{ext}")),
+                numbering: settings.numbering(p.settings.start_tc + start, drop_frame),
                 plan,
                 settings: settings.clone(),
                 color: None,
@@ -704,6 +756,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
         outputs.push(Output {
             plan: render::flatten(&proj, a, b)?,
             path: params.output.clone(),
+            numbering: settings.numbering(p.settings.start_tc + a, drop_frame),
             settings: settings.clone(),
             color: None,
             metadata: None,
@@ -712,10 +765,13 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     }
     add_subtitles(p, params, &settings, &mut outputs)?;
     for o in &outputs {
-        if o.path.exists() && !params.overwrite {
+        o.named()?;
+        if !params.overwrite
+            && let Some(taken) = o.taken()
+        {
             return Err(Error::invalid(format!(
                 "{} exists; pass overwrite to replace it",
-                o.path.display()
+                taken.display()
             )));
         }
     }
@@ -1114,7 +1170,7 @@ pub fn describe(prepared: &Prepared, available: &Availability) -> Value {
         "notes": notes(prepared, available),
         "outputs": prepared.outputs.iter().map(|o| {
             let mut out = json!({
-                "path": o.path,
+                "path": o.written(),
                 "frames": o.plan.frames,
                 "range": o.plan.range,
                 "video_pieces": o.plan.video.len(),
@@ -1339,11 +1395,12 @@ pub fn run(
             &o.plan,
             &o.settings,
             &o.path,
+            o.numbering,
             available,
             decoder,
             &o.subtitles,
             cancel,
-            &mut |pr| progress(i, &o.path, pr),
+            &mut |pr| progress(i, &o.written(), pr),
         )
         .map_err(|e| {
             if engine::is_cancelled(&e) {

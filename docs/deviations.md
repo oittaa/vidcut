@@ -2704,3 +2704,47 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The black is a fault in Resolve. An effect on a clip does not hide the tracks below.
   - The owner approved this difference.
+
+## X145. A TIFF can hold straight colors
+
+- **Resolve:**
+  - With TIFF, Alpha Mode shows Premultiplied and is greyed out (measured in Resolve Studio 21.2).
+- **vidcut:**
+  - A TIFF takes `video.alpha_mode` `straight`. The file then holds straight colors, and its ExtraSamples tag is 2.
+- **Why:**
+  - ExtraSamples 2 marks the colors as straight. Thus another program reads the file correctly.
+  - OpenEXR takes only Premultiplied, because the OpenEXR format takes premultiplied colors ([spec](cut-page-spec.md#10-quick-export-ch-39-pp-788790-40954096-41044109)).
+  - The owner approved this difference.
+
+## X146. Straight ProRes 4444 holds straight colors
+
+- **Resolve:**
+  - With Straight, a ProRes 4444 file still holds premultiplied colors (measured in Resolve Studio 21.2). ProRes 4444 XQ is not measured.
+- **vidcut:**
+  - With `video.alpha_mode` `straight`, ProRes 4444 and 4444 XQ hold straight colors.
+- **Why:**
+  - The file holds what its Alpha Mode says. The file from Resolve does not agree with its own setting.
+  - The owner approved this difference.
+
+## X147. An image sequence refuses sound settings
+
+- **Resolve:**
+  - With TIFF and OpenEXR, the Audio tab is greyed out.
+  - A render from the scripting API with Export Audio on writes only the frames (measured in Resolve Studio 21.2).
+- **vidcut:**
+  - A TIFF or OpenEXR export with `audio` settings stops with an error. It writes no files.
+- **Why:**
+  - The files cannot hold sound. vidcut does not drop a setting without a word.
+  - The owner approved this difference.
+
+## X148. An OpenEXR in drop-frame timecode has the drop-frame flag
+
+- **Resolve:**
+  - In drop-frame timecode, the frame digits of `timeCode` skip the dropped numbers. The drop-frame flag (bit 6) is 0.
+  - This is so at 29.97, 59.94 and 119.88 fps (measured in Resolve Studio 21.2).
+- **vidcut:**
+  - The frame digits are the same. vidcut sets the drop-frame flag.
+- **Why:**
+  - The `timeCode` of OpenEXR follows SMPTE 12M. There, bit 6 is the drop-frame flag.
+  - Without the flag, a reader takes the digits as non-drop-frame. At 29.97 fps, a frame count from them is then 2 frames too high for each minute that drops numbers.
+  - The owner approved this difference.
