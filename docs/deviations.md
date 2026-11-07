@@ -2666,13 +2666,17 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The picker reaches any file, with no LUT folder to set up.
   - The owner approved this difference.
 
-## X145. A Sharpen of very low contrast differs by up to 0.012
+## X145. Sharpen on weak noise is up to 3 levels off
 
 - **Resolve:**
-  - The Sharpen of a noise source with a standard deviation of 0.01 is the reference (16-bit renders, Resolve Studio 21.1.2).
+  - The spec gives the Sharpen rule ([§8.16](cut-page-spec.md#816-effects-pp-765-3526-3536)).
+  - The rule comes from 16-bit renders of Resolve Studio 21.1.2.
 - **vidcut:**
-  - On that source, vidcut differs from the render by up to 0.0035 at the defaults.
-  - With Medium Details at 3, the difference is up to 0.0122. The mean difference is 0.0006 or less.
+  - vidcut uses the same rule.
+  - The Sharpen reads a picture of 16-bit floating-point numbers (`MIXING`).
+  - The test picture is weak noise. Its pixels vary by about 2.5 levels out of 255.
+  - On this picture, some pixels are not the same as in the Resolve render.
+  - At the default values, the largest difference is less than 1 level out of 255.
+  - With Medium Details at 3, the largest difference is 3 levels out of 255.
 - **Why:**
-  - The Sharpen takes its input from the mixing picture, which holds 16-bit floats (`MIXING`). This is the probable cause. No cure was measured.
   - The owner approved this difference.
