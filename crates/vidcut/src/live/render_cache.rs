@@ -312,11 +312,15 @@ impl Background {
             Event::Ended { job, done, error } => {
                 if self.running.as_ref().is_some_and(|r| Arc::ptr_eq(r, &job)) {
                     self.running = None;
-                    let failed = error.is_some();
-                    if let Some(error) = error {
-                        self.error = Some(error);
+                    match error {
+                        Some(error) => {
+                            self.error = Some(error);
+                            self.quiet = Instant::now();
+                        }
+                        None if done => self.error = None,
+                        None => {}
                     }
-                    self.done |= done || failed;
+                    self.done |= done;
                 }
                 false
             }
@@ -815,6 +819,38 @@ mod tests {
         });
         assert_eq!(bg.error.as_deref(), Some("the disk cache has no room"));
         assert!(!bg.done);
+    }
+
+    #[test]
+    fn a_failed_pass_is_not_finished() {
+        let (tx, _rx) = mpsc::channel();
+        let mut bg = Background::new(tx, &Preferences::default());
+        let job = Arc::new(AtomicBool::new(false));
+        bg.running = Some(job.clone());
+        bg.event(Event::Ended {
+            job,
+            done: false,
+            error: Some("three writes failed".into()),
+        });
+        assert_eq!(bg.error.as_deref(), Some("three writes failed"));
+        assert!(!bg.done);
+        assert!(bg.running.is_none());
+    }
+
+    #[test]
+    fn a_finished_pass_clears_the_error() {
+        let (tx, _rx) = mpsc::channel();
+        let mut bg = Background::new(tx, &Preferences::default());
+        let job = Arc::new(AtomicBool::new(false));
+        bg.running = Some(job.clone());
+        bg.error = Some("three writes failed".into());
+        bg.event(Event::Ended {
+            job,
+            done: true,
+            error: None,
+        });
+        assert!(bg.done);
+        assert!(bg.error.is_none());
     }
 
     #[test]

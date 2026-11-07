@@ -620,7 +620,8 @@ The background render (`live::render_cache::Background`):
   - It uses the AI models that the viewer has loaded, with no second copy ([gpu](gpu.md#super-scale)).
   - It ends when the mode has nothing left to render. An edit or a change of the preferences starts it again.
   - A frame that fails to write is left out for this plan (`Cache::block`). The render writes the other frames. The line stays red on that frame, because the index does not have it. A change of the plan tries the frame again.
-  - Three failed writes in a row stop the pass. The error stays when a play or a seek stops the render (`Event::Problem`).
+  - Three failed writes in a row stop the pass. After `render_cache.after_secs` with no activity, another pass starts.
+  - The error stays when a play or a seek stops the render (`Event::Problem`).
 - `cache.render` in a GUI starts the render at once (`Background::render_now`). It does not wait for the time without activity.
   - It first stops a render that runs. Thus only one render writes the cache.
 - Without a GUI, the CLI process renders the cache (`render_all`).
