@@ -1683,7 +1683,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Detail Loss goes from 0 to 2 and is 0.
   - Advanced Controls:
     - Red, Green and Blue each go from −10 to 10 and are 1.
-    - Shadow Gain, Midtone Gain and Highlight Gain each go from 0 to 1 and are 0.5.
+    - Shadows, Midtones and Highlights each go from 0 to 1 and are 0.5.
+    - The Inspector of Resolve 21.2 shows these names. The manual (p. 3559) calls them Shadow, Midtone and Highlight Gain.
     - Optimized Mode is on. Animate On Every Refresh is off.
 - **How the film grain works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
   - `n` is the noise of a channel. `O` is Offset. Grain Only shows `G = clip(O + n)`, which does not depend on the picture.
@@ -1693,7 +1694,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Opacity acts twice. So the grain goes with the square of Opacity.
     - Offset changes the picture only where `G` stops at 0 or 1.
   - `F` is the tones, on the channel's own value: `F(v) = 2 × (s × Ws + m × Wm + h × Wh)`.
-    - `s`, `m` and `h` are Shadow Gain, Midtone Gain and Highlight Gain.
+    - `s`, `m` and `h` are Shadows, Midtones and Highlights.
     - `Ws = clamp((0.4005 − v) / 0.299, 0, 1)`, `Wh = clamp((v − 0.5995) / 0.299, 0, 1)` and `Wm = 1 − Ws − Wh`.
   - The output is `a` × the result, with `a` the alpha. `a` stays. With Grain Only it is `a` × `G`. Outside the picture nothing shows.
   - Use Alpha changes nothing. Blend mixes the input and the output.

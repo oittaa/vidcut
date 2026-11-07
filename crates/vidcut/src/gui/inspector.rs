@@ -419,7 +419,7 @@ impl GlowKnob {
     }
 }
 
-const TONES: [&str; 3] = ["Shadow Gain", "Midtone Gain", "Highlight Gain"];
+const TONES: [&str; 3] = ["Shadows", "Midtones", "Highlights"];
 
 impl GrainKnob {
     fn dial(self) -> Dial {
