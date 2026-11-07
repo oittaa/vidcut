@@ -391,8 +391,9 @@ Reading:
 Placing:
 
 - `ops::subtitles::import` turns each time into the nearest frame in the time base of the file (`SubtitleTimeBase`). The time base is real time, or timecode labels when the times sit on their grid.
-- It keeps the position, the anchor and the alignment of a cue only where they differ from the style of the track.
 - A file in timecode then loses the start timecode of the timeline, or 01:00:00:00 ([deviation X41](../deviations.md#x41-subtitle-files-placed-by-their-timecode-or-from-the-timelines-start)).
+- It keeps the position, the anchor and the alignment of a cue only where they differ from the style of the track.
+- A new track takes the alignment that all the cues of the file share.
 
 Writing:
 
