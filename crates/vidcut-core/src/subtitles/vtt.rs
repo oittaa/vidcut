@@ -1,7 +1,7 @@
 use super::text::{self, Dialect, PALETTE, Tag, Token};
 use super::{Read, Timed, clock, srt};
 use crate::error::{Error, Result};
-use crate::model::{Place, SubtitleAlign, SubtitleStyle};
+use crate::model::{Place, SubtitleStyle};
 
 fn place(settings: &str) -> Place {
     let Some(line) = settings
@@ -210,11 +210,6 @@ pub fn settings(place: Place, look: &SubtitleStyle) -> String {
             Place::Middle => parts.push("line:50%,center".into()),
             Place::Bottom => {}
         },
-    }
-    match look.line_align() {
-        SubtitleAlign::Left => parts.push("align:left".into()),
-        SubtitleAlign::Right => parts.push("align:right".into()),
-        SubtitleAlign::Center => {}
     }
     parts.join(" ")
 }

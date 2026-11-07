@@ -419,7 +419,8 @@ Cancel:
 - The stream has the name of the track, and its language as an ISO 639-2 code (`three_letter`). The stream of the shown track is the default.
 - `subtitles::dialog` turns the markup of a cue into the override codes that the encoders read.
 - Cues that overlap become one cue for each stretch of time (`subtitles::segments`). Why: mov_text samples cannot overlap. Where the muxer allows it, each place keeps its own stretch.
-- The place of a cue goes to SubRip as an alignment tag, and to WebVTT as a `line` setting. mov_text has no place.
+- The place of a cue goes to SubRip as a tag (`subtitles::ass_tag`), and to WebVTT as a `line` setting. mov_text has no place.
+- The alignment of the lines does not go into a stream. Why: the SubRip tag moves the block with its lines, and WebVTT centers the block on its position.
 
 **Burning in** ([spec D61](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 
@@ -428,6 +429,7 @@ Cancel:
 - `subtitles::shown` gives what each cue draws at the frame ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)). It gives the pieces, the spoken word in its color, the words not yet spoken, and the size of a pop.
 - `burn::draw` lays out the cues with cosmic-text: shaping, right-to-left text, and system fonts for the scripts that the first font does not have.
 - `burn::paint` draws one picture for each run of cues that share a place and a style. A popping word is a picture of its own over it.
+- `SubtitleStyle::block_box` places the block. The middle of the longest line (the `widest` field of `Laid`) goes to the `position`, else to the middle of the picture. The alignment moves only the shorter lines.
 - The last lines laid out stay in a `ByBytes` with a fixed limit (`laid_line`, `LINES_BYTES`). Why: exports use them, also with no viewer.
 - The player's `Subtitles` keeps the pictures while the same pieces show (`Subtitles::burned`). Thus a pop draws only its word again.
 - The pictures go onto the frame in the draw of the viewer ([todo](../todo/burn-in-ahead.md)).

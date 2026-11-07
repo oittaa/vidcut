@@ -5254,14 +5254,16 @@ pub struct SubtitleStyle {
     /// `words`, else `text`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker_color: Option<SpeakerPaint>,
-    /// `left`, `center` or `right`. Usual: `center`. On a cue, left out
-    /// keeps the track's alignment.
+    /// How the lines line up with the longest line: `left`, `center` or
+    /// `right`. The block stays where it is. Usual: `center`. On a cue, left
+    /// out keeps the track's alignment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<SubtitleAlign>,
-    /// Where the block's alignment point sits, `[x, y]` as fractions of
-    /// the picture from its top left, from -4 to 4 across and from -3 to 5
-    /// down. Usual: the cue's place. On a cue, left out keeps the track's
-    /// position.
+    /// Where the block sits, `[x, y]` as fractions of the picture from its
+    /// top left, from -4 to 4 across and from -3 to 5 down. `x` is the
+    /// middle of the longest line. `y` is the middle of the block, or with a
+    /// `margin` the edge of a top or bottom cue. Usual: the cue's place. On a
+    /// cue, left out keeps the track's position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<[f64; 2]>,
 }
@@ -5574,12 +5576,7 @@ impl SubtitleStyle {
     }
 
     pub fn usual_position(&self, place: Place) -> [f64; 2] {
-        let across = match self.line_align() {
-            SubtitleAlign::Left => self.inset(),
-            SubtitleAlign::Center => 0.5,
-            SubtitleAlign::Right => 1.0 - self.inset(),
-        };
-        [across, self.anchor(place).0]
+        [0.5, self.anchor(place).0]
     }
 
     pub fn block_top(&self, place: Place, picture_height: f64, lines: f64) -> f64 {
@@ -5591,21 +5588,17 @@ impl SubtitleStyle {
         &self,
         place: Place,
         (picture_w, picture_h): (f64, f64),
-        wrap: f64,
+        (wrap, widest): (f64, f64),
         lines: f64,
     ) -> (f64, f64) {
         let (at, above) = self.anchor(place);
-        match self.position {
-            Some([x, y]) => {
-                let across = match self.line_align() {
-                    SubtitleAlign::Left => 0.0,
-                    SubtitleAlign::Center => 0.5,
-                    SubtitleAlign::Right => 1.0,
-                };
-                (picture_w * x - wrap * across, picture_h * y - lines * above)
-            }
-            None => ((picture_w - wrap) / 2.0, picture_h * at - lines * above),
-        }
+        let [x, y] = self.position.unwrap_or([0.5, at]);
+        let middle = match self.line_align() {
+            SubtitleAlign::Left => widest / 2.0,
+            SubtitleAlign::Center => wrap / 2.0,
+            SubtitleAlign::Right => wrap - widest / 2.0,
+        };
+        (picture_w * x - middle, picture_h * y - lines * above)
     }
 }
 

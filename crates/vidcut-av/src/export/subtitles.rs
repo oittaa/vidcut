@@ -169,13 +169,12 @@ fn dialog_words(
 pub(crate) fn dialog(
     text: &str,
     place: Place,
-    align: vidcut_core::model::SubtitleAlign,
     html: bool,
     word_styles: &[Option<SubtitleStyle>],
     cue: &SubtitleStyle,
 ) -> String {
     let mut out = String::from("0,0,Default,,0,0,0,,");
-    if let Some(tag) = vidcut_core::subtitles::ass_align(place, align) {
+    if let Some(tag) = vidcut_core::subtitles::ass_tag(place) {
         out.push_str(tag);
     }
     if word_styles.iter().any(|s| s.is_some()) {
@@ -340,14 +339,7 @@ impl SubtitleOut {
         let mut packets = VecDeque::new();
         for cue in segments(&track.cues, by_place) {
             let look = track.style.for_cue(cue.style.as_ref());
-            let line = dialog(
-                &cue.text,
-                cue.place,
-                look.line_align(),
-                html,
-                &cue.word_styles,
-                &look,
-            );
+            let line = dialog(&cue.text, cue.place, html, &cue.word_styles, &look);
             // SAFETY: `encoder` is open.
             let n = encode_one(unsafe { encoder.as_mut_ptr() }, &line, &mut buf)?;
             if n == 0 {
@@ -439,7 +431,7 @@ impl SubtitleOut {
 #[cfg(test)]
 mod tests {
     use super::dialog;
-    use vidcut_core::model::{Place, SubtitleAlign, SubtitleStyle};
+    use vidcut_core::model::{Place, SubtitleStyle};
 
     #[test]
     fn a_stream_paints_one_word_and_leaves_the_other() {
@@ -452,14 +444,7 @@ mod tests {
             bold: Some(true),
             ..SubtitleStyle::default()
         };
-        let line = dialog(
-            "one two",
-            Place::Bottom,
-            SubtitleAlign::Center,
-            false,
-            &[None, Some(word)],
-            &cue,
-        );
+        let line = dialog("one two", Place::Bottom, false, &[None, Some(word)], &cue);
         assert_eq!(line, "0,0,Default,,0,0,0,,one{\\r} {\\b1}{\\c&H0000ff&}two");
     }
 }

@@ -332,6 +332,7 @@ struct Laid {
     tall: f32,
     sprite: Option<Sprite>,
     lines: f32,
+    widest: f32,
     above: f32,
     popped: Option<(f32, f32)>,
     seated: Option<[f32; 2]>,
@@ -1543,6 +1544,7 @@ fn lay_out(look: &Look) -> Option<Laid> {
     Some(Laid {
         sprite,
         lines,
+        widest,
         above,
         tall,
         popped,
@@ -1634,7 +1636,12 @@ fn block(
     let Some(laid) = laid_line(line, &look) else {
         return (None, None);
     };
-    let (left, top) = style.block_box(place, (w, h), f64::from(look.wrap), f64::from(laid.lines));
+    let (left, top) = style.block_box(
+        place,
+        (w, h),
+        (f64::from(look.wrap), f64::from(laid.widest)),
+        f64::from(laid.lines),
+    );
     let (left, top) = (left as f32, top as f32);
     let drawn = laid.sprite.map(|s| placed(s, left, top));
     let Some((cx, cy)) = laid.popped else {

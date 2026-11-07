@@ -356,8 +356,8 @@ Relinking:
   - its bold face, letter case and shadow
   - `SubtitleWords`: how its words show as they are spoken ([spec D69](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
   - `SpeakerPaint`: what the color of a cue paints (`SubtitleStyle::paints`)
-  - `SubtitleAlign`: `left`, `center` or `right`. Left out, the lines are centered.
-  - `position`: `[x, y]` as fractions of the picture from the top left. Left out, the block stays in the place of the cue.
+  - `SubtitleAlign`: `left`, `center` or `right`. It lines up the lines with the longest line. Left out, the lines are centered.
+  - `position`: `[x, y]` as fractions of the picture from the top left. `x` is the middle of the longest line. Left out, the block stays in the place of the cue.
 - `ops::subtitles` holds the edits. `editor::resolve_cue` reads a cue reference: its id, or a track and a time (S1@15s).
 
 **Cues follow Track 1** ([spec D57](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).

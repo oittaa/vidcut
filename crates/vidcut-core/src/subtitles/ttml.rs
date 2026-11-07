@@ -10,6 +10,7 @@ use crate::model::{Place, SubtitleAlign, SubtitleStyle};
 
 const TTP: &str = "http://www.w3.org/ns/ttml#parameter";
 const TTS: &str = "http://www.w3.org/ns/ttml#styling";
+const EBUTTS: &str = "urn:ebu:tt:style";
 const XML: &str = "http://www.w3.org/XML/1998/namespace";
 
 #[derive(Debug, Clone, Default)]
@@ -809,12 +810,17 @@ fn style_attrs(style: &SubtitleStyle, height: u32) -> String {
     };
     let mut attrs = format!(
         "tts:color=\"{}\" tts:fontFamily=\"{font}\" tts:fontSize=\"{}%\" tts:lineHeight=\"{}%\" \
-         tts:textAlign=\"{}\"",
+         tts:textAlign=\"center\"",
         hex(style.ink()),
         plain_number(style.text_fraction() * 10_000.0),
         plain_number(SubtitleStyle::LINE * 100.0),
-        align_name(style.line_align()),
     );
+    if style.line_align() != SubtitleAlign::Center {
+        attrs.push_str(&format!(
+            " ebutts:multiRowAlign=\"{}\"",
+            row_align(style.line_align())
+        ));
+    }
     if style.bold == Some(true) {
         attrs.push_str(" tts:fontWeight=\"bold\"");
     }
@@ -828,12 +834,19 @@ fn style_attrs(style: &SubtitleStyle, height: u32) -> String {
     attrs
 }
 
-fn align_name(align: SubtitleAlign) -> &'static str {
+fn row_align(align: SubtitleAlign) -> &'static str {
     match align {
-        SubtitleAlign::Left => "left",
+        SubtitleAlign::Left => "start",
         SubtitleAlign::Center => "center",
-        SubtitleAlign::Right => "right",
+        SubtitleAlign::Right => "end",
     }
+}
+
+fn rows_aligned(cues: &[Timed], style: &SubtitleStyle) -> bool {
+    style.line_align() != SubtitleAlign::Center
+        || cues
+            .iter()
+            .any(|c| c.style.as_ref().is_some_and(|s| s.align.is_some()))
 }
 
 fn cue_attrs(track: &SubtitleStyle, cue: &Timed) -> String {
@@ -844,8 +857,8 @@ fn cue_attrs(track: &SubtitleStyle, cue: &Timed) -> String {
     let mut attrs = String::new();
     if over.align.is_some() {
         attrs.push_str(&format!(
-            " tts:textAlign=\"{}\"",
-            align_name(look.line_align())
+            " ebutts:multiRowAlign=\"{}\"",
+            row_align(look.line_align())
         ));
     }
     if over.color.is_some() {
@@ -910,9 +923,13 @@ pub fn write(
             )
         })
         .collect();
+    let rows = match rows_aligned(cues, style) {
+        true => format!(" xmlns:ebutts=\"{EBUTTS}\""),
+        false => String::new(),
+    };
     let mut out = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tt xml:lang=\"{}\" \
-         xmlns=\"http://www.w3.org/ns/ttml\" xmlns:ttp=\"{TTP}\" xmlns:tts=\"{TTS}\" \
+         xmlns=\"http://www.w3.org/ns/ttml\" xmlns:ttp=\"{TTP}\" xmlns:tts=\"{TTS}\"{rows} \
          xmlns:ittp=\"http://www.w3.org/ns/ttml/profile/imsc1#parameter\" \
          ttp:profile=\"http://www.w3.org/ns/ttml/profile/imsc1/text\" \
          ttp:timeBase=\"media\"{} ttp:cellResolution=\"100 100\">\n  <head>\n    <styling>\n      \

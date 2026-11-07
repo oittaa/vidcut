@@ -8,7 +8,7 @@ mod vtt;
 use std::path::Path;
 
 use crate::error::{Error, Result};
-use crate::model::{Place, Settings, SubtitleAlign, SubtitleStyle};
+use crate::model::{Place, Settings, SubtitleStyle};
 use crate::request::SubtitleFormat;
 
 pub use languages::three_letter;
@@ -158,17 +158,11 @@ pub fn write(cues: &[Timed], format: SubtitleFormat, how: &Writing) -> Written {
     Written { text, warnings }
 }
 
-pub fn ass_align(place: Place, align: SubtitleAlign) -> Option<&'static str> {
-    match (place, align) {
-        (Place::Bottom, SubtitleAlign::Center) => None,
-        (Place::Bottom, SubtitleAlign::Left) => Some("{\\an1}"),
-        (Place::Bottom, SubtitleAlign::Right) => Some("{\\an3}"),
-        (Place::Middle, SubtitleAlign::Left) => Some("{\\an4}"),
-        (Place::Middle, SubtitleAlign::Center) => Some("{\\an5}"),
-        (Place::Middle, SubtitleAlign::Right) => Some("{\\an6}"),
-        (Place::Top, SubtitleAlign::Left) => Some("{\\an7}"),
-        (Place::Top, SubtitleAlign::Center) => Some("{\\an8}"),
-        (Place::Top, SubtitleAlign::Right) => Some("{\\an9}"),
+pub fn ass_tag(place: Place) -> Option<&'static str> {
+    match place {
+        Place::Bottom => None,
+        Place::Middle => Some("{\\an5}"),
+        Place::Top => Some("{\\an8}"),
     }
 }
 

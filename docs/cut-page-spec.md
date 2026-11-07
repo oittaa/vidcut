@@ -1208,9 +1208,11 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A track has a style: its font, size, color, outline, background and margin.
   - The style also has the bold face, the letters as capitals or small letters (Font Case), and a drop shadow.
   - Alignment is `left`, `center` or `right`. The usual alignment is center.
+  - The alignment lines up the lines with the longest line. The block stays where it is.
   - Position is `[x, y]`, two fractions of the picture from the top left.
   - The fractions are from −4 to 4 across and from −3 to 5 down. Left out, the block stays in the cue's place.
-  - With a position, that point is where the alignment of the block sits.
+  - Position X is the middle of the longest line. Without a position, that middle is at the middle of the picture.
+  - Position Y is the middle of the block. With a margin, it is the bottom edge of a bottom block, or the top edge of a top block.
   - The Subtitle Track section and the style of a cue show Position X and Position Y in pixels of the timeline:
     - Position X counts from the left edge. Position Y counts up from the bottom edge.
     - A typed value stops at 4 times the width or the height, to either side.
@@ -1220,15 +1222,25 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - Both stop at 4 times the width or the height, to either side.
     - The usual position is 960, 216 on a 1920×1080 timeline. This is the usual place of vidcut, `[0.5, 0.8]`.
     - A change of the timeline size keeps the fractions. 960, 216 became 1920, 432 on 3840×2160 and 1920, 216 on 3840×1080.
+  - Measured in Resolve Studio 21.2 on 1920×1080, with "Short" over "A much longer second line" at Size 58 and Position 960, 216:
+    - The block is as wide as its longest line. The longest line stays at x 592–1325 for each alignment.
+    - Only the short line moves. It starts at x 594 for Left, 887 for Center and 1179 for Right.
+    - With one line, Left, Center and Right give the same picture.
+    - The Anchor has six buttons. The first three put the bottom edge, the middle or the top edge of the block at Position Y.
+    - The other three put the left edge, the middle or the right edge of the block at Position X.
+    - The usual anchor is the middle of the block.
+    - An IMSC1 file has a region as large as the block, centered on the position, with `tts:textAlign` start.
+    - An SRT or WebVTT file has no alignment and no position.
   - Details: D61; deviation X51.
 - **Style of one cue** (p. 1238):
   - A cue stores its own style when you set one.
   - A field left out of that style keeps the track's style.
   - The cue leaves the whole style out when it keeps the track's style.
   - The viewer and a burn-in draw that one result.
-  - WebVTT writes the cue's alignment and its position.
-  - SRT writes the alignment together with the cue's place.
+  - WebVTT writes the cue's position. SRT writes the cue's place.
+  - Neither writes the alignment. Their settings move the block with its lines.
   - An IMSC1 paragraph takes a font, size, color, bold face, or alignment that the cue sets.
+  - The alignment is `ebutts:multiRowAlign`, which IMSC1 permits. `tts:textAlign` stays center, thus the longest line stays in the middle.
   - `subtitles.set` takes `style`. An empty style drops the cue's own style.
   - Other cues on the track stay as they were.
 - **Style of one word** (p. 1238):
@@ -1259,7 +1271,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - It exports or imports a preset as a `.preset` file.
   - vidcut: looks, for titles too. Some looks are built in (X59). Details: D71.
 - **Later:**
-  - the faces of a track style other than regular and bold, line spacing, kerning, zoom, opacity and text anchoring beyond alignment (p. 1237)
+  - the faces of a track style other than regular and bold, line spacing, kerning, zoom, opacity and the Anchor buttons (p. 1237)
   - caption presets (p. 1235)
   - fades (p. 1240)
   - subtitle regions (pp. 1243–1244)
