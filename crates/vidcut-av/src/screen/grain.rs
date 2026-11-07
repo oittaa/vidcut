@@ -1,13 +1,12 @@
 use std::f32::consts::TAU;
 
-use half::f16;
 use rustfft::FftPlanner;
 use rustfft::num_complex::Complex32;
 use vidcut_core::place::GrainTile;
 
 const CUBIC: f32 = 0.01245;
 
-const BYTES: usize = 8;
+pub(super) const BYTES: usize = 16;
 
 const THIRD: (usize, usize) = (17, 29);
 
@@ -90,8 +89,8 @@ pub(super) fn tile_bytes(t: &GrainTile, (w, h): (u32, u32)) -> Vec<u8> {
     let (w, h) = (w as usize, h as usize);
     let made = field(t, (w, h));
     let spread = (1.0 + 6.0 * CUBIC + 15.0 * CUBIC * CUBIC).sqrt();
-    let shaped = |u: f32| f16::from_f32((u + CUBIC * u * u * u) / spread).to_le_bytes();
-    let one = f16::ONE.to_le_bytes();
+    let shaped = |u: f32| ((u + CUBIC * u * u * u) / spread).to_le_bytes();
+    let one = 1.0f32.to_le_bytes();
     let mut out = Vec::with_capacity(w * h * BYTES);
     for y in 0..h {
         for x in 0..w {

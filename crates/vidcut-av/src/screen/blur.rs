@@ -848,7 +848,7 @@ fn grain_tile<'a>(
             &grain::tile_bytes(tile, (w, h)),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(w * 8),
+                bytes_per_row: Some(w * grain::BYTES as u32),
                 rows_per_image: Some(h),
             },
             made.texture.size(),
