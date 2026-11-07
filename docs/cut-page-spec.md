@@ -1209,8 +1209,17 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The style also has the bold face, the letters as capitals or small letters (Font Case), and a drop shadow.
   - Alignment is `left`, `center` or `right`. The usual alignment is center.
   - Position is `[x, y]`, two fractions of the picture from the top left.
-  - Each fraction is from 0 to 1. Left out, the block stays in the cue's place.
+  - The fractions are from −4 to 4 across and from −3 to 5 down. Left out, the block stays in the cue's place.
   - With a position, that point is where the alignment of the block sits.
+  - The Subtitle Track section and the style of a cue show Position X and Position Y in pixels of the timeline:
+    - Position X counts from the left edge. Position Y counts up from the bottom edge.
+    - A typed value stops at 4 times the width or the height, to either side.
+    - A change of the timeline size keeps the fractions.
+  - Measured in Resolve Studio 21.2, on 1920×1080, 3840×2160 and 3840×1080 timelines:
+    - The Inspector shows Position X in pixels from the left and Position Y in pixels up from the bottom.
+    - Both stop at 4 times the width or the height, to either side.
+    - The usual position is 960, 216 on a 1920×1080 timeline. This is the usual place of vidcut, `[0.5, 0.8]`.
+    - A change of the timeline size keeps the fractions. 960, 216 became 1920, 432 on 3840×2160 and 1920, 216 on 3840×1080.
   - Details: D61; deviation X51.
 - **Style of one cue** (p. 1238):
   - A cue stores its own style when you set one.
@@ -2970,7 +2979,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - The Drop Shadow switch off greys the values and keeps them, measured in Resolve Studio 21.1.2. On again gives the same values.
     - Show Background does the same. Its greying is not measured.
     - The two shadow offset boxes are separate, measured in Resolve Studio 21.1.2. One typed box is accepted, and the other keeps its value.
-    - One typed Across or Down box is accepted. The other box takes the position of the track, else the place of the block.
+    - One typed Position X or Position Y box is accepted. The other box takes the position of the track, else the place of the block.
   - A margin moves a block to the edge:
     - Without a margin, the middle of a bottom block is at 80% of the height.
     - With a margin, its bottom edge is at the margin.

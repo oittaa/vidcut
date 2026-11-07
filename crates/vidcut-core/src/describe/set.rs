@@ -331,7 +331,7 @@ fn seconds(v: &Value) -> String {
         .map_or_else(|| raw(v), |n| format!("{}s", trim(n)))
 }
 
-const STYLE: [(&str, &str); 30] = [
+const STYLE: [(&str, &str); 31] = [
     ("font", "Font"),
     ("size", "Size"),
     ("line_spacing", "Line Spacing"),
@@ -357,6 +357,7 @@ const STYLE: [(&str, &str); 30] = [
     ("shadow.blur", "Shadow Blur"),
     ("shadow.off", "Shadow Off"),
     ("margin", "Margin"),
+    ("position", "Position"),
     ("words", "Words"),
     ("words.show", "Show Words"),
     ("words.color", "Spoken Word"),
@@ -409,15 +410,22 @@ fn leaves(style: &Value) -> BTreeMap<String, Value> {
 const PRESENT: [&str; 2] = ["shadow", "words"];
 
 fn style(f: &mut Fields, before: &[Value], after: &Value, size: f64, frame: Option<[f64; 2]>) {
-    let pixels = |v: &Value| match (v.as_array(), frame) {
+    let pixels = |v: &Value, up: bool| match (v.as_array(), frame) {
         (Some(a), Some(size)) => a
             .iter()
             .zip(size)
-            .map(|(n, side)| n.as_f64().map_or_else(|| raw(n), |n| trim(n * side)))
+            .zip([false, up])
+            .map(|((n, side), flip)| match n.as_f64() {
+                Some(n) if flip => trim((1.0 - n) * side),
+                Some(n) => trim(n * side),
+                None => raw(n),
+            })
             .collect::<Vec<_>>()
             .join(", "),
         _ => percents(v),
     };
+    let offset = |v: &Value| pixels(v, false);
+    let place = |v: &Value| pixels(v, true);
     let new = leaves(after);
     let old: Vec<BTreeMap<String, Value>> = before.iter().map(leaves).collect();
     let rank = |k: &str| STYLE.iter().position(|(key, _)| *key == k);
@@ -444,10 +452,10 @@ fn style(f: &mut Fields, before: &[Value], after: &Value, size: f64, frame: Opti
             .map(|m| m.get(key).cloned().unwrap_or_else(|| absent.clone()))
             .collect();
         let now = new.get(key).cloned().unwrap_or(absent);
-        let show = if key == "shadow.offset" {
-            &pixels
-        } else {
-            style_show(key)
+        let show: Show = match key.as_str() {
+            "shadow.offset" => &offset,
+            "position" => &place,
+            _ => style_show(key),
         };
         f.put(name, &olds, &now, show, &usual);
     }
