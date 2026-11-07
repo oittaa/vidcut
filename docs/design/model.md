@@ -196,6 +196,7 @@ Media fields:
   - `Media::video_as_read` is the `VideoInfo` of the file, read in that space. Render pieces carry it.
   - `VideoReader` retags each decoded frame with it (`color::retag`). This drops the HDR side data.
   - A proxy is made from the pictures as read in that space. Thus its own tags are right.
+- `input_lut` is the `.cube` file that the pictures of each clip of the media go through (spec §3, [the LUT files](README.md#lut-files)).
 - `alpha_mode` (`AlphaMode`, spec §3) tells how to read the alpha channel of the pictures.
   - `VideoPiece::Source` carries it. `Picture::alpha_mode` gives it to the draw ([playback](playback.md#gpu-pictures)).
   - `Media::opaque` is true for a picture with no alpha channel, or with the mode None.
@@ -300,7 +301,7 @@ Ranges and resolution:
 
 - `Store` reads and writes the `Project` as pretty JSON (serde).
 - A media path in or under the folder of the project is stored relative to it. Other paths are stored absolute. In memory, media paths are absolute.
-  - The same rule holds for the `input_lut` of a clip and the `output_lut` of the settings.
+  - The same rule holds for the `input_lut` of a media item and the `output_lut` of the settings.
   - Why: a project folder that moves, to another computer too, keeps its media ([deviation X1](../deviations.md#x1-projects-are-always-saved-standalone-json-files)).
 - A proxy is stored by its file name (`Proxy::file`), and found in the proxy folder of this computer (`Proxy::path_in`, `Env::proxy_dir`).
 - A save writes a temporary file and renames it over the project (`temp::write`). Thus readers see the old file or the new one, never part of one.
@@ -406,22 +407,22 @@ Writing:
 - Its `Title` holds:
   - a `TitleKind`: `text`, `lower_third` or `scroll`
   - the `TitleAlign` of its lines
-  - the `TitleAnchor` of a Text title
+  - an optional `TitleAnchor`. Without one, the block takes the usual anchor of its kind, alignment and part (`Title::usual_anchor`). `Title::anchor_of` gives the anchor in force.
   - its lines, with markup that `rich::spans` reads into `Span`s
   - a `TitleStyle`
-  - an optional `position`: the point that its anchor goes to (`Title::place`, `Title::anchor`, [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
+  - an optional `position`: the point that its anchor goes to (`Title::place`, [spec D65](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions))
   - `position_keys` with `position_y`, `zoom_keys`, `rotation_keys` and `opacity_keys`: `Keyframe`s on source frames, beside the plain values
   - `position_handles`: the `PositionHandles` of the position keys that have any, each with the frame of its key
 - `Title::takes_keys` tells which values take keyframes. A scroll has no zoom or rotation.
 - `Title::as_picture` gives a `Picture` with these values, and `Title::take_picture` takes them back. Thus `ops::keyframes` and the sampling use the code of `Picture`.
 - `Title::sampled` gives the title of one frame, without keyframes.
 - The upper line of a lower third can go apart from its lower line:
-  - `Title::upper` holds a `TitleLine`: the place, zoom, rotation and keyframes of the upper line. The other fields are then those of the lower line.
+  - `Title::upper` holds a `TitleLine`: the anchor, place, zoom, rotation and keyframes of the upper line. The other fields are then those of the lower line.
   - Without `Title::upper`, the two lines go together. The point of the upper line is then `Title::UPPER_DROP` below the point of the lower line (`Title::upper_with_lower`).
   - `Title::swap_lines` swaps the values of the two lines, and `Title::upper_view` gives a title with the upper line's values in the fields of the title. Thus `ops::keyframes`, `ops::titles` and `otio::titles` have one code for the two lines.
   - `Title::part_lines` puts the values of `Title::upper_with_lower` into a `TitleLine`. `ops::titles::on_line` parts and swaps the lines around one edit.
   - `Title::each_line` makes one change on each line.
-- `Title::blocks` tells what to draw. A `TitleBlock` has its `TitlePart`, its pivot, the edge of its text, its zoom and its rotation:
+- `Title::blocks` tells what to draw. A `TitleBlock` has its `TitlePart`, its pivot, its anchor, the edge of its text, its zoom and its rotation:
   - A Text title or a scroll is one `TitlePart::Whole`.
   - A lower third is a `TitlePart::Lower` under a `TitlePart::Upper`, with a `TitlePart::Backing` under them when the title has a background. Each line has its own point, as in the file.
   - `Title::block_text` gives the text of a block.
@@ -566,7 +567,7 @@ The metadata:
 
 | Metadata | Holds |
 |---|---|
-| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `gain_keys` from the item's first source frame; `source_in`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects; `input_lut` |
+| `vidcut` on clips | `clip`, `media`, `color`, `stream`, `gain_db`, `muted`; `gain_keys` from the item's first source frame; `source_in`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`, a clip volume effect with the volume keyframes in its `Key Frames` (`effects::sound`), and `Media In` on reversed clips |
 | `Resolve_OTIO` on placed clips | Transform, Cropping, Retime and Scaling, and Dynamic Zoom (`otio::picture`), fitted, in place of carried ones |

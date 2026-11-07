@@ -278,7 +278,7 @@ pub struct VideoSettings {
     /// Encoder speed preset (e.g. `slow`, `p5`, `8`); default per encoder.
     #[serde(default)]
     pub speed: Option<String>,
-    /// ProRes: proxy, lt, standard, hq, 4444. DNxHR: lb, sq, hq, hqx, 444.
+    /// ProRes: proxy, lt, standard, hq, 4444, xq. DNxHR: lb, sq, hq, hqx, 444.
     #[serde(default)]
     pub profile: Option<String>,
     /// 8 or 10. Unset: 10 for HDR, and for SDR when most of the shown
@@ -336,6 +336,14 @@ pub struct VideoSettings {
     /// say none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cll: Option<String>,
+    /// Export Alpha: the file holds the alpha of the timeline, and what shows
+    /// nothing is transparent. Only ProRes with profile `4444` or `xq` has alpha. Off,
+    /// the export composites over black and writes opaque frames.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub alpha: bool,
+    /// How a file with `alpha` holds its colors.
+    #[serde(default, skip_serializing_if = "AlphaOut::is_default")]
+    pub alpha_mode: AlphaOut,
 }
 
 impl VideoSettings {
@@ -358,7 +366,13 @@ impl VideoSettings {
             hdr_metadata: HdrMetadata::default(),
             mastering_display: None,
             max_cll: None,
+            alpha: false,
+            alpha_mode: AlphaOut::default(),
         }
+    }
+
+    pub fn holds_alpha(&self) -> bool {
+        self.codec == VideoCodec::Prores && matches!(self.profile.as_deref(), Some("4444" | "xq"))
     }
 
     fn asked_size(&self, timeline: (u32, u32)) -> (u32, u32) {
@@ -426,6 +440,32 @@ fn size_words((w, h): (u32, u32)) -> String {
 pub const MAX_LOOKAHEAD: u32 = 32;
 
 pub const DEFAULT_LOOKAHEAD: u32 = 32;
+
+/// How a file with alpha holds its colors (`video.alpha_mode`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AlphaOut {
+    /// Each color is multiplied by its alpha.
+    #[default]
+    Premultiplied,
+    /// Each color is as it is, apart from its alpha.
+    Straight,
+}
+
+impl AlphaOut {
+    pub const ALL: [Self; 2] = [Self::Premultiplied, Self::Straight];
+
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Premultiplied => "Premultiplied",
+            Self::Straight => "Straight",
+        }
+    }
+}
 
 /// The first of two passes (`video.first_pass`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -529,6 +569,8 @@ fn video(codec: VideoCodec, quality: Option<u32>) -> VideoSettings {
         hdr_metadata: Default::default(),
         mastering_display: None,
         max_cll: None,
+        alpha: false,
+        alpha_mode: AlphaOut::default(),
     }
 }
 
@@ -759,7 +801,13 @@ pub fn apply_overrides(settings: &mut ExportSettings, sets: &[String]) -> Result
             }
             node = node.get_mut(*key).expect("just ensured");
         }
-        node[*keys.last().expect("non-empty")] = value;
+        let last = *keys.last().expect("non-empty");
+        match (value, node.as_object_mut()) {
+            (Value::Null, Some(fields)) => {
+                fields.remove(last);
+            }
+            (value, _) => node[last] = value,
+        }
     }
     *settings =
         serde_json::from_value(v).map_err(|e| Error::usage(format!("invalid --set: {e}")))?;
@@ -820,7 +868,7 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
             )));
         }
         let profiles: &[&str] = match v.codec {
-            V::Prores => &["proxy", "lt", "standard", "hq", "4444"],
+            V::Prores => &["proxy", "lt", "standard", "hq", "4444", "xq"],
             V::Dnxhr => &["lb", "sq", "hq", "hqx", "444"],
             V::H264 => &["baseline", "main", "high"],
             V::Hevc => &["main", "main10"],
@@ -839,6 +887,11 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
             && d != 10
         {
             return Err(Error::usage("bit_depth must be 8 or 10"));
+        }
+        if v.alpha && !v.holds_alpha() {
+            return Err(Error::usage(
+                "video.alpha needs a format with alpha: ProRes with profile 4444 or xq",
+            ));
         }
         let fixed = match (v.codec, v.profile.as_deref()) {
             (V::Prores, _) | (V::Dnxhr, Some("hqx" | "444")) | (V::Hevc, Some("main10")) => {

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use crate::editor::{Editor, History};
 use crate::error::{Error, Result};
 use crate::history::{self, HistoryFile, Tail, text_hash};
-use crate::model::{Project, Track};
+use crate::model::Project;
 
 const LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -320,24 +320,15 @@ fn io(path: &Path, e: std::io::Error) -> Error {
     Error::internal(format!("{}: {e}", path.display()))
 }
 
-fn clip_files<'a>(tracks: &'a mut [Track], out: &mut Vec<&'a mut PathBuf>) {
-    for clip in tracks.iter_mut().flat_map(|t| &mut t.clips) {
-        out.extend(clip.input_lut.as_mut());
-        if let Some(compound) = &mut clip.compound {
-            clip_files(&mut compound.tracks, out);
-        }
-    }
-}
-
 fn files(project: &mut Project) -> Vec<&mut PathBuf> {
     let Project {
-        media,
-        tracks,
-        settings,
-        ..
+        media, settings, ..
     } = project;
-    let mut out: Vec<&mut PathBuf> = media.iter_mut().map(|m| &mut m.path).collect();
-    clip_files(tracks, &mut out);
+    let mut out = Vec::with_capacity(media.len());
+    for m in media {
+        out.push(&mut m.path);
+        out.extend(m.input_lut.as_mut());
+    }
     out.extend(settings.output_lut.as_mut());
     out
 }

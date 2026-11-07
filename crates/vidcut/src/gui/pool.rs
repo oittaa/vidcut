@@ -21,7 +21,6 @@ const TILE: egui::Vec2 = egui::Vec2::new(176.0, 99.0);
 const TILE_FULL: egui::Vec2 = egui::Vec2::new(TILE.x, TILE.y + 30.0);
 const TILE_GAP: f32 = 8.0;
 const POSTER_PART: i64 = 48;
-const HOVER_PICTURES: usize = 8;
 const LIST_COLUMNS: [&str; 9] = [
     "Name",
     "Duration",
@@ -354,6 +353,23 @@ fn scrub_frame(frame: i64, frames: i64, px: f32) -> i64 {
     frame - frame.rem_euclid(step)
 }
 
+fn tile_key(
+    ctx: &egui::Context,
+    m: &Media,
+    frame: i64,
+    px: f32,
+) -> Option<(super::tiles::TileKey, u32)> {
+    let aspect = super::tiles::media_aspect(m)?;
+    let height = super::tiles::tile_height(px * ctx.pixels_per_point());
+    let width = (height as f32 * aspect).round().max(1.0) as u32;
+    let key = super::tiles::TileKey {
+        media: m.id.clone(),
+        frame,
+        height,
+    };
+    Some((key, width))
+}
+
 fn poster_frame(frames: i64) -> i64 {
     frames / POSTER_PART
 }
@@ -489,6 +505,7 @@ fn proxy_state(m: &Media, lost: bool) -> Option<ProxyState> {
 
 impl Workspace {
     pub(super) fn pool_panel(&mut self, ui: &mut egui::Ui) {
+        self.input_lut_picked();
         self.hover = None;
         self.bins.targets.clear();
         self.bins.area = Some(ui.max_rect());
@@ -961,6 +978,7 @@ impl Workspace {
         let visible = shown(viewport.y_range(), top, size.y + gap, media.len());
         for i in visible.clone() {
             self.filmstrip(ui, place(i), media[i]);
+            self.pool_thumbs(media[i], true);
         }
         for i in shown(
             near_view(viewport.y_range()),
@@ -1143,7 +1161,7 @@ impl Workspace {
                 let shown = hovered_frame
                     .and_then(|f| {
                         let f = scrub_frame(f, frames, picture.width());
-                        self.pool_picture(ui.ctx(), m, f, r.height(), frames)
+                        self.pool_picture(ui.ctx(), m, f, r.height(), 0)
                     })
                     .or_else(|| self.pool_picture(ui.ctx(), m, poster, r.height(), 0));
                 match shown {
@@ -1393,7 +1411,7 @@ impl Workspace {
                 if let (Some(f), Some(pos)) = (hovered_frame, resp.hover_pos()) {
                     let slot = (((pos.x - film.left()) / w) as usize).min(slots - 1);
                     at[slot] = scrub_frame(f, frames, film.width());
-                    within[slot] = frames;
+                    within[slot] = 0;
                 }
                 let mut drawn = false;
                 for (i, f) in at.into_iter().enumerate() {
@@ -1426,19 +1444,28 @@ impl Workspace {
         px: f32,
         within: i64,
     ) -> Option<egui::TextureId> {
-        let p = self.project()?;
-        let aspect = super::tiles::media_aspect(m)?;
-        let height = super::tiles::tile_height(px * ctx.pixels_per_point());
-        let width = (height as f32 * aspect).round().max(1.0) as u32;
-        let key = super::tiles::TileKey {
-            media: m.id.clone(),
-            frame,
-            height,
-        };
-        let t = self.tiles.as_ref()?;
-        t.want(&key, || t.job(p, &key, width))
-            .or_else(|| t.nearest(&m.id, height, frame, within))
+        let (p, t) = (self.project()?, self.tiles.as_ref()?);
+        let (key, width) = tile_key(ctx, m, frame, px)?;
+        t.want(&key, || t.job(p, m, &key, width))
+            .or_else(|| t.nearest(&m.id, key.height, frame, within))
             .or_else(|| t.nearest_any_height(&m.id, frame))
+    }
+
+    fn pool_ahead(&self, ctx: &egui::Context, m: &Media, frame: i64, px: f32) {
+        let (Some(p), Some(t)) = (self.project(), self.tiles.as_ref()) else {
+            return;
+        };
+        if let Some((key, width)) = tile_key(ctx, m, frame, px) {
+            t.prefetch(&key, || t.job(p, m, &key, width));
+        }
+    }
+
+    fn pool_thumbs(&self, m: &Media, shows: bool) {
+        if let (Some(p), Some(t)) = (self.project(), self.tiles.as_ref())
+            && self.snap.thumbs.contains(&m.id)
+        {
+            t.thumbs(p, m, shows);
+        }
     }
 
     fn preload(&self, ctx: &egui::Context, seen: &[&Media], near: &[&Media], cell: Vec2) {
@@ -1447,25 +1474,25 @@ impl Workspace {
         let px =
             |m: &Media| super::tiles::media_aspect(m).map_or(cell.y, |a| fit(picture, a).height());
         for m in seen {
-            let frames = p.media_frames(m);
-            for f in strip_frames(HOVER_PICTURES, frames) {
-                let f = scrub_frame(f, frames, cell.x);
-                self.pool_picture(ctx, m, f, px(m), 0);
-            }
+            self.pool_thumbs(m, true);
+        }
+        for m in near {
+            self.pool_thumbs(m, false);
         }
         for m in near {
             let poster = poster_frame(p.media_frames(m));
-            self.pool_picture(ctx, m, poster, px(m), 0);
+            self.pool_ahead(ctx, m, poster, px(m));
         }
     }
 
     fn preload_strip(&self, ctx: &egui::Context, m: &Media, width: f32) {
+        self.pool_thumbs(m, false);
         let (Some(p), Some(aspect)) = (self.project(), super::tiles::media_aspect(m)) else {
             return;
         };
         let slots = strip_slots(width, STRIP_HEIGHT * aspect);
         for f in strip_frames(slots, p.media_frames(m)) {
-            self.pool_picture(ctx, m, f, STRIP_HEIGHT, 0);
+            self.pool_ahead(ctx, m, f, STRIP_HEIGHT);
         }
     }
 
@@ -2025,6 +2052,21 @@ impl Workspace {
                         self.send("media.set", json!({ "media": ids, "color_space": space }));
                         ui.close();
                     }
+                }
+            });
+            let any_lut = self.project().is_some_and(|p| {
+                ids.iter()
+                    .any(|id| p.media(id).is_some_and(|x| x.input_lut.is_some()))
+            });
+            ui.menu_button("Input LUT", |ui| {
+                if ui.button("Choose…").clicked() {
+                    self.ask_input_lut(ui.ctx(), ids.clone(), m.input_lut.as_deref());
+                    ui.close();
+                }
+                let reset = egui::Button::new("Reset");
+                if ui.add_enabled(any_lut, reset).clicked() {
+                    self.send("media.set", json!({ "media": ids, "input_lut": "" }));
+                    ui.close();
                 }
             });
             let mut put = None;

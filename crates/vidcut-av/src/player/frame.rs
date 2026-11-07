@@ -105,6 +105,15 @@ pub enum Sampling {
     },
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum AlphaUse {
+    #[default]
+    Shown,
+    Multiplied,
+    Matte,
+    TakenOut,
+}
+
 pub struct Picture {
     frame: frame::Video,
     rotation: u16,
@@ -117,6 +126,8 @@ pub struct Picture {
     woven: Option<Woven>,
     origin: Option<Origin>,
     alpha_mode: AlphaMode,
+    alpha_use: AlphaUse,
+    matte: Option<Arc<Picture>>,
     lut: Option<crate::screen::Lut>,
 }
 
@@ -215,6 +226,8 @@ impl Picture {
             woven: None,
             origin: None,
             alpha_mode: AlphaMode::Straight,
+            alpha_use: AlphaUse::Shown,
+            matte: None,
             lut: None,
         }
     }
@@ -226,6 +239,24 @@ impl Picture {
 
     pub fn alpha_mode(&self) -> AlphaMode {
         self.alpha_mode
+    }
+
+    pub(crate) fn with_alpha_use(mut self, alpha_use: AlphaUse) -> Self {
+        self.alpha_use = alpha_use;
+        self
+    }
+
+    pub(crate) fn alpha_use(&self) -> AlphaUse {
+        self.alpha_use
+    }
+
+    pub(crate) fn with_matte(mut self, matte: Option<frame::Video>) -> Self {
+        self.matte = matte.map(|m| Arc::new(Self::new(m, 0, None, None)));
+        self
+    }
+
+    pub(crate) fn matte(&self) -> Option<&Arc<Picture>> {
+        self.matte.as_ref()
     }
 
     pub(crate) fn with_lut(mut self, lut: Option<crate::screen::Lut>) -> Self {
@@ -268,6 +299,7 @@ impl Picture {
             .iter()
             .map(|o| &o.picture)
             .chain(self.woven.iter().flat_map(Woven::pictures))
+            .chain(self.matte.iter())
     }
 
     pub(crate) fn with_over(mut self, over: Vec<Over>) -> Self {
@@ -404,7 +436,12 @@ impl Picture {
             .with_sampling(self.sampling.clone())
             .with_origin(self.origin.clone())
             .with_alpha_mode(self.alpha_mode)
+            .with_alpha_use(self.alpha_use)
             .with_lut(self.lut.clone());
+        let alone = Self {
+            matte: self.matte.clone(),
+            ..alone
+        };
         Ok(match &self.woven {
             Some(w) => alone.with_woven(w.clone()),
             None => alone,
@@ -417,13 +454,18 @@ impl Picture {
             (None, Some(_)) => crate::screen::held::in_memory(&self.frame)?,
             (None, None) => crate::export::video::frame_ref(&self.frame)?,
         };
-        Ok(
-            Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
-                .with_sampling(self.sampling.clone())
-                .with_origin(self.origin.clone())
-                .with_alpha_mode(self.alpha_mode)
-                .with_lut(self.lut.clone()),
-        )
+        let matte = self
+            .matte
+            .as_ref()
+            .map(|m| m.alone_copied_down().map(Arc::new))
+            .transpose()?;
+        let alone = Self::new(frame, self.rotation, self.decoder, self.decoding.clone())
+            .with_sampling(self.sampling.clone())
+            .with_origin(self.origin.clone())
+            .with_alpha_mode(self.alpha_mode)
+            .with_alpha_use(self.alpha_use)
+            .with_lut(self.lut.clone());
+        Ok(Self { matte, ..alone })
     }
 
     pub(crate) fn pools(&self) -> Vec<usize> {
@@ -448,11 +490,14 @@ impl Picture {
     }
 
     pub fn bytes(&self) -> usize {
-        self.bytes + self.over.iter().map(|o| o.picture.bytes()).sum::<usize>()
+        self.bytes
+            + self.matte.as_ref().map_or(0, |m| m.bytes())
+            + self.over.iter().map(|o| o.picture.bytes()).sum::<usize>()
     }
 
     pub(crate) fn layers(&self) -> Vec<(usize, Option<crate::hw::Kind>, bool)> {
         std::iter::once((self.bytes, self.gpu(), self.held()))
+            .chain(self.matte.iter().flat_map(|m| m.layers()))
             .chain(self.over.iter().flat_map(|o| o.picture.layers()))
             .collect()
     }
@@ -508,6 +553,7 @@ pub struct TitlePicture {
     pub top: i32,
     pub width: u32,
     pub height: u32,
+    pub lift: f32,
     pub frame: (u32, u32),
     pub rgba: Vec<u8>,
 }

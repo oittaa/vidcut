@@ -20,6 +20,10 @@ vidcut plays a compound clip from another editor. `edit.decompose` opens one. No
 **To do:**
 
 - Measure a compound clip that Resolve made, in the OpenTimelineIO file it writes.
+- Resolve 21.2 has two actions for the In–Out range:
+  - Convert In–Out to a compound clip, which replaces the clips in place.
+  - A separate context action that creates a compound clip from the In–Out range.
+- Measure what each action does, and which page has it.
 - Add one request that nests the selected clips into a compound clip of that shape.
 - The picture and the sound stay linked, as they do on an imported compound clip.
 - Playback and export use the plan an imported compound clip already uses.

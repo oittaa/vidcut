@@ -100,7 +100,12 @@ fn premultiplied() -> bool {
     return p.site.z > 1.5 && p.site.z < 2.5;
 }
 
+fn matte() -> bool {
+    return p.site.w > 1.5 && p.site.w < 2.5;
+}
+
 var<private> placed_share: f32 = 1.0;
+var<private> file_alpha: f32 = 1.0;
 
 fn weight(x: f32, kind: u32) -> f32 {
     let a = abs(x);
@@ -373,12 +378,15 @@ fn shown(px: vec2<f32>) -> vec4<f32> {
     }
     if p.made.x > 1.5 {
         let q = (px / p.made.yz - p.part.xy) / p.part.zw;
-        return vec4<f32>(pixel(q), cover * p.placed.y);
+        file_alpha = opacity(q);
+        placed_share = cover * p.placed.y;
+        return vec4<f32>(pixel(q), placed_share * file_alpha);
     }
     let size = p.upright.xy;
     let spans = vec2<f32>(length(across * size), length(down * size));
-    let a = cover * p.placed.y * opacity(uv);
+    file_alpha = opacity(uv);
     placed_share = cover * p.placed.y;
+    let a = placed_share * file_alpha;
     if resamples(uv, spans) {
         return vec4<f32>(sharp(uv, spans), a);
     }
@@ -682,32 +690,41 @@ fn mixed(mode: u32, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
 
 @group(1) @binding(0) var below: texture_2d<f32>;
 
+fn own_color(c: vec3<f32>) -> vec3<f32> {
+    return select(c, c / file_alpha, p.site.w > 2.5 && file_alpha > 0.0);
+}
+
+fn mode_mixed(mode: u32, c: vec3<f32>, under: vec4<f32>) -> vec3<f32> {
+    let b = select(under.rgb, under.rgb / under.a, under.a > 0.0);
+    return mix(c, mixed(mode, c, b), under.a);
+}
+
 @fragment
 fn fs_mode(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
     let top = shown(px);
     let under = textureLoad(below, vec2<i32>(px), 0);
+    let c = own_color(top.rgb);
     if p.placed.w > 1.5 {
-        var alone = top.rgb;
+        var alone = c;
         if under.a > 0.0 {
-            alone = mix(top.rgb, mixed(u32(p.placed.z + 0.5), top.rgb, under.rgb / under.a), under.a);
+            alone = mix(c, mixed(u32(p.placed.z + 0.5), c, under.rgb / under.a), under.a);
         }
         return vec4<f32>(alone * top.a, top.a);
     }
-    let b = under.rgb;
-    let m = mixed(u32(p.placed.z + 0.5), top.rgb, b);
+    let m = mode_mixed(u32(p.placed.z + 0.5), c, under);
     if p.placed.w > 0.5 {
         return vec4<f32>(m * top.a, top.a);
     }
-    return vec4<f32>(mix(b, m, top.a), 1.0);
+    return vec4<f32>(m * top.a + under.rgb * (1.0 - top.a), top.a + under.a * (1.0 - top.a));
 }
 
 @fragment
 fn fs_paired(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
     let top = textureLoad(letters, px, 0);
-    let b = textureLoad(below, px, 0).rgb;
-    return vec4<f32>(top.rgb + b * (1.0 - top.a), 1.0);
+    let under = textureLoad(below, px, 0);
+    return top + under * (1.0 - top.a);
 }
 
 @fragment
@@ -715,7 +732,11 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     let px = in.position.xy;
     if p.placed.x > 0.5 {
         if (p.made.x > 0.5 && p.made.x < 1.5) || p.made.w > 0.5 {
-            return vec4<f32>(shown(px + p.part.xy).rgb, 1.0);
+            let c = shown(px + p.part.xy).rgb;
+            if matte() {
+                return vec4<f32>(vec3<f32>(file_alpha), 1.0);
+            }
+            return vec4<f32>(c * select(1.0, file_alpha, p.site.w > 0.5 && !premultiplied()), 1.0);
         }
         return placed(px);
     }
@@ -729,6 +750,9 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     let rel = (px - p.place.xy) / p.place.zw;
     let cover = p.upright.xy / p.place.zw;
     let a = opacity(clamp(rel, vec2<f32>(0.0), vec2<f32>(1.0))) * edge;
+    if matte() {
+        return vec4<f32>(vec3<f32>(a), 1.0);
+    }
     let solid = select(1.0, a, keeps);
     let share = select(a, edge, premultiplied());
     if resamples(rel, cover) {
@@ -936,12 +960,12 @@ fn fs_motion(in: Out) -> @location(0) vec4<f32> {
 @fragment
 fn fs_motion_mode(in: Out) -> @location(0) vec4<f32> {
     let top = moved(floor(in.position.xy));
-    let b = textureLoad(below, vec2<i32>(in.position.xy), 0).rgb;
+    let under = textureLoad(below, vec2<i32>(in.position.xy), 0);
     if top.a <= 0.0 {
-        return vec4<f32>(b, 1.0);
+        return under;
     }
-    let m = mixed(motion.mode.x, top.rgb / top.a, b);
-    return vec4<f32>(mix(b, m, top.a), 1.0);
+    let m = mode_mixed(motion.mode.x, top.rgb / top.a, under);
+    return vec4<f32>(m * top.a + under.rgb * (1.0 - top.a), top.a + under.a * (1.0 - top.a));
 }
 
 fn moved(q: vec2<f32>) -> vec4<f32> {
@@ -1032,8 +1056,11 @@ fn drawn_at(x: i32, y: i32) -> vec4<f32> {
 
 fn pixel_at(x: i32, y: i32) -> vec3<f32> {
     let c = drawn_at(x, y);
-    let straight = encoding.alpha.x == 1u && c.a > 0.0;
-    return encoded_rgb(select(c.rgb, c.rgb / c.a, straight));
+    if encoding.alpha.x == 0u || c.a <= 0.0 {
+        return encoded_rgb(c.rgb);
+    }
+    let color = encoded_rgb(c.rgb / c.a);
+    return select(color, color * min(c.a, 1.0), encoding.alpha.x == 2u);
 }
 
 fn output_ycc(c: vec3<f32>) -> vec3<f32> {
@@ -1073,6 +1100,12 @@ fn chroma_at(px: vec2<i32>) -> vec2<f32> {
     return sum / total;
 }
 
+fn alpha_code(px: vec2<i32>) -> u32 {
+    let top = (1u << encoding.how.z) - 1u;
+    let a = select(1.0, clamp(drawn_at(px.x, px.y).a, 0.0, 1.0), encoding.alpha.x != 0u);
+    return u32(round(a * f32(top))) << encoding.how.w;
+}
+
 fn encoded_at(px: vec2<i32>) -> vec4<u32> {
     let kind = encoding.plane.x;
     var out = vec4<u32>(0u);
@@ -1084,9 +1117,10 @@ fn encoded_at(px: vec2<i32>) -> vec4<u32> {
         let cr = code_of(c.y, 128.0, 224.0);
         out = select(vec4<u32>(cb, cr, 0u, 0u), vec4<u32>(cr, 0u, 0u, 0u), kind == 3u);
     } else if kind == 4u {
-        let top = (1u << encoding.how.z) - 1u;
-        let a = select(1.0, clamp(drawn_at(px.x, px.y).a, 0.0, 1.0), encoding.alpha.x == 1u);
-        out.x = u32(round(a * f32(top))) << encoding.how.w;
+        out.x = alpha_code(px);
+    } else if kind == 6u {
+        let c = output_ycc(pixel_at(px.x, px.y));
+        out = vec4<u32>(alpha_code(px), code_of(c.x, 16.0, 219.0), code_of(c.y, 128.0, 224.0), code_of(c.z, 128.0, 224.0));
     } else {
         let top = (1u << encoding.how.z) - 1u;
         out = vec4<u32>(vec3<u32>(round(pixel_at(px.x, px.y) * f32(top))), top);

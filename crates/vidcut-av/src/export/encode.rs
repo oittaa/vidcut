@@ -311,7 +311,10 @@ fn gpu_name(codec: VideoCodec, kind: EncoderChoice) -> Option<&'static str> {
 
 fn gpu_pixel(v: &VideoSettings, kind: EncoderChoice, ten: bool) -> format::Pixel {
     match (kind, ten) {
-        _ if v.codec == VideoCodec::Prores && v.profile.as_deref() == Some("4444") => {
+        _ if v.alpha => format::Pixel::AYUV64LE,
+        _ if v.codec == VideoCodec::Prores
+            && matches!(v.profile.as_deref(), Some("4444" | "xq")) =>
+        {
             format::Pixel::P416LE
         }
         _ if v.codec == VideoCodec::Prores => format::Pixel::P210LE,
@@ -731,7 +734,10 @@ fn cpu_video(v: &VideoSettings, ten: bool) -> Result<VideoEncoder> {
                 "proxy" => (0, Pixel::YUV422P10LE),
                 "lt" => (1, Pixel::YUV422P10LE),
                 "standard" => (2, Pixel::YUV422P10LE),
-                "4444" => (4, Pixel::YUVA444P10LE),
+                "4444" if v.alpha => (4, Pixel::YUVA444P10LE),
+                "4444" => (4, Pixel::YUV444P10LE),
+                "xq" if v.alpha => (5, Pixel::YUVA444P10LE),
+                "xq" => (5, Pixel::YUV444P10LE),
                 _ => (3, Pixel::YUV422P10LE),
             };
             (pixel, vec![opt("profile", profile), opt("vendor", "apl0")])
@@ -1362,6 +1368,7 @@ pub fn probes() -> Vec<Probe> {
             format::Pixel::NV16,
             format::Pixel::P210LE,
             format::Pixel::P416LE,
+            format::Pixel::AYUV64LE,
         ];
         for &p in nv12_p010.iter().chain(&prores) {
             check("prores_videotoolbox", EncoderChoice::VideoToolbox, p, None);

@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use vidcut_core::model::Title;
 use vidcut_core::render::RenderPlan;
 
+pub(crate) use frame::AlphaUse;
 pub use frame::{
     Cached, Fit, Layout, Made, Making, Origin, Over, Picture, Sampling, Shown, TitleOver,
     TitlePicture, Upscaled, Woven,
