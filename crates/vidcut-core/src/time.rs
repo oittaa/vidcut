@@ -223,23 +223,20 @@ pub fn label_frames(frames: i64, fps: Rational, drop: bool) -> i64 {
 }
 
 pub fn packed_timecode(frames: i64, fps: Rational, drop: bool) -> Option<u32> {
-    let base = fps.timecode_base();
-    if frames < 0 || base > 60 {
+    if frames < 0 {
         return None;
     }
+    let base = fps.timecode_base();
     let drop = drop && fps.dropped_per_minute() > 0;
     let t = label_frames(frames, fps, drop);
     let (ff, s) = (t % base, t / base);
-    let (frame, second_of_pair) = match base > 30 {
-        true => (ff / 2, ff % 2 == 1),
-        false => (ff, false),
-    };
+    let shared = (base + 29) / 30;
     let bcd = |v: i64| u32::try_from(v / 10 * 16 + v % 10).ok();
     Some(
-        bcd(frame)?
+        bcd(ff / shared)?
             | u32::from(drop) << 6
             | bcd(s % 60)? << 8
-            | u32::from(second_of_pair) << 15
+            | u32::from(shared == 2 && ff % 2 == 1) << 15
             | bcd(s / 60 % 60)? << 16
             | bcd(s / 3600 % 24)? << 24,
     )

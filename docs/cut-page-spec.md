@@ -2047,6 +2047,11 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - The Audio tab is greyed out. A render from the scripting API with Export Audio on writes only the frames.
     - A TIFF has the tags 256-262, 266, 270 (empty), 273, 274, 277-279, 284, 338 (ExtraSamples 1), 339 and 34675 (an ICC profile). It has no timecode.
     - The header of an OpenEXR has `timeCode` and `framesPerSecond`, and also `proimCameraID`.
+    - The frame digits of `timeCode` count at most 30 numbers in each second. Thus frames in a row can share one number:
+      - At 47.952, 48, 50, 59.94 and 60 fps, 2 frames share each number. Bit 15 marks the second frame.
+      - At 72 and 90 fps, 3 frames share each number. At 95.904, 96, 100, 119.88 and 120 fps, 4 frames do. Bit 15 is 0.
+    - In drop-frame timecode, the frame digits skip the dropped numbers, but the drop-frame flag (bit 6) is 0. This is so at 29.97, 59.94 and 119.88 fps.
+    - The frame rates above 30 fps are 47.952, 48, 50, 59.94, 60, 72, 90, 95.904, 96, 100, 119.88 and 120. The scripting API refuses 144, 180 and 240.
     - TIFF has the compressions None, LZW and ZIP. Its Compression Level row is greyed out at None.
     - OpenEXR has RGB half and RGB float, each with no compression, RLE, ZIP, ZIP1, PIZ, DWAA, DWAB, HTJ2K 32 lines or HTJ2K 256 lines.
   - **In vidcut:**
@@ -2057,9 +2062,8 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - `video.profile` of an OpenEXR is `half` (the default) or `float`, each also with `_rle`, `_zip1` or `_zip16`.
     - With no suffix, the file has no compression.
     - vidcut has no PIZ, DWAA, DWAB, HTJ2K and Compression Level ([todo](todo/image-compression.md)).
-    - Each OpenEXR has the `timeCode` of its frame on the timeline, with the drop frame flag. A TIFF has no timecode.
-    - Above 30 fps, the frame digits of `timeCode` count pairs of frames, and bit 15 marks the second frame of a pair. This is not measured in Resolve.
-    - Above 60 fps, an OpenEXR has no `timeCode`.
+    - Each OpenEXR has the `timeCode` of its frame on the timeline, with the frame digits and bit 15 that Resolve writes. A TIFF has no timecode.
+    - In drop-frame timecode, vidcut sets the drop-frame flag.
     - The files hold the code values of the timeline. An OpenEXR keeps a value above 1 (measured for a render with no color management).
     - The files hold no sound. An export with sound settings is refused ([X147](deviations.md#x147-an-image-sequence-refuses-sound-settings)).
     - The ExtraSamples tag of a TIFF with alpha follows the Alpha Mode: 1 for Premultiplied and 2 for Straight ([gotchas](gotchas.md#ffmpeg-encoding-and-muxing)).
