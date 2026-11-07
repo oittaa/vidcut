@@ -2542,8 +2542,12 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - HDR10+ (PQ only) when any picture has it. For the other pictures, it is made from measured light.
     - Dolby Vision when every picture has it, in one profile.
 - **D47. Drop-frame timecode** (§4.3).
-  - At 29.97 and 59.94 fps, record timecode can count drop-frame, as Resolve's project settings offer.
-  - Each minute, drop-frame skips the frame numbers 00 and 01 (00–03 at 59.94), except each tenth minute.
+  - At 29.97, 59.94 and 119.88 fps, record timecode can count drop-frame, as Resolve's project settings offer.
+  - Resolve Studio 21.2 refuses it at other rates, also at 23.976, 47.952 and 95.904 (`timelineDropFrameTimecode` in a script).
+  - Each minute, drop-frame skips the frame numbers 00 and 01, except each tenth minute.
+    - At 59.94, it skips 00–03.
+    - At 119.88, it skips 000–007. Thus ten minutes have 71,928 frames, which is 600 s at 119.88 fps.
+    - The numbers at 119.88 are measured in Resolve Studio 21.2, by script and on the Edit page.
   - New Project and Project Settings offer it.
   - It turns on when the media's timecode counts drop-frame, in two cases:
     - The first video sets the format (D37).
