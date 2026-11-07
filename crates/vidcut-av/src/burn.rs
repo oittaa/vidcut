@@ -1773,10 +1773,15 @@ fn merged(mut sprites: Vec<Sprite>) -> Option<Sprite> {
     let y0 = sprites.iter().map(|s| s.y).min()?;
     let x1 = sprites.iter().map(|s| s.x + s.width as i32).max()?;
     let y1 = sprites.iter().map(|s| s.y + s.height as i32).max()?;
+    let float = sprites.iter().any(|s| s.float);
+    let at = |s: &Sprite, x: i32, y: i32| match float && !s.float {
+        true => stepped(s.at(x, y)),
+        false => s.at(x, y),
+    };
     let mut rgba = Vec::with_capacity((x1 - x0) as usize * (y1 - y0) as usize);
     for y in y0..y1 {
         for x in x0..x1 {
-            rgba.push(sprites.iter().fold([0.0; 4], |a, s| over(a, s.at(x, y))));
+            rgba.push(sprites.iter().fold([0.0; 4], |a, s| over(a, at(s, x, y))));
         }
     }
     Some(Sprite {
@@ -1785,7 +1790,7 @@ fn merged(mut sprites: Vec<Sprite>) -> Option<Sprite> {
         width: (x1 - x0) as u32,
         height: (y1 - y0) as u32,
         lift: 0.0,
-        float: sprites.iter().any(|s| s.float),
+        float,
         rgba,
     })
 }
