@@ -1,7 +1,7 @@
 use super::text::{self, Dialect, PALETTE, Tag, Token};
 use super::{Read, Timed, clock, srt};
 use crate::error::{Error, Result};
-use crate::model::{Place, SubtitleStyle, TitleAnchor};
+use crate::model::{Place, SubtitleStyle, Title, TitleAnchor};
 
 fn place(settings: &str) -> Place {
     let Some(line) = settings
@@ -30,13 +30,7 @@ fn style(settings: &str, place: Place) -> Option<SubtitleStyle> {
             .split_whitespace()
             .find_map(|s| s.strip_prefix(name))
     };
-    let fraction = |v: &str| {
-        v.strip_suffix('%')?
-            .parse::<f64>()
-            .ok()
-            .filter(|p| (0.0..=100.0).contains(p))
-            .map(|p| p / 100.0)
-    };
+    let fraction = |v: &str| v.strip_suffix('%')?.parse::<f64>().ok().map(|p| p / 100.0);
     let setting = |name: &str, usual: &'static str| {
         value(name).and_then(|v| {
             let (at, side) = v.split_once(',').unwrap_or((v, usual));
@@ -70,7 +64,7 @@ fn style(settings: &str, place: Place) -> Option<SubtitleStyle> {
         },
         None => SubtitleStyle::default().anchor(place),
     };
-    Some(SubtitleStyle {
+    Title::places([x, y]).then(|| SubtitleStyle {
         position: Some([x, y]),
         anchor: Some(TitleAnchor::at([across, down])),
         ..SubtitleStyle::default()

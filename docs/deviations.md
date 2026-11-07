@@ -697,7 +697,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Italic, bold, underline and colors come in from all three formats, on the words that have them.
 - **Why:**
   - An imported subtitle file must not lose text without a message.
-  - A cue from a file shows where the file puts it. Thus a file that vidcut wrote comes back the same.
+  - A cue from a file shows where the file puts it.
 
 ## X41. Subtitle files placed by their timecode, or from the timeline's start
 

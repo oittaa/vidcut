@@ -6,7 +6,7 @@ use super::text::{self, Tag, Token, escape_xml};
 use super::{Read, Timed, clock};
 use crate::error::{Error, Result};
 use crate::model::hex;
-use crate::model::{Place, SubtitleAlign, SubtitleStyle, TitleAnchor};
+use crate::model::{Place, SubtitleAlign, SubtitleStyle, Title, TitleAnchor};
 
 const TTP: &str = "http://www.w3.org/ns/ttml#parameter";
 const TTS: &str = "http://www.w3.org/ns/ttml#styling";
@@ -239,14 +239,11 @@ impl<'a> Sheet<'a> {
             _ => 0.0,
         };
         let point = [left + across * width, top + down * height].map(|v| v / 100.0);
-        point
-            .iter()
-            .all(|v| (0.0..=1.0).contains(v))
-            .then(|| SubtitleStyle {
-                position: Some(point),
-                anchor: Some(TitleAnchor::at([across, down])),
-                ..SubtitleStyle::default()
-            })
+        Title::places(point).then(|| SubtitleStyle {
+            position: Some(point),
+            anchor: Some(TitleAnchor::at([across, down])),
+            ..SubtitleStyle::default()
+        })
     }
 
     fn place(&self, region: &str) -> Place {
