@@ -1239,8 +1239,9 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - A field left out of that style keeps the track's style.
   - The cue leaves the whole style out when it keeps the track's style.
   - The viewer and a burn-in draw that one result.
-  - IMSC1 and WebVTT write the cue's position. SRT writes the cue's place.
+  - WebVTT writes the cue's position, and SRT writes the cue's place.
   - Neither writes the alignment. Their settings move the block with its lines.
+  - IMSC1 writes the position as a region of the cue (D64).
   - An IMSC1 paragraph takes a font, size, color, bold face, or alignment that the cue sets.
   - The alignment is `ebutts:multiRowAlign`, which IMSC1 permits. `tts:textAlign` stays center, thus the longest line stays in the middle.
   - `subtitles.set` takes `style`. An empty style drops the cue's own style.
