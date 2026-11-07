@@ -93,6 +93,10 @@ impl Rational {
         ((self.num + self.den / 2) / self.den).max(1)
     }
 
+    pub fn frame_digits(self) -> usize {
+        ((self.timecode_base() - 1).max(1).ilog10() as usize + 1).max(2)
+    }
+
     pub fn dropped_per_minute(self) -> i64 {
         match (self.den, self.timecode_base()) {
             (1001, b @ (30 | 60 | 120)) => b / 15,
@@ -203,12 +207,13 @@ pub fn format_timecode(frames: i64, fps: Rational, start_tc: i64, drop: bool) ->
     let ff = t % base;
     let s = t / base;
     format!(
-        "{sign}{:02}:{:02}:{:02}{}{:02}",
+        "{sign}{:02}:{:02}:{:02}{}{:0digits$}",
         s / 3600,
         (s / 60) % 60,
         s % 60,
         if dropped > 0 { ';' } else { ':' },
-        ff
+        ff,
+        digits = fps.frame_digits()
     )
 }
 

@@ -184,8 +184,7 @@ impl Format {
     }
 
     fn starts_at_zero(&self) -> bool {
-        self.start()
-            .is_some_and(|t| t.replace(';', ":") == "00:00:00:00")
+        self.start().and_then(timecode_fields) == Some((0, 0, 0, 0))
     }
 
     fn edit_start(&mut self, ui: &mut egui::Ui) {
@@ -196,11 +195,14 @@ impl Format {
                 let label = ui.label("Start timecode");
                 ui.horizontal(|ui| {
                     let sep = if self.drop_frame() { ';' } else { ':' };
+                    let digits = self.fps().map_or(2, Rational::frame_digits);
                     let offered: Vec<String> = START_HOURS
                         .iter()
-                        .map(|h| format!("{h:02}:00:00{sep}00"))
+                        .map(|h| format!("{h:02}:00:00{sep}{:0digits$}", 0))
                         .collect();
-                    let same = |a: &str, b: &str| a.trim().replace(';', ":") == b.replace(';', ":");
+                    let same = |a: &str, b: &str| {
+                        timecode_fields(a).is_some_and(|x| timecode_fields(b) == Some(x))
+                    };
                     let named = offered
                         .iter()
                         .find(|o| same(&self.start, o))
@@ -331,6 +333,13 @@ impl Format {
 
 fn size_name((name, w, h): (&str, u32, u32)) -> String {
     format!("{name} {w} × {h}")
+}
+
+fn timecode_fields(t: &str) -> Option<(i64, i64, i64, i64)> {
+    match TimeSpec::parse(t.trim()) {
+        Ok(TimeSpec::Timecode(h, m, s, f, _)) => Some((h, m, s, f)),
+        _ => None,
+    }
 }
 
 fn is_standard(f: Rational) -> bool {

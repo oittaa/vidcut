@@ -1003,7 +1003,12 @@ fn typed(text: &str) -> Option<f64> {
 }
 
 fn frames(p: &Project, text: &str, dropped: i64) -> Option<f64> {
-    let spec = TimeSpec::parse(&timecode_input(text, dropped)?).ok()?;
+    let spec = TimeSpec::parse(&timecode_input(
+        text,
+        dropped,
+        p.settings.fps.frame_digits(),
+    )?)
+    .ok()?;
     let n = p.time_context(None).duration(&spec).ok()?;
     Some(n as f64)
 }
