@@ -263,6 +263,7 @@ pub(crate) enum Msg {
         measured: Vec<Unmeasured>,
         kept: Vec<(crate::env::MeasureKey, vidcut_core::duck::Measured)>,
         failed: Option<String>,
+        failed_ids: Vec<Unmeasured>,
     },
     FileChanged,
     PreferencesChanged,
@@ -1141,16 +1142,21 @@ impl Live {
                 measured,
                 kept,
                 failed,
+                failed_ids,
             } => {
-                self.duck_kept.extend(kept);
-                if !measured.is_empty() {
-                    for m in &measured {
-                        self.duck_measuring.remove(m);
-                    }
-                    if let Some(e) = failed {
-                        self.duck_failed.extend(measured);
-                        self.notice(format!("Ducking isn't heard: {e}"), true);
-                    }
+                let heard = apply_duck_heard(
+                    &mut self.duck_measuring,
+                    &mut self.duck_failed,
+                    &mut self.duck_kept,
+                    measured,
+                    kept,
+                    failed,
+                    failed_ids,
+                );
+                if let Some(e) = heard.notice {
+                    self.notice(format!("Ducking isn't heard: {e}"), true);
+                }
+                if heard.refresh {
                     self.refresh_timeline();
                 }
             }
@@ -1830,6 +1836,7 @@ impl Live {
                 measured: Vec::new(),
                 kept,
                 failed: None,
+                failed_ids: Vec::new(),
             });
             Ok(())
         }))
@@ -3919,7 +3926,7 @@ impl Live {
             .collect();
         let wanted: Vec<_> = missing
             .iter()
-            .filter_map(|u| Some((p.media(&u.media)?.clone(), u.stream, u.detect)))
+            .filter_map(|u| Some((u.clone(), p.media(&u.media)?.clone())))
             .collect();
         if wanted.is_empty() {
             return;
@@ -3928,12 +3935,14 @@ impl Live {
         let tx = self.tx.clone();
         let _ = crate::threads::spawn("vidcut-measure", Work::Job, move || {
             let mut failed = None;
+            let mut failed_ids = Vec::new();
             let mut kept = Vec::new();
-            for (m, stream, detect) in &wanted {
-                match crate::env::measure_duck(m, *stream, *detect, false) {
+            for (u, m) in &wanted {
+                match crate::env::measure_duck(m, u.stream, u.detect, false) {
                     Ok(one) => kept.push(one),
                     Err(e) => {
                         failed.get_or_insert(e.message);
+                        failed_ids.push(u.clone());
                     }
                 }
             }
@@ -3941,6 +3950,7 @@ impl Live {
                 measured: missing,
                 kept,
                 failed,
+                failed_ids,
             });
         });
     }
@@ -5227,6 +5237,43 @@ fn edit_only(
     Ok((video, audio))
 }
 
+struct DuckHeardUpdate {
+    notice: Option<String>,
+    refresh: bool,
+}
+
+fn apply_duck_heard(
+    measuring: &mut HashSet<Unmeasured>,
+    failed: &mut HashSet<Unmeasured>,
+    kept: &mut HashMap<crate::env::MeasureKey, vidcut_core::duck::Measured>,
+    measured: Vec<Unmeasured>,
+    got: Vec<(crate::env::MeasureKey, vidcut_core::duck::Measured)>,
+    error: Option<String>,
+    failed_ids: Vec<Unmeasured>,
+) -> DuckHeardUpdate {
+    kept.extend(got);
+    if measured.is_empty() {
+        return DuckHeardUpdate {
+            notice: None,
+            refresh: false,
+        };
+    }
+    for m in &measured {
+        measuring.remove(m);
+    }
+    let notice = match error {
+        Some(e) => {
+            failed.extend(failed_ids);
+            Some(e)
+        }
+        None => None,
+    };
+    DuckHeardUpdate {
+        notice,
+        refresh: true,
+    }
+}
+
 pub(crate) fn fast_review_rate(frames: i64, fps: f64) -> f64 {
     if frames <= 0 || !fps.is_finite() || fps <= 0.0 {
         return 1.0;
@@ -5243,7 +5290,39 @@ pub(crate) fn fast_review_rate(frames: i64, fps: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
+
     use super::*;
+
+    #[test]
+    fn a_failed_duck_source_does_not_fail_the_others() {
+        let good = Unmeasured {
+            media: "good".into(),
+            stream: 0,
+            detect: vidcut_core::model::DuckDetect::Level,
+        };
+        let bad = Unmeasured {
+            media: "bad".into(),
+            stream: 0,
+            detect: vidcut_core::model::DuckDetect::Level,
+        };
+        let mut measuring = HashSet::from([good.clone(), bad.clone()]);
+        let mut failed = HashSet::new();
+        let mut kept = HashMap::new();
+        let heard = apply_duck_heard(
+            &mut measuring,
+            &mut failed,
+            &mut kept,
+            vec![good, bad.clone()],
+            Vec::new(),
+            Some("no audio".into()),
+            vec![bad.clone()],
+        );
+        assert_eq!(heard.notice.as_deref(), Some("no audio"));
+        assert!(heard.refresh);
+        assert!(measuring.is_empty());
+        assert_eq!(failed, HashSet::from([bad]));
+    }
 
     #[test]
     fn video_only_turns_audio_only_off() {

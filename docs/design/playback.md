@@ -353,7 +353,9 @@ Ducking in the preview:
 - It takes only the measurements that the core holds for the open project (`duck_kept`). The session thread reads no file.
 - Opening a project empties `duck_kept`.
 - It gets the rest on `vidcut-measure`, at job priority (`env::measure_duck`). That job reads the disk cache, or measures. Until then, those clips dip nothing.
-- `Msg::DuckHeard` brings the results to the core, and loads the timeline again. A measurement that failed shows as a notice, and is not tried again until the next `track.set` with `duck`.
+- `Msg::DuckHeard` brings the results to the core, and loads the timeline again.
+- A measurement that failed shows as a notice. That source is not tried again until the next `track.set` with `duck`.
+- The job keeps a measured source in `duck_kept`.
 
 Faders:
 
