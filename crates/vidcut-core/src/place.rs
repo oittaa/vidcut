@@ -1,6 +1,6 @@
 use crate::model::{
-    Border, CellShape, CompositeMode, Effect, EffectKind, Glow, GlowAlpha, GlowFraming, GlowOutput,
-    Media, MosaicBlur, Picture, Sharpen, Vignette, VignetteMode, VignetteShape,
+    Border, CellShape, CompositeMode, Effect, EffectKind, FilmGrain, Glow, GlowAlpha, GlowFraming,
+    GlowOutput, Media, MosaicBlur, Picture, Sharpen, Vignette, VignetteMode, VignetteShape,
 };
 use crate::render::Placed;
 
@@ -87,6 +87,7 @@ pub enum Work {
     Blur(Blurring),
     Mosaic(Tiling),
     Glow(Box<Glowing>),
+    Grain(Box<Graining>),
     Vignette(Shading),
     Sharpen(Sharpening),
 }
@@ -229,6 +230,161 @@ impl Glowing {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GrainTile {
+    pub ring: f64,
+    pub width: f64,
+    pub scale: f64,
+    pub aspect: f64,
+    pub seed: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Graining {
+    pub tile: GrainTile,
+    pub frame: i64,
+    pub amount: f64,
+    pub saturation: f64,
+    pub curve: [f64; 4],
+    pub tails: [f64; 3],
+    pub gains: [f64; 3],
+    pub offset: f64,
+    pub softness: f64,
+    pub detail: f64,
+    pub tones: [f64; 3],
+    pub opacity: f64,
+    pub mode: CompositeMode,
+    pub only: bool,
+}
+
+fn between<const N: usize>(rows: &[[f64; N]], x: f64) -> [f64; N] {
+    let i = rows.partition_point(|r| r[0] <= x).clamp(1, rows.len() - 1);
+    let (a, b) = (&rows[i - 1], &rows[i]);
+    let t = ((x - a[0]) / (b[0] - a[0])).clamp(0.0, 1.0);
+    std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t)
+}
+
+impl Graining {
+    const AMOUNT: f64 = 1.334 * 0.1986;
+    const HIGH: f64 = 1080.0;
+    const WIDE: f64 = 1920.0;
+    const SOFT: f64 = 5.0;
+    const DETAIL: f64 = 4.32;
+    const SHIFT: f64 = 0.13;
+    const NEAR: f64 = 0.09;
+    const TEXTURES: [[f64; 3]; 12] = [
+        [0.0, 0.1416, 0.2009],
+        [0.25, 0.0021, 0.2106],
+        [0.5, 0.0023, 0.1823],
+        [0.6, 0.1173, 0.1407],
+        [0.65, 0.1396, 0.1239],
+        [0.704, 0.1615, 0.1044],
+        [0.75, 0.1768, 0.0855],
+        [0.8, 0.1864, 0.0675],
+        [0.85, 0.1924, 0.0552],
+        [0.9, 0.1948, 0.0433],
+        [0.95, 0.1971, 0.0323],
+        [1.0, 0.1989, 0.0212],
+    ];
+    const SIZES: [[f64; 2]; 12] = [
+        [0.0, 0.4120],
+        [0.1, 0.4606],
+        [0.2156, 0.5003],
+        [0.25, 0.5402],
+        [0.4, 0.6505],
+        [0.6, 0.9114],
+        [0.7, 1.1413],
+        [0.8, 1.5220],
+        [0.85, 1.8248],
+        [0.9, 2.2788],
+        [0.95, 3.0311],
+        [1.0, 4.5242],
+    ];
+    const SYMMETRIES: [[f64; 5]; 30] = [
+        [0.0, -0.07744, 0.6358, -1.06414, 0.34923],
+        [0.04, -0.07739, 0.64081, -0.9797, 0.44705],
+        [0.08, -0.0772, 0.65078, -0.86977, 0.25285],
+        [0.12, -0.07669, 0.66729, -0.80699, -0.88817],
+        [0.16, -0.07646, 0.68175, -0.6498, -1.37177],
+        [0.2, -0.07522, 0.71945, -0.6292, -5.30187],
+        [0.24, -0.07351, 0.76562, -0.61471, -9.55647],
+        [0.28, -0.07081, 0.81804, -0.72264, -13.95116],
+        [0.32, -0.06693, 0.86831, -0.98022, -16.54602],
+        [0.36, -0.06155, 0.90966, -1.2118, -15.31277],
+        [0.38, -0.05757, 0.91704, -1.34923, -10.89731],
+        [0.42, -0.05541, 0.86577, -0.12053, -0.17395],
+        [0.44, -0.04579, 0.90897, -0.04096, 0.35627],
+        [0.46, -0.03272, 0.95123, -0.08668, 0.91194],
+        [0.48, -0.01564, 1.00156, -0.10991, -1.77354],
+        [0.5, 0.0, 1.0, 0.0, 0.0],
+        [0.52, 0.01956, 1.00131, 0.12804, -1.93273],
+        [0.54, 0.03684, 0.94974, 0.0717, 1.2161],
+        [0.56, 0.05007, 0.90897, 0.03813, 0.28897],
+        [0.58, 0.05985, 0.86518, 0.12339, -0.2245],
+        [0.62, 0.06091, 0.87297, 1.62573, -3.21686],
+        [0.66, 0.06804, 0.86244, 1.51316, -12.42271],
+        [0.7, 0.07347, 0.83585, 1.04878, -15.03239],
+        [0.74, 0.07704, 0.78627, 0.77186, -11.99199],
+        [0.78, 0.07925, 0.74308, 0.70712, -8.5182],
+        [0.82, 0.08084, 0.69763, 0.68734, -3.58237],
+        [0.86, 0.08169, 0.67401, 0.76786, -2.2161],
+        [0.9, 0.08217, 0.65444, 0.8672, -0.72808],
+        [0.94, 0.08259, 0.63968, 0.93542, 0.30383],
+        [1.0, 0.0828, 0.62865, 1.05907, 0.47028],
+    ];
+    const TAILS: [[f64; 3]; 4] = [
+        [0.0, 1.0, 1.0],
+        [0.2, 0.594, 0.845],
+        [0.3, 0.486, 0.847],
+        [0.4, 0.395, 0.842],
+    ];
+
+    fn of(g: &FilmGrain, on: &OnFrame) -> Self {
+        let [_, ring, width] = between(&Self::TEXTURES, g.rough());
+        let sizes = Self::SIZES.map(|[s, k]| [s, k.ln()]);
+        let scale = between(&sizes, g.large())[1].exp() * on.fit[3] / Self::HIGH;
+        let [across, down] = on.canvas;
+        let tall = down / Self::HIGH;
+        let spread = (across * down / (Self::WIDE * Self::HIGH)).sqrt();
+        let seed = g.rough().to_bits()
+            ^ g.large().to_bits().rotate_left(17)
+            ^ g.stretch().to_bits().rotate_left(34)
+            ^ 1
+            ^ (u64::from(g.animate) << 1);
+        let lean = g.lean();
+        let [_, c0, c1, c2, c3] = between(&Self::SYMMETRIES, lean);
+        let strong = g.strong();
+        let [_, steep, gentle] = between(&Self::TAILS, (lean - 0.5).abs());
+        let (low, high) = if lean < 0.5 {
+            (gentle, steep)
+        } else {
+            (steep, gentle)
+        };
+        Self {
+            tile: GrainTile {
+                ring,
+                width,
+                scale,
+                aspect: g.stretch(),
+                seed,
+            },
+            frame: if g.freeze { 0 } else { on.frame },
+            amount: Self::AMOUNT * strong,
+            saturation: g.colorful(),
+            curve: [c0 * (1.0 + Self::SHIFT * strong * strong), c1, c2, c3],
+            tails: [low, high, Self::NEAR],
+            gains: g.gains(),
+            offset: g.middle(),
+            softness: Self::SOFT * g.soft().powf(1.5) * tall,
+            detail: Self::DETAIL * g.lost() * g.lost() * spread,
+            tones: g.tones(),
+            opacity: g.shown(),
+            mode: g.over().mode(),
+            only: g.grain_only,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shading {
     pub shape: VignetteShape,
     pub radius: f64,
@@ -279,6 +435,7 @@ struct OnFrame {
     middle: [f64; 2],
     frame: i64,
     fit: [f64; 4],
+    canvas: [f64; 2],
 }
 
 impl Tiling {
@@ -397,6 +554,7 @@ impl Working {
             }
             EffectKind::MosaicBlur(m) => Work::Mosaic(Tiling::of(m, on)),
             EffectKind::Glow(g) => Work::Glow(Box::new(Glowing::of(g, on))),
+            EffectKind::FilmGrain(g) => Work::Grain(Box::new(Graining::of(g, on))),
             EffectKind::Vignette(v) => Work::Vignette(Shading::of(v, on)),
             EffectKind::Sharpen(s) => {
                 let sharpening = Sharpening::of(s);
@@ -631,6 +789,7 @@ impl Placing {
                 middle: ahead(&back, unzoomed),
                 frame: p.frame,
                 fit: at,
+                canvas: [frame.0, frame.1],
             };
             if i < kept {
                 let mut made: Vec<Working> = p

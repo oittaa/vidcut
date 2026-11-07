@@ -18,6 +18,7 @@ mod acquire;
 mod blur;
 mod carried;
 mod gate;
+mod grain;
 pub(crate) mod held;
 pub(crate) mod light;
 mod lut;

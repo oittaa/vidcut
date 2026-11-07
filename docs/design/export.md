@@ -543,7 +543,8 @@ The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3
 - `place::Glowing` holds what `fs_glow` needs for a Glow.
   - `place::GlowSpread` holds the sigma of each color across and down, for one glow, and its grid. The sigma comes from the area of the picture on the frame (`Glow::SIGMA`).
   - `place::GlowNoise` holds the Atmosphere noise at this frame. `Placed.frame` gives the frame of the clip.
-  - `Effect::moves_by_itself` is true for a Glow with Atmosphere. Then `render_cache` keeps a frame for each frame of the clip, and not one frame for a still.
+  - `Effect::moves_by_itself` is true for a Glow with Atmosphere and for a Film Grain without Freeze. Then `render_cache` keeps a frame for each frame of the clip, and not one frame for a still.
+- `place::Graining` holds what `fs_grain` needs for a Film Grain. `place::GrainTile` holds what makes its picture of noise.
 - `place::Shading` holds the shape of a Vignette: its radius, its cells, its boxes and the place of its first cell.
   - The fit of the picture sets its size (`OnFrame.fit`). Thus a Zoom and a Pan do not change the shape.
 - `place::Sharpening` holds the gain of each band of a Sharpen, for the brightness and for the colors.
@@ -571,6 +572,13 @@ The draw:
   - The tail window of the blur is in `blur_end`.
   - `blur::Blurred` keeps the grid pictures of a Glow in an `Lru` (`Spare`). A change of the frame size clears it. Its size bounds the bytes.
   - `glow_atmosphere` makes the noise in the shader, with no picture of its own.
+- `fs_grain` makes the last pass of a Film Grain (`blur::grain_into`):
+  - `grain::tile_bytes` makes a picture of noise at the size of the canvas, with an inverse Fourier transform. Why: a filter of that spectrum in the shader costs more at each frame.
+  - `grain::amplitudes` adds the folds of the spectrum at each frequency of the canvas ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536)).
+    - A ring that is wide in cycles for each pixel gives a flat sum. Then it uses a flat spectrum. Why: that sum has many folds, and they change nothing.
+  - `blur::Blurred` keeps two of these pictures in an `Lru` (`Tiles`). A change of the frame size clears it. Its size bounds the bytes.
+  - `fs_grain_noise` reads that picture at the shift of this frame (`grain::shift`), and gives the noise its Saturation, Symmetry and gains.
+  - `fs_blur` softens the noise. With Detail Loss, it also blurs the colors without their alpha, into two of the `Spare` pictures.
 - `vignette::cells` makes the shape of a Vignette in compute passes, before its one fragment pass:
   - The `mask` entry fills the cells. The `run` entry makes each box blur, one line at a time, with a running sum.
   - Why: a running sum costs the same at each box width. The widest boxes are hundreds of cells wide.

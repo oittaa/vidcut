@@ -1486,7 +1486,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - vidcut: the Effects tab has four groups:
     - Blur has Gaussian Blur and Mosaic Blur.
     - Light has Glow.
-    - Film Emulation has Vignette.
+    - Film Emulation has Film Grain and Vignette.
     - Sharpen has Sharpen.
   - vidcut: the other effects come later ([todo](todo/effects-library.md)).
   - vidcut: a double-click adds the effect to the first selected clip with a picture.
@@ -1673,6 +1673,76 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - The grid `g` doubles at each doubling of 600 pixels of sigma. The renders put the first step between 580.8 and 633.6.
     - Opacity acts as Blend on a picture with alpha, as it does on an opaque one.
     - Color Filter values go from 0 to 1000000. No limit is measured.
+- **Film Grain** (p. 3559). Its values and their defaults, measured in Resolve Studio 21.1.2:
+  - Film Grain Presets has 17 film stocks and Custom. 16mm S1 is the default.
+  - Composite Type is Overlay, Multiply, Darken, Lighten, Screen, Subtract, Hard Light, Soft Light, Linear Light, Vivid Light, Pin Light or Custom.
+    - Overlay is the default. Custom gives the same picture as Linear Light.
+  - Opacity goes from 0 to 1 and is 0.5.
+  - Grain Only is off. Freeze is off.
+  - Grain Params:
+    - Texture goes from 0 to 1 and is 0.704.
+    - Grain Size goes from 0 to 1 and is 0.66.
+    - Grain Aspect Ratio goes from 0.2 to 5 and is 1.
+    - Grain Strength goes from 0 to 1 and is 0.14875.
+    - Offset goes from 0 to 1 and is 0.482.
+    - Symmetry goes from 0 to 1 and is 0.5.
+    - Softness goes from 0 to 1 and is 0.2984.
+    - Saturation goes from 0 to 1 and is 0.
+    - Detail Loss goes from 0 to 2 and is 0.
+  - Advanced Controls:
+    - Red, Green and Blue each go from −10 to 10 and are 1.
+    - Shadows, Midtones and Highlights each go from 0 to 1 and are 0.5.
+    - The Inspector of Resolve 21.2 shows these names. The manual (p. 3559) calls them Shadow, Midtone and Highlight Gain.
+    - Animate On Every Refresh is off.
+    - The Inspector of Resolve 21.2 has no Optimized Mode row. The manual (p. 3559) names an Optimized Mode checkbox, on by default.
+- **How the film grain works,** measured in Resolve Studio 21.1.2 with 16-bit renders:
+  - `n` is the noise of a channel. `O` is Offset. Grain Only shows `G = clip(O + n)`, which does not depend on the picture.
+  - `c` is the picture's color without its alpha, after Detail Loss. `o` is Opacity. For each channel:
+    - `L = 0.5 + o × (256/255) × F(c) × (G − O)`.
+    - The result is `clip((1 − o) × c + o × f(c, L))`, with `f` the Composite Type.
+    - Opacity acts twice. So the grain goes with the square of Opacity.
+    - Offset changes the picture only where `G` stops at 0 or 1.
+  - `F` is the tones, on the channel's own value: `F(v) = 2 × (s × Ws + m × Wm + h × Wh)`.
+    - `s`, `m` and `h` are Shadows, Midtones and Highlights.
+    - `Ws = clamp((0.4005 − v) / 0.299, 0, 1)`, `Wh = clamp((v − 0.5995) / 0.299, 0, 1)` and `Wm = 1 − Ws − Wh`.
+  - The output is `a` × the result, with `a` the alpha. `a` stays. With Grain Only it is `a` × `G`. Outside the picture nothing shows.
+  - Use Alpha changes nothing. Blend mixes the input and the output.
+  - Detail Loss is a Gaussian curve on the picture's colors without their alpha.
+    - Its sigma is 4.32 × Detail Loss² pixels on 1920×1080. The alpha stays sharp, and the black around a smaller picture enters the blur.
+    - On 3840×2160 the sigma is twice as large. On 1080×1920 it is the same as on 1920×1080.
+  - The noise has the spectrum `R(f) = exp(−(f − C)² / 2W²) + exp(−(f + C)² / 2W²)`.
+    - `f = K × √((A × fx)² + fy²)`, with `fx` and `fy` in cycles for each pixel, and `A` the Grain Aspect Ratio.
+    - `C` and `W` come from Texture, and `K` comes from Grain Size, by tables. `K` also goes with the height of the fitted picture over 1080.
+    - The noise is one continuous field, and each pixel is a sample of it. Thus the parts of `R` above 0.5 cycles for each pixel fold back.
+    - On 3840×2160, 1920×1080 and 1280×720, Grain Only at Grain Size 0, 0.1 and 0.25 with Softness 0 has the same standard deviation.
+    - The spectrum of the 3840×2160 render, folded onto the two smaller sizes, agrees with their renders within about 1% at each frequency.
+    - Before Softness, its standard deviation is 0.1986 × Grain Strength. Its kurtosis is about 3.25.
+  - At Saturation 0 the channels are the same. At 1, they are three separate noises, 1.334 times as strong, and their BT.709 luma is the gray noise.
+  - Red, Green and Blue multiply the noise, after Saturation.
+  - Symmetry works on the noise of each channel, before Softness. It moves the noise down under 0.5 and up over 0.5, and changes its shape.
+  - Softness is a Gaussian curve with a sigma of 5 × Softness^1.5 × the height of the frame / 1080. The edge is a half-sample mirror.
+  - The grain stays in the pixels of the frame. Zoom and Position do not move it.
+  - Each frame of a clip has its own pattern, from the clip's first frame. A trim does not change it. Freeze keeps the first frame's pattern.
+  - A change of Texture, Grain Size, Grain Aspect Ratio or Animate On Every Refresh gives a new pattern.
+- **Film Grain in vidcut:**
+  - vidcut has no Optimized Mode, as the Inspector of Resolve 21.2 has none.
+  - vidcut makes the noise itself. It has the spectrum and the statistics of the renders, not their pattern ([X143](deviations.md#x143-the-noise-of-a-film-grain-has-its-own-pattern)).
+    - One picture of noise comes from an inverse Fourier transform at the size of the canvas. Each frame reads it at another random shift.
+    - A cubic curve on the noise gives the kurtosis.
+  - Symmetry is a table of measured curves, with a step of 0.02 to 0.06. Each curve is a cubic near the middle and a straight line on each side.
+    - Resolve gives spikes at exactly 0.4 and 0.6, with a standard deviation of 0.0109 and 0.0855 against 0.026 on each side. vidcut does not copy them ([X144](deviations.md#x144-a-film-grain-has-no-jumps-at-symmetry-04-and-06)).
+  - vidcut adds the folds of `R` at each frequency of the canvas. Thus the noise keeps its standard deviation before Softness on each frame height.
+    - The table of `K` for Grain Size 0 to 0.4 comes from fits to the renders on 1280×720, 1920×1080 and 3840×2160.
+    - The value at Grain Size 0.2156 comes from the values of 8mm 100D with Softness 0. The value at 0 also fits 35mm 400T.
+    - At the defaults, the renders on 3840×2160, 1080×1920 and 1440×1440 agree within 1.6%.
+    - 35mm 400T at Grain Size 0 gives 1.018, 1.031 and 1.032 of the standard deviation of the renders, on 1920×1080, 3840×2160 and 1080×1920.
+    - 8mm 100D at Grain Size 0.2156 and Grain Strength 1 gives 1.045, 1.046 and 1.048.
+  - vidcut's own choices, not measured ([todo](todo/effects-library.md)):
+    - A film stock also resets Opacity, Grain Aspect Ratio, Saturation, Detail Loss, the gains and the tones. It keeps Composite Type.
+    - Film Grain Presets shows Custom when a value differs from each film stock.
+    - The Detail Loss sigma follows the square root of the frame's area. The renders fit the short side of the frame equally well.
+    - Red, Green and Blue also multiply the shift that Symmetry makes.
+    - Below Symmetry 0.3, the straight lines are the mirror of those at 1 − Symmetry. Under 0.1 and over 0.9, they stay as at 0.1 and 0.9.
 - **Vignette.** Its values and their defaults, measured in Resolve Studio 21.1.2:
   - Operating Mode is Basic or Advanced. Basic is the default.
   - Border Shape is Oval, Triangle, Diamond, Rectangle, Hexagon or Octagon. Oval is the default.
@@ -3522,6 +3592,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
       - An upper soft edge over a partly clear picture gives the premultiplied sum of the same formula.
       - The effects of the compound clip work on a title alone.
       - A Mosaic Blur and a Glow on the compound clip follow the rule of the Gaussian Blur.
+      - A Film Grain on the compound clip counts its frames from the first frame of the compound clip.
     - A title inside it keeps its own place, zoom and rotation (X54) in the frame of the compound clip.
     - The tracks below it show wherever its tracks leave its frame uncovered.
     - A clip inside it that fills the frame at its usual values has the edges of the compound clip only. Thus they are smoothed once.

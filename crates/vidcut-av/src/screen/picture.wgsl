@@ -1205,6 +1205,13 @@ fn blur_folded(i: i32, n: i32) -> i32 {
             }
             return m;
         }
+        case 4: {
+            var m = i % (2 * n);
+            if m < 0 {
+                m += 2 * n;
+            }
+            return select(m, 2 * n - 1 - m, m >= n);
+        }
         default: {
             return i;
         }
@@ -1818,4 +1825,62 @@ fn fs_glow(in: Out) -> @location(0) vec4<f32> {
     out.a = max(was.a, max(out.r, max(out.g, out.b)));
     let last = effect_mixed(px, out, glowing.mixing.z, glowing.mixing.w);
     return clamp(last, vec4<f32>(0.0), vec4<f32>(1.0));
+}
+
+struct Grain {
+    noise: vec4<f32>,
+    curve: vec4<f32>,
+    tails: vec4<f32>,
+    gains: vec4<f32>,
+    tones: vec4<f32>,
+    shift: vec4<i32>,
+};
+
+@group(0) @binding(0) var<uniform> graining: Grain;
+@group(0) @binding(15) var grain_input: texture_2d<f32>;
+
+const GRAIN_LIFT: f32 = 256.0 / 255.0;
+const GRAIN_ONLY: i32 = 1;
+const GRAIN_DETAIL: i32 = 2;
+const GRAIN_LOW_END: f32 = 0.4005;
+const GRAIN_HIGH_START: f32 = 0.5995;
+const GRAIN_TONE_WIDTH: f32 = 0.299;
+
+@fragment
+fn fs_grain_noise(in: Out) -> @location(0) vec4<f32> {
+    let size = vec2<i32>(textureDimensions(blur_source));
+    let at = (vec2<i32>(in.position.xy) + graining.shift.xy) % size;
+    let u = textureLoad(blur_source, at, 0).rgb;
+    let x = graining.noise.x * mix(vec3<f32>(dot(u, BT709)), u, graining.noise.y);
+    let near = clamp(x, vec3<f32>(-graining.tails.z), vec3<f32>(graining.tails.z));
+    let c = graining.curve;
+    let y = c.x + near * (c.y + near * (c.z + near * c.w));
+    let tail = (x - near) * select(graining.tails.yyy, graining.tails.xxx, x < vec3<f32>(0.0));
+    return vec4<f32>((y + tail) * graining.gains.rgb, 1.0);
+}
+
+fn grain_tones(c: vec3<f32>) -> vec3<f32> {
+    let low = clamp((GRAIN_LOW_END - c) / GRAIN_TONE_WIDTH, vec3<f32>(0.0), vec3<f32>(1.0));
+    let high = clamp((c - GRAIN_HIGH_START) / GRAIN_TONE_WIDTH, vec3<f32>(0.0), vec3<f32>(1.0));
+    let t = graining.tones;
+    return 2.0 * (t.x * low + t.y * (1.0 - low - high) + t.z * high);
+}
+
+@fragment
+fn fs_grain(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let offset = graining.noise.z;
+    let o = graining.noise.w;
+    let flags = graining.shift.w;
+    let n = textureLoad(blur_source, px, 0).rgb;
+    let only = clamp(offset + n, vec3<f32>(0.0), vec3<f32>(1.0));
+    var made = only;
+    if (flags & GRAIN_ONLY) == 0 {
+        let taken = textureLoad(grain_input, px, 0);
+        let c = select(effect_taken(taken, 0.0).rgb, taken.rgb, (flags & GRAIN_DETAIL) != 0);
+        let l = 0.5 + o * GRAIN_LIFT * grain_tones(c) * (only - offset);
+        made = mix(c, mixed(u32(graining.shift.z), l, c), o);
+    }
+    let shown = vec4<f32>(clamp(made, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    return clamp(effect_mixed(px, shown, graining.gains.w, 0.0), vec4<f32>(0.0), vec4<f32>(1.0));
 }

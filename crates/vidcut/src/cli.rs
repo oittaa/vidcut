@@ -165,7 +165,7 @@ const GROUPS: &[(&str, &str)] = &[
     ("edit", "Edit the timeline"),
     (
         "effects",
-        "Effects on clips' pictures, in their order: Gaussian Blur, Mosaic Blur, Glow, Vignette, Sharpen",
+        "Effects on clips' pictures, in their order: Gaussian Blur, Mosaic Blur, Glow, Film Grain, Vignette, Sharpen",
     ),
     ("encoders", "Hardware encoders that work here"),
     (
@@ -406,7 +406,8 @@ const EXAMPLES: &[(&str, &str)] = &[
         "effects.add",
         "vidcut effects add c3 gaussian_blur\n  vidcut effects add V2@10s gaussian_blur\n  \
          vidcut effects add c3 mosaic_blur\n  vidcut effects add c3 vignette\n  \
-         vidcut effects add c3 sharpen\n  vidcut effects add c3 glow",
+         vidcut effects add c3 sharpen\n  vidcut effects add c3 glow\n  \
+         vidcut effects add c3 film_grain",
     ),
     (
         "effects.set",

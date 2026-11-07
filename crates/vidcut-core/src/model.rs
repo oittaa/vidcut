@@ -3253,6 +3253,8 @@ pub enum EffectKind {
     MosaicBlur(MosaicBlur),
     /// A soft light around the bright parts of the picture.
     Glow(Box<Glow>),
+    /// Noise with the look of film over the picture.
+    FilmGrain(Box<FilmGrain>),
     /// A soft shape with the picture inside it and a color around it.
     Vignette(Vignette),
     /// Makes the detail of the picture stronger.
@@ -3266,6 +3268,7 @@ pub enum EffectType {
     GaussianBlur,
     MosaicBlur,
     Glow,
+    FilmGrain,
     Vignette,
     Sharpen,
 }
@@ -3707,11 +3710,347 @@ impl GlowFraming {
     pub const ALL: [GlowFraming; 2] = [GlowFraming::OnlyAsSeen, GlowFraming::ReflectInCamera];
 }
 
+/// Film grain: noise with the spectrum of a film stock, mixed with the
+/// picture. It stays in the frame's pixels, so the transform does not move it.
+/// It works on the code values, after the transform and the crop.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FilmGrain {
+    /// How the grain goes over the picture. Usual: `overlay`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain_composite: Option<GrainComposite>,
+    /// How much grain shows, from 0 to 1. It scales the grain and mixes the
+    /// composite, so the grain goes with its square. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+    /// Shows the grain alone, with the picture's alpha. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub grain_only: bool,
+    /// The grain of the clip's first frame on each frame. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub freeze: bool,
+    /// The pattern of the grain, from 0 to 1: a higher value has a narrower
+    /// band of sizes. Usual: 0.704.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture: Option<f64>,
+    /// How large the grain is, from 0 to 1. Usual: 0.66.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain_size: Option<f64>,
+    /// The width of the grain over its height, from 0.2 to 5. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain_aspect: Option<f64>,
+    /// How strong the grain is, from 0 to 1. Usual: 0.14875.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain_strength: Option<f64>,
+    /// The code value of the grain with `grain_only`, from 0 to 1. The grain
+    /// on a picture changes only where it reaches 0 or 1. Usual: 0.482.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<f64>,
+    /// Moves the grain to the dark side, under 0.5, or to the bright side,
+    /// from 0 to 1. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symmetry: Option<f64>,
+    /// How soft the grain is, from 0 to 1. Its sigma is 5 × this^1.5 × the
+    /// frame's height / 1080 pixels. Usual: 0.2984.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness: Option<f64>,
+    /// How much the grain differs on red, green and blue, from 0 (gray) to 1.
+    /// Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saturation: Option<f64>,
+    /// Blurs the picture under the grain, from 0 to 2. Its sigma is 4.32 ×
+    /// this² × √(width × height / (1920 × 1080)) pixels of the frame.
+    /// Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_loss: Option<f64>,
+    /// Multiplies the grain on red, green and blue, each from -10 to 10.
+    /// Usual: `[1, 1, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_gains: Option<[f64; 3]>,
+    /// How much grain the dark parts of the picture take, from 0 to 1. Usual:
+    /// 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadows: Option<f64>,
+    /// How much grain the middle tones of the picture take, from 0 to 1.
+    /// Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midtones: Option<f64>,
+    /// How much grain the bright parts of the picture take, from 0 to 1.
+    /// Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlights: Option<f64>,
+    /// On, another pattern with the same look. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub animate: bool,
+}
+
+/// How a Film Grain goes over the picture. Each value but `custom` is the
+/// composite mode of its name, with the grain as `a` and the picture as `b`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GrainComposite {
+    #[default]
+    Overlay,
+    Multiply,
+    Darken,
+    Lighten,
+    Screen,
+    Subtract,
+    Hardlight,
+    Softlight,
+    LinearLight,
+    VividLight,
+    PinLight,
+    /// As `linear_light`.
+    Custom,
+}
+
+impl GrainComposite {
+    pub const ALL: [GrainComposite; 12] = [
+        Self::Overlay,
+        Self::Multiply,
+        Self::Darken,
+        Self::Lighten,
+        Self::Screen,
+        Self::Subtract,
+        Self::Hardlight,
+        Self::Softlight,
+        Self::LinearLight,
+        Self::VividLight,
+        Self::PinLight,
+        Self::Custom,
+    ];
+
+    pub fn mode(self) -> CompositeMode {
+        match self {
+            Self::Overlay => CompositeMode::Overlay,
+            Self::Multiply => CompositeMode::Multiply,
+            Self::Darken => CompositeMode::Darken,
+            Self::Lighten => CompositeMode::Lighten,
+            Self::Screen => CompositeMode::Screen,
+            Self::Subtract => CompositeMode::Subtract,
+            Self::Hardlight => CompositeMode::Hardlight,
+            Self::Softlight => CompositeMode::Softlight,
+            Self::LinearLight | Self::Custom => CompositeMode::LinearLight,
+            Self::VividLight => CompositeMode::VividLight,
+            Self::PinLight => CompositeMode::PinLight,
+        }
+    }
+}
+
+/// A film stock of a Film Grain: a set of its values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum GrainPreset {
+    #[serde(rename = "8mm_s1")]
+    S1At8,
+    #[serde(rename = "8mm_50d")]
+    D50At8,
+    #[serde(rename = "8mm_100d")]
+    D100At8,
+    #[serde(rename = "8mm_250d")]
+    D250At8,
+    #[serde(rename = "8mm_200t")]
+    T200At8,
+    #[serde(rename = "8mm_500t")]
+    T500At8,
+    #[serde(rename = "16mm_s1")]
+    S1At16,
+    #[serde(rename = "16mm_50d")]
+    D50At16,
+    #[serde(rename = "16mm_250d")]
+    D250At16,
+    #[serde(rename = "16mm_500t")]
+    T500At16,
+    #[serde(rename = "16mm_archival")]
+    ArchivalAt16,
+    #[serde(rename = "16mm_archival_print")]
+    ArchivalPrintAt16,
+    #[serde(rename = "16mm_reversal")]
+    ReversalAt16,
+    #[serde(rename = "35mm_s1")]
+    S1At35,
+    #[serde(rename = "35mm_200t")]
+    T200At35,
+    #[serde(rename = "35mm_400t")]
+    T400At35,
+    #[serde(rename = "35mm_reversal_bw")]
+    ReversalBwAt35,
+    /// Values of no film stock.
+    #[serde(rename = "custom")]
+    Custom,
+}
+
+impl GrainPreset {
+    pub const ALL: [GrainPreset; 18] = [
+        Self::S1At8,
+        Self::D50At8,
+        Self::D100At8,
+        Self::D250At8,
+        Self::T200At8,
+        Self::T500At8,
+        Self::S1At16,
+        Self::D50At16,
+        Self::D250At16,
+        Self::T500At16,
+        Self::ArchivalAt16,
+        Self::ArchivalPrintAt16,
+        Self::ReversalAt16,
+        Self::S1At35,
+        Self::T200At35,
+        Self::T400At35,
+        Self::ReversalBwAt35,
+        Self::Custom,
+    ];
+
+    fn values(self) -> Option<[f64; 6]> {
+        let usual = [
+            FilmGrain::TEXTURE,
+            FilmGrain::SIZE,
+            FilmGrain::STRENGTH,
+            FilmGrain::OFFSET,
+            FilmGrain::SYMMETRY,
+            FilmGrain::SOFTNESS,
+        ];
+        match self {
+            Self::S1At8 => Some([
+                0.613_684_237_003_326_4,
+                0.682_000_041_007_995_6,
+                0.307_500_004_768_371_6,
+                0.483_999_997_377_395_63,
+                0.5,
+                0.659_025_967_121_124_3,
+            ]),
+            Self::D50At8 => Some([
+                0.682_297_348_976_135_3,
+                0.693_000_018_596_649_2,
+                0.170_000_001_788_139_34,
+                0.515_999_972_820_282,
+                0.5,
+                0.215_443_462_133_407_6,
+            ]),
+            Self::D100At8 => Some([
+                0.794_900_536_537_170_4,
+                0.215_599_954_128_265_38,
+                1.0,
+                0.545_000_016_689_300_5,
+                0.5,
+                0.321_154_654_026_031_5,
+            ]),
+            Self::D250At8 => Some([
+                0.727_819_561_958_313,
+                0.807_399_988_174_438_5,
+                0.272_499_978_542_327_9,
+                0.5,
+                0.5,
+                0.265_754_342_079_162_6,
+            ]),
+            Self::T200At8 => Some([
+                0.771_309_494_972_229,
+                0.638_000_011_444_091_8,
+                0.317_499_995_231_628_4,
+                0.5,
+                0.5,
+                0.269_619_941_711_425_8,
+            ]),
+            Self::T500At8 => Some([
+                0.761_538_505_554_199_2,
+                0.728_200_018_405_914_3,
+                1.0,
+                0.398_000_001_907_348_63,
+                0.800_000_011_920_929,
+                0.341_995_179_653_167_7,
+            ]),
+            Self::S1At16 => Some(usual),
+            Self::D50At16 => Some([
+                0.703_740_179_538_726_8,
+                0.261_799_991_130_828_86,
+                0.170_000_001_788_139_34,
+                0.5,
+                0.5,
+                0.218_306_541_442_871_1,
+            ]),
+            Self::D250At16 => Some([
+                0.726_035_058_498_382_6,
+                0.409_200_012_683_868_4,
+                0.216_249_987_483_024_6,
+                0.476_999_998_092_651_37,
+                0.512_000_024_318_695_1,
+                0.166_599_079_966_545_1,
+            ]),
+            Self::T500At16 => Some([
+                0.704_328_417_778_015_1,
+                0.362_999_975_681_304_93,
+                0.237_499_997_019_767_76,
+                0.495_999_991_893_768_3,
+                0.5,
+                0.202_314_764_261_245_73,
+            ]),
+            Self::ArchivalAt16 => Some([
+                0.646_250_009_536_743_2,
+                0.307_999_968_528_747_56,
+                0.166_250_005_364_418_03,
+                0.504_999_995_231_628_4,
+                0.5,
+                0.202_314_764_261_245_73,
+            ]),
+            Self::ArchivalPrintAt16 => Some([
+                0.682_380_318_641_662_6,
+                0.272_800_028_324_127_2,
+                0.341_250_002_384_185_8,
+                0.492_000_013_589_859,
+                0.5,
+                0.233_732_417_225_837_7,
+            ]),
+            Self::ReversalAt16 => Some([
+                0.726_079_106_330_871_6,
+                0.488_400_042_057_037_35,
+                0.397_499_978_542_327_9,
+                0.414_000_004_529_953,
+                0.942_999_958_992_004_4,
+                0.218_306_541_442_871_1,
+            ]),
+            Self::S1At35 => Some([
+                0.783_991_873_264_312_7,
+                0.262_019_991_874_694_8,
+                0.158_749_997_615_814_2,
+                0.485_000_014_305_114_75,
+                0.5,
+                0.219_731_062_650_680_54,
+            ]),
+            Self::T200At35 => Some([
+                0.726_426_959_037_780_8,
+                0.136_400_043_964_386,
+                0.173_749_998_211_860_66,
+                0.501_999_974_250_793_5,
+                0.5,
+                0.233_732_417_225_837_7,
+            ]),
+            Self::T400At35 => Some([
+                0.750_200_033_187_866_2,
+                0.0,
+                0.283_749_997_615_814_2,
+                0.5,
+                0.5,
+                0.233_732_417_225_837_7,
+            ]),
+            Self::ReversalBwAt35 => Some([
+                0.501_734_733_581_543,
+                0.021_999_955_177_307_13,
+                0.263_749_986_886_978_15,
+                0.514_999_985_694_885_3,
+                0.5,
+                0.218_306_541_442_871_1,
+            ]),
+            Self::Custom => None,
+        }
+    }
+}
+
 impl EffectType {
-    pub const ALL: [EffectType; 5] = [
+    pub const ALL: [EffectType; 6] = [
         EffectType::GaussianBlur,
         EffectType::MosaicBlur,
         EffectType::Glow,
+        EffectType::FilmGrain,
         EffectType::Vignette,
         EffectType::Sharpen,
     ];
@@ -3721,6 +4060,7 @@ impl EffectType {
             Self::GaussianBlur => "Gaussian Blur",
             Self::MosaicBlur => "Mosaic Blur",
             Self::Glow => "Glow",
+            Self::FilmGrain => "Film Grain",
             Self::Vignette => "Vignette",
             Self::Sharpen => "Sharpen",
         }
@@ -3731,6 +4071,7 @@ impl EffectType {
             Self::GaussianBlur => EffectKind::GaussianBlur(GaussianBlur::default()),
             Self::MosaicBlur => EffectKind::MosaicBlur(MosaicBlur::default()),
             Self::Glow => EffectKind::Glow(Box::default()),
+            Self::FilmGrain => EffectKind::FilmGrain(Box::default()),
             Self::Vignette => EffectKind::Vignette(Vignette::default()),
             Self::Sharpen => EffectKind::Sharpen(Sharpen::default()),
         };
@@ -3750,6 +4091,7 @@ impl Effect {
             EffectKind::GaussianBlur(_) => EffectType::GaussianBlur,
             EffectKind::MosaicBlur(_) => EffectType::MosaicBlur,
             EffectKind::Glow(_) => EffectType::Glow,
+            EffectKind::FilmGrain(_) => EffectType::FilmGrain,
             EffectKind::Vignette(_) => EffectType::Vignette,
             EffectKind::Sharpen(_) => EffectType::Sharpen,
         }
@@ -3758,6 +4100,7 @@ impl Effect {
     pub fn moves_by_itself(&self) -> bool {
         match &self.kind {
             EffectKind::Glow(g) => g.atmosphere,
+            EffectKind::FilmGrain(g) => !g.freeze,
             _ => false,
         }
     }
@@ -3978,6 +4321,126 @@ impl Glow {
 
     pub fn recovers(&self) -> f64 {
         self.recovery.unwrap_or(0.0)
+    }
+}
+
+impl FilmGrain {
+    pub const UNIT: (f64, f64) = (0.0, 1.0);
+    pub const OPACITY: f64 = 0.5;
+    pub const TEXTURE: f64 = 0.704;
+    pub const SIZE: f64 = 0.66;
+    pub const ASPECTS: (f64, f64) = (0.2, 5.0);
+    pub const STRENGTH: f64 = 0.14875;
+    pub const OFFSET: f64 = 0.482;
+    pub const SYMMETRY: f64 = 0.5;
+    pub const SOFTNESS: f64 = 0.298_395_127_058_029_2;
+    pub const DETAILS: (f64, f64) = (0.0, 2.0);
+    pub const WHITE: [f64; 3] = [1.0; 3];
+    pub const GAINS: (f64, f64) = (-10.0, 10.0);
+    pub const TONE: f64 = 0.5;
+    const SAME: f64 = 1e-6;
+
+    pub fn over(&self) -> GrainComposite {
+        self.grain_composite.unwrap_or_default()
+    }
+
+    pub fn shown(&self) -> f64 {
+        self.opacity.unwrap_or(Self::OPACITY)
+    }
+
+    pub fn rough(&self) -> f64 {
+        self.texture.unwrap_or(Self::TEXTURE)
+    }
+
+    pub fn large(&self) -> f64 {
+        self.grain_size.unwrap_or(Self::SIZE)
+    }
+
+    pub fn stretch(&self) -> f64 {
+        self.grain_aspect.unwrap_or(1.0)
+    }
+
+    pub fn strong(&self) -> f64 {
+        self.grain_strength.unwrap_or(Self::STRENGTH)
+    }
+
+    pub fn middle(&self) -> f64 {
+        self.offset.unwrap_or(Self::OFFSET)
+    }
+
+    pub fn lean(&self) -> f64 {
+        self.symmetry.unwrap_or(Self::SYMMETRY)
+    }
+
+    pub fn soft(&self) -> f64 {
+        self.softness.unwrap_or(Self::SOFTNESS)
+    }
+
+    pub fn colorful(&self) -> f64 {
+        self.saturation.unwrap_or(0.0)
+    }
+
+    pub fn lost(&self) -> f64 {
+        self.detail_loss.unwrap_or(0.0)
+    }
+
+    pub fn gains(&self) -> [f64; 3] {
+        self.channel_gains.unwrap_or(Self::WHITE)
+    }
+
+    pub fn tones(&self) -> [f64; 3] {
+        [self.shadows, self.midtones, self.highlights].map(|t| t.unwrap_or(Self::TONE))
+    }
+
+    pub fn preset(&self) -> GrainPreset {
+        let plain = self.shown() == Self::OPACITY
+            && self.stretch() == 1.0
+            && self.colorful() == 0.0
+            && self.lost() == 0.0
+            && self.gains() == Self::WHITE
+            && self.tones() == [Self::TONE; 3];
+        let now = [
+            self.rough(),
+            self.large(),
+            self.strong(),
+            self.middle(),
+            self.lean(),
+            self.soft(),
+        ];
+        let same = |p: &GrainPreset| {
+            p.values().is_some_and(|values| {
+                values
+                    .iter()
+                    .zip(&now)
+                    .all(|(a, b)| (a - b).abs() < Self::SAME)
+            })
+        };
+        match plain {
+            true => GrainPreset::ALL
+                .into_iter()
+                .find(|p| same(p))
+                .unwrap_or(GrainPreset::Custom),
+            false => GrainPreset::Custom,
+        }
+    }
+
+    pub fn take_preset(&mut self, preset: GrainPreset) {
+        let Some([texture, size, strength, offset, symmetry, softness]) = preset.values() else {
+            return;
+        };
+        *self = Self {
+            grain_composite: self.grain_composite,
+            grain_only: self.grain_only,
+            freeze: self.freeze,
+            animate: self.animate,
+            texture: Some(texture),
+            grain_size: Some(size),
+            grain_strength: Some(strength),
+            offset: Some(offset),
+            symmetry: Some(symmetry),
+            softness: Some(softness),
+            ..Self::default()
+        };
     }
 }
 

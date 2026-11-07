@@ -9,9 +9,9 @@ use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType,
-    GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, Handle, LowerThirdLine, PictureTool,
-    PictureTransition, Place, SubtitleStyle, TitleAlign, TitleAnchor, TitleKind, TitleStyle,
-    TrackClip, VignetteMode, VignetteShape, ZoomBox,
+    GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, GrainPreset, Handle,
+    LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign, TitleAnchor,
+    TitleKind, TitleStyle, TrackClip, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -4553,7 +4553,8 @@ pub struct EffectChange {
     /// The gamma of a Glow, from 0.1 to 10.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gamma: Option<f64>,
-    /// The colorfulness of a Glow, from 0 to 10.
+    /// The colorfulness of a Glow, from 0 to 10. On a Film Grain, how much
+    /// the grain differs on red, green and blue, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub saturation: Option<f64>,
     /// Multiplies a Glow's red, green and blue, `[r, g, b]`, each from 0 to
@@ -4606,7 +4607,8 @@ pub struct EffectChange {
     /// with the picture in `advanced`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composite_type: Option<CompositeMode>,
-    /// How much of a Glow's composite shows, from 0 to 1.
+    /// How much of a Glow's composite shows, or how much of a Film Grain
+    /// shows, from 0 to 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f64>,
     /// A Glow on the picture's negative, which gives the negative of the
@@ -4616,6 +4618,66 @@ pub struct EffectChange {
     /// Takes a Glow away where the picture shines, from 0 to 5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<f64>,
+    /// Gives a Film Grain the values of a film stock. It also resets its
+    /// `opacity`, `grain_aspect`, `saturation`, `detail_loss`, `channel_gains`
+    /// and tones. The other values of this change go on top. `custom` changes
+    /// nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<GrainPreset>,
+    /// How a Film Grain goes over the picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain_composite: Option<GrainComposite>,
+    /// Shows a Film Grain alone, with the picture's alpha.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain_only: Option<bool>,
+    /// The grain of the clip's first frame on each frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub freeze: Option<bool>,
+    /// The pattern of a Film Grain, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture: Option<f64>,
+    /// How large a Film Grain is, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain_size: Option<f64>,
+    /// The width of a Film Grain over its height, from 0.2 to 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain_aspect: Option<f64>,
+    /// How strong a Film Grain is, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grain_strength: Option<f64>,
+    /// The code value of a Film Grain with `grain_only`, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<f64>,
+    /// Moves a Film Grain to the dark side, under 0.5, or to the bright side,
+    /// from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symmetry: Option<f64>,
+    /// How soft a Film Grain is, or how soft the edge of a Vignette's shape
+    /// is, from 0 to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub softness: Option<f64>,
+    /// Blurs the picture under a Film Grain, from 0 to 2.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_loss: Option<f64>,
+    /// Multiplies a Film Grain on red, green and blue, `[r, g, b]`, each from
+    /// -10 to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_gains: Option<Vec<f64>>,
+    /// How much of a Film Grain the dark parts of the picture take, from 0
+    /// to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadows: Option<f64>,
+    /// How much of a Film Grain the middle tones of the picture take, from 0
+    /// to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midtones: Option<f64>,
+    /// How much of a Film Grain the bright parts of the picture take, from 0
+    /// to 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highlights: Option<f64>,
+    /// On, another pattern of a Film Grain with the same look.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animate: Option<bool>,
     /// `basic` is a Vignette's oval in the middle, with its color in the
     /// `normal` mode. `advanced` uses all its values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4637,9 +4699,6 @@ pub struct EffectChange {
     /// of the picture from its bottom left, each from -1000000 to 1000000.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center: Option<Vec<f64>>,
-    /// How soft the edge of a Vignette's shape is, from 0 to 1.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub softness: Option<f64>,
     /// How much of the picture shows through a Vignette's color, in
     /// `advanced`, from 0 (none) to 1 (all).
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -12,9 +12,9 @@ use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     Border, CellShape, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel, Effect,
-    EffectKind, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming, GlowOutput, Gradient,
-    Keyframe, MosaicBlur, Picture, PictureTool, Project, Retime, Sharpen, Speed, TrackKind,
-    Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    EffectKind, FilmGrain, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming, GlowOutput,
+    Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, Picture, PictureTool, Project,
+    Retime, Sharpen, Speed, TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -78,9 +78,26 @@ enum Knob {
     Gaussian(GaussianKnob),
     Mosaic(MosaicKnob),
     Glow(GlowKnob),
+    Grain(GrainKnob),
     Vignette(VignetteKnob),
     Sharpen(SharpenKnob),
     Blend,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum GrainKnob {
+    Opacity,
+    Texture,
+    Size,
+    Aspect,
+    Strength,
+    Offset,
+    Symmetry,
+    Softness,
+    Saturation,
+    Detail,
+    Gain(usize),
+    Tone(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -413,6 +430,93 @@ impl GlowKnob {
     }
 }
 
+const TONES: [&str; 3] = ["Shadows", "Midtones", "Highlights"];
+
+impl GrainKnob {
+    fn dial(self) -> Dial {
+        let dial = |label, usual, range, speed| Dial {
+            label,
+            usual,
+            range,
+            speed,
+        };
+        let unit = pair(FilmGrain::UNIT);
+        match self {
+            Self::Opacity => dial("Opacity", FilmGrain::OPACITY, unit, 0.005),
+            Self::Texture => dial("Texture", FilmGrain::TEXTURE, unit, 0.005),
+            Self::Size => dial("Grain Size", FilmGrain::SIZE, unit, 0.005),
+            Self::Aspect => dial("Grain Aspect Ratio", 1.0, pair(FilmGrain::ASPECTS), 0.005),
+            Self::Strength => dial("Grain Strength", FilmGrain::STRENGTH, unit, 0.005),
+            Self::Offset => dial("Offset", FilmGrain::OFFSET, unit, 0.005),
+            Self::Symmetry => dial("Symmetry", FilmGrain::SYMMETRY, unit, 0.005),
+            Self::Softness => dial("Softness", FilmGrain::SOFTNESS, unit, 0.005),
+            Self::Saturation => dial("Saturation", 0.0, unit, 0.005),
+            Self::Detail => dial("Detail Loss", 0.0, pair(FilmGrain::DETAILS), 0.005),
+            Self::Gain(c) => dial(CHANNELS[c], 1.0, pair(FilmGrain::GAINS), 0.005),
+            Self::Tone(t) => dial(TONES[t], FilmGrain::TONE, unit, 0.005),
+        }
+    }
+
+    fn read(self, g: &FilmGrain) -> f64 {
+        match self {
+            Self::Opacity => g.shown(),
+            Self::Texture => g.rough(),
+            Self::Size => g.large(),
+            Self::Aspect => g.stretch(),
+            Self::Strength => g.strong(),
+            Self::Offset => g.middle(),
+            Self::Symmetry => g.lean(),
+            Self::Softness => g.soft(),
+            Self::Saturation => g.colorful(),
+            Self::Detail => g.lost(),
+            Self::Gain(c) => g.gains()[c],
+            Self::Tone(t) => g.tones()[t],
+        }
+    }
+
+    fn put(self, g: &mut FilmGrain, v: f64) {
+        match self {
+            Self::Opacity => g.opacity = Some(v),
+            Self::Texture => g.texture = Some(v),
+            Self::Size => g.grain_size = Some(v),
+            Self::Aspect => g.grain_aspect = Some(v),
+            Self::Strength => g.grain_strength = Some(v),
+            Self::Offset => g.offset = Some(v),
+            Self::Symmetry => g.symmetry = Some(v),
+            Self::Softness => g.softness = Some(v),
+            Self::Saturation => g.saturation = Some(v),
+            Self::Detail => g.detail_loss = Some(v),
+            Self::Gain(c) => {
+                let mut all = g.gains();
+                all[c] = v;
+                g.channel_gains = Some(all);
+            }
+            Self::Tone(0) => g.shadows = Some(v),
+            Self::Tone(1) => g.midtones = Some(v),
+            Self::Tone(_) => g.highlights = Some(v),
+        }
+    }
+
+    fn param(self, g: &FilmGrain) -> (&'static str, Value) {
+        match self {
+            Self::Opacity => ("opacity", json!(g.shown())),
+            Self::Texture => ("texture", json!(g.rough())),
+            Self::Size => ("grain_size", json!(g.large())),
+            Self::Aspect => ("grain_aspect", json!(g.stretch())),
+            Self::Strength => ("grain_strength", json!(g.strong())),
+            Self::Offset => ("offset", json!(g.middle())),
+            Self::Symmetry => ("symmetry", json!(g.lean())),
+            Self::Softness => ("softness", json!(g.soft())),
+            Self::Saturation => ("saturation", json!(g.colorful())),
+            Self::Detail => ("detail_loss", json!(g.lost())),
+            Self::Gain(_) => ("channel_gains", json!(g.gains())),
+            Self::Tone(0) => ("shadows", json!(g.tones()[0])),
+            Self::Tone(1) => ("midtones", json!(g.tones()[1])),
+            Self::Tone(_) => ("highlights", json!(g.tones()[2])),
+        }
+    }
+}
+
 impl VignetteKnob {
     fn dial(self) -> Dial {
         let dial = |label, usual, range, speed| Dial {
@@ -538,6 +642,7 @@ impl Knob {
             Knob::Gaussian(k) => k.dial(),
             Knob::Mosaic(k) => k.dial(),
             Knob::Glow(k) => k.dial(),
+            Knob::Grain(k) => k.dial(),
             Knob::Vignette(k) => k.dial(),
             Knob::Sharpen(k) => k.dial(),
             Knob::Blend => Dial {
@@ -554,6 +659,7 @@ impl Knob {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.read(g),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.read(m),
             (Knob::Glow(k), EffectKind::Glow(g)) => k.read(g),
+            (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.read(g),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.read(s),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.read(s),
             (Knob::Blend, _) => e.mixed(),
@@ -569,6 +675,7 @@ impl Knob {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.put(g, v),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.put(m, v),
             (Knob::Glow(k), EffectKind::Glow(g)) => k.put(g, v),
+            (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.put(g, v),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.put(s, v),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.put(s, v),
             (Knob::Blend, _) => out.blend = Some(v),
@@ -582,6 +689,7 @@ impl Knob {
             (Knob::Gaussian(k), EffectKind::GaussianBlur(g)) => k.param(g),
             (Knob::Mosaic(k), EffectKind::MosaicBlur(m)) => k.param(m),
             (Knob::Glow(k), EffectKind::Glow(g)) => k.param(g),
+            (Knob::Grain(k), EffectKind::FilmGrain(g)) => k.param(g),
             (Knob::Vignette(k), EffectKind::Vignette(s)) => k.param(s),
             (Knob::Sharpen(k), EffectKind::Sharpen(s)) => k.param(s),
             _ => ("blend", json!(e.mixed())),
@@ -2183,6 +2291,100 @@ fn glow_rows(
     });
 }
 
+fn grain_preset_label(p: GrainPreset) -> &'static str {
+    match p {
+        GrainPreset::S1At8 => "8mm S1",
+        GrainPreset::D50At8 => "8mm 50D",
+        GrainPreset::D100At8 => "8mm 100D",
+        GrainPreset::D250At8 => "8mm 250D",
+        GrainPreset::T200At8 => "8mm 200T",
+        GrainPreset::T500At8 => "8mm 500T",
+        GrainPreset::S1At16 => "16mm S1",
+        GrainPreset::D50At16 => "16mm 50D",
+        GrainPreset::D250At16 => "16mm 250D",
+        GrainPreset::T500At16 => "16mm 500T",
+        GrainPreset::ArchivalAt16 => "16mm Archival",
+        GrainPreset::ArchivalPrintAt16 => "16mm Archival Print",
+        GrainPreset::ReversalAt16 => "16mm Reversal",
+        GrainPreset::S1At35 => "35mm S1",
+        GrainPreset::T200At35 => "35mm 200T",
+        GrainPreset::T400At35 => "35mm 400T",
+        GrainPreset::ReversalBwAt35 => "35mm Reversal BW",
+        GrainPreset::Custom => "Custom",
+    }
+}
+
+fn grain_composite_label(c: GrainComposite) -> &'static str {
+    match c {
+        GrainComposite::Custom => "Custom",
+        _ => mode_label(c.mode()),
+    }
+}
+
+fn grain_rows(
+    ui: &mut egui::Ui,
+    i: &Inspector,
+    (n, e, g): (usize, &Effect, &FilmGrain),
+    acts: &mut Vec<Act>,
+) {
+    let grain = |ui: &mut egui::Ui, k: GrainKnob, acts: &mut Vec<Act>| {
+        knob(ui, i, (n, Knob::Grain(k)), e, acts);
+    };
+    rows(ui, (n, "main"), |ui| {
+        choice_row(
+            ui,
+            (n, "Film Grain Presets", "preset"),
+            (g.preset(), GrainPreset::S1At16),
+            (&GrainPreset::ALL, grain_preset_label),
+            acts,
+        );
+        choice_row(
+            ui,
+            (n, "Composite Type", "grain_composite"),
+            (g.over(), GrainComposite::default()),
+            (&GrainComposite::ALL, grain_composite_label),
+            acts,
+        );
+        grain(ui, GrainKnob::Opacity, acts);
+        check(
+            ui,
+            (n, "Grain Only", g.grain_only, false),
+            "grain_only",
+            acts,
+        );
+        check(ui, (n, "Freeze", g.freeze, false), "freeze", acts);
+    });
+    fold(ui, (n, "Grain Params"), |ui| {
+        for k in [
+            GrainKnob::Texture,
+            GrainKnob::Size,
+            GrainKnob::Aspect,
+            GrainKnob::Strength,
+            GrainKnob::Offset,
+            GrainKnob::Symmetry,
+            GrainKnob::Softness,
+            GrainKnob::Saturation,
+            GrainKnob::Detail,
+        ] {
+            grain(ui, k, acts);
+        }
+    });
+    fold(ui, (n, "Advanced Controls"), |ui| {
+        for c in 0..3 {
+            grain(ui, GrainKnob::Gain(c), acts);
+        }
+        for t in 0..3 {
+            grain(ui, GrainKnob::Tone(t), acts);
+        }
+        check(
+            ui,
+            (n, "Animate On Every Refresh", g.animate, false),
+            "animate",
+            acts,
+        );
+    });
+}
+
 fn vignette_mode_label(m: VignetteMode) -> &'static str {
     match m {
         VignetteMode::Basic => "Basic",
@@ -2365,6 +2567,7 @@ fn effect_block(
                     EffectKind::GaussianBlur(g) => gaussian_rows(ui, i, (n, e, g), acts),
                     EffectKind::MosaicBlur(m) => mosaic_rows(ui, i, (n, e, m), acts),
                     EffectKind::Glow(g) => glow_rows(ui, i, (n, e, g), acts),
+                    EffectKind::FilmGrain(g) => grain_rows(ui, i, (n, e, g), acts),
                     EffectKind::Vignette(v) => vignette_rows(ui, i, (n, e, v), acts),
                     EffectKind::Sharpen(_) => sharpen_rows(ui, i, (n, e), acts),
                 }

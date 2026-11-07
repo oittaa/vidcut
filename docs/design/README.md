@@ -139,7 +139,7 @@ vidcut has none of the other stages of the spec:
 
 - Camera Raw, Lens Correction, the display LUT and Fusion;
 - Input Sizing, Image Stabilization and the grades;
-- Open FX, the Resolve FX other than Gaussian Blur, Mosaic Blur, Glow, Vignette and Sharpen, Output Sizing and Data Burn-In.
+- Open FX, the Resolve FX other than Gaussian Blur, Mosaic Blur, Glow, Film Grain, Vignette and Sharpen, Output Sizing and Data Burn-In.
 
 ### LUT files
 

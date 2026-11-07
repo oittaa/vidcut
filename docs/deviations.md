@@ -2705,6 +2705,30 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The black is a fault in Resolve. An effect on a clip does not hide the tracks below.
   - The owner approved this difference.
 
+## X143. The noise of a Film Grain has its own pattern
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2 (Film Grain, p. 3559).
+  - The renders show the spectrum and the statistics of the noise. They do not show the rule that makes its pattern.
+- **vidcut:**
+  - vidcut makes the noise itself from the measured spectrum, by an inverse Fourier transform ([spec §8.16](cut-page-spec.md#816-effects-pp-765-3526-3536)).
+  - The noise has the spectrum and the statistics of the renders. Its pattern on each frame is not the pattern of Resolve.
+- **Why:**
+  - No render shows how Resolve makes the pattern. Thus no frame can be the same.
+  - The owner approved this difference.
+
+## X144. A Film Grain has no jumps at Symmetry 0.4 and 0.6
+
+- **Resolve:**
+  - These are measurements in Resolve Studio 21.1.2 (Film Grain, p. 3559), with Grain Only and Softness 0, at each 0.02 of Symmetry.
+  - At exactly 0.4 and 0.6, the standard deviation of the noise is 0.0109 and 0.0855. At the values on each side, it is about 0.026.
+- **vidcut:**
+  - Symmetry follows a table of the measured curves and blends between them ([spec §8.16](cut-page-spec.md#816-effects-pp-765-3526-3536)).
+  - The table has no curve at 0.4 and 0.6. There, vidcut blends the curves at 0.38 and 0.42, and at 0.58 and 0.62.
+- **Why:**
+  - The jumps are a fault in Resolve. A small change of Symmetry does not make a large change of the grain.
+  - The owner approved this difference.
+
 ## X145. A TIFF can hold straight colors
 
 - **Resolve:**
