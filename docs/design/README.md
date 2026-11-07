@@ -164,7 +164,11 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
 - A file that goes away later stops an export or a `frame.render` with the reason. The viewer shows the picture with no output LUT, and the player's status holds the reason.
 - `fs_lut` works on colors that are not premultiplied. It leaves a pixel with no alpha as it is.
 - The canvas of a frame with no alpha starts as opaque black. Thus the output LUT also changes a gap, and the part of a clip that its alpha lets through.
-- `fs_convert_lut` gives the color of a clip before its alpha. Thus a clip with alpha gets the table first, and the draw applies the alpha after that.
+- The input LUT follows the Alpha Mode of the clip's media ([spec §13](../cut-page-spec.md#the-lut-tables)). A LUT does not change alpha.
+  - In Premultiplied, `fs_convert_lut` takes the alpha out of the color, looks up the color, and multiplies by the alpha again. It gives 0 where the alpha is 0.
+  - In the other modes, it looks up the color as it is, before the alpha. Straight and Invert then multiply by their alpha when the picture is placed.
+  - Before an AI upscaler, `Source::push` reads a Premultiplied picture in the same way (`PictureId`).
+  - The frames around an interlaced picture take its Alpha Mode too (`Woven`). Why: the deinterlacer mixes the three converted frames.
 - `fs_lut` reads the canvas, and the canvas holds 16-bit floats. `fs_convert_lut` reads the picture before it goes to 16-bit floats. Thus a table with steep steps gives a larger error as an output LUT than as an input LUT.
 
 ## Rules the code follows

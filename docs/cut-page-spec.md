@@ -3942,7 +3942,8 @@ These facts are measured in Resolve Studio 21.1.2, with no color management. The
 - With no LUT, the input comes out unchanged, also below 0 and above 1.
 - A LUT does not change the alpha of a picture. In these results, `T` is the table, `C` is the color in the file and `A` is the alpha:
   - With the Alpha Mode Straight, the result is `T(C) * A`.
-  - With the Alpha Mode Premultiplied, the result is `T(C / A) * A`. With `A` at 0, the result is 0.
+  - With the Alpha Mode Premultiplied, the result is `T(clamp(C / A)) * A`. With `A` at 0, the result is 0.
+  - With the Alpha Mode Premultiplied and no LUT, `C` stays where `A` is 0.
 
 **Where a LUT goes:**
 
