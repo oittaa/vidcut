@@ -2046,7 +2046,8 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - The name has no underscore before the digits. The Custom name `tiffsound` from 01:00:01:00 at 60 fps gives `tiffsound00216060.tif` and on.
     - The Audio tab is greyed out. A render from the scripting API with Export Audio on writes only the frames.
     - A TIFF has the tags 256-262, 266, 270 (empty), 273, 274, 277-279, 284, 338 (ExtraSamples 1), 339 and 34675 (an ICC profile). It has no timecode.
-    - The header of an OpenEXR has `timeCode` and `framesPerSecond`, and also `proimCameraID`.
+    - The header of an OpenEXR has `timeCode` and `framesPerSecond`.
+    - Some renders also have `proimCameraID`, a UUID. A render of only a 10 Step generator has none.
     - The frame digits of `timeCode` count at most 30 numbers in each second. Thus frames in a row can share one number:
       - At 47.952, 48, 50, 59.94 and 60 fps, 2 frames share each number. Bit 15 marks the second frame.
       - At 72 and 90 fps, 3 frames share each number. At 95.904, 96, 100, 119.88 and 120 fps, 4 frames do. Bit 15 is 0.
