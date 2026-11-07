@@ -51,7 +51,7 @@ fn half(i: u32) -> f32 {
     return f32((rgb[i >> 1u] >> ((i & 1u) * 16u)) & 65535u) / 65535.0;
 }
 
-@group(0) @binding(6) var deep_picture: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(6) var deep_picture: Deep;
 
 @compute @workgroup_size(16, 16)
 fn unpack16(@builtin(global_invocation_id) id: vec3<u32>) {
