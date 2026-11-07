@@ -287,15 +287,15 @@ fn a_cue_keeps_the_track_fields_it_leaves_out() {
 }
 
 #[test]
-fn a_set_position_places_the_left_edge_on_that_point() {
+fn a_set_position_places_the_middle_of_the_longest_line_on_that_point() {
     let style = SubtitleStyle {
         align: Some(SubtitleAlign::Left),
         position: Some([0.25, 0.4]),
         ..SubtitleStyle::default()
     };
     assert_eq!(
-        style.block_box(Place::Bottom, (1000.0, 500.0), 200.0, 40.0),
-        (250.0, 180.0)
+        style.block_box(Place::Bottom, (1000.0, 500.0), (200.0, 120.0), 40.0),
+        (190.0, 180.0)
     );
 }
 
@@ -306,8 +306,8 @@ fn alignment_without_a_position_keeps_the_block_centered() {
         ..SubtitleStyle::default()
     };
     assert_eq!(
-        style.block_box(Place::Bottom, (1000.0, 500.0), 200.0, 40.0),
-        (400.0, 380.0)
+        style.block_box(Place::Bottom, (1000.0, 500.0), (200.0, 120.0), 40.0),
+        (440.0, 380.0)
     );
 }
 
@@ -644,7 +644,7 @@ fn an_imsc1_file_writes_one_words_style() {
 }
 
 #[test]
-fn webvtt_writes_a_cues_alignment_and_position() {
+fn webvtt_writes_a_cues_position() {
     let style = SubtitleStyle {
         align: Some(SubtitleAlign::Left),
         position: Some([0.25, 0.4]),
@@ -673,6 +673,6 @@ fn webvtt_writes_a_cues_alignment_and_position() {
     .text;
     assert_eq!(
         text,
-        "WEBVTT\n\n00:00:01.000 --> 00:00:02.000 position:25% line:40%,center align:left\nHi\n\n"
+        "WEBVTT\n\n00:00:01.000 --> 00:00:02.000 position:25% line:40%,center\nHi\n\n"
     );
 }

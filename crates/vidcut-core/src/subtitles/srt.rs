@@ -112,7 +112,7 @@ pub fn write(cues: &[Timed], positions: bool, style: &SubtitleStyle) -> String {
     for (n, c) in cues.iter().enumerate() {
         let look = style.for_cue(c.style.as_ref());
         let prefix = match positions {
-            true => super::ass_align(c.place, look.line_align()).unwrap_or(""),
+            true => super::ass_tag(c.place).unwrap_or(""),
             false => "",
         };
         out.push_str(&format!(
