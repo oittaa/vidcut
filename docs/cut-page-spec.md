@@ -2402,7 +2402,7 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
   - The Smart Indicator, V, Smart Insert, the alignment of Place On Top, and Up/Down use the edits of Track 1, the main story.
   - An edit selected by a click stays on its track for `,`/`.`, U, the Trim Editor and Dynamic Trim.
 - **D37. The format: chosen at the start, or set by the first video without asking** (§3; Resolve asks, p. 654).
-  - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate.
+  - New Project takes a picture size from 256 to 32768 px on each side, odd sizes too, and any positive frame rate ([X149](deviations.md#x149-a-project-takes-any-frame-rate)).
   - Its Frame rate menu offers the rates that Resolve Studio 21.2 takes for a project (`timelineFrameRate` in a script):
     - 16, 18, 23.976, 24, 25, 29.97, 30, 47.952, 48, 50, 59.94, 60, 72, 90, 95.904, 96, 100, 119.88 and 120 fps.
     - Resolve refuses other rates, for example 15, 20, 144 and 240.
