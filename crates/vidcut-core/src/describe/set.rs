@@ -368,7 +368,7 @@ fn style_show(key: &str) -> Show<'static> {
     match key {
         "size" | "background.opacity" | "shadow.opacity" | "margin" | "words.pop"
         | "shape.corner" => &percent,
-        "shadow.offset" | "shape.size" | "shape.center" => &percents,
+        "shape.size" | "shape.center" => &percents,
         "outline.size" | "shadow.blur" | "line_spacing" | "tracking" | "shape.outline_width" => {
             &number
         }
@@ -408,7 +408,16 @@ fn leaves(style: &Value) -> BTreeMap<String, Value> {
 
 const PRESENT: [&str; 2] = ["shadow", "words"];
 
-fn style(f: &mut Fields, before: &[Value], after: &Value, size: f64) {
+fn style(f: &mut Fields, before: &[Value], after: &Value, size: f64, frame: Option<[f64; 2]>) {
+    let pixels = |v: &Value| match (v.as_array(), frame) {
+        (Some(a), Some(size)) => a
+            .iter()
+            .zip(size)
+            .map(|(n, side)| n.as_f64().map_or_else(|| raw(n), |n| trim(n * side)))
+            .collect::<Vec<_>>()
+            .join(", "),
+        _ => percents(v),
+    };
     let new = leaves(after);
     let old: Vec<BTreeMap<String, Value>> = before.iter().map(leaves).collect();
     let rank = |k: &str| STYLE.iter().position(|(key, _)| *key == k);
@@ -435,7 +444,12 @@ fn style(f: &mut Fields, before: &[Value], after: &Value, size: f64) {
             .map(|m| m.get(key).cloned().unwrap_or_else(|| absent.clone()))
             .collect();
         let now = new.get(key).cloned().unwrap_or(absent);
-        f.put(name, &olds, &now, style_show(key), &usual);
+        let show = if key == "shadow.offset" {
+            &pixels
+        } else {
+            style_show(key)
+        };
+        f.put(name, &olds, &now, show, &usual);
     }
 }
 
@@ -487,7 +501,7 @@ impl Words<'_> {
         if self.params["style"].is_object() {
             let size = Title::usual_size(first.map_or(TitleKind::Text, |t| t.kind));
             let olds = s.olds(|t| json!(t.style));
-            style(&mut s.f, &olds, &self.params["style"], size);
+            style(&mut s.f, &olds, &self.params["style"], size, None);
         }
         let place = first.map_or(Value::Null, |t| {
             json!(Title::usual_position(t.kind, t.align()))
@@ -703,7 +717,10 @@ impl Words<'_> {
         if p["style"].is_object() {
             let size = SubtitleStyle::default().text_fraction();
             let before = s.olds(|t| t["style"].clone());
-            style(&mut s.f, &before, &p["style"], size);
+            let frame = self.project.map_or([1920.0, 1080.0], |pr| {
+                [f64::from(pr.settings.width), f64::from(pr.settings.height)]
+            });
+            style(&mut s.f, &before, &p["style"], size, Some(frame));
         }
         s.told("look", "Look", &text);
         s.f.text()
