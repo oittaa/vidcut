@@ -1879,6 +1879,9 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - FFmpeg's encoders have no DWAA, no DWAB and no Compression level. They write no timecode.
     - The files hold the code values of the timeline. An OpenEXR keeps a value above 1 (measured for a render with no color management).
     - The files hold no sound. An export with sound settings is refused.
+    - The ExtraSamples tag of a TIFF with alpha follows the Alpha Mode: 1 for Premultiplied and 2 for Straight ([gotchas](gotchas.md#ffmpeg-encoding-and-muxing)).
+    - An OpenEXR with Straight holds colors with no alpha in them. The OpenEXR format takes premultiplied colors, so another program can read it wrongly.
+    - A frame file name that the system refuses stops the export before the encode starts.
 
 ## 11. Keyboard shortcuts
 

@@ -147,6 +147,8 @@ The plan:
 
 - `Container::image_sequence` is true for TIFF and OpenEXR. Each packet of the encoder is one whole file.
 - `FrameFiles` writes the packets to a temporary folder beside the output, and `Writer::end` moves them to their names. Thus a cancelled export leaves no frames and keeps the old ones.
+- `Output::named` reads the name of the last frame file before the encode. Thus a name that the system refuses stops the export before the encode, and not at the move.
+- For a Premultiplied TIFF, `FrameFiles` changes the ExtraSamples tag of each file to associated alpha ([gotchas](../gotchas.md#ffmpeg-encoding-and-muxing)).
 - The muxer is `null`. Why: FFmpeg's image muxer takes a pattern, and a percent sign in a folder name would break the pattern.
 - `ExportSettings::frame_file` makes each name. `Output::first_number` comes from `ExportSettings::first_number`.
 - `VideoSettings::image_bits` gives the depth from the profile. `ColorChoice` reports it.

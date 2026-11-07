@@ -17,7 +17,8 @@ use serde::Serialize;
 use vidcut_core::export::color::{self, ColorChoice, PictureKind};
 use vidcut_core::export::metadata::{self, Measured, MetadataChoice, PieceMeta};
 use vidcut_core::export::{
-    EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Rounded, VideoSettings, validate,
+    AlphaOut, Container, EncoderChoice, ExportSettings, HdrMetadata, HdrMode, Rounded,
+    VideoSettings, validate,
 };
 use vidcut_core::model::{Hdr, SubtitleStyle};
 use vidcut_core::render::{RenderPlan, VideoPiece};
@@ -517,22 +518,60 @@ struct FrameFiles {
     output: PathBuf,
     first_number: i64,
     written: i64,
+    associated: bool,
+}
+
+const TIFF_EXTRA_SAMPLES: u16 = 338;
+const TIFF_SHORT: u16 = 3;
+const TIFF_ASSOCIATED_ALPHA: u16 = 1;
+
+fn tiff_extra_samples(data: &[u8]) -> Option<usize> {
+    if !data.starts_with(b"II*\0") {
+        return None;
+    }
+    let short = |at: usize| Some(u16::from_le_bytes(data.get(at..at + 2)?.try_into().ok()?));
+    let long = |at: usize| Some(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?));
+    let ifd = usize::try_from(long(4)?).ok()?;
+    (0..usize::from(short(ifd)?))
+        .map(|i| ifd + 2 + i * 12)
+        .find_map(|entry| {
+            let found = short(entry)? == TIFF_EXTRA_SAMPLES
+                && short(entry + 2)? == TIFF_SHORT
+                && long(entry + 4)? == 1;
+            found.then_some(entry + 8)
+        })
 }
 
 impl FrameFiles {
     fn new(settings: &ExportSettings, output: &Path, first_number: i64) -> Result<Self> {
+        let associated = settings.container == Container::Tiff
+            && settings
+                .video
+                .as_ref()
+                .is_some_and(|v| v.alpha && v.alpha_mode == AlphaOut::Premultiplied);
         Ok(Self {
             dir: vidcut_core::temp::dir(output)?,
             settings: settings.clone(),
             output: output.to_path_buf(),
             first_number,
             written: 0,
+            associated,
         })
     }
 
     fn write(&mut self, packet: &ffmpeg::Packet) -> Result<()> {
+        use std::io::Write;
         let path = self.dir.path().join(self.written.to_string());
-        std::fs::write(path, packet.data().unwrap_or_default())?;
+        let data = packet.data().unwrap_or_default();
+        match self.associated.then(|| tiff_extra_samples(data)).flatten() {
+            Some(at) => {
+                let mut file = std::fs::File::create(path)?;
+                file.write_all(&data[..at])?;
+                file.write_all(&TIFF_ASSOCIATED_ALPHA.to_le_bytes())?;
+                file.write_all(&data[at + 2..])?;
+            }
+            None => std::fs::write(path, data)?,
+        }
         self.written += 1;
         Ok(())
     }

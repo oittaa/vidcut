@@ -401,6 +401,13 @@ fn fit_codecs(s: &mut ExportSettings) {
                 v.bit_depth = None;
             }
         }
+        if v.image_bits().is_some() {
+            if !matches!(v.hdr_metadata, HdrMetadata::Auto | HdrMetadata::None) {
+                v.hdr_metadata = HdrMetadata::Auto;
+            }
+            v.mastering_display = None;
+            v.max_cll = None;
+        }
     }
     if s.container.image_sequence() {
         s.audio = None;

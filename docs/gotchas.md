@@ -132,6 +132,9 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - `prores_ks` files of 1281 and 1297 wide have a green last column. A file of 1283 wide does not.
   - Resolve Studio 21.1.2 reads the green in the file from vidcut. Its own ProRes file of 1281 wide has the same edge.
   - vidcut keeps the size and writes this edge.
+- **FFmpeg's `tiff` encoder tags each alpha as straight:**
+  - FFmpeg 9.0.1 writes ExtraSamples 2 (unassociated alpha) in each TIFF with alpha, also for premultiplied colors.
+  - `FrameFiles` changes the tag to 1 (associated alpha) for Premultiplied.
 - **Set packet durations when muxing from an encoder with delay** (x264 with B-frames).
   - If you do not, the edit list of MP4 drops the last frame (`VideoOut::drain`).
 - **Clear a decoded frame's picture type before encoding it** (`set_kind(picture::Type::None)`).

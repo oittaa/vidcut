@@ -564,6 +564,17 @@ impl Output {
         self.settings.first_file(&self.path, self.first_number)
     }
 
+    fn named(&self) -> Result<()> {
+        let last = self.plan.frames.max(1) - 1;
+        let file = self
+            .settings
+            .first_file(&self.path, self.first_number + last);
+        match file.try_exists() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(Error::usage(format!("{}: {e}", file.display()))),
+        }
+    }
+
     fn taken(&self) -> Option<PathBuf> {
         match self.settings.container.image_sequence() {
             true => (0..self.plan.frames)
@@ -732,6 +743,7 @@ pub fn prepare(p: &Project, params: &ExportParams, playhead: Option<i64>) -> Res
     }
     add_subtitles(p, params, &settings, &mut outputs)?;
     for o in &outputs {
+        o.named()?;
         if let Some(taken) = o.taken().filter(|_| !params.overwrite) {
             return Err(Error::invalid(format!(
                 "{} exists; pass overwrite to replace it",
