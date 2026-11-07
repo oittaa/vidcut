@@ -1868,6 +1868,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured in Resolve Studio 21.2, with renders to OpenEXR RGB float: the generators are drawn in 32-bit floats.
   - 10 Step holds 0.1, 0.2 and on as 32-bit floats. Grey Scale holds x/W in each column. 98% of the Four Color Gradient values are between the steps of 16-bit numbers.
   - vidcut: the generators are drawn in 32-bit floats, and the screen reads them as 32-bit floats.
+  - Measured: vidcut's OpenEXR float exports of 10 Step, Grey Scale and Four Color Gradient differ from those renders by at most 1.8e-7. That is one or two steps of a 32-bit float.
   - A Solid Color in an SDR timeline is 8-bit. Its color is a value out of 255, so 8 bits hold it exactly.
 - **Speed:**
   - Measured: Speed Change on a generator has a dim dot and does not open. A still acts the same.
