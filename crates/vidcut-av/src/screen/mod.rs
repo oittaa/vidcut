@@ -24,6 +24,7 @@ mod lut;
 mod out;
 pub mod scope;
 mod shared;
+mod vignette;
 #[cfg(any(target_os = "linux", windows))]
 mod vulkan;
 
@@ -78,6 +79,7 @@ pub struct Gpu {
     luts: OnceLock<lut::Pipes>,
     scope: OnceLock<scope::Pipes>,
     blur: blur::Pipes,
+    vignette: OnceLock<vignette::Pipes>,
 }
 
 struct Drawing {
@@ -706,6 +708,7 @@ impl Gpu {
             luts: OnceLock::new(),
             scope: OnceLock::new(),
             blur: blur::Pipes::new(device, &shader),
+            vignette: OnceLock::new(),
         }
     }
 
@@ -1310,15 +1313,16 @@ struct MixDraw<'a> {
     gpu: &'a Gpu,
     binds: &'a [Bound],
     canvases: &'a [blur::Texture],
-    scratch: Option<&'a [blur::Texture; 2]>,
+    scratch: Option<blur::Scratch<'a>>,
     below: Option<&'a Below>,
     letters: &'a [Letters],
     titles: &'a [TitleOver],
 }
 
 impl MixDraw<'_> {
-    fn mix(&self, encoder: &mut wgpu::CommandEncoder, mix: &Mix, depth: usize) {
-        let canvas = &self.canvases[depth].view;
+    fn mix(&mut self, encoder: &mut wgpu::CommandEncoder, mix: &Mix, depth: usize) {
+        let canvases = self.canvases;
+        let canvas = &canvases[depth].view;
         drop(begin(encoder, canvas, Some(wgpu::Color::TRANSPARENT)));
         for part in &mix.parts {
             match part {
@@ -1341,22 +1345,26 @@ impl MixDraw<'_> {
     }
 
     fn finished(
-        &self,
+        &mut self,
         encoder: &mut wgpu::CommandEncoder,
         mix: &Mix,
         depth: usize,
         adds: f64,
     ) -> wgpu::BindGroup {
-        let canvas = &self.canvases[depth];
+        let canvases = self.canvases;
+        let canvas = &canvases[depth];
         let mut placing = mix.placing.clone();
         let (effects, factor) = bared(&mut placing, &mut 1.0);
         let mode = f64::from(placing.mode.code());
         if effects.is_empty() {
             return blur::canvas_bind(self.gpu, &canvas.view, &placing, (mode, adds));
         }
-        let scratch = self.scratch.expect("made for the effects of a mix");
+        let (scratch, cells) = self
+            .scratch
+            .as_mut()
+            .expect("made for the effects of a mix");
         let how = (&placing, &effects[..]);
-        blur::canvas_effects(self.gpu, canvas, scratch, how, encoder);
+        blur::canvas_effects(self.gpu, canvas, (scratch, cells), how, encoder);
         blur::shown_bind(
             self.gpu,
             (&canvas.view, &canvas.view),
@@ -1928,7 +1936,7 @@ impl Screen {
                     drop(begin(&mut encoder, canvas, clear.take()));
                 }
                 let below = self.below.as_ref();
-                let mixing = MixDraw {
+                let mut mixing = MixDraw {
                     gpu,
                     binds: &binds,
                     canvases: &self.canvases,
