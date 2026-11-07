@@ -68,7 +68,7 @@ flowchart TD
   between["A frame between two pictures<br>VideoFrames::retimed_frame"]
   earlier["An earlier source frame<br>VideoFrames::reversed_frame"]
   place["The picture is placed<br>Screen::draw"]
-  fx["The effects work on it<br>fs_blur, fs_mosaic, fs_vignette"]
+  fx["The effects work on it<br>fs_blur, fs_mosaic, fs_vignette, fs_sharpen"]
   mix["The layers are on the canvas<br>Screen::draw"]
   looked["The output LUT<br>fs_lut"]
   show["The viewer shows this frame"]
@@ -124,7 +124,7 @@ A clip skips each step that it does not use. The steps run in this order:
 - `Screen::draw` places the picture and mixes the layers (`place::Placing`, `screen::kernel`, [export](export.md#placed-pictures)).
   - A transition's two sides, and each clip placed over another, are layers of the same draw.
   - Titles and burned subtitles are draws in that same pass (`fs_title`, [export](export.md#subtitles)).
-  - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, `fs_vignette`, [export](export.md#effects)).
+  - A clip with effects is placed into a picture of its own first. The effects work on it there (`fs_blur`, `fs_mosaic`, `fs_vignette`, `fs_sharpen`, [export](export.md#effects)).
 - `fs_lut` runs the output LUT of the project on the whole canvas, after the titles and subtitles.
 - The viewer shows the canvas. A wide canvas goes through `fs_screen` first ([playback](playback.md#the-viewer-thread)).
 - The scopes read the canvas after `fs_lut` and before `fs_screen` ([gpu](gpu.md#the-scopes)).
@@ -139,7 +139,7 @@ vidcut has none of the other stages of the spec:
 
 - Camera Raw, Lens Correction, the display LUT and Fusion;
 - Input Sizing, Image Stabilization and the grades;
-- Open FX, the Resolve FX other than Gaussian Blur, Mosaic Blur and Vignette, Output Sizing and Data Burn-In.
+- Open FX, the Resolve FX other than Gaussian Blur, Mosaic Blur, Vignette and Sharpen, Output Sizing and Data Burn-In.
 
 ### LUT files
 
@@ -164,7 +164,11 @@ The [spec](../cut-page-spec.md#the-lut-tables) gives the math of a table. vidcut
 - A file that goes away later stops an export or a `frame.render` with the reason. The viewer shows the picture with no output LUT, and the player's status holds the reason.
 - `fs_lut` works on colors that are not premultiplied. It leaves a pixel with no alpha as it is.
 - The canvas of a frame with no alpha starts as opaque black. Thus the output LUT also changes a gap, and the part of a clip that its alpha lets through.
-- `fs_convert_lut` gives the color of a clip before its alpha. Thus a clip with alpha gets the table first, and the draw applies the alpha after that.
+- The input LUT follows the Alpha Mode of the clip's media ([spec §13](../cut-page-spec.md#the-lut-tables)). A LUT does not change alpha.
+  - In Premultiplied, `fs_convert_lut` takes the alpha out of the color, looks up the color, and multiplies by the alpha again. It gives 0 where the alpha is 0.
+  - In the other modes, it looks up the color as it is, before the alpha. Straight and Invert then multiply by their alpha when the picture is placed.
+  - Before an AI upscaler, `Source::push` reads a Premultiplied picture in the same way (`PictureId`).
+  - The frames around an interlaced picture take its Alpha Mode too (`Woven`). Why: the deinterlacer mixes the three converted frames.
 - `fs_lut` reads the canvas, and the canvas holds 16-bit floats. `fs_convert_lut` reads the picture before it goes to 16-bit floats. Thus a table with steep steps gives a larger error as an output LUT than as an input LUT.
 
 ## Rules the code follows

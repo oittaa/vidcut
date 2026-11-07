@@ -1,6 +1,6 @@
-use vidcut_core::place::{Blurring, Level, Placing, Shading, Tiling, Work, Working};
+use vidcut_core::place::{Blurring, Level, Placing, Shading, Sharpening, Tiling, Work, Working};
 
-use super::{Gpu, MIXING, begin, vignette};
+use super::{Gpu, MIXING, begin, sharpen, vignette};
 
 const KERNEL: usize = 35;
 
@@ -20,6 +20,8 @@ pub(super) struct Pipes {
     blur: wgpu::RenderPipeline,
     mosaic: wgpu::RenderPipeline,
     vignette: wgpu::RenderPipeline,
+    sharpen_taken: wgpu::RenderPipeline,
+    sharpen: wgpu::RenderPipeline,
 }
 
 impl Pipes {
@@ -92,6 +94,8 @@ impl Pipes {
             blur: pipeline(&of(&layout), "fs_blur"),
             mosaic: pipeline(&of(&layout), "fs_mosaic"),
             vignette: pipeline(&of(&reading), "fs_vignette"),
+            sharpen_taken: pipeline(&of(&layout), "fs_sharpen_taken"),
+            sharpen: pipeline(&of(&reading), "fs_sharpen"),
             layout,
             reading,
         }
@@ -115,6 +119,10 @@ fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
         Work::Vignette(shading) => vec![Step {
             pipeline: &pipes.vignette,
             params: vignette_bytes(shading, effect),
+        }],
+        Work::Sharpen(sharpening) => vec![Step {
+            pipeline: &pipes.sharpen,
+            params: sharpen_bytes(sharpening, effect),
         }],
     }
 }
@@ -241,6 +249,15 @@ fn vignette_bytes(shading: &Shading, effect: &Working) -> Vec<u8> {
     out
 }
 
+fn sharpen_bytes(sharpening: &Sharpening, effect: &Working) -> Vec<u8> {
+    float_bytes(&[
+        effect.blend,
+        flag(effect.use_alpha),
+        flag(sharpening.colors()),
+        0.0,
+    ])
+}
+
 pub(super) struct Texture {
     pub(super) texture: wgpu::Texture,
     pub(super) view: wgpu::TextureView,
@@ -270,7 +287,13 @@ impl Texture {
     }
 }
 
-pub(super) type Scratch<'a> = (&'a [Texture; 2], &'a mut Option<vignette::Cells>);
+pub(super) type Scratch<'a> = (&'a [Texture; 2], &'a mut Worked);
+
+#[derive(Default)]
+pub(super) struct Worked {
+    cells: Option<vignette::Cells>,
+    planes: Option<sharpen::Planes>,
+}
 
 #[derive(Default)]
 pub(super) struct Blurred {
@@ -278,7 +301,7 @@ pub(super) struct Blurred {
     scratch: Option<[Texture; 2]>,
     layers: Vec<Option<Texture>>,
     masks: Vec<Option<Texture>>,
-    cells: Option<vignette::Cells>,
+    worked: Worked,
 }
 
 impl Blurred {
@@ -286,7 +309,7 @@ impl Blurred {
         if self.size != size {
             self.size = size;
             self.scratch = None;
-            self.cells = None;
+            self.worked = Worked::default();
             self.layers.clear();
             self.masks.clear();
         }
@@ -301,7 +324,7 @@ impl Blurred {
     }
 
     pub(super) fn scratch(&mut self) -> Option<Scratch<'_>> {
-        self.scratch.as_ref().map(|s| (s, &mut self.cells))
+        self.scratch.as_ref().map(|s| (s, &mut self.worked))
     }
 
     pub(super) fn drop_layer(&mut self, i: usize) {
@@ -328,7 +351,7 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        effects_into(gpu, own, (scratch, &mut self.cells), effects, encoder);
+        effects_into(gpu, own, (scratch, &mut self.worked), effects, encoder);
         &own.view
     }
 
@@ -353,7 +376,7 @@ impl Blurred {
         let scratch = self
             .scratch
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
-        effects_into(gpu, mask, (scratch, &mut self.cells), effects, encoder);
+        effects_into(gpu, mask, (scratch, &mut self.worked), effects, encoder);
         if live.is_empty() {
             return (&own.view, &mask.view, 5.0);
         }
@@ -369,7 +392,7 @@ impl Blurred {
             own.texture.as_image_copy(),
             own.texture.size(),
         );
-        effects_into(gpu, own, (scratch, &mut self.cells), live, encoder);
+        effects_into(gpu, own, (scratch, &mut self.worked), live, encoder);
         (&own.view, &own.view, 3.0)
     }
 }
@@ -386,62 +409,92 @@ fn add(
     pass.draw(0..3, 0..1);
 }
 
+fn step_into(
+    gpu: &Gpu,
+    step: &Step<'_>,
+    (from, start, to): (&wgpu::TextureView, &wgpu::TextureView, &wgpu::TextureView),
+    read: Option<&wgpu::Buffer>,
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let pipes = &gpu.blur;
+    let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vidcut blur"),
+        size: PARAMS as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    gpu.queue.write_buffer(&params, 0, &step.params);
+    let mut entries = vec![
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: params.as_entire_binding(),
+        },
+        wgpu::BindGroupEntry {
+            binding: 1,
+            resource: wgpu::BindingResource::TextureView(from),
+        },
+        wgpu::BindGroupEntry {
+            binding: 2,
+            resource: wgpu::BindingResource::TextureView(start),
+        },
+    ];
+    entries.extend(read.map(|buffer| wgpu::BindGroupEntry {
+        binding: 3,
+        resource: buffer.as_entire_binding(),
+    }));
+    let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("vidcut blur"),
+        layout: if read.is_some() {
+            &pipes.reading
+        } else {
+            &pipes.layout
+        },
+        entries: &entries,
+    });
+    let mut drawing = begin(encoder, to, None);
+    drawing.set_pipeline(step.pipeline);
+    drawing.set_bind_group(0, &bind, &[]);
+    drawing.draw(0..3, 0..1);
+}
+
 fn effects_into(
     gpu: &Gpu,
     own: &Texture,
-    (scratch, cells): (&[Texture; 2], &mut Option<vignette::Cells>),
+    (scratch, worked): (&[Texture; 2], &mut Worked),
     effects: &[Working],
     encoder: &mut wgpu::CommandEncoder,
 ) {
     let pipes = &gpu.blur;
     for effect in effects {
-        let read = match &effect.work {
-            Work::Vignette(shading) => Some(vignette::cells(gpu, shading, cells, encoder)),
-            _ => None,
-        };
         let mut from = &own.view;
         let mut k = 0;
+        let read = match &effect.work {
+            Work::Vignette(shading) => {
+                Some(vignette::cells(gpu, shading, &mut worked.cells, encoder))
+            }
+            Work::Sharpen(sharpening) => {
+                let taken = Step {
+                    pipeline: &pipes.sharpen_taken,
+                    params: sharpen_bytes(sharpening, effect),
+                };
+                let to = &scratch[0].view;
+                step_into(gpu, &taken, (from, &own.view, to), None, encoder);
+                from = to;
+                k = 1;
+                let on = (to, own.texture.size());
+                Some(sharpen::planes(
+                    gpu,
+                    sharpening,
+                    on,
+                    &mut worked.planes,
+                    encoder,
+                ))
+            }
+            _ => None,
+        };
         for step in steps(pipes, effect) {
             let to = &scratch[k];
-            let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("vidcut blur"),
-                size: PARAMS as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            gpu.queue.write_buffer(&params, 0, &step.params);
-            let mut entries = vec![
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: params.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(from),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&own.view),
-                },
-            ];
-            entries.extend(read.map(|buffer| wgpu::BindGroupEntry {
-                binding: 3,
-                resource: buffer.as_entire_binding(),
-            }));
-            let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("vidcut blur"),
-                layout: if read.is_some() {
-                    &pipes.reading
-                } else {
-                    &pipes.layout
-                },
-                entries: &entries,
-            });
-            let mut drawing = begin(encoder, &to.view, None);
-            drawing.set_pipeline(step.pipeline);
-            drawing.set_bind_group(0, &bind, &[]);
-            drawing.draw(0..3, 0..1);
-            drop(drawing);
+            step_into(gpu, &step, (from, &own.view, &to.view), read, encoder);
             from = &to.view;
             k = 1 - k;
         }
@@ -492,7 +545,7 @@ pub(super) fn canvas_bind(
 pub(super) fn canvas_effects(
     gpu: &Gpu,
     canvas: &Texture,
-    (scratch, cells): (&[Texture; 2], &mut Option<vignette::Cells>),
+    (scratch, worked): (&[Texture; 2], &mut Worked),
     (placing, effects): (&Placing, &[Working]),
     encoder: &mut wgpu::CommandEncoder,
 ) {
@@ -503,7 +556,7 @@ pub(super) fn canvas_effects(
         canvas.texture.as_image_copy(),
         canvas.texture.size(),
     );
-    effects_into(gpu, canvas, (scratch, cells), effects, encoder);
+    effects_into(gpu, canvas, (scratch, worked), effects, encoder);
 }
 
 pub(super) fn shown_bind(

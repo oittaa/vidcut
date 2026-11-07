@@ -1,6 +1,6 @@
 use crate::model::{
-    Border, CellShape, CompositeMode, Effect, EffectKind, Media, MosaicBlur, Picture, Vignette,
-    VignetteMode, VignetteShape,
+    Border, CellShape, CompositeMode, Effect, EffectKind, Media, MosaicBlur, Picture, Sharpen,
+    Vignette, VignetteMode, VignetteShape,
 };
 use crate::render::Placed;
 
@@ -87,6 +87,7 @@ pub enum Work {
     Blur(Blurring),
     Mosaic(Tiling),
     Vignette(Shading),
+    Sharpen(Sharpening),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -120,6 +121,36 @@ pub struct Shading {
     pub color: [f64; 3],
     pub strength: f64,
     pub mode: CompositeMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sharpening {
+    pub size: f64,
+    pub light: [f64; 3],
+    pub color: [f64; 3],
+}
+
+impl Sharpening {
+    fn of(s: &Sharpen) -> Self {
+        let bands = [s.fine(), s.medium(), s.large()];
+        let chroma = s.chroma();
+        Self {
+            size: s.size(),
+            light: bands.map(|g| s.amount() * g - 1.0),
+            color: match chroma == Sharpen::GAIN {
+                true => [0.0; 3],
+                false => bands.map(|g| chroma * g - 1.0),
+            },
+        }
+    }
+
+    pub fn colors(&self) -> bool {
+        self.color.iter().any(|k| *k != 0.0)
+    }
+
+    fn still(&self) -> bool {
+        !self.colors() && self.light.iter().all(|k| *k == 0.0)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -246,6 +277,13 @@ impl Working {
             }
             EffectKind::MosaicBlur(m) => Work::Mosaic(Tiling::of(m, on)),
             EffectKind::Vignette(v) => Work::Vignette(Shading::of(v, on)),
+            EffectKind::Sharpen(s) => {
+                let sharpening = Sharpening::of(s);
+                if sharpening.still() && e.use_alpha {
+                    return None;
+                }
+                Work::Sharpen(sharpening)
+            }
         };
         Some(Self {
             work,

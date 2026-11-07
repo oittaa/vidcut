@@ -83,7 +83,10 @@ fn opacity(u: vec2<f32>) -> f32 {
     if p.site.z > 0.5 && p.site.z < 1.5 {
         return 1.0;
     }
-    let s = stored(u) * p.upright.zw;
+    return stored_opacity(stored(u) * p.upright.zw);
+}
+
+fn stored_opacity(s: vec2<f32>) -> f32 {
     if p.flags.z == 2u {
         return read_as(textureSampleLevel(luma, bilinear, s, 0.0).r);
     }
@@ -510,7 +513,16 @@ fn looked_up(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_convert_lut(in: Out) -> @location(0) vec4<f32> {
-    return vec4<f32>(looked_up(rgb(yuv_woven(floor(in.position.xy)))), 1.0);
+    let px = floor(in.position.xy);
+    let c = rgb(yuv_woven(px));
+    if !premultiplied() {
+        return vec4<f32>(looked_up(c), 1.0);
+    }
+    let a = stored_opacity((px + 0.5) / stored_size() * p.upright.zw);
+    if a <= 0.0 {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    return vec4<f32>(looked_up(c / a) * a, 1.0);
 }
 
 @fragment
@@ -1316,6 +1328,36 @@ fn fs_vignette(in: Out) -> @location(0) vec4<f32> {
     let m = vignette_mixed(vignetting.color.rgb, was.rgb);
     let made = clamp(was.rgb + (m - was.rgb) * share, vec3<f32>(0.0), vec3<f32>(1.0));
     return effect_mixed(px, vec4<f32>(made, was.a), vignetting.first.w, use_alpha);
+}
+
+struct Sharpening {
+    more: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> sharpening: Sharpening;
+@group(0) @binding(3) var<storage, read> sharpen_planes: array<f32>;
+
+@fragment
+fn fs_sharpen_taken(in: Out) -> @location(0) vec4<f32> {
+    return effect_taken(textureLoad(blur_source, vec2<i32>(in.position.xy), 0), sharpening.more.y);
+}
+
+@fragment
+fn fs_sharpen(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let was = textureLoad(blur_source, px, 0);
+    let size = vec2<i32>(textureDimensions(blur_source));
+    let at = px.y * size.x + px.x;
+    var red = 0.0;
+    var blue = 0.0;
+    if sharpening.more.z > 0.5 {
+        let plane = size.x * size.y;
+        red = sharpen_planes[plane + at];
+        blue = sharpen_planes[2 * plane + at];
+    }
+    let green = -(BT709.r * red + BT709.b * blue) / BT709.g;
+    let made = was.rgb + sharpen_planes[at] + vec3<f32>(red, green, blue);
+    return effect_mixed(px, vec4<f32>(made, was.a), sharpening.more.x, sharpening.more.y);
 }
 
 struct Mosaic {

@@ -260,6 +260,7 @@ struct Source {
     kept: Option<Arc<[Arc<Cached>]>>,
     skipped: bool,
     lut: Option<crate::screen::Lut>,
+    premultiplied: bool,
     lut_in: bool,
 }
 
@@ -369,6 +370,7 @@ impl Source {
             told: false,
             upright: false,
             lut: None,
+            premultiplied: false,
             lut_in: false,
             sampling: Sampling::Own,
             looks: (None, 0),
@@ -441,6 +443,7 @@ impl Source {
             told: false,
             upright: false,
             lut: None,
+            premultiplied: false,
             lut_in: false,
             sampling: Sampling::Own,
             looks: (None, 0),
@@ -608,9 +611,10 @@ impl Source {
         }
     }
 
-    fn set_lut(&mut self, lut: Option<crate::screen::Lut>) {
-        if self.lut != lut {
+    fn set_lut(&mut self, lut: Option<crate::screen::Lut>, premultiplied: bool) {
+        if self.lut != lut || self.premultiplied != premultiplied {
             self.lut = lut;
+            self.premultiplied = premultiplied;
             self.normalized = None;
             self.reversed.clear();
         }
@@ -876,6 +880,7 @@ struct PictureId {
     key: Key,
     form: Form,
     lut: Option<crate::screen::Lut>,
+    premultiplied: bool,
 }
 
 type Waiting = std::sync::Arc<std::sync::Mutex<Vec<(Key, frame::Video)>>>;
@@ -1175,6 +1180,7 @@ impl Source {
         }
         let form = upscale_form(upscaler, timeline);
         let pts = frame.pts();
+        let lut = self.lut.clone().filter(|_| form.1 == timeline);
         let id = PictureId {
             input: self.reader.input().clone(),
             space: self.reader.color_space(),
@@ -1187,7 +1193,8 @@ impl Source {
                 None => Key::Still(pts),
             },
             form,
-            lut: self.lut.clone().filter(|_| form.1 == timeline),
+            premultiplied: self.premultiplied && lut.is_some(),
+            lut,
         };
         if let Some(p) = self.scaled.get(&id) {
             return frame_ref(p).map(Some);
@@ -1427,8 +1434,12 @@ impl Source {
             return self.end_run();
         }
         let clock = Instant::now();
+        let read_as = match run.id.premultiplied {
+            true => AlphaMode::Premultiplied,
+            false => AlphaMode::None,
+        };
         let look = Look::rounded(run.size, 0, run.id.form)
-            .with_alpha(AlphaMode::None, false)
+            .with_alpha(read_as, false)
             .with_lut(run.id.lut.clone());
         let path = self.reader.path();
         let input = match run.id.upscaler {
@@ -1975,10 +1986,12 @@ impl Single {
         size: (u32, u32),
         pixel: format::Pixel,
         path: &Path,
+        alpha: AlphaMode,
     ) -> Result<frame::Video> {
         let made = self.maker.make(&mut self.fitting, frame, path)?;
         let picture = crate::player::Picture::new(made, rotation, None, None)
-            .with_sampling(Sampling::Rounded);
+            .with_sampling(Sampling::Rounded)
+            .with_alpha_mode(alpha);
         let picture = std::sync::Arc::new(picture);
         let layers = (&[][..], &[][..], &[][..], None);
         self.drawer
@@ -1997,7 +2010,7 @@ impl Single {
         &mut self,
         (frame, (before, after)): (&frame::Video, Around<'_>),
         rotation: u16,
-        (path, lut): (&Path, Option<&crate::screen::Lut>),
+        (path, lut, mode): (&Path, Option<&crate::screen::Lut>, Option<AlphaMode>),
     ) -> Result<crate::player::Picture> {
         let made = self.maker.make(&mut self.fitting, frame, path)?;
         let picture =
@@ -2015,6 +2028,10 @@ impl Single {
                 };
                 let field =
                     crate::player::Picture::new(made, rotation, None, None).with_lut(lut.cloned());
+                let field = match mode {
+                    Some(mode) => field.with_alpha_mode(mode),
+                    None => field,
+                };
                 Ok(std::sync::Arc::new(field.with_woven(alone)))
             })
             .transpose()
@@ -2065,7 +2082,8 @@ impl Single {
         (look, path): (&Look, &Path),
         (pixel, sink): (format::Pixel, crate::screen::Sink<'_>),
     ) -> Result<frame::Video> {
-        let picture = self.woven(frames, rotation, (path, look.lut.as_ref()))?;
+        let mode = look.alpha.map(|t| t.mode);
+        let picture = self.woven(frames, rotation, (path, look.lut.as_ref(), mode))?;
         let picture = match look.alpha {
             Some(Through { mode, matte }) => {
                 picture.with_alpha_mode(mode).with_alpha_use(match matte {
@@ -2892,6 +2910,7 @@ impl VideoFrames {
                 super_scale,
                 retime,
                 input_lut,
+                alpha_mode,
                 ..
             } = layer
             else {
@@ -2963,7 +2982,7 @@ impl VideoFrames {
             };
             taken[s] = true;
             self.open[s].set_retime(*retime);
-            self.open[s].set_lut(lut);
+            self.open[s].set_lut(lut, *alpha_mode == AlphaMode::Premultiplied);
             if !(pace.speed() < 0.0 && !still) {
                 self.open[s].reversed.clear();
             }
