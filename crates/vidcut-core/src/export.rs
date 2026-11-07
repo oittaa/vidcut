@@ -396,8 +396,8 @@ pub struct VideoSettings {
     /// `premultiplied`.
     #[serde(default, skip_serializing_if = "AlphaOut::is_default")]
     pub alpha_mode: AlphaOut,
-    /// The digits of the frame number in the name of a TIFF or OpenEXR file.
-    /// Unset: 8.
+    /// The digits of the frame number in the name of a TIFF or OpenEXR file,
+    /// from 1 to 18. Unset: 8.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filename_digits: Option<u8>,
     /// The number of the first TIFF or OpenEXR file. With `per_clip`, each
@@ -622,6 +622,7 @@ fn yes() -> bool {
 }
 
 pub const FILENAME_DIGITS: u8 = 8;
+pub const FILENAME_DIGIT_COUNTS: std::ops::RangeInclusive<u8> = 1..=18;
 
 impl ExportSettings {
     pub fn frame_file(&self, output: &Path, number: i64) -> PathBuf {
@@ -1116,6 +1117,16 @@ pub fn validate(s: &ExportSettings) -> Result<()> {
             return Err(Error::usage(
                 "video.filename_digits and video.first_frame are for TIFF and OpenEXR",
             ));
+        }
+        if let Some(d) = v
+            .filename_digits
+            .filter(|d| !FILENAME_DIGIT_COUNTS.contains(d))
+        {
+            return Err(Error::usage(format!(
+                "video.filename_digits {d} is outside {}..{}",
+                FILENAME_DIGIT_COUNTS.start(),
+                FILENAME_DIGIT_COUNTS.end()
+            )));
         }
         if v.image_bits().is_some()
             && (!matches!(v.hdr_metadata, HdrMetadata::Auto | HdrMetadata::None)

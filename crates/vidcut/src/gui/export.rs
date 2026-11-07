@@ -2871,11 +2871,11 @@ fn settings_form(
                 if v.image_bits().is_some() {
                     ui.label("");
                     ui.horizontal(|ui| {
-                        use vidcut_core::export::FILENAME_DIGITS;
+                        use vidcut_core::export::{FILENAME_DIGIT_COUNTS, FILENAME_DIGITS};
                         ui.label(dim("filename digits"));
                         let mut digits = v.filename_digits.unwrap_or(FILENAME_DIGITS);
                         if ui
-                            .add(egui::DragValue::new(&mut digits).range(1..=18))
+                            .add(egui::DragValue::new(&mut digits).range(FILENAME_DIGIT_COUNTS))
                             .changed()
                         {
                             v.filename_digits = Some(digits);

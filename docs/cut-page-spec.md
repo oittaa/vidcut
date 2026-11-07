@@ -2056,7 +2056,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - TIFF has the compressions None, LZW and ZIP. Its Compression Level row is greyed out at None.
     - OpenEXR has RGB half and RGB float, each with no compression, RLE, ZIP, ZIP1, PIZ, DWAA, DWAB, HTJ2K 32 lines or HTJ2K 256 lines.
   - **In vidcut:**
-    - `out.tif` gives `out00000000.tif`, `out00000001.tif` and so on. `video.filename_digits` sets the digits.
+    - `out.tif` gives `out00000000.tif`, `out00000001.tif` and so on. `video.filename_digits` sets the digits, from 1 to 18.
     - The first number is the start timecode plus the first frame of the export, as a frame count.
     - `video.first_frame` sets the first number. With `per_clip`, each clip starts at it.
     - `video.profile` of a TIFF is `rgb8` or `rgb16` (the default), each also with `_packbits`, `_lzw` or `_deflate`.
