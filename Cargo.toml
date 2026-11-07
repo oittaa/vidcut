@@ -35,10 +35,10 @@ zeno = "0.3"
 # Geist Mono, Space Grotesk. OFL-1.1, the crates' code MIT. Exact versions,
 # and the same shadcn-egui-core: each font crate exports FontFiles from core
 # of its own version, and the theme match names this core.
-shadcn-egui-core = "=0.6.0"
-shadcn-egui-font-geist = "=0.6.0"
-shadcn-egui-font-geist-mono = "=0.6.0"
-shadcn-egui-font-space-grotesk = "=0.6.0"
+shadcn-egui-core = "=0.7.0"
+shadcn-egui-font-geist = "=0.7.0"
+shadcn-egui-font-geist-mono = "=0.7.0"
+shadcn-egui-font-space-grotesk = "=0.7.0"
 # A font's metrics, to center its capitals in a line (the version epaint
 # lays text out with), and the fitted width of a letter for a title's tracking.
 skrifa = "0.49"
