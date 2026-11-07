@@ -385,11 +385,13 @@ Reading:
   - its styles and regions, down to each span
   - its time base: media, or smpte with its drop mode, as appendix N.3 of TTML1 counts
   - its language (xml:lang), which the new track takes
+- A WebVTT `position` or percent `line`, and a TTML region, give `Timed::style` a position and an anchor ([deviation X40](../deviations.md#x40-subtitle-files-are-read-as-they-are-written)).
 - The markup of each format becomes the cue markup. Other tags go.
 
 Placing:
 
 - `ops::subtitles::import` turns each time into the nearest frame in the time base of the file (`SubtitleTimeBase`). The time base is real time, or timecode labels when the times sit on their grid.
+- It keeps the position and the anchor of a cue only where they differ from the style of the track.
 - A file in timecode then loses the start timecode of the timeline, or 01:00:00:00 ([deviation X41](../deviations.md#x41-subtitle-files-placed-by-their-timecode-or-from-the-timelines-start)).
 
 Writing:
