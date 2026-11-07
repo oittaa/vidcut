@@ -29,7 +29,7 @@ const HLG_WHITE: f64 = 0.1;
 
 pub const CENTER: RangeInclusive<f64> = -1.0..=1.0;
 
-const RGB48: usize = 6;
+const RGBA_F32: usize = 16;
 
 const BAR_COLORS: [Code; 7] = [
     [1.0, 1.0, 1.0],
@@ -333,15 +333,15 @@ fn mixed(corners: [[f64; 3]; 4], u: f64, v: f64) -> [f64; 3] {
 }
 
 fn put_row(row: &mut [u8], codes: impl Iterator<Item = [f64; 3]>) {
-    for (pixel, code) in row.as_chunks_mut::<RGB48>().0.iter_mut().zip(codes) {
-        for (bytes, v) in pixel.as_chunks_mut::<2>().0.iter_mut().zip(code) {
-            *bytes = ((v * 65535.0).round() as u16).to_le_bytes();
+    for (pixel, [r, g, b]) in row.as_chunks_mut::<RGBA_F32>().0.iter_mut().zip(codes) {
+        for (bytes, v) in pixel.as_chunks_mut::<4>().0.iter_mut().zip([r, g, b, 1.0]) {
+            *bytes = (v as f32).to_le_bytes();
         }
     }
 }
 
 fn same_rows(data: &mut [u8], stride: usize, width: usize, codes: &[[f64; 3]]) {
-    let bytes = width * RGB48;
+    let bytes = width * RGBA_F32;
     let (head, rest) = data.split_at_mut(stride.min(data.len()));
     put_row(&mut head[..bytes], codes.iter().copied().cycle());
     for line in rest.chunks_mut(stride) {
@@ -599,7 +599,7 @@ pub fn draw(
                 let codes = across
                     .iter()
                     .map(|&u| in_timeline(mixed(corners, u, v), colors));
-                put_row(&mut line[..width * RGB48], codes);
+                put_row(&mut line[..width * RGBA_F32], codes);
             });
         }
         Pattern::Chart(chart) => draw_bands(&bands(chart, w, h), data, stride, width),

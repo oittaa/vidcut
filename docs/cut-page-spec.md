@@ -1790,6 +1790,11 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: Pitch and Yaw differ at the edge pixels, by at most 78.2 of 255. These pixels are 0.3% of the values. A still in Resolve gives the same picture.
   - Not measured on a generator: Dynamic Zoom, Stabilization, keyframes in a render, Push, Slide, Wipe and Dip To Color.
   - vidcut: the sections and these transitions act as on a still. On a Solid Color and on a still, the same requests give the same frames (0.0 of 255).
+- **Precision:**
+  - Measured in Resolve Studio 21.2, with renders to OpenEXR RGB float: the generators are drawn in 32-bit floats.
+  - 10 Step holds 0.1, 0.2 and on as 32-bit floats. Grey Scale holds x/W in each column. 98% of the Four Color Gradient values are between the steps of 16-bit numbers.
+  - vidcut: the generators are drawn in 32-bit floats, and the screen reads them as 32-bit floats.
+  - A Solid Color in an SDR timeline is 8-bit. Its color is a value out of 255, so 8 bits hold it exactly.
 - **Speed:**
   - Measured: Speed Change on a generator has a dim dot and does not open. A still acts the same.
   - Measured: the right-click menu has Change Speed and Add Speed Point grey, and Change Clip Duration on.
