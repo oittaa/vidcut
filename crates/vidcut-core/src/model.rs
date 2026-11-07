@@ -3251,6 +3251,8 @@ pub enum EffectKind {
     GaussianBlur(GaussianBlur),
     /// The picture as cells of one color each.
     MosaicBlur(MosaicBlur),
+    /// A soft light around the bright parts of the picture.
+    Glow(Box<Glow>),
     /// A soft shape with the picture inside it and a color around it.
     Vignette(Vignette),
     /// Makes the detail of the picture stronger.
@@ -3263,6 +3265,7 @@ pub enum EffectKind {
 pub enum EffectType {
     GaussianBlur,
     MosaicBlur,
+    Glow,
     Vignette,
     Sharpen,
 }
@@ -3536,10 +3539,179 @@ impl Border {
     }
 }
 
+/// A glow: the bright parts of the picture, blurred and put over it. The
+/// blur's sigma is 0.146667 × `spread` × √(the picture's width × its height,
+/// on the frame). It works on the code values, after the transform and the
+/// crop, in the frame's pixels.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Glow {
+    /// What the effect gives. Usual: `glowing_image`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<GlowOutput>,
+    /// How the picture's alpha acts. Usual: `masks_sources`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_alpha: Option<GlowAlpha>,
+    /// The code value where a channel starts to shine, from 0 to 1. Usual:
+    /// 0.75.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<f64>,
+    /// With `input_alpha` `is_source`, the alpha where the picture starts to
+    /// shine, from 0 to 1. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha_threshold: Option<f64>,
+    /// How wide the glow is, from 0 to 3. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spread: Option<f64>,
+    /// Multiplies the spread across by 1 + this and down by 1 − this, from
+    /// -1 to 1. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hv_ratio: Option<f64>,
+    /// The spread on red, green and blue, each a multiple from 0 to 2. Usual:
+    /// `[1, 1, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_spread: Option<[f64; 3]>,
+    /// How bright the glow is, from 0 to 10. Usual: 0.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain: Option<f64>,
+    /// The gamma of the glow, from 0.1 to 10. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gamma: Option<f64>,
+    /// The colorfulness of the glow, from 0 to 10. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saturation: Option<f64>,
+    /// Multiplies the glow's red, green and blue, each from 0 to 1000000.
+    /// Usual: `[1, 1, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_filter: Option<[f64; 3]>,
+    /// Adds a second glow with its own gain, spread and color. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub secondary: bool,
+    /// How bright the second glow is, from 0 to 10. Usual: 0.75.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary_gain: Option<f64>,
+    /// How wide the second glow is, from 0 to 3. Its sigma is 3 times that of
+    /// a `spread` of the same value, and `spread` does not change it. Usual:
+    /// 0.25.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary_spread: Option<f64>,
+    /// Multiplies the second glow's red, green and blue, each from 0 to
+    /// 1000000. Usual: `[1, 1, 1]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary_color: Option<[f64; 3]>,
+    /// Breaks up the glow with soft noise. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub atmosphere: bool,
+    /// How much the noise changes the glow, from -5 to 5. Usual: 0.25.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_strength: Option<f64>,
+    /// How much fine noise there is, from 0 to 1. Usual: 0.55.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_detail: Option<f64>,
+    /// The size of the noise, from 0.01 to 100. Usual: 0.6.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_scale: Option<f64>,
+    /// Multiplies the noise's size across by 1 + this and down by 1 − this,
+    /// from -0.99 to 0.99. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_ratio: Option<f64>,
+    /// Another pattern of the noise, from 0 to 1000. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_evolution: Option<f64>,
+    /// How fast the noise changes from frame to frame, from 0 to 10. Usual:
+    /// 0.3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere_seethe: Option<f64>,
+    /// It does not change the picture. Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub atmosphere_tracked: bool,
+    /// What the blur takes from beyond the frame. Usual: `reflect_in_camera`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub framing: Option<GlowFraming>,
+    /// How the glow goes over the picture. Usual: `add`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composite_type: Option<CompositeMode>,
+    /// How much of the composite shows, from 0 to 1. Usual: 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+    /// Works on the picture's negative, and gives the negative of the result.
+    /// Usual: off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub invert: bool,
+    /// Takes the glow away where the picture shines, from 0 to 5. Usual: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<f64>,
+}
+
+/// What a glow gives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GlowOutput {
+    /// The parts of the picture that shine, not blurred.
+    ShinyRegions,
+    /// The glow alone.
+    GlowAlone,
+    /// The glow over the picture.
+    #[default]
+    GlowingImage,
+}
+
+impl GlowOutput {
+    pub const ALL: [GlowOutput; 3] = [
+        GlowOutput::ShinyRegions,
+        GlowOutput::GlowAlone,
+        GlowOutput::GlowingImage,
+    ];
+
+    pub fn code(self) -> u32 {
+        Self::ALL.iter().position(|o| *o == self).unwrap_or(2) as u32
+    }
+}
+
+/// How a glow uses the picture's alpha.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GlowAlpha {
+    /// The alpha multiplies what shines, and the result is opaque.
+    #[default]
+    MasksSources,
+    /// The same picture as `masks_sources`.
+    Usual,
+    /// The alpha itself shines, in gray, and the result is opaque.
+    IsSource,
+}
+
+impl GlowAlpha {
+    pub const ALL: [GlowAlpha; 3] = [
+        GlowAlpha::MasksSources,
+        GlowAlpha::Usual,
+        GlowAlpha::IsSource,
+    ];
+
+    pub fn code(self) -> u32 {
+        Self::ALL.iter().position(|a| *a == self).unwrap_or(0) as u32
+    }
+}
+
+/// What a glow's blur takes from beyond the frame.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GlowFraming {
+    /// Nothing. The glow also fades in the last pixels of the frame.
+    OnlyAsSeen,
+    /// The picture, mirrored just outside the frame.
+    #[default]
+    ReflectInCamera,
+}
+
+impl GlowFraming {
+    pub const ALL: [GlowFraming; 2] = [GlowFraming::OnlyAsSeen, GlowFraming::ReflectInCamera];
+}
+
 impl EffectType {
-    pub const ALL: [EffectType; 4] = [
+    pub const ALL: [EffectType; 5] = [
         EffectType::GaussianBlur,
         EffectType::MosaicBlur,
+        EffectType::Glow,
         EffectType::Vignette,
         EffectType::Sharpen,
     ];
@@ -3548,6 +3720,7 @@ impl EffectType {
         match self {
             Self::GaussianBlur => "Gaussian Blur",
             Self::MosaicBlur => "Mosaic Blur",
+            Self::Glow => "Glow",
             Self::Vignette => "Vignette",
             Self::Sharpen => "Sharpen",
         }
@@ -3557,6 +3730,7 @@ impl EffectType {
         let kind = match self {
             Self::GaussianBlur => EffectKind::GaussianBlur(GaussianBlur::default()),
             Self::MosaicBlur => EffectKind::MosaicBlur(MosaicBlur::default()),
+            Self::Glow => EffectKind::Glow(Box::default()),
             Self::Vignette => EffectKind::Vignette(Vignette::default()),
             Self::Sharpen => EffectKind::Sharpen(Sharpen::default()),
         };
@@ -3575,8 +3749,16 @@ impl Effect {
         match self.kind {
             EffectKind::GaussianBlur(_) => EffectType::GaussianBlur,
             EffectKind::MosaicBlur(_) => EffectType::MosaicBlur,
+            EffectKind::Glow(_) => EffectType::Glow,
             EffectKind::Vignette(_) => EffectType::Vignette,
             EffectKind::Sharpen(_) => EffectType::Sharpen,
+        }
+    }
+
+    pub fn moves_by_itself(&self) -> bool {
+        match &self.kind {
+            EffectKind::Glow(g) => g.atmosphere,
+            _ => false,
         }
     }
 
@@ -3670,6 +3852,132 @@ impl MosaicBlur {
 
     pub fn edge(&self) -> Border {
         self.border.unwrap_or_default()
+    }
+}
+
+impl Glow {
+    pub const SIGMA: f64 = 0.146_666_666_666_666_66;
+    pub const SECOND: f64 = 3.0;
+    pub const THRESHOLD: f64 = 0.75;
+    pub const ALPHA_THRESHOLD: f64 = 0.5;
+    pub const UNIT: (f64, f64) = (0.0, 1.0);
+    pub const SPREAD: f64 = 0.5;
+    pub const SPREADS: (f64, f64) = (0.0, 3.0);
+    pub const RATIOS: (f64, f64) = (-1.0, 1.0);
+    pub const WHITE: [f64; 3] = [1.0; 3];
+    pub const RELATIVES: (f64, f64) = (0.0, 2.0);
+    pub const GAIN: f64 = 0.5;
+    pub const GAINS: (f64, f64) = (0.0, 10.0);
+    pub const GAMMAS: (f64, f64) = (0.1, 10.0);
+    pub const SATURATIONS: (f64, f64) = (0.0, 10.0);
+    pub const COLORS: (f64, f64) = (0.0, 1e6);
+    pub const SECONDARY_GAIN: f64 = 0.75;
+    pub const SECONDARY_SPREAD: f64 = 0.25;
+    pub const STRENGTH: f64 = 0.25;
+    pub const STRENGTHS: (f64, f64) = (-5.0, 5.0);
+    pub const DETAIL: f64 = 0.55;
+    pub const SCALE: f64 = 0.6;
+    pub const SCALES: (f64, f64) = (0.01, 100.0);
+    pub const NOISE_RATIOS: (f64, f64) = (-0.99, 0.99);
+    pub const EVOLUTIONS: (f64, f64) = (0.0, 1000.0);
+    pub const SEETHE: f64 = 0.3;
+    pub const SEETHES: (f64, f64) = (0.0, 10.0);
+    pub const RECOVERIES: (f64, f64) = (0.0, 5.0);
+
+    pub fn shows(&self) -> GlowOutput {
+        self.output.unwrap_or_default()
+    }
+
+    pub fn alpha(&self) -> GlowAlpha {
+        self.input_alpha.unwrap_or_default()
+    }
+
+    pub fn shine(&self) -> f64 {
+        self.threshold.unwrap_or(Self::THRESHOLD)
+    }
+
+    pub fn alpha_shine(&self) -> f64 {
+        self.alpha_threshold.unwrap_or(Self::ALPHA_THRESHOLD)
+    }
+
+    pub fn wide(&self) -> f64 {
+        self.spread.unwrap_or(Self::SPREAD)
+    }
+
+    pub fn ratio(&self) -> f64 {
+        self.hv_ratio.unwrap_or(0.0)
+    }
+
+    pub fn relative(&self) -> [f64; 3] {
+        self.relative_spread.unwrap_or(Self::WHITE)
+    }
+
+    pub fn bright(&self) -> f64 {
+        self.gain.unwrap_or(Self::GAIN)
+    }
+
+    pub fn curve(&self) -> f64 {
+        self.gamma.unwrap_or(1.0)
+    }
+
+    pub fn colorful(&self) -> f64 {
+        self.saturation.unwrap_or(1.0)
+    }
+
+    pub fn filter(&self) -> [f64; 3] {
+        self.color_filter.unwrap_or(Self::WHITE)
+    }
+
+    pub fn second_bright(&self) -> f64 {
+        self.secondary_gain.unwrap_or(Self::SECONDARY_GAIN)
+    }
+
+    pub fn second_wide(&self) -> f64 {
+        self.secondary_spread.unwrap_or(Self::SECONDARY_SPREAD)
+    }
+
+    pub fn second_color(&self) -> [f64; 3] {
+        self.secondary_color.unwrap_or(Self::WHITE)
+    }
+
+    pub fn noise_strength(&self) -> f64 {
+        self.atmosphere_strength.unwrap_or(Self::STRENGTH)
+    }
+
+    pub fn noise_detail(&self) -> f64 {
+        self.atmosphere_detail.unwrap_or(Self::DETAIL)
+    }
+
+    pub fn noise_scale(&self) -> f64 {
+        self.atmosphere_scale.unwrap_or(Self::SCALE)
+    }
+
+    pub fn noise_ratio(&self) -> f64 {
+        self.atmosphere_ratio.unwrap_or(0.0)
+    }
+
+    pub fn noise_evolution(&self) -> f64 {
+        self.atmosphere_evolution.unwrap_or(0.0)
+    }
+
+    pub fn noise_seethe(&self) -> f64 {
+        self.atmosphere_seethe.unwrap_or(Self::SEETHE)
+    }
+
+    pub fn frames(&self) -> GlowFraming {
+        self.framing.unwrap_or_default()
+    }
+
+    pub fn over(&self) -> CompositeMode {
+        self.composite_type.unwrap_or(CompositeMode::Add)
+    }
+
+    pub fn shown(&self) -> f64 {
+        self.opacity.unwrap_or(1.0)
+    }
+
+    pub fn recovers(&self) -> f64 {
+        self.recovery.unwrap_or(0.0)
     }
 }
 

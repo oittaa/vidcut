@@ -4,8 +4,8 @@ use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
     Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectKind, GaussianBlur,
-    MosaicBlur, Picture, PictureTool, Project, Sharpen, TrackKind, Vignette, VignetteMode,
-    VignetteShape, ZoomBox,
+    Glow, GlowAlpha, GlowFraming, GlowOutput, MosaicBlur, Picture, PictureTool, Project, Sharpen,
+    TrackKind, Vignette, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -129,6 +129,125 @@ fn mosaic_checked(m: &MosaicBlur) -> Result<MosaicBlur> {
     })
 }
 
+fn glow_checked(g: &Glow) -> Result<Glow> {
+    for (v, range, why) in [
+        (g.threshold, Glow::UNIT, "a Glow's threshold is from 0 to 1"),
+        (
+            g.alpha_threshold,
+            Glow::UNIT,
+            "a Glow's alpha_threshold is from 0 to 1",
+        ),
+        (g.spread, Glow::SPREADS, "a Glow's spread is from 0 to 3"),
+        (
+            g.hv_ratio,
+            Glow::RATIOS,
+            "a Glow's hv_ratio is from -1 to 1",
+        ),
+        (g.gain, Glow::GAINS, "a Glow's gain is from 0 to 10"),
+        (g.gamma, Glow::GAMMAS, "a Glow's gamma is from 0.1 to 10"),
+        (
+            g.saturation,
+            Glow::SATURATIONS,
+            "a Glow's saturation is from 0 to 10",
+        ),
+        (
+            g.secondary_gain,
+            Glow::GAINS,
+            "a Glow's secondary_gain is from 0 to 10",
+        ),
+        (
+            g.secondary_spread,
+            Glow::SPREADS,
+            "a Glow's secondary_spread is from 0 to 3",
+        ),
+        (
+            g.atmosphere_strength,
+            Glow::STRENGTHS,
+            "a Glow's atmosphere_strength is from -5 to 5",
+        ),
+        (
+            g.atmosphere_detail,
+            Glow::UNIT,
+            "a Glow's atmosphere_detail is from 0 to 1",
+        ),
+        (
+            g.atmosphere_scale,
+            Glow::SCALES,
+            "a Glow's atmosphere_scale is from 0.01 to 100",
+        ),
+        (
+            g.atmosphere_ratio,
+            Glow::NOISE_RATIOS,
+            "a Glow's atmosphere_ratio is from -0.99 to 0.99",
+        ),
+        (
+            g.atmosphere_evolution,
+            Glow::EVOLUTIONS,
+            "a Glow's atmosphere_evolution is from 0 to 1000",
+        ),
+        (
+            g.atmosphere_seethe,
+            Glow::SEETHES,
+            "a Glow's atmosphere_seethe is from 0 to 10",
+        ),
+        (g.opacity, Glow::UNIT, "a Glow's opacity is from 0 to 1"),
+        (
+            g.recovery,
+            Glow::RECOVERIES,
+            "a Glow's recovery is from 0 to 5",
+        ),
+    ] {
+        within(v, range, why)?;
+    }
+    for v in g.relative_spread.iter().flatten() {
+        within(
+            Some(*v),
+            Glow::RELATIVES,
+            "a Glow's relative_spread values are from 0 to 2",
+        )?;
+    }
+    for v in [g.color_filter, g.secondary_color]
+        .iter()
+        .flatten()
+        .flatten()
+    {
+        within(
+            Some(*v),
+            Glow::COLORS,
+            "a Glow's color values are from 0 to 1000000",
+        )?;
+    }
+    let off = |v: Option<f64>, usual: f64| v.filter(|v| *v != usual);
+    let white = |k: Option<[f64; 3]>| k.filter(|k| *k != Glow::WHITE);
+    Ok(Glow {
+        output: g.output.filter(|v| *v != GlowOutput::default()),
+        input_alpha: g.input_alpha.filter(|v| *v != GlowAlpha::default()),
+        threshold: off(g.threshold, Glow::THRESHOLD),
+        alpha_threshold: off(g.alpha_threshold, Glow::ALPHA_THRESHOLD),
+        spread: off(g.spread, Glow::SPREAD),
+        hv_ratio: off(g.hv_ratio, 0.0),
+        relative_spread: white(g.relative_spread),
+        gain: off(g.gain, Glow::GAIN),
+        gamma: off(g.gamma, 1.0),
+        saturation: off(g.saturation, 1.0),
+        color_filter: white(g.color_filter),
+        secondary_gain: off(g.secondary_gain, Glow::SECONDARY_GAIN),
+        secondary_spread: off(g.secondary_spread, Glow::SECONDARY_SPREAD),
+        secondary_color: white(g.secondary_color),
+        atmosphere_strength: off(g.atmosphere_strength, Glow::STRENGTH),
+        atmosphere_detail: off(g.atmosphere_detail, Glow::DETAIL),
+        atmosphere_scale: off(g.atmosphere_scale, Glow::SCALE),
+        atmosphere_ratio: off(g.atmosphere_ratio, 0.0),
+        atmosphere_evolution: off(g.atmosphere_evolution, 0.0),
+        atmosphere_seethe: off(g.atmosphere_seethe, Glow::SEETHE),
+        framing: g.framing.filter(|v| *v != GlowFraming::default()),
+        composite_type: g.composite_type.filter(|v| *v != CompositeMode::Add),
+        opacity: off(g.opacity, 1.0),
+        recovery: off(g.recovery, 0.0),
+        ..g.clone()
+    })
+}
+
 fn vignette_checked(v: &Vignette) -> Result<Vignette> {
     within(
         v.size,
@@ -226,6 +345,7 @@ pub fn effect_checked(e: &Effect) -> Result<Effect> {
     let kind = match &e.kind {
         EffectKind::GaussianBlur(b) => EffectKind::GaussianBlur(gaussian_checked(b)?),
         EffectKind::MosaicBlur(m) => EffectKind::MosaicBlur(mosaic_checked(m)?),
+        EffectKind::Glow(g) => EffectKind::Glow(Box::new(glow_checked(g)?)),
         EffectKind::Vignette(v) => EffectKind::Vignette(vignette_checked(v)?),
         EffectKind::Sharpen(s) => EffectKind::Sharpen(sharpen_checked(s)?),
     };
@@ -560,6 +680,36 @@ pub fn effect_shown(e: &Effect) -> Value {
             "antialias": m.antialias,
             "blur_alpha": m.blurs_alpha(),
             "whole_cells": m.whole_cells,
+        }),
+        EffectKind::Glow(g) => json!({
+            "output": g.shows(),
+            "input_alpha": g.alpha(),
+            "threshold": g.shine(),
+            "alpha_threshold": g.alpha_shine(),
+            "spread": g.wide(),
+            "hv_ratio": g.ratio(),
+            "relative_spread": g.relative(),
+            "gain": g.bright(),
+            "gamma": g.curve(),
+            "saturation": g.colorful(),
+            "color_filter": g.filter(),
+            "secondary": g.secondary,
+            "secondary_gain": g.second_bright(),
+            "secondary_spread": g.second_wide(),
+            "secondary_color": g.second_color(),
+            "atmosphere": g.atmosphere,
+            "atmosphere_strength": g.noise_strength(),
+            "atmosphere_detail": g.noise_detail(),
+            "atmosphere_scale": g.noise_scale(),
+            "atmosphere_ratio": g.noise_ratio(),
+            "atmosphere_evolution": g.noise_evolution(),
+            "atmosphere_seethe": g.noise_seethe(),
+            "atmosphere_tracked": g.atmosphere_tracked,
+            "framing": g.frames(),
+            "composite_type": g.over(),
+            "opacity": g.shown(),
+            "invert": g.invert,
+            "recovery": g.recovers(),
         }),
         EffectKind::Vignette(v) => json!({
             "operating_mode": v.mode(),

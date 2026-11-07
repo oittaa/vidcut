@@ -1,4 +1,8 @@
-use vidcut_core::place::{Blurring, Level, Placing, Shading, Sharpening, Tiling, Work, Working};
+use vidcut_core::lru::Lru;
+use vidcut_core::model::GlowOutput;
+use vidcut_core::place::{
+    Blurring, GlowSpread, Glowing, Level, Placing, Shading, Sharpening, Tiling, Work, Working,
+};
 
 use super::{Gpu, MIXING, begin, sharpen, vignette};
 
@@ -10,9 +14,27 @@ const REACH: f64 = 4.0;
 
 const LEFT: f64 = 1e-3;
 
-const PARAMS: usize = 64;
-
 const MOSAIC_STAGES: u32 = 3;
+
+const GLOW_STEPS: [u32; 3] = [8, 4, 2];
+
+const GLOW_FINE: f64 = 8.0;
+
+const TAIL: (f64, f64) = (3.8, 4.3);
+
+const BORDER_BLACK: u32 = 0;
+
+const BORDER_MIRROR: u32 = 2;
+
+const FLAG_INVERT: i32 = 1;
+
+const FLAG_SEEN: i32 = 2;
+
+const FLAG_SECOND: i32 = 4;
+
+const FLAG_NOISE: i32 = 8;
+
+const SPARE_TEXTURES: usize = 6;
 
 pub(super) struct Pipes {
     layout: wgpu::BindGroupLayout,
@@ -22,6 +44,9 @@ pub(super) struct Pipes {
     vignette: wgpu::RenderPipeline,
     sharpen_taken: wgpu::RenderPipeline,
     sharpen: wgpu::RenderPipeline,
+    glow_mask: wgpu::RenderPipeline,
+    glow_cells: wgpu::RenderPipeline,
+    glow: wgpu::RenderPipeline,
 }
 
 impl Pipes {
@@ -47,14 +72,22 @@ impl Pipes {
             count: None,
         };
         let params = buffer(0, wgpu::BufferBindingType::Uniform);
+        let views = [texture(1), texture(2), texture(14), texture(15)];
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut blur"),
-            entries: &[params, texture(1), texture(2)],
+            entries: &[params, views[0], views[1], views[2], views[3]],
         });
         let read = wgpu::BufferBindingType::Storage { read_only: true };
         let reading = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("vidcut blur"),
-            entries: &[params, texture(1), texture(2), buffer(3, read)],
+            entries: &[
+                params,
+                views[0],
+                views[1],
+                views[2],
+                views[3],
+                buffer(3, read),
+            ],
         });
         let of = |layout: &wgpu::BindGroupLayout| {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -90,12 +123,16 @@ impl Pipes {
                 cache: None,
             })
         };
+        let plain = of(&layout);
         Self {
-            blur: pipeline(&of(&layout), "fs_blur"),
-            mosaic: pipeline(&of(&layout), "fs_mosaic"),
+            blur: pipeline(&plain, "fs_blur"),
+            mosaic: pipeline(&plain, "fs_mosaic"),
             vignette: pipeline(&of(&reading), "fs_vignette"),
-            sharpen_taken: pipeline(&of(&layout), "fs_sharpen_taken"),
+            sharpen_taken: pipeline(&plain, "fs_sharpen_taken"),
             sharpen: pipeline(&of(&reading), "fs_sharpen"),
+            glow_mask: pipeline(&plain, "fs_glow_mask"),
+            glow_cells: pipeline(&plain, "fs_glow_cells"),
+            glow: pipeline(&plain, "fs_glow"),
             layout,
             reading,
         }
@@ -124,6 +161,7 @@ fn steps<'a>(pipes: &'a Pipes, effect: &Working) -> Vec<Step<'a>> {
             pipeline: &pipes.sharpen,
             params: sharpen_bytes(sharpening, effect),
         }],
+        Work::Glow(_) => Vec::new(),
     }
 }
 
@@ -135,6 +173,10 @@ struct Pass {
 }
 
 fn passes(want: [f64; 4]) -> Vec<Pass> {
+    passes_within(want, MOST, REACH)
+}
+
+fn passes_within(want: [f64; 4], most: f64, reach: f64) -> Vec<Pass> {
     let mut done = [0.0_f64; 4];
     let mut out: Vec<Pass> = Vec::new();
     loop {
@@ -150,17 +192,17 @@ fn passes(want: [f64; 4]) -> Vec<Pass> {
         let rest = open.iter().map(|&c| left[c]).fold(0.0, f64::max);
         let step = match out.is_empty() {
             true => 1.0,
-            false => (rest / MOST).ceil().min(reached.floor()).max(1.0),
+            false => (rest / most).ceil().min(reached.floor()).max(1.0),
         };
-        let spread = left.map(|l| l.min(MOST * step));
+        let spread = left.map(|l| l.min(most * step));
         for (d, s) in done.iter_mut().zip(spread) {
             *d += s * s;
         }
-        let most = spread.into_iter().fold(0.0, f64::max);
+        let widest = spread.into_iter().fold(0.0, f64::max);
         out.push(Pass {
             spread,
             step: step as u32,
-            taps: (REACH * most / step).ceil() as u32,
+            taps: (reach * widest / step).ceil() as u32,
         });
     }
 }
@@ -169,24 +211,29 @@ fn flag(on: bool) -> f64 {
     if on { 1.0 } else { 0.0 }
 }
 
+fn pass_bytes(pass: &Pass, down: bool, border: u32, more: [f64; 4], window: [f64; 4]) -> Vec<u8> {
+    let mut out = float_bytes(&pass.spread);
+    for v in [u32::from(down), pass.step, pass.taps, border] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend(float_bytes(&more));
+    out.extend(float_bytes(&window));
+    out
+}
+
 fn blur_bytes(
     pass: &Pass,
     down: bool,
     (blur, effect): (&Blurring, &Working),
     (first, last): (bool, bool),
 ) -> Vec<u8> {
-    let mut out = float_bytes(&pass.spread);
-    for v in [u32::from(down), pass.step, pass.taps, blur.border.code()] {
-        out.extend_from_slice(&v.to_le_bytes());
-    }
     let more = [
         effect.blend,
         flag(effect.use_alpha),
         flag(last),
         flag(first),
     ];
-    out.extend(float_bytes(&more));
-    out
+    pass_bytes(pass, down, blur.border.code(), more, [0.0; 4])
 }
 
 fn blur_steps<'a>(
@@ -235,6 +282,147 @@ fn mosaic_bytes(tiling: &Tiling, effect: &Working, stage: u32) -> Vec<u8> {
     let keeps_alpha = effect.use_alpha && !tiling.blur_alpha;
     let whole = effect.use_alpha && tiling.blur_alpha && tiling.whole;
     out.extend(float_bytes(&[flag(keeps_alpha), flag(whole), 0.0, 0.0]));
+    out
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GlowGrid {
+    step: [u32; 2],
+    nodes: [u32; 2],
+    last: [i32; 2],
+    low: [i32; 2],
+    across: [f64; 4],
+    down: [f64; 4],
+    still: [f64; 4],
+}
+
+fn glow_step(spreads: &[f64; 3]) -> u32 {
+    let least = spreads
+        .iter()
+        .copied()
+        .filter(|s| *s > 0.0)
+        .fold(f64::INFINITY, f64::min);
+    GLOW_STEPS
+        .into_iter()
+        .find(|d| least.is_finite() && least >= GLOW_FINE * f64::from(*d))
+        .unwrap_or(1)
+}
+
+fn glow_low(spread: f64, step: u32) -> f64 {
+    if spread <= 0.0 {
+        return 0.0;
+    }
+    let d = f64::from(step);
+    (spread * spread - (d * d - 1.0) / 6.0).max(0.0).sqrt() / d
+}
+
+impl GlowGrid {
+    fn of(spread: &GlowSpread, (w, h): (u32, u32), seen: bool) -> Self {
+        let step = [glow_step(&spread.across), glow_step(&spread.down)];
+        let [gx, gy] = spread.grid;
+        let whole = |n: u32, grid: u32| n.div_ceil(grid) * grid;
+        let nodes =
+            |n: u32, d: u32, grid: u32| (whole(n, grid) + if seen { grid } else { 0 }) / d + 1;
+        let lows =
+            |s: &[f64; 3], d: u32| [glow_low(s[0], d), glow_low(s[1], d), glow_low(s[2], d), 0.0];
+        let still = std::array::from_fn(|c| {
+            flag(c < 3 && spread.across[c.min(2)] <= 0.0 && spread.down[c.min(2)] <= 0.0)
+        });
+        Self {
+            step,
+            nodes: [nodes(w, step[0], gx), nodes(h, step[1], gy)],
+            last: [
+                whole(w, gx) as i32 - (gx / 2) as i32,
+                whole(h, gy) as i32 - (gy / 2) as i32,
+            ],
+            low: [-((gx / 2) as i32), -((gy / 2) as i32)],
+            across: lows(&spread.across, step[0]),
+            down: lows(&spread.down, step[1]),
+            still,
+        }
+    }
+
+    fn cells_bytes(&self, seen: bool) -> Vec<u8> {
+        let [dx, dy] = self.step;
+        let mut out = Vec::new();
+        for v in [dx as i32, dy as i32, i32::from(seen), 0] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [self.low[0], self.low[1], self.last[0], self.last[1]] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        out
+    }
+
+    fn sampled(&self) -> [f64; 4] {
+        [
+            f64::from(self.step[0]),
+            f64::from(self.step[1]),
+            f64::from(self.low[0]),
+            f64::from(self.low[1]),
+        ]
+    }
+
+    fn ways(&self) -> Vec<(Pass, bool)> {
+        let most = MOST * f64::from(self.step[0] * self.step[1]);
+        passes_within(self.across, most, TAIL.1)
+            .into_iter()
+            .map(|p| (p, false))
+            .chain(
+                passes_within(self.down, most, TAIL.1)
+                    .into_iter()
+                    .map(|p| (p, true)),
+            )
+            .collect()
+    }
+
+    fn blurs(&self) -> bool {
+        self.still[..3].contains(&0.0)
+    }
+}
+
+fn glow_bytes(
+    glow: &Glowing,
+    effect: &Working,
+    (one, two): (&GlowGrid, Option<&GlowGrid>),
+) -> Vec<u8> {
+    let [fr, fg, fb] = glow.filter;
+    let [sr, sg, sb] = glow.second_color;
+    let mut out = float_bytes(&[glow.shine, glow.alpha_shine, glow.gain, glow.second_gain]);
+    out.extend(float_bytes(&[fr, fg, fb, glow.gamma]));
+    out.extend(float_bytes(&[sr, sg, sb, glow.saturation]));
+    out.extend(float_bytes(&[
+        glow.recovery,
+        glow.opacity,
+        effect.blend,
+        flag(effect.use_alpha),
+    ]));
+    let flags = i32::from(glow.invert) * FLAG_INVERT
+        + i32::from(glow.seen_only) * FLAG_SEEN
+        + i32::from(two.is_some()) * FLAG_SECOND
+        + i32::from(glow.noise.is_some()) * FLAG_NOISE;
+    for v in [
+        glow.output.code() as i32,
+        glow.alpha.code() as i32,
+        glow.mode.code() as i32,
+        flags,
+    ] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend(float_bytes(&one.sampled()));
+    out.extend(float_bytes(
+        &two.map_or([1.0, 1.0, 0.0, 0.0], GlowGrid::sampled),
+    ));
+    out.extend(float_bytes(&one.still));
+    out.extend(float_bytes(&two.map_or([1.0; 4], |g| g.still)));
+    let (noise, depth) = glow.noise.map_or(([0.0; 4], 0.0), |n| {
+        (
+            [n.strength, n.detail, 1.0 / n.cell[0], 1.0 / n.cell[1]],
+            n.depth,
+        )
+    });
+    out.extend(float_bytes(&noise));
+    out.extend(float_bytes(&[depth, 0.0, 0.0, 0.0]));
     out
 }
 
@@ -287,12 +475,22 @@ impl Texture {
     }
 }
 
-pub(super) type Scratch<'a> = (&'a [Texture; 2], &'a mut Worked);
+type Spare = Lru<(u32, u32, u32), Texture, SPARE_TEXTURES>;
+
+fn spare_ready(gpu: &Gpu, spare: &mut Spare, (w, h): (u32, u32), slots: [u32; 2]) {
+    for slot in slots {
+        let key = (w, h, slot);
+        if spare.get(&key).is_none() {
+            spare.insert(key, Texture::new(gpu, (w, h)));
+        }
+    }
+}
 
 #[derive(Default)]
-pub(super) struct Worked {
+struct Worked {
     cells: Option<vignette::Cells>,
     planes: Option<sharpen::Planes>,
+    spare: Spare,
 }
 
 #[derive(Default)]
@@ -323,8 +521,25 @@ impl Blurred {
             .get_or_insert_with(|| [Texture::new(gpu, size), Texture::new(gpu, size)]);
     }
 
-    pub(super) fn scratch(&mut self) -> Option<Scratch<'_>> {
-        self.scratch.as_ref().map(|s| (s, &mut self.worked))
+    pub(super) fn canvas_effects(
+        &mut self,
+        gpu: &Gpu,
+        canvas: &Texture,
+        (placing, effects): (&Placing, &[Working]),
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        let scratch = self
+            .scratch
+            .as_ref()
+            .expect("made for the effects of a mix");
+        let cut = canvas_bind(gpu, &canvas.view, placing, (0.0, 0.0));
+        add(gpu, &scratch[0].view, &cut, encoder);
+        encoder.copy_texture_to_texture(
+            scratch[0].texture.as_image_copy(),
+            canvas.texture.as_image_copy(),
+            canvas.texture.size(),
+        );
+        effects_into(gpu, canvas, (scratch, &mut self.worked), effects, encoder);
     }
 
     pub(super) fn drop_layer(&mut self, i: usize) {
@@ -409,52 +624,152 @@ fn add(
     pass.draw(0..3, 0..1);
 }
 
-fn step_into(
+struct Views<'a> {
+    source: &'a wgpu::TextureView,
+    start: &'a wgpu::TextureView,
+    second: &'a wgpu::TextureView,
+    mask: &'a wgpu::TextureView,
+    cells: Option<&'a wgpu::Buffer>,
+}
+
+impl<'a> Views<'a> {
+    fn same(view: &'a wgpu::TextureView) -> Self {
+        Self::with(view, view)
+    }
+
+    fn with(source: &'a wgpu::TextureView, start: &'a wgpu::TextureView) -> Self {
+        Self {
+            source,
+            start,
+            second: start,
+            mask: start,
+            cells: None,
+        }
+    }
+}
+
+fn draw_step(
     gpu: &Gpu,
-    step: &Step<'_>,
-    (from, start, to): (&wgpu::TextureView, &wgpu::TextureView, &wgpu::TextureView),
-    read: Option<&wgpu::Buffer>,
+    (pipeline, bytes): (&wgpu::RenderPipeline, &[u8]),
+    views: Views<'_>,
+    to: &wgpu::TextureView,
     encoder: &mut wgpu::CommandEncoder,
 ) {
-    let pipes = &gpu.blur;
     let params = gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("vidcut blur"),
-        size: PARAMS as u64,
+        size: bytes.len() as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    gpu.queue.write_buffer(&params, 0, &step.params);
+    gpu.queue.write_buffer(&params, 0, bytes);
+    let texture = |binding, view| wgpu::BindGroupEntry {
+        binding,
+        resource: wgpu::BindingResource::TextureView(view),
+    };
     let mut entries = vec![
         wgpu::BindGroupEntry {
             binding: 0,
             resource: params.as_entire_binding(),
         },
-        wgpu::BindGroupEntry {
-            binding: 1,
-            resource: wgpu::BindingResource::TextureView(from),
-        },
-        wgpu::BindGroupEntry {
-            binding: 2,
-            resource: wgpu::BindingResource::TextureView(start),
-        },
+        texture(1, views.source),
+        texture(2, views.start),
+        texture(14, views.second),
+        texture(15, views.mask),
     ];
-    entries.extend(read.map(|buffer| wgpu::BindGroupEntry {
+    entries.extend(views.cells.map(|buffer| wgpu::BindGroupEntry {
         binding: 3,
         resource: buffer.as_entire_binding(),
     }));
     let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("vidcut blur"),
-        layout: if read.is_some() {
-            &pipes.reading
+        layout: if views.cells.is_some() {
+            &gpu.blur.reading
         } else {
-            &pipes.layout
+            &gpu.blur.layout
         },
         entries: &entries,
     });
     let mut drawing = begin(encoder, to, None);
-    drawing.set_pipeline(step.pipeline);
+    drawing.set_pipeline(pipeline);
     drawing.set_bind_group(0, &bind, &[]);
     drawing.draw(0..3, 0..1);
+}
+
+fn glow_blurred<'a>(
+    gpu: &Gpu,
+    grid: &GlowGrid,
+    seen: bool,
+    (mask, spare, slots): (&'a wgpu::TextureView, &'a Spare, [u32; 2]),
+    encoder: &mut wgpu::CommandEncoder,
+) -> &'a wgpu::TextureView {
+    let (w, h) = (grid.nodes[0], grid.nodes[1]);
+    let textures = slots.map(|slot| spare.peek(&(w, h, slot)));
+    let [Some(a), Some(b)] = textures else {
+        return mask;
+    };
+    let cells = (&gpu.blur.glow_cells, &grid.cells_bytes(seen)[..]);
+    draw_step(gpu, cells, Views::same(mask), &a.view, encoder);
+    let border = if seen { BORDER_BLACK } else { BORDER_MIRROR };
+    let window = [1.0, TAIL.0, TAIL.1, 0.0];
+    let (mut from, mut to) = (a, b);
+    for (pass, down) in grid.ways() {
+        let bytes = pass_bytes(&pass, down, border, [0.0; 4], window);
+        let step = (&gpu.blur.blur, &bytes[..]);
+        draw_step(gpu, step, Views::same(&from.view), &to.view, encoder);
+        std::mem::swap(&mut from, &mut to);
+    }
+    &from.view
+}
+
+fn glow_into(
+    gpu: &Gpu,
+    own: &Texture,
+    (scratch, spare): (&[Texture; 2], &mut Spare),
+    (glow, effect): (&Glowing, &Working),
+    encoder: &mut wgpu::CommandEncoder,
+) {
+    let size = own.texture.size();
+    let size = (size.width, size.height);
+    let seen = glow.seen_only;
+    let one = GlowGrid::of(&glow.first, size, seen);
+    let two = glow.second.as_ref().map(|s| GlowGrid::of(s, size, seen));
+    let bytes = glow_bytes(glow, effect, (&one, two.as_ref()));
+    let mask = &scratch[0].view;
+    let first = (&gpu.blur.glow_mask, &bytes[..]);
+    draw_step(gpu, first, Views::same(&own.view), mask, encoder);
+    let blurs = |g: &GlowGrid| glow.output != GlowOutput::ShinyRegions && g.blurs();
+    let one_blurs = blurs(&one).then_some(&one);
+    let two_blurs = two.as_ref().filter(|g| blurs(g));
+    for (g, slots) in [(one_blurs, [0, 1]), (two_blurs, [2, 3])] {
+        if let Some(g) = g {
+            spare_ready(gpu, spare, (g.nodes[0], g.nodes[1]), slots);
+        }
+    }
+    let spare = &*spare;
+    let mut blurred = |g: Option<&GlowGrid>, slots| match g {
+        Some(g) => glow_blurred(gpu, g, seen, (mask, spare, slots), encoder),
+        None => mask,
+    };
+    let views = Views {
+        source: blurred(one_blurs, [0, 1]),
+        start: &own.view,
+        second: blurred(two_blurs, [2, 3]),
+        mask,
+        cells: None,
+    };
+    let made = &scratch[1];
+    draw_step(
+        gpu,
+        (&gpu.blur.glow, &bytes[..]),
+        views,
+        &made.view,
+        encoder,
+    );
+    encoder.copy_texture_to_texture(
+        made.texture.as_image_copy(),
+        own.texture.as_image_copy(),
+        own.texture.size(),
+    );
 }
 
 fn effects_into(
@@ -469,16 +784,18 @@ fn effects_into(
         let mut from = &own.view;
         let mut k = 0;
         let read = match &effect.work {
+            Work::Glow(glow) => {
+                let spare = &mut worked.spare;
+                glow_into(gpu, own, (scratch, spare), (glow.as_ref(), effect), encoder);
+                continue;
+            }
             Work::Vignette(shading) => {
                 Some(vignette::cells(gpu, shading, &mut worked.cells, encoder))
             }
             Work::Sharpen(sharpening) => {
-                let taken = Step {
-                    pipeline: &pipes.sharpen_taken,
-                    params: sharpen_bytes(sharpening, effect),
-                };
+                let taken = (&pipes.sharpen_taken, &sharpen_bytes(sharpening, effect)[..]);
                 let to = &scratch[0].view;
-                step_into(gpu, &taken, (from, &own.view, to), None, encoder);
+                draw_step(gpu, taken, Views::with(from, &own.view), to, encoder);
                 from = to;
                 k = 1;
                 let on = (to, own.texture.size());
@@ -494,7 +811,17 @@ fn effects_into(
         };
         for step in steps(pipes, effect) {
             let to = &scratch[k];
-            step_into(gpu, &step, (from, &own.view, &to.view), read, encoder);
+            let views = Views {
+                cells: read,
+                ..Views::with(from, &own.view)
+            };
+            draw_step(
+                gpu,
+                (step.pipeline, &step.params[..]),
+                views,
+                &to.view,
+                encoder,
+            );
             from = &to.view;
             k = 1 - k;
         }
@@ -540,23 +867,6 @@ pub(super) fn canvas_bind(
     (mode, adds): (f64, f64),
 ) -> wgpu::BindGroup {
     levels_bind(gpu, view, placing, [1.0, mode, adds, 6.0])
-}
-
-pub(super) fn canvas_effects(
-    gpu: &Gpu,
-    canvas: &Texture,
-    (scratch, worked): (&[Texture; 2], &mut Worked),
-    (placing, effects): (&Placing, &[Working]),
-    encoder: &mut wgpu::CommandEncoder,
-) {
-    let cut = canvas_bind(gpu, &canvas.view, placing, (0.0, 0.0));
-    add(gpu, &scratch[0].view, &cut, encoder);
-    encoder.copy_texture_to_texture(
-        scratch[0].texture.as_image_copy(),
-        canvas.texture.as_image_copy(),
-        canvas.texture.size(),
-    );
-    effects_into(gpu, canvas, (scratch, worked), effects, encoder);
 }
 
 pub(super) fn shown_bind(

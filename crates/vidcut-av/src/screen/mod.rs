@@ -1326,7 +1326,7 @@ struct MixDraw<'a> {
     gpu: &'a Gpu,
     binds: &'a [Bound],
     canvases: &'a [blur::Texture],
-    scratch: Option<blur::Scratch<'a>>,
+    blurred: &'a mut blur::Blurred,
     below: Option<&'a Below>,
     letters: &'a [Letters],
     titles: &'a [TitleOver],
@@ -1372,12 +1372,8 @@ impl MixDraw<'_> {
         if effects.is_empty() {
             return blur::canvas_bind(self.gpu, &canvas.view, &placing, (mode, adds));
         }
-        let (scratch, cells) = self
-            .scratch
-            .as_mut()
-            .expect("made for the effects of a mix");
         let how = (&placing, &effects[..]);
-        blur::canvas_effects(self.gpu, canvas, (scratch, cells), how, encoder);
+        self.blurred.canvas_effects(self.gpu, canvas, how, encoder);
         blur::shown_bind(
             self.gpu,
             (&canvas.view, &canvas.view),
@@ -1953,7 +1949,7 @@ impl Screen {
                     gpu,
                     binds: &binds,
                     canvases: &self.canvases,
-                    scratch: self.blurred.scratch(),
+                    blurred: &mut self.blurred,
                     below,
                     letters: &self.letters,
                     titles,

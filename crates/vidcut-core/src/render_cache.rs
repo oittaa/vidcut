@@ -7,7 +7,8 @@ use sha2::{Digest, Sha256};
 
 use crate::lru::ByBytes;
 use crate::model::{
-    AlphaMode, ClipCache, CompositeMode, Media, Project, RenderCache, Retime, SuperScale, Upscaler,
+    AlphaMode, ClipCache, CompositeMode, Effect, Media, Project, RenderCache, Retime, SuperScale,
+    Upscaler,
 };
 use crate::preferences::{CacheCodec, ProxyCodec, RenderCachePrefs};
 use crate::render::{Image, Placed, RenderPlan, Shape, ShownTitle, VideoPiece};
@@ -519,6 +520,9 @@ fn plain_placed(p: &mut Placed) {
     p.clip.clear();
     if p.ready {
         p.start = 0;
+    }
+    if !p.picture.effects.iter().any(Effect::moves_by_itself) {
+        p.frame = 0;
     }
     p.picture
         .effects
@@ -1359,6 +1363,7 @@ mod tests {
                     picture,
                     run: None,
                     source: 0,
+                    frame: 0,
                     start: 0,
                     ready: false,
                 }],

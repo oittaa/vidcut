@@ -1171,11 +1171,24 @@ struct Blur {
     spread: vec4<f32>,
     way: vec4<i32>,
     blend: vec4<f32>,
+    window: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> blurring: Blur;
 @group(0) @binding(1) var blur_source: texture_2d<f32>;
 @group(0) @binding(2) var blur_start: texture_2d<f32>;
+
+fn mirrored(i: i32, n: i32) -> i32 {
+    if n == 1 {
+        return 0;
+    }
+    let period = 2 * (n - 1);
+    var m = i % period;
+    if m < 0 {
+        m += period;
+    }
+    return select(m, period - m, m >= n);
+}
 
 fn blur_folded(i: i32, n: i32) -> i32 {
     switch blurring.way.w {
@@ -1183,15 +1196,7 @@ fn blur_folded(i: i32, n: i32) -> i32 {
             return clamp(i, 0, n - 1);
         }
         case 2: {
-            if n == 1 {
-                return 0;
-            }
-            let period = 2 * (n - 1);
-            var m = i % period;
-            if m < 0 {
-                m += period;
-            }
-            return select(m, period - m, m >= n);
+            return mirrored(i, n);
         }
         case 3: {
             var m = i % n;
@@ -1234,6 +1239,14 @@ fn effect_mixed(px: vec2<i32>, made: vec4<f32>, blend: f32, use_alpha: f32) -> v
     return mix(was, out, blend);
 }
 
+fn blur_end(d: f32) -> vec4<f32> {
+    if blurring.window.x < 0.5 {
+        return vec4<f32>(1.0);
+    }
+    let reach = max(blurring.spread, vec4<f32>(1e-6));
+    return 1.0 - smoothstep(blurring.window.yyyy, blurring.window.zzzz, d / reach);
+}
+
 @fragment
 fn fs_blur(in: Out) -> @location(0) vec4<f32> {
     let px = vec2<i32>(in.position.xy);
@@ -1245,7 +1258,7 @@ fn fs_blur(in: Out) -> @location(0) vec4<f32> {
     var total = vec4<f32>(1.0);
     for (var j = 1; j <= blurring.way.z; j++) {
         let d = f32(j * step);
-        let w = select(vec4<f32>(0.0), exp(-d * d * k), wide);
+        let w = select(vec4<f32>(0.0), exp(-d * d * k) * blur_end(d), wide);
         sum += (blur_tap(px, j * step, size) + blur_tap(px, -j * step, size)) * w;
         total += 2.0 * w;
     }
@@ -1541,4 +1554,268 @@ fn fs_mosaic(in: Out) -> @location(0) vec4<f32> {
     }
     let out = sum / f32(samples * samples);
     return effect_mixed(px, out, mosaicking.more.y, mosaicking.more.z);
+}
+
+struct Glow {
+    shine: vec4<f32>,
+    tint: vec4<f32>,
+    second: vec4<f32>,
+    mixing: vec4<f32>,
+    modes: vec4<i32>,
+    grid_one: vec4<f32>,
+    grid_two: vec4<f32>,
+    sharp_one: vec4<f32>,
+    sharp_two: vec4<f32>,
+    noise: vec4<f32>,
+    depth: vec4<f32>,
+};
+
+@group(0) @binding(0) var<uniform> glowing: Glow;
+@group(0) @binding(14) var glow_second: texture_2d<f32>;
+@group(0) @binding(15) var glow_mask: texture_2d<f32>;
+
+const GLOW_INVERT: i32 = 1;
+const GLOW_SEEN: i32 = 2;
+const GLOW_TWO: i32 = 4;
+const GLOW_NOISE: i32 = 8;
+const GLOW_ALPHA_SOURCE: i32 = 2;
+const GLOW_ROOM: f32 = 0.001;
+const GLOW_RECOVERY: f32 = 12.0 / 7.0;
+const GLOW_EDGE: f32 = 4.0;
+const GLOW_EDGE_WIDTH: f32 = 3.5;
+const GLOW_OCTAVES: i32 = 7;
+const GLOW_NOISE_GAIN: f32 = 1.9;
+const GLOW_LAYERS: f32 = 17.0;
+
+fn glow_has(flag: i32) -> bool {
+    return (glowing.modes.w & flag) != 0;
+}
+
+fn glow_taken(px: vec2<i32>, picture: texture_2d<f32>) -> vec4<f32> {
+    let use_alpha = glowing.mixing.w;
+    let c = effect_taken(textureLoad(picture, px, 0), use_alpha);
+    var rgb = clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    if glow_has(GLOW_INVERT) {
+        rgb = 1.0 - rgb;
+    }
+    return vec4<f32>(rgb, c.a);
+}
+
+fn glow_shining(c: vec3<f32>) -> vec3<f32> {
+    let t = glowing.shine.x;
+    let m = max(c - t, vec3<f32>(0.0)) / (1.0 - t + GLOW_ROOM);
+    return (1.0 - t) * m + t * (m.r + m.g + m.b) / 3.0;
+}
+
+@fragment
+fn fs_glow_mask(in: Out) -> @location(0) vec4<f32> {
+    let c = glow_taken(vec2<i32>(in.position.xy), blur_source);
+    if glowing.modes.y == GLOW_ALPHA_SOURCE {
+        let th = glowing.shine.y;
+        return vec4<f32>(vec3<f32>(max(c.a - th + GLOW_ROOM, 0.0) / (1.0 - th + GLOW_ROOM)), 1.0);
+    }
+    return vec4<f32>(c.a * glow_shining(c.rgb), 1.0);
+}
+
+struct GlowCells {
+    step: vec4<i32>,
+    ends: vec4<i32>,
+};
+
+@group(0) @binding(0) var<uniform> glow_cells: GlowCells;
+
+fn glow_cell_at(x: i32, low: i32, last: i32, n: i32) -> i32 {
+    if glow_cells.step.z == 1 {
+        return select(x, -1, x < 0 || x >= n);
+    }
+    return clamp(mirrored(x - low, last - low + 1) + low, 0, n - 1);
+}
+
+@fragment
+fn fs_glow_cells(in: Out) -> @location(0) vec4<f32> {
+    let node = vec2<i32>(in.position.xy);
+    let n = vec2<i32>(textureDimensions(blur_source));
+    let d = glow_cells.step.xy;
+    let low = glow_cells.ends.xy;
+    let at = low + node * d;
+    var sum = vec4<f32>(0.0);
+    for (var b = 1 - d.y; b < d.y; b++) {
+        let y = glow_cell_at(at.y + b, low.y, glow_cells.ends.w, n.y);
+        if y < 0 {
+            continue;
+        }
+        let wy = f32(d.y - abs(b));
+        for (var a = 1 - d.x; a < d.x; a++) {
+            let x = glow_cell_at(at.x + a, low.x, glow_cells.ends.z, n.x);
+            if x < 0 {
+                continue;
+            }
+            sum += wy * f32(d.x - abs(a)) * textureLoad(blur_source, vec2<i32>(x, y), 0);
+        }
+    }
+    return sum / f32(d.x * d.x * d.y * d.y);
+}
+
+fn glow_weights(f: f32) -> vec4<f32> {
+    let f2 = f * f;
+    let f3 = f2 * f;
+    return vec4<f32>(
+        0.5 * (2.0 * f2 - f3 - f),
+        0.5 * (3.0 * f3 - 5.0 * f2 + 2.0),
+        0.5 * (4.0 * f2 - 3.0 * f3 + f),
+        0.5 * (f3 - f2),
+    );
+}
+
+fn glow_blurred(t: texture_2d<f32>, px: vec2<f32>, grid: vec4<f32>) -> vec3<f32> {
+    let n = vec2<i32>(textureDimensions(t));
+    let u = (px - grid.zw) / grid.xy;
+    let base = floor(u);
+    let wx = glow_weights(u.x - base.x);
+    let wy = glow_weights(u.y - base.y);
+    let at = vec2<i32>(base);
+    var sum = vec3<f32>(0.0);
+    for (var b = 0; b < 4; b++) {
+        if wy[b] == 0.0 {
+            continue;
+        }
+        let y = mirrored(at.y + b - 1, n.y);
+        for (var a = 0; a < 4; a++) {
+            if wx[a] == 0.0 {
+                continue;
+            }
+            let x = mirrored(at.x + a - 1, n.x);
+            sum += wy[b] * wx[a] * textureLoad(t, vec2<i32>(x, y), 0).rgb;
+        }
+    }
+    return sum;
+}
+
+fn glow_normal(z: f32) -> f32 {
+    let x = abs(z) / sqrt(2.0);
+    let p = 1.0 + x * (0.278393 + x * (0.230389 + x * (0.000972 + x * 0.078108)));
+    let q = p * p;
+    let e = 1.0 - 1.0 / (q * q);
+    return 0.5 * (1.0 + select(-e, e, z >= 0.0));
+}
+
+fn glow_framed(at: f32, n: f32) -> f32 {
+    return glow_normal((at + GLOW_EDGE) / GLOW_EDGE_WIDTH) * glow_normal((n - GLOW_EDGE - at) / GLOW_EDGE_WIDTH);
+}
+
+fn glow_hash(p: vec3<i32>) -> u32 {
+    var h = (u32(p.x) * 73856093u) ^ (u32(p.y) * 19349663u) ^ (u32(p.z) * 83492791u);
+    h = (h ^ (h >> 13u)) * 1274126177u;
+    return h ^ (h >> 16u);
+}
+
+fn glow_slope(p: vec3<i32>, f: vec3<f32>) -> f32 {
+    let k = glow_hash(p) & 15u;
+    let u = select(f.y, f.x, k < 8u);
+    let v = select(select(f.z, f.x, k == 12u || k == 14u), f.y, k < 4u);
+    return select(-u, u, (k & 1u) == 0u) + select(-v, v, (k & 2u) == 0u);
+}
+
+fn glow_cloud(p: vec3<f32>) -> f32 {
+    let base = floor(p);
+    let i = vec3<i32>(base);
+    let f = p - base;
+    let w = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    let near = mix(
+        mix(glow_slope(i, f), glow_slope(i + vec3<i32>(1, 0, 0), f - vec3<f32>(1.0, 0.0, 0.0)), w.x),
+        mix(glow_slope(i + vec3<i32>(0, 1, 0), f - vec3<f32>(0.0, 1.0, 0.0)), glow_slope(i + vec3<i32>(1, 1, 0), f - vec3<f32>(1.0, 1.0, 0.0)), w.x),
+        w.y,
+    );
+    let far = mix(
+        mix(glow_slope(i + vec3<i32>(0, 0, 1), f - vec3<f32>(0.0, 0.0, 1.0)), glow_slope(i + vec3<i32>(1, 0, 1), f - vec3<f32>(1.0, 0.0, 1.0)), w.x),
+        mix(glow_slope(i + vec3<i32>(0, 1, 1), f - vec3<f32>(0.0, 1.0, 1.0)), glow_slope(i + vec3<i32>(1, 1, 1), f - vec3<f32>(1.0, 1.0, 1.0)), w.x),
+        w.y,
+    );
+    return mix(near, far, w.z);
+}
+
+fn glow_atmosphere(px: vec2<f32>) -> f32 {
+    var sum = 0.0;
+    var total = 0.0;
+    var amount = 1.0;
+    var size = 1.0;
+    for (var i = 0; i < GLOW_OCTAVES; i++) {
+        let layer = GLOW_LAYERS * f32(i);
+        let at = vec3<f32>(px * glowing.noise.zw * size + layer, glowing.depth.x * size + layer);
+        sum += amount * glow_cloud(at);
+        total += amount;
+        amount *= glowing.noise.y;
+        size *= 2.0;
+    }
+    return GLOW_NOISE_GAIN * sum / total;
+}
+
+fn glow_light(c: vec3<f32>) -> f32 {
+    return sqrt(max(dot(c * c, BT601), 0.0));
+}
+
+fn glow_saturated(c: vec3<f32>, k: f32) -> vec3<f32> {
+    let high = max(c.r, max(c.g, c.b));
+    let low = min(c.r, min(c.g, c.b));
+    let wide = high - low;
+    let s = select(0.0, wide / max(high, 1e-12), high > 0.0);
+    let s2 = clamp(s * k, 0.0, 1.0);
+    let t = select(vec3<f32>(1.0), (c - low) / max(wide, 1e-12), wide > 0.0);
+    let d = (1.0 - s2) + t * s2;
+    return d * glow_light(c) / max(glow_light(d), 1e-12);
+}
+
+fn glow_mixed(mode: u32, g: vec3<f32>, c: vec3<f32>) -> vec3<f32> {
+    let m = mixed(mode, g, c);
+    let ends = vec3<f32>(1.0);
+    switch mode {
+        case 11u: { return select(m, select(vec3<f32>(0.0), ends, c > vec3<f32>(0.0)), g >= ends); }
+        case 12u: { return select(m, select(vec3<f32>(0.0), ends, c >= ends), g <= vec3<f32>(0.0)); }
+        default: { return m; }
+    }
+}
+
+@fragment
+fn fs_glow(in: Out) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(in.position.xy);
+    let at = vec2<f32>(px);
+    let was = glow_taken(px, blur_start);
+    let mask = textureLoad(glow_mask, px, 0).rgb;
+    var made = mask;
+    var g = vec3<f32>(0.0);
+    if glowing.modes.x != 0 {
+        let one = mix(glow_blurred(blur_source, at, glowing.grid_one), mask, glowing.sharp_one.rgb);
+        g = glowing.shine.z * one;
+        if glow_has(GLOW_TWO) {
+            let two = mix(glow_blurred(glow_second, at, glowing.grid_two), mask, glowing.sharp_two.rgb);
+            g += glowing.shine.w * two * glowing.second.rgb;
+        }
+        if glow_has(GLOW_SEEN) {
+            let n = vec2<f32>(textureDimensions(blur_start));
+            g *= glow_framed(at.x, n.x) * glow_framed(at.y, n.y);
+        }
+        g *= glowing.tint.rgb;
+        g *= max(1.0 - GLOW_RECOVERY * glowing.mixing.x * max(mask.r, max(mask.g, mask.b)), 0.0);
+        if glow_has(GLOW_NOISE) {
+            g *= max(1.0 + glowing.noise.x * glow_atmosphere(at), 0.0);
+        }
+        if glowing.second.w != 1.0 {
+            g = glow_saturated(g, glowing.second.w);
+        }
+        if glowing.tint.w != 1.0 {
+            let light = glow_light(g);
+            g *= select(0.0, pow(light, 1.0 / glowing.tint.w) / light, light > 0.0);
+        }
+        made = g;
+        if glowing.modes.x == 2 {
+            made = glow_mixed(u32(glowing.modes.z), g, was.rgb);
+        }
+    }
+    var out = mix(was, vec4<f32>(made, 1.0), glowing.mixing.y);
+    if glow_has(GLOW_INVERT) {
+        out = vec4<f32>(1.0 - out.rgb, out.a);
+    }
+    out.a = max(was.a, max(out.r, max(out.g, out.b)));
+    let last = effect_mixed(px, out, glowing.mixing.z, glowing.mixing.w);
+    return clamp(last, vec4<f32>(0.0), vec4<f32>(1.0));
 }

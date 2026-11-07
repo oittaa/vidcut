@@ -495,7 +495,7 @@ A compound clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contrad
 - A part with a composite mode reads `Below`. It holds a copy of that picture only (`IN_MIX`). `fs_mode` mixes by the alpha below, and thus a part with nothing below it stays as it is.
 - `MixDraw::finished` then shows that picture as one layer:
   - `blur::canvas_bind` covers it by the levels of `Mix.placing`: edges, soft edges and opacity. The shader reads it as `made` 6.
-  - With effects, `blur::canvas_effects` covers it with no opacity (`bared`), then runs the effects. `blur::shown_bind` then shows it with the opacity.
+  - With effects, `blur::Blurred::canvas_effects` covers it with no opacity (`bared`), then runs the effects. The grid pictures of a Glow come from the same `Spare`. `blur::shown_bind` then shows it with the opacity.
   - The outer pass mixes it with the tracks below, by the mode of `Mix.placing`.
 - `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
@@ -537,6 +537,10 @@ The effects of a picture ([spec §8.16](../cut-page-spec.md#816-effects-pp-765-3
   - The origin is the middle of the picture on the frame, moved by Position and the offsets.
   - Its sizes are in samples. Antialias Result gives two samples for each pixel.
   - The origin is reduced by two steps and two cell heights. That keeps it exact at a high Pixel Frequency.
+- `place::Glowing` holds what `fs_glow` needs for a Glow.
+  - `place::GlowSpread` holds the sigma of each color across and down, for one glow, and its grid. The sigma comes from the area of the picture on the frame (`Glow::SIGMA`).
+  - `place::GlowNoise` holds the Atmosphere noise at this frame. `Placed.frame` gives the frame of the clip.
+  - `Effect::moves_by_itself` is true for a Glow with Atmosphere. Then `render_cache` keeps a frame for each frame of the clip, and not one frame for a still.
 - `place::Shading` holds the shape of a Vignette: its radius, its cells, its boxes and the place of its first cell.
   - The fit of the picture sets its size (`OnFrame.fit`). Thus a Zoom and a Pan do not change the shape.
 - `place::Sharpening` holds the gain of each band of a Sharpen, for the brightness and for the colors.
@@ -554,12 +558,22 @@ The draw:
   - The third pass finds the cell of each pixel and reads its color from the table (`mosaic_nearest`).
   - With Antialias Result, the third pass finds the cell of each of the four samples of a pixel, and takes their mean.
   - The third pass applies Blur Alpha and Whole Cells Only to each sample (`mosaic_alpha`). With Use Alpha off, it does not.
+- `fs_glow` makes the last pass of a Glow (`blur::glow_into`):
+  - `fs_glow_mask` draws the mask of the shiny parts into a picture of its own. All the blurs read it, and `fs_glow` reads it for Source Recovery.
+  - A large sigma blurs on a coarse grid (`blur::GlowGrid`). Why: the cost of `fs_blur` grows with the sigma, and a glow can have a sigma of hundreds of pixels.
+    - `fs_glow_cells` takes the mask to the grid with a tent filter. A box filter moves the small details by up to half a cell.
+    - `fs_blur` then blurs on the grid, and `glow_blurred` reads the grid with a cubic curve.
+    - The blurs of one Glow share a grid where they can. A grid with a sigma of less than a fixed number of cells gets smaller cells.
+  - A small sigma blurs each pixel, through the same `fs_blur`.
+  - The tail window of the blur is in `blur_end`.
+  - `blur::Blurred` keeps the grid pictures of a Glow in an `Lru` (`Spare`). A change of the frame size clears it. Its size bounds the bytes.
+  - `glow_atmosphere` makes the noise in the shader, with no picture of its own.
 - `vignette::cells` makes the shape of a Vignette in compute passes, before its one fragment pass:
   - The `mask` entry fills the cells. The `run` entry makes each box blur, one line at a time, with a running sum.
   - Why: a running sum costs the same at each box width. The widest boxes are hundreds of cells wide.
   - The cells are 32-bit floats in a storage buffer.
   - `Blurred` keeps the two buffers (`vignette::Cells`). Each frame makes the cells again, so there is no cache to keep up to date.
-  - The effects of a compound clip use the same buffers (`blur::Scratch`).
+  - The effects of a compound clip use the same buffers (`Blurred::canvas_effects`).
 - `fs_vignette` reads the cells and mixes the Color (`vignette_shape`, `vignette_mixed`).
   - `vignette_mixed` adds its own rules to `mixed`. The shared forms `dodged` and `burned` have no limits. `dodge` and `burn` put the limits of a layer's mode on them.
   - Divide, Hue, Lighter Color and Darker Color have their own rules in `vignette_mixed`. A layer's mode has other rules for a Color of 0, a gray Color and a tie.
