@@ -194,24 +194,33 @@ fn percent(v: f64) -> String {
 }
 
 pub fn settings(place: Place, look: &SubtitleStyle) -> String {
-    let mut parts = Vec::new();
-    match look.position {
-        Some([x, y]) => {
-            let edge = match look.anchor(place).1 {
-                a if a <= 0.0 => "",
-                a if a >= 1.0 => ",end",
-                _ => ",center",
+    let (at, above) = look.anchor(place);
+    let [x, y] = match (look.position, look.anchor) {
+        (Some(p), _) => p,
+        (None, Some(_)) => [0.5, at],
+        (None, None) => {
+            return match place {
+                Place::Top => "line:0".into(),
+                Place::Middle => "line:50%,center".into(),
+                Place::Bottom => String::new(),
             };
-            parts.push(format!("position:{}%", percent(x)));
-            parts.push(format!("line:{}%{edge}", percent(y)));
         }
-        None => match place {
-            Place::Top => parts.push("line:0".into()),
-            Place::Middle => parts.push("line:50%,center".into()),
-            Place::Bottom => {}
-        },
-    }
-    parts.join(" ")
+    };
+    let edge = match above {
+        a if a <= 0.0 => "",
+        a if a >= 1.0 => ",end",
+        _ => ",center",
+    };
+    let (side, align) = match look.anchor_across() {
+        a if a <= 0.0 => (",line-left", " align:left"),
+        a if a >= 1.0 => (",line-right", " align:right"),
+        _ => ("", ""),
+    };
+    format!(
+        "position:{}%{side} line:{}%{edge}{align}",
+        percent(x),
+        percent(y)
+    )
 }
 
 pub fn write(cues: &[Timed], style: &SubtitleStyle) -> String {
