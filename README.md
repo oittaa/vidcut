@@ -22,6 +22,8 @@ The AI runs on this computer. vidcut downloads each model the first time that it
 
 ## Requirements
 
+**GPU:** it must filter and blend 32-bit float textures. vidcut refuses a GPU without these features, and names the missing one.
+
 **Linux** (Ubuntu 26.04 or similar):
 
 ```bash

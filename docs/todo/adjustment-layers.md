@@ -13,7 +13,7 @@ Effects run on one clip's own picture (`fs_blur`), and then the tracks mix.
 
 - An adjustment clip carries effects and has no media.
 - The viewer and the export mix the tracks below that clip, then run its effects.
-- The effects read the mix in `Wide` (`Rgba16Float`).
+- The effects read the mix in `Wide` (`Rgba32Float`).
 - Measure an OpenTimelineIO shape that Resolve reads back, before vidcut writes one.
 - Gaussian Blur is the first effect on that mix.
 - The CLI, IPC and MCP perform the same action as the GUI.
