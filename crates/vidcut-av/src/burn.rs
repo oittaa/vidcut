@@ -1619,7 +1619,7 @@ fn block(
         markup: Markup::Pieces(pieces),
         bare: false,
         drop: 0.0,
-        float: false,
+        float: true,
     };
     let line = Line {
         pieces: pieces.to_vec(),

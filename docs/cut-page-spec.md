@@ -3189,8 +3189,11 @@ Each decision applies until the manual or a test shows that Resolve behaves diff
     - Thus the letters and the box are each 8-bit, and they are joined in floats.
     - Zoom 1.7 with rotation 13 puts 87% of the values between the steps. Opacity 0.5 puts the values on steps of half of 1/255.
     - A subtitle in the default style, burned in, is on the steps: all 2,823 edge values.
+    - A subtitle with a drop shadow (blur 20) has 33,693 of its 34,290 values between the steps. Thus its shadow is in floats.
+    - A subtitle with a box at 50% is like a title with a box. The box and the letters are on the steps.
+    - The edges of its letters over the box are between the steps: 2,833 green values.
   - vidcut: the letters with their outline are 8-bit, and the box is 8-bit. The shadow is in 32-bit floats.
-  - vidcut joins these layers in 32-bit floats. A title with no shadow and no box stays 8-bit.
+  - vidcut joins these layers in 32-bit floats. A title or a subtitle with no shadow and no box stays 8-bit.
   - Zoom draws the text larger, and the outline and the background box grow with it. The zoom scales the outline, measured in Resolve Studio 21.1.2.
   - Rotation turns the whole title, box and shadow too, counterclockwise.
   - The picture's edges cut a title after its zoom and before it turns. Thus a turned title does not show what is past those edges (measured in Resolve Studio 21.1.2).
