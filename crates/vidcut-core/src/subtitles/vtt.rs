@@ -1,7 +1,7 @@
 use super::text::{self, Dialect, PALETTE, Tag, Token};
 use super::{Read, Timed, clock, srt};
 use crate::error::{Error, Result};
-use crate::model::{Place, SubtitleStyle, Title, TitleAnchor};
+use crate::model::{Place, SubtitleAlign, SubtitleStyle, Title, TitleAnchor};
 
 fn place(settings: &str) -> Place {
     let Some(line) = settings
@@ -39,13 +39,14 @@ fn style(settings: &str, place: Place) -> Option<SubtitleStyle> {
     };
     let position = setting("position:", "auto");
     let line = setting("line:", "start");
-    if position.is_none() && line.is_none() {
+    let written = value("align:");
+    if position.is_none() && line.is_none() && written.is_none() {
         return None;
     }
-    let side = match value("align:") {
-        Some("left" | "start") => 0.0,
-        Some("right" | "end") => 1.0,
-        _ => 0.5,
+    let (side, align) = match written {
+        Some("left" | "start") => (0.0, SubtitleAlign::Left),
+        Some("right" | "end") => (1.0, SubtitleAlign::Right),
+        _ => (0.5, SubtitleAlign::Center),
     };
     let (x, across) = match position {
         Some((x, s)) => match s.as_str() {
@@ -64,9 +65,11 @@ fn style(settings: &str, place: Place) -> Option<SubtitleStyle> {
         },
         None => SubtitleStyle::default().anchor(place),
     };
-    Title::places([x, y]).then(|| SubtitleStyle {
-        position: Some([x, y]),
-        anchor: Some(TitleAnchor::at([across, down])),
+    let placed = Title::places([x, y]);
+    Some(SubtitleStyle {
+        align: Some(align),
+        position: placed.then_some([x, y]),
+        anchor: placed.then(|| TitleAnchor::at([across, down])),
         ..SubtitleStyle::default()
     })
 }

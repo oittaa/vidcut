@@ -829,6 +829,9 @@ fn read_style(
     read: Option<SubtitleStyle>,
 ) -> Option<SubtitleStyle> {
     let mut s = read?;
+    if s.align == Some(track.line_align()) {
+        s.align = None;
+    }
     if s.anchor == Some(track.anchor_in(place)) {
         s.anchor = None;
     }

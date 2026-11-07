@@ -20,6 +20,7 @@ struct Style {
     underline: Option<bool>,
     color: Option<String>,
     across: Option<f64>,
+    rows: Option<Option<f64>>,
 }
 
 fn side(v: &str) -> Option<f64> {
@@ -39,6 +40,7 @@ impl Style {
             underline: self.underline.or(base.underline),
             color: self.color.clone().or_else(|| base.color.clone()),
             across: self.across.or(base.across),
+            rows: self.rows.or(base.rows),
         }
     }
 
@@ -51,6 +53,7 @@ impl Style {
                 .map(|v| v.contains("underline") && !v.contains("noUnderline")),
             color: get("color").and_then(text::color),
             across: get("textAlign").and_then(side),
+            rows: n.attribute((EBUTTS, "multiRowAlign")).map(side),
         }
     }
 }
@@ -215,7 +218,12 @@ impl<'a> Sheet<'a> {
             .or_else(|| self.named(r, name, 0))
     }
 
-    fn position(&self, region: &str, place: Place, across: Option<f64>) -> Option<SubtitleStyle> {
+    fn text_align(&self, region: &str) -> Option<f64> {
+        self.region_attr(*self.regions.get(region)?, "textAlign")
+            .and_then(side)
+    }
+
+    fn position(&self, region: &str, place: Place, across: f64) -> Option<SubtitleStyle> {
         let r = *self.regions.get(region)?;
         let attr = |name: &str| self.region_attr(r, name);
         let origin = attr("origin")?;
@@ -230,9 +238,6 @@ impl<'a> Sheet<'a> {
         if super::close(middle, SubtitleStyle::default().usual_position(place)) {
             return None;
         }
-        let across = across
-            .or_else(|| attr("textAlign").and_then(side))
-            .unwrap_or(0.0);
         let down = match attr("displayAlign") {
             Some("center") => 0.5,
             Some("after") => 1.0,
@@ -344,6 +349,19 @@ impl Walk<'_, '_> {
         }
         let region = scope.region.as_deref();
         let place = region.map_or(Place::Bottom, |r| self.sheet.place(r));
+        let across = scope
+            .style
+            .across
+            .or_else(|| region.and_then(|r| self.sheet.text_align(r)))
+            .unwrap_or(0.0);
+        let mut style = region
+            .and_then(|r| self.sheet.position(r, place, across))
+            .unwrap_or_default();
+        style.align = Some(match scope.style.rows.flatten().unwrap_or(across) {
+            r if r <= 0.0 => SubtitleAlign::Left,
+            r if r >= 1.0 => SubtitleAlign::Right,
+            _ => SubtitleAlign::Center,
+        });
         self.cues.push(Timed {
             start: scope.begin,
             end,
@@ -351,7 +369,7 @@ impl Walk<'_, '_> {
             place,
             words: Vec::new(),
             speaker: None,
-            style: region.and_then(|r| self.sheet.position(r, place, scope.style.across)),
+            style: Some(style),
             word_styles: Vec::new(),
         });
     }
