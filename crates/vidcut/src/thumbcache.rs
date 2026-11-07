@@ -4,32 +4,45 @@ use std::sync::Mutex;
 use vidcut_av::thumbs::Image;
 use vidcut_core::disk_cache::{self, Kind};
 use vidcut_core::fingerprint::Origin;
-use vidcut_core::model::ColorSpace;
-use vidcut_core::model::Media;
+use vidcut_core::model::{ColorSpace, Media};
 
-use crate::paths;
+pub const THUMBS: usize = 24;
+
+pub const THUMB_SIZE: (u32, u32) = (192, 108);
 
 pub fn dir() -> PathBuf {
     Kind::Thumbs.dir()
 }
 
-fn file(media: &Media, origin: &Origin, count: usize, size: (u32, u32)) -> PathBuf {
+pub fn thumbs_file(media: &Media, origin: &Origin) -> PathBuf {
     let pictures = media
         .sequence
         .as_ref()
         .map(|s| format!("-{}", s.count))
         .unwrap_or_default();
     let space = read_as(media.color_space);
+    let (w, h) = THUMB_SIZE;
     Kind::Thumbs.file(
         origin,
-        &format!("{count}-{}x{}{pictures}{space}.thumbs", size.0, size.1),
+        &format!("s{THUMBS}-{w}x{h}{pictures}{space}.thumbs"),
     )
 }
 
-pub fn load(media: &Media, count: usize, size: (u32, u32)) -> Option<(Vec<Image>, Vec<f64>)> {
-    let origin = paths::media_origin(media);
-    let path = file(media, &origin, count, size);
-    vidcut_av::thumbs::from_bytes(origin.check(&disk_cache::read(&path)?)?)
+pub fn load_thumbs(path: &Path, origin: &Origin) -> Option<(Vec<Image>, Vec<f64>)> {
+    vidcut_av::thumbs::from_bytes(origin.check(&disk_cache::read(path)?)?)
+}
+
+pub fn has_thumbs(path: &Path) -> bool {
+    let there = path.is_file();
+    if there {
+        disk_cache::used(path);
+    }
+    there
+}
+
+pub fn store_thumbs(path: &Path, origin: &Origin, images: &[Image], times: &[f64]) -> bool {
+    vidcut_av::thumbs::to_bytes(images, times)
+        .is_ok_and(|bytes| disk_cache::write(path, &origin.stamp(&bytes)).is_ok())
 }
 
 pub const TILE_BLOCK: i64 = 64;
@@ -69,14 +82,6 @@ pub fn store_tiles(path: &Path, origin: &Origin, tiles: &[(i64, Image)]) {
     if let Ok(bytes) = vidcut_av::thumbs::to_bytes(&images, &frames) {
         let _ = disk_cache::write(path, &origin.stamp(&bytes));
     }
-}
-
-pub fn store(media: &Media, count: usize, size: (u32, u32), strip: (&[Image], &[f64])) {
-    let Ok(bytes) = vidcut_av::thumbs::to_bytes(strip.0, strip.1) else {
-        return;
-    };
-    let origin = paths::media_origin(media);
-    let _ = disk_cache::write(&file(media, &origin, count, size), &origin.stamp(&bytes));
 }
 
 pub fn clear() -> std::io::Result<()> {

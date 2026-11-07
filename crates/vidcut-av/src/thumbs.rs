@@ -157,20 +157,18 @@ fn strip_on(
                         &mut fit,
                         &decoded,
                         (rotation, tw, th),
-                        t,
+                        k as f64 / rate,
                     )?
                 }
-                None => {
-                    if let Some(prev) = images.last() {
-                        images.push(prev.clone());
-                        times.push(t);
-                        continue;
-                    }
-                    break;
-                }
+                None if images.is_empty() => break,
+                None => {}
             }
             continue;
         }
+        let from = match i {
+            0 if rate > 0.0 => ((t * rate).floor() - 0.5) / rate,
+            _ => t - spacing / 2.0,
+        };
         let near_ahead = position.is_some_and(|p| p <= t && t - p <= 3.0);
         if !near_ahead {
             let ts = ((start + t) * f64::from(ffmpeg::ffi::AV_TIME_BASE)) as i64;
@@ -184,13 +182,13 @@ fn strip_on(
             };
             let ft = f.timestamp().map_or(t, |ts| ts as f64 * tb - start);
             position = Some(ft);
-            let done = ft >= t - spacing / 2.0 || decoded_frames >= 300;
-            picked = Some(f);
+            let done = ft >= from || decoded_frames >= 300;
+            picked = Some((f, ft));
             if done {
                 break;
             }
         }
-        let Some(decoded) = picked else { break };
+        let Some((decoded, at)) = picked else { break };
         if refused(&decoded) {
             return Ok(None);
         }
@@ -200,7 +198,7 @@ fn strip_on(
             &mut fit,
             &decoded,
             (rotation, tw, th),
-            t,
+            at,
         )?;
     }
     if gpu.is_some() && images.is_empty() {

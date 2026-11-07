@@ -276,7 +276,7 @@ pub(crate) enum Msg {
     Thumbs {
         media: String,
         wanted: String,
-        result: std::result::Result<Filmstrip, String>,
+        result: std::result::Result<bool, String>,
     },
     Waveform {
         media: String,
@@ -531,7 +531,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         clipboard: 0,
         key_clipboard: 0,
         notices: Arc::new(VecDeque::new()),
-        thumbs: Arc::new(HashMap::new()),
+        thumbs: Arc::new(HashSet::new()),
         missing: Arc::new(HashSet::new()),
         transcribed: Arc::new(HashSet::new()),
         fillers: Arc::default(),
@@ -617,7 +617,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         log_seq: 0,
         notices: Arc::new(VecDeque::new()),
         notice_seq: 0,
-        thumbs: Arc::new(HashMap::new()),
+        thumbs: Arc::new(HashSet::new()),
         missing: Arc::new(HashSet::new()),
         transcribed: Arc::new(HashSet::new()),
         fillers: Arc::new(crate::preferences::filler_lists()),
@@ -625,6 +625,7 @@ pub fn start(config: Config) -> (Handle, std::thread::JoinHandle<()>) {
         proxy_dir: Arc::from(Path::new("")),
         missing_watch: missing::MissingWatch::start(tx.clone()),
         thumbs_wanted: HashMap::new(),
+        thumbs_on: thumbs_on(),
         waveforms: Arc::new(HashMap::new()),
         waveforms_wanted: HashMap::new(),
         workers: Workers::new(2),
@@ -784,9 +785,6 @@ const NOTICE_CAP: usize = 20;
 
 const WAVEFORM_RATE: u32 = 100;
 
-const THUMBS: usize = 24;
-const THUMB_SIZE: (u32, u32) = (192, 108);
-
 fn media_version(m: &vidcut_core::model::Media) -> String {
     format!(
         "{}|{}|{}|{}",
@@ -797,50 +795,37 @@ fn media_version(m: &vidcut_core::model::Media) -> String {
     )
 }
 
-fn filmstrip(media: &vidcut_core::model::Media) -> std::result::Result<Filmstrip, String> {
-    let prefs = crate::preferences::load().unwrap_or_default().thumbnails;
-    let cached = prefs
+fn thumbs_on() -> bool {
+    crate::preferences::load()
+        .unwrap_or_default()
+        .thumbnails
         .disk_cache
-        .then(|| crate::thumbcache::load(media, THUMBS, THUMB_SIZE))
-        .flatten();
-    let (images, times) = match cached {
-        Some(strip) => strip,
-        None => {
-            let input = crate::env::input_of(media);
-            let decoder = crate::preferences::gpu_decoding().own_decoder();
-            let decoder = decoder.as_ref();
-            let strip = match media.sequence.as_ref().map(|s| s.count) {
-                Some(pictures) => vidcut_av::thumbs::filmstrip_pictures(
-                    &input,
-                    pictures,
-                    THUMBS,
-                    THUMB_SIZE.0,
-                    THUMB_SIZE.1,
-                    decoder,
-                    media.color_space,
-                ),
-                None => vidcut_av::thumbs::filmstrip(
-                    &input,
-                    THUMBS,
-                    THUMB_SIZE.0,
-                    THUMB_SIZE.1,
-                    decoder,
-                    media.color_space,
-                ),
-            }
-            .map_err(|e| e.to_string())?;
-            if prefs.disk_cache && !strip.0.is_empty() {
-                crate::thumbcache::store(media, THUMBS, THUMB_SIZE, (&strip.0, &strip.1));
-            }
-            strip
-        }
-    };
-    Ok(Filmstrip {
-        width: images.first().map_or(0, |i| i.width),
-        height: images.first().map_or(0, |i| i.height),
-        frames: images.into_iter().map(|i| i.rgba).collect(),
-        times,
-    })
+}
+
+fn make_thumbs(media: &vidcut_core::model::Media) -> std::result::Result<bool, String> {
+    let origin = paths::media_origin(media);
+    let file = crate::thumbcache::thumbs_file(media, &origin);
+    if crate::thumbcache::has_thumbs(&file) {
+        return Ok(true);
+    }
+    let input = crate::env::input_of(media);
+    let decoder = crate::preferences::gpu_decoding().own_decoder();
+    let decoder = decoder.as_ref();
+    let (count, (w, h)) = (crate::thumbcache::THUMBS, crate::thumbcache::THUMB_SIZE);
+    let (images, times) = match media.sequence.as_ref().map(|s| s.count) {
+        Some(pictures) => vidcut_av::thumbs::filmstrip_pictures(
+            &input,
+            pictures,
+            count,
+            w,
+            h,
+            decoder,
+            media.color_space,
+        ),
+        None => vidcut_av::thumbs::filmstrip(&input, count, w, h, decoder, media.color_space),
+    }
+    .map_err(|e| e.to_string())?;
+    Ok(!images.is_empty() && crate::thumbcache::store_thumbs(&file, &origin, &images, &times))
 }
 
 fn chosen_name() -> String {
@@ -915,7 +900,7 @@ struct Live {
     log_seq: u64,
     notices: Arc<VecDeque<Notice>>,
     notice_seq: u64,
-    thumbs: Arc<HashMap<String, Arc<Filmstrip>>>,
+    thumbs: Arc<HashSet<String>>,
     missing: Arc<HashSet<String>>,
     transcribed: Arc<HashSet<String>>,
     fillers: Arc<std::collections::BTreeMap<String, Vec<String>>>,
@@ -923,6 +908,7 @@ struct Live {
     proxy_dir: Arc<Path>,
     missing_watch: missing::MissingWatch,
     thumbs_wanted: HashMap<String, String>,
+    thumbs_on: bool,
     waveforms: Arc<HashMap<String, Arc<vidcut_av::waveform::Waveform>>>,
     waveforms_wanted: HashMap<String, String>,
     workers: Workers,
@@ -1211,6 +1197,13 @@ impl Live {
                     self.bindings = Arc::new(bindings);
                     changed = true;
                 }
+                if self.thumbs_on != thumbs_on() {
+                    self.thumbs_on = !self.thumbs_on;
+                    self.thumbs = Arc::new(HashSet::new());
+                    self.thumbs_wanted.clear();
+                    self.check_media();
+                    changed = true;
+                }
                 self.follow_budget();
                 self.follow_theme();
                 if self
@@ -1246,6 +1239,18 @@ impl Live {
                 }
                 changed = refreshed;
             }
+            Msg::Thumbs { media, wanted, .. }
+                if self.thumbs_wanted.get(&media) != Some(&wanted) =>
+            {
+                changed = false;
+            }
+            Msg::Thumbs { media, result, .. } => match result {
+                Ok(true) => {
+                    Arc::make_mut(&mut self.thumbs).insert(media);
+                }
+                Ok(false) => changed = false,
+                Err(e) => self.notice(format!("thumbnails for {media}: {e}"), true),
+            },
             Msg::Waveform { media, wanted, .. }
                 if self.waveforms_wanted.get(&media) != Some(&wanted) =>
             {
@@ -1280,19 +1285,6 @@ impl Live {
                     self.make_proxies(Some(&lost));
                 }
             }
-            Msg::Thumbs { media, wanted, .. }
-                if self.thumbs_wanted.get(&media) != Some(&wanted) =>
-            {
-                changed = false;
-            }
-            Msg::Thumbs { media, result, .. } => match result {
-                Ok(strip) => {
-                    let mut map = (*self.thumbs).clone();
-                    map.insert(media, Arc::new(strip));
-                    self.thumbs = Arc::new(map);
-                }
-                Err(e) => self.notice(format!("thumbnails for {media}: {e}"), true),
-            },
             Msg::JobPlanned { id, outputs } => self.job_planned(id, outputs),
             Msg::JobProgress {
                 id,
@@ -3608,7 +3600,7 @@ impl Live {
         self.tape_position = 0;
         self.player.unload(SOURCE);
         self.player.unload(TIMELINE);
-        self.thumbs = Arc::new(HashMap::new());
+        self.thumbs = Arc::new(HashSet::new());
         self.thumbs_wanted.clear();
         self.waveforms = Arc::new(HashMap::new());
         self.waveforms_wanted.clear();
@@ -3711,13 +3703,13 @@ impl Live {
     fn forget_removed(&mut self, media: &[vidcut_core::model::Media]) {
         let ids: HashSet<&str> = media.iter().map(|m| m.id.as_str()).collect();
         let stays = |id: &String| ids.contains(id.as_str());
-        if !self.thumbs.keys().all(stays) {
-            Arc::make_mut(&mut self.thumbs).retain(|id, _| stays(id));
+        if !self.thumbs.iter().all(stays) {
+            Arc::make_mut(&mut self.thumbs).retain(stays);
         }
+        self.thumbs_wanted.retain(|id, _| stays(id));
         if !self.waveforms.keys().all(stays) {
             Arc::make_mut(&mut self.waveforms).retain(|id, _| stays(id));
         }
-        self.thumbs_wanted.retain(|id, _| stays(id));
         self.waveforms_wanted.retain(|id, _| stays(id));
         self.duck_failed.retain(|u| stays(&u.media));
         if !self.duck_kept.is_empty() {
@@ -3736,12 +3728,13 @@ impl Live {
         for m in media {
             let version = media_version(&m);
             let pictures = format!("{version}|{}", m.color_space.key());
-            if m.info.video.is_some() && self.thumbs_wanted.get(&m.id) != Some(&pictures) {
+            if self.thumbs_on
+                && m.info.video.is_some()
+                && self.thumbs_wanted.get(&m.id) != Some(&pictures)
+            {
                 self.thumbs_wanted.insert(m.id.clone(), pictures.clone());
-                if self.thumbs.contains_key(&m.id) {
-                    let mut map = (*self.thumbs).clone();
-                    map.remove(&m.id);
-                    self.thumbs = Arc::new(map);
+                if self.thumbs.contains(&m.id) {
+                    Arc::make_mut(&mut self.thumbs).remove(&m.id);
                 }
                 let (tx, id, media) = (self.tx.clone(), m.id.clone(), m.clone());
                 let wanted = pictures;
@@ -3749,7 +3742,7 @@ impl Live {
                     let _ = tx.send(Msg::Thumbs {
                         media: id,
                         wanted,
-                        result: filmstrip(&media),
+                        result: make_thumbs(&media),
                     });
                 });
             }

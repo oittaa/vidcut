@@ -68,7 +68,7 @@ pub struct TitleLook {
     /// How it lines up: `left`, `middle` or `right`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align: Option<TitleAlign>,
-    /// The point of a `text` title's block that goes to its position.
+    /// The point of a title's text that goes to its position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<TitleAnchor>,
     /// `[x, y]` as fractions of the picture. Usual: the kind's place.
