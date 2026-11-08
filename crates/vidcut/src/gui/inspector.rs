@@ -1377,6 +1377,7 @@ enum Act {
     Equalize(bool),
     Level(bool),
     Compress(bool),
+    Denoise(bool),
     Direction(Direction),
     SpeedEase(Ease),
     Ripple(bool),
@@ -3702,6 +3703,7 @@ impl Workspace {
         let mut edit_equalizer = false;
         let mut edit_leveler = false;
         let mut edit_compressor = false;
+        let mut edit_noise = false;
         let normalize = group(ui, "Audio", header, |ui| {
             let first = &sounds[0];
             let off = count > 1 && sounds.iter().any(|s| s.keyed);
@@ -3795,6 +3797,23 @@ impl Workspace {
                 edit_compressor = ui.button("Edit…").clicked();
             });
             ui.end_row();
+            let denoise = |id: &str| {
+                p.clip(id)
+                    .and_then(|c| c.audio.as_ref())
+                    .and_then(|a| a.noise_reduction)
+            };
+            let denoised = sounds
+                .iter()
+                .any(|s| denoise(&s.id).is_some_and(|n| n.heard()));
+            label(ui, "Noise Reduction", denoised);
+            ui.horizontal(|ui| {
+                let mut on = denoise(&first.id).is_some_and(|n| n.on);
+                if ui.checkbox(&mut on, "").clicked() {
+                    acts.push(Act::Denoise(on));
+                }
+                edit_noise = ui.button("Edit…").clicked();
+            });
+            ui.end_row();
             let isolated = sounds.iter().any(|s| heard(p, &s.id).flatten().is_some());
             label(ui, "Voice Isolation", isolated);
             ui.horizontal(|ui| {
@@ -3815,6 +3834,9 @@ impl Workspace {
         if edit_compressor {
             self.open_compressor(sounds.iter().map(|s| s.id.clone()).collect());
         }
+        if edit_noise {
+            self.open_noise(sounds.iter().map(|s| s.id.clone()).collect());
+        }
     }
 
     fn show_boxes(&mut self, chosen: &[Chosen]) {
@@ -3834,6 +3856,13 @@ impl Workspace {
     fn inspect(&mut self, act: Act, (chosen, sounds, paced): Lists<'_>) {
         let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
+            Act::Denoise(on) => {
+                let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
+                self.send(
+                    "clip.set",
+                    json!({ "clips": ids, "noise_reduction": { "on": on } }),
+                );
+            }
             Act::Compress(on) => {
                 let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
                 self.send(

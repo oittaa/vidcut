@@ -5053,6 +5053,9 @@ pub struct ClipAudio {
     /// The compressor. Left out when the clip has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compressor: Option<Compressor>,
+    /// Noise Reduction. Left out when the clip has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise_reduction: Option<NoiseReduction>,
     /// Effects on its sound, carried from another editor. The clip volume
     /// is `gain_db` and `gain_keys`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5150,6 +5153,33 @@ pub struct Compressor {
     pub release_ms: f64,
     /// The gain after it, in dB, from 0 to 24.
     pub makeup_db: f64,
+}
+
+/// Noise Reduction: it lowers the steady noise of the room and the hiss.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct NoiseReduction {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    /// How far above the noise a sound must be to stay, in dB, from 0 to
+    /// 40. A higher value removes more.
+    pub threshold_db: f64,
+    /// How fast the noise profile follows a change, in ms, from 10 to 1000.
+    pub attack_ms: f64,
+    /// How much the noise profile is raised, in dB, from 0 to 12. A higher
+    /// value removes more, also of the dialogue.
+    pub sensitivity_db: f64,
+    /// How much faster the signal profile is than the noise profile, from
+    /// 1 to 10.
+    pub ratio: f64,
+    /// How much the result is smoothed across frequencies, in percent,
+    /// from 0 to 100.
+    pub frequency_smoothing: f64,
+    /// Smooths the result over time.
+    pub time_smoothing: bool,
+    /// The share of the processed sound, in percent, from 0 to 100.
+    pub dry_wet: f64,
+    /// The gain before the mix with the dry sound, in dB, from -6 to 18.
+    pub level_db: f64,
 }
 
 /// Voice Isolation: a switch and an Amount.

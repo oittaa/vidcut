@@ -925,6 +925,9 @@ pub enum AudioPiece {
         /// Its clip's compressor, left out when it changes nothing.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         compressor: Option<Box<crate::model::Compressor>>,
+        /// Its clip's Noise Reduction, left out when it changes nothing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        noise_reduction: Option<Box<crate::model::NoiseReduction>>,
     },
     Silence {
         samples: i64,
@@ -1682,6 +1685,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 equalizer,
                 leveler,
                 compressor,
+                noise_reduction,
                 ..
             }),
             AudioPiece::Source {
@@ -1698,6 +1702,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 equalizer: e2,
                 leveler: l2,
                 compressor: c2,
+                noise_reduction: nr2,
                 ..
             },
         ) if media == m2
@@ -1708,6 +1713,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             && equalizer == e2
             && leveler == l2
             && compressor == c2
+            && noise_reduction == nr2
             && keyed
                 .as_ref()
                 .map(|k| (&k.keys, k.per_frame, k.at + *samples as f64))
@@ -2607,6 +2613,10 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
             .compressor
             .filter(crate::model::Compressor::heard)
             .map(Box::new),
+        noise_reduction: audio
+            .noise_reduction
+            .filter(crate::model::NoiseReduction::heard)
+            .map(Box::new),
     }
 }
 
@@ -2689,6 +2699,7 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
                 s.equalizer = None;
                 s.dialogue_leveler = None;
                 s.compressor = None;
+                s.noise_reduction = None;
                 s.voice_isolation = None;
             }
         }
@@ -2912,6 +2923,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
         equalizer: None,
         leveler: None,
         compressor: None,
+        noise_reduction: None,
     }
 }
 
@@ -3309,6 +3321,24 @@ mod tests {
             audio_pieces(&f)[0],
             AudioPiece::Source {
                 compressor: Some(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_noise_reduction_reaches_its_piece() {
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        req(
+            &mut f,
+            "clip.set",
+            json!({"clips": "c1", "noise_reduction": {}}),
+        );
+        assert!(matches!(
+            audio_pieces(&f)[0],
+            AudioPiece::Source {
+                noise_reduction: Some(_),
                 ..
             }
         ));

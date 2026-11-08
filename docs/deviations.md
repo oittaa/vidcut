@@ -1581,6 +1581,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - The Equalizer row has a switch and a button that opens the Equalizer window ([X154](#x154-the-equalizer-is-a-window-with-chosen-curves)).
     - The Dialogue Leveler row has a switch and a button that opens the Dialogue Leveler window ([X155](#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
     - The Compressor row has a switch and a button that opens the Compressor window ([X156](#x156-the-compressor-is-on-a-clip)).
+    - The Noise Reduction row has a switch and a button that opens the Noise Reduction window ([X157](#x157-noise-reduction-is-our-own-spectral-gate)).
     - The Audio section has no Pitch or Music Remixer.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
@@ -2911,3 +2912,25 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The tool of the Audio section acts on the selected clips, as the Equalizer does.
   - A clip recorded at its own level needs its own settings.
+
+## X157. Noise Reduction is our own spectral gate
+
+- **Resolve:**
+  - Noise Reduction is a Fairlight FX with its own analysis (pp. 4041–4042).
+  - Its scripting API cannot set its values. Thus its curves and its ranges are not measured.
+- **vidcut:**
+  - A short-time Fourier transform splits each channel into frequency bins. Each bin has a signal profile and a noise profile.
+  - A bin below the Threshold over its noise profile loses level. A bin at the noise level loses the Threshold and the Sensitivity.
+  - Threshold goes from 0 to 40 dB, Attack from 10 to 1000 ms, Sensitivity from 0 to 12 dB and Ratio from 1 to 10. The manual gives no range for them.
+  - Frequency Smoothing goes from 0 to 100. The manual gives no range for it.
+  - The defaults are Threshold 12 dB, Attack 200 ms, Sensitivity 3 dB, Ratio 4, Frequency Smoothing 25 and Time Smoothing on.
+  - Dry/Wet starts at 100% and Level at 0 dB. These are vidcut's choices.
+  - It has no Listen To Noise Only, no presets and no spectrum graph.
+  - A steady tone is noise to it, as it has no steady level above its own minimum.
+  - With the usual values, a render of a spoken clip with noise at −60 dBFS gave this result:
+    - The noise between the lines lost 12.5 dB. In the first gap it lost 8.8 dB, as the profile is still new.
+    - Lines from −16 to −44 dBFS lost 0.0 to 0.7 dB.
+  - An OTIO export keeps it in vidcut's own metadata. The export gives the note `noise_reduction_kept`.
+- **Why:**
+  - The effect has no public rules. A spectral gate is the usual way to lower steady noise and it runs in real time.
+  - The default effect lowered the noise by 0.4 dB and the quiet lines by up to 6.0 dB (spec). Meeting recordings need the opposite.

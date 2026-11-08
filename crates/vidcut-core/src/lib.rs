@@ -22,6 +22,7 @@ pub mod looks;
 pub mod lru;
 pub mod model;
 pub mod multicam;
+pub mod noise_reduction;
 pub mod ops;
 pub mod otio;
 pub mod past;

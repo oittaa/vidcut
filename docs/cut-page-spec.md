@@ -1495,7 +1495,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
-  - vidcut: its Audio section has Volume, Pan, Mute, Equalizer, Dialogue Leveler, Compressor and Voice Isolation for the selected clips with sound (X70).
+  - vidcut: its Audio section has Volume, Pan, Mute, Equalizer, Dialogue Leveler, Compressor, Noise Reduction and Voice Isolation for the selected clips with sound (X70).
   - vidcut: its Crop section has Softness, and its Composite section has Composite Mode and Opacity.
 - **The units of the Inspector,** measured in Resolve Studio 21.1.1:
   - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
@@ -2176,6 +2176,19 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - Release goes from 50 to 4000 ms. Its default is 93 ms.
   - The scripting API of Resolve Studio 21.2 cannot read or set the Dynamics. Thus the curve and the times are not measured.
   - vidcut: the Compressor row of the Audio section (X70) and `clip.set` set `compressor` ([X156](deviations.md#x156-the-compressor-is-on-a-clip)).
+- **Noise Reduction** (pp. 4041–4042):
+  - Noise Reduction is a Fairlight FX. It reduces noise in all kinds of recordings (p. 4041).
+  - It has a Bypass switch, Listen To Noise Only, Threshold, Attack, Sensitivity, Ratio, Frequency Smoothing, Time Smoothing, Dry/Wet and Level (pp. 4041–4042).
+  - A high Threshold removes more noise. It relates to the signal-to-noise ratio of the recording.
+  - Attack is the time over which it finds the noise profile. Sensitivity raises the profile, so that more noise goes.
+  - Ratio sets the attack of the signal profile relative to the attack of the noise profile.
+  - Dry/Wet goes from 0 to 100%, and Level goes from −6 to 18 dB. Level is a gain before the mix (p. 4042).
+  - It has the presets De-Hiss, De-Rumble and De-Rumble And Hiss (p. 4041).
+  - The scripting API of Resolve Studio 21.2 can add the effect, but it cannot read or set its values.
+  - With the effect at its default values, a render of a spoken clip with noise at −60 dBFS gave this result:
+    - Lines from −16 to −44 dBFS lost 0.3 to 6.0 dB. The quietest lines lost the most.
+    - The noise between the lines lost 0.4 dB.
+  - vidcut: the Noise Reduction row of the Audio section (X70) and `clip.set` set `noise_reduction` ([X157](deviations.md#x157-noise-reduction-is-our-own-spectral-gate)).
 - **Volume keyframes** (pp. 1109, 1111–1113, 1251, 1255):
   - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112). Two keyframes or more change the level over time (p. 1112).
   - Keyframes of the Inspector's Volume also show on the overlay (p. 1111).

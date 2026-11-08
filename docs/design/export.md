@@ -348,6 +348,11 @@ The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-7
   - Thus the player and the export play the same curve ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - A piece has the Pan of its clip (`pan` of an `AudioPiece`). `render::pan_gains` gives the gain of each side.
   - `AudioMix` multiplies the first two channels of a mix of two channels or more by those gains.
+- A piece has the `noise_reduction` of its clip when it changes the sound.
+  - `Denoiser` is a spectral gate with its own short-time Fourier transforms. It reads ahead of the piece, as `Isolator` does.
+  - It gets the sound after Voice Isolation and before the Dialogue Leveler.
+  - Each channel has its own noise profile, which starts at the first frame of the piece.
+  - The profile of a bin follows the lowest level of that bin, and it rises slowly.
 - A piece has the `compressor` of its clip when it changes the sound.
   - `Dynamics` runs after the equalizer and before the gain and the Pan. It adds no delay.
   - Each channel gets the same gain, from the highest peak of the channels.
