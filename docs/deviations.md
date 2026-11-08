@@ -2944,8 +2944,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A right-click on a selected keyframe keeps the selection. The ease goes on all the selected keyframes.
   - A right-click on another keyframe selects that keyframe alone.
   - With two or more keyframes selected, the bar under the tracks has an ease list. It shows `Mixed` when their eases are not the same.
-  - A keyframe takes the sides of the ease that have a neighbor.
-  - A first keyframe does not change with Ease In. A last keyframe does not change with Ease Out.
   - A speed keyframe takes only Linear and Ease In and Out.
   - `keyframes.set` with several `frames` sets the ease of one value. `apply` holds one such request for each value.
 - **Why:**
@@ -2956,8 +2954,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
 
 - **Resolve:**
   - Enable Snapping snaps the control points of the Curve Editor to the playhead (pp. 1259, 1264).
+  - It is on in a new project. A keyframe of another curve and a timeline marker are not targets (measured in Resolve Studio 21.2).
 - **vidcut:**
-  - Enable Snapping is in the ⋯ menu of the Keyframes tab. It is off when vidcut starts.
+  - Enable Snapping is in the ⋯ menu of the Keyframes tab. It is on when vidcut starts.
   - It acts on each drag of keyframes: on a track, on a group track and on a curve.
   - A dragged keyframe goes to the playhead or to a keyframe of another value when one is near.
   - A white line shows the time that it goes to.

@@ -399,7 +399,7 @@ The bar and the Jobs button:
 - Mark > Move Selected Keyframes (`Nudge`, `Workspace::nudge_keys`) sends what a drag of one frame or one step sends.
 - A drag finds its keyframe at the point of the press (`pressed_at`). The pointer can already be past that keyframe when the drag starts.
 - Shift holds a drag on a curve point to one direction (`Lock`, `locked`). The first movement selects the direction.
-- `Editor::snapping` turns on snapping. `snapped` finds the nearest target of a drag. `Shift::snap` is the time of the white line.
+- `Editor::snap_off` turns off snapping. `snapped` finds the nearest target of a drag. `Shift::snap` is the time of the white line.
 - A right-click on a selected keyframe keeps the selection. `marks_eases` gives the eases of the selection. `ease_parts` makes one `keyframes.set` for each value.
 - `Editor::graph` turns on the large graph (`Workspace::curve_graph`). `graphed` gives its lines, without those in `Editor::graph_off`.
   - `Editor::graph_active` is the curve with the points. Without one that the graph shows, the first line is active.
