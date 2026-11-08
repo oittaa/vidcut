@@ -522,6 +522,21 @@ mod tests {
     }
 
     #[test]
+    fn a_curve_past_the_range_stops_at_its_end() {
+        let mut e = EffectType::GaussianBlur.made();
+        let mut first = key(0, 0.9);
+        first.out_handle = Some(crate::model::Handle {
+            frames: 10.0,
+            value: 50.0,
+        });
+        e.keys = vec![EffectKeys {
+            value: EffectValue::Strength,
+            keys: vec![first, key(30, 0.9)],
+        }];
+        assert_eq!(e.value_at(EffectValue::Strength, 15.0), 1.0);
+    }
+
+    #[test]
     fn a_value_with_no_keys_stays_plain() {
         assert_eq!(blur_with_keys().value_at(EffectValue::Blend, 5.0), 1.0);
     }
@@ -566,12 +581,7 @@ mod tests {
     fn toggle_off_a_key_keys_every_value_at_its_value() {
         let mut e = blur_with_keys();
         e.toggle_keys(5);
-        let keyed = e
-            .values()
-            .iter()
-            .filter(|v| !e.keys_of(**v).is_empty())
-            .count();
-        assert_eq!(keyed, e.values().len());
+        assert_eq!(e.keys.iter().filter(|k| !k.keys.is_empty()).count(), 11);
     }
 
     #[test]

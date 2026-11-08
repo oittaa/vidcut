@@ -808,6 +808,10 @@ pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey
                 at,
                 CopiedKey {
                     param: *param,
+                    kind: match plain {
+                        KeyParam::Effect(q) => effect_of(c, q).map(Effect::kind),
+                        _ => None,
+                    },
                     offset: 0,
                     value,
                     ease: ease_of(keys, i).filter(|_| bent.is_none()),
@@ -830,6 +834,19 @@ pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey
         .collect())
 }
 
+fn pastes_on_its_kind(c: &Clip, id: &str, k: &CopiedKey) -> Result<()> {
+    let (KeyParam::Effect(q), Some(kind)) = (k.param.on_line().0, k.kind) else {
+        return Ok(());
+    };
+    match effect_of(c, q) {
+        Some(e) if e.kind() != kind => Err(Error::invalid(format!(
+            "{id}'s effect {} is not the kind of the copied keyframe",
+            q.effect
+        ))),
+        _ => Ok(()),
+    }
+}
+
 pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Result<Vec<Value>> {
     let Some(first) = keys.iter().map(|k| k.offset).min() else {
         return Err(Error::usage("keyframes.paste needs keyframes"));
@@ -841,6 +858,9 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
     let Some(earliest) = starts.iter().copied().min() else {
         return Err(Error::usage("keyframes.paste needs clips"));
     };
+    for (id, k) in ids.iter().flat_map(|id| keys.iter().map(move |k| (id, k))) {
+        pastes_on_its_kind(&holder(p, id)?, id, k)?;
+    }
     let mut out = Vec::new();
     for (id, start) in ids.iter().zip(starts) {
         let one = std::slice::from_ref(id);
@@ -1392,8 +1412,56 @@ mod tests {
             "effects.key",
             json!({"clip": "c1", "effect": 0, "at": 10}),
         ));
-        let e = effect(&f);
-        assert_eq!(e.keys.len(), e.values().len());
+        assert_eq!(effect(&f).keys.len(), 11);
+    }
+
+    #[test]
+    fn effects_set_keys_only_the_number_that_changes() {
+        let mut f = blurred();
+        f.ok(req(
+            "effects.key",
+            json!({"clip": "c1", "effect": 0, "at": 0}),
+        ));
+        f.ok(req(
+            "effects.set",
+            json!({"clip": "c1", "effect": 0, "at": 10, "horizontal_channels": [0.5, 1.0, 1.0, 1.0]}),
+        ));
+        assert_eq!(effect(&f).keys_of(EffectValue::HorizontalGreen).len(), 1);
+    }
+
+    #[test]
+    fn a_retime_keeps_an_effect_key_at_its_place_in_the_clip() {
+        let mut f = blurred();
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": strength(), "at": 10}),
+        ));
+        let old = f.editor.project().clip("c1").expect("a clip").clone();
+        let mut new = old.clone();
+        new.source_in = 30;
+        let mut e = effect(&f);
+        e.retime_keys(&old, &new);
+        assert_eq!(e.keys_of(EffectValue::Strength)[0].frame, 40);
+    }
+
+    #[test]
+    fn keyframes_paste_refuses_an_effect_of_another_kind() {
+        let mut f = blurred();
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": {"effect": 0, "value": "blend"}, "at": 10}),
+        ));
+        let copied = f.ok(req("keyframes.copy", json!({"clip": "c1"}))).result;
+        f.ok(req("effects.add", json!({"clips": "c1", "kind": "glow"})));
+        f.ok(req(
+            "effects.move",
+            json!({"clip": "c1", "effect": 1, "to": 0}),
+        ));
+        let got = f.err(req(
+            "keyframes.paste",
+            json!({"clips": "c1", "at": 40, "keyframes": copied["keyframes"]}),
+        ));
+        assert!(got.message.contains("kind"), "{}", got.message);
     }
 
     #[test]

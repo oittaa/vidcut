@@ -3879,6 +3879,10 @@ pub struct KeyPicks {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CopiedKey {
     pub param: KeyParam,
+    /// The kind of the effect, on a keyframe of an effect value. A paste puts
+    /// the keyframe only on an effect of this kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<EffectType>,
     /// Timeline frames after the first copied keyframe.
     pub offset: i64,
     /// A number, or x and y for position, zoom and the anchor point.

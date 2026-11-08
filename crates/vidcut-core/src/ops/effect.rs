@@ -268,7 +268,9 @@ pub fn set(
             )));
         };
         let to = next.plain(value);
-        next.put(value, frame, to);
+        if to != e.value_at(value, frame as f64) {
+            next.put(value, frame, to);
+        }
         next.write(value, e.plain(value));
     }
     *e = effect_checked(&next)?;

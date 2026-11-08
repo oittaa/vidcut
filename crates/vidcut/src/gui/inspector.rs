@@ -3084,7 +3084,8 @@ impl Workspace {
         let Some(to) = knob_picture(c, (n, k), value).filter(|p| *p != c.shown) else {
             return;
         };
-        let (name, v) = k.param(&k.put(&c.shown.effects[n], value));
+        let at_frame = c.shown.effects[n].adopted(c.frame as f64);
+        let (name, v) = k.param(&k.put(&at_frame, value));
         let mut params = json!({ "clip": c.id, "effect": n });
         params[name] = v;
         if c.stored.effects.get(n).is_some_and(Effect::has_keys) {

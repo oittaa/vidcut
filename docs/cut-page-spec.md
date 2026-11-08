@@ -1872,6 +1872,8 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
     - On any other frame, it adds a keyframe on each value of the effect, at the value of that frame.
     - A right-click on the button sets the ease of the keyframes on that frame.
   - At the playhead, a change of a value with keyframes puts a keyframe there. The plain value stays.
+  - A change of one number of a pair or a set puts a keyframe on that number only. The other numbers keep their curves.
+  - A paste puts a keyframe of an effect value only on an effect of the same kind.
   - When the last keyframe of a value goes, the value returns to its plain value.
   - Reset removes the keyframes of the effect, as the reset button of a group does.
   - The Keyframes tab has a group for each effect with a track for each value. A group name has a number when the clip has two effects of a kind.

@@ -374,7 +374,7 @@ The bar and the Jobs button:
   - The Center rows of a Four Color Gradient act as the other keyed rows. A value goes with `generators.set`, and its keyframes go with `keyframes.add`. Reset removes the keyframes and sets 0.
   - The Level row of an EBU Color Bar sends one `generators.set` for each choice.
 - The effect sections show the effects of the first selected clip (`effect_block`). Each change is one `effects.set` for that clip.
-  - A dragged value previews as a picture with the changed effect (`knob_picture`). `Picture::preview` takes the effects of the dragged picture.
+  - A dragged value previews as a picture with the changed effect (`knob_picture`). `Picture::preview` puts a keyframe on each changed value that has keyframes (`Effect::previewed`).
   - On a value with keyframes, `knob_picture` puts a keyframe on the frame of the playhead (`Knob::keyed_value`). `effects.set` then has `at`.
   - The section shows the values of the playhead's frame (`Effect::adopted`).
   - On, Move Up, Move Down, Reset and Delete send `effects.set`, `effects.move`, `effects.reset` and `effects.remove`.

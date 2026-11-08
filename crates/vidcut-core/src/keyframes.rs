@@ -1287,6 +1287,21 @@ mod tests {
     }
 
     #[test]
+    fn a_retarget_moves_an_effect_key() {
+        let mut e = crate::model::EffectType::GaussianBlur.made();
+        e.keys = vec![crate::model::EffectKeys {
+            value: crate::model::EffectValue::Strength,
+            keys: vec![key(10, 0.5)],
+        }];
+        let mut p = Picture {
+            effects: vec![e],
+            ..Picture::default()
+        };
+        p.retarget(|f| f + 5);
+        assert_eq!(p.effects[0].keys[0].keys[0].frame, 15);
+    }
+
+    #[test]
     fn linear_zoom_is_a_quarter_at_the_middle() {
         let p = Picture {
             zoom_keys: vec![key(0, 0.1), key(30, 0.4)],
