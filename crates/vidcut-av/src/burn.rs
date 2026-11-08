@@ -549,6 +549,27 @@ impl Renderer for Bars {
     fn glyph(&mut self, _: cosmic_text::PhysicalGlyph, _: Color) {}
 }
 
+struct Painter<'a> {
+    canvas: &'a mut Canvas,
+    fonts: &'a mut Fonts,
+}
+
+impl Renderer for Painter<'_> {
+    fn rectangle(&mut self, x: i32, y: i32, w: u32, h: u32, color: Color) {
+        self.canvas.rectangle(x, y, w, h, color);
+    }
+
+    fn glyph(&mut self, glyph: cosmic_text::PhysicalGlyph, color: Color) {
+        let canvas = &mut *self.canvas;
+        let fonts = &mut *self.fonts;
+        fonts
+            .cache
+            .with_pixels(&mut fonts.system, glyph.cache_key, color, |x, y, ink| {
+                canvas.rectangle(glyph.x + x, glyph.y + y, 1, 1, ink);
+            });
+    }
+}
+
 struct TextLine {
     left: f32,
     right: f32,
@@ -1427,12 +1448,9 @@ fn lay_out(look: &Look) -> Option<Laid> {
     if let Some(at) = exact.filter(|_| !look.bare) {
         letters(&mut canvas, &runs, &lifts, at, white, f);
     }
-    let mut painter = cosmic_text::LegacyRenderer {
-        font_system: &mut f.system,
-        cache: &mut f.cache,
-        callback: |x: i32, y: i32, bw: u32, bh: u32, color: Color| {
-            canvas.rectangle(x, y, bw, bh, color);
-        },
+    let mut painter = Painter {
+        canvas: &mut canvas,
+        fonts: &mut *f,
     };
     for (i, (run, lift)) in runs.iter().zip(&lifts).enumerate().filter(|_| !look.bare) {
         for (g, up) in run
