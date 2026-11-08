@@ -340,6 +340,8 @@ The other readers (thumbnails, measurements and proxies) deinterlace before the 
 - The CPU measures SDR pictures, other layouts and pictures in memory.
   - Why: the matrix of an SDR picture to BT.2020 mixes the three channels. Thus the highest code of each channel does not give the peak.
   - It measures RGB and gray of more than 8 bits as RGB (`measure_rgb`). Why: the conversion to YUV makes these pictures too bright ([gotchas](../gotchas.md#ffmpeg-filters-and-colors)).
+  - It measures a float picture with its values above 1 and below 0 (`Planar`, `float_light`).
+  - Why: the draw converts an SDR picture into an HDR timeline with no limit at 1 (`rgb` in `picture.wgsl`). Thus a value above 1 gives more light than SDR white.
 - After an error on the GPU, the CPU measures the rest of the file. vidcut prints the error.
   - A picture that the meter's import or copy brings down is such an error. Why: the GPU meter then copies it down, up and back. The CPU meter only copies it down.
 - `VIDCUT_DEBUG` tells whether the GPU or the CPU measures.

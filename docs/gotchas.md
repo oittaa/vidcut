@@ -85,9 +85,12 @@ This file lists the FFmpeg, driver, OS and library behavior that vidcut works ar
   - FFmpeg returns the frame all the same, with the failed blocks not filled, and no error.
   - Smooth gradients and half floats decode correctly. Thus the fault depends on the picture, not on its size. Renders of Resolve Studio 21.2 fail too.
   - Thus vidcut decodes each OpenEXR with the `exr` crate ([design/gpu.md](design/gpu.md#the-gpu-and-the-decoder)).
-- **FFmpeg's scaler clamps half floats** (9.0.2).
-  - The `exr` decoder gives `gbrpf16le` for half floats. swscale converts it to `gbrpf32le` between 0 and 1, and not exactly.
-  - `ffmpeg -pix_fmt gbrpf32le` does the same. Thus a test of a half file compares the `gbrpf16le` samples.
+- **FFmpeg's scaler cuts floats to 0 to 1, in steps of 16-bit numbers** (9.0.2).
+  - Each conversion from a float format does this, also into another float format.
+  - `grayf32le` at 2.5 gives 1.0 in `gbrpf32le`.
+  - `gbrpf32le` at 2.5, 0.5 and −0.25 gives 0.99979, 0.50016 and 0 in `gbrapf32le`.
+  - The `exr` decoder gives `gbrpf16le` for half floats. `ffmpeg -pix_fmt gbrpf32le` cuts them too. Thus a test of a half file compares the `gbrpf16le` samples.
+  - Thus `Relayout` gives no float picture to the scaler ([playback](design/playback.md#gpu-pictures)).
 - **FFmpeg 8 has no demuxer or decoder for an animated WebP** (8.0.1). FFmpeg has them from 9.0.
   - FFmpeg 8 reads the file with `webp_pipe`, as one image that it cannot decode. An animated WebP of one frame gives the same result.
   - Without a check, the file comes in as a still of 2×2 pixels, and its picture never renders.

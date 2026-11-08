@@ -4214,6 +4214,13 @@ The manual gives the order in which each picture is processed, on each page, as 
 
 Resolve converts each clip into full-range, uncompressed 32-bit float data when it reads it (p. 222). All stages then work on that data.
 
+- Measured in Resolve Studio 21.2, with no color management and renders to OpenEXR RGB float:
+  - An OpenEXR clip of R 2.5, G 0.5 and B −0.25 renders as 2.5, 0.5 and −0.25. Thus a value above 1 or below 0 stays.
+  - A clip in RGB half and a clip in RGB float give the same values.
+  - A clip of 0.25, 0.5 and 0.75 renders with the same values, with no steps of 16-bit numbers.
+  - Resolve does not convert the linear values of the file. They are the code values of the timeline.
+- vidcut: a float picture reaches the mix with its values ([design](design/playback.md#gpu-pictures)). The same four clips give the same values.
+
 **Source processing**, for each clip:
 
 1. Camera Raw settings.

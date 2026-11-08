@@ -24,11 +24,13 @@ pub enum Layout {
     Rgb,
     Rgb48,
     Gbrp16,
+    Gbrpf16,
+    Gbrpf32,
     Rgbaf32,
 }
 
 impl Layout {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 16] = [
         Self::Yuv420p,
         Self::Nv12,
         Self::P010,
@@ -42,6 +44,8 @@ impl Layout {
         Self::Rgb,
         Self::Rgb48,
         Self::Gbrp16,
+        Self::Gbrpf16,
+        Self::Gbrpf32,
         Self::Rgbaf32,
     ];
 
@@ -60,6 +64,8 @@ impl Layout {
             P::RGB24 => Self::Rgb,
             P::RGB48LE => Self::Rgb48,
             P::GBRP16LE | P::GBRAP16LE => Self::Gbrp16,
+            P::GBRPF16LE | P::GBRAPF16LE => Self::Gbrpf16,
+            P::GBRPF32LE | P::GBRAPF32LE => Self::Gbrpf32,
             P::RGBAF32LE => Self::Rgbaf32,
             _ => Self::Yuv420p,
         }
@@ -346,7 +352,10 @@ impl Picture {
     pub fn alpha_plane(&self) -> bool {
         matches!(
             crate::hw::sw_format(&self.frame),
-            format::Pixel::YUVA444P12LE | format::Pixel::GBRAP16LE
+            format::Pixel::YUVA444P12LE
+                | format::Pixel::GBRAP16LE
+                | format::Pixel::GBRAPF16LE
+                | format::Pixel::GBRAPF32LE
         )
     }
 
@@ -634,5 +643,21 @@ mod tests {
     #[test]
     fn p416le_pictures_are_16_bit_interleaved_4_4_4() {
         assert_eq!(Layout::of(Pixel::P416LE), Layout::P416);
+    }
+
+    #[test]
+    fn gbrpf16le_pictures_are_planar_half_floats() {
+        assert_eq!(Layout::of(Pixel::GBRPF16LE), Layout::Gbrpf16);
+    }
+
+    #[test]
+    fn gbrapf32le_pictures_are_planar_floats() {
+        assert_eq!(Layout::of(Pixel::GBRAPF32LE), Layout::Gbrpf32);
+    }
+
+    #[test]
+    fn a_gbrapf32le_picture_has_an_alpha_plane() {
+        let picture = Picture::new(frame::Video::new(Pixel::GBRAPF32LE, 2, 2), 0, None, None);
+        assert!(picture.alpha_plane());
     }
 }

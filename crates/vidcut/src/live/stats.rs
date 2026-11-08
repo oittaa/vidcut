@@ -184,6 +184,8 @@ impl PlayerStats {
                 Layout::Rgb => "RGB24",
                 Layout::Rgb48 => "RGB48",
                 Layout::Gbrp16 => "GBRP16",
+                Layout::Gbrpf16 => "GBRPF16",
+                Layout::Gbrpf32 => "GBRPF32",
                 Layout::Rgbaf32 => "RGBAF32",
             };
             let matrix = match c.matrix {

@@ -331,11 +331,22 @@ The audio device:
   - A Premultiplied picture keeps its colors at each alpha. Only the placement multiplies them (`placed_share`). Why: spec §3 has c + b × (1 − α), so an alpha of 0 still adds the color. Thus the shader does not divide by alpha.
   - Above 1 the sum stays in the wide canvas, and the output clamps it. Why: the canvas holds values above 1 for every mix.
   - A made picture has no alpha of its own. Its alpha is a second picture (`Picture::matte`, [export](export.md#which-source-frame)). `write_matte` puts that picture in the fourth texture.
-- A picture in memory in RGB or gray of more than 8 bits is `gbrp16le`, or `gbrap16le` with alpha (`Relayout`). The shader reads its three planes as RGB, with no matrix (`Layout::Gbrp16`).
+- A picture in memory in RGB or gray integers of more than 8 bits is `gbrp16le`, or `gbrap16le` with alpha (`Relayout`). The shader reads its three planes as RGB, with no matrix (`Layout::Gbrp16`).
   - Why: the conversion to YUV makes these pictures too bright ([gotchas](../gotchas.md#ffmpeg-filters-and-colors)).
-  - Float gray is the exception. It goes to YUV. Why: the conversion to RGB does not correct it.
   - Why planes: a 3-sample RGB picture goes through a storage buffer. The window's device limits the size of that buffer (`Slot::write_rgb`).
-  - A picture of this kind with no tag has the BT.709 primaries, at each size (`Source`).
+  - A picture of this kind with no tag has the BT.709 primaries, at each size (`Source`). A float picture has them too.
+- A float picture keeps its values, also above 1 and below 0. Thus a highlight of an OpenEXR reaches the mix as the file holds it.
+  - `GBRPF32LE` and `GBRAPF32LE` pass `Relayout`. Each plane goes into an `R32Float` texture (`Layout::Gbrpf32`).
+  - `GBRPF16LE` and `GBRAPF16LE` pass too. Each plane goes into an `R16Float` texture, which holds a half float exactly (`Layout::Gbrpf16`).
+  - The shader reads these planes as it reads `Layout::Gbrp16`. The mix is in 32-bit floats (`MIXING`).
+  - `Relayout` copies a gray float picture into three equal planes, and its alpha into a fourth plane (`spread`).
+  - Why not the scaler: it cuts floats to 0 to 1, in steps of 16-bit numbers ([gotchas](../gotchas.md#ffmpeg-reading-and-decoding)).
+  - Why planes: one RGBA texture of 32-bit floats takes 16 bytes for each pixel. The planes take 12 bytes, or 6 bytes in half floats.
+  - Why a copy for gray: the shader then reads one float layout. Gray float files are rare.
+- vidcut reads the transfer of a picture only to find PQ and HLG (`hdr_of_transfer`).
+  - Thus a picture with the linear transfer of an OpenEXR goes into an SDR timeline with its values as they are.
+  - Resolve does the same with no color management ([spec §13](../cut-page-spec.md#13-order-of-operations-pp-287296-3407)).
+  - An HDR timeline converts the picture as an SDR picture. A value above 1 then gives more light than SDR white, and a value below 0 gives 0.
 - Another picture in memory with alpha is `yuva444p12le`. Another picture in memory in RGB or 4:4:4 is `yuv444p12le`, and a 4:2:2 picture stays 4:2:2 (`Relayout`). Why: 4:2:0 loses color detail.
 
 ## Sound

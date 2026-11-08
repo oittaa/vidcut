@@ -397,7 +397,17 @@ impl Reading {
 
     fn light(&self, [r, g, b]: [f64; 3]) -> [f32; 3] {
         let t = &self.table;
-        let mut rgb = [lut(t, r), lut(t, g), lut(t, b)];
+        self.in_nits([lut(t, r), lut(t, g), lut(t, b)])
+    }
+
+    fn float_light(&self, rgb: [f64; 3]) -> [f32; 3] {
+        match self.gamut {
+            Some(_) => self.in_nits(rgb.map(|c| c.max(0.0).powf(2.4) as f32)),
+            None => self.light(rgb),
+        }
+    }
+
+    fn in_nits(&self, mut rgb: [f32; 3]) -> [f32; 3] {
         if let Some(m) = &self.gamut {
             let l = rgb.map(f64::from);
             for (i, row) in m.iter().enumerate() {
@@ -466,10 +476,41 @@ fn peak(s: &Samples, r: &Reading) -> [f32; 3] {
 
 fn readable(p: format::Pixel) -> bool {
     use format::Pixel as P;
-    matches!(
-        p,
-        P::P010LE | P::NV12 | P::YUV420P | P::YUVJ420P | P::GBRP16LE | P::GBRAP16LE
-    )
+    matches!(p, P::P010LE | P::NV12 | P::YUV420P | P::YUVJ420P) || Planar::of(p).is_some()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Planar {
+    Sixteen,
+    Half,
+    Float,
+}
+
+impl Planar {
+    fn of(p: format::Pixel) -> Option<Self> {
+        use format::Pixel as P;
+        match p {
+            P::GBRP16LE | P::GBRAP16LE => Some(Self::Sixteen),
+            P::GBRPF16LE | P::GBRAPF16LE => Some(Self::Half),
+            P::GBRPF32LE | P::GBRAPF32LE => Some(Self::Float),
+            _ => None,
+        }
+    }
+
+    fn size(self) -> usize {
+        match self {
+            Self::Float => 4,
+            Self::Sixteen | Self::Half => 2,
+        }
+    }
+
+    fn value(self, s: &[u8]) -> f64 {
+        match self {
+            Self::Sixteen => f64::from(u16::from_le_bytes([s[0], s[1]])) / 65535.0,
+            Self::Half => exr::prelude::f16::from_bits(u16::from_le_bytes([s[0], s[1]])).to_f64(),
+            Self::Float => f64::from(f32::from_le_bytes([s[0], s[1], s[2], s[3]])),
+        }
+    }
 }
 
 fn reading(f: &frame::Video) -> Result<(Samples<'_>, Reading)> {
@@ -554,11 +595,8 @@ fn measure_with(
     relayout: &mut crate::export::normalize::Relayout,
 ) -> Result<FrameLight> {
     let f = relayout.run(f, crate::decode::Reading::Stream)?;
-    if matches!(
-        f.format(),
-        format::Pixel::GBRP16LE | format::Pixel::GBRAP16LE
-    ) {
-        return Ok(measure_rgb(&f));
+    if let Some(planar) = Planar::of(f.format()) {
+        return Ok(measure_rgb(&f, planar));
     }
     let (s, r) = reading(&f)?;
     let maxscl = peak(&s, &r);
@@ -574,15 +612,20 @@ fn measure_with(
     Ok(spread.light(maxscl))
 }
 
-fn measure_rgb(f: &frame::Video) -> FrameLight {
+fn measure_rgb(f: &frame::Video, planar: Planar) -> FrameLight {
     let r = Reading::of(&crate::color::pq_light(f), 16);
     let (w, h) = (f.width() as usize, f.height() as usize);
     let planes = [2, 0, 1].map(|plane| (f.data(plane), f.stride(plane)));
+    let size = planar.size();
     let light = |x: usize, y: usize| {
-        r.light(planes.map(|(data, stride)| {
-            let at = y * stride + 2 * x;
-            f64::from(u16::from_le_bytes([data[at], data[at + 1]])) / 65535.0
-        }))
+        let rgb = planes.map(|(data, stride)| {
+            let at = y * stride + size * x;
+            planar.value(&data[at..at + size])
+        });
+        match planar {
+            Planar::Sixteen => r.light(rgb),
+            Planar::Half | Planar::Float => r.float_light(rgb),
+        }
     };
     let mut maxscl = [0f32; 3];
     for y in 0..h {
@@ -1055,6 +1098,23 @@ mod tests {
         let fail =
             |_: &mut (), _: u32| -> Result<u32> { Err(Error::Invalid("unmeasurable".into())) };
         assert!(on_threads(2, || (), feed, fail).is_err());
+    }
+
+    #[test]
+    fn a_half_float_sample_reads_as_its_value() {
+        assert_eq!(Planar::Half.value(&[0x00, 0x41]), 2.5);
+    }
+
+    #[test]
+    fn a_float_picture_brighter_than_white_is_measured_above_sdr_white() {
+        let mut f = frame::Video::new(format::Pixel::GBRPF32LE, 2, 2);
+        for plane in 0..3 {
+            for s in f.data_mut(plane).as_chunks_mut::<4>().0 {
+                *s = 2.0f32.to_le_bytes();
+            }
+        }
+        let light = Meter::new().measure(&f).unwrap();
+        assert!((light.max - 1071.44).abs() < 0.01, "{}", light.max);
     }
 
     #[test]
