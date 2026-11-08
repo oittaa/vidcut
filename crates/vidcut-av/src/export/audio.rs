@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use vidcut_core::compressor::Dynamics;
 use vidcut_core::equalizer::Filter;
 use vidcut_core::leveler::Leveler;
 use vidcut_core::render::{AudioPiece, Dip, Ducking};
@@ -607,6 +608,7 @@ struct Lane {
     isolator: Option<Isolator>,
     filter: Option<Filter>,
     leveler: Option<Leveler>,
+    dynamics: Option<Dynamics>,
     unheard: Option<String>,
     dip: Option<Arc<Dip>>,
     at: i64,
@@ -628,6 +630,7 @@ impl Lane {
             isolator: None,
             filter: None,
             leveler: None,
+            dynamics: None,
             unheard: None,
             dip: None,
             at: 0,
@@ -731,14 +734,19 @@ impl Lane {
                 pan,
                 equalizer,
                 leveler,
+                compressor,
                 ..
             } = &piece
             {
                 let before = self.piece.checked_sub(1).map(|i| &self.pieces[i]);
                 let opens = take > 0 && (self.pos == 0 || !self.started);
-                let rings_on = self.started
-                    && before.is_some_and(|b| plays_on(b, &piece) || ramps_on(b, &piece))
-                    && self.filter.as_ref().map(Filter::settings) == equalizer.as_deref();
+                let joined = self.started
+                    && before.is_some_and(|b| plays_on(b, &piece) || ramps_on(b, &piece));
+                let rings_on =
+                    joined && self.filter.as_ref().map(Filter::settings) == equalizer.as_deref();
+                let keeps_level = joined
+                    && self.dynamics.as_ref().map(Dynamics::settings)
+                        == compressor.as_deref().copied();
                 let ramps = self.started
                     && self.paced.is_some()
                     && before.is_some_and(|b| ramps_on(b, &piece));
@@ -817,6 +825,11 @@ impl Lane {
                     self.leveler = leveler.as_deref().map(|l| Leveler::new(*l, rate, channels));
                     self.started = true;
                 }
+                if opens && !keeps_level {
+                    self.dynamics = compressor
+                        .as_deref()
+                        .map(|c| Dynamics::new(*c, rate, channels));
+                }
                 if opens && !rings_on {
                     self.filter = equalizer.as_deref().map(|e| Filter::new(e, rate, channels));
                 }
@@ -839,6 +852,9 @@ impl Lane {
                 }
                 if let Some(filter) = self.filter.as_mut() {
                     filter.run(&mut self.scratch[..take * ch]);
+                }
+                if let Some(dynamics) = self.dynamics.as_mut() {
+                    dynamics.run(&mut self.scratch[..take * ch]);
                 }
                 let gain = if *silent && self.trim == 1.0 {
                     0.0

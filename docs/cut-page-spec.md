@@ -1495,7 +1495,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
-  - vidcut: its Audio section has Volume, Pan, Mute, Equalizer, Dialogue Leveler and Voice Isolation for the selected clips with sound (X70).
+  - vidcut: its Audio section has Volume, Pan, Mute, Equalizer, Dialogue Leveler, Compressor and Voice Isolation for the selected clips with sound (X70).
   - vidcut: its Crop section has Softness, and its Composite section has Composite Mode and Opacity.
 - **The units of the Inspector,** measured in Resolve Studio 21.1.1:
   - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
@@ -2164,6 +2164,18 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - vidcut: the Dialogue Leveler row of the Audio section (X70) and `clip.set` set `dialogue_leveler` ([X155](deviations.md#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
   - vidcut: the window of a clip with no Dialogue Leveler opens with On checked ([X155](deviations.md#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
   - vidcut: `clip.set` refuses an Output Gain outside the range. A clip with more than two channels takes the Dialogue Leveler too ([X155](deviations.md#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
+- **Compressor** (pp. 3946–3947):
+  - The Dynamics of a track have a Compressor module, with a switch (p. 3946).
+  - Its values (pp. 3946–3947):
+    - Threshold goes from −50 to 0 dB. Its default is −15 dB.
+    - Ratio goes from 1:1 to 10:1. Its default is 2:1.
+    - Knee rounds the curve around the threshold.
+    - Mix goes from all compressed at 0 to no compression at 100. Its default is 0.
+    - Attack goes from 0 to 100 ms. Its default is 1.4 ms.
+    - Hold goes from 0 to 4000 ms. Its default is 0.
+    - Release goes from 50 to 4000 ms. Its default is 93 ms.
+  - The scripting API of Resolve Studio 21.2 cannot read or set the Dynamics. Thus the curve and the times are not measured.
+  - vidcut: the Compressor row of the Audio section (X70) and `clip.set` set `compressor` ([X156](deviations.md#x156-the-compressor-is-on-a-clip)).
 - **Volume keyframes** (pp. 1109, 1111–1113, 1251, 1255):
   - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112). Two keyframes or more change the level over time (p. 1112).
   - Keyframes of the Inspector's Volume also show on the overlay (p. 1111).

@@ -907,7 +907,7 @@ pub enum AudioPiece {
         /// sample heard, on top of `gain_db`, which then holds the
         /// track's fader only.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        keyed: Option<Keyed>,
+        keyed: Option<Box<Keyed>>,
         /// Voice Isolation's Amount over it, up to 100: the clip's own,
         /// else its track's; left out when that is off or at 0, where the
         /// model does not run.
@@ -922,6 +922,9 @@ pub enum AudioPiece {
         /// Its clip's Dialogue Leveler, left out when it changes nothing.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         leveler: Option<Box<crate::model::DialogueLeveler>>,
+        /// Its clip's compressor, left out when it changes nothing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compressor: Option<Box<crate::model::Compressor>>,
     },
     Silence {
         samples: i64,
@@ -1678,6 +1681,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 pan,
                 equalizer,
                 leveler,
+                compressor,
                 ..
             }),
             AudioPiece::Source {
@@ -1693,6 +1697,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 pan: p2,
                 equalizer: e2,
                 leveler: l2,
+                compressor: c2,
                 ..
             },
         ) if media == m2
@@ -1702,6 +1707,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             && pan == p2
             && equalizer == e2
             && leveler == l2
+            && compressor == c2
             && keyed
                 .as_ref()
                 .map(|k| (&k.keys, k.per_frame, k.at + *samples as f64))
@@ -2566,10 +2572,12 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         fps.frame_to_sample(c.source_in, rate)
             + (c.pace().sound_in(k, since as f64 / per_frame) * per_frame).round() as i64
     };
-    let keyed = audio.is_keyed().then(|| Keyed {
-        keys: audio.gain_keys.clone(),
-        per_frame,
-        at: fps.frame_to_sample(c.content_at(c.start), rate) as f64 + since as f64,
+    let keyed = audio.is_keyed().then(|| {
+        Box::new(Keyed {
+            keys: audio.gain_keys.clone(),
+            per_frame,
+            at: fps.frame_to_sample(c.content_at(c.start), rate) as f64 + since as f64,
+        })
     });
     AudioPiece::Source {
         media: c.media.clone(),
@@ -2594,6 +2602,10 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         leveler: audio
             .dialogue_leveler
             .filter(crate::model::DialogueLeveler::heard)
+            .map(Box::new),
+        compressor: audio
+            .compressor
+            .filter(crate::model::Compressor::heard)
             .map(Box::new),
     }
 }
@@ -2676,6 +2688,7 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
                 s.pan = 0.0;
                 s.equalizer = None;
                 s.dialogue_leveler = None;
+                s.compressor = None;
                 s.voice_isolation = None;
             }
         }
@@ -2898,6 +2911,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
         pan: 0.0,
         equalizer: None,
         leveler: None,
+        compressor: None,
     }
 }
 
@@ -3283,6 +3297,20 @@ mod tests {
         assert!(matches!(
             audio_pieces(&f)[0],
             AudioPiece::Source { leveler: None, .. }
+        ));
+    }
+
+    #[test]
+    fn a_compressor_reaches_its_piece() {
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        req(&mut f, "clip.set", json!({"clips": "c1", "compressor": {}}));
+        assert!(matches!(
+            audio_pieces(&f)[0],
+            AudioPiece::Source {
+                compressor: Some(_),
+                ..
+            }
         ));
     }
 

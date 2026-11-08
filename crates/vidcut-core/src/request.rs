@@ -1567,7 +1567,7 @@ pub enum Request {
         #[serde(default)]
         look: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -100..30), pan, equalizer, Dialogue Leveler, name,
+    /// Enable/disable video (D), mute, gain (dB, -100..30), pan, equalizer, Dialogue Leveler, compressor, name,
     /// Clip Color, Voice Isolation, Retime Process and Render Cache.
     #[serde(rename = "clip.set")]
     ClipSet {
@@ -1600,6 +1600,14 @@ pub enum Request {
             skip_serializing_if = "Option::is_none"
         )]
         dialogue_leveler: Option<Option<DialogueLevelerSet>>,
+        /// The compressor: each field given replaces its own, and null takes
+        /// it off with its settings. `{}` puts on one with the usual values.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        compressor: Option<Option<CompressorSet>>,
         /// Where `gain_db` goes as a keyframe on clips with volume
         /// keyframes: the playhead by default.
         #[serde(default)]
@@ -4906,6 +4914,42 @@ pub struct DialogueLevelerSet {
     /// The output gain in dB, from 0 to 6. Only with `reduce_loud` on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_gain_db: Option<f64>,
+}
+
+/// A change to a clip's compressor: each field given replaces its own, and
+/// the rest stay as they are. A new one is on: Threshold -15 dB, Ratio 2,
+/// Knee 0, Mix 0, Attack 1.4 ms, Hold 0, Release 93 ms and Makeup Gain 0.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CompressorSet {
+    /// On or off. Off keeps the settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// The level above which it compresses, in dB, from -50 to 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold_db: Option<f64>,
+    /// The ratio of the input to the output, from 1 to 10.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ratio: Option<f64>,
+    /// The width of the curve around the threshold, in dB, from 0 to 30.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knee_db: Option<f64>,
+    /// How much of the sound stays as it was, in percent, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mix: Option<f64>,
+    /// How fast it starts to compress, in ms, from 0 to 100.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attack_ms: Option<f64>,
+    /// How long it keeps the reduction after the attack, in ms, from 0 to
+    /// 4000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_ms: Option<f64>,
+    /// How fast it stops to compress, in ms, from 50 to 4000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_ms: Option<f64>,
+    /// The gain after it, in dB, from 0 to 24.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub makeup_db: Option<f64>,
 }
 
 /// A change to a clip's equalizer: each field given replaces its own, and
