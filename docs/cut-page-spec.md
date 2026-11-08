@@ -82,8 +82,8 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - The Graph button in the header shows one large graph above the tracks. The curves under the tracks then go away.
     - The graph shows a colored line for each value with keyframes. The curve button of a track takes its line out or puts it back.
     - One curve is active. It has the points and the handles, and each edit in the graph acts on it. The other curves are dimmed.
-    - A click on a dimmed curve makes it the active curve. The selection stays.
-    - A click on a name beside the graph, on the name of a track or on a keyframe of a track does this too.
+    - A click on a dimmed curve makes it the active curve and clears the selection (measured in Resolve Studio 21.2).
+    - A click on a name beside the graph, on a track's name or on a track's keyframe also makes that curve active. The selection stays.
     - A drag on the line under the graph changes its height.
     - The Keyframe button adds a keyframe at the playhead, also outside the clip (measured in Resolve Studio 21.1.2). On a keyframe, it removes that keyframe, as the Inspector's button does.
     - The Keyframe button is orange on a keyframe (p. 1250), in the Inspector too.
@@ -102,10 +102,10 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
   - **Edits:**
     - The rules of the clicks, the box, the steps and the paste with no page number are measured in Resolve Studio 21.1.2.
     - A drag on a keyframe moves it in time. A drag on a curve point also changes the value.
-    - Shift and a drag on a curve point change only the time or only the value (p. 1262). The direction that the drag starts in selects which one.
+    - Shift and a drag on a curve point change only the time or only the value (p. 1262). The direction of the first movement selects which one (measured in Resolve Studio 21.2).
     - A drag on a Bezier handle also moves the other handle of that keyframe. The two stay on one line ([X161](deviations.md#x161-the-two-handles-of-a-keyframe-stay-on-one-line)). With Alt, the handle moves alone.
     - A drag on the line between two keyframes bends that part of the curve ([X162](deviations.md#x162-a-drag-on-the-line-bends-the-curve)).
-    - The ⋯ menu has Enable Snapping (p. 1264). With it on, a dragged keyframe goes to the playhead and to the keyframes of other values ([X159](deviations.md#x159-snapping-also-goes-to-other-keyframes)).
+    - The ⋯ menu has Enable Snapping (p. 1264). It is on by default (measured in Resolve Studio 21.2). With it on, a dragged keyframe goes to the playhead and to the keyframes of other values ([X159](deviations.md#x159-snapping-also-goes-to-other-keyframes)).
     - A drag on a group track moves that group's keyframes at that time.
     - A drag on an In or Out handle changes that handle. A handle value moves the key's own value.
     - On Position, Zoom and the anchor point, Y keeps the handle frames and uses a value offset of 0.
@@ -149,6 +149,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - Keyframes and clips share one clipboard. A copy of keyframes replaces the copied clips, and a copy of clips replaces the copied keyframes.
       - Each place pastes only its own kind. Ctrl+V in the timeline pastes no keyframes, and Ctrl+V in the tab or the tray pastes no clips.
     - A right-click on a keyframe sets its ease (X87). On a selected keyframe, it sets the ease of all the selected keyframes ([X158](deviations.md#x158-an-ease-on-all-selected-keyframes-comes-from-a-right-click-or-the-bar)). The anchor point's keyframes take no ease (D92).
+      - In a selection, Ease In removes the Out handle of a first keyframe, and it gets no In handle. Ease Out on a last keyframe does the opposite (measured in Resolve Studio 21.2).
     - A double-click on an empty part of a track adds a keyframe there ([X108](deviations.md#x108-a-double-click-on-a-row-of-the-keyframes-tab-adds-a-keyframe)).
     - The bar under the tracks shows the value, time and ease of the selected keyframe (X90).
     - A keyframe that the Keyframe button or a double-click adds is selected. Thus the bar shows it at once.
