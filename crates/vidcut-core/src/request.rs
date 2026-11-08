@@ -1196,7 +1196,7 @@ pub enum Request {
     /// the In mark and the Out mark, and makes a compound clip of what is
     /// between them. It goes on the lowest picture track and the lowest
     /// sound track with clips in the range, and the clips outside the range
-    /// stay. A J or L cut across a mark ends there. A clip in the range on a
+    /// stay. A J or L cut that reaches a mark is undone. A clip in the range on a
     /// locked track refuses it. `range` defaults to the timeline's marks,
     /// which stay. With one mark, the range runs from the start of the
     /// timeline or to its end. `name` is optional. Returns its clips.
