@@ -2935,7 +2935,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The effect has no public rules. A spectral gate is the usual way to lower steady noise and it runs in real time.
   - The default effect lowered the noise by 0.4 dB and the quiet lines by up to 6.0 dB (spec). Meeting recordings need the opposite.
 
-## X161. A compound clip takes its clips whole
+## X163. A compound clip takes its clips whole
 
 - **Resolve:** ([spec §8.18](cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
   - The window of New Compound Clip has a name and a start timecode (p. 1052).

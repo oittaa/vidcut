@@ -45,15 +45,16 @@ fn free(t: &Track, (a, b): (i64, i64)) -> bool {
 
 fn lift(p: &mut Project, ids: &HashSet<String>, kind: TrackKind, first: i64) -> Vec<Track> {
     let order = p.tracks_of(kind);
-    let Some(lowest) = order.iter().position(|&i| holds(&p.tracks[i], ids)) else {
+    let selected = |&i: &usize| holds(&p.tracks[i], ids);
+    let (Some(lowest), Some(highest)) = (
+        order.iter().position(selected),
+        order.iter().rposition(selected),
+    ) else {
         return Vec::new();
     };
     let mut lifted = Vec::new();
-    for (n, &i) in order[lowest..].iter().enumerate() {
+    for (n, &i) in order[lowest..=highest].iter().enumerate() {
         let track = &mut p.tracks[i];
-        if !holds(track, ids) {
-            continue;
-        }
         let id = format!("{}{}", tracks::prefix(kind), n + 1);
         let mut inner = Track::new(id, kind);
         let (moved, kept): (Vec<Clip>, Vec<Clip>) = std::mem::take(&mut track.clips)
@@ -346,7 +347,7 @@ pub(crate) fn unnest(
     };
     let span = (block.start, block.end());
     let mut made = Vec::new();
-    for inner in source {
+    for inner in source.iter().filter(|t| !t.clips.is_empty()) {
         let video = inner.kind == TrackKind::Video;
         let Some((base, _)) = hosts.iter().find(|(_, c)| c.video == video) else {
             continue;
@@ -396,6 +397,22 @@ mod tests {
         let hosts = nest(&mut f, &[&a, &b]);
         f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
         assert_eq!(f.editor.project().tracks[0].clips, before);
+    }
+
+    #[test]
+    fn a_track_between_selected_tracks_stays_inside_as_an_empty_track() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        let b = f.append("m1", 50, 100);
+        for track in ["V2", "V3", "V4", "V3"] {
+            let moved = json!({"clips": [b], "to": 0, "mode": "overwrite", "track": track});
+            f.ok(req("edit.move", moved));
+        }
+        let hosts = nest(&mut f, &[&a, &b]);
+        let host = f.editor.project().clip(&hosts[0]).unwrap();
+        let made = &host.compound.as_ref().unwrap().made_from;
+        let shape: Vec<(&str, usize)> = made.iter().map(|t| (&*t.id, t.clips.len())).collect();
+        assert_eq!(shape, [("V1", 1), ("V2", 0), ("V3", 1)]);
     }
 
     #[test]
