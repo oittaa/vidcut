@@ -54,7 +54,6 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
    - Measure the Gaussian Blur with Use Alpha off on a clip that is partly clear, for example with Crop Softness. vidcut blurs its colors without their alpha.
    - Audio effects: compressor, reverb and broadband noise reduction.
    - Voice Isolation separates a voice. Broadband noise reduction is the room and the hiss.
-   - Keyframes of effect values.
    - Hover Scrub Preview of transitions, effects and generators (pp. 759, 765, 766).
    - Onscreen controls of effects in the viewer (p. 766).
    - Favorites (p. 760).
