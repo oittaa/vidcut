@@ -1820,7 +1820,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Delete
   - A new value in the bar goes to `keyframes.set`. A drag on the value sends it when the drag stops.
   - A new keyframe is selected. Thus the bar shows its value at once.
-  - With two or more keyframes selected, the bar shows their number and Delete.
+  - With two or more keyframes selected, the bar shows their number, their ease and Delete.
   - The curve of a value shows under its track.
   - Fit Clip is the name of Full Extend Zoom. Detail Zoom and the zoom slider are as in Resolve.
   - Ctrl and the mouse wheel zoom at the pointer. Shift and the mouse wheel move the range.
@@ -2895,3 +2895,33 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The user opens the window to turn the Dialogue Leveler on.
   - A value outside the range is an error in the script. A refusal shows the error.
   - A track of vidcut has no channel type. Thus a clip with many channels gets what the user asks for.
+## X158. An ease on all selected keyframes comes from a right-click or the bar
+
+- **Resolve:**
+  - The title bar of the Curve Editor has four buttons: Linear, Ease In, Ease In and Out, and Ease Out. They change all the selected keyframes (pp. 1262–1263).
+  - A right-click on a keyframe in the Keyframe Editor opens no menu (measured in Resolve Studio 21.1.1).
+- **vidcut:**
+  - A right-click on a selected keyframe keeps the selection. The ease goes on all the selected keyframes.
+  - A right-click on another keyframe selects that keyframe alone.
+  - With two or more keyframes selected, the bar under the tracks has an ease list. It shows `Mixed` when their eases are not the same.
+  - A keyframe takes the sides of the ease that have a neighbor.
+  - A first keyframe does not change with Ease In. A last keyframe does not change with Ease Out.
+  - A speed keyframe takes only Linear and Ease In and Out.
+  - `keyframes.set` with several `frames` sets the ease of one value. `apply` holds one such request for each value.
+- **Why:**
+  - The ease menu is already on the keyframe (X87). A second place in a title bar adds nothing.
+  - A selection across several values takes one ease in one undo step.
+
+## X159. Snapping also goes to other keyframes
+
+- **Resolve:**
+  - Enable Snapping snaps the control points of the Curve Editor to the playhead (pp. 1259, 1264).
+- **vidcut:**
+  - Enable Snapping is in the ⋯ menu of the Keyframes tab. It is off when vidcut starts.
+  - It acts on each drag of keyframes: on a track, on a group track and on a curve.
+  - A dragged keyframe goes to the playhead or to a keyframe of another value when one is near.
+  - A white line shows the time that it goes to.
+  - It does not act on a handle, or on a Shift-drag that changes only the value.
+- **Why:**
+  - Two values often change on the same frame. A snap to the keyframes of the other values does this without a look at the timecode.
+  - Two keyframes of one value cannot share a frame. Thus the keyframes of the same value are not targets.

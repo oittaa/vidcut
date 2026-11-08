@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{
     self, Align, Align2, Color32, Layout, Pos2, Rect, RichText, Sense, Shape, Stroke, TextStyle,
-    pos2, vec2,
+    Vec2, pos2, vec2,
 };
 use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROWS_OUT_LINE_HORIZONTAL, CARET_DOWN, CARET_LEFT, CARET_RIGHT,
@@ -24,6 +24,7 @@ use vidcut_core::validate::GAIN;
 use super::inspector::{Shape as Frame, key_diamond, shape};
 use super::placing::ease_label;
 use super::theme;
+use super::timeline::geometry::SNAP_PX;
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
@@ -77,6 +78,12 @@ enum Axis {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Lock {
+    Time,
+    Value,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
     Keys,
     Group,
@@ -97,6 +104,7 @@ struct Shift {
     dv: f64,
     axis: Axis,
     handle: Option<HandleEdit>,
+    snap: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -110,6 +118,26 @@ struct Drag {
     marks: Vec<Mark>,
     axis: Axis,
     fix: Option<HandleFix>,
+    lock: Option<Lock>,
+    snap: Option<i64>,
+}
+
+impl Drag {
+    fn new(clip: &Clip, kind: Kind, origin: Pos2, map: TimeMap, marks: Vec<Mark>) -> Self {
+        Self {
+            clip: clip.id.clone(),
+            kind,
+            origin,
+            ppf: map.ppf(),
+            v_span: 0.0,
+            v_height: 1.0,
+            marks,
+            axis: Axis::None,
+            fix: None,
+            lock: None,
+            snap: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -152,6 +180,7 @@ struct Plot {
     label: f32,
     width: f32,
     play: i64,
+    snap: Option<i64>,
     tray: bool,
 }
 
@@ -367,6 +396,7 @@ pub struct Editor {
     menu_curve: bool,
     menu_tray: bool,
     keyed_only: bool,
+    snapping: bool,
     closed: Vec<Group>,
     curves: Vec<KeyParam>,
     view: Option<(f64, f64)>,
@@ -895,8 +925,115 @@ fn move_body(id: &str, param: KeyParam, frames: &[i64], by: i64) -> Value {
     json!({ "clips": [id], "param": param, "frames": frames, "by": by })
 }
 
-fn ease_body(id: &str, mark: Mark, ease: Ease) -> Value {
-    json!({ "clips": [id], "param": mark.param, "frames": [mark.frame], "ease": ease })
+fn ease_body(id: &str, param: KeyParam, frames: &[i64], ease: Ease) -> Value {
+    json!({ "clips": [id], "param": param, "frames": frames, "ease": ease })
+}
+
+fn takes_ease(clip: &Clip, lane: &Lane, i: usize, ease: Ease) -> bool {
+    if fixed(lane.param) {
+        return key_eases(clip, lane, i).1.contains(&ease);
+    }
+    let (first, last) = (i == 0, i + 1 == lane.keys.len());
+    match ease {
+        Ease::Linear => true,
+        Ease::EaseIn => !first,
+        Ease::EaseOut => !last,
+        Ease::EaseInOut => !first || !last,
+    }
+}
+
+fn eased_keys<'a>(clip: &Clip, lanes: &'a [Lane], marks: &[Mark]) -> Vec<(&'a Lane, usize)> {
+    marks
+        .iter()
+        .filter(|m| !linear(clip, m.param))
+        .filter_map(|m| {
+            let lane = lanes.iter().find(|l| l.param == m.param)?;
+            Some((lane, lane.keys.iter().position(|k| k.frame == m.frame)?))
+        })
+        .collect()
+}
+
+fn marks_eases(clip: &Clip, lanes: &[Lane], marks: &[Mark]) -> (Option<Ease>, Vec<Ease>) {
+    let keys = eased_keys(clip, lanes, marks);
+    if let [(lane, i)] = keys[..] {
+        return key_eases(clip, lane, i);
+    }
+    let mut nows = keys.iter().map(|(lane, i)| key_eases(clip, lane, *i).0);
+    let first = nows.next().flatten();
+    let now = first.filter(|_| nows.all(|e| e == first));
+    let options = Ease::ALL
+        .into_iter()
+        .filter(|&e| keys.iter().any(|(lane, i)| takes_ease(clip, lane, *i, e)))
+        .collect();
+    (now, options)
+}
+
+fn ease_parts(
+    clip: &Clip,
+    lanes: &[Lane],
+    marks: &[Mark],
+    ease: Ease,
+) -> Vec<(&'static str, Value)> {
+    let keys = eased_keys(clip, lanes, marks);
+    unique_params(marks)
+        .into_iter()
+        .filter_map(|param| {
+            let frames: Vec<i64> = keys
+                .iter()
+                .filter(|(lane, i)| lane.param == param && takes_ease(clip, lane, *i, ease))
+                .map(|(lane, i)| lane.keys[*i].frame)
+                .collect();
+            (!frames.is_empty())
+                .then(|| ("keyframes.set", ease_body(&clip.id, param, &frames, ease)))
+        })
+        .collect()
+}
+
+fn locked(now: Option<Lock>, shift: bool, moved: Vec2) -> Option<Lock> {
+    if !shift {
+        return None;
+    }
+    now.or(
+        (moved != Vec2::ZERO).then_some(if moved.x.abs() >= moved.y.abs() {
+            Lock::Time
+        } else {
+            Lock::Value
+        }),
+    )
+}
+
+fn snapped(
+    clip: &Clip,
+    lanes: &[Lane],
+    marks: &[Mark],
+    by: i64,
+    play: i64,
+    ppf: f32,
+) -> Option<(i64, i64)> {
+    let reach = f64::from(SNAP_PX / ppf.max(1e-3));
+    let mut best: Option<(i64, i64, i64)> = None;
+    for m in marks {
+        let from = clip.key_time(m.frame);
+        let others = lanes
+            .iter()
+            .filter(|l| l.param != m.param)
+            .flat_map(|l| l.keys.iter().map(move |k| (l.param, k.frame)))
+            .filter(|(param, frame)| {
+                !marks.contains(&Mark {
+                    param: *param,
+                    frame: *frame,
+                })
+            })
+            .map(|(_, frame)| clip.key_time(frame));
+        for to in std::iter::once(play as f64).chain(others) {
+            let wanted = (to - from).round() as i64;
+            let gap = (wanted - by).abs();
+            if gap as f64 <= reach && best.is_none_or(|b| gap < b.0) {
+                best = Some((gap, wanted, to.round() as i64));
+            }
+        }
+    }
+    best.map(|(_, by, at)| (by, at))
 }
 
 fn handle_body(id: &str, mark: Mark, out: bool, handle: Handle) -> Value {
@@ -1237,6 +1374,14 @@ fn shown_lane(lane: &Lane, shift: Option<&Shift>) -> Vec<Shown> {
     rows
 }
 
+fn pressed_at(ui: &egui::Ui, resp: &egui::Response, pos: Pos2) -> Pos2 {
+    if resp.drag_started() {
+        ui.input(|i| i.pointer.press_origin()).unwrap_or(pos)
+    } else {
+        pos
+    }
+}
+
 fn near(a: Pos2, b: Pos2) -> bool {
     a.distance(b) <= HIT
 }
@@ -1286,14 +1431,21 @@ fn edge_arrows(painter: &egui::Painter, rect: Rect, times: &[f64], map: TimeMap)
     }
 }
 
-fn playhead(painter: &egui::Painter, map: TimeMap, rect: Rect, at: i64) {
+fn time_line(painter: &egui::Painter, map: TimeMap, rect: Rect, at: i64, color: Color32) {
     let t = at as f64;
     if (map.lo..=map.hi).contains(&t) {
         let x = map.x(t);
         painter.line_segment(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
-            Stroke::new(1.0, theme::colors().playhead),
+            Stroke::new(1.0, color),
         );
+    }
+}
+
+fn playhead(painter: &egui::Painter, map: TimeMap, rect: Rect, plot: Plot) {
+    time_line(painter, map, rect, plot.play, theme::colors().playhead);
+    if let Some(at) = plot.snap {
+        time_line(painter, map, rect, at, Color32::WHITE);
     }
 }
 
@@ -1379,6 +1531,7 @@ impl Workspace {
             label: label - gap,
             width: (rect.width() - label).max(48.0),
             play: self.snap.timeline.position,
+            snap: shift.as_ref().and_then(|s| s.snap),
             tray: true,
         };
         egui::ScrollArea::vertical()
@@ -1432,6 +1585,7 @@ impl Workspace {
             label: LABEL,
             width,
             play,
+            snap: shift.as_ref().and_then(|s| s.snap),
             tray: false,
         };
         self.ruler(ui, &p, &clip, plot);
@@ -1594,6 +1748,7 @@ impl Workspace {
                     dv: 0.0,
                     axis: Axis::None,
                     handle: None,
+                    snap: None,
                 };
                 self.commit(&clip, p.rev, &shift);
             }
@@ -2012,6 +2167,8 @@ impl Workspace {
                         open = Some(false);
                         ui.close();
                     }
+                    ui.separator();
+                    ui.checkbox(&mut editor.snapping, "Enable Snapping");
                 });
                 if most > 1.0 {
                     ui.spacing_mut().slider_width = ZOOM_W;
@@ -2093,7 +2250,7 @@ impl Workspace {
             );
             t += step;
         }
-        playhead(&painter, map, rect, plot.play);
+        playhead(&painter, map, rect, plot);
         if let Some(pos) = resp.interact_pointer_pos() {
             let frame = map.time(pos.x).round() as i64;
             let done = resp.clicked() || resp.drag_stopped();
@@ -2125,7 +2282,7 @@ impl Workspace {
         let b = map.x(plot.hi).max(a + SCROLL_H);
         let thumb = Rect::from_x_y_ranges(a..=b, rect.y_range()).shrink(1.0);
         painter.rect_filled(thumb, round, colors.text_dim);
-        playhead(&painter, map, rect, plot.play);
+        playhead(&painter, map, rect, plot);
         if !resp.is_pointer_button_down_on() {
             self.key_editor.grab = None;
             return;
@@ -2213,11 +2370,13 @@ impl Workspace {
         }
     }
 
-    fn shown_shift(&self, ui: &egui::Ui, clip: &Clip, lanes: &[Lane]) -> Option<Shift> {
-        if let Some(drag) = &self.key_editor.drag
+    fn shown_shift(&mut self, ui: &egui::Ui, clip: &Clip, lanes: &[Lane]) -> Option<Shift> {
+        if let Some(drag) = self.key_editor.drag.as_mut()
             && drag.clip == clip.id
             && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
         {
+            let (shift, press) = ui.input(|i| (i.modifiers.shift, i.pointer.press_origin()));
+            drag.lock = locked(drag.lock, shift, pos - press.unwrap_or(drag.origin));
             return Some(shift_of(clip, lanes, drag, pos));
         }
         self.key_editor
@@ -2302,7 +2461,7 @@ impl Workspace {
         let map = TimeMap::of(plot.lo, plot.hi, rect);
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 2.0, theme::colors().panel_dark);
-        playhead(&painter, map, rect, plot.play);
+        playhead(&painter, map, rect, plot);
         let mut spots = Vec::new();
         let mut shown = Vec::new();
         for t in times {
@@ -2320,6 +2479,12 @@ impl Workspace {
         self.poke_group(ui, &resp, clip, map, &spots);
     }
 
+    fn drag_snap(&self) -> Option<i64> {
+        self.key_editor
+            .snapping
+            .then_some(self.snap.timeline.position)
+    }
+
     fn poke_group(
         &mut self,
         ui: &egui::Ui,
@@ -2331,7 +2496,8 @@ impl Workspace {
         let Some(pos) = resp.interact_pointer_pos() else {
             return;
         };
-        let hit = closest(spots, pos, |(at, _)| *at).map(|(_, marks)| marks.clone());
+        let from = pressed_at(ui, resp, pos);
+        let hit = closest(spots, from, |(at, _)| *at).map(|(_, marks)| marks.clone());
         if !resp.drag_started() {
             return;
         }
@@ -2343,15 +2509,8 @@ impl Workspace {
             return;
         }
         self.key_editor.drag = Some(Drag {
-            clip: clip.id.clone(),
-            kind: Kind::Group,
-            origin: pos,
-            ppf: map.ppf(),
-            v_span: 0.0,
-            v_height: 1.0,
-            marks,
-            axis: Axis::None,
-            fix: None,
+            snap: self.drag_snap(),
+            ..Drag::new(clip, Kind::Group, pos, map, marks)
         });
     }
 
@@ -2498,7 +2657,7 @@ impl Workspace {
         };
         painter.rect_filled(rect, 2.0, back);
         painter.rect_filled(clip_band(map, clip, rect), 0.0, band);
-        playhead(&painter, map, rect, plot.play);
+        playhead(&painter, map, rect, plot);
         let mut spots = Vec::new();
         let mut shown = Vec::new();
         for row in rows {
@@ -2557,7 +2716,7 @@ impl Workspace {
         let Some(pos) = resp.interact_pointer_pos() else {
             return;
         };
-        if closest(spots, pos, |(at, _)| *at).is_some() {
+        if closest(spots, pressed_at(ui, resp, pos), |(at, _)| *at).is_some() {
             return;
         }
         if resp.drag_started() {
@@ -2632,7 +2791,7 @@ impl Workspace {
                 value_paired(&keys, source, |i| ys[i])
             });
         }
-        playhead(&painter, map, rect, plot.play);
+        playhead(&painter, map, rect, plot);
         let mut handles = Vec::new();
         let mut spots = Vec::new();
         for (i, row) in rows.iter().enumerate() {
@@ -2726,12 +2885,20 @@ impl Workspace {
             [] => {}
             [one] => gone = self.one_key(ui, p, clip, lanes, *one, f),
             many => {
+                let (now, options) = marks_eases(clip, lanes, many);
+                let mut ease = None;
                 ui.horizontal(|ui| {
                     ui.label(format!("{} Keyframes", many.len()));
+                    if !options.is_empty() {
+                        ease = ease_combo(ui, "key-ease-many", now, "Mixed", options);
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         gone = ui.button("Delete").clicked();
                     });
                 });
+                if let Some(e) = ease {
+                    send_parts(self, ease_parts(clip, lanes, many, e));
+                }
             }
         }
         if gone {
@@ -2794,18 +2961,8 @@ impl Workspace {
                 return;
             }
             let (current, options) = key_eases(clip, lane, i);
-            egui::ComboBox::from_id_salt(("key-ease", lane_name(mark.param), mark.frame))
-                .selected_text(current.map_or("Custom", ease_label))
-                .show_ui(ui, |ui| {
-                    for e in options {
-                        if ui
-                            .selectable_label(current == Some(e), ease_label(e))
-                            .clicked()
-                        {
-                            ease = Some(e);
-                        }
-                    }
-                });
+            let salt = ("key-ease", lane_name(mark.param), mark.frame);
+            ease = ease_combo(ui, salt, current, "Custom", options);
         });
         if let Some(value) = value {
             if fixed(mark.param) {
@@ -2822,7 +2979,10 @@ impl Workspace {
             }
         }
         if let Some(e) = ease {
-            self.send("keyframes.set", ease_body(&clip.id, mark, e));
+            self.send(
+                "keyframes.set",
+                ease_body(&clip.id, mark.param, &[mark.frame], e),
+            );
         }
         gone
     }
@@ -2920,7 +3080,7 @@ impl Workspace {
         let Some(pos) = resp.interact_pointer_pos() else {
             return;
         };
-        let hit = closest(spots, pos, |(at, _)| *at).map(|(_, frame)| Mark {
+        let hit = closest(spots, pressed_at(ui, resp, pos), |(at, _)| *at).map(|(_, frame)| Mark {
             param: lane.param,
             frame: *frame,
         });
@@ -2942,15 +3102,11 @@ impl Workspace {
             let marks = dragged(&self.key_editor.selected, hit);
             let (v_span, v_height) = values.map_or((0.0, 1.0), |v| (v.span(), v.height));
             self.key_editor.drag = Some(Drag {
-                clip: clip.id.clone(),
-                kind: Kind::Keys,
-                origin: pos,
-                ppf: map.ppf(),
                 v_span,
                 v_height,
-                marks,
                 axis,
-                fix: None,
+                snap: self.drag_snap(),
+                ..Drag::new(clip, Kind::Keys, pos, map, marks)
             });
         } else if resp.clicked()
             && let Some(hit) = hit
@@ -2976,10 +3132,11 @@ impl Workspace {
             lane,
             map,
         } = press;
-        let handle_hit = closest(handles, pos, |(at, ..)| *at);
-        let key_hit = closest(spots, pos, |(at, ..)| *at);
+        let from = pressed_at(ui, resp, pos);
+        let handle_hit = closest(handles, from, |(at, ..)| *at);
+        let key_hit = closest(spots, from, |(at, ..)| *at);
         let use_handle = match (handle_hit, key_hit) {
-            (Some(handle), Some(key)) => handle.0.distance(pos) <= key.0.distance(pos),
+            (Some(handle), Some(key)) => handle.0.distance(from) <= key.0.distance(from),
             (Some(_), None) => true,
             _ => false,
         };
@@ -3002,14 +3159,8 @@ impl Workspace {
                 .map(|k| k.value)
                 .unwrap_or(0.0);
             self.key_editor.drag = Some(Drag {
-                clip: clip.id.clone(),
-                kind: Kind::Handle,
-                origin: pos,
-                ppf: map.ppf(),
                 v_span: values.span(),
                 v_height: values.height,
-                marks: vec![mark],
-                axis: Axis::None,
                 fix: Some(HandleFix {
                     mark,
                     out: *out,
@@ -3018,6 +3169,7 @@ impl Workspace {
                     key_value: row_value,
                     neighbor: *neighbor,
                 }),
+                ..Drag::new(clip, Kind::Handle, pos, map, vec![mark])
             });
             return;
         }
@@ -3056,7 +3208,9 @@ impl Workspace {
                 param,
                 frame: *frame,
             };
-            self.key_editor.selected = vec![mark];
+            if !self.key_editor.selected.contains(&mark) {
+                self.key_editor.selected = vec![mark];
+            }
             self.key_editor.menu = Some(mark);
             self.key_editor.menu_curve = curve;
             self.key_editor.menu_tray = self.key_editor.tray;
@@ -3075,19 +3229,19 @@ impl Workspace {
             self.key_editor.menu = None;
             return;
         }
-        let mark = self.key_editor.menu;
+        let lanes = lanes_of(clip, false);
+        let marks: Vec<Mark> = match self.key_editor.menu {
+            Some(m) if !self.key_editor.selected.contains(&m) => vec![m],
+            _ => self.key_editor.selected.clone(),
+        };
+        let (current, options) = marks_eases(clip, &lanes, &marks);
         let shown = resp.context_menu(|ui| {
-            let Some(mark) = mark else { return };
-            let Some(i) = lane.keys.iter().position(|k| k.frame == mark.frame) else {
-                return;
-            };
-            let (current, options) = key_eases(clip, lane, i);
             for ease in options {
                 if ui
                     .selectable_label(current == Some(ease), ease_label(ease))
                     .clicked()
                 {
-                    self.send("keyframes.set", ease_body(&clip.id, mark, ease));
+                    send_parts(self, ease_parts(clip, &lanes, &marks, ease));
                     self.key_editor.menu = None;
                     ui.close();
                 }
@@ -3097,6 +3251,26 @@ impl Workspace {
             self.key_editor.menu = None;
         }
     }
+}
+
+fn ease_combo(
+    ui: &mut egui::Ui,
+    salt: impl egui::AsIdSalt,
+    now: Option<Ease>,
+    other: &'static str,
+    options: Vec<Ease>,
+) -> Option<Ease> {
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt(salt)
+        .selected_text(now.map_or(other, ease_label))
+        .show_ui(ui, |ui| {
+            for e in options {
+                if ui.selectable_label(now == Some(e), ease_label(e)).clicked() {
+                    chosen = Some(e);
+                }
+            }
+        });
+    chosen
 }
 
 fn row(
@@ -3202,9 +3376,20 @@ fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
                 out: fix.out,
                 handle,
             }),
+            snap: None,
         };
     }
-    let by = frames_moved(dx, drag.ppf);
+    let (dx, dy) = match drag.lock {
+        Some(Lock::Time) => (dx, 0.0),
+        Some(Lock::Value) => (0.0, dy),
+        None => (dx, dy),
+    };
+    let moved = frames_moved(dx, drag.ppf);
+    let near = drag
+        .snap
+        .filter(|_| drag.lock != Some(Lock::Value))
+        .and_then(|play| snapped(clip, lanes, &drag.marks, moved, play, drag.ppf));
+    let by = near.map_or(moved, |(by, _)| by);
     let dt = fitted(lanes, &drag.marks, by);
     let dv = if drag.axis == Axis::None {
         0.0
@@ -3228,6 +3413,7 @@ fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
         dv,
         axis: drag.axis,
         handle: None,
+        snap: near.filter(|_| dt == by).map(|(_, at)| at),
     }
 }
 
@@ -3284,6 +3470,53 @@ mod tests {
             keys: frames.iter().copied().map(key).collect(),
             extra: Vec::new(),
         }
+    }
+
+    fn clip() -> Clip {
+        serde_json::from_value(json!({
+            "id": "c1", "media": "m1", "start": 0, "duration": 100,
+            "source_in": 0, "video": true, "enabled": true
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_shift_drag_keeps_the_direction_it_started_in() {
+        let first = locked(None, true, vec2(1.0, 8.0));
+        assert_eq!(locked(first, true, vec2(40.0, 2.0)), Some(Lock::Value));
+    }
+
+    #[test]
+    fn a_drag_snaps_to_the_nearest_keyframe_of_another_value() {
+        let lanes = [
+            lane(KeyParam::Volume, &[10]),
+            lane(KeyParam::Opacity, &[23, 40]),
+        ];
+        let marks = [mark(KeyParam::Volume, 10)];
+        assert_eq!(
+            snapped(&clip(), &lanes, &marks, 12, 80, 2.0),
+            Some((13, 23))
+        );
+    }
+
+    #[test]
+    fn a_drag_does_not_snap_to_a_keyframe_of_its_own_value() {
+        let lanes = [lane(KeyParam::Volume, &[10, 23])];
+        let marks = [mark(KeyParam::Volume, 10)];
+        assert_eq!(snapped(&clip(), &lanes, &marks, 12, 80, 2.0), None);
+    }
+
+    #[test]
+    fn an_ease_in_leaves_a_first_keyframe_alone() {
+        let lanes = [lane(KeyParam::Volume, &[0, 10, 20])];
+        let marks = [mark(KeyParam::Volume, 0), mark(KeyParam::Volume, 10)];
+        assert_eq!(
+            ease_parts(&clip(), &lanes, &marks, Ease::EaseIn),
+            vec![(
+                "keyframes.set",
+                json!({"clips":["c1"],"param":"volume","frames":[10],"ease":"ease_in"})
+            )]
+        );
     }
 
     #[test]
@@ -3381,7 +3614,7 @@ mod tests {
     #[test]
     fn an_ease_sets_that_keyframe() {
         assert_eq!(
-            ease_body("c1", mark(KeyParam::Volume, 3), Ease::EaseIn),
+            ease_body("c1", KeyParam::Volume, &[3], Ease::EaseIn),
             json!({"clips":["c1"],"param":"volume","frames":[3],"ease":"ease_in"})
         );
     }

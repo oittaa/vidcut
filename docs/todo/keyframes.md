@@ -17,7 +17,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** keyframes of speed ([speed-ramps.md](speed-ramps.md)), of the Pan of a clip, and of the other values of a [title](#titles).
+- **To do:** keyframes of the Pan of a clip, and of the other values of a [title](#titles).
 
 ## What Resolve has
 
@@ -129,6 +129,8 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - One track for each value that can have keyframes, in a group for its section. The ⋯ menu can hide the values without keyframes.
 - Each track has the curve button, the Keyframe button with its arrows, and Reset Keyframes.
 - A drag on a keyframe moves it in time. A drag on a curve point also changes the value.
+- Shift and a drag on a curve point change only the time or only the value.
+- With Enable Snapping on, a dragged keyframe goes to the playhead and to the keyframes of other values.
 - A drag on a group track moves that group's keyframes at that time.
 - Volume is a track in the Audio group.
 - The curve of a value shows under its track. A drag on an In or Out handle changes that handle.
@@ -138,7 +140,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - A click on the name of a value selects its row. Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes act on the selected rows.
 - Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the selection. A paste puts the keyframes on the selected clips, the first at the playhead.
 - [§2](../cut-page-spec.md#2-layout-pp-636637) gives the measured rules of the clicks, the box, the steps, the paste and the clipboard.
-- A right-click sets that keyframe's ease, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
+- A right-click sets the ease of that keyframe, or of all the selected keyframes, with the volume Bezier ([X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
 - A bar shows the value, time and ease of the selected keyframe (X90).
 - The time ruler moves the playhead. Fit Clip, Detail Zoom, the zoom slider and Ctrl with the mouse wheel zoom.
 - A scroll bar under the tracks moves the range.
@@ -149,13 +151,11 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
   - Step, Loop, Ping Pong, Reverse and the Shape Box (pp. 1261–1267)
   - keyframes of several selected clips at once (p. 1268)
   - the Lock and Track Color controls (p. 1257)
-  - the ruler in frames, Snap Keyframes to Grid, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
+  - the ruler in frames, curve tooltips and Display Selected Parameters (pp. 1256, 1259)
   - Select all (Ctrl+A) and deselect all (Ctrl+Shift+A) in the Keyframes tab and the tray
   - the parts of Resolve's tray that vidcut does not have ([§2](../cut-page-spec.md#2-layout-pp-636637), Keyframe tray)
   - Zoom X and Zoom Y as two keyframes when the zoom is not linked
     - Resolve then selects and steps Zoom X alone. vidcut's zoom is one keyframe for X and Y.
-
-**Later:** keyframes of speed.
 
 ## Model
 
