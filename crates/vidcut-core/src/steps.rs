@@ -323,6 +323,7 @@ pub fn category(kind: &str) -> &'static str {
         k if k.starts_with("track.")
             || k.starts_with("clip.")
             || k == "edit.compound"
+            || k == "edit.compound_range"
             || k == "edit.decompose" =>
         {
             "Tracks and clips"

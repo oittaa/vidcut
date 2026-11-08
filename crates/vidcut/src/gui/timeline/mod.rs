@@ -236,6 +236,7 @@ pub struct TimelineView {
     pub edits: Vec<EditSel>,
     pub transition: Option<(TrackRef, i64)>,
     pub transition_menu: Option<bool>,
+    pub ruler_menu: Option<bool>,
     pub fade_dialog: Option<fades::FadeDialog>,
     pub fade_in_frames: bool,
     pub transition_frames: Option<(TrackRef, i64, i64)>,
@@ -297,6 +298,7 @@ impl Default for TimelineView {
             edits: Vec::new(),
             transition: None,
             transition_menu: None,
+            ruler_menu: None,
             fade_dialog: None,
             fade_in_frames: false,
             transition_frames: None,
@@ -2335,6 +2337,9 @@ impl Workspace {
                 Some((clip, geometry::OnVolume::Key(f))) => Some((clip, f)),
                 _ => None,
             });
+        if resp.secondary_clicked() {
+            self.timeline.ruler_menu = None;
+        }
         if resp.secondary_clicked()
             && let Some((clip, f)) = key_hit.clone()
         {
@@ -2342,6 +2347,15 @@ impl Workspace {
                 self.timeline.keys = vec![(clip.clone(), f)];
             }
             self.timeline.key_menu = Some((upper, clip, f));
+            self.timeline.clip_menu = None;
+            self.timeline.transition_menu = None;
+            self.timeline.cue_menu = None;
+        } else if resp.secondary_clicked()
+            && let Some(pos) = resp.interact_pointer_pos()
+            && ruler.expand2(vec2(0.0, 2.0)).contains(pos)
+        {
+            self.timeline.ruler_menu = Some(upper);
+            self.timeline.key_menu = None;
             self.timeline.clip_menu = None;
             self.timeline.transition_menu = None;
             self.timeline.cue_menu = None;
@@ -2372,6 +2386,11 @@ impl Workspace {
                 }
                 self.timeline.clip_menu = id.map(|id| (upper, id));
             }
+        }
+        if self.timeline.ruler_menu == Some(upper)
+            && resp.context_menu(|ui| self.ruler_menu(ui, p)).is_none()
+        {
+            self.timeline.ruler_menu = None;
         }
         if self.timeline.transition_menu == Some(upper)
             && resp.context_menu(|ui| self.transition_menu(ui)).is_none()
@@ -2573,6 +2592,15 @@ impl Workspace {
             .collect();
         self.send_each("keyframes.remove", commands);
         true
+    }
+
+    fn ruler_menu(&mut self, ui: &mut egui::Ui, p: &Project) {
+        let marked = p.marks.mark_in.is_some() && p.marks.mark_out.is_some();
+        let convert = egui::Button::new("Convert In and Out to Compound Clip…");
+        if ui.add_enabled(marked, convert).clicked() {
+            self.new_compound = Some(NewCompound::of_marks());
+            ui.close();
+        }
     }
 
     fn key_menu(&mut self, ui: &mut egui::Ui, p: &Project, clip: &str, frame: i64) {

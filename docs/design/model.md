@@ -612,6 +612,7 @@ Import:
   - `Compound::made_from` holds each `Clip` whole, on the track that it came from. A new field of `Clip` thus stays through a nest with no change here.
   - `Compound::tracks` holds what plays. The picture block has the pictures. The sound block has the sounds (`sound_tracks`), each at the length of its own sound.
   - Each block keeps the dissolves of its tracks. `render::expanded` plays them (`inner_transitions`).
+  - `ops::compound::nest_range` cuts every track at the two marks, and nests what is between them. It keeps inner track numbers from V1 and A1.
   - `ops::compound::unnest` restores `made_from` when the two blocks are still tied. A block without the other brings only its own `tracks`, so that nothing is there twice.
   - `ops::compound::target` gives the track of each inner track, for a compound clip made here and for an imported one.
 

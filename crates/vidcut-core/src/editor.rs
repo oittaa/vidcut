@@ -4733,6 +4733,17 @@ fn mutate(
             let nested = ops::compound::nest(p, &ids, name.as_deref())?;
             json!({ "clips": nested.clips, "warnings": nested.warnings })
         }
+        Request::EditCompoundRange { range, name } => {
+            let span = match range {
+                Some(range) => ctx(p, playhead).range(range)?,
+                None => match (p.marks.mark_in, p.marks.mark_out) {
+                    (Some(a), Some(b)) => (a, b),
+                    _ => return Err(Error::usage("set In and Out, or give `range`")),
+                },
+            };
+            let nested = ops::compound::nest_range(p, span, name.as_deref())?;
+            json!({ "clips": nested.clips, "warnings": nested.warnings })
+        }
         Request::EditDecompose { clips } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
             let ids = ops::compound::leads(p, &ids);

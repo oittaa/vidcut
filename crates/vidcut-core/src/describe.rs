@@ -152,6 +152,7 @@ pub fn describe_at(
             d.place("clip", None)
         ),
         "edit.compound" => format!("New Compound Clip of {}", d.clips("clips")),
+        "edit.compound_range" => "New Compound Clip of In to Out".to_string(),
         "edit.decompose" => format!("Decompose {}", d.clips("clips")),
         "edit.slide" => format!(
             "Slide {} {}{}",

@@ -4,19 +4,33 @@ use serde_json::json;
 use super::workspace::Workspace;
 
 #[derive(Debug)]
+enum Making {
+    Clips(Vec<String>),
+    Marks,
+}
+
+#[derive(Debug)]
 pub(super) struct NewCompound {
-    clips: Vec<String>,
+    making: Making,
     name: String,
     focus: bool,
 }
 
 impl NewCompound {
-    pub(super) fn new(clips: Vec<String>) -> Self {
+    fn of(making: Making) -> Self {
         Self {
-            clips,
+            making,
             name: String::new(),
             focus: true,
         }
+    }
+
+    pub(super) fn new(clips: Vec<String>) -> Self {
+        Self::of(Making::Clips(clips))
+    }
+
+    pub(super) fn of_marks() -> Self {
+        Self::of(Making::Marks)
     }
 }
 
@@ -45,10 +59,13 @@ impl Workspace {
             });
         });
         if create {
-            self.send(
-                "edit.compound",
-                json!({ "clips": d.clips, "name": d.name.trim() }),
-            );
+            let name = d.name.trim();
+            match &d.making {
+                Making::Clips(clips) => {
+                    self.send("edit.compound", json!({ "clips": clips, "name": name }));
+                }
+                Making::Marks => self.send("edit.compound_range", json!({ "name": name })),
+            }
         } else if open && !cancel {
             self.new_compound = Some(d);
         }

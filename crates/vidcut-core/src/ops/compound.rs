@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{block_clip, ensure_track, linked, locate, tracks, unlocked};
+use super::{block_clip, ensure_track, fix_audio, linked, locate, split_at, tracks, unlocked};
 use crate::error::{Error, Result};
 use crate::model::{Clip, Compound, Kept, Project, Track, TrackKind};
 use crate::otio;
@@ -44,7 +44,13 @@ fn free(t: &Track, (a, b): (i64, i64), range: fn(&Clip) -> (i64, i64)) -> bool {
         })
 }
 
-fn lift(p: &mut Project, ids: &HashSet<String>, kind: TrackKind, first: i64) -> Vec<Track> {
+fn lift(
+    p: &mut Project,
+    ids: &HashSet<String>,
+    kind: TrackKind,
+    first: i64,
+    every_track: bool,
+) -> Vec<Track> {
     let order = p.tracks_of(kind);
     let selected = |&i: &usize| holds(&p.tracks[i], ids);
     let (Some(lowest), Some(highest)) = (
@@ -53,6 +59,7 @@ fn lift(p: &mut Project, ids: &HashSet<String>, kind: TrackKind, first: i64) -> 
     ) else {
         return Vec::new();
     };
+    let lowest = if every_track { 0 } else { lowest };
     let mut lifted = Vec::new();
     for (n, &i) in order[lowest..=highest].iter().enumerate() {
         let track = &mut p.tracks[i];
@@ -208,8 +215,6 @@ pub fn nest(p: &mut Project, ids: &[String], name: Option<&str>) -> Result<Neste
         }
     }
     let span = span_of(p, &ids);
-    let frames = span.1 - span.0;
-    let name = given_name(p, name);
     let lowest_picture = p
         .tracks_of(TrackKind::Video)
         .into_iter()
@@ -219,8 +224,73 @@ pub fn nest(p: &mut Project, ids: &[String], name: Option<&str>) -> Result<Neste
         .into_iter()
         .find(|&i| holds(&p.tracks[i], &ids))
         .map(|i| p.tracks[i].id.clone());
-    let mut whole = lift(p, &ids, TrackKind::Video, span.0);
-    whole.extend(lift(p, &ids, TrackKind::Audio, span.0));
+    build(p, &ids, span, name, (lowest_picture, lowest_sound), false)
+}
+
+fn end_sound_at(t: &mut Track, at: i64) {
+    let crosses = |c: &Clip| c.audio_range().is_some_and(|(s, e)| s < at && at < e);
+    if !t.clips.iter().any(crosses) {
+        return;
+    }
+    for c in &mut t.clips {
+        let (start, end) = (c.start, c.end());
+        if let Some(a) = c.audio.as_mut() {
+            if end == at {
+                a.tail = 0;
+            }
+            if start == at {
+                a.head = 0;
+            }
+        }
+    }
+}
+
+pub fn nest_range(p: &mut Project, (a, b): (i64, i64), name: Option<&str>) -> Result<Nested> {
+    if a >= b {
+        return Err(Error::usage(format!("empty range {a}..{b}")));
+    }
+    let first_picture = p.tracks_of(TrackKind::Video).first().copied();
+    for ti in 0..p.tracks.len() {
+        let reached = p.tracks[ti].clips.iter().any(|c| {
+            let (s, e) = extent(c);
+            s < b && e > a
+        });
+        if reached || Some(ti) == first_picture {
+            unlocked(p, ti)?;
+        }
+    }
+    for ti in 0..p.tracks.len() {
+        for at in [a, b] {
+            split_at(p, ti, at);
+            end_sound_at(&mut p.tracks[ti], at);
+        }
+        fix_audio(p, ti);
+    }
+    let ids: HashSet<String> = p
+        .tracks
+        .iter()
+        .flat_map(|t| &t.clips)
+        .filter(|c| c.start >= a && c.end() <= b)
+        .map(|c| c.id.clone())
+        .collect();
+    if ids.is_empty() {
+        return Err(Error::invalid("no clips between In and Out"));
+    }
+    build(p, &ids, (a, b), name, (first_picture, None), true)
+}
+
+fn build(
+    p: &mut Project,
+    ids: &HashSet<String>,
+    span: (i64, i64),
+    name: Option<&str>,
+    (lowest_picture, lowest_sound): (Option<usize>, Option<String>),
+    every_track: bool,
+) -> Result<Nested> {
+    let frames = span.1 - span.0;
+    let name = given_name(p, name);
+    let mut whole = lift(p, ids, TrackKind::Video, span.0, every_track);
+    whole.extend(lift(p, ids, TrackKind::Audio, span.0, every_track));
     let stack = stack_of(p, &whole, &name, frames)?;
     let (picture, sound) = (picture_tracks(&whole), sound_tracks(&whole));
     let mut clips = Vec::new();
@@ -394,6 +464,19 @@ mod tests {
     }
 
     #[test]
+    fn a_range_cuts_each_track_at_the_marks_and_nests_what_is_between() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 60);
+        let upper = f.append("m1", 0, 60);
+        let moved = json!({"clips": [upper], "to": 0, "mode": "overwrite", "track": "V2"});
+        f.ok(req("edit.move", moved));
+        f.ok(req("edit.compound_range", json!({"range": "10f..40f"})));
+        let host = f.editor.project().track("V1").unwrap().clips[1].clone();
+        assert_eq!((host.start, host.duration), (10, 30));
+        assert_eq!(f.track("V2").len(), 2);
+    }
+
+    #[test]
     fn a_nest_and_a_decompose_restore_the_clips_and_their_edits() {
         let mut f = Fixture::new(&[(4.0, true)]);
         let a = f.append("m1", 0, 50);
@@ -489,7 +572,11 @@ mod tests {
         let a = f.append("m1", 10, 50);
         let b = f.append("m1", 50, 90);
         f.ok(req("edit.dissolve", json!({"at": 40})));
-        let plan = |f: &Fixture| crate::render::flatten(f.editor.project(), 0, 80).unwrap().video;
+        let plan = |f: &Fixture| {
+            crate::render::flatten(f.editor.project(), 0, 80)
+                .unwrap()
+                .video
+        };
         let before = plan(&f);
         nest(&mut f, &[&a, &b]);
         assert_eq!(plan(&f), before);
