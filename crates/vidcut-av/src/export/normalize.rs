@@ -73,7 +73,54 @@ pub(crate) fn displayable(p: format::Pixel) -> bool {
             | P::RGB24
             | P::GBRP16LE
             | P::GBRAP16LE
+            | P::GBRPF16LE
+            | P::GBRAPF16LE
+            | P::GBRPF32LE
+            | P::GBRAPF32LE
     )
+}
+
+fn spread_to(p: format::Pixel) -> Option<format::Pixel> {
+    use format::Pixel as P;
+    match p {
+        P::GRAYF16LE => Some(P::GBRPF16LE),
+        P::YAF16LE => Some(P::GBRAPF16LE),
+        P::GRAYF32LE => Some(P::GBRPF32LE),
+        P::YAF32LE => Some(P::GBRAPF32LE),
+        _ => None,
+    }
+}
+
+fn spread(src: &frame::Video, to: format::Pixel) -> Result<frame::Video> {
+    let size = match to {
+        format::Pixel::GBRPF16LE | format::Pixel::GBRAPF16LE => 2,
+        _ => 4,
+    };
+    let step = if has_alpha(to) { 2 * size } else { size };
+    let (w, h) = (src.width() as usize, src.height() as usize);
+    let mut out = frame::Video::new(to, src.width(), src.height());
+    // SAFETY: two live frames; FFmpeg copies the fields that are not pictures.
+    let ret = unsafe { ffmpeg::ffi::av_frame_copy_props(out.as_mut_ptr(), src.as_ptr()) };
+    if ret < 0 {
+        return Err(Error::Ffmpeg {
+            context: "copying a gray picture's fields".into(),
+            source: ffmpeg::Error::from(ret),
+        });
+    }
+    let (from, stride) = (src.data(0), src.stride(0));
+    for plane in 0..out.planes() {
+        let at = if plane == 3 { size } else { 0 };
+        let row = out.stride(plane);
+        let to = out.data_mut(plane);
+        for y in 0..h {
+            let line = &from[y * stride..y * stride + w * step];
+            let samples = to[y * row..y * row + w * size].chunks_exact_mut(size);
+            for (sample, pixel) in samples.zip(line.chunks_exact(step)) {
+                sample.copy_from_slice(&pixel[at..at + size]);
+            }
+        }
+    }
+    Ok(out)
 }
 
 pub(crate) struct Relayout {
@@ -102,6 +149,9 @@ impl Relayout {
         let fmt = src.format();
         if (self.passes)(fmt) {
             return frame_ref(src);
+        }
+        if let Some(to) = spread_to(fmt).filter(|&to| (self.passes)(to)) {
+            return spread(src, to);
         }
         let key = (src.width(), src.height(), fmt);
         if self.graph.as_ref().is_none_or(|(_, k)| *k != key) {
@@ -197,6 +247,36 @@ mod tests {
     use crate::decode::Reading;
     use crate::ffmpeg::{color, format::Pixel, frame};
 
+    fn filled<const N: usize>(format: Pixel, planes: &[[u8; N]]) -> frame::Video {
+        let mut f = frame::Video::new(format, 2, 2);
+        f.set_pts(Some(0));
+        for (plane, sample) in planes.iter().enumerate() {
+            for s in f.data_mut(plane).as_chunks_mut::<N>().0 {
+                *s = *sample;
+            }
+        }
+        f
+    }
+
+    fn samples<const N: usize>(f: &frame::Video, plane: usize) -> Vec<[u8; N]> {
+        let stride = f.stride(plane);
+        (0..2)
+            .flat_map(|y| {
+                f.data(plane)[y * stride..y * stride + 2 * N]
+                    .as_chunks::<N>()
+                    .0
+            })
+            .copied()
+            .collect()
+    }
+
+    fn floats(f: &frame::Video, plane: usize) -> Vec<f32> {
+        samples::<4>(f, plane)
+            .into_iter()
+            .map(f32::from_le_bytes)
+            .collect()
+    }
+
     #[test]
     fn a_display_takes_10_bit_planar_4_2_0() {
         assert!(displayable(Pixel::YUV420P10LE));
@@ -235,6 +315,75 @@ mod tests {
     #[test]
     fn a_display_takes_16_bit_interleaved_4_4_4() {
         assert!(displayable(Pixel::P416LE));
+    }
+
+    #[test]
+    fn a_display_takes_planar_32_bit_floats_with_alpha() {
+        assert!(displayable(Pixel::GBRAPF32LE));
+    }
+
+    #[test]
+    fn a_display_takes_planar_half_floats() {
+        assert!(displayable(Pixel::GBRPF16LE));
+    }
+
+    #[test]
+    fn a_float_picture_keeps_its_values_above_1_and_below_0() {
+        let planes = [0.5f32, -0.25, 2.5].map(f32::to_le_bytes);
+        let out = Relayout::new()
+            .run(&filled(Pixel::GBRPF32LE, &planes), Reading::Stream)
+            .unwrap();
+        assert_eq!(
+            [floats(&out, 0), floats(&out, 1), floats(&out, 2)],
+            [vec![0.5; 4], vec![-0.25; 4], vec![2.5; 4]]
+        );
+    }
+
+    #[test]
+    fn a_gray_float_picture_becomes_three_equal_float_planes() {
+        let out = Relayout::new()
+            .run(
+                &filled(Pixel::GRAYF32LE, &[2.5f32.to_le_bytes()]),
+                Reading::Stream,
+            )
+            .unwrap();
+        assert_eq!(
+            (
+                out.format(),
+                [floats(&out, 0), floats(&out, 1), floats(&out, 2)]
+            ),
+            (Pixel::GBRPF32LE, [vec![2.5; 4], vec![2.5; 4], vec![2.5; 4]])
+        );
+    }
+
+    #[test]
+    fn a_gray_half_float_picture_keeps_its_alpha_in_the_fourth_plane() {
+        let minus_quarter_and_half = [0x00, 0xb4, 0x00, 0x38];
+        let out = Relayout::new()
+            .run(
+                &filled(Pixel::YAF16LE, &[minus_quarter_and_half]),
+                Reading::Stream,
+            )
+            .unwrap();
+        assert_eq!(
+            (out.format(), samples::<2>(&out, 2), samples::<2>(&out, 3)),
+            (
+                Pixel::GBRAPF16LE,
+                vec![[0x00, 0xb4]; 4],
+                vec![[0x00, 0x38]; 4]
+            )
+        );
+    }
+
+    #[test]
+    fn a_gray_float_picture_keeps_its_linear_transfer() {
+        let mut gray = filled(Pixel::GRAYF32LE, &[0.18f32.to_le_bytes()]);
+        gray.set_color_transfer_characteristic(color::TransferCharacteristic::Linear);
+        let out = Relayout::new().run(&gray, Reading::Stream).unwrap();
+        assert_eq!(
+            out.color_transfer_characteristic(),
+            color::TransferCharacteristic::Linear
+        );
     }
 
     #[test]
