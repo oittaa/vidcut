@@ -2084,7 +2084,8 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - Its parameter `pan` has its range and `Key Frames`.
     - An OTIO import sets the Pan from it.
   - vidcut: the Pan row of the Audio section (X70) and `clip.set` set `pan`.
-  - vidcut: a clip pans as on a stereo track ([X152](deviations.md#x152-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: a clip pans as on a stereo track ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: `clip.set` refuses a Pan outside the range ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
 - **Volume keyframes** (pp. 1109, 1111–1113, 1251, 1255):
   - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112). Two keyframes or more change the level over time (p. 1112).
   - Keyframes of the Inspector's Volume also show on the overlay (p. 1111).
