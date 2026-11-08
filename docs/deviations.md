@@ -1577,10 +1577,10 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Mute does what Mute and Unmute in the right-click menu of the clip do.
     - Normalize in the header opens Normalize Audio Levels for the clips of the section ([X72](#x72-normalize-audio-levels-on-the-cut-page)).
     - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([X64](#x64-voice-isolation-is-free-on-a-clip-or-a-track)).
-    - Pan sets the pan of the selected clips ([X152](#x152-every-clip-pans-as-on-a-stereo-track)).
-    - The Equalizer row has a switch and a button that opens the Equalizer window ([X153](#x153-the-equalizer-is-a-window-with-chosen-curves)).
-    - The Dialogue Leveler row has a switch and a button that opens the Dialogue Leveler window ([X154](#x154-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
-    - The Compressor row has a switch and a button that opens the Compressor window ([X155](#x155-the-compressor-is-on-a-clip)).
+    - Pan sets the pan of the selected clips ([X153](#x153-every-clip-pans-as-on-a-stereo-track)).
+    - The Equalizer row has a switch and a button that opens the Equalizer window ([X154](#x154-the-equalizer-is-a-window-with-chosen-curves)).
+    - The Dialogue Leveler row has a switch and a button that opens the Dialogue Leveler window ([X155](#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
+    - The Compressor row has a switch and a button that opens the Compressor window ([X156](#x156-the-compressor-is-on-a-clip)).
     - The Audio section has no Pitch or Music Remixer.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
@@ -2821,22 +2821,25 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The OpenEXR writer of vidcut, the `exr` crate, writes this attribute for each level that it gets.
   - The attribute is part of the OpenEXR format. A reader can see the level of the file, and a reader that does not know it skips it.
 
-## X152. Every clip pans as on a stereo track
+## X153. Every clip pans as on a stereo track
 
 - **Resolve:**
   - The law of the Pan is different on a stereo track and on a mono track (measured in Resolve Studio 21.2).
   - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives both laws.
   - The Pan has a switch.
+  - The scripting API takes a Pan outside −100 to 100, and sets the nearest limit.
 - **vidcut:**
   - A track has no channel type. Each clip uses the law of a stereo track.
   - A mix of one channel has no sides. The Pan does not change it.
   - A mix of three channels or more applies the Pan to its first two channels.
   - The Audio section has no switch for the Pan. Pan 0 gives the same sound.
+  - `clip.set` refuses a Pan outside −100 to 100.
 - **Why:**
   - Resolve puts a mono clip on a stereo track by default. Thus the law of a stereo track is what most clips get.
   - One slider is simpler. A section has no switch ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).
+  - A value outside the range is an error in the script. A refusal shows the error.
 
-## X153. The Equalizer is a window with chosen curves
+## X154. The Equalizer is a window with chosen curves
 
 - **Resolve:**
   - The Equalizer is a section of the Inspector, and a change applies at once (pp. 745–746).
@@ -2854,25 +2857,34 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A window with Apply makes one undo step for one set of changes.
   - The [todo](todo/effects-library.md) lists what to measure in the Resolve window.
 
-## X154. The Dialogue Leveler follows the levels with its own rules
+## X155. The Dialogue Leveler follows the levels with its own rules
 
 - **Resolve:**
   - The Dialogue Leveler finds dialogue with its own analysis (pp. 774–775). Its rules are not public.
   - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives what the renders show.
+  - Its switch starts off (measured in Resolve Studio 21.2).
+  - The scripting API sets an Output Gain outside 0 to 6 dB to the nearest limit.
+  - It does not work on a track with more than two channels (p. 775).
 - **vidcut:**
   - It does not separate dialogue from other sound. A part that is 10 dB above the lowest recent level is dialogue.
   - The window of each level is 50 ms. A process looks 200 ms ahead.
   - Reduce Loud and Lift Soft use the amounts of the measured presets.
   - Background Reduction lowers all the sound between lines. The amount is 1.2 to 5 dB for each preset.
   - The Dialogue Leveler is a window with Apply and Cancel.
+  - The window of a clip with no Dialogue Leveler opens with On checked.
   - On the spoken test clip with Allow Wider Dynamics, each line is within 1.3 dB of Resolve's level.
   - With the other presets, a line is up to 5.1 dB away from Resolve's level.
   - An OTIO export keeps it in vidcut's own metadata. The export gives the note `dialogue_leveler_kept`.
+  - `clip.set` refuses an Output Gain outside 0 to 6 dB.
+  - It works on a clip with any number of channels.
 - **Why:**
   - The player runs the same code as the export. Level rules with a short look ahead run in real time.
   - Background Reduction in the renders was uneven. A fixed amount is predictable.
+  - The user opens the window to turn the Dialogue Leveler on.
+  - A value outside the range is an error in the script. A refusal shows the error.
+  - A track of vidcut has no channel type. Thus a clip with many channels gets what the user asks for.
 
-## X155. The Compressor is on a clip
+## X156. The Compressor is on a clip
 
 - **Resolve:**
   - The Compressor is a module of the Dynamics of a track (pp. 3946–3947).

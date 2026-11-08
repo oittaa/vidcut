@@ -2084,7 +2084,8 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - Its parameter `pan` has its range and `Key Frames`.
     - An OTIO import sets the Pan from it.
   - vidcut: the Pan row of the Audio section (X70) and `clip.set` set `pan`.
-  - vidcut: a clip pans as on a stereo track ([X152](deviations.md#x152-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: a clip pans as on a stereo track ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: `clip.set` refuses a Pan outside the range ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
 - **Clip equalizer** (pp. 743, 745–746, 3950–3952):
   - The Equalizer of a clip has six bands, a switch for all the bands and a reset button (p. 745).
   - A graph shows the curve. It has a numbered handle for each band that is on. A drag on a handle changes its band (p. 745).
@@ -2102,7 +2103,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - The range and the default of each frequency.
     - The curve of each filter.
     - The effect that an OTIO export writes.
-  - vidcut: the Equalizer row of the Audio section (X70) and `clip.set` set `equalizer` ([X153](deviations.md#x153-the-equalizer-is-a-window-with-chosen-curves)).
+  - vidcut: the Equalizer row of the Audio section (X70) and `clip.set` set `equalizer` ([X154](deviations.md#x154-the-equalizer-is-a-window-with-chosen-curves)).
 - **Dialogue Leveler** (pp. 743, 774–775):
   - The Dialogue Leveler has a switch, a preset, three processes and an Output Gain (p. 775).
   - The presets are Allow Wider Dynamics, More Lift For Low Levels, Lift Soft Whispery Sources and Optimize Moderate Levels (p. 775).
@@ -2127,7 +2128,9 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Background Reduction changes only the sound between lines. It lowered the noise by 1 to 11 dB there, and only in the first gaps of the clip.
   - The Output Gain changes the sound only with Reduce Loud Dialogue on. With it, it adds its full value.
   - An OTIO export writes no effect for the Dialogue Leveler.
-  - vidcut: the Dialogue Leveler row of the Audio section (X70) and `clip.set` set `dialogue_leveler` ([X154](deviations.md#x154-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
+  - vidcut: the Dialogue Leveler row of the Audio section (X70) and `clip.set` set `dialogue_leveler` ([X155](deviations.md#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
+  - vidcut: the window of a clip with no Dialogue Leveler opens with On checked ([X155](deviations.md#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
+  - vidcut: `clip.set` refuses an Output Gain outside the range. A clip with more than two channels takes the Dialogue Leveler too ([X155](deviations.md#x155-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
 - **Compressor** (pp. 3946–3947):
   - The Dynamics of a track have a Compressor module, with a switch (p. 3946).
   - Its values (pp. 3946–3947):
@@ -2139,7 +2142,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - Hold goes from 0 to 4000 ms. Its default is 0.
     - Release goes from 50 to 4000 ms. Its default is 93 ms.
   - The scripting API of Resolve Studio 21.2 cannot read or set the Dynamics. Thus the curve and the times are not measured.
-  - vidcut: the Compressor row of the Audio section (X70) and `clip.set` set `compressor` ([X155](deviations.md#x155-the-compressor-is-on-a-clip)).
+  - vidcut: the Compressor row of the Audio section (X70) and `clip.set` set `compressor` ([X156](deviations.md#x156-the-compressor-is-on-a-clip)).
 - **Volume keyframes** (pp. 1109, 1111–1113, 1251, 1255):
   - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112). Two keyframes or more change the level over time (p. 1112).
   - Keyframes of the Inspector's Volume also show on the overlay (p. 1111).
