@@ -11,7 +11,7 @@ use egui_phosphor::regular::{
 use serde_json::{Value, json};
 use vidcut_core::generators::{self, CENTER};
 use vidcut_core::keyframes::{
-    PictureValue, ease_of, eases, handle_point, value_mapped, value_paired,
+    PictureValue, bent, ease_of, eases, handle_point, value_mapped, value_paired,
 };
 use vidcut_core::model::{
     Clip, Ease, EffectValue, Generator, Handle, Keyframe, LowerThirdLine, Picture, Project, Speed,
@@ -52,6 +52,7 @@ const ZOOM_W: f32 = 72.0;
 const LEAST_FRAMES: f64 = 4.0;
 const DETAIL: f64 = 4.0;
 const HIT: f32 = 8.0;
+const LINE_HIT: f32 = 6.0;
 const TICK_GAP: f32 = 96.0;
 const FIELD_W: f32 = 72.0;
 const TRAY_ROWS: usize = 4;
@@ -100,6 +101,7 @@ enum Kind {
     Keys,
     Group,
     Handle,
+    Bend,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -115,7 +117,7 @@ struct Shift {
     dt: i64,
     dv: f64,
     axis: Axis,
-    handle: Option<HandleEdit>,
+    handles: Vec<HandleEdit>,
     snap: Option<i64>,
 }
 
@@ -130,6 +132,9 @@ struct Drag {
     marks: Vec<Mark>,
     axis: Axis,
     fix: Option<HandleFix>,
+    bend: Option<BendFix>,
+    frozen: Option<(KeyParam, f64, f64)>,
+    apart: bool,
     lock: Option<Lock>,
     snap: Option<i64>,
 }
@@ -146,6 +151,9 @@ impl Drag {
             marks,
             axis: Axis::None,
             fix: None,
+            bend: None,
+            frozen: None,
+            apart: false,
             lock: None,
             snap: None,
         }
@@ -160,6 +168,17 @@ struct HandleFix {
     value: f64,
     key_value: f64,
     neighbor: i64,
+    across: Option<(Handle, f64)>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BendFix {
+    param: KeyParam,
+    a: Keyframe,
+    b: Keyframe,
+    frame: f64,
+    before: Option<(Handle, f64)>,
+    after: Option<(Handle, f64)>,
 }
 
 #[derive(Clone, Debug)]
@@ -1359,14 +1378,13 @@ fn shown_lane(lane: &Lane, shift: Option<&Shift>) -> Vec<Shown> {
     let Some(shift) = shift else {
         return rows;
     };
-    if let Some(edit) = &shift.handle
-        && edit.mark.param == lane.param
-        && let Some(row) = rows.iter_mut().find(|r| r.from == edit.mark.frame)
-    {
-        if edit.out {
-            row.key.out_handle = Some(edit.handle);
-        } else {
-            row.key.in_handle = Some(edit.handle);
+    for edit in shift.handles.iter().filter(|e| e.mark.param == lane.param) {
+        if let Some(row) = rows.iter_mut().find(|r| r.from == edit.mark.frame) {
+            if edit.out {
+                row.key.out_handle = Some(edit.handle);
+            } else {
+                row.key.in_handle = Some(edit.handle);
+            }
         }
     }
     for row in &mut rows {
@@ -1771,7 +1789,7 @@ impl Workspace {
                     dt,
                     dv: 0.0,
                     axis: Axis::None,
-                    handle: None,
+                    handles: Vec::new(),
                     snap: None,
                 };
                 self.commit(&clip, p.rev, &shift);
@@ -2406,8 +2424,10 @@ impl Workspace {
             && drag.clip == clip.id
             && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
         {
-            let (shift, press) = ui.input(|i| (i.modifiers.shift, i.pointer.press_origin()));
+            let (shift, alt, press) =
+                ui.input(|i| (i.modifiers.shift, i.modifiers.alt, i.pointer.press_origin()));
             drag.lock = locked(drag.lock, shift, pos - press.unwrap_or(drag.origin));
+            drag.apart = alt;
             return Some(shift_of(clip, lanes, drag, pos));
         }
         self.key_editor
@@ -2433,7 +2453,7 @@ impl Workspace {
                 ));
             }
         }
-        if let Some(edit) = &shift.handle {
+        for edit in &shift.handles {
             parts.push((
                 "keyframes.set",
                 handle_body(&clip.id, edit.mark, edit.out, edit.handle),
@@ -2761,7 +2781,9 @@ impl Workspace {
             return;
         }
         if resp.drag_started() {
-            self.start_box(ui, clip, pos);
+            if self.key_editor.drag.is_none() {
+                self.start_box(ui, clip, pos);
+            }
         } else if resp.double_clicked() {
             let t = map.time(pos.x).round() as i64;
             if clip.start <= t && t < clip.end() {
@@ -2919,8 +2941,7 @@ impl Workspace {
             ..
         } = *area;
         let map = TimeMap::of(plot.lo, plot.hi, rect);
-        let (vlo, vhi) = value_ends(rows);
-        let values = ValueMap::of(vlo, vhi, least_span(lane.param), rect);
+        let values = self.curve_values(lane, rows, rect);
         let painter = ui.painter_at(rect);
         let colors = theme::colors();
         if !matches!(
@@ -2951,7 +2972,7 @@ impl Workspace {
             map,
             values,
         };
-        sample_curve(&paint, 1.5, lines[0], |source| {
+        let line = sample_curve(&paint, 1.5, lines[0], |source| {
             value_mapped(&keys, source, |i| keys[i].value)
         });
         if rows.first().is_some_and(|r| r.paired) {
@@ -3019,11 +3040,37 @@ impl Workspace {
             values,
             keys: spots,
             handles,
+            line,
         }
+    }
+
+    fn curve_values(&self, lane: &Lane, rows: &[Shown], rect: Rect) -> ValueMap {
+        let frozen = self
+            .key_editor
+            .drag
+            .as_ref()
+            .and_then(|d| d.frozen)
+            .filter(|(param, ..)| *param == lane.param);
+        if let Some((_, lo, hi)) = frozen {
+            return ValueMap {
+                lo,
+                hi,
+                top: rect.top(),
+                height: rect.height().max(1.0),
+            };
+        }
+        let (vlo, vhi) = value_ends(rows);
+        ValueMap::of(vlo, vhi, least_span(lane.param), rect)
     }
 
     fn use_curve(&mut self, ui: &egui::Ui, area: &CurveArea<'_>, lane: &Lane, at: &CurveSpots) {
         let CurveArea { resp, clip, .. } = *area;
+        if resp
+            .hover_pos()
+            .is_some_and(|p| at.bend_at(clip, lane, p).is_some())
+        {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
         self.poke_curve(
             Press {
                 ui,
@@ -3032,9 +3079,7 @@ impl Workspace {
                 lane,
                 map: at.map,
             },
-            at.values,
-            &at.keys,
-            &at.handles,
+            at,
         );
         let flat: Vec<(Pos2, i64)> = at.keys.iter().map(|(at, frame, _)| (*at, *frame)).collect();
         self.key_editor.seen.extend(flat.iter().map(|(at, frame)| {
@@ -3294,13 +3339,14 @@ impl Workspace {
         }
     }
 
-    fn poke_curve(
-        &mut self,
-        press: Press<'_>,
-        values: ValueMap,
-        spots: &[(Pos2, i64, Axis)],
-        handles: &[(Pos2, i64, bool, Handle, i64)],
-    ) {
+    fn poke_curve(&mut self, press: Press<'_>, at: &CurveSpots) {
+        let CurveSpots {
+            values,
+            keys: spots,
+            handles,
+            ..
+        } = at;
+        let values = *values;
         let Some(pos) = press.resp.interact_pointer_pos() else {
             return;
         };
@@ -3312,6 +3358,7 @@ impl Workspace {
             map,
         } = press;
         let from = pressed_at(ui, resp, pos);
+        let frozen = Some((lane.param, values.lo, values.hi));
         let handle_hit = closest(handles, from, |(at, ..)| *at);
         let key_hit = closest(spots, from, |(at, ..)| *at);
         let use_handle = match (handle_hit, key_hit) {
@@ -3347,8 +3394,22 @@ impl Workspace {
                     value: handle.value,
                     key_value: row_value,
                     neighbor: *neighbor,
+                    across: across_of(&lane.keys, *frame, *out),
                 }),
+                frozen,
                 ..Drag::new(clip, Kind::Handle, pos, map, vec![mark])
+            });
+            return;
+        }
+        if resp.drag_started()
+            && let Some((i, frame)) = at.bend_at(clip, lane, from)
+        {
+            self.key_editor.drag = Some(Drag {
+                v_span: values.span(),
+                v_height: values.height,
+                bend: Some(bend_of(lane, i, frame)),
+                frozen,
+                ..Drag::new(clip, Kind::Bend, pos, map, Vec::new())
             });
             return;
         }
@@ -3506,9 +3567,18 @@ struct CurveSpots {
     values: ValueMap,
     keys: Vec<(Pos2, i64, Axis)>,
     handles: Vec<(Pos2, i64, bool, Handle, i64)>,
+    line: Vec<Pos2>,
 }
 
 impl CurveSpots {
+    fn bend_at(&self, clip: &Clip, lane: &Lane, pos: Pos2) -> Option<(usize, f64)> {
+        if self.hit(pos) || line_distance(&self.line, pos) > LINE_HIT {
+            return None;
+        }
+        let frame = clip.key_at(self.map.time(pos.x));
+        segment_at(&lane.keys, frame).map(|i| (i, frame))
+    }
+
     fn hit(&self, pos: Pos2) -> bool {
         self.keys.iter().any(|(at, ..)| near(*at, pos))
             || self.handles.iter().any(|(at, ..)| near(*at, pos))
@@ -3639,6 +3709,103 @@ fn dim_curve(
     lines
 }
 
+fn lined_up(moved: Handle, other: Handle, gap: f64, px: [f64; 2]) -> Handle {
+    let length = |h: Handle| (h.frames * px[0]).hypot(h.value * px[1]);
+    let moved_len = length(moved);
+    if moved_len == 0.0 {
+        return other;
+    }
+    let k = (length(other) / moved_len).min(gap / moved.frames.abs());
+    Handle {
+        frames: (-moved.frames * k * 100.0).round() / 100.0,
+        value: (-moved.value * k * 1e6).round() / 1e6,
+    }
+}
+
+fn edits_with_pair(
+    mark: Mark,
+    out: bool,
+    handle: Handle,
+    across: Option<(Handle, f64)>,
+    px: [f64; 2],
+) -> Vec<HandleEdit> {
+    let mut edits = vec![HandleEdit { mark, out, handle }];
+    if let Some((other, gap)) = across {
+        edits.push(HandleEdit {
+            mark,
+            out: !out,
+            handle: lined_up(handle, other, gap, px),
+        });
+    }
+    edits
+}
+
+fn across_of(keys: &[Keyframe], frame: i64, out: bool) -> Option<(Handle, f64)> {
+    let i = keys.iter().position(|k| k.frame == frame)?;
+    let key = &keys[i];
+    let (other, neighbor) = if out {
+        (key.in_handle, keys.get(i.checked_sub(1)?))
+    } else {
+        (key.out_handle, keys.get(i + 1))
+    };
+    Some((other?, (neighbor?.frame - frame).abs() as f64))
+}
+
+fn segment_at(keys: &[Keyframe], frame: f64) -> Option<usize> {
+    keys.windows(2)
+        .position(|w| (w[0].frame as f64) < frame && frame < w[1].frame as f64)
+}
+
+fn bend_of(lane: &Lane, i: usize, frame: f64) -> BendFix {
+    let (a, b) = (lane.keys[i], lane.keys[i + 1]);
+    BendFix {
+        param: lane.param,
+        a,
+        b,
+        frame,
+        before: across_of(&lane.keys, a.frame, true),
+        after: across_of(&lane.keys, b.frame, false),
+    }
+}
+
+fn bend_shift(fix: BendFix, by: f64, apart: bool, px: [f64; 2]) -> Shift {
+    let mut handles = Vec::new();
+    if by != 0.0 {
+        let (out, into) = bent(&fix.a, &fix.b, fix.frame, by);
+        let mark = |frame: i64| Mark {
+            param: fix.param,
+            frame,
+        };
+        let pair = |across: Option<(Handle, f64)>| across.filter(|_| !apart);
+        if let Some(h) = out {
+            handles.extend(edits_with_pair(
+                mark(fix.a.frame),
+                true,
+                h,
+                pair(fix.before),
+                px,
+            ));
+        }
+        if let Some(h) = into {
+            handles.extend(edits_with_pair(
+                mark(fix.b.frame),
+                false,
+                h,
+                pair(fix.after),
+                px,
+            ));
+        }
+    }
+    Shift {
+        marks: Vec::new(),
+        dt: 0,
+        dv: 0.0,
+        axis: Axis::None,
+        handles,
+        snap: None,
+    }
+}
+
 fn line_distance(line: &[Pos2], pos: Pos2) -> f32 {
     line.windows(2)
         .map(|w| {
@@ -3660,22 +3827,31 @@ fn dim_at(dims: &[(KeyParam, Vec<Pos2>)], pos: Pos2) -> Option<KeyParam> {
 fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
     let dx = pos.x - drag.origin.x;
     let dy = pos.y - drag.origin.y;
+    let px = [
+        f64::from(drag.ppf),
+        f64::from(drag.v_height) / drag.v_span.max(f64::MIN_POSITIVE),
+    ];
+    if let Some(fix) = drag.bend {
+        let by = d_value(drag.v_span, drag.v_height, dy);
+        return bend_shift(fix, by, drag.apart, px);
+    }
     if drag.kind == Kind::Handle
         && let Some(fix) = drag.fix
     {
         let handle = moved_handle(clip, fix, dx, dy, drag.ppf, drag.v_span, drag.v_height);
         let same =
             (handle.frames - fix.frames).abs() < 1e-4 && (handle.value - fix.value).abs() < 1e-6;
+        let mut handles = Vec::new();
+        if !same {
+            let across = fix.across.filter(|_| !drag.apart);
+            handles = edits_with_pair(fix.mark, fix.out, handle, across, px);
+        }
         return Shift {
             marks: vec![fix.mark],
             dt: 0,
             dv: 0.0,
             axis: Axis::None,
-            handle: (!same).then_some(HandleEdit {
-                mark: fix.mark,
-                out: fix.out,
-                handle,
-            }),
+            handles,
             snap: None,
         };
     }
@@ -3712,7 +3888,7 @@ fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
         dt,
         dv,
         axis: drag.axis,
-        handle: None,
+        handles: Vec::new(),
         snap: near.filter(|_| dt == by).map(|(_, at)| at),
     }
 }
@@ -3778,6 +3954,72 @@ mod tests {
             "source_in": 0, "video": true, "enabled": true
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_lined_up_handle_keeps_its_length_on_the_screen() {
+        let moved = Handle {
+            frames: 30.0,
+            value: 0.4,
+        };
+        let other = Handle {
+            frames: -5.0,
+            value: 0.0,
+        };
+        let done = lined_up(moved, other, 300.0, [2.0, 200.0]);
+        assert_eq!((done.frames, done.value), (-3.0, -0.04));
+    }
+
+    #[test]
+    fn a_lined_up_handle_stops_at_its_neighbor() {
+        let moved = Handle {
+            frames: 10.0,
+            value: 1.0,
+        };
+        let other = Handle {
+            frames: -40.0,
+            value: 0.0,
+        };
+        let done = lined_up(moved, other, 20.0, [1.0, 1.0]);
+        assert_eq!((done.frames, done.value), (-20.0, -2.0));
+    }
+
+    #[test]
+    fn a_handle_at_its_key_leaves_the_other_one() {
+        let zero = Handle {
+            frames: 0.0,
+            value: 0.0,
+        };
+        let other = Handle {
+            frames: -7.0,
+            value: 2.0,
+        };
+        let done = lined_up(zero, other, 20.0, [1.0, 1.0]);
+        assert_eq!((done.frames, done.value), (-7.0, 2.0));
+    }
+
+    #[test]
+    fn a_bend_realigns_the_handle_across_the_key() {
+        let mut lane = lane(KeyParam::Rotation, &[0, 30, 60]);
+        lane.keys[1].in_handle = Some(Handle {
+            frames: -10.0,
+            value: 0.0,
+        });
+        lane.keys[1].out_handle = Some(Handle {
+            frames: 10.0,
+            value: 0.0,
+        });
+        lane.keys[2].in_handle = Some(Handle {
+            frames: -10.0,
+            value: 0.0,
+        });
+        let shift = bend_shift(bend_of(&lane, 1, 40.0), 6.0, false, [1.0, 1.0]);
+        let across = shift
+            .handles
+            .iter()
+            .find(|e| e.mark.frame == 30 && !e.out)
+            .expect("the In handle moves too");
+        assert!(across.handle.value < 0.0);
     }
 
     #[test]

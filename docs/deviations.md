@@ -2943,3 +2943,35 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The tracks keep the diamonds of all the values. A box and a group drag still work there.
   - Opacity and Rotation have very different ranges. With one scale, one of the two is almost flat.
   - Each track already has a curve button. Checkboxes in a menu repeat it.
+
+## X161. The two handles of a keyframe stay on one line
+
+- **Resolve:**
+  - A drag moves a Bezier handle (p. 1262).
+  - The Flat Handle button turns the restraint of the handles on or off (p. 1263).
+  - The manual does not say how the other handle of the keyframe moves.
+- **vidcut:**
+  - A drag on a handle also moves the other handle of that keyframe. The other handle goes to the opposite direction on the screen.
+  - The other handle keeps its length on the screen. It stops at the next keyframe on its side.
+  - A keyframe with one handle has nothing to line up. A first or a last keyframe also has nothing to line up.
+  - With Alt, the handle moves alone. Thus a corner in the curve is a choice.
+  - The value scale of the curve stays during the drag.
+- **Why:**
+  - The curve stays smooth through the keyframe. A drag cannot put a corner in it by accident.
+
+## X162. A drag on the line bends the curve
+
+- **Resolve:**
+  - The control points and the Bezier handles change the curve (pp. 1261–1262).
+  - A drag on the line between two control points is not in the manual.
+- **vidcut:**
+  - A drag up or down on the line between two keyframes bends that part of the curve. The point of the press follows the pointer.
+  - A straight part gets two handles that give the same straight line. The drag then changes their values.
+  - A part with one handle changes only that handle.
+  - The handle frames stay. Only the handle values change.
+  - The handle on the other side of each of the two keyframes lines up ([X161](#x161-the-two-handles-of-a-keyframe-stay-on-one-line)). With Alt, it stays.
+  - The whole drag is one undo step.
+  - A click on the line changes nothing. A double-click on it still adds a keyframe.
+  - On Position and Zoom, a bend changes the X curve, as a handle does. The Y curve keeps only the timing of the handles.
+- **Why:**
+  - The user shapes a curve at the place that must change, with no handles to find.
