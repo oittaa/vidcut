@@ -1177,15 +1177,28 @@ pub enum Request {
     /// Slip a clip's content.
     #[serde(rename = "edit.slip")]
     EditSlip { clip: ClipRef, by: TimeSpec },
-    /// Decompose in Place: a compound clip from another editor (deviation
-    /// X9) becomes the clips it holds, at their times, trimmed to the part
-    /// it shows. A picture block brings its pictures: its first track in
-    /// the block's place, each other on the next video track above that is
-    /// free there. A sound block brings its sound the same way on audio
-    /// tracks. The picture of a placed compound clip goes to each clip
-    /// that has no picture of its own and fills the frame; with a Dynamic
-    /// Zoom, only to a clip that spans all of the compound clip. A warning
-    /// names the clips that don't take it.
+    /// New Compound Clip: the clips become one compound clip from the start
+    /// of the first to the end of the last, their sound and any gaps
+    /// included. Its picture stays on the lowest of their video tracks; a
+    /// clip that was left out there puts it on a new track above. Its sound
+    /// goes on the first audio track free there, and the two stay linked.
+    /// `name` is optional. Returns its clips.
+    #[serde(rename = "edit.compound")]
+    EditCompound {
+        clips: OneOrMany<ClipRef>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Decompose in Place: a compound clip becomes the clips it holds, at
+    /// their times, trimmed to the part it shows. Inner track n goes on the
+    /// track of the compound clip plus n. Where a clip is in the way, a new
+    /// track goes in, and that clip and the tracks above it move up. One made
+    /// here brings its clips back whole. One from another editor (deviation
+    /// X9) brings them from its file: a picture block its pictures, and a
+    /// sound block its sound. The picture of a placed compound clip goes to
+    /// each clip that has no picture of its own and fills the frame; with a
+    /// Dynamic Zoom, only to a clip that spans all of the compound clip. A
+    /// warning names the clips that don't take it.
     #[serde(rename = "edit.decompose")]
     EditDecompose { clips: OneOrMany<ClipRef> },
     /// Slide a clip (Dynamic Trim's Slide mode): it keeps its media and moves,

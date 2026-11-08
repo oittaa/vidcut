@@ -1916,7 +1916,7 @@ fn placed_of(c: &Clip, nest: Option<&Nest>, over: bool, x: i64) -> Vec<Placed> {
         .collect()
 }
 
-fn inside(x: &Clip, c: &Clip) -> Option<(Clip, Run)> {
+pub(crate) fn inside(x: &Clip, c: &Clip) -> Option<(Clip, Run)> {
     if c.speed.is_some() {
         let speed = c.pace().speed();
         let (k0, k1) = shown_between(c, x.start, x.end())?;

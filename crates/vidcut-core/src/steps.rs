@@ -320,7 +320,11 @@ pub fn category(kind: &str) -> &'static str {
         {
             "Media and bins"
         }
-        k if k.starts_with("track.") || k.starts_with("clip.") || k == "edit.decompose" => {
+        k if k.starts_with("track.")
+            || k.starts_with("clip.")
+            || k == "edit.compound"
+            || k == "edit.decompose" =>
+        {
             "Tracks and clips"
         }
         "project.set" => "Settings",

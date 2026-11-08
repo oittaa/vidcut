@@ -21,6 +21,7 @@ use vidcut_core::render_cache::Part;
 use vidcut_core::request::ViewerMode;
 use vidcut_core::shortcuts::Action;
 
+use crate::gui::compound::NewCompound;
 use crate::gui::shortcuts::Fired;
 use crate::gui::subclip::NewSubclip;
 use crate::gui::theme;
@@ -1269,6 +1270,7 @@ impl Workspace {
         }
         self.marker_window(ui.ctx());
         self.subclip_windows_tick(ui.ctx());
+        self.compound_window_tick(ui.ctx());
         self.duration_window(ui.ctx());
         self.fade_window(ui.ctx());
         self.speed_window(ui.ctx());
@@ -2774,6 +2776,11 @@ impl Workspace {
                 "edit.decompose",
                 json!({ "clips": [c.id] }),
             );
+        }
+        ui.separator();
+        if ui.button("New Compound Clip…").clicked() {
+            self.new_compound = Some(NewCompound::new(clips.clone()));
+            ui.close();
         }
         if vidcut_core::ops::picture::has_picture(c) {
             ui.separator();

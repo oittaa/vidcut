@@ -3,7 +3,7 @@ use crate::model::{Project, Track, TrackKind};
 
 use super::MAIN;
 
-fn prefix(kind: TrackKind) -> char {
+pub(super) fn prefix(kind: TrackKind) -> char {
     match kind {
         TrackKind::Video => 'V',
         TrackKind::Audio => 'A',
@@ -64,6 +64,22 @@ fn renumber(p: &mut Project) {
             p.tracks[i].id = format!("{}{}", prefix(kind), k + 1);
         }
     }
+}
+
+pub(super) fn insert_at(p: &mut Project, kind: TrackKind, at: usize) -> String {
+    let before: Vec<String> = p.tracks.iter().map(|t| t.id.clone()).collect();
+    p.tracks.insert(at, Track::new(String::new(), kind));
+    renumber(p);
+    let names = before
+        .into_iter()
+        .enumerate()
+        .map(|(i, id)| {
+            let now = if i >= at { i + 1 } else { i };
+            (id, p.tracks[now].id.clone())
+        })
+        .collect();
+    crate::duck::renamed(p, &names);
+    p.tracks[at].id.clone()
 }
 
 pub fn remove_track(p: &mut Project, id: &str, force: bool) -> Result<()> {

@@ -112,6 +112,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("edit.audio_roll", &["clip"]),
     ("edit.ripple_delete_silence", &["clips"]),
     ("edit.detect_scene_cuts", &["clips"]),
+    ("edit.compound", &["clips"]),
     ("edit.copy", &["clips"]),
     ("edit.cut", &["clips"]),
     ("edit.change_duration", &["clips"]),

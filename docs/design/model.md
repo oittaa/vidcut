@@ -607,6 +607,12 @@ Import:
 - An import looks for media at the path, then by their last parts beside the file (`MediaRef::paths`). Then it looks by name in `search` and the folder of the bundle (`find_media`).
 - It looks for the media of a compound clip in the same way.
 - `edit.decompose` first takes the media that the compound clip already plays (`otio::same_media`: by path, then by a file name that no other of them has).
+- `ops::compound::nest` makes a compound clip from timeline clips, in the shape of an imported one: a picture block and a sound block that `compound_links` ties.
+  - `otio::made_stack` writes the kept `Stack`, so an export gives other editors a usual compound clip.
+  - `Compound::made_from` holds each `Clip` whole, on the track that it came from. A new field of `Clip` thus stays through a nest with no change here.
+  - `Compound::tracks` holds what plays. The picture block has the pictures. The sound block has the sounds (`sound_tracks`), each at the length of its own sound.
+  - `ops::compound::unnest` restores `made_from` when the two blocks are still tied. A block without the other brings only its own `tracks`, so that nothing is there twice.
+  - `ops::compound::target` gives the track of each inner track, for a compound clip made here and for an imported one.
 
 Modes:
 

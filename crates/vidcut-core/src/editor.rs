@@ -4728,8 +4728,14 @@ fn mutate(
             },
             env,
         )?,
+        Request::EditCompound { clips, name } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let nested = ops::compound::nest(p, &ids, name.as_deref())?;
+            json!({ "clips": nested.clips, "warnings": nested.warnings })
+        }
         Request::EditDecompose { clips } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let ids = ops::compound::leads(p, &ids);
             let (mut made, mut warnings, mut played) = (Vec::new(), Vec::new(), Vec::new());
             for id in &ids {
                 if let Some(k) = p.clip(id).and_then(|c| c.compound.as_ref()) {
@@ -5542,6 +5548,7 @@ fn place_imported(
                 stack: k.stack.clone(),
                 frames: k.frames,
                 tracks: Vec::new(),
+                made_from: Vec::new(),
             });
             let title = c
                 .title_from
@@ -5922,7 +5929,9 @@ fn fill_contents(
             t.clips
                 .iter()
                 .enumerate()
-                .filter(|(_, c)| c.compound.is_some() && ids.contains(&c.id))
+                .filter(|(_, c)| {
+                    c.compound.is_some() && !ops::compound::is_made(c) && ids.contains(&c.id)
+                })
                 .map(move |(ci, _)| (ti, ci))
         })
         .collect();
@@ -5968,6 +5977,11 @@ fn decompose(
         .compound
         .clone()
         .ok_or_else(|| Error::invalid(format!("{id} isn't a compound clip")))?;
+    if !k.made_from.is_empty() {
+        let (block, made) = ops::compound::unnest(p, id, warnings)?;
+        finish_decompose(p, id, &block, &made, warnings);
+        return Ok(made);
+    }
     let mut t = nested(&k, block.video, at.base)?;
     let to = p.settings.fps;
     let conv = |f: i64| rescale(f, t.fps, to);
@@ -6030,38 +6044,25 @@ fn decompose(
     let mut names: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
     names.sort_by_key(|n| n[1..].parse::<usize>().unwrap_or(0));
     names.dedup();
-    let free = |t: &crate::model::Track| {
-        !t.locked
-            && t.clips.iter().all(|c| {
-                let (s, e) = c.audio_range().map_or((c.start, c.end()), |(s, e)| {
-                    (s.min(c.start), e.max(c.end()))
-                });
-                e <= start || s >= end
-            })
-    };
+    let base = p.tracks[ti].id.clone();
     let mut map = HashMap::new();
-    let mut at = ti;
-    for (n, name) in names.into_iter().enumerate() {
-        let target = if n == 0 {
-            p.tracks[ti].id.clone()
-        } else {
-            match (at + 1..p.tracks.len())
-                .find(|&i| p.tracks[i].kind == track_kind && free(&p.tracks[i]))
-            {
-                Some(i) => {
-                    at = i;
-                    p.tracks[i].id.clone()
-                }
-                None => {
-                    let made = ops::add_track(p, track_kind);
-                    at = p.track_index(&made).expect("made");
-                    made
-                }
-            }
-        };
-        map.insert(name.to_string(), target);
+    for name in names {
+        let n = name[1..].parse::<usize>().unwrap_or(1) - 1;
+        let target = ops::compound::target(p, track_kind, &base, n, (start, end));
+        map.insert(name.to_string(), p.tracks[target].id.clone());
     }
     let (made, _) = place_imported(p, &t, &ids, start, &map, warnings, false)?;
+    finish_decompose(p, id, &block, &made, warnings);
+    Ok(made)
+}
+
+fn finish_decompose(
+    p: &mut Project,
+    id: &str,
+    block: &Clip,
+    made: &[String],
+    warnings: &mut Vec<String>,
+) {
     if let Some(e) = &block.effects {
         warnings.push(format!(
             "{id}'s own effects were dropped: {}",
@@ -6069,7 +6070,7 @@ fn decompose(
         ));
     }
     if let Some(picture) = block.picture.as_ref().filter(|x| !x.is_usual()) {
-        let dropped = give_picture(p, &block, picture, &made);
+        let dropped = give_picture(p, block, picture, made);
         if !dropped.is_empty() {
             warnings.push(format!(
                 "{id}'s place, zoom and crop were dropped from {}: they would not show as they did",
@@ -6077,7 +6078,6 @@ fn decompose(
             ));
         }
     }
-    Ok(made)
 }
 
 fn give_picture(p: &mut Project, block: &Clip, picture: &Picture, made: &[String]) -> Vec<String> {
