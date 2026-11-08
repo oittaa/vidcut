@@ -2909,7 +2909,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A short-time Fourier transform splits each channel into frequency bins. Each bin has a signal profile and a noise profile.
   - A bin below the Threshold over its noise profile loses level. A bin at the noise level loses the Threshold and the Sensitivity.
   - Threshold goes from 0 to 40 dB, Attack from 10 to 1000 ms, Sensitivity from 0 to 12 dB and Ratio from 1 to 10. The manual gives no range for them.
+  - Frequency Smoothing goes from 0 to 100. The manual gives no range for it.
   - The defaults are Threshold 12 dB, Attack 200 ms, Sensitivity 3 dB, Ratio 4, Frequency Smoothing 25 and Time Smoothing on.
+  - Dry/Wet starts at 100% and Level at 0 dB. These are vidcut's choices.
   - It has no Listen To Noise Only, no presets and no spectrum graph.
   - A steady tone is noise to it, as it has no steady level above its own minimum.
   - With the usual values, a render of a spoken clip with noise at −60 dBFS gave this result:
