@@ -387,6 +387,25 @@ mod tests {
     }
 
     #[test]
+    fn u_v_and_w_beside_y_are_red_green_blue() {
+        let bytes = file(
+            vec![
+                ("U", halves(&[1.0])),
+                ("V", halves(&[2.0])),
+                ("W", halves(&[0.5])),
+                ("Y", halves(&[0.25])),
+            ],
+            (1, 1),
+            Vec2(0, 0),
+            (1, 1),
+        );
+        assert_eq!(
+            decoded(&bytes, format::Pixel::GBRPF16LE, (1, 1)),
+            [0x00, 0x40, 0x00, 0x38, 0x00, 0x3c]
+        );
+    }
+
+    #[test]
     fn y_and_alpha_alone_interleave() {
         let bytes = file(
             vec![("A", halves(&[1.0, 0.5])), ("Y", halves(&[2.0, 0.0]))],
