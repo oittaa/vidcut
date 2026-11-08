@@ -642,6 +642,9 @@ impl Workspace {
                         }
                     });
                 }
+                if let Some(p) = project {
+                    self.pooled_compounds(ui, p, &view.bin);
+                }
                 if folders.is_empty() && media.is_empty() {
                     ui.add_space(20.0);
                     ui.vertical_centered(|ui| {
@@ -684,6 +687,44 @@ impl Workspace {
             ui.ctx().request_repaint();
         }
         self.rename_bin_window(ui.ctx());
+    }
+
+    fn pooled_compounds(&mut self, ui: &mut egui::Ui, p: &Project, bin: &str) {
+        let needle = self.search.to_lowercase();
+        let shown: Vec<_> = p
+            .compounds
+            .iter()
+            .filter(|k| match needle.is_empty() {
+                true => k.bin == bin,
+                false => k.name.to_lowercase().contains(&needle),
+            })
+            .collect();
+        if shown.is_empty() {
+            return;
+        }
+        ui.horizontal_wrapped(|ui| {
+            for k in shown {
+                let length = p.settings.length_timecode(k.frames());
+                let r = ui.button(format!("{}  {length}", k.name));
+                r.context_menu(|ui| {
+                    if ui.button("Append to Timeline").clicked() {
+                        self.send("edit.place_compound", json!({ "compound": k.id }));
+                        ui.close();
+                    }
+                    if ui.button("Place at Playhead").clicked() {
+                        let at = self.snap.player(crate::live::PlayerId::Timeline).position;
+                        self.send("edit.place_compound", json!({ "compound": k.id, "at": at }));
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Delete").clicked() {
+                        self.send("media.compound_remove", json!({ "compound": k.id }));
+                        ui.close();
+                    }
+                });
+            }
+        });
+        ui.separator();
     }
 
     fn pool_box(&mut self, ui: &egui::Ui, background: &egui::Response, media: &[&Media]) {

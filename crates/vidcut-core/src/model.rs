@@ -30,6 +30,9 @@ pub struct Project {
     pub media: Vec<Media>,
     /// Video tracks `V1…` first, then audio tracks `A1…`.
     pub tracks: Vec<Track>,
+    /// The compound clips in the Media Pool. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compounds: Vec<PooledCompound>,
     /// Timeline In/Out marks.
     pub marks: Marks,
     /// Source Tape In/Out (decision D17). Empty until the tape is marked.
@@ -4970,6 +4973,33 @@ pub struct Compound {
     pub made_from: Vec<Track>,
 }
 
+/// A compound clip in the Media Pool: a copy that can go on the timeline
+/// again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PooledCompound {
+    /// `k<N>`, never reused.
+    pub id: String,
+    pub name: String,
+    /// The bin it is in (a path from [`Project::bins`]); empty: the top level.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub bin: String,
+    /// The picture block. Left out when it holds only sound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<Compound>,
+    /// The sound block. Left out when it holds only pictures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sound: Option<Compound>,
+}
+
+impl PooledCompound {
+    pub fn frames(&self) -> i64 {
+        self.picture
+            .as_ref()
+            .or(self.sound.as_ref())
+            .map_or(0, |k| k.frames)
+    }
+}
+
 /// Clip effects another editor applied, which vidcut keeps without showing
 /// or playing them (deviation X9): the OTIO effects of a clip's picture or
 /// of its sound. `otio::effects` reads, cuts and writes them.
@@ -6095,6 +6125,7 @@ impl Project {
             settings,
             media: Vec::new(),
             tracks: vec![Track::new("V1", TrackKind::Video)],
+            compounds: Vec::new(),
             marks: Marks::default(),
             tape_marks: TapeMarks::default(),
             markers: Vec::new(),
@@ -6274,6 +6305,12 @@ impl Project {
             mark_out: self.marks.mark_out,
             playhead,
         }
+    }
+
+    pub fn alloc_pooled_compound_id(&mut self) -> String {
+        let id = format!("k{}", self.next_id.clip);
+        self.next_id.clip += 1;
+        id
     }
 
     pub fn alloc_clip_id(&mut self) -> String {

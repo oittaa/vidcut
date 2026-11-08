@@ -4728,20 +4728,34 @@ fn mutate(
             },
             env,
         )?,
-        Request::EditCompound { clips, name } => {
+        Request::EditCompound { clips, name, bin } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
-            let nested = ops::compound::nest(p, &ids, name.as_deref())?;
+            let nested =
+                ops::compound::nest(p, &ids, name.as_deref(), bin.as_deref().unwrap_or(""))?;
             json!({ "clips": nested.clips, "warnings": nested.warnings })
         }
-        Request::EditCompoundRange { range, name } => {
-            let span = match range {
-                Some(range) => ctx(p, playhead).range(range)?,
-                None => match (p.marks.mark_in, p.marks.mark_out) {
-                    (Some(a), Some(b)) => (a, b),
-                    _ => return Err(Error::usage("set In and Out, or give `range`")),
-                },
-            };
-            let nested = ops::compound::nest_range(p, span, name.as_deref())?;
+        Request::EditCompoundRange { range, name, bin } => {
+            let span = marked_span(p, playhead, range.as_ref())?;
+            let bin = bin.as_deref().unwrap_or("");
+            let nested = ops::compound::nest_range(p, span, name.as_deref(), bin)?;
+            json!({ "clips": nested.clips, "warnings": nested.warnings })
+        }
+        Request::MediaCompound { range, name, bin } => {
+            let span = marked_span(p, playhead, range.as_ref())?;
+            let bin = bin.as_deref().unwrap_or("");
+            let (id, warnings) = ops::compound::pool_range(p, span, name.as_deref(), bin)?;
+            json!({ "compound": id, "warnings": warnings })
+        }
+        Request::MediaCompoundRemove { compound } => {
+            ops::compound::remove_pooled(p, compound)?;
+            json!({ "removed": compound })
+        }
+        Request::EditPlaceCompound { compound, at } => {
+            let at = at
+                .as_ref()
+                .map(|t| ctx(p, playhead).resolve(t))
+                .transpose()?;
+            let nested = ops::compound::place_pooled(p, compound, at)?;
             json!({ "clips": nested.clips, "warnings": nested.warnings })
         }
         Request::EditDecompose { clips } => {
@@ -5964,6 +5978,20 @@ fn fill_contents(
                 e.message
             )),
         }
+    }
+}
+
+fn marked_span(
+    p: &Project,
+    playhead: Option<i64>,
+    range: Option<&crate::time::RangeSpec>,
+) -> Result<(i64, i64)> {
+    match range {
+        Some(range) => Ok(ctx(p, playhead).range(range)?),
+        None => match (p.marks.mark_in, p.marks.mark_out) {
+            (Some(a), Some(b)) => Ok((a, b)),
+            _ => Err(Error::usage("set In and Out, or give `range`")),
+        },
     }
 }
 

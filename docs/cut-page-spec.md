@@ -2116,6 +2116,9 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - It opens the same window.
   - The timeline does not change. The compound clip goes only into the Media Pool.
   - In 70 and Out 110 give 41 frames.
+- **A compound clip of the Media Pool** on a timeline:
+  - An append gives a linked picture on V1 and sound on A1.
+  - A range of it trims these two, as a clip of a file.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.

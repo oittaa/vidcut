@@ -3028,13 +3028,15 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Resolve:** ([spec §8.18](cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
   - The window of New Compound Clip has a name and a start timecode (p. 1052).
   - A copy of the compound clip goes into the Media Pool (p. 1052).
+  - A compound clip of the Media Pool goes on a timeline as a linked picture and sound, on V1 and A1.
   - A selection can hold only the picture or only the sound of a linked clip.
   - A selected item on a locked track stays out, and the other items go in.
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. It then plays inside.
   - Decompose in Place has a submenu: Using Clips Only and Preserving Audio Data…
 - **vidcut:**
   - The window has only a name. `edit.compound` takes `clips` and an optional `name`.
-  - The compound clip is only on the timeline. The Media Pool gets no item.
+  - A compound clip in the Media Pool does not open. Its menu has Append to Timeline, Place at Playhead and Delete.
+  - `edit.place_compound` puts it on V1 and A1, and a drag does not.
   - A clip goes in with its picture and its sound.
   - A clip on a locked track refuses the request.
   - `edit.compound_range` is Convert In and Out to Compound Clip. A clip in the range on a locked track refuses it too.
@@ -3046,7 +3048,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The sound of a clip on a video track goes on the lowest selected audio track, else on A1 or the first free track above.
 - **Why:**
   - A timeline starts at 00:00:00:00 ([X7](#x7-timelines-start-at-00000000)). Thus a compound clip has no start timecode.
-  - The Media Pool of vidcut holds files. A project has one timeline (X2), so a pool item has no timeline to open.
+  - A project has one timeline (X2). Thus a pool item has no timeline to open.
   - A clip holds its picture and sound as one. Half of a clip is not a thing that vidcut can select.
   - A sound that runs past a mark cannot stay on the timeline without its picture.
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.

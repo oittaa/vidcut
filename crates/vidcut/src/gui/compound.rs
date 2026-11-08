@@ -7,6 +7,7 @@ use super::workspace::Workspace;
 enum Making {
     Clips(Vec<String>),
     Marks,
+    Pool,
 }
 
 #[derive(Debug)]
@@ -31,6 +32,10 @@ impl NewCompound {
 
     pub(super) fn of_marks() -> Self {
         Self::of(Making::Marks)
+    }
+
+    pub(super) fn in_pool() -> Self {
+        Self::of(Making::Pool)
     }
 }
 
@@ -60,12 +65,16 @@ impl Workspace {
         });
         if create {
             let name = d.name.trim();
-            match &d.making {
-                Making::Clips(clips) => {
-                    self.send("edit.compound", json!({ "clips": clips, "name": name }));
-                }
-                Making::Marks => self.send("edit.compound_range", json!({ "name": name })),
-            }
+            let bin = self.snap.pool.bin.clone();
+            let (method, params) = match &d.making {
+                Making::Clips(clips) => (
+                    "edit.compound",
+                    json!({ "clips": clips, "name": name, "bin": bin }),
+                ),
+                Making::Marks => ("edit.compound_range", json!({ "name": name, "bin": bin })),
+                Making::Pool => ("media.compound", json!({ "name": name, "bin": bin })),
+            };
+            self.send(method, params);
         } else if open && !cancel {
             self.new_compound = Some(d);
         }
