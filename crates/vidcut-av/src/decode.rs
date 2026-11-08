@@ -5,7 +5,98 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::error::{Context, Error, Result};
 use crate::ffmpeg::{self, codec, filter, format, frame, media, software::scaling};
 
+mod openexr;
 pub(crate) mod standalone;
+
+pub(crate) trait Decoder {
+    fn send_packet(&mut self, packet: &ffmpeg::Packet) -> std::result::Result<(), ffmpeg::Error>;
+    fn receive_frame(&mut self, frame: &mut frame::Frame)
+    -> std::result::Result<(), ffmpeg::Error>;
+    fn send_eof(&mut self) -> std::result::Result<(), ffmpeg::Error>;
+}
+
+impl Decoder for ffmpeg::decoder::Audio {
+    fn send_packet(&mut self, packet: &ffmpeg::Packet) -> std::result::Result<(), ffmpeg::Error> {
+        ffmpeg::decoder::Opened::send_packet(self, packet)
+    }
+
+    fn receive_frame(
+        &mut self,
+        frame: &mut frame::Frame,
+    ) -> std::result::Result<(), ffmpeg::Error> {
+        ffmpeg::decoder::Opened::receive_frame(self, frame)
+    }
+
+    fn send_eof(&mut self) -> std::result::Result<(), ffmpeg::Error> {
+        ffmpeg::decoder::Opened::send_eof(self)
+    }
+}
+
+pub(crate) struct VideoDecoder {
+    decoder: ffmpeg::decoder::Video,
+    exr: Option<openexr::Planes>,
+}
+
+impl VideoDecoder {
+    pub(crate) fn open(
+        mut ctx: codec::context::Context,
+        codec: Option<ffmpeg::Codec>,
+    ) -> std::result::Result<Self, ffmpeg::Error> {
+        let exr = match codec {
+            Some(_) => None,
+            None => openexr::Planes::take(&mut ctx),
+        };
+        let decoder = match codec {
+            Some(codec) => ctx.decoder().open_as(codec)?.video()?,
+            None => ctx.decoder().video()?,
+        };
+        Ok(Self { decoder, exr })
+    }
+
+    pub(crate) fn id(&self) -> codec::Id {
+        match self.exr {
+            Some(_) => codec::Id::EXR,
+            None => self.decoder.id(),
+        }
+    }
+
+    pub(crate) fn flush(&mut self) {
+        self.decoder.flush();
+    }
+
+    pub(crate) fn as_mut_ptr(&mut self) -> *mut ffmpeg::ffi::AVCodecContext {
+        // SAFETY: only the pointer; the caller writes through it between packets.
+        unsafe { self.decoder.as_mut_ptr() }
+    }
+}
+
+impl std::ops::Deref for VideoDecoder {
+    type Target = ffmpeg::decoder::Video;
+
+    fn deref(&self) -> &Self::Target {
+        &self.decoder
+    }
+}
+
+impl Decoder for VideoDecoder {
+    fn send_packet(&mut self, packet: &ffmpeg::Packet) -> std::result::Result<(), ffmpeg::Error> {
+        match &self.exr {
+            Some(exr) => self.decoder.send_packet(&exr.packet(packet)?),
+            None => self.decoder.send_packet(packet),
+        }
+    }
+
+    fn receive_frame(
+        &mut self,
+        frame: &mut frame::Frame,
+    ) -> std::result::Result<(), ffmpeg::Error> {
+        self.decoder.receive_frame(frame)
+    }
+
+    fn send_eof(&mut self) -> std::result::Result<(), ffmpeg::Error> {
+        self.decoder.send_eof()
+    }
+}
 
 pub(crate) const AUDIO_GAP: f64 = 0.002;
 
@@ -55,10 +146,7 @@ pub(crate) fn container_end(
     file_end(start, duration, stream_origin(stream_start, tick))
 }
 
-pub(crate) fn send_packet(
-    decoder: &mut ffmpeg::decoder::Opened,
-    packet: &ffmpeg::Packet,
-) -> Result<()> {
+pub(crate) fn send_packet(decoder: &mut impl Decoder, packet: &ffmpeg::Packet) -> Result<()> {
     match decoder.send_packet(packet) {
         Ok(()) | Err(ffmpeg::Error::InvalidData) => Ok(()),
         Err(e) => Err(Error::Ffmpeg {
@@ -68,18 +156,19 @@ pub(crate) fn send_packet(
     }
 }
 
-pub(crate) fn decode_stream<F>(
+pub(crate) fn decode_stream<F, D>(
     input: &mut format::context::Input,
     index: usize,
-    decoder: &mut ffmpeg::decoder::Opened,
+    decoder: &mut D,
     frame: &mut F,
     mut each: impl FnMut(&F) -> Result<()>,
 ) -> Result<()>
 where
     F: std::ops::DerefMut<Target = frame::Frame>,
+    D: Decoder,
 {
     let mut damaged = 0;
-    let mut drain = |decoder: &mut ffmpeg::decoder::Opened, frame: &mut F| loop {
+    let mut drain = |decoder: &mut D, frame: &mut F| loop {
         crate::cancel::stop()?;
         crate::first::wait()?;
         match decoder.receive_frame(frame) {
@@ -209,7 +298,7 @@ pub struct VideoReader {
     stream: usize,
     time_base: ffmpeg::Rational,
     start_pts: Option<i64>,
-    decoder: ffmpeg::decoder::Video,
+    decoder: VideoDecoder,
     draining: bool,
     min_pts: Option<i64>,
     pending: Option<frame::Video>,
@@ -709,10 +798,10 @@ pub(crate) fn open_video(
     id: codec::Id,
     gpu: Option<&crate::hw::GpuDecoder>,
     open_gop: impl FnOnce() -> bool,
-) -> Result<ffmpeg::decoder::Video> {
+) -> Result<VideoDecoder> {
     crate::buffers::own(&mut ctx);
     let Some((_, device, codec)) = gpu.and_then(|g| on_gpu(id, g, open_gop).ok()) else {
-        return ctx.decoder().video().ctx(|| "opening video decoder".into());
+        return VideoDecoder::open(ctx, None).ctx(|| "opening video decoder".into());
     };
     // SAFETY: the context isn't opened yet; it takes a reference of its own.
     unsafe {
@@ -726,10 +815,7 @@ pub(crate) fn open_video(
         (*raw).extra_hw_frames = 8;
         (*raw).thread_count = 1;
     }
-    ctx.decoder()
-        .open_as(codec)
-        .and_then(|d| d.video())
-        .ctx(|| "opening video decoder".into())
+    VideoDecoder::open(ctx, Some(codec)).ctx(|| "opening video decoder".into())
 }
 
 pub(crate) fn in_memory(f: frame::Video) -> Result<frame::Video> {
@@ -850,10 +936,8 @@ impl VideoReader {
 
     fn opened(&mut self, why: Option<&str>) {
         // SAFETY: the opened decoder's context, read only.
-        let (id, profile) = unsafe {
-            let ctx = &*self.decoder.as_ptr();
-            (ctx.codec_id, ctx.profile)
-        };
+        let profile = unsafe { (*self.decoder.as_ptr()).profile };
+        let id: ffmpeg::ffi::AVCodecID = self.decoder.id().into();
         self.decoding = Arc::new(Decoding {
             codec: codec::Id::from(id).name().to_string(),
             profile: c_name(unsafe { ffmpeg::ffi::avcodec_profile_name(id, profile) }),
@@ -1007,8 +1091,8 @@ impl VideoReader {
             ctx.set_threading(standalone::one_thread());
         }
         let decoder = match &on {
-            Some((_, _, codec)) => ctx.decoder().open_as(*codec).and_then(|d| d.video()),
-            None => ctx.decoder().video(),
+            Some((_, _, codec)) => VideoDecoder::open(ctx, Some(*codec)),
+            None => VideoDecoder::open(ctx, None),
         };
         let decoder = crate::parts::decoder_opened(decoder, codec_id, "video")?;
         let open = Opened::new(path.to_path_buf());

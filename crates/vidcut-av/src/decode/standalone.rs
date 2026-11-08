@@ -2,7 +2,9 @@ use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::{DAMAGED_IN_A_ROW, DECODED, Input, Reading, VideoReader, thread_name};
+use super::{
+    DAMAGED_IN_A_ROW, DECODED, Decoder, Input, Reading, VideoDecoder, VideoReader, thread_name,
+};
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, codec, ffi, format, frame};
 use crate::pool::tasks::Ordered;
@@ -94,7 +96,7 @@ impl Kind {
         }
     }
 
-    fn open(&self) -> Result<ffmpeg::decoder::Video> {
+    fn open(&self) -> Result<VideoDecoder> {
         let mut ctx =
             codec::context::Context::from_parameters(self.params.clone()).map_err(|e| {
                 Error::Ffmpeg {
@@ -106,10 +108,10 @@ impl Kind {
         unsafe { (*ctx.as_mut_ptr()).pkt_timebase = self.time_base.into() };
         crate::buffers::own(&mut ctx);
         ctx.set_threading(one_thread());
-        crate::parts::decoder_opened(ctx.decoder().video(), self.params.id(), "video")
+        crate::parts::decoder_opened(VideoDecoder::open(ctx, None), self.params.id(), "video")
     }
 
-    fn restore(&self, decoder: &mut ffmpeg::decoder::Video) {
+    fn restore(&self, decoder: &mut VideoDecoder) {
         // SAFETY: the parameters' fields, read; the opened context's, written between packets.
         unsafe {
             let p = &*self.params.as_ptr();
@@ -143,7 +145,7 @@ enum Outcome {
     Failed(Error),
 }
 
-fn decode(decoder: &mut Option<ffmpeg::decoder::Video>, job: &Job) -> Outcome {
+fn decode(decoder: &mut Option<VideoDecoder>, job: &Job) -> Outcome {
     let d = match decoder {
         Some(d) => d,
         None => match job.kind.open() {
@@ -183,7 +185,7 @@ fn decode(decoder: &mut Option<ffmpeg::decoder::Video>, job: &Job) -> Outcome {
 
 struct Kept {
     kind: Arc<Kind>,
-    decoder: ffmpeg::decoder::Video,
+    decoder: VideoDecoder,
     used: Instant,
 }
 
@@ -280,7 +282,7 @@ impl Times {
 pub(super) struct Standalone {
     kind: Arc<Kind>,
     frames: Ordered<Job, Outcome>,
-    own: Option<ffmpeg::decoder::Video>,
+    own: Option<VideoDecoder>,
     times: Times,
 }
 
