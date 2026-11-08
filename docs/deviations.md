@@ -2969,7 +2969,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 ## X160. The graph sits above the tracks with a scale for each curve
 
 - **Resolve:**
-  - The Curve Editor takes the place of the tracks. One keyframe track for the selected curve is at its bottom (p. 1260).
+  - The Curve Editor takes the place of the tracks. One keyframe track for the selected curve is at its bottom (p. 1261).
   - A Parameters menu with checkboxes selects the curves (p. 1262).
   - Auto Zoom Graph Height sets the scale of the graph from the active keyframes (p. 1264). A slider sets it by hand.
   - A larger editor is a window of its own (p. 1260).
