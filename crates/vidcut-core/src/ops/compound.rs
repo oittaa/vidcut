@@ -597,6 +597,23 @@ mod tests {
     }
 
     #[test]
+    fn a_speed_keyframe_goes_on_both_blocks_of_a_compound_clip() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 60);
+        let parts = nest(&mut f, &[&a]);
+        let key = json!({"clips": [parts[0]], "param": "speed", "at": "30f"});
+        f.ok(req("keyframes.add", key));
+        let sections = |id: &str| {
+            let c = f.editor.project().clip(id).unwrap().clone();
+            c.speed.map(|s| s.sections.len())
+        };
+        assert_eq!(
+            (sections(&parts[0]), sections(&parts[1])),
+            (Some(2), Some(2))
+        );
+    }
+
+    #[test]
     fn a_pooled_compound_clip_lands_on_v1_and_a1_linked() {
         let mut f = Fixture::new(&[(4.0, true)]);
         f.append("m1", 0, 60);
