@@ -1,10 +1,14 @@
 use std::io::Cursor;
+use std::sync::Mutex;
 
-use ::exr::block::{self, reader::ChunksReader};
+use ::exr::block::{self, UncompressedBlock, reader::ChunksReader};
+use ::exr::compression::Compression;
+use ::exr::meta::MetaData;
 use ::exr::meta::attribute::{ChannelList, SampleType};
 use ::exr::prelude::Vec2;
 
 use crate::ffmpeg::{self, codec, ffi, format, packet::Mut, packet::Ref};
+use crate::pool::lock;
 
 const RED: usize = 0;
 const GREEN: usize = 1;
@@ -136,17 +140,47 @@ fn chosen(channels: &ChannelList) -> Option<([Option<usize>; 4], Shape)> {
     Some((slots, shape))
 }
 
-fn decode(file: &[u8], shape: Shape, (w, h): (usize, usize), out: &mut [u8]) -> Result<(), String> {
+fn in_slices(
+    chunks: impl ChunksReader + Send,
+    meta: &MetaData,
+    write: &(dyn Fn(&UncompressedBlock, &mut [u8]) + Sync),
+    out: &mut [u8],
+) -> Result<(), String> {
+    let count = chunks.len();
+    let chunks = Mutex::new(chunks);
+    let out = Mutex::new(out);
+    let failed = Mutex::new(None);
+    crate::pool::run(count, &|_| {
+        let chunk = lock(&chunks).next();
+        let block = chunk.map(|c| UncompressedBlock::decompress_chunk(c?, meta, false));
+        match block {
+            Some(Ok(block)) => write(&block, &mut lock(&out)),
+            Some(Err(e)) => *lock(&failed) = Some(e.to_string()),
+            None => {}
+        }
+    });
+    match lock(&failed).take() {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+fn decode(
+    file: &[u8],
+    shape: Shape,
+    (w, h): (usize, usize),
+    out: &mut [u8],
+    whole: bool,
+) -> Result<(), String> {
     if out.len() != shape.frame_bytes((w, h)) {
         return Err(format!("{} bytes for a frame of {w}×{h}", out.len()));
     }
     let reader = block::read(Cursor::new(file), false).map_err(|e| e.to_string())?;
-    let header = reader
-        .meta_data()
+    let meta = reader.meta_data().clone();
+    let header = meta
         .headers
         .first()
-        .ok_or_else(|| "no header".to_string())?
-        .clone();
+        .ok_or_else(|| "no header".to_string())?;
     if header.deep {
         return Err("deep data".into());
     }
@@ -181,57 +215,64 @@ fn decode(file: &[u8], shape: Shape, (w, h): (usize, usize), out: &mut [u8]) -> 
     let chunks = reader
         .filter_chunks(false, |_, _, b| b.layer == 0 && b.level == Vec2(0, 0))
         .map_err(|e| e.to_string())?;
-    chunks
-        .decompress_sequential(false, |_, block| {
-            for line in block.lines(&header.channels) {
-                let at = line.location;
-                let Some(k) = component.get(at.channel).copied().flatten() else {
-                    continue;
-                };
-                let y = origin.1 + at.position.1 as i64;
-                if !(0..h as i64).contains(&y) {
-                    continue;
-                }
-                let x0 = origin.0 + at.position.0 as i64;
-                let first = (-x0).clamp(0, at.sample_count as i64) as usize;
-                let last = (w as i64 - x0).clamp(first as i64, at.sample_count as i64) as usize;
-                if first == last {
-                    continue;
-                }
-                let start = k * kstride + (y as usize * w + (x0 + first as i64) as usize) * step;
-                let dst = &mut out[start..];
-                match shape.sample {
-                    SampleType::F16 => {
-                        let src = &line.value.as_chunks::<2>().0[first..last];
-                        for (i, s) in src.iter().enumerate() {
-                            dst[i * step..i * step + 2]
-                                .copy_from_slice(&u16::from_ne_bytes(*s).to_le_bytes());
-                        }
+    let write = |block: &UncompressedBlock, out: &mut [u8]| {
+        for line in block.lines(&header.channels) {
+            let at = line.location;
+            let Some(k) = component.get(at.channel).copied().flatten() else {
+                continue;
+            };
+            let y = origin.1 + at.position.1 as i64;
+            if !(0..h as i64).contains(&y) {
+                continue;
+            }
+            let x0 = origin.0 + at.position.0 as i64;
+            let first = (-x0).clamp(0, at.sample_count as i64) as usize;
+            let last = (w as i64 - x0).clamp(first as i64, at.sample_count as i64) as usize;
+            if first == last {
+                continue;
+            }
+            let start = k * kstride + (y as usize * w + (x0 + first as i64) as usize) * step;
+            let dst = &mut out[start..];
+            match shape.sample {
+                SampleType::F16 => {
+                    let src = &line.value.as_chunks::<2>().0[first..last];
+                    for (i, s) in src.iter().enumerate() {
+                        dst[i * step..i * step + 2]
+                            .copy_from_slice(&u16::from_ne_bytes(*s).to_le_bytes());
                     }
-                    SampleType::F32 => {
-                        let src = &line.value.as_chunks::<4>().0[first..last];
-                        for (i, s) in src.iter().enumerate() {
-                            dst[i * step..i * step + 4]
-                                .copy_from_slice(&u32::from_ne_bytes(*s).to_le_bytes());
-                        }
+                }
+                SampleType::F32 => {
+                    let src = &line.value.as_chunks::<4>().0[first..last];
+                    for (i, s) in src.iter().enumerate() {
+                        dst[i * step..i * step + 4]
+                            .copy_from_slice(&u32::from_ne_bytes(*s).to_le_bytes());
                     }
-                    SampleType::U32 => {
-                        let src = &line.value.as_chunks::<4>().0[first..last];
-                        for (i, s) in src.iter().enumerate() {
-                            let high = (u32::from_ne_bytes(*s) >> 16) as u16;
-                            dst[i * step..i * step + 2].copy_from_slice(&high.to_le_bytes());
-                        }
+                }
+                SampleType::U32 => {
+                    let src = &line.value.as_chunks::<4>().0[first..last];
+                    for (i, s) in src.iter().enumerate() {
+                        let high = (u32::from_ne_bytes(*s) >> 16) as u16;
+                        dst[i * step..i * step + 2].copy_from_slice(&high.to_le_bytes());
                     }
                 }
             }
-            Ok(())
-        })
-        .map_err(|e| e.to_string())
+        }
+    };
+    if whole || header.compression == Compression::Uncompressed {
+        return chunks
+            .decompress_sequential(false, |_, block| {
+                write(&block, out);
+                Ok(())
+            })
+            .map_err(|e| e.to_string());
+    }
+    in_slices(chunks, &meta, &write, out)
 }
 
 pub(crate) struct Planes {
     shape: Shape,
     size: (usize, usize),
+    whole: bool,
 }
 
 impl Planes {
@@ -248,7 +289,15 @@ impl Planes {
         );
         c.codec_id = ffi::AVCodecID::AV_CODEC_ID_RAWVIDEO;
         c.codec_tag = 0;
-        Some(Self { shape, size })
+        Some(Self {
+            shape,
+            size,
+            whole: false,
+        })
+    }
+
+    pub(crate) fn whole_frames(&mut self) {
+        self.whole = true;
     }
 
     pub(crate) fn packet(&self, packet: &ffmpeg::Packet) -> Result<ffmpeg::Packet, ffmpeg::Error> {
@@ -256,7 +305,7 @@ impl Planes {
         let mut raw = ffmpeg::Packet::new(self.shape.frame_bytes(self.size));
         let out = raw.data_mut().ok_or(ffmpeg::Error::InvalidData)?;
         out.fill(0);
-        decode(file, self.shape, self.size, out).map_err(|e| {
+        decode(file, self.shape, self.size, out, self.whole).map_err(|e| {
             crate::debug!(
                 "decoding",
                 "{}: an OpenEXR frame: {e}",
@@ -325,8 +374,35 @@ mod tests {
     fn decoded(bytes: &[u8], pixel: format::Pixel, size: (usize, usize)) -> Vec<u8> {
         let shape = Shape::of(pixel).unwrap();
         let mut out = vec![0; shape.frame_bytes(size)];
-        decode(bytes, shape, size, &mut out).unwrap();
+        decode(bytes, shape, size, &mut out, true).unwrap();
         out
+    }
+
+    fn two_blocks() -> Vec<u8> {
+        let mut lines = [0.0; 33];
+        lines[0] = 1.0;
+        lines[32] = 2.0;
+        file(vec![("Y", halves(&lines))], (1, 33), Vec2(0, 0), (1, 33))
+    }
+
+    #[test]
+    fn the_blocks_in_slices_land_on_their_own_lines() {
+        let shape = Shape::of(format::Pixel::GRAYF16LE).unwrap();
+        let mut out = vec![0; 66];
+        decode(&two_blocks(), shape, (1, 33), &mut out, false).unwrap();
+        let mut expected = [0; 66];
+        expected[1] = 0x3c;
+        expected[65] = 0x40;
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn a_cut_off_file_fails_in_slices() {
+        let bytes = two_blocks();
+        let shape = Shape::of(format::Pixel::GRAYF16LE).unwrap();
+        let mut out = vec![0; 66];
+        let cut = &bytes[..bytes.len() - 4];
+        assert!(decode(cut, shape, (1, 33), &mut out, false).is_err());
     }
 
     #[test]
@@ -461,7 +537,7 @@ mod tests {
         let shape = Shape::of(format::Pixel::GBRPF16LE).unwrap();
         let mut out = vec![0; 6];
         assert_eq!(
-            decode(&bytes, shape, (1, 1), &mut out),
+            decode(&bytes, shape, (1, 1), &mut out, true),
             Err("no R, G and B or Y channels".to_string())
         );
     }
@@ -477,7 +553,7 @@ mod tests {
         let shape = Shape::of(format::Pixel::GRAYF16LE).unwrap();
         let mut out = vec![0; 2];
         assert_eq!(
-            decode(&bytes, shape, (1, 1), &mut out),
+            decode(&bytes, shape, (1, 1), &mut out, true),
             Err("GRAYF32LE, not GRAYF16LE".to_string())
         );
     }

@@ -39,7 +39,12 @@ flowchart LR
   - It takes R, G, B and A, or Y and A, by the names that FFmpeg's decoder takes. It reads the first part at its full size.
   - The data window goes into the display window, at its place from the origin of the display window. The rest of the picture is 0.
   - A file with another pixel format than the stream gives a damaged frame.
-  - It decodes on one thread. Why: frames that stand alone decode on the pool, one frame on each thread, as with FFmpeg.
+  - A frame on the pool (`Standalone`) decodes whole, on one thread (`VideoDecoder::whole_frames`). Why: the pool already decodes one frame on each thread.
+  - Other frames, such as a still, a single frame, a thumbnail or an analysis, decompress their blocks as slices with `pool::run`. Why: the caller waits for that one frame.
+    - A thread takes the next compressed block from the file, decompresses it and writes its lines into the planes. Thus a thread holds one block at a time, and the picture does not depend on the order of the threads.
+    - An uncompressed file does not divide, because its blocks need no work.
+    - A block that fails gives a damaged frame, as in one thread.
+    - The parallel decompressor of the `exr` crate is not used, because it makes a new thread pool for each frame.
   - `VideoDecoder` gives no mutable access to FFmpeg's decoder. Thus each packet goes through its `send_packet`.
   - The report of the reader names the `exr` codec and FFmpeg's `rawvideo` decoder.
 - A stream that the GPU's decoder refuses decodes on the CPU (`VideoReader::open_gpu_or_cpu`).

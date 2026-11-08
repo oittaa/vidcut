@@ -108,7 +108,8 @@ impl Kind {
         unsafe { (*ctx.as_mut_ptr()).pkt_timebase = self.time_base.into() };
         crate::buffers::own(&mut ctx);
         ctx.set_threading(one_thread());
-        crate::parts::decoder_opened(VideoDecoder::open(ctx, None), self.params.id(), "video")
+        let decoder = VideoDecoder::open(ctx, None).map(VideoDecoder::whole_frames);
+        crate::parts::decoder_opened(decoder, self.params.id(), "video")
     }
 
     fn restore(&self, decoder: &mut VideoDecoder) {
