@@ -103,6 +103,13 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - The rules of the clicks, the box, the steps and the paste with no page number are measured in Resolve Studio 21.1.2.
     - A drag on a keyframe moves it in time. A drag on a curve point also changes the value.
     - Shift and a drag on a curve point change only the time or only the value (p. 1262). The direction of the first movement selects which one (measured in Resolve Studio 21.2).
+    - A drag on a Bezier handle also moves the other handle of that keyframe. The two are then on one line (measured in Resolve Studio 21.2).
+      - The other handle goes to the opposite direction on the screen and keeps its length on the screen.
+      - The value scale of the curve stays during the drag.
+      - With Alt, the handle moves alone ([X161](deviations.md#x161-alt-moves-a-handle-alone-and-the-other-handle-stops-at-a-keyframe)).
+    - A drag on the line between two keyframes bends that part of the curve ([X162](deviations.md#x162-a-drag-on-the-line-bends-the-curve)).
+    - A click on the line clears the selection (measured in Resolve Studio 21.2). A double-click on it adds a keyframe.
+    - Alt and a click on the line adds a keyframe at that point (measured in Resolve Studio 21.2).
     - The ⋯ menu has Enable Snapping (p. 1264). It is on by default (measured in Resolve Studio 21.2). With it on, a dragged keyframe goes to the playhead and to the keyframes of other values ([X159](deviations.md#x159-snapping-also-goes-to-other-keyframes)).
     - A drag on a group track moves that group's keyframes at that time.
     - A drag on an In or Out handle changes that handle. A handle value moves the key's own value.
