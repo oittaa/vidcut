@@ -494,7 +494,10 @@ Writing:
   - `ops::picture::clear` puts back one `PictureTool`, or all of them. `ops::picture::cleared` is the reset of one `PictureTool`, which the Inspector also uses.
   - `picture.set` takes a `DynamicZoomSet`. Its fields replace their own (`DynamicZoomSet::on`).
   - `ops::picture::effect_checked` checks an effect. It is part of `ops::picture::checked`.
-- `ops::effect` holds the edits of the effects: `effects.add`, `effects.set`, `effects.reset`, `effects.remove` and `effects.move`.
+- `ops::effect` holds the edits of the effects: `effects.add`, `effects.set`, `effects.key`, `effects.reset`, `effects.remove` and `effects.move`.
+- The `keys` of an `Effect` hold one `EffectKeys` for each `EffectValue` with keyframes, sorted by value.
+  - `effect_keys` maps each `EffectValue` to its place in the kind of effect. An `EffectValue` of another kind has no place, and `ops::picture::effect_checked` refuses it.
+  - `effect_checked` checks each keyframe as a plain value of the effect.
   - A request names an effect by its place in the list of the clip, from 0.
   - `picture.clear` of all the tools keeps the effects.
 - `place::Placing` turns the picture of a clip, with the pictures of the compound clips around it, into maps.

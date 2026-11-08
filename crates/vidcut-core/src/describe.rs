@@ -298,6 +298,7 @@ pub fn describe_at(
         "picture.set" => d.picture_set(),
         "effects.add" => format!("Add {} to {}", d.effect_name(), d.clips("clips")),
         "effects.set" => format!("Change effect {} of {}", d.effect(), d.clips("clip")),
+        "effects.key" => format!("Key effect {} of {}", d.effect(), d.clips("clip")),
         "effects.reset" => format!("Reset effect {} of {}", d.effect(), d.clips("clip")),
         "effects.remove" => format!("Remove effect {} of {}", d.effect(), d.clips("clip")),
         "effects.move" => format!(
@@ -949,16 +950,19 @@ impl Words<'_> {
     }
 
     fn key_param(&self) -> String {
-        self.params["param"]
+        let param = &self.params["param"];
+        param["value"]
             .as_str()
+            .or(param.as_str())
             .unwrap_or("volume")
             .replace('_', " ")
     }
 
     fn key_value(&self, v: &Value) -> String {
-        match self.params["param"].as_str() {
-            None | Some("volume") => db(v),
-            Some(_) => v.to_string(),
+        match &self.params["param"] {
+            Value::Null => db(v),
+            Value::String(s) if s == "volume" => db(v),
+            _ => v.to_string(),
         }
     }
 

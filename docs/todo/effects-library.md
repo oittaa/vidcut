@@ -53,7 +53,6 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
    - Measure effects other than Gaussian Blur on a compound clip ([todo](compound-opacity.md)).
    - Measure the Gaussian Blur with Use Alpha off on a clip that is partly clear, for example with Crop Softness. vidcut blurs its colors without their alpha.
    - Audio effects: reverb.
-   - Keyframes of effect values.
    - Hover Scrub Preview of transitions, effects and generators (pp. 759, 765, 766).
    - Onscreen controls of effects in the viewer (p. 766).
    - Favorites (p. 760).
