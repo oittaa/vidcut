@@ -1581,6 +1581,7 @@ mod tests {
                 muted: false,
                 pan: 0.0,
                 equalizer: None,
+                dialogue_leveler: None,
                 effects: None,
                 voice_isolation: None,
             }),

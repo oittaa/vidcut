@@ -832,6 +832,9 @@ pub fn export_drawn(
                     if let Some(eq) = &au.equalizer {
                         meta["equalizer"] = json!(eq);
                     }
+                    if let Some(l) = &au.dialogue_leveler {
+                        meta["dialogue_leveler"] = json!(l);
+                    }
                     if let Some(v) = au.voice_isolation {
                         meta["voice_isolation"] = json!(v);
                     }
@@ -939,6 +942,9 @@ pub fn export_drawn(
                 }
                 if let Some(eq) = &au.equalizer {
                     meta["equalizer"] = json!(eq);
+                }
+                if let Some(l) = &au.dialogue_leveler {
+                    meta["dialogue_leveler"] = json!(l);
                 }
                 if let Some(v) = au.voice_isolation {
                     meta["voice_isolation"] = json!(v);
@@ -1376,6 +1382,7 @@ pub struct ImportedClip {
     pub muted: bool,
     pub pan: f64,
     pub equalizer: Option<crate::model::Equalizer>,
+    pub dialogue_leveler: Option<crate::model::DialogueLeveler>,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub link: Option<i64>,
     pub effects: Vec<Value>,
@@ -1461,6 +1468,7 @@ impl ImportedClip {
             muted: false,
             pan: 0.0,
             equalizer: None,
+            dialogue_leveler: None,
             voice_isolation: None,
             link: None,
             effects: Vec::new(),
@@ -2202,6 +2210,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         muted: meta["muted"].as_bool().unwrap_or(false),
                         pan: meta["pan"].as_f64().unwrap_or(0.0),
                         equalizer: serde_json::from_value(meta["equalizer"].clone()).ok(),
+                        dialogue_leveler: serde_json::from_value(meta["dialogue_leveler"].clone())
+                            .ok(),
                         voice_isolation: serde_json::from_value(meta["voice_isolation"].clone())
                             .ok(),
                         link: link_group(item),
@@ -2300,6 +2310,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let voice_isolation = serde_json::from_value(meta["voice_isolation"].clone()).ok();
             let pan = meta["pan"].as_f64().or_else(|| effects::pan(item));
             let equalizer = serde_json::from_value(meta["equalizer"].clone()).ok();
+            let dialogue_leveler = serde_json::from_value(meta["dialogue_leveler"].clone()).ok();
             effects::drop_pan(&mut effects);
             let stream = meta["stream"]
                 .as_u64()
@@ -2364,6 +2375,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if equalizer.is_some() {
                     c.equalizer = equalizer;
                 }
+                if dialogue_leveler.is_some() {
+                    c.dialogue_leveler = dialogue_leveler;
+                }
                 c.audio_effects = effects;
                 if c.speed.is_none() {
                     c.speed = speed;
@@ -2401,6 +2415,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 muted,
                 pan: pan.unwrap_or(0.0),
                 equalizer,
+                dialogue_leveler,
                 voice_isolation,
                 link,
                 effects: Vec::new(),
@@ -2646,26 +2661,38 @@ pub fn unheard_ducking(p: &Project, span: Option<(i64, i64)>) -> Option<String> 
     })
 }
 
-pub fn unheard_equalizer(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+fn kept_in_metadata(
+    p: &Project,
+    span: Option<(i64, i64)>,
+    what: &str,
+    heard: fn(&crate::model::ClipAudio) -> bool,
+) -> Option<String> {
     let (a, b) = span.unwrap_or((0, p.end()));
     let named: Vec<&str> = p
         .tracks
         .iter()
         .flat_map(|t| &t.clips)
-        .filter(|c| {
-            c.audio
-                .as_ref()
-                .and_then(|au| au.equalizer.as_ref())
-                .is_some_and(crate::model::Equalizer::heard)
-        })
+        .filter(|c| c.audio.as_ref().is_some_and(heard))
         .filter(|c| exported(c, a, b))
         .map(|c| c.id.as_str())
         .collect();
     (!named.is_empty()).then(|| {
         format!(
-            "The equalizer stays in vidcut's own metadata, so other editors won't hear it: {}",
+            "{what} stays in vidcut's own metadata, so other editors won't hear it: {}",
             named.join(", ")
         )
+    })
+}
+
+pub fn unheard_equalizer(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    kept_in_metadata(p, span, "The equalizer", |au| {
+        au.equalizer.as_ref().is_some_and(|e| e.heard())
+    })
+}
+
+pub fn unheard_leveler(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    kept_in_metadata(p, span, "The Dialogue Leveler", |au| {
+        au.dialogue_leveler.is_some_and(|l| l.heard())
     })
 }
 

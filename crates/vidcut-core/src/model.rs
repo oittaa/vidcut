@@ -5047,6 +5047,9 @@ pub struct ClipAudio {
     /// The equalizer. Left out when the clip has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equalizer: Option<Equalizer>,
+    /// The Dialogue Leveler. Left out when the clip has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dialogue_leveler: Option<DialogueLeveler>,
     /// Effects on its sound, carried from another editor. The clip volume
     /// is `gain_db` and `gain_keys`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5092,6 +5095,33 @@ pub enum EqKind {
     Notch,
     HiPass,
     LoPass,
+}
+
+/// The Dialogue Leveler: it rides the level of dialogue.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DialogueLeveler {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    /// How far each of the three processes goes.
+    pub preset: LevelerPreset,
+    /// Rides loud dialogue down.
+    pub reduce_loud: bool,
+    /// Lifts soft dialogue.
+    pub lift_soft: bool,
+    /// Lowers the sound between the lines of dialogue.
+    pub background_reduction: bool,
+    /// The output gain in dB, from 0 to 6. Only with `reduce_loud` on.
+    pub output_gain_db: f64,
+}
+
+/// The preset of a Dialogue Leveler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LevelerPreset {
+    AllowWiderDynamics,
+    OptimizeModerateLevels,
+    MoreLiftForLowLevels,
+    LiftSoftWhisperySources,
 }
 
 /// Voice Isolation: a switch and an Amount.

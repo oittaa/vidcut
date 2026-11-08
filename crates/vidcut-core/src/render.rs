@@ -919,6 +919,9 @@ pub enum AudioPiece {
         /// Its clip's equalizer, left out when it changes nothing.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         equalizer: Option<Box<crate::model::Equalizer>>,
+        /// Its clip's Dialogue Leveler, left out when it changes nothing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        leveler: Option<Box<crate::model::DialogueLeveler>>,
     },
     Silence {
         samples: i64,
@@ -1674,6 +1677,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 keyed,
                 pan,
                 equalizer,
+                leveler,
                 ..
             }),
             AudioPiece::Source {
@@ -1688,6 +1692,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 keyed: k2,
                 pan: p2,
                 equalizer: e2,
+                leveler: l2,
                 ..
             },
         ) if media == m2
@@ -1696,6 +1701,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             && isolation == i2
             && pan == p2
             && equalizer == e2
+            && leveler == l2
             && keyed
                 .as_ref()
                 .map(|k| (&k.keys, k.per_frame, k.at + *samples as f64))
@@ -2585,6 +2591,10 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
             .clone()
             .filter(crate::model::Equalizer::heard)
             .map(Box::new),
+        leveler: audio
+            .dialogue_leveler
+            .filter(crate::model::DialogueLeveler::heard)
+            .map(Box::new),
     }
 }
 
@@ -2665,6 +2675,7 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
                 s.muted = false;
                 s.pan = 0.0;
                 s.equalizer = None;
+                s.dialogue_leveler = None;
                 s.voice_isolation = None;
             }
         }
@@ -2886,6 +2897,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
         keyed: None,
         pan: 0.0,
         equalizer: None,
+        leveler: None,
     }
 }
 
@@ -3238,6 +3250,40 @@ mod tests {
         let eq = json!({"bands": [{"band": 2, "gain": 3.0}]});
         req(&mut f, "clip.set", json!({"clips": "c2", "equalizer": eq}));
         assert_eq!(audio_pieces(&f).len(), 2);
+    }
+
+    #[test]
+    fn a_leveler_with_a_process_on_reaches_its_piece() {
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        let l = json!({"reduce_loud": true});
+        req(
+            &mut f,
+            "clip.set",
+            json!({"clips": "c1", "dialogue_leveler": l}),
+        );
+        assert!(matches!(
+            audio_pieces(&f)[0],
+            AudioPiece::Source {
+                leveler: Some(_),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_leveler_with_no_process_on_does_not_reach_its_piece() {
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        req(
+            &mut f,
+            "clip.set",
+            json!({"clips": "c1", "dialogue_leveler": {}}),
+        );
+        assert!(matches!(
+            audio_pieces(&f)[0],
+            AudioPiece::Source { leveler: None, .. }
+        ));
     }
 
     #[test]

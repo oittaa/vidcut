@@ -16,6 +16,7 @@ pub mod folder;
 pub mod generators;
 mod history;
 pub mod keyframes;
+pub mod leveler;
 pub mod looks;
 pub mod lru;
 pub mod model;

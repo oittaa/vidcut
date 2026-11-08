@@ -3571,6 +3571,7 @@ fn mutate(
             gain_db,
             pan,
             equalizer,
+            dialogue_leveler,
             at,
             name,
             color,
@@ -3597,6 +3598,7 @@ fn mutate(
                 gain_db: *gain_db,
                 pan: *pan,
                 equalizer: equalizer.clone(),
+                dialogue_leveler: dialogue_leveler.clone(),
                 at,
                 name: or_none(name),
                 color: or_none(color),
@@ -5667,6 +5669,9 @@ fn place_imported(
                         .equalizer
                         .clone()
                         .filter(|e| crate::equalizer::problem(e).is_none()),
+                    dialogue_leveler: c
+                        .dialogue_leveler
+                        .filter(|l| crate::leveler::problem(l).is_none()),
                     effects: carry(&c.audio_effects, sound_from),
                     voice_isolation: c
                         .voice_isolation
