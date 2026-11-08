@@ -468,8 +468,18 @@ pub(crate) fn target(
 
 fn put_back(p: &mut Project, ti: usize, inner: &Track, block: &Clip, made: &mut Vec<String>) {
     let mut renamed = HashMap::new();
-    for x in &inner.clips {
-        let Some((mut y, _)) = crate::render::inside(x, block) else {
+    let cut = crate::render::stretches(block, TrackKind::Audio);
+    let parts = if cut.is_empty() {
+        std::slice::from_ref(block)
+    } else {
+        cut.as_slice()
+    };
+    for (x, part) in inner
+        .clips
+        .iter()
+        .flat_map(|x| parts.iter().map(move |part| (x, part)))
+    {
+        let Some((mut y, _)) = crate::render::inside(x, part) else {
             continue;
         };
         if p.clip(&y.id).is_some() {

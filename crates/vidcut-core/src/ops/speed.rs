@@ -1,5 +1,5 @@
 use super::keyframes::{Pick, picked_as};
-use super::{change_speed, check_source, retimed, split_clip};
+use super::{change_speed, check_source, linked, retimed, split_clip};
 use crate::error::{Error, Result};
 use crate::model::{Clip, Ease, Project, Section, Speed};
 use crate::render::source_frame;
@@ -10,8 +10,6 @@ fn clip_of(p: &Project, id: &str) -> Result<Clip> {
         .ok_or_else(|| Error::not_found(format!("no clip {id}")))?;
     let why = if c.title.is_some() {
         "a title"
-    } else if c.compound.is_some() {
-        "a compound clip"
     } else if c.is_generator() {
         "a generator"
     } else {
@@ -134,6 +132,7 @@ fn takes_keyframe(p: &Project, id: &str, t: i64) -> Result<Clip> {
 }
 
 pub fn add_keyframe(p: &mut Project, ids: &[String], t: i64) -> Result<Vec<(String, i64)>> {
+    let ids = &linked::with_ties(p, ids);
     let mut why = None;
     let mut targets = Vec::new();
     for id in ids {
@@ -172,7 +171,7 @@ fn merge(map: &mut Vec<Section>, i: usize, end: i64) {
 }
 
 pub fn remove_keyframes(p: &mut Project, ids: &[String], pick: &Pick) -> Result<()> {
-    for id in ids {
+    for id in &linked::with_ties(p, ids) {
         let c = clip_of(p, id)?;
         let keys = c.speed.as_ref().map(Speed::keyframes).unwrap_or_default();
         if keys.is_empty() {
@@ -207,9 +206,13 @@ pub fn set(
     ripple: Option<bool>,
 ) -> Result<()> {
     let ripple_on = ripple.unwrap_or(p.settings.ripple_on);
-    for id in latest_first(p, ids) {
+    let leads = linked::leads(p, ids);
+    for id in latest_first(p, &linked::with_ties(p, ids)) {
         let c = clip_of(p, &id)?;
         let plain = c.speed.as_ref().is_none_or(|s| s.sections.len() < 2);
+        if plain && !leads.contains(&id) {
+            continue;
+        }
         if plain && Speed::freezes(speed) && t >= c.start {
             freeze_from(p, &c, t)?;
             continue;
@@ -274,7 +277,7 @@ pub fn set(
 pub fn freeze(p: &mut Project, ids: &[String], t: i64, ripple: Option<bool>) -> Result<()> {
     let ripple_on = ripple.unwrap_or(p.settings.ripple_on);
     let hold = (2.0 * p.settings.fps.as_f64()).round() as i64;
-    for id in latest_first(p, ids) {
+    for id in latest_first(p, &linked::with_ties(p, ids)) {
         let c = under(p, &id, t)?;
         let (mut map, skip) = sections(&c);
         let u = skip + t - c.start;
@@ -309,7 +312,7 @@ pub fn freeze(p: &mut Project, ids: &[String], t: i64, ripple: Option<bool>) -> 
 }
 
 pub fn reverse(p: &mut Project, ids: &[String], t: i64, backward: bool) -> Result<()> {
-    for id in ids {
+    for id in &linked::with_ties(p, ids) {
         let c = under(p, id, t)?;
         let v = c.speed_at(t);
         if v == 0.0 {
@@ -423,7 +426,7 @@ fn keyed(c: &Clip) -> Result<()> {
 
 pub fn ease(p: &mut Project, ids: &[String], t: i64, ease: Ease) -> Result<()> {
     let (first, last) = sides(ease);
-    for id in ids {
+    for id in &linked::with_ties(p, ids) {
         let c = under(p, id, t)?;
         keyed(&c)?;
         let (mut map, skip) = sections(&c);
@@ -463,7 +466,7 @@ pub fn ease_keyframes(p: &mut Project, ids: &[String], pick: &Pick, ease: Ease) 
             ));
         }
     };
-    for id in ids {
+    for id in &linked::with_ties(p, ids) {
         let c = clip_of(p, id)?;
         keyed(&c)?;
         let keys = c.speed.as_ref().map(Speed::keyframes).unwrap_or_default();
