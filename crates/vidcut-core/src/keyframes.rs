@@ -1,5 +1,6 @@
 use crate::model::{
-    Clip, ClipAudio, Crop, Ease, Handle, Keyframe, Picture, PositionHandles, Title, TitleKind,
+    Clip, ClipAudio, Crop, Ease, Effect, Handle, Keyframe, Picture, PositionHandles, Title,
+    TitleKind,
 };
 use crate::otio::effects::rounded;
 use crate::validate::GAIN;
@@ -595,6 +596,7 @@ fn write_plain(p: &mut Picture, v: PictureValue, value: [f64; 2]) {
 impl Picture {
     pub fn is_keyed(&self) -> bool {
         PictureValue::ALL.into_iter().any(|v| self.has_keys(v))
+            || self.effects.iter().any(Effect::has_keys)
     }
 
     pub fn has_keys(&self, v: PictureValue) -> bool {
@@ -654,6 +656,7 @@ impl Picture {
                 write_plain(&mut p, v, self.channel_at(v, frame));
             }
         }
+        p.effects = self.effects.iter().map(|e| e.sampled(frame)).collect();
         p.clear_keys();
         p
     }
@@ -672,6 +675,9 @@ impl Picture {
     pub fn clear_keys(&mut self) {
         for v in PictureValue::ALL {
             self.clear_channel(v);
+        }
+        for e in &mut self.effects {
+            e.keys.clear();
         }
     }
 
@@ -729,6 +735,7 @@ impl Picture {
                 write_plain(&mut p, v, self.channel_at(v, frame));
             }
         }
+        p.effects = self.effects.iter().map(|e| e.adopted(frame)).collect();
         p
     }
 
@@ -745,7 +752,7 @@ impl Picture {
             }
         }
         if edited.effects != baseline.effects {
-            p.effects = edited.effects.clone();
+            p.effects = previewed_effects(&self.effects, &baseline.effects, &edited.effects, frame);
         }
         p
     }
@@ -754,17 +761,26 @@ impl Picture {
         for v in PictureValue::ALL {
             scale_channel(self, v, &conv, ratio);
         }
+        for e in &mut self.effects {
+            e.scale_key_times(conv, ratio);
+        }
     }
 
     pub fn retimed_to(&mut self, old: &Clip, new: &Clip) {
         for v in PictureValue::ALL {
             retime_channel(self, v, old, new);
         }
+        for e in &mut self.effects {
+            e.retime_keys(old, new);
+        }
     }
 
     pub fn retarget(&mut self, map: impl Fn(i64) -> i64) {
         for v in PictureValue::ALL {
             retarget_channel(self, v, &map);
+        }
+        for e in &mut self.effects {
+            e.retarget_keys(&map);
         }
     }
 
@@ -791,15 +807,7 @@ impl Picture {
     }
 
     pub fn mark_ease(&mut self, v: PictureValue, frame: i64, ease: Ease) {
-        let (keys, _) = parts_mut(self, v);
-        reshape(keys, |marked| {
-            if let Some((k, mark)) = marked.iter_mut().find(|(k, _)| k.frame == frame) {
-                *mark = Some(ease);
-                if ease.is_linear() {
-                    (k.in_handle, k.out_handle) = (None, None);
-                }
-            }
-        });
+        ease_mark(parts_mut(self, v).0, frame, ease);
     }
 
     pub fn move_chosen(
@@ -1094,6 +1102,34 @@ fn retarget_channel(p: &mut Picture, v: PictureValue, map: &impl Fn(i64) -> i64)
     if let Some(y) = y {
         *y = rows.into_iter().map(|(_, v)| v).collect();
     }
+}
+
+fn previewed_effects(
+    stored: &[Effect],
+    baseline: &[Effect],
+    edited: &[Effect],
+    frame: i64,
+) -> Vec<Effect> {
+    if stored.len() != edited.len() || baseline.len() != edited.len() {
+        return edited.to_vec();
+    }
+    stored
+        .iter()
+        .zip(baseline)
+        .zip(edited)
+        .map(|((s, b), e)| s.previewed(b, e, frame))
+        .collect()
+}
+
+pub fn ease_mark(keys: &mut Vec<Keyframe>, frame: i64, ease: Ease) {
+    reshape(keys, |marked| {
+        if let Some((k, mark)) = marked.iter_mut().find(|(k, _)| k.frame == frame) {
+            *mark = Some(ease);
+            if ease.is_linear() {
+                (k.in_handle, k.out_handle) = (None, None);
+            }
+        }
+    });
 }
 
 fn key_at(frame: i64, value: f64) -> Keyframe {

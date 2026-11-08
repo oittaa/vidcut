@@ -7,6 +7,7 @@ pub mod dirs;
 pub mod disk_cache;
 pub mod duck;
 pub mod editor;
+pub mod effect_keys;
 pub mod error;
 pub mod export;
 pub mod fingerprint;

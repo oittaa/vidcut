@@ -1850,8 +1850,39 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
 - **Sharpen in vidcut:** vidcut's own choices, not measured ([todo](todo/effects-library.md)):
   - A viewer that draws fewer pixels than the frame uses the same numbers on the pixels that it draws.
   - A Sharpen Chroma between 1 and 2 uses Sharpen Chroma × g − 1. Only 1, 2, 3 and 5 are measured.
+- **Keyframes of effect values** (pp. 747, 1250–1251):
+  - Each group of an applied effect in the Effects panel of the Inspector has a Keyframe button with Previous and Next buttons (p. 747).
+  - The button adds or removes a keyframe at the playhead, on each parameter of the group (p. 747).
+  - A right-click on the button sets Linear, Ease In, Ease Out or Ease In and Out (p. 1251).
+  - The reset button of a group removes the keyframes of the group (p. 1251).
+  - Measured in Resolve Studio 21.2, with a Bezier spline on the inputs of each plugin:
+    - Each slider and each number of a color takes a curve. Blend takes a curve too.
+    - The switches take no curve. Film Grain Freeze is the exception.
+    - Mosaic Blur Position and Vignette Center are one point.
+  - Not measured: the Keyframe button of a group, its ease menu and the curves of effect keyframes in the Inspector. The manual gives the facts above.
+- **Keyframes of effect values in vidcut:**
+  - Each value in the list above has its own keyframes, on source frames (`Effect::keys`).
+  - Between keyframes, a value follows the same curve as a Transform value. A curve past the range of the value stops at the end of the range.
+  - After the last keyframe, a value holds. Before the first one, it holds too.
+  - Position, Center and each number of a color are values of their own ([X152](deviations.md#x152-effect-keyframes-have-one-number-each)).
+  - Film Grain Freeze has no keyframes ([X152](deviations.md#x152-effect-keyframes-have-one-number-each)).
+  - The header of each effect section has the Keyframe button between Previous and Next.
+    - The button is orange on a keyframe.
+    - On a frame with a keyframe of the effect, it removes each keyframe of the effect on that frame.
+    - On any other frame, it adds a keyframe on each value of the effect, at the value of that frame.
+    - A right-click on the button sets the ease of the keyframes on that frame.
+  - At the playhead, a change of a value with keyframes puts a keyframe there. The plain value stays.
+  - When the last keyframe of a value goes, the value returns to its plain value.
+  - Reset removes the keyframes of the effect, as the reset button of a group does.
+  - The Keyframes tab has a group for each effect with a track for each value. A group name has a number when the clip has two effects of a kind.
+  - `keyframes.add` and the other `keyframes` methods take `{"effect": 0, "value": "strength"}` in `param`.
+  - `effects.set` with `at` puts a keyframe on a value with keyframes. `effects.key` is the Keyframe button.
 - **Compound clips:** the effects of a compound clip work on the mix of its tracks, after its transform ([D75](#12-decisions-on-gaps-and-contradictions)).
-- **In OTIO files:** Resolve writes no effects to them. vidcut keeps the effects in the picture of its own metadata of the clip.
+- **In OTIO files:**
+  - Resolve writes no effects to them. vidcut keeps the effects and their keyframes in the picture of its own metadata of the clip.
+  - Measured in Resolve Studio 21.2: an export of a timeline with Gaussian Blur leaves out the effect.
+  - Measured in Resolve Studio 21.2: an import of an `Effect.1` of type 4 makes a Gaussian Blur with no parameters, and drops its `Key Frames`.
+  - Thus Resolve has no OTIO form that carries keyframes of these effects.
 
 ### 8.17 Generators (p. 766)
 

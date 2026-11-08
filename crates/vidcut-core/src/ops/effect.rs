@@ -2,8 +2,8 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    Effect, EffectKind, EffectType, FilmGrain, GaussianBlur, Glow, MosaicBlur, Project, Sharpen,
-    Vignette,
+    Ease, Effect, EffectKind, EffectType, EffectValue, FilmGrain, GaussianBlur, Glow, MosaicBlur,
+    Project, Sharpen, Vignette,
 };
 use crate::request::EffectChange;
 
@@ -204,11 +204,7 @@ fn sharpen_values(c: &mut EffectChange, s: &mut Sharpen) {
     given(&mut c.sharpen_chroma, &mut s.sharpen_chroma);
 }
 
-pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result<()> {
-    if *change == EffectChange::default() {
-        return Err(Error::usage("effects.set needs a value to change"));
-    }
-    let e = &mut effects_of(p, id, n)?[n];
+fn applied(e: &Effect, change: &EffectChange) -> Result<Effect> {
     let mut next = e.clone();
     let mut left = change.clone();
     taken(&mut left.on, &mut next.on);
@@ -229,8 +225,73 @@ pub fn set(p: &mut Project, id: &str, n: usize, change: &EffectChange) -> Result
             e.kind().name()
         )));
     }
+    Ok(next)
+}
+
+fn named_values(e: &Effect, change: &EffectChange) -> Result<Vec<EffectValue>> {
+    let values = e.values();
+    let mut probe = e.clone();
+    for v in &values {
+        probe.write(*v, f64::NAN);
+    }
+    let probe = applied(&probe, change)?;
+    Ok(values
+        .into_iter()
+        .filter(|v| !probe.plain(*v).is_nan())
+        .collect())
+}
+
+fn source_frame(p: &Project, id: &str, at: i64) -> Result<i64> {
+    let (ti, ci) = locate(p, id)?;
+    Ok(p.tracks[ti].clips[ci].content_at(at))
+}
+
+pub fn set(
+    p: &mut Project,
+    id: &str,
+    n: usize,
+    change: &EffectChange,
+    at: Option<i64>,
+) -> Result<()> {
+    if *change == EffectChange::default() {
+        return Err(Error::usage("effects.set needs a value to change"));
+    }
+    let frame = at.map(|t| source_frame(p, id, t)).transpose()?;
+    let e = &mut effects_of(p, id, n)?[n];
+    let mut next = applied(e, change)?;
+    let named = named_values(e, change)?;
+    for value in e.keys.iter().map(|k| k.value).filter(|v| named.contains(v)) {
+        let Some(frame) = frame else {
+            return Err(Error::usage(format!(
+                "{id}'s {} has keyframes: give `at` for the keyframe",
+                value.name().replace('_', " ")
+            )));
+        };
+        let to = next.plain(value);
+        next.put(value, frame, to);
+        next.write(value, e.plain(value));
+    }
     *e = effect_checked(&next)?;
     Ok(())
+}
+
+pub fn key(p: &mut Project, id: &str, n: usize, at: i64, ease: Option<Ease>) -> Result<Value> {
+    let frame = source_frame(p, id, at)?;
+    let e = &mut effects_of(p, id, n)?[n];
+    let keyed = match ease {
+        Some(ease) if e.has_key_at(frame) => {
+            e.ease_keys(frame, ease);
+            true
+        }
+        Some(_) => {
+            return Err(Error::invalid(format!(
+                "effect {n} of {id} has no keyframes on source frame {frame}"
+            )));
+        }
+        None => e.toggle_keys(frame),
+    };
+    *e = effect_checked(e)?;
+    Ok(json!({ "clip": id, "effect": n, "frame": frame, "keyed": keyed }))
 }
 
 pub fn reset(p: &mut Project, id: &str, n: usize) -> Result<()> {
