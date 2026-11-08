@@ -2084,7 +2084,8 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - Its parameter `pan` has its range and `Key Frames`.
     - An OTIO import sets the Pan from it.
   - vidcut: the Pan row of the Audio section (X70) and `clip.set` set `pan`.
-  - vidcut: a clip pans as on a stereo track ([X152](deviations.md#x152-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: a clip pans as on a stereo track ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
+  - vidcut: `clip.set` refuses a Pan outside the range ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
 - **Clip equalizer** (pp. 743, 745–746, 3950–3952):
   - The Equalizer of a clip has six bands, a switch for all the bands and a reset button (p. 745).
   - A graph shows the curve. It has a numbered handle for each band that is on. A drag on a handle changes its band (p. 745).
@@ -2102,7 +2103,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - The range and the default of each frequency.
     - The curve of each filter.
     - The effect that an OTIO export writes.
-  - vidcut: the Equalizer row of the Audio section (X70) and `clip.set` set `equalizer` ([X153](deviations.md#x153-the-equalizer-is-a-window-with-chosen-curves)).
+  - vidcut: the Equalizer row of the Audio section (X70) and `clip.set` set `equalizer` ([X154](deviations.md#x154-the-equalizer-is-a-window-with-chosen-curves)).
 - **Volume keyframes** (pp. 1109, 1111–1113, 1251, 1255):
   - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112). Two keyframes or more change the level over time (p. 1112).
   - Keyframes of the Inspector's Volume also show on the overlay (p. 1111).
