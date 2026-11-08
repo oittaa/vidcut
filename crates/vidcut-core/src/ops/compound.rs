@@ -46,13 +46,7 @@ fn free(t: &Track, (a, b): (i64, i64), range: fn(&Clip) -> (i64, i64)) -> bool {
         })
 }
 
-fn lift(
-    p: &mut Project,
-    ids: &HashSet<String>,
-    kind: TrackKind,
-    first: i64,
-    every_track: bool,
-) -> Vec<Track> {
+fn lift(p: &mut Project, ids: &HashSet<String>, kind: TrackKind, first: i64) -> Vec<Track> {
     let order = p.tracks_of(kind);
     let selected = |&i: &usize| holds(&p.tracks[i], ids);
     let (Some(lowest), Some(highest)) = (
@@ -61,7 +55,6 @@ fn lift(
     ) else {
         return Vec::new();
     };
-    let lowest = if every_track { 0 } else { lowest };
     let mut lifted = Vec::new();
     for (n, &i) in order[lowest..=highest].iter().enumerate() {
         let track = &mut p.tracks[i];
@@ -218,16 +211,7 @@ pub fn nest(p: &mut Project, ids: &[String], name: Option<&str>, bin: &str) -> R
         }
     }
     let span = span_of(p, &ids);
-    let lowest_picture = p
-        .tracks_of(TrackKind::Video)
-        .into_iter()
-        .find(|&i| holds(&p.tracks[i], &ids));
-    let lowest_sound = p
-        .tracks_of(TrackKind::Audio)
-        .into_iter()
-        .find(|&i| holds(&p.tracks[i], &ids))
-        .map(|i| p.tracks[i].id.clone());
-    let nested = build(p, &ids, span, name, (lowest_picture, lowest_sound), false)?;
+    let nested = build(p, &ids, span, name)?;
     keep_copy(p, &nested, bin);
     Ok(nested)
 }
@@ -357,13 +341,12 @@ pub fn nest_range(
     if a >= b {
         return Err(Error::usage(format!("empty range {a}..{b}")));
     }
-    let first_picture = p.tracks_of(TrackKind::Video).first().copied();
     for ti in 0..p.tracks.len() {
         let reached = p.tracks[ti].clips.iter().any(|c| {
             let (s, e) = extent(c);
             s < b && e > a
         });
-        if reached || Some(ti) == first_picture {
+        if reached {
             unlocked(p, ti)?;
         }
     }
@@ -384,7 +367,7 @@ pub fn nest_range(
     if ids.is_empty() {
         return Err(Error::invalid("no clips between In and Out"));
     }
-    let nested = build(p, &ids, (a, b), name, (first_picture, None), true)?;
+    let nested = build(p, &ids, (a, b), name)?;
     keep_copy(p, &nested, bin);
     Ok(nested)
 }
@@ -394,13 +377,20 @@ fn build(
     ids: &HashSet<String>,
     span: (i64, i64),
     name: Option<&str>,
-    (lowest_picture, lowest_sound): (Option<usize>, Option<String>),
-    every_track: bool,
 ) -> Result<Nested> {
     let frames = span.1 - span.0;
     let name = given_name(p, name);
-    let mut whole = lift(p, ids, TrackKind::Video, span.0, every_track);
-    whole.extend(lift(p, ids, TrackKind::Audio, span.0, every_track));
+    let lowest_picture = p
+        .tracks_of(TrackKind::Video)
+        .into_iter()
+        .find(|&i| holds(&p.tracks[i], ids));
+    let lowest_sound = p
+        .tracks_of(TrackKind::Audio)
+        .into_iter()
+        .find(|&i| holds(&p.tracks[i], ids))
+        .map(|i| p.tracks[i].id.clone());
+    let mut whole = lift(p, ids, TrackKind::Video, span.0);
+    whole.extend(lift(p, ids, TrackKind::Audio, span.0));
     let stack = stack_of(p, &whole, &name, frames)?;
     let (picture, sound) = (picture_tracks(&whole), sound_tracks(&whole));
     let mut clips = Vec::new();
@@ -605,6 +595,19 @@ mod tests {
         let r = f.ok(req("edit.place_compound", json!({"compound": id})));
         let hosts = r.result["clips"].as_array().unwrap().len();
         assert_eq!((hosts, f.track("V1")[1].1), (2, 60));
+    }
+
+    #[test]
+    fn a_range_goes_on_the_lowest_track_with_clips_in_it() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 10);
+        let upper = f.append("m1", 0, 60);
+        let moved = json!({"clips": [upper], "to": 20, "mode": "overwrite", "track": "V2"});
+        f.ok(req("edit.move", moved));
+        f.ok(req("edit.compound_range", json!({"range": "30f..40f"})));
+        let v2 = f.editor.project().track("V2").unwrap();
+        assert_eq!(v2.clips[1].compound.as_ref().unwrap().tracks[0].id, "V1");
+        assert_eq!(f.track("V1").len(), 1);
     }
 
     #[test]

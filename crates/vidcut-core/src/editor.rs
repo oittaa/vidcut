@@ -5989,8 +5989,8 @@ fn marked_span(
     match range {
         Some(range) => Ok(ctx(p, playhead).range(range)?),
         None => match (p.marks.mark_in, p.marks.mark_out) {
-            (Some(a), Some(b)) => Ok((a, b)),
-            _ => Err(Error::usage("set In and Out, or give `range`")),
+            (None, None) => Err(Error::usage("set In or Out, or give `range`")),
+            (a, b) => Ok((a.unwrap_or(0), b.unwrap_or(p.end()))),
         },
     }
 }

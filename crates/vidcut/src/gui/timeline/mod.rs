@@ -2354,7 +2354,8 @@ impl Workspace {
             && let Some(pos) = resp.interact_pointer_pos()
             && ruler.expand2(vec2(0.0, 2.0)).contains(pos)
         {
-            self.timeline.ruler_menu = Some(upper);
+            let marked = p.marks.mark_in.is_some() || p.marks.mark_out.is_some();
+            self.timeline.ruler_menu = marked.then_some(upper);
             self.timeline.key_menu = None;
             self.timeline.clip_menu = None;
             self.timeline.transition_menu = None;
@@ -2388,7 +2389,7 @@ impl Workspace {
             }
         }
         if self.timeline.ruler_menu == Some(upper)
-            && resp.context_menu(|ui| self.ruler_menu(ui, p)).is_none()
+            && resp.context_menu(|ui| self.ruler_menu(ui)).is_none()
         {
             self.timeline.ruler_menu = None;
         }
@@ -2594,15 +2595,12 @@ impl Workspace {
         true
     }
 
-    fn ruler_menu(&mut self, ui: &mut egui::Ui, p: &Project) {
-        let marked = p.marks.mark_in.is_some() && p.marks.mark_out.is_some();
-        let convert = egui::Button::new("Convert In and Out to Compound Clip…");
-        if ui.add_enabled(marked, convert).clicked() {
+    fn ruler_menu(&mut self, ui: &mut egui::Ui) {
+        if ui.button("Convert In and Out to Compound Clip…").clicked() {
             self.new_compound = Some(NewCompound::of_marks());
             ui.close();
         }
-        let create = egui::Button::new("Create Compound Clip…");
-        if ui.add_enabled(marked, create).clicked() {
+        if ui.button("Create Compound Clip…").clicked() {
             self.new_compound = Some(NewCompound::in_pool());
             ui.close();
         }

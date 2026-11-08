@@ -3031,6 +3031,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A compound clip of the Media Pool goes on a timeline as a linked picture and sound, on V1 and A1.
   - A selection can hold only the picture or only the sound of a linked clip.
   - A selected item on a locked track stays out, and the other items go in.
+  - Convert In and Out to Compound Clip ignores a lock. It cuts a locked track and takes its clips inside.
+  - A range with no clips does nothing, and shows no message.
   - A dissolve between two selected clips goes inside only when the dissolve is also selected. It then plays inside.
   - Decompose in Place has a submenu: Using Clips Only and Preserving Audio Data…
 - **vidcut:**
@@ -3040,6 +3042,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A clip goes in with its picture and its sound.
   - A clip on a locked track refuses the request.
   - `edit.compound_range` is Convert In and Out to Compound Clip. A clip in the range on a locked track refuses it too.
+  - A range with no clips refuses the request, with a message.
   - A J or L cut across a mark ends at that mark.
   - A dissolve goes inside when its clips go inside. It plays there, and `edit.decompose` brings it back.
   - `edit.decompose` acts as Using Clips Only.
@@ -3050,5 +3053,6 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A clip holds its picture and sound as one. Half of a clip is not a thing that vidcut can select.
   - A sound that runs past a mark cannot stay on the timeline without its picture.
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.
+  - As in [X27](#x27-a-dissolve-short-of-media-is-shortened), a stop without a message makes the user guess.
   - Preserving Audio Data was dimmed in the measurement. Thus its behavior is not known.
   - vidcut has no selection of a dissolve in this request. A dissolve that goes away is a loss that the user did not ask for.
