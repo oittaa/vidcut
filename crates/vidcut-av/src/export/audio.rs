@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use vidcut_core::equalizer::Filter;
 use vidcut_core::render::{AudioPiece, Dip, Ducking};
 
 use super::ahead::Ahead;
@@ -603,6 +604,7 @@ struct Lane {
     scratch: Vec<f32>,
     trim: f32,
     isolator: Option<Isolator>,
+    filter: Option<Filter>,
     unheard: Option<String>,
     dip: Option<Arc<Dip>>,
     at: i64,
@@ -622,6 +624,7 @@ impl Lane {
             scratch: Vec::new(),
             trim: 1.0,
             isolator: None,
+            filter: None,
             unheard: None,
             dip: None,
             at: 0,
@@ -723,10 +726,15 @@ impl Lane {
                 isolation,
                 keyed,
                 pan,
+                equalizer,
                 ..
             } = &piece
             {
                 let before = self.piece.checked_sub(1).map(|i| &self.pieces[i]);
+                let opens = take > 0 && (self.pos == 0 || !self.started);
+                let rings_on = self.started
+                    && before.is_some_and(|b| plays_on(b, &piece) || ramps_on(b, &piece))
+                    && self.filter.as_ref().map(Filter::settings) == equalizer.as_deref();
                 let ramps = self.started
                     && self.paced.is_some()
                     && before.is_some_and(|b| ramps_on(b, &piece));
@@ -801,6 +809,9 @@ impl Lane {
                     };
                     self.started = true;
                 }
+                if opens && !rings_on {
+                    self.filter = equalizer.as_deref().map(|e| Filter::new(e, rate, channels));
+                }
                 self.scratch.clear();
                 let source = self.source.as_mut().expect("open");
                 match (self.isolator.as_mut(), self.paced.as_mut()) {
@@ -812,6 +823,9 @@ impl Lane {
                     }
                     (None, Some(paced)) => paced.read(source, take, &mut self.scratch)?,
                     (None, None) => source.read(take, &mut self.scratch)?,
+                }
+                if let Some(filter) = self.filter.as_mut() {
+                    filter.run(&mut self.scratch[..take * ch]);
                 }
                 let gain = if *silent && self.trim == 1.0 {
                     0.0

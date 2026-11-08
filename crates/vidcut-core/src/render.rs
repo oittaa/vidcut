@@ -916,6 +916,9 @@ pub enum AudioPiece {
         /// Its clip's pan, from -100 to 100. Left out at 0.
         #[serde(default, skip_serializing_if = "is_centered")]
         pan: f64,
+        /// Its clip's equalizer, left out when it changes nothing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        equalizer: Option<Box<crate::model::Equalizer>>,
     },
     Silence {
         samples: i64,
@@ -1670,6 +1673,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 isolation,
                 keyed,
                 pan,
+                equalizer,
                 ..
             }),
             AudioPiece::Source {
@@ -1683,6 +1687,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 isolation: i2,
                 keyed: k2,
                 pan: p2,
+                equalizer: e2,
                 ..
             },
         ) if media == m2
@@ -1690,6 +1695,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
             && gain_db == g2
             && isolation == i2
             && pan == p2
+            && equalizer == e2
             && keyed
                 .as_ref()
                 .map(|k| (&k.keys, k.per_frame, k.at + *samples as f64))
@@ -2574,6 +2580,11 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         isolation: None,
         keyed,
         pan: audio.pan,
+        equalizer: audio
+            .equalizer
+            .clone()
+            .filter(crate::model::Equalizer::heard)
+            .map(Box::new),
     }
 }
 
@@ -2653,6 +2664,7 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
                 s.gain_keys.clear();
                 s.muted = false;
                 s.pan = 0.0;
+                s.equalizer = None;
                 s.voice_isolation = None;
             }
         }
@@ -2873,6 +2885,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
         isolation: None,
         keyed: None,
         pan: 0.0,
+        equalizer: None,
     }
 }
 
@@ -3189,6 +3202,42 @@ mod tests {
             audio_pieces(&f)[0],
             AudioPiece::Source { pan, .. } if pan == -40.0
         ));
+    }
+
+    #[test]
+    fn a_heard_equalizer_reaches_its_piece() {
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        let eq = json!({"bands": [{"band": 2, "gain": 3.0}]});
+        req(&mut f, "clip.set", json!({"clips": "c1", "equalizer": eq}));
+        assert!(matches!(
+            &audio_pieces(&f)[0],
+            AudioPiece::Source { equalizer: Some(e), .. } if e.bands[1].gain == 3.0
+        ));
+    }
+
+    #[test]
+    fn a_flat_equalizer_does_not_reach_its_piece() {
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        req(&mut f, "clip.set", json!({"clips": "c1", "equalizer": {}}));
+        assert!(matches!(
+            &audio_pieces(&f)[0],
+            AudioPiece::Source {
+                equalizer: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn two_clips_with_other_equalizers_stay_two_pieces() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m1", 50, 100);
+        let eq = json!({"bands": [{"band": 2, "gain": 3.0}]});
+        req(&mut f, "clip.set", json!({"clips": "c2", "equalizer": eq}));
+        assert_eq!(audio_pieces(&f).len(), 2);
     }
 
     #[test]

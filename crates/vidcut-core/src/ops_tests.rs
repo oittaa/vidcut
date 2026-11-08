@@ -268,6 +268,58 @@ fn clip_set_refuses_a_pan_past_the_edge() {
     f.err(req("clip.set", json!({"clips": "c2", "pan": 100.5})));
 }
 
+fn equalizer_of(f: &Fixture, clip: &str) -> Option<crate::model::Equalizer> {
+    let p = f.editor.project();
+    p.clip(clip)
+        .unwrap()
+        .audio
+        .as_ref()
+        .unwrap()
+        .equalizer
+        .clone()
+}
+
+#[test]
+fn clip_set_puts_on_a_flat_equalizer() {
+    let mut f = three_clips();
+    f.ok(req("clip.set", json!({"clips": "c2", "equalizer": {}})));
+    assert_eq!(equalizer_of(&f, "c2"), Some(crate::equalizer::first()));
+}
+
+#[test]
+fn clip_set_changes_one_band_of_the_equalizer() {
+    let mut f = three_clips();
+    let bands = json!({"bands": [{"band": 2, "gain": -6.0}]});
+    f.ok(req("clip.set", json!({"clips": "c2", "equalizer": bands})));
+    assert_eq!(equalizer_of(&f, "c2").unwrap().bands[1].gain, -6.0);
+}
+
+#[test]
+fn clip_set_keeps_the_other_bands_of_the_equalizer() {
+    let mut f = three_clips();
+    let one = json!({"bands": [{"band": 2, "gain": -6.0}]});
+    let two = json!({"bands": [{"band": 3, "gain": 4.0}]});
+    f.ok(req("clip.set", json!({"clips": "c2", "equalizer": one})));
+    f.ok(req("clip.set", json!({"clips": "c2", "equalizer": two})));
+    assert_eq!(equalizer_of(&f, "c2").unwrap().bands[1].gain, -6.0);
+}
+
+#[test]
+fn clip_set_null_takes_the_equalizer_off() {
+    let mut f = three_clips();
+    f.ok(req("clip.set", json!({"clips": "c2", "equalizer": {}})));
+    f.ok(req("clip.set", json!({"clips": "c2", "equalizer": null})));
+    assert_eq!(equalizer_of(&f, "c2"), None);
+}
+
+#[test]
+fn clip_set_refuses_a_band_seven_and_changes_nothing() {
+    let mut f = three_clips();
+    let bands = json!({"bands": [{"band": 7, "gain": 1.0}]});
+    f.err(req("clip.set", json!({"clips": "c2", "equalizer": bands})));
+    assert_eq!(equalizer_of(&f, "c2"), None);
+}
+
 #[test]
 fn media_remove_needs_force_when_used() {
     let mut f = three_clips();

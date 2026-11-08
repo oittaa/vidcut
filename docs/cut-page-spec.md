@@ -1495,7 +1495,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
-  - vidcut: its Audio section has Volume, Pan, Mute and Voice Isolation for the selected clips with sound (X70).
+  - vidcut: its Audio section has Volume, Pan, Mute, Equalizer and Voice Isolation for the selected clips with sound (X70).
   - vidcut: its Crop section has Softness, and its Composite section has Composite Mode and Opacity.
 - **The units of the Inspector,** measured in Resolve Studio 21.1.1:
   - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
@@ -2119,6 +2119,24 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - vidcut: the Pan row of the Audio section (X70) and `clip.set` set `pan`.
   - vidcut: a clip pans as on a stereo track ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
   - vidcut: `clip.set` refuses a Pan outside the range ([X153](deviations.md#x153-every-clip-pans-as-on-a-stereo-track)).
+- **Clip equalizer** (pp. 743, 745–746, 3950–3952):
+  - The Equalizer of a clip has six bands, a switch for all the bands and a reset button (p. 745).
+  - A graph shows the curve. It has a numbered handle for each band that is on. A drag on a handle changes its band (p. 745).
+  - Each band has a switch, a filter, a frequency and a gain (pp. 745–746).
+  - Only the Bell filter has a Q. A low Q affects a wide range of frequencies (p. 746).
+  - The filters of each band (pp. 745–746):
+    - Band 1: Lo-Shelf, Bell, Notch, Hi-Shelf and Hi-Pass.
+    - Bands 2 to 5: Lo-Shelf, Bell, Notch and Hi-Shelf.
+    - Band 6: Lo-Pass, Lo-Shelf, Bell, Notch and Hi-Shelf.
+  - The equalizer of a mixer track has these values (pp. 3950–3952):
+    - The gain goes from −20 to 20 dB, and the Q from 0.3 to 10.3.
+    - Bands 1 and 6 are off by default, and bands 2 to 5 are on.
+    - The pass filters have slopes from 6 to 24 dB per octave.
+  - The scripting API of Resolve Studio 21.2 cannot read or set the equalizer of a clip. Thus these are not measured:
+    - The range and the default of each frequency.
+    - The curve of each filter.
+    - The effect that an OTIO export writes.
+  - vidcut: the Equalizer row of the Audio section (X70) and `clip.set` set `equalizer` ([X154](deviations.md#x154-the-equalizer-is-a-window-with-chosen-curves)).
 - **Volume keyframes** (pp. 1109, 1111–1113, 1251, 1255):
   - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112). Two keyframes or more change the level over time (p. 1112).
   - Keyframes of the Inspector's Volume also show on the overlay (p. 1111).

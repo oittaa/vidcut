@@ -1567,7 +1567,7 @@ pub enum Request {
         #[serde(default)]
         look: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -100..30), pan, name,
+    /// Enable/disable video (D), mute, gain (dB, -100..30), pan, equalizer, name,
     /// Clip Color, Voice Isolation, Retime Process and Render Cache.
     #[serde(rename = "clip.set")]
     ClipSet {
@@ -1584,6 +1584,14 @@ pub enum Request {
         /// 0 is the middle.
         #[serde(default)]
         pan: Option<f64>,
+        /// The equalizer: each field given replaces its own, and null takes
+        /// it off with its settings. `{}` puts on a flat one.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        equalizer: Option<Option<EqualizerSet>>,
         /// Where `gain_db` goes as a keyframe on clips with volume
         /// keyframes: the playhead by default.
         #[serde(default)]
@@ -4864,6 +4872,48 @@ pub struct DuckSet {
     /// fader, from which it is active, from -96 to 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold_db: Option<f64>,
+}
+
+/// A change to a clip's equalizer: each field given replaces its own, and
+/// the rest stay as they are. A new one is on and flat. Band 1 is a
+/// `hi_pass` at 80 Hz and band 6 a `lo_pass` at 16000 Hz, both off. Bands 2
+/// to 5 are `bell` filters at 200, 800, 2500 and 8000 Hz.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EqualizerSet {
+    /// On or off. Off keeps the bands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// The bands to change.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bands: Vec<EqBandSet>,
+}
+
+/// A change to one band of an equalizer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EqBandSet {
+    /// The band, from 1 to 6.
+    pub band: u32,
+    /// On or off. Off keeps its values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// Its filter. Band 1 has `lo_shelf`, `bell`, `notch`, `hi_shelf` and
+    /// `hi_pass`. Band 6 has `lo_pass`, `lo_shelf`, `bell`, `notch` and
+    /// `hi_shelf`. Bands 2 to 5 have `lo_shelf`, `bell`, `notch` and
+    /// `hi_shelf`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<crate::model::EqKind>,
+    /// Its frequency in Hz, from 20 to 20000.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub freq: Option<f64>,
+    /// Its gain in dB, from -20 to 20. Only `bell`, `lo_shelf` and
+    /// `hi_shelf` use it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain: Option<f64>,
+    /// Its width, from 0.3 to 10.3. Only `bell` uses it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub q: Option<f64>,
 }
 
 fn given<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
