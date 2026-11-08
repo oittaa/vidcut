@@ -53,6 +53,13 @@ impl VideoDecoder {
         Ok(Self { decoder, exr })
     }
 
+    pub(crate) fn whole_frames(mut self) -> Self {
+        if let Some(exr) = &mut self.exr {
+            exr.whole_frames();
+        }
+        self
+    }
+
     pub(crate) fn id(&self) -> codec::Id {
         match self.exr {
             Some(_) => codec::Id::EXR,
