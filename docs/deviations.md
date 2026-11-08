@@ -2939,7 +2939,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
 
 - **Resolve:**
   - The title bar of the Curve Editor has four buttons: Linear, Ease In, Ease In and Out, and Ease Out. They change all the selected keyframes (pp. 1262–1263).
-  - A right-click on a keyframe in the Keyframe Editor opens no menu (measured in Resolve Studio 21.1.1).
+  - A right-click on a keyframe in the Keyframe Editor opens no menu ([X87](#x87-the-keyframes-tab-has-an-ease-menu)).
 - **vidcut:**
   - A right-click on a selected keyframe keeps the selection. The ease goes on all the selected keyframes.
   - A right-click on another keyframe selects that keyframe alone.
