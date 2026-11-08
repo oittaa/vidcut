@@ -489,7 +489,11 @@ mod tests {
         let a = f.append("m1", 10, 50);
         let b = f.append("m1", 50, 90);
         f.ok(req("edit.dissolve", json!({"at": 40})));
-        let plan = |f: &Fixture| crate::render::flatten(f.editor.project(), 0, 80).unwrap().video;
+        let plan = |f: &Fixture| {
+            crate::render::flatten(f.editor.project(), 0, 80)
+                .unwrap()
+                .video
+        };
         let before = plan(&f);
         nest(&mut f, &[&a, &b]);
         assert_eq!(plan(&f), before);
