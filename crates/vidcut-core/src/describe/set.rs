@@ -757,6 +757,12 @@ impl Words<'_> {
         s.put("dialogue_leveler", "Dialogue Leveler", &raw, |c| {
             audio(c, |a| json!(a.dialogue_leveler))
         });
+        s.put("compressor", "Compressor", &raw, |c| {
+            audio(c, |a| json!(a.compressor))
+        });
+        s.put("noise_reduction", "Noise Reduction", &raw, |c| {
+            audio(c, |a| json!(a.noise_reduction))
+        });
         if s.put("name", "Name", &text, |c| json!(c.name)) && named {
             s.f.naming();
         }
