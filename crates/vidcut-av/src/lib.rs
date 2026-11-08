@@ -11,6 +11,7 @@ pub(crate) mod compute;
 pub mod copies;
 pub mod cuda;
 pub mod decode;
+mod denoise;
 pub mod ending;
 pub mod error;
 pub mod export;

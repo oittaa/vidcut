@@ -52,7 +52,7 @@ classDiagram
   class ClipAudio {
     stream
     head, tail
-    gain_db, muted, pan, equalizer, dialogue_leveler, voice_isolation
+    gain_db, muted, pan, equalizer, dialogue_leveler, compressor, noise_reduction, voice_isolation
   }
   class Keyframe {
     frame, value
@@ -574,7 +574,7 @@ The metadata:
 
 | Metadata | Holds |
 |---|---|
-| `vidcut` on clips, for the sound | `stream`, `gain_db`, `muted`, `pan`, `equalizer`, `dialogue_leveler`; `gain_keys` from the item's first source frame |
+| `vidcut` on clips, for the sound | `stream`, `gain_db`, `muted`, `pan`, `equalizer`, `dialogue_leveler`, `compressor`, `noise_reduction`; `gain_keys` from the item's first source frame |
 | `vidcut` on clips | `clip`, `media`, `color`; `source_in`, `skip` and `sections` of stills and speeds; a title's `Title`; a placed or compound clip's `Picture`, read before Resolve's effects |
 | `vidcut` elsewhere | track settings and `name`; marker id and `color`; the timeline's `fps`, `marks` and, when whole, `project` (`ProjectMeta`, with the subtitle tracks) |
 | `Resolve_OTIO` on clips | `Link Group ID`, `Channels`, a clip volume effect with the volume keyframes in its `Key Frames`, a clip pan effect (`effects::sound`), and `Media In` on reversed clips |
