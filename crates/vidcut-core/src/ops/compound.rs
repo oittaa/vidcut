@@ -289,7 +289,12 @@ pub(crate) fn target(
         .position(|&i| p.tracks[i].id == base)
         .expect("the track of the compound clip");
     let ti = tracks::nth(p, kind, at + n);
-    if !free(&p.tracks[ti], span, extent) {
+    let range = if kind == TrackKind::Video {
+        picture_of
+    } else {
+        extent
+    };
+    if !free(&p.tracks[ti], span, range) {
         tracks::insert_at(p, kind, ti);
     }
     ti
@@ -436,6 +441,17 @@ mod tests {
         f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
         assert_eq!(f.track("V2")[0].0, b);
         assert_eq!(f.track("V3")[0].0, c);
+    }
+
+    #[test]
+    fn a_neighbours_l_cut_stays_on_its_track_after_a_decompose() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        let b = f.append("m1", 50, 100);
+        l_cut(&mut f, &a, 10);
+        let hosts = nest(&mut f, &[&b]);
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        assert_eq!(f.track("V1")[0].0, a);
     }
 
     #[test]
