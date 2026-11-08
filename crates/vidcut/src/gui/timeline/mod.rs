@@ -256,6 +256,7 @@ pub struct TimelineView {
     pub equalizer: Option<super::equalizer::EqualizerDialog>,
     pub leveler: Option<super::leveler::LevelerDialog>,
     pub compressor: Option<super::compressor::CompressorDialog>,
+    pub noise: Option<super::noise::NoiseDialog>,
     pub boring_dialog: Option<(f64, i64)>,
     pub dynamic: Option<tools::Dynamic>,
     pub strip_drag: Option<(EditSel, i64)>,
@@ -316,6 +317,7 @@ impl Default for TimelineView {
             equalizer: None,
             leveler: None,
             compressor: None,
+            noise: None,
             normalize_last: None,
             boring_dialog: None,
             dynamic: None,
@@ -1277,6 +1279,7 @@ impl Workspace {
         self.equalizer_window(ui.ctx());
         self.leveler_window(ui.ctx());
         self.compressor_window(ui.ctx());
+        self.noise_window(ui.ctx());
         self.boring_window(ui.ctx());
         self.subtitle_windows(ui.ctx());
         self.title_tick();
@@ -4108,6 +4111,7 @@ mod tests {
                 equalizer: None,
                 dialogue_leveler: None,
                 compressor: None,
+                noise_reduction: None,
                 effects: None,
                 voice_isolation: None,
             }),

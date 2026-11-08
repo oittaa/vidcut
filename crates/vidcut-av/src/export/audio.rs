@@ -7,6 +7,7 @@ use vidcut_core::leveler::Leveler;
 use vidcut_core::render::{AudioPiece, Dip, Ducking};
 
 use super::ahead::Ahead;
+use crate::denoise::Denoiser;
 use crate::error::{Error, Result};
 use crate::ffmpeg::{self, codec, ffi, format, frame, media};
 use crate::isolate::Isolator;
@@ -609,6 +610,7 @@ struct Lane {
     filter: Option<Filter>,
     leveler: Option<Leveler>,
     dynamics: Option<Dynamics>,
+    denoiser: Option<Denoiser>,
     unheard: Option<String>,
     dip: Option<Arc<Dip>>,
     at: i64,
@@ -631,6 +633,7 @@ impl Lane {
             filter: None,
             leveler: None,
             dynamics: None,
+            denoiser: None,
             unheard: None,
             dip: None,
             at: 0,
@@ -735,6 +738,7 @@ impl Lane {
                 equalizer,
                 leveler,
                 compressor,
+                noise_reduction,
                 ..
             } = &piece
             {
@@ -752,12 +756,15 @@ impl Lane {
                     && before.is_some_and(|b| ramps_on(b, &piece));
                 let continues = ramps
                     || self.started
-                        && (self.isolator.is_some() || self.leveler.is_some())
+                        && (self.isolator.is_some()
+                            || self.leveler.is_some()
+                            || self.denoiser.is_some())
                         && *speed > 0.0
                         && before.is_some_and(|b| {
                             plays_on(b, &piece)
                                 && isolation_of(b) == *isolation
                                 && leveler_of(b) == leveler.as_deref().copied()
+                                && noise_of(b) == noise_reduction.as_deref().copied()
                         });
                 if take > 0 && self.pos == 0 && continues {
                     if let Some(paced) = self.paced.as_mut().filter(|_| !ramps) {
@@ -823,6 +830,9 @@ impl Lane {
                         _ => None,
                     };
                     self.leveler = leveler.as_deref().map(|l| Leveler::new(*l, rate, channels));
+                    self.denoiser = noise_reduction
+                        .as_deref()
+                        .map(|n| Denoiser::new(*n, rate, channels));
                     self.started = true;
                 }
                 if opens && !keeps_level {
@@ -846,9 +856,16 @@ impl Lane {
                         (None, None) => source.read(n, out),
                     }
                 };
+                let denoiser = &mut self.denoiser;
+                let mut clean = |n: usize, out: &mut Vec<f32>| -> Result<()> {
+                    match denoiser.as_mut() {
+                        Some(d) => d.read(n, out, &mut read),
+                        None => read(n, out),
+                    }
+                };
                 match self.leveler.as_mut() {
-                    Some(leveler) => leveler.read(take, &mut self.scratch, read)?,
-                    None => read(take, &mut self.scratch)?,
+                    Some(leveler) => leveler.read(take, &mut self.scratch, clean)?,
+                    None => clean(take, &mut self.scratch)?,
                 }
                 if let Some(filter) = self.filter.as_mut() {
                     filter.run(&mut self.scratch[..take * ch]);
@@ -911,6 +928,15 @@ impl Lane {
 fn leveler_of(piece: &AudioPiece) -> Option<vidcut_core::model::DialogueLeveler> {
     match piece {
         AudioPiece::Source { leveler, .. } => leveler.as_deref().copied(),
+        AudioPiece::Silence { .. } => None,
+    }
+}
+
+fn noise_of(piece: &AudioPiece) -> Option<vidcut_core::model::NoiseReduction> {
+    match piece {
+        AudioPiece::Source {
+            noise_reduction, ..
+        } => noise_reduction.as_deref().copied(),
         AudioPiece::Silence { .. } => None,
     }
 }

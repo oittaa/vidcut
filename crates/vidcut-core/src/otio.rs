@@ -838,6 +838,9 @@ pub fn export_drawn(
                     if let Some(k) = &au.compressor {
                         meta["compressor"] = json!(k);
                     }
+                    if let Some(n) = &au.noise_reduction {
+                        meta["noise_reduction"] = json!(n);
+                    }
                     if let Some(v) = au.voice_isolation {
                         meta["voice_isolation"] = json!(v);
                     }
@@ -951,6 +954,9 @@ pub fn export_drawn(
                 }
                 if let Some(k) = &au.compressor {
                     meta["compressor"] = json!(k);
+                }
+                if let Some(n) = &au.noise_reduction {
+                    meta["noise_reduction"] = json!(n);
                 }
                 if let Some(v) = au.voice_isolation {
                     meta["voice_isolation"] = json!(v);
@@ -1390,6 +1396,7 @@ pub struct ImportedClip {
     pub equalizer: Option<crate::model::Equalizer>,
     pub dialogue_leveler: Option<crate::model::DialogueLeveler>,
     pub compressor: Option<crate::model::Compressor>,
+    pub noise_reduction: Option<crate::model::NoiseReduction>,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub link: Option<i64>,
     pub effects: Vec<Value>,
@@ -1477,6 +1484,7 @@ impl ImportedClip {
             equalizer: None,
             dialogue_leveler: None,
             compressor: None,
+            noise_reduction: None,
             voice_isolation: None,
             link: None,
             effects: Vec::new(),
@@ -2218,6 +2226,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         muted: meta["muted"].as_bool().unwrap_or(false),
                         pan: meta["pan"].as_f64().unwrap_or(0.0),
                         compressor: serde_json::from_value(meta["compressor"].clone()).ok(),
+                        noise_reduction: serde_json::from_value(meta["noise_reduction"].clone())
+                            .ok(),
                         equalizer: serde_json::from_value(meta["equalizer"].clone()).ok(),
                         dialogue_leveler: serde_json::from_value(meta["dialogue_leveler"].clone())
                             .ok(),
@@ -2321,6 +2331,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let equalizer = serde_json::from_value(meta["equalizer"].clone()).ok();
             let dialogue_leveler = serde_json::from_value(meta["dialogue_leveler"].clone()).ok();
             let compressor = serde_json::from_value(meta["compressor"].clone()).ok();
+            let noise_reduction = serde_json::from_value(meta["noise_reduction"].clone()).ok();
             effects::drop_pan(&mut effects);
             let stream = meta["stream"]
                 .as_u64()
@@ -2391,6 +2402,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if compressor.is_some() {
                     c.compressor = compressor;
                 }
+                if noise_reduction.is_some() {
+                    c.noise_reduction = noise_reduction;
+                }
                 c.audio_effects = effects;
                 if c.speed.is_none() {
                     c.speed = speed;
@@ -2430,6 +2444,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 equalizer,
                 dialogue_leveler,
                 compressor,
+                noise_reduction,
                 voice_isolation,
                 link,
                 effects: Vec::new(),
@@ -2707,6 +2722,12 @@ pub fn unheard_equalizer(p: &Project, span: Option<(i64, i64)>) -> Option<String
 pub fn unheard_compressor(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
     kept_in_metadata(p, span, "The compressor", |au| {
         au.compressor.is_some_and(|c| c.heard())
+    })
+}
+
+pub fn unheard_noise_reduction(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    kept_in_metadata(p, span, "Noise Reduction", |au| {
+        au.noise_reduction.is_some_and(|n| n.heard())
     })
 }
 

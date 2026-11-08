@@ -144,6 +144,13 @@ pub fn violations(p: &Project) -> Vec<String> {
                         {
                             v.push(format!("{}: {why}", c.id));
                         }
+                        if let Some(why) = a
+                            .noise_reduction
+                            .as_ref()
+                            .and_then(crate::noise_reduction::problem)
+                        {
+                            v.push(format!("{}: {why}", c.id));
+                        }
                         if let Some(why) = crate::keyframes::problem(&a.gain_keys) {
                             v.push(format!("{}: {why}", c.id));
                         }

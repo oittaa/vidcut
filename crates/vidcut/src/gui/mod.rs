@@ -24,6 +24,7 @@ mod leveler;
 mod look_tiles;
 mod looks;
 mod mixer;
+mod noise;
 mod normalize;
 mod onscreen;
 mod placing;

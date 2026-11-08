@@ -827,6 +827,7 @@ mod tests {
                 equalizer: None,
                 dialogue_leveler: None,
                 compressor: None,
+                noise_reduction: None,
                 effects: None,
                 voice_isolation: None,
             }),

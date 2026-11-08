@@ -316,6 +316,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             equalizer: None,
             dialogue_leveler: None,
             compressor: None,
+            noise_reduction: None,
             effects: None,
             voice_isolation: None,
         }),
@@ -2025,6 +2026,7 @@ pub struct ClipProps {
     pub equalizer: Option<Option<crate::request::EqualizerSet>>,
     pub dialogue_leveler: Option<Option<crate::request::DialogueLevelerSet>>,
     pub compressor: Option<Option<crate::request::CompressorSet>>,
+    pub noise_reduction: Option<Option<crate::request::NoiseReductionSet>>,
     pub at: Option<i64>,
     pub name: Option<Option<String>>,
     pub color: Option<Option<String>>,
@@ -2088,6 +2090,9 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
     if let Some(Some(set)) = &props.compressor {
         crate::compressor::check(set)?;
     }
+    if let Some(Some(set)) = &props.noise_reduction {
+        crate::noise_reduction::check(set)?;
+    }
     if let Some(Some(c)) = &props.color {
         check_clip_color(c)?;
     }
@@ -2125,6 +2130,7 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
             || props.equalizer.is_some()
             || props.dialogue_leveler.is_some()
             || props.compressor.is_some()
+            || props.noise_reduction.is_some()
             || props.voice_isolation.is_some()
             || props.voice_isolation_on.is_some()
         {
@@ -2154,6 +2160,12 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
                 a.compressor = change
                     .as_ref()
                     .map(|set| crate::compressor::patched(a.compressor, set))
+                    .transpose()?;
+            }
+            if let Some(change) = &props.noise_reduction {
+                a.noise_reduction = change
+                    .as_ref()
+                    .map(|set| crate::noise_reduction::patched(a.noise_reduction, set))
                     .transpose()?;
             }
             match (props.gain_db, at) {
