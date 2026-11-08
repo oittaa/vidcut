@@ -3041,7 +3041,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A clip on a locked track refuses the request.
   - `edit.compound_range` is Convert In and Out to Compound Clip. A clip in the range on a locked track refuses it too.
   - A range with no clips refuses the request, with a message.
-  - A J or L cut across a mark ends at that mark.
+  - A J or L cut that reaches a mark is undone at its picture cut, as at a blade.
   - A dissolve goes inside when its clips go inside. It plays there, and `edit.decompose` brings it back.
   - `edit.decompose` acts as Using Clips Only.
   - The sound of a clip on a video track goes on the lowest selected audio track, else on A1 or the first free track above.
