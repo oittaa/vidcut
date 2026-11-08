@@ -1579,7 +1579,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([X64](#x64-voice-isolation-is-free-on-a-clip-or-a-track)).
     - Pan sets the pan of the selected clips ([X152](#x152-every-clip-pans-as-on-a-stereo-track)).
     - The Equalizer row has a switch and a button that opens the Equalizer window ([X153](#x153-the-equalizer-is-a-window-with-chosen-curves)).
-    - The Audio section has no Pitch, Dialogue Leveler or Music Remixer.
+    - The Dialogue Leveler row has a switch and a button that opens the Dialogue Leveler window ([X154](#x154-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
+    - The Audio section has no Pitch or Music Remixer.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
     - Position X and Y are frame pixels from the middle of the frame, with Y up.
@@ -2851,3 +2852,21 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The Inspector is too narrow for six bands of four values.
   - A window with Apply makes one undo step for one set of changes.
   - The [todo](todo/effects-library.md) lists what to measure in the Resolve window.
+
+## X154. The Dialogue Leveler follows the levels with its own rules
+
+- **Resolve:**
+  - The Dialogue Leveler finds dialogue with its own analysis (pp. 774–775). Its rules are not public.
+  - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives what the renders show.
+- **vidcut:**
+  - It does not separate dialogue from other sound. A part that is 10 dB above the lowest recent level is dialogue.
+  - The window of each level is 50 ms. A process looks 200 ms ahead.
+  - Reduce Loud and Lift Soft use the amounts of the measured presets.
+  - Background Reduction lowers all the sound between lines. The amount is 1.2 to 5 dB for each preset.
+  - The Dialogue Leveler is a window with Apply and Cancel.
+  - On the spoken test clip with Allow Wider Dynamics, each line is within 1.3 dB of Resolve's level.
+  - With the other presets, a line is up to 5.1 dB away from Resolve's level.
+  - An OTIO export keeps it in vidcut's own metadata. The export gives the note `dialogue_leveler_kept`.
+- **Why:**
+  - The player runs the same code as the export. Level rules with a short look ahead run in real time.
+  - Background Reduction in the renders was uneven. A fixed amount is predictable.

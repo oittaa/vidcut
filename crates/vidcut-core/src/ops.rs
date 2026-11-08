@@ -314,6 +314,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             muted: false,
             pan: 0.0,
             equalizer: None,
+            dialogue_leveler: None,
             effects: None,
             voice_isolation: None,
         }),
@@ -2021,6 +2022,7 @@ pub struct ClipProps {
     pub gain_db: Option<f64>,
     pub pan: Option<f64>,
     pub equalizer: Option<Option<crate::request::EqualizerSet>>,
+    pub dialogue_leveler: Option<Option<crate::request::DialogueLevelerSet>>,
     pub at: Option<i64>,
     pub name: Option<Option<String>>,
     pub color: Option<Option<String>>,
@@ -2078,6 +2080,9 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
     if let Some(Some(set)) = &props.equalizer {
         crate::equalizer::check(set)?;
     }
+    if let Some(Some(set)) = &props.dialogue_leveler {
+        crate::leveler::check(set)?;
+    }
     if let Some(Some(c)) = &props.color {
         check_clip_color(c)?;
     }
@@ -2113,6 +2118,7 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
             || props.gain_db.is_some()
             || props.pan.is_some()
             || props.equalizer.is_some()
+            || props.dialogue_leveler.is_some()
             || props.voice_isolation.is_some()
             || props.voice_isolation_on.is_some()
         {
@@ -2130,6 +2136,12 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
                 a.equalizer = change
                     .as_ref()
                     .map(|set| crate::equalizer::patched(a.equalizer.as_ref(), set))
+                    .transpose()?;
+            }
+            if let Some(change) = &props.dialogue_leveler {
+                a.dialogue_leveler = change
+                    .as_ref()
+                    .map(|set| crate::leveler::patched(a.dialogue_leveler, set))
                     .transpose()?;
             }
             match (props.gain_db, at) {

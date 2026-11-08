@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use vidcut_core::equalizer::Filter;
+use vidcut_core::leveler::Leveler;
 use vidcut_core::render::{AudioPiece, Dip, Ducking};
 
 use super::ahead::Ahead;
@@ -605,6 +606,7 @@ struct Lane {
     trim: f32,
     isolator: Option<Isolator>,
     filter: Option<Filter>,
+    leveler: Option<Leveler>,
     unheard: Option<String>,
     dip: Option<Arc<Dip>>,
     at: i64,
@@ -625,6 +627,7 @@ impl Lane {
             trim: 1.0,
             isolator: None,
             filter: None,
+            leveler: None,
             unheard: None,
             dip: None,
             at: 0,
@@ -727,6 +730,7 @@ impl Lane {
                 keyed,
                 pan,
                 equalizer,
+                leveler,
                 ..
             } = &piece
             {
@@ -740,10 +744,13 @@ impl Lane {
                     && before.is_some_and(|b| ramps_on(b, &piece));
                 let continues = ramps
                     || self.started
-                        && self.isolator.is_some()
+                        && (self.isolator.is_some() || self.leveler.is_some())
                         && *speed > 0.0
-                        && before
-                            .is_some_and(|b| plays_on(b, &piece) && isolation_of(b) == *isolation);
+                        && before.is_some_and(|b| {
+                            plays_on(b, &piece)
+                                && isolation_of(b) == *isolation
+                                && leveler_of(b) == leveler.as_deref().copied()
+                        });
                 if take > 0 && self.pos == 0 && continues {
                     if let Some(paced) = self.paced.as_mut().filter(|_| !ramps) {
                         paced.bound = *source_sample + (len as f64 * speed).round() as i64;
@@ -807,6 +814,7 @@ impl Lane {
                         },
                         _ => None,
                     };
+                    self.leveler = leveler.as_deref().map(|l| Leveler::new(*l, rate, channels));
                     self.started = true;
                 }
                 if opens && !rings_on {
@@ -814,15 +822,20 @@ impl Lane {
                 }
                 self.scratch.clear();
                 let source = self.source.as_mut().expect("open");
-                match (self.isolator.as_mut(), self.paced.as_mut()) {
-                    (Some(iso), Some(paced)) => {
-                        iso.read(take, &mut self.scratch, |n, out| paced.read(source, n, out))?
+                let (isolator, paced) = (&mut self.isolator, &mut self.paced);
+                let mut read = |n: usize, out: &mut Vec<f32>| -> Result<()> {
+                    match (isolator.as_mut(), paced.as_mut()) {
+                        (Some(iso), Some(paced)) => {
+                            iso.read(n, out, |n, out| paced.read(source, n, out))
+                        }
+                        (Some(iso), None) => iso.read(n, out, |n, out| source.read(n, out)),
+                        (None, Some(paced)) => paced.read(source, n, out),
+                        (None, None) => source.read(n, out),
                     }
-                    (Some(iso), None) => {
-                        iso.read(take, &mut self.scratch, |n, out| source.read(n, out))?
-                    }
-                    (None, Some(paced)) => paced.read(source, take, &mut self.scratch)?,
-                    (None, None) => source.read(take, &mut self.scratch)?,
+                };
+                match self.leveler.as_mut() {
+                    Some(leveler) => leveler.read(take, &mut self.scratch, read)?,
+                    None => read(take, &mut self.scratch)?,
                 }
                 if let Some(filter) = self.filter.as_mut() {
                     filter.run(&mut self.scratch[..take * ch]);
@@ -876,6 +889,13 @@ impl Lane {
             }
         }
         Ok(())
+    }
+}
+
+fn leveler_of(piece: &AudioPiece) -> Option<vidcut_core::model::DialogueLeveler> {
+    match piece {
+        AudioPiece::Source { leveler, .. } => leveler.as_deref().copied(),
+        AudioPiece::Silence { .. } => None,
     }
 }
 

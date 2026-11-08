@@ -19,6 +19,7 @@ mod import;
 mod inspector;
 mod isolation;
 mod keyframe_editor;
+mod leveler;
 mod look_tiles;
 mod looks;
 mod mixer;

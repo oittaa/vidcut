@@ -320,6 +320,51 @@ fn clip_set_refuses_a_band_seven_and_changes_nothing() {
     assert_eq!(equalizer_of(&f, "c2"), None);
 }
 
+fn leveler_of(f: &Fixture, clip: &str) -> Option<crate::model::DialogueLeveler> {
+    let p = f.editor.project();
+    p.clip(clip)
+        .unwrap()
+        .audio
+        .as_ref()
+        .unwrap()
+        .dialogue_leveler
+}
+
+#[test]
+fn clip_set_keeps_a_dialogue_leveler() {
+    let mut f = three_clips();
+    let l = json!({"lift_soft": true, "preset": "more_lift_for_low_levels"});
+    f.ok(req(
+        "clip.set",
+        json!({"clips": "c2", "dialogue_leveler": l}),
+    ));
+    assert!(leveler_of(&f, "c2").unwrap().lift_soft);
+}
+
+#[test]
+fn clip_set_null_takes_the_dialogue_leveler_off() {
+    let mut f = three_clips();
+    f.ok(req(
+        "clip.set",
+        json!({"clips": "c2", "dialogue_leveler": {}}),
+    ));
+    f.ok(req(
+        "clip.set",
+        json!({"clips": "c2", "dialogue_leveler": null}),
+    ));
+    assert_eq!(leveler_of(&f, "c2"), None);
+}
+
+#[test]
+fn clip_set_refuses_an_output_gain_past_six_db() {
+    let mut f = three_clips();
+    let l = json!({"output_gain_db": 6.5});
+    f.err(req(
+        "clip.set",
+        json!({"clips": "c2", "dialogue_leveler": l}),
+    ));
+}
+
 #[test]
 fn media_remove_needs_force_when_used() {
     let mut f = three_clips();

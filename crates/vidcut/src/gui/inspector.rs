@@ -1338,6 +1338,7 @@ enum Act {
     Edit(Key, f64),
     Release(Key),
     Equalize(bool),
+    Level(bool),
     Direction(Direction),
     SpeedEase(Ease),
     Ripple(bool),
@@ -3609,6 +3610,7 @@ impl Workspace {
             .inner
         };
         let mut edit_equalizer = false;
+        let mut edit_leveler = false;
         let normalize = group(ui, "Audio", header, |ui| {
             let first = &sounds[0];
             let off = count > 1 && sounds.iter().any(|s| s.keyed);
@@ -3668,6 +3670,23 @@ impl Workspace {
                 edit_equalizer = ui.button("Edit…").clicked();
             });
             ui.end_row();
+            let leveler = |id: &str| {
+                p.clip(id)
+                    .and_then(|c| c.audio.as_ref())
+                    .and_then(|a| a.dialogue_leveler)
+            };
+            let leveled = sounds
+                .iter()
+                .any(|s| leveler(&s.id).is_some_and(|l| l.heard()));
+            label(ui, "Dialogue Leveler", leveled);
+            ui.horizontal(|ui| {
+                let mut on = leveler(&first.id).is_some_and(|l| l.on);
+                if ui.checkbox(&mut on, "").clicked() {
+                    acts.push(Act::Level(on));
+                }
+                edit_leveler = ui.button("Edit…").clicked();
+            });
+            ui.end_row();
             let isolated = sounds.iter().any(|s| heard(p, &s.id).flatten().is_some());
             label(ui, "Voice Isolation", isolated);
             ui.horizontal(|ui| {
@@ -3681,6 +3700,9 @@ impl Workspace {
         }
         if edit_equalizer {
             self.open_equalizer(sounds.iter().map(|s| s.id.clone()).collect());
+        }
+        if edit_leveler {
+            self.open_leveler(sounds.iter().map(|s| s.id.clone()).collect());
         }
     }
 
@@ -3701,6 +3723,13 @@ impl Workspace {
     fn inspect(&mut self, act: Act, (chosen, sounds, paced): Lists<'_>) {
         let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
+            Act::Level(on) => {
+                let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
+                self.send(
+                    "clip.set",
+                    json!({ "clips": ids, "dialogue_leveler": { "on": on } }),
+                );
+            }
             Act::Equalize(on) => {
                 let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
                 self.send(

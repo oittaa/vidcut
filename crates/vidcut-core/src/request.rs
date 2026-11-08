@@ -1567,7 +1567,7 @@ pub enum Request {
         #[serde(default)]
         look: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -100..30), pan, equalizer, name,
+    /// Enable/disable video (D), mute, gain (dB, -100..30), pan, equalizer, Dialogue Leveler, name,
     /// Clip Color, Voice Isolation, Retime Process and Render Cache.
     #[serde(rename = "clip.set")]
     ClipSet {
@@ -1592,6 +1592,14 @@ pub enum Request {
             skip_serializing_if = "Option::is_none"
         )]
         equalizer: Option<Option<EqualizerSet>>,
+        /// The Dialogue Leveler: each field given replaces its own, and null
+        /// takes it off with its settings.
+        #[serde(
+            default,
+            deserialize_with = "given",
+            skip_serializing_if = "Option::is_none"
+        )]
+        dialogue_leveler: Option<Option<DialogueLevelerSet>>,
         /// Where `gain_db` goes as a keyframe on clips with volume
         /// keyframes: the playhead by default.
         #[serde(default)]
@@ -4832,6 +4840,32 @@ pub struct DuckSet {
     /// fader, from which it is active, from -96 to 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub threshold_db: Option<f64>,
+}
+
+/// A change to a clip's Dialogue Leveler: each field given replaces its own,
+/// and the rest stay as they are. A new one is on, with the preset
+/// `allow_wider_dynamics`, its three processes off and an output gain of 0.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DialogueLevelerSet {
+    /// On or off. Off keeps the settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// How far each of the three processes goes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset: Option<crate::model::LevelerPreset>,
+    /// Rides loud dialogue down.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reduce_loud: Option<bool>,
+    /// Lifts soft dialogue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lift_soft: Option<bool>,
+    /// Lowers the sound between the lines of dialogue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_reduction: Option<bool>,
+    /// The output gain in dB, from 0 to 6. Only with `reduce_loud` on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_gain_db: Option<f64>,
 }
 
 /// A change to a clip's equalizer: each field given replaces its own, and

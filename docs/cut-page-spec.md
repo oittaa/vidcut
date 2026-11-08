@@ -1495,7 +1495,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
-  - vidcut: its Audio section has Volume, Pan, Mute, Equalizer and Voice Isolation for the selected clips with sound (X70).
+  - vidcut: its Audio section has Volume, Pan, Mute, Equalizer, Dialogue Leveler and Voice Isolation for the selected clips with sound (X70).
   - vidcut: its Crop section has Softness, and its Composite section has Composite Mode and Opacity.
 - **The units of the Inspector,** measured in Resolve Studio 21.1.1:
   - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
@@ -2103,6 +2103,31 @@ A generator is a clip that makes its own picture. It has no media and no sound.
     - The curve of each filter.
     - The effect that an OTIO export writes.
   - vidcut: the Equalizer row of the Audio section (X70) and `clip.set` set `equalizer` ([X153](deviations.md#x153-the-equalizer-is-a-window-with-chosen-curves)).
+- **Dialogue Leveler** (pp. 743, 774–775):
+  - The Dialogue Leveler has a switch, a preset, three processes and an Output Gain (p. 775).
+  - The presets are Allow Wider Dynamics, More Lift For Low Levels, Lift Soft Whispery Sources and Optimize Moderate Levels (p. 775).
+  - The processes are Reduce Loud Dialogue, Lift Soft Dialogue and Background Reduction (p. 775).
+  - It works on a track of one or two channels, and not on a track with more (p. 775).
+  - Resolve Studio 21.2 gave these results, with renders of a spoken clip at six levels to 24-bit WAV files at 48 kHz.
+  - The scripting API starts with the switch off, the first preset, all three processes off and an Output Gain of 0.
+  - The Output Gain goes from 0 to 6 dB. The API sets the nearest limit, and it keeps one decimal.
+  - With the switch on and no process on, the sound does not change.
+  - Reduce Loud Dialogue lowers dialogue by a fixed amount, also at −44 dBFS. It starts about 0.2 s before the first sound of a line.
+  - The largest changes, in dB:
+
+    | Preset | Reduce Loud Dialogue | Lift Soft Dialogue |
+    |---|---|---|
+    | Allow Wider Dynamics | −3 | +4.3 |
+    | Optimize Moderate Levels | −10 | +4.3 |
+    | More Lift For Low Levels | −6 | +9.5 |
+    | Lift Soft Whispery Sources | −6 | +10.2 |
+
+  - On a line that is quieter than the line before, Reduce Loud Dialogue starts about 1 s after the first sound.
+  - Lift Soft Dialogue raises the soft parts of a line, and it raises the start of a quieter line.
+  - Background Reduction changes only the sound between lines. It lowered the noise by 1 to 11 dB there, and only in the first gaps of the clip.
+  - The Output Gain changes the sound only with Reduce Loud Dialogue on. With it, it adds its full value.
+  - An OTIO export writes no effect for the Dialogue Leveler.
+  - vidcut: the Dialogue Leveler row of the Audio section (X70) and `clip.set` set `dialogue_leveler` ([X154](deviations.md#x154-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
 - **Volume keyframes** (pp. 1109, 1111–1113, 1251, 1255):
   - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112). Two keyframes or more change the level over time (p. 1112).
   - Keyframes of the Inspector's Volume also show on the overlay (p. 1111).

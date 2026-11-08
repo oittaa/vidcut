@@ -282,6 +282,21 @@ fn a_clips_equalizer_comes_back_from_an_otio_file() {
     assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
 }
 
+#[test]
+fn a_clips_dialogue_leveler_comes_back_from_an_otio_file() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    let l = json!({"reduce_loud": true, "output_gain_db": 2.5});
+    f.ok(req(
+        "clip.set",
+        json!({"clips": "c1", "dialogue_leveler": l}),
+    ));
+    assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
+}
+
 fn pan_effects(item: &Value) -> Vec<Value> {
     item["effects"]
         .as_array()
