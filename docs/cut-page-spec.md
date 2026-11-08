@@ -2107,15 +2107,21 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - It opens the same window.
   - It cuts the clips at In and at the frame after Out, on all tracks. The Out frame is inside.
   - Thus In 24 and Out 120 give 97 frames, from 24 up to 121.
-  - The compound clip goes on V1 and A1, linked.
+  - The compound clip goes on the lowest video track and the lowest audio track with clips in the range, linked.
+  - The lowest track with clips in the range is inner V1 or A1. A track below it does not go inside.
   - The clips of the other tracks go inside. Those tracks stay on the timeline, empty.
   - The inner tracks start at the In frame.
+  - A locked track does not stop it. Its clips in the range are cut and go inside.
+  - With only In, the range runs to the end of the timeline. With only Out, the range starts at the start of the timeline.
+  - With no marks, the menu does not have this item or Create Compound Clip….
+  - A range with no clips does nothing, and shows no message.
   - Clips outside the range stay on the timeline.
   - A copy goes into the Media Pool. The marks stay.
 - **Create Compound Clip…**, on the same menu, under Create SubClip:
   - It opens the same window.
   - The timeline does not change. The compound clip goes only into the Media Pool.
   - In 70 and Out 110 give 41 frames.
+  - One mark gives the same range as in Convert In and Out to Compound Clip.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.

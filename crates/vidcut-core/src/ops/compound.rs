@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{block_clip, ensure_track, linked, locate, tracks, unlocked};
+use super::{block_clip, ensure_track, fix_audio, linked, locate, split_at, tracks, unlocked};
 use crate::error::{Error, Result};
 use crate::model::{Clip, Compound, Kept, Project, Track, TrackKind};
 use crate::otio;
@@ -208,19 +208,79 @@ pub fn nest(p: &mut Project, ids: &[String], name: Option<&str>) -> Result<Neste
         }
     }
     let span = span_of(p, &ids);
+    build(p, &ids, span, name)
+}
+
+fn end_sound_at(t: &mut Track, at: i64) {
+    let crosses = |c: &Clip| c.audio_range().is_some_and(|(s, e)| s < at && at < e);
+    if !t.clips.iter().any(crosses) {
+        return;
+    }
+    for c in &mut t.clips {
+        let (start, end) = (c.start, c.end());
+        if let Some(a) = c.audio.as_mut() {
+            if end == at {
+                a.tail = 0;
+            }
+            if start == at {
+                a.head = 0;
+            }
+        }
+    }
+}
+
+pub fn nest_range(p: &mut Project, (a, b): (i64, i64), name: Option<&str>) -> Result<Nested> {
+    if a >= b {
+        return Err(Error::usage(format!("empty range {a}..{b}")));
+    }
+    for ti in 0..p.tracks.len() {
+        let reached = p.tracks[ti].clips.iter().any(|c| {
+            let (s, e) = extent(c);
+            s < b && e > a
+        });
+        if reached {
+            unlocked(p, ti)?;
+        }
+    }
+    for ti in 0..p.tracks.len() {
+        for at in [a, b] {
+            split_at(p, ti, at);
+            end_sound_at(&mut p.tracks[ti], at);
+        }
+        fix_audio(p, ti);
+    }
+    let ids: HashSet<String> = p
+        .tracks
+        .iter()
+        .flat_map(|t| &t.clips)
+        .filter(|c| c.start >= a && c.end() <= b)
+        .map(|c| c.id.clone())
+        .collect();
+    if ids.is_empty() {
+        return Err(Error::invalid("no clips between In and Out"));
+    }
+    build(p, &ids, (a, b), name)
+}
+
+fn build(
+    p: &mut Project,
+    ids: &HashSet<String>,
+    span: (i64, i64),
+    name: Option<&str>,
+) -> Result<Nested> {
     let frames = span.1 - span.0;
     let name = given_name(p, name);
     let lowest_picture = p
         .tracks_of(TrackKind::Video)
         .into_iter()
-        .find(|&i| holds(&p.tracks[i], &ids));
+        .find(|&i| holds(&p.tracks[i], ids));
     let lowest_sound = p
         .tracks_of(TrackKind::Audio)
         .into_iter()
-        .find(|&i| holds(&p.tracks[i], &ids))
+        .find(|&i| holds(&p.tracks[i], ids))
         .map(|i| p.tracks[i].id.clone());
-    let mut whole = lift(p, &ids, TrackKind::Video, span.0);
-    whole.extend(lift(p, &ids, TrackKind::Audio, span.0));
+    let mut whole = lift(p, ids, TrackKind::Video, span.0);
+    whole.extend(lift(p, ids, TrackKind::Audio, span.0));
     let stack = stack_of(p, &whole, &name, frames)?;
     let (picture, sound) = (picture_tracks(&whole), sound_tracks(&whole));
     let mut clips = Vec::new();
@@ -391,6 +451,32 @@ mod tests {
             "edit.audio_roll",
             json!({"clip": id, "edge": "tail", "by": by}),
         ));
+    }
+
+    #[test]
+    fn a_range_cuts_each_track_at_the_marks_and_nests_what_is_between() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 60);
+        let upper = f.append("m1", 0, 60);
+        let moved = json!({"clips": [upper], "to": 0, "mode": "overwrite", "track": "V2"});
+        f.ok(req("edit.move", moved));
+        f.ok(req("edit.compound_range", json!({"range": "10f..40f"})));
+        let host = f.editor.project().track("V1").unwrap().clips[1].clone();
+        assert_eq!((host.start, host.duration), (10, 30));
+        assert_eq!(f.track("V2").len(), 2);
+    }
+
+    #[test]
+    fn a_range_goes_on_the_lowest_track_with_clips_in_it() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 10);
+        let upper = f.append("m1", 0, 60);
+        let moved = json!({"clips": [upper], "to": 20, "mode": "overwrite", "track": "V2"});
+        f.ok(req("edit.move", moved));
+        f.ok(req("edit.compound_range", json!({"range": "30f..40f"})));
+        let v2 = f.editor.project().track("V2").unwrap();
+        assert_eq!(v2.clips[1].compound.as_ref().unwrap().tracks[0].id, "V1");
+        assert_eq!(f.track("V1").len(), 1);
     }
 
     #[test]
