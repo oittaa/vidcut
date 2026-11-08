@@ -13,7 +13,7 @@ Each step is scriptable: the CLI, IPC and MCP can do each GUI action.
 
 1. **Measure the effects:**
    - Measure each new effect in Resolve first: its values, their ranges and defaults, and its math.
-   - **Equalizer, measure these in the Inspector.** Resolve's scripts cannot set it. vidcut's choices are in [X153](../deviations.md#x153-the-equalizer-is-a-window-with-chosen-curves):
+   - **Equalizer, measure these in the Inspector.** Resolve's scripts cannot set it. vidcut's choices are in [X154](../deviations.md#x154-the-equalizer-is-a-window-with-chosen-curves):
      - The range and the default of each frequency.
      - The curve of each filter, from renders of a sweep or of tones.
      - The width of a Notch filter and the slope of the pass filters.
