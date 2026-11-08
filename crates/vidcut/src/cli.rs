@@ -90,6 +90,7 @@ pub const POSITIONAL: &[(&str, &[&str])] = &[
     ("picture.clear", &["clips"]),
     ("effects.add", &["clips", "kind"]),
     ("effects.set", &["clip", "effect"]),
+    ("effects.key", &["clip", "effect"]),
     ("effects.reset", &["clip", "effect"]),
     ("effects.remove", &["clip", "effect"]),
     ("effects.move", &["clip", "effect", "to"]),
@@ -183,7 +184,7 @@ const GROUPS: &[(&str, &str)] = &[
         "jobs",
         "Export, proxy and transcription jobs of the running GUI",
     ),
-    ("keyframes", "Volume and picture keyframes"),
+    ("keyframes", "Volume, picture and effect keyframes"),
     ("keys", "Keyboard shortcuts"),
     (
         "looks",
@@ -312,7 +313,9 @@ const EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "keyframes.add",
-        "vidcut keyframes add c4 --at 10s\n  vidcut keyframes add c4 --at 12s --value -20 --ease ease_in\n  vidcut keyframes list c4",
+        "vidcut keyframes add c4 --at 10s\n  vidcut keyframes add c4 --at 12s --value -20 --ease ease_in\n  \
+         vidcut keyframes add c4 --at 2s --param '{\"effect\": 0, \"value\": \"strength\"}' --value 0.7\n  \
+         vidcut keyframes list c4",
     ),
     (
         "proxy.generate",
@@ -422,7 +425,12 @@ const EXAMPLES: &[(&str, &str)] = &[
          vidcut effects set c3 2 --operating-mode advanced --border-shape hexagon --rotation 30\n  \
          vidcut effects set c3 2 --center 0.25,0.75 --transparency 0.5 --composite-type screen\n  \
          vidcut effects set c3 3 --sharpen-amount 2.5 --fine-detail-size 0.03\n  \
-         vidcut effects set c3 3 --fine-details 2 --large-details 3 --sharpen-chroma 1.5",
+         vidcut effects set c3 3 --fine-details 2 --large-details 3 --sharpen-chroma 1.5\n  \
+         vidcut effects set c3 0 --strength 0.6 --at 2s",
+    ),
+    (
+        "effects.key",
+        "vidcut effects key c3 0 --at 2s\n  vidcut effects key c3 0 --at 2s --ease ease_in_out",
     ),
     (
         "export.start",
@@ -490,6 +498,7 @@ enum Kind {
     Choice(Vec<String>),
     List(Box<Kind>),
     Json,
+    NameOrJson,
 }
 
 #[derive(Debug, Clone)]
@@ -640,6 +649,9 @@ fn kind(schema: &Value, defs: &Map<String, Value>) -> Kind {
                     .all(|a| matches!(a["type"].as_str(), Some("string" | "integer" | "number")))
             {
                 return Kind::Text;
+            }
+            if alts.iter().any(|a| a["type"] == "string") {
+                return Kind::NameOrJson;
             }
             Kind::Json
         }
@@ -926,6 +938,7 @@ fn arg(p: &Param, followed: bool) -> Arg {
             .value_delimiter(',')
             .action(ArgAction::Append),
         Kind::Json => a.value_name("JSON|@FILE|-").allow_hyphen_values(true),
+        Kind::NameOrJson => a.value_name("NAME|JSON|@FILE|-").allow_hyphen_values(true),
         k => one(a, k, true),
     }
 }
@@ -1094,6 +1107,11 @@ fn value(m: &ArgMatches, p: &Param) -> Result<Option<Value>> {
             Some(text) => Some(read_json_arg(text)?),
             None => None,
         },
+        Kind::NameOrJson => match m.get_one::<String>(id) {
+            Some(text) if is_name(text) => Some(json!(text)),
+            Some(text) => Some(read_json_arg(text)?),
+            None => None,
+        },
     };
     Ok(match v {
         Some(Value::Array(mut a)) if p.scalar && a.len() == 1 => a.pop(),
@@ -1123,6 +1141,8 @@ pub fn command_line(project: &std::path::Path, method: &str, params: &Value) -> 
             (Kind::Flag, _) => continue,
             (Kind::List(_), Value::Array(a)) => a.iter().map(text).collect(),
             (Kind::Json, v) => vec![v.to_string()],
+            (Kind::NameOrJson, Value::String(s)) => vec![s.clone()],
+            (Kind::NameOrJson, v) => vec![v.to_string()],
             (_, v) => vec![text(v)],
         };
         match p.position {
@@ -1138,6 +1158,10 @@ pub fn command_line(project: &std::path::Path, method: &str, params: &Value) -> 
     }
     words.extend(flags);
     shlex::try_join(words.iter().map(String::as_str)).ok()
+}
+
+fn is_name(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn read_json_arg(arg: &str) -> Result<Value> {

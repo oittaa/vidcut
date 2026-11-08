@@ -8,6 +8,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - A clip has volume keyframes on its volume line ([spec §9](../cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779), D81–D85; deviations [X73](../deviations.md#x73-the-volume-line-takes-the-keyframe-controls-of-the-edit-page), [X74](../deviations.md#x74-eases-are-bezier-handles-that-drag-on-the-volume-line)).
   - The `Keyframe` type holds a source frame, a value, an In handle and an Out handle. `ClipAudio::gain_keys` holds the volume keyframes.
   - Transform, Crop and Composite values have keyframes on `Picture` ([§8.15](../cut-page-spec.md#815-transform-and-crop-pp-766768), D75).
+  - The values of the effects of a clip have keyframes on `Effect` ([§8.16](../cut-page-spec.md#816-effects-pp-765-3526-3536), [X152](../deviations.md#x152-effect-keyframes-have-one-number-each)).
   - The Keyframes tab shows each value of the item selected first that can have keyframes.
   - Each value has a track. Its curve shows when the user turns it on. A drag moves a keyframe, a group or a handle.
   - Position is one keyframe for X and Y. Zoom is one keyframe for X and Y. The anchor point is one keyframe for X and Y.

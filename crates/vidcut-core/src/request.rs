@@ -9,9 +9,9 @@ use crate::export::{EncoderChoice, ExportSettings};
 use crate::looks::{LookKind, SubtitleLook, TitleLook};
 use crate::model::{
     Border, CellShape, CompositeMode, DuckDetect, DynamicZoom, Ease, EbuLevel, EffectType,
-    GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, GrainPreset, Handle,
-    LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign, TitleAnchor,
-    TitleKind, TitleStyle, TrackClip, VignetteMode, VignetteShape, ZoomBox,
+    EffectValue, GeneratorKind, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, GrainPreset,
+    Handle, LowerThirdLine, PictureTool, PictureTransition, Place, SubtitleStyle, TitleAlign,
+    TitleAnchor, TitleKind, TitleStyle, TrackClip, VignetteMode, VignetteShape, ZoomBox,
 };
 use crate::ops::{Edge, MoveMode};
 use crate::time::{DurationSpec, RangeSpec, Rational, TimeSpec};
@@ -1698,7 +1698,8 @@ pub enum Request {
         /// crop side (a fraction), crop softness (from -100 to 100), opacity
         /// (from 0 to 1) and a gradient's center (from -1 to 1). For
         /// position, zoom and the anchor point, two numbers, x then y, or one
-        /// number for both axes of zoom.
+        /// number for both axes of zoom. For a value of an effect, a number
+        /// in the range that `effects.set` takes.
         #[serde(default)]
         value: Option<KeyValue>,
         #[serde(default)]
@@ -2580,12 +2581,29 @@ pub enum Request {
     /// counts from 0, in the order of the clip's effects (`picture.get`).
     /// Each value given replaces its own; a value the effect doesn't have is
     /// an error.
+    ///
+    /// A value with keyframes takes a keyframe on `at` and keeps its plain
+    /// value. Without `at`, or a playhead, that is an error.
     #[serde(rename = "effects.set")]
     EffectsSet {
         clip: ClipRef,
         effect: usize,
+        #[serde(default)]
+        at: Option<TimeSpec>,
         #[serde(flatten)]
         change: Box<EffectChange>,
+    },
+    /// The Keyframe button of one effect of a clip. With a keyframe on `at`,
+    /// it removes each keyframe of the effect on that frame. Without one, it
+    /// puts a keyframe on `at` on each value of the effect. With `ease`, it
+    /// only gives the keyframes on `at` that ease. `effect` counts from 0.
+    #[serde(rename = "effects.key")]
+    EffectsKey {
+        clip: ClipRef,
+        effect: usize,
+        at: TimeSpec,
+        #[serde(default)]
+        ease: Option<Ease>,
     },
     /// Put one effect of a clip back at its usual values. It stays on, and
     /// keeps its `render_cache`. An effect that is off does not change.
@@ -3712,8 +3730,20 @@ pub enum Detect {
     Speech,
 }
 
+/// One value of one effect of a clip. `effect` counts from 0, in the order
+/// of the clip's effects (`picture.get`).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+pub struct EffectParam {
+    pub effect: usize,
+    pub value: EffectValue,
+}
+
 /// The value that keyframes set (decisions D75 and D81).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyParam {
     /// The volume of a clip's sound, in dB.
@@ -3775,6 +3805,12 @@ pub enum KeyParam {
     /// The Center Y of a Four Color Gradient, from -1 to 1. A number past an
     /// end takes that end.
     CenterY,
+    /// A value of an effect, as `{"effect": 0, "value": "strength"}`. Its
+    /// numbers are those of `effects.set`. One number of a color or a
+    /// position has a value of its own, for example `color_red`.
+    /// `keyframes.list` names it in the same form.
+    #[serde(untagged)]
+    Effect(EffectParam),
 }
 
 impl KeyParam {
@@ -3843,6 +3879,10 @@ pub struct KeyPicks {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CopiedKey {
     pub param: KeyParam,
+    /// The kind of the effect, on a keyframe of an effect value. A paste puts
+    /// the keyframe only on an effect of this kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<EffectType>,
     /// Timeline frames after the first copied keyframe.
     pub offset: i64,
     /// A number, or x and y for position, zoom and the anchor point.

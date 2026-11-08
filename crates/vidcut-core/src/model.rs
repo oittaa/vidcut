@@ -3258,6 +3258,103 @@ pub struct Effect {
     /// mode and in its User mode. Usual: off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub render_cache: bool,
+    /// The keyframes of its values, on source frames. A value with keyframes
+    /// follows them, and its plain value returns when the last one goes.
+    /// Left out when it has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<EffectKeys>,
+}
+
+/// The keyframes of one value of an effect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct EffectKeys {
+    pub value: EffectValue,
+    pub keys: Vec<Keyframe>,
+}
+
+/// A value of an effect that can have keyframes. A color or a list of
+/// channels has one value for each of its numbers, and a position or a center
+/// has one for x and one for y. `softness`, `opacity` and `saturation` are
+/// values of more than one kind of effect.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectValue {
+    Blend,
+    Strength,
+    VerticalStrength,
+    HorizontalRed,
+    HorizontalGreen,
+    HorizontalBlue,
+    HorizontalAlpha,
+    VerticalRed,
+    VerticalGreen,
+    VerticalBlue,
+    VerticalAlpha,
+    PixelFrequency,
+    SmoothStrength,
+    Aliasing,
+    XOffset,
+    YOffset,
+    Aspect,
+    PositionX,
+    PositionY,
+    Threshold,
+    AlphaThreshold,
+    Spread,
+    HvRatio,
+    RelativeSpreadRed,
+    RelativeSpreadGreen,
+    RelativeSpreadBlue,
+    Gain,
+    Gamma,
+    ColorFilterRed,
+    ColorFilterGreen,
+    ColorFilterBlue,
+    SecondaryGain,
+    SecondarySpread,
+    SecondaryColorRed,
+    SecondaryColorGreen,
+    SecondaryColorBlue,
+    AtmosphereStrength,
+    AtmosphereDetail,
+    AtmosphereScale,
+    AtmosphereRatio,
+    AtmosphereEvolution,
+    AtmosphereSeethe,
+    Recovery,
+    Opacity,
+    Texture,
+    GrainSize,
+    GrainAspect,
+    GrainStrength,
+    Offset,
+    Symmetry,
+    Softness,
+    Saturation,
+    DetailLoss,
+    ChannelGainRed,
+    ChannelGainGreen,
+    ChannelGainBlue,
+    Shadows,
+    Midtones,
+    Highlights,
+    Size,
+    Rotation,
+    Anamorphism,
+    CenterX,
+    CenterY,
+    Transparency,
+    ColorRed,
+    ColorGreen,
+    ColorBlue,
+    SharpenAmount,
+    FineDetailSize,
+    FineDetails,
+    MediumDetails,
+    LargeDetails,
+    SharpenChroma,
 }
 
 /// What an effect does, with its own values.
@@ -4098,6 +4195,7 @@ impl EffectType {
             blend: None,
             use_alpha: true,
             render_cache: false,
+            keys: Vec::new(),
         }
     }
 }
@@ -4129,6 +4227,8 @@ impl Effect {
 
 impl GaussianBlur {
     pub const STRENGTH: f64 = 0.4;
+    pub const STRENGTHS: (f64, f64) = (0.0, 1.0);
+    pub const CHANNELS: (f64, f64) = (0.0, 2.0);
     pub const SPREAD: f64 = 0.05625;
     pub const SAME: [f64; 4] = [1.0; 4];
 
