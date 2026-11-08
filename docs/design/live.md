@@ -401,6 +401,11 @@ The bar and the Jobs button:
 - Shift holds a drag on a curve point to one direction (`Lock`, `locked`). The first movement selects the direction.
 - `Editor::snapping` turns on snapping. `snapped` finds the nearest target of a drag. `Shift::snap` is the time of the white line.
 - A right-click on a selected keyframe keeps the selection. `marks_eases` gives the eases of the selection. `ease_parts` makes one `keyframes.set` for each value.
+- `Editor::graph` turns on the large graph (`Workspace::curve_graph`). `graphed` gives its lines, without those in `Editor::graph_off`.
+  - `Editor::graph_active` is the curve with the points. Without one that the graph shows, the first line is active.
+  - `paint_curve` draws a curve with its points. `use_curve` takes its clicks and drags. The rows under the tracks use both too.
+  - `dim_curve` draws a dimmed line and returns its points. `dim_at` finds the line at a click.
+  - `Editor::graph_h` is the height, from the drag in `graph_grip`.
 - The selected rows are a list of values (`Editor::rows`). A click on a row's name or on a keyframe changes them.
 - Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes (`KeyCmd`, `Workspace::key_cmd`) act on the selected marks or the selected rows.
   - `Workspace::key_target` takes only the rows that the open tab or tray shows.

@@ -2925,3 +2925,21 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - Two values often change on the same frame. A snap to the keyframes of the other values does this without a look at the timecode.
   - Two keyframes of one value cannot share a frame. Thus the keyframes of the same value are not targets.
+
+## X160. The graph sits above the tracks with a scale for each curve
+
+- **Resolve:**
+  - The Curve Editor takes the place of the tracks. One keyframe track for the selected curve is at its bottom (p. 1260).
+  - A Parameters menu with checkboxes selects the curves (p. 1262).
+  - Auto Zoom Graph Height sets the scale of the graph from the active keyframes (p. 1264). A slider sets it by hand.
+  - A larger editor is a window of its own (p. 1260).
+- **vidcut:**
+  - The Graph button shows the graph above all the tracks. The tracks stay under it.
+  - The curve button of each track turns its line on or off in the graph.
+  - The names and the colors of the lines are at the left of the graph. A click on a name makes that curve active.
+  - Each curve fills the height of the graph with its own scale. The labels show the range of the active curve.
+  - A drag on the line under the graph changes its height. No window opens.
+- **Why:**
+  - The tracks keep the diamonds of all the values. A box and a group drag still work there.
+  - Opacity and Rotation have very different ranges. With one scale, one of the two is almost flat.
+  - Each track already has a curve button. Checkboxes in a menu repeat it.

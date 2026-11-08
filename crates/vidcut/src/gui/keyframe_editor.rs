@@ -6,7 +6,7 @@ use eframe::egui::{
 };
 use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROWS_OUT_LINE_HORIZONTAL, CARET_DOWN, CARET_LEFT, CARET_RIGHT,
-    DOTS_THREE, MAGNIFYING_GLASS_PLUS, WAVE_SINE,
+    CHART_LINE, DOTS_THREE, MAGNIFYING_GLASS_PLUS, WAVE_SINE,
 };
 use serde_json::{Value, json};
 use vidcut_core::generators::{self, CENTER};
@@ -34,6 +34,18 @@ const RULER_H: f32 = 20.0;
 const GROUP_H: f32 = 22.0;
 const TRACK_H: f32 = 26.0;
 const CURVE_H: f32 = 110.0;
+const GRAPH_H: f32 = 280.0;
+const GRIP_H: f32 = 6.0;
+const TRACKS_KEPT: f32 = 3.0;
+const DIMMED: f32 = 0.65;
+const HUES: [Color32; 6] = [
+    Color32::from_rgb(240, 140, 60),
+    Color32::from_rgb(90, 170, 250),
+    Color32::from_rgb(110, 205, 120),
+    Color32::from_rgb(235, 110, 170),
+    Color32::from_rgb(225, 205, 80),
+    Color32::from_rgb(90, 210, 210),
+];
 const BAR_H: f32 = 68.0;
 const SCROLL_H: f32 = 12.0;
 const ZOOM_W: f32 = 72.0;
@@ -399,6 +411,10 @@ pub struct Editor {
     snapping: bool,
     closed: Vec<Group>,
     curves: Vec<KeyParam>,
+    graph: bool,
+    graph_off: Vec<KeyParam>,
+    graph_active: Option<KeyParam>,
+    graph_h: Option<f32>,
     view: Option<(f64, f64)>,
     held: Option<Held>,
     fresh: Option<(KeyParam, i64, Instant)>,
@@ -1468,6 +1484,7 @@ impl Workspace {
             self.key_editor.pending = None;
             self.key_editor.menu = None;
             self.key_editor.menu_curve = false;
+            self.key_editor.graph_active = None;
             self.key_editor.view = None;
             self.key_editor.held = None;
             self.key_editor.fresh = None;
@@ -1589,6 +1606,10 @@ impl Workspace {
             tray: false,
         };
         self.ruler(ui, &p, &clip, plot);
+        let graph = self.key_editor.graph;
+        if graph {
+            self.curve_graph(ui, &clip, &lanes, plot, &frame, shift.as_ref());
+        }
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .max_height(
@@ -1611,7 +1632,10 @@ impl Workspace {
                     for lane in &members {
                         let rows = shown_lane(lane, shift.as_ref());
                         self.track_row(ui, &clip, lane, &rows, plot);
-                        if !lane.keys.is_empty() && self.key_editor.curves.contains(&lane.param) {
+                        if !graph
+                            && !lane.keys.is_empty()
+                            && self.key_editor.curves.contains(&lane.param)
+                        {
                             self.curve_row(ui, &clip, lane, &rows, plot, &frame);
                         }
                     }
@@ -2197,6 +2221,13 @@ impl Workspace {
                 {
                     detail = true;
                 }
+                if ui
+                    .add(egui::Button::selectable(editor.graph, CHART_LINE))
+                    .on_hover_text("Graph")
+                    .clicked()
+                {
+                    editor.graph = !editor.graph;
+                }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.add(egui::Label::new(RichText::new(name).strong()).truncate());
                 });
@@ -2534,7 +2565,12 @@ impl Workspace {
         let keyable = !speed || (clip.start < play && play < clip.end());
         let prev = times.iter().any(|&t| reached(t) && t < play);
         let next = times.iter().any(|&t| reached(t) && t > play);
-        let curve = self.key_editor.curves.contains(&lane.param);
+        let graph = self.key_editor.graph;
+        let curve = if graph {
+            !self.key_editor.graph_off.contains(&lane.param)
+        } else {
+            self.key_editor.curves.contains(&lane.param)
+        };
         let keyed = !lane.keys.is_empty();
         let picked = self.key_editor.rows.contains(&lane.param);
         let mut act = None;
@@ -2554,7 +2590,7 @@ impl Workspace {
             if !plot.tray {
                 let c = ui
                     .add_enabled(
-                        keyed && !linear(clip, lane.param) && !fixed(lane.param),
+                        has_curve(clip, lane),
                         egui::Button::selectable(curve && keyed, WAVE_SINE).frame(false),
                     )
                     .on_hover_text("Curve");
@@ -2598,10 +2634,15 @@ impl Workspace {
         });
         match act {
             Some(RowAct::Curve) => {
-                if curve {
-                    self.key_editor.curves.retain(|c| *c != lane.param);
+                let list = if graph {
+                    &mut self.key_editor.graph_off
                 } else {
-                    self.key_editor.curves.push(lane.param);
+                    &mut self.key_editor.curves
+                };
+                if list.contains(&lane.param) {
+                    list.retain(|c| *c != lane.param);
+                } else {
+                    list.push(lane.param);
                 }
             }
             Some(RowAct::Step(dir)) => {
@@ -2645,7 +2686,7 @@ impl Workspace {
             None => {}
         }
         if named {
-            self.key_editor.rows = vec![lane.param];
+            self.activate(lane.param);
         }
         let map = TimeMap::of(plot.lo, plot.hi, rect);
         let painter = ui.painter_at(rect);
@@ -2738,6 +2779,11 @@ impl Workspace {
         }
     }
 
+    fn activate(&mut self, param: KeyParam) {
+        self.key_editor.graph_active = Some(param);
+        self.key_editor.rows = vec![param];
+    }
+
     fn curve_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -2748,12 +2794,135 @@ impl Workspace {
         frame: &Frame,
     ) {
         let (rect, resp) = row(ui, CURVE_H, plot, |_| {});
+        let colors = theme::colors();
+        ui.painter_at(rect)
+            .rect_filled(rect, 2.0, colors.panel_dark);
+        let area = CurveArea {
+            rect,
+            resp: &resp,
+            clip,
+            plot,
+            frame,
+        };
+        let spots = self.paint_curve(ui, &area, lane, rows, [colors.text, colors.text_dim]);
+        self.use_curve(ui, &area, lane, &spots);
+    }
+
+    fn curve_graph(
+        &mut self,
+        ui: &mut egui::Ui,
+        clip: &Clip,
+        lanes: &[Lane],
+        plot: Plot,
+        frame: &Frame,
+        shift: Option<&Shift>,
+    ) {
+        let shown = graphed(clip, lanes, &self.key_editor.graph_off);
+        let mut active = shown
+            .iter()
+            .find(|(lane, _)| Some(lane.param) == self.key_editor.graph_active)
+            .or(shown.first())
+            .map(|(lane, _)| lane.param);
+        let gap = ui.spacing().item_spacing.y;
+        let most = (ui.available_height()
+            - BAR_H
+            - SCROLL_H
+            - GRIP_H
+            - 3.0 * gap
+            - TRACKS_KEPT * (TRACK_H + gap))
+            .max(CURVE_H);
+        let h = self
+            .key_editor
+            .graph_h
+            .unwrap_or(GRAPH_H)
+            .clamp(CURVE_H, most);
+        let mut named = None;
+        let (rect, resp) = row(ui, h, plot, |ui| {
+            named = legend(ui, h, &shown, active);
+        });
+        if let Some(param) = named {
+            self.activate(param);
+            active = Some(param);
+        }
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 2.0, theme::colors().panel_dark);
+        let area = CurveArea {
+            rect,
+            resp: &resp,
+            clip,
+            plot,
+            frame,
+        };
+        let mut dims = Vec::new();
+        for (lane, color) in shown.iter().filter(|(l, _)| Some(l.param) != active) {
+            let rows = shown_lane(lane, shift);
+            let lines = dim_curve(&area, &painter, lane, &rows, color.gamma_multiply(DIMMED));
+            dims.extend(lines.into_iter().map(|line| (lane.param, line)));
+        }
+        if let Some((lane, color)) = shown.iter().find(|(l, _)| Some(l.param) == active) {
+            let rows = shown_lane(lane, shift);
+            let lines = [*color, color.gamma_multiply(DIMMED)];
+            let spots = self.paint_curve(ui, &area, lane, &rows, lines);
+            if resp
+                .hover_pos()
+                .filter(|at| !spots.hit(*at))
+                .and_then(|at| dim_at(&dims, at))
+                .is_some()
+            {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            let picked = resp
+                .interact_pointer_pos()
+                .filter(|at| resp.clicked() && !spots.hit(*at))
+                .and_then(|at| dim_at(&dims, at));
+            match picked {
+                Some(param) => self.activate(param),
+                None => self.use_curve(ui, &area, lane, &spots),
+            }
+        } else {
+            playhead(&painter, TimeMap::of(plot.lo, plot.hi, rect), rect, plot);
+        }
+        self.graph_grip(ui, plot, h, most);
+    }
+
+    fn graph_grip(&mut self, ui: &mut egui::Ui, plot: Plot, h: f32, most: f32) {
+        let width = plot.label + ui.spacing().item_spacing.x + plot.width;
+        let (rect, resp) = ui.allocate_exact_size(vec2(width, GRIP_H), Sense::drag());
+        let colors = theme::colors();
+        let busy = resp.hovered() || resp.dragged();
+        if busy {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
+        ui.painter().hline(
+            rect.x_range(),
+            rect.center().y,
+            Stroke::new(1.0, if busy { colors.text_dim } else { colors.line }),
+        );
+        if resp.dragged() {
+            self.key_editor.graph_h = Some((h + resp.drag_delta().y).clamp(CURVE_H, most));
+        }
+    }
+
+    fn paint_curve(
+        &self,
+        ui: &egui::Ui,
+        area: &CurveArea<'_>,
+        lane: &Lane,
+        rows: &[Shown],
+        lines: [Color32; 2],
+    ) -> CurveSpots {
+        let CurveArea {
+            rect,
+            clip,
+            plot,
+            frame,
+            ..
+        } = *area;
         let map = TimeMap::of(plot.lo, plot.hi, rect);
         let (vlo, vhi) = value_ends(rows);
         let values = ValueMap::of(vlo, vhi, least_span(lane.param), rect);
         let painter = ui.painter_at(rect);
         let colors = theme::colors();
-        painter.rect_filled(rect, 2.0, colors.panel_dark);
         if !matches!(
             lane.param,
             KeyParam::Position
@@ -2782,12 +2951,12 @@ impl Workspace {
             map,
             values,
         };
-        sample_curve(&paint, 1.5, colors.text, |source| {
+        sample_curve(&paint, 1.5, lines[0], |source| {
             value_mapped(&keys, source, |i| keys[i].value)
         });
         if rows.first().is_some_and(|r| r.paired) {
             let ys: Vec<f64> = rows.iter().map(|r| r.y).collect();
-            sample_curve(&paint, 1.0, colors.text_dim, |source| {
+            sample_curve(&paint, 1.0, lines[1], |source| {
                 value_paired(&keys, source, |i| ys[i])
             });
         }
@@ -2845,19 +3014,29 @@ impl Workspace {
                 spots.push((yat, row.from, Axis::Y));
             }
         }
+        CurveSpots {
+            map,
+            values,
+            keys: spots,
+            handles,
+        }
+    }
+
+    fn use_curve(&mut self, ui: &egui::Ui, area: &CurveArea<'_>, lane: &Lane, at: &CurveSpots) {
+        let CurveArea { resp, clip, .. } = *area;
         self.poke_curve(
             Press {
                 ui,
-                resp: &resp,
+                resp,
                 clip,
                 lane,
-                map,
+                map: at.map,
             },
-            values,
-            &spots,
-            &handles,
+            at.values,
+            &at.keys,
+            &at.handles,
         );
-        let flat: Vec<(Pos2, i64)> = spots.iter().map(|(at, frame, _)| (*at, *frame)).collect();
+        let flat: Vec<(Pos2, i64)> = at.keys.iter().map(|(at, frame, _)| (*at, *frame)).collect();
         self.key_editor.seen.extend(flat.iter().map(|(at, frame)| {
             (
                 *at,
@@ -2870,11 +3049,11 @@ impl Workspace {
         let all: Vec<(Pos2, i64)> = flat
             .iter()
             .copied()
-            .chain(handles.iter().map(|(at, frame, ..)| (*at, *frame)))
+            .chain(at.handles.iter().map(|(at, frame, ..)| (*at, *frame)))
             .collect();
-        self.empty_press(ui, &resp, clip, lane.param, map, &all);
-        self.open_menu(&resp, lane.param, &flat, true);
-        self.show_menu(&resp, clip, lane, true);
+        self.empty_press(ui, resp, clip, lane.param, at.map, &all);
+        self.open_menu(resp, lane.param, &flat, true);
+        self.show_menu(resp, clip, lane, true);
     }
 
     fn key_bar(&mut self, ui: &mut egui::Ui, p: &Project, clip: &Clip, lanes: &[Lane], f: &Frame) {
@@ -3084,11 +3263,11 @@ impl Workspace {
             param: lane.param,
             frame: *frame,
         });
-        if (resp.drag_started() || resp.clicked())
-            && hit.is_some()
-            && !self.key_editor.rows.contains(&lane.param)
-        {
-            self.key_editor.rows.push(lane.param);
+        if (resp.drag_started() || resp.clicked()) && hit.is_some() {
+            self.key_editor.graph_active = Some(lane.param);
+            if !self.key_editor.rows.contains(&lane.param) {
+                self.key_editor.rows.push(lane.param);
+            }
         }
         if resp.drag_started()
             && !fixed(lane.param)
@@ -3313,6 +3492,29 @@ fn shown_group_time(clip: &Clip, marks: &[Mark], shift: Option<&Shift>) -> f64 {
     clip.key_time(frame)
 }
 
+#[derive(Clone, Copy)]
+struct CurveArea<'a> {
+    rect: Rect,
+    resp: &'a egui::Response,
+    clip: &'a Clip,
+    plot: Plot,
+    frame: &'a Frame,
+}
+
+struct CurveSpots {
+    map: TimeMap,
+    values: ValueMap,
+    keys: Vec<(Pos2, i64, Axis)>,
+    handles: Vec<(Pos2, i64, bool, Handle, i64)>,
+}
+
+impl CurveSpots {
+    fn hit(&self, pos: Pos2) -> bool {
+        self.keys.iter().any(|(at, ..)| near(*at, pos))
+            || self.handles.iter().any(|(at, ..)| near(*at, pos))
+    }
+}
+
 struct Press<'a> {
     ui: &'a egui::Ui,
     resp: &'a egui::Response,
@@ -3334,7 +3536,7 @@ fn sample_curve(
     width: f32,
     color: Color32,
     at: impl Fn(f64) -> Option<f64>,
-) {
+) -> Vec<Pos2> {
     let CurvePaint {
         painter,
         clip,
@@ -3353,8 +3555,106 @@ fn sample_curve(
         pts.push(pos2(x, values.y(v)));
     }
     if pts.len() >= 2 {
-        painter.add(Shape::line(pts, Stroke::new(width, color)));
+        painter.add(Shape::line(pts.clone(), Stroke::new(width, color)));
     }
+    pts
+}
+
+fn has_curve(clip: &Clip, lane: &Lane) -> bool {
+    !lane.keys.is_empty() && !linear(clip, lane.param) && !fixed(lane.param)
+}
+
+fn graphed<'a>(clip: &Clip, lanes: &'a [Lane], off: &[KeyParam]) -> Vec<(&'a Lane, Color32)> {
+    let all = lanes_of(clip, false);
+    let hue = |param: KeyParam| {
+        let i = all.iter().position(|l| l.param == param).unwrap_or(0);
+        HUES[i % HUES.len()]
+    };
+    lanes
+        .iter()
+        .filter(|l| has_curve(clip, l) && !off.contains(&l.param))
+        .map(|l| (l, hue(l.param)))
+        .collect()
+}
+
+fn legend(
+    ui: &mut egui::Ui,
+    h: f32,
+    shown: &[(&Lane, Color32)],
+    active: Option<KeyParam>,
+) -> Option<KeyParam> {
+    if shown.is_empty() {
+        ui.label(dim("No Curves"));
+        return None;
+    }
+    let mut picked = None;
+    egui::ScrollArea::vertical()
+        .id_salt("keyframe-legend")
+        .auto_shrink([false, false])
+        .max_height(h)
+        .show(ui, |ui| {
+            ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                for (lane, color) in shown {
+                    ui.horizontal(|ui| {
+                        let (swatch, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+                        ui.painter().rect_filled(swatch, 2.0, *color);
+                        let name = RichText::new(lane_name(lane.param)).small();
+                        if ui
+                            .selectable_label(active == Some(lane.param), name)
+                            .clicked()
+                        {
+                            picked = Some(lane.param);
+                        }
+                    });
+                }
+            });
+        });
+    picked
+}
+
+fn dim_curve(
+    area: &CurveArea<'_>,
+    painter: &egui::Painter,
+    lane: &Lane,
+    rows: &[Shown],
+    color: Color32,
+) -> Vec<Vec<Pos2>> {
+    let (vlo, vhi) = value_ends(rows);
+    let paint = CurvePaint {
+        painter,
+        clip: area.clip,
+        map: TimeMap::of(area.plot.lo, area.plot.hi, area.rect),
+        values: ValueMap::of(vlo, vhi, least_span(lane.param), area.rect),
+    };
+    let keys: Vec<Keyframe> = rows.iter().map(|r| r.key).collect();
+    let mut lines = vec![sample_curve(&paint, 1.0, color, |source| {
+        value_mapped(&keys, source, |i| keys[i].value)
+    })];
+    if rows.first().is_some_and(|r| r.paired) {
+        let ys: Vec<f64> = rows.iter().map(|r| r.y).collect();
+        lines.push(sample_curve(&paint, 1.0, color, |source| {
+            value_paired(&keys, source, |i| ys[i])
+        }));
+    }
+    lines
+}
+
+fn line_distance(line: &[Pos2], pos: Pos2) -> f32 {
+    line.windows(2)
+        .map(|w| {
+            let along = w[1] - w[0];
+            let t = (pos - w[0]).dot(along) / along.length_sq().max(f32::EPSILON);
+            (w[0] + along * t.clamp(0.0, 1.0)).distance(pos)
+        })
+        .fold(f32::MAX, f32::min)
+}
+
+fn dim_at(dims: &[(KeyParam, Vec<Pos2>)], pos: Pos2) -> Option<KeyParam> {
+    dims.iter()
+        .map(|(param, line)| (*param, line_distance(line, pos)))
+        .filter(|(_, d)| *d <= HIT)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(param, _)| param)
 }
 
 fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
@@ -3478,6 +3778,21 @@ mod tests {
             "source_in": 0, "video": true, "enabled": true
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_point_beside_a_steep_line_is_near_it() {
+        let line = [pos2(0.0, 0.0), pos2(3.0, 90.0)];
+        assert!(line_distance(&line, pos2(1.5, 45.0)) < 0.01);
+    }
+
+    #[test]
+    fn a_click_on_two_dimmed_curves_takes_the_nearer() {
+        let dims = [
+            (KeyParam::Opacity, vec![pos2(0.0, 10.0), pos2(90.0, 10.0)]),
+            (KeyParam::Rotation, vec![pos2(0.0, 14.0), pos2(90.0, 14.0)]),
+        ];
+        assert_eq!(dim_at(&dims, pos2(40.0, 13.0)), Some(KeyParam::Rotation));
     }
 
     #[test]
