@@ -10,7 +10,7 @@ use crate::model::{
     AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, DuckDetect,
     Generator, Gradient, Hdr, Keyframe, Media, MediaSuperScale, Picture, PictureTransition,
     Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode, SuperScale,
-    TimelineColors, Title, TrackKind, WipeDirection,
+    TimelineColors, Title, Track, TrackKind, Transition, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -454,7 +454,7 @@ impl Smooth {
     }
 
     pub fn at(&self, ramp: &Ramp, k: i64) -> f64 {
-        let f = (ramp.at + k) as f64;
+        let f = ramp.frame(k) as f64;
         let p = crate::keyframes::value_at(&self.keys, f).unwrap_or(0.0);
         (p + 0.5 / ramp.of.max(1) as f64).min(1.0)
     }
@@ -563,6 +563,9 @@ pub struct Ramp {
     /// A wipe's edge, from this direction. Left out, the level is a dissolve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wipe: Option<WipeDirection>,
+    /// The level stays at frame `at`, as in a frozen compound clip.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held: bool,
 }
 
 pub const WHOLE: u32 = 1 << 16;
@@ -574,8 +577,12 @@ fn is_black(c: &[u8; 3]) -> bool {
 }
 
 impl Ramp {
+    pub fn frame(&self, k: i64) -> i64 {
+        if self.held { self.at } else { self.at + k }
+    }
+
     pub fn rising(&self, k: i64) -> (i64, i64) {
-        (2 * (self.at + k) + 1, 2 * self.of)
+        (2 * self.frame(k) + 1, 2 * self.of)
     }
 
     pub fn fraction(&self, k: i64) -> (i64, i64) {
@@ -600,7 +607,7 @@ impl Ramp {
 
     pub fn after(&self, k: i64) -> Self {
         Self {
-            at: self.at + k,
+            at: self.frame(k),
             ..*self
         }
     }
@@ -707,7 +714,7 @@ impl Move {
     }
 
     pub fn at(&self, ramp: &Ramp, k: i64) -> Moving {
-        let f = (ramp.at + k) as f64;
+        let f = ramp.frame(k) as f64;
         let p = |f: f64| crate::keyframes::value_at(&self.keys, f).unwrap_or(0.0);
         Moving {
             way: self.way,
@@ -1822,7 +1829,26 @@ fn run_of(c: &Clip, run: Option<Run>) -> Run {
     })
 }
 
-type Within = Vec<Vec<Nest>>;
+#[derive(Debug, Clone, Copy)]
+struct Shown {
+    from: i64,
+    to: i64,
+    held: bool,
+}
+
+const EVERY_FRAME: Shown = Shown {
+    from: i64::MIN,
+    to: i64::MAX,
+    held: false,
+};
+
+#[derive(Debug, Clone)]
+struct Inner {
+    nests: Vec<Nest>,
+    shown: Shown,
+}
+
+type Within = Vec<Inner>;
 
 pub const NESTED: usize = 8;
 
@@ -1835,7 +1861,10 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
     let mut within: Within = out
         .tracks
         .iter()
-        .map(|t| vec![Nest::default(); t.clips.len()])
+        .map(|t| Inner {
+            nests: vec![Nest::default(); t.clips.len()],
+            shown: EVERY_FRAME,
+        })
         .collect();
     for _ in 0..NESTED {
         if !holds(&out) {
@@ -1846,7 +1875,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
             let (mut host, mut host_within) = (t.clone(), Vec::new());
             host.clips.clear();
             let mut inner = Vec::new();
-            for (c, nest) in t.clips.iter().zip(w) {
+            for (c, nest) in t.clips.iter().zip(&w.nests) {
                 if !plays_inside(c) {
                     host.clips.push(c.clone());
                     host_within.push(nest.clone());
@@ -1871,11 +1900,11 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     v.volume_db = t.volume_db;
                     v.video_enabled &= t.video_enabled;
                     v.render_cache &= t.render_cache;
-                    v.transitions.clear();
-                    let mut clips: Vec<(Clip, Nest)> = n
+                    let laid = inner_layout(p, n, c);
+                    v.transitions = laid.transitions;
+                    let mut clips: Vec<(Clip, Nest)> = laid
                         .clips
-                        .iter()
-                        .filter_map(|x| inside(x, c))
+                        .into_iter()
                         .map(|(y, run)| {
                             let nest = Nest {
                                 outer: chain.clone(),
@@ -1885,13 +1914,21 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                         })
                         .collect();
                     clips.sort_by_key(|(y, _)| y.start);
-                    let (clips, chains) = clips.into_iter().unzip();
+                    let (clips, nests) = clips.into_iter().unzip();
                     v.clips = clips;
-                    inner.push((v, chains));
+                    let shown = Shown {
+                        from: w.shown.from.max(c.start),
+                        to: w.shown.to.min(c.end()),
+                        held: laid.held,
+                    };
+                    inner.push((v, Inner { nests, shown }));
                 }
             }
             tracks.push(host);
-            placed.push(host_within);
+            placed.push(Inner {
+                nests: host_within,
+                shown: w.shown,
+            });
             for (v, chains) in inner {
                 tracks.push(v);
                 placed.push(chains);
@@ -1901,6 +1938,87 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
         within = placed;
     }
     Some((out, within))
+}
+
+struct Laid {
+    clips: Vec<(Clip, Run)>,
+    transitions: Vec<Transition>,
+    held: bool,
+}
+
+fn inner_layout(p: &Project, n: &Track, c: &Clip) -> Laid {
+    let cuts = transitions::Cuts::of(p, n);
+    let (first, last) = c.shown();
+    let reached: Vec<(&Transition, i64)> = n
+        .transitions
+        .iter()
+        .filter_map(|t| Some((t, cuts.place(p, t)?)))
+        .filter(|(t, cut)| cut - t.before < last && cut + t.after > first)
+        .collect();
+    let speed = c.pace().speed();
+    if speed == 0.0 {
+        return match reached.first().filter(|_| n.kind == TrackKind::Video) {
+            Some(&(t, cut)) => held_on(n, c, t, cut),
+            None => Laid {
+                clips: n.clips.iter().filter_map(|x| inside(x, c)).collect(),
+                transitions: Vec::new(),
+                held: false,
+            },
+        };
+    }
+    let (lo, hi) = reached.iter().fold((first, last), |(lo, hi), (t, cut)| {
+        (lo.min(cut - t.before), hi.max(cut + t.after))
+    });
+    let room = |frames: i64| (frames as f64 / speed.abs()).ceil() as i64;
+    let (head, tail) = match speed > 0.0 {
+        true => (room(first - lo), room(hi - last)),
+        false => (room(hi - last), room(first - lo)),
+    };
+    let wide = (head > 0 || tail > 0).then(|| {
+        let mut wide = c.clone();
+        wide.move_head(-head);
+        wide.duration += tail;
+        wide
+    });
+    let wide = wide.as_ref().unwrap_or(c);
+    let shown = |frames: i64| (frames as f64 / speed.abs()).floor() as i64;
+    Laid {
+        clips: n.clips.iter().filter_map(|x| inside(x, wide)).collect(),
+        transitions: reached
+            .into_iter()
+            .map(|(t, _)| {
+                let mut t = t.clone();
+                (t.before, t.after) = (shown(t.before), shown(t.after));
+                if speed < 0.0 {
+                    std::mem::swap(&mut t.from, &mut t.to);
+                    std::mem::swap(&mut t.before, &mut t.after);
+                }
+                t
+            })
+            .collect(),
+        held: false,
+    }
+}
+
+fn held_on(n: &Track, c: &Clip, t: &Transition, cut: i64) -> Laid {
+    let on = c.source_at(c.start);
+    let a = c.start - (on - (cut - t.before));
+    let m = a + t.before;
+    let side = |id: &Option<String>, (s, e): (i64, i64)| {
+        let x = n.clips.iter().find(|x| Some(&x.id) == id.as_ref())?;
+        let mut at = c.clone();
+        (at.start, at.duration) = (s, e - s);
+        seen(x, &at, (on, on + 1))
+    };
+    let clips = [
+        side(&t.from, (a.min(m - 1), m)),
+        side(&t.to, (m, (m + t.after).max(m + 1))),
+    ];
+    Laid {
+        clips: clips.into_iter().flatten().collect(),
+        transitions: vec![t.clone()],
+        held: true,
+    }
 }
 
 fn placed_of(c: &Clip, nest: Option<&Nest>, over: bool, x: i64) -> Vec<Placed> {
@@ -1917,9 +2035,13 @@ fn placed_of(c: &Clip, nest: Option<&Nest>, over: bool, x: i64) -> Vec<Placed> {
 }
 
 pub(crate) fn inside(x: &Clip, c: &Clip) -> Option<(Clip, Run)> {
+    seen(x, c, (x.start, x.end()))
+}
+
+fn seen(x: &Clip, c: &Clip, (lo, hi): (i64, i64)) -> Option<(Clip, Run)> {
     if c.speed.is_some() {
         let speed = c.pace().speed();
-        let (k0, k1) = shown_between(c, x.start, x.end())?;
+        let (k0, k1) = shown_between(c, lo, hi)?;
         let mut y = x.clone();
         let walked = c.source_at(c.start + k0) - x.start;
         y.walk(walked);
@@ -1947,7 +2069,7 @@ pub(crate) fn inside(x: &Clip, c: &Clip) -> Option<(Clip, Run)> {
         return Some((y, run));
     }
     let (first, last) = (c.source_in, c.source_in + c.duration);
-    let (s, e) = (x.start.max(first), x.end().min(last));
+    let (s, e) = (lo.max(first), hi.min(last));
     if e <= s {
         return None;
     }
@@ -2111,29 +2233,35 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
         .iter()
         .enumerate()
         .filter(|(_, t)| t.kind == TrackKind::Video)
-        .map(|(i, t)| (t, within.and_then(|w| w.get(i)).map(Vec::as_slice)))
+        .map(|(i, t)| (t, within.and_then(|w| w.get(i))))
         .unzip();
     let dissolves: Vec<_> = tracks
         .iter()
         .map(|t| transitions::playing(p, t, false, transitions::mixes))
         .collect();
     let mut cuts = vec![a, b];
-    for (t, played) in tracks.iter().zip(&dissolves) {
+    for ((t, played), inner) in tracks.iter().zip(&dissolves).zip(&inside) {
+        let shown = inner.map_or(EVERY_FRAME, |i| i.shown);
+        let (from, to) = (a.max(shown.from), b.min(shown.to));
+        if to <= from {
+            continue;
+        }
+        cuts.extend([from, to]);
         for c in t
             .clips
             .iter()
-            .filter(|c| c.end() > a && c.start < b && (visible(t, c) || titled(t, c)))
+            .filter(|c| c.end() > from && c.start < to && (visible(t, c) || titled(t, c)))
         {
-            cuts.push(c.start.max(a));
-            cuts.push(c.end().min(b));
-            for (s, _) in c.runs(c.start.max(a), c.end().min(b)) {
+            cuts.push(c.start.max(from));
+            cuts.push(c.end().min(to));
+            for (s, _) in c.runs(c.start.max(from), c.end().min(to)) {
                 cuts.push(s);
             }
         }
         for d in played {
-            cuts.extend([d.frames.0, d.frames.1].map(|f| f.clamp(a, b)));
+            cuts.extend([d.frames.0, d.frames.1].map(|f| f.clamp(from, to)));
             if transitions::dip_of(d.transition).is_some() {
-                cuts.push(middle(d.frames).clamp(a, b));
+                cuts.push(middle(d.frames).clamp(from, to));
             }
         }
     }
@@ -2182,7 +2310,20 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     for w in cuts.windows(2) {
         let (x, y) = (w[0], w[1]);
         let mut stack: Vec<Layer> = Vec::new();
-        for ((t, played), within) in tracks.iter().zip(&dissolves).zip(&inside) {
+        for ((t, played), inner) in tracks.iter().zip(&dissolves).zip(&inside) {
+            let window = inner.map_or(EVERY_FRAME, |i| i.shown);
+            if x < window.from || x >= window.to {
+                continue;
+            }
+            let within = inner.map(|i| i.nests.as_slice());
+            let now = if window.held { window.from } else { x };
+            let ramp_of = |d: &transitions::Playing, falling, wipe| Ramp {
+                at: now - d.frames.0,
+                of: d.frames.1 - d.frames.0,
+                falling,
+                wipe,
+                held: window.held,
+            };
             let excluded = !t.render_cache;
             let black = |color| VideoPiece::Black {
                 frames: y - x,
@@ -2244,18 +2385,22 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     _ => None,
                 })
             };
-            match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {
+            match played
+                .iter()
+                .find(|d| d.frames.0 <= now && now < d.frames.1)
+            {
                 Some(d) if let Some(color) = transitions::dip_of(d.transition) => {
                     let mid = middle(d.frames);
-                    let (side, half) = match x < mid {
-                        true => (d.before, (x - d.frames.0, mid - d.frames.0, true)),
-                        false => (d.after, (x - mid, d.frames.1 - mid, false)),
+                    let (side, half) = match now < mid {
+                        true => (d.before, (now - d.frames.0, mid - d.frames.0, true)),
+                        false => (d.after, (now - mid, d.frames.1 - mid, false)),
                     };
                     let half = Some(Ramp {
                         at: half.0,
                         of: half.1,
                         falling: half.2,
                         wipe: None,
+                        held: window.held,
                     });
                     let picture = match side.filter(shows) {
                         Some(c) => shown(c, half, !stack.is_empty())?,
@@ -2264,12 +2409,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     stack = vec![Layer::Picture(black(color), None), picture];
                 }
                 Some(d) if let Some(m) = Move::of(d) => {
-                    let ramp = |falling| Ramp {
-                        at: x - d.frames.0,
-                        of: d.frames.1 - d.frames.0,
-                        falling,
-                        wipe: None,
-                    };
+                    let ramp = |falling| ramp_of(d, falling, None);
                     let below = !stack.is_empty();
                     let side = |c: Option<&Clip>| -> Result<(VideoPiece, bool, bool)> {
                         Ok(match c.filter(shows) {
@@ -2291,22 +2431,12 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     stack.push(Layer::Moved(g, ramp(false), moved(gap_g), true));
                 }
                 Some(d) if let Some((f, g, smooth)) = smoothed(d, !stack.is_empty())? => {
-                    let ramp = Ramp {
-                        at: x - d.frames.0,
-                        of: d.frames.1 - d.frames.0,
-                        falling: false,
-                        wipe: None,
-                    };
+                    let ramp = ramp_of(d, false, None);
                     stack = vec![Layer::Picture(f, None), Layer::Smoothed(g, ramp, smooth)];
                 }
                 Some(d) => {
                     let wipe = transitions::wipe_of(d.transition);
-                    let ramp = |falling| Ramp {
-                        at: x - d.frames.0,
-                        of: d.frames.1 - d.frames.0,
-                        falling,
-                        wipe,
-                    };
+                    let ramp = |falling| ramp_of(d, falling, wipe);
                     let below = !stack.is_empty();
                     match (d.before.filter(shows), d.after.filter(shows)) {
                         (Some(f), Some(g)) => {
@@ -2363,14 +2493,12 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         .map_or_else(Vec::new, |n| n.outer.iter().map(|p| p.after(x)).collect()),
                 })
             };
-            match played.iter().find(|d| d.frames.0 <= x && x < d.frames.1) {
+            match played
+                .iter()
+                .find(|d| d.frames.0 <= now && now < d.frames.1)
+            {
                 Some(d) => {
-                    let ramp = |falling| Ramp {
-                        at: x - d.frames.0,
-                        of: d.frames.1 - d.frames.0,
-                        falling,
-                        wipe: None,
-                    };
+                    let ramp = |falling| ramp_of(d, falling, None);
                     for (c, falling) in [(d.before, true), (d.after, false)] {
                         if let Some(s) = c
                             .filter(|c| titled(t, c))
@@ -2433,10 +2561,13 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     let any_solo = p.any_solo();
     let mut audio = Vec::new();
     let mut lanes = Vec::new();
-    for track in &p.tracks {
+    for (ti, track) in p.tracks.iter().enumerate() {
         if !track.in_mix(any_solo) || track.clips.iter().all(|c| c.audio.is_none()) {
             continue;
         }
+        let window = within
+            .and_then(|w| w.get(ti))
+            .map_or(EVERY_FRAME, |i| i.shown);
         let fades = transitions::playing(p, track, true, |t| transitions::cross_fade(t).is_some());
         let fade_of = |c: &Clip, into: bool| {
             fades.iter().find(|f| {
@@ -2473,7 +2604,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 (head, tail, None, false),
                 (tail, end, out_of, true),
             ] {
-                let (x, y) = (x.max(a), y.min(b));
+                let (x, y) = (x.max(a).max(window.from), y.min(b).min(window.to));
                 if y <= x {
                     continue;
                 }
@@ -3442,6 +3573,7 @@ mod tests {
             of: 4,
             falling: false,
             wipe: None,
+            held: false,
         };
         let levels: Vec<(i64, i64)> = (0..4).map(|k| ramp.fraction(k)).collect();
         assert_eq!(levels, [(1, 8), (3, 8), (5, 8), (7, 8)]);
@@ -3454,6 +3586,7 @@ mod tests {
             of: 4,
             falling: true,
             wipe: None,
+            held: false,
         };
         assert_eq!(ramp.fraction(0), (7, 8));
     }
@@ -3465,6 +3598,7 @@ mod tests {
             of: 3,
             falling: false,
             wipe: None,
+            held: false,
         };
         assert_eq!(ramp.weight(0), 10923);
     }
