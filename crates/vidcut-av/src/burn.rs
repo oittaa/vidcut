@@ -1094,7 +1094,7 @@ fn spaced<'a>(
 
 fn pair_kerning(font: &Font, first: &str, next: &str) -> f32 {
     let width = |text: &str| {
-        let mut buffer = harfrust::UnicodeBuffer::new();
+        let mut buffer = cosmic_text::harfrust::UnicodeBuffer::new();
         buffer.push_str(text);
         buffer.guess_segment_properties();
         let shaped = font.shaper().shape(buffer, &[]);

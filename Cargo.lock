@@ -5312,7 +5312,6 @@ dependencies = [
  "exr",
  "ffmpeg-next",
  "flate2",
- "harfrust 0.5.2",
  "libc",
  "libloading 0.9.0",
  "naga",
