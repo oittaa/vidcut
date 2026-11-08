@@ -12,9 +12,10 @@ use vidcut_core::generators::{Axis, CENTER};
 use vidcut_core::keyframes::PictureValue;
 use vidcut_core::model::{
     Border, CellShape, Clip, ClipRetime, CompositeMode, DynamicZoom, Ease, EbuLevel, Effect,
-    EffectKind, FilmGrain, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming, GlowOutput,
-    Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, Picture, PictureTool, Project,
-    Retime, Sharpen, Speed, TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    EffectKind, EffectValue, FilmGrain, GaussianBlur, Generator, Glow, GlowAlpha, GlowFraming,
+    GlowOutput, Gradient, GrainComposite, GrainPreset, Keyframe, MosaicBlur, Picture, PictureTool,
+    Project, Retime, Sharpen, Speed, TrackKind, Upscaler, Vignette, VignetteMode, VignetteShape,
+    ZoomBox,
 };
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
@@ -668,7 +669,7 @@ impl Knob {
         }
     }
 
-    fn put(self, e: &Effect, v: f64) -> Effect {
+    fn written(self, e: &Effect, v: f64) -> Effect {
         let r = self.dial().range;
         let v = v.clamp(*r.start(), *r.end());
         let mut out = e.clone();
@@ -682,7 +683,23 @@ impl Knob {
             (Knob::Blend, _) => out.blend = Some(v),
             _ => {}
         }
-        effect_checked(&out).unwrap_or_else(|_| e.clone())
+        out
+    }
+
+    fn put(self, e: &Effect, v: f64) -> Effect {
+        effect_checked(&self.written(e, v)).unwrap_or_else(|_| e.clone())
+    }
+
+    fn keyed_value(self, e: &Effect) -> Option<EffectValue> {
+        let values = e.values();
+        let mut probe = e.clone();
+        for value in &values {
+            probe.write(*value, f64::NAN);
+        }
+        let out = self.written(&probe, 0.0);
+        values
+            .into_iter()
+            .find(|value| !out.plain(*value).is_nan() && !e.keys_of(*value).is_empty())
     }
 
     fn param(self, e: &Effect) -> (&'static str, Value) {
@@ -710,8 +727,27 @@ fn border_label(b: Border) -> &'static str {
 fn knob_picture(c: &Chosen, (n, k): (usize, Knob), v: f64) -> Option<Picture> {
     let e = c.shown.effects.get(n)?;
     let mut p = c.shown.clone();
-    p.effects[n] = k.put(e, v);
+    p.effects[n] = match k.keyed_value(e) {
+        Some(value) => {
+            let mut keyed = e.clone();
+            let r = k.dial().range;
+            keyed.put(value, c.frame, v.clamp(*r.start(), *r.end()));
+            keyed
+        }
+        None => k.put(e, v),
+    };
     Some(p)
+}
+
+fn effect_key_times(c: &Clip, n: usize) -> Vec<i64> {
+    let effects = c.picture.as_ref().map_or(&[][..], |p| &p.effects);
+    effects.get(n).map_or_else(Vec::new, |e| {
+        e.keys
+            .iter()
+            .flat_map(|k| k.keys.iter())
+            .map(|k| c.key_time(k.frame).round() as i64)
+            .collect()
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1194,6 +1230,7 @@ struct Chosen {
     shown: Picture,
     shape: Shape,
     frame: i64,
+    effect_keys: Vec<KeyMark>,
 }
 
 #[derive(Debug, Clone)]
@@ -1361,6 +1398,8 @@ enum Act {
     ResetChannel(Field),
     ResetCenter(Axis),
     EffectSet(usize, Value),
+    EffectStep(usize, i64),
+    EffectKey(usize, Option<Ease>),
     EffectReset(usize),
     EffectRemove(usize),
     EffectMove(usize, usize),
@@ -1538,6 +1577,7 @@ fn keyed_look(off: bool) -> Look<'static> {
     }
 }
 
+#[derive(Debug, Clone, Default)]
 pub(super) struct KeyMark {
     on: bool,
     prev: bool,
@@ -1607,6 +1647,17 @@ pub(super) fn mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
         prev: keys.iter().any(|k| time(k) < at),
         next: keys.iter().any(|k| time(k) > at),
     }
+}
+
+fn effect_marks(c: &Clip, at: i64) -> Vec<KeyMark> {
+    let effects = c.picture.as_ref().map_or(&[][..], |p| &p.effects);
+    effects
+        .iter()
+        .map(|e| {
+            let keys: Vec<Keyframe> = e.keys.iter().flat_map(|k| k.keys.clone()).collect();
+            mark(c, &keys, at)
+        })
+        .collect()
 }
 
 fn speed_mark(c: &Clip, keys: &[Keyframe], at: i64) -> KeyMark {
@@ -2533,7 +2584,7 @@ fn effect_block(
     ui: &mut egui::Ui,
     i: &Inspector,
     (n, count): (usize, usize),
-    e: &Effect,
+    (e, marks): (&Effect, &KeyMark),
     acts: &mut Vec<Act>,
 ) {
     let mut fresh = e.kind().made();
@@ -2548,6 +2599,12 @@ fn effect_block(
             act = Some(Act::EffectSet(n, json!({ "on": on })));
         }
         ui.label(RichText::new(e.kind().name()).strong());
+        match key_buttons(ui, marks, &Ease::ALL, None) {
+            Some(KeyClick::Step(dir)) => act = Some(Act::EffectStep(n, dir)),
+            Some(KeyClick::Toggle) => act = Some(Act::EffectKey(n, None)),
+            Some(KeyClick::Ease(ease)) => act = Some(Act::EffectKey(n, Some(ease))),
+            None => {}
+        }
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if icon(ui, TRASH, "Delete", true) {
                 act = Some(Act::EffectRemove(n));
@@ -2591,7 +2648,9 @@ fn effect_block(
 fn effects(ui: &mut egui::Ui, i: &Inspector, c: &Chosen, acts: &mut Vec<Act>) {
     let count = c.shown.effects.len();
     for (n, e) in c.shown.effects.iter().enumerate() {
-        effect_block(ui, i, (n, count), e, acts);
+        let shown = e.adopted(c.frame as f64);
+        let marks = c.effect_keys.get(n).cloned().unwrap_or_default();
+        effect_block(ui, i, (n, count), (&shown, &marks), acts);
     }
 }
 
@@ -2790,6 +2849,7 @@ impl Workspace {
                         shown,
                         shape: shape(&p, c),
                         frame: c.content_at(self.snap.timeline.position),
+                        effect_keys: effect_marks(c, self.snap.timeline.position),
                     }
                 })
             })
@@ -3032,9 +3092,13 @@ impl Workspace {
         let Some(to) = knob_picture(c, (n, k), value).filter(|p| *p != c.shown) else {
             return;
         };
-        let (name, v) = k.param(&to.effects[n]);
+        let at_frame = c.shown.effects[n].adopted(c.frame as f64);
+        let (name, v) = k.param(&k.put(&at_frame, value));
         let mut params = json!({ "clip": c.id, "effect": n });
         params[name] = v;
+        if c.stored.effects.get(n).is_some_and(Effect::has_keys) {
+            params["at"] = json!(self.snap.timeline.position);
+        }
         self.send("effects.set", params);
         self.inspector.landing = Some(Landing {
             since: Instant::now(),
@@ -3048,7 +3112,32 @@ impl Workspace {
         };
         params["clip"] = json!(c.id);
         params["effect"] = json!(n);
+        if method == "effects.set" && c.stored.effects.get(n).is_some_and(Effect::has_keys) {
+            params["at"] = json!(self.snap.timeline.position);
+        }
         self.send(method, params);
+    }
+
+    fn step_effect(&mut self, n: usize, dir: i64, chosen: &[Chosen]) {
+        let at = self.snap.timeline.position;
+        let Some(p) = self.project_shared() else {
+            return;
+        };
+        let Some(c) = chosen.first().and_then(|c| p.clip(&c.id)) else {
+            return;
+        };
+        if let Some(t) = next_key(effect_key_times(c, n).into_iter(), at, dir) {
+            self.seek(PlayerId::Timeline, t, false);
+        }
+    }
+
+    fn key_effect(&mut self, n: usize, ease: Option<Ease>, chosen: &[Chosen]) {
+        let at = self.snap.timeline.position;
+        let params = match ease {
+            Some(ease) => json!({ "at": at, "ease": ease }),
+            None => json!({ "at": at }),
+        };
+        self.send_effect("effects.key", chosen, n, params);
     }
 
     pub(super) fn settle_inspector(&mut self) {
@@ -3912,6 +4001,8 @@ impl Workspace {
             Act::ResetChannel(field) => self.reset_channel(field, chosen),
             Act::ResetCenter(axis) => self.reset_center(axis, chosen),
             Act::EffectSet(n, params) => self.send_effect("effects.set", chosen, n, params),
+            Act::EffectStep(n, dir) => self.step_effect(n, dir, chosen),
+            Act::EffectKey(n, ease) => self.key_effect(n, ease, chosen),
             Act::EffectReset(n) => self.send_effect("effects.reset", chosen, n, json!({})),
             Act::EffectRemove(n) => self.send_effect("effects.remove", chosen, n, json!({})),
             Act::EffectMove(n, to) => {

@@ -4251,11 +4251,26 @@ fn mutate(
         Request::EffectsSet {
             clip,
             effect,
+            at,
             change,
         } => {
             let id = resolve_clip(p, clip, playhead)?;
-            ops::effect::set(p, &id, *effect, change)?;
+            let at = match at {
+                Some(t) => Some(resolve(p, t, playhead)?),
+                None => playhead,
+            };
+            ops::effect::set(p, &id, *effect, change, at)?;
             Value::Null
+        }
+        Request::EffectsKey {
+            clip,
+            effect,
+            at,
+            ease,
+        } => {
+            let id = resolve_clip(p, clip, playhead)?;
+            let at = resolve(p, at, playhead)?;
+            ops::effect::key(p, &id, *effect, at, *ease)?
         }
         Request::EffectsReset { clip, effect } => {
             let id = resolve_clip(p, clip, playhead)?;

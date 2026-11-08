@@ -1,5 +1,5 @@
 use super::*;
-use crate::model::{AudioInfo, Effects, MediaInfo};
+use crate::model::{AudioInfo, EffectValue, Effects, MediaInfo};
 use crate::test_support::{FakeEnv, Fixture, media_info, still_info};
 
 fn req(method: &str, params: Value) -> Value {
@@ -399,6 +399,30 @@ fn a_vidcut_files_media_come_into_a_bin_named_after_it() {
         (m.bin.as_str(), m.color.as_deref()),
         ("t/Interviews", Some("teal"))
     );
+}
+
+#[test]
+fn an_effect_keyframe_comes_back_from_the_file() {
+    let mut f = Fixture::new(&[(4.0, true)]);
+    f.append("m1", 0, 50);
+    f.ok(req(
+        "effects.add",
+        json!({"clips": "c1", "kind": "gaussian_blur"}),
+    ));
+    f.ok(req(
+        "keyframes.add",
+        json!({
+            "clips": "c1",
+            "param": {"effect": 0, "value": "strength"},
+            "at": 10,
+            "value": 0.7,
+        }),
+    ));
+    let mut other = Fixture::new(&[]);
+    other.ok(req("timeline.import", json!({"otio": written(&f)})));
+    let clip = &other.editor.project().tracks[0].clips[0];
+    let effects = &clip.picture.as_ref().expect("a picture").effects;
+    assert_eq!(effects[0].keys_of(EffectValue::Strength).len(), 1);
 }
 
 #[test]
