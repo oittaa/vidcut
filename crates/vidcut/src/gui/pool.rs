@@ -642,10 +642,11 @@ impl Workspace {
                         }
                     });
                 }
+                let mut compounds = false;
                 if let Some(p) = project {
-                    self.pooled_compounds(ui, p, &view.bin);
+                    compounds = self.pooled_compounds(ui, p, &view.bin);
                 }
-                if folders.is_empty() && media.is_empty() {
+                if folders.is_empty() && media.is_empty() && !compounds {
                     ui.add_space(20.0);
                     ui.vertical_centered(|ui| {
                         if searching {
@@ -689,7 +690,7 @@ impl Workspace {
         self.rename_bin_window(ui.ctx());
     }
 
-    fn pooled_compounds(&mut self, ui: &mut egui::Ui, p: &Project, bin: &str) {
+    fn pooled_compounds(&mut self, ui: &mut egui::Ui, p: &Project, bin: &str) -> bool {
         let needle = self.search.to_lowercase();
         let shown: Vec<_> = p
             .compounds
@@ -700,7 +701,7 @@ impl Workspace {
             })
             .collect();
         if shown.is_empty() {
-            return;
+            return false;
         }
         ui.horizontal_wrapped(|ui| {
             for k in shown {
@@ -725,6 +726,7 @@ impl Workspace {
             }
         });
         ui.separator();
+        true
     }
 
     fn pool_box(&mut self, ui: &egui::Ui, background: &egui::Response, media: &[&Media]) {
