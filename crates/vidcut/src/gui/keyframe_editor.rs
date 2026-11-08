@@ -14,10 +14,11 @@ use vidcut_core::keyframes::{
     PictureValue, ease_of, eases, handle_point, value_mapped, value_paired,
 };
 use vidcut_core::model::{
-    Clip, Ease, Generator, Handle, Keyframe, LowerThirdLine, Picture, Project, Speed, Title,
+    Clip, Ease, EffectValue, Generator, Handle, Keyframe, LowerThirdLine, Picture, Project, Speed,
+    Title,
 };
 use vidcut_core::ops::picture::has_picture;
-use vidcut_core::request::KeyParam;
+use vidcut_core::request::{EffectParam, KeyParam};
 use vidcut_core::validate::GAIN;
 
 use super::inspector::{Shape as Frame, key_diamond, shape};
@@ -57,6 +58,7 @@ enum Group {
     Transform,
     Crop,
     Composite,
+    Effect(usize),
     Speed,
     Audio,
 }
@@ -414,22 +416,73 @@ fn group_of(param: KeyParam) -> Group {
         KeyParam::Opacity => Group::Composite,
         KeyParam::Speed => Group::Speed,
         KeyParam::CenterX | KeyParam::CenterY => Group::Generator,
+        KeyParam::Effect(q) => Group::Effect(q.effect),
     }
 }
 
-fn group_name(group: Group) -> &'static str {
+fn groups_of(clip: &Clip) -> Vec<Group> {
+    let effects = clip.picture.as_ref().map_or(0, |p| p.effects.len());
+    let mut out = GROUPS.to_vec();
+    let at = out
+        .iter()
+        .position(|g| *g == Group::Speed)
+        .unwrap_or(out.len());
+    out.splice(at..at, (0..effects).map(Group::Effect));
+    out
+}
+
+fn group_name(group: Group, clip: &Clip) -> String {
     match group {
-        Group::Generator => "Generator",
-        Group::Transform => "Transform",
-        Group::Crop => "Crop",
-        Group::Composite => "Composite",
-        Group::Speed => "Speed",
-        Group::Audio => "Audio",
+        Group::Generator => "Generator".to_string(),
+        Group::Transform => "Transform".to_string(),
+        Group::Crop => "Crop".to_string(),
+        Group::Composite => "Composite".to_string(),
+        Group::Effect(n) => effect_name(clip, n),
+        Group::Speed => "Speed".to_string(),
+        Group::Audio => "Audio".to_string(),
     }
 }
 
-fn lane_name(param: KeyParam) -> &'static str {
+fn effect_name(clip: &Clip, n: usize) -> String {
+    let effects = clip.picture.as_ref().map_or(&[][..], |p| &p.effects);
+    let Some(e) = effects.get(n) else {
+        return String::new();
+    };
+    let same = effects.iter().filter(|x| x.kind() == e.kind()).count();
+    if same > 1 {
+        format!("{} {}", e.kind().name(), n + 1)
+    } else {
+        e.kind().name().to_string()
+    }
+}
+
+fn effect_value_name(value: EffectValue) -> String {
+    if value == EffectValue::HvRatio {
+        return "H vs V Ratio".to_string();
+    }
+    value
+        .name()
+        .split('_')
+        .map(|word| {
+            let mut letters = word.chars();
+            letters.next().map_or_else(String::new, |first| {
+                first.to_uppercase().chain(letters).collect()
+            })
+        })
+        .collect::<Vec<String>>()
+        .join(" ")
+}
+
+fn lane_name(param: KeyParam) -> String {
+    if let KeyParam::Effect(q) = param {
+        return effect_value_name(q.value);
+    }
+    plain_lane_name(param).to_string()
+}
+
+fn plain_lane_name(param: KeyParam) -> &'static str {
     match param {
+        KeyParam::Effect(_) => "",
         KeyParam::Volume => "Volume",
         KeyParam::Position => "Position",
         KeyParam::Zoom => "Zoom",
@@ -474,6 +527,7 @@ fn limits(param: KeyParam) -> (f64, f64) {
         KeyParam::Opacity => (0.0, 1.0),
         KeyParam::Speed => (*Speed::RANGE.start(), *Speed::RANGE.end()),
         KeyParam::CenterX | KeyParam::CenterY => (*CENTER.start(), *CENTER.end()),
+        KeyParam::Effect(_) => (f64::MIN, f64::MAX),
     }
 }
 
@@ -527,7 +581,8 @@ fn shown_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::Yaw
         | KeyParam::CropSoftness
         | KeyParam::CenterX
-        | KeyParam::CenterY => v,
+        | KeyParam::CenterY
+        | KeyParam::Effect(_) => v,
     }
 }
 
@@ -553,7 +608,8 @@ fn stored_value(param: KeyParam, v: f64, y: bool, f: &Frame) -> f64 {
         | KeyParam::Yaw
         | KeyParam::CropSoftness
         | KeyParam::CenterX
-        | KeyParam::CenterY => v,
+        | KeyParam::CenterY
+        | KeyParam::Effect(_) => v,
     }
 }
 
@@ -582,7 +638,11 @@ fn places(param: KeyParam) -> usize {
         | KeyParam::LowerRotation
         | KeyParam::CropSoftness
         | KeyParam::Speed => 2,
-        KeyParam::Pitch | KeyParam::Yaw | KeyParam::CenterX | KeyParam::CenterY => 3,
+        KeyParam::Pitch
+        | KeyParam::Yaw
+        | KeyParam::CenterX
+        | KeyParam::CenterY
+        | KeyParam::Effect(_) => 3,
         _ => 0,
     }
 }
@@ -642,6 +702,12 @@ fn limits_of(clip: &Clip, param: KeyParam, axis: Axis) -> (f64, f64) {
         {
             Title::ACROSS
         }
+        KeyParam::Effect(q) => clip
+            .picture
+            .as_ref()
+            .and_then(|p| p.effects.get(q.effect))
+            .and_then(|e| e.range_of(q.value))
+            .unwrap_or_else(|| limits(param)),
         _ => limits(param),
     }
 }
@@ -667,7 +733,8 @@ fn nudge_step(param: KeyParam, sign: f64, y: bool) -> f64 {
         | KeyParam::CropTop
         | KeyParam::CropBottom
         | KeyParam::CenterX
-        | KeyParam::CenterY => 0.001,
+        | KeyParam::CenterY
+        | KeyParam::Effect(_) => 0.001,
     };
     let down = matches!(
         param,
@@ -1022,6 +1089,18 @@ fn lanes_of(clip: &Clip, keyed_only: bool) -> Vec<Lane> {
                 out.push(lane_from(&picture, v));
             }
         }
+        for (effect, e) in picture.effects.iter().enumerate() {
+            for value in e.values() {
+                let keys = e.keys_of(value);
+                if !keyed_only || !keys.is_empty() {
+                    out.push(Lane {
+                        param: KeyParam::Effect(EffectParam { effect, value }),
+                        keys: keys.to_vec(),
+                        extra: Vec::new(),
+                    });
+                }
+            }
+        }
     }
     if let Some(t) = &clip.title {
         let high = t.upper_view();
@@ -1363,7 +1442,7 @@ impl Workspace {
                     .max(TRACK_H),
             )
             .show(ui, |ui| {
-                for group in GROUPS {
+                for group in groups_of(&clip) {
                     let members: Vec<&Lane> = lanes
                         .iter()
                         .filter(|l| group_of(l.param) == group)
@@ -1838,7 +1917,8 @@ impl Workspace {
                 let rows: Vec<KeyParam> =
                     t.rows.iter().copied().filter(|&r| t.count(r) > 0).collect();
                 let count: usize = rows.iter().map(|&r| t.count(r)).sum();
-                let names: Vec<&str> = rows.iter().map(|&r| lane_name(r)).collect();
+                let names: Vec<String> = rows.iter().map(|&r| lane_name(r)).collect();
+                let names: Vec<&str> = names.iter().map(String::as_str).collect();
                 let name = self
                     .project_shared()
                     .map(|p| clip_name(&p, &t.clip))
@@ -1980,7 +2060,7 @@ impl Workspace {
         }
         match open {
             Some(true) => editor.closed.clear(),
-            Some(false) => editor.closed = GROUPS.to_vec(),
+            Some(false) => editor.closed = groups_of(clip),
             None => {}
         }
     }
@@ -2203,7 +2283,7 @@ impl Workspace {
         let mut flip = false;
         let (rect, resp) = row(ui, GROUP_H, plot, |ui| {
             let icon = if open { CARET_DOWN } else { CARET_RIGHT };
-            let text = RichText::new(format!("{icon} {}", group_name(group))).small();
+            let text = RichText::new(format!("{icon} {}", group_name(group, clip))).small();
             if ui.add(egui::Button::new(text).frame(false)).clicked() {
                 flip = true;
             }

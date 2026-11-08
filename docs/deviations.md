@@ -147,7 +147,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - Resolve Studio 21.1.1 imports `.otio` and `.otioz` files. It imports an `.otiod` folder by its `content.otio`.
   - It keeps tracks and their names, J/L cuts, clip gain, markers, stills, image sequences and the timecode of sources.
   - It also keeps clip effects and their keyframes, transitions, generators, speeds, and compound clips with their picture and sound linked.
-  - The OTIO of Resolve leaves out ResolveFX plugins. Thus these plugins never come over.
+  - The OTIO of Resolve leaves out ResolveFX plugins. Thus these plugins never come over, nor do their keyframes ([spec §8.16](cut-page-spec.md#816-effects-pp-765-3526-3536)).
   - OTIO has no drop-frame flag. An imported timeline takes the frame rate and the drop-frame setting of the project.
   - An import into a project with no media turns drop-frame off.
 - **Why:**
@@ -2817,6 +2817,19 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The OpenEXR writer of vidcut, the `exr` crate, writes this attribute for each level that it gets.
   - The attribute is part of the OpenEXR format. A reader can see the level of the file, and a reader that does not know it skips it.
+
+## X152. Effect keyframes have one number each
+
+- **Resolve:**
+  - Mosaic Blur Position and Vignette Center are one point with X and Y (measured in Resolve Studio 21.2).
+  - Film Grain Freeze takes a curve (measured in Resolve Studio 21.2).
+  - The Keyframe button of a group is in the Effects panel of the Inspector (p. 747).
+- **vidcut:**
+  - Position X, Position Y, Center X and Center Y have keyframes of their own. The Keyframe button of an effect keys all of them together.
+  - Film Grain Freeze is a switch and has no keyframes.
+- **Why:**
+  - The keyframes of an effect are one list of numbers for each value. A pair of numbers needs a second list, as Transform has, for two values only.
+  - A `Keyframe` is a number on a curve. A switch has no value between on and off, and the curves of vidcut have no steps.
 
 ## X153. Every clip pans as on a stereo track
 

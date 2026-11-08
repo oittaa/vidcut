@@ -796,7 +796,7 @@ impl Placing {
                     .picture
                     .effects
                     .iter()
-                    .filter_map(|e| Working::of(e, &on))
+                    .filter_map(|e| Working::of(&e.sampled(p.source as f64), &on))
                     .collect();
                 made.append(&mut effects);
                 effects = made;
@@ -1276,6 +1276,37 @@ mod tests {
         let frame = (1920.0, 1080.0);
         let level = Placing::whole(&[placed], frame).levels[0];
         level.forward(uv).map(|v| (v * 1e6).round() / 1e6)
+    }
+
+    #[test]
+    fn a_keyed_blur_takes_its_strength_on_the_source_frame() {
+        let mut effect = crate::model::EffectType::GaussianBlur.made();
+        effect.keys = vec![crate::model::EffectKeys {
+            value: crate::model::EffectValue::Strength,
+            keys: vec![crate::model::Keyframe {
+                frame: 30,
+                value: 0.6,
+                in_handle: None,
+                out_handle: None,
+            }],
+        }];
+        let placed = Placed {
+            clip: "c1".into(),
+            picture: Picture {
+                effects: vec![effect],
+                ..Picture::default()
+            },
+            run: None,
+            source: 30,
+            frame: 0,
+            start: 0,
+            ready: true,
+        };
+        let placing = Placing::whole(&[placed], (1920.0, 1080.0));
+        let Work::Blur(b) = &placing.effects[0].work else {
+            panic!("a blur");
+        };
+        assert_eq!((b.across[0] * 100.0).round(), 3888.0);
     }
 
     #[test]
