@@ -2,16 +2,16 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{
     self, Align, Align2, Color32, Layout, Pos2, Rect, RichText, Sense, Shape, Stroke, TextStyle,
-    pos2, vec2,
+    Vec2, pos2, vec2,
 };
 use egui_phosphor::regular::{
     ARROW_COUNTER_CLOCKWISE, ARROWS_OUT_LINE_HORIZONTAL, CARET_DOWN, CARET_LEFT, CARET_RIGHT,
-    DOTS_THREE, MAGNIFYING_GLASS_PLUS, WAVE_SINE,
+    CHART_LINE, DOTS_THREE, MAGNIFYING_GLASS_PLUS, WAVE_SINE,
 };
 use serde_json::{Value, json};
 use vidcut_core::generators::{self, CENTER};
 use vidcut_core::keyframes::{
-    PictureValue, ease_of, eases, handle_point, value_mapped, value_paired,
+    PictureValue, bent, ease_of, eases, handle_point, value_mapped, value_paired,
 };
 use vidcut_core::model::{
     Clip, Ease, EffectValue, Generator, Handle, Keyframe, LowerThirdLine, Picture, Project, Speed,
@@ -24,6 +24,7 @@ use vidcut_core::validate::GAIN;
 use super::inspector::{Shape as Frame, key_diamond, shape};
 use super::placing::ease_label;
 use super::theme;
+use super::timeline::geometry::SNAP_PX;
 use super::title_browser::LeftTab;
 use super::workspace::{Workspace, dim};
 use crate::live::PlayerId;
@@ -33,12 +34,25 @@ const RULER_H: f32 = 20.0;
 const GROUP_H: f32 = 22.0;
 const TRACK_H: f32 = 26.0;
 const CURVE_H: f32 = 110.0;
+const GRAPH_H: f32 = 280.0;
+const GRIP_H: f32 = 6.0;
+const TRACKS_KEPT: f32 = 3.0;
+const DIMMED: f32 = 0.65;
+const HUES: [Color32; 6] = [
+    Color32::from_rgb(240, 140, 60),
+    Color32::from_rgb(90, 170, 250),
+    Color32::from_rgb(110, 205, 120),
+    Color32::from_rgb(235, 110, 170),
+    Color32::from_rgb(225, 205, 80),
+    Color32::from_rgb(90, 210, 210),
+];
 const BAR_H: f32 = 68.0;
 const SCROLL_H: f32 = 12.0;
 const ZOOM_W: f32 = 72.0;
 const LEAST_FRAMES: f64 = 4.0;
 const DETAIL: f64 = 4.0;
 const HIT: f32 = 8.0;
+const LINE_HIT: f32 = 6.0;
 const TICK_GAP: f32 = 96.0;
 const FIELD_W: f32 = 72.0;
 const TRAY_ROWS: usize = 4;
@@ -77,10 +91,17 @@ enum Axis {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Lock {
+    Time,
+    Value,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
     Keys,
     Group,
     Handle,
+    Bend,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -96,7 +117,8 @@ struct Shift {
     dt: i64,
     dv: f64,
     axis: Axis,
-    handle: Option<HandleEdit>,
+    handles: Vec<HandleEdit>,
+    snap: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -110,6 +132,32 @@ struct Drag {
     marks: Vec<Mark>,
     axis: Axis,
     fix: Option<HandleFix>,
+    bend: Option<BendFix>,
+    frozen: Option<(KeyParam, f64, f64)>,
+    apart: bool,
+    lock: Option<Lock>,
+    snap: Option<i64>,
+}
+
+impl Drag {
+    fn new(clip: &Clip, kind: Kind, origin: Pos2, map: TimeMap, marks: Vec<Mark>) -> Self {
+        Self {
+            clip: clip.id.clone(),
+            kind,
+            origin,
+            ppf: map.ppf(),
+            v_span: 0.0,
+            v_height: 1.0,
+            marks,
+            axis: Axis::None,
+            fix: None,
+            bend: None,
+            frozen: None,
+            apart: false,
+            lock: None,
+            snap: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -120,6 +168,17 @@ struct HandleFix {
     value: f64,
     key_value: f64,
     neighbor: i64,
+    across: Option<(Handle, f64)>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BendFix {
+    param: KeyParam,
+    a: Keyframe,
+    b: Keyframe,
+    frame: f64,
+    before: Option<(Handle, f64)>,
+    after: Option<(Handle, f64)>,
 }
 
 #[derive(Clone, Debug)]
@@ -152,6 +211,7 @@ struct Plot {
     label: f32,
     width: f32,
     play: i64,
+    snap: Option<i64>,
     tray: bool,
 }
 
@@ -367,8 +427,13 @@ pub struct Editor {
     menu_curve: bool,
     menu_tray: bool,
     keyed_only: bool,
+    snap_off: bool,
     closed: Vec<Group>,
     curves: Vec<KeyParam>,
+    graph: bool,
+    graph_off: Vec<KeyParam>,
+    graph_active: Option<KeyParam>,
+    graph_h: Option<f32>,
     view: Option<(f64, f64)>,
     held: Option<Held>,
     fresh: Option<(KeyParam, i64, Instant)>,
@@ -895,8 +960,106 @@ fn move_body(id: &str, param: KeyParam, frames: &[i64], by: i64) -> Value {
     json!({ "clips": [id], "param": param, "frames": frames, "by": by })
 }
 
-fn ease_body(id: &str, mark: Mark, ease: Ease) -> Value {
-    json!({ "clips": [id], "param": mark.param, "frames": [mark.frame], "ease": ease })
+fn ease_body(id: &str, param: KeyParam, frames: &[i64], ease: Ease) -> Value {
+    json!({ "clips": [id], "param": param, "frames": frames, "ease": ease })
+}
+
+fn takes_ease(clip: &Clip, lane: &Lane, i: usize, ease: Ease) -> bool {
+    !fixed(lane.param) || key_eases(clip, lane, i).1.contains(&ease)
+}
+
+fn eased_keys<'a>(clip: &Clip, lanes: &'a [Lane], marks: &[Mark]) -> Vec<(&'a Lane, usize)> {
+    marks
+        .iter()
+        .filter(|m| !linear(clip, m.param))
+        .filter_map(|m| {
+            let lane = lanes.iter().find(|l| l.param == m.param)?;
+            Some((lane, lane.keys.iter().position(|k| k.frame == m.frame)?))
+        })
+        .collect()
+}
+
+fn marks_eases(clip: &Clip, lanes: &[Lane], marks: &[Mark]) -> (Option<Ease>, Vec<Ease>) {
+    let keys = eased_keys(clip, lanes, marks);
+    if let [(lane, i)] = keys[..] {
+        return key_eases(clip, lane, i);
+    }
+    let mut nows = keys.iter().map(|(lane, i)| key_eases(clip, lane, *i).0);
+    let first = nows.next().flatten();
+    let now = first.filter(|_| nows.all(|e| e == first));
+    let options = Ease::ALL
+        .into_iter()
+        .filter(|&e| keys.iter().any(|(lane, i)| takes_ease(clip, lane, *i, e)))
+        .collect();
+    (now, options)
+}
+
+fn ease_parts(
+    clip: &Clip,
+    lanes: &[Lane],
+    marks: &[Mark],
+    ease: Ease,
+) -> Vec<(&'static str, Value)> {
+    let keys = eased_keys(clip, lanes, marks);
+    unique_params(marks)
+        .into_iter()
+        .filter_map(|param| {
+            let frames: Vec<i64> = keys
+                .iter()
+                .filter(|(lane, i)| lane.param == param && takes_ease(clip, lane, *i, ease))
+                .map(|(lane, i)| lane.keys[*i].frame)
+                .collect();
+            (!frames.is_empty())
+                .then(|| ("keyframes.set", ease_body(&clip.id, param, &frames, ease)))
+        })
+        .collect()
+}
+
+fn locked(now: Option<Lock>, shift: bool, moved: Vec2) -> Option<Lock> {
+    if !shift {
+        return None;
+    }
+    now.or(
+        (moved != Vec2::ZERO).then_some(if moved.x.abs() >= moved.y.abs() {
+            Lock::Time
+        } else {
+            Lock::Value
+        }),
+    )
+}
+
+fn snapped(
+    clip: &Clip,
+    lanes: &[Lane],
+    marks: &[Mark],
+    by: i64,
+    play: i64,
+    ppf: f32,
+) -> Option<(i64, i64)> {
+    let reach = f64::from(SNAP_PX / ppf.max(1e-3));
+    let mut best: Option<(i64, i64, i64)> = None;
+    for m in marks {
+        let from = clip.key_time(m.frame);
+        let others = lanes
+            .iter()
+            .filter(|l| l.param != m.param)
+            .flat_map(|l| l.keys.iter().map(move |k| (l.param, k.frame)))
+            .filter(|(param, frame)| {
+                !marks.contains(&Mark {
+                    param: *param,
+                    frame: *frame,
+                })
+            })
+            .map(|(_, frame)| clip.key_time(frame));
+        for to in std::iter::once(play as f64).chain(others) {
+            let wanted = (to - from).round() as i64;
+            let gap = (wanted - by).abs();
+            if gap as f64 <= reach && best.is_none_or(|b| gap < b.0) {
+                best = Some((gap, wanted, to.round() as i64));
+            }
+        }
+    }
+    best.map(|(_, by, at)| (by, at))
 }
 
 fn handle_body(id: &str, mark: Mark, out: bool, handle: Handle) -> Value {
@@ -1206,14 +1369,13 @@ fn shown_lane(lane: &Lane, shift: Option<&Shift>) -> Vec<Shown> {
     let Some(shift) = shift else {
         return rows;
     };
-    if let Some(edit) = &shift.handle
-        && edit.mark.param == lane.param
-        && let Some(row) = rows.iter_mut().find(|r| r.from == edit.mark.frame)
-    {
-        if edit.out {
-            row.key.out_handle = Some(edit.handle);
-        } else {
-            row.key.in_handle = Some(edit.handle);
+    for edit in shift.handles.iter().filter(|e| e.mark.param == lane.param) {
+        if let Some(row) = rows.iter_mut().find(|r| r.from == edit.mark.frame) {
+            if edit.out {
+                row.key.out_handle = Some(edit.handle);
+            } else {
+                row.key.in_handle = Some(edit.handle);
+            }
         }
     }
     for row in &mut rows {
@@ -1235,6 +1397,14 @@ fn shown_lane(lane: &Lane, shift: Option<&Shift>) -> Vec<Shown> {
     }
     rows.sort_by_key(|r| r.key.frame);
     rows
+}
+
+fn pressed_at(ui: &egui::Ui, resp: &egui::Response, pos: Pos2) -> Pos2 {
+    if resp.drag_started() {
+        ui.input(|i| i.pointer.press_origin()).unwrap_or(pos)
+    } else {
+        pos
+    }
 }
 
 fn near(a: Pos2, b: Pos2) -> bool {
@@ -1286,14 +1456,21 @@ fn edge_arrows(painter: &egui::Painter, rect: Rect, times: &[f64], map: TimeMap)
     }
 }
 
-fn playhead(painter: &egui::Painter, map: TimeMap, rect: Rect, at: i64) {
+fn time_line(painter: &egui::Painter, map: TimeMap, rect: Rect, at: i64, color: Color32) {
     let t = at as f64;
     if (map.lo..=map.hi).contains(&t) {
         let x = map.x(t);
         painter.line_segment(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
-            Stroke::new(1.0, theme::colors().playhead),
+            Stroke::new(1.0, color),
         );
+    }
+}
+
+fn playhead(painter: &egui::Painter, map: TimeMap, rect: Rect, plot: Plot) {
+    time_line(painter, map, rect, plot.play, theme::colors().playhead);
+    if let Some(at) = plot.snap {
+        time_line(painter, map, rect, at, Color32::WHITE);
     }
 }
 
@@ -1316,6 +1493,7 @@ impl Workspace {
             self.key_editor.pending = None;
             self.key_editor.menu = None;
             self.key_editor.menu_curve = false;
+            self.key_editor.graph_active = None;
             self.key_editor.view = None;
             self.key_editor.held = None;
             self.key_editor.fresh = None;
@@ -1379,6 +1557,7 @@ impl Workspace {
             label: label - gap,
             width: (rect.width() - label).max(48.0),
             play: self.snap.timeline.position,
+            snap: shift.as_ref().and_then(|s| s.snap),
             tray: true,
         };
         egui::ScrollArea::vertical()
@@ -1432,9 +1611,14 @@ impl Workspace {
             label: LABEL,
             width,
             play,
+            snap: shift.as_ref().and_then(|s| s.snap),
             tray: false,
         };
         self.ruler(ui, &p, &clip, plot);
+        let graph = self.key_editor.graph;
+        if graph {
+            self.curve_graph(ui, &clip, &lanes, plot, &frame, shift.as_ref());
+        }
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .max_height(
@@ -1457,7 +1641,10 @@ impl Workspace {
                     for lane in &members {
                         let rows = shown_lane(lane, shift.as_ref());
                         self.track_row(ui, &clip, lane, &rows, plot);
-                        if !lane.keys.is_empty() && self.key_editor.curves.contains(&lane.param) {
+                        if !graph
+                            && !lane.keys.is_empty()
+                            && self.key_editor.curves.contains(&lane.param)
+                        {
                             self.curve_row(ui, &clip, lane, &rows, plot, &frame);
                         }
                     }
@@ -1593,7 +1780,8 @@ impl Workspace {
                     dt,
                     dv: 0.0,
                     axis: Axis::None,
-                    handle: None,
+                    handles: Vec::new(),
+                    snap: None,
                 };
                 self.commit(&clip, p.rev, &shift);
             }
@@ -2012,6 +2200,11 @@ impl Workspace {
                         open = Some(false);
                         ui.close();
                     }
+                    ui.separator();
+                    let mut snapping = !editor.snap_off;
+                    if ui.checkbox(&mut snapping, "Enable Snapping").changed() {
+                        editor.snap_off = !snapping;
+                    }
                 });
                 if most > 1.0 {
                     ui.spacing_mut().slider_width = ZOOM_W;
@@ -2039,6 +2232,13 @@ impl Workspace {
                     .clicked()
                 {
                     detail = true;
+                }
+                if ui
+                    .add(egui::Button::selectable(editor.graph, CHART_LINE))
+                    .on_hover_text("Graph")
+                    .clicked()
+                {
+                    editor.graph = !editor.graph;
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.add(egui::Label::new(RichText::new(name).strong()).truncate());
@@ -2093,7 +2293,7 @@ impl Workspace {
             );
             t += step;
         }
-        playhead(&painter, map, rect, plot.play);
+        playhead(&painter, map, rect, plot);
         if let Some(pos) = resp.interact_pointer_pos() {
             let frame = map.time(pos.x).round() as i64;
             let done = resp.clicked() || resp.drag_stopped();
@@ -2125,7 +2325,7 @@ impl Workspace {
         let b = map.x(plot.hi).max(a + SCROLL_H);
         let thumb = Rect::from_x_y_ranges(a..=b, rect.y_range()).shrink(1.0);
         painter.rect_filled(thumb, round, colors.text_dim);
-        playhead(&painter, map, rect, plot.play);
+        playhead(&painter, map, rect, plot);
         if !resp.is_pointer_button_down_on() {
             self.key_editor.grab = None;
             return;
@@ -2213,11 +2413,15 @@ impl Workspace {
         }
     }
 
-    fn shown_shift(&self, ui: &egui::Ui, clip: &Clip, lanes: &[Lane]) -> Option<Shift> {
-        if let Some(drag) = &self.key_editor.drag
+    fn shown_shift(&mut self, ui: &egui::Ui, clip: &Clip, lanes: &[Lane]) -> Option<Shift> {
+        if let Some(drag) = self.key_editor.drag.as_mut()
             && drag.clip == clip.id
             && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
         {
+            let (shift, alt, press) =
+                ui.input(|i| (i.modifiers.shift, i.modifiers.alt, i.pointer.press_origin()));
+            drag.lock = locked(drag.lock, shift, pos - press.unwrap_or(drag.origin));
+            drag.apart = alt;
             return Some(shift_of(clip, lanes, drag, pos));
         }
         self.key_editor
@@ -2243,7 +2447,7 @@ impl Workspace {
                 ));
             }
         }
-        if let Some(edit) = &shift.handle {
+        for edit in &shift.handles {
             parts.push((
                 "keyframes.set",
                 handle_body(&clip.id, edit.mark, edit.out, edit.handle),
@@ -2302,7 +2506,7 @@ impl Workspace {
         let map = TimeMap::of(plot.lo, plot.hi, rect);
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 2.0, theme::colors().panel_dark);
-        playhead(&painter, map, rect, plot.play);
+        playhead(&painter, map, rect, plot);
         let mut spots = Vec::new();
         let mut shown = Vec::new();
         for t in times {
@@ -2320,6 +2524,10 @@ impl Workspace {
         self.poke_group(ui, &resp, clip, map, &spots);
     }
 
+    fn drag_snap(&self) -> Option<i64> {
+        (!self.key_editor.snap_off).then_some(self.snap.timeline.position)
+    }
+
     fn poke_group(
         &mut self,
         ui: &egui::Ui,
@@ -2331,7 +2539,8 @@ impl Workspace {
         let Some(pos) = resp.interact_pointer_pos() else {
             return;
         };
-        let hit = closest(spots, pos, |(at, _)| *at).map(|(_, marks)| marks.clone());
+        let from = pressed_at(ui, resp, pos);
+        let hit = closest(spots, from, |(at, _)| *at).map(|(_, marks)| marks.clone());
         if !resp.drag_started() {
             return;
         }
@@ -2343,15 +2552,8 @@ impl Workspace {
             return;
         }
         self.key_editor.drag = Some(Drag {
-            clip: clip.id.clone(),
-            kind: Kind::Group,
-            origin: pos,
-            ppf: map.ppf(),
-            v_span: 0.0,
-            v_height: 1.0,
-            marks,
-            axis: Axis::None,
-            fix: None,
+            snap: self.drag_snap(),
+            ..Drag::new(clip, Kind::Group, pos, map, marks)
         });
     }
 
@@ -2375,7 +2577,12 @@ impl Workspace {
         let keyable = !speed || (clip.start < play && play < clip.end());
         let prev = times.iter().any(|&t| reached(t) && t < play);
         let next = times.iter().any(|&t| reached(t) && t > play);
-        let curve = self.key_editor.curves.contains(&lane.param);
+        let graph = self.key_editor.graph;
+        let curve = if graph {
+            !self.key_editor.graph_off.contains(&lane.param)
+        } else {
+            self.key_editor.curves.contains(&lane.param)
+        };
         let keyed = !lane.keys.is_empty();
         let picked = self.key_editor.rows.contains(&lane.param);
         let mut act = None;
@@ -2395,7 +2602,7 @@ impl Workspace {
             if !plot.tray {
                 let c = ui
                     .add_enabled(
-                        keyed && !linear(clip, lane.param) && !fixed(lane.param),
+                        has_curve(clip, lane),
                         egui::Button::selectable(curve && keyed, WAVE_SINE).frame(false),
                     )
                     .on_hover_text("Curve");
@@ -2439,10 +2646,15 @@ impl Workspace {
         });
         match act {
             Some(RowAct::Curve) => {
-                if curve {
-                    self.key_editor.curves.retain(|c| *c != lane.param);
+                let list = if graph {
+                    &mut self.key_editor.graph_off
                 } else {
-                    self.key_editor.curves.push(lane.param);
+                    &mut self.key_editor.curves
+                };
+                if list.contains(&lane.param) {
+                    list.retain(|c| *c != lane.param);
+                } else {
+                    list.push(lane.param);
                 }
             }
             Some(RowAct::Step(dir)) => {
@@ -2486,7 +2698,7 @@ impl Workspace {
             None => {}
         }
         if named {
-            self.key_editor.rows = vec![lane.param];
+            self.activate(lane.param);
         }
         let map = TimeMap::of(plot.lo, plot.hi, rect);
         let painter = ui.painter_at(rect);
@@ -2498,7 +2710,7 @@ impl Workspace {
         };
         painter.rect_filled(rect, 2.0, back);
         painter.rect_filled(clip_band(map, clip, rect), 0.0, band);
-        playhead(&painter, map, rect, plot.play);
+        playhead(&painter, map, rect, plot);
         let mut spots = Vec::new();
         let mut shown = Vec::new();
         for row in rows {
@@ -2557,19 +2769,16 @@ impl Workspace {
         let Some(pos) = resp.interact_pointer_pos() else {
             return;
         };
-        if closest(spots, pos, |(at, _)| *at).is_some() {
+        if closest(spots, pressed_at(ui, resp, pos), |(at, _)| *at).is_some() {
             return;
         }
         if resp.drag_started() {
-            self.start_box(ui, clip, pos);
+            if self.key_editor.drag.is_none() {
+                self.start_box(ui, clip, pos);
+            }
         } else if resp.double_clicked() {
             let t = map.time(pos.x).round() as i64;
-            if clip.start <= t && t < clip.end() {
-                self.send(
-                    "keyframes.add",
-                    json!({ "clips": [clip.id], "param": param, "at": t }),
-                );
-                self.key_editor.fresh = Some((param, t, Instant::now()));
+            if self.add_key_at(clip, param, t) {
                 self.seek(PlayerId::Timeline, t, false);
             }
         } else if resp.clicked()
@@ -2577,6 +2786,35 @@ impl Workspace {
         {
             self.key_editor.selected.clear();
         }
+    }
+
+    fn add_key_at(&mut self, clip: &Clip, param: KeyParam, t: i64) -> bool {
+        if t < clip.start || t >= clip.end() {
+            return false;
+        }
+        self.send(
+            "keyframes.add",
+            json!({ "clips": [clip.id], "param": param, "at": t }),
+        );
+        self.key_editor.fresh = Some((param, t, Instant::now()));
+        true
+    }
+
+    fn add_on_line(&mut self, ui: &egui::Ui, area: &CurveArea<'_>, lane: &Lane, at: &CurveSpots) {
+        let CurveArea { resp, clip, .. } = *area;
+        let alt = ui.input(|i| i.modifiers.alt);
+        if let Some(pos) = resp
+            .interact_pointer_pos()
+            .filter(|_| alt && resp.clicked())
+            && at.bend_at(clip, lane, pos).is_some()
+        {
+            self.add_key_at(clip, lane.param, at.map.time(pos.x).round() as i64);
+        }
+    }
+
+    fn activate(&mut self, param: KeyParam) {
+        self.key_editor.graph_active = Some(param);
+        self.key_editor.rows = vec![param];
     }
 
     fn curve_row(
@@ -2589,12 +2827,137 @@ impl Workspace {
         frame: &Frame,
     ) {
         let (rect, resp) = row(ui, CURVE_H, plot, |_| {});
+        let colors = theme::colors();
+        ui.painter_at(rect)
+            .rect_filled(rect, 2.0, colors.panel_dark);
+        let area = CurveArea {
+            rect,
+            resp: &resp,
+            clip,
+            plot,
+            frame,
+        };
+        let spots = self.paint_curve(ui, &area, lane, rows, [colors.text, colors.text_dim]);
+        self.use_curve(ui, &area, lane, &spots);
+    }
+
+    fn curve_graph(
+        &mut self,
+        ui: &mut egui::Ui,
+        clip: &Clip,
+        lanes: &[Lane],
+        plot: Plot,
+        frame: &Frame,
+        shift: Option<&Shift>,
+    ) {
+        let shown = graphed(clip, lanes, &self.key_editor.graph_off);
+        let mut active = shown
+            .iter()
+            .find(|(lane, _)| Some(lane.param) == self.key_editor.graph_active)
+            .or(shown.first())
+            .map(|(lane, _)| lane.param);
+        let gap = ui.spacing().item_spacing.y;
+        let most = (ui.available_height()
+            - BAR_H
+            - SCROLL_H
+            - GRIP_H
+            - 3.0 * gap
+            - TRACKS_KEPT * (TRACK_H + gap))
+            .max(CURVE_H);
+        let h = self
+            .key_editor
+            .graph_h
+            .unwrap_or(GRAPH_H)
+            .clamp(CURVE_H, most);
+        let mut named = None;
+        let (rect, resp) = row(ui, h, plot, |ui| {
+            named = legend(ui, h, &shown, active);
+        });
+        if let Some(param) = named {
+            self.activate(param);
+            active = Some(param);
+        }
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 2.0, theme::colors().panel_dark);
+        let area = CurveArea {
+            rect,
+            resp: &resp,
+            clip,
+            plot,
+            frame,
+        };
+        let mut dims = Vec::new();
+        for (lane, color) in shown.iter().filter(|(l, _)| Some(l.param) != active) {
+            let rows = shown_lane(lane, shift);
+            let lines = dim_curve(&area, &painter, lane, &rows, color.gamma_multiply(DIMMED));
+            dims.extend(lines.into_iter().map(|line| (lane.param, line)));
+        }
+        if let Some((lane, color)) = shown.iter().find(|(l, _)| Some(l.param) == active) {
+            let rows = shown_lane(lane, shift);
+            let lines = [*color, color.gamma_multiply(DIMMED)];
+            let spots = self.paint_curve(ui, &area, lane, &rows, lines);
+            if resp
+                .hover_pos()
+                .filter(|at| !spots.hit(*at))
+                .and_then(|at| dim_at(&dims, at))
+                .is_some()
+            {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            let picked = resp
+                .interact_pointer_pos()
+                .filter(|at| resp.clicked() && !spots.hit(*at))
+                .and_then(|at| dim_at(&dims, at));
+            match picked {
+                Some(param) => {
+                    self.activate(param);
+                    self.key_editor.selected.clear();
+                }
+                None => self.use_curve(ui, &area, lane, &spots),
+            }
+        } else {
+            playhead(&painter, TimeMap::of(plot.lo, plot.hi, rect), rect, plot);
+        }
+        self.graph_grip(ui, plot, h, most);
+    }
+
+    fn graph_grip(&mut self, ui: &mut egui::Ui, plot: Plot, h: f32, most: f32) {
+        let width = plot.label + ui.spacing().item_spacing.x + plot.width;
+        let (rect, resp) = ui.allocate_exact_size(vec2(width, GRIP_H), Sense::drag());
+        let colors = theme::colors();
+        let busy = resp.hovered() || resp.dragged();
+        if busy {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
+        ui.painter().hline(
+            rect.x_range(),
+            rect.center().y,
+            Stroke::new(1.0, if busy { colors.text_dim } else { colors.line }),
+        );
+        if resp.dragged() {
+            self.key_editor.graph_h = Some((h + resp.drag_delta().y).clamp(CURVE_H, most));
+        }
+    }
+
+    fn paint_curve(
+        &self,
+        ui: &egui::Ui,
+        area: &CurveArea<'_>,
+        lane: &Lane,
+        rows: &[Shown],
+        lines: [Color32; 2],
+    ) -> CurveSpots {
+        let CurveArea {
+            rect,
+            clip,
+            plot,
+            frame,
+            ..
+        } = *area;
         let map = TimeMap::of(plot.lo, plot.hi, rect);
-        let (vlo, vhi) = value_ends(rows);
-        let values = ValueMap::of(vlo, vhi, least_span(lane.param), rect);
+        let values = self.curve_values(lane, rows, rect);
         let painter = ui.painter_at(rect);
         let colors = theme::colors();
-        painter.rect_filled(rect, 2.0, colors.panel_dark);
         if !matches!(
             lane.param,
             KeyParam::Position
@@ -2623,16 +2986,16 @@ impl Workspace {
             map,
             values,
         };
-        sample_curve(&paint, 1.5, colors.text, |source| {
+        let line = sample_curve(&paint, 1.5, lines[0], |source| {
             value_mapped(&keys, source, |i| keys[i].value)
         });
         if rows.first().is_some_and(|r| r.paired) {
             let ys: Vec<f64> = rows.iter().map(|r| r.y).collect();
-            sample_curve(&paint, 1.0, colors.text_dim, |source| {
+            sample_curve(&paint, 1.0, lines[1], |source| {
                 value_paired(&keys, source, |i| ys[i])
             });
         }
-        playhead(&painter, map, rect, plot.play);
+        playhead(&painter, map, rect, plot);
         let mut handles = Vec::new();
         let mut spots = Vec::new();
         for (i, row) in rows.iter().enumerate() {
@@ -2686,19 +3049,54 @@ impl Workspace {
                 spots.push((yat, row.from, Axis::Y));
             }
         }
+        CurveSpots {
+            map,
+            values,
+            keys: spots,
+            handles,
+            line,
+        }
+    }
+
+    fn curve_values(&self, lane: &Lane, rows: &[Shown], rect: Rect) -> ValueMap {
+        let frozen = self
+            .key_editor
+            .drag
+            .as_ref()
+            .and_then(|d| d.frozen)
+            .filter(|(param, ..)| *param == lane.param);
+        if let Some((_, lo, hi)) = frozen {
+            return ValueMap {
+                lo,
+                hi,
+                top: rect.top(),
+                height: rect.height().max(1.0),
+            };
+        }
+        let (vlo, vhi) = value_ends(rows);
+        ValueMap::of(vlo, vhi, least_span(lane.param), rect)
+    }
+
+    fn use_curve(&mut self, ui: &egui::Ui, area: &CurveArea<'_>, lane: &Lane, at: &CurveSpots) {
+        let CurveArea { resp, clip, .. } = *area;
+        if resp
+            .hover_pos()
+            .is_some_and(|p| at.bend_at(clip, lane, p).is_some())
+        {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
+        self.add_on_line(ui, area, lane, at);
         self.poke_curve(
             Press {
                 ui,
-                resp: &resp,
+                resp,
                 clip,
                 lane,
-                map,
+                map: at.map,
             },
-            values,
-            &spots,
-            &handles,
+            at,
         );
-        let flat: Vec<(Pos2, i64)> = spots.iter().map(|(at, frame, _)| (*at, *frame)).collect();
+        let flat: Vec<(Pos2, i64)> = at.keys.iter().map(|(at, frame, _)| (*at, *frame)).collect();
         self.key_editor.seen.extend(flat.iter().map(|(at, frame)| {
             (
                 *at,
@@ -2711,11 +3109,11 @@ impl Workspace {
         let all: Vec<(Pos2, i64)> = flat
             .iter()
             .copied()
-            .chain(handles.iter().map(|(at, frame, ..)| (*at, *frame)))
+            .chain(at.handles.iter().map(|(at, frame, ..)| (*at, *frame)))
             .collect();
-        self.empty_press(ui, &resp, clip, lane.param, map, &all);
-        self.open_menu(&resp, lane.param, &flat, true);
-        self.show_menu(&resp, clip, lane, true);
+        self.empty_press(ui, resp, clip, lane.param, at.map, &all);
+        self.open_menu(resp, lane.param, &flat, true);
+        self.show_menu(resp, clip, lane, true);
     }
 
     fn key_bar(&mut self, ui: &mut egui::Ui, p: &Project, clip: &Clip, lanes: &[Lane], f: &Frame) {
@@ -2726,12 +3124,20 @@ impl Workspace {
             [] => {}
             [one] => gone = self.one_key(ui, p, clip, lanes, *one, f),
             many => {
+                let (now, options) = marks_eases(clip, lanes, many);
+                let mut ease = None;
                 ui.horizontal(|ui| {
                     ui.label(format!("{} Keyframes", many.len()));
+                    if !options.is_empty() {
+                        ease = ease_combo(ui, "key-ease-many", now, "Mixed", options);
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         gone = ui.button("Delete").clicked();
                     });
                 });
+                if let Some(e) = ease {
+                    send_parts(self, ease_parts(clip, lanes, many, e));
+                }
             }
         }
         if gone {
@@ -2794,18 +3200,8 @@ impl Workspace {
                 return;
             }
             let (current, options) = key_eases(clip, lane, i);
-            egui::ComboBox::from_id_salt(("key-ease", lane_name(mark.param), mark.frame))
-                .selected_text(current.map_or("Custom", ease_label))
-                .show_ui(ui, |ui| {
-                    for e in options {
-                        if ui
-                            .selectable_label(current == Some(e), ease_label(e))
-                            .clicked()
-                        {
-                            ease = Some(e);
-                        }
-                    }
-                });
+            let salt = ("key-ease", lane_name(mark.param), mark.frame);
+            ease = ease_combo(ui, salt, current, "Custom", options);
         });
         if let Some(value) = value {
             if fixed(mark.param) {
@@ -2822,7 +3218,10 @@ impl Workspace {
             }
         }
         if let Some(e) = ease {
-            self.send("keyframes.set", ease_body(&clip.id, mark, e));
+            self.send(
+                "keyframes.set",
+                ease_body(&clip.id, mark.param, &[mark.frame], e),
+            );
         }
         gone
     }
@@ -2920,15 +3319,15 @@ impl Workspace {
         let Some(pos) = resp.interact_pointer_pos() else {
             return;
         };
-        let hit = closest(spots, pos, |(at, _)| *at).map(|(_, frame)| Mark {
+        let hit = closest(spots, pressed_at(ui, resp, pos), |(at, _)| *at).map(|(_, frame)| Mark {
             param: lane.param,
             frame: *frame,
         });
-        if (resp.drag_started() || resp.clicked())
-            && hit.is_some()
-            && !self.key_editor.rows.contains(&lane.param)
-        {
-            self.key_editor.rows.push(lane.param);
+        if (resp.drag_started() || resp.clicked()) && hit.is_some() {
+            self.key_editor.graph_active = Some(lane.param);
+            if !self.key_editor.rows.contains(&lane.param) {
+                self.key_editor.rows.push(lane.param);
+            }
         }
         if resp.drag_started()
             && !fixed(lane.param)
@@ -2942,15 +3341,11 @@ impl Workspace {
             let marks = dragged(&self.key_editor.selected, hit);
             let (v_span, v_height) = values.map_or((0.0, 1.0), |v| (v.span(), v.height));
             self.key_editor.drag = Some(Drag {
-                clip: clip.id.clone(),
-                kind: Kind::Keys,
-                origin: pos,
-                ppf: map.ppf(),
                 v_span,
                 v_height,
-                marks,
                 axis,
-                fix: None,
+                snap: self.drag_snap(),
+                ..Drag::new(clip, Kind::Keys, pos, map, marks)
             });
         } else if resp.clicked()
             && let Some(hit) = hit
@@ -2959,13 +3354,14 @@ impl Workspace {
         }
     }
 
-    fn poke_curve(
-        &mut self,
-        press: Press<'_>,
-        values: ValueMap,
-        spots: &[(Pos2, i64, Axis)],
-        handles: &[(Pos2, i64, bool, Handle, i64)],
-    ) {
+    fn poke_curve(&mut self, press: Press<'_>, at: &CurveSpots) {
+        let CurveSpots {
+            values,
+            keys: spots,
+            handles,
+            ..
+        } = at;
+        let values = *values;
         let Some(pos) = press.resp.interact_pointer_pos() else {
             return;
         };
@@ -2976,10 +3372,12 @@ impl Workspace {
             lane,
             map,
         } = press;
-        let handle_hit = closest(handles, pos, |(at, ..)| *at);
-        let key_hit = closest(spots, pos, |(at, ..)| *at);
+        let from = pressed_at(ui, resp, pos);
+        let frozen = Some((lane.param, values.lo, values.hi));
+        let handle_hit = closest(handles, from, |(at, ..)| *at);
+        let key_hit = closest(spots, from, |(at, ..)| *at);
         let use_handle = match (handle_hit, key_hit) {
-            (Some(handle), Some(key)) => handle.0.distance(pos) <= key.0.distance(pos),
+            (Some(handle), Some(key)) => handle.0.distance(from) <= key.0.distance(from),
             (Some(_), None) => true,
             _ => false,
         };
@@ -3002,14 +3400,8 @@ impl Workspace {
                 .map(|k| k.value)
                 .unwrap_or(0.0);
             self.key_editor.drag = Some(Drag {
-                clip: clip.id.clone(),
-                kind: Kind::Handle,
-                origin: pos,
-                ppf: map.ppf(),
                 v_span: values.span(),
                 v_height: values.height,
-                marks: vec![mark],
-                axis: Axis::None,
                 fix: Some(HandleFix {
                     mark,
                     out: *out,
@@ -3017,7 +3409,22 @@ impl Workspace {
                     value: handle.value,
                     key_value: row_value,
                     neighbor: *neighbor,
+                    across: across_of(&lane.keys, *frame, *out),
                 }),
+                frozen,
+                ..Drag::new(clip, Kind::Handle, pos, map, vec![mark])
+            });
+            return;
+        }
+        if resp.drag_started()
+            && let Some((i, frame)) = at.bend_at(clip, lane, from)
+        {
+            self.key_editor.drag = Some(Drag {
+                v_span: values.span(),
+                v_height: values.height,
+                bend: Some(bend_of(lane, i, frame)),
+                frozen,
+                ..Drag::new(clip, Kind::Bend, pos, map, Vec::new())
             });
             return;
         }
@@ -3056,7 +3463,9 @@ impl Workspace {
                 param,
                 frame: *frame,
             };
-            self.key_editor.selected = vec![mark];
+            if !self.key_editor.selected.contains(&mark) {
+                self.key_editor.selected = vec![mark];
+            }
             self.key_editor.menu = Some(mark);
             self.key_editor.menu_curve = curve;
             self.key_editor.menu_tray = self.key_editor.tray;
@@ -3075,19 +3484,19 @@ impl Workspace {
             self.key_editor.menu = None;
             return;
         }
-        let mark = self.key_editor.menu;
+        let lanes = lanes_of(clip, false);
+        let marks: Vec<Mark> = match self.key_editor.menu {
+            Some(m) if !self.key_editor.selected.contains(&m) => vec![m],
+            _ => self.key_editor.selected.clone(),
+        };
+        let (current, options) = marks_eases(clip, &lanes, &marks);
         let shown = resp.context_menu(|ui| {
-            let Some(mark) = mark else { return };
-            let Some(i) = lane.keys.iter().position(|k| k.frame == mark.frame) else {
-                return;
-            };
-            let (current, options) = key_eases(clip, lane, i);
             for ease in options {
                 if ui
                     .selectable_label(current == Some(ease), ease_label(ease))
                     .clicked()
                 {
-                    self.send("keyframes.set", ease_body(&clip.id, mark, ease));
+                    send_parts(self, ease_parts(clip, &lanes, &marks, ease));
                     self.key_editor.menu = None;
                     ui.close();
                 }
@@ -3097,6 +3506,26 @@ impl Workspace {
             self.key_editor.menu = None;
         }
     }
+}
+
+fn ease_combo(
+    ui: &mut egui::Ui,
+    salt: impl egui::AsIdSalt,
+    now: Option<Ease>,
+    other: &'static str,
+    options: Vec<Ease>,
+) -> Option<Ease> {
+    let mut chosen = None;
+    egui::ComboBox::from_id_salt(salt)
+        .selected_text(now.map_or(other, ease_label))
+        .show_ui(ui, |ui| {
+            for e in options {
+                if ui.selectable_label(now == Some(e), ease_label(e)).clicked() {
+                    chosen = Some(e);
+                }
+            }
+        });
+    chosen
 }
 
 fn row(
@@ -3139,6 +3568,38 @@ fn shown_group_time(clip: &Clip, marks: &[Mark], shift: Option<&Shift>) -> f64 {
     clip.key_time(frame)
 }
 
+#[derive(Clone, Copy)]
+struct CurveArea<'a> {
+    rect: Rect,
+    resp: &'a egui::Response,
+    clip: &'a Clip,
+    plot: Plot,
+    frame: &'a Frame,
+}
+
+struct CurveSpots {
+    map: TimeMap,
+    values: ValueMap,
+    keys: Vec<(Pos2, i64, Axis)>,
+    handles: Vec<(Pos2, i64, bool, Handle, i64)>,
+    line: Vec<Pos2>,
+}
+
+impl CurveSpots {
+    fn bend_at(&self, clip: &Clip, lane: &Lane, pos: Pos2) -> Option<(usize, f64)> {
+        if self.hit(pos) || line_distance(&self.line, pos) > LINE_HIT {
+            return None;
+        }
+        let frame = clip.key_at(self.map.time(pos.x));
+        segment_at(&lane.keys, frame).map(|i| (i, frame))
+    }
+
+    fn hit(&self, pos: Pos2) -> bool {
+        self.keys.iter().any(|(at, ..)| near(*at, pos))
+            || self.handles.iter().any(|(at, ..)| near(*at, pos))
+    }
+}
+
 struct Press<'a> {
     ui: &'a egui::Ui,
     resp: &'a egui::Response,
@@ -3160,7 +3621,7 @@ fn sample_curve(
     width: f32,
     color: Color32,
     at: impl Fn(f64) -> Option<f64>,
-) {
+) -> Vec<Pos2> {
     let CurvePaint {
         painter,
         clip,
@@ -3179,32 +3640,247 @@ fn sample_curve(
         pts.push(pos2(x, values.y(v)));
     }
     if pts.len() >= 2 {
-        painter.add(Shape::line(pts, Stroke::new(width, color)));
+        painter.add(Shape::line(pts.clone(), Stroke::new(width, color)));
     }
+    pts
+}
+
+fn has_curve(clip: &Clip, lane: &Lane) -> bool {
+    !lane.keys.is_empty() && !linear(clip, lane.param) && !fixed(lane.param)
+}
+
+fn graphed<'a>(clip: &Clip, lanes: &'a [Lane], off: &[KeyParam]) -> Vec<(&'a Lane, Color32)> {
+    let all = lanes_of(clip, false);
+    let hue = |param: KeyParam| {
+        let i = all.iter().position(|l| l.param == param).unwrap_or(0);
+        HUES[i % HUES.len()]
+    };
+    lanes
+        .iter()
+        .filter(|l| has_curve(clip, l) && !off.contains(&l.param))
+        .map(|l| (l, hue(l.param)))
+        .collect()
+}
+
+fn legend(
+    ui: &mut egui::Ui,
+    h: f32,
+    shown: &[(&Lane, Color32)],
+    active: Option<KeyParam>,
+) -> Option<KeyParam> {
+    if shown.is_empty() {
+        ui.label(dim("No Curves"));
+        return None;
+    }
+    let mut picked = None;
+    egui::ScrollArea::vertical()
+        .id_salt("keyframe-legend")
+        .auto_shrink([false, false])
+        .max_height(h)
+        .show(ui, |ui| {
+            ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                for (lane, color) in shown {
+                    ui.horizontal(|ui| {
+                        let (swatch, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+                        ui.painter().rect_filled(swatch, 2.0, *color);
+                        let name = RichText::new(lane_name(lane.param)).small();
+                        if ui
+                            .selectable_label(active == Some(lane.param), name)
+                            .clicked()
+                        {
+                            picked = Some(lane.param);
+                        }
+                    });
+                }
+            });
+        });
+    picked
+}
+
+fn dim_curve(
+    area: &CurveArea<'_>,
+    painter: &egui::Painter,
+    lane: &Lane,
+    rows: &[Shown],
+    color: Color32,
+) -> Vec<Vec<Pos2>> {
+    let (vlo, vhi) = value_ends(rows);
+    let paint = CurvePaint {
+        painter,
+        clip: area.clip,
+        map: TimeMap::of(area.plot.lo, area.plot.hi, area.rect),
+        values: ValueMap::of(vlo, vhi, least_span(lane.param), area.rect),
+    };
+    let keys: Vec<Keyframe> = rows.iter().map(|r| r.key).collect();
+    let mut lines = vec![sample_curve(&paint, 1.0, color, |source| {
+        value_mapped(&keys, source, |i| keys[i].value)
+    })];
+    if rows.first().is_some_and(|r| r.paired) {
+        let ys: Vec<f64> = rows.iter().map(|r| r.y).collect();
+        lines.push(sample_curve(&paint, 1.0, color, |source| {
+            value_paired(&keys, source, |i| ys[i])
+        }));
+    }
+    lines
+}
+
+fn lined_up(moved: Handle, other: Handle, gap: f64, px: [f64; 2]) -> Handle {
+    let length = |h: Handle| (h.frames * px[0]).hypot(h.value * px[1]);
+    let moved_len = length(moved);
+    if moved_len == 0.0 {
+        return other;
+    }
+    let k = (length(other) / moved_len).min(gap / moved.frames.abs());
+    Handle {
+        frames: (-moved.frames * k * 100.0).round() / 100.0,
+        value: (-moved.value * k * 1e6).round() / 1e6,
+    }
+}
+
+fn edits_with_pair(
+    mark: Mark,
+    out: bool,
+    handle: Handle,
+    across: Option<(Handle, f64)>,
+    px: [f64; 2],
+) -> Vec<HandleEdit> {
+    let mut edits = vec![HandleEdit { mark, out, handle }];
+    if let Some((other, gap)) = across {
+        edits.push(HandleEdit {
+            mark,
+            out: !out,
+            handle: lined_up(handle, other, gap, px),
+        });
+    }
+    edits
+}
+
+fn across_of(keys: &[Keyframe], frame: i64, out: bool) -> Option<(Handle, f64)> {
+    let i = keys.iter().position(|k| k.frame == frame)?;
+    let key = &keys[i];
+    let (other, neighbor) = if out {
+        (key.in_handle, keys.get(i.checked_sub(1)?))
+    } else {
+        (key.out_handle, keys.get(i + 1))
+    };
+    Some((other?, (neighbor?.frame - frame).abs() as f64))
+}
+
+fn segment_at(keys: &[Keyframe], frame: f64) -> Option<usize> {
+    keys.windows(2)
+        .position(|w| (w[0].frame as f64) < frame && frame < w[1].frame as f64)
+}
+
+fn bend_of(lane: &Lane, i: usize, frame: f64) -> BendFix {
+    let (a, b) = (lane.keys[i], lane.keys[i + 1]);
+    BendFix {
+        param: lane.param,
+        a,
+        b,
+        frame,
+        before: across_of(&lane.keys, a.frame, true),
+        after: across_of(&lane.keys, b.frame, false),
+    }
+}
+
+fn bend_shift(fix: BendFix, by: f64, apart: bool, px: [f64; 2]) -> Shift {
+    let mut handles = Vec::new();
+    if by != 0.0 {
+        let (out, into) = bent(&fix.a, &fix.b, fix.frame, by);
+        let mark = |frame: i64| Mark {
+            param: fix.param,
+            frame,
+        };
+        let pair = |across: Option<(Handle, f64)>| across.filter(|_| !apart);
+        if let Some(h) = out {
+            handles.extend(edits_with_pair(
+                mark(fix.a.frame),
+                true,
+                h,
+                pair(fix.before),
+                px,
+            ));
+        }
+        if let Some(h) = into {
+            handles.extend(edits_with_pair(
+                mark(fix.b.frame),
+                false,
+                h,
+                pair(fix.after),
+                px,
+            ));
+        }
+    }
+    Shift {
+        marks: Vec::new(),
+        dt: 0,
+        dv: 0.0,
+        axis: Axis::None,
+        handles,
+        snap: None,
+    }
+}
+
+fn line_distance(line: &[Pos2], pos: Pos2) -> f32 {
+    line.windows(2)
+        .map(|w| {
+            let along = w[1] - w[0];
+            let t = (pos - w[0]).dot(along) / along.length_sq().max(f32::EPSILON);
+            (w[0] + along * t.clamp(0.0, 1.0)).distance(pos)
+        })
+        .fold(f32::MAX, f32::min)
+}
+
+fn dim_at(dims: &[(KeyParam, Vec<Pos2>)], pos: Pos2) -> Option<KeyParam> {
+    dims.iter()
+        .map(|(param, line)| (*param, line_distance(line, pos)))
+        .filter(|(_, d)| *d <= HIT)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(param, _)| param)
 }
 
 fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
     let dx = pos.x - drag.origin.x;
     let dy = pos.y - drag.origin.y;
+    let px = [
+        f64::from(drag.ppf),
+        f64::from(drag.v_height) / drag.v_span.max(f64::MIN_POSITIVE),
+    ];
+    if let Some(fix) = drag.bend {
+        let by = d_value(drag.v_span, drag.v_height, dy);
+        return bend_shift(fix, by, drag.apart, px);
+    }
     if drag.kind == Kind::Handle
         && let Some(fix) = drag.fix
     {
         let handle = moved_handle(clip, fix, dx, dy, drag.ppf, drag.v_span, drag.v_height);
         let same =
             (handle.frames - fix.frames).abs() < 1e-4 && (handle.value - fix.value).abs() < 1e-6;
+        let mut handles = Vec::new();
+        if !same {
+            let across = fix.across.filter(|_| !drag.apart);
+            handles = edits_with_pair(fix.mark, fix.out, handle, across, px);
+        }
         return Shift {
             marks: vec![fix.mark],
             dt: 0,
             dv: 0.0,
             axis: Axis::None,
-            handle: (!same).then_some(HandleEdit {
-                mark: fix.mark,
-                out: fix.out,
-                handle,
-            }),
+            handles,
+            snap: None,
         };
     }
-    let by = frames_moved(dx, drag.ppf);
+    let (dx, dy) = match drag.lock {
+        Some(Lock::Time) => (dx, 0.0),
+        Some(Lock::Value) => (0.0, dy),
+        None => (dx, dy),
+    };
+    let moved = frames_moved(dx, drag.ppf);
+    let near = drag
+        .snap
+        .filter(|_| drag.lock != Some(Lock::Value))
+        .and_then(|play| snapped(clip, lanes, &drag.marks, moved, play, drag.ppf));
+    let by = near.map_or(moved, |(by, _)| by);
     let dt = fitted(lanes, &drag.marks, by);
     let dv = if drag.axis == Axis::None {
         0.0
@@ -3227,7 +3903,8 @@ fn shift_of(clip: &Clip, lanes: &[Lane], drag: &Drag, pos: Pos2) -> Shift {
         dt,
         dv,
         axis: drag.axis,
-        handle: None,
+        handles: Vec::new(),
+        snap: near.filter(|_| dt == by).map(|(_, at)| at),
     }
 }
 
@@ -3284,6 +3961,134 @@ mod tests {
             keys: frames.iter().copied().map(key).collect(),
             extra: Vec::new(),
         }
+    }
+
+    fn clip() -> Clip {
+        serde_json::from_value(json!({
+            "id": "c1", "media": "m1", "start": 0, "duration": 100,
+            "source_in": 0, "video": true, "enabled": true
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_lined_up_handle_keeps_its_length_on_the_screen() {
+        let moved = Handle {
+            frames: 30.0,
+            value: 0.4,
+        };
+        let other = Handle {
+            frames: -5.0,
+            value: 0.0,
+        };
+        let done = lined_up(moved, other, 300.0, [2.0, 200.0]);
+        assert_eq!((done.frames, done.value), (-3.0, -0.04));
+    }
+
+    #[test]
+    fn a_lined_up_handle_stops_at_its_neighbor() {
+        let moved = Handle {
+            frames: 10.0,
+            value: 1.0,
+        };
+        let other = Handle {
+            frames: -40.0,
+            value: 0.0,
+        };
+        let done = lined_up(moved, other, 20.0, [1.0, 1.0]);
+        assert_eq!((done.frames, done.value), (-20.0, -2.0));
+    }
+
+    #[test]
+    fn a_handle_at_its_key_leaves_the_other_one() {
+        let zero = Handle {
+            frames: 0.0,
+            value: 0.0,
+        };
+        let other = Handle {
+            frames: -7.0,
+            value: 2.0,
+        };
+        let done = lined_up(zero, other, 20.0, [1.0, 1.0]);
+        assert_eq!((done.frames, done.value), (-7.0, 2.0));
+    }
+
+    #[test]
+    fn a_bend_realigns_the_handle_across_the_key() {
+        let mut lane = lane(KeyParam::Rotation, &[0, 30, 60]);
+        lane.keys[1].in_handle = Some(Handle {
+            frames: -10.0,
+            value: 0.0,
+        });
+        lane.keys[1].out_handle = Some(Handle {
+            frames: 10.0,
+            value: 0.0,
+        });
+        lane.keys[2].in_handle = Some(Handle {
+            frames: -10.0,
+            value: 0.0,
+        });
+        let shift = bend_shift(bend_of(&lane, 1, 40.0), 6.0, false, [1.0, 1.0]);
+        let across = shift
+            .handles
+            .iter()
+            .find(|e| e.mark.frame == 30 && !e.out)
+            .expect("the In handle moves too");
+        assert!(across.handle.value < 0.0);
+    }
+
+    #[test]
+    fn a_point_beside_a_steep_line_is_near_it() {
+        let line = [pos2(0.0, 0.0), pos2(3.0, 90.0)];
+        assert!(line_distance(&line, pos2(1.5, 45.0)) < 0.01);
+    }
+
+    #[test]
+    fn a_click_on_two_dimmed_curves_takes_the_nearer() {
+        let dims = [
+            (KeyParam::Opacity, vec![pos2(0.0, 10.0), pos2(90.0, 10.0)]),
+            (KeyParam::Rotation, vec![pos2(0.0, 14.0), pos2(90.0, 14.0)]),
+        ];
+        assert_eq!(dim_at(&dims, pos2(40.0, 13.0)), Some(KeyParam::Rotation));
+    }
+
+    #[test]
+    fn a_shift_drag_keeps_the_direction_it_started_in() {
+        let first = locked(None, true, vec2(1.0, 8.0));
+        assert_eq!(locked(first, true, vec2(40.0, 2.0)), Some(Lock::Value));
+    }
+
+    #[test]
+    fn a_drag_snaps_to_the_nearest_keyframe_of_another_value() {
+        let lanes = [
+            lane(KeyParam::Volume, &[10]),
+            lane(KeyParam::Opacity, &[23, 40]),
+        ];
+        let marks = [mark(KeyParam::Volume, 10)];
+        assert_eq!(
+            snapped(&clip(), &lanes, &marks, 12, 80, 2.0),
+            Some((13, 23))
+        );
+    }
+
+    #[test]
+    fn a_drag_does_not_snap_to_a_keyframe_of_its_own_value() {
+        let lanes = [lane(KeyParam::Volume, &[10, 23])];
+        let marks = [mark(KeyParam::Volume, 10)];
+        assert_eq!(snapped(&clip(), &lanes, &marks, 12, 80, 2.0), None);
+    }
+
+    #[test]
+    fn an_ease_in_also_goes_to_a_first_keyframe() {
+        let lanes = [lane(KeyParam::Volume, &[0, 10, 20])];
+        let marks = [mark(KeyParam::Volume, 0), mark(KeyParam::Volume, 10)];
+        assert_eq!(
+            ease_parts(&clip(), &lanes, &marks, Ease::EaseIn),
+            vec![(
+                "keyframes.set",
+                json!({"clips":["c1"],"param":"volume","frames":[0, 10],"ease":"ease_in"})
+            )]
+        );
     }
 
     #[test]
@@ -3381,7 +4186,7 @@ mod tests {
     #[test]
     fn an_ease_sets_that_keyframe() {
         assert_eq!(
-            ease_body("c1", mark(KeyParam::Volume, 3), Ease::EaseIn),
+            ease_body("c1", KeyParam::Volume, &[3], Ease::EaseIn),
             json!({"clips":["c1"],"param":"volume","frames":[3],"ease":"ease_in"})
         );
     }

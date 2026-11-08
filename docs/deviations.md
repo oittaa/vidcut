@@ -1822,7 +1822,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Delete
   - A new value in the bar goes to `keyframes.set`. A drag on the value sends it when the drag stops.
   - A new keyframe is selected. Thus the bar shows its value at once.
-  - With two or more keyframes selected, the bar shows their number and Delete.
+  - With two or more keyframes selected, the bar shows their number, their ease and Delete.
   - The curve of a value shows under its track.
   - Fit Clip is the name of Full Extend Zoom. Detail Zoom and the zoom slider are as in Resolve.
   - Ctrl and the mouse wheel zoom at the pointer. Shift and the mouse wheel move the range.
@@ -2934,6 +2934,94 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The effect has no public rules. A spectral gate is the usual way to lower steady noise and it runs in real time.
   - The default effect lowered the noise by 0.4 dB and the quiet lines by up to 6.0 dB (spec). Meeting recordings need the opposite.
+
+## X158. An ease on all selected keyframes comes from a right-click or the bar
+
+- **Resolve:**
+  - The title bar of the Curve Editor has four buttons: Linear, Ease In, Ease In and Out, and Ease Out. They change all the selected keyframes (pp. 1262–1263).
+  - A right-click on a keyframe in the Keyframe Editor opens no menu ([X87](#x87-the-keyframes-tab-has-an-ease-menu)).
+- **vidcut:**
+  - A right-click on a selected keyframe keeps the selection. The ease goes on all the selected keyframes.
+  - A right-click on another keyframe selects that keyframe alone.
+  - With two or more keyframes selected, the bar under the tracks has an ease list. It shows `Mixed` when their eases are not the same.
+  - A speed keyframe takes only Linear and Ease In and Out.
+  - `keyframes.set` with several `frames` sets the ease of one value. `apply` holds one such request for each value.
+- **Why:**
+  - The ease menu is already on the keyframe (X87). A second place in a title bar adds nothing.
+  - A selection across several values takes one ease in one undo step.
+
+## X159. Snapping also goes to other keyframes
+
+- **Resolve:**
+  - Enable Snapping snaps the control points of the Curve Editor to the playhead (pp. 1259, 1264).
+  - It is on in a new project. A keyframe of another curve and a timeline marker are not targets (measured in Resolve Studio 21.2).
+- **vidcut:**
+  - Enable Snapping is in the ⋯ menu of the Keyframes tab. It is on when vidcut starts.
+  - It acts on each drag of keyframes: on a track, on a group track and on a curve.
+  - A dragged keyframe goes to the playhead or to a keyframe of another value when one is near.
+  - A white line shows the time that it goes to.
+  - It does not act on a handle, or on a Shift-drag that changes only the value.
+- **Why:**
+  - Two values often change on the same frame. A snap to the keyframes of the other values does this without a look at the timecode.
+  - Two keyframes of one value cannot share a frame. Thus the keyframes of the same value are not targets.
+
+## X160. The graph sits above the tracks with a scale for each curve
+
+- **Resolve:**
+  - The Curve Editor takes the place of the tracks. One keyframe track for the selected curve is at its bottom (p. 1261).
+  - A Parameters menu with checkboxes selects the curves (p. 1262).
+  - Auto Zoom Graph Height sets the scale of the graph from the active keyframes (p. 1264). A slider sets it by hand.
+  - Its menu has Off, On and Normalized. A new project uses Normalized (measured in Resolve Studio 21.2).
+    - Normalized gives each curve the full height with its own range, and the labels show the active curve.
+    - On and Off give all the curves one scale.
+  - After a click on an empty part of the graph, no curve is active (measured in Resolve Studio 21.2).
+  - A larger editor is a window of its own (p. 1260).
+- **vidcut:**
+  - The Graph button shows the graph above all the tracks. The tracks stay under it.
+  - The curve button of each track turns its line on or off in the graph.
+  - The names and the colors of the lines are at the left of the graph. A click on a name makes that curve active.
+  - Each curve fills the height of the graph with its own scale, as Normalized does. The labels show the range of the active curve. There is no choice of scale.
+  - One curve is always active. A click on an empty part of the graph clears only the selection.
+  - A drag on the line under the graph changes its height. No window opens.
+- **Why:**
+  - The tracks keep the diamonds of all the values. A box and a group drag still work there.
+  - Opacity and Rotation have very different ranges. With one scale, one of the two is almost flat.
+  - With one active curve, its points and handles stay ready to use.
+  - Each track already has a curve button. Checkboxes in a menu repeat it.
+
+## X161. Alt moves a handle alone, and the other handle stops at a keyframe
+
+- **Resolve:**
+  - Alt and a drag on a Bezier handle moves nothing (measured in Resolve Studio 21.2).
+  - The other handle keeps its length on the screen (measured in Resolve Studio 21.2). Its limit at the next keyframe is not measured.
+- **vidcut:**
+  - With Alt, the handle moves alone. The other handle of the keyframe stays.
+  - The other handle stops at the next keyframe on its side.
+  - A first or a last keyframe has nothing to line up.
+- **Why:**
+  - A corner in the curve is then a choice. Alt has no other use on a handle.
+  - A curve has one value at each frame. A handle past the next keyframe would break that.
+
+## X162. A drag on the line bends the curve
+
+- **Resolve:**
+  - The control points and the Bezier handles change the curve (pp. 1261–1262).
+  - A drag on the line between two keyframes moves the two keyframes together (measured in Resolve Studio 21.2).
+    - It changes only their values, and the two become the selection.
+    - Ctrl and a drag does the same.
+  - Alt and a press on the line adds a keyframe. The new keyframe does not follow the drag.
+- **vidcut:**
+  - A drag up or down on the line between two keyframes bends that part of the curve. The point of the press follows the pointer.
+  - A straight part gets two handles that give the same straight line. The drag then changes their values.
+  - A part with one handle changes only that handle.
+  - The handle frames stay. Only the handle values change.
+  - The handle on the other side of each of the two keyframes lines up. With Alt, it stays ([X161](#x161-alt-moves-a-handle-alone-and-the-other-handle-stops-at-a-keyframe)).
+  - The whole drag is one undo step.
+  - Alt and a click on the line adds a keyframe. Alt and a drag bends the curve.
+  - On Position and Zoom, a bend changes the X curve, as a handle does. The Y curve keeps only the timing of the handles.
+- **Why:**
+  - The user shapes a curve at the place that must change, with no handles to find.
+  - A drag on one of two selected keyframes still moves the two together.
 
 ## X163. A compound clip takes its clips whole
 

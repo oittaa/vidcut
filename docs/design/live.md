@@ -397,6 +397,19 @@ The bar and the Jobs button:
 - Each row records where it drew each keyframe (`Editor::seen`). A box drag (`Boxing`) selects the marks inside it on release.
 - A drag shows the moved keyframes (`Shift`) and sends one `apply` on release. The selection follows the moved frames (`Pending`).
 - Mark > Move Selected Keyframes (`Nudge`, `Workspace::nudge_keys`) sends what a drag of one frame or one step sends.
+- A drag finds its keyframe at the point of the press (`pressed_at`). The pointer can already be past that keyframe when the drag starts.
+- Shift holds a drag on a curve point to one direction (`Lock`, `locked`). The first movement selects the direction.
+- `Editor::snap_off` turns off snapping. `snapped` finds the nearest target of a drag. `Shift::snap` is the time of the white line.
+- A right-click on a selected keyframe keeps the selection. `marks_eases` gives the eases of the selection. `ease_parts` makes one `keyframes.set` for each value.
+- `Editor::graph` turns on the large graph (`Workspace::curve_graph`). `graphed` gives its lines, without those in `Editor::graph_off`.
+  - `Editor::graph_active` is the curve with the points. Without one that the graph shows, the first line is active.
+  - `paint_curve` draws a curve with its points. `use_curve` takes its clicks and drags. The rows under the tracks use both too.
+  - `dim_curve` draws a dimmed line and returns its points. `dim_at` finds the line at a click.
+  - `Editor::graph_h` is the height, from the drag in `graph_grip`.
+- A drag on a handle also sets the other handle of the keyframe (`HandleFix`, `lined_up`). `Drag::apart` is true while Alt is down.
+- A drag on the line between two keyframes is `Kind::Bend`. `CurveSpots::bend_at` finds the part of the curve and `BendFix` holds it. `keyframes::bent` gives the new handles.
+- `Workspace::add_on_line` adds a keyframe at an Alt-click on the line.
+- `Drag::frozen` keeps the value scale of the curve during a drag of a handle or a bend. Why: the handle stays under the pointer.
 - The selected rows are a list of values (`Editor::rows`). A click on a row's name or on a keyframe changes them.
 - Mark > Add Keyframe, Delete Keyframe and Delete All Keyframes (`KeyCmd`, `Workspace::key_cmd`) act on the selected marks or the selected rows.
   - `Workspace::key_target` takes only the rows that the open tab or tray shows.
