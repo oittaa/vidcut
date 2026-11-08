@@ -1188,6 +1188,9 @@ pub enum Request {
         clips: OneOrMany<ClipRef>,
         #[serde(default)]
         name: Option<String>,
+        /// The bin of its copy in the Media Pool. Default: the top level.
+        #[serde(default)]
+        bin: Option<String>,
     },
     /// Convert In and Out to Compound Clip: cuts the clips of every track at
     /// the In mark and the Out mark, and makes a compound clip of what is
@@ -1203,6 +1206,35 @@ pub enum Request {
         range: Option<RangeSpec>,
         #[serde(default)]
         name: Option<String>,
+        /// The bin of its copy in the Media Pool. Default: the top level.
+        #[serde(default)]
+        bin: Option<String>,
+    },
+    /// Create Compound Clip: makes a compound clip of what is between the
+    /// marks, only in the Media Pool. The timeline does not change. `range`
+    /// defaults to the timeline's marks. With one mark, the range runs from
+    /// the start of the timeline or to its end. Returns its `compound` id.
+    #[serde(rename = "media.compound")]
+    MediaCompound {
+        #[serde(default)]
+        range: Option<RangeSpec>,
+        #[serde(default)]
+        name: Option<String>,
+        /// The bin it goes in. Default: the top level.
+        #[serde(default)]
+        bin: Option<String>,
+    },
+    /// Delete a compound clip from the Media Pool. Copies on the timeline
+    /// stay.
+    #[serde(rename = "media.compound_remove")]
+    MediaCompoundRemove { compound: String },
+    /// Put a compound clip of the Media Pool on V1 and A1, over what is
+    /// there, at `at`. Default: the end of the timeline. Returns its clips.
+    #[serde(rename = "edit.place_compound")]
+    EditPlaceCompound {
+        compound: String,
+        #[serde(default)]
+        at: Option<TimeSpec>,
     },
     /// Decompose in Place: a compound clip becomes the clips it holds, at
     /// their times, trimmed to the part it shows. Inner track n goes on the

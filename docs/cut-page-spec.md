@@ -28,7 +28,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
 - generators: the twelve kinds of the Generators section (§8.17)
-- compound clips made from timeline clips (§8.18)
+- compound clips (§8.18)
 - the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
@@ -41,7 +41,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
 - angle switches ([todo](todo/sync-bin.md)), Live Overwrite
-- the two In-Out actions for compound clips ([todo](todo/compound-clips.md))
+- a drag of a compound clip from the Media Pool ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
 - Mixer FX other than the Ducker, Paste Attributes, guides
@@ -2122,6 +2122,9 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - The timeline does not change. The compound clip goes only into the Media Pool.
   - In 70 and Out 110 give 41 frames.
   - One mark gives the same range as in Convert In and Out to Compound Clip.
+- **A compound clip of the Media Pool** on a timeline:
+  - An append gives a linked picture on V1 and sound on A1.
+  - A range of it trims these two, as a clip of a file.
 - **Decompose in Place** (p. 1054), on the context menu of a clip:
   - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
   - Inner track n goes on the track of the compound clip plus n, for picture and for sound.

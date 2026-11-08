@@ -1,4 +1,4 @@
-# Compound clips: the Media Pool
+# Compound clips: the rest
 
 **When:** not decided.
 
@@ -6,8 +6,8 @@
 
 **Why:**
 
-- A compound clip in the Media Pool can go on the timeline many times.
+- A drag is the usual way to put a Media Pool item on the timeline.
 
 **To do:**
 
-- Build Create Compound Clip, as spec §8.18 tells. It needs a Media Pool item that holds a compound clip. The pool holds only files now.
+- Let a drag put a compound clip of the Media Pool on the timeline.

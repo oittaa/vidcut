@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{block_clip, ensure_track, fix_audio, linked, locate, split_at, tracks, unlocked};
+use super::{
+    block_clip, clear_range, ensure_track, fix_audio, linked, locate, split_at, tracks, unlocked,
+};
 use crate::error::{Error, Result};
-use crate::model::{Clip, Compound, Kept, Project, Track, TrackKind};
+use crate::model::{Clip, Compound, Kept, PooledCompound, Project, Track, TrackKind};
 use crate::otio;
 
 #[derive(Debug, Default)]
@@ -192,12 +194,13 @@ fn given_name(p: &Project, name: Option<&str>) -> String {
                 .flat_map(|t| &t.clips)
                 .filter(|c| c.video && c.compound.is_some())
                 .count();
-            format!("Compound Clip {}", made + 1)
+            format!("Compound Clip {}", made.max(p.compounds.len()) + 1)
         }
     }
 }
 
-pub fn nest(p: &mut Project, ids: &[String], name: Option<&str>) -> Result<Nested> {
+pub fn nest(p: &mut Project, ids: &[String], name: Option<&str>, bin: &str) -> Result<Nested> {
+    checked_bin(p, bin)?;
     let ids: HashSet<String> = linked::with_ties(p, ids).into_iter().collect();
     if ids.is_empty() {
         return Err(Error::usage("name the clips to make a compound clip of"));
@@ -208,7 +211,106 @@ pub fn nest(p: &mut Project, ids: &[String], name: Option<&str>) -> Result<Neste
         }
     }
     let span = span_of(p, &ids);
-    build(p, &ids, span, name)
+    let nested = build(p, &ids, span, name)?;
+    keep_copy(p, &nested, bin);
+    Ok(nested)
+}
+
+fn checked_bin(p: &Project, bin: &str) -> Result<()> {
+    if bin.is_empty() || p.bins.iter().any(|b| b == bin) {
+        return Ok(());
+    }
+    Err(Error::not_found(format!("no bin {bin}")))
+}
+
+fn keep_copy(p: &mut Project, nested: &Nested, bin: &str) {
+    let hosts: Vec<Clip> = nested
+        .clips
+        .iter()
+        .filter_map(|id| p.clip(id).cloned())
+        .collect();
+    let part = |picture: bool| {
+        hosts
+            .iter()
+            .find(|c| c.video == picture)
+            .and_then(|c| c.compound.clone())
+    };
+    let (picture, sound) = (part(true), part(false));
+    let name = hosts
+        .iter()
+        .find_map(|c| c.name.clone())
+        .unwrap_or_default();
+    let id = p.alloc_pooled_compound_id();
+    p.compounds.push(PooledCompound {
+        id,
+        name,
+        bin: bin.to_string(),
+        picture,
+        sound,
+    });
+}
+
+pub fn pool_range(
+    p: &mut Project,
+    span: (i64, i64),
+    name: Option<&str>,
+    bin: &str,
+) -> Result<(String, Vec<String>)> {
+    checked_bin(p, bin)?;
+    let mut copy = p.clone();
+    let nested = nest_range(&mut copy, span, name, bin)?;
+    let made = copy.compounds.pop().expect("a nest keeps a copy");
+    let id = p.alloc_pooled_compound_id();
+    p.compounds.push(PooledCompound {
+        id: id.clone(),
+        ..made
+    });
+    Ok((id, nested.warnings))
+}
+
+pub fn remove_pooled(p: &mut Project, id: &str) -> Result<()> {
+    let before = p.compounds.len();
+    p.compounds.retain(|x| x.id != id);
+    if p.compounds.len() == before {
+        return Err(Error::not_found(format!("no compound clip {id}")));
+    }
+    Ok(())
+}
+
+pub fn place_pooled(p: &mut Project, id: &str, at: Option<i64>) -> Result<Nested> {
+    let item = p
+        .compounds
+        .iter()
+        .find(|x| x.id == id)
+        .cloned()
+        .ok_or_else(|| Error::not_found(format!("no compound clip {id}")))?;
+    let at = at.unwrap_or_else(|| p.end());
+    let span = (at, at + item.frames());
+    let mut clips = Vec::new();
+    for (kind, video, part) in [
+        (TrackKind::Video, true, item.picture),
+        (TrackKind::Audio, false, item.sound),
+    ] {
+        let Some(k) = part else { continue };
+        let name = tracks::prefix(kind).to_string() + "1";
+        let ti = ensure_track(p, &name)?;
+        unlocked(p, ti)?;
+        clear_range(p, ti, span.0, span.1);
+        fix_audio(p, ti);
+        let mut host = block_clip(p.alloc_clip_id(), (span.0, span.1 - span.0), None, None);
+        host.video = video;
+        host.name = Some(item.name.clone());
+        host.compound = Some(k);
+        clips.push(host.id.clone());
+        p.tracks[ti].clips.push(host);
+        p.tracks[ti].sort();
+    }
+    let mut warnings = Vec::new();
+    let dropped = otio::transitions::prune(p);
+    if dropped > 0 {
+        warnings.push(otio::transitions::dropped(dropped));
+    }
+    Ok(Nested { clips, warnings })
 }
 
 fn end_sound_at(t: &mut Track, at: i64) {
@@ -229,7 +331,13 @@ fn end_sound_at(t: &mut Track, at: i64) {
     }
 }
 
-pub fn nest_range(p: &mut Project, (a, b): (i64, i64), name: Option<&str>) -> Result<Nested> {
+pub fn nest_range(
+    p: &mut Project,
+    (a, b): (i64, i64),
+    name: Option<&str>,
+    bin: &str,
+) -> Result<Nested> {
+    checked_bin(p, bin)?;
     if a >= b {
         return Err(Error::usage(format!("empty range {a}..{b}")));
     }
@@ -259,7 +367,9 @@ pub fn nest_range(p: &mut Project, (a, b): (i64, i64), name: Option<&str>) -> Re
     if ids.is_empty() {
         return Err(Error::invalid("no clips between In and Out"));
     }
-    build(p, &ids, (a, b), name)
+    let nested = build(p, &ids, (a, b), name)?;
+    keep_copy(p, &nested, bin);
+    Ok(nested)
 }
 
 fn build(
@@ -464,6 +574,27 @@ mod tests {
         let host = f.editor.project().track("V1").unwrap().clips[1].clone();
         assert_eq!((host.start, host.duration), (10, 30));
         assert_eq!(f.track("V2").len(), 2);
+    }
+
+    #[test]
+    fn create_compound_clip_leaves_the_timeline_and_fills_the_pool() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 60);
+        let before = f.editor.project().tracks.clone();
+        f.ok(req("media.compound", json!({"range": "10f..40f"})));
+        assert_eq!(f.editor.project().tracks, before);
+        assert_eq!(f.editor.project().compounds[0].frames(), 30);
+    }
+
+    #[test]
+    fn a_pooled_compound_clip_lands_on_v1_and_a1_linked() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 60);
+        f.ok(req("media.compound", json!({"range": "10f..40f"})));
+        let id = f.editor.project().compounds[0].id.clone();
+        let r = f.ok(req("edit.place_compound", json!({"compound": id})));
+        let hosts = r.result["clips"].as_array().unwrap().len();
+        assert_eq!((hosts, f.track("V1")[1].1), (2, 60));
     }
 
     #[test]

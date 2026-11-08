@@ -2600,6 +2600,10 @@ impl Workspace {
             self.new_compound = Some(NewCompound::of_marks());
             ui.close();
         }
+        if ui.button("Create Compound Clip…").clicked() {
+            self.new_compound = Some(NewCompound::in_pool());
+            ui.close();
+        }
     }
 
     fn key_menu(&mut self, ui: &mut egui::Ui, p: &Project, clip: &str, frame: i64) {
