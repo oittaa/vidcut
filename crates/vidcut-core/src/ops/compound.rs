@@ -714,6 +714,45 @@ mod tests {
     }
 
     #[test]
+    fn a_compound_clip_cut_through_a_dissolve_shows_that_part_of_it() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 10, 50);
+        let b = f.append("m1", 50, 90);
+        f.ok(req("edit.dissolve", json!({"at": 40})));
+        let plan = |f: &Fixture| {
+            crate::render::flatten(f.editor.project(), 0, 35)
+                .unwrap()
+                .video
+        };
+        let before = plan(&f);
+        let host = nest(&mut f, &[&a, &b]).remove(0);
+        let trim = json!({"clip": host, "edge": "tail", "to": "35f", "ripple": false});
+        f.ok(req("edit.trim", trim));
+        assert_eq!(plan(&f), before);
+    }
+
+    #[test]
+    fn a_frozen_compound_clip_holds_the_level_of_its_frame_in_a_dissolve() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 10, 50);
+        let b = f.append("m1", 50, 90);
+        f.ok(req("edit.dissolve", json!({"at": 40})));
+        let host = nest(&mut f, &[&a, &b]).remove(0);
+        let trim = json!({"clip": host, "edge": "head", "to": "35f", "ripple": false});
+        f.ok(req("edit.trim", trim));
+        f.ok(req(
+            "edit.change_speed",
+            json!({"clips": [host], "speed": 0.0}),
+        ));
+        let plan = crate::render::flatten(f.editor.project(), 35, 80).unwrap();
+        let crate::render::VideoPiece::Mix { over, .. } = &plan.video[0] else {
+            panic!("the frozen frame is a mix");
+        };
+        let ramp = over[0].ramp.unwrap();
+        assert_eq!((ramp.at, ramp.of, ramp.held), (8, 25, true));
+    }
+
+    #[test]
     fn a_dissolve_between_nested_clips_returns_with_a_decompose() {
         let mut f = Fixture::new(&[(4.0, true)]);
         let a = f.append("m1", 0, 50);

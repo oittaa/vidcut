@@ -548,6 +548,7 @@ mod tests {
                     of: 10,
                     falling: false,
                     wipe: Some(direction),
+                    held: false,
                 }),
                 cross: false,
                 motion: None,

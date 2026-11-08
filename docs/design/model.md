@@ -611,7 +611,9 @@ Import:
   - `otio::made_stack` writes the kept `Stack`, so an export gives other editors a usual compound clip.
   - `Compound::made_from` holds each `Clip` whole, on the track that it came from. A new field of `Clip` thus stays through a nest with no change here.
   - `Compound::tracks` holds what plays. The picture block has the pictures. The sound block has the sounds (`sound_tracks`), each at the length of its own sound.
-  - Each block keeps the dissolves of its tracks. `render::expanded` plays them (`inner_transitions`).
+  - Each block keeps the dissolves of its tracks. `render::expanded` plays them (`inner_layout`).
+  - `inner_layout` widens the compound clip to reach each dissolve that it shows a part of. `Shown` limits the track to the frames of the compound clip.
+  - A frozen compound clip on a frame of a dissolve holds the level of that frame (`held_on`).
   - `ops::compound::nest_range` cuts every track at the two marks, and nests what is between them. It keeps inner track numbers from V1 and A1.
   - Each compound clip made here also has a copy in the Media Pool (`PooledCompound`, `keep_copy`). `pool_range` makes one on a clone of the project, so the timeline does not change.
   - `place_pooled` puts a copy on V1 and A1, over what is there.

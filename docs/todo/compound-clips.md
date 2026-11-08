@@ -7,9 +7,7 @@
 **Why:**
 
 - A drag is the usual way to put a Media Pool item on the timeline.
-- A dissolve inside a compound clip should play at each length and speed.
 
 **To do:**
 
 - Let a drag put a compound clip of the Media Pool on the timeline.
-- Make a dissolve play where an end of the compound clip cuts through it, and at speed sections.
