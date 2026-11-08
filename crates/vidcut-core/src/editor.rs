@@ -4737,8 +4737,8 @@ fn mutate(
             let span = match range {
                 Some(range) => ctx(p, playhead).range(range)?,
                 None => match (p.marks.mark_in, p.marks.mark_out) {
-                    (Some(a), Some(b)) => (a, b),
-                    _ => return Err(Error::usage("set In and Out, or give `range`")),
+                    (None, None) => return Err(Error::usage("set In or Out, or give `range`")),
+                    (a, b) => (a.unwrap_or(0), b.unwrap_or(p.end())),
                 },
             };
             let nested = ops::compound::nest_range(p, span, name.as_deref())?;
