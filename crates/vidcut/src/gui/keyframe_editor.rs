@@ -2778,18 +2778,37 @@ impl Workspace {
             }
         } else if resp.double_clicked() {
             let t = map.time(pos.x).round() as i64;
-            if clip.start <= t && t < clip.end() {
-                self.send(
-                    "keyframes.add",
-                    json!({ "clips": [clip.id], "param": param, "at": t }),
-                );
-                self.key_editor.fresh = Some((param, t, Instant::now()));
+            if self.add_key_at(clip, param, t) {
                 self.seek(PlayerId::Timeline, t, false);
             }
         } else if resp.clicked()
             && !ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl)
         {
             self.key_editor.selected.clear();
+        }
+    }
+
+    fn add_key_at(&mut self, clip: &Clip, param: KeyParam, t: i64) -> bool {
+        if t < clip.start || t >= clip.end() {
+            return false;
+        }
+        self.send(
+            "keyframes.add",
+            json!({ "clips": [clip.id], "param": param, "at": t }),
+        );
+        self.key_editor.fresh = Some((param, t, Instant::now()));
+        true
+    }
+
+    fn add_on_line(&mut self, ui: &egui::Ui, area: &CurveArea<'_>, lane: &Lane, at: &CurveSpots) {
+        let CurveArea { resp, clip, .. } = *area;
+        let alt = ui.input(|i| i.modifiers.alt);
+        if let Some(pos) = resp
+            .interact_pointer_pos()
+            .filter(|_| alt && resp.clicked())
+            && at.bend_at(clip, lane, pos).is_some()
+        {
+            self.add_key_at(clip, lane.param, at.map.time(pos.x).round() as i64);
         }
     }
 
@@ -3066,6 +3085,7 @@ impl Workspace {
         {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
         }
+        self.add_on_line(ui, area, lane, at);
         self.poke_curve(
             Press {
                 ui,

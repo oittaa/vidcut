@@ -134,7 +134,7 @@ These facts come from Resolve Studio 21.1.1 on Windows. The test timeline was 19
 - A drag on a group track moves that group's keyframes at that time.
 - Volume is a track in the Audio group.
 - The curve of a value shows under its track. A drag on an In or Out handle changes that handle and lines up the other one. With Alt, the handle moves alone.
-- A drag on the line between two keyframes bends that part of the curve.
+- A drag on the line between two keyframes bends that part of the curve. Alt and a click on the line adds a keyframe.
 - The Graph button shows the curves together in one large graph, with a height that the user changes ([X160](../deviations.md#x160-the-graph-sits-above-the-tracks-with-a-scale-for-each-curve)).
 - One click selects one keyframe. Ctrl-click adds a keyframe to the selection or removes it. Delete removes the selection.
 - A drag from an empty part draws a box. The box replaces the selection with the keyframes in it.
