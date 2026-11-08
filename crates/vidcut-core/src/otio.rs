@@ -826,6 +826,9 @@ pub fn export_drawn(
                             json!(effects::relative(&au.gain_keys, c.content_at(s)));
                     }
                     meta["muted"] = json!(au.muted);
+                    if au.pan != 0.0 {
+                        meta["pan"] = json!(au.pan);
+                    }
                     if let Some(v) = au.voice_isolation {
                         meta["voice_isolation"] = json!(v);
                     }
@@ -928,6 +931,9 @@ pub fn export_drawn(
                     "clip": c.id, "media": c.media, "color": c.color, "stream": au.stream,
                     "gain_db": au.gain_db,
                 });
+                if au.pan != 0.0 {
+                    meta["pan"] = json!(au.pan);
+                }
                 if let Some(v) = au.voice_isolation {
                     meta["voice_isolation"] = json!(v);
                 }
@@ -1362,6 +1368,7 @@ pub struct ImportedClip {
     pub gain_db: f64,
     pub gain_keys: Vec<Keyframe>,
     pub muted: bool,
+    pub pan: f64,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub link: Option<i64>,
     pub effects: Vec<Value>,
@@ -1445,6 +1452,7 @@ impl ImportedClip {
             gain_db: 0.0,
             gain_keys: Vec::new(),
             muted: false,
+            pan: 0.0,
             voice_isolation: None,
             link: None,
             effects: Vec::new(),
@@ -2184,6 +2192,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         gain_db: meta["gain_db"].as_f64().unwrap_or(0.0),
                         gain_keys: our_keys(meta).unwrap_or_default(),
                         muted: meta["muted"].as_bool().unwrap_or(false),
+                        pan: meta["pan"].as_f64().unwrap_or(0.0),
                         voice_isolation: serde_json::from_value(meta["voice_isolation"].clone())
                             .ok(),
                         link: link_group(item),
@@ -2280,6 +2289,8 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let gain_keys = our_keys(meta).unwrap_or_else(|| effects::gain_keys(item));
             effects::drop_gain_keys(&mut effects);
             let voice_isolation = serde_json::from_value(meta["voice_isolation"].clone()).ok();
+            let pan = meta["pan"].as_f64().or_else(|| effects::pan(item));
+            effects::drop_pan(&mut effects);
             let stream = meta["stream"]
                 .as_u64()
                 .map(|s| s as u32)
@@ -2337,6 +2348,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if voice_isolation.is_some() {
                     c.voice_isolation = voice_isolation;
                 }
+                if let Some(pan) = pan {
+                    c.pan = pan;
+                }
                 c.audio_effects = effects;
                 if c.speed.is_none() {
                     c.speed = speed;
@@ -2372,6 +2386,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 gain_db: gain.unwrap_or(0.0),
                 gain_keys,
                 muted,
+                pan: pan.unwrap_or(0.0),
                 voice_isolation,
                 link,
                 effects: Vec::new(),

@@ -5040,6 +5040,10 @@ pub struct ClipAudio {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gain_keys: Vec<Keyframe>,
     pub muted: bool,
+    /// The pan, from -100 (all the way left) to 100 (all the way right).
+    /// Left out at 0, the middle.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pan: f64,
     /// Effects on its sound, carried from another editor. The clip volume
     /// is `gain_db` and `gain_keys`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

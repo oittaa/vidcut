@@ -913,6 +913,9 @@ pub enum AudioPiece {
         /// model does not run.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         isolation: Option<f64>,
+        /// Its clip's pan, from -100 to 100. Left out at 0.
+        #[serde(default, skip_serializing_if = "is_centered")]
+        pan: f64,
     },
     Silence {
         samples: i64,
@@ -1349,6 +1352,26 @@ fn is_normal_speed(speed: &f64) -> bool {
     *speed == 1.0
 }
 
+fn is_centered(pan: &f64) -> bool {
+    *pan == 0.0
+}
+
+pub fn pan_db(pan: f64) -> (f64, f64) {
+    let share = (pan.abs() / 100.0).min(1.0);
+    let steps = |gain: f64| (gain.log10() * 200.0).round() / 10.0;
+    let near = steps(1.0 + share);
+    let far = steps(1.0 - share).max(-6.0);
+    if pan < 0.0 { (near, far) } else { (far, near) }
+}
+
+pub fn pan_gains(pan: f64) -> (f32, f32) {
+    let (left, right) = pan_db(pan);
+    (
+        10f64.powf(left / 20.0) as f32,
+        10f64.powf(right / 20.0) as f32,
+    )
+}
+
 impl AudioPiece {
     pub fn samples(&self) -> i64 {
         match self {
@@ -1646,6 +1669,7 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 fade,
                 isolation,
                 keyed,
+                pan,
                 ..
             }),
             AudioPiece::Source {
@@ -1658,12 +1682,14 @@ fn push_audio(out: &mut Vec<AudioPiece>, piece: AudioPiece) {
                 fade: f2,
                 isolation: i2,
                 keyed: k2,
+                pan: p2,
                 ..
             },
         ) if media == m2
             && stream == st2
             && gain_db == g2
             && isolation == i2
+            && pan == p2
             && keyed
                 .as_ref()
                 .map(|k| (&k.keys, k.per_frame, k.at + *samples as f64))
@@ -2547,6 +2573,7 @@ fn source_audio(p: &Project, c: &Clip, m: &Media, x: i64, samples: i64) -> Audio
         fade: None,
         isolation: None,
         keyed,
+        pan: audio.pan,
     }
 }
 
@@ -2625,6 +2652,7 @@ pub fn sound_alone(p: &Project, clip: &str) -> Result<RenderPlan> {
                 s.gain_db = 0.0;
                 s.gain_keys.clear();
                 s.muted = false;
+                s.pan = 0.0;
                 s.voice_isolation = None;
             }
         }
@@ -2844,6 +2872,7 @@ fn sound_of(p: &Project, m: &Media, head: i64, samples: i64) -> AudioPiece {
         fade: None,
         isolation: None,
         keyed: None,
+        pan: 0.0,
     }
 }
 
@@ -3110,6 +3139,65 @@ mod tests {
         let t = p.track("V1").unwrap();
         let fades = transitions::cross_fades(&p, t);
         assert_eq!(transitions::heard_at(&fades, &t.clips[1], 49), Some(0.5));
+    }
+
+    #[test]
+    fn the_middle_of_the_pan_changes_no_side() {
+        assert_eq!(pan_db(0.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn pan_to_the_right_lowers_the_left_and_raises_the_right() {
+        assert_eq!(pan_db(25.0), (-2.5, 1.9));
+    }
+
+    #[test]
+    fn pan_to_the_left_mirrors_pan_to_the_right() {
+        assert_eq!(pan_db(-25.0), (1.9, -2.5));
+    }
+
+    #[test]
+    fn the_far_side_of_a_pan_stops_at_minus_six_db() {
+        assert_eq!(pan_db(75.0), (-6.0, 4.9));
+    }
+
+    #[test]
+    fn a_full_pan_is_six_db_on_each_side() {
+        assert_eq!(pan_db(100.0), (-6.0, 6.0));
+    }
+
+    #[test]
+    fn a_pan_moves_in_steps_of_a_tenth_of_a_db() {
+        assert_eq!(pan_db(1.5), (-0.1, 0.1));
+    }
+
+    #[test]
+    fn a_centered_pan_has_unity_gains() {
+        assert_eq!(pan_gains(0.0), (1.0, 1.0));
+    }
+
+    fn audio_pieces(f: &Fixture) -> Vec<AudioPiece> {
+        flatten(f.editor.project(), 0, 100).unwrap().audio[0].clone()
+    }
+
+    #[test]
+    fn a_clips_pan_reaches_its_piece() {
+        let mut f = fixture();
+        f.append("m1", 0, 100);
+        req(&mut f, "clip.set", json!({"clips": "c1", "pan": -40.0}));
+        assert!(matches!(
+            audio_pieces(&f)[0],
+            AudioPiece::Source { pan, .. } if pan == -40.0
+        ));
+    }
+
+    #[test]
+    fn two_clips_with_other_pans_stay_two_pieces() {
+        let mut f = fixture();
+        f.append("m1", 0, 50);
+        f.append("m1", 50, 100);
+        req(&mut f, "clip.set", json!({"clips": "c2", "pan": 30.0}));
+        assert_eq!(audio_pieces(&f).len(), 2);
     }
 
     fn auto_for_hdr_slow_motion() -> Retime {

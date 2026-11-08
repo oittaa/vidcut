@@ -259,6 +259,86 @@ fn a_timeline_comes_back_from_an_otio_file() {
     assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
 }
 
+#[test]
+fn a_clips_pan_comes_back_from_an_otio_file() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    f.ok(req("clip.set", json!({"clips": "c1", "pan": 62.5})));
+    assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
+}
+
+fn pan_effects(item: &Value) -> Vec<Value> {
+    item["effects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["metadata"][EDITOR]["Effect Name"] == "Fairlight Clip Pan")
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn a_clips_pan_is_written_as_the_pan_effect() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    f.ok(req("clip.set", json!({"clips": "c1", "pan": 62.5})));
+    let doc = written(&f);
+    let found = &pan_effects(&doc["tracks"]["children"][1]["children"][0])[0];
+    assert_eq!(
+        found["metadata"][EDITOR]["Parameters"][0]["Parameter Value"],
+        62.5
+    );
+}
+
+#[test]
+fn a_centered_pan_is_not_written() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    let doc = written(&f);
+    assert!(pan_effects(&doc["tracks"]["children"][1]["children"][0]).is_empty());
+}
+
+fn with_pan(value: f64, keys: Value) -> Value {
+    let parameter = json!({
+        "Parameter ID": "pan",
+        "Parameter Value": value,
+        "Default Parameter Value": 0.0,
+        "Key Frames": keys,
+    });
+    json!({"effects": [{
+        "OTIO_SCHEMA": "Effect.1",
+        "metadata": {EDITOR: {
+            "Effect Name": "Fairlight Clip Pan",
+            "Enabled": true,
+            "Name": "Pan",
+            "Parameters": [parameter],
+            "Type": 72,
+        }},
+    }]})
+}
+
+#[test]
+fn the_pan_effect_of_a_file_sets_the_pan() {
+    assert_eq!(effects::pan(&with_pan(-37.5, json!({}))), Some(-37.5));
+}
+
+#[test]
+fn a_keyed_pan_of_a_file_sets_no_pan() {
+    assert_eq!(
+        effects::pan(&with_pan(-37.5, json!({"0": {"Value": 10.0}}))),
+        None
+    );
+}
+
 fn written(f: &Fixture) -> Value {
     export(f.editor.project(), "t", None, Locations::Absolute).unwrap()
 }

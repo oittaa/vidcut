@@ -722,6 +722,7 @@ impl Lane {
                 fade: cross,
                 isolation,
                 keyed,
+                pan,
                 ..
             } = &piece
             {
@@ -817,6 +818,7 @@ impl Lane {
                 } else {
                     10f32.powf(*gain_db as f32 / 20.0) * self.trim
                 };
+                let sides = (ch >= 2).then(|| vidcut_core::render::pan_gains(*pan));
                 let fade = self.declick.min(len / 2).max(1);
                 let before = self.piece.checked_sub(1).map(|i| &self.pieces[i]);
                 let after = self.pieces.get(self.piece + 1);
@@ -843,7 +845,12 @@ impl Lane {
                         g *= dip.gain(base + (done + i) as i64);
                     }
                     for c in 0..ch {
-                        out[(done + i) * ch + c] += self.scratch[i * ch + c] * g;
+                        let side = match (sides, c) {
+                            (Some((left, _)), 0) => left,
+                            (Some((_, right)), 1) => right,
+                            _ => 1.0,
+                        };
+                        out[(done + i) * ch + c] += self.scratch[i * ch + c] * g * side;
                     }
                 }
             }

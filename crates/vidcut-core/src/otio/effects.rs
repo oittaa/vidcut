@@ -5,6 +5,7 @@ use crate::model::{ClipAudio, Effects, Handle, Kept, Keyframe};
 use crate::validate::GAIN;
 
 const VOLUME: &str = "Fairlight Clip Volume and Fades";
+const PAN: &str = "Fairlight Clip Pan";
 
 const FADES: [(&str, bool); 4] = [
     ("videoFaderIn", true),
@@ -83,6 +84,38 @@ pub(super) fn volume(db: f64) -> Value {
             ],
         } },
     })
+}
+
+fn pan_effect(pan: f64) -> Value {
+    let p = plain("pan", json!(pan), json!(0.0), "Double");
+    effect(group(PAN, 72, 1, vec![ranged(p, -100.0, 100.0)]))
+}
+
+fn is_pan(e: &Value) -> bool {
+    e["metadata"][EDITOR]["Effect Name"] == PAN
+}
+
+fn pan_param(e: &Value) -> Option<&Value> {
+    params(e).find(|p| p["Parameter ID"] == "pan")
+}
+
+fn pan_keyed(e: &Value) -> bool {
+    pan_param(e)
+        .and_then(|p| p["Key Frames"].as_object())
+        .is_some_and(|keys| !keys.is_empty())
+}
+
+pub(super) fn pan(item: &Value) -> Option<f64> {
+    item["effects"]
+        .as_array()?
+        .iter()
+        .find(|e| is_pan(e) && e["metadata"][EDITOR]["Enabled"] != false && !pan_keyed(e))
+        .and_then(pan_param)?["Parameter Value"]
+        .as_f64()
+}
+
+pub(super) fn drop_pan(list: &mut Vec<Value>) {
+    list.retain(|e| !is_pan(e) || pan_keyed(e));
 }
 
 pub(super) fn gain(item: &Value) -> Option<f64> {
@@ -438,6 +471,9 @@ pub(super) fn sound(
             list.insert(0, v);
         }
         None => {}
+    }
+    if au.pan != 0.0 {
+        list.push(pan_effect(au.pan));
     }
     list
 }

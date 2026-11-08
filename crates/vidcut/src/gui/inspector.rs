@@ -20,7 +20,7 @@ use vidcut_core::model::{
 use vidcut_core::ops::picture::{cleared, effect_checked, has_picture};
 use vidcut_core::place::fitted;
 use vidcut_core::time::TimeSpec;
-use vidcut_core::validate::GAIN;
+use vidcut_core::validate::{GAIN, PAN};
 
 use super::dialog;
 use super::export::Picked;
@@ -69,6 +69,7 @@ enum Key {
     Effect(usize, Knob),
     Center(Axis),
     Volume,
+    Pan,
     Speed,
     Rate,
     Length,
@@ -1074,6 +1075,7 @@ impl Key {
             Key::Center(Axis::X) => "Center X",
             Key::Center(Axis::Y) => "Center Y",
             Key::Volume => "Volume",
+            Key::Pan => "Pan",
             Key::Speed => "Speed",
             Key::Rate => "Frames per Second",
             Key::Length => "Duration",
@@ -1094,7 +1096,7 @@ impl Key {
             Key::Volume => " dB",
             Key::Speed => "%",
             Key::Rate => " fps",
-            Key::Effect(..) | Key::Center(_) | Key::Length => "",
+            Key::Effect(..) | Key::Center(_) | Key::Length | Key::Pan => "",
         }
     }
 
@@ -1104,6 +1106,7 @@ impl Key {
             Key::Effect(_, k) => k.dial().speed,
             Key::Center(_) => 0.005,
             Key::Volume => 0.1,
+            Key::Pan => 0.5,
             Key::Speed | Key::Length => 1.0,
             Key::Rate => 0.1,
         }
@@ -1114,7 +1117,7 @@ impl Key {
             Key::Picture(Field::Pitch | Field::Yaw) => (0, 3),
             Key::Picture(_) => (0, 2),
             Key::Effect(..) | Key::Center(_) => (3, 3),
-            Key::Volume => (1, 1),
+            Key::Volume | Key::Pan => (1, 1),
             Key::Speed => (0, 2),
             Key::Rate => (0, 3),
             Key::Length => (0, 0),
@@ -1125,7 +1128,7 @@ impl Key {
         match self {
             Key::Picture(f) => f.usual(),
             Key::Effect(_, k) => k.dial().usual,
-            Key::Center(_) | Key::Volume => 0.0,
+            Key::Center(_) | Key::Volume | Key::Pan => 0.0,
             Key::Speed => 100.0,
             Key::Rate | Key::Length => 0.0,
         }
@@ -1237,6 +1240,7 @@ struct Sound {
     gain: f64,
     muted: bool,
     keyed: bool,
+    pan: f64,
 }
 
 type Lists<'a> = (&'a [Chosen], &'a [Sound], &'a [Paced]);
@@ -2888,6 +2892,7 @@ impl Workspace {
                     gain,
                     muted: a.muted,
                     keyed: a.is_keyed(),
+                    pan: a.pan,
                 })
             })
             .collect()
@@ -3232,6 +3237,18 @@ impl Workspace {
         });
     }
 
+    fn send_pan(&mut self, sounds: &[Sound], to: f64) {
+        let to = to.clamp(*PAN.start(), *PAN.end());
+        let ids: Vec<&str> = sounds
+            .iter()
+            .filter(|s| s.pan != to)
+            .map(|s| s.id.as_str())
+            .collect();
+        if !ids.is_empty() {
+            self.send("clip.set", json!({ "clips": ids, "pan": to }));
+        }
+    }
+
     fn step_key(&mut self, key: Key, dir: i64, lists: Lists<'_>) {
         let at = self.snap.timeline.position;
         let Some(p) = self.project_shared() else {
@@ -3368,6 +3385,7 @@ impl Workspace {
             Key::Effect(n, k) => self.send_knob(chosen, (n, k), value),
             Key::Center(axis) => self.send_center(axis, value, chosen),
             Key::Volume => self.send_volume(sounds, value),
+            Key::Pan => self.send_pan(sounds, value),
             Key::Speed if Speed::freezes(value / 100.0) && !paced.iter().any(|c| c.ramped) => {
                 self.send_freeze(paced, value / 100.0);
             }
@@ -3700,6 +3718,17 @@ impl Workspace {
                 keys,
                 acts,
             );
+            let panned = sounds.iter().any(|s| s.pan != Key::Pan.usual());
+            let pan = (panned, first.pan, *PAN.start()..=*PAN.end());
+            field(
+                ui,
+                Key::Pan,
+                &self.inspector,
+                pan,
+                keyed_look(false),
+                None,
+                acts,
+            );
             label(ui, "Mute", sounds.iter().any(|s| s.muted));
             let mut on = first.muted;
             if ui.checkbox(&mut on, "").clicked() {
@@ -4007,7 +4036,7 @@ impl Workspace {
         let gone = |k: Key| match k {
             Key::Picture(_) | Key::Center(_) => chosen.is_empty(),
             Key::Effect(n, _) => chosen.first().is_none_or(|c| c.shown.effects.len() <= n),
-            Key::Volume => sounds.is_empty(),
+            Key::Volume | Key::Pan => sounds.is_empty(),
             Key::Speed | Key::Rate | Key::Length => paced.is_empty(),
         };
         if self.inspector.held.as_ref().is_some_and(|h| gone(h.field)) {

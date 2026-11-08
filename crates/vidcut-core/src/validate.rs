@@ -4,6 +4,7 @@ use crate::model::{Generator, Project, TrackKind};
 
 pub const GAIN: std::ops::RangeInclusive<f64> = -100.0..=30.0;
 pub const FADER: std::ops::RangeInclusive<f64> = -100.0..=10.0;
+pub const PAN: std::ops::RangeInclusive<f64> = -100.0..=100.0;
 
 pub fn fader_silent(volume_db: f64) -> bool {
     volume_db <= *FADER.start()
@@ -123,6 +124,9 @@ pub fn violations(p: &Project) -> Vec<String> {
                                 "{}: gain {} dB outside -100..30 dB",
                                 c.id, a.gain_db
                             ));
+                        }
+                        if !PAN.contains(&a.pan) {
+                            v.push(format!("{}: pan {} outside -100..100", c.id, a.pan));
                         }
                         if let Some(why) = crate::keyframes::problem(&a.gain_keys) {
                             v.push(format!("{}: {why}", c.id));

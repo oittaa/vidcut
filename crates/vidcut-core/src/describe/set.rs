@@ -750,6 +750,7 @@ impl Words<'_> {
             (Some(a), Some(t)) if a.is_keyed() => json!(c.gain_at(t as f64)),
             _ => audio(c, |a| json!(a.gain_db)),
         });
+        s.put("pan", "Pan", &number, |c| audio(c, |a| json!(a.pan)));
         if s.put("name", "Name", &text, |c| json!(c.name)) && named {
             s.f.naming();
         }
