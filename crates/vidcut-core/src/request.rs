@@ -1044,7 +1044,8 @@ pub enum Request {
     /// out. `all`: on every edit between two clips of the track (Add
     /// Dissolve to All Edits). Transitions on those edits go. A transition
     /// that is the same as the one it replaces but for its length keeps its
-    /// curve, with the frames of the keys scaled to the new length.
+    /// curve, with the frames of the keys scaled to the new length. An edge
+    /// of a compound clip takes only a cross dissolve or a dip to color.
     #[serde(rename = "edit.dissolve")]
     EditDissolve {
         #[serde(default)]
@@ -1086,7 +1087,8 @@ pub enum Request {
     /// Sets the type of the picture transition on the edit of `track`
     /// (default V1) nearest `at` (default: the playhead). The length stays.
     /// Any type can become any other: a cross dissolve, a dip to color, a
-    /// wipe, a smooth cut, a push or a slide.
+    /// wipe, a smooth cut, a push or a slide. An edge of a compound clip
+    /// takes only a cross dissolve or a dip to color.
     #[serde(rename = "edit.transition")]
     EditTransition {
         #[serde(default)]

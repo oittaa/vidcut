@@ -532,6 +532,18 @@ A compound clip ([spec D75](../cut-page-spec.md#12-decisions-on-gaps-and-contrad
   - The outer pass mixes it with the tracks below, by the mode of `Mix.placing`.
 - `Screen` keeps one picture for each depth of nesting in the frame. All the compound clips of the frame share them. A frame with no `place::Mix` frees them.
 
+A transition at an edge of a compound clip ([spec §8.18](../cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120)):
+
+- `render::expanded` keeps the compound clip on its track as a clip with no tracks (`hollow`). Thus `transitions::playing` still finds the transition, and the other side plays as usual.
+- `edges_on` gives the compound clip its edges. A dissolve gives its frames, and a dip to color the half of its side.
+- `expanded` widens the compound clip to reach those frames. Thus the hidden frames play (`inner_layout`).
+- `Around::at` gives the picture of the compound clip for a frame. `Placed::ramp` is the level of the dissolve. `place::level` multiplies it with the opacity.
+- `crossing` makes one `Placed` that both sides share. It is no picture. `place::parts_of` makes a `place::Mix` of the two sides, with `added` set.
+- `MixDraw::lay` adds the parts of such a `place::Mix` (`Gpu::adding`). Thus the two sides add up, then go over the layers below, as a crossing pair does.
+- A side with a composite mode does not cross. It fades over the other side.
+- `edge_fades` finds the sound fades at an edge. A fade of a picture block goes to its sound block (`otio::tied`).
+- `AudioPiece::Source` holds them in `edges`. The mix multiplies them with the gain.
+
 Dynamic Zoom and keyframes (D75):
 
 - The `render::Placed` of a piece has a `Run`: where the piece starts in its clip. `VideoPiece::part` and `Placed::after` move the `Run` with the piece.

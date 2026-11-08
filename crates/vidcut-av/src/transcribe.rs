@@ -669,6 +669,7 @@ pub fn voice_activity(
         speed: 1.0,
         joined: false,
         fade: None,
+        edges: Box::default(),
         isolation: None,
         keyed: None,
         pan: 0.0,

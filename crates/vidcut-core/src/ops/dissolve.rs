@@ -7,7 +7,10 @@ use crate::model::{
     Clip, Handle, Keyframe, MAX_BORDER, MotionEase, PictureTransition, Project, TrackKind,
     Transition,
 };
-use crate::otio::transitions::{self, Cuts};
+use crate::otio::{
+    self,
+    transitions::{self, Cuts},
+};
 
 /// Where a dissolve goes about its edit (decision D50).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
@@ -177,6 +180,7 @@ fn checked(kind: &PictureTransition) -> Result<()> {
 fn span(c: &Clip, sound: bool) -> Option<(i64, i64)> {
     if sound {
         c.audio_range()
+            .or_else(|| c.compound.is_some().then(|| (c.start, c.end())))
     } else {
         c.video.then(|| (c.start, c.end()))
     }
@@ -211,8 +215,8 @@ fn sides(p: &Project, ti: usize, sound: bool, e: i64) -> (Option<String>, Option
     (find(true), find(false))
 }
 
-fn compound_at(p: &Project, ti: usize, sound: bool, e: i64) -> Option<String> {
-    let (from, to) = sides(p, ti, sound, e);
+fn compound_at(p: &Project, ti: usize, e: i64) -> Option<String> {
+    let (from, to) = sides(p, ti, false, e);
     [from, to].into_iter().flatten().find(|id| {
         p.tracks[ti]
             .clips
@@ -294,7 +298,7 @@ type Plan = (Option<String>, Option<String>, i64, i64);
 
 fn plan(p: &Project, ti: usize, sound: bool, e: i64, shape: Shape) -> Option<Plan> {
     let (from, to) = sides(p, ti, sound, e);
-    if from.is_none() && to.is_none() || compound_at(p, ti, sound, e).is_some() {
+    if from.is_none() && to.is_none() {
         return None;
     }
     let (want_before, want_after) = wanted(shape, from.is_some(), to.is_some())?;
@@ -316,6 +320,9 @@ fn put(
     shape: Shape,
     kind: &PictureTransition,
 ) -> Option<Made> {
+    if !sound && !transitions::compound_takes(kind) && compound_at(p, ti, e).is_some() {
+        return None;
+    }
     let (from, to, before, after) = plan(p, ti, sound, e, shape)?;
     let cuts = Cuts::of(p, &p.tracks[ti]);
     let gone: Vec<bool> = p.tracks[ti]
@@ -407,7 +414,10 @@ pub fn dissolve(
     }
     let e = nearest(p, ti, !pictures, at)
         .ok_or_else(|| Error::invalid(format!("{track} has no edit to dissolve")))?;
-    if pictures && let Some(c) = compound_at(p, ti, false, e) {
+    if pictures
+        && !transitions::compound_takes(kind)
+        && let Some(c) = compound_at(p, ti, e)
+    {
         return Err(compound_error(&c));
     }
     let made = at_edit(p, ti, pictures, sound, e, shape, kind);
@@ -467,6 +477,9 @@ pub fn dissolve_clips(
     kind: &PictureTransition,
 ) -> Result<Vec<Made>> {
     checked(kind)?;
+    let beside_picture = |c: &Clip| {
+        picture && sound && !c.video && otio::tied(p, &c.id).iter().any(|x| clips.contains(x))
+    };
     let mut points: Vec<(usize, bool, i64)> = p
         .tracks
         .iter()
@@ -475,7 +488,7 @@ pub fn dissolve_clips(
             let pictures = picture && t.kind == TrackKind::Video;
             t.clips
                 .iter()
-                .filter(|c| clips.contains(&c.id))
+                .filter(|c| clips.contains(&c.id) && !beside_picture(c))
                 .filter_map(move |c| span(c, !pictures))
                 .flat_map(move |(a, b)| [(ti, pictures, a), (ti, pictures, b)])
         })
@@ -489,7 +502,8 @@ pub fn dissolve_clips(
     if made.is_empty() {
         return Err(points
             .iter()
-            .find_map(|&(ti, pictures, e)| compound_at(p, ti, !pictures, e))
+            .filter(|&&(_, pictures, _)| pictures && !transitions::compound_takes(kind))
+            .find_map(|&(ti, _, e)| compound_at(p, ti, e))
             .map_or_else(
                 || Error::invalid("the clips have no frames past their edges to dissolve with"),
                 |c| compound_error(&c),
@@ -500,7 +514,7 @@ pub fn dissolve_clips(
 
 fn compound_error(c: &str) -> Error {
     Error::invalid(format!(
-        "{c} is a compound clip, and its edges take no dissolve: decompose it first"
+        "{c} is a compound clip, and its edges take only a dissolve or a dip to color"
     ))
 }
 
@@ -531,7 +545,8 @@ fn sound_edit(p: &Project, ti: usize, from: Option<&str>, to: Option<&str>) -> O
     let clips = &p.tracks[ti].clips;
     let range = |id: Option<&str>| {
         id.and_then(|id| clips.iter().find(|c| c.id == id))
-            .and_then(Clip::audio_range)
+            .filter(|c| c.audio.is_some() || !c.video || !otio::tied(p, &c.id).is_empty())
+            .and_then(|c| span(c, true))
     };
     match (range(from), range(to), from, to) {
         (Some((_, b)), Some((a, _)), ..) => (a == b).then_some(a),
@@ -556,6 +571,11 @@ pub fn set_transition(
     }
     let e =
         nearest(p, ti, false, at).ok_or_else(|| Error::invalid(format!("{track} has no edit")))?;
+    if !transitions::compound_takes(kind)
+        && let Some(c) = compound_at(p, ti, e)
+    {
+        return Err(compound_error(&c));
+    }
     let cuts = Cuts::of(p, &p.tracks[ti]);
     let slot = p.tracks[ti]
         .transitions
@@ -971,7 +991,7 @@ mod tests {
     }
 
     #[test]
-    fn a_compound_clips_edge_takes_no_dissolve() {
+    fn a_compound_clips_edge_dissolves_with_its_hidden_frames() {
         let mut p = c2_compound();
         let made = super::dissolve(
             &mut p,
@@ -982,12 +1002,13 @@ mod tests {
             false,
             false,
             &crate::model::PictureTransition::Dissolve,
-        );
-        assert!(made.is_err());
+        )
+        .unwrap();
+        assert_eq!((made[0].before, made[0].after), (10, 12));
     }
 
     #[test]
-    fn ctrl_t_on_a_selected_compound_clip_asks_to_decompose_it() {
+    fn a_compound_clips_edge_refuses_a_wipe() {
         let mut p = c2_compound();
         let e = super::dissolve_clips(
             &mut p,
@@ -995,12 +1016,14 @@ mod tests {
             super::Shape::Length(25, super::Align::Center),
             true,
             false,
-            &crate::model::PictureTransition::Dissolve,
+            &crate::model::PictureTransition::Wipe {
+                direction: crate::model::WipeDirection::Left,
+            },
         )
         .unwrap_err();
         assert_eq!(
             e.to_string(),
-            "c2 is a compound clip, and its edges take no dissolve: decompose it first"
+            "c2 is a compound clip, and its edges take only a dissolve or a dip to color"
         );
     }
 

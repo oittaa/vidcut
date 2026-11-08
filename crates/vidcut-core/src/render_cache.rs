@@ -1367,6 +1367,8 @@ mod tests {
                     frame: 0,
                     start: 0,
                     ready: false,
+                    ramp: None,
+                    crossing: false,
                 }],
             }],
         }

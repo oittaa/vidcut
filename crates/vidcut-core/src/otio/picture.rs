@@ -1045,6 +1045,8 @@ mod tests {
             frame: 0,
             start: 0,
             ready: true,
+            ramp: None,
+            crossing: false,
         };
         let fitted = [240.0, 0.0, 1440.0, 1080.0];
         let level = Placing::new(&[placed], (1920.0, 1080.0), fitted, (1440.0, 1080.0)).levels[0];

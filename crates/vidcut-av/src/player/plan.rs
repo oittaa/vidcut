@@ -529,6 +529,8 @@ mod tests {
                 frame: 0,
                 start,
                 ready: true,
+                ramp: None,
+                crossing: false,
             }],
             cache: Default::default(),
             excluded: false,
