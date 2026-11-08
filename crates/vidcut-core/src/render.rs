@@ -10,7 +10,7 @@ use crate::model::{
     AlphaMode, Chart, Clip, ClipCache, ClipRetime, ColorSpace, CompositeMode, DuckDetect,
     Generator, Gradient, Hdr, Keyframe, Media, MediaSuperScale, Picture, PictureTransition,
     Project, PushPreset, Retime, Section, Settings, SlidePreset, SmoothMode, SuperScale,
-    TimelineColors, Title, TrackKind, WipeDirection,
+    TimelineColors, Title, Track, TrackKind, Transition, WipeDirection,
 };
 use crate::otio::transitions;
 use crate::time::Rational;
@@ -1871,7 +1871,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     v.volume_db = t.volume_db;
                     v.video_enabled &= t.video_enabled;
                     v.render_cache &= t.render_cache;
-                    v.transitions.clear();
+                    v.transitions = inner_transitions(p, n, c);
                     let mut clips: Vec<(Clip, Nest)> = n
                         .clips
                         .iter()
@@ -1901,6 +1901,37 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
         within = placed;
     }
     Some((out, within))
+}
+
+fn inner_transitions(p: &Project, n: &Track, c: &Clip) -> Vec<Transition> {
+    if n.transitions.is_empty() {
+        return Vec::new();
+    }
+    let speed = match c.speed.as_ref().map(|s| &*s.sections) {
+        None => 1.0,
+        Some([only]) if only.speed != 0.0 => only.speed,
+        Some(_) => return Vec::new(),
+    };
+    let ends = [c.source_at(c.start), c.source_at(c.end() - 1)];
+    let (first, last) = (ends[0].min(ends[1]), ends[0].max(ends[1]) + 1);
+    let cuts = transitions::Cuts::of(p, n);
+    let shown = |frames: i64| (frames as f64 / speed.abs()).round() as i64;
+    n.transitions
+        .iter()
+        .filter(|t| {
+            cuts.place(p, t)
+                .is_some_and(|cut| cut - t.before >= first && cut + t.after <= last)
+        })
+        .cloned()
+        .map(|mut t| {
+            (t.before, t.after) = (shown(t.before), shown(t.after));
+            if speed < 0.0 {
+                std::mem::swap(&mut t.from, &mut t.to);
+                std::mem::swap(&mut t.before, &mut t.after);
+            }
+            t
+        })
+        .collect()
 }
 
 fn placed_of(c: &Clip, nest: Option<&Nest>, over: bool, x: i64) -> Vec<Placed> {

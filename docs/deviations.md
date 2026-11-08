@@ -3037,8 +3037,9 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - The compound clip is only on the timeline. The Media Pool gets no item.
   - A clip goes in with its picture and its sound.
   - A clip on a locked track refuses the request.
-  - A dissolve goes inside when its clips go inside. It plays as a cut there, and a warning says so.
-  - `edit.decompose` brings the dissolve back.
+  - A dissolve goes inside when its clips go inside. It plays there, and `edit.decompose` brings it back.
+  - A dissolve plays as a cut where an end of the compound clip cuts through it.
+  - A dissolve also plays as a cut in a frozen compound clip, or in one with speed sections.
   - `edit.decompose` acts as Using Clips Only.
   - The sound of a clip on a video track goes on the lowest selected audio track, else on A1 or the first free track above.
 - **Why:**
@@ -3048,3 +3049,4 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.
   - Preserving Audio Data was dimmed in the measurement. Thus its behavior is not known.
   - vidcut has no selection of a dissolve in this request. A dissolve that goes away is a loss that the user did not ask for.
+  - The render plan plays only whole dissolves at one speed. Thus a part of a dissolve, or a dissolve at a changing speed, plays as a cut.

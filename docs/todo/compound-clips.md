@@ -1,4 +1,4 @@
-# Compound clips: the In-Out actions and a dissolve inside
+# Compound clips: the In-Out actions
 
 **When:** not decided.
 
@@ -8,10 +8,10 @@
 
 - A range on all tracks is a fast way to nest a scene.
 - A compound clip in the Media Pool can go on the timeline many times.
-- A dissolve inside a compound clip should play as it does on the timeline.
+- A dissolve inside a compound clip should play at each length and speed.
 
 **To do:**
 
 - Build Convert In and Out to Compound Clip, as spec §8.18 tells.
 - Build Create Compound Clip, as spec §8.18 tells. It needs a Media Pool item that holds a compound clip. The pool holds only files now.
-- Make a dissolve play inside a compound clip. `render::expanded` removes transitions there, so a dissolve plays as a cut until a decompose.
+- Make a dissolve play where an end of the compound clip cuts through it, and at speed sections.

@@ -97,6 +97,7 @@ fn picture_tracks(whole: &[Track]) -> Vec<Track> {
                 .collect();
             (!clips.is_empty()).then(|| Track {
                 clips,
+                transitions: t.transitions.iter().filter(|x| !x.sound).cloned().collect(),
                 ..Track::new(t.id.clone(), TrackKind::Video)
             })
         })
@@ -136,6 +137,7 @@ fn sound_tracks(whole: &[Track]) -> Vec<Track> {
         };
         sound.push(Track {
             clips,
+            transitions: t.transitions.iter().filter(|x| x.sound).cloned().collect(),
             ..Track::new(format!("A{n}"), TrackKind::Audio)
         });
     }
@@ -250,12 +252,6 @@ pub fn nest(p: &mut Project, ids: &[String], name: Option<&str>) -> Result<Neste
     let dropped = otio::transitions::prune(p);
     if dropped > 0 {
         warnings.push(otio::transitions::dropped(dropped));
-    }
-    let nested: usize = whole.iter().map(|t| t.transitions.len()).sum();
-    if nested > 0 {
-        warnings.push(format!(
-            "{nested} transition(s) play as cuts while inside the compound clip"
-        ));
     }
     Ok(Nested { clips, warnings })
 }
@@ -485,6 +481,18 @@ mod tests {
         let host = f.editor.project().clip(&hosts[1]).unwrap();
         let sound: &Clip = &host.compound.as_ref().unwrap().tracks[0].clips[0];
         assert_eq!((sound.start, sound.duration, sound.source_in), (0, 55, 10));
+    }
+
+    #[test]
+    fn a_dissolve_plays_the_same_inside_a_compound_clip() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 10, 50);
+        let b = f.append("m1", 50, 90);
+        f.ok(req("edit.dissolve", json!({"at": 40})));
+        let plan = |f: &Fixture| crate::render::flatten(f.editor.project(), 0, 80).unwrap().video;
+        let before = plan(&f);
+        nest(&mut f, &[&a, &b]);
+        assert_eq!(plan(&f), before);
     }
 
     #[test]
