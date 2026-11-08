@@ -1,4 +1,4 @@
-use crate::validate::GAIN;
+use crate::validate::{GAIN, PAN};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -3569,6 +3569,7 @@ fn mutate(
             enabled,
             muted,
             gain_db,
+            pan,
             at,
             name,
             color,
@@ -3593,6 +3594,7 @@ fn mutate(
                 enabled: *enabled,
                 muted: *muted,
                 gain_db: *gain_db,
+                pan: *pan,
                 at,
                 name: or_none(name),
                 color: or_none(color),
@@ -5643,6 +5645,7 @@ fn place_imported(
                         })
                         .collect(),
                     muted: c.muted,
+                    pan: c.pan.clamp(*PAN.start(), *PAN.end()),
                     effects: carry(&c.audio_effects, sound_from),
                     voice_isolation: c
                         .voice_isolation

@@ -1495,7 +1495,7 @@ The edit buttons are one row of icons at the bottom of the Media Pool (p. 696). 
   - The Audio panel opens in Clip mode when the user selects an audio clip (p. 742).
   - The Audio panel has Volume, Pan, Pitch, Equalizer, Voice Isolation, Dialogue Leveler and Music Remixer (p. 743).
   - vidcut: an Inspector tab in the place of the Media Pool (X70).
-  - vidcut: its Audio section has Volume, Mute and Voice Isolation for the selected clips with sound (X70).
+  - vidcut: its Audio section has Volume, Pan, Mute and Voice Isolation for the selected clips with sound (X70).
   - vidcut: its Crop section has Softness, and its Composite section has Composite Mode and Opacity.
 - **The units of the Inspector,** measured in Resolve Studio 21.1.1:
   - The timeline was 1920×1080. A 1280×720 chart and a 960×720 chart were fitted into it.
@@ -2062,6 +2062,29 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - vidcut: Volume and Mute in the Audio section of the Inspector (X70). `clip.set` sets `gain_db` and `muted`. D12 gives the range.
   - vidcut: a line on each clip with sound that is tall enough. A drag on it sets `gain_db` with `clip.set` (X71).
   - The scale of the line and the step of Shift are in D77.
+- **Clip pan** (pp. 743, 3909):
+  - Resolve Studio 21.2 gave these results, with renders of a clip to 24-bit WAV files at 48 kHz.
+  - The Pan of a clip goes from −100 to 100. Its default is 0.
+  - The scripting API takes a value outside the range, and sets the nearest limit. It keeps decimals.
+  - A switch (`AudioPanEnabled` in the scripting API) turns the Pan off. Off, the sound does not change.
+  - On a stereo track, each channel stays on its own side. The Pan changes only the gain of each side.
+  - S is the size of the Pan divided by 100:
+    - The side that the Pan moves toward has the gain 1 + S.
+    - The other side has the gain 1 − S, and it stops at −6 dB. It gets there at Pan 50.
+    - Each gain is rounded to 0.1 dB.
+  - Examples, with the far side first and the near side second:
+    - Pan 25: −2.5 dB and +1.9 dB.
+    - Pan 75: −6.0 dB and +4.9 dB.
+    - Pan 100: −6.0 dB and +6.0 dB.
+  - A mono clip on a stereo track plays at its full level on each side at Pan 0. Its Pan has the same gains.
+  - On a track of type mono, the law is different:
+    - Pan 0 gives −3 dB on each side.
+    - Pan 100 gives 0 dB on the near side and silence on the far side.
+  - An OTIO export writes the effect `Fairlight Clip Pan`, `Type` 72, on a clip with a Pan other than 0.
+    - Its parameter `pan` has its range and `Key Frames`.
+    - An OTIO import sets the Pan from it.
+  - vidcut: the Pan row of the Audio section (X70) and `clip.set` set `pan`.
+  - vidcut: a clip pans as on a stereo track ([X152](deviations.md#x152-every-clip-pans-as-on-a-stereo-track)).
 - **Volume keyframes** (pp. 1109, 1111–1113, 1251, 1255):
   - An Alt-click on the overlay makes a keyframe (pp. 1109, 1112). Two keyframes or more change the level over time (p. 1112).
   - Keyframes of the Inspector's Volume also show on the overlay (p. 1111).

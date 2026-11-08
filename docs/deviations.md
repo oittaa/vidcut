@@ -1577,7 +1577,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Mute does what Mute and Unmute in the right-click menu of the clip do.
     - Normalize in the header opens Normalize Audio Levels for the clips of the section ([X72](#x72-normalize-audio-levels-on-the-cut-page)).
     - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([X64](#x64-voice-isolation-is-free-on-a-clip-or-a-track)).
-    - The Audio section has no Pan, Pitch, Equalizer, Dialogue Leveler or Music Remixer.
+    - Pan sets the pan of the selected clips ([X152](#x152-every-clip-pans-as-on-a-stereo-track)).
+    - The Audio section has no Pitch, Equalizer, Dialogue Leveler or Music Remixer.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
     - Position X and Y are frame pixels from the middle of the frame, with Y up.
@@ -2816,3 +2817,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The OpenEXR writer of vidcut, the `exr` crate, writes this attribute for each level that it gets.
   - The attribute is part of the OpenEXR format. A reader can see the level of the file, and a reader that does not know it skips it.
+
+## X152. Every clip pans as on a stereo track
+
+- **Resolve:**
+  - The law of the Pan is different on a stereo track and on a mono track (measured in Resolve Studio 21.2).
+  - The [spec](cut-page-spec.md#9-audio-pp-642-649650-743744-771-773-778779) gives both laws.
+  - The Pan has a switch.
+- **vidcut:**
+  - A track has no channel type. Each clip uses the law of a stereo track.
+  - A mix of one channel has no sides. The Pan does not change it.
+  - A mix of three channels or more applies the Pan to its first two channels.
+  - The Audio section has no switch for the Pan. Pan 0 gives the same sound.
+- **Why:**
+  - Resolve puts a mono clip on a stereo track by default. Thus the law of a stereo track is what most clips get.
+  - One slider is simpler. A section has no switch ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).

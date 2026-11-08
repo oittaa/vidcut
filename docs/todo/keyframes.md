@@ -16,7 +16,7 @@ A keyframe is a value of a clip at one frame. Between two keyframes, the value g
   - vidcut keeps the keyframes of other clip effects, but it does not play them ([X9](../deviations.md#x9-opentimelineio-interchange)).
   - The exception is Dynamic Zoom. vidcut reads its two keyframes as the start box and the end box.
 - **Why:** the user changes a part of a clip, not only the whole clip. An example is a push in on one moment.
-- **To do:** keyframes of speed ([speed-ramps.md](speed-ramps.md)), and the other values of a [title](#titles).
+- **To do:** keyframes of speed ([speed-ramps.md](speed-ramps.md)), of the Pan of a clip, and of the other values of a [title](#titles).
 
 ## What Resolve has
 

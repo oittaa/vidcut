@@ -250,6 +250,24 @@ fn a_portrait_phone_clip_makes_a_portrait_project() {
     assert_eq!((s.width, s.height), (1080, 1920));
 }
 
+fn pan_of(f: &Fixture, clip: &str) -> f64 {
+    let p = f.editor.project();
+    p.clip(clip).unwrap().audio.as_ref().unwrap().pan
+}
+
+#[test]
+fn clip_set_keeps_a_pan() {
+    let mut f = three_clips();
+    f.ok(req("clip.set", json!({"clips": "c2", "pan": -37.5})));
+    assert_eq!(pan_of(&f, "c2"), -37.5);
+}
+
+#[test]
+fn clip_set_refuses_a_pan_past_the_edge() {
+    let mut f = three_clips();
+    f.err(req("clip.set", json!({"clips": "c2", "pan": 100.5})));
+}
+
 #[test]
 fn media_remove_needs_force_when_used() {
     let mut f = three_clips();

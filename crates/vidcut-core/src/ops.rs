@@ -312,6 +312,7 @@ fn make_clip(p: &mut Project, src: &Source) -> Result<Clip> {
             gain_db: 0.0,
             gain_keys: Vec::new(),
             muted: false,
+            pan: 0.0,
             effects: None,
             voice_isolation: None,
         }),
@@ -2017,6 +2018,7 @@ pub struct ClipProps {
     pub enabled: Option<bool>,
     pub muted: Option<bool>,
     pub gain_db: Option<f64>,
+    pub pan: Option<f64>,
     pub at: Option<i64>,
     pub name: Option<Option<String>>,
     pub color: Option<Option<String>>,
@@ -2068,6 +2070,9 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
     if let Some(g) = props.gain_db {
         crate::keyframes::checked(g)?;
     }
+    if let Some(pan) = props.pan.filter(|v| !crate::validate::PAN.contains(v)) {
+        return Err(Error::invalid(format!("pan {pan} is outside -100..100")));
+    }
     if let Some(Some(c)) = &props.color {
         check_clip_color(c)?;
     }
@@ -2101,6 +2106,7 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
         }
         if props.muted.is_some()
             || props.gain_db.is_some()
+            || props.pan.is_some()
             || props.voice_isolation.is_some()
             || props.voice_isolation_on.is_some()
         {
@@ -2110,6 +2116,9 @@ pub fn set_clips(p: &mut Project, ids: &[String], props: &ClipProps) -> Result<(
                 .ok_or_else(|| Error::invalid(format!("{id} has no audio")))?;
             if let Some(m) = props.muted {
                 a.muted = m;
+            }
+            if let Some(pan) = props.pan {
+                a.pan = pan;
             }
             match (props.gain_db, at) {
                 (Some(g), Some(frame)) if a.is_keyed() => {

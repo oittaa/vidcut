@@ -1579,6 +1579,7 @@ mod tests {
                 gain_db: 0.0,
                 gain_keys: Vec::new(),
                 muted: false,
+                pan: 0.0,
                 effects: None,
                 voice_isolation: None,
             }),

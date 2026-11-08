@@ -1567,8 +1567,8 @@ pub enum Request {
         #[serde(default)]
         look: Option<String>,
     },
-    /// Enable/disable video (D), mute, gain (dB, -100..30), name, Clip Color,
-    /// Voice Isolation, Retime Process and Render Cache.
+    /// Enable/disable video (D), mute, gain (dB, -100..30), pan, name,
+    /// Clip Color, Voice Isolation, Retime Process and Render Cache.
     #[serde(rename = "clip.set")]
     ClipSet {
         clips: OneOrMany<ClipRef>,
@@ -1580,6 +1580,10 @@ pub enum Request {
         /// at `at`, also outside the clip (decision D82).
         #[serde(default)]
         gain_db: Option<f64>,
+        /// The pan, from -100 (all the way left) to 100 (all the way right).
+        /// 0 is the middle.
+        #[serde(default)]
+        pan: Option<f64>,
         /// Where `gain_db` goes as a keyframe on clips with volume
         /// keyframes: the playhead by default.
         #[serde(default)]
