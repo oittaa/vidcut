@@ -28,7 +28,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
 - generators: the twelve kinds of the Generators section (§8.17)
-- compound clips made from timeline clips (§8.18)
+- compound clips (§8.18)
 - the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
@@ -41,7 +41,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
 - angle switches ([todo](todo/sync-bin.md)), Live Overwrite
-- the two In-Out actions for compound clips ([todo](todo/compound-clips.md))
+- a drag of a compound clip from the Media Pool ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
 - Mixer FX other than the Ducker, Paste Attributes, guides
