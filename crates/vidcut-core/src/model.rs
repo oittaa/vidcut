@@ -1793,10 +1793,10 @@ pub struct Clip {
     /// flipped and cropped. Left out, it fills the frame as it always has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picture: Option<Picture>,
-    /// A compound clip or nested timeline another editor made, carried
-    /// (deviation X9): a block that plays as a gap, with no media and no
-    /// audio. On an audio track it stands for the nested timeline's sound
-    /// (`video` false).
+    /// A compound clip: made from timeline clips (`edit.compound`), or a
+    /// compound clip or nested timeline from another editor's file (deviation
+    /// X9). It is a block with no media and no audio of its own. On an audio
+    /// track it stands for the sound of what it holds (`video` false).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compound: Option<Compound>,
     /// Its speed, when not 100% forward: one speed, or sections between
@@ -4963,6 +4963,11 @@ pub struct Compound {
     /// it plays as a gap.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracks: Vec<Track>,
+    /// The clips it was made from, whole, on the tracks they came from,
+    /// frames from its first: what `edit.decompose` puts back. Left out on
+    /// a compound clip from another editor's file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub made_from: Vec<Track>,
 }
 
 /// Clip effects another editor applied, which vidcut keeps without showing

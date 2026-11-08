@@ -1,31 +1,17 @@
-# Compound clips made in vidcut
+# Compound clips: In and Out, and Decompose in Place
 
 **When:** not decided.
 
-vidcut plays a compound clip from another editor. `edit.decompose` opens one. No request builds one from timeline clips.
+`edit.compound` makes a compound clip from timeline clips ([spec §8.18](../cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120), [deviation X161](../deviations.md#x161-a-compound-clip-takes-its-clips-whole)). These parts need a measurement in the window of Resolve, because the scripting call does not reach them.
 
 **Why:**
 
-- One clip can hold a scene, a title card or a stack.
-- An OpenTimelineIO file from Resolve keeps compound clips ([deviation X9](../deviations.md#x9-opentimelineio-interchange)).
-- vidcut already plays that shape.
-
-**In the code:**
-
-- `timeline.import` with mode `compound` adds one compound clip after the last clip.
-- `Compound` stores the nested stack and the tracks that play (`tracks`).
-- `render::flatten` plays those tracks inside the host clip.
-- `edit.decompose` puts the inner clips back on the timeline.
+- A range on all tracks is a fast way to nest a scene.
+- Decompose in Place has choices that vidcut does not know yet.
 
 **To do:**
 
-- Measure a compound clip that Resolve made, in the OpenTimelineIO file it writes.
-- Resolve 21.2 has two actions for the In–Out range:
-  - Convert In–Out to a compound clip, which replaces the clips in place.
-  - A separate context action that creates a compound clip from the In–Out range.
-- Measure what each action does, and which page has it.
-- Add one request that nests the selected clips into a compound clip of that shape.
-- The picture and the sound stay linked, as they do on an imported compound clip.
-- Playback and export use the plan an imported compound clip already uses.
-- Decompose restores the inner clips and their edits.
-- The CLI, IPC and MCP perform the same action as the GUI.
+- Measure Convert In and Out to Compound Clip (manual p. 1053). It is on the Edit page.
+- Find the separate context action that creates a compound clip from the In–Out range. The 21.1 manual and the notes of the later versions do not name it.
+- Measure Decompose in Place (manual p. 1054): the track of each clip, and clips that are in the way.
+- Make a dissolve play inside a compound clip. `render::expanded` removes transitions there, so a dissolve plays as a cut until a decompose.

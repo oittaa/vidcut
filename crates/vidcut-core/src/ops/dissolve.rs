@@ -965,6 +965,7 @@ mod tests {
             stack: Default::default(),
             frames: 100,
             tracks: vec![inner],
+            made_from: Vec::new(),
         });
         p
     }

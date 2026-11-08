@@ -28,6 +28,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - titles: Text, the three lower thirds and Scroll (§8.14)
 - a clip's Transform, Crop, Dynamic Zoom, composite mode and opacity (§8.15)
 - generators: the twelve kinds of the Generators section (§8.17)
+- compound clips made from timeline clips (§8.18)
 - the input LUT and the output LUT, from a `.cube` file ([§13](#the-lut-tables))
 - Quick Export, plus our Export dialog
 
@@ -40,7 +41,6 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
 - angle switches ([todo](todo/sync-bin.md)), Live Overwrite
-- making a compound clip from timeline clips ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
 - Mixer FX other than the Ducker, Paste Attributes, guides
@@ -2044,6 +2044,48 @@ A generator is a clip that makes its own picture. It has no media and no sound.
   - Measured: the `generator_kind` of a BT.2111 Color Bar has a lower-case word: `BT.2111 Color bar PQ Full`. Its clip name has `Color Bar`.
   - vidcut reads its kinds back from that shape.
   - vidcut keeps a generator of any other section as data. It plays as a gap, and an import warns about it (X9).
+
+### 8.18 Compound clips (pp. 1052–1054, 1126; measured in Resolve Studio 21.2.0)
+
+The Cut page chapters do not tell about compound clips. The Edit page has them (p. 1052).
+
+The measurements use the scripting call for a new compound clip, and the OpenTimelineIO file that Resolve then writes.
+
+- **Shape in the file:**
+  - A selection with picture and sound gives two clips: a `Stack` on a video track and a `Stack` on an audio track.
+  - The two have the same `Link Group ID` and the same `Sequence ID`.
+  - Each has the `Sequence Type` `Compound Clip` and a `Sequence Fps`.
+  - Each `Stack` holds all the inner tracks: video first, then audio.
+- **Span:**
+  - A compound clip runs from the first start to the last end of the selected items. The sound of an L-cut counts.
+  - The inner times count from the first frame of the span.
+  - Gaps stay. A clip that is not selected leaves a gap inside.
+- **Inner tracks:**
+  - They count from the lowest selected track, and empty tracks between them stay.
+  - Thus V2 and V3 become V1 and V2. V1 and V3 become V1, an empty V2 and V3.
+  - They have default names.
+  - They are enabled, also when the outer track is disabled.
+- **Where it goes:**
+  - The picture goes on the lowest selected video track.
+  - A clip on that track in the span that is not selected puts the picture on a new track directly above. Higher tracks move up.
+  - The sound goes on the lowest selected audio track, else on the first free track above it.
+  - A new audio track goes on top when no track is free. Audio tracks do not move up.
+- **Part of a linked clip:**
+  - The picture alone gives only a picture compound clip. The sound stays on the timeline, and the link ends.
+  - The sound alone gives only a sound compound clip. The picture stays on the timeline, and the link ends.
+- **What goes inside:**
+  - Timeline markers stay on the timeline.
+  - Clip markers, a clip's Transform and a disabled clip's state go inside.
+  - A compound clip can hold a compound clip.
+  - A dissolve between two selected clips goes inside only when the dissolve is also selected. Else it is removed.
+  - A dissolve to a clip that is not selected is removed.
+- **Locked tracks:** a selected item on a locked track stays out, and the other items go in.
+- **In and Out marks:** the scripting call does not use them. It takes whole items.
+- **From the manual, not measured:**
+  - New Compound Clip opens a window with a name and a start timecode (p. 1052).
+  - A copy of the compound clip goes into the selected bin of the Media Pool (p. 1052).
+  - Convert In and Out to Compound Clip is on the Edit page. It nests the In–Out range on all tracks (p. 1053).
+  - Decompose in Place replaces a compound clip with its clips (p. 1054).
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

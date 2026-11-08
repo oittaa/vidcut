@@ -4728,8 +4728,14 @@ fn mutate(
             },
             env,
         )?,
+        Request::EditCompound { clips, name } => {
+            let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let nested = ops::compound::nest(p, &ids, name.as_deref())?;
+            json!({ "clips": nested.clips, "warnings": nested.warnings })
+        }
         Request::EditDecompose { clips } => {
             let ids = resolve_clips(p, &clips.to_vec(), playhead)?;
+            let ids = ops::compound::leads(p, &ids);
             let (mut made, mut warnings, mut played) = (Vec::new(), Vec::new(), Vec::new());
             for id in &ids {
                 if let Some(k) = p.clip(id).and_then(|c| c.compound.as_ref()) {
@@ -5542,6 +5548,7 @@ fn place_imported(
                 stack: k.stack.clone(),
                 frames: k.frames,
                 tracks: Vec::new(),
+                made_from: Vec::new(),
             });
             let title = c
                 .title_from
@@ -5922,7 +5929,9 @@ fn fill_contents(
             t.clips
                 .iter()
                 .enumerate()
-                .filter(|(_, c)| c.compound.is_some() && ids.contains(&c.id))
+                .filter(|(_, c)| {
+                    c.compound.is_some() && !ops::compound::is_made(c) && ids.contains(&c.id)
+                })
                 .map(move |(ci, _)| (ti, ci))
         })
         .collect();
@@ -5968,6 +5977,11 @@ fn decompose(
         .compound
         .clone()
         .ok_or_else(|| Error::invalid(format!("{id} isn't a compound clip")))?;
+    if !k.made_from.is_empty() {
+        let (block, made) = ops::compound::unnest(p, id, warnings)?;
+        finish_decompose(p, id, &block, &made, warnings);
+        return Ok(made);
+    }
     let mut t = nested(&k, block.video, at.base)?;
     let to = p.settings.fps;
     let conv = |f: i64| rescale(f, t.fps, to);
@@ -6062,6 +6076,17 @@ fn decompose(
         map.insert(name.to_string(), target);
     }
     let (made, _) = place_imported(p, &t, &ids, start, &map, warnings, false)?;
+    finish_decompose(p, id, &block, &made, warnings);
+    Ok(made)
+}
+
+fn finish_decompose(
+    p: &mut Project,
+    id: &str,
+    block: &Clip,
+    made: &[String],
+    warnings: &mut Vec<String>,
+) {
     if let Some(e) = &block.effects {
         warnings.push(format!(
             "{id}'s own effects were dropped: {}",
@@ -6069,7 +6094,7 @@ fn decompose(
         ));
     }
     if let Some(picture) = block.picture.as_ref().filter(|x| !x.is_usual()) {
-        let dropped = give_picture(p, &block, picture, &made);
+        let dropped = give_picture(p, block, picture, made);
         if !dropped.is_empty() {
             warnings.push(format!(
                 "{id}'s place, zoom and crop were dropped from {}: they would not show as they did",
@@ -6077,7 +6102,6 @@ fn decompose(
             ));
         }
     }
-    Ok(made)
 }
 
 fn give_picture(p: &mut Project, block: &Clip, picture: &Picture, made: &[String]) -> Vec<String> {

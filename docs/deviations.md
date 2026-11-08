@@ -2934,3 +2934,26 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The effect has no public rules. A spectral gate is the usual way to lower steady noise and it runs in real time.
   - The default effect lowered the noise by 0.4 dB and the quiet lines by up to 6.0 dB (spec). Meeting recordings need the opposite.
+
+## X161. A compound clip takes its clips whole
+
+- **Resolve:** ([spec §8.18](cut-page-spec.md#818-compound-clips-pp-10521054-1126-measured-in-resolve-studio-2120))
+  - The window of New Compound Clip has a name and a start timecode (p. 1052).
+  - A copy of the compound clip goes into the Media Pool (p. 1052).
+  - A selection can hold only the picture or only the sound of a linked clip.
+  - A selected item on a locked track stays out, and the other items go in.
+  - A dissolve between two selected clips goes inside only when the dissolve is also selected. It then plays inside.
+- **vidcut:**
+  - The window has only a name. `edit.compound` takes `clips` and an optional `name`.
+  - The compound clip is only on the timeline. The Media Pool gets no item.
+  - A clip goes in with its picture and its sound.
+  - A clip on a locked track refuses the request.
+  - A dissolve goes inside when its clips go inside. It plays as a cut there, and a warning says so.
+  - `edit.decompose` brings the dissolve back.
+  - The sound of a clip on a video track goes on the lowest selected audio track, else on A1 or the first free track above.
+- **Why:**
+  - A timeline starts at 00:00:00:00 ([X7](#x7-timelines-start-at-00000000)). Thus a compound clip has no start timecode.
+  - The Media Pool of vidcut holds files. A project has one timeline (X2), so a pool item has no timeline to open.
+  - A clip holds its picture and sound as one. Half of a clip is not a thing that vidcut can select.
+  - A locked track must not change. A selection that goes in only partly is a surprise. A refusal shows the lock.
+  - vidcut has no selection of a dissolve in this request. A dissolve that goes away is a loss that the user did not ask for.

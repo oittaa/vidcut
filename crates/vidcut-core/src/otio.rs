@@ -1193,7 +1193,25 @@ fn compound_of(item: &Value, fps: Rational) -> Compound {
         stack: stack.into(),
         frames,
         tracks: Vec::new(),
+        made_from: Vec::new(),
     }
+}
+
+pub(crate) fn made_stack(inner: &Project, name: &str, frames: i64) -> Result<Value> {
+    let doc = export(inner, name, Some((0, frames)), Locations::Absolute)?;
+    let mut stack = doc["tracks"].clone();
+    stack["name"] = json!(name);
+    stack["metadata"] = json!({ EDITOR: {
+        "Sequence Type": "Compound Clip",
+        "Sequence Fps": inner.settings.fps.as_f64(),
+    }});
+    if let Some(o) = stack.as_object_mut() {
+        for key in ["source_range", "effects", "markers"] {
+            o.remove(key);
+        }
+    }
+    stack["metadata"][EDITOR]["Sequence ID"] = json!(stack_id(&stack));
+    Ok(stack)
 }
 
 fn compound_item(
@@ -1263,21 +1281,20 @@ fn sequence_id(k: &Compound) -> Option<&str> {
     k.stack["metadata"][EDITOR]["Sequence ID"].as_str()
 }
 
-fn sequence_of(k: &Compound) -> String {
-    sequence_id(k).map_or_else(
-        || {
-            let h = crate::fingerprint::short_digest(k.stack.to_string().as_bytes());
-            format!(
-                "{{{}-{}-{}-{}-{}}}",
-                &h[..8],
-                &h[8..12],
-                &h[12..16],
-                &h[16..20],
-                &h[20..]
-            )
-        },
-        str::to_string,
+fn stack_id(stack: &Value) -> String {
+    let h = crate::fingerprint::short_digest(stack.to_string().as_bytes());
+    format!(
+        "{{{}-{}-{}-{}-{}}}",
+        &h[..8],
+        &h[8..12],
+        &h[12..16],
+        &h[16..20],
+        &h[20..]
     )
+}
+
+fn sequence_of(k: &Compound) -> String {
+    sequence_id(k).map_or_else(|| stack_id(&k.stack), str::to_string)
 }
 
 pub fn tied(p: &Project, id: &str) -> Vec<String> {

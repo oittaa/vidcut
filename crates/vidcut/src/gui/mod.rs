@@ -3,6 +3,7 @@ mod bar;
 mod cache_manager;
 mod cells;
 mod clip_info;
+mod compound;
 mod compressor;
 mod dialog;
 mod ducking;
