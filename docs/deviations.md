@@ -2989,14 +2989,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - With one active curve, its points and handles stay ready to use.
   - Each track already has a curve button. Checkboxes in a menu repeat it.
 
-## X161. Alt moves a handle alone
+## X161. Alt moves a handle alone, and the other handle stops at a keyframe
 
 - **Resolve:**
   - Alt and a drag on a Bezier handle moves nothing (measured in Resolve Studio 21.2).
+  - The other handle keeps its length on the screen (measured in Resolve Studio 21.2). Its limit at the next keyframe is not measured.
 - **vidcut:**
   - With Alt, the handle moves alone. The other handle of the keyframe stays.
+  - The other handle stops at the next keyframe on its side.
+  - A first or a last keyframe has nothing to line up.
 - **Why:**
   - A corner in the curve is then a choice. Alt has no other use on a handle.
+  - A curve has one value at each frame. A handle past the next keyframe would break that.
 
 ## X162. A drag on the line bends the curve
 
@@ -3011,7 +3015,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
   - A straight part gets two handles that give the same straight line. The drag then changes their values.
   - A part with one handle changes only that handle.
   - The handle frames stay. Only the handle values change.
-  - The handle on the other side of each of the two keyframes lines up. With Alt, it stays ([X161](#x161-alt-moves-a-handle-alone)).
+  - The handle on the other side of each of the two keyframes lines up. With Alt, it stays ([X161](#x161-alt-moves-a-handle-alone-and-the-other-handle-stops-at-a-keyframe)).
   - The whole drag is one undo step.
   - Alt and a click on the line adds a keyframe. Alt and a drag bends the curve.
   - On Position and Zoom, a bend changes the X curve, as a handle does. The Y curve keeps only the timing of the handles.
