@@ -3572,6 +3572,8 @@ fn mutate(
             pan,
             equalizer,
             dialogue_leveler,
+            compressor,
+            noise_reduction,
             at,
             name,
             color,
@@ -3599,6 +3601,8 @@ fn mutate(
                 pan: *pan,
                 equalizer: equalizer.clone(),
                 dialogue_leveler: dialogue_leveler.clone(),
+                compressor: compressor.clone(),
+                noise_reduction: noise_reduction.clone(),
                 at,
                 name: or_none(name),
                 color: or_none(color),
@@ -5672,6 +5676,12 @@ fn place_imported(
                     dialogue_leveler: c
                         .dialogue_leveler
                         .filter(|l| crate::leveler::problem(l).is_none()),
+                    compressor: c
+                        .compressor
+                        .filter(|k| crate::compressor::problem(k).is_none()),
+                    noise_reduction: c
+                        .noise_reduction
+                        .filter(|n| crate::noise_reduction::problem(n).is_none()),
                     effects: carry(&c.audio_effects, sound_from),
                     voice_isolation: c
                         .voice_isolation
