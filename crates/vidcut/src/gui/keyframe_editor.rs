@@ -2868,7 +2868,10 @@ impl Workspace {
                 .filter(|at| resp.clicked() && !spots.hit(*at))
                 .and_then(|at| dim_at(&dims, at));
             match picked {
-                Some(param) => self.activate(param),
+                Some(param) => {
+                    self.activate(param);
+                    self.key_editor.selected.clear();
+                }
                 None => self.use_curve(ui, &area, lane, &spots),
             }
         } else {
