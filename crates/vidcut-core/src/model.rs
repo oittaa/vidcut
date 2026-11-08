@@ -4950,6 +4950,9 @@ pub struct ClipAudio {
     /// The Dialogue Leveler. Left out when the clip has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialogue_leveler: Option<DialogueLeveler>,
+    /// The compressor. Left out when the clip has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compressor: Option<Compressor>,
     /// Effects on its sound, carried from another editor. The clip volume
     /// is `gain_db` and `gain_keys`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5022,6 +5025,31 @@ pub enum LevelerPreset {
     OptimizeModerateLevels,
     MoreLiftForLowLevels,
     LiftSoftWhisperySources,
+}
+
+/// A compressor: it lowers the level above its threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Compressor {
+    /// The switch. Off keeps the settings.
+    pub on: bool,
+    /// The level above which it compresses, in dB, from -50 to 0.
+    pub threshold_db: f64,
+    /// The ratio of the input to the output, from 1 to 10.
+    pub ratio: f64,
+    /// The width of the curve around the threshold, in dB, from 0 to 30.
+    /// At 0, compression starts at the threshold.
+    pub knee_db: f64,
+    /// How much of the sound stays as it was, in percent, from 0 to 100.
+    pub mix: f64,
+    /// How fast it starts to compress, in ms, from 0 to 100.
+    pub attack_ms: f64,
+    /// How long it keeps the reduction after the attack, in ms, from 0 to
+    /// 4000.
+    pub hold_ms: f64,
+    /// How fast it stops to compress, in ms, from 50 to 4000.
+    pub release_ms: f64,
+    /// The gain after it, in dB, from 0 to 24.
+    pub makeup_db: f64,
 }
 
 /// Voice Isolation: a switch and an Amount.

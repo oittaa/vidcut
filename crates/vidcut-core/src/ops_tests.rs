@@ -365,6 +365,39 @@ fn clip_set_refuses_an_output_gain_past_six_db() {
     ));
 }
 
+fn compressor_of(f: &Fixture, clip: &str) -> Option<crate::model::Compressor> {
+    f.editor
+        .project()
+        .clip(clip)
+        .unwrap()
+        .audio
+        .as_ref()
+        .unwrap()
+        .compressor
+}
+
+#[test]
+fn clip_set_puts_on_the_usual_compressor() {
+    let mut f = three_clips();
+    f.ok(req("clip.set", json!({"clips": "c2", "compressor": {}})));
+    assert_eq!(compressor_of(&f, "c2"), Some(crate::compressor::first()));
+}
+
+#[test]
+fn clip_set_null_takes_the_compressor_off() {
+    let mut f = three_clips();
+    f.ok(req("clip.set", json!({"clips": "c2", "compressor": {}})));
+    f.ok(req("clip.set", json!({"clips": "c2", "compressor": null})));
+    assert_eq!(compressor_of(&f, "c2"), None);
+}
+
+#[test]
+fn clip_set_refuses_a_ratio_past_ten() {
+    let mut f = three_clips();
+    let c = json!({"ratio": 11.0});
+    f.err(req("clip.set", json!({"clips": "c2", "compressor": c})));
+}
+
 #[test]
 fn media_remove_needs_force_when_used() {
     let mut f = three_clips();

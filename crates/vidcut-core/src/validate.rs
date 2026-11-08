@@ -139,6 +139,11 @@ pub fn violations(p: &Project) -> Vec<String> {
                         {
                             v.push(format!("{}: {why}", c.id));
                         }
+                        if let Some(why) =
+                            a.compressor.as_ref().and_then(crate::compressor::problem)
+                        {
+                            v.push(format!("{}: {why}", c.id));
+                        }
                         if let Some(why) = crate::keyframes::problem(&a.gain_keys) {
                             v.push(format!("{}: {why}", c.id));
                         }

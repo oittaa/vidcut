@@ -301,6 +301,9 @@ pub fn timeline(
     if let Some(message) = otio::unheard_leveler(p, span) {
         notes.push(json!({ "code": "dialogue_leveler_kept", "message": message }));
     }
+    if let Some(message) = otio::unheard_compressor(p, span) {
+        notes.push(json!({ "code": "compressor_kept", "message": message }));
+    }
     if let Some(message) = otio::unheard_ducking(p, span) {
         notes.push(json!({ "code": "ducking_kept", "message": message }));
     }

@@ -835,6 +835,9 @@ pub fn export_drawn(
                     if let Some(l) = &au.dialogue_leveler {
                         meta["dialogue_leveler"] = json!(l);
                     }
+                    if let Some(k) = &au.compressor {
+                        meta["compressor"] = json!(k);
+                    }
                     if let Some(v) = au.voice_isolation {
                         meta["voice_isolation"] = json!(v);
                     }
@@ -945,6 +948,9 @@ pub fn export_drawn(
                 }
                 if let Some(l) = &au.dialogue_leveler {
                     meta["dialogue_leveler"] = json!(l);
+                }
+                if let Some(k) = &au.compressor {
+                    meta["compressor"] = json!(k);
                 }
                 if let Some(v) = au.voice_isolation {
                     meta["voice_isolation"] = json!(v);
@@ -1383,6 +1389,7 @@ pub struct ImportedClip {
     pub pan: f64,
     pub equalizer: Option<crate::model::Equalizer>,
     pub dialogue_leveler: Option<crate::model::DialogueLeveler>,
+    pub compressor: Option<crate::model::Compressor>,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub link: Option<i64>,
     pub effects: Vec<Value>,
@@ -1469,6 +1476,7 @@ impl ImportedClip {
             pan: 0.0,
             equalizer: None,
             dialogue_leveler: None,
+            compressor: None,
             voice_isolation: None,
             link: None,
             effects: Vec::new(),
@@ -2209,6 +2217,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         gain_keys: our_keys(meta).unwrap_or_default(),
                         muted: meta["muted"].as_bool().unwrap_or(false),
                         pan: meta["pan"].as_f64().unwrap_or(0.0),
+                        compressor: serde_json::from_value(meta["compressor"].clone()).ok(),
                         equalizer: serde_json::from_value(meta["equalizer"].clone()).ok(),
                         dialogue_leveler: serde_json::from_value(meta["dialogue_leveler"].clone())
                             .ok(),
@@ -2311,6 +2320,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             let pan = meta["pan"].as_f64().or_else(|| effects::pan(item));
             let equalizer = serde_json::from_value(meta["equalizer"].clone()).ok();
             let dialogue_leveler = serde_json::from_value(meta["dialogue_leveler"].clone()).ok();
+            let compressor = serde_json::from_value(meta["compressor"].clone()).ok();
             effects::drop_pan(&mut effects);
             let stream = meta["stream"]
                 .as_u64()
@@ -2378,6 +2388,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if dialogue_leveler.is_some() {
                     c.dialogue_leveler = dialogue_leveler;
                 }
+                if compressor.is_some() {
+                    c.compressor = compressor;
+                }
                 c.audio_effects = effects;
                 if c.speed.is_none() {
                     c.speed = speed;
@@ -2416,6 +2429,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 pan: pan.unwrap_or(0.0),
                 equalizer,
                 dialogue_leveler,
+                compressor,
                 voice_isolation,
                 link,
                 effects: Vec::new(),
@@ -2687,6 +2701,12 @@ fn kept_in_metadata(
 pub fn unheard_equalizer(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
     kept_in_metadata(p, span, "The equalizer", |au| {
         au.equalizer.as_ref().is_some_and(|e| e.heard())
+    })
+}
+
+pub fn unheard_compressor(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    kept_in_metadata(p, span, "The compressor", |au| {
+        au.compressor.is_some_and(|c| c.heard())
     })
 }
 

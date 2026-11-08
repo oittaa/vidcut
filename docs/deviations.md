@@ -1580,6 +1580,7 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Pan sets the pan of the selected clips ([X152](#x152-every-clip-pans-as-on-a-stereo-track)).
     - The Equalizer row has a switch and a button that opens the Equalizer window ([X153](#x153-the-equalizer-is-a-window-with-chosen-curves)).
     - The Dialogue Leveler row has a switch and a button that opens the Dialogue Leveler window ([X154](#x154-the-dialogue-leveler-follows-the-levels-with-its-own-rules)).
+    - The Compressor row has a switch and a button that opens the Compressor window ([X155](#x155-the-compressor-is-on-a-clip)).
     - The Audio section has no Pitch or Music Remixer.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
@@ -2870,3 +2871,18 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - The player runs the same code as the export. Level rules with a short look ahead run in real time.
   - Background Reduction in the renders was uneven. A fixed amount is predictable.
+
+## X155. The Compressor is on a clip
+
+- **Resolve:**
+  - The Compressor is a module of the Dynamics of a track (pp. 3946–3947).
+  - It has a sidechain and a graph (pp. 3946–3947).
+- **vidcut:**
+  - The Compressor is a setting of a clip. A window from the Audio section sets it.
+  - It has no sidechain and no graph.
+  - Knee goes from 0 to 30 dB, and Makeup Gain from 0 to 24 dB. The manual gives no range for them.
+  - It detects the peak of the channels together, and it gives each channel the same gain.
+  - An OTIO export keeps it in vidcut's own metadata. The export gives the note `compressor_kept`.
+- **Why:**
+  - The tool of the Audio section acts on the selected clips, as the Equalizer does.
+  - A clip recorded at its own level needs its own settings.
