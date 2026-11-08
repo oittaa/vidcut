@@ -66,21 +66,20 @@ fn renumber(p: &mut Project) {
     }
 }
 
-pub(super) fn insert_above(p: &mut Project, ti: usize) -> String {
+pub(super) fn insert_at(p: &mut Project, kind: TrackKind, at: usize) -> String {
     let before: Vec<String> = p.tracks.iter().map(|t| t.id.clone()).collect();
-    let kind = p.tracks[ti].kind;
-    p.tracks.insert(ti + 1, Track::new(String::new(), kind));
+    p.tracks.insert(at, Track::new(String::new(), kind));
     renumber(p);
     let names = before
         .into_iter()
         .enumerate()
         .map(|(i, id)| {
-            let now = if i > ti { i + 1 } else { i };
+            let now = if i >= at { i + 1 } else { i };
             (id, p.tracks[now].id.clone())
         })
         .collect();
     crate::duck::renamed(p, &names);
-    p.tracks[ti + 1].id.clone()
+    p.tracks[at].id.clone()
 }
 
 pub fn remove_track(p: &mut Project, id: &str, force: bool) -> Result<()> {

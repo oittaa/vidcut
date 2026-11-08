@@ -1190,15 +1190,15 @@ pub enum Request {
         name: Option<String>,
     },
     /// Decompose in Place: a compound clip becomes the clips it holds, at
-    /// their times, trimmed to the part it shows. One made here brings its
-    /// clips back whole. One from another editor (deviation X9) brings them
-    /// from its file: a picture block brings its pictures, its first track in
-    /// the block's place, each other on the next video track above that is
-    /// free there; a sound block brings its sound the same way on audio
-    /// tracks. The picture of a placed compound clip goes to each clip
-    /// that has no picture of its own and fills the frame; with a Dynamic
-    /// Zoom, only to a clip that spans all of the compound clip. A warning
-    /// names the clips that don't take it.
+    /// their times, trimmed to the part it shows. Inner track n goes on the
+    /// track of the compound clip plus n. Where a clip is in the way, a new
+    /// track goes in, and that clip and the tracks above it move up. One made
+    /// here brings its clips back whole. One from another editor (deviation
+    /// X9) brings them from its file: a picture block its pictures, and a
+    /// sound block its sound. The picture of a placed compound clip goes to
+    /// each clip that has no picture of its own and fills the frame; with a
+    /// Dynamic Zoom, only to a clip that spans all of the compound clip. A
+    /// warning names the clips that don't take it.
     #[serde(rename = "edit.decompose")]
     EditDecompose { clips: OneOrMany<ClipRef> },
     /// Slide a clip (Dynamic Trim's Slide mode): it keeps its media and moves,

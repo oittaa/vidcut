@@ -32,13 +32,14 @@ fn span_of(p: &Project, ids: &HashSet<String>) -> (i64, i64) {
         })
 }
 
-fn free(t: &Track, (a, b): (i64, i64)) -> bool {
+fn picture_of(c: &Clip) -> (i64, i64) {
+    (c.start, c.end())
+}
+
+fn free(t: &Track, (a, b): (i64, i64), range: fn(&Clip) -> (i64, i64)) -> bool {
     !t.locked
         && t.clips.iter().all(|c| {
-            let (s, e) = match t.kind {
-                TrackKind::Video => (c.start, c.end()),
-                TrackKind::Audio => extent(c),
-            };
+            let (s, e) = range(c);
             e <= a || s >= b
         })
 }
@@ -159,10 +160,10 @@ fn stack_of(p: &mut Project, whole: &[Track], name: &str, frames: i64) -> Result
 }
 
 fn picture_target(p: &mut Project, lowest: usize, span: (i64, i64)) -> String {
-    if free(&p.tracks[lowest], span) {
+    if free(&p.tracks[lowest], span, picture_of) {
         return p.tracks[lowest].id.clone();
     }
-    tracks::insert_above(p, lowest)
+    tracks::insert_at(p, TrackKind::Video, lowest + 1)
 }
 
 fn sound_target(p: &mut Project, lowest: Option<String>, span: (i64, i64)) -> String {
@@ -170,7 +171,10 @@ fn sound_target(p: &mut Project, lowest: Option<String>, span: (i64, i64)) -> St
     let from = lowest
         .and_then(|id| order.iter().position(|&i| p.tracks[i].id == id))
         .unwrap_or(0);
-    match order[from..].iter().find(|&&i| free(&p.tracks[i], span)) {
+    match order[from..]
+        .iter()
+        .find(|&&i| free(&p.tracks[i], span, extent))
+    {
         Some(&i) => p.tracks[i].id.clone(),
         None => tracks::add_track(p, TrackKind::Audio),
     }
@@ -272,20 +276,23 @@ pub fn leads(p: &Project, ids: &[String]) -> Vec<String> {
     kept
 }
 
-fn target(p: &mut Project, kind: TrackKind, base: &str, n: usize, span: (i64, i64)) -> usize {
-    let order = p.tracks_of(kind);
-    let at = order
+pub(crate) fn target(
+    p: &mut Project,
+    kind: TrackKind,
+    base: &str,
+    n: usize,
+    span: (i64, i64),
+) -> usize {
+    let at = p
+        .tracks_of(kind)
         .iter()
         .position(|&i| p.tracks[i].id == base)
         .expect("the track of the compound clip");
-    let mut m = at + n;
-    loop {
-        let ti = tracks::nth(p, kind, m);
-        if free(&p.tracks[ti], span) {
-            return ti;
-        }
-        m += 1;
+    let ti = tracks::nth(p, kind, at + n);
+    if !free(&p.tracks[ti], span, extent) {
+        tracks::insert_at(p, kind, ti);
     }
+    ti
 }
 
 fn put_back(p: &mut Project, ti: usize, inner: &Track, block: &Clip, made: &mut Vec<String>) {
@@ -413,6 +420,22 @@ mod tests {
         let made = &host.compound.as_ref().unwrap().made_from;
         let shape: Vec<(&str, usize)> = made.iter().map(|t| (&*t.id, t.clips.len())).collect();
         assert_eq!(shape, [("V1", 1), ("V2", 0), ("V3", 1)]);
+    }
+
+    #[test]
+    fn a_clip_in_the_way_of_a_decompose_moves_up_on_a_new_track() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        let b = f.append("m1", 50, 100);
+        let c = f.append("m1", 0, 50);
+        let moved = json!({"clips": [b], "to": 0, "mode": "overwrite", "track": "V2"});
+        f.ok(req("edit.move", moved));
+        let hosts = nest(&mut f, &[&a, &b]);
+        let moved = json!({"clips": [c], "to": 0, "mode": "overwrite", "track": "V2"});
+        f.ok(req("edit.move", moved));
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        assert_eq!(f.track("V2")[0].0, b);
+        assert_eq!(f.track("V3")[0].0, c);
     }
 
     #[test]

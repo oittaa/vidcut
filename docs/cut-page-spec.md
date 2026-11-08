@@ -41,6 +41,7 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
 - Lens Correction ([todo](todo/lens-correction.md))
 - Smart Reframe and Close Up ([todo](todo/smart-reframe.md))
 - angle switches ([todo](todo/sync-bin.md)), Live Overwrite
+- the two In-Out actions for compound clips ([todo](todo/compound-clips.md))
 - Replay, voiceover
 - AI tools other than Create Subtitles from Audio and Voice Isolation: the other voice and dialogue tools
 - Mixer FX other than the Ducker, Paste Attributes, guides
@@ -2066,7 +2067,7 @@ A generator is a clip that makes its own picture. It has no media and no sound.
 
 The Cut page chapters do not tell about compound clips. The Edit page has them (p. 1052).
 
-The measurements use the scripting call for a new compound clip, and the OpenTimelineIO file that Resolve then writes.
+The measurements use the scripting call for a new compound clip, the OpenTimelineIO file that Resolve then writes, and the menus of the Edit page.
 
 - **Shape in the file:**
   - A selection with picture and sound gives two clips: a `Stack` on a video track and a `Stack` on an audio track.
@@ -2098,11 +2099,31 @@ The measurements use the scripting call for a new compound clip, and the OpenTim
   - A dissolve to a clip that is not selected is removed.
 - **Locked tracks:** a selected item on a locked track stays out, and the other items go in.
 - **In and Out marks:** the scripting call does not use them. It takes whole items.
-- **From the manual, not measured:**
-  - New Compound Clip opens a window with a name and a start timecode (p. 1052).
+- **The window:**
+  - New Compound Clip opens a window with Start Timecode and Name, and Cancel and Create (p. 1052).
+  - The default name is `Compound Clip 1`, then `Compound Clip 2`.
   - A copy of the compound clip goes into the selected bin of the Media Pool (p. 1052).
-  - Convert In and Out to Compound Clip is on the Edit page. It nests the In–Out range on all tracks (p. 1053).
-  - Decompose in Place replaces a compound clip with its clips (p. 1054).
+- **Convert In and Out to Compound Clip** (p. 1053), on the context menu of the timeline ruler:
+  - It opens the same window.
+  - It cuts the clips at In and at the frame after Out, on all tracks. The Out frame is inside.
+  - Thus In 24 and Out 120 give 97 frames, from 24 up to 121.
+  - The compound clip goes on V1 and A1, linked.
+  - The clips of the other tracks go inside. Those tracks stay on the timeline, empty.
+  - The inner tracks start at the In frame.
+  - Clips outside the range stay on the timeline.
+  - A copy goes into the Media Pool. The marks stay.
+- **Create Compound Clip…**, on the same menu, under Create SubClip:
+  - It opens the same window.
+  - The timeline does not change. The compound clip goes only into the Media Pool.
+  - In 70 and Out 110 give 41 frames.
+- **Decompose in Place** (p. 1054), on the context menu of a clip:
+  - The submenu has Using Clips Only and Preserving Audio Data…. The second one was dimmed in the measurement.
+  - Inner track n goes on the track of the compound clip plus n, for picture and for sound.
+  - Thus a compound clip on V2 puts inner V1 on V2 and inner V2 on V3.
+  - Cuts stay. A clip that was cut at In comes back as two pieces.
+  - A free track is used as it is, and no track is added.
+  - Where a clip is in the way, a new track goes in at the target. The clip in the way and all higher tracks move up.
+  - This is the same on video tracks and on audio tracks.
 
 ## 9. Audio (pp. 642, 649–650, 743–744, 771, 773, 778–779)
 

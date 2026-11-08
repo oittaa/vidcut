@@ -6044,36 +6044,12 @@ fn decompose(
     let mut names: Vec<&str> = t.clips.iter().map(|c| c.track.as_str()).collect();
     names.sort_by_key(|n| n[1..].parse::<usize>().unwrap_or(0));
     names.dedup();
-    let free = |t: &crate::model::Track| {
-        !t.locked
-            && t.clips.iter().all(|c| {
-                let (s, e) = c.audio_range().map_or((c.start, c.end()), |(s, e)| {
-                    (s.min(c.start), e.max(c.end()))
-                });
-                e <= start || s >= end
-            })
-    };
+    let base = p.tracks[ti].id.clone();
     let mut map = HashMap::new();
-    let mut at = ti;
-    for (n, name) in names.into_iter().enumerate() {
-        let target = if n == 0 {
-            p.tracks[ti].id.clone()
-        } else {
-            match (at + 1..p.tracks.len())
-                .find(|&i| p.tracks[i].kind == track_kind && free(&p.tracks[i]))
-            {
-                Some(i) => {
-                    at = i;
-                    p.tracks[i].id.clone()
-                }
-                None => {
-                    let made = ops::add_track(p, track_kind);
-                    at = p.track_index(&made).expect("made");
-                    made
-                }
-            }
-        };
-        map.insert(name.to_string(), target);
+    for name in names {
+        let n = name[1..].parse::<usize>().unwrap_or(1) - 1;
+        let target = ops::compound::target(p, track_kind, &base, n, (start, end));
+        map.insert(name.to_string(), p.tracks[target].id.clone());
     }
     let (made, _) = place_imported(p, &t, &ids, start, &map, warnings, false)?;
     finish_decompose(p, id, &block, &made, warnings);
