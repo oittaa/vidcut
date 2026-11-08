@@ -3570,6 +3570,7 @@ fn mutate(
             muted,
             gain_db,
             pan,
+            equalizer,
             at,
             name,
             color,
@@ -3595,6 +3596,7 @@ fn mutate(
                 muted: *muted,
                 gain_db: *gain_db,
                 pan: *pan,
+                equalizer: equalizer.clone(),
                 at,
                 name: or_none(name),
                 color: or_none(color),
@@ -5646,6 +5648,10 @@ fn place_imported(
                         .collect(),
                     muted: c.muted,
                     pan: c.pan.clamp(*PAN.start(), *PAN.end()),
+                    equalizer: c
+                        .equalizer
+                        .clone()
+                        .filter(|e| crate::equalizer::problem(e).is_none()),
                     effects: carry(&c.audio_effects, sound_from),
                     voice_isolation: c
                         .voice_isolation

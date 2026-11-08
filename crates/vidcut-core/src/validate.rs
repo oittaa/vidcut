@@ -128,6 +128,10 @@ pub fn violations(p: &Project) -> Vec<String> {
                         if !PAN.contains(&a.pan) {
                             v.push(format!("{}: pan {} outside -100..100", c.id, a.pan));
                         }
+                        if let Some(why) = a.equalizer.as_ref().and_then(crate::equalizer::problem)
+                        {
+                            v.push(format!("{}: {why}", c.id));
+                        }
                         if let Some(why) = crate::keyframes::problem(&a.gain_keys) {
                             v.push(format!("{}: {why}", c.id));
                         }

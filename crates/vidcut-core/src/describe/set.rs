@@ -751,6 +751,9 @@ impl Words<'_> {
             _ => audio(c, |a| json!(a.gain_db)),
         });
         s.put("pan", "Pan", &number, |c| audio(c, |a| json!(a.pan)));
+        s.put("equalizer", "Equalizer", &raw, |c| {
+            audio(c, |a| json!(a.equalizer))
+        });
         if s.put("name", "Name", &text, |c| json!(c.name)) && named {
             s.f.naming();
         }

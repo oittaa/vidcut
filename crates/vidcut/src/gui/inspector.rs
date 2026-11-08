@@ -1337,6 +1337,7 @@ enum Act {
     Put(Key, f64),
     Edit(Key, f64),
     Release(Key),
+    Equalize(bool),
     Direction(Direction),
     SpeedEase(Ease),
     Ripple(bool),
@@ -3607,6 +3608,7 @@ impl Workspace {
             })
             .inner
         };
+        let mut edit_equalizer = false;
         let normalize = group(ui, "Audio", header, |ui| {
             let first = &sounds[0];
             let off = count > 1 && sounds.iter().any(|s| s.keyed);
@@ -3646,6 +3648,26 @@ impl Workspace {
                 acts.push(Act::Mute(on));
             }
             ui.end_row();
+            let equalizer = |id: &str| {
+                p.clip(id)
+                    .and_then(|c| c.audio.as_ref())
+                    .and_then(|a| a.equalizer.as_ref())
+            };
+            label(
+                ui,
+                "Equalizer",
+                sounds
+                    .iter()
+                    .any(|s| equalizer(&s.id).is_some_and(|e| e.heard())),
+            );
+            ui.horizontal(|ui| {
+                let mut on = equalizer(&first.id).is_some_and(|e| e.on);
+                if ui.checkbox(&mut on, "").clicked() {
+                    acts.push(Act::Equalize(on));
+                }
+                edit_equalizer = ui.button("Edit…").clicked();
+            });
+            ui.end_row();
             let isolated = sounds.iter().any(|s| heard(p, &s.id).flatten().is_some());
             label(ui, "Voice Isolation", isolated);
             ui.horizontal(|ui| {
@@ -3656,6 +3678,9 @@ impl Workspace {
         });
         if normalize {
             self.open_normalize(sounds.iter().map(|s| s.id.clone()).collect());
+        }
+        if edit_equalizer {
+            self.open_equalizer(sounds.iter().map(|s| s.id.clone()).collect());
         }
     }
 
@@ -3676,6 +3701,13 @@ impl Workspace {
     fn inspect(&mut self, act: Act, (chosen, sounds, paced): Lists<'_>) {
         let held_on = |i: &Inspector, f: Key| i.held.as_ref().is_some_and(|h| h.field == f);
         match act {
+            Act::Equalize(on) => {
+                let ids: Vec<&str> = sounds.iter().map(|s| s.id.as_str()).collect();
+                self.send(
+                    "clip.set",
+                    json!({ "clips": ids, "equalizer": { "on": on } }),
+                );
+            }
             Act::Hold(field, value) => {
                 self.inspector.held = Some(Held {
                     field,

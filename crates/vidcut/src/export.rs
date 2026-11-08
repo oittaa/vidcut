@@ -295,6 +295,9 @@ pub fn timeline(
     if let Some(message) = otio::unheard_isolation(p, span) {
         notes.push(json!({ "code": "voice_isolation_kept", "message": message }));
     }
+    if let Some(message) = otio::unheard_equalizer(p, span) {
+        notes.push(json!({ "code": "equalizer_kept", "message": message }));
+    }
     if let Some(message) = otio::unheard_ducking(p, span) {
         notes.push(json!({ "code": "ducking_kept", "message": message }));
     }

@@ -4944,6 +4944,9 @@ pub struct ClipAudio {
     /// Left out at 0, the middle.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub pan: f64,
+    /// The equalizer. Left out when the clip has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equalizer: Option<Equalizer>,
     /// Effects on its sound, carried from another editor. The clip volume
     /// is `gain_db` and `gain_keys`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4952,6 +4955,43 @@ pub struct ClipAudio {
     /// when its track has it on. Left out, the clip follows its track's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_isolation: Option<VoiceIsolation>,
+}
+
+/// An equalizer: six bands, one after the other.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Equalizer {
+    /// The switch. Off keeps the bands.
+    pub on: bool,
+    /// Bands 1 to 6, from the low end to the high end.
+    pub bands: [EqBand; 6],
+}
+
+/// One band of an equalizer.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct EqBand {
+    /// The switch of this band. Off keeps its values.
+    pub on: bool,
+    /// Its filter.
+    pub kind: EqKind,
+    /// Its frequency in Hz, from 20 to 20000.
+    pub freq: f64,
+    /// Its gain in dB, from -20 to 20. Only `bell`, `lo_shelf` and
+    /// `hi_shelf` use it.
+    pub gain: f64,
+    /// Its width, from 0.3 to 10.3. Only `bell` uses it.
+    pub q: f64,
+}
+
+/// The filter of an equalizer band.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EqKind {
+    Bell,
+    LoShelf,
+    HiShelf,
+    Notch,
+    HiPass,
+    LoPass,
 }
 
 /// Voice Isolation: a switch and an Amount.

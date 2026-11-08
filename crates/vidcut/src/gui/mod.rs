@@ -6,6 +6,7 @@ mod clip_info;
 mod dialog;
 mod ducking;
 mod effect_browser;
+mod equalizer;
 pub mod export;
 mod file_manager;
 mod fillers;

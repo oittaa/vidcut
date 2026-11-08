@@ -308,7 +308,7 @@ const EXAMPLES: &[(&str, &str)] = &[
     ("media.set", "vidcut media set m1 m2 --color teal"),
     (
         "clip.set",
-        "vidcut clip set c4 --color pink\n  vidcut clip set c4 --color \"\"\n  vidcut clip set c4 --voice-isolation 75 --download\n  vidcut clip set c4 --voice-isolation-on false\n  vidcut clip set c4 --pan -50",
+        "vidcut clip set c4 --color pink\n  vidcut clip set c4 --color \"\"\n  vidcut clip set c4 --voice-isolation 75 --download\n  vidcut clip set c4 --voice-isolation-on false\n  vidcut clip set c4 --pan -50\n  vidcut clip set c4 --equalizer '{\"bands\":[{\"band\":2,\"gain\":-6}]}'",
     ),
     (
         "keyframes.add",

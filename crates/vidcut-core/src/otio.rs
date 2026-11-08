@@ -829,6 +829,9 @@ pub fn export_drawn(
                     if au.pan != 0.0 {
                         meta["pan"] = json!(au.pan);
                     }
+                    if let Some(eq) = &au.equalizer {
+                        meta["equalizer"] = json!(eq);
+                    }
                     if let Some(v) = au.voice_isolation {
                         meta["voice_isolation"] = json!(v);
                     }
@@ -933,6 +936,9 @@ pub fn export_drawn(
                 });
                 if au.pan != 0.0 {
                     meta["pan"] = json!(au.pan);
+                }
+                if let Some(eq) = &au.equalizer {
+                    meta["equalizer"] = json!(eq);
                 }
                 if let Some(v) = au.voice_isolation {
                     meta["voice_isolation"] = json!(v);
@@ -1369,6 +1375,7 @@ pub struct ImportedClip {
     pub gain_keys: Vec<Keyframe>,
     pub muted: bool,
     pub pan: f64,
+    pub equalizer: Option<crate::model::Equalizer>,
     pub voice_isolation: Option<crate::model::VoiceIsolation>,
     pub link: Option<i64>,
     pub effects: Vec<Value>,
@@ -1453,6 +1460,7 @@ impl ImportedClip {
             gain_keys: Vec::new(),
             muted: false,
             pan: 0.0,
+            equalizer: None,
             voice_isolation: None,
             link: None,
             effects: Vec::new(),
@@ -2193,6 +2201,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                         gain_keys: our_keys(meta).unwrap_or_default(),
                         muted: meta["muted"].as_bool().unwrap_or(false),
                         pan: meta["pan"].as_f64().unwrap_or(0.0),
+                        equalizer: serde_json::from_value(meta["equalizer"].clone()).ok(),
                         voice_isolation: serde_json::from_value(meta["voice_isolation"].clone())
                             .ok(),
                         link: link_group(item),
@@ -2290,6 +2299,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
             effects::drop_gain_keys(&mut effects);
             let voice_isolation = serde_json::from_value(meta["voice_isolation"].clone()).ok();
             let pan = meta["pan"].as_f64().or_else(|| effects::pan(item));
+            let equalizer = serde_json::from_value(meta["equalizer"].clone()).ok();
             effects::drop_pan(&mut effects);
             let stream = meta["stream"]
                 .as_u64()
@@ -2351,6 +2361,9 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 if let Some(pan) = pan {
                     c.pan = pan;
                 }
+                if equalizer.is_some() {
+                    c.equalizer = equalizer;
+                }
                 c.audio_effects = effects;
                 if c.speed.is_none() {
                     c.speed = speed;
@@ -2387,6 +2400,7 @@ pub fn import(doc: &Value, base: Option<&Path>) -> Result<Imported> {
                 gain_keys,
                 muted,
                 pan: pan.unwrap_or(0.0),
+                equalizer,
                 voice_isolation,
                 link,
                 effects: Vec::new(),
@@ -2627,6 +2641,29 @@ pub fn unheard_ducking(p: &Project, span: Option<(i64, i64)>) -> Option<String> 
     (!named.is_empty()).then(|| {
         format!(
             "Ducking stays in vidcut's own metadata, so other editors won't hear it: {}",
+            named.join(", ")
+        )
+    })
+}
+
+pub fn unheard_equalizer(p: &Project, span: Option<(i64, i64)>) -> Option<String> {
+    let (a, b) = span.unwrap_or((0, p.end()));
+    let named: Vec<&str> = p
+        .tracks
+        .iter()
+        .flat_map(|t| &t.clips)
+        .filter(|c| {
+            c.audio
+                .as_ref()
+                .and_then(|au| au.equalizer.as_ref())
+                .is_some_and(crate::model::Equalizer::heard)
+        })
+        .filter(|c| exported(c, a, b))
+        .map(|c| c.id.as_str())
+        .collect();
+    (!named.is_empty()).then(|| {
+        format!(
+            "The equalizer stays in vidcut's own metadata, so other editors won't hear it: {}",
             named.join(", ")
         )
     })

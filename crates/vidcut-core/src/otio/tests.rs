@@ -270,6 +270,18 @@ fn a_clips_pan_comes_back_from_an_otio_file() {
     assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
 }
 
+#[test]
+fn a_clips_equalizer_comes_back_from_an_otio_file() {
+    let mut f = Fixture::new(&[(10.0, true)]);
+    f.ok(req(
+        "edit.append",
+        json!({"media": "m1", "range": "0f..50f"}),
+    ));
+    let eq = json!({"bands": [{"band": 2, "gain": -6.0, "kind": "notch"}]});
+    f.ok(req("clip.set", json!({"clips": "c1", "equalizer": eq})));
+    assert_eq!(as_saved(&reopened(&f)), as_saved(f.editor.project()));
+}
+
 fn pan_effects(item: &Value) -> Vec<Value> {
     item["effects"]
         .as_array()

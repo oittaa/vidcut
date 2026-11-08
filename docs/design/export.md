@@ -348,6 +348,9 @@ The size of the file ([spec §10](../cut-page-spec.md#10-quick-export-ch-39-pp-7
   - Thus the player and the export play the same curve ([spec D81](../cut-page-spec.md#12-decisions-on-gaps-and-contradictions)).
 - A piece has the Pan of its clip (`pan` of an `AudioPiece`). `render::pan_gains` gives the gain of each side.
   - `AudioMix` multiplies the first two channels of a mix of two channels or more by those gains.
+- A piece has the `equalizer` of its clip when it changes the sound.
+  - `Filter` runs the bands one after the other on each channel, before the gain and the Pan.
+  - Each band is one biquad filter. The player and the export use the same `AudioMix`, so they give the same sound.
 - A track at the bottom of its fader (`fader_silent`) keeps its lanes, and its pieces are `silent`. `AudioMix` gives such a piece no sound.
   - Why: a fader preview ([playback](playback.md#sound)) can raise the lane with no new plan.
 - A clip with speed keyframes gives a sound piece for each section. A piece that plays on into the next section is `joined`.

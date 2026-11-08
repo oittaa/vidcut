@@ -824,6 +824,7 @@ mod tests {
                 gain_keys: Vec::new(),
                 muted: false,
                 pan: 0.0,
+                equalizer: None,
                 effects: None,
                 voice_isolation: None,
             }),

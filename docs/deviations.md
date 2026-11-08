@@ -1578,7 +1578,8 @@ This file also lists the features that vidcut adds. Where the manual does not te
     - Normalize in the header opens Normalize Audio Levels for the clips of the section ([X72](#x72-normalize-audio-levels-on-the-cut-page)).
     - Voice Isolation and its Amount do what Voice Isolation in the right-click menu does, with the same download question ([X64](#x64-voice-isolation-is-free-on-a-clip-or-a-track)).
     - Pan sets the pan of the selected clips ([X152](#x152-every-clip-pans-as-on-a-stereo-track)).
-    - The Audio section has no Pitch, Equalizer, Dialogue Leveler or Music Remixer.
+    - The Equalizer row has a switch and a button that opens the Equalizer window ([X153](#x153-the-equalizer-is-a-window-with-chosen-curves)).
+    - The Audio section has no Pitch, Dialogue Leveler or Music Remixer.
   - A section has no on/off toggle, as in the Tools row ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)). Dynamic Zoom Off takes the Dynamic Zoom off the clip.
   - **Units:**
     - Position X and Y are frame pixels from the middle of the frame, with Y up.
@@ -2832,3 +2833,21 @@ This file also lists the features that vidcut adds. Where the manual does not te
 - **Why:**
   - Resolve puts a mono clip on a stereo track by default. Thus the law of a stereo track is what most clips get.
   - One slider is simpler. A section has no switch ([X65](#x65-transform-and-crop-are-keys-and-viewer-handles-in-fractions-of-the-frame)).
+
+## X153. The Equalizer is a window with chosen curves
+
+- **Resolve:**
+  - The Equalizer is a section of the Inspector, and a change applies at once (pp. 745–746).
+  - Resolve's scripts cannot read or set it. Thus its frequencies and curves are not measured.
+- **vidcut:**
+  - The Equalizer window opens from the Audio section. Apply changes the clips. Cancel changes nothing.
+  - A frequency goes from 20 to 20000 Hz.
+  - Bands 1 to 6 start at 80, 200, 800, 2500, 8000 and 16000 Hz. Bands 2 to 5 start as Bell filters with Q 1.
+  - Band 1 starts as a Hi-Pass filter and band 6 as a Lo-Pass filter.
+  - Each filter is a biquad filter of 12 dB per octave. A Notch filter has a fixed width.
+  - The Lo-Pass and Hi-Pass filters have no slope control.
+  - An OTIO export keeps the Equalizer in vidcut's own metadata. The export gives the note `equalizer_kept`.
+- **Why:**
+  - The Inspector is too narrow for six bands of four values.
+  - A window with Apply makes one undo step for one set of changes.
+  - The [todo](todo/effects-library.md) lists what to measure in the Resolve window.
