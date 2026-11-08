@@ -78,6 +78,13 @@ It gives the page numbers of the *DaVinci Resolve 21.1 Reference Manual*. Most p
     - A click on the name of a group opens or closes it. The ⋯ menu also has Expand All Parameters and Collapse All Parameters.
   - **Track controls** (p. 1257):
     - The curve button shows the curve of the value under its track.
+  - **Graph** (p. 1261, [X160](deviations.md#x160-the-graph-sits-above-the-tracks-with-a-scale-for-each-curve)):
+    - The Graph button in the header shows one large graph above the tracks. The curves under the tracks then go away.
+    - The graph shows a colored line for each value with keyframes. The curve button of a track takes its line out or puts it back.
+    - One curve is active. It has the points and the handles, and each edit in the graph acts on it. The other curves are dimmed.
+    - A click on a dimmed curve makes it the active curve and clears the selection (measured in Resolve Studio 21.2).
+    - A click on a name beside the graph, on a track's name or on a track's keyframe also makes that curve active. The selection stays.
+    - A drag on the line under the graph changes its height.
     - The Keyframe button adds a keyframe at the playhead, also outside the clip (measured in Resolve Studio 21.1.2). On a keyframe, it removes that keyframe, as the Inspector's button does.
     - The Keyframe button is orange on a keyframe (p. 1250), in the Inspector too.
     - The arrows beside it go to the previous and the next keyframe of the value, also outside the clip (measured in Resolve Studio 21.1.2).
