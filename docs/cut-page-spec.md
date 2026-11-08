@@ -2137,6 +2137,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A Cross Dissolve and a sound fade at an edge act as on a plain clip.
   - The dissolve uses the frames that a trim hides in the compound clip.
   - The compound clip mixes as one picture with the clip on the other side. A compound clip with clear parts shows the tracks below through them, as a placed clip does.
+  - A side with a composite mode fades over the other side, as a placed clip does.
   - A compound clip with no hidden frames follows [X27](deviations.md#x27-a-dissolve-short-of-media-is-shortened).
   - The sound fade of a picture edit also fades the sound of the compound clip on its audio track.
   - vidcut also takes a dip to color at an edge. It refuses a wipe, a push, a slide and a smooth cut there ([todo](todo/compound-clips.md)).

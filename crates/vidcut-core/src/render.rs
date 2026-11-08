@@ -2153,7 +2153,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                         to: w.shown.to.min(to),
                         held: laid.held,
                     };
-                    let fades = fading.clone();
+                    let fades: Vec<Fading> = w.fades.iter().chain(&fading).copied().collect();
                     inner.push((
                         v,
                         Inner {
