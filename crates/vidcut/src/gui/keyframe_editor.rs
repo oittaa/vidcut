@@ -396,7 +396,7 @@ pub struct Editor {
     menu_curve: bool,
     menu_tray: bool,
     keyed_only: bool,
-    snapping: bool,
+    snap_off: bool,
     closed: Vec<Group>,
     curves: Vec<KeyParam>,
     view: Option<(f64, f64)>,
@@ -930,16 +930,7 @@ fn ease_body(id: &str, param: KeyParam, frames: &[i64], ease: Ease) -> Value {
 }
 
 fn takes_ease(clip: &Clip, lane: &Lane, i: usize, ease: Ease) -> bool {
-    if fixed(lane.param) {
-        return key_eases(clip, lane, i).1.contains(&ease);
-    }
-    let (first, last) = (i == 0, i + 1 == lane.keys.len());
-    match ease {
-        Ease::Linear => true,
-        Ease::EaseIn => !first,
-        Ease::EaseOut => !last,
-        Ease::EaseInOut => !first || !last,
-    }
+    !fixed(lane.param) || key_eases(clip, lane, i).1.contains(&ease)
 }
 
 fn eased_keys<'a>(clip: &Clip, lanes: &'a [Lane], marks: &[Mark]) -> Vec<(&'a Lane, usize)> {
@@ -2168,7 +2159,10 @@ impl Workspace {
                         ui.close();
                     }
                     ui.separator();
-                    ui.checkbox(&mut editor.snapping, "Enable Snapping");
+                    let mut snapping = !editor.snap_off;
+                    if ui.checkbox(&mut snapping, "Enable Snapping").changed() {
+                        editor.snap_off = !snapping;
+                    }
                 });
                 if most > 1.0 {
                     ui.spacing_mut().slider_width = ZOOM_W;
@@ -2480,9 +2474,7 @@ impl Workspace {
     }
 
     fn drag_snap(&self) -> Option<i64> {
-        self.key_editor
-            .snapping
-            .then_some(self.snap.timeline.position)
+        (!self.key_editor.snap_off).then_some(self.snap.timeline.position)
     }
 
     fn poke_group(
@@ -3507,14 +3499,14 @@ mod tests {
     }
 
     #[test]
-    fn an_ease_in_leaves_a_first_keyframe_alone() {
+    fn an_ease_in_also_goes_to_a_first_keyframe() {
         let lanes = [lane(KeyParam::Volume, &[0, 10, 20])];
         let marks = [mark(KeyParam::Volume, 0), mark(KeyParam::Volume, 10)];
         assert_eq!(
             ease_parts(&clip(), &lanes, &marks, Ease::EaseIn),
             vec![(
                 "keyframes.set",
-                json!({"clips":["c1"],"param":"volume","frames":[10],"ease":"ease_in"})
+                json!({"clips":["c1"],"param":"volume","frames":[0, 10],"ease":"ease_in"})
             )]
         );
     }
