@@ -1340,6 +1340,7 @@ mod tests {
             blend: None,
             use_alpha: true,
             render_cache: true,
+            keys: Vec::new(),
         }
     }
 

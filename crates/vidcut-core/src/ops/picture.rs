@@ -3,9 +3,10 @@ use serde_json::{Value, json};
 use crate::error::{Error, Result};
 use crate::keyframes::PictureValue;
 use crate::model::{
-    Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectKind, FilmGrain,
-    GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, MosaicBlur, Picture,
-    PictureTool, Project, Sharpen, TrackKind, Vignette, VignetteMode, VignetteShape, ZoomBox,
+    Border, CellShape, Clip, CompositeMode, Crop, DynamicZoom, Effect, EffectKeys, EffectKind,
+    FilmGrain, GaussianBlur, Glow, GlowAlpha, GlowFraming, GlowOutput, GrainComposite, MosaicBlur,
+    Picture, PictureTool, Project, Sharpen, TrackKind, Vignette, VignetteMode, VignetteShape,
+    ZoomBox,
 };
 use crate::request::DynamicZoomSet;
 
@@ -54,7 +55,11 @@ fn within(v: Option<f64>, (low, high): (f64, f64), why: &str) -> Result<()> {
 
 fn gaussian_checked(b: &GaussianBlur) -> Result<GaussianBlur> {
     for v in [b.strength, b.vertical_strength] {
-        within(v, (0.0, 1.0), "a Gaussian Blur's strength is from 0 to 1")?;
+        within(
+            v,
+            GaussianBlur::STRENGTHS,
+            "a Gaussian Blur's strength is from 0 to 1",
+        )?;
     }
     for k in [b.horizontal_channels, b.vertical_channels]
         .iter()
@@ -63,7 +68,7 @@ fn gaussian_checked(b: &GaussianBlur) -> Result<GaussianBlur> {
     {
         within(
             Some(*k),
-            (0.0, 2.0),
+            GaussianBlur::CHANNELS,
             "a Gaussian Blur's channel values are from 0 to 2",
         )?;
     }
@@ -440,7 +445,58 @@ fn sharpen_checked(s: &Sharpen) -> Result<Sharpen> {
     })
 }
 
+fn keys_checked(e: &Effect) -> Result<Vec<EffectKeys>> {
+    let mut keys = e.keys.clone();
+    keys.retain(|k| !k.keys.is_empty());
+    keys.sort_by_key(|k| k.value);
+    if keys.windows(2).any(|w| w[0].value == w[1].value) {
+        return Err(Error::invalid(
+            "an effect's value has one list of keyframes",
+        ));
+    }
+    let mut plain = e.clone();
+    plain.keys.clear();
+    for entry in &keys {
+        let name = entry.value.name().replace('_', " ");
+        if !e.takes(entry.value) {
+            return Err(Error::invalid(format!(
+                "a {} has no {name}",
+                e.kind().name()
+            )));
+        }
+        if entry.keys.windows(2).any(|w| w[0].frame >= w[1].frame) {
+            return Err(Error::invalid(format!(
+                "{name} keyframes out of order or on one frame"
+            )));
+        }
+        for k in &entry.keys {
+            for (h, before) in [(k.in_handle, true), (k.out_handle, false)] {
+                if let Some(h) = h {
+                    crate::keyframes::checked_handle(h, before)?;
+                }
+            }
+            let mut one = plain.clone();
+            one.write(entry.value, k.value);
+            plain_effect_checked(&one).map_err(|err| {
+                Error::invalid(format!(
+                    "{name} keyframe at source frame {}: {}",
+                    k.frame, err.message
+                ))
+            })?;
+        }
+    }
+    Ok(keys)
+}
+
 pub fn effect_checked(e: &Effect) -> Result<Effect> {
+    let keys = keys_checked(e)?;
+    Ok(Effect {
+        keys,
+        ..plain_effect_checked(e)?
+    })
+}
+
+fn plain_effect_checked(e: &Effect) -> Result<Effect> {
     within(e.blend, (0.0, 1.0), "an effect's blend is from 0 to 1")?;
     let kind = match &e.kind {
         EffectKind::GaussianBlur(b) => EffectKind::GaussianBlur(gaussian_checked(b)?),

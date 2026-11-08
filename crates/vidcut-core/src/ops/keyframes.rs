@@ -7,10 +7,10 @@ use crate::error::{Error, Result};
 use crate::generators::{Axis, CENTER, checked_center};
 use crate::keyframes::{PictureValue, checked, checked_handle, ease_of, reshape};
 use crate::model::{
-    Clip, ClipAudio, Ease, Generator, Gradient, Handle, Keyframe, LowerThirdLine, Picture, Project,
-    Title, TitleKind,
+    Clip, ClipAudio, Ease, Effect, Generator, Gradient, Handle, Keyframe, LowerThirdLine, Picture,
+    Project, Title, TitleKind,
 };
-use crate::request::{CopiedKey, KeyParam, KeyPicks, KeyValue};
+use crate::request::{CopiedKey, EffectParam, KeyParam, KeyPicks, KeyValue};
 use crate::validate::GAIN;
 
 const ANCHOR_LINEAR: &str = "the anchor point's keyframes are linear: they take no ease or handles";
@@ -74,6 +74,7 @@ pub fn put_value(keys: &mut Vec<Keyframe>, frame: i64, value: f64) {
 enum Number {
     Volume,
     Center(Axis),
+    Effect(EffectParam),
 }
 
 impl Number {
@@ -81,15 +82,17 @@ impl Number {
         match param {
             KeyParam::CenterX => Self::Center(Axis::X),
             KeyParam::CenterY => Self::Center(Axis::Y),
+            KeyParam::Effect(q) => Self::Effect(q),
             _ => Self::Volume,
         }
     }
 
-    fn name(self) -> &'static str {
+    fn name(self) -> String {
         match self {
-            Self::Volume => "volume",
-            Self::Center(Axis::X) => "center x",
-            Self::Center(Axis::Y) => "center y",
+            Self::Volume => "volume".to_string(),
+            Self::Center(Axis::X) => "center x".to_string(),
+            Self::Center(Axis::Y) => "center y".to_string(),
+            Self::Effect(q) => q.value.name().replace('_', " "),
         }
     }
 
@@ -97,6 +100,7 @@ impl Number {
         match self {
             Self::Volume => c.audio_range().is_some(),
             Self::Center(_) => gradient(c).is_some(),
+            Self::Effect(q) => effect_of(c, q).is_some_and(|e| e.takes(q.value)),
         }
     }
 
@@ -104,6 +108,7 @@ impl Number {
         match self {
             Self::Volume => "has no sound",
             Self::Center(_) => "is not a Four Color Gradient",
+            Self::Effect(_) => "has no effect with that value",
         }
     }
 
@@ -111,6 +116,7 @@ impl Number {
         match self {
             Self::Volume => c.audio.as_ref().map_or(&[], |a| a.gain_keys.as_slice()),
             Self::Center(axis) => gradient(c).map_or(&[], |g| g.keys(axis)),
+            Self::Effect(q) => effect_of(c, q).map_or(&[], |e| e.keys_of(q.value)),
         }
     }
 
@@ -121,6 +127,12 @@ impl Number {
                 Some(Generator::FourColorGradient(g)) => Some(g.keys_mut(axis)),
                 _ => None,
             },
+            Self::Effect(q) => c
+                .picture
+                .as_mut()?
+                .effects
+                .get_mut(q.effect)?
+                .keys_mut(q.value),
         }
     }
 
@@ -128,6 +140,7 @@ impl Number {
         match self {
             Self::Volume => c.audio.as_ref().map_or(0.0, |a| a.db_at(frame)),
             Self::Center(axis) => gradient(c).map_or(0.0, |g| g.center_at(axis, frame)),
+            Self::Effect(q) => effect_of(c, q).map_or(0.0, |e| e.value_at(q.value, frame)),
         }
     }
 
@@ -135,16 +148,39 @@ impl Number {
         match self {
             Self::Volume => checked(value),
             Self::Center(_) => checked_center(value),
+            Self::Effect(_) if value.is_finite() => Ok(value),
+            Self::Effect(_) => Err(Error::invalid("a keyframe's value is a finite number")),
         }
     }
 
-    fn limited(self, value: f64) -> f64 {
-        let range = match self {
-            Self::Volume => GAIN,
-            Self::Center(_) => CENTER,
+    fn limited(self, c: &Clip, value: f64) -> f64 {
+        let (low, high) = match self {
+            Self::Volume => (*GAIN.start(), *GAIN.end()),
+            Self::Center(_) => (*CENTER.start(), *CENTER.end()),
+            Self::Effect(q) => effect_of(c, q)
+                .and_then(|e| e.range_of(q.value))
+                .unwrap_or((value, value)),
         };
-        value.clamp(*range.start(), *range.end())
+        value.clamp(low, high)
     }
+}
+
+fn effect_of(c: &Clip, q: EffectParam) -> Option<&Effect> {
+    c.picture.as_ref()?.effects.get(q.effect)
+}
+
+fn settled(p: &mut Project, ids: &[String], number: Number) -> Result<()> {
+    let Number::Effect(q) = number else {
+        return Ok(());
+    };
+    for id in ids {
+        let (ti, ci) = locate(p, id)?;
+        let picture = p.tracks[ti].clips[ci].picture.as_mut();
+        if let Some(e) = picture.and_then(|x| x.effects.get_mut(q.effect)) {
+            *e = super::picture::effect_checked(e)?;
+        }
+    }
+    Ok(())
 }
 
 fn gradient(c: &Clip) -> Option<&Gradient> {
@@ -187,7 +223,10 @@ pub fn add(
         return add_picture(p, ids, v, at, value, ease);
     }
     let value = scalar(param, value)?;
-    add_number(p, ids, Number::of(param), at, value, ease)
+    let number = Number::of(param);
+    let added = add_number(p, ids, number, at, value, ease)?;
+    settled(p, ids, number)?;
+    Ok(added)
 }
 
 fn add_number(
@@ -215,6 +254,7 @@ fn add_number(
             match number {
                 Number::Volume => "has sound",
                 Number::Center(_) => "is a Four Color Gradient",
+                Number::Effect(_) => "has an effect with that value",
             }
         )));
     }
@@ -342,7 +382,7 @@ pub fn set(
     if by.is_some_and(|b| !b.is_finite()) {
         return Err(Error::invalid(match number {
             Number::Volume => "`by` needs a number of dB",
-            Number::Center(_) => "`by` needs a number",
+            Number::Center(_) | Number::Effect(_) => "`by` needs a number",
         }));
     }
     if value.is_some() && by.is_some() {
@@ -362,14 +402,14 @@ pub fn set(
         .transpose()?;
     for id in ids {
         let (keys, c) = keyed_number(p, id, number)?;
-        let chosen = picked_as(&c, keys, pick, number.name())?;
+        let chosen = picked_as(&c, keys, pick, &number.name())?;
         reshape(keys, |marked| {
             for entry in marked.iter_mut().filter(|(k, _)| chosen.contains(&k.frame)) {
                 if let Some(v) = value {
                     entry.0.value = v;
                 }
                 if let Some(by) = by {
-                    entry.0.value = number.limited(entry.0.value + by);
+                    entry.0.value = number.limited(&c, entry.0.value + by);
                 }
                 if let Some(e) = change.ease {
                     eased(entry, e);
@@ -383,7 +423,7 @@ pub fn set(
             }
         });
     }
-    Ok(())
+    settled(p, ids, number)
 }
 
 pub fn shift(
@@ -401,7 +441,9 @@ pub fn shift(
     if let Some(v) = picture_param(param) {
         return shift_picture(p, ids, v, pick, by, to);
     }
-    shift_number(p, ids, Number::of(param), pick, by, to)
+    let number = Number::of(param);
+    shift_number(p, ids, number, pick, by, to)?;
+    settled(p, ids, number)
 }
 
 fn shift_number(
@@ -417,7 +459,7 @@ fn shift_number(
     }
     for id in ids {
         let (keys, c) = keyed_number(p, id, number)?;
-        let chosen = picked_as(&c, keys, pick, number.name())?;
+        let chosen = picked_as(&c, keys, pick, &number.name())?;
         if to.is_some() && chosen.len() != 1 {
             return Err(Error::usage(format!(
                 "`to` moves one keyframe; {id} has {} chosen",
@@ -460,13 +502,15 @@ pub fn remove(p: &mut Project, ids: &[String], param: KeyParam, pick: &Pick) -> 
     if let Some(v) = picture_param(param) {
         return remove_picture(p, ids, v, pick);
     }
-    remove_number(p, ids, Number::of(param), pick)
+    let number = Number::of(param);
+    remove_number(p, ids, number, pick)?;
+    settled(p, ids, number)
 }
 
 fn remove_number(p: &mut Project, ids: &[String], number: Number, pick: &Pick) -> Result<()> {
     for id in ids {
         let (keys, c) = keyed_number(p, id, number)?;
-        let chosen = picked_as(&c, keys, pick, number.name())?;
+        let chosen = picked_as(&c, keys, pick, &number.name())?;
         reshape(keys, |marked| {
             marked.retain(|(k, _)| !chosen.contains(&k.frame));
         });
@@ -482,11 +526,12 @@ pub fn list(p: &Project, ids: Option<&[String]>) -> Result<Value> {
             if !wanted {
                 continue;
             }
-            let numbers = [
-                ("volume", Number::Volume),
-                ("center_x", Number::Center(Axis::X)),
-                ("center_y", Number::Center(Axis::Y)),
+            let mut numbers = vec![
+                (json!("volume"), Number::Volume),
+                (json!("center_x"), Number::Center(Axis::X)),
+                (json!("center_y"), Number::Center(Axis::Y)),
             ];
+            numbers.extend(effect_params(c).map(|q| (json!(q), Number::Effect(q))));
             for (param, number) in numbers {
                 let held = number.keys(c);
                 if held.is_empty() {
@@ -642,25 +687,43 @@ fn keys_of(c: &Clip, param: KeyParam) -> &[Keyframe] {
     }
 }
 
-fn param_name(param: KeyParam) -> &'static str {
+fn param_name(param: KeyParam) -> String {
     match param {
-        KeyParam::Speed => "speed",
-        KeyParam::CenterX => "center_x",
-        KeyParam::CenterY => "center_y",
-        _ => picture_param(param).map_or("volume", PictureValue::name),
+        KeyParam::Speed => "speed".to_string(),
+        KeyParam::CenterX => "center_x".to_string(),
+        KeyParam::CenterY => "center_y".to_string(),
+        KeyParam::Effect(q) => q.value.name(),
+        _ => picture_param(param)
+            .map_or("volume", PictureValue::name)
+            .to_string(),
     }
+}
+
+fn effect_params(c: &Clip) -> impl Iterator<Item = EffectParam> + '_ {
+    c.picture
+        .iter()
+        .flat_map(|x| x.effects.iter().enumerate())
+        .flat_map(|(effect, e)| {
+            e.keys.iter().map(move |k| EffectParam {
+                effect,
+                value: k.value,
+            })
+        })
 }
 
 pub type ChosenKeys = (KeyParam, Vec<i64>);
 
-fn listed_params(c: &Clip) -> impl Iterator<Item = KeyParam> + use<> {
+fn listed_params(c: &Clip) -> Vec<KeyParam> {
     let apart = c.title.as_ref().is_some_and(|t| t.upper.is_some());
-    KeyParam::ALL.into_iter().filter(move |&param| {
+    let plain = KeyParam::ALL.into_iter().filter(move |&param| {
         if param.on_line().1.is_some() {
             return apart;
         }
         !apart || param.for_line(LowerThirdLine::Lower) == param
-    })
+    });
+    plain
+        .chain(effect_params(c).map(KeyParam::Effect))
+        .collect()
 }
 
 pub fn chosen(p: &Project, id: &str, picks: Option<&[KeyPicks]>) -> Result<Vec<ChosenKeys>> {
@@ -671,6 +734,7 @@ pub fn chosen(p: &Project, id: &str, picks: Option<&[KeyPicks]>) -> Result<Vec<C
             .map(|k| (k.param, k.frames.as_ref().map(|f| f.to_vec())))
             .collect(),
         None => listed_params(whole)
+            .into_iter()
             .filter(|&param| {
                 let (value, line) = param.on_line();
                 !keys_of(&of_line(whole, line), value).is_empty()
@@ -695,7 +759,7 @@ pub fn chosen(p: &Project, id: &str, picks: Option<&[KeyPicks]>) -> Result<Vec<C
         let pick = Pick { frames, at: None };
         let mut taken: Vec<i64> = match picture_param(value) {
             Some(v) => picked_name(c, keys, &pick, v)?,
-            None => picked_as(c, keys, &pick, Number::of(value).name())?,
+            None => picked_as(c, keys, &pick, &Number::of(value).name())?,
         }
         .into_iter()
         .collect();
@@ -744,6 +808,10 @@ pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey
                 at,
                 CopiedKey {
                     param: *param,
+                    kind: match plain {
+                        KeyParam::Effect(q) => effect_of(c, q).map(Effect::kind),
+                        _ => None,
+                    },
                     offset: 0,
                     value,
                     ease: ease_of(keys, i).filter(|_| bent.is_none()),
@@ -756,7 +824,7 @@ pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey
         }
     }
     let first = rows.iter().map(|(at, _)| *at).min().unwrap_or(0);
-    rows.sort_by_key(|(at, k)| (*at, k.param as u8));
+    rows.sort_by_key(|(at, k)| (*at, k.param));
     Ok(rows
         .into_iter()
         .map(|(at, k)| CopiedKey {
@@ -764,6 +832,19 @@ pub fn copy(p: &Project, id: &str, picks: &[ChosenKeys]) -> Result<Vec<CopiedKey
             ..k
         })
         .collect())
+}
+
+fn pastes_on_its_kind(c: &Clip, id: &str, k: &CopiedKey) -> Result<()> {
+    let (KeyParam::Effect(q), Some(kind)) = (k.param.on_line().0, k.kind) else {
+        return Ok(());
+    };
+    match effect_of(c, q) {
+        Some(e) if e.kind() != kind => Err(Error::invalid(format!(
+            "{id}'s effect {} is not the kind of the copied keyframe",
+            q.effect
+        ))),
+        _ => Ok(()),
+    }
 }
 
 pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Result<Vec<Value>> {
@@ -777,6 +858,9 @@ pub fn paste(p: &mut Project, ids: &[String], at: i64, keys: &[CopiedKey]) -> Re
     let Some(earliest) = starts.iter().copied().min() else {
         return Err(Error::usage("keyframes.paste needs clips"));
     };
+    for (id, k) in ids.iter().flat_map(|id| keys.iter().map(move |k| (id, k))) {
+        pastes_on_its_kind(&holder(p, id)?, id, k)?;
+    }
     let mut out = Vec::new();
     for (id, start) in ids.iter().zip(starts) {
         let one = std::slice::from_ref(id);
@@ -843,7 +927,7 @@ fn picture_param(param: KeyParam) -> Option<PictureValue> {
         KeyParam::CropBottom => Some(PictureValue::CropBottom),
         KeyParam::CropSoftness => Some(PictureValue::CropSoftness),
         KeyParam::Opacity => Some(PictureValue::Opacity),
-        KeyParam::Speed => None,
+        KeyParam::Speed | KeyParam::Effect(_) => None,
     }
 }
 
@@ -1189,6 +1273,7 @@ fn listed(p: &Project, c: &Clip, picture: &Picture, v: PictureValue) -> Vec<Valu
 #[cfg(test)]
 mod tests {
     use crate::keyframes::PictureValue;
+    use crate::model::{Effect, EffectValue};
     use crate::test_support::Fixture;
     use serde_json::json;
 
@@ -1216,5 +1301,222 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(picture.scale_at(15.0), [0.25, 0.25]);
         assert!(picture.has_keys(PictureValue::Zoom));
+    }
+
+    fn blurred() -> Fixture {
+        let mut f = Fixture::new(&[(10.0, true)]);
+        f.append("m1", 0, 100);
+        f.ok(req(
+            "effects.add",
+            json!({"clips": "c1", "kind": "gaussian_blur"}),
+        ));
+        f
+    }
+
+    fn strength() -> serde_json::Value {
+        json!({"effect": 0, "value": "strength"})
+    }
+
+    fn effect(f: &Fixture) -> Effect {
+        f.editor
+            .project()
+            .clip("c1")
+            .and_then(|c| c.picture.clone())
+            .map(|p| p.effects[0].clone())
+            .expect("an effect")
+    }
+
+    #[test]
+    fn keyframes_add_keys_an_effect_value() {
+        let mut f = blurred();
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": strength(), "at": 10, "value": 0.7}),
+        ));
+        assert_eq!(effect(&f).value_at(EffectValue::Strength, 10.0), 0.7);
+    }
+
+    #[test]
+    fn a_keyframe_out_of_range_is_refused() {
+        let mut f = blurred();
+        let got = f.err(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": strength(), "at": 10, "value": 7.0}),
+        ));
+        assert!(got.message.contains("from 0 to 1"), "{}", got.message);
+    }
+
+    #[test]
+    fn keyframes_add_refuses_a_value_of_another_kind() {
+        let mut f = blurred();
+        let got = f.err(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": {"effect": 0, "value": "gamma"}, "at": 10}),
+        ));
+        assert!(got.message.contains("that value"), "{}", got.message);
+    }
+
+    #[test]
+    fn removing_the_last_key_leaves_no_list() {
+        let mut f = blurred();
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": strength(), "at": 10}),
+        ));
+        f.ok(req(
+            "keyframes.remove",
+            json!({"clips": "c1", "param": strength()}),
+        ));
+        assert_eq!(effect(&f).keys, vec![]);
+    }
+
+    #[test]
+    fn effects_set_at_puts_a_key_and_keeps_the_plain_value() {
+        let mut f = blurred();
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": strength(), "at": 10, "value": 0.2}),
+        ));
+        f.ok(req(
+            "effects.set",
+            json!({"clip": "c1", "effect": 0, "at": 20, "strength": 0.9}),
+        ));
+        let e = effect(&f);
+        assert_eq!(
+            (
+                e.value_at(EffectValue::Strength, 20.0),
+                e.plain(EffectValue::Strength)
+            ),
+            (0.9, 0.4)
+        );
+    }
+
+    #[test]
+    fn effects_set_of_a_keyed_value_needs_at() {
+        let mut f = blurred();
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": strength(), "at": 10}),
+        ));
+        let got = f.err(req(
+            "effects.set",
+            json!({"clip": "c1", "effect": 0, "strength": 0.9}),
+        ));
+        assert!(got.message.contains("give `at`"), "{}", got.message);
+    }
+
+    #[test]
+    fn effects_key_keys_each_value_of_the_effect() {
+        let mut f = blurred();
+        f.ok(req(
+            "effects.key",
+            json!({"clip": "c1", "effect": 0, "at": 10}),
+        ));
+        assert_eq!(effect(&f).keys.len(), 11);
+    }
+
+    #[test]
+    fn effects_set_keys_only_the_number_that_changes() {
+        let mut f = blurred();
+        f.ok(req(
+            "effects.key",
+            json!({"clip": "c1", "effect": 0, "at": 0}),
+        ));
+        f.ok(req(
+            "effects.set",
+            json!({"clip": "c1", "effect": 0, "at": 10, "horizontal_channels": [0.5, 1.0, 1.0, 1.0]}),
+        ));
+        assert_eq!(effect(&f).keys_of(EffectValue::HorizontalGreen).len(), 1);
+    }
+
+    #[test]
+    fn a_retime_keeps_an_effect_key_at_its_place_in_the_clip() {
+        let mut f = blurred();
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": strength(), "at": 10}),
+        ));
+        let old = f.editor.project().clip("c1").expect("a clip").clone();
+        let mut new = old.clone();
+        new.source_in = 30;
+        let mut e = effect(&f);
+        e.retime_keys(&old, &new);
+        assert_eq!(e.keys_of(EffectValue::Strength)[0].frame, 40);
+    }
+
+    #[test]
+    fn keyframes_paste_refuses_an_effect_of_another_kind() {
+        let mut f = blurred();
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": {"effect": 0, "value": "blend"}, "at": 10}),
+        ));
+        let copied = f.ok(req("keyframes.copy", json!({"clip": "c1"}))).result;
+        f.ok(req("effects.add", json!({"clips": "c1", "kind": "glow"})));
+        f.ok(req(
+            "effects.move",
+            json!({"clip": "c1", "effect": 1, "to": 0}),
+        ));
+        let got = f.err(req(
+            "keyframes.paste",
+            json!({"clips": "c1", "at": 40, "keyframes": copied["keyframes"]}),
+        ));
+        assert!(got.message.contains("kind"), "{}", got.message);
+    }
+
+    #[test]
+    fn effects_key_on_a_keyed_frame_removes_its_keys() {
+        let mut f = blurred();
+        let key = json!({"clip": "c1", "effect": 0, "at": 10});
+        f.ok(req("effects.key", key.clone()));
+        f.ok(req("effects.key", key));
+        assert_eq!(effect(&f).keys, vec![]);
+    }
+
+    #[test]
+    fn effects_key_with_an_ease_needs_a_key_there() {
+        let mut f = blurred();
+        let got = f.err(req(
+            "effects.key",
+            json!({"clip": "c1", "effect": 0, "at": 10, "ease": "ease_in"}),
+        ));
+        assert!(got.message.contains("no keyframes"), "{}", got.message);
+    }
+
+    #[test]
+    fn a_list_names_the_effect_and_its_value() {
+        let mut f = blurred();
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": strength(), "at": 10}),
+        ));
+        let got = f.ok(req("keyframes.list", json!({"clips": "c1"}))).result;
+        assert_eq!(got["clips"][0]["param"], strength());
+    }
+
+    #[test]
+    fn a_copied_effect_key_pastes_later() {
+        let mut f = blurred();
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": strength(), "at": 10, "value": 0.7}),
+        ));
+        let copied = f.ok(req("keyframes.copy", json!({"clip": "c1"}))).result;
+        f.ok(req(
+            "keyframes.paste",
+            json!({"clips": "c1", "at": 40, "keyframes": copied["keyframes"]}),
+        ));
+        assert_eq!(effect(&f).value_at(EffectValue::Strength, 40.0), 0.7);
+    }
+
+    #[test]
+    fn a_reset_removes_the_keys() {
+        let mut f = blurred();
+        f.ok(req(
+            "keyframes.add",
+            json!({"clips": "c1", "param": strength(), "at": 10}),
+        ));
+        f.ok(req("effects.reset", json!({"clip": "c1", "effect": 0})));
+        assert_eq!(effect(&f).keys, vec![]);
     }
 }
