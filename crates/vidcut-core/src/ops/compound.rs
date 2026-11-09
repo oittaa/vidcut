@@ -306,7 +306,12 @@ fn put_host(
     Ok(())
 }
 
-fn make_room(p: &mut Project, how: Place, at: i64, frames: i64) -> Result<i64> {
+fn make_room(
+    p: &mut Project,
+    how: Place,
+    at: i64,
+    frames: i64,
+) -> Result<(i64, Option<(i64, i64)>)> {
     let ti = main_index(p);
     unlocked(p, ti)?;
     if how == Place::Insert {
@@ -317,16 +322,21 @@ fn make_room(p: &mut Project, how: Place, at: i64, frames: i64) -> Result<i64> {
         };
         split_at(p, ti, at);
         shift_from(p, ti, at, frames);
-        return Ok(at);
+        return Ok((at, None));
     }
     let t = &p.tracks[ti];
     let ci = t
         .clip_at(at)
         .ok_or_else(|| Error::invalid(format!("no clip on {} to replace", t.id)))?;
     let (a, b) = (t.clips[ci].start, t.clips[ci].end());
+    let others = linked::tied_to(p, &t.clips[ci].id);
+    for (id, _) in &others {
+        unlocked(p, locate(p, id)?.0)?;
+    }
+    linked::take(p, &others)?;
     clear_range(p, ti, a, b);
     shift_from(p, ti, b, frames - (b - a));
-    Ok(a)
+    Ok((a, Some((a, b))))
 }
 
 pub fn place_pooled(
@@ -342,6 +352,9 @@ pub fn place_pooled(
         .find(|x| x.id == id)
         .cloned()
         .ok_or_else(|| Error::not_found(format!("no compound clip {id}")))?;
+    if let Some(t) = track {
+        ensure_track(p, t)?;
+    }
     let frames = item.frames();
     let mut at = at.unwrap_or_else(|| p.end());
     let number = track.and_then(|t| t.get(1..)).unwrap_or("1");
@@ -350,8 +363,9 @@ pub fn place_pooled(
         linked::split_main(p, at, &[]);
     }
     let before = Before::of(p);
+    let mut old = None;
     if ripples {
-        at = make_room(p, how, at, frames)?;
+        (at, old) = make_room(p, how, at, frames)?;
     }
     let host = Host {
         number,
@@ -363,11 +377,17 @@ pub fn place_pooled(
         put_host(p, &host, (TrackKind::Video, k), &mut clips)?;
     }
     if ripples {
+        let kept: Vec<(i64, i64)> = old
+            .iter()
+            .map(|&(a, b)| (a, a + frames.min(b - a)))
+            .collect();
         follow::follow(
             p,
             &before,
             &Edit {
                 created: &clips,
+                kept: &kept,
+                replaced: old.map(|(a, b)| (a + frames, b)),
                 ..Edit::default()
             },
         );
@@ -664,6 +684,22 @@ mod tests {
         f.ok(req("media.compound", json!({"range": "10f..40f"})));
         assert_eq!(f.editor.project().tracks, before);
         assert_eq!(f.editor.project().compounds[0].frames(), 30);
+    }
+
+    #[test]
+    fn a_replace_by_a_pooled_compound_clip_leaves_the_clip_above_where_it_is() {
+        let mut f = Fixture::new(&[(8.0, true)]);
+        let _ = f.append("m1", 0, 40);
+        let _ = f.append("m1", 0, 40);
+        let _ = f.append("m1", 0, 30);
+        let above = f.append("m1", 0, 20);
+        let moved = json!({"clips": [above], "to": 50, "mode": "overwrite", "track": "V2"});
+        f.ok(req("edit.move", moved));
+        f.ok(req("media.compound", json!({"range": "0f..12f"})));
+        let id = f.editor.project().compounds[0].id.clone();
+        let place = json!({"compound": id, "at": "45f", "how": "replace"});
+        f.ok(req("edit.place_compound", place));
+        assert_eq!(f.editor.project().clip(&above).unwrap().start, 50);
     }
 
     #[test]
