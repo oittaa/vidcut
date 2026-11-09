@@ -150,7 +150,8 @@ The history file:
 - Each save appends lines. They end with a hash of the project text that the save wrote.
 - On load (`Store::load_text`), a project file that does not match that hash was changed by something else. Then `Editor::record_external` makes the difference from the last saved state one undoable step, by `file`.
 - When a GUI cannot write the project file, the edit stays in memory (`OpenProject::apply`).
-  - The request succeeds, with a warning. The next edit writes the file again.
+  - The request succeeds, with a warning. Its result has `saved: false`.
+  - The next edit writes the file again. A quit and the open of another project do so too (`OpenProject::save_left`), if no other program changed the file.
   - If no later write succeeds, the project loads without that edit. One undo brings it back, because the history has the edit.
   - Without a GUI, the request fails. The CLI process keeps nothing in memory.
 - vidcut never writes over a history file that it cannot read. Examples: `HistoryFile::read_tail` fails, or the last saved project cannot be rebuilt.

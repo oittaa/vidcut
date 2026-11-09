@@ -15,6 +15,7 @@ pub struct OpenProject {
     disk: String,
     stamp: Option<(u64, std::time::SystemTime)>,
     pub unsaved: Option<String>,
+    pub save_failed: bool,
     told: Option<String>,
     opened: u64,
     steps: StepsCache,
@@ -53,6 +54,7 @@ impl OpenProject {
             disk,
             stamp,
             unsaved: None,
+            save_failed: false,
             told: None,
             opened,
             steps: StepsCache::default(),
@@ -112,6 +114,7 @@ impl OpenProject {
             || editor.history_counts() != self.editor.history_counts();
         self.editor = editor;
         self.disk = text;
+        self.save_failed = false;
         Ok(changed)
     }
 
@@ -140,6 +143,7 @@ impl OpenProject {
         if committed {
             let saved = self.store.save(&mut self.editor);
             self.unsaved = unsaved_warning(&saved);
+            self.save_failed = saved.is_err();
             if let Ok(saved) = saved {
                 self.disk = saved.text;
                 self.stamp = self.store.stamp();
@@ -156,6 +160,23 @@ impl OpenProject {
         }
         (result, committed || refreshed)
     }
+
+    pub fn save_left(&mut self) {
+        if !self.save_failed {
+            return;
+        }
+        let Ok(_lock) = self.store.lock() else {
+            return;
+        };
+        if self.store.stamp() == self.stamp
+            && let Ok(saved) = self.store.save(&mut self.editor)
+        {
+            self.disk = saved.text;
+            self.stamp = self.store.stamp();
+            self.history_stamp = self.store.history_stamp();
+            self.save_failed = false;
+        }
+    }
 }
 
 fn unsaved_warning(saved: &Result<Saved>) -> Option<String> {
@@ -165,7 +186,7 @@ fn unsaved_warning(saved: &Result<Saved>) -> Option<String> {
             .as_deref()
             .map(crate::session::history_unsaved),
         Err(e) => Some(format!(
-            "the edit is made, but it isn't saved ({}). The next edit tries to save it again",
+            "the edit isn't saved ({}); the next edit tries again",
             e.message
         )),
     }
@@ -239,9 +260,7 @@ mod tests {
     fn a_failed_write_says_the_edit_is_made_but_not_saved() {
         assert_eq!(
             unsaved_warning(&Err(Error::internal("disk full"))).as_deref(),
-            Some(
-                "the edit is made, but it isn't saved (disk full). The next edit tries to save it again"
-            )
+            Some("the edit isn't saved (disk full); the next edit tries again")
         );
     }
 

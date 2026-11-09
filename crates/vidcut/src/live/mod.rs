@@ -1041,6 +1041,9 @@ impl Live {
         for (r, result) in self.answers.drain(..) {
             let _ = r.tx.send(ReplyEvent::Done(result));
         }
+        if let Some(open) = self.project.as_mut() {
+            open.save_left();
+        }
         if let Some(i) = &self.instance {
             ipc::registry::unregister(i);
         }
@@ -3565,9 +3568,13 @@ impl Live {
         {
             self.multi_alone = false;
         }
+        let failed = open.save_failed;
         if let Some(warning) = open.unsaved.take() {
             self.notice(warning.clone(), true);
             if let Ok(r) = result.as_mut() {
+                if failed && (r.result.is_object() || r.result.is_null()) {
+                    r.result["saved"] = json!(false);
+                }
                 r.warnings.push(warning);
             }
         }
@@ -3620,6 +3627,9 @@ impl Live {
     }
 
     fn open_project(&mut self, path: &Path, create: Option<project::New>) -> Result<()> {
+        if let Some(old) = self.project.as_mut() {
+            old.save_left();
+        }
         let open = OpenProject::open(path, create, self.tx.clone())?;
         self.render.open(open.store.path());
         let proxies = AvEnv::for_project(open.store.path()).proxy_dir();
@@ -5135,7 +5145,10 @@ fn runs_long(r: &Request) -> bool {
             ..
         } => true,
         Request::EditRippleDeleteSilence { parts, .. } => parts.is_none(),
-        _ => false,
+        Request::MediaSet { download: true, .. }
+        | Request::ClipSet { download: true, .. }
+        | Request::TrackSet { download: true, .. } => true,
+        _ => fetches(r),
     }
 }
 
@@ -5161,7 +5174,7 @@ fn still_open(asked: Option<PathBuf>, open: Option<PathBuf>) -> Result<()> {
         return Ok(());
     }
     Err(Error::conflict(
-        "another project opened while this ran; nothing changed",
+        "the project is no longer open; nothing changed",
     ))
 }
 

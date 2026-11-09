@@ -185,6 +185,7 @@ Each wait has a deadline, except an untimed `jobs.wait`.
 - A `background` request has its answer when the files are planned. Other requests have it when the job ends. The GUI's requests are `background`.
 - Automatic proxies are the core's own `proxy.generate` (`Origin::Session`).
 - An `apply` with a request that runs long (`runs_long`) runs first on a copy, on a thread. Then the core applies it. It takes what the copy measured and made. Both runs use the playhead of the request's start.
+  - The copy runs every command of the batch with the full environment. Thus a command that writes a file also writes it during the copy.
 
 Transcriptions:
 
