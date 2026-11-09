@@ -41,7 +41,13 @@ pub fn register(instance: &Instance) -> std::io::Result<()> {
 
 pub fn unregister(instance: &Instance) {
     let _ = std::fs::remove_file(entry_path(instance.pid));
-    let _ = std::fs::remove_file(&instance.socket);
+    remove_socket(&instance.socket, &dir());
+}
+
+fn remove_socket(socket: &Path, dir: &Path) {
+    if socket.parent() == Some(dir) {
+        let _ = std::fs::remove_file(socket);
+    }
 }
 
 #[cfg(unix)]
@@ -101,19 +107,23 @@ pub fn list() -> Vec<Instance> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Instance, unregister};
+    use super::remove_socket;
 
     #[test]
-    fn unregister_removes_the_socket_the_instance_recorded() {
+    fn a_socket_in_the_folder_goes() {
         let dir = tempfile::tempdir().unwrap();
         let socket = dir.path().join("1234-salted.sock");
         std::fs::write(&socket, b"").unwrap();
-        unregister(&Instance {
-            pid: u32::MAX,
-            socket: socket.clone(),
-            project: None,
-            version: String::new(),
-        });
+        remove_socket(&socket, dir.path());
         assert!(!socket.exists());
+    }
+
+    #[test]
+    fn a_file_outside_the_folder_stays() {
+        let (dir, other) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let file = other.path().join("notes.txt");
+        std::fs::write(&file, b"").unwrap();
+        remove_socket(&file, dir.path());
+        assert!(file.exists());
     }
 }
