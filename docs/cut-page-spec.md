@@ -2141,7 +2141,7 @@ The measurements use the scripting call for a new compound clip, the OpenTimelin
   - A compound clip with no hidden frames follows [X27](deviations.md#x27-a-dissolve-short-of-media-is-shortened).
   - The sound fade of a picture edit also fades the sound of the compound clip on its audio track.
   - A Smooth Cut acts as on a plain clip too. The compound clip is one picture of the frame size.
-  - vidcut also takes a dip to color at an edge. It refuses a smooth cut there ([todo](todo/compound-clips.md)).
+  - vidcut also takes a dip to color at an edge.
 - **Speed keyframes on a compound clip** (measured in Resolve Studio 21.2.0):
   - Each section plays at its own speed, in its picture and in its sound, as on a plain clip.
   - vidcut gives an edit to the picture and to the sound of the compound clip.

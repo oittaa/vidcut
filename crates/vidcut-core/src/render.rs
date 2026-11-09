@@ -240,6 +240,17 @@ pub enum VideoPiece {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         excluded: bool,
     },
+    /// A compound clip as one picture of the frame size, for a Smooth Cut.
+    /// Frame `k` is frame `skip + k` of its `pieces`. Past their end, their
+    /// last frame stays.
+    Flat {
+        frames: i64,
+        pieces: Arc<[VideoPiece]>,
+        skip: i64,
+        /// Its track is out of the render cache's User mode.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        excluded: bool,
+    },
     /// Pictures over each other: `under`, then each of `over` on top of it,
     /// at its level while a dissolve plays (decision D50), each as long as
     /// the piece. `under` is a source, a generator's picture, black or a
@@ -1067,7 +1078,8 @@ impl VideoPiece {
         match self {
             Self::Source { frames, .. }
             | Self::Black { frames, .. }
-            | Self::Generated { frames, .. } => *frames,
+            | Self::Generated { frames, .. }
+            | Self::Flat { frames, .. } => *frames,
             Self::Mix { under, .. } | Self::Titled { under, .. } => under.frames(),
         }
     }
@@ -1130,9 +1142,10 @@ impl VideoPiece {
     pub fn super_scales(&self) -> Vec<SuperScale> {
         self.layers()
             .into_iter()
-            .filter_map(|(l, _)| match l {
-                Self::Source { super_scale, .. } if !super_scale.is_off() => Some(*super_scale),
-                _ => None,
+            .flat_map(|(l, _)| match l {
+                Self::Source { super_scale, .. } if !super_scale.is_off() => vec![*super_scale],
+                Self::Flat { pieces, .. } => pieces.iter().flat_map(Self::super_scales).collect(),
+                _ => Vec::new(),
             })
             .collect()
     }
@@ -1140,13 +1153,14 @@ impl VideoPiece {
     pub fn retimes(&self) -> Vec<Retime> {
         self.layers()
             .into_iter()
-            .filter_map(|(l, _)| match l {
+            .flat_map(|(l, _)| match l {
                 Self::Source { image, retime, .. }
                     if !matches!(image, Some(Image::Still)) && !retime.is_nearest() =>
                 {
-                    Some(*retime)
+                    vec![*retime]
                 }
-                _ => None,
+                Self::Flat { pieces, .. } => pieces.iter().flat_map(Self::retimes).collect(),
+                _ => Vec::new(),
             })
             .chain(self.smooths().into_iter().flatten().map(|s| s.retime))
             .collect()
@@ -1260,6 +1274,17 @@ impl VideoPiece {
                 frames,
                 picture: picture.after(k),
                 placed: placed.iter().map(|p| p.after(k)).collect(),
+                excluded: *excluded,
+            },
+            Self::Flat {
+                pieces,
+                skip,
+                excluded,
+                ..
+            } => Self::Flat {
+                frames,
+                pieces: pieces.clone(),
+                skip: skip + k,
                 excluded: *excluded,
             },
             Self::Mix { under, over } => Self::Mix {
@@ -1387,7 +1412,8 @@ impl VideoPiece {
         match self {
             Self::Source { frames, .. }
             | Self::Black { frames, .. }
-            | Self::Generated { frames, .. } => *frames += more,
+            | Self::Generated { frames, .. }
+            | Self::Flat { frames, .. } => *frames += more,
             Self::Mix { under, over } => {
                 under.lengthen(more);
                 for o in over {
@@ -1680,6 +1706,10 @@ impl VideoPiece {
                 source_frame, pace, ..
             } => source_frame + pace.offset(k),
             VideoPiece::Black { .. } | VideoPiece::Generated { .. } => 0,
+            VideoPiece::Flat { pieces, skip, .. } => {
+                let last = pieces.iter().map(VideoPiece::frames).sum::<i64>() - 1;
+                (skip + k).min(last).max(0)
+            }
             VideoPiece::Mix { under, .. } | VideoPiece::Titled { under, .. } => under.position(k),
         }
     }
@@ -1690,6 +1720,7 @@ impl VideoPiece {
                 source_frame, pace, ..
             } => *source_frame as f64 + pace.exact(k),
             VideoPiece::Black { .. } | VideoPiece::Generated { .. } => 0.0,
+            VideoPiece::Flat { .. } => self.position(k) as f64,
             VideoPiece::Mix { under, .. } | VideoPiece::Titled { under, .. } => under.exact(k),
         }
     }
@@ -1860,6 +1891,7 @@ struct Edge {
     frames: (i64, i64),
     falling: bool,
     wipe: Option<WipeDirection>,
+    smooth: bool,
     crossing: Option<Placed>,
 }
 
@@ -1911,6 +1943,7 @@ struct Fading {
 struct Nest {
     outer: Vec<Around>,
     run: Option<Run>,
+    flat: Option<Box<Clip>>,
 }
 
 fn run_of(c: &Clip, run: Option<Run>) -> Run {
@@ -2007,6 +2040,10 @@ fn edges_on(p: &Project, t: &Track) -> HashMap<String, Vec<Edge>> {
                 frames,
                 falling,
                 wipe: transitions::wipe_of(d.transition),
+                smooth: matches!(
+                    transitions::kind_of(d.transition),
+                    Some(PictureTransition::SmoothCut { .. })
+                ),
                 crossing: crossing(&d),
             });
         }
@@ -2047,7 +2084,7 @@ fn edge_fades(p: &Project) -> HashMap<String, Vec<Fading>> {
 }
 
 fn joins_compound(t: &Transition) -> bool {
-    transitions::kind_of(t).is_some_and(|k| transitions::compound_takes(&k))
+    transitions::kind_of(t).is_some()
 }
 
 fn touches_compound(t: &Track, x: &Transition) -> bool {
@@ -2135,10 +2172,10 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     continue;
                 }
                 host.clips.push(hollow(c));
-                host_within.push(Nest::default());
                 let own = c.picture.clone().unwrap_or_default();
                 let always = !own.is_usual() || holds_mode(c);
                 let edges = edges.get(&c.id).cloned().unwrap_or_default();
+                let smooth = edges.iter().any(|e| e.smooth);
                 let fading = fades.get(&c.id).cloned().unwrap_or_default();
                 let (from, to) = reached(
                     c,
@@ -2165,6 +2202,14 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     wide
                 });
                 let wide = wide.as_ref().unwrap_or(c);
+                host_within.push(match smooth {
+                    true => Nest {
+                        outer: nest.outer.clone(),
+                        run: nest.run,
+                        flat: Some(Box::new(wide.clone())),
+                    },
+                    false => Nest::default(),
+                });
                 let k = c.compound.as_ref().expect("plays inside");
                 let cut = stretches(wide, t.kind);
                 let parts = if cut.is_empty() {
@@ -2194,6 +2239,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                             let nest = Nest {
                                 outer: chain.clone(),
                                 run: Some(run),
+                                flat: None,
                             };
                             (y, nest)
                         })
@@ -2363,6 +2409,23 @@ fn held_on(n: &Track, c: &Clip, t: &Transition, cut: i64) -> Laid {
         transitions: vec![t.clone()],
         held: true,
     }
+}
+
+fn flat_pieces(
+    p: &Project,
+    t: &Track,
+    whole: &Clip,
+    frames: (i64, i64),
+) -> Result<Arc<[VideoPiece]>> {
+    let mut clip = whole.clone();
+    clip.audio = None;
+    let mut track = t.clone();
+    track.clips = vec![clip];
+    track.transitions.clear();
+    let mut alone = p.clone();
+    alone.tracks = vec![track];
+    let (plan, _) = plan_lanes(&alone, frames.0, frames.1)?;
+    Ok(plan.video.into())
 }
 
 fn outer_at(nest: Option<&Nest>, x: i64) -> Vec<Placed> {
@@ -2805,9 +2868,19 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
     for w in cuts.windows(2) {
         let (x, y) = (w[0], w[1]);
         let mut stack: Vec<Layer> = Vec::new();
+        let mut flattened: Vec<&str> = Vec::new();
         for ((t, played), inner) in tracks.iter().zip(&dissolves).zip(&inside) {
             let window = inner.map_or(EVERY_FRAME, |i| i.shown);
             if x < window.from || x >= window.to {
+                continue;
+            }
+            let drawn_flat = |i: &Inner| {
+                i.nests
+                    .iter()
+                    .flat_map(|n| &n.outer)
+                    .any(|a| flattened.contains(&a.placed.clip.as_str()))
+            };
+            if inner.is_some_and(drawn_flat) {
                 continue;
             }
             let within = inner.map(|i| i.nests.as_slice());
@@ -2866,16 +2939,62 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     },
                 ])
             };
+            let nest_of = |c: &Clip| {
+                within.and_then(|w| w.get(t.clips.iter().position(|x| std::ptr::eq(x, c))?))
+            };
+            let flat = |c: &Clip,
+                        whole: &Clip,
+                        (at, mode): (i64, SmoothMode),
+                        below: bool|
+             -> Result<Option<VideoPiece>> {
+                let usual = whole.picture.as_ref().is_none_or(Picture::is_usual)
+                    && outer_at(nest_of(c), x).is_empty();
+                let backward = mode != SmoothMode::Faster && whole.pace().speed() < 0.0;
+                let held = nest_of(c).and_then(|n| n.run).is_some_and(|r| r.held);
+                if held || !t.video_enabled || !usual || backward {
+                    return Ok(None);
+                }
+                let (a, b) = match mode {
+                    SmoothMode::Faster => (at, at + 1),
+                    _ => (x, y),
+                };
+                let pieces = flat_pieces(p, t, whole, (a.max(0), b.max(1)))?;
+                let covers = |piece: &VideoPiece| match piece.layers()[0].0 {
+                    VideoPiece::Source { media, placed, .. } => {
+                        placed.is_empty()
+                            && pool
+                                .get(media.as_str())
+                                .is_some_and(|m| crate::place::fills(m, (s.width, s.height)))
+                    }
+                    VideoPiece::Generated { placed, .. } => placed.is_empty(),
+                    _ => false,
+                };
+                if below && !pieces.iter().all(covers) {
+                    return Ok(None);
+                }
+                Ok(Some(VideoPiece::Flat {
+                    frames: y - x,
+                    pieces,
+                    skip: 0,
+                    excluded,
+                }))
+            };
             let smoothed = |d: &transitions::Playing,
                             below: bool|
              -> Result<Option<(VideoPiece, VideoPiece, Smooth)>> {
                 let Some((smooth, mode)) = Smooth::of(d) else {
                     return Ok(None);
                 };
-                let (Some(f), Some(g)) = (d.before.filter(shows), d.after.filter(shows)) else {
+                let (Some(f), Some(g)) = (d.before, d.after) else {
                     return Ok(None);
                 };
                 let side = |c: &Clip, at: i64| -> Result<Option<VideoPiece>> {
+                    if let Some(whole) = nest_of(c).and_then(|n| n.flat.as_deref()) {
+                        return flat(c, whole, (at, mode), below);
+                    }
+                    if !shows(&c) {
+                        return Ok(None);
+                    }
                     let Layer::Picture(mut piece, _) = shown(c, None, below)? else {
                         return Ok(None);
                     };
@@ -2968,6 +3087,13 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 }
                 Some(d) if let Some((f, g, smooth)) = smoothed(d, !stack.is_empty())? => {
                     let ramp = ramp_of(d, false, None);
+                    flattened.extend(
+                        [d.before, d.after]
+                            .into_iter()
+                            .flatten()
+                            .filter(|c| nest_of(c).is_some_and(|n| n.flat.is_some()))
+                            .map(|c| c.id.as_str()),
+                    );
                     stack = vec![Layer::Picture(f, None), Layer::Smoothed(g, ramp, smooth)];
                 }
                 Some(d) => {
@@ -4135,6 +4261,7 @@ mod tests {
                 } => format!("{media}@{source_frame}+{frames}"),
                 VideoPiece::Black { frames, .. } => format!("black+{frames}"),
                 VideoPiece::Generated { frames, .. } => format!("generated+{frames}"),
+                VideoPiece::Flat { frames, .. } => format!("flat+{frames}"),
                 VideoPiece::Mix { under, over } => {
                     let over: Vec<String> = over
                         .iter()
@@ -4356,6 +4483,7 @@ mod tests {
                 } => (format!("{media}@{source_frame}"), *frames),
                 VideoPiece::Black { frames, .. } => ("black".into(), *frames),
                 VideoPiece::Generated { frames, .. } => ("generated".into(), *frames),
+                VideoPiece::Flat { frames, .. } => ("flat".into(), *frames),
                 VideoPiece::Mix { .. } | VideoPiece::Titled { .. } => ("mix".into(), v.frames()),
             })
             .collect();

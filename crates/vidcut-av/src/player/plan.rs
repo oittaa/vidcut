@@ -179,6 +179,7 @@ impl Plan {
                     l.position(k)
                 }
                 VideoPiece::Generated { picture, .. } if picture.is_keyed() => k,
+                VideoPiece::Flat { .. } => l.position(k),
                 _ => 0,
             };
             (at, placed_now(l, k))
@@ -399,6 +400,11 @@ fn source_key(piece: &VideoPiece, plan: &RenderPlan) -> Arc<str> {
         .into(),
         VideoPiece::Generated { picture, .. } => format!(
             "generated|{}x{}|{:?}|{picture:?}",
+            plan.width, plan.height, plan.colors
+        )
+        .into(),
+        VideoPiece::Flat { pieces, .. } => format!(
+            "flat|{}x{}|{:?}|{pieces:?}",
             plan.width, plan.height, plan.colors
         )
         .into(),

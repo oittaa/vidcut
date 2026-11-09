@@ -215,16 +215,6 @@ fn sides(p: &Project, ti: usize, sound: bool, e: i64) -> (Option<String>, Option
     (find(true), find(false))
 }
 
-fn compound_at(p: &Project, ti: usize, e: i64) -> Option<String> {
-    let (from, to) = sides(p, ti, false, e);
-    [from, to].into_iter().flatten().find(|id| {
-        p.tracks[ti]
-            .clips
-            .iter()
-            .any(|c| &c.id == id && crate::render::plays_inside(c))
-    })
-}
-
 fn room(
     p: &Project,
     ti: usize,
@@ -325,9 +315,6 @@ fn put(
     shape: Shape,
     kind: &PictureTransition,
 ) -> Option<Made> {
-    if !sound && !transitions::compound_takes(kind) && compound_at(p, ti, e).is_some() {
-        return None;
-    }
     let (from, to, before, after) = plan(p, ti, sound, e, shape)?;
     let cuts = Cuts::of(p, &p.tracks[ti]);
     let gone: Vec<bool> = p.tracks[ti]
@@ -419,12 +406,6 @@ pub fn dissolve(
     }
     let e = nearest(p, ti, !pictures, at)
         .ok_or_else(|| Error::invalid(format!("{track} has no edit to dissolve")))?;
-    if pictures
-        && !transitions::compound_takes(kind)
-        && let Some(c) = compound_at(p, ti, e)
-    {
-        return Err(compound_error(&c));
-    }
     let made = at_edit(p, ti, pictures, sound, e, shape, kind);
     if made.is_empty() {
         let (from, to) = sides(p, ti, !pictures, e);
@@ -505,22 +486,11 @@ pub fn dissolve_clips(
         made.extend(at_edit(p, ti, pictures, sound, e, shape, kind));
     }
     if made.is_empty() {
-        return Err(points
-            .iter()
-            .filter(|&&(_, pictures, _)| pictures && !transitions::compound_takes(kind))
-            .find_map(|&(ti, _, e)| compound_at(p, ti, e))
-            .map_or_else(
-                || Error::invalid("the clips have no frames past their edges to dissolve with"),
-                |c| compound_error(&c),
-            ));
+        return Err(Error::invalid(
+            "the clips have no frames past their edges to dissolve with",
+        ));
     }
     Ok(made)
-}
-
-fn compound_error(c: &str) -> Error {
-    Error::invalid(format!(
-        "{c} is a compound clip, and its edges do not take a smooth cut"
-    ))
 }
 
 fn at_edit(
@@ -576,11 +546,6 @@ pub fn set_transition(
     }
     let e =
         nearest(p, ti, false, at).ok_or_else(|| Error::invalid(format!("{track} has no edit")))?;
-    if !transitions::compound_takes(kind)
-        && let Some(c) = compound_at(p, ti, e)
-    {
-        return Err(compound_error(&c));
-    }
     let cuts = Cuts::of(p, &p.tracks[ti]);
     let slot = p.tracks[ti]
         .transitions
@@ -1010,28 +975,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!((made[0].before, made[0].after), (10, 12));
-    }
-
-    #[test]
-    fn a_compound_clips_edge_refuses_a_smooth_cut() {
-        let mut p = c2_compound();
-        let e = super::dissolve_clips(
-            &mut p,
-            &["c2".to_string()],
-            super::Shape::Length(25, super::Align::Center),
-            true,
-            false,
-            &crate::model::PictureTransition::SmoothCut {
-                mode: Default::default(),
-                process: Default::default(),
-                course: Default::default(),
-            },
-        )
-        .unwrap_err();
-        assert_eq!(
-            e.to_string(),
-            "c2 is a compound clip, and its edges do not take a smooth cut"
-        );
     }
 
     #[test]

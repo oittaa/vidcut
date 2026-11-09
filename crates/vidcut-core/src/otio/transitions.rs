@@ -61,10 +61,6 @@ pub fn kind_of(t: &Transition) -> Option<PictureTransition> {
     (!t.sound && dissolves(t)).then_some(PictureTransition::Dissolve)
 }
 
-pub fn compound_takes(kind: &PictureTransition) -> bool {
-    !matches!(kind, PictureTransition::SmoothCut { .. })
-}
-
 pub fn mixes(t: &Transition) -> bool {
     dissolves(t)
         || wipe_of(t).is_some()
