@@ -3181,7 +3181,8 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         .iter()
                         .all(|(c, _)| c.filter(shows).is_some_and(fills))
                     {
-                        stack.clear();
+                        let outer = outer_at(d.before.and_then(nest_of), x);
+                        stack.retain(|l| !outer.is_empty() && !l.inside(&outer));
                     }
                     let wipe = transitions::wipe_of(d.transition);
                     for (c, falling) in sides {
