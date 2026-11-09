@@ -3613,6 +3613,10 @@ impl Live {
         self.tape_position = 0;
         self.player.unload(SOURCE);
         self.player.unload(TIMELINE);
+        self.skipping = None;
+        self.player.end_audition();
+        self.free_title = None;
+        self.free_pictures.clear();
         self.thumbs = Arc::new(HashSet::new());
         self.thumbs_wanted.clear();
         self.waveforms = Arc::new(HashMap::new());
