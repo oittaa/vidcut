@@ -300,7 +300,7 @@ The audio device:
   - A wipe draws the incoming side only inside its part of the frame (`shown_part`).
   - The two sides of a Push or a Slide draw into two pictures of their own (`Moves`), each over transparent.
     - `fs_motion` then lays them over the canvas, premultiplied. `Moving::shift` gives where each side is, in pixels of the frame.
-    - The sides draw without their composite modes. The mode of the outgoing clip mixes the moved result with the canvas, as for any `place::Mix`.
+    - The sides draw without their composite modes. The `Placed` of the crossing holds one mode. It mixes the moved result with the canvas, as for any `place::Mix`.
     - Why: thus the tracks below do not move, and the motion blur does not blur them, as in Resolve ([gotchas](../gotchas.md#resolves-otio-files)).
     - Each side moves by whole pixels. The band comes from the exact edges, on top.
     - A feather fades the upper side linearly across the band. In a corner, the smaller of the two fades applies.
@@ -433,7 +433,7 @@ What it renders:
   - A layer takes it only from its own picture (`checked_on_own`). The effects of a compound clip can work on its mix, at the draw.
   - A `Placed` around a title under another track gives it. The cache file holds that title.
   - A `Placed` around a title on top of all tracks gives none. The cache file does not hold that title.
-- Each `VideoPiece::Source`, `VideoPiece::Black` and `VideoPiece::Generated` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
+- Each `VideoPiece::Source` and `VideoPiece::Generated` holds `excluded` from its track. A compound clip's inner tracks take it from the track of the compound clip.
   - In User mode, an excluded piece gives no `Reason::Speed`, `Reason::Retime`, `Reason::AiRetime`, `Reason::Transition`, `Reason::Opacity` or `Reason::Composite`.
 - Slow media (`Reason::Media`) are of two kinds:
   - With GPU decoding on, media of a long-GOP codec that the GPU decoder does not take (vidcut-av `render_cache::slow`).

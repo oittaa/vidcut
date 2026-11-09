@@ -219,12 +219,7 @@ pub enum VideoPiece {
         input_lut: Option<PathBuf>,
     },
     /// A black frame.
-    Black {
-        frames: i64,
-        /// Its track is out of the render cache's User mode.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        excluded: bool,
-    },
+    Black { frames: i64 },
     /// A generator's picture, made at the plan's size.
     Generated {
         frames: i64,
@@ -1078,10 +1073,7 @@ impl Fade {
 
 impl VideoPiece {
     pub fn black(frames: i64) -> Self {
-        Self::Black {
-            frames,
-            excluded: false,
-        }
+        Self::Black { frames }
     }
     pub fn frames(&self) -> i64 {
         match self {
@@ -1267,10 +1259,7 @@ impl VideoPiece {
                     input_lut: input_lut.clone(),
                 }
             }
-            Self::Black { excluded, .. } => Self::Black {
-                frames,
-                excluded: *excluded,
-            },
+            Self::Black { .. } => Self::Black { frames },
             Self::Generated {
                 picture,
                 placed,
@@ -1313,7 +1302,7 @@ impl VideoPiece {
 
     fn goes_on_as(&self, next: &VideoPiece) -> bool {
         match (self, next) {
-            (Self::Black { excluded: x, .. }, Self::Black { excluded: y, .. }) => x == y,
+            (Self::Black { .. }, Self::Black { .. }) => true,
             (
                 Self::Generated {
                     frames,
@@ -3190,9 +3179,11 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 Some(d) => {
                     let below = !stack.is_empty();
                     let sides = sides_at(d, now);
-                    let covers = sides
-                        .iter()
-                        .all(|(c, _)| c.filter(shows).is_some_and(fills));
+                    let plain = crossing(d).is_none_or(|c| c.picture.composite_mode.is_none());
+                    let covers = plain
+                        && sides
+                            .iter()
+                            .all(|(c, _)| c.filter(shows).is_some_and(fills));
                     let wipe = transitions::wipe_of(d.transition);
                     let mut layers = Vec::new();
                     for (c, falling) in sides {

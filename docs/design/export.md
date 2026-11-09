@@ -517,7 +517,7 @@ The pictures:
 - A composite mode (`Placing::mode`) mixes in R'G'B' (D75). The shader mixes it with the layers below (`mixed`).
 - A transition with two sides is one `place::Mix`. `crossing` makes one `Placed` that both sides share.
   - The two sides add up. Neither side has its own composite mode.
-  - The `Placed` holds the mode of the outgoing side. That mode mixes the `place::Mix` with the layers below.
+  - The `Placed` holds the mode of the outgoing side, or of the incoming side if there is no outgoing clip. That mode mixes the `place::Mix` with the layers below.
   - Where both sides fill the frame, the plan leaves out the layers below. Inside a placed compound clip, it leaves out only the layers of that compound clip. Nothing of them shows.
 - A wipe shows a part of each side. The shader draws the incoming side only inside its part (`shown_part`).
 - A Push or a Slide draws each side into its own picture. `fs_motion` moves them and lays them over the layers below ([playback](playback.md#the-viewer-thread)).
