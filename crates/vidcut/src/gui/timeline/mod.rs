@@ -283,6 +283,7 @@ pub struct TimelineView {
     pub(super) files: Option<crate::gui::subtitles::Files>,
     pub(super) retime: Option<crate::gui::retime::Retime>,
     pub(crate) subtitles_sent: Option<crate::gui::subtitles::SubtitlesKey>,
+    pub project: Option<std::path::PathBuf>,
 }
 
 impl Default for TimelineView {
@@ -345,11 +346,24 @@ impl Default for TimelineView {
             files: None,
             retime: None,
             subtitles_sent: None,
+            project: None,
         }
     }
 }
 
 impl TimelineView {
+    pub fn switch_project(&mut self, project: Option<std::path::PathBuf>) {
+        *self = Self {
+            options: std::mem::take(&mut self.options),
+            snap_flipped: self.snap_flipped,
+            fade_in_frames: self.fade_in_frames,
+            normalize_last: self.normalize_last.take(),
+            heard: self.heard,
+            project,
+            ..Self::default()
+        };
+    }
+
     pub fn set_edit(&mut self, e: Option<EditSel>) {
         self.edit = e;
         self.edits.clear();
@@ -4115,6 +4129,27 @@ mod tests {
     use vidcut_core::model::{Clip, ClipAudio, TrackKind};
 
     use super::*;
+
+    #[test]
+    fn another_project_clears_what_the_timeline_held() {
+        let mut t = TimelineView {
+            scroll: 5.0,
+            silence: Some(tools::SilenceDialog::new(vec!["c1".into()])),
+            ..TimelineView::default()
+        };
+        t.switch_project(Some("b.vidcut".into()));
+        assert_eq!((t.scroll, t.silence.is_none()), (0.0, true));
+    }
+
+    #[test]
+    fn another_project_keeps_the_way_the_timeline_works() {
+        let mut t = TimelineView {
+            fade_in_frames: true,
+            ..TimelineView::default()
+        };
+        t.switch_project(Some("b.vidcut".into()));
+        assert!(t.fade_in_frames);
+    }
 
     #[test]
     fn a_repaint_in_16_ms_comes_in_16_ms() {

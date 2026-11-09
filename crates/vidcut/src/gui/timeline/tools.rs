@@ -68,6 +68,7 @@ pub struct SilenceDialog {
     redone: Vec<Shot>,
     download: bool,
     cross_fade: bool,
+    rev: Option<u64>,
 }
 
 impl SilenceDialog {
@@ -95,7 +96,18 @@ impl SilenceDialog {
             redone: Vec::new(),
             download: false,
             cross_fade: false,
+            rev: None,
         }
+    }
+
+    fn forget_found(&mut self) {
+        self.stripes.clear();
+        self.found.clear();
+        self.asked = None;
+        self.found_for = None;
+        self.held = None;
+        self.undone.clear();
+        self.redone.clear();
     }
 
     pub fn params(&self) -> Value {
@@ -600,6 +612,10 @@ impl Workspace {
             return;
         };
         let bindings = self.snap.bindings.clone();
+        let rev = self.project().map(|p| p.rev);
+        if std::mem::replace(&mut d.rev, rev) != rev {
+            d.forget_found();
+        }
         if let Some((params, ask)) = &d.asked
             && let Some(result) = ask.take()
         {
@@ -1463,6 +1479,20 @@ fn next_step_in(speed: f64, fps: f64, elapsed: f64) -> Option<f64> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn forgetting_drops_the_silence_that_was_found() {
+        let mut d = SilenceDialog::new(vec!["c1".into()]);
+        d.found_for = Some(d.params());
+        d.stripes.push(Stripe {
+            clip: "c1".into(),
+            start: 0,
+            end: 5,
+            keep: false,
+        });
+        d.forget_found();
+        assert_eq!((d.current(), d.stripes.len()), (false, 0));
+    }
 
     #[test]
     fn a_run_at_25_fps_steps_half_a_frame_after_it_starts() {
