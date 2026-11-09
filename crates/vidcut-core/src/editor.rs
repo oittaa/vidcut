@@ -2715,22 +2715,19 @@ fn mutate(
         Request::MediaRemove { media, force } => {
             p.media(media)
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
-            let users: Vec<String> = p
-                .tracks
-                .iter()
-                .flat_map(|t| &t.clips)
-                .filter(|c| &c.media == media)
-                .map(|c| c.id.clone())
-                .collect();
+            let users: Vec<String> = p.clips_using(media).map(|c| c.id.clone()).collect();
+            let pooled = p.compounds.iter().filter(|k| k.holds(media));
+            let held: Vec<String> = pooled.map(|k| k.id.clone()).collect();
+            if !force && !(users.is_empty() && held.is_empty()) {
+                return Err(Error::invalid(format!(
+                    "{media} is used by {}; pass force to delete those clips too",
+                    [users.clone(), held].concat().join(", ")
+                )));
+            }
             if !users.is_empty() {
-                if !force {
-                    return Err(Error::invalid(format!(
-                        "{media} is used by {}; pass force to delete those clips too",
-                        users.join(", ")
-                    )));
-                }
                 ops::delete(p, &users, false)?;
             }
+            p.compounds.retain(|k| !k.holds(media));
             p.media.retain(|m| &m.id != media);
             for g in &mut p.groups {
                 g.dropped.retain(|m| m != media);
@@ -6320,7 +6317,7 @@ fn import_timeline(p: &mut Project, import: &Import, env: &dyn Env) -> Result<Va
             p.settings.drop_frame = true;
         }
         p.settings.start_tc = t.start_tc;
-        if !adopt_rate {
+        if !adopt_rate || !p.compounds.is_empty() {
             p.settings.set_fps(rate);
         }
         groups_to_rate(p, rate);
@@ -6708,9 +6705,9 @@ fn checked_lut(env: &dyn Env, path: &Path) -> Result<Option<PathBuf>> {
 fn project_set(p: &mut Project, set: &ProjectSet, env: &dyn Env) -> Result<()> {
     if let Some(fps) = set.fps {
         let has_clips = p.tracks.iter().any(|t| !t.clips.is_empty());
-        if has_clips && fps != p.settings.fps {
+        if (has_clips || !p.compounds.is_empty()) && fps != p.settings.fps {
             return Err(Error::invalid(
-                "the frame rate can only change while the timeline is empty",
+                "the frame rate can only change with no clips on the timeline or compound clips in the pool",
             ));
         }
         let rate = p.settings.fps;
@@ -7038,14 +7035,7 @@ pub fn query(
                 .ok_or_else(|| Error::not_found(format!("no media {media}")))?;
             let mut v = media_json(p, m, env, &env.proxy_dir());
             v["info"] = serde_json::to_value(&m.info).unwrap_or_default();
-            v["used_by"] = json!(
-                p.tracks
-                    .iter()
-                    .flat_map(|t| &t.clips)
-                    .filter(|c| &c.media == media)
-                    .map(|c| &c.id)
-                    .collect::<Vec<_>>()
-            );
+            v["used_by"] = json!(p.clips_using(media).map(|c| &c.id).collect::<Vec<_>>());
             v
         }
         Request::Probe { path } => {

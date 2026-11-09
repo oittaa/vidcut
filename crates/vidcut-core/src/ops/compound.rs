@@ -987,4 +987,99 @@ mod tests {
         f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
         assert_eq!(f.editor.project().tracks[0].transitions, before);
     }
+
+    #[test]
+    fn media_in_a_compound_clip_needs_force_to_go() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        nest(&mut f, &[&a]);
+        f.err(req("media.remove", json!({"media": "m1"})));
+    }
+
+    #[test]
+    fn forced_removal_takes_the_compound_clips_that_hold_the_media() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        nest(&mut f, &[&a]);
+        f.ok(req("media.remove", json!({"media": "m1", "force": true})));
+        let p = f.editor.project();
+        let left = (p.tracks[0].clips.len(), p.compounds.len());
+        assert_eq!(left, (0, 0));
+    }
+
+    #[test]
+    fn media_used_by_lists_the_compound_clip_that_holds_it() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        let hosts = nest(&mut f, &[&a]);
+        let r = f.ok(req("media.get", json!({"media": "m1"})));
+        assert_eq!(r.result["used_by"], json!(hosts));
+    }
+
+    #[test]
+    fn a_new_subclip_start_moves_the_clips_of_compound_clips() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let sub = json!({"media": "m1", "range": "10f..60f", "name": "s"});
+        f.ok(req("media.subclip", sub));
+        let sub = f.editor.project().media.last().unwrap().id.clone();
+        let a = f.append(&sub, 0, 20);
+        let hosts = nest(&mut f, &[&a]);
+        f.ok(req(
+            "media.subclip_set",
+            json!({"media": sub, "range": "5f..60f"}),
+        ));
+        let p = f.editor.project();
+        let k = p.clip(&hosts[0]).unwrap().compound.as_ref().unwrap();
+        let tracks = k.tracks[0].clips[0].source_in;
+        let made = k.made_from[0].clips[0].source_in;
+        let pooled = p.compounds[0].picture.as_ref().unwrap();
+        let in_pool = pooled.made_from[0].clips[0].source_in;
+        assert_eq!((tracks, made, in_pool), (5, 5, 5));
+    }
+
+    #[test]
+    fn a_subclip_cannot_lose_frames_only_a_pooled_compound_clip_uses() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let sub = json!({"media": "m1", "range": "10f..60f", "name": "s"});
+        f.ok(req("media.subclip", sub));
+        let sub = f.editor.project().media.last().unwrap().id.clone();
+        let a = f.append(&sub, 0, 40);
+        let hosts = nest(&mut f, &[&a]);
+        f.ok(req("edit.delete", json!({"clips": hosts})));
+        f.err(req(
+            "media.subclip_set",
+            json!({"media": sub, "range": "10f..30f"}),
+        ));
+    }
+
+    #[test]
+    fn a_renamed_bin_keeps_its_compound_clip() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 60);
+        f.ok(req("bins.add", json!({"path": "X"})));
+        let made = json!({"range": "10f..40f", "bin": "X"});
+        f.ok(req("media.compound", made));
+        f.ok(req("bins.rename", json!({"path": "X", "to": "Y"})));
+        assert_eq!(f.editor.project().compounds[0].bin, "Y");
+    }
+
+    #[test]
+    fn a_removed_bin_moves_its_compound_clip_up() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 60);
+        f.ok(req("bins.add", json!({"path": "X"})));
+        let made = json!({"range": "10f..40f", "bin": "X"});
+        f.ok(req("media.compound", made));
+        f.ok(req("bins.remove", json!({"path": "X"})));
+        assert_eq!(f.editor.project().compounds[0].bin, "");
+    }
+
+    #[test]
+    fn a_pooled_compound_clip_keeps_the_frame_rate() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        let hosts = nest(&mut f, &[&a]);
+        f.ok(req("edit.delete", json!({"clips": hosts})));
+        f.err(req("project.set", json!({"fps": "30"})));
+    }
 }

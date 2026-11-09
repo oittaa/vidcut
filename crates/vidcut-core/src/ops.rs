@@ -28,8 +28,9 @@ pub use tracks::{TrackProps, add_track, remove_track, set_track};
 
 use crate::error::{Error, Result};
 use crate::model::{
-    AlphaMode, Clip, ClipAudio, ColorSpace, Generator, Marker, Media, MediaUpscaler, Project,
-    Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind, Upscaler,
+    AlphaMode, Clip, ClipAudio, ColorSpace, Compound, Generator, Marker, Media, MediaUpscaler,
+    PooledCompound, Project, Sharpness, Speed, Subclip, Title, Track, TrackClip, TrackKind,
+    Upscaler,
 };
 use crate::otio::effects::{self, cut};
 use follow::{Before, Edit};
@@ -2710,7 +2711,7 @@ pub fn is_date(text: &str) -> bool {
 fn clip_outside(tracks: &[Track], media: &str, part: std::ops::Range<i64>) -> Option<String> {
     for c in tracks.iter().flat_map(|t| &t.clips) {
         if let Some(k) = &c.compound
-            && let Some(id) = clip_outside(&k.tracks, media, part.clone())
+            && let Some(id) = compound_outside(k, media, part.clone())
         {
             return Some(id);
         }
@@ -2722,6 +2723,10 @@ fn clip_outside(tracks: &[Track], media: &str, part: std::ops::Range<i64>) -> Op
         }
     }
     None
+}
+
+fn compound_outside(k: &Compound, media: &str, part: std::ops::Range<i64>) -> Option<String> {
+    clip_outside(&k.tracks, media, part.clone()).or_else(|| clip_outside(&k.made_from, media, part))
 }
 
 fn shift_source(c: &mut Clip, by: i64) {
@@ -2748,12 +2753,17 @@ fn shift_source(c: &mut Clip, by: i64) {
 fn shift_clips(tracks: &mut [Track], media: &str, by: i64) {
     for c in tracks.iter_mut().flat_map(|t| &mut t.clips) {
         if let Some(k) = c.compound.as_mut() {
-            shift_clips(&mut k.tracks, media, by);
+            shift_compound(k, media, by);
         }
         if c.media == media {
             shift_source(c, by);
         }
     }
+}
+
+fn shift_compound(k: &mut Compound, media: &str, by: i64) {
+    shift_clips(&mut k.tracks, media, by);
+    shift_clips(&mut k.made_from, media, by);
 }
 
 pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> Result<()> {
@@ -2770,8 +2780,15 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
         )));
     }
     let (by, len, more) = (first - a, b - a, b - end);
+    let part = -by..len - by;
+    let outside = clip_outside(&p.tracks, media, part.clone()).or_else(|| {
+        p.compounds
+            .iter()
+            .flat_map(PooledCompound::blocks)
+            .find_map(|k| compound_outside(k, media, part.clone()))
+    });
     if !m.is_still()
-        && let Some(c) = clip_outside(&p.tracks, media, -by..len - by)
+        && let Some(c) = outside
     {
         return Err(Error::invalid(format!(
             "{c} uses frames of {media} outside {a}..{b}"
@@ -2792,6 +2809,9 @@ pub fn set_subclip_limits(p: &mut Project, media: &str, (a, b): (i64, i64)) -> R
         }
     }
     shift_clips(&mut p.tracks, media, by);
+    for k in p.compounds.iter_mut().flat_map(PooledCompound::blocks_mut) {
+        shift_compound(k, media, by);
+    }
     let fps = p.settings.fps;
     let m = p
         .media
@@ -3203,6 +3223,11 @@ pub fn remove_bin(p: &mut Project, path: &str) -> Result<()> {
             g.bin = parent.clone();
         }
     }
+    for k in &mut p.compounds {
+        if within(&k.bin, path) {
+            k.bin = parent.clone();
+        }
+    }
     Ok(())
 }
 
@@ -3233,6 +3258,11 @@ pub fn rename_bin(p: &mut Project, path: &str, to: &str) -> Result<()> {
     for g in &mut p.groups {
         if within(&g.bin, path) {
             g.bin = rebase(&g.bin);
+        }
+    }
+    for k in &mut p.compounds {
+        if within(&k.bin, path) {
+            k.bin = rebase(&k.bin);
         }
     }
     add_bin(p, to)?;

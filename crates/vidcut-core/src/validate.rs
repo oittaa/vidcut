@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::model::{Generator, Project, TrackKind};
+use crate::model::{Compound, Generator, Media, Project, TrackKind};
 
 pub const GAIN: std::ops::RangeInclusive<f64> = -100.0..=30.0;
 pub const FADER: std::ops::RangeInclusive<f64> = -100.0..=10.0;
@@ -8,6 +8,16 @@ pub const PAN: std::ops::RangeInclusive<f64> = -100.0..=100.0;
 
 pub fn fader_silent(volume_db: f64) -> bool {
     volume_db <= *FADER.start()
+}
+
+fn compound_media(k: &Compound, pool: &HashMap<&str, &Media>, v: &mut Vec<String>) {
+    for c in k.tracks.iter().chain(&k.made_from).flat_map(|t| &t.clips) {
+        if let Some(k) = &c.compound {
+            compound_media(k, pool, v);
+        } else if !c.is_block() && !pool.contains_key(c.media.as_str()) {
+            v.push(format!("{}: unknown media {}", c.id, c.media));
+        }
+    }
 }
 
 pub fn violations(p: &Project) -> Vec<String> {
@@ -93,13 +103,14 @@ pub fn violations(p: &Project) -> Vec<String> {
                     v.push(format!("{}: {why}", c.id));
                 }
                 let (lo, hi) = c.shown();
-                if let Some(k) = &c.compound
-                    && (lo < 0 || hi > k.frames)
-                {
-                    v.push(format!(
-                        "{}: source {lo}..{hi} outside its compound (0..{})",
-                        c.id, k.frames
-                    ));
+                if let Some(k) = &c.compound {
+                    compound_media(k, &pool, &mut v);
+                    if lo < 0 || hi > k.frames {
+                        v.push(format!(
+                            "{}: source {lo}..{hi} outside its compound (0..{})",
+                            c.id, k.frames
+                        ));
+                    }
                 }
                 continue;
             }
@@ -240,6 +251,14 @@ pub fn violations(p: &Project) -> Vec<String> {
             v.push(format!("{} is in unknown bin {:?}", m.id, m.bin));
         }
     }
+    for k in &p.compounds {
+        if !k.bin.is_empty() && !p.bins.contains(&k.bin) {
+            v.push(format!("{} is in unknown bin {:?}", k.id, k.bin));
+        }
+        for block in k.blocks() {
+            compound_media(block, &pool, &mut v);
+        }
+    }
     for m in &p.media {
         if let Some(s) = m.subclip
             && (s.start < 0.0 || s.end <= s.start)
@@ -328,6 +347,8 @@ pub fn v1_gapless(p: &Project) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::violations;
     use crate::test_support::Fixture;
 
@@ -342,5 +363,28 @@ mod tests {
         let v = violations(&p).join("; ");
         assert!(v.contains("gain 1000 dB outside -100..30 dB"), "{v}");
         assert!(v.contains("track V1 volume NaN dB"), "{v}");
+    }
+
+    #[test]
+    fn a_compound_clip_of_unknown_media_makes_a_project_inconsistent() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        f.ok(json!({"method": "edit.compound", "params": {"clips": [a]}}));
+        let mut p = f.editor.project().clone();
+        let inner = &mut p.tracks[0].clips[0].compound.as_mut().unwrap().tracks[0].clips[0];
+        inner.media = "gone".into();
+        let want = format!("{}: unknown media gone", inner.id);
+        assert_eq!(violations(&p), vec![want]);
+    }
+
+    #[test]
+    fn a_pooled_compound_clip_in_an_unknown_bin_makes_a_project_inconsistent() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        f.append("m1", 0, 60);
+        f.ok(json!({"method": "media.compound", "params": {"range": "10f..40f"}}));
+        let mut p = f.editor.project().clone();
+        p.compounds[0].bin = "gone".into();
+        let want = format!("{} is in unknown bin \"gone\"", p.compounds[0].id);
+        assert_eq!(violations(&p), vec![want]);
     }
 }
