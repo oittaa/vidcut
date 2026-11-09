@@ -274,4 +274,32 @@ mod tests {
         let warning = unsaved_warning(&saved(Some("no room"))).unwrap();
         assert!(warning.contains("undo history isn't (no room)"));
     }
+
+    fn opened(dir: &Path) -> OpenProject {
+        let (inbox, _) = std::sync::mpsc::channel();
+        let new = New {
+            settings: Settings::default(),
+            replace: false,
+        };
+        OpenProject::open(&dir.join("p.vidcut"), Some(new), inbox).unwrap()
+    }
+
+    #[test]
+    fn a_save_that_is_left_is_written_while_the_file_is_as_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut open = opened(dir.path());
+        open.save_failed = true;
+        open.save_left();
+        assert!(!open.save_failed);
+    }
+
+    #[test]
+    fn a_save_that_is_left_waits_while_the_file_is_another() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut open = opened(dir.path());
+        open.save_failed = true;
+        std::fs::write(open.store.path(), "{}").unwrap();
+        open.save_left();
+        assert!(open.save_failed);
+    }
 }
