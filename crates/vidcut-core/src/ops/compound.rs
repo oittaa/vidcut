@@ -468,8 +468,18 @@ pub(crate) fn target(
 
 fn put_back(p: &mut Project, ti: usize, inner: &Track, block: &Clip, made: &mut Vec<String>) {
     let mut renamed = HashMap::new();
-    for x in &inner.clips {
-        let Some((mut y, _)) = crate::render::inside(x, block) else {
+    let cut = crate::render::stretches(block, TrackKind::Audio);
+    let parts = if cut.is_empty() {
+        std::slice::from_ref(block)
+    } else {
+        cut.as_slice()
+    };
+    for (x, part) in inner
+        .clips
+        .iter()
+        .flat_map(|x| parts.iter().map(move |part| (x, part)))
+    {
+        let Some((mut y, _)) = crate::render::inside(x, part) else {
             continue;
         };
         if p.clip(&y.id).is_some() {
@@ -584,6 +594,39 @@ mod tests {
         f.ok(req("media.compound", json!({"range": "10f..40f"})));
         assert_eq!(f.editor.project().tracks, before);
         assert_eq!(f.editor.project().compounds[0].frames(), 30);
+    }
+
+    #[test]
+    fn a_longer_speed_edit_moves_the_sound_of_the_next_compound_clip() {
+        let mut f = Fixture::new(&[(8.0, true)]);
+        let a = f.append("m1", 0, 60);
+        let b = f.append("m1", 60, 100);
+        let first = nest(&mut f, &[&a]);
+        let second = nest(&mut f, &[&b]);
+        let slower = json!({"clips": [first[0]], "speed": 0.5});
+        f.ok(req("edit.change_speed", slower));
+        let start = |id: &str| f.editor.project().clip(id).map(|c| c.start);
+        assert_eq!(
+            (start(&second[0]), start(&second[1])),
+            (Some(120), Some(120))
+        );
+    }
+
+    #[test]
+    fn a_speed_keyframe_goes_on_both_blocks_of_a_compound_clip() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 60);
+        let parts = nest(&mut f, &[&a]);
+        let key = json!({"clips": [parts[0]], "param": "speed", "at": "30f"});
+        f.ok(req("keyframes.add", key));
+        let sections = |id: &str| {
+            let c = f.editor.project().clip(id).unwrap().clone();
+            c.speed.map(|s| s.sections.len())
+        };
+        assert_eq!(
+            (sections(&parts[0]), sections(&parts[1])),
+            (Some(2), Some(2))
+        );
     }
 
     #[test]
