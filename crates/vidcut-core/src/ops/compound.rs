@@ -616,19 +616,17 @@ fn fit_sound(p: &mut Project, ti: usize, made: &[String]) {
             .filter(stayed)
             .find_map(Clip::audio_range);
         let (start, end) = (clips[i].start, clips[i].end());
-        let covered = before.is_some_and(|(_, reach)| reach >= end)
-            || after.is_some_and(|(reach, _)| reach <= start);
-        if covered {
-            clips[i].audio = None;
+        let Some(a) = clips[i].audio.as_mut() else {
             continue;
+        };
+        if let Some((_, reach)) = before {
+            a.head = a.head.max(reach - start);
         }
-        if let Some(a) = clips[i].audio.as_mut() {
-            if let Some((_, reach)) = before {
-                a.head = a.head.max(reach - start);
-            }
-            if let Some((reach, _)) = after {
-                a.tail = a.tail.min(reach - end);
-            }
+        if let Some((reach, _)) = after {
+            a.tail = a.tail.min(reach - end);
+        }
+        if start + a.head >= end + a.tail {
+            clips[i].audio = None;
         }
     }
 }
@@ -724,6 +722,24 @@ mod tests {
         f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
         let range = f.editor.project().clip(&a).unwrap().audio_range();
         assert_eq!(range, Some((0, 60)));
+    }
+
+    #[test]
+    fn a_decompose_between_an_l_cut_and_a_j_cut_that_meet_keeps_both() {
+        let mut f = Fixture::new(&[(4.0, true)]);
+        let a = f.append("m1", 0, 50);
+        let short = f.append("m1", 50, 58);
+        let c = f.append("m1", 58, 98);
+        let hosts = nest(&mut f, &[&short]);
+        l_cut(&mut f, &a, 5);
+        let j_cut = json!({"clip": c, "edge": "head", "by": -3});
+        f.ok(req("edit.audio_roll", j_cut));
+        f.ok(req("edit.decompose", json!({"clips": [hosts[0]]})));
+        let range = |id: &str| f.editor.project().clip(id).unwrap().audio_range();
+        assert_eq!(
+            [range(&a), range(&short), range(&c)],
+            [Some((0, 55)), None, Some((55, 98))]
+        );
     }
 
     #[test]
