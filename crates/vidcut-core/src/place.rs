@@ -2,7 +2,7 @@ use crate::model::{
     Border, CellShape, CompositeMode, Effect, EffectKind, FilmGrain, Glow, GlowAlpha, GlowFraming,
     GlowOutput, Media, MosaicBlur, Picture, Sharpen, Vignette, VignetteMode, VignetteShape,
 };
-use crate::render::{Placed, Wipe};
+use crate::render::{Moving, Placed, Wipe};
 
 const LEAST_ZOOM: f64 = 1e-9;
 const LEAST_BAR: f64 = 0.2;
@@ -631,7 +631,7 @@ fn level(placed: &Placed, frame: (f64, f64), fitted: [f64; 4], (pw, ph): (f64, f
         opacity: match gone {
             true => 0.0,
             false => {
-                let dissolve = placed.ramp.filter(|r| r.wipe.is_none());
+                let dissolve = placed.ramp.filter(|r| r.wipe.is_none() && !r.moved);
                 p.opaque() * dissolve.map_or(1.0, |r| r.level(0))
             }
         },
@@ -953,6 +953,8 @@ pub struct Mix {
     pub placing: Placing,
     pub added: bool,
     pub wipe: Option<Wipe>,
+    pub moving: Option<Moving>,
+    pub outgoing: Option<bool>,
     around: usize,
 }
 
@@ -969,6 +971,7 @@ pub struct Mixes {
     pub deepest: usize,
     pub moded: bool,
     pub blurs: bool,
+    pub moved: usize,
     layers: Vec<usize>,
     titles: Vec<usize>,
 }
@@ -1020,8 +1023,23 @@ fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixP
         let (run, after) = rest.split_at(n);
         let inner = parts_of(run, depth + 1, frame);
         let wipe = outer.ramp.and_then(|r| r.mask(0));
+        let moving = outer
+            .moving
+            .as_ref()
+            .zip(outer.ramp)
+            .map(|(m, r)| m.at(&r, 0));
+        let outgoing = outer
+            .ramp
+            .filter(|r| r.moved && !outer.crossing)
+            .map(|r| r.falling);
+        let alone = moving.is_none() && outgoing.is_none();
         let (held, around, added, wipe) = match <[MixPart; 1]>::try_from(inner) {
-            Ok([MixPart::Mix(one)]) if wipe.is_none() || one.wipe.is_none() => {
+            Ok([MixPart::Mix(one)])
+                if alone
+                    && (wipe.is_none() || one.wipe.is_none())
+                    && one.moving.is_none()
+                    && one.outgoing.is_none() =>
+            {
                 (one.parts, one.around, Some(one.added), wipe.or(one.wipe))
             }
             Ok([lone]) => (vec![lone], depth + 1, None, wipe),
@@ -1032,7 +1050,7 @@ fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixP
         let placing = Placing::whole_inside(&chain[chain.len() - around..], frame, depth);
         let mixes = grows
             || match held.as_slice() {
-                [MixPart::Layer(_)] => wipe.is_some(),
+                [MixPart::Layer(_)] => wipe.is_some() || outgoing.is_some(),
                 [MixPart::Title(_)] => {
                     placing.mode != CompositeMode::Normal
                         || !placing.effects.is_empty()
@@ -1051,6 +1069,8 @@ fn parts_of(members: &[Member<'_>], depth: usize, frame: (f64, f64)) -> Vec<MixP
                 placing,
                 added: added.unwrap_or(outer.crossing),
                 wipe,
+                moving,
+                outgoing,
                 around,
             }));
         } else {
@@ -1136,6 +1156,7 @@ impl Mixes {
         self.deepest = self.deepest.max(depth);
         self.moded |= mix.placing.mode != CompositeMode::Normal;
         self.blurs |= !mix.placing.effects.is_empty();
+        self.moved += usize::from(mix.moving.is_some());
         for part in &mix.parts {
             match part {
                 MixPart::Layer(i) => self.layers[*i] = mix.around,
@@ -1300,6 +1321,7 @@ mod tests {
             ready: true,
             ramp: None,
             crossing: false,
+            moving: None,
         };
         let frame = (1920.0, 1080.0);
         let level = Placing::whole(&[placed], frame).levels[0];
@@ -1331,6 +1353,7 @@ mod tests {
             ready: true,
             ramp: None,
             crossing: false,
+            moving: None,
         };
         let placing = Placing::whole(&[placed], (1920.0, 1080.0));
         let Work::Blur(b) = &placing.effects[0].work else {
@@ -1369,6 +1392,7 @@ mod tests {
             ready: true,
             ramp: None,
             crossing: false,
+            moving: None,
         };
         assert_eq!(detail(&[placed]), 0.4);
     }

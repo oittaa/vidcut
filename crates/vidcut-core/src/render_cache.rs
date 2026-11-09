@@ -1369,6 +1369,7 @@ mod tests {
                     ready: false,
                     ramp: None,
                     crossing: false,
+                    moving: None,
                 }],
             }],
         }
