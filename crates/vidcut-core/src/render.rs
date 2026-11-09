@@ -2353,6 +2353,47 @@ pub(crate) fn inside(x: &Clip, c: &Clip) -> Option<(Clip, Run)> {
     seen(x, c, (x.start, x.end()))
 }
 
+fn paced_keys(y: &mut Clip, c: &Clip, k0: i64, first_key: i64) {
+    let pace = c.pace();
+    let moving: Vec<(i64, i64, f64)> = c
+        .runs(c.start, c.end())
+        .into_iter()
+        .map(|(a, _)| (a - c.start, c.source_at(a), pace.rate(a - c.start)))
+        .filter(|&(_, _, v)| v != 0.0)
+        .collect();
+    let Some(&(_, _, way)) = moving.first() else {
+        let held = first_key as f64;
+        y.picture = y.picture.take().map(|p| p.sampled(held));
+        y.title = y.title.take().map(|t| t.sampled(held));
+        return;
+    };
+    let from = c.source_at(c.start + k0) - first_key;
+    let to = y.content_at(y.start) - k0;
+    let run = |q: i64| {
+        let past = moving.partition_point(|&(_, s, _)| if way > 0.0 { s <= q } else { s >= q });
+        moving[past.saturating_sub(1)]
+    };
+    let conv = |k: i64| {
+        let (at, s, v) = run(from + k);
+        to + at + ((from + k - s) as f64 / v).round() as i64
+    };
+    let ratio = |k: i64| 1.0 / run(from + k).2;
+    if let Some(picture) = y.picture.as_mut() {
+        picture.scale_times(&conv, &ratio);
+    }
+    if let Some(title) = y.title.as_mut().filter(|t| t.is_keyed()) {
+        title.each_line(|line| {
+            let mut picture = line.as_picture();
+            picture.scale_times(&conv, &ratio);
+            line.move_handles(conv);
+            line.take_picture(&picture);
+        });
+    }
+    if let Some(a) = y.audio.as_mut() {
+        a.gain_keys = crate::keyframes::scaled_by(&a.gain_keys, conv, &ratio);
+    }
+}
+
 fn seen(x: &Clip, c: &Clip, (lo, hi): (i64, i64)) -> Option<(Clip, Run)> {
     if c.speed.is_some() {
         let speed = c.pace().rate(0);
@@ -2360,9 +2401,11 @@ fn seen(x: &Clip, c: &Clip, (lo, hi): (i64, i64)) -> Option<(Clip, Run)> {
         let mut y = x.clone();
         let walked = c.source_at(c.start + k0) - x.start;
         y.walk(walked);
+        let first_key = y.content_at(y.start);
         (y.start, y.duration) = (c.start + k0, k1 - k0);
         let own = y.speed.take();
         y.speed = paced(c, own.as_ref(), k0);
+        paced_keys(&mut y, c, k0, first_key);
         if let Some(a) = y.audio.as_mut() {
             a.head = 0;
             a.tail = 0;
