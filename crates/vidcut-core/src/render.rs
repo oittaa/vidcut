@@ -1867,26 +1867,27 @@ struct Edge {
 struct Around {
     placed: Placed,
     always: bool,
-    held: bool,
+    held: Option<i64>,
     edges: Vec<Edge>,
 }
 
 impl Around {
     fn at(&self, x: i64) -> Vec<Placed> {
+        let now = self.held.unwrap_or(x);
         let edge = self
             .edges
             .iter()
-            .find(|e| e.frames.0 <= x && x < e.frames.1);
+            .find(|e| e.frames.0 <= now && now < e.frames.1);
         if edge.is_none() && !self.always {
             return Vec::new();
         }
         let mut own = self.placed.after(x);
         own.ramp = edge.map(|e| Ramp {
-            at: x - e.frames.0,
+            at: now - e.frames.0,
             of: e.frames.1 - e.frames.0,
             falling: e.falling,
             wipe: e.wipe,
-            held: self.held,
+            held: self.held.is_some(),
             moved: e.crossing.as_ref().is_some_and(|c| c.moving.is_some()),
         });
         let crossing = edge.and_then(|e| e.crossing.clone()).map(|c| Placed {
@@ -1925,13 +1926,13 @@ fn run_of(c: &Clip, run: Option<Run>) -> Run {
 struct Shown {
     from: i64,
     to: i64,
-    held: bool,
+    held: Option<i64>,
 }
 
 const EVERY_FRAME: Shown = Shown {
     from: i64::MIN,
     to: i64::MAX,
-    held: false,
+    held: None,
 };
 
 #[derive(Debug, Clone)]
@@ -2151,7 +2152,7 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     .then(|| Around {
                         placed: Placed::of(c, own, run_of(c, nest.run)),
                         always,
-                        held: nest.run.is_some_and(|r| r.held),
+                        held: w.shown.held,
                         edges,
                     })
                     .into_iter()
@@ -2201,10 +2202,14 @@ fn expanded(p: &Project) -> Option<(Project, Within)> {
                     clips.sort_by_key(|(y, _)| y.start);
                     let (clips, nests) = clips.into_iter().unzip();
                     v.clips = clips;
-                    let shown = Shown {
-                        from: w.shown.from.max(from).max(part.start),
-                        to: w.shown.to.min(to).min(part.end()),
-                        held: laid.held,
+                    let held = laid.held.then_some(part.start).or(w.shown.held);
+                    let shown = match w.shown.held {
+                        Some(_) => Shown { held, ..w.shown },
+                        None => Shown {
+                            from: w.shown.from.max(from).max(part.start),
+                            to: w.shown.to.min(to).min(part.end()),
+                            held,
+                        },
                     };
                     let fades: Vec<Fading> = w.fades.iter().chain(&fading).copied().collect();
                     inner.push((
@@ -2811,13 +2816,13 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 continue;
             }
             let within = inner.map(|i| i.nests.as_slice());
-            let now = if window.held { window.from } else { x };
+            let now = window.held.unwrap_or(x);
             let ramp_of = |d: &transitions::Playing, falling, wipe| Ramp {
                 at: now - d.frames.0,
                 of: d.frames.1 - d.frames.0,
                 falling,
                 wipe,
-                held: window.held,
+                held: window.held.is_some(),
                 moved: false,
             };
             let excluded = !t.render_cache;
@@ -2921,7 +2926,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                         of: half.1,
                         falling: half.2,
                         wipe: None,
-                        held: window.held,
+                        held: window.held.is_some(),
                         moved: false,
                     });
                     let compound = side.is_some_and(|c| c.compound.is_some());
@@ -3004,7 +3009,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                     }
                 }
                 None => {
-                    if let Some(c) = t.clip_covering(x).map(|ci| &t.clips[ci]).filter(shows) {
+                    if let Some(c) = t.clip_covering(now).map(|ci| &t.clips[ci]).filter(shows) {
                         match shown(c, None, !stack.is_empty())? {
                             Layer::Placed(piece, ramp) => {
                                 if fills(c) {
@@ -3055,7 +3060,7 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
                 }
                 None => {
                     if let Some(s) = t
-                        .clip_covering(x)
+                        .clip_covering(now)
                         .map(|ci| &t.clips[ci])
                         .filter(|c| titled(t, c))
                         .and_then(|c| lettered(c, None, Vec::new()))

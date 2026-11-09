@@ -624,7 +624,9 @@ Import:
   - Each block keeps the dissolves of its tracks. `render::expanded` plays them (`inner_layout`).
   - `inner_layout` widens the compound clip to reach each dissolve that it shows a part of. `Shown` limits the track to the frames of the compound clip.
   - `expanded` also widens it to reach a transition at its edge ([export](export.md#placed-pictures)).
-  - A frozen compound clip on a frame of a dissolve holds the level of that frame (`held_on`).
+  - A frozen compound clip on a frame of a transition holds the level of that frame (`held_on`).
+    - `Shown::held` is the frame of the layout that each frame of the clip shows.
+    - A compound clip on a side of that transition takes the frames and the held frame of the track around it. Thus the side shows on each frame of the frozen clip.
   - `ops::compound::nest_range` cuts every track at the two marks, and nests what is between them. The lowest track with clips in the range becomes inner V1 or A1.
   - Each compound clip made here also has a copy in the Media Pool (`PooledCompound`, `keep_copy`). `pool_range` makes one on a clone of the project, so the timeline does not change.
   - `place_pooled` puts a copy on a video track and on the audio track of its number. `Place` tells how. `compound_preview` gives the requests of a drag.
