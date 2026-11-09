@@ -2403,6 +2403,9 @@ fn held_on(n: &Track, c: &Clip, t: &Transition, cut: i64) -> Laid {
         let x = n.clips.iter().find(|x| Some(&x.id) == id.as_ref())?;
         let mut at = c.clone();
         (at.start, at.duration) = (s, e - s);
+        if let Some(speed) = at.speed.as_mut() {
+            speed.sections = crate::model::Speed::constant(0.0).sections;
+        }
         seen(x, &at, (on, on + 1))
     };
     let clips = [
@@ -3152,14 +3155,15 @@ fn plan_lanes(p: &Project, a: i64, b: i64) -> Result<(RenderPlan, Vec<LaneTrack>
             let lettered = |c: &Clip, fade: Option<Ramp>, crossed: Vec<Placed>| {
                 let nest =
                     within.and_then(|w| w.get(t.clips.iter().position(|o| std::ptr::eq(o, c))?));
+                let run = nest.and_then(|n| n.run).filter(|r| r.held).unwrap_or(Run {
+                    at: x - c.start,
+                    of: c.duration,
+                    held: false,
+                });
                 Some(ShownTitle {
                     clip: c.id.clone(),
                     title: c.title.clone()?,
-                    run: Run {
-                        at: x - c.start,
-                        of: c.duration,
-                        held: false,
-                    },
+                    run,
                     source_in: c.source_in,
                     fade,
                     placed: crossed.into_iter().chain(outer_at(nest, x)).collect(),
